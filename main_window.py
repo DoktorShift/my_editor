@@ -4,6 +4,7 @@
 import json
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 from send2trash import send2trash
@@ -63,6 +64,30 @@ from nostr.ui.publish_article_dialog import PublishArticleDialog
 from nostr.ui.publish_note_dialog import PublishNoteDialog
 from nostr.ui.save_destination_dialog import SaveDestination, SaveDestinationDialog
 from nostr.ui.stash_kind_dialog import StashChoice, StashKind, StashKindDialog
+
+from plugin_system import (
+    EditorBackend,
+    LoadReport,
+    PaymentProvider,
+    PluginHost,
+    PluginSettingsStore,
+    load_all_plugins,
+    load_one_plugin_folder,
+    plugin_log_path,
+    user_config_root,
+)
+from plugin_marketplace.log_viewer import PluginLogDialog
+from plugin_marketplace.payment_receipts import PaymentReceiptStore
+from plugin_marketplace.social import (
+    CommenterProfileFetcher,
+    EngagementCache,
+    EngagementFetcher,
+    EngagementPublisher,
+    FollowTrustCache,
+    MuteListCache,
+    Nip05Verifier,
+    OutboxRouter,
+)
 
 _IPC_SERVER_NAME = "minimal-texteditor-ipc"
 
@@ -209,6 +234,10 @@ class MainWindow(QMainWindow):
             # if the panel is never opened, this still keeps the store
             # warm so opening the panel later is instant.
             self._draft_sync.start_for(active)
+            # NIP-51 mute-list watch is started inside ``_init_plugin_system``
+            # below, since the cache itself is constructed there. We re-read
+            # the active profile from the store at that point to stay tolerant
+            # of any state changes between here and that call.
 
         self._build_actions()
         self._build_menu()
@@ -226,6 +255,13 @@ class MainWindow(QMainWindow):
         self._update_undo_redo_buttons()
         self._update_status_bar()
         self._start_ipc_server()
+
+        # Plugins load last, after the menu bar, splitter, profile
+        # chip and draft sync are all alive. The loader walks
+        # bundled_plugins/ and the user's plugins folder, isolating
+        # any errors per plugin so one bad plugin can't take the
+        # editor down.
+        self._init_plugin_system()
 
 
     # ----------------------------------------------------------------------
@@ -712,6 +748,24 @@ class MainWindow(QMainWindow):
         act_nostr_sign_out = QAction("Sign Out Active Profile", self)
         act_nostr_sign_out.triggered.connect(self._on_nostr_sign_out)
         m_nostr.addAction(act_nostr_sign_out)
+
+        # Marketplace menu lives between Nostr and Help so the loader
+        # has a stable home for ``add_menu_action(menu="Marketplace",
+        # ...)``. The legacy ``menu="Plugins"`` string is still accepted
+        # as an alias by ``_find_or_create_plugin_menu`` so existing
+        # third-party plugins keep working. Plugin entries are appended
+        # *after* the built-in actions and a separator that is created
+        # on demand by the loader, so the menu never shows a dangling
+        # separator when no plugins are installed.
+        self._m_plugins = self.menuBar().addMenu("&Marketplace")
+        self.act_plugins_browse = QAction("Browse Marketplace…", self)
+        self.act_plugins_browse.setShortcut(QKeySequence("Ctrl+Shift+M"))
+        self.act_plugins_browse.triggered.connect(self.open_plugin_marketplace)
+        self._m_plugins.addAction(self.act_plugins_browse)
+
+        self.act_plugins_log = QAction("View Plugin Log…", self)
+        self.act_plugins_log.triggered.connect(self.open_plugin_log_dialog)
+        self._m_plugins.addAction(self.act_plugins_log)
 
         help_menu = self.menuBar().addMenu("&Help")
         shortcuts_action = QAction("Keyboard Shortcuts", self)
@@ -2072,7 +2126,14 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def _on_nostr_profile_connected(self, profile: Profile):
-        # New (or re-connected) profile becomes the active one.
+        # Drop any prior profile's trust subscriptions before swapping.
+        # Without this, a user who switches profiles mid-session keeps
+        # the old profile's mute + follow watches open, leaking sockets
+        # and worse — leaking trust signals into the new identity.
+        previous = self._profile_store.default()
+        if previous is not None and previous.user_pubkey != profile.user_pubkey:
+            self._teardown_profile_trust_watches(previous.user_pubkey)
+
         self._profile_store.set_default(profile.user_pubkey)
         self._update_profile_chip()
         self._refresh_profile_chip_menu()
@@ -2084,6 +2145,14 @@ class MainWindow(QMainWindow):
         self._metadata_fetcher.fetch(profile)
         # Also prime the mentions cache from this profile's NIP-02 contact list.
         self._contact_fetcher.fetch(profile.user_pubkey, profile.bunker_relays)
+        # NIP-51 mute-list watch + NIP-02 follow-trust watch for the
+        # newly connected profile.
+        self._mute_list_cache.watch(
+            profile.user_pubkey, extra_relays=profile.bunker_relays,
+        )
+        self._follow_trust_cache.watch(
+            profile.user_pubkey, extra_relays=profile.bunker_relays,
+        )
         # Bind the draft pipeline to the new profile so the panel
         # (visible or not) starts collecting wraps from the relays.
         self._draft_sync.start_for(profile)
@@ -2092,6 +2161,9 @@ class MainWindow(QMainWindow):
             self._drafts_panel.set_signer_unsupported(False)
 
     def _on_nostr_select_profile(self, profile: Profile):
+        previous = self._profile_store.default()
+        if previous is not None and previous.user_pubkey != profile.user_pubkey:
+            self._teardown_profile_trust_watches(previous.user_pubkey)
         self._profile_store.set_default(profile.user_pubkey)
         self._update_profile_chip()
         self._refresh_profile_chip_menu()
@@ -2099,9 +2171,36 @@ class MainWindow(QMainWindow):
         # profile. ``DraftSync.start_for`` is idempotent if the same
         # profile is already active.
         self._draft_sync.start_for(profile)
+        # Open trust watches for the newly active profile so the
+        # marketplace immediately uses ITS mute/follow lists.
+        try:
+            self._mute_list_cache.watch(
+                profile.user_pubkey, extra_relays=profile.bunker_relays,
+            )
+            self._follow_trust_cache.watch(
+                profile.user_pubkey, extra_relays=profile.bunker_relays,
+            )
+        except Exception:  # noqa: BLE001
+            pass
         if self._drafts_panel is not None:
             self._drafts_panel.set_active_profile(profile)
             self._drafts_panel.set_signer_unsupported(False)
+
+    def _teardown_profile_trust_watches(self, owner_pubkey: str) -> None:
+        """Close the per-profile mute + follow watches.
+
+        Called when the active profile changes so we don't keep
+        sockets open against a profile the user is no longer signed
+        in as.
+        """
+        try:
+            self._mute_list_cache.unwatch(owner_pubkey)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            self._follow_trust_cache.unwatch(owner_pubkey)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _on_nostr_sign_out(self):
         active = self._profile_store.default()
@@ -3058,3 +3157,401 @@ class MainWindow(QMainWindow):
             binding.title = record.title
         self._update_tab_title()
         self._dismiss_conflict_banner(ed)
+
+    # ----------------------------------------------------------------------
+    # PLUGIN SYSTEM — loader bootstrap + EditorBackend adapter
+    # ----------------------------------------------------------------------
+
+    def _init_plugin_system(self) -> None:
+        """Build the plugin host adapter + settings store and run the
+        loader. Errors are isolated per plugin and surfaced via a
+        clickable status-bar hint that opens the diagnostics log.
+        """
+        self._plugin_settings = PluginSettingsStore()
+        self._plugin_host = PluginHost(self)
+        # Marketplace social stack. Lives for the editor's lifetime so
+        # cached engagement survives between dialog opens. The cache
+        # file is created on first instantiation.
+        self._engagement_cache = EngagementCache(
+            path=user_config_root() / "plugin_engagement_cache.sqlite",
+        )
+        self._nip05_verifier = Nip05Verifier(
+            self._engagement_cache, parent=self,
+        )
+        # NIP-65 outbox router shared by every social I/O path so the
+        # marketplace honors per-user relay preferences instead of
+        # hardcoding our DEFAULT_RELAYS for everyone.
+        self._marketplace_outbox_router = OutboxRouter(self._relay_list_cache)
+        self._engagement_fetcher = EngagementFetcher(
+            self._engagement_cache,
+            relay_pool=self._relay_pool,
+            outbox_router=self._marketplace_outbox_router,
+            parent=self,
+        )
+        self._engagement_publisher = EngagementPublisher(
+            relay_pool=self._relay_pool,
+            bunker_pool=self._session_pool,
+            cache=self._engagement_cache,
+            outbox_router=self._marketplace_outbox_router,
+            parent=self,
+        )
+        # Resolves kind:0 profile metadata for everyone in a thread so
+        # the social panel can show real display names + avatars
+        # instead of pubkey shorthand.
+        self._commenter_profile_fetcher = CommenterProfileFetcher(
+            relay_pool=self._relay_pool,
+            cache=self._engagement_cache,
+            outbox_router=self._marketplace_outbox_router,
+            parent=self,
+        )
+        # NIP-51 mute list. The active profile's list flows into the
+        # trust policy so muted accounts never appear in the social
+        # panel. ``mute()`` / ``unmute()`` publish updated kind:10000
+        # events through the same bunker session pool used elsewhere.
+        self._mute_list_cache = MuteListCache(
+            relay_pool=self._relay_pool,
+            bunker_pool=self._session_pool,
+            outbox_router=self._marketplace_outbox_router,
+            parent=self,
+        )
+        # NIP-02 follow trust cache, owner-keyed so profile switches
+        # never leak follows from one identity into another's trust
+        # filter.
+        self._follow_trust_cache = FollowTrustCache(
+            relay_pool=self._relay_pool,
+            outbox_router=self._marketplace_outbox_router,
+            parent=self,
+        )
+        # Paid plugin installs leave a receipt here so the user doesn't
+        # re-pay on reinstall / version-skip. Atomically written, so a
+        # crashed editor never leaves a half-written receipts file.
+        self._payment_receipts = PaymentReceiptStore(
+            path=user_config_root() / "payment_receipts.json",
+        )
+
+        # Now that the mute-list cache + follow-trust cache exist, open
+        # watches for the active profile if one was restored at session
+        # start. Both are refcount-aware so a profile switch via
+        # ``_on_nostr_profile_connected`` adds new watches without
+        # double-counting.
+        active = self._profile_store.default()
+        if active is not None:
+            try:
+                self._mute_list_cache.watch(
+                    active.user_pubkey, extra_relays=active.bunker_relays,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                self._follow_trust_cache.watch(
+                    active.user_pubkey, extra_relays=active.bunker_relays,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        report = load_all_plugins(
+            host=self._plugin_host,
+            settings_store=self._plugin_settings,
+        )
+        self._plugin_report = report
+
+        loaded_n = len(report.loaded)
+        errors_n = len(report.errors)
+        if loaded_n:
+            self.status.showMessage(
+                f"Loaded {loaded_n} plugin{'s' if loaded_n != 1 else ''}", 3500,
+            )
+        if errors_n:
+            self._show_plugin_error_status(errors_n)
+
+    def _show_plugin_error_status(self, count: int) -> None:
+        """Persistent (no timeout) status banner with a clickable link to
+        the diagnostics dialog. Bundled GUIs have no stderr, so this is
+        the user's primary way to see what went wrong.
+        """
+        plural = "s" if count != 1 else ""
+        # Use a permanent widget so it doesn't time out and stays visible
+        # until the user dismisses it. Clicking opens the log dialog.
+        if getattr(self, "_plugin_error_label", None) is not None:
+            self.status.removeWidget(self._plugin_error_label)
+        from PySide6.QtWidgets import QLabel
+        link = QLabel(
+            f'<a href="#">{count} plugin{plural} failed to load — view log</a>'
+        )
+        link.setOpenExternalLinks(False)
+        link.linkActivated.connect(lambda *_: self.open_plugin_log_dialog())
+        link.setToolTip("Click to open the plugin diagnostics dialog.")
+        self.status.addPermanentWidget(link)
+        self._plugin_error_label = link
+
+    def open_plugin_log_dialog(self) -> None:
+        """Open the read-only plugin diagnostics dialog."""
+        dlg = PluginLogDialog(self, log_path=plugin_log_path())
+        dlg.exec()
+
+    def open_plugin_marketplace(self) -> None:
+        """Open the marketplace browser dialog.
+
+        Imported lazily so the marketplace UI module doesn't pull in
+        until the user actually opens it — keeps startup lean.
+        """
+        from plugin_marketplace.ui.marketplace_dialog import MarketplaceDialog
+        dlg = MarketplaceDialog(self)
+        dlg.exec()
+
+    # -- EditorBackend methods (plugin_system.host_adapter.EditorBackend) ---
+    #
+    # These bridge the plugin host adapter into MainWindow internals.
+    # The adapter is what plugins talk to via PluginAPI; nothing here
+    # is reachable from a plugin's code directly.
+
+    def editor_create_menu_action(
+        self,
+        menu_title: str,
+        label: str,
+        callback,
+    ):
+        menu = self._find_or_create_plugin_menu(menu_title)
+        # Lazily insert a separator between built-in entries and the
+        # first plugin contribution to the Plugins menu, so the menu
+        # never shows a dangling separator when no plugins exist.
+        if menu is self._m_plugins and not getattr(self, "_plugins_menu_sep_added", False):
+            menu.addSeparator()
+            self._plugins_menu_sep_added = True
+        action = QAction(label, self)
+        action.triggered.connect(lambda *_args: callback())
+        menu.addAction(action)
+        # Return a (menu, action) tuple so unload can locate the
+        # owning menu in O(1) without searching the menu bar.
+        return (menu, action)
+
+    def editor_remove_menu_action(self, handle) -> None:
+        menu, action = handle
+        try:
+            menu.removeAction(action)
+        finally:
+            action.deleteLater()
+
+    def editor_create_dock_widget(self, title: str, widget, area: str):
+        """Insert a plugin-built widget into the central splitter.
+
+        Layout convention: the editor lives at index 0, the drafts
+        panel at the rightmost index. Plugin dock widgets stack between
+        them: ``"left"`` inserts at the start, ``"right"`` inserts just
+        before the drafts panel so drafts stays anchored on the right.
+
+        The widget reparents into the splitter (Qt manages its memory
+        from here on). The returned handle is the widget itself - opaque
+        to the host adapter but cheap to dispose of in
+        ``editor_remove_dock_widget``.
+        """
+        splitter = self._central_splitter
+        if area == "left":
+            insert_index = 0
+        else:
+            # Keep drafts (the last child) anchored as the rightmost
+            # panel by inserting plugin docks immediately before it.
+            insert_index = max(0, splitter.count() - 1)
+        splitter.insertWidget(insert_index, widget)
+        # Stretch factor 0 keeps plugin docks at their preferred size;
+        # the editor remains the only flexible region in the row.
+        splitter.setStretchFactor(insert_index, 0)
+        widget.setToolTip(title)
+        return widget
+
+    def editor_remove_dock_widget(self, handle) -> None:
+        widget = handle
+        # Reparenting to None removes the widget from the splitter; the
+        # subsequent deleteLater frees Qt-owned resources on the next
+        # event-loop turn so the splitter geometry settles cleanly.
+        widget.setParent(None)
+        widget.deleteLater()
+
+    def editor_get_current_text(self) -> Optional[str]:
+        ed = self.current_editor()
+        return ed.toPlainText() if ed is not None else None
+
+    def editor_set_current_text(self, text: str) -> bool:
+        ed = self.current_editor()
+        if ed is None:
+            return False
+        ed.setPlainText(text)
+        return True
+
+    def editor_open_tab(self, title: str, content: str) -> None:
+        self.new_tab()
+        ed = self.current_editor()
+        if ed is None:
+            return
+        ed.setPlainText(content)
+        idx = self.tabs.currentIndex()
+        if title:
+            self.tabs.setTabText(idx, title)
+
+    def editor_show_status(self, message: str, timeout_ms: int = 4000) -> None:
+        self.status.showMessage(message, timeout_ms)
+
+    def editor_publish_event(
+        self,
+        plugin_id: str,
+        template: dict,
+        *,
+        on_success,
+        on_failure,
+    ) -> None:
+        """Sign a plugin's event with the active profile and publish it.
+
+        Flow:
+          1. Refuse synchronously when no profile is connected (so
+             plugins can show a clear "sign in" hint to the user).
+          2. Acquire the bunker client via ``BunkerSessionPool.get``;
+             surface signer failures through ``on_failure``.
+          3. Sign the event with the bunker.
+          4. Publish via the marketplace's outbox router. If the
+             template carries ``p`` tags we route to those recipients'
+             read relays too (NIP-65 fan-out for mentions).
+          5. Treat "all relays NACK" as failure; "at least one OK" as
+             success so the plugin sees a single binary outcome.
+        """
+        del plugin_id  # currently unused; reserved for quota bookkeeping
+        profile = self._profile_store.default()
+        if profile is None:
+            on_failure(
+                "no Nostr profile connected — open the Nostr menu and connect a signer"
+            )
+            return
+
+        try:
+            import time as _time
+
+            from nostr.events import build_event as _build_event
+
+            unsigned = _build_event(
+                pubkey_hex=profile.user_pubkey,
+                kind=int(template["kind"]),
+                content=str(template.get("content", "")),
+                tags=[list(t) for t in template.get("tags", [])],
+                created_at=int(template.get("created_at") or _time.time()),
+            )
+        except Exception as exc:  # noqa: BLE001 — bad input from plugin
+            on_failure(f"could not build event: {exc}")
+            return
+
+        outbox = getattr(self, "_marketplace_outbox_router", None)
+        seeds = self._marketplace_publish_seeds()
+        target_pubkeys: list[str] = []
+        for tag in unsigned.get("tags", []):
+            if isinstance(tag, list) and len(tag) >= 2 and tag[0] == "p":
+                pk = (tag[1] or "").lower()
+                if len(pk) == 64:
+                    target_pubkeys.append(pk)
+        if outbox is not None:
+            plan = outbox.relays_for_write(profile.user_pubkey, target_pubkeys, seeds=seeds)
+            urls = plan.relays
+        else:
+            urls = seeds
+        if not urls:
+            on_failure("no relays available to publish")
+            return
+
+        def _on_signer_ready(client) -> None:
+            def _on_signed(signed: dict) -> None:
+                publish = self._relay_pool.publish(urls, signed)
+
+                def _on_done(results) -> None:
+                    accepted = sum(1 for _u, ok, _msg in (results or []) if ok)
+                    if accepted == 0:
+                        on_failure("no relay accepted the event")
+                    else:
+                        on_success(signed)
+
+                publish.all_done.connect(_on_done)
+
+            def _on_sign_failed(reason: str) -> None:
+                on_failure(f"signer rejected: {reason}")
+
+            client.sign_event(
+                unsigned, on_success=_on_signed, on_failure=_on_sign_failed,
+            )
+
+        def _on_signer_failed(reason: str) -> None:
+            on_failure(f"signer unreachable: {reason}")
+
+        self._session_pool.get(profile, _on_signer_ready, _on_signer_failed)
+
+    def _marketplace_publish_seeds(self) -> list[str]:
+        """The seed relay set the marketplace uses as a backstop.
+
+        Single source of truth so ``editor_publish_event`` and the
+        marketplace dialog agree on which relays back up the user's
+        own NIP-65 list.
+        """
+        from nostr import DEFAULT_RELAYS as _DR
+        return list(_DR)
+
+    # -- Plugin lifecycle exposed for the marketplace ---------------------
+
+    def reload_plugin(self, folder: Path) -> "LoadReport":
+        """Unload any plugin already loaded from this folder, then load it.
+
+        Used by the marketplace installer after a fresh install or an
+        update so the user doesn't have to restart the editor.
+        """
+        # Find any currently-loaded plugin pointing at this folder and
+        # unload it first. Folder match (not id) so an update that
+        # changes the id still cleans up the previous slot — though we
+        # also forbid that at install time.
+        resolved = folder.resolve()
+        for info in list(self._plugin_report.loaded):
+            if info.folder.resolve() == resolved:
+                self._plugin_host.unload(info.plugin_id)
+                self._plugin_report.loaded = [
+                    p for p in self._plugin_report.loaded if p.plugin_id != info.plugin_id
+                ]
+        info, sub_report = load_one_plugin_folder(
+            folder,
+            host=self._plugin_host,
+            settings_store=self._plugin_settings,
+            source="user",
+        )
+        if info is not None:
+            self._plugin_report.loaded.append(info)
+        self._plugin_report.errors.extend(sub_report.errors)
+        self._plugin_report.skipped.extend(sub_report.skipped)
+        if sub_report.errors:
+            self._show_plugin_error_status(len(self._plugin_report.errors))
+        return sub_report
+
+    def unload_plugin(self, plugin_id: str) -> bool:
+        """Retract a plugin's side effects without removing its files.
+
+        Returns True if the plugin was loaded and is now unloaded.
+        Used by the marketplace's Disable / Uninstall flows.
+        """
+        unloaded = self._plugin_host.unload(plugin_id)
+        if unloaded:
+            self._plugin_report.loaded = [
+                p for p in self._plugin_report.loaded if p.plugin_id != plugin_id
+            ]
+        return unloaded
+
+    # -- Helpers ----------------------------------------------------------
+
+    def _find_or_create_plugin_menu(self, title: str):
+        """Return the named top-level menu, creating it if necessary.
+
+        ``"Marketplace"`` resolves to the dedicated menu we built up
+        front. ``"Plugins"`` is kept as a back-compat alias for the
+        same menu so third-party plugins authored against the old name
+        keep working. Any other name creates a fresh top-level entry.
+        Title matching is ampersand-insensitive so a plugin asking for
+        "Tools" matches an existing "&Tools" mnemonic.
+        """
+        norm = title.replace("&", "").strip()
+        if norm.lower() in ("marketplace", "plugins"):
+            return self._m_plugins
+        bar = self.menuBar()
+        for action in bar.actions():
+            menu = action.menu()
+            if menu is not None and menu.title().replace("&", "").strip() == norm:
+                return menu
+        return bar.addMenu(title)

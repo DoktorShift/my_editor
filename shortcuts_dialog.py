@@ -112,6 +112,12 @@ SHORTCUT_GROUPS: Tuple[ShortcutGroup, ...] = (
             Shortcut("Ctrl+Shift+S",    "Save As (local or draft)"),
         ),
     ),
+    ShortcutGroup(
+        title="Marketplace",
+        items=(
+            Shortcut("Ctrl+Shift+M",    "Browse Marketplace"),
+        ),
+    ),
 )
 
 
