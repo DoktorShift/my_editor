@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 rinbal
+# SPDX-License-Identifier: AGPL-3.0-or-later
 
 
 import itertools
@@ -9,11 +11,12 @@ from dataclasses import dataclass
 from typing import Optional
 
 from send2trash import send2trash
-from PySide6.QtCore import QBuffer, QIODevice, Qt, QMarginsF, QTimer, QUrl, QFileSystemWatcher
+from PySide6.QtCore import QBuffer, QIODevice, Qt, QMarginsF, QTimer, QUrl, QFileSystemWatcher, QPointF
 from PySide6.QtNetwork import QLocalServer
 from PySide6.QtGui import (
     QAction, QActionGroup, QKeySequence, QTextCursor, QTextDocument, QTextCharFormat, QColor,
-    QPageLayout, QPageSize, QPixmap, QGuiApplication, QDesktopServices
+    QPageLayout, QPageSize, QPixmap, QGuiApplication, QDesktopServices, QIcon,
+    QPainter, QPen
 )
 from PySide6.QtWidgets import (
     QMainWindow, QFileDialog, QInputDialog, QMenu, QMessageBox, QWidget, QVBoxLayout,
@@ -111,6 +114,101 @@ class DraftBinding:
     # pubkey of the profile this draft was last signed by. Used to
     # detect "tab from a different identity" after profile switches.
     profile_pubkey: str = ""
+
+
+# Left-to-right order stock QMessageBox uses for these three roles.
+_SAVE_DIALOG_BUTTON_ORDER = (
+    (QMessageBox.Cancel, "Cancel", "x"),
+    (QMessageBox.No, "No", "x"),
+    (QMessageBox.Yes, "Yes", "check"),
+)
+
+
+def _badge_icon(glyph: str, size: int = 16) -> QIcon:
+    """A small red-x / green-check circular badge for dialog buttons.
+
+    Drawn rather than pulled from the icon theme: Windows and macOS ship
+    no such icons at all, and Linux desktop themes draw them differently,
+    so painting them here keeps the buttons identical on every platform."""
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor("#c0392b" if glyph == "x" else "#2e9e4f"))
+    p.drawEllipse(0, 0, size, size)
+    p.setPen(QPen(QColor("white"), 1.6))
+    if glyph == "x":
+        m = size * 0.28
+        p.drawLine(QPointF(m, m), QPointF(size - m, size - m))
+        p.drawLine(QPointF(size - m, m), QPointF(m, size - m))
+    else:
+        p.drawPolyline([
+            QPointF(size * 0.22, size * 0.52),
+            QPointF(size * 0.42, size * 0.72),
+            QPointF(size * 0.78, size * 0.28),
+        ])
+    p.end()
+    return QIcon(pix)
+
+
+class _SaveChangesDialog(QDialog):
+    """Compact Yes/No/Cancel prompt: question icon left, message right,
+    buttons bottom-right -- same structure as QMessageBox, but sized
+    tightly around its own content instead of QMessageBox's generous
+    (and, on Linux, desktop-theme-dependent) grid layout."""
+
+    def __init__(self, parent, text: str, buttons, default_button):
+        super().__init__(parent)
+        self.setWindowTitle("Save Changes?")
+
+        icon_label = QLabel()
+        icon_label.setPixmap(QMessageBox.standardIcon(QMessageBox.Question))
+        icon_label.setAlignment(Qt.AlignTop)
+
+        text_label = QLabel(text)
+        text_label.setWordWrap(True)
+        text_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+
+        top_row = QHBoxLayout()
+        top_row.setSpacing(14)
+        top_row.addWidget(icon_label, 0, Qt.AlignTop)
+        top_row.addWidget(text_label, 1)
+
+        button_row = QHBoxLayout()
+        button_row.setSpacing(8)
+        button_row.addStretch(1)
+        escape_value = None
+        for flag, label, glyph in _SAVE_DIALOG_BUTTON_ORDER:
+            if not (buttons & flag):
+                continue
+            btn = QPushButton(_badge_icon(glyph), label)
+            btn.clicked.connect(lambda checked=False, v=flag: self.done(v))
+            if flag == default_button:
+                btn.setDefault(True)
+            button_row.addWidget(btn)
+            if escape_value is None and flag in (QMessageBox.Cancel, QMessageBox.No):
+                escape_value = flag
+
+        self._escape_value = escape_value if escape_value is not None else default_button
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 22, 18, 18)
+        layout.setSpacing(22)
+        layout.addLayout(top_row)
+        layout.addLayout(button_row)
+        layout.setSizeConstraint(QVBoxLayout.SizeConstraint.SetFixedSize)
+
+    def reject(self):
+        self.done(self._escape_value)
+
+
+def _ask_save_changes(parent, text: str, buttons, default_button):
+    """Save/No/Cancel confirmation used before closing a dirty tab, the
+    whole window, or during an in-place update. See _SaveChangesDialog
+    for why this isn't a plain QMessageBox.question(...) call."""
+    dlg = _SaveChangesDialog(parent, text, buttons, default_button)
+    return dlg.exec()
 
 
 class MainWindow(QMainWindow):
@@ -1257,8 +1355,8 @@ class MainWindow(QMainWindow):
 
         if editor and editor.document().isModified():
             file_name = os.path.basename(editor._file_path) if getattr(editor, '_file_path', None) else "Untitled"
-            r = QMessageBox.question(
-                self, "Save Changes?",
+            r = _ask_save_changes(
+                self,
                 f"The document '{file_name}' has unsaved changes.\n\nDo you want to save before closing?",
                 QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
                 QMessageBox.Yes
@@ -1308,9 +1406,9 @@ class MainWindow(QMainWindow):
             msg = (f"The document '{unsaved[0]}' has unsaved changes.\n\nDo you want to save before quitting?"
                    if len(unsaved) == 1
                    else f"You have {len(unsaved)} documents with unsaved changes.\n\nDo you want to save all before quitting?")
-            r = QMessageBox.question(self, "Save Changes?", msg,
-                                     QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
-                                     QMessageBox.Yes)
+            r = _ask_save_changes(self, msg,
+                                  QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+                                  QMessageBox.Yes)
             if r == QMessageBox.Cancel:
                 return
             if r == QMessageBox.Yes:
@@ -2059,8 +2157,8 @@ class MainWindow(QMainWindow):
                 break
         if not has_unsaved:
             return True
-        r = QMessageBox.question(
-            self, "Save Changes?",
+        r = _ask_save_changes(
+            self,
             "MyEditor will close to install the update.\n\nSave your changes first?",
             QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel, QMessageBox.Yes)
         if r == QMessageBox.Cancel:
@@ -2494,9 +2592,9 @@ class MainWindow(QMainWindow):
             for i in range(self.tabs.count()):
                 ed = self._editor_from_widget(self.tabs.widget(i))
                 if ed and ed.document().isModified():
-                    r = QMessageBox.question(self, "Save Changes?",
-                                             "There are unsaved changes. Close everything now?",
-                                             QMessageBox.Yes | QMessageBox.No)
+                    r = _ask_save_changes(self,
+                                          "There are unsaved changes. Close everything now?",
+                                          QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
                     if r != QMessageBox.Yes:
                         event.ignore()
                         return
