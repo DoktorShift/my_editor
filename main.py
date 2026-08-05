@@ -79,7 +79,14 @@ def _forward_to_running_instance(path: str) -> bool:
 def main():
     app = EditorApplication(sys.argv)
     app.setApplicationName(constants.APP_DISPLAY_NAME)
-    app.setApplicationDisplayName(constants.APP_DISPLAY_NAME)
+    # Deliberately NOT setting applicationDisplayName: Qt's Linux platform
+    # plugins (xcb, wayland) append it to every window title via
+    # QPlatformWindow::formatWindowTitle with an em-dash separator, turning
+    # "Save Changes?" into "Save Changes? - MyEditor" and truncating it on
+    # narrow dialogs. The Windows and macOS plugins never did this, so the
+    # suffix was Linux-only noise. applicationName still identifies the app
+    # to the desktop; the About box and welcome page use APP_DISPLAY_NAME
+    # from constants directly.
     app.setApplicationVersion(constants.APP_VERSION)
     # Link the window to the installed .desktop launcher so Linux desktops show
     # the app icon in the dock / task switcher instead of a generic one. No-op
