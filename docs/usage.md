@@ -10,6 +10,7 @@
 | `Ctrl+O` | Open file |
 | `Ctrl+S` | Save (local file, or silent re-save of a draft tab) |
 | `Ctrl+Shift+S` | Save As (choose local file or Nostr draft) |
+| `Ctrl+Shift+K` | Knit R Markdown to HTML (`.Rmd` tabs) |
 | `Ctrl+W` | Close tab |
 | `Ctrl+Q` | Quit |
 
@@ -93,6 +94,24 @@ Right-clicking a **tab** opens a context menu with:
 | Format | Notes |
 |---|---|
 | `.txt` | Plain text, no formatting |
-| `.pdf` | Print-ready, preserves text colors and formatting |
+| `.html` | Clean semantic HTML5; bullets become real lists, images are embedded as data URIs so the single file is shareable; adapts to the reader's light/dark mode |
+| `.pdf` | Native PDF export: document metadata, locale-aware page size (A4/Letter), page-number footer, images scaled to the printable width; configure via `File > Page Setup…` |
 | `.md` | Markdown |
 | `.rtf` | Rich Text Format |
+| `.Rmd` | R Markdown: YAML frontmatter plus Pandoc markdown; colors and underline use Pandoc spans, images go into a `<name>_media/` folder next to the file |
+
+---
+
+## R Markdown knitting
+
+`.Rmd` tabs get `File > Knit to HTML` (`Ctrl+Shift+K`) and `File > Knit to PDF`.
+Knitting saves the tab, then renders the file through `rmarkdown::render` and
+opens the result.
+
+If R, pandoc, or the rmarkdown package are missing, the editor offers to install
+them from their official sources (CRAN and the pandoc GitHub releases) into a
+private app library. Nothing is downloaded without confirmation, and an existing
+system R is always preferred over downloading one. Knit to PDF additionally
+needs LaTeX, offered as an optional TinyTeX install (about 100 MB).
+
+`File > R Markdown Toolchain…` shows the status of all components at any time.

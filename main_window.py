@@ -6,6 +6,7 @@
 import itertools
 import json
 import os
+import re
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -37,16 +38,38 @@ from welcome import welcome_html
 from update_check import UpdateChecker
 from updater import detect_install_kind, supports_in_app_update, select_asset, UpdateInstaller
 import theme
+from export_html import document_to_html, normalize_lists_after_set_html, sniff_image_ext
+from export_pdf import export_pdf
+from page_setup_dialog import PageSetupDialog
+from rmarkdown import KnitRunner, derive_title, document_to_rmd, media_dir_for
+from rmd_setup_dialog import RmdSetupDialog
+import rmd_toolchain
 
 # These extensions are loaded as rendered documents, not plain-text source code.
 _RICH_DOC_EXTS = ('.html', '.htm', '.md', '.markdown')
 
 # Extensions accepted for drag-and-drop and file open.
-_SUPPORTED_EXTS = {'.md', '.html', '.htm', '.txt'}
+# .rmd opens as SOURCE (plain text + markdown highlighting), like RStudio.
+_SUPPORTED_EXTS = {'.md', '.html', '.htm', '.txt', '.rmd'}
 
 # Image extensions we route through Blossom upload on drag-and-drop.
 # These never overlap with _SUPPORTED_EXTS so the dispatcher stays simple.
 _IMAGE_EXTS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'}
+
+# Extensions the Save As dialog can produce; used to decide whether the
+# typed filename already carries one.
+_SAVE_EXTS = ('.txt', '.html', '.htm', '.md', '.rtf', '.pdf', '.rmd')
+
+
+def _extension_from_filter(selected_filter: str) -> Optional[str]:
+    """Extension from a save-filter's glob pattern, e.g. ".Rmd (*.Rmd)" -> ".Rmd".
+
+    Extracting from the pattern keeps the filter's canonical casing and
+    stays correct as filters are added (the old substring matching was
+    case-sensitive and silently failed for ".Rmd").
+    """
+    m = re.search(r'\(\*(\.[0-9A-Za-z]+)', selected_filter)
+    return m.group(1) if m else None
 from recovery import EditorBackup, find_all_backups
 from recent_files import load_recent, add_recent, clear_recent
 
@@ -723,6 +746,7 @@ class MainWindow(QMainWindow):
         self._update_window_title()
         self._update_undo_redo_buttons()
         self._update_status_bar()  # also calls _update_format_buttons
+        self._update_knit_actions()
         if self.findbar.isVisible():
             # Clear stale highlights on every non-active tab
             for i in range(self.tabs.count()):
@@ -793,6 +817,24 @@ class MainWindow(QMainWindow):
         # encrypted Nostr draft) and remembers the per-tab choice. See
         # ``_on_save_as_pressed`` for the full decision tree.
         self.act_save_as.triggered.connect(self._on_save_as_pressed)
+
+        self.act_page_setup = QAction("Page Setup…", self)
+        self.act_page_setup.triggered.connect(self._on_page_setup)
+
+        # Knitting renders the on-disk .Rmd through the R toolchain, so the
+        # actions only light up for .Rmd tabs (see _update_knit_actions).
+        self.act_knit_html = QAction("Knit to HTML", self)
+        self.act_knit_html.setShortcut(QKeySequence("Ctrl+Shift+K"))
+        self.act_knit_html.setEnabled(False)
+        self.act_knit_html.triggered.connect(lambda: self._on_knit("html"))
+        self.addAction(self.act_knit_html)
+
+        self.act_knit_pdf = QAction("Knit to PDF", self)
+        self.act_knit_pdf.setEnabled(False)
+        self.act_knit_pdf.triggered.connect(lambda: self._on_knit("pdf"))
+
+        self.act_rmd_toolchain = QAction("R Markdown Toolchain…", self)
+        self.act_rmd_toolchain.triggered.connect(self._on_rmd_toolchain)
 
         self.act_close_tab = QAction("Close Tab", self)
         self.act_close_tab.setShortcut(QKeySequence("Ctrl+W"))
@@ -904,6 +946,12 @@ class MainWindow(QMainWindow):
         m_file.addSeparator()
         m_file.addAction(self.act_save)
         m_file.addAction(self.act_save_as)
+        m_file.addSeparator()
+        m_file.addAction(self.act_page_setup)
+        m_file.addSeparator()
+        m_file.addAction(self.act_knit_html)
+        m_file.addAction(self.act_knit_pdf)
+        m_file.addAction(self.act_rmd_toolchain)
         m_file.addSeparator()
         m_file.addAction(self.act_close_tab)
         m_file.addAction(self.act_quit)
@@ -1536,12 +1584,37 @@ class MainWindow(QMainWindow):
         ed.setTextCursor(cursor)
 
     def open_dialog(self):
+        # Both .Rmd casings listed: some non-native dialogs glob case-sensitively.
         path, _ = QFileDialog.getOpenFileName(
             self, "Open", "",
-            "Note files (*.md *.html *.txt);;All files (*.*)"
+            "Note files (*.md *.html *.htm *.txt *.Rmd *.rmd);;All files (*.*)"
         )
         if path:
             self.open_path(path)
+
+    def _set_editor_content(self, ed, path: str, content: str) -> None:
+        """Load file content into an editor with per-format handling.
+
+        Shared by open_path and _reload_from_disk so both agree on the
+        dispatch and on post-load normalization.
+        """
+        ext = path.lower()
+        if ext.endswith(('.html', '.htm')):
+            ed.setHtml(content)
+            # Real <ul><li> lists (our own exports, foreign HTML) become
+            # QTextList objects, which the editor's bullet handlers don't
+            # manage; convert them back to literal "• " lines.
+            normalize_lists_after_set_html(ed.document())
+            ed.document().clearUndoRedoStacks()
+        elif ext.endswith('.md'):
+            ed.document().setMarkdown(content)
+            ed._loaded_as_markdown = True
+        elif ext.endswith('.rmd'):
+            # R Markdown is edited as source, the way RStudio does it.
+            ed.setPlainText(content)
+            ed._loaded_as_rmd_source = True
+        else:
+            ed.setPlainText(content)
 
     def open_path(self, path: str):
         for i in range(self.tabs.count()):
@@ -1561,14 +1634,7 @@ class MainWindow(QMainWindow):
             return
 
         ed = HtmlEditor()
-        ext = path.lower()
-        if ext.endswith(('.html', '.htm')):
-            ed.setHtml(content)
-        elif ext.endswith('.md'):
-            ed.document().setMarkdown(content)
-            ed._loaded_as_markdown = True
-        else:
-            ed.setPlainText(content)
+        self._set_editor_content(ed, path, content)
 
         ed._file_path = path
         ed.document().setModified(False)
@@ -1736,24 +1802,17 @@ class MainWindow(QMainWindow):
     def save_as(self, initial_path: str = "", initial_filter: str = "") -> bool:
         path, selected_filter = QFileDialog.getSaveFileName(
             self, "Save As", initial_path,
-            ".txt (*.txt);; .html (*.html);; .pdf (*.pdf);; .md (*.md);; .rtf (*.rtf)",
+            ".txt (*.txt);; .html (*.html);; .pdf (*.pdf);; .md (*.md);; .rtf (*.rtf);; .Rmd (*.Rmd)",
             initial_filter
         )
         if not path:
             return False
 
         # Auto-add extension if the user didn't type one
-        ext_map = {
-            ".txt":  ".txt",
-            ".html": ".html",
-            ".md":   ".md",
-            ".rtf":  ".rtf",
-            ".pdf":  ".pdf",
-        }
-        for keyword, ext in ext_map.items():
-            if keyword in selected_filter and not any(path.lower().endswith(e) for e in ext_map.values()):
+        if not any(path.lower().endswith(e) for e in _SAVE_EXTS):
+            ext = _extension_from_filter(selected_filter)
+            if ext:
                 path += ext
-                break
 
         # Warn if saving to a format that loses formatting
         ed = self.current_editor()
@@ -1781,6 +1840,7 @@ class MainWindow(QMainWindow):
                 ed._backup.update_file_path(path)
             add_recent(path)
             self._populate_recent_menu()
+            self._update_knit_actions()
         return ok
 
     def _save_to(self, path: str) -> bool:
@@ -1800,7 +1860,13 @@ class MainWindow(QMainWindow):
                 return self._save_as_rtf(ed, path)
 
             if ext.endswith(('.html', '.htm')):
-                content = ed.toHtml()
+                content = document_to_html(
+                    ed.document(),
+                    title=self._export_title_for(path),
+                    source_url_for=self._image_source_url_lookup(ed),
+                )
+            elif ext.endswith('.rmd'):
+                content = self._to_rmd_content(ed, path)
             elif ext.endswith('.md') and getattr(ed, '_loaded_as_markdown', False):
                 content = ed.document().toMarkdown()
             else:
@@ -1848,18 +1914,88 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"Could not reload file:\n{e}")
             return
 
-        ext = path.lower()
-        if ext.endswith(('.html', '.htm')):
-            ed.setHtml(content)
-        elif ext.endswith('.md'):
-            ed.document().setMarkdown(content)
-            ed._loaded_as_markdown = True
-        else:
-            ed.setPlainText(content)
+        self._set_editor_content(ed, path, content)
 
         ed.document().setModified(False)
         bar.hide()
         self._update_tab_title()
+
+    def _export_title_for(self, path: str) -> str:
+        """Document title for export metadata: the filename without extension."""
+        return os.path.splitext(os.path.basename(path))[0] or "Untitled"
+
+    def _image_source_url_lookup(self, ed):
+        """Callback for exporters: local image path to its original https URL.
+
+        Checks the per-editor record written by _do_insert_image first,
+        then falls back to the media store's sha256 index (cache filenames
+        ARE the sha). Returns None when the URL is unknown; exporters embed
+        the bytes regardless, the URL is provenance only.
+        """
+        urls = dict(getattr(ed, "_image_urls", {}))
+
+        def lookup(local_path: str):
+            url = urls.get(local_path)
+            if url:
+                return url
+            store = getattr(self, "_media_store", None)
+            if store is not None:
+                media = store.files.get(os.path.basename(local_path).lower())
+                if media is not None:
+                    return media.url
+            return None
+
+        return lookup
+
+    def _to_rmd_content(self, ed, path: str) -> str:
+        """Content for a .Rmd save: source passthrough or rich conversion.
+
+        A tab that came from an .Rmd file (including one restored by crash
+        recovery, which loses the flag but keeps the path) is already
+        source. A plain tab whose text already starts with a YAML fence is
+        treated as source too, so raw Rmd typed into a new tab is not
+        double-wrapped. Everything else is converted with frontmatter.
+        """
+        origin = (getattr(ed, "_file_path", "") or "").lower()
+        if getattr(ed, "_loaded_as_rmd_source", False) or origin.endswith(".rmd"):
+            return ed.toPlainText()
+        text = ed.toPlainText()
+        if text.lstrip().startswith("---") and not self._has_formatting(ed):
+            return text
+        title = derive_title(ed.document(), self._export_title_for(path))
+        return document_to_rmd(ed.document(), title,
+                               copy_image=self._make_rmd_image_copier(path))
+
+    def _make_rmd_image_copier(self, rmd_path: str):
+        """Copy images into the .Rmd's sidecar media folder.
+
+        Returns a callback mapping a local cache path to a relative
+        markdown reference like "notes_media/<sha>.png". rmarkdown's
+        html_document embeds these into the knitted output, so the
+        rendered artifact stays a single shareable file.
+        """
+        media_dir = media_dir_for(rmd_path)
+
+        def copy(local_path: str):
+            try:
+                with open(local_path, "rb") as f:
+                    data = f.read()
+            except OSError:
+                return None
+            ext = sniff_image_ext(data)
+            if ext is None:
+                return None
+            name = os.path.basename(local_path) + ext
+            os.makedirs(media_dir, exist_ok=True)
+            target = os.path.join(media_dir, name)
+            try:
+                with open(target, "wb") as f:
+                    f.write(data)
+            except OSError:
+                return None
+            return f"{os.path.basename(media_dir)}/{name}"
+
+        return copy
 
     def _save_as_rtf(self, editor, path: str) -> bool:
         try:
@@ -1962,41 +2098,106 @@ class MainWindow(QMainWindow):
         return "".join(parts)
 
     def _save_as_pdf(self, editor, path: str) -> bool:
+        """Export via the native Qt PDF pipeline (export_pdf.py): document
+        metadata, persisted page setup, page-number footer, images capped
+        to the printable width."""
         try:
-            from PySide6.QtPrintSupport import QPrinter
-            from PySide6.QtGui import QFont
-
-            printer = QPrinter(QPrinter.HighResolution)
-            printer.setOutputFormat(QPrinter.PdfFormat)
-            printer.setOutputFileName(path)
-            printer.setPageSize(QPageSize(QPageSize.A4))
-            printer.setPageMargins(QMarginsF(10, 10, 10, 10), QPageLayout.Millimeter)
-
-            # Clone document and force white background + black default text for print.
-            # Custom text colors (red, blue, etc.) are mid-range and print well on white.
-            doc = editor.document().clone()
-            frame_fmt = doc.rootFrame().frameFormat()
-            frame_fmt.setBackground(QColor("white"))
-            doc.rootFrame().setFrameFormat(frame_fmt)
-            doc.setDefaultStyleSheet("body { color: #000000; background: #ffffff; }")
-
-            # Use point size (device-independent) so text scales correctly at 1200 DPI.
-            # The editor uses "font-size: 14px" (screen pixels) which would appear tiny
-            # at printer resolution without this conversion. 11pt ≈ standard document size.
-            font = QFont(MONO_FONT, 11)
-            doc.setDefaultFont(font)
-
-            doc.print_(printer)
-
+            export_pdf(editor.document(), path,
+                       title=self._export_title_for(path))
             editor.document().setModified(False)
             self._update_tab_title()
             self.status.showMessage(f"Saved: {path}")
             return True
-
         except Exception as e:
             QMessageBox.critical(self, "Error", f"PDF could not be saved:\n{e}")
             return False
 
+    # ----------------------------------------------------------------------
+    # PAGE SETUP + R MARKDOWN KNITTING
+    # ----------------------------------------------------------------------
+    def _on_page_setup(self):
+        PageSetupDialog(is_dark=self.is_dark_theme, parent=self).exec()
+
+    def _on_rmd_toolchain(self):
+        RmdSetupDialog(is_dark=self.is_dark_theme, parent=self).exec()
+
+    def _current_rmd_path(self) -> Optional[str]:
+        ed = self.current_editor()
+        path = getattr(ed, '_file_path', None) if ed else None
+        if path and path.lower().endswith('.rmd'):
+            return path
+        return None
+
+    def _update_knit_actions(self):
+        if not hasattr(self, 'act_knit_html'):
+            return
+        busy = hasattr(self, '_knit_runner') and self._knit_runner.busy
+        available = self._current_rmd_path() is not None and not busy
+        self.act_knit_html.setEnabled(available)
+        self.act_knit_pdf.setEnabled(available)
+
+    def _ensure_knit_runner(self) -> KnitRunner:
+        if not hasattr(self, '_knit_runner'):
+            self._knit_runner = KnitRunner(self)
+            self._knit_runner.started.connect(self._on_knit_started)
+            self._knit_runner.finished.connect(self._on_knit_done)
+            self._knit_runner.failed.connect(self._on_knit_failed)
+        return self._knit_runner
+
+    def _on_knit(self, fmt: str):
+        ed = self.current_editor()
+        if ed is None:
+            return
+        path = self._current_rmd_path()
+        if path is None:
+            # Knitting renders the file on disk, so the tab must become an
+            # .Rmd file first.
+            if not self.save_as("", ".Rmd (*.Rmd)"):
+                return
+            path = self._current_rmd_path()
+            if path is None:
+                return
+        elif ed.document().isModified():
+            # Auto-save before knitting, RStudio-style.
+            if not self._save_to(path):
+                return
+        runner = self._ensure_knit_runner()
+        if runner.busy:
+            return
+        if not rmd_toolchain.ready_to_knit(to_pdf=(fmt == "pdf")):
+            dlg = RmdSetupDialog(is_dark=self.is_dark_theme, parent=self,
+                                 want_pdf=(fmt == "pdf"))
+            if dlg.exec() != QDialog.Accepted or not dlg.succeeded:
+                return
+        runner.knit(path, fmt)
+
+    def _on_knit_started(self):
+        self.status.showMessage("Knitting…")
+        self._update_knit_actions()
+
+    def _on_knit_done(self, output_path: str):
+        self.status.showMessage(f"Knit complete: {output_path}", 8000)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(output_path))
+        self._update_knit_actions()
+
+    def _on_knit_failed(self, kind: str, detail: str):
+        self._update_knit_actions()
+        installable = {"missing-r", "missing-rmarkdown", "missing-pandoc",
+                       "missing-latex"}
+        if kind in installable:
+            # Route straight into the setup dialog, which shows what is
+            # missing and can install it from the official source.
+            dlg = RmdSetupDialog(is_dark=self.is_dark_theme, parent=self,
+                                 want_pdf=(kind == "missing-latex"))
+            dlg.exec()
+            return
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Knit failed")
+        msg.setIcon(QMessageBox.Warning)
+        msg.setText("The document could not be rendered.")
+        msg.setDetailedText(detail)
+        msg.exec()
+        self.status.showMessage("Knit failed.", 5000)
 
     # ----------------------------------------------------------------------
     # SEARCH
@@ -2600,6 +2801,8 @@ class MainWindow(QMainWindow):
                         return
                     else:
                         break
+        if hasattr(self, "_knit_runner"):
+            self._knit_runner.kill()
         self._save_session()
         for i in range(self.tabs.count()):
             ed = self._editor_from_widget(self.tabs.widget(i))
@@ -3008,6 +3211,12 @@ class MainWindow(QMainWindow):
             cursor.insertText(f"![{alt_text}]({source_url})")
         else:
             cursor.insertImage(local_path)
+            # Remember the upload URL so exporters can attach provenance
+            # (data-source-url); embedding never depends on this record.
+            if source_url:
+                if not hasattr(editor, "_image_urls"):
+                    editor._image_urls = {}
+                editor._image_urls[local_path] = source_url
         editor.setTextCursor(cursor)
         suffix = f" · alt: {alt_text}" if alt_text else ""
         self.status.showMessage(f"Inserted image · {source_url}{suffix}", 5000)
