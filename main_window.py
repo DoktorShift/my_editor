@@ -41,6 +41,7 @@ import theme
 from export_html import document_to_html, normalize_lists_after_set_html, sniff_image_ext
 from export_pdf import export_pdf
 from page_setup_dialog import PageSetupDialog
+from pdf_viewer import PdfViewerTab
 from rmarkdown import KnitRunner, derive_title, document_to_rmd, media_dir_for
 from rmd_setup_dialog import RmdSetupDialog
 import rmd_toolchain
@@ -50,7 +51,8 @@ _RICH_DOC_EXTS = ('.html', '.htm', '.md', '.markdown')
 
 # Extensions accepted for drag-and-drop and file open.
 # .rmd opens as SOURCE (plain text + markdown highlighting), like RStudio.
-_SUPPORTED_EXTS = {'.md', '.html', '.htm', '.txt', '.rmd'}
+# .pdf opens read-only in the built-in PDF viewer, not in an editor.
+_SUPPORTED_EXTS = {'.md', '.html', '.htm', '.txt', '.rmd', '.pdf'}
 
 # Image extensions we route through Blossom upload on drag-and-drop.
 # These never overlap with _SUPPORTED_EXTS so the dispatcher stays simple.
@@ -347,14 +349,14 @@ class MainWindow(QMainWindow):
         self._draft_sync.status_changed.connect(self._on_draft_sync_status)
         self._draft_sync.bunker_error.connect(self._on_draft_sync_bunker_error)
         # Created lazily inside ``_build_findbar`` so its parent is the
-        # central widget rather than ``self`` — keeps Qt's geometry
+        # central widget rather than ``self`` - keeps Qt's geometry
         # reasoning straightforward.
         self._drafts_panel: Optional[DraftsPanel] = None
         # Maps each open editor → its conflict banner widget so we can
         # avoid stacking duplicate banners on the same tab.
         self._tab_conflict_banners: dict = {}
 
-        # Blossom media library — orchestrates uploads / list / delete
+        # Blossom media library - orchestrates uploads / list / delete
         # against the user's configured Blossom servers, signing each
         # auth event through the existing bunker pool.
         self._media_store = MediaStore(
@@ -387,7 +389,7 @@ class MainWindow(QMainWindow):
         if active is not None:
             self._metadata_fetcher.fetch(active)
             self._contact_fetcher.fetch(active.user_pubkey, active.bunker_relays)
-            # Start the draft sync in the background. It's idempotent —
+            # Start the draft sync in the background. It's idempotent -
             # if the panel is never opened, this still keeps the store
             # warm so opening the panel later is instant.
             self._draft_sync.start_for(active)
@@ -719,6 +721,12 @@ class MainWindow(QMainWindow):
         return f"{prefix}{base}{dirty}"
 
     def _update_status_bar(self):
+        viewer = self.current_pdf_viewer()
+        if viewer is not None:
+            self.status.showMessage(viewer._file_path)
+            self._line_label.setText(viewer.page_display())
+            self._update_format_buttons()
+            return
         ed = self.current_editor()
         if not ed:
             self._line_label.setText("")
@@ -747,6 +755,12 @@ class MainWindow(QMainWindow):
         self._update_undo_redo_buttons()
         self._update_status_bar()  # also calls _update_format_buttons
         self._update_knit_actions()
+        # The global find bar searches editors only; a PDF tab carries
+        # its own find bar, so retire the editor one when switching over.
+        if self.findbar.isVisible() and self.current_pdf_viewer() is not None:
+            self.findbar.setVisible(False)
+            self.findbar.set_match_info("")
+            self._clear_search_highlights()
         if self.findbar.isVisible():
             # Clear stale highlights on every non-active tab
             for i in range(self.tabs.count()):
@@ -928,6 +942,14 @@ class MainWindow(QMainWindow):
         self.act_highlight_line.setChecked(self.highlight_current_line)
         self.act_highlight_line.toggled.connect(self._toggle_highlight_line)
 
+        # Distraction-free reading and writing: the whole window can go
+        # full screen. QKeySequence.FullScreen is F11 on Windows/Linux
+        # and Ctrl+Cmd+F on macOS, matching each platform's convention.
+        self.act_fullscreen = QAction("Full Screen", self)
+        self.act_fullscreen.setShortcut(QKeySequence.FullScreen)
+        self.act_fullscreen.setCheckable(True)
+        self.act_fullscreen.toggled.connect(self._toggle_fullscreen)
+
         self.addAction(self.act_bold)
         self.addAction(self.act_italic)
         self.addAction(self.act_underline)
@@ -935,6 +957,7 @@ class MainWindow(QMainWindow):
         self.addAction(self.act_toggle_theme)
         self.addAction(self.act_toggle_line_numbers)
         self.addAction(self.act_toggle_syntax_hl)
+        self.addAction(self.act_fullscreen)
 
     def _build_menu(self):
         m_file = self.menuBar().addMenu("&File")
@@ -971,6 +994,8 @@ class MainWindow(QMainWindow):
         m_background.addAction(self.act_bg_dots)
         m_background.addAction(self.act_bg_grid)
         m_view.addAction(self.act_highlight_line)
+        m_view.addSeparator()
+        m_view.addAction(self.act_fullscreen)
 
         m_nostr = self.menuBar().addMenu("&Nostr")
         act_nostr_publish = QAction("Publish as Note…", self)
@@ -982,7 +1007,7 @@ class MainWindow(QMainWindow):
         act_nostr_publish_article.triggered.connect(self._on_nostr_publish_article)
         m_nostr.addAction(act_nostr_publish_article)
         m_nostr.addSeparator()
-        # Media (Blossom) — browse the user's uploaded blobs, upload new
+        # Media (Blossom) - browse the user's uploaded blobs, upload new
         # ones, or insert one into the current document at the cursor.
         act_nostr_media = QAction("Media Library…", self)
         act_nostr_media.setShortcut(QKeySequence("Ctrl+Shift+M"))
@@ -995,7 +1020,7 @@ class MainWindow(QMainWindow):
         m_nostr.addAction(act_nostr_insert_image)
         self.addAction(act_nostr_insert_image)
         m_nostr.addSeparator()
-        # Drafts surface — the side-docked panel. ``Ctrl+Shift+D`` (D
+        # Drafts surface - the side-docked panel. ``Ctrl+Shift+D`` (D
         # for Draft) toggles it, sitting alongside the other Ctrl+Shift
         # Nostr shortcuts.
         self.act_nostr_drafts = QAction("Drafts…", self)
@@ -1092,7 +1117,7 @@ class MainWindow(QMainWindow):
 
         # The editor area (header + findbar + tabs) lives on the left
         # of a horizontal splitter; the drafts panel docks on the right.
-        # We always create the panel — keeping it always-present (just
+        # We always create the panel - keeping it always-present (just
         # hidden) preserves the layout's geometry across show/hide and
         # avoids re-parenting issues. When no Nostr profile is connected,
         # the panel itself renders the "Connect a Nostr profile" empty
@@ -1337,7 +1362,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Delete Failed", str(e))
             return
 
-        # Close tab without prompting to save — file is gone
+        # Close tab without prompting to save - file is gone
         if hasattr(ed, '_backup'):
             ed._backup.delete()
         self._watcher.removePath(file_path)
@@ -1399,6 +1424,14 @@ class MainWindow(QMainWindow):
 
     def close_tab(self, index: int):
         w = self.tabs.widget(index)
+
+        viewer = self._pdf_viewer_from_widget(w)
+        if viewer is not None:
+            viewer.save_view_state()
+            self._watcher.removePath(viewer._file_path)
+            self.tabs.removeTab(index)
+            return
+
         editor = self._editor_from_widget(w)
 
         if editor and editor.document().isModified():
@@ -1421,7 +1454,7 @@ class MainWindow(QMainWindow):
             path = getattr(editor, '_file_path', None)
             if path:
                 self._watcher.removePath(path)
-            # A draft tab might own a conflict banner — drop the dict
+            # A draft tab might own a conflict banner - drop the dict
             # entry so we don't accumulate references to dead editors
             # across the session.
             banner = self._tab_conflict_banners.pop(editor, None)
@@ -1478,6 +1511,20 @@ class MainWindow(QMainWindow):
         if isinstance(w, QWidget):
             return w.findChild(HtmlEditor)
         return None
+
+    def _pdf_viewer_from_widget(self, w) -> PdfViewerTab | None:
+        return w if isinstance(w, PdfViewerTab) else None
+
+    def current_pdf_viewer(self) -> PdfViewerTab | None:
+        return self._pdf_viewer_from_widget(self.tabs.currentWidget())
+
+    def _tab_file_path(self, w) -> str | None:
+        """The file backing a tab, regardless of tab kind (editor / PDF)."""
+        ed = self._editor_from_widget(w)
+        if ed is not None:
+            return getattr(ed, '_file_path', None)
+        viewer = self._pdf_viewer_from_widget(w)
+        return viewer._file_path if viewer is not None else None
 
     def _bar_from_widget(self, w) -> FileChangedBar | None:
         if isinstance(w, QWidget):
@@ -1559,7 +1606,7 @@ class MainWindow(QMainWindow):
         if prompt.exec() != QMessageBox.Yes:
             return
 
-        # Match by basename — MediaStore emits upload_finished(name, ...)
+        # Match by basename - MediaStore emits upload_finished(name, ...)
         # using the file's basename as the display name.
         for path in paths:
             self._pending_upload_inserts[os.path.basename(path)] = id(ed)
@@ -1587,7 +1634,9 @@ class MainWindow(QMainWindow):
         # Both .Rmd casings listed: some non-native dialogs glob case-sensitively.
         path, _ = QFileDialog.getOpenFileName(
             self, "Open", "",
-            "Note files (*.md *.html *.htm *.txt *.Rmd *.rmd);;All files (*.*)"
+            "Supported files (*.md *.html *.htm *.txt *.Rmd *.rmd *.pdf);;"
+            "Note files (*.md *.html *.htm *.txt *.Rmd *.rmd);;"
+            "PDF documents (*.pdf);;All files (*.*)"
         )
         if path:
             self.open_path(path)
@@ -1618,13 +1667,16 @@ class MainWindow(QMainWindow):
 
     def open_path(self, path: str):
         for i in range(self.tabs.count()):
-            ed = self._editor_from_widget(self.tabs.widget(i))
-            if ed and getattr(ed, '_file_path', None) == path:
+            if self._tab_file_path(self.tabs.widget(i)) == path:
                 self.tabs.setCurrentIndex(i)
                 bar = self._bar_from_widget(self.tabs.widget(i))
                 if bar:
                     bar.show_already_open()
                 return
+
+        if path.lower().endswith('.pdf'):
+            self._open_pdf_tab(path)
+            return
 
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -1680,6 +1732,33 @@ class MainWindow(QMainWindow):
         self._populate_recent_menu()
         ed.setFocus()
         self._update_window_title()
+
+    def _open_pdf_tab(self, path: str):
+        """Open ``path`` read-only in the built-in PDF viewer."""
+        viewer = PdfViewerTab(path, is_dark=self.is_dark_theme)
+        if not viewer.load_ok:
+            QMessageBox.critical(self, "Error",
+                                 f"PDF could not be opened:\n{viewer.load_error}")
+            viewer.deleteLater()
+            return
+        viewer.page_changed.connect(self._on_pdf_page_changed)
+
+        idx = self.tabs.addTab(viewer, os.path.basename(path))
+        self.tabs.setTabToolTip(idx, viewer.document_title())
+        self.tabs.setCurrentIndex(idx)
+        self._attach_close_button(idx, viewer)
+        # Watch the file so a regenerated PDF (LaTeX build, re-export)
+        # refreshes in place at the same reading position.
+        self._watcher.addPath(path)
+        add_recent(path)
+        self._populate_recent_menu()
+        viewer.setFocus()
+        self._update_window_title()
+        self._update_status_bar()
+
+    def _on_pdf_page_changed(self):
+        if self.sender() is self.tabs.currentWidget():
+            self._update_status_bar()
 
     def _has_formatting(self, ed: HtmlEditor) -> bool:
         """Return True if the document contains any bold, italic, underline, or color formatting."""
@@ -1750,12 +1829,15 @@ class MainWindow(QMainWindow):
         return 'cancel'
 
     def save(self) -> bool:
+        if self.current_pdf_viewer() is not None:
+            self.status.showMessage("PDFs open read-only; there is nothing to save.", 3000)
+            return True
         path = self.current_path()
         if not path:
             # No local file backs this tab. If it's a draft tab (opened
             # from the drafts panel, or stashed and never disk-saved),
             # the user pressing Ctrl+S means "save what I'm working on"
-            # — i.e. re-stash with the same kind + d-tag, no dialogs.
+            # - i.e. re-stash with the same kind + d-tag, no dialogs.
             # Otherwise fall through to the standard "Save As" prompt.
             ed = self.current_editor()
             binding = getattr(ed, "_draft_binding", None) if ed else None
@@ -1767,7 +1849,7 @@ class MainWindow(QMainWindow):
                 # belongs to a different profile, the user has to make
                 # an intentional choice. We don't offer "save a copy"
                 # here because Ctrl+S is meant to mean "save what I
-                # have" — silently changing identity violates that.
+                # have" - silently changing identity violates that.
                 mismatch_pk = self._draft_binding_profile_mismatch(ed)
                 if mismatch_pk is not None:
                     outcome = self._resolve_mismatch(ed, mismatch_pk, allow_fork=False)
@@ -1890,6 +1972,14 @@ class MainWindow(QMainWindow):
         # Re-add path: some OS implementations remove it after a change event
         if os.path.exists(path):
             self._watcher.addPath(path)
+
+        # A regenerated PDF reloads in place: the viewer holds no user
+        # edits, so there is nothing to protect behind a prompt.
+        for i in range(self.tabs.count()):
+            viewer = self._pdf_viewer_from_widget(self.tabs.widget(i))
+            if viewer is not None and viewer._file_path == path:
+                viewer.schedule_reload()
+                return
 
         for i in range(self.tabs.count()):
             w = self.tabs.widget(i)
@@ -2203,6 +2293,10 @@ class MainWindow(QMainWindow):
     # SEARCH
     # ----------------------------------------------------------------------
     def _toggle_findbar(self):
+        viewer = self.current_pdf_viewer()
+        if viewer is not None:
+            viewer.toggle_findbar()
+            return
         vis = not self.findbar.isVisible()
         self.findbar.setVisible(vis)
         if vis:
@@ -2550,9 +2644,17 @@ class MainWindow(QMainWindow):
         self.findbar.set_match_info(f"{current} of {total}")
 
     def _find_next(self):
+        viewer = self.current_pdf_viewer()
+        if viewer is not None:
+            viewer.find_next()
+            return
         self._find_once(True)
 
     def _find_prev(self):
+        viewer = self.current_pdf_viewer()
+        if viewer is not None:
+            viewer.find_prev()
+            return
         self._find_once(False)
 
 
@@ -2617,6 +2719,9 @@ class MainWindow(QMainWindow):
             bar = self._bar_from_widget(self.tabs.widget(i))
             if bar:
                 bar.update_theme(self.is_dark_theme)
+            viewer = self._pdf_viewer_from_widget(self.tabs.widget(i))
+            if viewer is not None:
+                viewer.update_theme(self.is_dark_theme)
         # The drafts panel and any mounted conflict banners each carry
         # their own dark/light stylesheet pair. Update them in lockstep
         # with the rest of the window so a theme switch doesn't leave
@@ -2644,6 +2749,12 @@ class MainWindow(QMainWindow):
         if not self._follow_os_theme:
             return
         self._set_theme(scheme != Qt.ColorScheme.Light)
+
+    def _toggle_fullscreen(self, checked: bool):
+        if checked:
+            self.showFullScreen()
+        else:
+            self.showNormal()
 
 
     # ----------------------------------------------------------------------
@@ -2755,9 +2866,9 @@ class MainWindow(QMainWindow):
     def _save_session(self):
         paths = []
         for i in range(self.tabs.count()):
-            ed = self._editor_from_widget(self.tabs.widget(i))
-            if ed and getattr(ed, '_file_path', None):
-                paths.append(ed._file_path)
+            path = self._tab_file_path(self.tabs.widget(i))
+            if path:
+                paths.append(path)
         if not paths:
             return
         data = {"paths": paths, "active": self.tabs.currentIndex()}
@@ -2808,6 +2919,9 @@ class MainWindow(QMainWindow):
             ed = self._editor_from_widget(self.tabs.widget(i))
             if ed and hasattr(ed, '_backup'):
                 ed._backup.delete()
+            viewer = self._pdf_viewer_from_widget(self.tabs.widget(i))
+            if viewer is not None:
+                viewer.save_view_state()
         # Close any warm relay sockets and bunker channels so the WebSocket
         # layer can flush close frames before the QApplication tears down.
         if hasattr(self, "_session_pool"):
@@ -2817,7 +2931,7 @@ class MainWindow(QMainWindow):
         event.accept()
 
     # ----------------------------------------------------------------------
-    # NOSTR — profile chip menu + connect flow
+    # NOSTR - profile chip menu + connect flow
     # ----------------------------------------------------------------------
 
     def _update_profile_chip(self):
@@ -2839,7 +2953,7 @@ class MainWindow(QMainWindow):
         )
 
     def _refresh_profile_chip_menu(self):
-        """Rebuild the chip's dropdown — fast and idempotent."""
+        """Rebuild the chip's dropdown - fast and idempotent."""
         menu = self.header_widget.profile_chip.menu()
         menu.clear()
 
@@ -2899,7 +3013,7 @@ class MainWindow(QMainWindow):
         self._profile_store.set_default(profile.user_pubkey)
         self._update_profile_chip()
         self._refresh_profile_chip_menu()
-        # Switching identities — re-point the draft sync at the new
+        # Switching identities - re-point the draft sync at the new
         # profile. ``DraftSync.start_for`` is idempotent if the same
         # profile is already active.
         self._draft_sync.start_for(profile)
@@ -2941,7 +3055,7 @@ class MainWindow(QMainWindow):
     # -- metadata / avatar updates ----------------------------------------
 
     def _on_metadata_updated(self, profile: Profile):
-        """Refreshed display name / picture URL landed — repaint the chip
+        """Refreshed display name / picture URL landed - repaint the chip
         and queue the avatar download if one is available."""
         self._update_profile_chip()
         self._refresh_profile_chip_menu()
@@ -2965,7 +3079,7 @@ class MainWindow(QMainWindow):
             self._avatar_batcher.request(person.pubkey, person.picture)
 
     def _on_search_results(self, _query: str, people: list):
-        """NIP-50 search returned matches — queue their avatars too."""
+        """NIP-50 search returned matches - queue their avatars too."""
         for person in people:
             if isinstance(person, Person) and person.picture:
                 self._avatar_batcher.request(person.pubkey, person.picture)
@@ -3140,7 +3254,7 @@ class MainWindow(QMainWindow):
             pick_mode=True,
             parent=self,
         )
-        # Pre-select images in the picker — videos / audio can't be
+        # Pre-select images in the picker - videos / audio can't be
         # inserted as inline document objects.
         dialog._filter_combo.setCurrentIndex(1)
         dialog.file_picked.connect(
@@ -3189,7 +3303,7 @@ class MainWindow(QMainWindow):
         self._do_insert_image(editor, local_path, original_url, alt_text)
 
     def _on_media_image_failed(self, sha: str, reason: str) -> None:
-        """Loader failed for a hash we wanted to insert — drop the
+        """Loader failed for a hash we wanted to insert - drop the
         pending entry and surface a status message so the queue doesn't
         leak and the user sees why nothing was inserted."""
         if self._pending_image_inserts.pop(sha, None) is None:
@@ -3235,7 +3349,7 @@ class MainWindow(QMainWindow):
 
         Uploads NOT initiated by drop/paste (e.g. the Library dialog's
         Upload button) won't be in the pending dict, so this is a no-op
-        for those — no UI surprise."""
+        for those - no UI surprise."""
         editor_id = self._pending_upload_inserts.pop(name, None)
         if editor_id is None:
             return
@@ -3245,7 +3359,7 @@ class MainWindow(QMainWindow):
         self._insert_media_at_cursor(media, editor)
 
     def _on_upload_failed_for_insert(self, name: str, reason: str) -> None:
-        """An upload originated from a drop or paste failed — drop the
+        """An upload originated from a drop or paste failed - drop the
         pending entry so it doesn't leak. Failure status is already
         surfaced by MediaStore via upload_failed → status label."""
         self._pending_upload_inserts.pop(name, None)
@@ -3274,7 +3388,7 @@ class MainWindow(QMainWindow):
                 "Connect one (Nostr → Connect Signer…) to upload images "
                 "to Blossom and insert them into your notes.",
             )
-            return True  # consumed — don't fall through to plain-text paste
+            return True  # consumed - don't fall through to plain-text paste
 
         ed = self.current_editor()
         if ed is None:
@@ -3301,7 +3415,7 @@ class MainWindow(QMainWindow):
         return True
 
     # ----------------------------------------------------------------------
-    # NOSTR — drafts panel toggling
+    # NOSTR - drafts panel toggling
     # ----------------------------------------------------------------------
 
     def _on_toggle_drafts_panel(self):
@@ -3341,11 +3455,11 @@ class MainWindow(QMainWindow):
         self.act_nostr_drafts.setChecked(False)
 
     # ----------------------------------------------------------------------
-    # NOSTR — drafts panel signal handlers
+    # NOSTR - drafts panel signal handlers
     # ----------------------------------------------------------------------
 
     def _on_panel_switch_profile(self) -> None:
-        """The panel's profile chip was clicked — defer to the existing
+        """The panel's profile chip was clicked - defer to the existing
         chip menu so the user has one canonical place to switch."""
         chip = self.header_widget.profile_chip
         chip.showMenu()
@@ -3363,7 +3477,7 @@ class MainWindow(QMainWindow):
         record = self._draft_store.get(identifier)
         if record is None or record.state is not DraftState.READY:
             self.status.showMessage(
-                "Draft isn't ready to open yet — still decrypting.", 4000
+                "Draft isn't ready to open yet - still decrypting.", 4000
             )
             return
 
@@ -3394,7 +3508,7 @@ class MainWindow(QMainWindow):
             title=record.title,
             profile_pubkey=active.user_pubkey.lower() if active else "",
         )
-        # Deliberately NOT pre-setting ``_save_destination`` — the
+        # Deliberately NOT pre-setting ``_save_destination`` - the
         # destination dialog should still appear on first Ctrl+Shift+S
         # so the user can save the draft locally if they want. Silent
         # re-stashes go through Ctrl+S, which respects the binding via
@@ -3424,10 +3538,10 @@ class MainWindow(QMainWindow):
         time, the bunker request timed out, and the row is now sitting
         in FAILED state. ``DraftSync.retry_decrypt`` uses the
         ciphertext cached on the record, so this is a single fresh
-        signer round-trip — no relay re-fetch.
+        signer round-trip - no relay re-fetch.
         """
         self._draft_sync.retry_decrypt(identifier)
-        self.status.showMessage("Retrying decryption — approve on your signer…", 6000)
+        self.status.showMessage("Retrying decryption - approve on your signer…", 6000)
 
     def _on_panel_delete_draft(self, identifier: str, inner_kind: int) -> None:
         profile = self._profile_store.default()
@@ -3510,12 +3624,12 @@ class MainWindow(QMainWindow):
     def _on_draft_sync_bunker_error(self, message: str) -> None:
         if self._drafts_panel is not None:
             self._drafts_panel.set_signer_unsupported(True)
-        # Surface in the main window status bar too — the user may not
+        # Surface in the main window status bar too - the user may not
         # have the panel open.
         self.status.showMessage(message, 8000)
 
     # ----------------------------------------------------------------------
-    # NOSTR — contextual Ctrl+Shift+S: disk vs. draft destination
+    # NOSTR - contextual Ctrl+Shift+S: disk vs. draft destination
     # ----------------------------------------------------------------------
 
     def _has_active_nostr_profile(self) -> bool:
@@ -3560,7 +3674,7 @@ class MainWindow(QMainWindow):
             if outcome == "switch":
                 if not self._switch_active_profile_to(mismatch_pk):
                     # Profile was removed between detection and
-                    # confirmation — surface and bail rather than fall
+                    # confirmation - surface and bail rather than fall
                     # through to a save under the wrong identity.
                     QMessageBox.warning(
                         self, "Profile unavailable",
@@ -3583,7 +3697,7 @@ class MainWindow(QMainWindow):
 
         # Default the chooser to the option that matches the tab's
         # current identity: if it's a draft tab, pre-select "Save as
-        # Nostr draft" — but still show the dialog so the user can
+        # Nostr draft" - but still show the dialog so the user can
         # change their mind. Otherwise default to the safer disk option.
         is_draft_tab = getattr(ed, "_draft_binding", None) is not None
         default = (
@@ -3607,7 +3721,7 @@ class MainWindow(QMainWindow):
         """Open the kind picker and, on accept, fire a ``DraftPublishJob``.
 
         Per the product spec we ask for the kind on every Save-As stash
-        — the prior binding (if any) is pre-selected so the common path
+        - the prior binding (if any) is pre-selected so the common path
         is two clicks: open dialog → confirm.
 
         For a silent re-save of an already-bound tab (the ``Ctrl+S``
@@ -3647,7 +3761,7 @@ class MainWindow(QMainWindow):
         self._fire_draft_publish_job(ed, profile, choice, inner)
 
     def _restash_with_binding(self, ed, binding: DraftBinding) -> None:
-        """Silent re-save of a draft-bound tab — no dialogs.
+        """Silent re-save of a draft-bound tab - no dialogs.
 
         Triggered by ``Ctrl+S`` when the tab has a draft binding but no
         local file path. The kind, identifier, and metadata are taken
@@ -3701,7 +3815,7 @@ class MainWindow(QMainWindow):
         path so both behave identically once the kind + identifier are
         decided.
         """
-        # Final debounce check — the entry points (Ctrl+S, Ctrl+Shift+S)
+        # Final debounce check - the entry points (Ctrl+S, Ctrl+Shift+S)
         # also guard, but defense-in-depth here protects any future
         # call site we add (e.g. an auto-save timer).
         if self._is_stash_in_flight_for(ed):
@@ -3846,7 +3960,7 @@ class MainWindow(QMainWindow):
         optimistically so the panel reflects the new state immediately
         rather than waiting for the relay echo to round-trip back
         through ``DraftSync``."""
-        # The editor may have been closed mid-flight — bail gracefully.
+        # The editor may have been closed mid-flight - bail gracefully.
         if ed is None or self._editor_widget_index(ed) < 0:
             return
         active = self._profile_store.default()
@@ -3858,12 +3972,12 @@ class MainWindow(QMainWindow):
             title=choice.title or (choice.identifier if choice.kind is StashKind.NOTE else ""),
             profile_pubkey=active.user_pubkey.lower() if active else "",
         )
-        # A successful stash clears the modified flag — the tab's
+        # A successful stash clears the modified flag - the tab's
         # contents now match the latest draft snapshot on the network.
         ed.document().setModified(False)
         self._update_tab_title()
 
-        # Optimistic store update — by the time the relay echo arrives
+        # Optimistic store update - by the time the relay echo arrives
         # via DraftSync, the panel already shows the row.
         self._draft_store.upsert_from_inner(
             identifier=choice.identifier,
@@ -3876,7 +3990,7 @@ class MainWindow(QMainWindow):
     def _editor_widget_index(self, ed) -> int:
         """Return the tab index that hosts ``ed``, or -1 if not found.
 
-        Walks the tab widgets defensively — used by the post-job
+        Walks the tab widgets defensively - used by the post-job
         callback to verify the tab still exists before mutating it.
         """
         for i in range(self.tabs.count()):
@@ -3885,7 +3999,7 @@ class MainWindow(QMainWindow):
         return -1
 
     # ----------------------------------------------------------------------
-    # NOSTR — stash debounce: at most one in-flight stash per tab
+    # NOSTR - stash debounce: at most one in-flight stash per tab
     # ----------------------------------------------------------------------
 
     def _is_stash_in_flight_for(self, ed) -> bool:
@@ -3900,13 +4014,13 @@ class MainWindow(QMainWindow):
         return getattr(ed, "_active_stash_job", None) is not None
 
     def _stash_already_running_message(self) -> None:
-        self.status.showMessage("Already saving this draft — wait for it to finish.", 4000)
+        self.status.showMessage("Already saving this draft - wait for it to finish.", 4000)
 
     def _attach_active_stash(self, ed, job) -> None:
         ed._active_stash_job = job
 
         def _release(*_args) -> None:
-            # Only clear if this is still the registered job — guards
+            # Only clear if this is still the registered job - guards
             # against an out-of-order completed/failed pair from an
             # earlier cancelled job clobbering a newer one.
             if getattr(ed, "_active_stash_job", None) is job:
@@ -3916,7 +4030,7 @@ class MainWindow(QMainWindow):
         job.failed.connect(_release)
 
     # ----------------------------------------------------------------------
-    # NOSTR — draft / active-profile mismatch
+    # NOSTR - draft / active-profile mismatch
     # ----------------------------------------------------------------------
 
     def _draft_binding_profile_mismatch(self, ed) -> Optional[str]:
@@ -3926,7 +4040,7 @@ class MainWindow(QMainWindow):
         The active profile drives signing and relay routing. Saving a
         draft tab under a different identity would silently fork the
         draft's addressable coordinate, which is rarely the user's
-        intent — so this check funnels mismatches through a clear
+        intent - so this check funnels mismatches through a clear
         confirmation dialog rather than letting them happen by accident.
         """
         binding: Optional[DraftBinding] = getattr(ed, "_draft_binding", None)
@@ -4021,7 +4135,7 @@ class MainWindow(QMainWindow):
         self._update_tab_title()
 
     # ----------------------------------------------------------------------
-    # NOSTR — conflict banner
+    # NOSTR - conflict banner
     # ----------------------------------------------------------------------
 
     def _on_draft_record_changed(self, identifier: str) -> None:
@@ -4044,7 +4158,7 @@ class MainWindow(QMainWindow):
                 continue
             if not record.event_id or record.event_id == binding.event_id:
                 continue  # No new server-side version.
-            # If the tab isn't dirty, silently refresh — there's
+            # If the tab isn't dirty, silently refresh - there's
             # nothing to conflict with.
             if not ed.document().isModified():
                 ed.setPlainText(record.content)
@@ -4060,7 +4174,7 @@ class MainWindow(QMainWindow):
     def _show_conflict_banner(self, container, ed, record) -> None:
         """Insert (or update) the per-tab conflict banner."""
         if ed in self._tab_conflict_banners:
-            # Already showing — refresh the message in case the remote
+            # Already showing - refresh the message in case the remote
             # version has updated again.
             self._tab_conflict_banners[ed].show()
             return

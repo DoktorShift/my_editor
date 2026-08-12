@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Keyboard-shortcuts cheat sheet — modal dialog with a "mega menu" feel.
+"""Keyboard-shortcuts cheat sheet - modal dialog with a "mega menu" feel.
 
 Style brief:
   - Category cards laid out in two responsive columns.
@@ -39,7 +39,7 @@ from PySide6.QtWidgets import (
 
 
 # --------------------------------------------------------------------------- #
-# Shortcut catalogue — single source of truth for the help dialog             #
+# Shortcut catalogue - single source of truth for the help dialog             #
 # --------------------------------------------------------------------------- #
 
 @dataclass(frozen=True)
@@ -104,6 +104,28 @@ SHORTCUT_GROUPS: Tuple[ShortcutGroup, ...] = (
             Shortcut("Ctrl+Shift+T",    "Toggle theme"),
             Shortcut("Ctrl+Shift+L",    "Toggle line numbers"),
             Shortcut("Ctrl+Shift+H",    "Toggle syntax highlighting"),
+            Shortcut("F11",             "Full screen (Ctrl+Cmd+F on macOS)"),
+        ),
+    ),
+    ShortcutGroup(
+        title="PDF Reading",
+        items=(
+            Shortcut("Ctrl+F",          "Find in PDF"),
+            Shortcut("Space",           "Next screenful"),
+            Shortcut("Shift+Space",     "Previous screenful"),
+            Shortcut("J",               "Scroll down"),
+            Shortcut("K",               "Scroll up"),
+            Shortcut("N",               "Next page"),
+            Shortcut("P",               "Previous page"),
+            Shortcut("G",               "Go to page"),
+            Shortcut("Home",            "First page"),
+            Shortcut("End",             "Last page"),
+            Shortcut("Ctrl+=",          "Zoom in (also Ctrl+wheel)"),
+            Shortcut("Ctrl+-",          "Zoom out (also Ctrl+wheel)"),
+            Shortcut("Ctrl+0",          "Fit page width"),
+            Shortcut("Ctrl+1",          "Actual size"),
+            Shortcut("Ctrl+2",          "Fit whole page"),
+            Shortcut("F12",             "Toggle table of contents"),
         ),
     ),
     ShortcutGroup(
@@ -261,7 +283,7 @@ def _make_keycap_row(keys: str) -> QWidget:
     """Render a key combo as a row of pill-shaped key caps.
 
     "Ctrl+Shift+D" becomes three caps with thin "+" separators in
-    between — closer to how Apple's Help shortcuts viewer or Sublime's
+    between - closer to how Apple's Help shortcuts viewer or Sublime's
     cheat sheet display key combos than a single bold string.
     """
     container = QWidget()
@@ -294,7 +316,7 @@ class _ShortcutCard(QFrame):
         self._group = group
         # Tracked separately from Qt's ``isHidden()`` because that
         # property reports True for any widget that hasn't yet been
-        # shown — making it useless for "should this card take a grid
+        # shown - making it useless for "should this card take a grid
         # slot?" decisions during initial construction.
         self._filtered_out = False
 
@@ -441,7 +463,7 @@ class ShortcutsDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(self.reject)
         buttons.accepted.connect(self.accept)
-        # Close is a "reject" role by default — wire its click to accept
+        # Close is a "reject" role by default - wire its click to accept
         # so Enter / Esc both dismiss cleanly.
         close_btn = buttons.button(QDialogButtonBox.Close)
         close_btn.setDefault(True)
@@ -458,7 +480,7 @@ class ShortcutsDialog(QDialog):
         total_visible = 0
         for card in self._cards:
             total_visible += card.apply_filter(text)
-        # Hidden cards left holes in the 2-column grid before — re-pack
+        # Hidden cards left holes in the 2-column grid before - re-pack
         # so the survivors fill the layout sequentially from the top.
         self._reflow_cards()
         self._no_results.setVisible(total_visible == 0)
@@ -467,7 +489,7 @@ class ShortcutsDialog(QDialog):
         """Re-pack visible cards into a tight two-column grid.
 
         Qt's ``QGridLayout`` doesn't collapse empty cells when a child
-        is hidden — it preserves grid positions and leaves visible
+        is hidden - it preserves grid positions and leaves visible
         gaps. Whenever the filter changes (or on first render) we
         remove every card from the grid and re-add only the ones that
         survived the filter, in sequential row-major order.

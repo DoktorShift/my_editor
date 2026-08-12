@@ -72,6 +72,9 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"
 ; File association stays opt-in so the installer never quietly hijacks .md / .txt.
 Name: "associatefiles"; Description: "Open .md and .txt files with {#MyAppName}"; GroupDescription: "File associations:"; Flags: unchecked
+; PDF stays opt-in too, and only adds an "Open with" entry (OpenWithProgids),
+; never claiming the .pdf default away from the user's PDF reader.
+Name: "associatepdf"; Description: "Add {#MyAppName} to ""Open with"" for .pdf files"; GroupDescription: "File associations:"; Flags: unchecked
 
 [Files]
 ; The whole PyInstaller onedir folder.
@@ -88,6 +91,11 @@ Root: HKCU; Subkey: "Software\Classes\myeditor.textfile\DefaultIcon"; ValueType:
 Root: HKCU; Subkey: "Software\Classes\myeditor.textfile\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Tasks: associatefiles
 Root: HKCU; Subkey: "Software\Classes\.md\OpenWithProgids"; ValueType: string; ValueName: "myeditor.textfile"; ValueData: ""; Tasks: associatefiles; Flags: uninsdeletevalue
 Root: HKCU; Subkey: "Software\Classes\.txt\OpenWithProgids"; ValueType: string; ValueName: "myeditor.textfile"; ValueData: ""; Tasks: associatefiles; Flags: uninsdeletevalue
+; Per-user "Open with" entry for PDFs (read-only viewer).
+Root: HKCU; Subkey: "Software\Classes\myeditor.pdffile"; ValueType: string; ValueName: ""; ValueData: "PDF Document"; Tasks: associatepdf; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\myeditor.pdffile\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#MyAppExeName},0"; Tasks: associatepdf
+Root: HKCU; Subkey: "Software\Classes\myeditor.pdffile\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Tasks: associatepdf
+Root: HKCU; Subkey: "Software\Classes\.pdf\OpenWithProgids"; ValueType: string; ValueName: "myeditor.pdffile"; ValueData: ""; Tasks: associatepdf; Flags: uninsdeletevalue
 
 [Run]
 ; No skipifsilent: the in-app updater installs with /SILENT and relies on this

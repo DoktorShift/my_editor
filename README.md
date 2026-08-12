@@ -28,6 +28,12 @@ NIP-46, keep private encrypted drafts that sync across your devices, manage medi
 on your own Blossom servers, and mirror any blog in from RSS.
 [Read the Nostr guide](docs/nostr.md).
 
+**Reads PDFs, too.** A built-in distraction-free PDF viewer: open any PDF in a
+tab, find text, zoom or fit to width, browse the table of contents, and pick up
+on the exact page you left off. Keyboard-first navigation (j/k, n/p, g, Space)
+follows the muscle memory of readers like SumatraPDF, and regenerated PDFs
+(LaTeX builds, re-exports) refresh in place.
+
 **Stays out of your way.** Crash recovery, session restore, external-change
 detection, recent files, drag and drop, and export to `.txt`, `.html`, `.pdf`,
 `.md`, `.rtf`, and `.Rmd`. HTML and PDF exports are self-contained (images
