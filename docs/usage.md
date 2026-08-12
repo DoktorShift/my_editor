@@ -82,11 +82,19 @@ viewer remembers the page and zoom you left off at per file, and if the PDF is
 regenerated on disk (a LaTeX build, a re-export) it reloads in place at the
 same position.
 
+Drag over text to select it and copy with `Ctrl+C`; the selection snaps to
+characters like a text editor and pastes cleanly into any tab. Links work the
+way you expect: web links open in your browser, internal references (table of
+contents entries, "see section 4.2") jump to their page, and the cursor shows
+a pointing hand over both.
+
 Navigation follows the muscle memory of readers like SumatraPDF:
 
 | Shortcut | Action |
 |---|---|
 | `Ctrl+F` | Find in PDF (`Enter` / `Shift+Enter` step through matches) |
+| `Ctrl+C` | Copy selected text |
+| `Esc` | Clear the selection |
 | `Space` / `Shift+Space` | Next / previous screenful |
 | `j` / `k` | Scroll down / up |
 | `n` / `p` | Next / previous page |

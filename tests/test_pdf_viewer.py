@@ -7,7 +7,12 @@ The defect classes this file guards against:
 - page navigation drifting (clamping, page-entry field, page display),
 - zoom escaping its clamps or the fit-mode buttons losing sync,
 - search not starting from the page being read, or not wrapping,
-- reload after an external change losing the reading position.
+- reload after an external change losing the reading position,
+- the layout mirror in _ReaderView drifting from QPdfView's private
+  page layout (selection and link hit-testing both sit on it),
+- drag-selection dying in margins or line gaps (caret snapping),
+- URL links reported as misses (QPdfLink.isValid() is page() >= 0,
+  so a URL-only link is "invalid" even when hit).
 
 PdfViewerTab is a widget, so a full QApplication plus the offscreen
 platform is required. The saved-position restore is deferred to first
@@ -23,13 +28,14 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QPointF
 from PySide6.QtGui import QTextDocument
 from PySide6.QtPdfWidgets import QPdfView
 from PySide6.QtWidgets import QApplication
 
 import pdf_viewer
 from export_pdf import export_pdf
-from pdf_viewer import PdfViewerTab, load_view_state, save_view_state
+from pdf_viewer import PdfViewerTab, _ReaderView, load_view_state, save_view_state
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -351,6 +357,141 @@ def test_reload_keeps_position(sample_pdf, qt_app):
     qt_app.processEvents()
     assert tab.load_ok
     assert tab.current_page() == 3
+
+
+# --------------------------------------------------------------------------- #
+# Layout mirror, text selection, links (_ReaderView)
+# --------------------------------------------------------------------------- #
+
+def _to_viewport(view, page, pt):
+    """Map a page point to viewport coordinates via the view's layout."""
+    rect, scale = view._page_layouts()[page]
+    f = view._screen_resolution() * scale
+    return (QPointF(rect.topLeft()) + QPointF(pt.x() * f, pt.y() * f)
+            - QPointF(view._scroll_offset()))
+
+
+def test_layout_mirror_matches_view_scrolling(sample_pdf, qt_app):
+    # Qt scrolls to its private layout's page y on every jump; if our
+    # mirrored layout matches it for every page and zoom mode, the
+    # mapping that selection and links rely on is exact.
+    tab = _shown(PdfViewerTab(sample_pdf), qt_app)
+    view = tab.view
+    n = tab.document.pageCount()
+    for mode in (QPdfView.ZoomMode.FitToWidth, QPdfView.ZoomMode.FitInView):
+        tab._set_zoom_mode(mode)
+        qt_app.processEvents()
+        layouts = view._page_layouts()
+        for page in list(range(1, n)) + [0]:  # same-page jumps are deduped
+            tab.jump_to_page(page)
+            qt_app.processEvents()
+            expected = min(layouts[page][0].y(), view.verticalScrollBar().maximum())
+            assert view.verticalScrollBar().value() == expected, (mode, page)
+
+
+def test_page_point_roundtrip(sample_pdf, qt_app):
+    tab = _shown(PdfViewerTab(sample_pdf), qt_app)
+    page, pt = tab.view.page_point_at(_to_viewport(tab.view, 0, QPointF(100, 66)))
+    assert page == 0
+    assert abs(pt.x() - 100) < 1.5 and abs(pt.y() - 66) < 1.5
+
+
+def test_drag_selection_and_copy(sample_pdf, qt_app):
+    # sample page 1 starts with "needle in the haystack" at ~(61, 61..72).
+    tab = _shown(PdfViewerTab(sample_pdf), qt_app)
+    view = tab.view
+    view._sel_anchor = view._caret_near(_to_viewport(view, 0, QPointF(60, 66)))
+    assert view._sel_anchor is not None
+    view._update_selection(_to_viewport(view, 0, QPointF(220, 66)))
+    assert view.selected_text() == "needle in the haystack"
+
+    # Dragging into the right margin keeps the selection at line end
+    # (the caret snaps to the nearest character on the cursor's line).
+    view._update_selection(_to_viewport(view, 0, QPointF(590, 66)))
+    assert view.selected_text() == "needle in the haystack"
+
+    # Multi-line drags concatenate lines.
+    view._update_selection(_to_viewport(view, 0, QPointF(200, 90)))
+    assert view.selected_text().startswith("needle in the haystack")
+    assert "plain body" in view.selected_text()
+
+    view.copy_selection()
+    assert QApplication.clipboard().text() == view.selected_text()
+
+    view.grab()  # selection overlay paints without crashing
+    view.clear_selection()
+    assert not view.has_selection()
+
+
+def test_selection_survives_zoom_and_reload_clears_it(sample_pdf, qt_app):
+    tab = _shown(PdfViewerTab(sample_pdf), qt_app)
+    view = tab.view
+    view._sel_anchor = view._caret_near(_to_viewport(view, 0, QPointF(60, 66)))
+    view._update_selection(_to_viewport(view, 0, QPointF(220, 66)))
+    before = view.selected_text()
+    tab.zoom_in()
+    qt_app.processEvents()
+    assert view.selected_text() == before  # stored in page space
+    tab.reload()
+    qt_app.processEvents()
+    assert not view.has_selection()  # content may have changed
+
+
+def _build_link_pdf(path):
+    """Two pages; page one carries a URI link annotation and an
+    internal GoTo link to page two. /Rect values are bottom-up PDF
+    coordinates; Qt exposes them top-left, so [100 700 200 720] on an
+    842pt page becomes (100, 122, 100x20)."""
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Annots [5 0 R 6 0 R] >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] >>",
+        b"<< /Type /Annot /Subtype /Link /Rect [100 700 200 720] /Border [0 0 0] "
+        b"/A << /S /URI /URI (https://example.com/doc) >> >>",
+        b"<< /Type /Annot /Subtype /Link /Rect [100 600 200 620] /Border [0 0 0] "
+        b"/A << /S /GoTo /D [4 0 R /XYZ 0 842 0] >> >>",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for i, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += f"{i} 0 obj\n".encode() + body + b"\nendobj\n"
+    xref = len(out)
+    out += f"xref\n0 {len(objects) + 1}\n".encode() + b"0000000000 65535 f \n"
+    for off in offsets:
+        out += f"{off:010d} 00000 n \n".encode()
+    out += (f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
+            f"startxref\n{xref}\n%%EOF\n").encode()
+    with open(path, "wb") as f:
+        f.write(bytes(out))
+
+
+def test_links_hit_follow_and_miss(tmp_path, qt_app, monkeypatch):
+    path = str(tmp_path / "links.pdf")
+    _build_link_pdf(path)
+    tab = _shown(PdfViewerTab(path), qt_app)
+    assert tab.load_ok
+    view = tab.view
+
+    url_link = view._link_at(_to_viewport(view, 0, QPointF(150, 132)))
+    assert url_link is not None
+    assert url_link.url().toString() == "https://example.com/doc"
+
+    goto_link = view._link_at(_to_viewport(view, 0, QPointF(150, 232)))
+    assert goto_link is not None and goto_link.page() == 1
+
+    assert view._link_at(_to_viewport(view, 0, QPointF(400, 400))) is None
+
+    view._follow_link(goto_link)
+    qt_app.processEvents()
+    assert tab.current_page() == 1
+
+    opened = []
+    monkeypatch.setattr(pdf_viewer.QDesktopServices, "openUrl",
+                        staticmethod(lambda u: opened.append(u.toString()) or True))
+    view._follow_link(url_link)
+    assert opened == ["https://example.com/doc"]
 
 
 # --------------------------------------------------------------------------- #

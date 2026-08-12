@@ -31,13 +31,16 @@ import json
 import os
 import time
 
-from PySide6.QtCore import QEvent, QPointF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QIntValidator, QKeySequence, QPalette, QShortcut
-from PySide6.QtPdf import QPdfBookmarkModel, QPdfDocument, QPdfSearchModel
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import (
+    QColor, QDesktopServices, QGuiApplication, QIntValidator, QKeySequence,
+    QPainter, QPalette, QShortcut, QTransform,
+)
+from PySide6.QtPdf import QPdfBookmarkModel, QPdfDocument, QPdfLinkModel, QPdfSearchModel
 from PySide6.QtPdfWidgets import QPdfView
 from PySide6.QtWidgets import (
-    QHBoxLayout, QInputDialog, QLabel, QLineEdit, QToolButton, QTreeView,
-    QVBoxLayout, QWidget,
+    QApplication, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QToolButton,
+    QTreeView, QVBoxLayout, QWidget,
 )
 
 from widgets import FindBar
@@ -163,6 +166,309 @@ QTreeView::item:selected { background: #0078D4; color: #FFFFFF; }
 """
 
 
+# Painted over selected text. Pages always render white (see module
+# docstring), so one color works for both app themes.
+_SELECTION_FILL = QColor(0, 120, 212, 70)
+
+
+class _PageTextIndex:
+    """Per-page glyph geometry for caret snapping.
+
+    QPdfDocument.getSelection() places both endpoints with a small
+    tolerance and returns nothing when either lands in whitespace,
+    which makes raw drag-selection die in margins and line gaps. Real
+    readers snap the endpoint to the nearest character instead. One
+    whole-page getSelectionAtIndex() call returns a polygon per
+    non-whitespace character in text order (verified against pdfium),
+    so the entire snapping index costs a single call (~1.5 ms) rather
+    than one call per character (~1.4 s).
+    """
+
+    def __init__(self, document, page: int):
+        text = document.getAllText(page).text()
+        self.char_count = len(text)
+        glyph_chars = [i for i, c in enumerate(text) if not c.isspace()]
+        polys = document.getSelectionAtIndex(page, 0, self.char_count).bounds()
+        # Defensive clamp in case pdfium's whitespace notion ever
+        # disagrees with str.isspace() for some exotic character.
+        n = min(len(glyph_chars), len(polys))
+        self._chars = glyph_chars[:n]
+        self._rects = [p.boundingRect() for p in polys[:n]]
+
+    def caret_at(self, point: QPointF):
+        """Caret position (0..char_count) nearest to a page point, or
+        None when the page has no text. Distance is lexicographic
+        (vertical first): the line at the cursor's height always wins,
+        and horizontal distance only picks the character within it.
+        Anything else lets a longer line above or below capture a drag
+        into the margin."""
+        if not self._rects:
+            return None
+        best, best_score = 0, (float("inf"), float("inf"))
+        for i, r in enumerate(self._rects):
+            dx = max(r.left() - point.x(), 0.0, point.x() - r.right())
+            dy = max(r.top() - point.y(), 0.0, point.y() - r.bottom())
+            score = (dy, dx)
+            if score < best_score:
+                best, best_score = i, score
+        char = self._chars[best]
+        if point.x() > self._rects[best].center().x():
+            char += 1
+        return char
+
+
+class _ReaderView(QPdfView):
+    """QPdfView plus the two things its widget API lacks: text
+    selection and working hyperlinks.
+
+    The widget exposes no viewport-to-page mapping, so this class
+    mirrors QPdfViewPrivate::calculateDocumentLayout (Qt 6.11) exactly,
+    Qt types and rounding included: content coordinates are viewport
+    coordinates plus the scroll offsets, pages stack vertically inside
+    documentMargins with pageSpacing between them and center
+    horizontally, and page points scale to pixels by
+    (logicalDotsPerInch / 72) * pageScale.
+
+    The base class ships link handling behind this same math, but its
+    hit test forgets the scroll offset (compares viewport coordinates
+    against content coordinates), so it only works before the first
+    scroll; it also ignores external URLs. Both are fixed here, which
+    is why the mouse handlers deliberately do not call super().
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._link_model = QPdfLinkModel(self)
+        self._text_indexes: dict[int, _PageTextIndex] = {}
+        # Current selection as [(page, QPdfSelection)]. Selections are
+        # stored in page-point space, so they survive zoom and scroll
+        # unchanged; painting maps them to pixels on the fly.
+        self._selections = []
+        self._sel_anchor = None      # (page, caret) where the drag started
+        self._press_pos = None
+        self._press_link = None
+        self._dragging = False
+        self.documentChanged.connect(self._link_model.setDocument)
+        # Hover feedback (pointing hand over links) needs move events
+        # without a button held.
+        self.viewport().setMouseTracking(True)
+
+    # -- geometry (mirror of QPdfView's private layout) --------------------
+
+    @staticmethod
+    def _screen_resolution() -> float:
+        screen = QGuiApplication.primaryScreen()
+        return screen.logicalDotsPerInch() / 72.0 if screen else 1.0
+
+    def _page_layouts(self) -> dict:
+        """{page: (QRect in content coordinates, page scale)}."""
+        doc = self.document()
+        if doc is None or doc.status() != QPdfDocument.Status.Ready:
+            return {}
+        res = self._screen_resolution()
+        viewport = self.viewport().size()
+        margins = self.documentMargins()
+        spacing = self.pageSpacing()
+        single = self.pageMode() == QPdfView.PageMode.SinglePage
+        pages = ([self.pageNavigator().currentPage()] if single
+                 else range(doc.pageCount()))
+
+        sizes = {}
+        total_width = 0
+        for page in pages:
+            if self.zoomMode() == QPdfView.ZoomMode.Custom:
+                scale = self.zoomFactor()
+                size = (doc.pagePointSize(page) * res * scale).toSize()
+            elif self.zoomMode() == QPdfView.ZoomMode.FitToWidth:
+                size = (doc.pagePointSize(page) * res).toSize()
+                scale = (viewport.width() - margins.left() - margins.right()) / size.width()
+                size = size * scale
+            else:  # FitInView
+                avail = QSize(viewport.width() - margins.left() - margins.right(),
+                              viewport.height() - spacing)
+                size = (doc.pagePointSize(page) * res).toSize()
+                scaled = size.scaled(avail, Qt.KeepAspectRatio)
+                scale = scaled.width() / size.width()
+                size = scaled
+            sizes[page] = (size, scale)
+            total_width = max(total_width, size.width())
+        total_width += margins.left() + margins.right()
+
+        layouts = {}
+        y = margins.top()
+        for page in pages:
+            size, scale = sizes[page]
+            x = (max(total_width, viewport.width()) - size.width()) // 2
+            layouts[page] = (QRect(QPoint(x, y), size), scale)
+            y += size.height() + spacing
+        return layouts
+
+    def _scroll_offset(self) -> QPoint:
+        return QPoint(self.horizontalScrollBar().value(),
+                      self.verticalScrollBar().value())
+
+    def page_point_at(self, viewport_pos: QPointF):
+        """(page, point-in-page-points) under a viewport position, or
+        (None, None) when the position is off every page."""
+        content = viewport_pos + QPointF(self._scroll_offset())
+        for page, (rect, scale) in self._page_layouts().items():
+            if rect.contains(content.toPoint()):
+                factor = self._screen_resolution() * scale
+                return page, (content - QPointF(rect.topLeft())) / factor
+        return None, None
+
+    def _page_point_near(self, viewport_pos: QPointF):
+        """Like page_point_at, but clamps positions in margins or page
+        gaps onto the nearest page so drag-selection never dies there."""
+        page, point = self.page_point_at(viewport_pos)
+        if page is not None:
+            return page, point
+        content = viewport_pos + QPointF(self._scroll_offset())
+        best = None
+        best_dist = float("inf")
+        for pg, (rect, scale) in self._page_layouts().items():
+            dx = max(rect.left() - content.x(), 0.0, content.x() - rect.right())
+            dy = max(rect.top() - content.y(), 0.0, content.y() - rect.bottom())
+            dist = dx * dx + dy * dy
+            if dist < best_dist:
+                clamped = QPointF(min(max(content.x(), rect.left()), rect.right()),
+                                  min(max(content.y(), rect.top()), rect.bottom()))
+                factor = self._screen_resolution() * scale
+                best = (pg, (clamped - QPointF(rect.topLeft())) / factor)
+                best_dist = dist
+        return best if best is not None else (None, None)
+
+    # -- selection ---------------------------------------------------------
+
+    def _text_index(self, page: int) -> _PageTextIndex:
+        index = self._text_indexes.get(page)
+        if index is None:
+            index = _PageTextIndex(self.document(), page)
+            self._text_indexes[page] = index
+        return index
+
+    def _caret_near(self, viewport_pos: QPointF):
+        page, point = self._page_point_near(viewport_pos)
+        if page is None:
+            return None
+        caret = self._text_index(page).caret_at(point)
+        return None if caret is None else (page, caret)
+
+    def _update_selection(self, viewport_pos: QPointF):
+        current = self._caret_near(viewport_pos)
+        if self._sel_anchor is None or current is None:
+            return
+        start, end = sorted((self._sel_anchor, current))
+        doc = self.document()
+        selections = []
+        for page in range(start[0], end[0] + 1):
+            first = start[1] if page == start[0] else 0
+            last = end[1] if page == end[0] else self._text_index(page).char_count
+            if last > first:
+                selection = doc.getSelectionAtIndex(page, first, last - first)
+                if selection.isValid():
+                    selections.append((page, selection))
+        self._selections = selections
+        self.viewport().update()
+
+    def has_selection(self) -> bool:
+        return bool(self._selections)
+
+    def selected_text(self) -> str:
+        return "\n".join(sel.text() for _, sel in self._selections)
+
+    def clear_selection(self):
+        if self._selections:
+            self._selections = []
+            self.viewport().update()
+
+    def copy_selection(self):
+        text = self.selected_text()
+        if text:
+            QGuiApplication.clipboard().setText(text)
+
+    def reset_reader_state(self):
+        """Drop caches tied to document content; call after a reload."""
+        self._text_indexes.clear()
+        self._sel_anchor = None
+        self.clear_selection()
+
+    # -- links -------------------------------------------------------------
+
+    def _link_at(self, viewport_pos: QPointF):
+        page, point = self.page_point_at(viewport_pos)
+        if page is None:
+            return None
+        self._link_model.setPage(page)
+        link = self._link_model.linkAt(point)
+        # QPdfLink.isValid() literally means page() >= 0, so a URL-only
+        # link reports invalid even when hit. Treat either destination
+        # kind as a hit; a miss returns a link with neither.
+        if link.isValid() or not link.url().isEmpty():
+            return link
+        return None
+
+    def _follow_link(self, link):
+        url = link.url()
+        if url.isValid() and not url.isEmpty():
+            QDesktopServices.openUrl(url)
+        elif link.page() >= 0:
+            self.pageNavigator().jump(link)
+
+    # -- mouse -------------------------------------------------------------
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._press_pos = event.position()
+            self._press_link = self._link_at(event.position())
+            self._dragging = False
+            self.clear_selection()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.LeftButton and self._press_pos is not None:
+            started = (event.position() - self._press_pos).manhattanLength() \
+                >= QApplication.startDragDistance()
+            if not self._dragging and started:
+                self._dragging = True
+                self._sel_anchor = self._caret_near(self._press_pos)
+            if self._dragging:
+                self._update_selection(event.position())
+            return
+        self.setCursor(Qt.PointingHandCursor if self._link_at(event.position())
+                       else Qt.ArrowCursor)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            if not self._dragging and self._press_link is not None:
+                self._follow_link(self._press_link)
+            self._press_pos = None
+            self._press_link = None
+            self._dragging = False
+
+    # -- painting ----------------------------------------------------------
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if not self._selections:
+            return
+        layouts = self._page_layouts()
+        offset = self._scroll_offset()
+        painter = QPainter(self.viewport())
+        painter.translate(-offset.x(), -offset.y())
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(_SELECTION_FILL)
+        for page, selection in self._selections:
+            layout = layouts.get(page)
+            if layout is None:
+                continue
+            rect, scale = layout
+            factor = self._screen_resolution() * scale
+            transform = QTransform().translate(rect.x(), rect.y()).scale(factor, factor)
+            for poly in selection.bounds():
+                painter.drawPolygon(transform.map(poly))
+        painter.end()
+
+
 class PdfViewerTab(QWidget):
     """A read-only PDF tab: toolbar + find bar + QPdfView.
 
@@ -185,7 +491,7 @@ class PdfViewerTab(QWidget):
 
         self.document = QPdfDocument(self)
 
-        self.view = QPdfView()
+        self.view = _ReaderView()
         self.view.setDocument(self.document)
         self.view.setPageMode(QPdfView.PageMode.MultiPage)
         self.view.setZoomMode(QPdfView.ZoomMode.FitToWidth)
@@ -347,6 +653,8 @@ class PdfViewerTab(QWidget):
             (QKeySequence(Qt.Key_Plus), self.zoom_in),
             (QKeySequence(Qt.Key_Minus), self.zoom_out),
             (QKeySequence(Qt.Key_G), self._focus_page_box),
+            (QKeySequence.Copy, self.view.copy_selection),
+            (QKeySequence(Qt.Key_Escape), self.view.clear_selection),
         ):
             sc = QShortcut(keys, self.view)
             sc.setContext(Qt.WidgetShortcut)
@@ -419,6 +727,7 @@ class PdfViewerTab(QWidget):
         """
         page = self.current_page()
         self.document.close()
+        self.view.reset_reader_state()
         if self._load():
             self.jump_to_page(min(page, self.document.pageCount() - 1))
             self.page_changed.emit()

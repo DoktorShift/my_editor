@@ -111,6 +111,8 @@ SHORTCUT_GROUPS: Tuple[ShortcutGroup, ...] = (
         title="PDF Reading",
         items=(
             Shortcut("Ctrl+F",          "Find in PDF"),
+            Shortcut("Ctrl+C",          "Copy selected text"),
+            Shortcut("Esc",             "Clear selection"),
             Shortcut("Space",           "Next screenful"),
             Shortcut("Shift+Space",     "Previous screenful"),
             Shortcut("J",               "Scroll down"),
