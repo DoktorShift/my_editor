@@ -55,7 +55,9 @@ hiddenimports = [
 hiddenimports += collect_submodules("coincurve")
 coincurve_binaries = collect_dynamic_libs("coincurve")
 
-# Trim the bundle and make sure the giant, unused Qt WebEngine never sneaks in.
+# QtPdf backs the built-in PDF viewer (pdf_viewer.py) and must ship in
+# every bundle. Trim the rest and make sure the giant, unused Qt
+# WebEngine never sneaks in.
 excludes = [
     "PySide6.QtWebEngineCore",
     "PySide6.QtWebEngineWidgets",
@@ -69,7 +71,6 @@ excludes = [
     "PySide6.QtDataVisualization",
     "PySide6.QtMultimedia",
     "PySide6.QtMultimediaWidgets",
-    "PySide6.QtPdf",
     "PySide6.QtBluetooth",
     "PySide6.QtNfc",
     "PySide6.QtPositioning",
@@ -205,7 +206,16 @@ if sys.platform == "darwin":
                         "public.source-code",
                         "public.python-script",
                     ],
-                }
+                },
+                # Read-only PDF viewing. Rank Alternate so the app shows
+                # up under Finder's "Open With" without ever contesting
+                # Preview as the system default.
+                {
+                    "CFBundleTypeName": "PDF Document",
+                    "CFBundleTypeRole": "Viewer",
+                    "LSHandlerRank": "Alternate",
+                    "LSItemContentTypes": ["com.adobe.pdf"],
+                },
             ],
         },
     )

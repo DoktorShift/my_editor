@@ -72,6 +72,50 @@ The **`Nostr`** menu also exposes `Drafts…`, `Connect Signer…`, and `Sign Ou
 
 ---
 
+## PDF reading
+
+Opening a `.pdf` (via `Ctrl+O`, drag and drop, double-click from the file
+manager, or Recent Files) shows it in the built-in read-only viewer: a slim
+toolbar with a contents toggle, a page box, and zoom controls, the document,
+and nothing else. Password-protected files prompt for their password. The
+viewer remembers the page and zoom you left off at per file, and if the PDF is
+regenerated on disk (a LaTeX build, a re-export) it reloads in place at the
+same position.
+
+Drag over text to select it and copy with `Ctrl+C`; the selection snaps to
+characters like a text editor and pastes cleanly into any tab. Links work the
+way you expect: web links open in your browser, internal references (table of
+contents entries, "see section 4.2") jump to their page, and the cursor shows
+a pointing hand over both.
+
+Navigation follows the muscle memory of readers like SumatraPDF:
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl+F` | Find in PDF (`Enter` / `Shift+Enter` step through matches) |
+| `Ctrl+C` | Copy selected text |
+| `Esc` | Clear the selection |
+| `Space` / `Shift+Space` | Next / previous screenful |
+| `j` / `k` | Scroll down / up |
+| `n` / `p` | Next / previous page |
+| `g` | Go to page (focuses the toolbar page box) |
+| `PageDown` / `PageUp` | Scroll page-wise |
+| `Home` / `End` | First / last page |
+| `Ctrl+=` / `Ctrl+-` / `Ctrl+wheel` | Zoom in / out |
+| `Ctrl+0` | Fit page width |
+| `Ctrl+1` | Actual size |
+| `Ctrl+2` | Fit whole page |
+| `F12` | Toggle the table of contents |
+| `F11` | Full screen (whole window; `Ctrl+Cmd+F` on macOS) |
+
+Type a page number into the toolbar's page box and press `Enter` to jump
+straight there. **Fit Width** and **Fit Page** in the toolbar switch scaling
+modes; searching starts from the page you are reading, not from page one.
+Documents with an embedded outline get a **Contents** sidebar (toolbar button
+or `F12`); the button stays greyed out when the PDF has no outline.
+
+---
+
 ## Right-click menu
 
 Right-clicking in the editor opens a context menu with:
