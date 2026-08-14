@@ -29,8 +29,13 @@ on your own Blossom servers, and mirror any blog in from RSS.
 [Read the Nostr guide](docs/nostr.md).
 
 **Stays out of your way.** Crash recovery, session restore, external-change
-detection, recent files, drag and drop, and export to `.txt`, `.pdf`, `.md`, and
-`.rtf`.
+detection, recent files, drag and drop, and export to `.txt`, `.html`, `.pdf`,
+`.md`, `.rtf`, and `.Rmd`. HTML and PDF exports are self-contained (images
+embedded, metadata, page numbers, Page Setup dialog).
+
+**R Markdown.** Open and edit `.Rmd` files as source, convert rich documents to
+R Markdown, and knit to HTML or PDF; missing toolchain parts (R, pandoc,
+rmarkdown, TinyTeX) install on demand from their official sources.
 
 > Developed and tested on Linux. macOS and Windows work but may show minor visual
 > differences.

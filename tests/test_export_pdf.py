@@ -1,0 +1,186 @@
+"""Pins the native Qt PDF exporter against QPdfDocument (pdfium).
+
+The defect classes this file guards against:
+- pagination drift: content lost or duplicated across page boundaries,
+- invisible text: dark-theme default text painting near-white on the
+  white page (the ctx.palette override),
+- page geometry not honoring the persisted page setup,
+- oversized images overflowing the printable width,
+- metadata (title/creator) not landing in the file.
+
+Painting requires a QApplication (not QCoreApplication) plus the
+offscreen platform.
+"""
+
+import os
+import sys
+
+import pytest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QSize, QLocale
+from PySide6.QtGui import QColor, QImage, QTextCharFormat, QTextCursor, QTextDocument
+from PySide6.QtPdf import QPdfDocument
+
+import export_pdf
+from export_pdf import (
+    default_page_setup,
+    export_pdf as export_pdf_file,
+    load_page_setup,
+    save_page_setup,
+)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def qt_app():
+    app = QApplication.instance() or QApplication(sys.argv)
+    yield app
+
+
+A4_SETUP = {"page_size": "A4", "orientation": "portrait", "margins_mm": 20.0}
+LETTER_SETUP = {"page_size": "Letter", "orientation": "portrait", "margins_mm": 20.0}
+
+
+def _long_doc(n=100):
+    doc = QTextDocument()
+    cur = QTextCursor(doc)
+    plain = QTextCharFormat()
+    for i in range(n):
+        if i:
+            cur.insertBlock()
+        cur.insertText(f"Line {i:03d} sample body text", plain)
+    return doc
+
+
+def _load(path):
+    pdf = QPdfDocument()
+    assert pdf.load(path) == QPdfDocument.Error.None_
+    return pdf
+
+
+# --------------------------------------------------------------------------- #
+# Geometry + metadata
+# --------------------------------------------------------------------------- #
+
+def test_a4_and_letter_page_sizes(tmp_path):
+    for setup, (w, h) in ((A4_SETUP, (595, 842)), (LETTER_SETUP, (612, 792))):
+        out = str(tmp_path / f"{setup['page_size']}.pdf")
+        export_pdf_file(_long_doc(5), out, title="T", page_setup=setup)
+        pdf = _load(out)
+        size = pdf.pagePointSize(0)
+        assert round(size.width()) == w
+        assert round(size.height()) == h
+
+
+def test_landscape_orientation(tmp_path):
+    setup = dict(A4_SETUP, orientation="landscape")
+    out = str(tmp_path / "land.pdf")
+    export_pdf_file(_long_doc(5), out, title="T", page_setup=setup)
+    size = _load(out).pagePointSize(0)
+    assert round(size.width()) == 842
+    assert round(size.height()) == 595
+
+
+def test_metadata(tmp_path):
+    out = str(tmp_path / "meta.pdf")
+    export_pdf_file(_long_doc(3), out, title="My Notes", page_setup=A4_SETUP)
+    pdf = _load(out)
+    assert pdf.metaData(QPdfDocument.MetaDataField.Title) == "My Notes"
+    assert pdf.metaData(QPdfDocument.MetaDataField.Creator) == "minimal texteditor"
+
+
+# --------------------------------------------------------------------------- #
+# Pagination + content integrity
+# --------------------------------------------------------------------------- #
+
+def test_multipage_no_loss_no_dupes_with_footers(tmp_path):
+    out = str(tmp_path / "multi.pdf")
+    export_pdf_file(_long_doc(100), out, title="T", page_setup=A4_SETUP)
+    pdf = _load(out)
+    n = pdf.pageCount()
+    assert n >= 2
+    all_text = " ".join(pdf.getAllText(p).text() for p in range(n))
+    for i in range(100):
+        assert all_text.count(f"Line {i:03d} ") == 1
+    for p in range(n):
+        assert f"Page {p + 1} of {n}" in pdf.getAllText(p).text()
+
+
+def test_single_page_has_no_footer(tmp_path):
+    out = str(tmp_path / "single.pdf")
+    export_pdf_file(_long_doc(3), out, title="T", page_setup=A4_SETUP)
+    pdf = _load(out)
+    assert pdf.pageCount() == 1
+    assert "Page 1 of 1" not in pdf.getAllText(0).text()
+
+
+def test_unset_color_text_prints_black_not_theme_color(tmp_path):
+    # A document whose text has NO explicit foreground must not inherit
+    # the (dark) app palette when painted; it must come out black.
+    out = str(tmp_path / "dark.pdf")
+    export_pdf_file(_long_doc(3), out, title="T", page_setup=A4_SETUP)
+    pdf = _load(out)
+    assert "Line 000" in pdf.getAllText(0).text()
+    im = pdf.render(0, QSize(595, 842))
+    dark_pixels = sum(
+        1 for y in range(0, 842, 3) for x in range(0, 595, 3)
+        if im.pixelColor(x, y).lightness() < 96
+    )
+    assert dark_pixels > 20  # visible dark glyphs on the white page
+
+
+def test_oversized_image_capped_to_printable_width(tmp_path):
+    img = QImage(3000, 1000, QImage.Format_RGB32)
+    img.fill(QColor("red"))
+    ipath = str(tmp_path / "big.png")
+    img.save(ipath, "PNG")
+    doc = QTextDocument()
+    QTextCursor(doc).insertImage(ipath)
+    out = str(tmp_path / "img.pdf")
+    export_pdf_file(doc, out, title="T", page_setup=A4_SETUP)
+    pdf = _load(out)
+    im = pdf.render(0, QSize(595, 842))
+    xs = [x for y in range(0, 842, 2) for x in range(595)
+          if im.pixelColor(x, y).red() > 200 and im.pixelColor(x, y).green() < 80]
+    assert xs, "image did not render"
+    width_pt = max(xs) - min(xs) + 1
+    printable_pt = 595 - 2 * (20 / 25.4 * 72)  # A4 minus 20mm margins
+    assert width_pt <= printable_pt + 3  # rasterization tolerance
+
+
+# --------------------------------------------------------------------------- #
+# Page setup persistence
+# --------------------------------------------------------------------------- #
+
+def test_page_setup_roundtrip_and_validation(tmp_path, monkeypatch):
+    monkeypatch.setattr(export_pdf, "_CONFIG_PATH",
+                        str(tmp_path / "page_setup.json"))
+    save_page_setup({"page_size": "Legal", "orientation": "landscape",
+                     "margins_mm": 15.0})
+    loaded = load_page_setup()
+    assert loaded == {"page_size": "Legal", "orientation": "landscape",
+                      "margins_mm": 15.0}
+    # Invalid values fall back to defaults per-field.
+    save_page_setup({"page_size": "Tabloid", "orientation": "diagonal",
+                     "margins_mm": 500})
+    loaded = load_page_setup()
+    assert loaded == default_page_setup()
+
+
+def test_default_page_setup_follows_locale():
+    expected = ("Letter"
+                if QLocale().measurementSystem() != QLocale.MetricSystem
+                else "A4")
+    setup = default_page_setup()
+    assert setup["page_size"] == expected
+    assert setup["orientation"] == "portrait"
+    assert setup["margins_mm"] == 20.0
+
+
+def test_missing_config_gives_defaults(tmp_path, monkeypatch):
+    monkeypatch.setattr(export_pdf, "_CONFIG_PATH",
+                        str(tmp_path / "nope" / "page_setup.json"))
+    assert load_page_setup() == default_page_setup()

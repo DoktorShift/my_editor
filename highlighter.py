@@ -28,6 +28,7 @@ _EXT_TO_LANG: dict[str, str] = {
     '.sql': 'sql',
     '.html': 'html', '.htm': 'html',
     '.md': 'markdown', '.markdown': 'markdown',
+    '.rmd': 'markdown',
 }
 
 LANGUAGE_DISPLAY_NAMES: dict[str, str] = {
