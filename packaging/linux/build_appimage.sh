@@ -41,11 +41,16 @@ mkdir -p "$APPDIR/usr/share/metainfo"
 cp packaging/linux/my-editor.appdata.xml "$APPDIR/usr/share/metainfo/my-editor.appdata.xml"
 
 # Get appimagetool (prefer one on PATH; otherwise download the static build).
+# It goes under build/, never dist/: dist/ holds only shippable artifacts, and
+# the release workflow globs dist/ for the files it attaches to the release.
+# Downloading the tool into dist/ used to publish it as a release asset next to
+# the real installers.
 TOOL="$(command -v appimagetool || true)"
 if [ -z "$TOOL" ]; then
-  TOOL="dist/appimagetool-x86_64.AppImage"
+  TOOL="build/tools/appimagetool-x86_64.AppImage"
   if [ ! -x "$TOOL" ]; then
     echo "Downloading appimagetool..."
+    mkdir -p "$(dirname "$TOOL")"
     curl -fsSL -o "$TOOL" \
       "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
     chmod +x "$TOOL"

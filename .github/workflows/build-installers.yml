@@ -72,11 +72,15 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: installer-${{ matrix.name }}
+          # Match the my-editor prefix rather than the bare extension: build
+          # tools can land in dist/ too (appimagetool is itself an .AppImage),
+          # and a bare *.AppImage glob attached it to the release as a sixth,
+          # confusing download.
           path: |
-            dist/*-setup.exe
-            dist/*.dmg
-            dist/*.AppImage
-            dist/*.deb
+            dist/my-editor*-setup.exe
+            dist/my-editor*.dmg
+            dist/my-editor*.AppImage
+            dist/my-editor*.deb
           if-no-files-found: error
 
   release:
