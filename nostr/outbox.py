@@ -31,7 +31,7 @@ from .queries import fetch_latest_event
 from .relay import RelayPool
 
 
-# Per the NIP-65 spec, lists should stay small (2-4 per category) — clamping
+# Per the NIP-65 spec, lists should stay small (2-4 per category), so clamping
 # the union at 10 keeps publishing fast even if a user has a sprawling list.
 RELAY_CAP: int = 10
 
@@ -94,12 +94,12 @@ def select_draft_publish_relays(
 
     Drafts must land somewhere the user's other devices will read back.
     The reader path (``draft_sync._select_read_relays``) consults
-    ``read`` → ``write`` → bunker — so we mirror that by publishing to
+    ``read`` → ``write`` → bunker, so we mirror that by publishing to
     the union ``write`` ∪ ``read`` ∪ bunker, with the curated base set
     as a backstop for brand-new profiles. Deduped and capped at ``cap``.
 
     Distinct from ``select_publish_relays`` (used for regular notes &
-    articles), which only blends write + base — drafts need the
+    articles), which only blends write + base. Drafts need the
     extra read-set inclusion specifically because asymmetric read /
     write sets are common (paid read relays + free write relays, etc.)
     and we cannot afford drafts written on device A to be invisible
@@ -242,7 +242,7 @@ class RelayListCache(QObject):
             for cb in callbacks:
                 try:
                     cb(relay_list)
-                except Exception:  # noqa: BLE001 — best-effort, don't swallow others
+                except Exception:  # noqa: BLE001, best-effort, don't swallow others
                     pass
 
         fetch_latest_event(
