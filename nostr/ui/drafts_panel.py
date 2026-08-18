@@ -66,7 +66,7 @@ it does, the panel won't crash, it'll just show the disconnected state.
 from __future__ import annotations
 
 import time
-from typing import NamedTuple, Optional, Tuple
+from typing import Callable, NamedTuple, Optional, Tuple
 
 from PySide6.QtCore import QEvent, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
@@ -919,6 +919,7 @@ class DraftsPanel(QFrame):
     publish_draft = Signal(str)
     delete_draft = Signal(str, int)
     retry_decrypt = Signal(str)
+    retry_signer = Signal()
     copy_event_id = Signal(str)
     refresh_requested = Signal()
     close_requested = Signal()
@@ -936,6 +937,7 @@ class DraftsPanel(QFrame):
         self._active_profile: Optional[Profile] = None
         self._search_text: str = ""
         self._signer_unsupported: bool = False
+        self._signer_unreachable: bool = False
         self._loading: bool = False
         self._sync_message: str = ""
         # Maps draft identifier → QListWidgetItem so signal updates can
@@ -1159,14 +1161,17 @@ class DraftsPanel(QFrame):
         self._empty_body.setAlignment(Qt.AlignCenter)
         self._empty_body.setWordWrap(True)
         empty_layout.addWidget(self._empty_body)
-        # Only the no-results branch gets a button, because it is the
-        # only branch whose remedy the panel itself owns. writing.md:
+        # A branch gets a button when it has a remedy to offer. writing.md:
         # "guide people on actions they can take, and give them a button
-        # or link to do so if possible."
-        self._empty_action = QPushButton("Clear search")
+        # or link to do so if possible." The label and the handler both
+        # belong to the branch, so the button dispatches through
+        # ``_empty_action_handler`` rather than being wired to one of them
+        # for the life of the panel.
+        self._empty_action = QPushButton()
         self._empty_action.setObjectName("drafts_panel_empty_action")
         self._empty_action.setMinimumHeight(_control_height())
-        self._empty_action.clicked.connect(self._search_edit.clear)
+        self._empty_action_handler: Optional[Callable[[], None]] = None
+        self._empty_action.clicked.connect(self._on_empty_action)
         self._empty_action.hide()
         empty_layout.addWidget(self._empty_action, 0, Qt.AlignHCenter)
         empty_layout.addStretch(2)
@@ -1299,6 +1304,24 @@ class DraftsPanel(QFrame):
         self._render_status()
         self._refresh_empty_state()
 
+    def set_signer_unreachable(self, unreachable: bool) -> None:
+        """Show (or clear) the state where the signer is not answering."""
+        if unreachable == self._signer_unreachable:
+            return
+        self._signer_unreachable = unreachable
+        if unreachable:
+            # A stale narration line would otherwise outrank the new
+            # state for its remaining TTL, which is exactly the window
+            # where the user is looking for an explanation.
+            self._sync_message = ""
+        self._render_status()
+        self._refresh_empty_state()
+
+    def _has_readable_draft(self) -> bool:
+        return any(
+            record.state is DraftState.READY for record in self._store or []
+        )
+
     # -- public API: the hover preview ------------------------------------
 
     def set_preview_image_loader(self, loader) -> None:
@@ -1396,6 +1419,12 @@ class DraftsPanel(QFrame):
         """
         if self._signer_unsupported:
             return "Signer cannot decrypt drafts (no NIP-44)", True
+        # Outranks both the failure count and the decrypting count. Those
+        # describe drafts; this describes the one thing standing between
+        # the user and all of them, and it is the only line here whose
+        # remedy is somewhere other than this app.
+        if self._signer_unreachable:
+            return "Your signer is not responding", True
 
         failed = ready = total = 0
         for record in self._store or []:
@@ -1456,6 +1485,20 @@ class DraftsPanel(QFrame):
                 "NIP-44-capable signer (Amber, nsec.app) to use drafts.",
             )
             return
+        # Only when there is nothing readable to show. A signer that went
+        # quiet halfway through leaves drafts already decrypted on
+        # screen, and replacing those with an explanation would take away
+        # more than it gives; there the status line and the per-row retry
+        # carry the message.
+        if self._signer_unreachable and not self._has_readable_draft():
+            self._show_placeholder(
+                "Your signer is not responding",
+                "Drafts stay encrypted until your signer unlocks them. Open "
+                "your signer app, make sure it is running, then try again.",
+                action="Try again",
+                on_action=self.retry_signer.emit,
+            )
+            return
         if self._store is None or len(self._store) == 0:
             if self._loading:
                 # A first refresh in flight is not an empty library.
@@ -1477,16 +1520,32 @@ class DraftsPanel(QFrame):
             self._show_placeholder(
                 "No matching drafts",
                 f'No draft matches "{self._search_text}".',
-                action=True,
+                action="Clear search",
+                on_action=self._search_edit.clear,
             )
             return
         self._body_stack.setCurrentIndex(0)
 
-    def _show_placeholder(self, title: str, body: str, *, action: bool = False) -> None:
+    def _show_placeholder(
+        self,
+        title: str,
+        body: str,
+        *,
+        action: str = "",
+        on_action: Optional[Callable[[], None]] = None,
+    ) -> None:
         self._empty_title.setText(title)
         self._empty_body.setText(body)
-        self._empty_action.setVisible(action)
+        self._empty_action_handler = on_action if action else None
+        if action:
+            self._empty_action.setText(action)
+        self._empty_action.setVisible(bool(action))
         self._body_stack.setCurrentIndex(1)
+
+    def _on_empty_action(self) -> None:
+        handler = self._empty_action_handler
+        if handler is not None:
+            handler()
 
     # -- list rebuild + filter --------------------------------------------
 

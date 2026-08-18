@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 from ..avatar_store import AvatarStore
 from ..bech32 import encode_naddr
 from ..blossom.store import MediaFile, MediaStore
-from ..bunker import BunkerSessionPool
+from ..bunker import BunkerSessionPool, humanize_failure
 from ..known_people import KnownPeople
 from ..outbox import RelayListCache
 from ..profiles import Profile, ProfileStore
@@ -885,7 +885,7 @@ class PublishArticleDialog(QDialog):
 
     def _on_failed(self, reason: str) -> None:
         self._job = None
-        self._set_status(f"Publish failed: {reason}", error=True)
+        self._set_status(f"Publish failed: {humanize_failure(reason)}", error=True)
         self._set_busy(False)
 
     def _on_cancel(self) -> None:

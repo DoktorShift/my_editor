@@ -372,6 +372,9 @@ class MainWindow(QMainWindow):
         )
         self._draft_sync.status_changed.connect(self._on_draft_sync_status)
         self._draft_sync.bunker_error.connect(self._on_draft_sync_bunker_error)
+        self._draft_sync.signer_unreachable.connect(
+            self._on_draft_sync_signer_unreachable
+        )
         # Created lazily inside ``_build_findbar`` so its parent is the
         # central widget rather than ``self`` - keeps Qt's geometry
         # reasoning straightforward.
@@ -1259,6 +1262,7 @@ class MainWindow(QMainWindow):
         self._drafts_panel.publish_draft.connect(self._on_panel_publish_draft)
         self._drafts_panel.delete_draft.connect(self._on_panel_delete_draft)
         self._drafts_panel.retry_decrypt.connect(self._on_panel_retry_decrypt)
+        self._drafts_panel.retry_signer.connect(self._draft_sync.retry_signer)
         self._drafts_panel.copy_event_id.connect(self._on_panel_copy_event_id)
         self._drafts_panel.refresh_requested.connect(self._draft_sync.refresh)
         self._drafts_panel.close_requested.connect(self._hide_drafts_panel)
@@ -3565,6 +3569,7 @@ class MainWindow(QMainWindow):
         if self._drafts_panel is not None:
             self._drafts_panel.set_active_profile(profile)
             self._drafts_panel.set_signer_unsupported(False)
+            self._drafts_panel.set_signer_unreachable(False)
 
     def _release_identity_state(self) -> None:
         """Drop everything that belonged to the account being left.
@@ -3602,6 +3607,7 @@ class MainWindow(QMainWindow):
         if self._drafts_panel is not None:
             self._drafts_panel.set_active_profile(profile)
             self._drafts_panel.set_signer_unsupported(False)
+            self._drafts_panel.set_signer_unreachable(False)
 
     def _on_nostr_sign_out(self):
         active = self._profile_store.default()
@@ -3632,6 +3638,7 @@ class MainWindow(QMainWindow):
         if self._drafts_panel is not None:
             self._drafts_panel.set_active_profile(remaining)
             self._drafts_panel.set_signer_unsupported(False)
+            self._drafts_panel.set_signer_unreachable(False)
         if remaining is not None:
             self._draft_sync.start_for(remaining)
 
@@ -4241,6 +4248,17 @@ class MainWindow(QMainWindow):
     def _on_draft_sync_status(self, text: str) -> None:
         if self._drafts_panel is not None:
             self._drafts_panel.set_status(text)
+
+    def _on_draft_sync_signer_unreachable(self, unreachable: bool) -> None:
+        if self._drafts_panel is not None:
+            self._drafts_panel.set_signer_unreachable(unreachable)
+        if unreachable:
+            # The panel may be closed, and this is the same condition that
+            # makes publishing fail, so it belongs in the window too.
+            self.status.showMessage(
+                "Your signer is not responding. Open your signer app and "
+                "make sure it is running.", 8000,
+            )
 
     def _on_draft_sync_bunker_error(self, message: str) -> None:
         if self._drafts_panel is not None:

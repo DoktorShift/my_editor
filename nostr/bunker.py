@@ -32,7 +32,7 @@ from __future__ import annotations
 import json
 import secrets
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, quote, urlsplit
 
 from PySide6.QtCore import QObject, QTimer, Signal
@@ -53,11 +53,52 @@ DEFAULT_CONNECT_TIMEOUT_MS = 90_000
 # is already up, the signer just has to compute.
 DEFAULT_RPC_TIMEOUT_MS = 30_000
 
+# ``ping`` is the one call no signer asks a human about, so the only thing
+# it waits on is a relay round-trip. Giving it the full RPC budget meant a
+# signer that simply does not implement ping (Amber does not) burned 30
+# seconds before ``reattach`` even tried the fallback that would have
+# worked, and a signer that is asleep cost 60 seconds to say nothing. This
+# is a liveness probe: if it has not come back in a few seconds, the answer
+# we need is somewhere else.
+PING_TIMEOUT_MS = 6_000
+
 # A signer may answer any request with an "auth_url" challenge instead of a
 # result, meaning the user has to authenticate in a browser first. The real
 # answer arrives later under the same request id, so the pending request is
 # held open this long rather than failing.
 AUTH_CHALLENGE_TIMEOUT_MS = 180_000
+
+# The failure reasons that mean nobody answered, as opposed to the signer
+# answering "no". Defined here, next to the code that produces them, so
+# the callers that have to recognise them cannot drift from the wording.
+SIGNER_SILENT_NEEDLES: Tuple[str, ...] = (
+    "timed out waiting for signer",
+    "could not deliver request to any relay",
+)
+
+
+def is_signer_silent(reason: str) -> bool:
+    """True if ``reason`` means the signer never answered."""
+    lowered = (reason or "").lower()
+    return any(needle in lowered for needle in SIGNER_SILENT_NEEDLES)
+
+
+def humanize_failure(reason: str) -> str:
+    """Turn a transport failure into something the user can act on.
+
+    These strings are written to be precise in a log, and "timed out
+    waiting for signer" is precise. It is also a dead end for someone
+    holding a phone, because it does not say that the phone is where the
+    problem is. Anything we do not have better words for is passed
+    through unchanged rather than blurred into a generic apology.
+    """
+    if is_signer_silent(reason):
+        return (
+            "Your signer did not answer. Open your signer app, make sure "
+            "it is running, and try again."
+        )
+    return reason
+
 
 # Permissions we request at connect time. Comma-separated per spec.
 #
@@ -519,7 +560,10 @@ class BunkerClient(QObject):
             params=[],
             on_success=_ok,
             on_failure=_ping_failed,
-            timeout_ms=timeout_ms,
+            # The probe gets a short leash so the fallback that actually
+            # works is reached quickly. ``min`` so a caller asking for an
+            # even tighter budget still gets it.
+            timeout_ms=min(PING_TIMEOUT_MS, timeout_ms),
         )
 
     # -- high-level: sign an event ------------------------------------------
