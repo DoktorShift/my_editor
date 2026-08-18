@@ -192,5 +192,70 @@ class TestRehostLoop(unittest.TestCase):
                       outcome.markdown)
 
 
+HOSTILE_MD = (
+    "# Post\n\n"
+    "![a](file:///etc/passwd)\n\n"
+    "![b](http://169.254.169.254/latest/meta-data/)\n\n"
+    "![c](javascript:alert(1))\n\n"
+    "![ok](https://a.example/banner.png)\n"
+)
+
+
+class TestUrlPolicy(unittest.TestCase):
+    """A feed body is attacker-authored, and its URLs are handed to a
+    server to fetch and to the review dialog to preview."""
+
+    def test_non_web_schemes_never_reach_the_scans(self):
+        # The scans feed the review dialog's preview as well as the
+        # mirror loop, so anything that is not an http(s) image is
+        # dropped here. Address-level policy is the loop's job.
+        self.assertEqual(scan_markdown_images(HOSTILE_MD), [
+            "http://169.254.169.254/latest/meta-data/",
+            "https://a.example/banner.png",
+        ])
+        self.assertNotIn("file:///etc/passwd", scan_markdown_images(HOSTILE_MD))
+        self.assertEqual(
+            scan_html_images(
+                '<img src="file:///etc/passwd">'
+                '<img src="javascript:alert(1)">'
+                '<img src="https://a.example/x.png">'
+            ),
+            ["https://a.example/x.png"],
+        )
+
+    def test_refused_urls_are_never_handed_to_the_mirror(self):
+        mirror, calls = fake_mirror()
+        outcome, progress = run_rehost(HOSTILE_MD, mirror)
+        # Only the legitimate image is mirrored.
+        self.assertEqual(calls, ["https://a.example/banner.png"])
+        self.assertEqual(outcome.mirrored, 1)
+        # The refused ones are reported, not silently dropped, and their
+        # markdown is left exactly as the author wrote it.
+        self.assertIn("http://169.254.169.254/latest/meta-data/",
+                      outcome.failed)
+        self.assertIn("![a](file:///etc/passwd)", outcome.markdown)
+        self.assertIn("![b](http://169.254.169.254/latest/meta-data/)",
+                      outcome.markdown)
+        failed = [p for p in progress if p.status == "failed"]
+        self.assertEqual([p.error for p in failed], ["URL was not allowed"])
+
+    def test_private_address_is_refused_even_when_scanned_in(self):
+        # The scan lets http through, so the mirror loop is the gate
+        # that stops a server being pointed at the local network.
+        markdown = "![m](http://10.0.0.1/x.png)\n"
+        mirror, calls = fake_mirror()
+        outcome, _ = run_rehost(markdown, mirror)
+        self.assertEqual(calls, [])
+        self.assertEqual(outcome.failed, ["http://10.0.0.1/x.png"])
+        self.assertEqual(outcome.markdown, markdown)
+
+    def test_plain_http_images_still_mirror(self):
+        markdown = "![m](http://blog.example/x.png)\n"
+        mirror, calls = fake_mirror()
+        outcome, _ = run_rehost(markdown, mirror)
+        self.assertEqual(calls, ["http://blog.example/x.png"])
+        self.assertEqual(outcome.mirrored, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

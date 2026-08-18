@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 
+import hashlib
 import itertools
 import json
 import os
@@ -12,17 +13,21 @@ from dataclasses import dataclass
 from typing import Optional
 
 from send2trash import send2trash
-from PySide6.QtCore import QBuffer, QIODevice, Qt, QMarginsF, QTimer, QUrl, QFileSystemWatcher, QPointF
+from PySide6.QtCore import (
+    QBuffer, QByteArray, QIODevice, Qt, QMarginsF, QTimer, QUrl, QFileSystemWatcher,
+    QPointF,
+)
 from PySide6.QtNetwork import QLocalServer
 from PySide6.QtGui import (
     QAction, QActionGroup, QKeySequence, QTextCursor, QTextDocument, QTextCharFormat, QColor,
-    QPageLayout, QPageSize, QPixmap, QGuiApplication, QDesktopServices, QIcon,
-    QPainter, QPen
+    QImage, QPageLayout, QPageSize, QPixmap, QGuiApplication, QDesktopServices, QIcon,
+    QPainter, QPen, QTextImageFormat
 )
 from PySide6.QtWidgets import (
-    QMainWindow, QFileDialog, QInputDialog, QMenu, QMessageBox, QWidget, QVBoxLayout,
-    QTextEdit, QTabWidget, QToolButton, QHBoxLayout, QStatusBar, QPushButton, QTabBar,
-    QDialogButtonBox, QWidgetAction, QLabel, QDialog, QSplitter, QProgressDialog
+    QMainWindow, QCheckBox, QFileDialog, QInputDialog, QMenu, QMessageBox, QWidget,
+    QVBoxLayout, QTextEdit, QTabWidget, QToolButton, QHBoxLayout, QStatusBar,
+    QPushButton, QTabBar, QDialogButtonBox, QWidgetAction, QLabel, QDialog, QSplitter,
+    QProgressDialog
 )
 
 from constants import (
@@ -31,7 +36,10 @@ from constants import (
     DARK_BORDER, LIGHT_BORDER, MONO_FONT, APP_DISPLAY_NAME, APP_VERSION, APP_URL
 )
 from widgets import FindBar, HeaderWidget, LineNumberGutter, FileChangedBar, UpdateBar
+from doc_walk import iter_blocks, iter_image_names, serialize_plain_with_images
 from editor import HtmlEditor
+import image_safety
+import url_safety
 from highlighter import SyntaxHighlighter, detect_language, detect_language_from_content, LANGUAGE_DISPLAY_NAMES
 from settings import load_settings, save_setting
 from welcome import welcome_html
@@ -54,9 +62,14 @@ _RICH_DOC_EXTS = ('.html', '.htm', '.md', '.markdown')
 # .pdf opens read-only in the built-in PDF viewer, not in an editor.
 _SUPPORTED_EXTS = {'.md', '.html', '.htm', '.txt', '.rmd', '.pdf'}
 
-# Image extensions we route through Blossom upload on drag-and-drop.
-# These never overlap with _SUPPORTED_EXTS so the dispatcher stays simple.
-_IMAGE_EXTS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'}
+# Image extensions accepted on drag-and-drop. These never overlap with
+# _SUPPORTED_EXTS so the dispatcher stays simple. SVG is absent: it is
+# not decoded anywhere in this process, so a dropped .svg gets the
+# ordinary "unsupported" bar message instead of a silent nothing.
+_IMAGE_EXTS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'}
+
+# Persisted answer to the paste-upload prompt: "ask" | "always" | "never".
+_PASTE_UPLOAD_SETTING = "upload_pasted_images"
 
 # Extensions the Save As dialog can produce; used to decide whether the
 # typed filename already carries one.
@@ -72,11 +85,13 @@ def _extension_from_filter(selected_filter: str) -> Optional[str]:
     """
     m = re.search(r'\(\*(\.[0-9A-Za-z]+)', selected_filter)
     return m.group(1) if m else None
-from recovery import EditorBackup, find_all_backups
+from recovery import BACKUP_VERSION, EditorBackup, classify_backup, find_all_backups
 from recent_files import load_recent, add_recent, clear_recent
 
 from nostr.avatar_store import AvatarBatchLoader, AvatarStore
 from nostr.bech32 import encode_note
+from nostr.blossom.errors import friendly_message
+from nostr.blossom.settings import BlossomSettings
 from nostr.blossom.store import MediaFile, MediaStore
 from nostr.bunker import BunkerSessionPool
 from nostr.contacts import ContactListFetcher
@@ -91,6 +106,8 @@ from nostr.drafts import (
     serialize_inner_event,
 )
 from nostr.known_people import KnownPeople, Person
+from nostr.media.assets import ASSET_SCHEME, asset_key, parse_asset_key
+from nostr.media.manager import AssetManager
 from nostr.metadata import AvatarLoader, ProfileMetadataFetcher
 from nostr.outbox import RelayListCache
 from nostr.profiles import Profile, ProfileStore
@@ -364,21 +381,22 @@ class MainWindow(QMainWindow):
             profile_provider=lambda: self._profile_store.default(),
             parent=self,
         )
-        # Loader used by the editor's "Insert image" flow to materialize
-        # a Blossom URL into a local file before calling QTextCursor.insertImage.
+        # Content-addressed byte cache. Doubles as the asset layer's blob
+        # store: one cache for thumbnails and document images means an
+        # image the library already downloaded needs no second copy.
         self._media_image_loader = ThumbnailLoader(parent=self)
-        self._media_image_loader.ready.connect(self._on_media_image_ready)
-        self._media_image_loader.failed.connect(self._on_media_image_failed)
-        # hash -> (editor_id, source_url, alt_text). Populated when we
-        # pick or paste an image whose bytes aren't cached yet; drained
-        # by _on_media_image_ready / _on_media_image_failed.
-        self._pending_image_inserts: dict = {}
-        # display_name -> editor_id. Tracks drag-/paste-originated
-        # uploads so we can auto-insert into the originating editor
-        # when MediaStore.upload_finished fires.
-        self._pending_upload_inserts: dict = {}
-        self._media_store.upload_finished.connect(self._on_upload_finished_for_insert)
-        self._media_store.upload_failed.connect(self._on_upload_failed_for_insert)
+        # The one object the editor side talks to about images. Every
+        # boundary it crosses is injected here, so nothing below this
+        # line knows anything about Blossom.
+        self._asset_manager = AssetManager(
+            blob_store=self._media_image_loader,
+            uploader=self._media_store,
+            profile_provider=lambda: self._profile_store.default(),
+            decoder=image_safety.decode_image_bytes,
+            parent=self,
+        )
+        self._asset_manager.asset_changed.connect(self._refresh_asset_in_documents)
+        self._asset_manager.asset_upload_failed.connect(self._on_asset_upload_failed)
 
         self._update_profile_chip()
         self._refresh_profile_chip_menu()
@@ -669,6 +687,48 @@ class MainWindow(QMainWindow):
         editor.set_highlight_current_line(self.highlight_current_line)
         editor.set_paper_mode(self.paper_mode)
 
+
+    def _new_wired_editor(self) -> HtmlEditor:
+        """A fully wired editor: signals, theme, view prefs, media entry.
+
+        Every tab is built through here. The three construction sites
+        used to duplicate this by hand, and a tab wired without the
+        resource resolver silently loses image rendering, which is
+        exactly what the crash-restored tab (the one nobody opens by
+        hand) used to do.
+        """
+        ed = HtmlEditor()
+        ed.document().contentsChanged.connect(self._update_tab_title)
+        ed.document().undoAvailable.connect(self._update_undo_redo_buttons)
+        ed.document().redoAvailable.connect(self._update_undo_redo_buttons)
+        ed.cursorPositionChanged.connect(self._update_status_bar)
+        ed.currentCharFormatChanged.connect(self._update_format_buttons)
+        ed.selectionChanged.connect(self._update_format_buttons)
+        self._update_editor_theme(ed)
+        self._apply_view_prefs_to_editor(ed)
+        ed.set_resource_resolver(self._asset_manager.resolve_image, ASSET_SCHEME)
+        ed.set_local_image_resolver(lambda name, e=ed: self._resolve_local_image(e, name))
+        ed.image_pasted.connect(lambda img, e=ed: self._handle_pasted_image(e, img))
+        ed.urls_dropped.connect(self._handle_dropped_urls)
+        return ed
+
+    def _resolve_local_image(self, editor, name: str):
+        """QImage for an image named relative to the editor's own file.
+
+        A .md saved offline points at "<stem>_media/<sha>.png" beside
+        itself, so this is the path that decides whether a reopened
+        document shows its pictures. Reading it here rather than
+        letting Qt fall back to the working directory also keeps the
+        bytes inside the decode allowlist.
+        """
+        path = getattr(editor, "_file_path", "") or ""
+        if not path:
+            return None
+        root = os.path.dirname(os.path.abspath(path))
+        data = image_safety.ImageRootPolicy((root,)).read(name)
+        if not data:
+            return None
+        return image_safety.decode_image_bytes(data)
 
     # ----------------------------------------------------------------------
     # EDITOR / TAB HELPERS
@@ -1177,74 +1237,104 @@ class MainWindow(QMainWindow):
 
         Returns True if at least one backup was restored.
         """
-        backups = find_all_backups()
-        for backup in backups:
-            original_path = backup.get("original_path")
-            content = backup.get("content", "")
-            backup_file = backup["_backup_file"]
+        restored = 0
+        for backup in find_all_backups():
+            try:
+                if self._restore_one_backup(backup):
+                    restored += 1
+            except Exception:
+                # One unreadable record must never cost the user the
+                # other tabs it was found beside.
+                continue
+        return restored > 0
 
-            ed = HtmlEditor()
+    def _restore_one_backup(self, backup: dict) -> bool:
+        version = backup.get("version")
+        if version is not None and (not isinstance(version, int)
+                                    or isinstance(version, bool)
+                                    or version > BACKUP_VERSION
+                                    or backup.get("format") not in ("html",)):
+            # Written by a newer build. Leave it on disk untouched rather
+            # than guess at a format this build does not know.
+            return False
+
+        original_path = backup.get("original_path")
+        content = backup.get("content", "")
+        backup_file = backup["_backup_file"]
+        freshness = classify_backup(backup)
+
+        ed = self._new_wired_editor()
+        # A stale backup keeps no path: Ctrl+S then has to go through
+        # Save As, so a recovered copy can never overwrite newer work.
+        # Set before the content: image names beside the original file
+        # resolve against it.
+        ed._file_path = None if freshness == "stale" else original_path
+        if version is None:
+            # Version 1 stored plain text. Restoring it as HTML would
+            # render the user's angle brackets as markup.
             ed.setPlainText(content)
-            ed._file_path = original_path
-            ed.document().setModified(True)
-            ed.document().contentsChanged.connect(self._update_tab_title)
-            ed.document().undoAvailable.connect(self._update_undo_redo_buttons)
-            ed.document().redoAvailable.connect(self._update_undo_redo_buttons)
-            ed.cursorPositionChanged.connect(self._update_status_bar)
-            ed.currentCharFormatChanged.connect(self._update_format_buttons)
-            ed.selectionChanged.connect(self._update_format_buttons)
-            self._update_editor_theme(ed)
+        else:
+            ed.setHtml(content)
+            normalize_lists_after_set_html(ed.document())
+        ed.document().clearUndoRedoStacks()
+        ed.document().setModified(True)
 
-            container = QWidget()
-            vbox = QVBoxLayout(container)
-            vbox.setContentsMargins(0, 0, 0, 0)
-            vbox.setSpacing(0)
+        container = QWidget()
+        vbox = QVBoxLayout(container)
+        vbox.setContentsMargins(0, 0, 0, 0)
+        vbox.setSpacing(0)
 
-            bar = FileChangedBar()
-            bar.update_theme(self.is_dark_theme)
-            bar.reload_requested.connect(lambda b=bar, e=ed: self._reload_from_disk(e, b))
-            vbox.addWidget(bar)
+        bar = FileChangedBar()
+        bar.update_theme(self.is_dark_theme)
+        bar.reload_requested.connect(lambda b=bar, e=ed: self._reload_from_disk(e, b))
+        vbox.addWidget(bar)
 
-            editor_area = QWidget()
-            layout = QHBoxLayout(editor_area)
-            layout.setContentsMargins(0, 0, 0, 0)
-            layout.setSpacing(0)
+        editor_area = QWidget()
+        layout = QHBoxLayout(editor_area)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-            if self.show_line_numbers:
-                gutter = LineNumberGutter(ed)
-                layout.addWidget(gutter)
-                ed._line_gutter = gutter
+        if self.show_line_numbers:
+            gutter = LineNumberGutter(ed)
+            layout.addWidget(gutter)
+            ed._line_gutter = gutter
 
-            layout.addWidget(ed)
-            vbox.addWidget(editor_area)
+        layout.addWidget(ed)
+        vbox.addWidget(editor_area)
 
-            base_name = os.path.basename(original_path) if original_path else "Untitled"
-            idx = self.tabs.addTab(container, f"{base_name} (recovered)*")
-            self._attach_close_button(idx, container)
+        base_name = os.path.basename(original_path) if original_path else "Untitled"
+        suffix = "recovered copy" if freshness == "stale" else "recovered"
+        idx = self.tabs.addTab(container, f"{base_name} ({suffix})*")
+        self._attach_close_button(idx, container)
 
-            if original_path:
-                self._watcher.addPath(original_path)
+        if freshness == "stale" and original_path:
+            bar.show_notice(
+                f"Recovered a copy. The file on disk is newer: {original_path}"
+            )
+        elif ed._file_path:
+            self._watcher.addPath(ed._file_path)
 
-            # Replace the old backup file with a fresh one for the restored content
-            os.remove(backup_file)
-            ed._backup = EditorBackup(ed, original_path)
-            ed._backup.write_now()
-
-        return len(backups) > 0
+        # Write the replacement first: removing the old file before its
+        # successor exists is a window in which a second crash loses
+        # everything. A restored document that kept its path derives the
+        # same backup ID, so the replacement IS this record's file and
+        # deleting it would leave the recovered work unprotected.
+        ed._backup = EditorBackup(
+            ed, ed._file_path, externalize=self._asset_manager.adopt_data_uri
+        )
+        if (ed._backup.write_now()
+                and os.path.abspath(backup_file) != os.path.abspath(ed._backup.path)):
+            try:
+                os.remove(backup_file)
+            except OSError:
+                pass
+        return True
 
     # ----------------------------------------------------------------------
     # FILE I/O
     # ----------------------------------------------------------------------
     def new_tab(self):
-        ed = HtmlEditor()
-        ed.document().contentsChanged.connect(self._update_tab_title)
-        ed.document().undoAvailable.connect(self._update_undo_redo_buttons)
-        ed.document().redoAvailable.connect(self._update_undo_redo_buttons)
-        ed.cursorPositionChanged.connect(self._update_status_bar)
-        ed.currentCharFormatChanged.connect(self._update_format_buttons)
-        ed.selectionChanged.connect(self._update_format_buttons)
-        self._update_editor_theme(ed)
-        self._apply_view_prefs_to_editor(ed)
+        ed = self._new_wired_editor()
 
         container = QWidget()
         vbox = QVBoxLayout(container)
@@ -1286,7 +1376,9 @@ class MainWindow(QMainWindow):
         ed._lang_detect_timer = _timer
 
         ed.setHtml("<div></div>")
-        ed._backup = EditorBackup(ed, None)
+        ed._backup = EditorBackup(
+            ed, None, externalize=self._asset_manager.adopt_data_uri
+        )
         ed.setFocus()
         self._update_window_title()
 
@@ -1575,21 +1667,12 @@ class MainWindow(QMainWindow):
                 bar.show_unsupported(", ".join(unsupported))
 
     def _handle_dropped_images(self, paths):
-        """An image was dropped on the window. Offer to upload it to
-        Blossom and insert the resulting URL at the current cursor.
+        """Images were dropped on the window: adopt and insert them now.
 
-        No-op with a single informational dialog when no profile is
-        connected: the editor's no-image-support story is fine for that
-        case (no key, no upload, no insert)."""
-        active = self._profile_store.default()
-        if active is None:
-            QMessageBox.information(
-                self,
-                "Connect a signer first",
-                "Connect a Nostr signer (Nostr → Connect Signer…) before "
-                "uploading images to Blossom.",
-            )
-            return
+        The insert never waits for a signer or a server. Uploading is
+        offered afterwards, and declining costs nothing: the image is
+        already in the document either way.
+        """
         ed = self.current_editor()
         if ed is None:
             self.new_tab()
@@ -1597,27 +1680,49 @@ class MainWindow(QMainWindow):
         if ed is None:
             return
 
-        names = ", ".join(os.path.basename(p) for p in paths)
-        prompt = QMessageBox(self)
-        prompt.setWindowTitle("Upload image to Blossom")
-        prompt.setText(
-            f"Upload {len(paths)} image{'s' if len(paths) != 1 else ''} "
-            f"({names}) to your Blossom servers and insert at the cursor?"
-        )
-        prompt.setStandardButtons(QMessageBox.Cancel | QMessageBox.Yes)
-        prompt.setDefaultButton(QMessageBox.Yes)
-        if prompt.exec() != QMessageBox.Yes:
+        adopted = []
+        refused = []
+        for path in paths:
+            alt = os.path.splitext(os.path.basename(path))[0] or "image"
+            asset = self._asset_manager.adopt_file(path, alt=alt)
+            if asset is None:
+                refused.append(os.path.basename(path))
+                continue
+            self._insert_asset(ed, asset, alt=alt)
+            adopted.append(asset)
+
+        if refused:
+            self.status.showMessage(
+                f"Could not add: {', '.join(refused)}", 5000
+            )
+        if not adopted:
             return
 
-        # Match by basename - MediaStore emits upload_finished(name, ...)
-        # using the file's basename as the display name.
-        for path in paths:
-            self._pending_upload_inserts[os.path.basename(path)] = id(ed)
-            self._media_store.upload_file(path)
-        self.status.showMessage(
-            f"Uploading {len(paths)} image{'s' if len(paths) != 1 else ''} to Blossom…",
-            5000,
+        pending = [a for a in adopted if not a.is_uploaded]
+        if not pending:
+            return
+        if self._profile_store.default() is None:
+            self.status.showMessage(
+                "Images added. Connect a signer to upload them.", 6000
+            )
+            return
+
+        count = len(pending)
+        plural = "s" if count != 1 else ""
+        prompt = QMessageBox(self)
+        prompt.setWindowTitle("Upload images")
+        prompt.setText(
+            f"Upload {count} image{plural} to your Blossom servers? They are "
+            f"already in your document and stay there either way."
         )
+        upload_btn = prompt.addButton("Upload", QMessageBox.AcceptRole)
+        prompt.addButton("Keep local", QMessageBox.RejectRole)
+        prompt.setDefaultButton(upload_btn)
+        prompt.exec()
+        if prompt.clickedButton() is not upload_btn:
+            return
+        for asset in pending:
+            self._asset_manager.request_upload(asset.sha256)
 
     def _handle_dropped_text(self, text: str):
         ed = self.current_editor()
@@ -1688,19 +1793,14 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"File could not be read:\n{e}")
             return
 
-        ed = HtmlEditor()
+        ed = self._new_wired_editor()
+        # The path first: image names in the content resolve against the
+        # document's own directory, and Qt caches whatever the first
+        # lookup answered.
+        ed._file_path = path
         self._set_editor_content(ed, path, content)
 
-        ed._file_path = path
         ed.document().setModified(False)
-        ed.document().contentsChanged.connect(self._update_tab_title)
-        ed.document().undoAvailable.connect(self._update_undo_redo_buttons)
-        ed.document().redoAvailable.connect(self._update_undo_redo_buttons)
-        ed.cursorPositionChanged.connect(self._update_status_bar)
-        ed.currentCharFormatChanged.connect(self._update_format_buttons)
-        ed.selectionChanged.connect(self._update_format_buttons)
-        self._update_editor_theme(ed)
-        self._apply_view_prefs_to_editor(ed)
         self._attach_highlighter(ed, path)
 
         container = QWidget()
@@ -1729,7 +1829,9 @@ class MainWindow(QMainWindow):
         idx = self.tabs.addTab(container, os.path.basename(path))
         self.tabs.setCurrentIndex(idx)
         self._attach_close_button(idx, container)
-        ed._backup = EditorBackup(ed, path)
+        ed._backup = EditorBackup(
+            ed, path, externalize=self._asset_manager.adopt_data_uri
+        )
         self._watcher.addPath(path)
         add_recent(path)
         self._populate_recent_menu()
@@ -1781,25 +1883,137 @@ class MainWindow(QMainWindow):
             block = block.next()
         return False
 
+    def _has_images(self, ed: HtmlEditor) -> bool:
+        """Whether the document holds any image at all.
+
+        Kept apart from _has_formatting on purpose: .md now preserves
+        images, so folding images into the formatting check would warn
+        about a loss that no longer happens.
+        """
+        return any(True for _ in iter_image_names(ed.document()))
+
+    def _unpublishable_images(self, doc) -> list:
+        """Image names that would break for a reader of a published event.
+
+        An asset with no upload has no address anyone else can fetch,
+        and a bare local path means even less to a stranger. A foreign
+        http(s) or data: image is already readable and passes.
+        """
+        blocked = []
+        for name in dict.fromkeys(iter_image_names(doc)):
+            sha = parse_asset_key(name)
+            if sha is None:
+                if not image_safety.is_portable_image_source(name):
+                    blocked.append(name)
+                continue
+            asset = self._asset_manager.get(sha)
+            if asset is None or not asset.is_uploaded:
+                blocked.append(name)
+        return blocked
+
+    def _confirm_images_uploaded(self, ed) -> bool:
+        """Gate before anything is signed. False means do not publish.
+
+        Publishing is irreversible in a way that inserting is not: an
+        event with an unreachable image cannot be recalled, so this is
+        the one place where waiting is the right answer.
+        """
+        if ed is None:
+            return True
+        blocked = self._unpublishable_images(ed.document())
+        if not blocked:
+            return True
+
+        count = len(blocked)
+        plural = "s" if count != 1 else ""
+        verb = "are" if count != 1 else "is"
+        them = "them" if count != 1 else "it"
+        prompt = QMessageBox(self)
+        prompt.setWindowTitle("Images not uploaded yet")
+        prompt.setText(
+            f"{count} image{plural} in this document {verb} not uploaded to "
+            f"Blossom. Publishing now would break {them} for readers. Upload "
+            f"first, then publish."
+        )
+        upload_btn = prompt.addButton("Upload now", QMessageBox.AcceptRole)
+        prompt.addButton(QMessageBox.Cancel)
+        prompt.setDefaultButton(upload_btn)
+        prompt.exec()
+        if prompt.clickedButton() is upload_btn:
+            for name in blocked:
+                sha = parse_asset_key(name)
+                if sha is not None:
+                    self._asset_manager.request_upload(sha)
+        return False
+
+    def _publish_text(self, ed, flavor: str) -> str:
+        """Document text for a signed event, with images as real references.
+
+        toPlainText() emits U+FFFC for every image, so a published note
+        used to carry an invisible placeholder where the picture was.
+        """
+        def destination(fmt) -> Optional[str]:
+            name = fmt.name()
+            sha = parse_asset_key(name)
+            if sha is None:
+                return name if image_safety.is_portable_image_source(name) else None
+            asset = self._asset_manager.get(sha)
+            return asset.remote_url if asset is not None and asset.is_uploaded else None
+
+        def as_markdown(fmt) -> Optional[str]:
+            url = destination(fmt)
+            if not url:
+                return None
+            alt = str(fmt.property(QTextImageFormat.ImageAltText) or "image")
+            return f"![{alt}]({url})"
+
+        def as_note(fmt) -> Optional[str]:
+            url = destination(fmt)
+            # A bare URL welded to the surrounding words is unreadable
+            # and unlinkable, so it always keeps its own whitespace.
+            return f" {url} " if url else None
+
+        target = as_markdown if flavor == "markdown" else as_note
+        return serialize_plain_with_images(ed.document(), target)
+
+    def _loses_content_on_save(self, ed, path: str) -> bool:
+        """Whether saving to ``path`` would drop something in the document.
+
+        .md keeps images now (remote URL or sidecar), so only formatting
+        counts there. .txt and .rtf carry no image at all, so an
+        image-only document has to warn before it is flattened.
+        """
+        lowered = path.lower()
+        if lowered.endswith('.rtf'):
+            return self._has_images(ed)
+        if lowered.endswith('.md'):
+            return self._has_formatting(ed)
+        if lowered.endswith('.txt'):
+            return self._has_formatting(ed) or self._has_images(ed)
+        return False
+
     def _warn_formatting_loss(self, ext_label: str) -> str:
-        """Show warning dialog when saving to a format that loses formatting.
+        """Show warning dialog when saving to a format that loses content.
         Returns 'anyway', 'html', 'rtf', or 'cancel'."""
         msg = QMessageBox(self)
-        msg.setWindowTitle("Formatting will be lost")
+        msg.setWindowTitle("Content will be lost")
         msg.setIcon(QMessageBox.Warning)
         msg.setText(
-            f"This document contains colors or text formatting\n"
+            f"This document contains colors, text formatting or images\n"
             f"that cannot be stored in {ext_label}."
         )
         anyway_btn = msg.addButton(f"Save as {ext_label} anyway", QMessageBox.DestructiveRole)
         html_btn   = msg.addButton("Save as .html", QMessageBox.AcceptRole)
-        rtf_btn    = msg.addButton("Save as .rtf", QMessageBox.AcceptRole)
+        # Offering .rtf as the escape from an .rtf save would be a loop.
+        rtf_btn = (None if ext_label.lower() == ".rtf"
+                   else msg.addButton("Save as .rtf", QMessageBox.AcceptRole))
         cancel_btn = msg.addButton(QMessageBox.Cancel)
         msg.setDefaultButton(cancel_btn)
 
-        anyway_btn.setToolTip("Formatting and colors will be permanently removed from the saved file.")
+        anyway_btn.setToolTip("Formatting, colors and images will be permanently removed from the saved file.")
         html_btn.setToolTip("Saves all colors, bold, italic and formatting.\nBest choice for editing in this editor.")
-        rtf_btn.setToolTip("Saves all colors, bold, italic and formatting.\nCompatible with Word, LibreOffice and other apps.")
+        if rtf_btn is not None:
+            rtf_btn.setToolTip("Saves all colors, bold, italic and formatting.\nCompatible with Word, LibreOffice and other apps.")
 
         _btn_base = """
             QPushButton {
@@ -1816,10 +2030,11 @@ class MainWindow(QMainWindow):
             QPushButton { background: transparent; color: #4A9F4A; border-color: #4A9F4A; }
             QPushButton:hover { background: rgba(40,140,40,0.15); color: #5ABF5A; border-color: #5ABF5A; }
         """)
-        rtf_btn.setStyleSheet(_btn_base + """
-            QPushButton { background: transparent; color: #4A9F4A; border-color: #4A9F4A; }
-            QPushButton:hover { background: rgba(40,140,40,0.15); color: #5ABF5A; border-color: #5ABF5A; }
-        """)
+        if rtf_btn is not None:
+            rtf_btn.setStyleSheet(_btn_base + """
+                QPushButton { background: transparent; color: #4A9F4A; border-color: #4A9F4A; }
+                QPushButton:hover { background: rgba(40,140,40,0.15); color: #5ABF5A; border-color: #5ABF5A; }
+            """)
 
         msg.exec()
         clicked = msg.clickedButton()
@@ -1827,7 +2042,7 @@ class MainWindow(QMainWindow):
             return 'anyway'
         elif clicked == html_btn:
             return 'html'
-        elif clicked == rtf_btn:
+        elif rtf_btn is not None and clicked == rtf_btn:
             return 'rtf'
         return 'cancel'
 
@@ -1870,7 +2085,7 @@ class MainWindow(QMainWindow):
                 return True
             return self.save_as()
         ed = self.current_editor()
-        if ed and path.lower().endswith(('.txt', '.md')) and self._has_formatting(ed):
+        if ed and self._loses_content_on_save(ed, path):
             result = self._warn_formatting_loss(os.path.splitext(path)[1])
             if result == 'cancel':
                 return False
@@ -1901,7 +2116,7 @@ class MainWindow(QMainWindow):
 
         # Warn if saving to a format that loses formatting
         ed = self.current_editor()
-        if ed and path.lower().endswith(('.txt', '.md')) and self._has_formatting(ed):
+        if ed and self._loses_content_on_save(ed, path):
             result = self._warn_formatting_loss(os.path.splitext(path)[1])
             if result == 'cancel':
                 return False
@@ -1948,14 +2163,24 @@ class MainWindow(QMainWindow):
                 content = document_to_html(
                     ed.document(),
                     title=self._export_title_for(path),
-                    source_url_for=self._image_source_url_lookup(ed),
+                    image_roots=self._image_roots_for(path),
+                    asset_resolver=self._asset_manager.export_view,
                 )
             elif ext.endswith('.rmd'):
                 content = self._to_rmd_content(ed, path)
-            elif ext.endswith('.md') and getattr(ed, '_loaded_as_markdown', False):
-                content = ed.document().toMarkdown()
+            elif ext.endswith('.md'):
+                target = self._image_target_for_file_save(ed.document(), path)
+                if getattr(ed, '_loaded_as_markdown', False):
+                    content = self._markdown_with_mapped_images(ed, target)
+                else:
+                    content = serialize_plain_with_images(
+                        ed.document(), self._markdown_reference_for(target)
+                    )
             else:
-                content = ed.toPlainText()
+                # .txt and anything unknown: images cannot be carried, so
+                # they are omitted rather than left as the raw U+FFFC
+                # placeholder the old toPlainText call wrote out.
+                content = serialize_plain_with_images(ed.document(), lambda fmt: None)
 
             with open(path, "w", encoding="utf-8") as f:
                 f.write(content)
@@ -2013,32 +2238,180 @@ class MainWindow(QMainWindow):
         bar.hide()
         self._update_tab_title()
 
+    def _open_external(self, url: str) -> None:
+        """Hand a URL to the desktop browser, if it is one.
+
+        Release metadata arrives as JSON from the network, so the check
+        belongs on this side of it rather than at each call site.
+        """
+        if url_safety.is_safe_external_url(url):
+            QDesktopServices.openUrl(QUrl(url))
+        else:
+            self.status.showMessage("That link cannot be opened.", 5000)
+
     def _export_title_for(self, path: str) -> str:
         """Document title for export metadata: the filename without extension."""
         return os.path.splitext(os.path.basename(path))[0] or "Untitled"
 
-    def _image_source_url_lookup(self, ed):
-        """Callback for exporters: local image path to its original https URL.
+    def _blob_cache_root(self) -> str:
+        """Directory holding the content-addressed image cache."""
+        return str(self._media_image_loader.cache_path("x").parent)
 
-        Checks the per-editor record written by _do_insert_image first,
-        then falls back to the media store's sha256 index (cache filenames
-        ARE the sha). Returns None when the URL is unknown; exporters embed
-        the bytes regardless, the URL is provenance only.
+    def _image_roots_for(self, save_path: str) -> tuple:
+        """Directories an exporter may read local image bytes from.
+
+        The document's own directory, because sidecar media beside a
+        file is this app's own pattern, plus the blob cache, because a
+        document written by an older build names its images by their
+        absolute cache path.
         """
-        urls = dict(getattr(ed, "_image_urls", {}))
+        doc_dir = os.path.dirname(os.path.abspath(save_path))
+        return (doc_dir, self._blob_cache_root())
 
-        def lookup(local_path: str):
-            url = urls.get(local_path)
-            if url:
-                return url
-            store = getattr(self, "_media_store", None)
-            if store is not None:
-                media = store.files.get(os.path.basename(local_path).lower())
-                if media is not None:
-                    return media.url
+    def _markdown_reference_for(self, target):
+        """Wrap a destination function so plain text gets ![alt](dest)."""
+        def reference(fmt):
+            destination = target(fmt)
+            if not destination:
+                return None
+            alt = str(fmt.property(QTextImageFormat.ImageAltText) or "image")
+            return f"![{alt}]({destination})"
+
+        return reference
+
+    def _markdown_with_mapped_images(self, ed, target) -> str:
+        """toMarkdown() with every image name rewritten to its destination.
+
+        The rewrite happens on a clone: the live document keeps its
+        asset keys, so the open tab still renders and the user's undo
+        stack is untouched.
+        """
+        clone = ed.document().clone()
+        cursor = QTextCursor(clone)
+        cursor.beginEditBlock()
+        for block in iter_blocks(clone):
+            it = block.begin()
+            while not it.atEnd():
+                frag = it.fragment()
+                fmt = frag.charFormat()
+                if frag.isValid() and fmt.isImageFormat():
+                    imf = fmt.toImageFormat()
+                    destination = target(imf)
+                    if destination:
+                        new_fmt = QTextImageFormat(imf)
+                        new_fmt.setName(destination)
+                        cursor.setPosition(frag.position())
+                        cursor.setPosition(frag.position() + frag.length(),
+                                           QTextCursor.KeepAnchor)
+                        cursor.setCharFormat(new_fmt)
+                it += 1
+        cursor.endEditBlock()
+        return clone.toMarkdown()
+
+    def _image_target_for_file_save(self, doc, save_path: str):
+        """Where each image should point once written to ``save_path``.
+
+        An uploaded asset serializes to its validated remote URL. An
+        asset that is not uploaded is copied into a sidecar folder
+        beside the document, so a .md file carries its own pictures
+        without the app running. Media this app did not create is left
+        exactly as it was found.
+        """
+        media_dir = media_dir_for(save_path)
+        written: dict = {}
+
+        def sidecar(sha: str, data: bytes, ext: str) -> Optional[str]:
+            # Hex names only: a markdown destination containing a space
+            # is destroyed by Qt's own parser when the file is reopened.
+            name = f"{sha}{ext}"
+            if name in written:
+                return written[name]
+            try:
+                os.makedirs(media_dir, exist_ok=True)
+                with open(os.path.join(media_dir, name), "wb") as f:
+                    f.write(data)
+            except OSError:
+                return None
+            written[name] = f"{os.path.basename(media_dir)}/{name}"
+            return written[name]
+
+        def target(fmt) -> Optional[str]:
+            name = fmt.name()
+            sha = parse_asset_key(name)
+            if sha is None:
+                return self._foreign_image_target(name, sidecar)
+
+            asset = self._asset_manager.get(sha)
+            if asset is not None and asset.is_uploaded:
+                return asset.remote_url
+
+            data = self._asset_manager.resolve_bytes(name)
+            if data:
+                ext = sniff_image_ext(data) or ".png"
+                written_path = sidecar(sha, data, ext)
+                if written_path:
+                    return written_path
+            else:
+                # The cache lost the bytes but the open document still
+                # holds the decoded image; re-encoding it is lossy for
+                # nothing else but keeps the picture.
+                rescued = self._encode_document_image(doc, name)
+                if rescued is not None:
+                    written_path = sidecar(sha, rescued, ".png")
+                    if written_path:
+                        return written_path
+            if asset is not None and asset.remote_url:
+                return asset.remote_url
+            # An honest dangling relative reference: repairable by hand,
+            # and never a machine-local cache path or an internal key.
+            ext = ".png"
+            return f"{os.path.basename(media_dir)}/{sha}{ext}"
+
+        return target
+
+    def _foreign_image_target(self, name: str, sidecar):
+        """Destination for an image this app did not create.
+
+        Everything passes through verbatim: a URL, and equally the
+        author's own local layout, because another editor's
+        "pics/dog.png" is the document's arrangement and rewriting it on
+        a text-only save would duplicate the file and destroy the
+        reference (AD-4, I3).
+
+        The one exception is a name pointing into this app's own blob
+        cache, which older builds wrote into documents. That path is
+        machine-local, so it cannot travel with the file and its bytes
+        move into the sidecar folder beside the document instead.
+        """
+        if image_safety.is_portable_image_source(name):
+            return name
+        if not (os.path.isabs(name) or name.lower().startswith("file:")):
+            # Only an absolute name can be shown to point at the cache;
+            # a relative one would be resolved against it by guesswork.
+            return name
+        policy = image_safety.ImageRootPolicy((self._blob_cache_root(),))
+        data = policy.read(name)
+        if not data:
+            return name
+        ext = sniff_image_ext(data)
+        if ext is None:
+            return name
+        return sidecar(hashlib.sha256(data).hexdigest(), data, ext) or name
+
+    def _encode_document_image(self, doc, name: str) -> Optional[bytes]:
+        """PNG bytes for an image the document still holds in memory."""
+        resource = doc.resource(QTextDocument.ImageResource, QUrl(name))
+        if isinstance(resource, QByteArray):
+            return bytes(resource)
+        if isinstance(resource, QPixmap):
+            resource = resource.toImage()
+        if not isinstance(resource, QImage) or resource.isNull():
             return None
-
-        return lookup
+        buf = QBuffer()
+        buf.open(QIODevice.WriteOnly)
+        if not resource.save(buf, "PNG"):
+            return None
+        return bytes(buf.data())
 
     def _to_rmd_content(self, ed, path: str) -> str:
         """Content for a .Rmd save: source passthrough or rich conversion.
@@ -2068,25 +2441,40 @@ class MainWindow(QMainWindow):
         rendered artifact stays a single shareable file.
         """
         media_dir = media_dir_for(rmd_path)
+        policy = image_safety.ImageRootPolicy(self._image_roots_for(rmd_path))
 
-        def copy(local_path: str):
-            try:
-                with open(local_path, "rb") as f:
-                    data = f.read()
-            except OSError:
-                return None
+        def copy(name: str):
+            sha = parse_asset_key(name)
+            if sha is not None:
+                data = self._asset_manager.resolve_bytes(name)
+                if not data:
+                    return None
+                base = sha
+            elif image_safety.is_portable_image_source(name):
+                return name  # foreign media travels as it arrived
+            else:
+                # A document names the files it embeds and a document
+                # can be hostile, so these bytes come through the same
+                # trusted roots the other exporters read from. A name
+                # outside them is dropped rather than passed along:
+                # knitting with self_contained would hand the very read
+                # this refused to pandoc instead.
+                data = policy.read(name)
+                if not data:
+                    return None
+                base = os.path.basename(name)
             ext = sniff_image_ext(data)
             if ext is None:
                 return None
-            name = os.path.basename(local_path) + ext
+            filename = base + ext
             os.makedirs(media_dir, exist_ok=True)
-            target = os.path.join(media_dir, name)
+            target = os.path.join(media_dir, filename)
             try:
                 with open(target, "wb") as f:
                     f.write(data)
             except OSError:
                 return None
-            return f"{os.path.basename(media_dir)}/{name}"
+            return f"{os.path.basename(media_dir)}/{filename}"
 
         return copy
 
@@ -2152,6 +2540,12 @@ class MainWindow(QMainWindow):
             while not it.atEnd():
                 frag = it.fragment()
                 fmt = frag.charFormat()
+                if fmt.isImageFormat():
+                    # RTF image support is out of scope; emitting the
+                    # fragment text would write an escaped U+FFFC into
+                    # the file, which is visible junk in every reader.
+                    it += 1
+                    continue
 
                 # Escape RTF special chars and non-ASCII
                 escaped = []
@@ -2196,7 +2590,9 @@ class MainWindow(QMainWindow):
         to the printable width."""
         try:
             export_pdf(editor.document(), path,
-                       title=self._export_title_for(path))
+                       title=self._export_title_for(path),
+                       image_roots=self._image_roots_for(path),
+                       asset_resolver=self._asset_manager.export_view)
             editor.document().setModified(False)
             self._update_tab_title()
             self.status.showMessage(f"Saved: {path}")
@@ -2270,6 +2666,8 @@ class MainWindow(QMainWindow):
 
     def _on_knit_done(self, output_path: str):
         self.status.showMessage(f"Knit complete: {output_path}", 8000)
+        # Not gated: this path is the output of our own knit run, not a
+        # name that came from a document or the network.
         QDesktopServices.openUrl(QUrl.fromLocalFile(output_path))
         self._update_knit_actions()
 
@@ -2376,7 +2774,7 @@ class MainWindow(QMainWindow):
         if supports_in_app_update(kind) and asset is not None:
             self._run_in_app_update(kind, asset)
         else:
-            QDesktopServices.openUrl(QUrl(info.page_url))
+            self._open_external(info.page_url)
 
     def _run_in_app_update(self, kind, asset):
         self._update_installer = UpdateInstaller(kind, self)
@@ -2440,7 +2838,7 @@ class MainWindow(QMainWindow):
                 text + "\n\nOpen the download page instead?",
                 QMessageBox.Yes | QMessageBox.No)
             if r == QMessageBox.Yes:
-                QDesktopServices.openUrl(QUrl(info.page_url))
+                self._open_external(info.page_url)
         else:
             QMessageBox.warning(self, "Update Failed", text)
 
@@ -2505,7 +2903,7 @@ class MainWindow(QMainWindow):
             msg.addButton(QMessageBox.StandardButton.Close)
             msg.exec()
             if msg.clickedButton() == action_btn:
-                QDesktopServices.openUrl(QUrl(info.page_url))
+                self._open_external(info.page_url)
 
     def _on_manual_up_to_date(self):
         QMessageBox.information(self, "Check for Updates", "You are up to date.")
@@ -2917,6 +3315,7 @@ class MainWindow(QMainWindow):
                         break
         if hasattr(self, "_knit_runner"):
             self._knit_runner.kill()
+        self._asset_manager.flush()
         self._save_session()
         for i in range(self.tabs.count()):
             ed = self._editor_from_widget(self.tabs.widget(i))
@@ -3105,7 +3504,9 @@ class MainWindow(QMainWindow):
             return
 
         ed = self.current_editor()
-        content = ed.toPlainText().strip() if ed is not None else ""
+        if not self._confirm_images_uploaded(ed):
+            return
+        content = self._publish_text(ed, "note").strip() if ed is not None else ""
         if not content:
             QMessageBox.information(
                 self,
@@ -3154,7 +3555,9 @@ class MainWindow(QMainWindow):
             return
 
         ed = self.current_editor()
-        body = ed.toPlainText().rstrip() if ed is not None else ""
+        if not self._confirm_images_uploaded(ed):
+            return
+        body = self._publish_text(ed, "markdown").rstrip() if ed is not None else ""
         if not body:
             QMessageBox.information(
                 self,
@@ -3270,156 +3673,162 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def _insert_media_at_cursor(self, media: MediaFile, editor, alt_text: str = "") -> None:
-        """Resolve a media file and insert it at the editor's cursor.
+        """Insert a library pick at the editor's cursor, immediately.
 
-        Three branches:
-          - non-image  → insert the URL as plain text
-          - markdown   → ``![alt](url)`` (no fetch needed, survives save)
-          - rich text  → fetch into the cache, then insertImage(local path)
+        There is no fetch-then-insert detour: the blob is already hosted,
+        so the asset goes in at once and the bytes arrive underneath it
+        when they arrive.
         """
         if not (media.mime_type or "").startswith("image/"):
-            self.status.showMessage(
-                f"Inserted URL only (non-image): {media.url}", 5000
-            )
-            cursor = editor.textCursor()
-            cursor.insertText(media.url)
+            self._insert_url_as_text(editor, media.url)
             return
 
-        if getattr(editor, "_loaded_as_markdown", False):
-            self._do_insert_image(editor, "", media.url, alt_text)
+        asset = self._asset_manager.adopt_library_file(
+            sha256=media.hash,
+            remote_url=media.url,
+            mime=media.mime_type,
+            size=media.size,
+            alt=alt_text,
+        )
+        if asset is None:
+            self._insert_url_as_text(editor, media.url)
             return
+        self._insert_asset(editor, asset, alt=alt_text or "image")
 
-        cache_path = self._media_image_loader.cache_path(media.hash)
-        if cache_path.is_file():
-            self._do_insert_image(editor, str(cache_path), media.url, alt_text)
+    def _insert_url_as_text(self, editor, url: str) -> None:
+        """Fallback for media that cannot be an inline image."""
+        if not url_safety.is_safe_media_url(url):
+            self.status.showMessage("That link cannot be inserted.", 5000)
             return
-        # Queue and trigger an async load. ``ready`` will fire with the
-        # local path so we can complete the insert.
-        self._pending_image_inserts[media.hash] = (id(editor), media.url, alt_text)
-        self._media_image_loader.load(media.hash, media.url)
-        self.status.showMessage(f"Fetching {media.url}…", 5000)
-
-    def _on_media_image_ready(self, sha: str, local_path: str, _pixmap) -> None:
-        pending = self._pending_image_inserts.pop(sha, None)
-        if pending is None:
-            return
-        editor_id, original_url, alt_text = pending
-        editor = self._editor_by_id(editor_id)
-        if editor is None:
-            return
-        self._do_insert_image(editor, local_path, original_url, alt_text)
-
-    def _on_media_image_failed(self, sha: str, reason: str) -> None:
-        """Loader failed for a hash we wanted to insert - drop the
-        pending entry and surface a status message so the queue doesn't
-        leak and the user sees why nothing was inserted."""
-        if self._pending_image_inserts.pop(sha, None) is None:
-            return
-        self.status.showMessage(f"Image fetch failed: {reason}", 5000)
-
-    def _do_insert_image(self, editor, local_path: str, source_url: str, alt_text: str = "") -> None:
-        """Insert an image at the editor's current cursor.
-
-        Markdown-loaded tabs (``_loaded_as_markdown``) get
-        ``![alt](url)`` so the image survives a save round-trip. Rich-
-        text tabs get an embedded ``QTextImageFormat`` pointing at the
-        local cache file; the alt text rides along as the image's
-        tooltip (the closest QTextDocument equivalent of alt).
-        """
-        is_md = getattr(editor, "_loaded_as_markdown", False)
         cursor = editor.textCursor()
-        if is_md:
-            cursor.insertText(f"![{alt_text}]({source_url})")
-        else:
-            cursor.insertImage(local_path)
-            # Remember the upload URL so exporters can attach provenance
-            # (data-source-url); embedding never depends on this record.
-            if source_url:
-                if not hasattr(editor, "_image_urls"):
-                    editor._image_urls = {}
-                editor._image_urls[local_path] = source_url
+        cursor.insertText(url)
         editor.setTextCursor(cursor)
-        suffix = f" · alt: {alt_text}" if alt_text else ""
-        self.status.showMessage(f"Inserted image · {source_url}{suffix}", 5000)
+        self.status.showMessage(f"Inserted URL only (non-image): {url}", 5000)
 
-    def _editor_by_id(self, editor_id: int):
+    def _insert_asset(self, editor, asset, *, alt: str) -> None:
+        """Put one asset into the document. Local only, cannot fail.
+
+        The same real image format goes into markdown-loaded and rich
+        text tabs alike. Inserting the literal text ``![alt](url)`` was
+        the old markdown path, and Qt's markdown writer escapes it into
+        a link, so the image reopened as text.
+        """
+        alt = alt or "image"
+        data = self._asset_manager.resolve_bytes(asset.key)
+        if data:
+            # Priming the document means the first paint needs no
+            # resolver round trip and no decode on the paint path.
+            editor.document().addResource(
+                QTextDocument.ImageResource, QUrl(asset.key), QByteArray(data)
+            )
+
+        fmt = QTextImageFormat()
+        fmt.setName(asset.key)
+        # Never leave alt empty: Qt's markdown writer substitutes the
+        # word "image" for an empty one, which makes round trips differ
+        # from what was inserted.
+        fmt.setProperty(QTextImageFormat.ImageAltText, alt)
+
+        cursor = editor.textCursor()
+        cursor.insertImage(fmt)
+        editor.setTextCursor(cursor)
+        self.status.showMessage(f"Inserted image · alt: {alt}", 5000)
+
+    def _refresh_asset_in_documents(self, sha: str) -> None:
+        """Repaint every open document that shows this asset.
+
+        Registering the resource and marking the range dirty replaces
+        the placeholder in place without touching the modified flag, so
+        a saved document stays saved and no backup is triggered.
+        """
+        key = asset_key(sha)
+        data = self._asset_manager.resolve_bytes(key)
+        if not data:
+            return
+        payload = QByteArray(data)
         for i in range(self.tabs.count()):
             ed = self._editor_from_widget(self.tabs.widget(i))
-            if ed is not None and id(ed) == editor_id:
-                return ed
-        # Fall back to the current editor if the original tab is gone.
-        return self.current_editor()
+            if ed is None:
+                continue
+            doc = ed.document()
+            if key not in set(iter_image_names(doc)):
+                continue
+            doc.addResource(QTextDocument.ImageResource, QUrl(key), payload)
+            doc.markContentsDirty(0, doc.characterCount())
 
-    def _on_upload_finished_for_insert(self, name: str, media: MediaFile) -> None:
-        """When a dragged or pasted image finishes uploading, auto-insert
-        it into the editor the user originated the drop / paste on.
-
-        Uploads NOT initiated by drop/paste (e.g. the Library dialog's
-        Upload button) won't be in the pending dict, so this is a no-op
-        for those - no UI surprise."""
-        editor_id = self._pending_upload_inserts.pop(name, None)
-        if editor_id is None:
-            return
-        editor = self._editor_by_id(editor_id)
-        if editor is None:
-            return
-        self._insert_media_at_cursor(media, editor)
-
-    def _on_upload_failed_for_insert(self, name: str, reason: str) -> None:
-        """An upload originated from a drop or paste failed - drop the
-        pending entry so it doesn't leak. Failure status is already
-        surfaced by MediaStore via upload_failed → status label."""
-        self._pending_upload_inserts.pop(name, None)
+    def _on_asset_upload_failed(self, sha: str, code: str) -> None:
+        waiting = len(self._asset_manager.failed_assets())
+        message = friendly_message(code)
+        if waiting > 1:
+            message += f" {waiting} images are waiting."
+        self.status.showMessage(message, 8000)
 
     # -- Blossom: paste image from clipboard ------------------------------
 
-    def _handle_pasted_image(self) -> bool:
-        """Upload the clipboard image and queue an auto-insert at the
-        editor's cursor. Returns True if the paste was consumed (so the
-        editor skips its plain-text fallback). Returns False on any
-        reason we couldn't handle it.
+    def _handle_pasted_image(self, editor, image) -> None:
+        """A clipboard image arrived. Insert it, then ask about uploading.
+
+        The insert is unconditional and comes first. A pasted screenshot
+        exists nowhere else, so a missing signer, a refused upload or no
+        network must never be a reason for it to vanish.
         """
-        clipboard = QApplication.clipboard()
-        if not clipboard.mimeData().hasImage():
-            return False
-        image = clipboard.image()
-        if image.isNull():
-            return False
-
-        active = self._profile_store.default()
-        if active is None:
-            QMessageBox.information(
-                self,
-                "Connect a signer first",
-                "You pasted an image, but no Nostr signer is connected. "
-                "Connect one (Nostr → Connect Signer…) to upload images "
-                "to Blossom and insert them into your notes.",
-            )
-            return True  # consumed - don't fall through to plain-text paste
-
-        ed = self.current_editor()
-        if ed is None:
-            self.new_tab()
-            ed = self.current_editor()
-        if ed is None:
-            return False
-
         buf = QBuffer()
         buf.open(QIODevice.WriteOnly)
         if not image.save(buf, "PNG"):
-            self.status.showMessage(
-                "Pasted image could not be encoded as PNG.", 5000
-            )
-            return True
+            # Nothing image-shaped survived; the editor already handed
+            # us the event, so run its fallback from here.
+            editor.paste_normalized()
+            return
         body = bytes(buf.data())
 
-        # Monotonic counter + wall clock keeps the display name unique
-        # even when two pastes land inside one second.
-        name = f"clipboard-{int(time.time())}-{next(_paste_job_counter):03d}.png"
-        self._pending_upload_inserts[name] = id(ed)
-        self._media_store.upload_bytes(body, name=name, mime_type="image/png")
-        self.status.showMessage("Uploading pasted image to Blossom…", 5000)
-        return True
+        asset = self._asset_manager.adopt_bytes(body, mime="image/png", alt="image")
+        if asset is None:
+            self.status.showMessage("That image could not be added.", 5000)
+            return
+        self._insert_asset(editor, asset, alt="image")
+
+        if asset.is_uploaded or self._profile_store.default() is None:
+            if not asset.is_uploaded:
+                self.status.showMessage(
+                    "Image added. Connect a signer to upload it.", 6000
+                )
+            return
+
+        choice = load_settings().get(_PASTE_UPLOAD_SETTING, "ask")
+        if choice == "never":
+            return
+        if choice != "always" and not self._confirm_paste_upload():
+            return
+        self._asset_manager.request_upload(asset.sha256)
+
+    def _confirm_paste_upload(self) -> bool:
+        """Ask before a pasted image leaves the machine.
+
+        Keep local is the default: a paste is a high-frequency, low
+        intent gesture, so the outcome of an accidental one has to be
+        that nothing was published.
+        """
+        hosts = ", ".join(
+            url_safety.host_of(s) or s for s in BlossomSettings().configured_servers()
+        )
+        prompt = QMessageBox(self)
+        prompt.setWindowTitle("Upload pasted image")
+        prompt.setText(
+            f"Upload this image to {hosts or 'your Blossom servers'}? Anyone "
+            f"with the link can view it. The image is already in your document "
+            f"and stays there either way."
+        )
+        upload_btn = prompt.addButton("Upload", QMessageBox.AcceptRole)
+        keep_btn = prompt.addButton("Keep local", QMessageBox.RejectRole)
+        prompt.setDefaultButton(keep_btn)
+        remember = QCheckBox("Remember this choice")
+        prompt.setCheckBox(remember)
+        prompt.exec()
+
+        upload = prompt.clickedButton() is upload_btn
+        if remember.isChecked():
+            save_setting(_PASTE_UPLOAD_SETTING, "always" if upload else "never")
+        return upload
 
     # ----------------------------------------------------------------------
     # NOSTR - drafts panel toggling
@@ -3762,7 +4171,12 @@ class MainWindow(QMainWindow):
             return
 
         choice: StashChoice = dlg.choice
-        inner = self._build_inner_for_choice(profile, choice, ed.toPlainText())
+        if not self._confirm_images_uploaded(ed):
+            return
+        flavor = "markdown" if choice.kind is StashKind.ARTICLE else "note"
+        inner = self._build_inner_for_choice(
+            profile, choice, self._publish_text(ed, flavor)
+        )
         if inner is None:
             return
         self._fire_draft_publish_job(ed, profile, choice, inner)
@@ -3804,7 +4218,12 @@ class MainWindow(QMainWindow):
             title=binding.title,
             summary=summary,
         )
-        inner = self._build_inner_for_choice(profile, choice, ed.toPlainText())
+        if not self._confirm_images_uploaded(ed):
+            return
+        flavor = "markdown" if kind is StashKind.ARTICLE else "note"
+        inner = self._build_inner_for_choice(
+            profile, choice, self._publish_text(ed, flavor)
+        )
         if inner is None:
             return
         self._fire_draft_publish_job(ed, profile, choice, inner)

@@ -89,3 +89,52 @@ def test_normalize_rejects_invalid_inputs():
 
 def test_normalize_strips_path_and_lowercases_host():
     assert settings._normalize("HTTPS://Blossom.Band/foo/bar") == "https://blossom.band"
+
+
+# --------------------------------------------------------------------------- #
+# Scheme policy: https anywhere, http only on loopback
+# --------------------------------------------------------------------------- #
+
+def test_plain_http_server_is_rejected(tmp_path):
+    # The docstring always promised http was for localhost only; the
+    # scheme check did not enforce it, so a plain-http origin could be
+    # configured and every upload would go out in the clear.
+    s = _store(tmp_path)
+    before = s.custom_servers
+    assert s.add_server("http://evil.example") == before
+    assert "http://evil.example" not in s.configured_servers
+    assert settings._normalize("http://evil.example") is None
+
+
+@pytest.mark.parametrize("url,expected", [
+    ("http://localhost:3000", "http://localhost:3000"),
+    ("http://127.0.0.1:3000", "http://127.0.0.1:3000"),
+    ("http://[::1]:3000", "http://[::1]:3000"),
+])
+def test_loopback_dev_servers_still_work(tmp_path, url, expected):
+    s = _store(tmp_path)
+    assert settings._normalize(url) == expected
+    s.add_server(url)
+    assert expected in s.configured_servers
+
+
+def test_persisted_plain_http_entry_is_dropped_on_load(tmp_path):
+    path = tmp_path / "blossom_servers.json"
+    path.write_text(json.dumps({
+        "version": 1,
+        "custom": ["https://blossom.band", "http://evil.example"],
+    }), encoding="utf-8")
+    s = settings.BlossomSettings(path=path)
+    assert s.custom_servers == ["https://blossom.band"]
+
+
+def test_save_never_writes_outside_the_configured_directory(tmp_path):
+    # A temp file created beside the default settings file would both
+    # touch the real config directory and break os.replace across
+    # filesystems.
+    path = tmp_path / "nested" / "blossom_servers.json"
+    s = settings.BlossomSettings(path=path)
+    s.set_custom_servers(["https://blossom.band"])
+    assert path.is_file()
+    assert sorted(p.name for p in path.parent.iterdir()) == [
+        "blossom_servers.json"]

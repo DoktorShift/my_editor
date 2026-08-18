@@ -4,7 +4,7 @@
 
 One JSON file in ~/.config/my_editor/blossom_servers.json. Atomic
 write (temp file + rename in the same directory) so a crash mid-write
-can't corrupt the store — same pattern as ``ProfileStore``.
+can't corrupt the store, the same pattern as ``ProfileStore``.
 
 An empty / missing ``custom`` list means "use the bundled defaults".
 The user's primary is always ``custom[0]`` when ``custom`` is non-empty.
@@ -17,7 +17,8 @@ import os
 import tempfile
 from pathlib import Path
 from typing import List, Optional
-from urllib.parse import urlparse
+
+import url_safety
 
 from .servers import DEFAULT_BLOSSOM_SERVERS
 
@@ -29,24 +30,17 @@ SETTINGS_FILE = SETTINGS_DIR / "blossom_servers.json"
 def _normalize(url: str) -> Optional[str]:
     """Normalize a server URL to ``scheme://host[:port]`` form, lowercase
     host, no trailing slash, no path. Returns None for anything that
-    isn't a usable Blossom origin (we accept https:// and http://; the
-    latter only so localhost dev servers work for testing)."""
+    isn't a usable Blossom origin: https anywhere, http only on
+    loopback, which is what the docstring above always promised and the
+    old scheme check did not enforce. ``_load`` re-normalizes every
+    persisted entry, so a hand-edited file naming a plain-http host is
+    dropped on read as well as on write."""
     if not isinstance(url, str):
         return None
-    raw = url.strip()
-    if not raw:
+    origin = url_safety.origin_of(url.strip())
+    if origin is None or not url_safety.is_safe_media_url(origin):
         return None
-    try:
-        parsed = urlparse(raw)
-    except (ValueError, AttributeError):
-        return None
-    if parsed.scheme not in ("https", "http"):
-        return None
-    host = (parsed.hostname or "").lower()
-    if not host:
-        return None
-    port = f":{parsed.port}" if parsed.port else ""
-    return f"{parsed.scheme}://{host}{port}"
+    return origin
 
 
 class BlossomSettings:
@@ -114,7 +108,7 @@ class BlossomSettings:
 
     def remove_server(self, url: str) -> List[str]:
         """Drop a server from the custom list. Materializes defaults
-        first if the list was empty, then removes — so users can prune
+        first if the list was empty, then removes, so users can prune
         a default they don't want."""
         normalized = _normalize(url)
         if normalized is None:
@@ -138,7 +132,7 @@ class BlossomSettings:
         return self.set_custom_servers(base)
 
     def reset_to_defaults(self) -> List[str]:
-        """Forget the custom list — ``configured_servers`` will return
+        """Forget the custom list. ``configured_servers`` returns
         ``DEFAULT_BLOSSOM_SERVERS`` again."""
         self._custom = []
         self._save()
@@ -170,16 +164,21 @@ class BlossomSettings:
         self._custom = cleaned
 
     def _save(self) -> None:
-        SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
+        # The temp file goes beside the target, not beside the default
+        # settings file: os.replace cannot cross filesystems, and a
+        # caller that passed its own path must not have writes land in
+        # the real config directory.
+        directory = self._path.parent
+        directory.mkdir(parents=True, exist_ok=True)
         try:
-            os.chmod(SETTINGS_DIR, 0o700)
+            os.chmod(directory, 0o700)
         except OSError:
             pass
 
         payload = {"version": 1, "custom": list(self._custom)}
 
         fd, tmp_path = tempfile.mkstemp(
-            prefix=".blossom_servers_", suffix=".json.tmp", dir=str(SETTINGS_DIR)
+            prefix=".blossom_servers_", suffix=".json.tmp", dir=str(directory)
         )
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:

@@ -34,10 +34,17 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import unquote, urlparse
 
+import url_safety
+
 from ..blossom.auth import build_blossom_auth_event
 from ..blossom.client import BlossomClient, server_origin
 from ..bunker import BunkerSessionPool
 from ..profiles import Profile
+
+
+# Copy shown for a URL the mirror policy refuses. Short because it lands
+# in the per-image row of the review dialog next to the filename.
+_UNSAFE_URL_ERROR = "URL was not allowed"
 
 
 # Matches ``![alt](url)``. Mirrors the reference importer's scan; titles
@@ -80,15 +87,25 @@ def image_label(url: str) -> str:
         return url[:80]
 
 
-def scan_markdown_images(markdown: str) -> List[str]:
-    """Unique image URLs in ``markdown``, in first-seen order.
+def _is_web_url(url: str) -> bool:
+    """True for an http(s) URL. Everything else is out of scope here.
 
-    ``data:`` URIs are skipped: they are already self-contained.
+    ``data:`` URIs are already self-contained, and ``file:``,
+    ``javascript:`` and friends must never reach the review dialog's
+    preview or a mirror request; the scans feed both.
     """
+    try:
+        return urlparse(url).scheme.lower() in ("http", "https")
+    except ValueError:
+        return False
+
+
+def scan_markdown_images(markdown: str) -> List[str]:
+    """Unique image URLs in ``markdown``, in first-seen order."""
     seen: List[str] = []
     for match in _MD_IMAGE_RE.finditer(markdown or ""):
         url = match.group(2).strip()
-        if not url or url.startswith("data:") or url in seen:
+        if not url or url in seen or not _is_web_url(url):
             continue
         seen.append(url)
     return seen
@@ -99,7 +116,7 @@ def scan_html_images(html: str) -> List[str]:
     seen: List[str] = []
     for match in _HTML_IMG_SRC_RE.finditer(html or ""):
         url = match.group(1).strip()
-        if not url or url.startswith("data:") or url in seen:
+        if not url or url in seen or not _is_web_url(url):
             continue
         seen.append(url)
     return seen
@@ -172,6 +189,13 @@ def rehost_images(
             _finish()
             return
         url = urls[index]
+        if not url_safety.is_safe_mirror_source(url):
+            # Never hand a server an address that points back into the
+            # local network; the original URL stays in the markdown.
+            outcome.failed.append(url)
+            _report(index, url, "failed", error=_UNSAFE_URL_ERROR)
+            _next(index + 1)
+            return
         _report(index, url, "mirroring")
 
         def _ok(mirrored_url: str, i=index, u=url) -> None:
@@ -220,6 +244,12 @@ def blossom_mirror(
         on_success: Callable[[str], None],
         on_failure: Callable[[str], None],
     ) -> None:
+        # Second net: the loop already filters, and a caller wiring this
+        # transport up differently must not get past it either. Refused
+        # before signing, so no signer prompt and no request.
+        if not url_safety.is_safe_mirror_source(source_url):
+            on_failure(_UNSAFE_URL_ERROR)
+            return
         unsigned = build_blossom_auth_event(
             "upload", server=origin, pubkey_hex=profile.user_pubkey)
 

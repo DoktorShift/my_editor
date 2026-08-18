@@ -245,7 +245,7 @@ class HeaderWidget(QWidget):
         self.syntax_highlight_checkbox.setToolTip("Toggle Syntax Highlighting (Ctrl+Shift+H)")
         self.syntax_highlight_checkbox.setChecked(True)
 
-        # Format buttons — created here, placed inside the left widget below
+        # Format buttons, created here, placed inside the left widget below
         self.bold_btn = self._make_format_btn("B", "Bold (Ctrl+B)", bold=True)
         self.italic_btn = self._make_format_btn("I", "Italic (Ctrl+I)", italic=True)
         self.underline_btn = self._make_format_btn("U", "Underline (Ctrl+U)", underline=True)
@@ -263,7 +263,7 @@ class HeaderWidget(QWidget):
         left_layout.addWidget(self.underline_btn)
         left_layout.addStretch(1)
 
-        # Center: undo / redo — exactly centred by the equal left(1) / right(1) halves
+        # Center: undo / redo, exactly centred by the equal left(1) / right(1) halves
         self.undo_btn = QPushButton("↺")
         self.undo_btn.setToolTip("Undo (Ctrl+Z)")
         self.undo_btn.setFixedSize(26, 26)
@@ -275,7 +275,7 @@ class HeaderWidget(QWidget):
         self.redo_btn.setEnabled(False)
 
         # Right half: credit label right-aligned, with the Nostr profile chip
-        # tucked just after it. The credit stays exactly where it was — the
+        # tucked just after it. The credit stays exactly where it was, the
         # chip is additive.
         right = QWidget()
         right.setObjectName("HeaderRight")
@@ -466,6 +466,12 @@ class FileChangedBar(QWidget):
     def show_unsupported(self, filename: str = ""):
         msg = f"File type not supported: {filename}" if filename else "File type not supported."
         self._text.setText(msg)
+        self._reload_btn.hide()
+        self.show()
+
+    def show_notice(self, message: str):
+        """Show an arbitrary one-line notice with no reload offer."""
+        self._text.setText(message)
         self._reload_btn.hide()
         self.show()
 
