@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Media Library dialog — browse, upload, preview, delete Blossom media.
+"""Media Library dialog: browse, upload, preview, delete Blossom media.
 
 One self-contained dialog. Toolbar with filter + sort + Upload + Refresh
 above a thumbnail grid; an upload-progress strip pinned at the bottom
@@ -48,7 +48,7 @@ from .thumbnail_loader import ThumbnailLoader
 
 
 # --------------------------------------------------------------------------- #
-# Theme CSS — matches the publisher dialog family
+# Theme CSS: matches the publisher dialog family
 # --------------------------------------------------------------------------- #
 
 _DARK_CSS = """
@@ -278,7 +278,7 @@ QFrame#media_drop_zone[drag_active="true"] {
 
 _THUMB_SIZE = 128
 
-# Monotonic counter used to disambiguate paste-to-upload job names — two
+# Monotonic counter used to disambiguate paste-to-upload job names, two
 # pastes within one wall-clock second must not collide in the upload
 # queue, otherwise the auto-insert routes to the wrong editor.
 _paste_counter = itertools.count(1)
@@ -398,21 +398,21 @@ class _PreviewDialog(QDialog):
         layout.setContentsMargins(16, 12, 16, 12)
         layout.setSpacing(10)
 
-        # Massive image area — takes all the slack from the layout.
+        # Massive image area, takes all the slack from the layout.
         self._image = QLabel()
         self._image.setAlignment(Qt.AlignCenter)
         self._image.setMinimumHeight(420)
         self._image.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout.addWidget(self._image, 1)
 
-        # Metadata strip — URL, size, mime, server count.
+        # Metadata strip: URL, size, mime, server count.
         self._meta = QLabel("")
         self._meta.setObjectName("media_hint")
         self._meta.setWordWrap(True)
         self._meta.setTextInteractionFlags(Qt.TextSelectableByMouse)
         layout.addWidget(self._meta)
 
-        # Action row — Copy / Download / Open in browser / nav.
+        # Action row: Copy / Download / Open in browser / nav.
         action_row = QHBoxLayout()
         action_row.setSpacing(8)
 
@@ -484,7 +484,7 @@ class _PreviewDialog(QDialog):
             self._image.setText("Loading…")
             self._loader.load(media.hash, media.url)
         else:
-            self._image.setText(f"[{media.mime_type or 'binary'} — open in browser to inspect]")
+            self._image.setText(f"[{media.mime_type or 'binary'}, open in browser to inspect]")
         # Download / open-in-browser always make sense; copy URL always makes sense.
         # No need to enable/disable anything per item.
 
@@ -585,6 +585,9 @@ class MediaLibraryDialog(QDialog):
         self._loader = ThumbnailLoader(parent=self)
         self._items_by_hash: dict[str, QListWidgetItem] = {}
         self._active_uploads: dict[str, QProgressBar] = {}
+        # sha256 -> why its thumbnail could not be produced. Survives a
+        # grid rebuild so the explanation is not lost on every refresh.
+        self._preview_errors: dict[str, str] = {}
 
         self._build_ui()
         self._install_shortcuts()
@@ -603,8 +606,12 @@ class MediaLibraryDialog(QDialog):
         store.upload_rerouted.connect(self._on_upload_rerouted)
         store.delete_failed.connect(self._on_delete_failed)
 
-        # Wire thumbnail loader signal to update existing items.
+        # Wire thumbnail loader signals to update existing items. The
+        # failure side matters as much as the success side: without it a
+        # blob that cannot be previewed is indistinguishable from one
+        # still loading, forever.
         self._loader.ready.connect(self._on_thumbnail_ready)
+        self._loader.failed.connect(self._on_thumbnail_failed)
 
         # Kick off an initial fetch.
         self._refresh_grid()
@@ -687,7 +694,7 @@ class MediaLibraryDialog(QDialog):
         self._empty_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self._empty_label)
 
-        # Discoverability hint — surfaces the double-click / right-click /
+        # Discoverability hint, surfaces the double-click / right-click /
         # paste / delete affordances that aren't obvious from the grid alone.
         hint_text = (
             "Double-click a tile to preview · Right-click for actions · "
@@ -699,7 +706,7 @@ class MediaLibraryDialog(QDialog):
         self._hint_label.setObjectName("media_hint")
         layout.addWidget(self._hint_label)
 
-        # Alt-text field — only when the embedding flow actually uses
+        # Alt-text field, only when the embedding flow actually uses
         # alt text (the editor's "Insert image" picker does; the
         # article-cover picker does not, because Nostr's NIP-23
         # ``image`` tag is a URL with no alt sibling).
@@ -779,7 +786,7 @@ class MediaLibraryDialog(QDialog):
         paste_action.triggered.connect(self._on_paste_image)
         self._grid.addAction(paste_action)
 
-        # Delete is library-only — pick mode is read-only.
+        # Delete is library-only, pick mode is read-only.
         if not self._pick_mode:
             delete_action = QAction(self._grid)
             delete_action.setShortcuts([QKeySequence.Delete, QKeySequence(Qt.Key_Backspace)])
@@ -833,7 +840,9 @@ class MediaLibraryDialog(QDialog):
         item = QListWidgetItem()
         item.setText(_short_label(media))
         item.setTextAlignment(Qt.AlignHCenter)
-        item.setToolTip(_tooltip_for(media))
+        item.setToolTip(_tooltip_for(
+            media, preview_error=self._preview_errors.get(media.hash, "")
+        ))
         item.setData(Qt.UserRole, media.hash)
 
         # Default icon: a placeholder coloured square. Replaced when the
@@ -845,6 +854,15 @@ class MediaLibraryDialog(QDialog):
         if (media.mime_type or "").startswith("image/"):
             self._loader.load(media.hash, media.url)
 
+    def _on_thumbnail_failed(self, sha: str, reason: str) -> None:
+        """Record why a preview is missing and say so on the item."""
+        self._preview_errors[sha] = reason
+        item = self._items_by_hash.get(sha)
+        media = self._store.files.get(sha)
+        if item is None or media is None:
+            return
+        item.setToolTip(_tooltip_for(media, preview_error=reason))
+
     def _on_thumbnail_ready(self, sha: str, _path: str, pix: QPixmap) -> None:
         # Stash the decoded dimensions on the MediaFile the first time
         # we see them. Cheap (we have the pixmap), and powers the
@@ -853,6 +871,9 @@ class MediaLibraryDialog(QDialog):
         if media is not None and not media.width and not pix.isNull():
             media.width = pix.width()
             media.height = pix.height()
+        # A later success supersedes an earlier failure, for instance
+        # after a retry or a mirror that actually has the bytes.
+        self._preview_errors.pop(sha, None)
         item = self._items_by_hash.get(sha)
         if item is None:
             return
@@ -957,7 +978,7 @@ class MediaLibraryDialog(QDialog):
                 self.file_picked.emit(media, self._current_alt_text())
                 self.accept()
             return
-        # Library mode — open the lightbox preview.
+        # Library mode: open the lightbox preview.
         files = self._store.file_list(
             filter_type=self._filter_combo.currentData() or "all",
             sort_by=self._sort_combo.currentData() or "newest",
@@ -986,7 +1007,7 @@ class MediaLibraryDialog(QDialog):
         act_copy = menu.addAction("Copy URL")
         act_open = menu.addAction("Open in browser")
         act_download = menu.addAction("Download…")
-        # Per-server copy submenu — useful when a file is mirrored on
+        # Per-server copy submenu, useful when a file is mirrored on
         # several servers and the user wants a specific CDN.
         if len(media.urls) > 1:
             per_server = menu.addMenu("Copy URL from server")
@@ -1045,7 +1066,7 @@ class MediaLibraryDialog(QDialog):
             self._copy_to_target(cache_path, target)
             return
 
-        # Not cached yet — kick off the loader and complete the copy on
+        # Not cached yet, kick off the loader and complete the copy on
         # arrival. Track the destination by hash so multiple parallel
         # downloads route to the right paths.
         if not hasattr(self, "_pending_downloads"):
@@ -1159,11 +1180,11 @@ class MediaLibraryDialog(QDialog):
 
     def _on_upload_rerouted(self, name: str, from_host: str, to_host: str) -> None:
         self._set_status(
-            f"{from_host} can't take this file — routing {name} to {to_host} instead."
+            f"{from_host} can't take this file, routing {name} to {to_host} instead."
         )
 
     def _on_delete_failed(self, file_hash: str, reason: str) -> None:
-        # The store already removed the file locally — surface as a
+        # The store already removed the file locally, so surface as a
         # neutral note rather than a red error, since "the file is gone
         # from your library" is exactly what the user asked for.
         short = file_hash[:8]
@@ -1186,7 +1207,7 @@ def _short_label(media: MediaFile) -> str:
     return f"{_format_size(media.size)} {badge}\n{media.hash[:8]}…"
 
 
-def _tooltip_for(media: MediaFile) -> str:
+def _tooltip_for(media: MediaFile, *, preview_error: str = "") -> str:
     server_count = len(media.urls)
     lines = [
         f"sha256: {media.hash}",
@@ -1195,12 +1216,37 @@ def _tooltip_for(media: MediaFile) -> str:
     ]
     if media.width and media.height:
         lines.append(f"dim:    {media.width} × {media.height}")
+    # A blob can be perfectly healthy on the server and still have no
+    # preview, so the grid says which it is. A bare placeholder with no
+    # explanation reads as a broken app.
+    note = _no_preview_reason(media, preview_error)
+    if note:
+        lines.append(f"preview: {note}")
     lines.append(f"on {server_count} server{'s' if server_count != 1 else ''}:")
     for entry in media.urls:
         lines.append(f"  · {entry.get('url', '')}")
     lines.append("")
     lines.append("Double-click to preview · Right-click for actions")
     return "\n".join(lines)
+
+
+def _no_preview_reason(media: MediaFile, preview_error: str = "") -> str:
+    """Plain-language reason this blob shows a placeholder, or "".
+
+    Two different situations land on the same grey square. A non-image
+    type is never even requested, while an image type that the decoder
+    refuses has already been downloaded and checked. Encrypted uploads
+    from other clients are the common case of the second.
+    """
+    mime = (media.mime_type or "").strip()
+    if not mime.startswith("image/"):
+        label = mime or "unknown type"
+        return f"none, {label} is not an image"
+    if preview_error == "not an image":
+        return "downloaded, but the bytes are not a readable image"
+    if preview_error:
+        return preview_error
+    return ""
 
 
 def _placeholder_icon(mime_type: str) -> QIcon:
@@ -1220,7 +1266,7 @@ def _placeholder_icon(mime_type: str) -> QIcon:
 def _suggested_save_name(media: MediaFile) -> str:
     """Pick a sensible default filename for the Save dialog.
 
-    Blossom doesn't carry filenames — the URL path is the sha256. We
+    Blossom doesn't carry filenames, the URL path is the sha256. We
     use the hash prefix + the mime-derived extension so the user gets
     something they can recognize and re-rename if they want.
     """
@@ -1228,7 +1274,7 @@ def _suggested_save_name(media: MediaFile) -> str:
     ext = mimetypes.guess_extension(media.mime_type or "") or ""
     if not ext and media.mime_type:
         # mimetypes can return None for some common types we still want
-        # to honor — handle a couple by hand.
+        # to honor, so handle a couple by hand.
         ext_map = {
             "image/webp": ".webp",
             "image/svg+xml": ".svg",
