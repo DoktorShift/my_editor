@@ -476,9 +476,12 @@ class BunkerClient(QObject):
     ) -> None:
         """Re-open the channel for an already-paired profile.
 
-        We skip the ``connect`` request and verify the channel is live by
-        sending a ``ping``. If the ping comes back, we trust the saved
-        user_pubkey and emit ``connected``.
+        The ``connect`` request is skipped and the channel is proven live
+        with a ``ping``. Not every signer answers one, so a failed ping
+        falls back to ``get_public_key``, which every signer implements and
+        which we already hold permission for. That fallback also re-checks
+        the identity: if the signer has since switched accounts, saying so
+        beats publishing under a pubkey the user no longer means to use.
         """
         self._setup_channel(
             bunker_pubkey=bunker_pubkey,
@@ -492,11 +495,30 @@ class BunkerClient(QObject):
             self.connected.emit(user_pubkey)
             on_success()
 
+        def _confirm_identity(pk_hex: str) -> None:
+            if pk_hex.strip().lower() != user_pubkey.strip().lower():
+                on_failure(
+                    "the signer is now holding a different account than this "
+                    "profile was paired with"
+                )
+                self.close(reason="identity changed")
+                return
+            _ok("pong")
+
+        def _ping_failed(_reason: str) -> None:
+            self._send_request(
+                method="get_public_key",
+                params=[],
+                on_success=_confirm_identity,
+                on_failure=on_failure,
+                timeout_ms=timeout_ms,
+            )
+
         self._send_request(
             method="ping",
             params=[],
             on_success=_ok,
-            on_failure=on_failure,
+            on_failure=_ping_failed,
             timeout_ms=timeout_ms,
         )
 

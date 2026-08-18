@@ -99,6 +99,7 @@ class FakeSigner:
         self.seen = []
         self.auth_url_for_connect = None
         self.withhold_after_auth = False
+        self.refuse_ping = False
         self.client_pk = None
 
     def watch(self, client_pk):
@@ -134,7 +135,10 @@ class FakeSigner:
         elif method == "get_public_key":
             self.send({"id": rid, "result": self.user_pk})
         elif method == "ping":
-            self.send({"id": rid, "result": "pong"})
+            if self.refuse_ping:
+                self.send({"id": rid, "error": "unknown method"})
+            else:
+                self.send({"id": rid, "result": "pong"})
 
     def send(self, payload):
         self.send_raw(crypto.encrypt(json.dumps(payload), self.conv))
@@ -335,3 +339,64 @@ def test_connect_request_sends_the_secret_and_requested_perms():
     assert connect["params"][0] == signer.pk
     assert connect["params"][1] == "pairing-token"
     assert "sign_event:30023" in connect["params"][2]
+
+
+# --------------------------------------------------------------------- #
+# Reattaching a saved profile                                            #
+# --------------------------------------------------------------------- #
+
+def _reattach(signer_answers_ping=True, signer_user_pk=None):
+    pool = FakePool()
+    signer = FakeSigner(pool)
+    if not signer_answers_ping:
+        signer.refuse_ping = True
+    if signer_user_pk is not None:
+        signer.user_pk = signer_user_pk
+    client = BunkerClient(pool)
+    outcome = {}
+    local_sk = crypto.generate_secret_key()
+    signer.watch(crypto.get_public_key(local_sk).hex())
+    client.reattach(
+        bunker_pubkey=signer.pk,
+        relays=["wss://fake"],
+        local_sk=local_sk,
+        user_pubkey=signer.user_pk,
+        on_success=lambda: outcome.setdefault("ok", True),
+        on_failure=lambda r: outcome.setdefault("err", r),
+    )
+    return signer, client, outcome
+
+
+def test_reattach_succeeds_on_a_ping():
+    signer, client, outcome = _reattach()
+    assert outcome.get("ok") is True
+    assert client.is_connected
+
+
+def test_reattach_falls_back_when_the_signer_ignores_ping():
+    # A signer that does not answer ping is still a working signer.
+    signer, client, outcome = _reattach(signer_answers_ping=False)
+    assert outcome.get("ok") is True
+    assert [p["method"] for p in signer.seen] == ["ping", "get_public_key"]
+
+
+def test_reattach_refuses_a_signer_holding_a_different_account():
+    pool = FakePool()
+    signer = FakeSigner(pool)
+    signer.refuse_ping = True
+    client = BunkerClient(pool)
+    outcome = {}
+    local_sk = crypto.generate_secret_key()
+    signer.watch(crypto.get_public_key(local_sk).hex())
+    # The saved profile names an account the signer no longer holds.
+    stale_pk = crypto.get_public_key(crypto.generate_secret_key()).hex()
+    client.reattach(
+        bunker_pubkey=signer.pk,
+        relays=["wss://fake"],
+        local_sk=local_sk,
+        user_pubkey=stale_pk,
+        on_success=lambda: outcome.setdefault("ok", True),
+        on_failure=lambda r: outcome.setdefault("err", r),
+    )
+    assert "different account" in outcome.get("err", "")
+    assert not client.is_connected
