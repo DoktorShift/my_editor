@@ -198,7 +198,7 @@ QPushButton#drafts_panel_segment {{
     background: transparent;
     color: {t["muted"]};
     border: 1px solid {t["border"]};
-    padding: 2px 14px;
+    padding: 2px {_segment_padding_px()}px;
 }}
 QPushButton#drafts_panel_segment[seg="first"] {{
     border-top-left-radius: 4px;
@@ -342,6 +342,40 @@ def _row_metrics() -> _RowMetrics:
     )
     age_width = max(fm_secondary.horizontalAdvance(s) for s in _AGE_SAMPLES)
     return _RowMetrics(title_font, secondary_font, height, age_width)
+
+
+# The inset a segment carries at the size the panel was drawn for, and
+# the least it may shrink to before the control stops reading as a
+# button rather than as bare text.
+_SEGMENT_PADDING_PX = 14
+_MIN_SEGMENT_PADDING_PX = 8
+
+# The two labels the switch has to fit. Kept here rather than read off
+# the widgets because the stylesheet is built before they exist.
+_SEGMENT_LABELS = ("Drafts", "Feeds")
+
+
+def _segment_padding_px() -> int:
+    """Horizontal inset for one segment of the mode switch.
+
+    Both segments share one line at the panel's narrowest width, and at
+    200 percent type the two labels plus a 14 px inset each need more
+    room than that line has. Something has to give, and the inset is the
+    right thing: a generous margin around a word that has been cut in
+    half helps nobody, while a tighter one around the whole word still
+    reads as a button.
+
+    Derived from the constraint rather than from a scaling curve, so it
+    stays correct if the labels, the gutter or the minimum width change.
+    The floor means a truly enormous font still elides, which the
+    segment already does legibly, rather than collapsing the control.
+    """
+    metrics = QFontMetrics(QApplication.font())
+    widest = max(metrics.horizontalAdvance(label) for label in _SEGMENT_LABELS)
+    line = MIN_PANEL_WIDTH - 2 * GUTTER
+    # Two segments, each one label, two insets and a one pixel border.
+    room = (line - 2 * (widest + 2)) // 4
+    return max(_MIN_SEGMENT_PADDING_PX, min(_SEGMENT_PADDING_PX, room))
 
 
 def _control_height() -> int:

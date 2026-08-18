@@ -141,3 +141,54 @@ def test_a_publish_dialog_is_given_the_provider(handler, dialog):
             f"{dialog} received an already-resolved list, so membership "
             f"resolving while it is open would be ignored"
         )
+
+
+# --------------------------------------------------------------------- #
+# Identity-scoped state is released when the account changes            #
+# --------------------------------------------------------------------- #
+
+def test_identity_teardown_names_both_the_drafts_and_the_media_keys(init_body):
+    # The private library holds a decryption key per file, so an account
+    # left behind with its keys resident is a privacy problem and not
+    # just untidy. Both belong to the same teardown.
+    body = method_body("_release_identity_state")
+    released = {
+        node.func.value.attr
+        for statement in body
+        for node in ast.walk(statement)
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "attr", "") == "stop"
+        and isinstance(getattr(node.func, "value", None), ast.Attribute)
+    }
+    assert "_draft_sync" in released
+    assert "_private_library" in released
+
+
+@pytest.mark.parametrize("handler", [
+    "_on_nostr_select_profile",
+    "_on_nostr_profile_connected",
+    "_on_nostr_sign_out",
+])
+def test_every_identity_transition_releases_the_previous_account(handler):
+    # Three separate paths change the active account. Missing any one of
+    # them leaves the previous identity's keys in memory, which is the
+    # defect this pins.
+    body = method_body(handler)
+    assert statement_index(body, self_calls("_release_identity_state")) >= 0
+
+
+def test_reselecting_the_same_account_does_not_tear_it_down():
+    # Re-selecting the current profile must not discard drafts already
+    # decrypted, which would cost a fresh round of signer prompts for
+    # nothing.
+    source = textwrap.dedent(inspect.getsource(MainWindow._on_nostr_select_profile))
+    assert "leaving" in source
+    guarded = [
+        node for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.If)
+        and any(
+            isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "_release_identity_state"
+            for n in ast.walk(node)
+        )
+    ]
+    assert guarded, "the teardown is unconditional, so re-selecting costs prompts"

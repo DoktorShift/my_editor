@@ -208,7 +208,7 @@ def parse_file_record(plaintext: str, *, identifier: str) -> ParsedRecord:
             size=_non_negative_int(payload.get("size")),
             mime=str(payload.get("type") or ""),
             name=str(payload.get("name") or ""),
-            uploaded_at=_non_negative_int(payload.get("uploadedAt")),
+            uploaded_at=_plausible_timestamp(payload.get("uploadedAt")),
             public_copy_hash=_public_copy_hash(payload.get("publicCopy")),
         )
     except (ValueError, TypeError):
@@ -235,6 +235,27 @@ def _non_negative_int(value: object) -> int:
     except (TypeError, ValueError):
         return 0
     return number if number > 0 else 0
+
+
+# Seconds, not milliseconds. The reference implementation writes
+# ``Math.floor(Date.now() / 1000)`` everywhere, and this app treats the
+# field as seconds throughout. A record is not obliged to agree: it
+# arrives off a relay, and one written in milliseconds would render as a
+# date tens of thousands of years away.
+#
+# So a timestamp outside a plausible range is dropped rather than shown.
+# An unknown date reads as unknown; a confidently wrong one reads as a
+# broken app, and the user cannot tell which of the two it is.
+_EARLIEST_PLAUSIBLE_SECONDS = 1_200_000_000   # 2008, before Bitcoin's genesis
+_LATEST_PLAUSIBLE_SECONDS = 4_000_000_000     # 2096
+
+
+def _plausible_timestamp(value: object) -> int:
+    """A unix timestamp in seconds, or 0 when it cannot be one."""
+    number = _non_negative_int(value)
+    if number and _EARLIEST_PLAUSIBLE_SECONDS <= number <= _LATEST_PLAUSIBLE_SECONDS:
+        return number
+    return 0
 
 
 def _servers(payload: dict) -> List[str]:

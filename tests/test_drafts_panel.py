@@ -48,6 +48,7 @@ from PySide6.QtWidgets import (
 from nostr.draft_store import DraftRecord, DraftState, DraftStore
 from nostr.drafts import DraftWrapMeta
 from nostr.profiles import Profile
+import nostr.ui.drafts_panel as dp
 from nostr.ui.drafts_panel import (
     _AGE_SAMPLES,
     _THEME_TOKENS,
@@ -1149,8 +1150,12 @@ def test_a_squeezed_segment_paints_the_ellipsis_it_claims_to(app_font):
     output is compared against the same draw call fed the elided string
     and the full one.
     """
+    # Past 200 percent. At 200 exactly the segment inset now shrinks
+    # enough for the whole word to fit, which is the better outcome and
+    # is pinned separately; this test is about what happens once no
+    # amount of shrinking helps.
     font = QFont(app_font.font())
-    font.setPointSizeF(26)
+    font.setPointSizeF(40)
     app_font.setFont(font)
 
     panel = DraftsPanel(is_dark=True)
@@ -1160,8 +1165,7 @@ def test_a_squeezed_segment_paints_the_ellipsis_it_claims_to(app_font):
         panel.layout().activate()
         segment = panel._seg_drafts
         painted = segment.painted_text()
-        # The premise: at 200 percent type on the narrowest panel the
-        # label really does not fit.
+        # The premise: at this size the label really does not fit.
         assert painted != "Drafts"
         assert painted.endswith("…")
 
@@ -1180,3 +1184,64 @@ def test_the_whole_panel_paints_at_the_minimum_width():
         panel.bind_store(store)
         panel.resize(MIN_PANEL_WIDTH, 600)
         assert not panel.grab().isNull()
+
+
+# --------------------------------------------------------------------------- #
+# The mode switch survives 200 percent type
+# --------------------------------------------------------------------------- #
+
+def _segment_line_fits(point_size: int) -> bool:
+    """Whether both labels fit the narrowest panel whole, at this size."""
+    font = QFont()
+    font.setPointSize(point_size)
+    QApplication.setFont(font)
+    metrics = QFontMetrics(font)
+    inset = dp._segment_padding_px()
+    widest = max(metrics.horizontalAdvance(label) for label in dp._SEGMENT_LABELS)
+    needed = 2 * (widest + 2 * inset + 2)
+    return needed <= MIN_PANEL_WIDTH - 2 * dp.GUTTER
+
+
+@pytest.fixture
+def restore_font():
+    previous = QApplication.font()
+    yield
+    QApplication.setFont(previous)
+
+
+def test_the_mode_switch_reads_whole_at_two_hundred_percent(restore_font):
+    # accessibility.md asks for text to enlarge by at least 200 percent.
+    # The switch is the panel's primary navigation, so it clipping is
+    # the one truncation that cannot be shrugged off.
+    assert _segment_line_fits(26)
+
+
+@pytest.mark.parametrize("point_size", [9, 11, 13, 17, 22, 26])
+def test_the_mode_switch_fits_at_every_ordinary_size(restore_font, point_size):
+    assert _segment_line_fits(point_size)
+
+
+def test_the_inset_is_untouched_at_ordinary_sizes(restore_font):
+    # Shrinking early would cost the control its shape for no reason.
+    for point_size in (9, 13, 17, 22):
+        font = QFont()
+        font.setPointSize(point_size)
+        QApplication.setFont(font)
+        assert dp._segment_padding_px() == dp._SEGMENT_PADDING_PX
+
+
+def test_the_inset_never_collapses_the_control(restore_font):
+    # Past the point where shrinking can help, the segment elides with an
+    # ellipsis instead, which it already does legibly. The inset must not
+    # keep shrinking until the button reads as bare text.
+    font = QFont()
+    font.setPointSize(64)
+    QApplication.setFont(font)
+    assert dp._segment_padding_px() == dp._MIN_SEGMENT_PADDING_PX
+
+
+def test_the_stylesheet_carries_the_computed_inset(restore_font):
+    font = QFont()
+    font.setPointSize(26)
+    QApplication.setFont(font)
+    assert f"padding: 2px {dp._segment_padding_px()}px" in dp._panel_css(True)

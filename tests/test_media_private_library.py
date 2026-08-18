@@ -463,13 +463,25 @@ def test_the_signer_is_asked_for_one_file_at_a_time():
 
 
 def test_the_files_are_listed_newest_first():
+    # Real second-precision stamps, because a value too small to be a
+    # date is now read as no date at all and would not order anything.
     library = loaded([
-        event(record(HASH_A, uploadedAt=100)),
-        event(record(HASH_B, uploadedAt=300)),
-        event(record(HASH_C, uploadedAt=200)),
+        event(record(HASH_A, uploadedAt=1_699_000_100)),
+        event(record(HASH_B, uploadedAt=1_699_000_300)),
+        event(record(HASH_C, uploadedAt=1_699_000_200)),
     ])
 
     assert [b.sha256 for b in library.files] == [HASH_B, HASH_C, HASH_A]
+
+
+def test_a_file_with_no_usable_date_still_appears_in_the_listing():
+    # Losing its place in the order is acceptable. Disappearing is not.
+    library = loaded([
+        event(record(HASH_A, uploadedAt=1_699_000_100)),
+        event(record(HASH_B, uploadedAt="whenever")),
+    ])
+
+    assert {b.sha256 for b in library.files} == {HASH_A, HASH_B}
 
 
 def test_the_injected_clock_stamps_when_the_listing_was_read():
@@ -830,3 +842,42 @@ def test_switching_profiles_stops_vouching_for_the_previous_identity():
 
     assert library.settled is False
     assert library.vouches_for(HASH_C) is False
+
+# --------------------------------------------------------------------- #
+# The upload timestamp comes off a relay, so it is not trusted          #
+# --------------------------------------------------------------------- #
+
+def test_a_timestamp_in_seconds_is_kept():
+    # What the reference implementation actually writes at every site:
+    # Math.floor(Date.now() / 1000).
+    parsed = parse_file_record(
+        json.dumps(record(uploadedAt=1_755_000_000)), identifier=HASH_A,
+    )
+    assert parsed.blob is not None and parsed.blob.uploaded_at == 1_755_000_000
+
+
+def test_a_timestamp_in_milliseconds_is_dropped_rather_than_shown():
+    # A record written in milliseconds would render as a date tens of
+    # thousands of years away. Unknown reads as unknown; confidently
+    # wrong reads as a broken app, and the user cannot tell which.
+    parsed = parse_file_record(
+        json.dumps(record(uploadedAt=1_755_000_000_000)), identifier=HASH_A,
+    )
+    assert parsed.blob is not None and parsed.blob.uploaded_at == 0
+
+
+@pytest.mark.parametrize("value", [-1, 0, 1, 999, "not a number", None, [], {}])
+def test_an_implausible_timestamp_becomes_unknown(value):
+    parsed = parse_file_record(
+        json.dumps(record(uploadedAt=value)), identifier=HASH_A,
+    )
+    assert parsed.blob is not None and parsed.blob.uploaded_at == 0
+
+
+def test_the_file_is_still_usable_without_a_date():
+    # A missing or unreadable date must not cost the user the file.
+    parsed = parse_file_record(
+        json.dumps(record(uploadedAt=None)), identifier=HASH_A,
+    )
+    assert parsed.blob is not None
+    assert parsed.blob.sha256 == HASH_A and parsed.blob.key_hex == KEY

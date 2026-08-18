@@ -3540,6 +3540,13 @@ class MainWindow(QMainWindow):
 
     def _on_nostr_profile_connected(self, profile: Profile):
         # New (or re-connected) profile becomes the active one.
+        previous = self._profile_store.default()
+        if previous is not None and (
+            previous.user_pubkey.lower() != profile.user_pubkey.lower()
+        ):
+            # Connecting a second account is a switch, so the first one's
+            # drafts and media keys go with it.
+            self._release_identity_state()
         self._profile_store.set_default(profile.user_pubkey)
         self._refresh_membership(profile)
         self._update_profile_chip()
@@ -3559,14 +3566,38 @@ class MainWindow(QMainWindow):
             self._drafts_panel.set_active_profile(profile)
             self._drafts_panel.set_signer_unsupported(False)
 
+    def _release_identity_state(self) -> None:
+        """Drop everything that belonged to the account being left.
+
+        Identity-scoped state arrives one object at a time, and each new
+        one has to be remembered at three separate transitions: connect,
+        switch, and sign out. Naming the set in one place means the next
+        addition has somewhere obvious to go instead of being forgotten
+        at two of the three.
+
+        This is not only cache. The private library holds a decryption
+        key per file, so an account left behind with its keys still in
+        memory is a privacy problem and not merely untidy.
+        """
+        self._draft_sync.stop()
+        self._private_library.stop()
+
     def _on_nostr_select_profile(self, profile: Profile):
+        previous = self._profile_store.default()
+        leaving = previous is not None and (
+            previous.user_pubkey.lower() != profile.user_pubkey.lower()
+        )
         self._profile_store.set_default(profile.user_pubkey)
         self._refresh_membership(profile)
         self._update_profile_chip()
         self._refresh_profile_chip_menu()
-        # Switching identities - re-point the draft sync at the new
-        # profile. ``DraftSync.start_for`` is idempotent if the same
-        # profile is already active.
+        # Only tear down when the account actually changes. Re-selecting
+        # the current one would otherwise discard drafts already
+        # decrypted and cost a fresh round of signer prompts.
+        if leaving:
+            self._release_identity_state()
+        # ``DraftSync.start_for`` is idempotent if the same profile is
+        # already active.
         self._draft_sync.start_for(profile)
         if self._drafts_panel is not None:
             self._drafts_panel.set_active_profile(profile)
@@ -3592,10 +3623,11 @@ class MainWindow(QMainWindow):
         self._profile_store.remove(active.user_pubkey)
         self._update_profile_chip()
         self._refresh_profile_chip_menu()
-        # Tear down the draft pipeline. If another profile remains, the
-        # caller (or chip menu) can re-bind to it; otherwise the panel
-        # falls back to its "Connect a Nostr profile" empty state.
-        self._draft_sync.stop()
+        # Tear down everything scoped to the account just removed. If
+        # another profile remains, the caller (or chip menu) can re-bind
+        # to it; otherwise the panel falls back to its "Connect a Nostr
+        # profile" empty state.
+        self._release_identity_state()
         remaining = self._profile_store.default()
         if self._drafts_panel is not None:
             self._drafts_panel.set_active_profile(remaining)
