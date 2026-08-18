@@ -369,3 +369,63 @@ def test_an_oversized_roster_is_aborted_and_resolves_false():
     # An aborted fetch says nothing about which year is current, so it must
     # not spend a second request retrying last year.
     assert nam.requested == [2026]
+
+
+# --------------------------------------------------------------------- #
+# The entitled relay reaching the publish targets                       #
+# --------------------------------------------------------------------- #
+
+from nostr.outbox import (
+    RELAY_CAP, RelayList, select_draft_publish_relays, select_publish_relays,
+)
+
+
+def test_a_members_relay_leads_the_publish_targets():
+    out = select_publish_relays(
+        ["wss://mine.example"],
+        base=["wss://base.example"],
+        entitled=[MEMBER_RELAY],
+    )
+    assert out[0] == MEMBER_RELAY
+    assert "wss://mine.example" in out and "wss://base.example" in out
+
+
+def test_a_non_member_publishes_exactly_as_before():
+    # No entitlement must mean no change at all to the existing behaviour.
+    args = (["wss://mine.example"],)
+    kwargs = dict(base=["wss://base.example"])
+    assert select_publish_relays(*args, **kwargs) == select_publish_relays(
+        *args, entitled=[], **kwargs
+    )
+
+
+def test_the_cap_cannot_drop_the_entitled_relay():
+    # Being silently trimmed would cost a member the benefit they paid for.
+    crowded = [f"wss://r{i}.example" for i in range(RELAY_CAP * 2)]
+    out = select_publish_relays(crowded, base=crowded, entitled=[MEMBER_RELAY])
+    assert out[0] == MEMBER_RELAY
+    assert len(out) == RELAY_CAP
+
+
+def test_an_entitled_relay_already_configured_is_not_duplicated():
+    out = select_publish_relays(
+        [MEMBER_RELAY + "/"], base=[], entitled=[MEMBER_RELAY],
+    )
+    assert out == [MEMBER_RELAY]
+
+
+def test_drafts_reach_the_members_relay_but_after_the_users_own():
+    out = select_draft_publish_relays(
+        RelayList(write=["wss://mine.example"], read=[]),
+        base=["wss://base.example"],
+        entitled=[MEMBER_RELAY],
+    )
+    assert out.index("wss://mine.example") < out.index(MEMBER_RELAY)
+    assert out.index(MEMBER_RELAY) < out.index("wss://base.example")
+
+
+def test_drafts_are_unchanged_without_an_entitlement():
+    rl = RelayList(write=["wss://mine.example"], read=[])
+    assert select_draft_publish_relays(rl, base=["wss://b.example"]) == (
+        select_draft_publish_relays(rl, base=["wss://b.example"], entitled=[])
+    )

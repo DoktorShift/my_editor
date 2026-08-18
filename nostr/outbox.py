@@ -87,6 +87,7 @@ def select_draft_publish_relays(
     *,
     bunker_relays: Iterable[str] = (),
     base: Iterable[str] = DEFAULT_RELAYS,
+    entitled: Iterable[str] = (),
     cap: int = RELAY_CAP,
 ) -> List[str]:
     """Choose where to *publish* a NIP-37 private draft.
@@ -106,10 +107,14 @@ def select_draft_publish_relays(
     """
     seen: set[str] = set()
     out: List[str] = []
+    # The user's own relays lead, since those are where their other devices
+    # look. An entitled relay comes next, ahead of the generic backstop, so
+    # a member's draft reaches it before the cap runs out.
     for url in (
         list(relay_list.write)
         + list(relay_list.read)
         + list(bunker_relays)
+        + list(entitled)
         + list(base)
     ):
         normalized = _normalize_for_dedup(url)
@@ -126,16 +131,25 @@ def select_publish_relays(
     user_write_relays: Iterable[str],
     *,
     base: Iterable[str] = DEFAULT_RELAYS,
+    entitled: Iterable[str] = (),
     cap: int = RELAY_CAP,
 ) -> List[str]:
     """Combine the curated base set with the user's write relays.
 
-    Order: base relays first (most trusted by us), then the user's choices.
-    Case-folded host comparison so trivial URL variations don't double-publish.
+    Order: entitled relays first, then base relays (most trusted by us),
+    then the user's choices. Case-folded host comparison so trivial URL
+    variations don't double-publish.
+
+    ``entitled`` is for a relay this account has specific standing on, such
+    as one that comes with an association membership. It leads because a
+    relay that accepts writes only from its own members is worth more to
+    that member than any general-purpose relay, and because being dropped
+    by ``cap`` would quietly cost them the benefit. This module stays
+    unaware of what confers the entitlement; the caller resolves that.
     """
     seen: set[str] = set()
     out: List[str] = []
-    for relay in list(base) + list(user_write_relays):
+    for relay in list(entitled) + list(base) + list(user_write_relays):
         normalized = _normalize_for_dedup(relay)
         if not normalized or normalized in seen:
             continue
