@@ -1979,18 +1979,20 @@ class MainWindow(QMainWindow):
     def _loses_content_on_save(self, ed, path: str) -> bool:
         """Whether saving to ``path`` would drop something in the document.
 
-        .md keeps images now (remote URL or sidecar), so only formatting
-        counts there. .txt and .rtf carry no image at all, so an
-        image-only document has to warn before it is flattened.
+        .md and .Rmd keep images now (remote URL or sidecar), so only
+        formatting counts there. .rtf keeps formatting but carries no image.
+        Everything else is a plain-text destination, and losing an image
+        silently is the worst outcome, so the check applies by default and
+        formats opt out rather than in.
         """
         lowered = path.lower()
+        if lowered.endswith(('.html', '.htm', '.pdf')):
+            return False
         if lowered.endswith('.rtf'):
             return self._has_images(ed)
-        if lowered.endswith('.md'):
+        if lowered.endswith(('.md', '.rmd')):
             return self._has_formatting(ed)
-        if lowered.endswith('.txt'):
-            return self._has_formatting(ed) or self._has_images(ed)
-        return False
+        return self._has_formatting(ed) or self._has_images(ed)
 
     def _warn_formatting_loss(self, ext_label: str) -> str:
         """Show warning dialog when saving to a format that loses content.
@@ -2423,11 +2425,17 @@ class MainWindow(QMainWindow):
         double-wrapped. Everything else is converted with frontmatter.
         """
         origin = (getattr(ed, "_file_path", "") or "").lower()
+        # R Markdown is markdown, so a pasted image serializes to real
+        # ![alt](sidecar) syntax here. Reading the source out as plain text
+        # would drop it, leaving a bare U+FFFC for pandoc to choke on.
+        target = self._image_target_for_file_save(ed.document(), path)
+        source = serialize_plain_with_images(
+            ed.document(), self._markdown_reference_for(target)
+        )
         if getattr(ed, "_loaded_as_rmd_source", False) or origin.endswith(".rmd"):
-            return ed.toPlainText()
-        text = ed.toPlainText()
-        if text.lstrip().startswith("---") and not self._has_formatting(ed):
-            return text
+            return source
+        if source.lstrip().startswith("---") and not self._has_formatting(ed):
+            return source
         title = derive_title(ed.document(), self._export_title_for(path))
         return document_to_rmd(ed.document(), title,
                                copy_image=self._make_rmd_image_copier(path))
@@ -2647,7 +2655,12 @@ class MainWindow(QMainWindow):
             if path is None:
                 return
         elif ed.document().isModified():
-            # Auto-save before knitting, RStudio-style.
+            # Auto-save before knitting, RStudio-style. It goes through the
+            # same guard as an explicit save, so an automatic step can never
+            # discard more than a deliberate one would.
+            if self._loses_content_on_save(ed, path):
+                if self._warn_formatting_loss(os.path.splitext(path)[1]) == 'cancel':
+                    return
             if not self._save_to(path):
                 return
         runner = self._ensure_knit_runner()
