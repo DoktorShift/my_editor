@@ -66,7 +66,7 @@ it does, the panel won't crash, it'll just show the disconnected state.
 from __future__ import annotations
 
 import time
-from typing import Callable, NamedTuple, Optional, Tuple
+from typing import Callable, List, NamedTuple, Optional, Tuple
 
 from PySide6.QtCore import QEvent, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
@@ -890,7 +890,7 @@ class DraftsPanel(QFrame):
     Public signals (the host wires these into MainWindow handlers):
       open_draft(str)            , identifier of a draft to open in a new tab
       publish_draft(str)         , identifier to promote draft → real publish
-      delete_draft(str, int)     , (identifier, inner_kind) to tombstone
+      delete_drafts(list)        , identifiers to tombstone, one or many
       copy_event_id(str)         , copy outer wrap event id to clipboard
       refresh_requested()        , manual refresh tap on the header
       close_requested()          , × on the header
@@ -917,9 +917,13 @@ class DraftsPanel(QFrame):
 
     open_draft = Signal(str)
     publish_draft = Signal(str)
-    delete_draft = Signal(str, int)
+    # One signal for one draft and for twenty. The host asks the same
+    # question either way, and a separate single-draft path was a second
+    # confirmation and a second delete job to keep in step with this one.
+    delete_drafts = Signal(list)
     retry_decrypt = Signal(str)
     retry_signer = Signal()
+    delete_drafts = Signal(list)
     copy_event_id = Signal(str)
     refresh_requested = Signal()
     close_requested = Signal()
@@ -1137,11 +1141,18 @@ class DraftsPanel(QFrame):
         self._list.setSpacing(0)
         self._list.setUniformItemSizes(True)
         self._list.setVerticalScrollMode(QListWidget.ScrollPerPixel)
-        self._list.setSelectionMode(QListWidget.SingleSelection)
+        # Extended, so a shift-drag or a cmd-click selects a range the way
+        # it does in every list on this platform, and Select All means
+        # what it says. The preview and the open/publish commands still
+        # follow the current row, because those act on one draft and
+        # there is exactly one current row whatever else is selected.
+        self._list.setSelectionMode(QListWidget.ExtendedSelection)
         self._list.itemActivated.connect(self._on_item_activated)
         self._list.currentItemChanged.connect(self._on_current_item_changed)
         self._list.setContextMenuPolicy(Qt.CustomContextMenu)
         self._list.customContextMenuRequested.connect(self._on_context_menu)
+        # Delete / Backspace on the list, see ``eventFilter``.
+        self._list.installEventFilter(self)
         self._body_stack.addWidget(self._list)
 
         # Empty / disconnected / unsupported / no-results state.
@@ -1789,6 +1800,57 @@ class DraftsPanel(QFrame):
         """
         return self._list.itemAt(pos) or self._list.currentItem()
 
+    def selected_identifiers(self) -> List[str]:
+        """Every selected draft, in the order the list shows them.
+
+        List order rather than click order, because the count in the
+        confirmation and the order things are deleted in should match
+        what the user is looking at.
+        """
+        if self._store is None:
+            return []
+        out: List[str] = []
+        for row in range(self._list.count()):
+            item = self._list.item(row)
+            if item is None or not item.isSelected():
+                continue
+            identifier = item.data(Qt.UserRole)
+            if isinstance(identifier, str) and identifier:
+                out.append(identifier)
+        return out
+
+    def _request_delete(self, identifiers: List[str]) -> None:
+        if identifiers:
+            # Closed first: the confirmation is about to open over this
+            # panel, and a popover must not outlive the row it describes.
+            self._preview.close(disarm=True)
+            self.delete_drafts.emit(identifiers)
+
+    def eventFilter(self, obj, event) -> bool:
+        """Delete removes the selected drafts.
+
+        Filtered on the list rather than handled on the panel, because
+        the key belongs to the list and only the list. Reaching it here
+        means the list had focus, which is the condition that matters and
+        the one a ``hasFocus`` check in the panel could only approximate:
+        the search field is in this panel too, and Delete there is an
+        edit, not a deletion.
+
+        Backspace as well. On this platform it is the key people actually
+        reach for in a list, and having only one of the two work reads as
+        the panel being half-wired.
+        """
+        if (
+            obj is self._list
+            and event.type() == QEvent.KeyPress
+            and event.key() in (Qt.Key_Delete, Qt.Key_Backspace)
+        ):
+            selected = self.selected_identifiers()
+            if selected:
+                self._request_delete(selected)
+                return True
+        return super().eventFilter(obj, event)
+
     def _on_context_menu(self, pos) -> None:
         # First statement, before anything is built. ``popovers.md``:
         # "Don't show another view over a popover. Make sure nothing
@@ -1862,10 +1924,25 @@ class DraftsPanel(QFrame):
         menu.addAction(act_copy_id)
 
         menu.addSeparator()
-        act_delete = QAction("Delete Draft", menu)
-        act_delete.triggered.connect(
-            lambda: self.delete_draft.emit(identifier, record.inner_kind)
+        # Right-clicking inside the selection acts on the selection;
+        # right-clicking a row outside it acts on that row, which is what
+        # every list on this platform does and what stops a stray click
+        # from deleting twelve drafts the user had selected earlier.
+        targets = (
+            self.selected_identifiers()
+            if item.isSelected()
+            else [identifier]
         )
+        if len(targets) > 1:
+            act_delete = QAction(f"Delete {len(targets)} Drafts", menu)
+            act_delete.triggered.connect(
+                lambda checked=False, ids=list(targets): self._request_delete(ids)
+            )
+        else:
+            act_delete = QAction("Delete Draft", menu)
+            act_delete.triggered.connect(
+                lambda checked=False, ids=[identifier]: self._request_delete(ids)
+            )
         menu.addAction(act_delete)
         return menu
 

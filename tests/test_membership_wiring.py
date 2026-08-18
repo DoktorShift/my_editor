@@ -106,7 +106,7 @@ def test_membership_is_refreshed_when_the_account_changes(handler):
 
 @pytest.mark.parametrize("handler,job", [
     ("_fire_draft_publish_job", "DraftPublishJob"),
-    ("_on_panel_delete_draft", "DraftDeleteJob"),
+    ("_run_draft_deletion", "DraftBulkDeleteJob"),
 ])
 def test_a_publish_job_is_given_the_resolved_relays(handler, job):
     # A job must get the list, not the provider: a callable is truthy and

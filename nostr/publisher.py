@@ -879,3 +879,191 @@ class DraftDeleteJob(QObject):
             f"Draft removed on {accepted}/{len(results)} relays."
         )
         self.completed.emit(results)
+
+
+class DraftBulkDeleteJob(QObject):
+    """Delete several drafts, one signer round-trip at a time.
+
+    Sequential rather than parallel, and not as a performance choice.
+    Every deletion needs its own signature, and a remote signer answers
+    one request at a time whatever this end does; firing all of them at
+    once would put N prompts on the user's phone in an order nobody
+    chose, and take away the ability to stop after the third.
+
+    One failure does not end the run. The user asked for these to go,
+    and the ones that can go should. What they get at the end is a count
+    of what did not, because a partial result reported as a whole one is
+    the version of this that loses drafts quietly.
+
+    Cancelling stops the run before the next signature is requested. It
+    cannot recall a deletion already signed and published, so the count
+    in ``finished`` is what actually happened rather than what was asked
+    for.
+
+    Signals:
+      progress(int, int)   drafts settled so far, total asked for.
+      tombstoned(str, str) (identifier, event_id) as each one is signed,
+                           forwarded so the panel can drop the row before
+                           the relay results land.
+      finished(int, list)  how many were deleted, and the
+                           (identifier, reason) pairs for those that
+                           were not.
+    """
+
+    progress = Signal(int, int)
+    tombstoned = Signal(str, str)
+    finished = Signal(int, list)
+
+    def __init__(
+        self,
+        *,
+        relay_pool: RelayPool,
+        relay_list_cache: RelayListCache,
+        session_pool: BunkerSessionPool,
+        profile: Profile,
+        targets: Sequence[Tuple[str, int]],
+        entitled_relays: Sequence[str] = (),
+        parent: Optional[QObject] = None,
+    ) -> None:
+        super().__init__(parent)
+        # Validated here, before a single signature is asked for. A run
+        # that would die on its ninth draft because of something knowable
+        # at the start has already cost the user eight approvals.
+        self._targets: List[Tuple[str, int]] = []
+        for identifier, inner_kind in targets:
+            if not identifier:
+                raise ValueError("draft identifier (d-tag) must not be empty")
+            if inner_kind not in SUPPORTED_INNER_KINDS:
+                raise ValueError(
+                    f"unsupported inner kind {inner_kind!r}; "
+                    f"expected one of {SUPPORTED_INNER_KINDS}"
+                )
+            self._targets.append((identifier, int(inner_kind)))
+
+        self._relay_pool = relay_pool
+        self._relay_list_cache = relay_list_cache
+        self._session_pool = session_pool
+        self._entitled_relays = list(entitled_relays)
+        self._profile = profile
+
+        self._index: int = 0
+        self._deleted: int = 0
+        self._failures: List[Tuple[str, str]] = []
+        self._current: Optional[DraftDeleteJob] = None
+        self._cancelled: bool = False
+        # Re-entrancy guard, the same shape the decrypt queues use: a
+        # signer that answers synchronously would otherwise recurse once
+        # per draft.
+        self._pumping: bool = False
+        self._inflight: bool = False
+        self._done: bool = False
+
+    # -- public API --------------------------------------------------------
+
+    @property
+    def total(self) -> int:
+        return len(self._targets)
+
+    def start(self) -> None:
+        if not self._targets:
+            self._finish()
+            return
+        self._pump()
+
+    def cancel(self) -> None:
+        """Stop before the next signature is asked for.
+
+        The in-flight deletion is cancelled too, but it may already be
+        signed and on its way to the relays, which is why this reports
+        rather than promises.
+        """
+        if self._cancelled or self._done:
+            return
+        self._cancelled = True
+        if self._current is not None:
+            self._current.cancel()
+            self._current = None
+        self._finish()
+
+    # -- the queue ---------------------------------------------------------
+
+    def _pump(self) -> None:
+        if self._pumping or self._inflight or self._done:
+            return
+        self._pumping = True
+        try:
+            while (
+                not self._cancelled
+                and not self._inflight
+                and self._index < len(self._targets)
+            ):
+                identifier, inner_kind = self._targets[self._index]
+                self._inflight = True
+                self._start_one(identifier, inner_kind)
+        finally:
+            self._pumping = False
+        if not self._inflight and not self._cancelled:
+            self._finish()
+
+    def _start_one(self, identifier: str, inner_kind: int) -> None:
+        try:
+            job = DraftDeleteJob(
+                relay_pool=self._relay_pool,
+                relay_list_cache=self._relay_list_cache,
+                session_pool=self._session_pool,
+                profile=self._profile,
+                identifier=identifier,
+                inner_kind=inner_kind,
+                entitled_relays=self._entitled_relays,
+                parent=self,
+            )
+        except ValueError as exc:
+            # Cannot happen for targets that passed the constructor, but
+            # a run that dies here would strand the whole queue.
+            self._settle(identifier, reason=str(exc))
+            return
+
+        self._current = job
+        job.tombstoned.connect(self.tombstoned)
+        job.completed.connect(
+            lambda results, ident=identifier: self._on_one_completed(ident, results)
+        )
+        job.failed.connect(
+            lambda reason, ident=identifier: self._settle(ident, reason=reason)
+        )
+        job.start()
+
+    def _on_one_completed(self, identifier: str, results: List[PublishResult]) -> None:
+        # ``completed`` fires even when every relay refused, so the
+        # results decide whether this counts as deleted. Reporting a
+        # deletion no relay accepted would tell the user a draft is gone
+        # from a place it is still on.
+        if any(ok for _, ok, _ in results):
+            self._settle(identifier)
+            return
+        reasons = "; ".join(msg for _url, ok, msg in results if not ok and msg)
+        self._settle(
+            identifier,
+            reason=f"no relay accepted the deletion{f' ({reasons})' if reasons else ''}",
+        )
+
+    def _settle(self, identifier: str, *, reason: str = "") -> None:
+        if self._done:
+            return
+        if reason:
+            self._failures.append((identifier, _safe_reason(reason)))
+        else:
+            self._deleted += 1
+        self._current = None
+        self._index += 1
+        self._inflight = False
+        self.progress.emit(self._index, len(self._targets))
+        if self._cancelled:
+            return
+        self._pump()
+
+    def _finish(self) -> None:
+        if self._done:
+            return
+        self._done = True
+        self.finished.emit(self._deleted, list(self._failures))

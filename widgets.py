@@ -243,7 +243,10 @@ class HeaderWidget(QWidget):
 
         self.syntax_highlight_checkbox = QCheckBox("Syntax Highlighting")
         self.syntax_highlight_checkbox.setToolTip("Toggle Syntax Highlighting (Ctrl+Shift+H)")
-        self.syntax_highlight_checkbox.setChecked(True)
+        # Unchecked at startup, matching MainWindow.syntax_highlighting.
+        # These three defaults have to agree or the box shows a state the
+        # editor is not in.
+        self.syntax_highlight_checkbox.setChecked(False)
 
         # Format buttons, created here, placed inside the left widget below
         self.bold_btn = self._make_format_btn("B", "Bold (Ctrl+B)", bold=True)

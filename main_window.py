@@ -10,7 +10,7 @@ import os
 import re
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Optional, Tuple
 
 from send2trash import send2trash
 from PySide6.QtCore import (
@@ -116,7 +116,11 @@ from nostr.media.visibility import PublicLedger
 from nostr.metadata import AvatarLoader, ProfileMetadataFetcher
 from nostr.outbox import RelayListCache
 from nostr.profiles import Profile, ProfileStore
-from nostr.publisher import DraftDeleteJob, DraftPublishJob, PublishedMedia
+from nostr.publisher import (
+    DraftBulkDeleteJob,
+    DraftPublishJob,
+    PublishedMedia,
+)
 from nostr.relay import RelayPool
 from nostr.search import Nip50SearchClient
 from nostr.ui.connect_dialog import ConnectDialog
@@ -280,7 +284,10 @@ class MainWindow(QMainWindow):
         QGuiApplication.styleHints().colorSchemeChanged.connect(self._on_os_color_scheme_changed)
 
         self.show_line_numbers = False
-        self.syntax_highlighting = True
+        # Off by default, like line numbers above it. This is a writing
+        # app first, and colouring prose that merely looks like code is
+        # a distraction the user has to go and switch off.
+        self.syntax_highlighting = False
 
         _s = load_settings()
         self.editor_background = _s.get("editor_background", "none")
@@ -1018,7 +1025,7 @@ class MainWindow(QMainWindow):
         self.act_toggle_syntax_hl.setShortcut(QKeySequence("Ctrl+Shift+H"))
         self.act_toggle_syntax_hl.triggered.connect(self._toggle_syntax_highlighting)
         self.act_toggle_syntax_hl.setCheckable(True)
-        self.act_toggle_syntax_hl.setChecked(True)
+        self.act_toggle_syntax_hl.setChecked(False)
 
         # View menu: background viewing aids. All four toggles are independent
         # and composable except the background pattern, which is a radio pick.
@@ -1260,7 +1267,7 @@ class MainWindow(QMainWindow):
         # The panel's outbound actions all route back through the host.
         self._drafts_panel.open_draft.connect(self._on_panel_open_draft)
         self._drafts_panel.publish_draft.connect(self._on_panel_publish_draft)
-        self._drafts_panel.delete_draft.connect(self._on_panel_delete_draft)
+        self._drafts_panel.delete_drafts.connect(self._on_panel_delete_drafts)
         self._drafts_panel.retry_decrypt.connect(self._on_panel_retry_decrypt)
         self._drafts_panel.retry_signer.connect(self._draft_sync.retry_signer)
         self._drafts_panel.copy_event_id.connect(self._on_panel_copy_event_id)
@@ -4170,80 +4177,185 @@ class MainWindow(QMainWindow):
         self._draft_sync.retry_decrypt(identifier)
         self.status.showMessage("Retrying decryption - approve on your signer…", 6000)
 
-    def _on_panel_delete_draft(self, identifier: str, inner_kind: int) -> None:
+    def _on_panel_delete_drafts(self, identifiers: list) -> None:
+        """Delete one draft or twenty, through one question and one run.
+
+        Drafts written by other Nostr clients can use inner kinds this
+        editor does not speak (kind 30024, used by Habla and Yakihonne
+        for long-form drafts, is the common one). Tombstoning one of
+        those from here could leave it visible in the client that made
+        it, so they are separated out before anything is confirmed and
+        named in the confirmation rather than failing partway through a
+        run the user already approved.
+        """
         profile = self._profile_store.default()
-        if profile is None:
-            return
-        record = self._draft_store.get(identifier)
-        title = record.title if (record and record.title) else "this draft"
-
-        # Pre-flight: drafts created by other Nostr clients can use inner
-        # kinds this editor doesn't speak (the most common case is NIP-23
-        # kind 30024, used by Habla / Yakihonne for long-form drafts).
-        # Tombstoning one of those from here could leave it visible in
-        # the originating client, so we refuse early with a clear note
-        # instead of asking the user to confirm a destructive action that
-        # would then fail at the signer round-trip.
-        if inner_kind not in SUPPORTED_INNER_KINDS:
-            info = QMessageBox(self)
-            info.setIcon(QMessageBox.Information)
-            info.setWindowTitle("Can't remove this draft")
-            info.setText(f"\"{title}\" was created by another Nostr client.")
-            info.setInformativeText(
-                "It uses a draft format this editor doesn't recognise, so "
-                "removing it from here might leave it visible in the other "
-                "client.\n\nTo remove it cleanly, open it in the app that "
-                "created it and delete it there."
-            )
-            info.setDetailedText(f"Inner event kind: {inner_kind}")
-            info.setStandardButtons(QMessageBox.Ok)
-            info.exec()
+        if profile is None or not identifiers:
             return
 
+        deletable: List[Tuple[str, int]] = []
+        skipped: List[str] = []
+        for identifier in identifiers:
+            record = self._draft_store.get(identifier)
+            if record is None:
+                continue
+            if record.inner_kind in SUPPORTED_INNER_KINDS:
+                deletable.append((identifier, record.inner_kind))
+            else:
+                skipped.append(record.title or "Untitled")
+
+        if not deletable:
+            self._warn_all_drafts_foreign(skipped)
+            return
+        if not self._confirm_draft_deletion(deletable, skipped):
+            return
+        self._run_draft_deletion(profile, deletable)
+
+    def _warn_all_drafts_foreign(self, skipped: List[str]) -> None:
+        info = QMessageBox(self)
+        info.setIcon(QMessageBox.Information)
+        info.setWindowTitle("Can't remove these drafts")
+        count = len(skipped)
+        info.setText(
+            "This draft was created by another Nostr client."
+            if count == 1 else
+            f"These {count} drafts were created by other Nostr clients."
+        )
+        info.setInformativeText(
+            "They use a draft format this editor doesn't recognise, so "
+            "removing them from here might leave them visible in the other "
+            "client.\n\nTo remove them cleanly, open them in the app that "
+            "created them and delete them there."
+        )
+        if skipped:
+            info.setDetailedText("\n".join(skipped))
+        info.setStandardButtons(QMessageBox.Ok)
+        info.exec()
+
+    def _confirm_draft_deletion(
+        self, deletable: List[Tuple[str, int]], skipped: List[str],
+    ) -> bool:
+        count = len(deletable)
         confirm = QMessageBox(self)
         confirm.setIcon(QMessageBox.Warning)
-        confirm.setWindowTitle("Delete draft?")
-        confirm.setText(f"Delete \"{title}\" from your Nostr drafts?")
-        confirm.setInformativeText(
+        confirm.setWindowTitle("Delete draft?" if count == 1 else "Delete drafts?")
+        if count == 1:
+            record = self._draft_store.get(deletable[0][0])
+            title = record.title if (record and record.title) else "this draft"
+            confirm.setText(f'Delete "{title}" from your Nostr drafts?')
+        else:
+            confirm.setText(f"Delete {count} drafts from your Nostr drafts?")
+
+        lines = [
             "A blank-content replacement will be published to your relays. "
-            "Other clients (and your other devices) will treat the draft as "
-            "removed. This action can't be undone."
-        )
+            "Other clients (and your other devices) will treat "
+            f"{'the draft' if count == 1 else 'them'} as removed. This action "
+            "can't be undone."
+        ]
+        if count > 1:
+            # Said before the first prompt appears rather than discovered
+            # at the fourth: each deletion is separately signed, so this
+            # is a row of approvals on the user's phone, not one.
+            lines.append(
+                f"Your signer will ask you to approve each one, so expect "
+                f"{count} requests. You can stop partway through."
+            )
+        if skipped:
+            n = len(skipped)
+            lines.append(
+                f"{n} draft{'' if n == 1 else 's'} from another Nostr client "
+                f"{'is' if n == 1 else 'are'} not included, and will be left "
+                "alone."
+            )
+        confirm.setInformativeText("\n\n".join(lines))
+        if skipped:
+            confirm.setDetailedText("Not included:\n" + "\n".join(skipped))
         confirm.setStandardButtons(QMessageBox.Cancel | QMessageBox.Yes)
         confirm.setDefaultButton(QMessageBox.Cancel)
-        if confirm.exec() != QMessageBox.Yes:
-            return
+        return confirm.exec() == QMessageBox.Yes
 
-        # Safety net: any future validation that DraftDeleteJob adds
-        # (or any new ValueError path) lands as a calm dialog instead of
-        # a traceback, matching the pre-flight tone above.
+    def _run_draft_deletion(
+        self, profile, deletable: List[Tuple[str, int]],
+    ) -> None:
         try:
-            job = DraftDeleteJob(
+            job = DraftBulkDeleteJob(
                 relay_pool=self._relay_pool,
                 relay_list_cache=self._relay_list_cache,
                 session_pool=self._session_pool,
-            entitled_relays=self._entitled_relays(),
+                entitled_relays=self._entitled_relays(),
                 profile=profile,
-                identifier=identifier,
-                inner_kind=inner_kind,
+                targets=deletable,
                 parent=self,
             )
         except ValueError as exc:
             QMessageBox.warning(
                 self,
                 "Couldn't start the deletion",
-                f"This draft can't be removed from here.\n\n{exc}",
+                f"These drafts can't be removed from here.\n\n{exc}",
             )
             return
 
-        job.status_changed.connect(lambda s: self.status.showMessage(s, 4000))
+        total = job.total
+        progress = None
+        if total > 1:
+            # One signer approval each, so this is a wait the user has to
+            # be able to see and get out of. A single deletion is fast
+            # enough that a dialog would flash.
+            progress = QProgressDialog(
+                "Deleting drafts…", "Stop", 0, total, self)
+            progress.setWindowTitle("Deleting drafts")
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setMinimumDuration(0)
+            progress.setAutoClose(False)
+            progress.setAutoReset(False)
+            progress.setValue(0)
+            progress.canceled.connect(job.cancel)
+
+        def on_progress(done: int, count: int) -> None:
+            if progress is not None and not progress.wasCanceled():
+                progress.setLabelText(f"Deleting draft {min(done + 1, count)} of {count}…")
+                progress.setValue(done)
+
+        job.progress.connect(on_progress)
         job.tombstoned.connect(lambda d, _eid: self._draft_store.remove(d))
-        job.failed.connect(
-            lambda reason: QMessageBox.warning(
-                self, "Couldn't delete draft", reason
+        job.finished.connect(
+            lambda deleted, failures: self._on_draft_deletion_finished(
+                deleted, failures, total, progress,
             )
         )
         job.start()
+
+    def _on_draft_deletion_finished(
+        self, deleted: int, failures: list, total: int, progress,
+    ) -> None:
+        if progress is not None:
+            progress.close()
+        if not failures:
+            self.status.showMessage(
+                "Draft deleted." if deleted == 1
+                else f"{deleted} drafts deleted.", 5000,
+            )
+            return
+
+        # A partial result reported as a whole one is how a user comes to
+        # believe a draft is gone when it is not, so the count that did
+        # not go is the headline and the reasons are one click away.
+        warn = QMessageBox(self)
+        warn.setIcon(QMessageBox.Warning)
+        warn.setWindowTitle("Some drafts were not deleted")
+        warn.setText(
+            f"{deleted} of {total} deleted."
+            if deleted else "No drafts were deleted."
+        )
+        warn.setInformativeText(
+            f"{len(failures)} could not be removed and "
+            f"{'is' if len(failures) == 1 else 'are'} still on your relays. "
+            "You can try again."
+        )
+        warn.setDetailedText("\n".join(
+            f"{identifier[:16]}: {reason}" for identifier, reason in failures
+        ))
+        warn.setStandardButtons(QMessageBox.Ok)
+        warn.exec()
 
     def _on_draft_sync_status(self, text: str) -> None:
         if self._drafts_panel is not None:
