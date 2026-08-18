@@ -82,6 +82,46 @@ def parse_relay_list(event: dict) -> RelayList:
     return RelayList(write=write, read=read)
 
 
+def relay_list_tags_adding(
+    existing_event: Optional[dict],
+    url: str,
+    *,
+    marker: str = "write",
+) -> Optional[List[List[str]]]:
+    """Tags for a kind 10002 that adds ``url`` and changes nothing else.
+
+    Returns None when the addition must not be published, which is the
+    important half of this function. A kind 10002 is replaceable, so
+    publishing one built from an unread list does not add a relay, it
+    replaces the user's entire list with whatever we happened to know.
+    Losing an author's relay list scatters their readers, and no undo
+    exists once relays have taken the replacement. So a caller with no
+    confirmed current event gets None and must refuse.
+
+    None is also returned when there is nothing to do, so a caller never
+    asks the signer to approve a no-op. That covers a relay already
+    listed under any marker, including read-only: silently promoting a
+    read entry to a write one would be rewriting a choice the user made,
+    not adding to it.
+    """
+    if not isinstance(existing_event, dict):
+        return None
+    normalized = _normalize_for_dedup(url)
+    if not normalized:
+        return None
+
+    tags: List[List[str]] = []
+    for tag in existing_event.get("tags", []):
+        if not isinstance(tag, list):
+            continue
+        tags.append([str(part) for part in tag])
+        if len(tag) >= 2 and tag[0] == "r" and _normalize_for_dedup(str(tag[1])) == normalized:
+            return None  # already listed, under whatever marker they chose
+
+    tags.append(["r", url.strip().rstrip("/"), marker])
+    return tags
+
+
 def select_draft_publish_relays(
     relay_list: "RelayList",
     *,
