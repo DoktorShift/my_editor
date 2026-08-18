@@ -1206,7 +1206,6 @@ class MainWindow(QMainWindow):
 
         self._drafts_panel = DraftsPanel(is_dark=self.is_dark_theme)
         self._drafts_panel.bind_store(self._draft_store)
-        self._drafts_panel.set_avatar_store(self._avatars)
         self._drafts_panel.feeds.bind_runtime(
             relay_pool=self._relay_pool,
             relay_list_cache=self._relay_list_cache,
@@ -1222,9 +1221,6 @@ class MainWindow(QMainWindow):
         self._drafts_panel.delete_draft.connect(self._on_panel_delete_draft)
         self._drafts_panel.retry_decrypt.connect(self._on_panel_retry_decrypt)
         self._drafts_panel.copy_event_id.connect(self._on_panel_copy_event_id)
-        self._drafts_panel.switch_profile_requested.connect(
-            self._on_panel_switch_profile
-        )
         self._drafts_panel.refresh_requested.connect(self._draft_sync.refresh)
         self._drafts_panel.close_requested.connect(self._hide_drafts_panel)
 
@@ -3985,12 +3981,6 @@ class MainWindow(QMainWindow):
     # ----------------------------------------------------------------------
     # NOSTR - drafts panel signal handlers
     # ----------------------------------------------------------------------
-
-    def _on_panel_switch_profile(self) -> None:
-        """The panel's profile chip was clicked - defer to the existing
-        chip menu so the user has one canonical place to switch."""
-        chip = self.header_widget.profile_chip
-        chip.showMenu()
 
     def _on_panel_copy_event_id(self, event_id: str) -> None:
         if event_id:
