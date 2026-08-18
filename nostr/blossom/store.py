@@ -7,10 +7,10 @@ This is the layer the UI talks to. It owns:
   - a 30 s freshness window on /list calls so the library, the picker
     and the editor can all call ``fetch()`` on mount without fanning
     out N x M requests
-  - the upload pipeline: hash, plan, ask each server whether it already
-    has the blob, sign auth and PUT /upload only for the servers that do
-    not, then replicate to the rest one at a time and merge URLs back
-    into the map
+  - the upload pipeline: hash, keep the bytes in the local cache, plan,
+    ask each server whether it already has the blob, sign auth and PUT
+    /upload only for the servers that do not, then replicate to the rest
+    one at a time and merge URLs back into the map
   - the delete pipeline: sign auth, DELETE, remove from map
 
 Signing happens via the existing ``BunkerSessionPool``. The store keeps
@@ -33,7 +33,7 @@ import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence, Set
+from typing import Callable, Dict, List, Optional, Protocol, Sequence, Set
 
 from PySide6.QtCore import QObject, Signal
 
@@ -83,8 +83,21 @@ _RETRYABLE_CODES = frozenset({ERROR_CODES.REDIRECT_REFUSED})
 
 
 # ---------------------------------------------------------------------------
-# Data classes
+# Types and data classes
 # ---------------------------------------------------------------------------
+
+class BlobCache(Protocol):
+    """The app's content-addressed byte cache.
+
+    ``ThumbnailLoader`` is the implementation; it is a UI module and the
+    store must not import it, so the object arrives as a constructor
+    argument the way every other boundary in this codebase is crossed.
+    Only the write half is named here, because writing is all the store
+    does with it.
+    """
+
+    def put_bytes(self, data: bytes) -> str: ...
+
 
 @dataclass
 class MediaFile:
@@ -178,6 +191,7 @@ class MediaStore(QObject):
         profile_provider: Callable[[], Optional[Profile]],
         settings: Optional[BlossomSettings] = None,
         client: Optional[BlossomClient] = None,
+        blob_cache: Optional[BlobCache] = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -185,6 +199,10 @@ class MediaStore(QObject):
         self._profile_provider = profile_provider
         self._settings = settings or BlossomSettings()
         self._client = client or BlossomClient(parent=self)
+        # Where uploaded bytes are kept so displaying them never needs
+        # the network. None means no cache, which is what every caller
+        # had before this seam existed.
+        self._blob_cache = blob_cache
 
         self._files: Dict[str, MediaFile] = {}
         self._last_fetch_at: float = 0.0
@@ -480,6 +498,9 @@ class MediaStore(QObject):
         """Upload an in-memory buffer. Used by the drop handler when the
         bytes come from a QMimeData payload rather than a file path.
 
+        The bytes are put in the local cache first, so nothing that
+        happens next decides whether they can still be displayed.
+
         Nothing is signed until the store knows which servers actually
         need the bytes. Every eligible server that the library cannot
         vouch for is asked ``HEAD /<sha256>`` first, unsigned and in
@@ -520,6 +541,7 @@ class MediaStore(QObject):
             return
 
         sha = hashlib.sha256(body).hexdigest()
+        self._seed_cache(body)
         state = UploadJobState(name=name, status="queued", hash=sha)
         self._uploads[name] = state
         self.upload_started.emit(name)
@@ -542,6 +564,31 @@ class MediaStore(QObject):
                 configured_primary=configured_primary,
             ),
         )
+
+    def _seed_cache(self, body: bytes) -> None:
+        """Keep the bytes locally before they are sent anywhere.
+
+        Without this the app downloads its own upload back from a server
+        the moment it wants to show it, which is a round trip for bytes
+        that were in memory a second earlier and simply fails when the
+        machine is offline. The cache is content addressed, so seeding it
+        here is the same write the download would have made.
+
+        It happens before the network rather than after a successful
+        upload on purpose: a failed upload the user retries still has
+        something to show, and the local copy is what makes a Blossom
+        server a place a file is kept rather than the only place.
+
+        A cache that cannot be written is not an upload failure. The
+        bytes are still going to a server, so the upload carries on and
+        the display falls back to fetching them.
+        """
+        if self._blob_cache is None:
+            return
+        try:
+            self._blob_cache.put_bytes(body)
+        except OSError:
+            pass
 
     # ------------------------------------------------------------------
     # Dedup: find out who already has the blob before signing anything

@@ -373,18 +373,21 @@ class MainWindow(QMainWindow):
         # avoid stacking duplicate banners on the same tab.
         self._tab_conflict_banners: dict = {}
 
-        # Blossom media library - orchestrates uploads / list / delete
-        # against the user's configured Blossom servers, signing each
-        # auth event through the existing bunker pool.
-        self._media_store = MediaStore(
-            session_pool=self._session_pool,
-            profile_provider=lambda: self._profile_store.default(),
-            parent=self,
-        )
         # Content-addressed byte cache. Doubles as the asset layer's blob
         # store: one cache for thumbnails and document images means an
         # image the library already downloaded needs no second copy.
         self._media_image_loader = ThumbnailLoader(parent=self)
+        # Blossom media library - orchestrates uploads / list / delete
+        # against the user's configured Blossom servers, signing each
+        # auth event through the existing bunker pool. It seeds the same
+        # cache on the way out, so an upload never has to be downloaded
+        # back to be shown.
+        self._media_store = MediaStore(
+            session_pool=self._session_pool,
+            profile_provider=lambda: self._profile_store.default(),
+            blob_cache=self._media_image_loader,
+            parent=self,
+        )
         # The one object the editor side talks to about images. Every
         # boundary it crosses is injected here, so nothing below this
         # line knows anything about Blossom.

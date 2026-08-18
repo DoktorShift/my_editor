@@ -33,6 +33,7 @@ from nostr.blossom.client import BlossomClient
 from nostr.blossom.errors import ERROR_CODES, friendly_message
 from nostr.blossom.settings import BlossomSettings
 from nostr.blossom.store import MediaStore
+from nostr.ui.thumbnail_loader import ThumbnailLoader
 from tests.blossom_fakes import (
     BODY,
     MIRROR,
@@ -48,6 +49,7 @@ from tests.blossom_fakes import (
     error_reply,
     json_reply,
 )
+from tests.media_fakes import PNG_BYTES
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -100,7 +102,7 @@ class Ctx:
 
 
 def make_store(tmp_path, *, servers=(SERVER,), replies=None, responder=None,
-               signer=None, pool_error=None, profile=True):
+               signer=None, pool_error=None, profile=True, blob_cache=None):
     settings = BlossomSettings(tmp_path / "blossom_servers.json")
     settings.set_custom_servers(list(servers))
     nam = FakeNam(replies, responder=responder)
@@ -111,6 +113,7 @@ def make_store(tmp_path, *, servers=(SERVER,), replies=None, responder=None,
         profile_provider=lambda: FakeProfile() if profile else None,
         settings=settings,
         client=BlossomClient(nam=nam),
+        blob_cache=blob_cache,
     )
     return Ctx(store, nam, pool, signer, settings)
 
@@ -620,3 +623,92 @@ def test_a_blob_the_server_dropped_is_still_removed_by_a_fetch(tmp_path):
     ctx.store.fetch(force=True)
     ctx.nam.issued[1].finish()
     assert OTHER_SHA not in ctx.store.files
+
+
+# --------------------------------------------------------------------------- #
+# Seeding the local blob cache
+# --------------------------------------------------------------------------- #
+
+def _cache(tmp_path):
+    """A real ``ThumbnailLoader`` on a temp directory, wired to a
+    transport that would fail loudly if anything asked it to download."""
+    nam = FakeNam()
+    return ThumbnailLoader(cache_dir=tmp_path / "cache", nam=nam), nam
+
+
+def test_an_uploaded_blob_resolves_from_the_cache_with_no_network(tmp_path):
+    """The bytes were in memory a moment ago; fetching them back from a
+    server to display them is a round trip that also fails offline."""
+    cache, cache_nam = _cache(tmp_path)
+    ctx = make_store(tmp_path, responder=FakeBlossomServer(SERVER),
+                     blob_cache=cache)
+    sha = hashlib.sha256(PNG_BYTES).hexdigest()
+
+    ctx.store.upload_bytes(PNG_BYTES, name="a.png", mime_type="image/png")
+    ctx.probe()
+    ctx.settle()
+    assert ctx.failures == []
+
+    ready, failed = [], []
+    cache.ready.connect(lambda s, _p, _pix: ready.append(s))
+    cache.failed.connect(lambda s, r: failed.append((s, r)))
+    cache.load(sha, f"{SERVER}/{sha}.png")
+
+    assert cache_nam.calls == []
+    assert ready == [sha]
+    assert failed == []
+
+
+def test_the_bytes_are_cached_before_anything_leaves_the_process(tmp_path):
+    cache, _cache_nam = _cache(tmp_path)
+    ctx = make_store(tmp_path, responder=FakeBlossomServer(SERVER),
+                     blob_cache=cache)
+    sha = hashlib.sha256(PNG_BYTES).hexdigest()
+
+    ctx.store.upload_bytes(PNG_BYTES, name="a.png", mime_type="image/png")
+    assert cache.has(sha)
+    assert ctx.verbs() == ["head"]
+
+
+def test_an_upload_refused_for_its_size_is_never_cached(tmp_path):
+    """The size plan runs first, so nothing is written for a file that
+    was never going anywhere."""
+    cache, _cache_nam = _cache(tmp_path)
+    ctx = make_store(tmp_path, blob_cache=cache)
+    huge = b"x" * 16
+    monkey = plan_module.get_effective_max_file
+    try:
+        plan_module.get_effective_max_file = lambda _s: 1
+        ctx.store.upload_bytes(huge, name="huge.png")
+    finally:
+        plan_module.get_effective_max_file = monkey
+
+    assert not cache.has(hashlib.sha256(huge).hexdigest())
+    assert ctx.nam.calls == []
+    assert ctx.failures
+
+
+def test_a_cache_that_cannot_be_written_does_not_fail_the_upload(tmp_path):
+    """Losing the local copy costs a download later. Losing the upload
+    would cost the user their file."""
+
+    class Broken:
+        def put_bytes(self, data):
+            raise OSError("read-only file system")
+
+    ctx = make_store(tmp_path, responder=FakeBlossomServer(SERVER),
+                     blob_cache=Broken())
+    ctx.store.upload_bytes(BODY, name="a.png")
+    ctx.probe()
+    ctx.settle()
+    assert ctx.failures == []
+    assert ctx.finished[0][1].hash == SHA
+
+
+def test_a_store_without_a_cache_still_uploads(tmp_path):
+    ctx = make_store(tmp_path, responder=FakeBlossomServer(SERVER))
+    ctx.store.upload_bytes(BODY, name="a.png")
+    ctx.probe()
+    ctx.settle()
+    assert ctx.failures == []
+    assert ctx.finished[0][1].hash == SHA

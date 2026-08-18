@@ -125,6 +125,7 @@ class FakeReply(QObject):
         attributes=None,
         raw_headers=None,
         url: str = "",
+        content_type: str = "",
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -132,6 +133,7 @@ class FakeReply(QObject):
         self._body = body
         self._error = error
         self._error_string = error_string
+        self._content_type = content_type
         self._attributes = dict(attributes or {})
         self._raw_headers = {
             _header_name(k): bytes(v) for k, v in (raw_headers or {}).items()
@@ -155,7 +157,9 @@ class FakeReply(QObject):
             return self._status
         return self._attributes.get(attr)
 
-    def header(self, _header):
+    def header(self, header):
+        if header == QNetworkRequest.ContentTypeHeader:
+            return self._content_type or None
         return None
 
     def rawHeader(self, name) -> bytes:
