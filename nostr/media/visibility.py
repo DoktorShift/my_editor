@@ -279,6 +279,14 @@ class PublicLedger:
         """Write the ledger atomically. Returns False when it did not."""
         if self._read_only:
             return False
+        if self._degraded:
+            # The file exists and could not be read, so this object holds
+            # none of what is in it. Writing would replace the record of
+            # everything the user has ever published with whatever one
+            # entry happened to be added since, and this ledger is the
+            # only way to revoke any of it. Refusing costs the caller a
+            # publish; writing would cost the user the list.
+            return False
         payload = {
             "version": CURRENT_LEDGER_VERSION,
             "public": [public_blob_to_record(b) for b in self._blobs.values()],

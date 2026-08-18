@@ -297,3 +297,65 @@ def test_put_bytes_raises_when_the_cache_cannot_be_written(tmp_path):
 def test_has_is_false_for_an_unknown_hash(tmp_path):
     loader, _nam = _loader(tmp_path)
     assert loader.has("b" * 64) is False
+
+
+# --------------------------------------------------------------------------- #
+# The ciphertext fetch, which the public-copy path uses
+# --------------------------------------------------------------------------- #
+
+def _fetch(loader, nam, url):
+    """Drive ``fetch`` and collect whichever side answered."""
+    got, refused = [], []
+    loader.fetch(url, on_success=got.append, on_failure=refused.append)
+    if nam.issued:
+        nam.issued[0].finish()
+    return got, refused
+
+
+def test_the_fetch_hands_back_the_bytes_at_one_url(tmp_path):
+    body = b"\x02" + b"\x11" * 48
+    loader, _nam = _loader(tmp_path, [FakeReply(status=200, body=body)])
+    got, refused = _fetch(loader, _nam, BLOB_URL)
+    assert got == [body] and refused == []
+
+
+def test_the_fetch_caches_nothing(tmp_path):
+    # The copy maker hashes and verifies the bytes itself, and an
+    # envelope has no business being filed under an address the rest of
+    # the app resolves as a picture.
+    body = b"\x02" + b"\x22" * 48
+    loader, _nam = _loader(tmp_path, [FakeReply(status=200, body=body)])
+    _fetch(loader, _nam, BLOB_URL)
+    assert _cache_files(tmp_path) == []
+
+
+@pytest.mark.parametrize("url", [
+    "file:///etc/passwd",
+    "data:application/octet-stream;base64,AAAA",
+    "http://evil.example/blob",
+])
+def test_the_fetch_applies_the_same_url_policy(tmp_path, url):
+    loader, nam = _loader(tmp_path)
+    got, refused = _fetch(loader, nam, url)
+    assert nam.calls == []
+    assert got == []
+    assert refused == ["blob URL was not allowed"]
+
+
+def test_the_fetch_refuses_bytes_served_from_loopback_after_a_redirect(tmp_path):
+    reply = FakeReply(status=200, body=b"\x02" * 64, url="http://127.0.0.1:9/x")
+    loader, _nam = _loader(tmp_path, [reply])
+    got, refused = _fetch(loader, _nam, BLOB_URL)
+    assert got == []
+    assert refused == ["blob URL was not allowed"]
+
+
+def test_the_fetch_reports_a_transport_failure_rather_than_empty_bytes(tmp_path):
+    from PySide6.QtNetwork import QNetworkReply
+
+    reply = FakeReply(error=QNetworkReply.HostNotFoundError,
+                      error_string="host not found")
+    loader, _nam = _loader(tmp_path, [reply])
+    got, refused = _fetch(loader, _nam, BLOB_URL)
+    assert got == []
+    assert refused == ["host not found"]

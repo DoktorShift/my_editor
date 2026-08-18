@@ -107,7 +107,12 @@ from nostr.drafts import (
 )
 from nostr.known_people import KnownPeople, Person
 from nostr.media.assets import ASSET_SCHEME, asset_key, parse_asset_key
+from nostr.imports.sources.nostr import RelayQueryAdapter
 from nostr.media.manager import AssetManager
+from nostr.media.media_visibility import MediaVisibility
+from nostr.media.private_library import PrivateLibrary
+from nostr.media.publish_copy import PublicCopyMaker
+from nostr.media.visibility import PublicLedger
 from nostr.metadata import AvatarLoader, ProfileMetadataFetcher
 from nostr.outbox import RelayListCache
 from nostr.profiles import Profile, ProfileStore
@@ -120,6 +125,7 @@ from nostr.ui.drafts_panel import DEFAULT_PANEL_WIDTH, DraftsPanel
 from nostr.einundzwanzig import NO_BENEFITS, Benefits, MembershipDirectory
 from nostr.ui.media_library_dialog import MediaLibraryDialog
 from nostr.ui.publish_article_dialog import PublishArticleDialog
+from nostr.ui.publish_copy_dialog import resolve_pick
 from nostr.ui.publish_note_dialog import PublishNoteDialog
 from nostr.ui.save_destination_dialog import SaveDestination, SaveDestinationDialog
 from nostr.ui.stash_kind_dialog import StashChoice, StashKind, StashKindDialog
@@ -410,6 +416,35 @@ class MainWindow(QMainWindow):
         )
         self._asset_manager.asset_changed.connect(self._refresh_asset_in_documents)
         self._asset_manager.asset_upload_failed.connect(self._on_asset_upload_failed)
+
+        # Private media. The ledger is the record of everything this app
+        # has deliberately made public and is the only way to revoke any
+        # of it, so it is loaded at startup rather than on demand. The
+        # library is not: reading it costs one signer round-trip per
+        # file, and an account that never opens the media library must
+        # not pay for a prompt it did not ask for. It is bound lazily,
+        # where the user actually goes looking for their pictures.
+        self._public_ledger = PublicLedger()
+        self._private_library = PrivateLibrary(
+            session_pool=self._session_pool,
+            relay_list_cache=self._relay_list_cache,
+            query=RelayQueryAdapter(self._relay_pool, parent=self),
+            parent=self,
+        )
+        self._media_visibility = MediaVisibility(
+            library=self._private_library, ledger=self._public_ledger,
+        )
+        # The one object in the app that turns a private file into a
+        # public one. It fetches through the same guarded downloader as
+        # every other blob and uploads through the same store, so a
+        # public copy gets the same auth, verification and mirroring as
+        # anything else this app sends.
+        self._copy_maker = PublicCopyMaker(
+            ledger=self._public_ledger,
+            fetcher=self._media_image_loader,
+            uploader=self._media_store,
+            parent=self,
+        )
 
         self._update_profile_chip()
         self._refresh_profile_chip_menu()
@@ -3710,6 +3745,9 @@ class MainWindow(QMainWindow):
             search_client=self._search_client,
             avatars=self._avatars,
             media_store=self._media_store,
+            media_visibility=self._media_visibility,
+            copy_maker=self._copy_maker,
+            private_library=self._private_library,
             default_title=default_title,
             default_slug=default_slug,
             parent=self,
@@ -3743,12 +3781,18 @@ class MainWindow(QMainWindow):
                 "browsing your Blossom media library.",
             )
             return
+        # Reading the private library is where the signer prompts are, so
+        # it happens when the user opens their media and not before.
+        # Re-binding the profile already loaded is a no-op.
+        self._private_library.bind_profile(active)
         dialog = MediaLibraryDialog(
             store=self._media_store,
             is_dark=self.is_dark_theme,
             pick_mode=False,
+            visibility=self._media_visibility,
             parent=self,
         )
+        dialog.bind_private_library(self._private_library)
         dialog.show()
 
     def _on_nostr_insert_image(self):
@@ -3770,12 +3814,15 @@ class MainWindow(QMainWindow):
             ed = self.current_editor()
         if ed is None:
             return
+        self._private_library.bind_profile(active)
         dialog = MediaLibraryDialog(
             store=self._media_store,
             is_dark=self.is_dark_theme,
             pick_mode=True,
+            visibility=self._media_visibility,
             parent=self,
         )
+        dialog.bind_private_library(self._private_library)
         # Pre-select images in the picker - videos / audio can't be
         # inserted as inline document objects.
         dialog._filter_combo.setCurrentIndex(1)
@@ -3790,20 +3837,39 @@ class MainWindow(QMainWindow):
         There is no fetch-then-insert detour: the blob is already hosted,
         so the asset goes in at once and the bytes arrive underneath it
         when they arrive.
+
+        Unless the pick is private, which is the one case that has to
+        stop and ask. A document is written to be published, so the
+        address that goes in here is the address readers will fetch, and
+        for a private file that address serves ciphertext. The gate turns
+        it into a public copy the user agreed to, or nothing goes in at
+        all.
         """
-        if not (media.mime_type or "").startswith("image/"):
-            self._insert_url_as_text(editor, media.url)
+        picked = resolve_pick(
+            media,
+            visibility=self._media_visibility,
+            maker=self._copy_maker,
+            is_dark=self.is_dark_theme,
+            parent=self,
+        )
+        if not picked.ok:
+            if picked.reason:
+                self.status.showMessage(picked.reason, 8000)
+            return
+
+        if not (picked.mime or "").startswith("image/"):
+            self._insert_url_as_text(editor, picked.url)
             return
 
         asset = self._asset_manager.adopt_library_file(
-            sha256=media.hash,
-            remote_url=media.url,
-            mime=media.mime_type,
-            size=media.size,
+            sha256=picked.sha256,
+            remote_url=picked.url,
+            mime=picked.mime,
+            size=picked.size,
             alt=alt_text,
         )
         if asset is None:
-            self._insert_url_as_text(editor, media.url)
+            self._insert_url_as_text(editor, picked.url)
             return
         self._insert_asset(editor, asset, alt=alt_text or "image")
 

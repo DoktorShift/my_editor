@@ -202,6 +202,32 @@ def test_a_newer_file_is_left_alone(tmp_path):
     assert path.read_text() == original
 
 
+def test_a_degraded_ledger_is_not_overwritten_by_the_first_commit(tmp_path):
+    # A ledger that failed to load holds none of what is in the file. The
+    # first commit used to write a fresh one containing only the new
+    # entry, discarding every public copy the user had ever made, and
+    # this list is the only way they can revoke any of it. Refusing costs
+    # a publish; writing would cost the list.
+    original = json.dumps({"version": 1, "public": [
+        {"sha256": B, "url": "https://cdn.example/b", "source_hash": A},
+    ]})
+    path = tmp_path / "media_public.json"
+    path.write_text(original[:-9])   # a truncated write
+    led = ledger(tmp_path)
+    assert led.degraded and len(led) == 0
+
+    assert led.record(public(sha=C)) is False
+    assert path.read_text() == original[:-9]
+
+
+def test_a_degraded_ledger_does_not_forget_its_way_to_an_empty_file(tmp_path):
+    (tmp_path / "media_public.json").write_text("{not json")
+    led = ledger(tmp_path)
+
+    assert led.forget(B) is False
+    assert (tmp_path / "media_public.json").read_text() == "{not json"
+
+
 def test_a_write_failure_is_reported_not_swallowed(tmp_path):
     # An unlisted public blob cannot be revoked by a user who cannot see
     # it, so the caller has to learn that the write did not happen.

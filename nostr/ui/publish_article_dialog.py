@@ -46,7 +46,11 @@ from .avatar import (
     compose_chip_icon,
     pixmap_for_profile,
 )
+from ..media.media_visibility import MediaVisibility
+from ..media.private_library import PrivateLibrary
+from ..media.publish_copy import PublicCopyMaker
 from .media_library_dialog import MediaLibraryDialog
+from .publish_copy_dialog import resolve_pick
 from .mention_chips import MentionChipRow
 from .thumbnail_loader import ThumbnailLoader
 
@@ -326,6 +330,9 @@ class PublishArticleDialog(QDialog):
         search_client: Nip50SearchClient,
         avatars: AvatarStore,
         media_store: Optional[MediaStore] = None,
+        media_visibility: Optional[MediaVisibility] = None,
+        copy_maker: Optional[PublicCopyMaker] = None,
+        private_library: Optional[PrivateLibrary] = None,
         default_title: str = "",
         default_slug: str = "",
         parent=None,
@@ -348,6 +355,18 @@ class PublishArticleDialog(QDialog):
         self._search_client = search_client
         self._avatars = avatars
         self._media_store = media_store
+        # A cover image is the most public thing in an article: it is the
+        # picture every reader sees before they read a word. So the same
+        # gate the editor uses runs here, and a picker with no visibility
+        # wired simply sees every file as public, which is what it saw
+        # before this existed.
+        self._media_visibility = media_visibility or MediaVisibility()
+        self._copy_maker = copy_maker
+        # Held so the cover picker can start the library reading. Nothing
+        # is read on the way into this dialog: the signer prompts that
+        # cost belong to the moment someone goes looking for a picture,
+        # and most articles are published without one.
+        self._private_library = private_library
         self._is_dark = is_dark
         self._current_profile = active_profile
         self._job: Optional[PublishJob] = None
@@ -616,13 +635,22 @@ class PublishArticleDialog(QDialog):
         row hidden (cover URL has no alt sibling on Nostr)."""
         if self._media_store is None:
             return
+        # Reading the private library is what lets this picker tell a
+        # private file from a public one. Without it every file reads as
+        # unchecked and no cover can be chosen at all, which is the
+        # honest failure but a useless one, so the read starts here.
+        if self._private_library is not None:
+            self._private_library.bind_profile(self._current_profile)
         picker = MediaLibraryDialog(
             store=self._media_store,
             is_dark=self._is_dark,
             pick_mode=True,
             pick_alt_text=False,
+            visibility=self._media_visibility,
             parent=self,
         )
+        if self._private_library is not None:
+            picker.bind_private_library(self._private_library)
         picker.setWindowTitle("Choose hero image")
         # Pre-filter to images: videos / audio can't be a NIP-23 cover.
         picker._filter_combo.setCurrentIndex(1)
@@ -630,13 +658,29 @@ class PublishArticleDialog(QDialog):
         picker.exec()
 
     def _on_cover_image_picked(self, media: MediaFile, _alt: str) -> None:
+        # A private pick cannot become a cover as it stands: the bytes at
+        # that address are ciphertext, so a reader would get a broken
+        # image and the user would have advertised a file they meant to
+        # keep. The gate turns it into a public copy first, or leaves the
+        # field alone.
+        picked = resolve_pick(
+            media,
+            visibility=self._media_visibility,
+            maker=self._copy_maker,
+            is_dark=self._is_dark,
+            parent=self,
+        )
+        if not picked.ok:
+            if picked.reason:
+                self._set_status(picked.reason, error=True)
+            return
         # Setting .text() triggers ``_on_cover_url_changed``, which
         # clears any prior thumbnail. We then kick off the load by hash
         # so the preview reflects the new pick.
-        self._image_edit.setText(media.url)
-        self._cover_thumb_hash = media.hash
-        if self._cover_loader is not None and (media.mime_type or "").startswith("image/"):
-            self._cover_loader.load(media.hash, media.url)
+        self._image_edit.setText(picked.url)
+        self._cover_thumb_hash = picked.sha256
+        if self._cover_loader is not None and (picked.mime or "").startswith("image/"):
+            self._cover_loader.load(picked.sha256, picked.url)
 
     def _on_cover_url_changed(self, text: str) -> None:
         """Reset the preview whenever the URL field changes. A typed URL

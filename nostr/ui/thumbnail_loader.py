@@ -195,6 +195,40 @@ class ThumbnailLoader(QObject):
             lambda r=reply, u=url: self._on_url_reply(u, r, oversize)
         )
 
+    def fetch(
+        self,
+        url: str,
+        *,
+        on_success,
+        on_failure,
+    ) -> None:
+        """Hand back one URL's bytes, satisfying ``CiphertextFetcher``.
+
+        The copy maker needs the raw bytes at one address and nothing
+        else: it hashes them itself, because trusting a fetcher to do
+        that is how a substituted blob gets decrypted. So this caches
+        nothing and decodes nothing, and exists here rather than as a
+        second downloader so that the policy check, the redirect rules,
+        the hop limit, the final-URL revalidation and the size cap are
+        the same code that guards every other download in the app.
+        """
+        if not url_safety.is_safe_media_url(url):
+            on_failure(_UNSAFE_URL_REASON)
+            return
+        reply, oversize = self._start(url)
+
+        def _done(r=reply, u=url) -> None:
+            try:
+                data, reason = self._settled_bytes(r, oversize, u)
+                if reason:
+                    on_failure(reason)
+                else:
+                    on_success(data)
+            finally:
+                r.deleteLater()
+
+        reply.finished.connect(_done)
+
     # -- shared request plumbing ------------------------------------------
 
     def _start(self, url: str):
