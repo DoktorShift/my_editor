@@ -74,6 +74,10 @@ class MirrorOutcome:
     markdown: str
     mirrored: int = 0
     failed: List[str] = field(default_factory=list)
+    # Source URL to rehosted URL, for the images that were actually
+    # rewritten. Exposed so a caller holding the same URL somewhere
+    # outside the body (the NIP-23 cover) can stay in step with it.
+    mapping: Dict[str, str] = field(default_factory=dict)
 
 
 def image_label(url: str) -> str:
@@ -182,6 +186,7 @@ def rehost_images(
 
     def _finish() -> None:
         outcome.markdown = rewrite_markdown_images(markdown, mapping)
+        outcome.mapping = dict(mapping)
         on_done(outcome)
 
     def _next(index: int) -> None:

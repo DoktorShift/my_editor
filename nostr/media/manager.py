@@ -28,8 +28,15 @@ from typing import Callable, Deque, Dict, Iterable, List, Optional, Protocol, Tu
 
 from PySide6.QtCore import QObject, Signal
 
+import url_safety
+
 from export_html import sniff_image_mime
 
+# The one BUD-03 hash-from-URL rule, imported rather than repeated: a
+# third copy of it is how the copies drift apart. ``blob_url`` builds the
+# canonical address BUD-01 guarantees, which is what makes a recovery
+# attempt against a sibling server honest rather than a guess.
+from ..blossom.hashes import blob_url, hash_from_url
 from .assets import (
     LEGAL_TRANSITIONS,
     AssetIndex,
@@ -54,6 +61,13 @@ ADOPTABLE_MIMES = frozenset(
 MAX_ASSET_BYTES = 25 * 1024 * 1024
 
 _DATA_URI_RE = re.compile(r"^data:([^,]*),(.*)$", re.DOTALL)
+
+# How many sibling servers one dead blob URL may be worth. The address
+# in the index has already been tried by the ordinary path, so this
+# counts the extra requests recovery itself issues. Four is a budget,
+# not a target: a document full of broken images must not turn into a
+# fan-out against servers the user never chose.
+_MAX_RECOVERY_CANDIDATES = 4
 
 
 class AssetErrorCodes:
@@ -131,6 +145,7 @@ class AssetManager(QObject):
         profile_provider: Callable[[], Optional[object]],
         decoder: Optional[Callable[[bytes], Optional[object]]] = None,
         index: Optional[AssetIndex] = None,
+        recovery_provider: Optional[Callable[[str], List[str]]] = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -139,11 +154,17 @@ class AssetManager(QObject):
         self._profile_provider = profile_provider
         self._decoder = decoder
         self._index = index if index is not None else AssetIndex()
+        # Origins to try when a stored blob URL goes dead, supplied by
+        # the BUD-03 policy object. None means no recovery at all, which
+        # is the behaviour every caller had before this seam existed.
+        self._recovery_provider = recovery_provider
 
         self._queue: Deque[str] = deque()
         self._inflight: Optional[str] = None
         self._jobs: Dict[str, Tuple[str, int]] = {}   # job name -> (sha, attempts)
         self._fetching: set = set()
+        self._recovery: Dict[str, List[str]] = {}    # sha -> candidates left
+        self._recovered: set = set()                 # shas whose ladder ran
 
         uploader.upload_status.connect(self._on_upload_status)
         uploader.upload_finished.connect(self._on_upload_finished)
@@ -164,6 +185,38 @@ class AssetManager(QObject):
 
     def __contains__(self, sha256: object) -> bool:
         return isinstance(sha256, str) and self._index.get(sha256) is not None
+
+    def find_by_url(self, url: str) -> Optional[DocumentAsset]:
+        """The asset a published URL refers to, or None. Read only.
+
+        After a ``.md`` save and reopen, an image this app uploaded comes
+        back as a plain ``https`` name, so the hash in the URL is the
+        only route back to the record holding its mime, size and pixel
+        size. Deliberately strict about which URLs qualify: content
+        addressing means a stranger hosting the same picture matches by
+        hash too, and describing their copy as ours is exactly the
+        silent rewrite that had to be removed from the save path. The
+        URL must also be one this app was told about, either the exact
+        address the upload returned or a server that confirmed the blob.
+
+        Nothing is written, and nothing is rewritten in either
+        direction. The only effect of a match is that the publisher may
+        describe the image it was already going to publish.
+        """
+        if not isinstance(url, str) or not url:
+            return None
+        sha = hash_from_url(url)
+        if sha is None:
+            return None
+        asset = self._index.get(sha)
+        if asset is None:
+            return None
+        if asset.remote_url and url == asset.remote_url:
+            return asset
+        for origin in asset.servers:
+            if url_safety.same_origin(url, origin):
+                return asset
+        return None
 
     def can_upload(self) -> bool:
         """Whether an upload could start at all, i.e. a profile is active.
@@ -533,6 +586,7 @@ class AssetManager(QObject):
         if sha not in self._fetching:
             return
         self._fetching.discard(sha)
+        self._recovery.pop(sha, None)
         asset = self._index.get(sha)
         if asset is None:
             return
@@ -547,7 +601,101 @@ class AssetManager(QObject):
     def _on_blob_failed(self, sha256: str, reason: str) -> None:
         # Nothing destructive: the asset keeps every field it had and the
         # next resolve may try again.
-        self._fetching.discard((sha256 or "").lower())
+        sha = (sha256 or "").lower()
+        self._fetching.discard(sha)
+        self._try_recovery(sha)
+
+    # ------------------------------------------------------------------
+    # BUD-03 recovery: a dead URL is not a dead blob
+    # ------------------------------------------------------------------
+
+    def _try_recovery(self, sha: str) -> None:
+        """Ask the next sibling server for a blob whose URL went dead.
+
+        BUD-03 describes exactly this flow: read the hash out of the
+        URL, consult the author's servers, and try each one in order.
+        The bytes are what is trusted, not the host that served them,
+        because the blob store verifies the sha256 before adopting
+        anything. That verification is what lets this contact a server
+        the user never chose without sending a credential to it.
+
+        Strictly read only. Nothing here rewrites ``remote_url``, the
+        document, or the modified flag: ``remote_url`` is the string the
+        save path and the publish path serialize, so repointing it at
+        whichever server happened to answer would silently rewrite the
+        user's file and their next published event. That is the rewrite
+        AD-4 exists to prevent, wearing a different hat.
+        """
+        if self._blob_store.has(sha):
+            # The bytes are already here, so the failure was about
+            # rendering them, not about finding them. Content addressing
+            # guarantees a sibling server holds the same bytes, so asking
+            # one would be four requests to learn nothing.
+            return
+        queue = self._recovery.get(sha)
+        if queue is None:
+            if sha in self._recovered:
+                # The ladder already ran for this hash. A repaint asks
+                # again for every unresolved image, so remembering the
+                # negative outcome is what stops one broken picture from
+                # re-issuing its whole ladder on every keystroke.
+                return
+            queue = self._recovery_candidates(sha)
+            if not queue:
+                return
+            self._recovered.add(sha)
+            self._recovery[sha] = queue
+
+        if not queue:
+            self._recovery.pop(sha, None)
+            return
+        url = queue.pop(0)
+        if not queue:
+            self._recovery.pop(sha, None)
+        # One request at a time: the next candidate is only reached when
+        # this one fails. A parallel fan-out would be a load problem for
+        # the servers and a privacy problem for the user.
+        self._fetching.add(sha)
+        self._blob_store.load(sha, url)
+
+    def _recovery_candidates(self, sha: str) -> List[str]:
+        """Sibling addresses for ``sha``, most trusted first.
+
+        Order: the servers that confirmed this blob, then whatever the
+        provider offers, which is the user's own configuration followed
+        by the published kind 10063 in its own order. The URL already in
+        the index is not included; it is the address that just failed.
+
+        BUD-03's optional step 4, falling back to a well-known popular
+        Blossom server, is deliberately declined. It broadcasts a hash
+        the user is interested in to a server neither party named, and
+        the spec makes it a MAY.
+        """
+        if self._recovery_provider is None:
+            return []
+        asset = self._index.get(sha)
+        if asset is None or not asset.remote_url:
+            return []
+        try:
+            offered = list(self._recovery_provider(sha) or [])
+        except Exception:  # noqa: BLE001 - a provider fault must not break resolve
+            offered = []
+
+        candidates: List[str] = []
+        for origin in list(asset.servers) + offered:
+            if not isinstance(origin, str) or not origin:
+                continue
+            url = blob_url(origin, sha)
+            if url in candidates:
+                continue
+            if url_safety.same_origin(url, asset.remote_url):
+                continue
+            if not url_safety.is_safe_media_url(url):
+                continue
+            candidates.append(url)
+            if len(candidates) >= _MAX_RECOVERY_CANDIDATES:
+                break
+        return candidates
 
     def _fail(self, asset: DocumentAsset, code: str, reason: str) -> None:
         asset.failure_code = code

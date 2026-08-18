@@ -607,6 +607,48 @@ class TestImageRehosting:
         assert calls == []
         assert "https://a.example/banner.png" in created[0].inner_event["content"]
 
+    def test_cover_follows_the_body_when_it_was_rehosted(self):
+        # The cover is a tag, the body is content, and both can name the
+        # same file. Once the user has approved rehosting that image in
+        # the review dialog, leaving the tag pointing at the dead
+        # original would publish an article whose cover disagrees with
+        # its own first picture.
+        factory, created = make_factory()
+        mirror, _calls = fake_image_mirror()
+        item = make_item("Pictures", guid="p1", content_html=IMAGE_HTML,
+                         image="https://a.example/banner.png")
+        job = make_job([item], factory=factory, image_mirror=mirror)
+        job.start()
+        tags = created[0].inner_event["tags"]
+        assert ["image", "https://blossom.example/1"] in tags
+
+    def test_a_cover_outside_the_body_is_neither_uploaded_nor_rewritten(self):
+        # The review dialog lists body images only, so a cover the user
+        # never saw there must keep the URL the feed gave it. Rehosting
+        # it would put a third party's file on the user's server outside
+        # what was approved.
+        factory, created = make_factory()
+        mirror, calls = fake_image_mirror()
+        item = make_item("Pictures", guid="p1", content_html=IMAGE_HTML,
+                         image="https://a.example/cover-only.png")
+        job = make_job([item], factory=factory, image_mirror=mirror)
+        job.start()
+        assert "https://a.example/cover-only.png" not in calls
+        tags = created[0].inner_event["tags"]
+        assert ["image", "https://a.example/cover-only.png"] in tags
+
+    def test_a_cover_whose_image_failed_to_rehost_keeps_its_url(self):
+        factory, created = make_factory()
+        mirror, _calls = fake_image_mirror({
+            "https://a.example/banner.png": ("err", "no thanks"),
+        })
+        item = make_item("Pictures", guid="p1", content_html=IMAGE_HTML,
+                         image="https://a.example/banner.png")
+        job = make_job([item], factory=factory, image_mirror=mirror)
+        job.start()
+        tags = created[0].inner_event["tags"]
+        assert ["image", "https://a.example/banner.png"] in tags
+
     def test_skip_set_honoured(self):
         factory, created = make_factory()
         mirror, calls = fake_image_mirror()

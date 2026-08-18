@@ -111,7 +111,7 @@ from nostr.media.manager import AssetManager
 from nostr.metadata import AvatarLoader, ProfileMetadataFetcher
 from nostr.outbox import RelayListCache
 from nostr.profiles import Profile, ProfileStore
-from nostr.publisher import DraftDeleteJob, DraftPublishJob
+from nostr.publisher import DraftDeleteJob, DraftPublishJob, PublishedMedia
 from nostr.relay import RelayPool
 from nostr.search import Nip50SearchClient
 from nostr.ui.connect_dialog import ConnectDialog
@@ -1946,19 +1946,58 @@ class MainWindow(QMainWindow):
                     self._asset_manager.request_upload(sha)
         return False
 
-    def _publish_text(self, ed, flavor: str) -> str:
-        """Document text for a signed event, with images as real references.
+    def _publish_payload(self, ed, flavor: str) -> tuple[str, list]:
+        """Document text for a signed event, plus what its media is.
 
         toPlainText() emits U+FFFC for every image, so a published note
         used to carry an invisible placeholder where the picture was.
+
+        The media half is collected here because this walk is the only
+        place that knows which URL was written for which image, and what
+        this app measured about the bytes behind it. That is why NIP-92
+        imeta is built from these records rather than from a scan of the
+        finished content: a scan would also find third-party addresses
+        nobody here fetched and URLs the user typed as prose.
+
+        Foreign images stay foreign. One exception, and it is narrow: an
+        image this app uploaded and then saved to ``.md`` comes back as a
+        plain URL, and ``AssetManager.find_by_url`` recognises it only
+        when the address is one an upload actually produced. Nothing is
+        rewritten either way; the only effect is whether the image gets
+        described.
         """
+        records: dict = {}
+
+        def remember(asset, url: str, fmt) -> None:
+            if not url or url in records:
+                return
+            alt = str(fmt.property(QTextImageFormat.ImageAltText) or "")
+            records[url] = PublishedMedia(
+                url=url,
+                sha256=asset.sha256,
+                mime=asset.mime,
+                width=asset.width,
+                height=asset.height,
+                alt=alt or asset.alt,
+                size=asset.size,
+                servers=tuple(asset.servers),
+            )
+
         def destination(fmt) -> Optional[str]:
             name = fmt.name()
             sha = parse_asset_key(name)
             if sha is None:
-                return name if image_safety.is_portable_image_source(name) else None
+                if not image_safety.is_portable_image_source(name):
+                    return None
+                asset = self._asset_manager.find_by_url(name)
+                if asset is not None:
+                    remember(asset, name, fmt)
+                return name
             asset = self._asset_manager.get(sha)
-            return asset.remote_url if asset is not None and asset.is_uploaded else None
+            if asset is None or not asset.is_uploaded:
+                return None
+            remember(asset, asset.remote_url, fmt)
+            return asset.remote_url
 
         def as_markdown(fmt) -> Optional[str]:
             url = destination(fmt)
@@ -1974,7 +2013,12 @@ class MainWindow(QMainWindow):
             return f" {url} " if url else None
 
         target = as_markdown if flavor == "markdown" else as_note
-        return serialize_plain_with_images(ed.document(), target)
+        content = serialize_plain_with_images(ed.document(), target)
+        return content, list(records.values())
+
+    def _publish_text(self, ed, flavor: str) -> str:
+        """The content half of :meth:`_publish_payload`."""
+        return self._publish_payload(ed, flavor)[0]
 
     def _loses_content_on_save(self, ed, path: str) -> bool:
         """Whether saving to ``path`` would drop something in the document.

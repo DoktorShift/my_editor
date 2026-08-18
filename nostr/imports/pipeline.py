@@ -557,7 +557,17 @@ class ImportItemsJob(QObject):
                     f"{len(outcome.failed)} of {total} image(s) couldn't be "
                     "mirrored; originals kept."
                 )
-            self._sign_and_publish(replace(template, content=outcome.markdown))
+            # The cover follows the body only when it IS an image from
+            # the body, because that rewrite is the one the user already
+            # approved in the review dialog. A cover the user never saw
+            # in that list keeps the URL the feed gave it; rehosting it
+            # would upload a third party's file to the user's server
+            # outside what was approved.
+            self._sign_and_publish(replace(
+                template,
+                content=outcome.markdown,
+                image=outcome.mapping.get(template.image, template.image),
+            ))
 
         rehost_images(
             template.content,

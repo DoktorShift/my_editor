@@ -21,6 +21,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
+from nostr.blossom.hashes import hash_from_url
 from nostr.media.assets import (
     ASSET_SCHEME,
     CURRENT_INDEX_VERSION,
@@ -132,6 +133,56 @@ def test_acceptable_remote_url_table(url, expected):
 
 def test_acceptable_remote_url_ignores_case_of_the_hash_in_the_url():
     assert _acceptable_remote_url(f"https://cdn.example/{SHA.upper()}", SHA)
+
+
+def test_a_tokenised_url_is_accepted():
+    # A spec-compliant server may hand back a signed URL whose token is
+    # itself 64 hex characters. Reading that as the blob's name reported
+    # a successful upload as a failure.
+    url = f"https://cdn.example/{SHA}.png?token={OTHER_SHA}"
+    assert _acceptable_remote_url(url, SHA) is True
+
+
+def test_a_fragment_does_not_rename_the_blob_either():
+    assert _acceptable_remote_url(f"https://cdn.example/{SHA}#{OTHER_SHA}", SHA)
+
+
+def test_a_same_origin_url_naming_a_different_blob_is_still_rejected():
+    assert _acceptable_remote_url(f"https://cdn.example/{OTHER_SHA}", SHA) is False
+    assert _acceptable_remote_url(
+        f"https://cdn.example/{SHA}/x/{OTHER_SHA}?t={SHA}", SHA) is False
+
+
+# The six URL shapes from specs/bud-03.md lines 45 to 51, and the hash
+# the spec says each one must select.
+BUD03_HASH = "b1674191a88ec5cdd733e4240a81803105dc412d6c6708d53ab94fc248f4f553"
+BUD03_PUBKEY = "ec4425ff5e9446080d2f70440188e3ca5d6da8713db7bdeef73d0ed54d9093f0"
+BUD03_URLS = [
+    f"https://blossom.example.com/{BUD03_HASH}.pdf",
+    f"https://cdn.example.com/{BUD03_HASH}",
+    f"https://cdn.example.com/user/{BUD03_PUBKEY}/media/{BUD03_HASH}.pdf",
+    f"https://cdn.example.com/media/user-name/documents/{BUD03_HASH}.pdf",
+    f"http://download.example.com/downloads/{BUD03_HASH}",
+    f"http://media.example.com/documents/b1/67/{BUD03_HASH}.pdf",
+]
+
+
+@pytest.mark.parametrize("url", BUD03_URLS)
+def test_the_two_copies_of_the_bud03_hash_rule_agree(url):
+    """The AD-12 rule lives in two files on purpose. This pins them.
+
+    ``nostr/blossom/hashes.py`` owns the rule; ``nostr/media/assets.py``
+    repeats it so the asset layer keeps its promise to import nothing.
+    Feeding both the spec's own six URL shapes is what stops the copies
+    drifting apart, and drift here is what silently rewrote one host's
+    URL to another's.
+    """
+    assert hash_from_url(url) == BUD03_HASH
+    # Plain http is refused by the transport half of the policy, not the
+    # hash half, so all six shapes are compared over https.
+    over_https = url.replace("http://", "https://", 1)
+    assert _acceptable_remote_url(over_https, BUD03_HASH) is True
+    assert _acceptable_remote_url(over_https, OTHER_SHA) is False
 
 
 # --------------------------------------------------------------------------- #

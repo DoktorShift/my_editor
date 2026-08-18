@@ -34,6 +34,7 @@ from nostr.blossom.client import (
 )
 from nostr.blossom.errors import ERROR_CODES
 from tests.blossom_fakes import (
+    BODY,
     PUBKEY,
     SERVER,
     SHA,
@@ -66,7 +67,7 @@ def _ok_reply(payload) -> FakeReply:
 def _drive(verb, client, ok, err, *, server=SERVER):
     """Issue one request of each kind through a uniform interface."""
     if verb == "upload":
-        client.upload(server, b"abc", "image/png", auth_event(server), ok, err)
+        client.upload(server, BODY, "image/png", auth_event(server), ok, err)
     elif verb == "mirror":
         client.mirror(server, "https://src.example/i.png",
                       auth_event(server), ok, err)
@@ -115,7 +116,7 @@ def test_a_redirect_response_fails_with_a_stable_code(verb):
 def test_auth_event_for_another_server_is_never_sent():
     client, nam = _client()
     ok, err = [], []
-    client.upload(SERVER, b"abc", "image/png",
+    client.upload(SERVER, BODY, "image/png",
                   auth_event("https://evil.example"), ok.append, err.append)
     assert nam.calls == []
     assert ok == []
@@ -125,10 +126,10 @@ def test_auth_event_for_another_server_is_never_sent():
 def test_matching_host_issues_exactly_one_put():
     client, nam = _client([_ok_reply(DESCRIPTOR)])
     ok, err = [], []
-    client.upload(SERVER, b"abc", "image/png", auth_event(SERVER),
+    client.upload(SERVER, BODY, "image/png", auth_event(SERVER),
                   ok.append, err.append)
     assert [verb for verb, _r, _b in nam.calls] == ["put"]
-    assert nam.calls[0][2] == b"abc"
+    assert nam.calls[0][2] == BODY
     nam.issued[0].finish()
     assert err == []
     assert ok[0]["hash"] == SHA
@@ -141,10 +142,55 @@ def test_bare_domain_server_tag_is_accepted():
     ok, err = [], []
     event = auth_event(SERVER)
     event["tags"] = [["t", "upload"], ["server", "good.example"]]
-    client.upload(SERVER, b"abc", "image/png", event, ok.append, err.append)
+    client.upload(SERVER, BODY, "image/png", event, ok.append, err.append)
     assert len(nam.calls) == 1
     nam.issued[0].finish()
     assert err == []
+
+
+def test_full_origin_server_tag_still_accepted():
+    # Tokens minted before the BUD-11 fix carry a full origin. The
+    # reader stays tolerant so a queued upload does not break.
+    client, nam = _client([_ok_reply(DESCRIPTOR)])
+    ok, err = [], []
+    client.upload(SERVER, BODY, "image/png", auth_event(SERVER),
+                  ok.append, err.append)
+    assert len(nam.calls) == 1
+    nam.issued[0].finish()
+    assert err == []
+
+
+def test_multi_server_token_matches_any_named_host():
+    """BUD-11: "Multiple ``server`` tags may be present to allow the
+    token to be used on multiple servers", and a server validates by
+    finding its own domain in ANY of them. Reading only the first tag
+    refused a perfectly valid token."""
+    client, nam = _client([_ok_reply(DESCRIPTOR)])
+    ok, err = [], []
+    event = auth_event(SERVER)
+    event["tags"] = [
+        ["t", "upload"],
+        ["server", "other.example"],
+        ["server", "good.example"],
+    ]
+    client.upload(SERVER, BODY, "image/png", event, ok.append, err.append)
+    assert len(nam.calls) == 1
+    nam.issued[0].finish()
+    assert err == []
+
+
+def test_multi_server_token_still_refuses_an_unnamed_host():
+    client, nam = _client()
+    ok, err = [], []
+    event = auth_event(SERVER)
+    event["tags"] = [
+        ["t", "upload"],
+        ["server", "other.example"],
+        ["server", "third.example"],
+    ]
+    client.upload(SERVER, BODY, "image/png", event, ok.append, err.append)
+    assert nam.calls == []
+    assert err[0].code == ERROR_CODES.HOST_MISMATCH
 
 
 def test_missing_server_tag_skips_the_check():
@@ -181,6 +227,45 @@ def test_from_json_rewrites_an_unacceptable_url(hostile):
 def test_from_json_fills_in_a_missing_url():
     payload = {"sha256": SHA, "size": 3, "type": "image/png"}
     assert UploadResult.from_json(payload, SERVER)["url"] == f"{SERVER}/{SHA}"
+
+
+# --------------------------------------------------------------------------- #
+# The URL has to name the blob, not just come from the right host          #
+# --------------------------------------------------------------------------- #
+
+def test_a_same_origin_url_naming_another_blob_is_rewritten():
+    # Right host, wrong blob. Every client applying the BUD-03 rule would
+    # read this stored URL as the other hash, so it is replaced with the
+    # canonical address rather than kept: BUD-01 serves every endpoint
+    # from the root of the domain, so the canonical form always works.
+    payload = dict(DESCRIPTOR, url=f"{SERVER}/{'d' * 64}.png")
+    assert UploadResult.from_json(payload, SERVER)["url"] == f"{SERVER}/{SHA}"
+
+
+def test_a_tokenised_url_for_the_right_blob_is_kept():
+    # A signed or tokenised address is spec compliant, and the token can
+    # itself be 64 hex characters, so the query is not part of the check.
+    tokenised = f"{SERVER}/{SHA}.png?token={'e' * 64}"
+    payload = dict(DESCRIPTOR, url=tokenised)
+    assert UploadResult.from_json(payload, SERVER)["url"] == tokenised
+
+
+def test_a_same_origin_url_with_no_hash_in_it_is_kept():
+    # Plenty of servers address blobs by an opaque path, and refusing
+    # those would break retrieval for no gain.
+    opaque = f"{SERVER}/media/opaque-name.png"
+    payload = dict(DESCRIPTOR, url=opaque)
+    assert UploadResult.from_json(payload, SERVER)["url"] == opaque
+
+
+def test_list_entries_inherit_the_hash_check():
+    entries = [{"sha256": SHA, "url": f"{SERVER}/{'d' * 64}", "size": 1}]
+    client, nam = _client([_ok_reply(entries)])
+    ok = []
+    client.list_for_pubkey(SERVER, PUBKEY, auth_event(SERVER, "list"),
+                           ok.append, lambda *_a: None)
+    nam.issued[0].finish()
+    assert ok[0][0]["url"] == f"{SERVER}/{SHA}"
 
 
 def test_list_response_urls_are_sanitised_at_parse_time():
@@ -223,7 +308,7 @@ def test_oversized_list_body_is_aborted_mid_transfer():
 def test_announced_oversize_is_refused_before_any_bytes_arrive():
     client, nam = _client([_ok_reply(DESCRIPTOR)])
     ok, err = [], []
-    client.upload(SERVER, b"abc", "image/png", auth_event(SERVER),
+    client.upload(SERVER, BODY, "image/png", auth_event(SERVER),
                   ok.append, err.append)
     reply = nam.issued[0]
     reply.progress(0, 4 * 1024 * 1024)
@@ -236,7 +321,7 @@ def test_announced_oversize_is_refused_before_any_bytes_arrive():
 def test_a_normal_sized_response_is_not_disturbed():
     client, nam = _client([_ok_reply(DESCRIPTOR)])
     ok, err = [], []
-    client.upload(SERVER, b"abc", "image/png", auth_event(SERVER),
+    client.upload(SERVER, BODY, "image/png", auth_event(SERVER),
                   ok.append, err.append)
     reply = nam.issued[0]
     reply.progress(200, 200)

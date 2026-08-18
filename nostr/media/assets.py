@@ -194,6 +194,11 @@ def _acceptable_remote_url(url: str, sha256: str) -> bool:
     64 character hex run, the last one is the blob's hash and must be
     the hash this asset claims. A URL with no hex run is accepted
     because its origin was validated where it was parsed.
+
+    Query and fragment are excluded from that scan. A signed or
+    tokenised blob URL can carry an unrelated 64 character hex run in
+    its token, and reading that as the blob's name rejected a
+    spec-compliant server's successful upload.
     """
     if not isinstance(url, str) or not url:
         return False
@@ -211,7 +216,8 @@ def _acceptable_remote_url(url: str, sha256: str) -> bool:
             return False
     elif parts.scheme != "https":
         return False
-    runs = _HEX64_RE.findall(url.lower())
+    path_only = url.lower().split("#", 1)[0].split("?", 1)[0]
+    runs = _HEX64_RE.findall(path_only)
     if runs and runs[-1] != (sha256 or "").lower():
         return False
     return True

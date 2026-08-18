@@ -76,6 +76,7 @@ class _Window:
     _make_rmd_image_copier = MainWindow._make_rmd_image_copier
     _markdown_reference_for = MainWindow._markdown_reference_for
     _markdown_with_mapped_images = MainWindow._markdown_with_mapped_images
+    _publish_payload = MainWindow._publish_payload
     _publish_text = MainWindow._publish_text
     _unpublishable_images = MainWindow._unpublishable_images
     _has_images = MainWindow._has_images
