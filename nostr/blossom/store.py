@@ -37,6 +37,8 @@ from typing import Callable, Dict, List, Optional, Protocol, Sequence, Set
 
 from PySide6.QtCore import QObject, Signal
 
+import url_safety
+
 from ..bunker import BunkerClient, BunkerSessionPool
 from ..profiles import Profile
 from . import replicate
@@ -192,6 +194,7 @@ class MediaStore(QObject):
         settings: Optional[BlossomSettings] = None,
         client: Optional[BlossomClient] = None,
         blob_cache: Optional[BlobCache] = None,
+        entitled_servers: Optional[Callable[[], Sequence[str]]] = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -203,6 +206,11 @@ class MediaStore(QObject):
         # the network. None means no cache, which is what every caller
         # had before this seam existed.
         self._blob_cache = blob_cache
+        # Servers this account may use beyond the ones it configured, such
+        # as one that comes with an association membership. Resolved on
+        # each call because entitlement can change while the app is open.
+        # This module knows nothing about what grants it.
+        self._entitled_servers = entitled_servers
 
         self._files: Dict[str, MediaFile] = {}
         self._last_fetch_at: float = 0.0
@@ -284,7 +292,7 @@ class MediaStore(QObject):
         if not force and (time.monotonic() - self._last_fetch_at) < _FETCH_FRESHNESS_SECONDS:
             return
 
-        servers = list(self._settings.configured_servers)
+        servers = self._target_servers()
         if not servers:
             return
 
@@ -521,7 +529,7 @@ class MediaStore(QObject):
             self.upload_failed.emit(name, "Nothing to upload.")
             return
 
-        servers = list(self._settings.configured_servers)
+        servers = self._target_servers()
         if not servers:
             self.upload_failed.emit(name, "No Blossom servers configured.")
             return
@@ -564,6 +572,32 @@ class MediaStore(QObject):
                 configured_primary=configured_primary,
             ),
         )
+
+    def _target_servers(self) -> List[str]:
+        """Configured servers, followed by any this account is entitled to.
+
+        Entitled servers are appended, never promoted. A benefit must not
+        quietly become the primary and start receiving a user's uploads
+        ahead of the server they chose themselves. Appending also means
+        losing the entitlement costs nothing already stored elsewhere.
+
+        Used for retrieval as well as upload, so media already sitting on
+        an entitled server is listed rather than looking lost.
+        """
+        servers = list(self._settings.configured_servers)
+        if self._entitled_servers is None:
+            return servers
+        try:
+            extra = list(self._entitled_servers() or ())
+        except Exception:  # noqa: BLE001, an entitlement lookup must never
+            return servers  # take the media library down with it
+        seen = {url_safety.origin_of(s) for s in servers}
+        for url in extra:
+            origin = url_safety.origin_of(url)
+            if origin and origin not in seen and url_safety.is_safe_media_url(origin):
+                seen.add(origin)
+                servers.append(origin)
+        return servers
 
     def _seed_cache(self, body: bytes) -> None:
         """Keep the bytes locally before they are sent anywhere.

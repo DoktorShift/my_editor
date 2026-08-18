@@ -11,7 +11,7 @@ collapsible **Advanced** section that stays out of the way until needed.
 from __future__ import annotations
 
 import time
-from typing import List, Optional
+from typing import Callable, List, Optional, Sequence
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPixmap
@@ -57,7 +57,7 @@ _WPM_READ_SPEED: int = 200
 
 
 # --------------------------------------------------------------------------- #
-# Stylesheets — palette pulled from widgets.py / editor.py                    #
+# Stylesheets: palette pulled from widgets.py / editor.py                    #
 # --------------------------------------------------------------------------- #
 
 _DARK_CSS = """
@@ -321,6 +321,7 @@ class PublishArticleDialog(QDialog):
         relay_pool: RelayPool,
         relay_list_cache: RelayListCache,
         session_pool: BunkerSessionPool,
+        entitled_relays: Optional[Callable[[], Sequence[str]]] = None,
         known_people: KnownPeople,
         search_client: Nip50SearchClient,
         avatars: AvatarStore,
@@ -340,6 +341,9 @@ class PublishArticleDialog(QDialog):
         self._relay_pool = relay_pool
         self._relay_list_cache = relay_list_cache
         self._session_pool = session_pool
+        # Relays this account has standing on beyond its own list, resolved
+        # when the publish actually happens rather than at dialog open.
+        self._entitled_relays = entitled_relays
         self._known_people = known_people
         self._search_client = search_client
         self._avatars = avatars
@@ -440,8 +444,8 @@ class PublishArticleDialog(QDialog):
         self._advanced_toggle.clicked.connect(self._toggle_advanced)
         root.addWidget(self._advanced_toggle)
 
-        # The Advanced panel stacks two rows so the cover-image block —
-        # which is taller than a single-line field — gets its own
+        # The Advanced panel stacks two rows so the cover-image block,
+        # which is taller than a single-line field, gets its own
         # horizontal slot instead of stretching the siblings around it.
         #   Row 1:  Slug · Hashtags          (equal-weight compact fields)
         #   Row 2:  Cover image              (URL + button, then thumb)
@@ -542,7 +546,7 @@ class PublishArticleDialog(QDialog):
 
     # -- cover image -------------------------------------------------------
 
-    # Compact landscape thumb — large enough to read at a glance, small
+    # Compact landscape thumb, large enough to read at a glance, small
     # enough that the cover block sits at the same visual weight as the
     # slug + hashtags row above it.
     _COVER_THUMB_WIDTH = 144
@@ -556,7 +560,7 @@ class PublishArticleDialog(QDialog):
 
         The thumbnail is on the left so the user's eye lands on the
         actual image first; the controls cluster on the right. Alt
-        text is intentionally absent — NIP-23's ``image`` tag has no
+        text is intentionally absent: NIP-23's ``image`` tag has no
         alt sibling.
         """
         container = QWidget()
@@ -592,7 +596,7 @@ class PublishArticleDialog(QDialog):
         else:
             self._image_pick_btn = None
         controls.addLayout(input_row)
-        # Subtle help line under the input — Notion / Medium do something
+        # Subtle help line under the input, since Notion / Medium do something
         # similar so users know where the asset comes from without us
         # having to write docs.
         hint = QLabel(
@@ -620,7 +624,7 @@ class PublishArticleDialog(QDialog):
             parent=self,
         )
         picker.setWindowTitle("Choose hero image")
-        # Pre-filter to images — videos / audio can't be a NIP-23 cover.
+        # Pre-filter to images: videos / audio can't be a NIP-23 cover.
         picker._filter_combo.setCurrentIndex(1)
         picker.file_picked.connect(self._on_cover_image_picked)
         picker.exec()
@@ -642,7 +646,7 @@ class PublishArticleDialog(QDialog):
         if not text.strip():
             self._clear_cover_preview("No cover\nselected")
         elif not self._cover_thumb_hash:
-            # Manual entry — we have no hash, so no thumbnail. Make the
+            # Manual entry, so we have no hash, so no thumbnail. Make the
             # preview state honest rather than misleading.
             self._clear_cover_preview("Preview shown\nfor library picks")
 
@@ -801,6 +805,8 @@ class PublishArticleDialog(QDialog):
             relay_list_cache=self._relay_list_cache,
             session_pool=self._session_pool,
             profile=self._current_profile,
+            entitled_relays=list(self._entitled_relays() or ())
+            if self._entitled_relays else (),
             unsigned_event=unsigned,
             parent=self,
         )

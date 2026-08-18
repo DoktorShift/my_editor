@@ -102,7 +102,8 @@ class Ctx:
 
 
 def make_store(tmp_path, *, servers=(SERVER,), replies=None, responder=None,
-               signer=None, pool_error=None, profile=True, blob_cache=None):
+               signer=None, pool_error=None, profile=True, blob_cache=None,
+               entitled_servers=None):
     settings = BlossomSettings(tmp_path / "blossom_servers.json")
     settings.set_custom_servers(list(servers))
     nam = FakeNam(replies, responder=responder)
@@ -114,6 +115,7 @@ def make_store(tmp_path, *, servers=(SERVER,), replies=None, responder=None,
         settings=settings,
         client=BlossomClient(nam=nam),
         blob_cache=blob_cache,
+        entitled_servers=entitled_servers,
     )
     return Ctx(store, nam, pool, signer, settings)
 
@@ -712,3 +714,61 @@ def test_a_store_without_a_cache_still_uploads(tmp_path):
     ctx.settle()
     assert ctx.failures == []
     assert ctx.finished[0][1].hash == SHA
+
+
+# --------------------------------------------------------------------------- #
+# Servers this account is entitled to beyond the ones it configured
+# --------------------------------------------------------------------------- #
+
+E21 = "https://blossom.einundzwanzig.space"
+
+
+def test_an_entitled_server_is_added_to_the_targets(tmp_path):
+    ctx = make_store(tmp_path, entitled_servers=lambda: [E21])
+    assert ctx.store._target_servers() == [SERVER, E21]
+
+
+def test_an_entitled_server_never_becomes_the_primary(tmp_path):
+    # A benefit must not quietly start receiving uploads ahead of the
+    # server the user chose for themselves.
+    ctx = make_store(tmp_path, entitled_servers=lambda: [E21])
+    assert ctx.store._target_servers()[0] == SERVER
+
+
+def test_no_entitlement_leaves_the_targets_exactly_as_configured(tmp_path):
+    ctx = make_store(tmp_path)
+    assert ctx.store._target_servers() == [SERVER]
+    empty = make_store(tmp_path, entitled_servers=lambda: [])
+    assert empty.store._target_servers() == [SERVER]
+
+
+def test_an_already_configured_entitled_server_is_not_duplicated(tmp_path):
+    ctx = make_store(tmp_path, servers=(SERVER, E21), entitled_servers=lambda: [E21 + "/"])
+    assert ctx.store._target_servers() == [SERVER, E21]
+
+
+def test_an_unusable_entitled_url_is_refused(tmp_path):
+    ctx = make_store(tmp_path, entitled_servers=lambda: [
+        "http://not-loopback.example", "file:///etc/passwd", "", "notaurl",
+    ])
+    assert ctx.store._target_servers() == [SERVER]
+
+
+def test_a_failing_entitlement_lookup_does_not_break_the_library(tmp_path):
+    # Losing a benefit is a small annoyance; losing the media library
+    # because a membership check raised would not be.
+    def boom():
+        raise RuntimeError("roster unavailable")
+    ctx = make_store(tmp_path, entitled_servers=boom)
+    assert ctx.store._target_servers() == [SERVER]
+
+
+def test_entitlement_is_resolved_per_call_not_cached(tmp_path):
+    # Membership can be resolved after the store is built, so a value
+    # captured at construction would leave a member without the benefit
+    # for the rest of the session.
+    state = {"servers": []}
+    ctx = make_store(tmp_path, entitled_servers=lambda: state["servers"])
+    assert ctx.store._target_servers() == [SERVER]
+    state["servers"] = [E21]
+    assert ctx.store._target_servers() == [SERVER, E21]

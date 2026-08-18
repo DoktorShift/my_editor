@@ -476,6 +476,7 @@ class PublishJob(QObject):
         session_pool: BunkerSessionPool,
         profile: Profile,
         unsigned_event: dict,
+        entitled_relays: Sequence[str] = (),
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -486,6 +487,8 @@ class PublishJob(QObject):
         self._relay_pool = relay_pool
         self._relay_list_cache = relay_list_cache
         self._session_pool = session_pool
+        # Relays this account has standing on beyond its own list.
+        self._entitled_relays = list(entitled_relays)
         self._profile = profile
         self._unsigned = unsigned_event
 
@@ -504,7 +507,9 @@ class PublishJob(QObject):
     # -- pipeline ----------------------------------------------------------
 
     def _on_relay_list_resolved(self, relay_list) -> None:
-        publish_relays = select_publish_relays(relay_list.write)
+        publish_relays = select_publish_relays(
+            relay_list.write, entitled=self._entitled_relays,
+        )
         self.status_changed.emit("Connecting to your signer…")
         self._session_pool.get(
             self._profile,
@@ -593,6 +598,7 @@ class DraftPublishJob(QObject):
         identifier: str,
         expiration_seconds: int = DEFAULT_EXPIRATION_SECONDS,
         extra_wrap_tags: Optional[List[List[str]]] = None,
+        entitled_relays: Sequence[str] = (),
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -605,6 +611,8 @@ class DraftPublishJob(QObject):
         self._relay_pool = relay_pool
         self._relay_list_cache = relay_list_cache
         self._session_pool = session_pool
+        # Relays this account has standing on beyond its own list.
+        self._entitled_relays = list(entitled_relays)
         self._profile = profile
         self._inner_event = inner_event
         self._identifier = identifier
@@ -647,6 +655,7 @@ class DraftPublishJob(QObject):
         publish_relays = select_draft_publish_relays(
             relay_list,
             bunker_relays=self._profile.bunker_relays,
+            entitled=self._entitled_relays,
         )
         self._emit_status("Connecting to your signer…")
         self._session_pool.get(
@@ -776,6 +785,7 @@ class DraftDeleteJob(QObject):
         profile: Profile,
         identifier: str,
         inner_kind: int,
+        entitled_relays: Sequence[str] = (),
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -789,6 +799,8 @@ class DraftDeleteJob(QObject):
         self._relay_pool = relay_pool
         self._relay_list_cache = relay_list_cache
         self._session_pool = session_pool
+        # Relays this account has standing on beyond its own list.
+        self._entitled_relays = list(entitled_relays)
         self._profile = profile
         self._identifier = identifier
         self._inner_kind = inner_kind
@@ -825,6 +837,7 @@ class DraftDeleteJob(QObject):
         publish_relays = select_draft_publish_relays(
             relay_list,
             bunker_relays=self._profile.bunker_relays,
+            entitled=self._entitled_relays,
         )
         self._session_pool.get(
             self._profile,

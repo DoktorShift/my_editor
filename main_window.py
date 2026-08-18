@@ -117,6 +117,7 @@ from nostr.search import Nip50SearchClient
 from nostr.ui.connect_dialog import ConnectDialog
 from nostr.ui.draft_conflict_banner import DraftConflictBanner
 from nostr.ui.drafts_panel import DEFAULT_PANEL_WIDTH, DraftsPanel
+from nostr.einundzwanzig import NO_BENEFITS, Benefits, MembershipDirectory
 from nostr.ui.media_library_dialog import MediaLibraryDialog
 from nostr.ui.publish_article_dialog import PublishArticleDialog
 from nostr.ui.publish_note_dialog import PublishNoteDialog
@@ -382,10 +383,19 @@ class MainWindow(QMainWindow):
         # auth event through the existing bunker pool. It seeds the same
         # cache on the way out, so an upload never has to be downloaded
         # back to be shown.
+        # Association membership, which grants a relay and a media server.
+        # Resolved in the background; until it answers the account simply
+        # has no benefits, which is the same state as not being a member.
+        self._membership = MembershipDirectory(parent=self)
+        self._membership.resolved.connect(self._on_membership_resolved)
+        # An account that was already signed in when the app opened never
+        # passes through the connect flow, so resolve it here too.
+        self._refresh_membership(self._profile_store.default())
         self._media_store = MediaStore(
             session_pool=self._session_pool,
             profile_provider=lambda: self._profile_store.default(),
             blob_cache=self._media_image_loader,
+            entitled_servers=self._entitled_blossom_servers,
             parent=self,
         )
         # The one object the editor side talks to about images. Every
@@ -3455,9 +3465,48 @@ class MainWindow(QMainWindow):
         dialog.profile_connected.connect(self._on_nostr_profile_connected)
         dialog.exec()
 
+    # -- association membership --------------------------------------------
+
+    def _active_benefits(self) -> Benefits:
+        """What the active profile is entitled to, as far as we know.
+
+        An unresolved membership yields no benefits rather than blocking,
+        so nothing in the app ever waits on a third-party host.
+        """
+        profile = self._profile_store.default()
+        if profile is None:
+            return NO_BENEFITS
+        return self._membership.cached_benefits(profile.user_pubkey) or NO_BENEFITS
+
+    def _entitled_relays(self) -> list:
+        relay = self._active_benefits().relay
+        return [relay] if relay else []
+
+    def _entitled_blossom_servers(self) -> list:
+        server = self._active_benefits().blossom_server
+        return [server] if server else []
+
+    def _refresh_membership(self, profile: Optional[Profile]) -> None:
+        if profile is not None:
+            self._membership.resolve(profile.user_pubkey)
+
+    def _on_membership_resolved(self, pubkey: str, is_member: bool) -> None:
+        # The media library reads its targets on each call, so a member
+        # who resolves after startup still gets the server without a
+        # restart. Nothing is written to the user's configuration.
+        active = self._profile_store.default()
+        if active is None or active.user_pubkey.lower() != pubkey.lower():
+            return
+        if is_member:
+            self.status.showMessage(
+                "Einundzwanzig membership recognised. Your association relay "
+                "and media server are available.", 6000,
+            )
+
     def _on_nostr_profile_connected(self, profile: Profile):
         # New (or re-connected) profile becomes the active one.
         self._profile_store.set_default(profile.user_pubkey)
+        self._refresh_membership(profile)
         self._update_profile_chip()
         self._refresh_profile_chip_menu()
         self.status.showMessage(
@@ -3477,6 +3526,7 @@ class MainWindow(QMainWindow):
 
     def _on_nostr_select_profile(self, profile: Profile):
         self._profile_store.set_default(profile.user_pubkey)
+        self._refresh_membership(profile)
         self._update_profile_chip()
         self._refresh_profile_chip_menu()
         # Switching identities - re-point the draft sync at the new
@@ -3582,6 +3632,7 @@ class MainWindow(QMainWindow):
             relay_pool=self._relay_pool,
             relay_list_cache=self._relay_list_cache,
             session_pool=self._session_pool,
+            entitled_relays=self._entitled_relays,
             known_people=self._known_people,
             search_client=self._search_client,
             avatars=self._avatars,
@@ -3654,6 +3705,7 @@ class MainWindow(QMainWindow):
             relay_pool=self._relay_pool,
             relay_list_cache=self._relay_list_cache,
             session_pool=self._session_pool,
+            entitled_relays=self._entitled_relays,
             known_people=self._known_people,
             search_client=self._search_client,
             avatars=self._avatars,
@@ -4071,6 +4123,7 @@ class MainWindow(QMainWindow):
                 relay_pool=self._relay_pool,
                 relay_list_cache=self._relay_list_cache,
                 session_pool=self._session_pool,
+            entitled_relays=self._entitled_relays(),
                 profile=profile,
                 identifier=identifier,
                 inner_kind=inner_kind,
@@ -4342,6 +4395,7 @@ class MainWindow(QMainWindow):
             relay_pool=self._relay_pool,
             relay_list_cache=self._relay_list_cache,
             session_pool=self._session_pool,
+            entitled_relays=self._entitled_relays(),
             profile=profile,
             inner_event=inner,
             identifier=choice.identifier,
