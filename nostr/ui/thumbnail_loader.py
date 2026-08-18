@@ -61,6 +61,15 @@ class ThumbnailLoader(QObject):
     ready = Signal(str, str, object)   # sha256, local_path, QPixmap
     failed = Signal(str, str)          # sha256, reason
 
+    # A NIP-23 ``image`` tag is a bare URL with no hash, so the API
+    # above cannot resolve it: it is keyed by content hash and verifies
+    # the bytes against the caller's sha256. These two carry the URL
+    # instead. Separate signals rather than reusing the pair above, so
+    # no existing listener, all of which match on a known sha, ever sees
+    # a payload it cannot interpret.
+    url_ready = Signal(str, str, object)   # url, sha256, QPixmap
+    url_failed = Signal(str, str)          # url, reason
+
     def __init__(
         self,
         parent: Optional[QObject] = None,
@@ -76,6 +85,11 @@ class ThumbnailLoader(QObject):
         _chmod(self._cache_dir, 0o700)
         self._nam = nam or QNetworkAccessManager(self)
         self._inflight: Dict[str, QNetworkReply] = {}
+        self._inflight_urls: Dict[str, QNetworkReply] = {}
+        # url → sha256, learned from a completed download, so a repeat
+        # request is served from the content-addressed cache with no
+        # network at all.
+        self._url_sha: Dict[str, str] = {}
 
     def cache_path(self, sha256: str) -> Path:
         return self._cache_dir / sha256.lower()
@@ -132,6 +146,59 @@ class ThumbnailLoader(QObject):
         if not url_safety.is_safe_media_url(url):
             self.failed.emit(sha, _UNSAFE_URL_REASON)
             return
+        reply, oversize = self._start(url)
+        self._inflight[sha] = reply
+        reply.finished.connect(
+            lambda s=sha, r=reply, p=path, u=url: self._on_reply(
+                s, r, p, oversize, u)
+        )
+
+    def load_url(self, url: str) -> None:
+        """Resolve an image whose bytes are not known in advance.
+
+        Everything ``load`` guards against is guarded against here, and
+        by the same code: the pre-request policy check, the no-less-safe
+        redirect policy and its hop limit, the re-validation of the
+        final URL after redirects, the mid-flight size abort, and the
+        decode allowlist. The one difference is that the sha256 is
+        *computed from the bytes* rather than compared to one the caller
+        already knew, because a NIP-23 ``image`` tag carries no hash.
+
+        Callers are expected to apply their own, tighter gate first. The
+        media policy accepts plain http on loopback so a local Blossom
+        dev server works, and a URL that arrived inside someone else's
+        content should never reach the user's own machine.
+        """
+        sha = self._url_sha.get(url, "")
+        if sha:
+            path = self.cache_path(sha)
+            if path.is_file():
+                try:
+                    data = path.read_bytes()
+                except OSError:
+                    data = b""
+                if data and hashlib.sha256(data).hexdigest() == sha:
+                    image = decode_image_bytes(data)
+                    if image is None:
+                        self.url_failed.emit(url, "not an image")
+                    else:
+                        self.url_ready.emit(url, sha, QPixmap.fromImage(image))
+                    return
+        if url in self._inflight_urls:
+            return
+        if not url_safety.is_safe_media_url(url):
+            self.url_failed.emit(url, _UNSAFE_URL_REASON)
+            return
+        reply, oversize = self._start(url)
+        self._inflight_urls[url] = reply
+        reply.finished.connect(
+            lambda r=reply, u=url: self._on_url_reply(u, r, oversize)
+        )
+
+    # -- shared request plumbing ------------------------------------------
+
+    def _start(self, url: str):
+        """Issue the GET both entry points use, with the same guards."""
         request = QNetworkRequest(QUrl(url))
         request.setRawHeader(b"User-Agent", b"my-editor-blossom-thumb/1")
         request.setTransferTimeout(_HTTP_TIMEOUT_MS)
@@ -141,7 +208,6 @@ class ThumbnailLoader(QObject):
         )
         request.setMaximumRedirectsAllowed(_MAX_REDIRECTS)
         reply = self._nam.get(request)
-        self._inflight[sha] = reply
         oversize = {"hit": False}
 
         def _size_guard(received: int, total: int, r=reply) -> None:
@@ -154,10 +220,30 @@ class ThumbnailLoader(QObject):
                 r.abort()
 
         reply.downloadProgress.connect(_size_guard)
-        reply.finished.connect(
-            lambda s=sha, r=reply, p=path, u=url: self._on_reply(
-                s, r, p, oversize, u)
-        )
+        return reply, oversize
+
+    def _settled_bytes(self, reply, oversize: dict, requested_url: str):
+        """``(data, reason)``: the body, or why it may not be read.
+
+        One copy of the response boundary, shared by both entry points,
+        so a fix to any of these checks cannot land on one and miss the
+        other.
+        """
+        if oversize["hit"]:
+            return b"", "blob exceeds cache limit"
+        if reply.error() != QNetworkReply.NoError:
+            return b"", reply.errorString() or "network error"
+        # Redirects were followed, so the bytes may come from an origin
+        # the caller never named; validate where they came from before
+        # reading them.
+        if not _final_url_allowed(requested_url, reply.url().toString()):
+            return b"", _UNSAFE_URL_REASON
+        data = bytes(reply.readAll())
+        if not data:
+            return b"", "empty response"
+        if len(data) > _MAX_DOWNLOAD_BYTES:
+            return b"", "blob exceeds cache limit"
+        return data, ""
 
     def _on_reply(
         self,
@@ -169,24 +255,9 @@ class ThumbnailLoader(QObject):
     ) -> None:
         self._inflight.pop(sha, None)
         try:
-            if oversize["hit"]:
-                self.failed.emit(sha, "blob exceeds cache limit")
-                return
-            if reply.error() != QNetworkReply.NoError:
-                self.failed.emit(sha, reply.errorString() or "network error")
-                return
-            # Redirects were followed, so the bytes may come from an
-            # origin the caller never named; validate where they came
-            # from before reading them.
-            if not _final_url_allowed(requested_url, reply.url().toString()):
-                self.failed.emit(sha, _UNSAFE_URL_REASON)
-                return
-            data = bytes(reply.readAll())
-            if not data:
-                self.failed.emit(sha, "empty response")
-                return
-            if len(data) > _MAX_DOWNLOAD_BYTES:
-                self.failed.emit(sha, "blob exceeds cache limit")
+            data, reason = self._settled_bytes(reply, oversize, requested_url)
+            if reason:
+                self.failed.emit(sha, reason)
                 return
             # Validate the bytes match the hash before trusting them.
             actual = hashlib.sha256(data).hexdigest()
@@ -209,6 +280,30 @@ class ThumbnailLoader(QObject):
             except OSError:
                 pass
             self.ready.emit(sha, str(path), QPixmap.fromImage(image))
+        finally:
+            reply.deleteLater()
+
+    def _on_url_reply(self, url: str, reply: QNetworkReply, oversize: dict) -> None:
+        self._inflight_urls.pop(url, None)
+        try:
+            data, reason = self._settled_bytes(reply, oversize, url)
+            if reason:
+                self.url_failed.emit(url, reason)
+                return
+            sha = hashlib.sha256(data).hexdigest()
+            image = decode_image_bytes(data)
+            # Cached either way, and the url → sha mapping recorded
+            # either way, so a refusal is remembered as cheaply as a
+            # success and neither is re-downloaded.
+            try:
+                _write_cache_file(self.cache_path(sha), data)
+            except OSError:
+                pass
+            self._url_sha[url] = sha
+            if image is None:
+                self.url_failed.emit(url, "not an image")
+                return
+            self.url_ready.emit(url, sha, QPixmap.fromImage(image))
         finally:
             reply.deleteLater()
 

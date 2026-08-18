@@ -1206,6 +1206,10 @@ class MainWindow(QMainWindow):
 
         self._drafts_panel = DraftsPanel(is_dark=self.is_dark_theme)
         self._drafts_panel.bind_store(self._draft_store)
+        # The hover preview's hero images go through the loader the app
+        # already owns, so there is one cache, one URL policy and one
+        # place where an image request can be made.
+        self._drafts_panel.set_preview_image_loader(self._media_image_loader)
         self._drafts_panel.feeds.bind_runtime(
             relay_pool=self._relay_pool,
             relay_list_cache=self._relay_list_cache,

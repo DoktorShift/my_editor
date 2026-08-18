@@ -67,14 +67,12 @@ from __future__ import annotations
 
 import time
 from typing import NamedTuple, Optional, Tuple
-from urllib.parse import urlparse
 
 from PySide6.QtCore import QEvent, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QAction,
     QColor,
     QFont,
-    QFontInfo,
     QFontMetrics,
     QKeySequence,
     QPainter,
@@ -103,23 +101,25 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from constants import (
-    DARK_BG,
-    DARK_BORDER,
-    DARK_FG,
-    DARK_MENU_BG,
-    DARK_MENU_FG,
-    DARK_MUTED_FG,
-    DARK_SELECTION,
-    LIGHT_BG,
-    LIGHT_BORDER,
-    LIGHT_FG,
-    LIGHT_MUTED_FG,
-    LIGHT_SELECTION,
-)
-
 from ..draft_store import DraftRecord, DraftState, DraftStore
 from ..profiles import Profile
+# Colour, type and record-to-words live in ``drafts_common`` because the
+# preview popover needs the same three things and cannot import this
+# module back: the panel is what builds the preview's controller. The
+# aliases keep the panel's own body, and its tests, reading as before.
+from .drafts_common import (
+    MIN_CONTROL_PX as _MIN_CONTROL_PX,
+    THEME_TOKENS as _THEME_TOKENS,
+    format_absolute_time as _format_absolute_time,
+    secondary_font as _secondary_font,
+    source_host as _source_host,
+    title_font as _title_font,
+)
+from .drafts_preview import (
+    PreviewController,
+    preview_announcement,
+    preview_is_eligible,
+)
 from .feeds_panel import FeedsPanel
 
 
@@ -145,88 +145,10 @@ _ROW_INLINE_GAP: int = 8
 # state."
 _SELECTION_BAR_W: int = 3
 
-# A source URL reduced to its host still has to fit beside a preview on
-# a 260 px line, so a pathological one is capped rather than elided into
-# eating the whole line.
-_MAX_SOURCE_CHARS: int = 28
-
 # How long a one-off sync narration holds the status line once the store
 # is no longer loading. Matches the main window's own transient status
 # messages, and lets the line fall back to naming the account.
 _SYNC_MESSAGE_TTL_MS: int = 6_000
-
-
-# --------------------------------------------------------------------------- #
-# Theme tokens                                                                #
-# --------------------------------------------------------------------------- #
-
-# One table per theme, and one QSS template below fed from it. The panel
-# used to carry two hand-maintained stylesheets with about sixty literal
-# hexes between them, which is exactly how the two themes drifted apart:
-# five text pairs failed the 4.5:1 minimum in light and four in dark, and
-# fixing one meant hunting for its twin in the other sheet. Now a
-# contrast fix is a single edit here.
-#
-# App-wide colours come from ``constants.py``, the same single source of
-# truth ``theme.py`` uses. Only roles with no app-wide token stay
-# literal, and each literal appears exactly once.
-#
-# ``accessibility.md``: "Text size / Text weight / Minimum contrast ratio
-# / Up to 17 pts / All / 4.5:1", and "If your app supports Dark Mode,
-# make sure to check the minimum contrast in both light and dark
-# appearances." Every text pair below clears 4.5:1 on the list
-# background, on the hover fill and on the selection fill, in both
-# themes. Disabled text sits deliberately below it so it still reads as
-# unavailable (``labels.md``: "Tertiary label: Text that describes an
-# unavailable item or behavior") but is legible rather than invisible.
-_THEME_TOKENS = {
-    True: {
-        "panel_bg": DARK_BG,               # list surface and field fill
-        "chrome_bg": DARK_MENU_BG,          # the two bands above the list
-        "border": DARK_BORDER,
-        "chrome_fg": DARK_MENU_FG,
-        "field_fg": DARK_FG,
-        "muted": DARK_MUTED_FG,             # 5.15 list / 4.68 hover / 4.74 chrome
-        "disabled": "#7A7A7A",
-        "row_fg": "#FFFFFF",
-        # Was #2A2D2E, which put the repo's muted grey at a marginal
-        # 4.29:1. The fill is ours to choose and the token is not, so
-        # the fill moved and the token stayed.
-        "hover_bg": "#262626",
-        "control_hover_bg": DARK_BORDER,
-        "control_pressed_bg": DARK_BG,
-        "selected_bg": "#094771",
-        "selected_fg": "#FFFFFF",
-        "selected_muted": "#C9D9E5",        # 6.76 on the selection fill
-        "accent": "#007ACC",                # focus ring
-        # The selection bar sits on top of the selection fill, so it is
-        # not the accent: #007ACC on #094771 is 2.16:1 and the shape cue
-        # disappears exactly where it has to be legible. 3.82:1 here.
-        "selection_bar": "#4DA6FF",
-        "text_selection_bg": DARK_SELECTION,
-        "error_fg": "#F48771",
-    },
-    False: {
-        "panel_bg": LIGHT_BG,
-        "chrome_bg": "#F8F8F8",
-        "border": LIGHT_BORDER,
-        "chrome_fg": LIGHT_FG,
-        "field_fg": LIGHT_FG,
-        "muted": LIGHT_MUTED_FG,            # 5.17 list / 4.66 hover / 4.87 chrome
-        "disabled": "#8A8A8A",
-        "row_fg": "#1A1A1A",
-        "hover_bg": "#F3F3F3",
-        "control_hover_bg": LIGHT_BORDER,
-        "control_pressed_bg": "#D0D0D0",
-        "selected_bg": "#DCEEFA",
-        "selected_fg": "#1A1A1A",
-        "selected_muted": "#565656",        # 6.17 on the selection fill
-        "accent": "#0078D4",
-        "selection_bar": "#0F5FA8",         # 5.48 on the selection fill
-        "text_selection_bg": LIGHT_SELECTION,
-        "error_fg": "#C8412A",
-    },
-}
 
 
 def _panel_css(is_dark: bool) -> str:
@@ -382,56 +304,12 @@ QMenu::separator {{ height: 1px; background: {t["border"]}; margin: 4px 0px; }}
 # Type scale and derived geometry                                             #
 # --------------------------------------------------------------------------- #
 
-# ``accessibility.md`` platform tables: type is "macOS 13 pt 10 pt"
-# (default, minimum) and controls are "macOS 28x28 pt 20x20 pt". The
-# 44x44 figure in ``buttons.md`` is the cross-platform fingertip rule;
-# for a mouse-driven desktop side panel the macOS row governs.
-_MIN_TEXT_PT: float = 10.0
-_MIN_CONTROL_PX: int = 28
-
 # The age column is sized from the widest thing it can ever hold, so it
 # never clips and never changes width from row to row. "just now" is
 # rendered "now" for the same reason: it was the one string wide enough
 # to give a freshly saved draft a different column width from every
 # other row.
 _AGE_SAMPLES: Tuple[str, ...] = ("now", "59m", "23h", "29d", "11mo", "99y")
-
-
-def _app_point_size() -> float:
-    """The application font size in points, whatever unit it was set in."""
-    font = QApplication.font()
-    size = font.pointSizeF()
-    if size <= 0:
-        # Set in pixels. QFontInfo reports what the platform actually
-        # resolved, in points.
-        size = float(QFontInfo(font).pointSizeF())
-    return size if size > 0 else 13.0
-
-
-def _title_font() -> QFont:
-    """The row title: application size, heavier weight.
-
-    Weight only. A QSS ``font-weight: 600`` survives a Python-set font,
-    but a QSS ``font-size`` would pin the row while the rest of the app
-    scaled, so the size is inherited from the application font here.
-    """
-    font = QFont(QApplication.font())
-    font.setWeight(QFont.DemiBold)
-    return font
-
-
-def _secondary_font() -> QFont:
-    """The age and meta line: one point below the title, clamped.
-
-    Clamped at both ends. The floor honours the macOS 10 pt minimum. The
-    ceiling stops the secondary text overtaking the title on a machine
-    whose base font is already at or below 10 pt, where the hierarchy
-    then rests on weight and colour, which is enough.
-    """
-    font = QFont(QApplication.font())
-    app_pt = _app_point_size()
-    font.setPointSizeF(min(max(_MIN_TEXT_PT, app_pt - 1.0), app_pt))
-    return font
 
 
 class _RowMetrics(NamedTuple):
@@ -515,61 +393,6 @@ def _format_relative_time(ts: int, *, now: Optional[int] = None) -> str:
     return f"{delta // (86_400 * 365)}y"
 
 
-def _format_absolute_time(ts: int) -> str:
-    """The exact save time, in words, for tooltips and screen readers.
-
-    It was previously unavailable to every user by any means.
-    """
-    if ts <= 0:
-        return ""
-    try:
-        return time.strftime("%d %B %Y at %H:%M", time.localtime(int(ts)))
-    except (ValueError, OverflowError, OSError):
-        return ""
-
-
-def _imported_source(record: DraftRecord) -> str:
-    """The origin feed/file of an imported draft, or '' for authored ones.
-
-    The importer writes a ``source`` tag on the inner event; it only
-    becomes visible here after decryption.
-    """
-    for tag in record.inner_tags or []:
-        if isinstance(tag, list) and len(tag) >= 2 and tag[0] == "source":
-            return str(tag[1])
-    return ""
-
-
-def _source_host(record: DraftRecord) -> str:
-    """The origin of an imported draft, reduced to something row-sized.
-
-    Replaces the fixed-width "Imported" pill, which read the same on 54
-    of 54 rows in a real library and so discriminated nothing while
-    costing 61 px of the title column. The host does discriminate, and
-    it costs line 1 nothing.
-    """
-    raw = _imported_source(record)
-    if not raw:
-        return ""
-    parsed = urlparse(raw)
-    if parsed.netloc:
-        host = parsed.netloc.rsplit("@", 1)[-1].split(":")[0]
-        if host.startswith("www."):
-            host = host[4:]
-    else:
-        # Not a URL. A file import writes the file name here, and a
-        # Windows path must not be mistaken for a scheme plus a host.
-        host = raw.replace("\\", "/").rsplit("/", 1)[-1] or raw
-    if len(host) <= _MAX_SOURCE_CHARS:
-        return host
-    # Elide in the middle, not at the end. A host is identified by its
-    # tail, so cutting "some-very-long-name.example.org" to
-    # "some-very-long-name.example." throws away the informative half.
-    keep = _MAX_SOURCE_CHARS - 1
-    head = keep // 2
-    return f"{host[:head]}…{host[head - keep:]}"
-
-
 # Row state as a stylesheet property. Set from one mapping rather than a
 # boolean OR: LOADING and FAILED used to share a single ``failed`` flag,
 # so a draft mid-decryption rendered identically to one that could not be
@@ -610,7 +433,7 @@ def _display_meta(record: DraftRecord) -> str:
     return host or preview
 
 
-def _accessible_row_text(record: DraftRecord) -> str:
+def _accessible_row_text(record: DraftRecord, *, now: Optional[int] = None) -> str:
     """What a screen reader announces for one row.
 
     The visible row lives in a ``setItemWidget`` widget that the
@@ -620,6 +443,14 @@ def _accessible_row_text(record: DraftRecord) -> str:
     ``accessibility.md``: "Describe your app's interface and content for
     VoiceOver... VoiceOver is a screen reader that lets people
     experience your app's interface without needing to see the screen."
+
+    The reading time, the hashtags and an imminent expiry are appended
+    after the save time, so everything the hover preview shows is
+    reachable without a pointer and without opening anything. That is
+    what keeps the preview a visual convenience rather than an
+    information channel, which is the only way a surface that dismisses
+    itself on a timer can satisfy ``accessibility.md``'s "Prefer
+    dismissing views with an explicit action".
     """
     sentences = [_display_title(record).rstrip("…")]
     if record.state is DraftState.LOADING:
@@ -635,6 +466,11 @@ def _accessible_row_text(record: DraftRecord) -> str:
     saved = _format_absolute_time(record.created_at)
     if saved:
         sentences.append(f"Saved {saved}")
+    extra = preview_announcement(
+        record, now=now if now is not None else int(time.time()),
+    )
+    if extra:
+        sentences.append(extra)
     return ". ".join(s.rstrip(". ") for s in sentences if s.strip()) + "."
 
 
@@ -949,6 +785,11 @@ class _DraftRowWidget(QWidget):
         self._age.setText(_format_relative_time(record.created_at))
         self.setToolTip(_row_tooltip(record))
         self._title.setProperty("state", _ROW_STATE.get(record.state, "ready"))
+        # The draft this row is showing, stored on the widget so the
+        # preview controller's event filter can resolve a row without
+        # walking the list, and so it never has to hold a widget
+        # reference of its own past the event it is handling.
+        self.setProperty("draft_identifier", record.identifier)
         self.refresh_style()
 
     # -- state -------------------------------------------------------------
@@ -1030,6 +871,14 @@ class DraftsPanel(QFrame):
       set_status(text)           , narrate a sync step on the status line
       set_signer_unsupported(bool), show the "signer lacks NIP-44" state
       apply_theme(is_dark)       , switch dark/light
+      set_preview_image_loader(l), hand the hover preview a ThumbnailLoader
+
+    Hovering a row opens a preview of that draft after half a second.
+    That surface lives in ``drafts_preview.py``; the panel owns one
+    controller and answers four questions for it, below under "preview
+    host". It hands over a record, never a widget, so a search keystroke
+    can destroy every row without leaving the controller holding a dead
+    pointer.
     """
 
     open_draft = Signal(str)
@@ -1063,7 +912,12 @@ class DraftsPanel(QFrame):
         self._status_timer.setSingleShot(True)
         self._status_timer.timeout.connect(self._on_status_expired)
 
+        # Built before the UI, because ``_insert_row`` hands it every row
+        # it creates and a rebuild can happen during ``_build_ui``.
+        self._preview = PreviewController(self)
+
         self._build_ui()
+        self._preview.attach_list(self._list)
         self.apply_theme(is_dark)
         self._refresh_empty_state()
         self._render_status()
@@ -1304,6 +1158,9 @@ class DraftsPanel(QFrame):
             return
         if 0 <= button_id < self._mode_stack.count():
             self._mode_stack.setCurrentIndex(button_id)
+        # Feeds is different data and different rows, so the drafts
+        # preview has nothing to describe there.
+        self._preview.close(disarm=True)
 
     # -- public API: theming ----------------------------------------------
 
@@ -1311,6 +1168,9 @@ class DraftsPanel(QFrame):
         self._is_dark = is_dark
         self.setStyleSheet(_panel_css(is_dark))
         self._apply_placeholder_colour(is_dark)
+        # Re-styled in place rather than closed: a theme switch is not a
+        # reason to take a surface away from someone reading it.
+        self._preview.apply_theme(is_dark)
         if hasattr(self, "_feeds_panel") and self._feeds_panel is not None:
             self._feeds_panel.apply_theme(is_dark)
         if not hasattr(self, "_list") or self._list is None:
@@ -1404,6 +1264,79 @@ class DraftsPanel(QFrame):
         self._signer_unsupported = unsupported
         self._render_status()
         self._refresh_empty_state()
+
+    # -- public API: the hover preview ------------------------------------
+
+    def set_preview_image_loader(self, loader) -> None:
+        """Hand the preview the app's one ``ThumbnailLoader``, or ``None``.
+
+        ``main_window`` injects the loader it already owns, so there is
+        one cache, one URL policy and one place where an image request
+        can be made. The default is ``None``, and with ``None`` the
+        preview renders with no hero image at all and constructs no
+        request, which is what keeps a ``DraftsPanel()`` built in a test
+        free of a network by construction rather than by discipline.
+        """
+        self._preview.set_image_loader(loader)
+
+    # -- preview host: the four questions the controller asks --------------
+
+    def preview_record(self, identifier: str) -> Optional[DraftRecord]:
+        """The record behind one row, or ``None`` if it has gone."""
+        if self._store is None or not identifier:
+            return None
+        return self._store.get(identifier)
+
+    def preview_current_row(self) -> Tuple[str, QRect]:
+        """The focused row's identifier and its rect in global coordinates.
+
+        The rect rather than the widget, because ``_rebuild_list``
+        destroys every row widget and the controller must never hold one
+        past the call it was handed in.
+        """
+        return self._preview_anchor(self._list.currentItem())
+
+    def _preview_anchor(self, item: Optional[QListWidgetItem]) -> Tuple[str, QRect]:
+        if item is None:
+            return "", QRect()
+        identifier = item.data(Qt.UserRole)
+        if not isinstance(identifier, str) or not identifier:
+            return "", QRect()
+        rect = self._list.visualItemRect(item)
+        return identifier, QRect(
+            self._list.viewport().mapToGlobal(rect.topLeft()), rect.size(),
+        )
+
+    def _show_preview_for(self, item: QListWidgetItem) -> None:
+        """Open the preview for the row a context menu was raised on.
+
+        Resolved from the item rather than from the current row: a
+        right-click does not move the selection, so the two are often
+        different rows and the menu has to describe the one under the
+        pointer. Opened as a keyboard preview, because it was reached by
+        an explicit command and so should take focus and be dismissible
+        with Escape rather than by moving the pointer away.
+        """
+        identifier, anchor = self._preview_anchor(item)
+        if identifier:
+            self._preview.open_for(identifier, anchor, keyboard=True)
+
+    def preview_is_available(self) -> bool:
+        """Whether a preview may open at all right now.
+
+        A floating window over another application's window, describing
+        a draft in a window the user is not looking at, is a bug, so the
+        panel has to be on screen, in drafts mode, and inside the active
+        window.
+        """
+        if not self.isVisible() or self._mode_stack.currentIndex() != 0:
+            return False
+        window = self.window()
+        return window is not None and window.isActiveWindow()
+
+    def preview_now(self) -> int:
+        """The clock the preview reads, in one place so tests can move it."""
+        return int(time.time())
 
     # -- status line: one writer ------------------------------------------
 
@@ -1586,6 +1519,11 @@ class DraftsPanel(QFrame):
         else:
             self._list.insertItem(at_index, item)
         self._list.setItemWidget(item, widget)
+        # Mouse tracking plus the controller's event filter. It cannot go
+        # on the list's viewport: the row widget covers the item rect
+        # exactly and is not mouse transparent, so the viewport never
+        # sees the pointer.
+        self._preview.attach_row(widget)
         self._items[record.identifier] = item
 
     def _decorate_item(self, item: QListWidgetItem, record: DraftRecord) -> None:
@@ -1655,20 +1593,28 @@ class DraftsPanel(QFrame):
         present = identifier in self._items
         passes = self._passes_filter(record)
         if present and not passes:
+            self._preview.on_record_removed(identifier)
             self._remove_row(identifier)
             self._refresh_empty_state()
         elif not present and passes:
             self._on_record_added(identifier)  # treat as fresh insertion
         else:
             self._update_row(identifier)
+            # A row that has just finished decrypting under the pointer
+            # becomes previewable without the user moving off and back.
+            self._preview.on_record_changed(identifier)
         self._render_status()
 
     def _on_record_removed(self, identifier: str) -> None:
+        self._preview.on_record_removed(identifier)
         self._remove_row(identifier)
         self._refresh_empty_state()
         self._render_status()
 
     def _on_store_cleared(self) -> None:
+        # A profile switch, so every cached digest and every remembered
+        # broken image belonged to someone else's library.
+        self._preview.on_store_cleared()
         self._clear_list()
         self._refresh_empty_state()
         self._render_status()
@@ -1688,6 +1634,11 @@ class DraftsPanel(QFrame):
     # -- search handler ----------------------------------------------------
 
     def _on_search_changed(self, text: str) -> None:
+        # Closed and disarmed before the rebuild, not after: the rebuild
+        # destroys every row widget, and typing must never leave a
+        # preview anchored to one of them or open one for whichever row
+        # slid under a stationary pointer.
+        self._preview.on_search_changed()
         self._search_text = text
         self._rebuild_list()
 
@@ -1746,21 +1697,49 @@ class DraftsPanel(QFrame):
         return self._list.itemAt(pos) or self._list.currentItem()
 
     def _on_context_menu(self, pos) -> None:
-        item = self._item_for_context(pos)
+        # First statement, before anything is built. ``popovers.md``:
+        # "Don't show another view over a popover. Make sure nothing
+        # displays on top of a popover, except for an alert."
+        self._preview.close(disarm=True)
+        menu = self._build_context_menu(self._item_for_context(pos))
+        if menu is not None:
+            menu.exec(self._list.mapToGlobal(pos))
+
+    def _build_context_menu(self, item: Optional[QListWidgetItem]) -> Optional[QMenu]:
+        """The row's menu, built but not shown.
+
+        Split from ``_on_context_menu`` so the commands and their enabled
+        states can be asserted without a modal event loop, which is the
+        only way to test them at all.
+        """
         if item is None:
-            return
+            return None
         identifier = item.data(Qt.UserRole)
         if not isinstance(identifier, str) or self._store is None:
-            return
+            return None
         record = self._store.get(identifier)
         if record is None:
-            return
+            return None
         menu = QMenu(self._list)
         menu.setStyleSheet(_menu_css(self._is_dark))
 
         # menus.md: "To be consistent with platform experiences, use
         # title-style capitalization." The ellipsis stays on the one
         # command that opens a dialog.
+
+        # First, because it is how the Space key is discovered at all.
+        # Hover is not allowed to be the only route to the preview:
+        # an audit of this panel already flagged hover-only affordances,
+        # and the Menu key reaches this menu without a pointer.
+        act_preview = QAction("Show Preview", menu)
+        act_preview.setShortcut(QKeySequence(Qt.Key_Space))
+        act_preview.triggered.connect(lambda: self._show_preview_for(item))
+        act_preview.setEnabled(
+            preview_is_eligible(record, now=self.preview_now())
+        )
+        menu.addAction(act_preview)
+        menu.addSeparator()
+
         if record.state is DraftState.FAILED:
             # For a failed row the *only* useful primary action is to
             # retry decryption. Promote it to the top of the menu so
@@ -1795,8 +1774,26 @@ class DraftsPanel(QFrame):
             lambda: self.delete_draft.emit(identifier, record.inner_kind)
         )
         menu.addAction(act_delete)
+        return menu
 
-        menu.exec(self._list.mapToGlobal(pos))
+    # -- lifetime ----------------------------------------------------------
+
+    def hideEvent(self, event) -> None:
+        """A hidden panel must not leave a floating window describing it."""
+        self._preview.close(disarm=True)
+        super().hideEvent(event)
+
+    def changeEvent(self, event) -> None:
+        if event.type() == QEvent.FontChange:
+            # Every dimension of the preview is derived from font
+            # metrics, and recomposing one under the pointer is not
+            # worth the code. The next hover builds it at the new size.
+            self._preview.close(disarm=True)
+        super().changeEvent(event)
+
+    def closeEvent(self, event) -> None:
+        self._preview.shutdown()
+        super().closeEvent(event)
 
     def _copy_event_id(self, record: DraftRecord) -> None:
         clip = QApplication.clipboard()
