@@ -698,11 +698,16 @@ class FakePrivateLibrary(QObject):
     library_changed = Signal()
     status_changed = Signal(str)
 
-    def __init__(self, *, settled=False, failures=()) -> None:
+    def __init__(self, *, settled=False, failures=(), loading=False, status="") -> None:
         super().__init__()
         self.settled = settled
         self.failures = list(failures)
         self.blobs: dict = {}
+        # ``loading`` separates work in progress from a finding, and
+        # ``status`` is readable rather than only emitted, so a dialog
+        # built after the load can ask what it missed.
+        self.loading = loading
+        self.status = status
 
     def get(self, sha256):
         return self.blobs.get((sha256 or "").lower())
@@ -740,12 +745,36 @@ def test_a_library_nobody_has_read_says_that_much(tmp_path, monkeypatch):
     assert dialog._library_label.text() == _LIBRARY_UNREAD
 
 
-def test_the_per_file_reasons_are_shown_not_just_counted(tmp_path, monkeypatch):
+def test_a_files_own_reason_is_on_that_file(tmp_path, monkeypatch):
+    # The reason names one file, so it belongs on that file. It used to
+    # be concatenated into the banner along with every other file's,
+    # which put a diagnostic dump above a grid and still said nothing
+    # about the tile under the pointer.
     from nostr.media.private_library import LibraryFailure
 
     library = FakePrivateLibrary(failures=[
-        LibraryFailure(identifier="a" * 64, reason="Your signer could not open this file: refused."),
-        LibraryFailure(identifier="b" * 64, reason="This record is not a file, so it was skipped."),
+        LibraryFailure(identifier=CIPHER_SHA,
+                       reason="Your signer could not open this file: refused."),
+        LibraryFailure(identifier="b" * 64,
+                       reason="This record is not a file, so it was skipped."),
+    ])
+    dialog = build_dialog(
+        tmp_path, monkeypatch, records=[media()], visibility=_unchecked(),
+    )
+    dialog.bind_private_library(library)
+
+    tooltip = dialog._grid.item(0).toolTip()
+    assert "Your signer could not open this file" in tooltip
+    # And not somebody else's reason.
+    assert "not a file" not in tooltip
+
+
+def test_the_banner_counts_rather_than_recites(tmp_path, monkeypatch):
+    from nostr.media.private_library import LibraryFailure
+
+    library = FakePrivateLibrary(failures=[
+        LibraryFailure(identifier=CIPHER_SHA, reason="Your signer refused."),
+        LibraryFailure(identifier="b" * 64, reason="This record is not a file."),
     ])
     dialog = build_dialog(
         tmp_path, monkeypatch, records=[media()], visibility=_unchecked(),
@@ -753,8 +782,10 @@ def test_the_per_file_reasons_are_shown_not_just_counted(tmp_path, monkeypatch):
     dialog.bind_private_library(library)
 
     text = dialog._library_label.text()
-    assert "Your signer could not open this file" in text
-    assert "1 more could not be opened." in text
+    assert "2 items" in text
+    # One sentence about what it means, not a transcript of the load.
+    assert "Your signer refused." not in text
+    assert "cannot be used in published work" in text
 
 
 def test_a_settled_library_says_nothing_at_all(tmp_path, monkeypatch):

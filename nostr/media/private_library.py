@@ -137,13 +137,21 @@ class LibraryFailure:
 class ParsedRecord:
     """What one decrypted record turned out to be.
 
-    Exactly one of the three is meaningful: a blob, a tombstone, or a
-    reason it was skipped. Returning this rather than raising is what
-    keeps one bad record from costing the user the rest of a library.
+    Exactly one of the four is meaningful: a blob, a tombstone, a record
+    that is not a file at all, or a reason it was skipped. Returning this
+    rather than raising is what keeps one bad record from costing the
+    user the rest of a library.
+
+    ``not_a_file`` is not a softer ``reason``. A reason means this app
+    failed at something it should have managed, and the library stays
+    unsure about a blob because of it. ``not_a_file`` means there was
+    never a blob here to be unsure about, so it is not reported and it
+    holds nothing back.
     """
 
     blob: Optional[PrivateBlob] = None
     tombstone: bool = False
+    not_a_file: bool = False
     reason: str = ""
 
 
@@ -175,12 +183,36 @@ def parse_file_record(plaintext: str, *, identifier: str) -> ParsedRecord:
         # The user deleted this. Not a fault, and not a file.
         return ParsedRecord(tombstone=True)
 
+    filed_under = str(identifier or "").strip().lower()
     sha256 = _hash_field(payload.get("hash"))
     if not sha256:
+        if not is_sha256(filed_under):
+            # Not a file record at all. A drive holds more than files:
+            # Lotus keeps one marker per folder in this same kind, filed
+            # under d="folder--<name>" and carrying
+            #
+            #   {"type": "application/x-folder-keep", "name": ".keep",
+            #    "hash": "folder--<name>", "size": 0, "encryptionKey": ""}
+            #
+            # so its "hash" is the folder's own address echoed back, not
+            # a content hash. Neither the address nor the hash names
+            # anything a Blossom server could ever serve, so this record
+            # cannot be telling us that some listed blob is private, and
+            # passing over it withholds nothing.
+            #
+            # Counting these as unreadable file records is what left
+            # every real file in a real drive badged NOT CHECKED. One is
+            # enough: an unresolved record at a non-hash address
+            # withholds the library's answer for every hash, deliberately,
+            # because whatever it says could have named any of them.
+            return ParsedRecord(not_a_file=True)
+        # Filed under a content hash but naming no file this app can
+        # identify. That record is claiming to be that file and failing,
+        # so the doubt is real, and it stays confined to that one hash.
         return ParsedRecord(
             reason="This record does not name a file, so it was skipped."
         )
-    filed_under = str(identifier or "").strip().lower()
+
     if is_sha256(filed_under) and filed_under != sha256:
         return ParsedRecord(
             reason="This record does not match the file it is filed under, "
@@ -364,6 +396,9 @@ class PrivateLibrary(QObject):
         # this dict is the session's entire copy of the user's keys.
         self._blobs: Dict[str, PrivateBlob] = {}
         self._failures: List[LibraryFailure] = []
+        # Mirrors the last emitted status so a widget built after
+        # the fact can read it instead of waiting for a repeat.
+        self._status: str = ""
         self._loaded_at: int = 0
         self._loading = False
 
@@ -415,6 +450,22 @@ class PrivateLibrary(QObject):
     def failures(self) -> List[LibraryFailure]:
         """The records this load could not list, and why."""
         return list(self._failures)
+
+    @property
+    def status(self) -> str:
+        """The line a footer would show right now.
+
+        A dialog built after the load finished never saw
+        ``status_changed`` go by, so it has to be able to ask instead of
+        assuming the silence means nothing has happened. Without this a
+        second opening of the media library reported a library that had
+        been read minutes ago as never read.
+        """
+        return self._status
+
+    def _emit_status(self, text: str) -> None:
+        self._status = text
+        self.status_changed.emit(text)
 
     @property
     def settled(self) -> bool:
@@ -512,6 +563,7 @@ class PrivateLibrary(QObject):
         # it may not be quoted about this one. Back to knowing nothing.
         self._covered = False
         self._unresolved = set()
+        self._status = ""
 
     def refresh(self) -> None:
         """Re-read the library from the user's relays."""
@@ -537,7 +589,7 @@ class PrivateLibrary(QObject):
         self._covered = False
         self._unresolved = set()
         gen = self._generation
-        self.status_changed.emit("Opening your private library...")
+        self._emit_status("Opening your private library...")
 
         def _on_relay_list(relay_list) -> None:
             if not self._is_current(gen):
@@ -621,7 +673,7 @@ class PrivateLibrary(QObject):
         self._queue.clear()
         self._batch_active = False
         self._loading = False
-        self.status_changed.emit(
+        self._emit_status(
             f"Couldn't reach your signer, so your private library stayed "
             f"closed: {_safe_reason(reason)}"
         )
@@ -672,10 +724,13 @@ class PrivateLibrary(QObject):
         if not self._is_current(gen):
             return
         parsed = parse_file_record(plaintext, identifier=identifier)
-        if parsed.tombstone:
-            # A deleted file is not a file. Dropping any earlier entry
-            # matters because a tombstone can arrive for a record we
-            # already listed from a stale event.
+        if parsed.tombstone or parsed.not_a_file:
+            # Neither one leaves a private file at this address: the
+            # tombstone because the file is gone, the folder because it
+            # was never a file. Either way this address is settled and
+            # stops counting against what the library can vouch for.
+            # Dropping any earlier entry matters because a tombstone can
+            # arrive for a record we already listed from a stale event.
             self._blobs.pop(identifier, None)
             self._unresolved.discard(identifier)
         elif parsed.blob is not None:
@@ -704,7 +759,7 @@ class PrivateLibrary(QObject):
         self._batch_active = False
         self._client = None
         self._loading = False
-        self.status_changed.emit(self._summary())
+        self._emit_status(self._summary())
         self.library_changed.emit()
 
     def _summary(self) -> str:

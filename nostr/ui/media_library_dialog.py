@@ -29,7 +29,7 @@ the shared blob cache, because that cache is what an export walks. See
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Final, List, Optional
 
 import itertools
 import time
@@ -97,6 +97,14 @@ QLabel#media_notice {
     border: 1px solid #5A4620;
     border-radius: 4px;
     padding: 8px 10px;
+}
+/* Work in progress is not trouble. Same shape so the grid does not jump
+   when one becomes the other, but the dialog's own grey rather than the
+   amber it uses to mean "read this". 7.0:1 on its background. */
+QLabel#media_notice[tone="working"] {
+    color: #C8C8C8;
+    background: #262626;
+    border: 1px solid #3C3C3C;
 }
 QPushButton, QToolButton {
     background: #2D2D30;
@@ -216,6 +224,12 @@ QLabel#media_notice {
     border: 1px solid #E0BE85;
     border-radius: 4px;
     padding: 8px 10px;
+}
+/* See the dark sheet. 8.6:1 on its background. */
+QLabel#media_notice[tone="working"] {
+    color: #4A4A4A;
+    background: #F4F4F4;
+    border: 1px solid #DCDCDC;
 }
 QPushButton, QToolButton {
     background: #ECECEC;
@@ -353,6 +367,20 @@ _CHIP_TEXT = {
     PUBLISHED_COPY: "PRIVATE",
     UNKNOWN: "NOT CHECKED",
 }
+
+# A verdict the library has not reached yet, as opposed to one it tried
+# to reach and could not. Every rendering table here is read with
+# ``.get(state, "")``, so this state draws no chip, prints no word and
+# adds no tooltip line without any of them needing to know it exists.
+#
+# The distinction is the whole point. UNKNOWN is a finding and deserves
+# to be said out loud, because it means publishing is blocked until
+# somebody does something. A load that is simply still running is not a
+# finding, and stamping NOT CHECKED across an entire grid while the
+# answers are still arriving reports a verdict the app has not reached.
+# What is softened here is the badge and never the permission: the
+# publish gate keeps asking ``state_of``, which does not know this state.
+_PENDING: Final[str] = "pending"
 _CHIP_PAD_X = 6
 _CHIP_PAD_Y = 3
 _CHIP_MARGIN = 6
@@ -439,6 +467,21 @@ _PICK_UNKNOWN_NOTICE = (
 _LIBRARY_UNREAD = (
     "Your private library has not been read yet, so this app cannot tell "
     "which of these files are private."
+)
+
+# Shown while the load is running. Reading the library costs a signer
+# round-trip per file, so this is the normal state of a large library for
+# a few seconds, and it is progress rather than trouble: it says what is
+# happening, not what is missing.
+_LIBRARY_CHECKING = "Checking which of your files are private…"
+
+# The picker equivalent, for the seconds before the answer for the
+# selected file arrives. The publish gate still refuses a file in this
+# state; what changes is that the user is told it is coming rather than
+# told it cannot be used.
+_PICK_PENDING_NOTICE = (
+    "Checking whether this picture is private. This takes a moment the "
+    "first time."
 )
 
 # Monotonic counter used to disambiguate paste-to-upload job names, two
@@ -814,6 +857,11 @@ class MediaLibraryDialog(QDialog):
         decision: it is where the signer prompts come from.
         """
         self._private_library = library
+        # Seeded rather than waited for. The library outlives this dialog,
+        # so a load that finished before it was built emitted its status
+        # into a widget that did not exist yet, and this reported a
+        # library read minutes ago as one that had never been read.
+        self._library_status = library.status
         library.library_changed.connect(self._on_private_library_changed)
         library.status_changed.connect(self._on_private_library_status)
         self._on_private_library_changed()
@@ -826,29 +874,86 @@ class MediaLibraryDialog(QDialog):
         self._refresh_grid()
         self._refresh_library_notice()
 
-    def _refresh_library_notice(self) -> None:
-        """Show the banner exactly while the grid cannot be trusted.
+    def _library_pending(self) -> bool:
+        """Whether the answers are still on their way."""
+        library = self._private_library
+        return library is not None and library.loading
 
-        The condition is the library's own ``settled``, not "did
-        something fail", so the banner covers the load still running,
-        the signer that never answered and the records that could not be
-        opened with one rule. When it is gone, every tile in the grid is
-        an answer rather than a guess.
+    def _library_failure_for(self, sha256: str) -> str:
+        """Why this one file could not be accounted for, if it could not.
+
+        Failures are filed under the record's ``d`` tag, which for a file
+        record is its content hash, so a tile can find its own.
+        """
+        library = self._private_library
+        if library is None or not sha256:
+            return ""
+        wanted = sha256.strip().lower()
+        for failure in library.failures:
+            if (failure.identifier or "").strip().lower() == wanted:
+                return failure.reason
+        return ""
+
+    def _shown_state(self, sha256: str) -> str:
+        """The state to draw, which is not always the state to act on.
+
+        Only ever softens :data:`UNKNOWN`, and only while the load that
+        would answer it is still running. Everything else is passed
+        through untouched, so a file the library has actually failed to
+        account for still gets its badge.
+        """
+        state = self._visibility.state_of(sha256)
+        if state == UNKNOWN and self._library_pending():
+            return _PENDING
+        return state
+
+    def _refresh_library_notice(self) -> None:
+        """Say what is happening, and only when there is something to say.
+
+        Three situations, and they used to share one amber banner and one
+        run-on sentence assembled from whatever internal complaints were
+        lying around. Reading the library is normal work that takes a
+        signer round-trip per file, so most of the time this is a
+        progress line, not a warning; a person who is told something is
+        wrong every time they open a dialog stops reading the times it
+        is.
+
+        Settled is silence. Nothing is more reassuring than a dialog that
+        has nothing to report.
         """
         library = self._private_library
         if library is None or library.settled:
             self._library_label.setVisible(False)
             return
-        lines = [self._library_status or _LIBRARY_UNREAD]
-        # The per-file reasons are the actionable part, and until now
-        # nothing read them. One is enough to show what kind of problem
-        # it is; the count carries the rest.
-        failures = library.failures
-        if failures:
-            lines.append(failures[0].reason)
-            if len(failures) > 1:
-                lines.append(f"{len(failures) - 1} more could not be opened.")
-        self._library_label.setText(" ".join(lines))
+
+        if library.loading:
+            self._show_library_notice(_LIBRARY_CHECKING, working=True)
+            return
+
+        # Not loading and not settled: something is genuinely unresolved,
+        # and the grid is showing files it cannot vouch for. One sentence
+        # that says what it means for the user, rather than the load's
+        # internal complaints concatenated. The per-record reasons stay
+        # on the tiles they belong to, where they name a file.
+        count = len(library.failures)
+        if count:
+            self._show_library_notice(
+                f"{count} item{'' if count == 1 else 's'} in your private "
+                "library could not be opened, so files marked NOT CHECKED "
+                "cannot be used in published work. Refresh to try again.",
+                working=False,
+            )
+            return
+        self._show_library_notice(
+            self._library_status or _LIBRARY_UNREAD, working=False,
+        )
+
+    def _show_library_notice(self, text: str, *, working: bool) -> None:
+        self._library_label.setText(text)
+        self._library_label.setProperty("tone", "working" if working else "")
+        # A property that styling depends on does not repaint on its own.
+        self._library_label.style().unpolish(self._library_label)
+        self._library_label.style().polish(self._library_label)
         self._library_label.setVisible(True)
 
     # ------------------------------------------------------------------
@@ -1128,7 +1233,7 @@ class MediaLibraryDialog(QDialog):
         self._refresh_pick_notice()
 
     def _add_grid_item(self, media: MediaFile) -> None:
-        state = self._visibility.state_of(media.hash)
+        state = self._shown_state(media.hash)
         item = QListWidgetItem()
         item.setText(_short_label(media, state))
         item.setTextAlignment(Qt.AlignHCenter)
@@ -1137,6 +1242,7 @@ class MediaLibraryDialog(QDialog):
             preview_error=self._preview_errors.get(media.hash, ""),
             state=state,
             public_copy=self._visibility.public_copy_of(media.hash),
+            library_error=self._library_failure_for(media.hash),
         ))
         item.setData(Qt.UserRole, media.hash)
 
@@ -1189,8 +1295,9 @@ class MediaLibraryDialog(QDialog):
         item.setToolTip(_tooltip_for(
             media,
             preview_error=reason,
-            state=self._visibility.state_of(sha),
+            state=self._shown_state(sha),
             public_copy=self._visibility.public_copy_of(sha),
+            library_error=self._library_failure_for(sha),
         ))
 
     def _try_private_preview(self, sha: str) -> str:
@@ -1225,13 +1332,14 @@ class MediaLibraryDialog(QDialog):
             Qt.KeepAspectRatio, Qt.SmoothTransformation,
         )
         self._preview_errors.pop(sha, None)
-        item.setIcon(_chipped_icon(pix, self._visibility.state_of(sha), self._is_dark))
+        item.setIcon(_chipped_icon(pix, self._shown_state(sha), self._is_dark))
         media = self._store.files.get(sha)
         if media is not None:
             item.setToolTip(_tooltip_for(
                 media,
-                state=self._visibility.state_of(sha),
+                state=self._shown_state(sha),
                 public_copy=self._visibility.public_copy_of(sha),
+                library_error=self._library_failure_for(sha),
             ))
         return ""
 
@@ -1245,11 +1353,17 @@ class MediaLibraryDialog(QDialog):
         if not self._pick_mode:
             return
         media = self._first_selected()
-        state = self._visibility.state_of(media.hash) if media is not None else PUBLIC
+        # ``_shown_state`` rather than ``state_of``: this line is what the
+        # user reads, and "cannot be used" is the wrong thing to tell
+        # someone whose answer is two seconds away. The gate behind the
+        # click is unchanged and still refuses.
+        state = self._shown_state(media.hash) if media is not None else PUBLIC
         if state == PRIVATE:
             self._notice_label.setText(_PICK_PRIVATE_NOTICE)
         elif state == PUBLISHED_COPY:
             self._notice_label.setText(_PICK_PUBLISHED_NOTICE)
+        elif state == _PENDING:
+            self._notice_label.setText(_PICK_PENDING_NOTICE)
         elif state == UNKNOWN:
             self._notice_label.setText(_PICK_UNKNOWN_NOTICE)
         else:
@@ -1270,10 +1384,12 @@ class MediaLibraryDialog(QDialog):
         item = self._items_by_hash.get(sha)
         if item is None:
             return
-        state = self._visibility.state_of(sha)
+        state = self._shown_state(sha)
         if media is not None:
             item.setToolTip(_tooltip_for(
-                media, state=state, public_copy=self._visibility.public_copy_of(sha),
+                media, state=state,
+                public_copy=self._visibility.public_copy_of(sha),
+                library_error=self._library_failure_for(sha),
             ))
         scaled = pix.scaled(
             _THUMB_SIZE, _THUMB_SIZE,
@@ -1630,6 +1746,7 @@ def _tooltip_for(
     preview_error: str = "",
     state: str = PUBLIC,
     public_copy=None,
+    library_error: str = "",
 ) -> str:
     server_count = len(media.urls)
     lines = [
@@ -1639,6 +1756,12 @@ def _tooltip_for(
     ]
     if media.width and media.height:
         lines.append(f"dim:    {media.width} × {media.height}")
+    # Why this particular file could not be accounted for. It belongs
+    # here rather than in the banner above the grid: the reason names one
+    # file, and a banner that concatenates every file's reason is a
+    # diagnostic dump that says nothing about the tile under the pointer.
+    if library_error:
+        lines.append(f"library: {library_error}")
     # Which of the two states a private file is in matters more than the
     # colour of its chip can say, so the tooltip spells it out and names
     # the copy's address when there is one. The address is the thing a
