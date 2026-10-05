@@ -5,7 +5,6 @@
 Kept only while call sites move to RelayDirectory and the policy
 functions; nothing new should use it. Each name here has a successor:
 
-    select_publish_relays        -> policy.plan_publish / RelayDirectory.publish_plan
     select_draft_publish_relays  -> policy.private_relays / RelayDirectory.private_relays
     RelayListCache               -> RelayDirectory
 
@@ -73,11 +72,9 @@ def select_draft_publish_relays(
     the union ``write`` ∪ ``read`` ∪ bunker, with the curated base set
     as a backstop for brand-new profiles. Deduped and capped at ``cap``.
 
-    Distinct from ``select_publish_relays`` (used for regular notes &
-    articles), which only blends write + base. Drafts need the
-    extra read-set inclusion specifically because asymmetric read /
-    write sets are common (paid read relays + free write relays, etc.)
-    and we cannot afford drafts written on device A to be invisible
+    Drafts need the read set as well as the write set because asymmetric
+    read / write sets are common (paid read relays + free write relays,
+    etc.) and we cannot afford drafts written on device A to be invisible
     on device B.
     """
     seen: set[str] = set()
@@ -97,39 +94,6 @@ def select_draft_publish_relays(
             continue
         seen.add(normalized)
         out.append(url)
-        if len(out) >= cap:
-            break
-    return out
-
-
-def select_publish_relays(
-    user_write_relays: Iterable[str],
-    *,
-    base: Iterable[str] = DEFAULT_RELAYS,
-    entitled: Iterable[str] = (),
-    cap: int = RELAY_CAP,
-) -> List[str]:
-    """Combine the curated base set with the user's write relays.
-
-    Order: entitled relays first, then base relays (most trusted by us),
-    then the user's choices. Case-folded host comparison so trivial URL
-    variations don't double-publish.
-
-    ``entitled`` is for a relay this account has specific standing on, such
-    as one that comes with an association membership. It leads because a
-    relay that accepts writes only from its own members is worth more to
-    that member than any general-purpose relay, and because being dropped
-    by ``cap`` would quietly cost them the benefit. This module stays
-    unaware of what confers the entitlement; the caller resolves that.
-    """
-    seen: set[str] = set()
-    out: List[str] = []
-    for relay in list(entitled) + list(base) + list(user_write_relays):
-        normalized = _normalize_for_dedup(relay)
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        out.append(relay.strip().rstrip("/"))
         if len(out) >= cap:
             break
     return out

@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Fakes for the nostr/outbox tests: relays, a signer, and lookups.
+"""Fakes for the nostr/outbox tests: relays, a signer, and lookups, plus
+a relay directory for the code that routes through one.
 
 Signatures are real (throwaway keys), because every rule under test
 starts with "only a validly signed event counts".
@@ -14,8 +15,9 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtWidgets import QApplication
 
 from nostr import crypto, events
+from nostr.outbox import policy
 from nostr.outbox.lookup import Lookup
-from nostr.outbox.policy import LookupState
+from nostr.outbox.policy import LookupState, RelayList
 
 SK = bytes.fromhex("2a" * 32)
 PK = crypto.get_public_key(SK).hex()
@@ -68,6 +70,7 @@ class FakeSessionPool:
 
 
 class FakeJob(QObject):
+    first_accept = Signal(str)
     all_done = Signal(list)
 
 
@@ -126,6 +129,61 @@ class FakeQuery:
     def __call__(self, pool, relays, *, kind, author, on_done, timeout_ms=6000, parent=None):
         self.calls.append({"relays": list(relays), "kind": kind, "author": author})
         on_done(self.answers.get(kind, Lookup(LookupState.UNKNOWN)))
+
+
+class FakeRelayDirectory(QObject):
+    """RelayDirectory's routing surface, answering at once from known lists.
+
+    Routing runs through the real policy functions, so a test sees where
+    the app would really go with those lists. ``lists`` maps a pubkey to
+    its RelayList (or to relay URLs, read as a list with no markers);
+    anyone else is UNKNOWN. ``calls`` records each question asked.
+    """
+
+    changed = Signal(str)
+
+    def __init__(self, lists: Optional[dict] = None):
+        super().__init__()
+        self.lists: Dict[str, RelayList] = {}
+        for pubkey, value in (lists or {}).items():
+            self.set(pubkey, value)
+        self.calls: List[tuple] = []
+        self.shared: List[tuple] = []
+
+    def set(self, pubkey: str, value) -> None:
+        if not isinstance(value, RelayList):
+            value = RelayList(write=list(value), read=list(value), state=LookupState.FOUND)
+        self.lists[pubkey.lower()] = value
+
+    def cached(self, pubkey: str) -> RelayList:
+        return self.lists.get((pubkey or "").lower()) or RelayList()
+
+    def lookup(self, pubkey, on_done, *, hints=(), fresh=False, timeout_ms=0):
+        self.calls.append(("lookup", pubkey, tuple(hints)))
+        on_done(self.cached(pubkey))
+
+    def publish_plan(self, author, on_done, *, mentioned=(), entitled=()):
+        mentioned = list(mentioned)
+        self.calls.append(("publish_plan", author, tuple(mentioned), tuple(entitled)))
+        on_done(policy.plan_publish(
+            self.cached(author),
+            mentioned={p.lower(): self.cached(p) for p, _hint in mentioned},
+            hints={p.lower(): h for p, h in mentioned if h},
+            entitled=entitled))
+
+    def private_relays(self, author, on_done, *, entitled=(), legacy=()):
+        self.calls.append(("private_relays", author, tuple(entitled), tuple(legacy)))
+        on_done(policy.private_relays(self.cached(author), entitled=entitled, legacy=legacy))
+
+    def outbox_of(self, author, on_done, *, hints=()):
+        self.calls.append(("outbox_of", author, tuple(hints)))
+        on_done(policy.outbox_relays(self.cached(author), hints=hints))
+
+    def share_relay_list(self, author, relays):
+        self.shared.append((author, list(relays)))
+
+    def asked(self, name: str) -> List[tuple]:
+        return [call for call in self.calls if call[0] == name]
 
 
 def found(event: dict) -> Lookup:

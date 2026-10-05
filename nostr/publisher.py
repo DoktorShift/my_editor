@@ -8,12 +8,19 @@ live alongside it as pure functions so callers stay declarative.
 
 Shape of the flow:
 
-  1. Look up the author's NIP-65 write relays (cached after first hit).
-  2. Open or reuse the bunker session for the active profile.
-  3. Hand the unsigned event to the signer. The user typically has to
-     approve on their phone here.
-  4. Publish the signed event with eager-first-accept semantics.
-  5. Emit ``completed(results)`` with per-relay outcomes.
+  1. Two things start together: the relay directory works out where the
+     event goes (the author's write relays, then the read relays of
+     everyone it mentions, NIP-65), and the signer is asked to sign it.
+     The user typically has to approve on their phone, which is plenty
+     of time for the lookups to land.
+  2. Once both are in, publish the signed event with eager-first-accept
+     semantics.
+  3. Hand the author's relay list to the mentioned people's relays that
+     took the event, so readers there can find the author's other notes.
+  4. Emit ``completed(results)`` with per-relay outcomes.
+
+Drafts are private and go where every device of the author reads them
+back: the same set for writing and reading (RelayDirectory.private_relays).
 
 The builders also attach NIP-92 ``imeta`` tags for media, from records
 the caller hands them. One rule governs every field: describe only media
@@ -46,7 +53,7 @@ from .drafts import (
     serialize_inner_event,
 )
 from .events import build_event
-from .outbox import RelayDirectory, select_draft_publish_relays, select_publish_relays
+from .outbox import RelayDirectory, normalize_relay_url, select_draft_publish_relays
 from .profiles import Profile
 from .relay import RelayPool
 
@@ -453,6 +460,10 @@ def slugify(text: str, *, fallback: str = "untitled") -> str:
 class PublishJob(QObject):
     """One end-to-end publish of any unsigned event.
 
+    The relay plan and the signature are fetched at the same time, and
+    the event goes out once both are in. Where it goes is the relay
+    directory's decision (RelayDirectory.publish_plan), never this job's.
+
     Signals (fired in this order on the happy path):
       status_changed(str)     human-readable progress text
       signed(str)             event id (hex) of the signed event
@@ -491,50 +502,68 @@ class PublishJob(QObject):
         self._entitled_relays = list(entitled_relays)
         self._profile = profile
         self._unsigned = unsigned_event
+        self._plan = None
+        self._signed_event: Optional[dict] = None
+        self._sent = False
+        self._failed = False
 
     def start(self) -> None:
         """Kick off the publish. Safe to call once per instance."""
-        self.status_changed.emit("Looking up your relay list…")
-        # Always include the profile's bunker relays when querying, even
-        # if the user has no NIP-65 published, we still want a fast result.
-        relays_to_query = list(dict.fromkeys(list(self._profile.bunker_relays)))
-        self._relay_directory.fetch(
+        self.status_changed.emit("Connecting to your signer…")
+        self._relay_directory.publish_plan(
             self._profile.user_pubkey,
-            relays=relays_to_query,
-            on_done=self._on_relay_list_resolved,
+            self._on_plan_ready,
+            mentioned=mentioned_pubkeys(self._unsigned),
+            entitled=self._entitled_relays,
+        )
+        self._session_pool.get(
+            self._profile,
+            on_ready=self._on_bunker_ready,
+            on_error=self._fail,
         )
 
     # -- pipeline ----------------------------------------------------------
 
-    def _on_relay_list_resolved(self, relay_list) -> None:
-        publish_relays = select_publish_relays(
-            relay_list.write, entitled=self._entitled_relays,
-        )
-        self.status_changed.emit("Connecting to your signer…")
-        self._session_pool.get(
-            self._profile,
-            on_ready=lambda client: self._on_bunker_ready(client, publish_relays),
-            on_error=self.failed.emit,
-        )
+    def _on_plan_ready(self, plan) -> None:
+        self._plan = plan
+        self._publish_when_ready()
 
-    def _on_bunker_ready(self, client, publish_relays: List[str]) -> None:
+    def _on_bunker_ready(self, client) -> None:
+        if self._failed:
+            return
         self.status_changed.emit(
             "Waiting for signature. Approve the request on your signer…"
         )
         client.sign_event(
             self._unsigned,
-            on_success=lambda signed: self._on_signed(signed, publish_relays),
-            on_failure=self.failed.emit,
+            on_success=self._on_signed,
+            on_failure=self._fail,
         )
 
-    def _on_signed(self, signed_event: dict, publish_relays: List[str]) -> None:
+    def _on_signed(self, signed_event: dict) -> None:
+        if self._failed:
+            return
+        self._signed_event = signed_event
         self.signed.emit(signed_event["id"])
-        self.status_changed.emit(
-            f"Publishing to {len(publish_relays)} relays…"
-        )
-        job = self._relay_pool.publish(publish_relays, signed_event)
+        if self._plan is None:
+            self.status_changed.emit("Finding your relays…")
+        self._publish_when_ready()
+
+    def _publish_when_ready(self) -> None:
+        if self._sent or self._failed or self._plan is None or self._signed_event is None:
+            return
+        self._sent = True
+        relays = self._plan.targets
+        self.status_changed.emit(f"Publishing to {len(relays)} relays…")
+        job = self._relay_pool.publish(relays, self._signed_event)
         job.first_accept.connect(self._on_first_accept)
         job.all_done.connect(self._on_publish_done)
+
+    def _fail(self, reason: str) -> None:
+        if self._failed or self._sent:
+            return
+        self._failed = True
+        self.failed.emit(reason)
 
     def _on_first_accept(self, url: str) -> None:
         # Surface the win immediately so the dialog can flip to a success
@@ -543,10 +572,37 @@ class PublishJob(QObject):
 
     def _on_publish_done(self, results: List[PublishResult]) -> None:
         accepted = sum(1 for _, ok, _ in results if ok)
+        # NIP-65: the mentioned people's relays that now hold this event
+        # also get the author's relay list, so whoever reads it there can
+        # find the rest of what the author writes.
+        took_it = {normalize_relay_url(url) for url, ok, _ in results if ok}
+        reached = [url for url in self._plan.inbox if url in took_it]
+        if reached:
+            self._relay_directory.share_relay_list(self._profile.user_pubkey, reached)
         self.status_changed.emit(
             f"Published. {accepted}/{len(results)} relays accepted."
         )
         self.completed.emit(results)
+
+
+_PUBKEY_HEX = re.compile(r"[0-9a-f]{64}")
+
+
+def mentioned_pubkeys(event: dict) -> List[Tuple[str, str]]:
+    """``(pubkey, relay hint)`` for everyone an event mentions (its ``p``
+    tags), in tag order, once each; the hint is "" when the tag has none."""
+    out: List[Tuple[str, str]] = []
+    seen: set = set()
+    for tag in event.get("tags", []):
+        if not isinstance(tag, list) or len(tag) < 2 or tag[0] != "p":
+            continue
+        pubkey = str(tag[1]).lower()
+        if pubkey in seen or not _PUBKEY_HEX.fullmatch(pubkey):
+            continue
+        seen.add(pubkey)
+        hint = tag[2] if len(tag) >= 3 and isinstance(tag[2], str) else ""
+        out.append((pubkey, hint))
+    return out
 
 
 # --------------------------------------------------------------------------- #

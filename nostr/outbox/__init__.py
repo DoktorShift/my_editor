@@ -22,7 +22,6 @@ from .legacy import (  # noqa: F401  (re-exported while call sites migrate)
     RELAY_CAP,
     RelayListCache,
     select_draft_publish_relays,
-    select_publish_relays,
 )
 from .directory import RelayDirectory  # noqa: F401
 from .policy import (  # noqa: F401
