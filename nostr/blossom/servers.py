@@ -19,14 +19,16 @@ _KiB = 1024
 _MiB = 1024 * _KiB
 
 
-# Global ceiling. The largest file the app will accept regardless of the
-# configured primary's individual cap; acts as a hard sanity bound and
-# the upper bound for the per-upload planner.
+# A display bound only, read by ``plan.clamp_to_app_limit``. Nothing in
+# the upload path enforces it: ``plan_upload`` lets each server's own
+# published cap decide, which is how the members' server takes files up
+# to 1 GiB. Do not read this as the largest file the app will upload.
 BLOSSOM_MAX_FILE_SIZE = 100 * _MiB
 
 # Used by ``plan_upload`` when the configured server has no published
 # per-file limit. Best-effort: we still try the upload, but cap the file
 # at this size up front so users can't push a 4 GB video to a black box.
+# This one is enforced, for unpublished servers only.
 BLOSSOM_UNPUBLISHED_LIMIT_FALLBACK = 100 * _MiB
 
 

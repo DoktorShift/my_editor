@@ -151,11 +151,12 @@ def plan_upload(file_size: int, servers: Sequence[str]) -> UploadPlan:
 
 
 def clamp_to_app_limit(byte_count: Optional[int]) -> tuple[Optional[int], bool]:
-    """Clamp a server's documented cap to the app's actual upload ceiling.
+    """Clamp a server's documented cap to ``BLOSSOM_MAX_FILE_SIZE`` for display.
 
-    Returns ``(value, clamped)``. The UI must not promise a number the
-    upload code can't honour (e.g. satellite.earth's metadata-true
-    5 GiB paid tier vs. the 100 MiB global cap).
+    Returns ``(value, clamped)``. A presentation helper only: the upload
+    path does not clamp, it plans against each server's own published
+    cap (``plan_upload``), so a server that documents more than this
+    (the members' server, 1 GiB) really does receive larger files.
     """
     if not isinstance(byte_count, int):
         return None, False

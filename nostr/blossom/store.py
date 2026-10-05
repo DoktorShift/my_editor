@@ -250,6 +250,15 @@ class MediaStore(QObject):
         self._last_targets: tuple = ()
         self._last_fetch_at: float = 0.0
         self._fetch_in_flight: bool = False
+        # Every fetch carries the generation it started under. ``clear``
+        # moves it on, so a walk still running for the account being left
+        # can never land its files in the next account's library.
+        self._fetch_generation: int = 0
+        # The servers the running walk covers, and whether somebody asked
+        # for a fetch while it ran. A server added mid-walk (a membership
+        # that resolved) is listed once the walk ends rather than dropped.
+        self._inflight_targets: tuple = ()
+        self._fetch_requested: bool = False
         self._mirror_by_default: bool = True
         # Hashes this process committed itself during this session. Their
         # library records were written from a server's own confirmation
@@ -343,12 +352,16 @@ class MediaStore(QObject):
         servers changed since the last fetch (a membership that resolved
         adds one, and its files belong in the library at once).
 
+        A call that arrives while a walk is running is remembered, not
+        dropped: when the walk ends and the servers it covered are no
+        longer the servers the library reads, it walks again.
+
         Each server is walked with BUD-12 cursor pagination, reusing one
         signed list token for all of its pages: BUD-11 scopes a list
         token to a server and gives it no ``x`` tag, so an N-page walk
         still costs a single signer prompt. A server known to list
         publicly is asked without a token first, which costs no prompt
-        at all; a 401 or 403 then falls back to signing.
+        at all; a 401 or 403 then falls back to signing, once.
 
         A server that cannot be listed keeps the files the library last
         saw there, marked by its ``ServerListing`` as not ok: a server
@@ -361,6 +374,7 @@ class MediaStore(QObject):
         if profile is None:
             return
         if self._fetch_in_flight:
+            self._fetch_requested = True
             return
         servers = self._target_servers()
         targets = tuple(url_safety.origin_of(s) for s in servers)
@@ -370,7 +384,12 @@ class MediaStore(QObject):
         if not servers:
             return
 
+        self._fetch_generation += 1
+        generation = self._fetch_generation
+        pubkey = (profile.user_pubkey or "").lower()
         self._fetch_in_flight = True
+        self._fetch_requested = False
+        self._inflight_targets = targets
         self.fetch_started.emit()
 
         merged: Dict[str, MediaFile] = {}
@@ -387,11 +406,22 @@ class MediaStore(QObject):
         started_with: Set[str] = set(self._files)
         previous: Dict[str, MediaFile] = dict(self._files)
 
+        def current() -> bool:
+            """This walk still speaks for the library: nothing cleared it,
+            and the account it lists is still the active one."""
+            if generation != self._fetch_generation:
+                return False
+            active = self._profile_provider()
+            return active is not None and (active.user_pubkey or "").lower() == pubkey
+
         def finish_one() -> None:
+            if not current():
+                return
             remaining["count"] -= 1
             if remaining["count"] > 0:
                 return
             self._fetch_in_flight = False
+            self._inflight_targets = ()
             self._last_fetch_at = time.monotonic()
             self._last_targets = targets
             now = time.time()
@@ -418,6 +448,11 @@ class MediaStore(QObject):
                 self.library_changed.emit()
             self.listings_changed.emit()
             self.fetch_finished.emit()
+            # Asked again while this walk ran: walk again only when the
+            # servers changed underneath it. Anything else was answered.
+            requested, self._fetch_requested = self._fetch_requested, False
+            if requested and self._current_targets() != targets:
+                self.fetch()
 
         def carry_over(failed_origins: Set[str]) -> None:
             """Keep what unreachable servers held last time."""
@@ -450,13 +485,18 @@ class MediaStore(QObject):
                 if media.urls:
                     media.url = str(media.urls[0].get("url") or media.url)
 
-        def attempt_server(server: str, *, signed: bool) -> None:
+        def attempt_server(server: str, *, signed: bool, retried: bool) -> None:
+            """List ``server`` one way. ``retried`` is True for the second
+            way of asking, after the first was refused; it is the only
+            retry a server gets in one fetch."""
             origin = server_origin(server)
 
             def do_list(auth_event: Optional[dict]) -> None:
+                if not current():
+                    return
                 seen: Set[str] = set()
                 request_page(origin, auth_event, cursor=None, page=1, seen=seen,
-                             signed=signed, server=server)
+                             signed=signed, retried=retried, server=server)
 
             if not signed:
                 # No bunker round-trip: a public listing, or the fallback
@@ -472,7 +512,8 @@ class MediaStore(QObject):
                 unsigned,
                 on_signed=do_list,
                 on_failure=lambda reason: handle_list_error(
-                    server, origin, BlossomError(reason), signed=True, fallback_done=False
+                    server, origin, BlossomError(reason), page=1, signed=True,
+                    retried=retried,
                 ),
             )
 
@@ -484,6 +525,7 @@ class MediaStore(QObject):
             page: int,
             seen: Set[str],
             signed: bool,
+            retried: bool,
             server: str,
         ) -> None:
             self._client.list_for_pubkey(
@@ -491,11 +533,11 @@ class MediaStore(QObject):
                 profile.user_pubkey,
                 auth_event,
                 on_success=lambda items: handle_page(
-                    server, origin, auth_event, items,
-                    cursor=cursor, page=page, seen=seen, signed=signed,
+                    server, origin, auth_event, items, cursor=cursor, page=page,
+                    seen=seen, signed=signed, retried=retried,
                 ),
                 on_failure=lambda err: handle_list_error(
-                    server, origin, err, signed=signed, fallback_done=page > 1
+                    server, origin, err, page=page, signed=signed, retried=retried,
                 ),
                 cursor=cursor,
                 limit=_LIST_PAGE_SIZE,
@@ -511,7 +553,10 @@ class MediaStore(QObject):
             page: int,
             seen: Set[str],
             signed: bool,
+            retried: bool,
         ) -> None:
+            if not current():
+                return
             listing = listings[url_safety.origin_of(origin)]
             novel = 0
             last_sha = ""
@@ -547,7 +592,7 @@ class MediaStore(QObject):
                 finish_one()
                 return
             request_page(origin, auth_event, cursor=last_sha, page=page + 1,
-                         seen=seen, signed=signed, server=server)
+                         seen=seen, signed=signed, retried=retried, server=server)
 
         def merge_entry(origin: str, sha: str, entry: dict) -> None:
             url = entry.get("url") or f"{origin}/{sha}"
@@ -571,18 +616,22 @@ class MediaStore(QObject):
                 )
 
         def handle_list_error(server: str, origin: str, err: BlossomError, *,
-                              signed: bool, fallback_done: bool) -> None:
+                              page: int, signed: bool, retried: bool) -> None:
+            if not current():
+                return
             # A 401/403 on the first page means the other way of asking may
             # work: a signed request some operators reject mid-flight (clock
             # skew between signer and server) can succeed unsigned, since
             # BUD-11 marks the token optional for /list; an unsigned request
             # to a server that turned out to want one is retried signed.
-            if not fallback_done and getattr(err, "status", None) in (401, 403):
+            # Once per server per fetch: a server that refuses both ways is
+            # a failed listing, not a loop.
+            if not retried and page == 1 and getattr(err, "status", None) in (401, 403):
                 if signed:
-                    attempt_server(server, signed=False)
+                    attempt_server(server, signed=False, retried=True)
                     return
                 if lists_publicly(server):
-                    attempt_server(server, signed=True)
+                    attempt_server(server, signed=True, retried=True)
                     return
             listing = listings[url_safety.origin_of(origin)]
             listing.ok = False
@@ -591,10 +640,42 @@ class MediaStore(QObject):
             finish_one()
 
         for server in servers:
-            attempt_server(server, signed=not lists_publicly(server))
+            attempt_server(server, signed=not lists_publicly(server), retried=False)
+
+    def refetch_if_targets_changed(self) -> bool:
+        """Walk the library again only when the servers it reads changed.
+
+        For callers that hear about a possible change (a membership that
+        resolved or lapsed) without knowing whether it moved anything, so
+        a membership check that changed nothing costs no signer prompt.
+        A library that has not been fetched for this account stays that
+        way: listing costs prompts, and only opening the library asks for
+        them. While a walk runs the request is remembered, and the walk
+        repeats itself when it ends if the servers differ. Returns True
+        when a fetch started.
+        """
+        if self._fetch_in_flight:
+            if self._current_targets() != self._inflight_targets:
+                self._fetch_requested = True
+            return False
+        if not self._last_targets:
+            return False
+        if self._current_targets() == self._last_targets:
+            return False
+        self.fetch()
+        return self._fetch_in_flight
 
     def clear(self) -> None:
-        """Drop the library entirely. Used on profile switch / sign-out."""
+        """Drop the library entirely. Used on profile switch / sign-out.
+
+        A walk still running is abandoned: its answers are for the
+        account being left, and the next fetch starts a walk of its own
+        instead of being folded into that one.
+        """
+        self._fetch_generation += 1
+        self._fetch_in_flight = False
+        self._fetch_requested = False
+        self._inflight_targets = ()
         self._files = {}
         self._listings = {}
         self._last_fetch_at = 0.0
@@ -718,15 +799,22 @@ class MediaStore(QObject):
     def _has_room(self, server: str, sha: str, size: int, name: str) -> bool:
         """Whether a file of ``size`` bytes still fits on ``server``.
 
-        Only servers with a known allowance are checked. A file the
-        library already knows to be there costs nothing more. A server
-        that is full is left out of this upload with a note, never the
-        reason the whole upload fails while another server has room.
+        Only servers with a known allowance are checked, and only when
+        the last fetch listed that server successfully: usage counted
+        from a listing that failed (or never ran) is a guess, and a
+        server is never left out on a guess. It then decides for itself.
+        A file the library already knows to be there costs nothing more.
+        A server that is full is left out of this upload with a note,
+        never the reason the whole upload fails while another server has
+        room.
         """
         quota = self.quota_for(server)
         if quota is None:
             return True
         origin = url_safety.origin_of(server)
+        listing = self._listings.get(origin)
+        if listing is None or not listing.ok:
+            return True
         existing = self._files.get(sha)
         if existing is not None and any(
                 url_safety.origin_of(u.get("server", "")) == origin for u in existing.urls):
@@ -735,6 +823,10 @@ class MediaStore(QObject):
             return True
         self.server_skipped.emit(name, _hostname(server), "full")
         return False
+
+    def _current_targets(self) -> tuple:
+        """The origins a fetch started now would walk, in order."""
+        return tuple(url_safety.origin_of(s) for s in self._target_servers())
 
     def _target_servers(self) -> List[str]:
         """Configured servers, followed by any this account is entitled to.

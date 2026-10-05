@@ -176,6 +176,8 @@ def test_a_full_server_is_left_out_of_an_upload_and_it_says_so(tmp_path):
     store, nam, _signer, _ = make(
         tmp_path, router, servers=(SERVER,), entitled=[E21],
         quota=lambda origin: 1 if origin == E21 else None)
+    store.fetch()
+    nam.settle()                                 # usage is known: it listed fine
     skipped, finished = [], []
     store.server_skipped.connect(lambda n, h, r: skipped.append((n, h, r)))
     store.upload_finished.connect(lambda n, m: finished.append(m))
@@ -190,17 +192,188 @@ def test_no_room_anywhere_fails_plainly(tmp_path):
     router = Router(FakeBlossomServer(E21))
     store, nam, _signer, _ = make(tmp_path, router, servers=(E21,),
                                   quota=lambda origin: 1)
+    store.fetch()
+    nam.settle()
+    calls = len(nam.calls)
     failed = []
     store.upload_failed.connect(lambda n, r: failed.append(r))
     store.upload_bytes(BODY, name="photo.png", mime_type="image/png")
     assert failed and "enough space" in failed[0]
-    assert nam.calls == []                       # nothing left the machine
+    assert len(nam.calls) == calls               # nothing left the machine
+
+
+@pytest.mark.parametrize("listed", ["never", "failed"])
+def test_a_server_is_not_left_out_on_a_guess(tmp_path, listed):
+    # Usage counted without a good listing is a guess: the server decides.
+    e21 = FakeBlossomServer(E21, blobs=[descriptor(A, server=E21, size=50)])
+    router = Router(FakeBlossomServer(SERVER), e21)
+    store, nam, _signer, _ = make(
+        tmp_path, router, servers=(SERVER,), entitled=[E21],
+        quota=lambda origin: 60 if origin == E21 else None)
+    if listed == "failed":
+        store.fetch()
+        nam.settle()
+        assert store.bytes_on(E21) == 50
+        router.down.add("blossom.einundzwanzig.space")
+        store.fetch(force=True)
+        nam.settle()
+        router.down.clear()
+        assert not store.server_listings()[E21].ok
+    skipped = []
+    store.server_skipped.connect(lambda n, h, r: skipped.append(h))
+    store.upload_bytes(b"x" * 20, name="clip.bin")
+    nam.settle()
+    assert skipped == []
 
 
 def test_the_members_server_accepts_files_up_to_a_gigabyte():
     from nostr.blossom.plan import get_effective_max_file, lists_publicly
     assert get_effective_max_file(E21) == 1024 ** 3
     assert lists_publicly(E21) and not lists_publicly(SERVER)
+
+
+def test_the_display_bound_is_not_an_upload_ceiling():
+    # The comments once called 100 MiB the largest file the app uploads.
+    # The planner lets the members' server take what it publishes.
+    from nostr.blossom.plan import BLOSSOM_MAX_FILE_SIZE, plan_upload
+    big = BLOSSOM_MAX_FILE_SIZE * 2
+    assert plan_upload(big, [E21]).primary == E21
+
+
+def test_the_published_limit_and_the_server_registry_agree():
+    # Two places name the members' per-file limit; they must not drift.
+    from nostr.blossom.plan import get_effective_max_file
+    from nostr.einundzwanzig import MAX_FILE_BYTES, MEMBER_BLOSSOM
+    assert get_effective_max_file(MEMBER_BLOSSOM) == MAX_FILE_BYTES
+
+
+# -- a walk that cannot loop, cannot leak, and cannot drop a server ---------------------
+
+def test_a_server_refusing_both_ways_is_asked_twice_and_marked_failed(tmp_path):
+    # A public-list server that refuses unsigned and signed alike: one
+    # fallback, then a failed listing and a finished fetch, never a loop.
+    router = Router(FakeBlossomServer(SERVER, blobs=[descriptor(A)]),
+                    FakeBlossomServer(E21, fail_with=403, fail_reason="No."))
+    store, nam, signer, _ = make(tmp_path, router, servers=(SERVER,), entitled=[E21])
+    finished = []
+    store.fetch_finished.connect(lambda: finished.append(True))
+    store.fetch()
+    nam.settle()
+    asked_e21 = [r for _v, r, _b in nam.calls
+                 if r.url().host() == "blossom.einundzwanzig.space"]
+    assert len(asked_e21) == 2                     # unsigned, then signed once
+    assert sum(r.hasRawHeader("Authorization") for r in asked_e21) == 1
+    assert finished == [True]
+    listing = store.server_listings()[E21]
+    assert not listing.ok and listing.error_code
+    assert A in store.files                        # the other server still counts
+
+
+def test_a_signed_refusal_falls_back_once_and_stops(tmp_path):
+    router = Router(FakeBlossomServer(SERVER, fail_with=401, fail_reason="No."))
+    store, nam, _signer, _ = make(tmp_path, router, servers=(SERVER,))
+    store.fetch()
+    nam.settle()
+    assert len(nam.requests_to("/list/" + FakeProfile().user_pubkey)) == 2
+    assert not store.server_listings()[SERVER].ok
+
+
+class SwitchableProfile:
+    def __init__(self, pubkey):
+        self.user_pubkey = pubkey
+        self.bunker_relays = []
+
+
+def make_switchable(tmp_path, router, *, servers=(SERVER,)):
+    settings = BlossomSettings(tmp_path / "blossom_servers.json")
+    settings.set_custom_servers(list(servers))
+    nam = FakeNam(None, responder=router)
+    active = {"profile": FakeProfile()}
+    store = MediaStore(
+        session_pool=FakeSessionPool(FakeSigner()),
+        profile_provider=lambda: active["profile"],
+        settings=settings,
+        client=BlossomClient(nam=nam),
+    )
+    return store, nam, active
+
+
+def test_a_walk_for_the_account_being_left_never_lands(tmp_path):
+    router = Router(FakeBlossomServer(SERVER, blobs=[descriptor(A)]))
+    store, nam, active = make_switchable(tmp_path, router)
+    store.fetch()                                  # in flight for account one
+    active["profile"] = SwitchableProfile("cd" * 32)
+    store.clear()
+    store.fetch()                                  # account two gets its own walk
+    lists = nam.requests_to("/list/" + "cd" * 32)
+    assert len(lists) == 1, "the new account's fetch was folded into the old walk"
+    old = nam.issued[0]
+    old.finish()                                   # the old answer arrives late
+    assert store.files == {} and store.server_listings() == {}
+    nam.settle()
+    assert set(store.files) == {A}                 # the new walk's own answer
+
+
+def test_a_late_answer_after_clear_alone_is_ignored(tmp_path):
+    router = Router(FakeBlossomServer(SERVER, blobs=[descriptor(A)]))
+    store, nam, _active = make_switchable(tmp_path, router)
+    finished = []
+    store.fetch_finished.connect(lambda: finished.append(True))
+    store.fetch()
+    store.clear()
+    nam.settle()
+    assert store.files == {} and finished == []
+
+
+def test_a_server_added_during_a_walk_is_listed_when_it_ends(tmp_path):
+    router = Router(FakeBlossomServer(SERVER, blobs=[descriptor(A)]),
+                    FakeBlossomServer(E21, blobs=[descriptor(B, server=E21)]))
+    store, nam, _signer, entitled = make(tmp_path, router, servers=(SERVER,))
+    store.fetch()
+    entitled.append(E21)                           # the membership resolved mid-walk
+    store.fetch()                                  # coalesced, but remembered
+    nam.settle()
+    assert set(store.files) == {A, B}
+    assert E21 in store.server_listings()
+
+
+def test_a_request_during_a_walk_with_the_same_servers_costs_nothing(tmp_path):
+    router = Router(FakeBlossomServer(SERVER, blobs=[descriptor(A)]))
+    store, nam, signer, _ = make(tmp_path, router, servers=(SERVER,))
+    store.fetch()
+    store.fetch()
+    nam.settle()
+    assert len(signer.requests) == 1
+
+
+def test_a_membership_check_that_changed_nothing_does_not_refetch(tmp_path):
+    router = Router(FakeBlossomServer(SERVER, blobs=[descriptor(A)]),
+                    FakeBlossomServer(E21, blobs=[descriptor(B, server=E21)]))
+    store, nam, signer, entitled = make(tmp_path, router, servers=(SERVER,))
+    assert store.refetch_if_targets_changed() is False
+    assert nam.calls == []                         # never fetched: stays that way
+    store.fetch()
+    nam.settle()
+    store._last_fetch_at -= 3600                   # long past the freshness window
+    prompts = len(signer.requests)
+    assert store.refetch_if_targets_changed() is False
+    assert len(signer.requests) == prompts         # no signer prompt for nothing
+
+    entitled.append(E21)                           # membership flipped
+    assert store.refetch_if_targets_changed() is True
+    nam.settle()
+    assert set(store.files) == {A, B}
+
+
+def test_a_target_change_during_a_walk_is_picked_up_by_refetch(tmp_path):
+    router = Router(FakeBlossomServer(SERVER, blobs=[descriptor(A)]),
+                    FakeBlossomServer(E21, blobs=[descriptor(B, server=E21)]))
+    store, nam, _signer, entitled = make(tmp_path, router, servers=(SERVER,))
+    store.fetch()
+    entitled.append(E21)
+    assert store.refetch_if_targets_changed() is False
+    nam.settle()
+    assert set(store.files) == {A, B}
 
 
 # -- the storage meter's words ---------------------------------------------------------
