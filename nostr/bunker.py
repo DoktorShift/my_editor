@@ -978,9 +978,12 @@ class BunkerSessionPool(QObject):
     Closing the pool tears down every active client (used at app shutdown).
     """
 
-    def __init__(self, pool: RelayPool, parent: Optional[QObject] = None) -> None:
+    def __init__(self, pool: RelayPool, parent: Optional[QObject] = None, *,
+                 vault=None) -> None:
         super().__init__(parent)
         self._pool = pool
+        # Keys kept on this computer, for profiles that sign locally.
+        self._vault = vault
         self._clients: Dict[str, BunkerClient] = {}
         # pubkey -> pending callbacks waiting on the first reattach to finish.
         self._inflight: Dict[str, List[tuple[Callable[[BunkerClient], None], Callable[[str], None]]]] = {}
@@ -995,6 +998,21 @@ class BunkerSessionPool(QObject):
         client = self._clients.get(pubkey)
         if client is not None and client.is_connected:
             on_ready(client)
+            return
+
+        if getattr(profile, "signer", "remote") == "local":
+            # A key kept on this computer: no channel to open, no phone to
+            # ask. The same calls are answered by a LocalSigner.
+            from .key_vault import KeyVault
+            from .local_signer import LocalSigner
+            vault = self._vault if self._vault is not None else KeyVault()
+            secret = vault.load(pubkey)
+            if secret is None:
+                on_error("the private key for this account is not on this computer")
+                return
+            local = LocalSigner(secret, parent=self)
+            self._clients[pubkey] = local
+            on_ready(local)
             return
 
         # Coalesce: if a reattach is already in flight for this profile,
