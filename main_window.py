@@ -124,10 +124,7 @@ from nostr.media.private_library import PrivateLibrary
 from nostr.media.publish_copy import PublicCopyMaker
 from nostr.media.visibility import PublicLedger
 from nostr.metadata import AvatarLoader, ProfileMetadataFetcher
-from nostr.outbox import writer as outbox_writer
 from nostr.outbox.directory import RelayDirectory
-from nostr.outbox.lookup import fetch_replaceable
-from nostr.outbox.policy import KIND_PROFILE, LookupState, lookup_relays
 from nostr.profiles import Profile, ProfileStore
 from nostr.publisher import (
     DraftBulkDeleteJob,
@@ -141,10 +138,7 @@ from nostr.ui.draft_conflict_banner import DraftConflictBanner
 from nostr.ui.drafts_panel import DEFAULT_PANEL_WIDTH, DraftsPanel
 from nostr.membership_controller import MembershipController
 from nostr.key_vault import KeyVault
-from nostr.ui.account_windows import (
-    STEP_PROFILE, STEP_RELAYS, BackupAccountWindow, CreateAccountWindow, RestoreAccountWindow,
-)
-from nostr.outbox.defaults import STARTER_LIST
+from nostr.account_controller import AccountController
 from nostr.ui.media_library_dialog import MediaLibraryDialog
 from nostr.ui.publish_article_dialog import PublishArticleDialog
 from nostr.ui.publish_copy_dialog import resolve_pick
@@ -288,6 +282,18 @@ class MainWindow(QMainWindow):
         self._key_vault = KeyVault()
         self._session_pool = BunkerSessionPool(self._relay_pool, parent=self,
                                                vault=self._key_vault)
+        # Creating, restoring, backing up and signing out of accounts, and
+        # telling the network about a new one (nostr/account_controller.py).
+        self._accounts = AccountController(
+            relay_pool=self._relay_pool, directory=self._relay_directory,
+            vault=self._key_vault, session_pool=self._session_pool,
+            store=self._profile_store, window=self,
+            is_dark=lambda: self.is_dark_theme, parent=self)
+        self._accounts.activate.connect(self._on_nostr_profile_connected)
+        self._accounts.profile_changed.connect(self._on_metadata_updated)
+        self._accounts.status.connect(
+            lambda text, ms: self.status.showMessage(text, ms))
+        self._accounts.link_activated.connect(self._open_external)
         self._metadata_fetcher = ProfileMetadataFetcher(
             self._relay_pool, self._profile_store, parent=self,
             relay_directory=self._relay_directory,
@@ -440,6 +446,10 @@ class MainWindow(QMainWindow):
             # if the panel is never opened, this still keeps the store
             # warm so opening the panel later is instant.
             self._draft_sync.start_for(active)
+            # An account created here whose setup was left for later is
+            # finished now, once the window is up.
+            QTimer.singleShot(0, lambda: self._accounts.profile_activated(
+                self._profile_store.default()))
 
         self._build_actions()
         self._build_menu()
@@ -1149,6 +1159,7 @@ class MainWindow(QMainWindow):
         self._act_backup_account = QAction("Back Up Account\u2026", self)
         self._act_backup_account.triggered.connect(self._on_backup_account)
         m_nostr.addAction(self._act_backup_account)
+        self._update_account_actions()
         act_nostr_sign_out = QAction("Sign Out Active Profile", self)
         act_nostr_sign_out.triggered.connect(self._on_nostr_sign_out)
         m_nostr.addAction(act_nostr_sign_out)
@@ -3419,15 +3430,13 @@ class MainWindow(QMainWindow):
         """Rebuild the chip's dropdown - fast and idempotent."""
         menu = self.header_widget.profile_chip.menu()
         menu.clear()
-        current = self._profile_store.default()
-        if hasattr(self, "_act_backup_account"):
-            self._act_backup_account.setEnabled(current is not None and current.is_local)
+        self._update_account_actions()
 
         profiles = self._profile_store.list()
         if not profiles:
             act = menu.addAction("Create Account\u2026")
             act.triggered.connect(self._on_create_account)
-            act = menu.addAction("Connect Nostr signer…")
+            act = menu.addAction("Connect Signer\u2026")
             act.triggered.connect(self._on_nostr_connect)
             act = menu.addAction("Restore Account\u2026")
             act.triggered.connect(self._on_restore_account)
@@ -3450,169 +3459,32 @@ class MainWindow(QMainWindow):
         if active is not None and active.is_local:
             act_backup = menu.addAction("Back Up Account\u2026")
             act_backup.triggered.connect(self._on_backup_account)
-        act_add = menu.addAction("Add profile…")
+        act_add = menu.addAction("Add Profile\u2026")
         act_add.triggered.connect(self._on_nostr_connect)
-        act_signout = menu.addAction("Sign out active profile")
+        act_signout = menu.addAction("Sign Out")
         act_signout.triggered.connect(self._on_nostr_sign_out)
 
+    def _update_account_actions(self) -> None:
+        """Back Up Account is for an account whose key is kept here. The
+        menu bar is built after the first chip refresh, so both call this."""
+        action = getattr(self, "_act_backup_account", None)
+        if action is not None:
+            current = self._profile_store.default()
+            action.setEnabled(current is not None and current.is_local)
+
     # -- creating, restoring and backing up accounts ---------------------------
+    # The windows and the network work behind them are the account
+    # controller's (nostr/account_controller.py); it makes an account active
+    # through ``_on_nostr_profile_connected``.
 
     def _on_create_account(self) -> None:
-        window = CreateAccountWindow(
-            store=self._profile_store, vault=self._key_vault,
-            connect_signer=self._pair_signer_for_account,
-            is_dark=self.is_dark_theme, parent=self)
-        window.account_ready.connect(
-            lambda profile, name, report: self._on_account_ready(
-                profile, name, report, created=True))
-        window.link_activated.connect(self._open_external)
-        window.finished.connect(window.deleteLater)
-        window.open()
+        self._accounts.create_account()
 
     def _on_restore_account(self) -> None:
-        window = RestoreAccountWindow(store=self._profile_store, vault=self._key_vault,
-                                      is_dark=self.is_dark_theme, parent=self)
-        window.account_ready.connect(
-            lambda profile, name, report: self._on_account_ready(
-                profile, name, report, created=False))
-        window.finished.connect(window.deleteLater)
-        window.open()
+        self._accounts.restore_account()
 
     def _on_backup_account(self) -> None:
-        active = self._profile_store.default()
-        secret = self._key_vault.load(active.user_pubkey) if active is not None else None
-        if secret is None:
-            inform(self, title="This account\u2019s key isn\u2019t on this computer",
-                   message=("It is kept in your signer app. Back it up there."),
-                   is_dark=self.is_dark_theme)
-            return
-        window = BackupAccountWindow(secret=secret, is_dark=self.is_dark_theme, parent=self)
-        window.finished.connect(window.deleteLater)
-        window.open()
-
-    def _pair_signer_for_account(self, on_profile, parent=None) -> None:
-        """Pair a signer app for Create Account, over its window. Nothing is
-        saved here: the window checks the account first."""
-        dialog = ConnectDialog(self._relay_pool, self._profile_store, parent=parent or self,
-                               is_dark=self.is_dark_theme, persist=False, start_on_qr=True,
-                               offer_alternatives=False)
-        dialog.profile_connected.connect(on_profile)
-        try:
-            dialog.exec()
-        finally:
-            dialog.deleteLater()
-
-    # -- the network side of an account (NIP-65 and the profile) ---------------
-
-    def _outbox_deps(self, profile: Profile) -> dict:
-        return {"pool": self._relay_pool, "directory": self._relay_directory,
-                "session_pool": self._session_pool, "profile": profile}
-
-    def _run_account_setup(self, profile: Profile, name: str, report, *, created: bool) -> None:
-        """Publish a new account's relay list and profile; for a restored one,
-        read what it already has (and only offer to publish a relay list)."""
-        if created:
-            setup = outbox_writer.AccountSetup(name=name, deps=self._outbox_deps(profile),
-                                               parent=self)
-            steps = {"relays": STEP_RELAYS, "profile": STEP_PROFILE}
-            setup.step.connect(lambda key, state, detail: report.step.emit(
-                steps[key], state, detail))
-            setup.finished.connect(report.finished)
-            setup.finished.connect(lambda _ok, _msg: setup.deleteLater())
-            # The window's Try Again asks for setup again; the same signed
-            # events are sent, so a retry never asks the signer twice.
-            report.retry = setup.start
-            setup.start()
-            return
-        self._read_restored_account(profile, report)
-
-    def _read_restored_account(self, profile: Profile, report) -> None:
-        pubkey = profile.user_pubkey
-        state = {"relays": None}
-
-        def relays_known(relay_list):
-            state["relays"] = relay_list
-            if relay_list.found:
-                report.step.emit(STEP_RELAYS, "done",
-                                 f"Found, with {len(relay_list.write)} relays to write to.")
-            elif relay_list.state is LookupState.ABSENT:
-                report.step.emit(STEP_RELAYS, "done", "This account has no relay list yet.")
-            else:
-                report.step.emit(STEP_RELAYS, "error",
-                                 "Couldn\u2019t check right now. MyEditor tries again later.")
-            report.step.emit(STEP_PROFILE, "active", "")
-            fetch_replaceable(self._relay_pool, lookup_relays(known=relay_list),
-                              kind=KIND_PROFILE, author=pubkey, on_done=profile_known,
-                              parent=self)
-
-        def profile_known(result):
-            name = ""
-            if result.event is not None:
-                try:
-                    content = json.loads(result.event.get("content") or "{}")
-                    name = str(content.get("display_name") or content.get("name") or "")
-                except ValueError:
-                    pass
-            if name:
-                stored = self._profile_store.get(pubkey)
-                if stored is not None:
-                    stored.display_name = name
-                    self._profile_store.upsert(stored)
-                    self._update_profile_chip()
-                report.step.emit(STEP_PROFILE, "done", f"Welcome back, {name}.")
-            else:
-                report.step.emit(STEP_PROFILE, "done", "No public profile found.")
-            report.finished.emit(True, "")
-            if state["relays"] is not None and state["relays"].state is LookupState.ABSENT:
-                QTimer.singleShot(0, lambda: self._offer_relay_list(profile))
-
-        report.step.emit(STEP_RELAYS, "active", "")
-        self._relay_directory.lookup(pubkey, relays_known, fresh=True)
-
-    def _check_relay_list(self, profile: Profile) -> None:
-        """After connecting an existing account: if it really has no relay
-        list, offer one. Never published without asking: it is the person's."""
-        def known(relay_list):
-            if relay_list.state is LookupState.ABSENT:
-                self._offer_relay_list(profile)
-        self._relay_directory.lookup(profile.user_pubkey, known, fresh=True)
-
-    def _offer_relay_list(self, profile: Profile) -> None:
-        declined = getattr(self, "_relay_list_declined", set())
-        if profile.user_pubkey in declined:
-            return
-        hosts = ", ".join(url.split("://", 1)[1] for url, _marker in STARTER_LIST)
-        choice = ask(
-            self, title="Publish a relay list for this account?",
-            message=("Other Nostr apps use a relay list to find your notes and "
-                     "articles, and this account doesn\u2019t have one yet. MyEditor "
-                     f"can publish its recommended relays: {hosts}."),
-            buttons=(Button("Not Now", False, CANCEL),
-                     Button("Publish Relay List", True, DEFAULT)))
-        if choice is not True:
-            declined.add(profile.user_pubkey)
-            self._relay_list_declined = declined
-            return
-        writer = outbox_writer.create_relay_list(parent=self, **self._outbox_deps(profile))
-
-        def done(outcome):
-            if outcome.status == outbox_writer.WRITTEN:
-                self.status.showMessage("Your relay list is published.", 5000)
-            elif outcome.status == outbox_writer.EXISTS:
-                self.status.showMessage("This account already has a relay list.", 5000)
-            else:
-                self.status.showMessage("The relay list wasn\u2019t published. "
-                                        "Try again later.", 6000)
-            writer.deleteLater()
-
-        writer.finished.connect(done)
-        writer.start()
-
-    def _on_account_ready(self, profile: Profile, name: str, report, *, created: bool) -> None:
-        """A created or restored account becomes the active one, and the
-        network learns about it (see _run_account_setup)."""
-        self._on_nostr_profile_connected(profile)
-        self._run_account_setup(profile, name, report, created=created)
+        self._accounts.backup_account()
 
     def _on_nostr_connect(self):
         dialog = ConnectDialog(
@@ -3622,9 +3494,10 @@ class MainWindow(QMainWindow):
             is_dark=self.is_dark_theme,
         )
         dialog.profile_connected.connect(self._on_nostr_profile_connected)
-        # An account connected from a signer app may have no relay list yet.
+        # A key still kept here for the account is offered for deletion, and
+        # an account connected from a signer app may have no relay list yet.
         dialog.profile_connected.connect(
-            lambda profile: QTimer.singleShot(0, lambda: self._check_relay_list(profile)))
+            lambda profile: QTimer.singleShot(0, lambda: self._accounts.signer_paired(profile)))
         # No signer app yet: the dialog offers the other two ways in.
         dialog.create_requested.connect(lambda: QTimer.singleShot(0, self._on_create_account))
         dialog.restore_requested.connect(lambda: QTimer.singleShot(0, self._on_restore_account))
@@ -3685,11 +3558,18 @@ class MainWindow(QMainWindow):
     def _on_nostr_profile_connected(self, profile: Profile):
         # New (or re-connected) profile becomes the active one.
         previous = self._profile_store.default()
+        bound = self._draft_sync.active_profile
         if previous is not None and (
             previous.user_pubkey.lower() != profile.user_pubkey.lower()
         ):
             # Connecting a second account is a switch, so the first one's
             # drafts and media keys go with it.
+            self._release_identity_state()
+        elif bound is not None and bound.user_pubkey == profile.user_pubkey and (
+            bound.signer != profile.signer
+        ):
+            # The same account signs another way now (its key restored here,
+            # or a signer app paired): whatever holds the old signer lets go.
             self._release_identity_state()
         self._profile_store.set_default(profile.user_pubkey)
         self._membership.account_changed(profile)
@@ -3710,6 +3590,8 @@ class MainWindow(QMainWindow):
             self._drafts_panel.set_active_profile(profile)
             self._drafts_panel.set_signer_unsupported(False)
             self._drafts_panel.set_signer_unreachable(False)
+        # An account created here whose setup was left for later is finished.
+        self._accounts.profile_activated(profile)
 
     def _release_identity_state(self) -> None:
         """Drop everything that belonged to the account being left.
@@ -3756,31 +3638,15 @@ class MainWindow(QMainWindow):
             self._drafts_panel.set_active_profile(profile)
             self._drafts_panel.set_signer_unsupported(False)
             self._drafts_panel.set_signer_unreachable(False)
+        self._accounts.profile_activated(profile)
 
     def _on_nostr_sign_out(self):
         active = self._profile_store.default()
-        if active is None:
+        # The controller asks, then forgets every key kept for the account,
+        # its signer and its profile.
+        if active is None or not self._accounts.sign_out(active):
             return
-        name = active.display_name or active.npub_short()
-        if active.is_local:
-            confirmed = confirm_destructive(
-                self, title=f"Sign out of {name}?",
-                message=("MyEditor deletes the private key it keeps for this account. "
-                         "Without a backup, nobody can get this account back."),
-                action="Sign Out and Delete Key", caution=True)
-        else:
-            confirmed = confirm_destructive(
-                self, title=f"Sign out of {name}?",
-                message=("Your key stays in your signer. MyEditor only forgets "
-                         "this connection."),
-                action="Sign Out")
-        if not confirmed:
-            return
-        if active.is_local:
-            self._key_vault.forget(active.user_pubkey)
-        self._session_pool.drop(active.user_pubkey)
         self._avatars.pop(active.user_pubkey, None)
-        self._profile_store.remove(active.user_pubkey)
         self._update_profile_chip()
         self._refresh_profile_chip_menu()
         # Tear down everything scoped to the account just removed. If
