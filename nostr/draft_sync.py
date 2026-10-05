@@ -366,6 +366,11 @@ class DraftSync(QObject):
             self._latch_signer_unreachable()
 
     def _open_subscription(self) -> None:
+        # One subscription at a time: the signer coming back after it was
+        # unreachable opens it again, and the old one must not stay open.
+        if self._subscription is not None:
+            self._subscription.close()
+            self._subscription = None
         if self._profile is None or not self._read_relays:
             self._store.set_loading(False)
             self.status_changed.emit("No relays available to fetch drafts.")

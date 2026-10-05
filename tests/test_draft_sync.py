@@ -513,3 +513,56 @@ def test_on_wrap_event_drops_events_from_other_authors():
     }
     sync._on_wrap_event(event)
     assert "x" not in sync._store
+
+
+# --------------------------------------------------------------------------- #
+# One subscription at a time                                                  #
+# --------------------------------------------------------------------------- #
+
+class _ParkedSessionPool:
+    """A signer that answers only when the test says so."""
+
+    def __init__(self):
+        self.waiting = []
+
+    def get(self, profile, on_ready, on_error):
+        self.waiting.append((on_ready, on_error))
+
+
+def _sync_with(session_pool, directory):
+    pool = MagicMock()
+    pool.subscribe.side_effect = lambda relays, filters: MagicMock(name=f"sub{len(relays)}")
+    sync = DraftSync(relay_pool=pool, relay_directory=directory,
+                     session_pool=session_pool, store=DraftStore())
+    sync.start_for(_make_profile(PK))
+    return sync, pool
+
+
+def test_the_signer_coming_back_does_not_leave_a_second_subscription_open():
+    session_pool = _ParkedSessionPool()
+    sync, pool = _sync_with(session_pool, FakeRelayDirectory(
+        {PK: _own_list(write=["wss://w.example"])}))
+    _ready, failed = session_pool.waiting.pop()
+    failed("bunker relay refused the connection")        # drafts show as locked
+    first = sync._subscription
+    assert first is not None
+    sync.retry_signer()
+    ready, _failed = session_pool.waiting.pop()
+    ready(MagicMock())
+    assert pool.subscribe.call_count == 2
+    first.close.assert_called_once()
+    assert sync._subscription is not first
+
+
+def test_a_newer_list_while_the_signer_is_pending_is_where_drafts_are_read():
+    session_pool = _ParkedSessionPool()
+    directory = FakeRelayDirectory({PK: _own_list(write=["wss://old.example"])})
+    sync, pool = _sync_with(session_pool, directory)
+    assert pool.subscribe.call_count == 0                 # waiting for the signer
+    directory.set(PK, _own_list(write=["wss://new.example"]))
+    directory.changed.emit(PK)
+    assert pool.subscribe.call_count == 0                 # nothing to move yet
+    ready, _failed = session_pool.waiting.pop()
+    ready(MagicMock())
+    (relays, _filters), = [call.args for call in pool.subscribe.call_args_list]
+    assert relays[0] == "wss://new.example" and "wss://old.example" not in relays
