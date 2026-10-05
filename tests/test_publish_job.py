@@ -202,3 +202,94 @@ def test_mentions_are_the_p_tags_once_each_with_their_hints():
     event = note(["p", ALICE.upper(), "wss://hint.example"], ["e", "x" * 64],
                  ["p", ALICE], ["p", "not-a-pubkey"], ["p"], ["p", BOB])
     assert mentioned_pubkeys(event) == [(ALICE, "wss://hint.example"), (BOB, "")]
+
+
+# -- stopping ----------------------------------------------------------------------------
+
+class FailingSessionPool:
+    def __init__(self, reason):
+        self.reason = reason
+
+    def get(self, profile, on_ready, on_error):
+        on_error(self.reason)
+
+
+def watch(job):
+    seen = {"completed": [], "failed": [], "signed": [], "status": []}
+    job.completed.connect(seen["completed"].append)
+    job.failed.connect(seen["failed"].append)
+    job.signed.connect(seen["signed"].append)
+    job.status_changed.connect(seen["status"].append)
+    return seen
+
+
+def test_a_cancelled_job_publishes_nothing_when_the_signature_lands_later():
+    client = ParkedClient()
+    pool = FakePool()
+    job = make_job(note(["p", ALICE]), pool=pool, session_pool=FakeSessionPool(client))
+    seen = watch(job)
+    job.start()
+    seen["status"].clear()
+    job.cancel()
+    client.parked.pop()()
+    settle()
+    assert pool.published == []
+    assert seen == {"completed": [], "failed": [], "signed": [], "status": []}
+
+
+def test_a_signer_that_cannot_be_reached_fails_the_job():
+    pool = FakePool()
+    job = make_job(note(), pool=pool,
+                   session_pool=FailingSessionPool("bunker relay refused the connection"))
+    seen = watch(job)
+    job.start()
+    settle()
+    assert seen["failed"] == ["bunker relay refused the connection"]
+    assert pool.published == [] and seen["completed"] == []
+
+
+def _dialog(kind, tmp_path, job):
+    from nostr.avatar_store import AvatarStore
+    from nostr.known_people import KnownPeople
+    from nostr.profiles import Profile as StoredProfile
+    from nostr.profiles import ProfileStore
+    from nostr.search import Nip50SearchClient
+    from tests.outbox_fakes import HandPool
+
+    store = ProfileStore(path=tmp_path / "profiles.json")
+    profile = StoredProfile(user_pubkey=PK, bunker_pubkey="b" * 64,
+                            bunker_relays=["wss://bunker.example"], local_secret_hex="0" * 64)
+    store.upsert(profile)
+    people = KnownPeople(path=tmp_path / "people.json")
+    common = dict(active_profile=profile, store=store, relay_pool=FakePool(),
+                  relay_directory=directory(), session_pool=FakeSessionPool(FakeClient()),
+                  known_people=people, search_client=Nip50SearchClient(HandPool(), people),
+                  avatars=AvatarStore())
+    if kind == "note":
+        from nostr.ui.publish_note_dialog import PublishNoteDialog
+        dialog = PublishNoteDialog(content="hello", **common)
+    else:
+        from nostr.ui.publish_article_dialog import PublishArticleDialog
+        dialog = PublishArticleDialog(body_markdown="# Hello\n\nBody.", **common)
+    dialog._job = job
+    return dialog
+
+
+class StubJob:
+    def __init__(self):
+        self.cancelled = False
+
+    def cancel(self):
+        self.cancelled = True
+
+
+@pytest.mark.parametrize("kind", ["note", "article"])
+def test_closing_a_publish_dialog_stops_its_job(kind, tmp_path):
+    job = StubJob()
+    dialog = _dialog(kind, tmp_path, job)
+    dialog._on_cancel()
+    assert job.cancelled and dialog._job is None
+    job = StubJob()
+    dialog = _dialog(kind, tmp_path, job)
+    dialog.reject()                                  # Escape, or the close button
+    assert job.cancelled

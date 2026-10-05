@@ -473,6 +473,11 @@ class PublishJob(QObject):
                               zero relays accepted
       failed(str)             short reason; terminal. No further signals
                               after this
+
+    Cancellation: ``cancel()`` stops the job where it is. Nothing is
+    published after it and no further signal fires; a signer request
+    already sent cannot be recalled, so its answer is ignored. Once the
+    event has gone to the relays, cancelling only silences the job.
     """
 
     status_changed = Signal(str)
@@ -507,6 +512,7 @@ class PublishJob(QObject):
         self._signed_event: Optional[dict] = None
         self._sent = False
         self._failed = False
+        self._cancelled = False
 
     def start(self) -> None:
         """Kick off the publish. Safe to call once per instance."""
@@ -523,6 +529,10 @@ class PublishJob(QObject):
             on_error=self._fail,
         )
 
+    def cancel(self) -> None:
+        """Stop: publish nothing more and emit nothing more."""
+        self._cancelled = True
+
     # -- pipeline ----------------------------------------------------------
 
     def _on_plan_ready(self, plan) -> None:
@@ -530,7 +540,7 @@ class PublishJob(QObject):
         self._publish_when_ready()
 
     def _on_bunker_ready(self, client) -> None:
-        if self._failed:
+        if self._failed or self._cancelled:
             return
         self.status_changed.emit(
             "Waiting for signature. Approve the request on your signer…"
@@ -542,7 +552,7 @@ class PublishJob(QObject):
         )
 
     def _on_signed(self, signed_event: dict) -> None:
-        if self._failed:
+        if self._failed or self._cancelled:
             return
         self._signed_event = signed_event
         self.signed.emit(signed_event["id"])
@@ -551,7 +561,8 @@ class PublishJob(QObject):
         self._publish_when_ready()
 
     def _publish_when_ready(self) -> None:
-        if self._sent or self._failed or self._plan is None or self._signed_event is None:
+        if (self._sent or self._failed or self._cancelled or self._plan is None
+                or self._signed_event is None):
             return
         self._sent = True
         relays = self._plan.targets
@@ -561,12 +572,14 @@ class PublishJob(QObject):
         job.all_done.connect(self._on_publish_done)
 
     def _fail(self, reason: str) -> None:
-        if self._failed or self._sent:
+        if self._failed or self._sent or self._cancelled:
             return
         self._failed = True
         self.failed.emit(reason)
 
     def _on_first_accept(self, url: str) -> None:
+        if self._cancelled:
+            return
         # Surface the win immediately so the dialog can flip to a success
         # state even before the slower relays finish reporting.
         self.status_changed.emit(f"Accepted by {url}. Waiting for the rest…")
@@ -580,6 +593,8 @@ class PublishJob(QObject):
         reached = [url for url in self._plan.inbox if url in took_it]
         if reached:
             self._relay_directory.share_relay_list(self._profile.user_pubkey, reached)
+        if self._cancelled:
+            return
         self.status_changed.emit(
             f"Published. {accepted}/{len(results)} relays accepted."
         )

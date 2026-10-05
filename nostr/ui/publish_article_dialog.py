@@ -889,6 +889,13 @@ class PublishArticleDialog(QDialog):
         self._set_busy(False)
 
     def _on_cancel(self) -> None:
-        if self._job is not None:
-            self._job = None
         self.reject()
+
+    def reject(self) -> None:
+        # Cancel, Escape and the window's close button all end here. A
+        # signer request already sent can't be revoked, but the job stops:
+        # a signature that arrives later is not published.
+        if self._job is not None:
+            self._job.cancel()
+            self._job = None
+        super().reject()
