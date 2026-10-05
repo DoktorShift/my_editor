@@ -307,15 +307,16 @@ def test_upper_case_and_a_lightning_prefix_are_read():
 # House style                                                           #
 # --------------------------------------------------------------------- #
 
-def _sidecar_files():
-    folder = os.path.join(ROOT, "sidecar")
-    return sorted(f"sidecar/{name}" for name in os.listdir(folder)
-                  if os.path.isfile(os.path.join(folder, name)) and name != ".env")
+def _files_in(folder):
+    path = os.path.join(ROOT, folder)
+    return sorted(f"{folder}/{name}" for name in os.listdir(path)
+                  if os.path.isfile(os.path.join(path, name))
+                  and name != ".env" and not name.endswith(".pyc"))
 
 
 @pytest.mark.parametrize("path", [
     "nostr/nip98.py",
-    "nostr/einundzwanzig_api.py",
+    *_files_in("nostr/einundzwanzig_api"),
     "tests/membership_fakes.py",
     "tests/test_nip98.py",
     "tests/test_einundzwanzig_api.py",
@@ -327,7 +328,7 @@ def _sidecar_files():
     "packaging/my_editor.spec",
     ".github/workflows/build-installers.yml",
     ".gitignore",
-    *_sidecar_files(),
+    *_files_in("sidecar"),
 ])
 def test_no_em_dash_in_the_files_this_feature_touches(path):
     with open(os.path.join(ROOT, path), encoding="utf-8") as handle:
