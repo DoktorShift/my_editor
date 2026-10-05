@@ -119,6 +119,13 @@ def test_a_silent_signer_points_at_the_signer_app():
     assert "signer" in title.lower() and "signer app" in message
 
 
+def test_unavailable_joining_points_at_the_website():
+    assert humanize(ApiError(ErrorCode.UNAVAILABLE)) == (
+        "Joining in the app isn't available right now",
+        "You can join on the EINUNDZWANZIG website instead.",
+    )
+
+
 def test_a_refused_credential_suggests_the_clock():
     # The likeliest cause a user can fix is a computer clock outside the
     # server's one-minute window.

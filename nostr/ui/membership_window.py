@@ -285,7 +285,7 @@ class MembershipWindow(AssistantWindow):
             note = note or ("Membership belongs to a Nostr identity. Connect your "
                             "signer to join.")
         elif self._service == "unavailable":
-            note = note or ("This copy of MyEditor can’t sign you up directly. "
+            note = note or ("Joining in the app isn’t available right now. "
                             "You can join on the EINUNDZWANZIG website.")
         elif self._service == "checking":
             note = note or "Checking whether you can join from here…"

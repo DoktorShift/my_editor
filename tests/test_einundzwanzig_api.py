@@ -204,17 +204,36 @@ def test_no_service_means_not_available_without_asking():
     assert answers == [False] and env.nam.calls == []
 
 
-def test_a_service_without_a_key_is_no_key():
-    script = [json_reply({"message": "Not available.", "code": "not_configured"}, status=503)]
+@pytest.mark.parametrize("service_code", ["not_configured", "upstream_refused"])
+def test_a_service_without_a_usable_key_means_joining_is_unavailable(service_code):
+    # No key on the service, or the association refused it: nothing the
+    # user can do about either, so not "could not confirm it is you".
+    script = [json_reply({"message": "Not available.", "code": service_code}, status=503)]
     env = make(script=script, server=False)
-    assert failure(env, "config").code == ErrorCode.NO_KEY
+    assert failure(env, "config").code == ErrorCode.UNAVAILABLE
+    env = make(script=[json_reply({"message": "Not available.", "code": service_code},
+                                  status=503)], server=False)
+    error = failure(env, "me")
+    assert error.code == ErrorCode.UNAVAILABLE and len(env.signer.requests) == 1
+
+
+def test_another_503_is_the_servers_trouble():
+    env = make(script=[json_reply({"message": "Down.", "code": "maintenance"}, status=503)],
+               server=False)
+    assert failure(env, "me").code == ErrorCode.SERVER
+
+
+def test_the_services_own_404_is_not_nothing_on_record():
+    script = [json_reply({"message": "Not Found", "code": "not_forwarded"}, status=404)]
+    env = make(script=script, server=False)
+    assert failure(env, "me").code == ErrorCode.BAD_RESPONSE
 
 
 @pytest.mark.parametrize("name, args, kwargs, verb, path, kind", ALL_CALLS)
 def test_without_a_service_nothing_is_signed_or_sent(name, args, kwargs, verb, path, kind):
     env = make(service="")
     error = failure(env, name, *args, **kwargs)
-    assert error.code == ErrorCode.NO_KEY
+    assert error.code == ErrorCode.UNAVAILABLE
     assert env.signer.requests == []
     assert env.nam.calls == []
 
@@ -452,7 +471,7 @@ def test_the_longest_allowed_application_text_is_sent():
 
 def test_no_service_outranks_a_field_problem():
     env = make(service="")
-    assert failure(env, "apply", nip05_handle="BAD").code == ErrorCode.NO_KEY
+    assert failure(env, "apply", nip05_handle="BAD").code == ErrorCode.UNAVAILABLE
 
 
 # --------------------------------------------------------------------- #

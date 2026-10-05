@@ -197,7 +197,7 @@ def has_service() -> bool:
 class ErrorCode:
     """The stable error codes. Plain strings, so they survive a signal."""
 
-    NO_KEY = "no_key"                          # this build has no client key
+    UNAVAILABLE = "unavailable"                # joining in the app isn't available right now
     OFFLINE = "offline"                        # no connection to the server
     TIMEOUT = "timeout"                        # the server stopped answering
     UNAUTHORIZED = "unauthorized"              # 401: key or signature refused
@@ -754,11 +754,9 @@ def _wait_advice(seconds: Optional[int]) -> str:
 
 
 _COPY: Dict[str, Tuple[str, str]] = {
-    ErrorCode.NO_KEY: (
-        "Joining is not available in this version",
-        "This copy of MyEditor cannot connect to EINUNDZWANZIG. Install "
-        "MyEditor from the official download page, or join on the "
-        "EINUNDZWANZIG website.",
+    ErrorCode.UNAVAILABLE: (
+        "Joining in the app isn't available right now",
+        "You can join on the EINUNDZWANZIG website instead.",
     ),
     ErrorCode.OFFLINE: (
         "Cannot reach EINUNDZWANZIG",
@@ -934,7 +932,7 @@ class MembershipApi(QObject):
 
     Every method takes ``on_success`` and ``on_failure`` and exactly one
     of them fires, ``on_failure`` always with an :class:`ApiError`. A
-    failure that needs no network (no key, a field that would be
+    failure that needs no network (no service, a field that would be
     refused) is reported before the method returns and before anything
     is signed, so the user is never asked to approve a request that
     cannot succeed.
@@ -1176,7 +1174,7 @@ class MembershipApi(QObject):
 
     def _run(self, call: _Call) -> None:
         if not self._service_url:
-            self._fail(call, ApiError(ErrorCode.NO_KEY))
+            self._fail(call, ApiError(ErrorCode.UNAVAILABLE))
             return
         if call.signed:
             self._sign_and_send(call)
@@ -1354,11 +1352,18 @@ class MembershipApi(QObject):
                 _reply_header(reply, "Retry-After"), now=self._clock(),
             )
 
-        if status == 503 and body.get("code") == "not_configured":
-            # The service runs but holds no key: joining isn't offered here.
-            code = ErrorCode.NO_KEY
+        service_code = body.get("code")
+        if status == 503 and service_code in ("not_configured", "upstream_refused"):
+            # The service runs but holds no key, or the association refused
+            # it: joining in the app isn't available, whatever the user does.
+            code = ErrorCode.UNAVAILABLE
         elif status in (401, 403):
             code = ErrorCode.UNAUTHORIZED
+        elif status == 404 and service_code == "not_forwarded":
+            # The service's own 404: it does not forward this request at
+            # all, which only a bug or a changed service explains. Not the
+            # association's "nothing on record".
+            code = ErrorCode.BAD_RESPONSE
         elif status == 404:
             code = ErrorCode.NOT_FOUND
         elif status == 409:

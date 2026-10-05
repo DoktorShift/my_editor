@@ -232,7 +232,7 @@ def test_a_passing_failure_keeps_waiting(code):
 
 @pytest.mark.parametrize("code", [
     ErrorCode.SIGNER_DECLINED, ErrorCode.SIGNER_UNREACHABLE, ErrorCode.UNAUTHORIZED,
-    ErrorCode.NO_KEY, ErrorCode.NOT_FOUND, ErrorCode.VALIDATION, ErrorCode.CONFLICT,
+    ErrorCode.UNAVAILABLE, ErrorCode.NOT_FOUND, ErrorCode.VALIDATION, ErrorCode.CONFLICT,
 ])
 def test_a_failure_asking_again_cannot_cure_stops_the_wait(code):
     # Above all a signer that said no or is not answering: asking again
