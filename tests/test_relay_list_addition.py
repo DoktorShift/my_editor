@@ -35,7 +35,7 @@ from nostr import relay_list_addition as rla  # noqa: E402
 from nostr.outbox import defaults  # noqa: E402
 from nostr.outbox.directory import RelayDirectory  # noqa: E402
 from tests.outbox_fakes import (  # noqa: E402
-    ABSENT, NOW, OTHER_SK, UNKNOWN, FakeClient, FakePool, FakeQuery, FakeSessionPool,
+    ABSENT, NOW, UNKNOWN, FakeClient, FakePool, FakeQuery, FakeSessionPool,
     Profile, found, settle, signed,
 )
 

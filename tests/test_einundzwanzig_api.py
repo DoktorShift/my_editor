@@ -20,7 +20,6 @@ from __future__ import annotations
 import json
 import os
 import sys
-import types
 from types import SimpleNamespace
 
 import pytest
@@ -68,7 +67,6 @@ from tests.membership_fakes import (
     FakeReply,
     FakeSigner,
     config_data,
-    data_reply,
     decode_authorization,
     header,
     invoice_data,

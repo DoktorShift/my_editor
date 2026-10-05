@@ -23,7 +23,7 @@ import ipaddress
 import json
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
-from typing import Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import Dict, Iterable, List, Mapping, Optional
 
 from .. import events
 from . import defaults

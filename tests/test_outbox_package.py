@@ -33,10 +33,10 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from nostr import bunker, crypto, events  # noqa: E402
 from nostr.outbox import defaults, policy, writer  # noqa: E402
 from nostr.outbox.directory import RelayDirectory  # noqa: E402
-from nostr.outbox.lookup import Lookup, classify  # noqa: E402
+from nostr.outbox.lookup import classify  # noqa: E402
 from nostr.outbox.policy import LookupState, RelayList  # noqa: E402
 from tests.outbox_fakes import (  # noqa: E402
-    ABSENT, NOW, OTHER_PK, OTHER_SK, PK, SK, UNKNOWN, FakeClient, FakePool, FakeQuery, HandPool,
+    ABSENT, NOW, OTHER_PK, OTHER_SK, PK, UNKNOWN, FakeClient, FakePool, FakeQuery, HandPool,
     FakeSessionPool, Profile, found, one_by_one, settle, signed,
 )
 
