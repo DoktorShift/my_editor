@@ -22,8 +22,8 @@ Write in the editor, hit publish, approve on your phone. The document goes out a
 
 ### What you can publish
 
-- **Short notes** (kind 1, `Ctrl+Shift+P`): the editor's content as plain text. Formatting is stripped on publish.
-- **Long-form articles** (NIP-23 kind 30023, `Ctrl+Shift+A`): Markdown body with title, summary, slug (the `d`-tag identifier), cover image, and hashtags. Re-publishing with the same slug replaces the previous version, so an article stays addressable as one `naddr1…` link across edits.
+- **Short notes** (kind 1, `Ctrl+Shift+P`): the editor's content as plain text, since that is what apps show for a note. Bold and italic are left out; list markers and link addresses stay.
+- **Long-form articles** (NIP-23 kind 30023, `Ctrl+Shift+A`): the body is the same Markdown a `.md` save writes (`markdown_writer.py`): bold, italic, strikethrough, inline code, links, headings, lists, quotes, code blocks, tables and task lists reach Nostr. Underline and colors have no Markdown and stay in local files. Lines typed one under the other stay separate lines; characters Markdown would read as markup are escaped, so they show as typed. Title, summary, slug (the `d`-tag identifier), cover image, and hashtags come with it. Re-publishing with the same slug replaces the previous version, so an article stays addressable as one `naddr1…` link across edits.
 
 Both flows display a `Published from MyEditor` client tag so readers that honour NIP-89 can show which app produced the note.
 
@@ -100,6 +100,7 @@ In-progress work is saved as a **NIP-37 draft**: a kind 31234 event whose body i
 - **`Ctrl+Shift+S`** asks where to save the current tab: local file or private Nostr draft. The choice can be remembered per tab.
 - **`Ctrl+S`** on a draft-bound tab silently re-saves the draft. Same shortcut, no questions, exactly like saving a local file.
 - Double-click a row to open the draft in a new tab. Right-click for Publish, Copy event id, or Delete.
+- An article draft holds the article's Markdown and opens with its formatting (headings, bold, lists); a note draft opens as typed.
 
 ### Recovery
 

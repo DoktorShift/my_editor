@@ -103,6 +103,7 @@ from recent_files import load_recent, add_recent, clear_recent
 from nostr.avatar_store import AvatarBatchLoader, AvatarStore
 from nostr.bech32 import encode_note
 from nostr.blossom.errors import friendly_message
+from nostr.state import NostrState
 from nostr.blossom.server_list import UserServerList
 from nostr.blossom.store import MediaFile, MediaStore
 from nostr.bunker import BunkerSessionPool
@@ -272,6 +273,9 @@ class MainWindow(QMainWindow):
         # alive for the lifetime of the editor.
         self._relay_pool = RelayPool(parent=self)
         self._profile_store = ProfileStore()
+        # Whether Nostr is in use (an account is active): the one signal the
+        # editor's Nostr features follow (nostr/state.py).
+        self.nostr_state = NostrState(lambda: self._profile_store.default(), parent=self)
         # Where everyone reads and writes (NIP-65): verified, cached, and the
         # user's own lists remembered across launches. Every job and panel
         # that touches relays asks it where to go.
@@ -2845,7 +2849,10 @@ class MainWindow(QMainWindow):
         how major desktop apps display their keyboard reference.
         """
         from shortcuts_dialog import OTHER_KEYS, ShortcutsDialog, groups_from
-        groups = groups_from(self.commands.shortcut_groups(OTHER_KEYS))
+        # Nostr shortcuts are listed once Nostr is in use; before that the
+        # editor shows nothing of it beyond the Nostr menu.
+        groups = groups_from(self.commands.shortcut_groups(
+            OTHER_KEYS, nostr=self.nostr_state.active))
         dlg = ShortcutsDialog(groups, is_dark=self.is_dark_theme, parent=self)
         dlg.exec()
 
@@ -3450,7 +3457,14 @@ class MainWindow(QMainWindow):
 
     def _update_account_actions(self) -> None:
         """Back Up Account is for an account whose key is kept here. The
-        menu bar is built after the first chip refresh, so both call this."""
+        menu bar is built after the first chip refresh, so both call this.
+
+        Every change of the active account passes through here (connect,
+        switch, sign out, create, restore), so this is also where the one
+        "Nostr in use" signal is brought up to date."""
+        state = getattr(self, "nostr_state", None)
+        if state is not None:
+            state.refresh()
         action = getattr(self, "_act_backup_account", None)
         if action is not None:
             current = self._profile_store.default()

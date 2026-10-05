@@ -24,7 +24,7 @@
 | `Ctrl+U` | Underline |
 | `Ctrl+D` | Reset all formatting |
 
-The **B**, **I**, and **U** buttons in the header bar mirror these shortcuts and highlight orange when the format is active at the cursor position.
+The **B**, **I**, and **U** buttons in the header bar and the **Format** menu mirror these shortcuts; the buttons highlight orange when the format is active at the cursor position.
 
 ### Undo / Redo
 
@@ -56,7 +56,9 @@ The **B**, **I**, and **U** buttons in the header bar mirror these shortcuts and
 | `Ctrl+Shift+T` | Toggle dark / light theme |
 | `Ctrl+Shift+H` | Toggle syntax highlighting |
 
-The **`View`** menu holds the appearance options: background style (lined, dashed, dotted, grid), paper mode, and highlight current line.
+The **`View`** menu holds the appearance options: theme, line numbers, syntax highlighting, background style (lined, dashed, dotted, grid), paper mode, and highlight current line.
+
+`Help > Keyboard Shortcuts` lists every shortcut. It is built from the same command list as the menus (`commands.py`), so the two always agree; the Nostr shortcuts appear there once an account is in use.
 
 ### Nostr
 
@@ -155,7 +157,7 @@ macOS shows a preview inside its print dialog. On Windows and Linux,
 | `.txt` | Plain text, no formatting |
 | `.html` | Clean semantic HTML5; bullets become real lists, images are embedded as data URIs so the single file is shareable; adapts to the reader's light/dark mode |
 | `.pdf` | Native PDF export: document metadata, locale-aware page size (A4/Letter), page-number footer, images scaled to the printable width; configure via `File > Page Setup…` |
-| `.md` | Markdown |
+| `.md` | Markdown: bold, italic, strikethrough, inline code, links, headings, lists, quotes, code blocks, tables and task lists are kept; underline and colors are not (MyEditor asks first when the document has them). It is the same Markdown an article publishes. |
 | `.rtf` | Rich Text Format |
 | `.Rmd` | R Markdown: YAML frontmatter plus Pandoc markdown; colors and underline use Pandoc spans, images go into a `<name>_media/` folder next to the file |
 
