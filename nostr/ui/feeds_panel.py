@@ -91,7 +91,7 @@ from ..imports.registry import (
     resolve_source,
 )
 from ..imports.subscriptions import FeedSubscriptionStore
-from ..outbox import RelayDirectory
+from ..outbox import RelayDirectory, relays_from
 from ..profiles import Profile
 from ..relay import RelayPool
 from ..rss.parser import FeedItem
@@ -1206,8 +1206,7 @@ class FeedsPanel(QFrame):
                 if self._rehost_check.isChecked() else ""
             ),
             skip_image_urls=set(self._skip_image_urls),
-            entitled_relays=(list(self._entitled_relays() or ())
-                             if self._entitled_relays else ()),
+            entitled_relays=relays_from(self._entitled_relays),
             parent=self,
         )
         self._job.status_changed.connect(self._set_status)

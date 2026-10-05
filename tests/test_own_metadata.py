@@ -85,6 +85,7 @@ def my_directory():
 # -- the user's own profile (kind 0) ---------------------------------------------------
 
 def metadata_fetcher(tmp_path, relays, directory=None):
+    directory = directory or FakeRelayDirectory()
     store = ProfileStore(path=tmp_path / "profiles.json")
     store.upsert(Profile(user_pubkey=PK, bunker_pubkey="b" * 64,
                          bunker_relays=["wss://bunker.example"],
@@ -132,6 +133,7 @@ def test_the_profile_is_asked_for_where_the_users_lists_are(tmp_path):
 # -- the user's contact list (kind 3) and the people in it ----------------------------
 
 def contact_fetcher(tmp_path, relays, directory=None):
+    directory = directory or FakeRelayDirectory()
     people = KnownPeople(path=tmp_path / "people.json")
     fetcher = ContactListFetcher(relays, people, relay_directory=directory)
     return fetcher, people
@@ -175,3 +177,14 @@ def test_a_late_answer_for_another_account_is_dropped(tmp_path):
     fetcher.fetch(OTHER_PK)          # the account switched before PK's answer
     settle()
     assert OTHER_PK not in people
+
+
+def test_the_users_own_lookups_cannot_be_built_without_the_directory(tmp_path):
+    # Without it, the user's own relays would silently go unasked.
+    from nostr.blossom.server_list import UserServerList
+    with pytest.raises(TypeError):
+        ProfileMetadataFetcher(ScriptedRelays([]), ProfileStore(path=tmp_path / "p.json"))
+    with pytest.raises(TypeError):
+        ContactListFetcher(ScriptedRelays([]), KnownPeople(path=tmp_path / "k.json"))
+    with pytest.raises(TypeError):
+        UserServerList(ScriptedRelays([]))

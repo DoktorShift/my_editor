@@ -35,7 +35,7 @@ from ..bech32 import encode_naddr
 from ..blossom.store import MediaFile, MediaStore
 from ..bunker import BunkerSessionPool, humanize_failure
 from ..known_people import KnownPeople
-from ..outbox import RelayDirectory
+from ..outbox import RelayDirectory, relays_from
 from ..profiles import Profile, ProfileStore
 from ..publisher import PublishJob, PublishResult, build_article, slugify
 from ..relay import RelayPool
@@ -849,8 +849,7 @@ class PublishArticleDialog(QDialog):
             relay_directory=self._relay_directory,
             session_pool=self._session_pool,
             profile=self._current_profile,
-            entitled_relays=list(self._entitled_relays() or ())
-            if self._entitled_relays else (),
+            entitled_relays=relays_from(self._entitled_relays),
             unsigned_event=unsigned,
             parent=self,
         )

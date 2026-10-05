@@ -42,6 +42,7 @@ from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequ
 import url_safety
 from image_safety import decode_image_bytes
 
+from .outbox.directory import RelayDirectory
 from .outbox.lookup import Lookup, fetch_replaceable
 from .outbox.policy import KIND_PROFILE, lookup_relays
 from .profiles import Profile, ProfileStore
@@ -84,20 +85,21 @@ class ProfileMetadataFetcher(QObject):
         store: ProfileStore,
         parent: Optional[QObject] = None,
         *,
-        relay_directory=None,
+        relay_directory: RelayDirectory,
         query=fetch_replaceable,
     ) -> None:
         super().__init__(parent)
         self._pool = pool
         self._store = store
-        # Knows the user's own relay list, which leads the lookup. Without
-        # one the indexers and the fallback relays are asked.
+        # Knows the user's own relay list, which leads the lookup (while
+        # it is unknown, the indexers and the fallback relays are asked).
+        # Required: without it the user's own relays would silently go
+        # unasked.
         self._relay_directory = relay_directory
         self._query = query
 
     def fetch(self, profile: Profile, *, timeout_ms: int = 8_000) -> None:
-        known = (self._relay_directory.cached(profile.user_pubkey)
-                 if self._relay_directory is not None else None)
+        known = self._relay_directory.cached(profile.user_pubkey)
 
         def _on_done(result: Lookup) -> None:
             event = result.event

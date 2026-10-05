@@ -34,6 +34,7 @@ from PySide6.QtCore import QObject, Signal
 
 from . import events
 from .known_people import KnownPeople, Person
+from .outbox.directory import RelayDirectory
 from .outbox.lookup import Lookup, fetch_replaceable
 from .outbox.policy import bulk_profile_relays, created_at_of, lookup_relays
 from .relay import RelayPool, Subscription
@@ -150,14 +151,16 @@ class ContactListFetcher(QObject):
         people: KnownPeople,
         parent: Optional[QObject] = None,
         *,
-        relay_directory=None,
+        relay_directory: RelayDirectory,
         query=fetch_replaceable,
     ) -> None:
         super().__init__(parent)
         self._pool = pool
         self._people = people
-        # Knows the user's own relay list, which leads the kind 3 lookup.
-        # Without one the indexers and the fallback relays are asked.
+        # Knows the user's own relay list, which leads the kind 3 lookup
+        # (while it is unknown, the indexers and the fallback relays are
+        # asked). Required: without it the user's own relays would
+        # silently go unasked.
         self._relay_directory = relay_directory
         self._query = query
         self._sub: Optional[Subscription] = None
@@ -175,8 +178,7 @@ class ContactListFetcher(QObject):
         self._generation += 1
         generation = self._generation
         self._metadata_count = 0
-        known = (self._relay_directory.cached(pubkey_hex)
-                 if self._relay_directory is not None else None)
+        known = self._relay_directory.cached(pubkey_hex)
 
         def _on_contact_list(result: Lookup) -> None:
             if generation != self._generation:
