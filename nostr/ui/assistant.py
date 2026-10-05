@@ -35,7 +35,7 @@ import atexit
 import sys
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
-from PySide6.QtCore import QMimeData, Qt, QTimer
+from PySide6.QtCore import QEvent, QMimeData, Qt, QTimer
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
@@ -392,11 +392,49 @@ class AssistantWindow(QDialog):
     def add_page(self, key: str, widget: QWidget) -> None:
         self._pages[key] = widget
         self._stack.addWidget(widget)
+        # A page whose text changed asks for a new layout; it may need
+        # more room than before.
+        widget.installEventFilter(self)
+
+    def eventFilter(self, watched, event) -> bool:
+        if (event.type() == QEvent.Type.LayoutRequest
+                and watched is self._stack.currentWidget()):
+            self.fit_page()
+        return super().eventFilter(watched, event)
 
     def show_page(self, key: str, buttons: Iterable[ButtonSpec]) -> None:
         self._page = key
         self._stack.setCurrentWidget(self._pages[key])
         self.set_buttons(buttons)
+        self.fit_page()
+
+    def fit_page(self) -> None:
+        """Make room for every line of the page shown.
+
+        Wrapped text needs more height the narrower the window is, and a
+        stack of pages does not pass that on, so the page's own height at
+        the current width becomes the window's minimum. Longer words (a
+        translation, a larger font) then grow the window instead of
+        clipping the text. It runs again whenever the page's layout
+        changes, so text that arrives later fits too."""
+        page = self._stack.currentWidget()
+        layout = page.layout() if page is not None else None
+        if layout is None:
+            return
+        width = self._stack.width()
+        if not self.isVisible() or width <= 0:
+            margins = self.layout().contentsMargins()
+            width = max(self.width(), self.minimumWidth()) - margins.left() - margins.right()
+        if layout.hasHeightForWidth():
+            needed = layout.totalHeightForWidth(width)
+        else:
+            needed = layout.totalSizeHint().height()
+        if needed != self._stack.minimumHeight():
+            self._stack.setMinimumHeight(needed)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self.fit_page()
 
     def set_buttons(self, specs: Iterable[ButtonSpec]) -> None:
         """Lay out ``(key, label, placement, handler)`` buttons: Go Back at
