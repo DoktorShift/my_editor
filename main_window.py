@@ -44,7 +44,7 @@ import image_safety
 import url_safety
 from highlighter import SyntaxHighlighter, detect_language, detect_language_from_content, LANGUAGE_DISPLAY_NAMES
 from settings import load_settings, save_setting
-from welcome import welcome_html
+from welcome import is_pristine_welcome, welcome_html
 from update_check import UpdateChecker
 from updater import detect_install_kind, supports_in_app_update, select_asset, UpdateInstaller
 from alerts import (
@@ -761,6 +761,8 @@ class MainWindow(QMainWindow):
         """Compute the display title for a tab.
 
         Precedence:
+          - "Welcome" for the welcome tab as MyEditor opened it (never
+            saved and not edited; see welcome.is_pristine_welcome).
           - File path basename if the tab is backed by a local file.
           - Draft title if the tab is purely a draft (opened from the
             drafts panel without a local file).
@@ -770,11 +772,11 @@ class MainWindow(QMainWindow):
         can tell at a glance that contents are encrypted at rest on
         the relays.
         """
+        if is_pristine_welcome(ed):
+            return "Welcome"
         path = getattr(ed, "_file_path", None)
         binding = getattr(ed, "_draft_binding", None)
         dirty = "*" if ed.document().isModified() else ""
-        if getattr(ed, "_is_welcome", False) and not dirty:
-            return "Welcome"
         if path:
             base = os.path.basename(path)
         elif binding and binding.title:

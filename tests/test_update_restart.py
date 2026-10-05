@@ -211,6 +211,27 @@ result["tabs"] = tabs_of(w)
     assert r["tabs"][1]["modified"] is True
 
 
+def test_a_welcome_tab_saved_as_a_file_is_that_file_from_then_on(tmp_path):
+    r = scenario(tmp_path, r"""
+w = main_window.MainWindow()
+assert w.tabs.tabText(0) == "Welcome"
+saved = os.path.join(home, "welcome.html")
+main_window.QFileDialog = SimpleNamespace(
+    getSaveFileName=lambda *a, **k: (saved, ".html (*.html)"))
+assert w.save_as()
+result["title_after_save"] = w.tabs.tabText(0)
+assert close_for_update(w)
+w2 = main_window.MainWindow()
+app.processEvents()
+result["tabs"] = tabs_of(w2)
+result["saved"] = saved
+""")
+    assert r["title_after_save"] == "welcome.html"
+    assert titles(r) == ["welcome.html"]
+    assert r["tabs"][0]["path"] == r["saved"]
+    assert "Welcome to MyEditor" in r["tabs"][0]["text"]
+
+
 def test_after_an_update_the_command_line_file_and_crash_leftovers_still_open(tmp_path):
     # The update restore skips only what it took over: a crash backup it did
     # not take over is still restored, alongside the file on the command line.

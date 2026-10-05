@@ -34,6 +34,7 @@ from recovery import (
     classify_backup, document_is_empty, is_restorable, load_backup_content, read_backup,
 )
 from update_check import version_tuple
+from welcome import is_pristine_welcome
 from workspace import DOCUMENT, PDF, WELCOME, TabState
 
 
@@ -45,11 +46,11 @@ def capture_editor_tab(ed) -> Optional[TabState]:
     Unsaved and untitled content is written to the tab's crash-recovery
     backup now, and the record points at that file.
     """
+    if is_pristine_welcome(ed):
+        return TabState(kind=WELCOME)
     path = getattr(ed, "_file_path", None)
     doc = ed.document()
     modified = doc.isModified()
-    if getattr(ed, "_is_welcome", False) and not modified:
-        return TabState(kind=WELCOME)
     backup_file = None
     if modified or not path:
         backup = getattr(ed, "_backup", None)

@@ -31,7 +31,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 import recovery  # noqa: E402
 import workspace_restore  # noqa: E402
 from editor import HtmlEditor  # noqa: E402
-from workspace import DOCUMENT, Workspace  # noqa: E402
+from workspace import DOCUMENT, WELCOME, Workspace  # noqa: E402
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -96,6 +96,22 @@ def test_unsaved_content_with_nowhere_to_go_is_reported(monkeypatch):
 def test_an_empty_untitled_tab_is_kept_without_a_backup():
     tab = workspace_restore.capture_editor_tab(editor())
     assert tab is not None and tab.backup_file is None
+
+
+def test_only_an_untouched_welcome_tab_is_written_down_as_the_welcome_tab(tmp_path):
+    pristine = editor("Welcome to MyEditor")
+    pristine._is_welcome = True
+    assert workspace_restore.capture_editor_tab(pristine).kind == WELCOME
+
+    saved = editor("Welcome to MyEditor", path=str(tmp_path / "welcome.html"))
+    saved._is_welcome = True   # the flag stays when the tab is saved as a file
+    tab = workspace_restore.capture_editor_tab(saved)
+    assert (tab.kind, tab.path) == (DOCUMENT, str(tmp_path / "welcome.html"))
+
+    edited = editor("Welcome to MyEditor, with my notes", modified=True)
+    edited._is_welcome = True
+    tab = workspace_restore.capture_editor_tab(edited)
+    assert tab.kind == DOCUMENT and tab.backup_file
 
 
 def test_the_draft_link_is_written_down():
