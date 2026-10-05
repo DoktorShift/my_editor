@@ -191,17 +191,20 @@ class LongFormFetcher(QObject):
     ) -> None:
         """Query relays for the event identified by ``coord``.
 
-        ``extra_relays`` (typically the user's NIP-65 read set) is
-        merged with ``coord.relay_hints`` and deduplicated. On EOSE or
-        timeout, the newest matching event is delivered to
-        ``on_success``; if nothing matched, ``on_not_found`` fires.
+        ``extra_relays`` are where the event's author publishes: their
+        NIP-65 write relays, as RelayDirectory.outbox_of answers for
+        ``coord.pubkey_hex`` (the outbox model; whoever is importing
+        reads elsewhere). They are merged with ``coord.relay_hints`` and
+        deduplicated. On EOSE or timeout, the newest matching event is
+        delivered to ``on_success``; if nothing matched, ``on_not_found``
+        fires.
 
         Exactly one of the two callbacks is invoked, once.
         """
         relays = _dedup_relays((*extra_relays, *coord.relay_hints))
         if not relays:
-            # Nothing to query against, no read relays cached, no naddr
-            # hints. Fail fast and let the caller fall back.
+            # Nothing to query against: no outbox and no naddr hints.
+            # Fail fast and let the caller fall back.
             on_not_found()
             return
 

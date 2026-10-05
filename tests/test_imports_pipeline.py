@@ -46,12 +46,12 @@ from tests.imports_fakes import (
     RESULTS_OK,
     FakeFetcher,
     FakeLongFormFetcher,
-    FakeRelayListCache,
     RecordingPacer,
     inline_run_blocking,
     make_factory,
     make_item,
 )
+from tests.outbox_fakes import FakeRelayDirectory
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -63,8 +63,20 @@ def qt_app():
 FEED_URL = "https://example.com/feed"
 
 
+# The importing user publishes and reads on their own relays; the author
+# of a resolved article (AUTHOR) publishes somewhere else entirely.
+AUTHOR = "cd" * 32
+
+
+def make_directory():
+    return FakeRelayDirectory({
+        PROFILE.user_pubkey: ["wss://read.example"],
+        AUTHOR: ["wss://author-outbox.example"],
+    })
+
+
 def make_job(items, *, factory=None, long_form=None, pacer=None,
-             page_fetcher=None, feed_url=FEED_URL, **kwargs):
+             page_fetcher=None, feed_url=FEED_URL, directory=None, **kwargs):
     if factory is None:
         factory, _ = make_factory()
     return ImportItemsJob(
@@ -72,7 +84,7 @@ def make_job(items, *, factory=None, long_form=None, pacer=None,
         feed_url=feed_url,
         profile=PROFILE,
         relay_pool=None,
-        relay_directory=FakeRelayListCache(),
+        relay_directory=directory or make_directory(),
         session_pool=None,
         fetcher=page_fetcher or FakeFetcher(),
         long_form_fetcher=long_form or FakeLongFormFetcher(None),
@@ -174,10 +186,10 @@ class TestHappyPath:
         assert rec.of("completed") == [("completed", 1, 2)]
 
     def test_empty_item_list_completes_immediately(self):
-        cache = FakeRelayListCache()
+        directory = make_directory()
         job = ImportItemsJob(
             items=[], feed_url=FEED_URL, profile=PROFILE, relay_pool=None,
-            relay_directory=cache, session_pool=None,
+            relay_directory=directory, session_pool=None,
             long_form_fetcher=FakeLongFormFetcher(None),
             publish_job_factory=make_factory()[0],
             run_blocking=inline_run_blocking, pacer=RecordingPacer(),
@@ -185,7 +197,14 @@ class TestHappyPath:
         rec = Recorder(job)
         job.start()
         assert rec.of("completed") == [("completed", 0, 0)]
-        assert cache.calls == []  # no pointless relay-list round-trip
+        assert directory.calls == []  # no pointless relay-list round-trip
+
+    def test_drafts_carry_the_membership_relay(self):
+        factory, created = make_factory()
+        job = make_job([make_item("Only", guid="g1")], factory=factory,
+                       entitled_relays=["wss://members.example"])
+        job.start()
+        assert created[0].kwargs["entitled_relays"] == ["wss://members.example"]
 
 
 # --------------------------------------------------------------------------- #
@@ -329,7 +348,7 @@ class TestCancellation:
 # Long-form (naddr) resolution                                                #
 # --------------------------------------------------------------------------- #
 
-NADDR = encode_naddr("post-1", "cd" * 32, 30023, ["wss://hint.example"])
+NADDR = encode_naddr("post-1", AUTHOR, 30023, ["wss://hint.example"])
 
 THIN_HTML = "<p>teaser</p>"
 THICK_HTML = "<p>" + ("long body text " * 30) + "</p>"
@@ -348,7 +367,9 @@ class TestLongFormResolution:
         assert len(long_form.calls) == 1
         coord, extra = long_form.calls[0]
         assert coord.d_tag == "post-1"
-        assert extra == ("wss://read.example",)
+        # Read from where the article's author publishes (hint first),
+        # never from the importing user's own read relays.
+        assert extra == ("wss://hint.example", "wss://author-outbox.example")
         assert rec.of("item_resolving") == [("item_resolving", 0, "Nostr post")]
         assert created[0].inner_event["content"].startswith(
             "# Full prose from Nostr")
@@ -392,6 +413,19 @@ class TestLongFormResolution:
         assert coord.relay_hints == ()
         assert created[0].inner_event["content"].startswith(
             "# Full prose from Nostr")
+
+    def test_an_author_with_no_known_list_is_read_from_the_fallback(self):
+        from nostr.outbox import defaults
+        long_form = FakeLongFormFetcher({"content": LONG_PROSE})
+        item = make_item("Nostr post", guid="ng1", link=f"nostr:{NADDR}",
+                         content_html=THIN_HTML)
+        directory = FakeRelayDirectory({PROFILE.user_pubkey: ["wss://read.example"]})
+        job = make_job([item], long_form=long_form, directory=directory)
+        job.start()
+        _coord, extra = long_form.calls[0]
+        assert extra == ("wss://hint.example", *defaults.FALLBACK_RELAYS)
+        assert directory.asked("outbox_of") == [
+            ("outbox_of", AUTHOR, ("wss://hint.example",))]
 
     def test_not_found_falls_back_to_feed_body(self):
         factory, created = make_factory()

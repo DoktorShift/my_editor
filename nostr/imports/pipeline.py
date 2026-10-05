@@ -16,7 +16,10 @@ each into an encrypted draft:
      kind-30023 event on relays and the feed body is only a teaser,
      *however long that teaser reads*. So we always resolve when a
      coordinate is present and prefer the relay body when it is longer
-     than the feed body, falling back to the feed text otherwise.
+     than the feed body, falling back to the feed text otherwise. The
+     event is read where its author publishes (their NIP-65 write
+     relays, and any relay the coordinate names), not where the
+     importing user reads.
   3. Full-text recovery (opt-in, default on): a thin item (teaser under
      ``THIN_CONTENT_CHARS``) with an ordinary http(s) link gets its
      article page fetched and the main content lifted via Readability.
@@ -217,7 +220,6 @@ class ImportItemsJob(QObject):
         self._attempted: int = 0
         self._current_job: Optional[DraftPublishJob] = None
         self._cancelled: bool = False
-        self._user_read_relays: List[str] = []
 
     # -- public API --------------------------------------------------------
 
@@ -226,14 +228,7 @@ class ImportItemsJob(QObject):
         if not self._items:
             self.completed.emit(0, 0)
             return
-        # The user's NIP-65 read relays are resolved up front so
-        # per-item long-form lookups don't each pay a round-trip.
-        self._emit_status("Looking up your relay list…")
-        self._relay_directory.fetch(
-            self._profile.user_pubkey,
-            relays=list(dict.fromkeys(self._profile.bunker_relays)),
-            on_done=self._on_relay_list_ready,
-        )
+        self._start_next_item()
 
     def cancel(self) -> None:
         """Stop the import. The in-flight draft job (if any) is
@@ -241,14 +236,6 @@ class ImportItemsJob(QObject):
         self._cancelled = True
         if self._current_job is not None:
             self._current_job.cancel()
-
-    # -- setup -------------------------------------------------------------
-
-    def _on_relay_list_ready(self, relay_list) -> None:
-        if self._cancelled:
-            return
-        self._user_read_relays = list(getattr(relay_list, "read", ()) or ())
-        self._start_next_item()
 
     # -- helpers -----------------------------------------------------------
 
@@ -422,16 +409,26 @@ class ImportItemsJob(QObject):
         if not self._cancelled:
             self.item_resolving_from_nostr.emit(self._index, title_for_ui)
         self._emit_status(f"Resolving '{title_for_ui}' from Nostr…")
-        self._long_form_fetcher.fetch(
-            coord,
-            extra_relays=self._user_read_relays,
-            on_success=lambda event, t=template, i=item, ui=title_for_ui: (
-                self._on_long_form_resolved(event, t, i, ui)
-            ),
-            on_not_found=lambda t=template, i=item, ui=title_for_ui: (
-                self._maybe_recover_full_text(i, t, ui)
-            ),
-        )
+
+        def _fetch_from(relays) -> None:
+            if self._cancelled:
+                return
+            self._long_form_fetcher.fetch(
+                coord,
+                extra_relays=relays,
+                on_success=lambda event, t=template, i=item, ui=title_for_ui: (
+                    self._on_long_form_resolved(event, t, i, ui)
+                ),
+                on_not_found=lambda t=template, i=item, ui=title_for_ui: (
+                    self._maybe_recover_full_text(i, t, ui)
+                ),
+            )
+
+        # Someone else's article lives in their outbox (NIP-65), which the
+        # directory looks up (hints first); the importing user's own read
+        # relays say nothing about where it is.
+        self._relay_directory.outbox_of(
+            coord.pubkey_hex, _fetch_from, hints=coord.relay_hints)
 
     def _on_long_form_resolved(
         self,

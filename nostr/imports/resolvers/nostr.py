@@ -6,10 +6,12 @@ Turns any Nostr reference into importable long-form content, covering
 the whole ecosystem behind one resolver instead of per-host cases:
 
 - a bare or ``nostr:``-prefixed **npub / nprofile**: that author's
-  kind-30023 long-form articles, read via their NIP-65 outbox relays;
+  kind-30023 long-form articles, read via their NIP-65 outbox relays
+  (the relay directory in the resolve context looks them up);
 - a **NIP-05** address (``name@domain``): resolved to a pubkey, then
   the same author-articles path;
-- a **naddr / nevent / note**: that single event as one draft, with
+- a **naddr / nevent / note**: that single event as one draft, read
+  from its author's outbox when the reference names the author, with
   NIP-54 wiki bodies (kind 30818) normalised to Markdown;
 - the same identifiers embedded in any host URL (njump.me, habla.news,
   yakihonne.com, primal.net, ...), since those are just SPAs around the
@@ -25,7 +27,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from ..constants import NOSTR_LONGFORM_RELAYS, NOSTR_MAX_ARTICLES
+from ..constants import NOSTR_MAX_ARTICLES
 from ..errors import ERROR_CODES, SourceError
 from ..registry import ResolveContext, ResolveInput, ResolveResult, SourceResolver
 from ...rss.parser import Feed
@@ -33,8 +35,7 @@ from ..sources.nostr import (
     NJUMP,
     Nip05Address,
     NostrEntity,
-    author_article_relays,
-    dedup_relays,
+    author_outbox,
     extract_nip05,
     extract_nostr_entity,
     fetch_author_name,
@@ -129,7 +130,6 @@ def _resolve_single_event(
         }]
     else:
         filters = [{"ids": [entity.event_id], "limit": 1}]
-    relays = dedup_relays(entity.relays, NOSTR_LONGFORM_RELAYS)
     ctx.stage("parsing", url, hostname="nostr")
 
     def _on_event(event) -> None:
@@ -149,7 +149,12 @@ def _resolve_single_event(
         ctx.stage("done", item.link or url, hostname="nostr", item_count=1)
         ctx.on_success(ResolveResult(url=item.link or url, feed=feed))
 
-    query.latest(relays, filters, _on_event)
+    def _on_relays(relays: List[str]) -> None:
+        if ctx.is_cancelled():
+            return
+        query.latest(relays, filters, _on_event)
+
+    author_outbox(ctx.relay_directory, entity.pubkey, entity.relays, _on_relays)
 
 
 def _resolve_author(
@@ -200,7 +205,7 @@ def _resolve_author(
                       description=None, items=items),
         ))
 
-    author_article_relays(query, pubkey, hints, _on_relays)
+    author_outbox(ctx.relay_directory, pubkey, hints, _on_relays)
 
 
 NOSTR_RESOLVER = SourceResolver(

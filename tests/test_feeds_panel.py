@@ -28,7 +28,6 @@ from tests.imports_fakes import (
     TWO_ITEM_FEED,
     FakeFetcher,
     FakeLongFormFetcher,
-    FakeRelayListCache,
     ManualFetcher,
     RecordingPacer,
     inline_run_blocking,
@@ -77,7 +76,7 @@ def make_panel(fetcher, *, publish_outcomes=None, entitled_relays=None):
     def import_job_factory(**kwargs):
         job_kwargs_seen.append(dict(kwargs))
         kwargs.update(
-            relay_directory=FakeRelayListCache(),
+            relay_directory=FakeRelayDirectory(),
             # Page fetches (full-text recovery) also settle synchronously
             # against the same fake response table.
             fetcher=fetcher,

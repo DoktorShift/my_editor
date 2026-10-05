@@ -733,6 +733,7 @@ class FeedsPanel(QFrame):
             is_cancelled=lambda g=generation: g != self._load_generation,
             run_blocking=self._run_blocking,
             nostr_query=self._nostr_query,
+            relay_directory=self._relay_directory,
         )
 
     def _enter_loading_state(self, *, source_label: str) -> int:
@@ -811,6 +812,7 @@ class FeedsPanel(QFrame):
             is_cancelled=lambda g=generation: g != self._load_generation,
             run_blocking=self._run_blocking,
             nostr_query=self._nostr_query,
+            relay_directory=self._relay_directory,
         )
 
     def _import_archive(self, data: bytes, label: str) -> None:
