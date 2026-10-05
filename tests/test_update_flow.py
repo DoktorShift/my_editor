@@ -61,9 +61,13 @@ def test_self_updating_installs_get_the_automatic_plan():
     plan = plan_for(updater.WINDOWS_INSTALLER, "3.3", release_url=RELEASE_URL,
                     asset=asset, can_self_update=True, machine="AMD64")
     assert plan.mode == AUTOMATIC
-    assert plan.primary_label == "Update Now"
-    assert [s.title for s in plan.steps] == ["Download", "Save your work", "Restart"]
+    assert plan.primary_label == "Install Update"
+    assert [s.title for s in plan.steps] == ["Download", "Restart"]
     assert "(42 MB)" in plan.steps[0].detail
+    assert "intact" in plan.steps[0].detail
+    # Nothing is asked about unsaved work any more: it comes back.
+    assert "haven't saved" in plan.intro
+    assert "tabs" in plan.steps[-1].detail
     assert _query(plan.guide_url)["os"] == "windows"   # the fallback if it fails
 
 
@@ -120,4 +124,32 @@ def test_no_plan_text_uses_an_em_dash():
             plan = plan_for(kind, "3.3", release_url=RELEASE_URL,
                             can_self_update=can_self_update, machine="x86_64")
             text = plan.intro + "".join(s.title + s.detail + s.command for s in plan.steps)
+            assert "\u2014" not in text
+
+
+def test_a_replaceable_mac_app_updates_itself_with_an_install_step():
+    plan = plan_for(updater.MACOS_APP, "3.4", release_url=RELEASE_URL,
+                    asset=SimpleNamespace(name="my-editor-3.4-macos-arm64.dmg", size=55_000_000),
+                    can_self_update=True, machine="arm64")
+    assert plan.mode == AUTOMATIC
+    assert [s.title for s in plan.steps] == ["Download", "Install", "Restart"]
+    assert [s.role for s in plan.steps] == ["download", "prepare", "restart"]
+    assert "signature" in plan.steps[1].detail
+
+
+def test_the_deb_says_the_system_will_ask_for_a_password():
+    plan = plan_for(updater.DEB, "3.4", release_url=RELEASE_URL,
+                    asset=SimpleNamespace(name="my-editor_3.4_amd64.deb", size=1),
+                    can_self_update=True, machine="x86_64")
+    assert plan.mode == AUTOMATIC
+    assert "password" in plan.steps[1].detail
+
+
+def test_no_plan_text_uses_em_dashes():
+    for kind in (updater.WINDOWS_INSTALLER, updater.APPIMAGE, updater.MACOS_APP,
+                 updater.DEB, updater.SOURCE, updater.LINUX_OTHER):
+        for self_update in (True, False):
+            plan = plan_for(kind, "3.4", release_url=RELEASE_URL, asset=None,
+                            can_self_update=self_update, machine="x86_64")
+            text = plan.intro + " ".join(s.title + s.detail for s in plan.steps)
             assert "\u2014" not in text

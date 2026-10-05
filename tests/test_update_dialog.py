@@ -10,10 +10,17 @@ Every state is load-bearing:
   A failed download says so inside the Download step and offers both a
   retry and the update guide, never a dead end.
 
-  Cancelling the save prompt leaves nothing behind: the downloaded file is
+  Cancelling before the restart leaves nothing behind: the downloaded file is
   deleted and the app keeps running on the old version.
 
-  Only a started swap asks the window to close.
+  Installs that prepare the update while the window is open (macOS, .deb)
+  report failures inside the Install step, offer no Cancel while it runs,
+  and a closed password prompt is not an error.
+
+  Only a started swap asks the window to close; a swap that cannot start
+  tells the window, so the tabs it wrote down are not reopened later.
+
+  The release notes are shown in the dialog, without their own heading.
 
 The installer is a fake with the real one's signals, so no network or file
 swap happens. No modal loop is entered: each state is reached by calling or
@@ -34,8 +41,10 @@ from PySide6.QtWidgets import QApplication, QDialog  # noqa: E402
 
 import updater  # noqa: E402
 import update_dialog  # noqa: E402
-from update_dialog import DOWNLOADING, FAILED, READY, RESTARTING, UpdateDialog  # noqa: E402
-from update_flow import plan_for  # noqa: E402
+from update_dialog import (  # noqa: E402
+    DOWNLOADING, FAILED, PREPARING, READY, RESTARTING, UpdateDialog, WhatsNewDialog,
+)
+from update_flow import DOWNLOAD, PREPARE, RESTART, plan_for  # noqa: E402
 
 RELEASE_URL = "https://github.com/rinbal/my_editor/releases/tag/v3.3"
 ASSET = SimpleNamespace(name="my-editor-3.3-windows-setup.exe", url="https://github.com/x", size=10)
@@ -50,20 +59,35 @@ def qt_app():
 class FakeInstaller(QObject):
     progress = Signal(int)
     ready = Signal(str)
+    prepared = Signal(str)
+    declined = Signal(str)
     failed = Signal(str)
 
-    def __init__(self, apply_error=None):
+    def __init__(self, apply_error=None, prepare_at_once=True):
         super().__init__()
         self.started = []
         self.canceled = 0
         self.applied = []
+        self.preparing = []
+        self.discarded = []
         self._apply_error = apply_error
+        self._prepare_at_once = prepare_at_once
 
     def start(self, asset):
         self.started.append(asset)
 
     def cancel(self):
         self.canceled += 1
+
+    def prepare(self, path):
+        self.preparing.append(path)
+        if self._prepare_at_once:
+            self.prepared.emit(path)
+
+    def discard_prepared(self, path):
+        self.discarded.append(path)
+        if os.path.exists(path):
+            os.remove(path)
 
     def apply(self, path):
         if self._apply_error:
@@ -74,6 +98,13 @@ class FakeInstaller(QObject):
 def automatic_dialog(installer, before_restart=lambda: True):
     plan = plan_for(updater.WINDOWS_INSTALLER, "3.3", release_url=RELEASE_URL,
                     asset=ASSET, can_self_update=True, machine="AMD64")
+    return UpdateDialog("3.3", "3.2", plan, release_url=RELEASE_URL, asset=ASSET,
+                        installer=installer, before_restart=before_restart, is_dark=False)
+
+
+def mac_dialog(installer, before_restart=lambda: True):
+    plan = plan_for(updater.MACOS_APP, "3.3", release_url=RELEASE_URL,
+                    asset=ASSET, can_self_update=True, machine="arm64")
     return UpdateDialog("3.3", "3.2", plan, release_url=RELEASE_URL, asset=ASSET,
                         installer=installer, before_restart=before_restart, is_dark=False)
 
@@ -99,7 +130,7 @@ def test_it_opens_ready_with_the_three_usual_choices():
     assert dialog.state == READY
     assert visible_buttons(dialog) == ["later", "primary", "skip"]
     assert dialog._buttons["primary"].isDefault()
-    assert dialog._buttons["primary"].text() == "Update Now"
+    assert dialog._buttons["primary"].text() == "Install Update"
     assert installer.started == []
     assert dialog.windowTitle() == "Software Update"
 
@@ -164,7 +195,7 @@ def test_the_guide_button_hands_off_to_the_guide_in_update_mode():
     assert dialog.result() == QDialog.Accepted
 
 
-def test_a_finished_download_saves_work_then_starts_the_swap(tmp_path):
+def test_a_finished_download_keeps_the_workspace_then_starts_the_swap(tmp_path):
     installer = FakeInstaller()
     asked = []
     dialog = automatic_dialog(installer, before_restart=lambda: asked.append(True) or True)
@@ -179,10 +210,10 @@ def test_a_finished_download_saves_work_then_starts_the_swap(tmp_path):
     assert installer.applied == [str(path)]
     assert restarts == [()]
     assert dialog.state == RESTARTING
-    assert [row.badge.property("state") for row in dialog._rows] == ["done", "done", "active"]
+    assert [row.badge.property("state") for row in dialog._rows] == ["done", "active"]
 
 
-def test_cancelling_the_save_prompt_deletes_the_download_and_changes_nothing(tmp_path):
+def test_cancelling_before_the_restart_deletes_the_download_and_changes_nothing(tmp_path):
     installer = FakeInstaller()
     dialog = automatic_dialog(installer, before_restart=lambda: False)
     restarts = recorder(dialog.restart_ready)
@@ -212,7 +243,104 @@ def test_a_swap_that_cannot_start_is_reported_in_the_restart_step(tmp_path):
     assert dialog.state == FAILED
     assert restarts == []
     assert not path.exists()
-    assert "Could not launch the installer." in dialog._rows[2].error.text()
+    assert "Could not launch the installer." in dialog._roles[RESTART].error.text()
+
+
+def test_a_swap_that_cannot_start_tells_the_window(tmp_path):
+    installer = FakeInstaller(apply_error="Could not launch the update helper.")
+    dialog = automatic_dialog(installer)
+    failures = recorder(dialog.restart_failed)
+    path = tmp_path / "setup.exe"
+    path.write_bytes(b"x")
+    dialog._buttons["primary"].click()
+    installer.ready.emit(str(path))
+    assert failures == [()]
+
+
+def test_a_mac_update_prepares_before_anything_closes(tmp_path):
+    installer = FakeInstaller(prepare_at_once=False)
+    asked = []
+    dialog = mac_dialog(installer, before_restart=lambda: asked.append(True) or True)
+    restarts = recorder(dialog.restart_ready)
+    assert [s.role for s in dialog._plan.steps] == [DOWNLOAD, PREPARE, RESTART]
+
+    dialog._buttons["primary"].click()
+    installer.ready.emit(str(tmp_path / "x.dmg"))
+    assert dialog.state == PREPARING
+    assert visible_buttons(dialog) == []          # nothing half-installed to cancel
+    assert dialog._roles[PREPARE].badge.property("state") == "active"
+    assert asked == [] and restarts == []
+
+    staged = str(tmp_path / ".MyEditor.app.update")
+    installer.prepared.emit(staged)
+    assert asked == [True]
+    assert installer.applied == [staged]
+    assert restarts == [()]
+
+
+def test_a_failed_preparation_is_reported_in_the_install_step(tmp_path):
+    installer = FakeInstaller(prepare_at_once=False)
+    dialog = mac_dialog(installer)
+    dialog._buttons["primary"].click()
+    installer.ready.emit(str(tmp_path / "x.dmg"))
+    installer.failed.emit("The disk image doesn't contain MyEditor.")
+    assert dialog.state == FAILED
+    row = dialog._roles[PREPARE]
+    assert row.badge.property("state") == "error"
+    assert "doesn't contain MyEditor" in row.error.text()
+    assert "didn't finish" not in row.error.text()   # not worded as a download error
+    assert visible_buttons(dialog) == ["guide", "later", "retry"]
+
+
+def test_a_closed_password_prompt_is_not_an_error(tmp_path):
+    installer = FakeInstaller(prepare_at_once=False)
+    plan = plan_for(updater.DEB, "3.3", release_url=RELEASE_URL, asset=ASSET,
+                    can_self_update=True, machine="x86_64")
+    dialog = UpdateDialog("3.3", "3.2", plan, release_url=RELEASE_URL, asset=ASSET,
+                          installer=installer, is_dark=False)
+    dialog._buttons["primary"].click()
+    installer.ready.emit(str(tmp_path / "x.deb"))
+    installer.declined.emit("The update wasn't installed because the password prompt "
+                            "was closed. Nothing was changed.")
+    assert dialog.state == READY
+    assert "Nothing was changed" in dialog._note.text()
+    assert all(row.badge.property("state") == "pending" for row in dialog._rows)
+
+
+def test_cancelling_after_preparation_discards_what_was_prepared(tmp_path):
+    installer = FakeInstaller(prepare_at_once=False)
+    dialog = mac_dialog(installer, before_restart=lambda: False)
+    dialog._buttons["primary"].click()
+    installer.ready.emit(str(tmp_path / "x.dmg"))
+    staged = str(tmp_path / ".MyEditor.app.update")
+    installer.prepared.emit(staged)
+    assert installer.discarded == [staged]
+    assert installer.applied == []
+    assert dialog.state == READY
+
+
+NOTES = "# MyEditor v3.3\n\n## Highlights\n\n- **A universal importer** - more sources.\n"
+
+
+def test_the_release_notes_are_shown_in_the_dialog_without_their_heading():
+    plan = plan_for(updater.WINDOWS_INSTALLER, "3.3", release_url=RELEASE_URL,
+                    asset=ASSET, can_self_update=True, machine="AMD64")
+    dialog = UpdateDialog("3.3", "3.2", plan, release_url=RELEASE_URL, asset=ASSET,
+                          installer=FakeInstaller(), release_notes=NOTES, is_dark=False)
+    text = dialog.notes_view.toPlainText()
+    assert "A universal importer" in text
+    assert "MyEditor v3.3" not in text
+    links = [l for l in dialog.findChildren(update_dialog.QLabel) if "Release Notes" in l.text()]
+    assert links == []   # the notes are right there; no link out needed
+
+
+def test_whats_new_shows_the_notes_with_one_done_button():
+    dialog = WhatsNewDialog("3.4", NOTES, release_url=RELEASE_URL, is_dark=True)
+    assert "A universal importer" in dialog.notes_view.toPlainText()
+    assert "MyEditor v3.3" not in dialog.notes_view.toPlainText()
+    assert dialog.done_button.isDefault()
+    buttons = [b.text() for b in dialog.findChildren(update_dialog.QPushButton)]
+    assert buttons == ["Done"]
 
 
 def test_skip_is_explicit_and_says_which_version():

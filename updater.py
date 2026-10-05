@@ -4,24 +4,33 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """In-app updater for the packaged builds that can safely replace themselves.
 
-Only two install formats are updated in place, because only these can be swapped
-without code signing or a system package manager:
+Every update runs the same four stages, and only the last happens after
+MyEditor has closed:
 
-    Windows (Inno Setup) : download the new -windows-setup.exe and run it
-                           silently; it closes the app, updates, and relaunches.
-    Linux AppImage       : download the new .AppImage next to the running one,
-                           then a tiny helper waits for the app to quit, swaps
-                           the file, and relaunches it.
+    download  fetch the release file and check it against the SHA-256
+              GitHub published for it. A file that does not match is
+              deleted, never run.
+    prepare   everything that can fail while the window is still open, so
+              a failure is reported where the person can see it:
+                Windows   nothing to do; the installer runs at restart.
+                AppImage  nothing to do; the file is already beside the old one.
+                macOS     open the disk image, copy the new app next to the
+                          running one, and check its code signature.
+                .deb      install the package (the system asks for a password).
+    apply     start a small helper that waits for MyEditor to quit, puts the
+              new version in place, and opens it again.
 
-For every other case (macOS .app, the Linux .deb, or a source checkout) there is
-nothing safe to swap, so supports_in_app_update() returns False and the update
-dialog walks the person through the same steps as the install guide instead
-(see update_flow.py).
+Install kinds that cannot be replaced safely (a read-only location, a Mac
+app run from the disk image, a source checkout) report False from
+supports_in_app_update(), and the update dialog walks the person through
+the install guide's steps instead (see update_flow.py).
 """
 
+import hashlib
 import os
 import platform
 import shlex
+import shutil
 import sys
 import tempfile
 
@@ -40,6 +49,19 @@ SOURCE = "source"
 
 # Where packaging/linux/build_deb.sh puts the PyInstaller folder.
 _DEB_PREFIX = "/opt/my-editor/"
+
+# Exit codes of the macOS staging script, and what each one tells the person.
+_MAC_STAGE_ERRORS = {
+    11: "The downloaded disk image couldn't be opened.",
+    12: "The disk image doesn't contain MyEditor.",
+    13: "MyEditor couldn't copy the new version. Check that your disk has free space.",
+    14: "The new version didn't pass the macOS integrity check, so it wasn't installed.",
+}
+
+# pkexec's own exit codes: the person closed the password prompt, or no
+# prompt could be shown at all.
+_PKEXEC_DISMISSED = 126
+_PKEXEC_UNAVAILABLE = 127
 
 
 def detect_install_kind() -> str:
@@ -60,12 +82,16 @@ def detect_install_kind() -> str:
 
 
 def supports_in_app_update(kind: str = None) -> bool:
-    """True only for the formats we can replace in place (see module docstring)."""
+    """True only for the installs we can replace in place (see module docstring)."""
     kind = kind or detect_install_kind()
     if kind == WINDOWS_INSTALLER:
         return True
     if kind == APPIMAGE:
         return _appimage_writable()
+    if kind == MACOS_APP:
+        return _mac_bundle_replaceable()
+    if kind == DEB:
+        return _deb_installable()
     return False
 
 
@@ -107,25 +133,80 @@ def _appimage_writable() -> bool:
     return bool(path) and os.access(os.path.dirname(path) or ".", os.W_OK)
 
 
-class UpdateInstaller(QObject):
-    """Downloads a release asset and applies it for the current install kind."""
+def mac_bundle_path(executable: str = None):
+    """The .app folder the running executable lives in, or None.
 
-    progress = Signal(int)   # 0..100 percent
-    ready = Signal(str)      # local path of the downloaded update, once complete
+    A bundle runs from ``<Name>.app/Contents/MacOS/<binary>``.
+    """
+    exe = os.path.realpath(executable or sys.executable)
+    bundle = os.path.dirname(os.path.dirname(os.path.dirname(exe)))
+    return bundle if bundle.endswith(".app") else None
+
+
+def _mac_bundle_replaceable(executable: str = None) -> bool:
+    """Whether the running app sits somewhere it can be replaced.
+
+    Not when macOS runs it from a randomized read-only copy (App
+    Translocation: the app was opened where it was downloaded, never
+    moved), not from the disk image itself, and not from a folder this
+    account cannot write to.
+    """
+    bundle = mac_bundle_path(executable)
+    if bundle is None or "/AppTranslocation/" in bundle:
+        return False
+    if not all(shutil.which(tool) for tool in ("hdiutil", "ditto", "codesign")):
+        return False
+    return os.access(os.path.dirname(bundle), os.W_OK) and os.access(bundle, os.W_OK)
+
+
+def _deb_installable() -> bool:
+    """The system can ask for a password and install a package: pkexec, apt,
+    and a graphical session for the password prompt to appear in."""
+    has_display = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    return has_display and bool(shutil.which("pkexec")) and bool(shutil.which("apt-get"))
+
+
+def mac_staging_path(bundle: str) -> str:
+    """Where the new app is copied before the swap: hidden, and beside the
+    old one, so the final move is a rename on the same disk."""
+    parent, name = os.path.split(bundle)
+    return os.path.join(parent, f".{name}.update")
+
+
+class UpdateInstaller(QObject):
+    """Downloads a release asset, checks it, prepares it, and applies it."""
+
+    progress = Signal(int)     # 0..100 percent of the download
+    ready = Signal(str)        # local path of the downloaded, verified file
+    prepared = Signal(str)     # what apply() needs; the window may close after apply
+    declined = Signal(str)     # the person backed out of a system prompt; nothing changed
     failed = Signal(str)
 
-    def __init__(self, kind: str, parent=None):
+    def __init__(self, kind: str, parent=None, *, executable: str = None):
         super().__init__(parent)
         self._kind = kind
+        self._executable = executable or sys.executable
         self._manager = QNetworkAccessManager(self)
         self._reply = None
         self._fh = None
         self._dest = None
         self._expected_size = 0
+        self._expected_sha256 = ""
+        self._hash = None
         self._canceled = False
         self._error = None
+        self._process = None
 
+    # -- download -----------------------------------------------------------
     def start(self, asset):
+        self._canceled = False
+        self._error = None
+        self._expected_sha256 = (getattr(asset, "sha256", "") or "").lower()
+        if not self._expected_sha256:
+            # Never install what cannot be checked. update_flow only offers an
+            # automatic update when the release names a hash, so this is a guard.
+            self.failed.emit("MyEditor couldn't check this download, so it wasn't installed.")
+            return
         try:
             self._dest = _download_destination(self._kind, asset)
             self._fh = open(self._dest, "wb")
@@ -133,6 +214,7 @@ class UpdateInstaller(QObject):
             self.failed.emit(f"Cannot write the update file: {exc}")
             return
         self._expected_size = asset.size or 0
+        self._hash = hashlib.sha256()
 
         request = QNetworkRequest(QUrl(asset.url))
         # GitHub download URLs redirect to a storage host; follow that.
@@ -150,25 +232,112 @@ class UpdateInstaller(QObject):
         if self._reply is not None:
             self._reply.abort()
 
+    # -- prepare ------------------------------------------------------------
+    def prepare(self, path: str):
+        """Do whatever can fail before the window closes; emits ``prepared``,
+        ``declined`` or ``failed``."""
+        if self._kind == MACOS_APP:
+            self._stage_mac(path)
+        elif self._kind == DEB:
+            self._install_deb(path)
+        else:
+            self.prepared.emit(path)
+
+    def _stage_mac(self, dmg_path: str):
+        bundle = mac_bundle_path(self._executable)
+        if bundle is None:
+            self.failed.emit("MyEditor couldn't find where it is installed.")
+            return
+        script = mac_stage_script(dmg_path, mac_staging_path(bundle))
+
+        def done(code: int):
+            _discard(dmg_path)
+            if code == 0:
+                self.prepared.emit(mac_staging_path(bundle))
+            else:
+                self.failed.emit(_MAC_STAGE_ERRORS.get(
+                    code, "MyEditor couldn't prepare the new version."))
+
+        self._run("sh", ["-c", script], done)
+
+    def _install_deb(self, deb_path: str):
+        def done(code: int):
+            _discard(deb_path)
+            if code == 0:
+                self.prepared.emit(os.path.realpath(self._executable))
+            elif code == _PKEXEC_DISMISSED:
+                self.declined.emit("The update wasn't installed because the password "
+                                   "prompt was closed. Nothing was changed.")
+            elif code == _PKEXEC_UNAVAILABLE:
+                self.failed.emit("Your system couldn't ask for your password. "
+                                 "Use the update guide to install this update.")
+            else:
+                self.failed.emit("The package couldn't be installed. Another "
+                                 "installation may be running. Try again in a moment.")
+
+        self._run("pkexec", ["apt-get", "install", "-y", os.path.abspath(deb_path)], done)
+
+    def _run(self, program: str, args, on_exit):
+        process = QProcess(self)
+        self._process = process
+
+        def finished(code, status):
+            self._process = None
+            process.deleteLater()
+            crashed = status != QProcess.ExitStatus.NormalExit
+            on_exit(-1 if crashed else code)
+
+        def error(err):
+            if err == QProcess.ProcessError.FailedToStart:
+                self._process = None
+                process.deleteLater()
+                on_exit(-1)
+
+        process.finished.connect(finished)
+        process.errorOccurred.connect(error)
+        process.start(program, list(args))
+
+    # -- apply --------------------------------------------------------------
     def apply(self, path: str):
         """Launch the swap. The caller must quit the app right after this."""
         if self._kind == WINDOWS_INSTALLER:
             _apply_windows(path)
         elif self._kind == APPIMAGE:
             _apply_appimage(path)
+        elif self._kind == MACOS_APP:
+            _apply_mac(path, mac_bundle_path(self._executable))
+        elif self._kind == DEB:
+            _relaunch_after_exit(path)
         else:
             raise RuntimeError("in-app update is not supported for this install")
+
+    def discard_prepared(self, path: str):
+        """Undo download and prepare() when the restart is called off.
+
+        The downloaded installer or AppImage is deleted and a staged Mac app
+        removed. An installed package stays installed: the next launch
+        simply is the new version.
+        """
+        if self._kind == MACOS_APP:
+            if path and os.path.basename(path).endswith(".update"):
+                shutil.rmtree(path, ignore_errors=True)
+        elif self._kind in (WINDOWS_INSTALLER, APPIMAGE):
+            _discard(path)
 
     # -- download plumbing --------------------------------------------------
     def _on_progress(self, received: int, total: int):
         if total > 0:
             self.progress.emit(int(received * 100 / total))
 
+    def _write_chunk(self, chunk: bytes):
+        self._fh.write(chunk)
+        self._hash.update(chunk)
+
     def _on_ready_read(self):
         if self._fh is None or self._reply is None:
             return
         try:
-            self._fh.write(bytes(self._reply.readAll()))
+            self._write_chunk(bytes(self._reply.readAll()))
         except OSError as exc:
             self._error = f"Cannot write the update file: {exc}"
             self._reply.abort()
@@ -183,7 +352,7 @@ class UpdateInstaller(QObject):
 
         if self._fh is not None:
             try:
-                self._fh.write(data)
+                self._write_chunk(data)
             except OSError as exc:
                 self._error = self._error or f"Cannot save the update file: {exc}"
             try:
@@ -207,6 +376,11 @@ class UpdateInstaller(QObject):
             self._discard()
             self.failed.emit("The download was incomplete.")
             return
+        if self._hash.hexdigest() != self._expected_sha256:
+            self._discard()
+            self.failed.emit("The download was damaged or changed on the way, "
+                             "so it wasn't installed.")
+            return
         self.ready.emit(self._dest)
 
     def _discard(self):
@@ -216,18 +390,108 @@ class UpdateInstaller(QObject):
             except OSError:
                 pass
             self._fh = None
-        if self._dest and os.path.exists(self._dest):
-            try:
-                os.remove(self._dest)
-            except OSError:
-                pass
+        _discard(self._dest)
+
+
+_DOWNLOAD_DIR_PREFIX = "my-editor-update-"
+
+
+def _discard(path: str):
+    if path and os.path.exists(path):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    # The private folder the download was made in goes with it.
+    folder = os.path.dirname(path or "")
+    if os.path.basename(folder).startswith(_DOWNLOAD_DIR_PREFIX):
+        try:
+            os.rmdir(folder)
+        except OSError:
+            pass
 
 
 def _download_destination(kind: str, asset) -> str:
     if kind == APPIMAGE:
         # Same directory as the running AppImage so the later rename is atomic.
         return os.environ["APPIMAGE"] + ".new"
-    return os.path.join(tempfile.gettempdir(), os.path.basename(asset.name))
+    # A fresh folder only this account can open: nobody else on the machine
+    # can swap the checked file for another before it is installed (the .deb
+    # is installed as root), and a predictable name cannot be pre-planted.
+    folder = tempfile.mkdtemp(prefix=_DOWNLOAD_DIR_PREFIX)
+    return os.path.join(folder, os.path.basename(asset.name))
+
+
+# -- scripts ------------------------------------------------------------------
+#
+# Each script is built as a string by a pure function, so tests can read
+# exactly what will run without running it.
+
+def mac_stage_script(dmg_path: str, staged: str) -> str:
+    """Open the disk image, copy the app out, close it, check the copy.
+
+    Exit codes map to _MAC_STAGE_ERRORS. The image is mounted privately
+    (no Finder window, no desktop icon) and read-only.
+    """
+    q = shlex.quote
+    return (
+        f'mnt=$(mktemp -d) || exit 11; '
+        f'hdiutil attach -nobrowse -noautoopen -readonly -mountpoint "$mnt" {q(dmg_path)} '
+        f'>/dev/null 2>&1 || {{ rmdir "$mnt"; exit 11; }}; '
+        f'app=$(find "$mnt" -maxdepth 1 -name "*.app" -type d | head -n 1); '
+        f'if [ -z "$app" ]; then hdiutil detach "$mnt" -quiet; rmdir "$mnt"; exit 12; fi; '
+        f'rm -rf {q(staged)}; '
+        f'ditto "$app" {q(staged)} || {{ hdiutil detach "$mnt" -quiet; rmdir "$mnt"; exit 13; }}; '
+        f'hdiutil detach "$mnt" -quiet || hdiutil detach "$mnt" -force -quiet; '
+        f'rmdir "$mnt" 2>/dev/null; '
+        f'codesign --verify --deep --strict {q(staged)} >/dev/null 2>&1 '
+        f'|| {{ rm -rf {q(staged)}; exit 14; }}; '
+        f'exit 0'
+    )
+
+
+def _wait_for_exit(pid: int) -> str:
+    return f'p={pid}; while kill -0 "$p" 2>/dev/null; do sleep 0.2; done; '
+
+
+def mac_swap_script(pid: int, staged: str, bundle: str) -> str:
+    """Wait for MyEditor to quit, swap the staged app in, open it.
+
+    If either move fails, the old app is put back and opened, so a failed
+    swap leaves a working MyEditor (which then says the update didn't
+    install, see MainWindow._report_unfinished_update).
+    """
+    q = shlex.quote
+    old = os.path.join(os.path.dirname(bundle), f".{os.path.basename(bundle)}.previous")
+    return (
+        _wait_for_exit(pid)
+        + f'rm -rf {q(old)}; '
+        f'if mv -f {q(bundle)} {q(old)}; then '
+        f'if mv -f {q(staged)} {q(bundle)}; then rm -rf {q(old)}; '
+        f'else mv -f {q(old)} {q(bundle)}; fi; fi; '
+        f'rm -rf {q(staged)}; '
+        f'open {q(bundle)}'
+    )
+
+
+def appimage_swap_script(pid: int, new_path: str, appimage: str) -> str:
+    q = shlex.quote
+    return (
+        _wait_for_exit(pid)
+        + f'mv -f {q(new_path)} {q(appimage)} && '
+        f'chmod +x {q(appimage)} && exec {q(appimage)}'
+    )
+
+
+def relaunch_script(pid: int, executable: str) -> str:
+    return _wait_for_exit(pid) + f'exec {shlex.quote(executable)}'
+
+
+def _start_helper(script: str):
+    # Runs detached from us, so it outlives this process.
+    started, _ = QProcess.startDetached("sh", ["-c", script])
+    if not started:
+        raise RuntimeError("Could not launch the update helper.")
 
 
 def _apply_windows(installer_path: str):
@@ -248,14 +512,14 @@ def _apply_appimage(new_path: str):
         os.chmod(new_path, 0o755)
     except OSError:
         pass
-    # Wait for this process to exit (so the file is no longer mounted), swap the
-    # new AppImage over the old one, then relaunch it. Runs detached from us.
-    pid = os.getpid()
-    script = (
-        f'p={pid}; while kill -0 "$p" 2>/dev/null; do sleep 0.2; done; '
-        f'mv -f {shlex.quote(new_path)} {shlex.quote(appimage)} && '
-        f'chmod +x {shlex.quote(appimage)} && exec {shlex.quote(appimage)}'
-    )
-    started, _ = QProcess.startDetached("sh", ["-c", script])
-    if not started:
-        raise RuntimeError("Could not launch the update helper.")
+    _start_helper(appimage_swap_script(os.getpid(), new_path, appimage))
+
+
+def _apply_mac(staged: str, bundle: str):
+    if not bundle or not os.path.isdir(staged):
+        raise RuntimeError("The prepared update is missing.")
+    _start_helper(mac_swap_script(os.getpid(), staged, bundle))
+
+
+def _relaunch_after_exit(executable: str):
+    _start_helper(relaunch_script(os.getpid(), executable))

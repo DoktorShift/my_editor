@@ -149,14 +149,23 @@ class EditorBackup:
         self._timer.stop()
         return self._write()
 
-    def delete(self) -> None:
-        """Call on normal close: stop the timers and remove the backup file."""
+    def release(self) -> None:
+        """Stop writing but keep the file on disk.
+
+        Used when MyEditor closes for an update: the next launch restores
+        the tab from this file (workspace.py), so deleting it here would
+        lose exactly the work the restart promised to keep.
+        """
         self._timer.stop()
         self._max_timer.stop()
         try:
             self._editor.document().contentsChanged.disconnect(self._schedule)
         except RuntimeError:
             pass
+
+    def delete(self) -> None:
+        """Call on normal close: stop the timers and remove the backup file."""
+        self.release()
         if os.path.exists(self.path):
             try:
                 os.remove(self.path)
@@ -234,6 +243,23 @@ class EditorBackup:
             return False  # backup is best-effort; never raise to the user
         self._last_hash = fingerprint
         return True
+
+
+def read_backup(path: str) -> dict | None:
+    """One backup record by file path, or None if it is missing or unreadable.
+
+    The record carries ``_backup_file`` like the ones find_all_backups
+    returns, so either can be handed to the same restore code.
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    data["_backup_file"] = path
+    return data
 
 
 def find_all_backups() -> list[dict]:
