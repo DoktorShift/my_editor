@@ -11,7 +11,9 @@ What must hold:
   only its own settings, and says it doesn't know the key's history.
 
   The key file is readable by this account only, and a key filed under
-  the wrong public key is never handed out.
+  the wrong public key is never handed out. A file that can't be read is
+  never overwritten, and a damaged one is kept aside before a new one is
+  written.
 
   The local signer answers exactly like the remote one, later rather than
   inside the call, and its signatures verify.
@@ -33,7 +35,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from nostr import bech32, crypto, events, nip49  # noqa: E402
 from nostr.bunker import BunkerSessionPool  # noqa: E402
-from nostr.key_vault import KeyVault  # noqa: E402
+from nostr.key_vault import KeyVault, KeyVaultError  # noqa: E402
 from nostr.local_signer import LocalSigner  # noqa: E402
 from nostr.profiles import Profile  # noqa: E402
 
@@ -138,6 +140,7 @@ def test_every_failure_is_a_nip49_error_in_plain_words(monkeypatch):
 
 def test_the_key_file_is_private_and_keys_come_back(tmp_path):
     vault = KeyVault(tmp_path / "cfg" / "nostr_keys.json")
+    assert not vault.has(crypto.get_public_key(SK).hex())
     pubkey = vault.store(SK)
     assert pubkey == crypto.get_public_key(SK).hex()
     assert vault.load(pubkey) == SK and vault.has(pubkey)
@@ -167,6 +170,36 @@ def test_a_missing_or_broken_file_means_no_keys(tmp_path):
     assert KeyVault(path).load("ab" * 32) is None
     path.write_text("{not json")
     assert KeyVault(path).load("ab" * 32) is None
+    path.write_bytes(b"\xff\xfe not text")
+    assert KeyVault(path).load("ab" * 32) is None
+
+
+def test_a_damaged_key_file_is_kept_aside_before_a_new_one_is_written(tmp_path):
+    path = tmp_path / "nostr_keys.json"
+    path.write_text('{"version": 1, "keys": [')        # cut off mid-write
+    pubkey = KeyVault(path).store(SK)
+    assert KeyVault(path).load(pubkey) == SK
+    aside = list(tmp_path.glob("nostr_keys.json.corrupt-*"))
+    assert len(aside) == 1 and aside[0].read_text() == '{"version": 1, "keys": ['
+
+
+@pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0,
+                    reason="needs file permissions that apply to this user")
+def test_a_key_file_that_cant_be_read_is_never_overwritten(tmp_path):
+    path = tmp_path / "nostr_keys.json"
+    other = bytes.fromhex("7a" * 32)
+    vault = KeyVault(path)
+    kept = vault.store(other)
+    before = path.read_bytes()
+    os.chmod(path, 0)
+    try:
+        with pytest.raises(KeyVaultError):
+            vault.store(SK)
+        with pytest.raises(OSError):         # what the windows catch
+            vault.forget(kept)
+    finally:
+        os.chmod(path, 0o600)
+    assert path.read_bytes() == before and vault.load(kept) == other
 
 
 # -- the local signer ----------------------------------------------------------------------
