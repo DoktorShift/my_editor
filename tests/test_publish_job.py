@@ -86,8 +86,8 @@ def test_the_authors_write_relays_lead_then_the_mentioned_inboxes():
     seen = run(make_job(event, pool=pool))
     targets, published = pool.published[0]
     assert targets == ["wss://w1.example", "wss://w2.example",
-                       "wss://a1.example", "wss://a2.example",
-                       "wss://bob-hint.example"]
+                       "wss://a1.example", "wss://bob-hint.example",   # everyone's first
+                       "wss://a2.example"]
     assert published["id"] and seen["completed"] and not seen["failed"]
 
 

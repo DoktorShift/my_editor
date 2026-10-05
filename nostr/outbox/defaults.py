@@ -62,9 +62,9 @@ SEARCH_RELAYS = (
 # Limits.
 WRITE_CAP = 6               # own write relays used per publish (spec: 2-4; tolerate more)
 MIN_WRITE_TARGETS = 2       # top up from FALLBACK_RELAYS below this
-INBOX_PER_MENTION = 2       # read relays per person a note mentions
+INBOX_PER_MENTION = 2       # read relays per person a note mentions (NIP-65 says all)
 MENTION_LOOKUP_CAP = 20     # mentions whose relay lists are looked up
-INBOX_TOTAL_CAP = 10        # inbox relays per publish, all mentions together
+INBOX_TOTAL_CAP = 10        # inbox relays per publish, all mentions together, shared in turn
 LOOKUP_CAP = 8              # relays asked for someone's relay list
 PRIVATE_CAP = 10            # relays for drafts and other private records
 

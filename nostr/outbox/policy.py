@@ -315,20 +315,35 @@ def plan_publish(author: RelayList, *,
                  mentioned: Mapping[str, RelayList] = (),
                  hints: Mapping[str, str] = (),
                  entitled: Iterable[str] = ()) -> PublishPlan:
-    """The outbox and inbox routing for one public event (NIP-65)."""
+    """The outbox and inbox routing for one public event (NIP-65).
+
+    NIP-65 sends a note to all of a mentioned person's read relays. Here
+    each person gets their first INBOX_PER_MENTION, and all mentions
+    together INBOX_TOTAL_CAP, so a note naming many people does not go
+    to dozens of relays. The slots go round: every person's first read
+    relay, then every person's second, so the people named last are not
+    left out because the first ones used up the cap. A person whose list
+    is unknown is reached through the relay hint of their mention.
+    """
     own = author_relays(author, entitled=entitled)
     taken = set(own)
-    inbox: List[str] = []
+    hints = dict(hints)
+    choices: List[List[str]] = []
     for pubkey, relay_list in dict(mentioned).items():
         if relay_list is not None and relay_list.found and relay_list.read:
-            theirs = relay_list.read[:defaults.INBOX_PER_MENTION]
+            theirs = relay_list.read
         else:
-            hint = dict(hints).get(pubkey)
+            hint = hints.get(pubkey)
             theirs = [hint] if hint else []
-        for url in dedupe_relays(theirs):
-            if url not in taken and len(inbox) < defaults.INBOX_TOTAL_CAP:
-                taken.add(url)
-                inbox.append(url)
+        choices.append(dedupe_relays(theirs, cap=defaults.INBOX_PER_MENTION))
+    inbox: List[str] = []
+    for rank in range(defaults.INBOX_PER_MENTION):
+        for theirs in choices:
+            if len(inbox) >= defaults.INBOX_TOTAL_CAP:
+                break
+            if rank < len(theirs) and theirs[rank] not in taken:
+                taken.add(theirs[rank])
+                inbox.append(theirs[rank])
     return PublishPlan(author=tuple(own), inbox=tuple(inbox))
 
 

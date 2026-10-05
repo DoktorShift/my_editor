@@ -242,8 +242,18 @@ def test_mentions_reach_their_inboxes():
                    bob: RelayList(),
                    carol: rl(read=["wss://me.com"])},
         hints={bob: "wss://bob-hint.com"})
-    assert list(plan.inbox) == ["wss://alice1.com", "wss://alice2.com", "wss://bob-hint.com"]
+    assert list(plan.inbox) == ["wss://alice1.com", "wss://bob-hint.com", "wss://alice2.com"]
     assert plan.targets[:2] == ["wss://me.com", "wss://me2.com"]
+
+
+def test_inbox_slots_go_round_so_every_mention_gets_one():
+    people = [f"{i:x}" * 64 for i in range(8)]
+    mentioned = {p: rl(read=[f"wss://{p[:4]}-1.com", f"wss://{p[:4]}-2.com"]) for p in people}
+    plan = policy.plan_publish(rl(write=["wss://me.com", "wss://me2.com"]), mentioned=mentioned)
+    assert len(plan.inbox) == defaults.INBOX_TOTAL_CAP
+    firsts = [f"wss://{p[:4]}-1.com" for p in people]
+    assert list(plan.inbox[:8]) == firsts                   # everyone's first relay
+    assert list(plan.inbox[8:]) == [f"wss://{p[:4]}-2.com" for p in people[:2]]
 
 
 def test_private_records_are_read_where_they_are_written():
