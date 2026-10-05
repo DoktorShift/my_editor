@@ -50,18 +50,28 @@ SOURCE = "source"
 # Where packaging/linux/build_deb.sh puts the PyInstaller folder.
 _DEB_PREFIX = "/opt/my-editor/"
 
-# Exit codes of the macOS staging script, and what each one tells the person.
-_MAC_STAGE_ERRORS = {
-    11: "The downloaded disk image couldn't be opened.",
-    12: "The disk image doesn't contain MyEditor.",
-    13: "MyEditor couldn't copy the new version. Check that your disk has free space.",
-    14: "The new version didn't pass the macOS integrity check, so it wasn't installed.",
-}
+# A failure is reported as (message, retryable): complete sentences the
+# dialog shows as they are, and whether trying again can help. The dialog
+# adds the next step itself ("Try again" only when it can help), so no
+# message here names one.
 
-# pkexec's own exit codes: the person closed the password prompt, or no
-# prompt could be shown at all.
+# Exit codes of the macOS staging script, and what each one tells the person.
+# The download was checked against its hash, so a retry fetches the very
+# same file: an image without the app, or an app that fails the signature
+# check, fails again.
+_MAC_STAGE_ERRORS = {
+    11: ("The downloaded disk image couldn't be opened.", True),
+    12: ("The disk image doesn't contain MyEditor.", False),
+    13: ("MyEditor couldn't copy the new version. Check that your disk has free space.", True),
+    14: ("The new version didn't pass the macOS integrity check, so it wasn't installed.", False),
+}
+_MAC_STAGE_FAILED = ("MyEditor couldn't prepare the new version.", True)
+
+# pkexec's own exit codes (pkexec(1)): 126 means the person dismissed the
+# password prompt; 127 means permission was not granted, because the account
+# is not allowed, the password was wrong, or no prompt could be shown.
 _PKEXEC_DISMISSED = 126
-_PKEXEC_UNAVAILABLE = 127
+_PKEXEC_NOT_AUTHORIZED = 127
 
 
 def detect_install_kind() -> str:
@@ -180,7 +190,7 @@ class UpdateInstaller(QObject):
     ready = Signal(str)        # local path of the downloaded, verified file
     prepared = Signal(str)     # what apply() needs; the window may close after apply
     declined = Signal(str)     # the person backed out of a system prompt; nothing changed
-    failed = Signal(str)
+    failed = Signal(str, bool)  # what went wrong, and whether trying again can help
 
     def __init__(self, kind: str, parent=None, *, executable: str = None):
         super().__init__(parent)
@@ -205,13 +215,14 @@ class UpdateInstaller(QObject):
         if not self._expected_sha256:
             # Never install what cannot be checked. update_flow only offers an
             # automatic update when the release names a hash, so this is a guard.
-            self.failed.emit("MyEditor couldn't check this download, so it wasn't installed.")
+            self.failed.emit("MyEditor couldn't check this download, so it wasn't "
+                             "installed.", False)
             return
         try:
             self._dest = _download_destination(self._kind, asset)
             self._fh = open(self._dest, "wb")
-        except OSError as exc:
-            self.failed.emit(f"Cannot write the update file: {exc}")
+        except OSError:
+            self.failed.emit(_CANNOT_SAVE, True)
             return
         self._expected_size = asset.size or 0
         self._hash = hashlib.sha256()
@@ -246,7 +257,7 @@ class UpdateInstaller(QObject):
     def _stage_mac(self, dmg_path: str):
         bundle = mac_bundle_path(self._executable)
         if bundle is None:
-            self.failed.emit("MyEditor couldn't find where it is installed.")
+            self.failed.emit("MyEditor couldn't find where it is installed.", False)
             return
         script = mac_stage_script(dmg_path, mac_staging_path(bundle))
 
@@ -255,8 +266,7 @@ class UpdateInstaller(QObject):
             if code == 0:
                 self.prepared.emit(mac_staging_path(bundle))
             else:
-                self.failed.emit(_MAC_STAGE_ERRORS.get(
-                    code, "MyEditor couldn't prepare the new version."))
+                self.failed.emit(*_MAC_STAGE_ERRORS.get(code, _MAC_STAGE_FAILED))
 
         self._run("sh", ["-c", script], done)
 
@@ -268,12 +278,12 @@ class UpdateInstaller(QObject):
             elif code == _PKEXEC_DISMISSED:
                 self.declined.emit("The update wasn't installed because the password "
                                    "prompt was closed. Nothing was changed.")
-            elif code == _PKEXEC_UNAVAILABLE:
-                self.failed.emit("Your system couldn't ask for your password. "
-                                 "Use the update guide to install this update.")
+            elif code == _PKEXEC_NOT_AUTHORIZED:
+                self.failed.emit("MyEditor didn't get permission to install the update.",
+                                 True)
             else:
                 self.failed.emit("The package couldn't be installed. Another "
-                                 "installation may be running. Try again in a moment.")
+                                 "installation may be running.", True)
 
         # --no-remove: an update that would take other packages off the
         # system is refused instead of carried out unseen.
@@ -305,7 +315,10 @@ class UpdateInstaller(QObject):
 
     # -- apply --------------------------------------------------------------
     def apply(self, path: str):
-        """Launch the swap. The caller must quit the app right after this."""
+        """Launch the swap. The caller must quit the app right after this.
+
+        Raises RuntimeError, worded for the person, when the swap can't start.
+        """
         if self._kind == WINDOWS_INSTALLER:
             _apply_windows(path)
         elif self._kind == APPIMAGE:
@@ -315,7 +328,7 @@ class UpdateInstaller(QObject):
         elif self._kind == DEB:
             _relaunch_after_exit(path)
         else:
-            raise RuntimeError("in-app update is not supported for this install")
+            raise RuntimeError("This copy of MyEditor can't update itself.")
 
     def discard_prepared(self, path: str):
         """Undo download and prepare() when the restart is called off.
@@ -344,8 +357,8 @@ class UpdateInstaller(QObject):
             return
         try:
             self._write_chunk(bytes(self._reply.readAll()))
-        except OSError as exc:
-            self._error = f"Cannot write the update file: {exc}"
+        except OSError:
+            self._error = _CANNOT_SAVE
             self._reply.abort()
 
     def _on_finished(self):
@@ -359,8 +372,8 @@ class UpdateInstaller(QObject):
         if self._fh is not None:
             try:
                 self._write_chunk(data)
-            except OSError as exc:
-                self._error = self._error or f"Cannot save the update file: {exc}"
+            except OSError:
+                self._error = self._error or _CANNOT_SAVE
             try:
                 self._fh.close()
             except OSError:
@@ -372,20 +385,20 @@ class UpdateInstaller(QObject):
             return
         if self._error:
             self._discard()
-            self.failed.emit(self._error)
+            self.failed.emit(self._error, True)
             return
         if net_error != QNetworkReply.NetworkError.NoError:
             self._discard()
-            self.failed.emit(net_error_text)
+            self.failed.emit(download_failure(net_error_text), True)
             return
         if self._expected_size and os.path.getsize(self._dest) != self._expected_size:
             self._discard()
-            self.failed.emit("The download was incomplete.")
+            self.failed.emit("The download was incomplete.", True)
             return
         if self._hash.hexdigest() != self._expected_sha256:
             self._discard()
             self.failed.emit("The download was damaged or changed on the way, "
-                             "so it wasn't installed.")
+                             "so it wasn't installed.", True)
             return
         self.ready.emit(self._dest)
 
@@ -400,6 +413,17 @@ class UpdateInstaller(QObject):
 
 
 _DOWNLOAD_DIR_PREFIX = "my-editor-update-"
+
+_CANNOT_SAVE = "MyEditor couldn't save the download. Check that your disk has free space."
+
+
+def download_failure(detail: str) -> str:
+    """A network error as a sentence. Qt's own text is kept as the reason
+    unless it is empty or names the (long, signed) download URL."""
+    reason = (detail or "").strip().rstrip(".")
+    if not reason or "://" in reason:
+        return "The download didn't finish."
+    return f"The download didn't finish ({reason})."
 
 
 def _discard(path: str):
@@ -509,7 +533,7 @@ def _start_helper(script: str):
     # Runs detached from us, so it outlives this process.
     started, _ = QProcess.startDetached("sh", ["-c", script])
     if not started:
-        raise RuntimeError("Could not launch the update helper.")
+        raise RuntimeError("MyEditor couldn't start the update helper.")
 
 
 def _apply_windows(installer_path: str):
@@ -521,11 +545,13 @@ def _apply_windows(installer_path: str):
         ["/SILENT", "/SUPPRESSMSGBOXES", "/CLOSEAPPLICATIONS", "/NORESTARTAPPLICATIONS"],
     )
     if not started:
-        raise RuntimeError("Could not launch the installer.")
+        raise RuntimeError("MyEditor couldn't open the installer.")
 
 
 def _apply_appimage(new_path: str):
-    appimage = os.environ["APPIMAGE"]
+    appimage = os.environ.get("APPIMAGE")
+    if not appimage:
+        raise RuntimeError("MyEditor couldn't find its AppImage.")
     try:
         os.chmod(new_path, 0o755)
     except OSError:

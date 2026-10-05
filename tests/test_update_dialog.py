@@ -8,7 +8,9 @@ Every state is load-bearing:
   the window means Later. Skipping a version is only ever an explicit click.
 
   A failed download says so inside the Download step and offers both a
-  retry and the update guide, never a dead end.
+  retry and the update guide, never a dead end. Every error reads as the
+  installer's own sentences plus one next step, and Try Again is offered
+  only where trying again can help.
 
   Cancelling before the restart leaves nothing behind: the downloaded file is
   deleted and the app keeps running on the old version.
@@ -42,7 +44,8 @@ from PySide6.QtWidgets import QApplication, QDialog  # noqa: E402
 import updater  # noqa: E402
 import update_dialog  # noqa: E402
 from update_dialog import (  # noqa: E402
-    DOWNLOADING, FAILED, PREPARING, READY, RESTARTING, UpdateDialog, WhatsNewDialog,
+    DOWNLOADING, FAILED, GUIDE_ONLY, PREPARING, READY, RESTARTING, UpdateDialog,
+    WhatsNewDialog,
 )
 from update_flow import DOWNLOAD, PREPARE, RESTART, plan_for  # noqa: E402
 
@@ -61,7 +64,7 @@ class FakeInstaller(QObject):
     ready = Signal(str)
     prepared = Signal(str)
     declined = Signal(str)
-    failed = Signal(str)
+    failed = Signal(str, bool)
 
     def __init__(self, apply_error=None, prepare_at_once=True):
         super().__init__()
@@ -170,11 +173,13 @@ def test_a_failed_download_explains_itself_and_offers_a_way_on():
     installer = FakeInstaller()
     dialog = automatic_dialog(installer)
     dialog._buttons["primary"].click()
-    installer.failed.emit("Connection refused.")
+    installer.failed.emit("The download didn't finish (Connection refused).", True)
     assert dialog.state == FAILED
     row = dialog._rows[0]
     assert row.badge.property("state") == "error"
-    assert "Connection refused." in row.error.text()
+    # The installer's sentence as it is, then the one next step.
+    assert row.error.text() == ("The download didn't finish (Connection refused). "
+                                "Try again, or use the update guide.")
     assert visible_buttons(dialog) == ["guide", "later", "retry"]
     assert dialog._buttons["retry"].isDefault()
 
@@ -184,12 +189,53 @@ def test_a_failed_download_explains_itself_and_offers_a_way_on():
     assert row.error.isHidden()
 
 
+def test_a_damaged_download_reads_as_one_message():
+    installer = FakeInstaller()
+    dialog = automatic_dialog(installer)
+    dialog._buttons["primary"].click()
+    installer.failed.emit("The download was damaged or changed on the way, "
+                          "so it wasn't installed.", True)
+    assert dialog._rows[0].error.text() == (
+        "The download was damaged or changed on the way, so it wasn't installed. "
+        "Try again, or use the update guide.")
+
+
+def test_a_failure_that_trying_again_cannot_fix_offers_only_the_guide(tmp_path):
+    installer = FakeInstaller(prepare_at_once=False)
+    dialog = mac_dialog(installer)
+    dialog._buttons["primary"].click()
+    installer.ready.emit(str(tmp_path / "x.dmg"))
+    installer.failed.emit("The new version didn't pass the macOS integrity check, "
+                          "so it wasn't installed.", False)
+    assert dialog.state == GUIDE_ONLY
+    assert visible_buttons(dialog) == ["guide", "later"]
+    assert dialog._buttons["guide"].isDefault()
+    text = dialog._roles[PREPARE].error.text()
+    assert text.endswith("so it wasn't installed. Use the update guide to install this update.")
+    assert "Try again" not in text
+
+
+def test_a_refused_permission_names_the_guide_once(tmp_path):
+    installer = FakeInstaller(prepare_at_once=False)
+    plan = plan_for(updater.DEB, "3.3", release_url=RELEASE_URL, asset=ASSET,
+                    can_self_update=True, machine="x86_64")
+    dialog = UpdateDialog("3.3", "3.2", plan, release_url=RELEASE_URL, asset=ASSET,
+                          installer=installer, is_dark=False)
+    dialog._buttons["primary"].click()
+    installer.ready.emit(str(tmp_path / "x.deb"))
+    installer.failed.emit("MyEditor didn't get permission to install the update.", True)
+    text = dialog._roles[PREPARE].error.text()
+    assert text == ("MyEditor didn't get permission to install the update. "
+                    "Try again, or use the update guide.")
+    assert text.count("guide") == 1
+
+
 def test_the_guide_button_hands_off_to_the_guide_in_update_mode():
     installer = FakeInstaller()
     dialog = automatic_dialog(installer)
     links = recorder(dialog.link_activated)
     dialog._buttons["primary"].click()
-    installer.failed.emit("Timed out.")
+    installer.failed.emit("The download didn't finish (Timed out).", True)
     dialog._buttons["guide"].click()
     assert links and "update=3.3" in links[0][0]
     assert dialog.result() == QDialog.Accepted
@@ -231,7 +277,7 @@ def test_cancelling_before_the_restart_deletes_the_download_and_changes_nothing(
 
 
 def test_a_swap_that_cannot_start_is_reported_in_the_restart_step(tmp_path):
-    installer = FakeInstaller(apply_error="Could not launch the installer.")
+    installer = FakeInstaller(apply_error="MyEditor couldn't open the installer.")
     dialog = automatic_dialog(installer)
     restarts = recorder(dialog.restart_ready)
     path = tmp_path / "setup.exe"
@@ -243,11 +289,22 @@ def test_a_swap_that_cannot_start_is_reported_in_the_restart_step(tmp_path):
     assert dialog.state == FAILED
     assert restarts == []
     assert not path.exists()
-    assert "Could not launch the installer." in dialog._roles[RESTART].error.text()
+    assert dialog._roles[RESTART].error.text() == (
+        "MyEditor couldn't open the installer. Try again, or use the update guide.")
+
+
+def test_an_unexpected_error_while_starting_the_swap_is_one_plain_sentence(tmp_path):
+    installer = FakeInstaller()
+    installer.apply = lambda path: {}["APPIMAGE"]   # a KeyError, not a worded failure
+    dialog = automatic_dialog(installer)
+    dialog._buttons["primary"].click()
+    installer.ready.emit(str(tmp_path / "setup.exe"))
+    assert dialog._roles[RESTART].error.text() == (
+        "MyEditor couldn't start the update. Try again, or use the update guide.")
 
 
 def test_a_swap_that_cannot_start_tells_the_window(tmp_path):
-    installer = FakeInstaller(apply_error="Could not launch the update helper.")
+    installer = FakeInstaller(apply_error="MyEditor couldn't start the update helper.")
     dialog = automatic_dialog(installer)
     failures = recorder(dialog.restart_failed)
     path = tmp_path / "setup.exe"
@@ -283,11 +340,11 @@ def test_a_failed_preparation_is_reported_in_the_install_step(tmp_path):
     dialog = mac_dialog(installer)
     dialog._buttons["primary"].click()
     installer.ready.emit(str(tmp_path / "x.dmg"))
-    installer.failed.emit("The disk image doesn't contain MyEditor.")
+    installer.failed.emit("The downloaded disk image couldn't be opened.", True)
     assert dialog.state == FAILED
     row = dialog._roles[PREPARE]
     assert row.badge.property("state") == "error"
-    assert "doesn't contain MyEditor" in row.error.text()
+    assert "couldn't be opened" in row.error.text()
     assert "didn't finish" not in row.error.text()   # not worded as a download error
     assert visible_buttons(dialog) == ["guide", "later", "retry"]
 

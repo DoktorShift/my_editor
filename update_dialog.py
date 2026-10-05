@@ -55,7 +55,8 @@ from update_flow import AUTOMATIC, DOWNLOAD, PREPARE, RESTART
 READY = "ready"
 DOWNLOADING = "downloading"
 PREPARING = "preparing"
-FAILED = "failed"
+FAILED = "failed"            # trying again can help
+GUIDE_ONLY = "guide_only"    # it can't: the update guide is the way on
 RESTARTING = "restarting"
 
 # Which buttons each state shows. One table, so a state can never leave a
@@ -66,7 +67,16 @@ _BUTTONS = {
     DOWNLOADING: ("cancel",),
     PREPARING: (),
     FAILED: ("later", "guide", "retry"),
+    GUIDE_ONLY: ("later", "guide"),
     RESTARTING: (),
+}
+_DEFAULT_BUTTON = {READY: "primary", FAILED: "retry", GUIDE_ONLY: "guide"}
+
+# What to do after an error, added to the installer's own sentences. "Try
+# again" is offered only where trying again can help.
+_NEXT_STEP = {
+    True: "Try again, or use the update guide.",
+    False: "Use the update guide to install this update.",
 }
 
 _NOTES_MAX_HEIGHT = 180
@@ -349,7 +359,7 @@ class UpdateDialog(QDialog):
             button.setVisible(key in visible)
             button.setDefault(False)
             button.setAutoDefault(False)
-        default = {READY: "primary", FAILED: "retry"}.get(state)
+        default = _DEFAULT_BUTTON.get(state)
         if default:
             self._buttons[default].setDefault(True)
 
@@ -400,12 +410,11 @@ class UpdateDialog(QDialog):
         if self._state == DOWNLOADING:
             self._roles[DOWNLOAD].set_progress(percent)
 
-    def _on_installer_failed(self, message: str) -> None:
+    def _on_installer_failed(self, message: str, retryable: bool) -> None:
         if self._state == DOWNLOADING:
-            self._fail(DOWNLOAD, f"The download didn't finish. {message} "
-                                 "Try again, or use the update guide.")
+            self._fail(DOWNLOAD, message, retryable=retryable)
         elif self._state == PREPARING:
-            self._fail(PREPARE, f"{message} Try again, or use the update guide.")
+            self._fail(PREPARE, message, retryable=retryable)
 
     def _on_downloaded(self, path: str) -> None:
         download = self._roles[DOWNLOAD]
@@ -445,17 +454,18 @@ class UpdateDialog(QDialog):
         except Exception as exc:
             self._installer.discard_prepared(path)
             self.restart_failed.emit()
-            self._fail(RESTART, f"MyEditor couldn't start the update. {exc} "
-                                "Try again, or use the update guide.")
+            # apply() words its own failures; anything else gets one sentence.
+            reason = str(exc).strip() if isinstance(exc, RuntimeError) else ""
+            self._fail(RESTART, reason or "MyEditor couldn't start the update.")
             return
         self.restart_ready.emit()
         self.accept()
 
-    def _fail(self, role: str, message: str) -> None:
+    def _fail(self, role: str, message: str, *, retryable: bool = True) -> None:
         row = self._roles[role]
         row.set_state("error")
-        row.set_error(message)
-        self._set_state(FAILED)
+        row.set_error(f"{message} {_NEXT_STEP[retryable]}")
+        self._set_state(FAILED if retryable else GUIDE_ONLY)
 
 
 def _quiet_headings(view: QTextBrowser) -> None:

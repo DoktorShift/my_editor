@@ -78,19 +78,20 @@ class FakeReply:
         pass
 
 
-def download(tmp_path, payload: bytes, sha256: str, kind=updater.WINDOWS_INSTALLER):
+def download(tmp_path, payload: bytes, sha256: str, kind=updater.WINDOWS_INSTALLER,
+             reply=None):
     """Run a download to completion with a fake reply; return (signals, dest)."""
     installer = updater.UpdateInstaller(kind)
     seen = {"ready": [], "failed": []}
     installer.ready.connect(lambda p: seen["ready"].append(p))
-    installer.failed.connect(lambda m: seen["failed"].append(m))
+    installer.failed.connect(lambda m, retry: seen["failed"].append((m, retry)))
     dest = tmp_path / "setup.exe"
     installer._dest = str(dest)
     installer._fh = open(dest, "wb")
     installer._expected_size = len(payload)
     installer._expected_sha256 = sha256
     installer._hash = hashlib.sha256()
-    installer._reply = FakeReply(payload)
+    installer._reply = reply or FakeReply(payload)
     installer._on_finished()
     return seen, dest
 
@@ -114,16 +115,36 @@ def test_a_download_that_matches_its_hash_is_ready(tmp_path):
 def test_a_download_that_does_not_match_is_deleted_and_never_ready(tmp_path):
     seen, dest = download(tmp_path, b"tampered bytes", hashlib.sha256(b"original").hexdigest())
     assert seen["ready"] == []
-    assert "damaged or changed" in seen["failed"][0]
+    # Another download can arrive intact, so trying again can help.
+    assert seen["failed"] == [("The download was damaged or changed on the way, "
+                               "so it wasn't installed.", True)]
     assert not dest.exists()
+
+
+def test_a_network_error_is_one_sentence_with_its_reason(tmp_path):
+    reply = FakeReply(b"", error=QNetworkReply.NetworkError.ConnectionRefusedError)
+    seen, dest = download(tmp_path, b"x", "0" * 64, reply=reply)
+    assert seen["failed"] == [("The download didn't finish (network down).", True)]
+    assert not dest.exists()
+
+
+def test_a_network_reason_that_names_the_download_url_is_left_out():
+    assert updater.download_failure("Connection refused.") == \
+        "The download didn't finish (Connection refused)."
+    assert updater.download_failure(
+        "Error transferring https://objects.example/x?sig=abc - server replied: Not Found"
+    ) == "The download didn't finish."
+    assert updater.download_failure("") == "The download didn't finish."
 
 
 def test_a_release_without_a_hash_is_never_downloaded():
     installer = updater.UpdateInstaller(updater.WINDOWS_INSTALLER)
     failed = []
-    installer.failed.connect(failed.append)
+    installer.failed.connect(lambda m, retry: failed.append((m, retry)))
     installer.start(SimpleNamespace(name="setup.exe", url="https://x", size=1, sha256=""))
-    assert failed and "couldn't check" in failed[0]
+    # The same release would be just as unverifiable on a second try.
+    assert failed == [("MyEditor couldn't check this download, so it wasn't installed.",
+                       False)]
     assert installer._reply is None
 
 
@@ -430,8 +451,9 @@ def prepare_with_exit_code(kind, code, tmp_path, monkeypatch, executable=None):
 
     monkeypatch.setattr(installer, "_run", fake_run)
     seen = {"prepared": [], "declined": [], "failed": []}
-    for name in seen:
-        getattr(installer, name).connect(lambda v, n=name: seen[n].append(v))
+    installer.prepared.connect(seen["prepared"].append)
+    installer.declined.connect(seen["declined"].append)
+    installer.failed.connect(lambda m, retry: seen["failed"].append((m, retry)))
     downloaded = tmp_path / "update.bin"
     downloaded.write_bytes(b"x")
     installer.prepare(str(downloaded))
@@ -457,9 +479,18 @@ def test_a_closed_password_prompt_is_declined_not_failed(tmp_path, monkeypatch):
     assert seen["failed"] == [] and "Nothing was changed" in seen["declined"][0]
 
 
-def test_no_password_prompt_at_all_points_to_the_guide(tmp_path, monkeypatch):
+def test_permission_not_granted_is_said_once_without_naming_the_next_step(
+        tmp_path, monkeypatch):
+    # pkexec(1): 127 means not authorized, authentication failed, or no
+    # prompt could be shown. The dialog adds what to do next.
     seen, _, _ = prepare_with_exit_code(updater.DEB, 127, tmp_path, monkeypatch)
-    assert "update guide" in seen["failed"][0]
+    assert seen["failed"] == [("MyEditor didn't get permission to install the update.", True)]
+
+
+def test_a_failed_package_install_does_not_name_the_next_step_either(tmp_path, monkeypatch):
+    seen, _, _ = prepare_with_exit_code(updater.DEB, 100, tmp_path, monkeypatch)
+    (message, retryable), = seen["failed"]
+    assert retryable and "Try again" not in message and "guide" not in message
 
 
 def test_a_mac_staging_failure_is_explained(tmp_path, monkeypatch):
@@ -467,7 +498,16 @@ def test_a_mac_staging_failure_is_explained(tmp_path, monkeypatch):
     seen, calls, _ = prepare_with_exit_code(updater.MACOS_APP, 14, tmp_path, monkeypatch,
                                             executable=exe)
     assert calls[0][:2] == ["sh", "-c"]
-    assert "integrity check" in seen["failed"][0]
+    # The download was checked, so a second try fetches the same app.
+    assert seen["failed"] == [("The new version didn't pass the macOS integrity check, "
+                               "so it wasn't installed.", False)]
+
+
+def test_a_full_disk_while_staging_can_be_tried_again(tmp_path, monkeypatch):
+    exe = make_bundle(tmp_path)
+    seen, _, _ = prepare_with_exit_code(updater.MACOS_APP, 13, tmp_path, monkeypatch,
+                                        executable=exe)
+    assert seen["failed"][0][1] is True
 
 
 def test_a_staged_mac_app_is_what_gets_applied(tmp_path, monkeypatch):
@@ -496,9 +536,21 @@ def test_calling_off_the_restart_removes_what_was_prepared(tmp_path):
     assert other.exists()
 
 
-def test_messages_use_no_em_dashes():
-    texts = list(updater._MAC_STAGE_ERRORS.values())
-    assert all("\u2014" not in t for t in texts)
+def test_messages_are_sentences_without_em_dashes():
+    texts = [m for m, _ in updater._MAC_STAGE_ERRORS.values()]
+    texts += [updater._MAC_STAGE_FAILED[0], updater._CANNOT_SAVE,
+              updater.download_failure("x")]
+    for text in texts:
+        assert "\u2014" not in text
+        assert text.endswith(".") and text[0].isupper()
+
+
+def test_a_swap_that_cannot_start_says_so_in_a_sentence(monkeypatch):
+    monkeypatch.delenv("APPIMAGE", raising=False)
+    with pytest.raises(RuntimeError, match=r"\AMyEditor couldn't find its AppImage\.\Z"):
+        updater.UpdateInstaller(updater.APPIMAGE).apply("/tmp/x.new")
+    with pytest.raises(RuntimeError, match=r"\AThis copy of MyEditor can't update itself\.\Z"):
+        updater.UpdateInstaller(updater.SOURCE).apply("/tmp/x")
 
 
 def test_downloads_land_in_a_private_folder_that_goes_away_with_them():
