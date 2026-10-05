@@ -53,6 +53,7 @@ Run: ``uvicorn sidecar.app:app`` from the repository root (the app's own
 from __future__ import annotations
 
 import ipaddress
+import json
 import logging
 import os
 import re
@@ -63,6 +64,7 @@ from collections import OrderedDict, deque
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional, Tuple
+from urllib.parse import quote
 
 import httpx
 from fastapi import FastAPI, Request
@@ -98,9 +100,10 @@ _INVOICE = re.compile(r"\A/payments/\d{4}/invoice\Z")
 
 @dataclass(frozen=True)
 class Settings:
-    """The sidecar's configuration, read from the environment."""
+    """The sidecar's configuration, read from the environment. The key is
+    left out of the repr, so printing the settings cannot log it."""
 
-    api_key: str = ""
+    api_key: str = field(default="", repr=False)
     upstream: str = "https://verein.einundzwanzig.space"
     rate_per_minute: int = 60
     invoices_per_day: int = 10
@@ -221,6 +224,29 @@ def _route(method: str, path: str) -> Optional[bool]:
     return None
 
 
+def key_forms(key: str) -> Tuple[bytes, ...]:
+    """Every form in which an answer could carry ``key``: as is, escaped
+    inside a JSON string (the way Python writes it, and the way PHP does,
+    with ``/`` as ``\\/`` and non-ASCII as ``\\uXXXX``), and
+    percent-encoded. Longest first, so a longer form is removed whole
+    before a shorter one inside it could split it."""
+    if not key:
+        return ()
+    forms = {key, quote(key, safe="")}
+    for ensure_ascii in (True, False):
+        escaped = json.dumps(key, ensure_ascii=ensure_ascii)[1:-1]
+        forms.update((escaped, escaped.replace("/", "\\/")))
+    return tuple(sorted({form.encode("utf-8") for form in forms}, key=len, reverse=True))
+
+
+def redact(content: bytes, forms: Tuple[bytes, ...]) -> bytes:
+    """``content`` with every form of the key replaced by ``[redacted]``."""
+    for form in forms:
+        if form in content:
+            content = content.replace(form, b"[redacted]")
+    return content
+
+
 _DIGITS = re.compile(r"\A[0-9]{1,18}\Z")
 
 
@@ -337,7 +363,7 @@ def create_app(settings: Optional[Settings] = None, *,
     limits = _Limits(clock=clock, per_minute=settings.rate_per_minute,
                      per_day=settings.invoices_per_day)
     config_cache: Dict[str, object] = {}
-    key_bytes = settings.api_key.encode("utf-8")
+    secret_forms = key_forms(settings.api_key)
     client = httpx.AsyncClient(transport=transport, timeout=UPSTREAM_TIMEOUT_SECONDS,
                                follow_redirects=False,
                                headers={"User-Agent": f"myeditor-sidecar/{VERSION}"})
@@ -475,8 +501,7 @@ def create_app(settings: Optional[Settings] = None, *,
                         method, path, status_code)
             return finish(_json(503, "Joining through this server is not available right now.",
                                 code="upstream_refused"))
-        if key_bytes and key_bytes in content:
-            content = content.replace(key_bytes, b"[redacted]")
+        content = redact(content, secret_forms)
         if path == "/config" and status_code == 200:
             config_cache["answer"] = (status_code, content, passed)
             config_cache["at"] = clock()

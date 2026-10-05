@@ -533,6 +533,33 @@ def test_the_key_never_leaves_in_an_answer(caplog):
     assert KEY not in caplog.text
 
 
+# Shaped like a base64 key: slashes, a plus, padding.
+SLASHED_KEY = "e21/client+key/0123=="
+
+
+@pytest.mark.parametrize("echo", [
+    SLASHED_KEY,                                    # as is
+    "e21\\/client+key\\/0123==",                    # in JSON, the way PHP writes it
+    "e21%2Fclient%2Bkey%2F0123%3D%3D",              # percent-encoded
+])
+def test_the_key_is_removed_in_every_form_it_could_be_echoed_in(echo):
+    association = Association()
+    app = sidecar.create_app(sidecar.Settings(api_key=SLASHED_KEY, upstream=UPSTREAM),
+                             transport=httpx.MockTransport(association.handler),
+                             clock=Clock())
+    raw = b'{"message":"Unknown client key ' + echo.encode("utf-8") + b'"}'
+    association.answer = lambda r: reply(422, content=raw,
+                                         headers={"Content-Type": "application/json"})
+    response = call(TestClient(app), "GET", "/me")
+    assert echo.encode("utf-8") not in response.content
+    assert b"[redacted]" in response.content
+
+
+def test_the_settings_never_print_the_key():
+    settings = sidecar.Settings(api_key=KEY, upstream=UPSTREAM)
+    assert KEY not in repr(settings) and KEY not in str(settings)
+
+
 def test_a_refused_key_is_this_servers_problem_not_the_users(caplog):
     client, association, _ = make()
     association.answer = lambda r: reply(401, json_body={"message": "Unauthenticated."})
