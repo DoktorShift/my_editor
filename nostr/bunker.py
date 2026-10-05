@@ -112,12 +112,26 @@ def humanize_failure(reason: str) -> str:
 #
 # Signers that don't recognise an entry typically ignore it silently;
 # the actual capability check happens lazily when we invoke each method.
+# Where MyEditor and a signer app meet to pair (NIP-46 nostrconnect).
+# Transport only, never anyone's home relay. theforest.nostr1.com and
+# relay.primal.net are among Amber's own defaults, so a phone that pairs
+# usually already listens on one of them.
+NIP46_RELAYS: tuple = (
+    "wss://relay.primal.net",
+    "wss://relay.damus.io",
+    "wss://nos.lol",
+    "wss://theforest.nostr1.com",
+)
+
+
 DEFAULT_PERMS = (
     "get_public_key,"
     "sign_event:1,sign_event:30023,sign_event:31234,"
     # Proof of identity for EINUNDZWANZIG membership requests (NIP-98), and
     # adding the members' relay to the user's relay list (NIP-65).
     "sign_event:27235,sign_event:10002,"
+    # Publishing the profile of an account created or edited in MyEditor.
+    "sign_event:0,"
     "nip44_encrypt,nip44_decrypt,"
     "ping"
 )

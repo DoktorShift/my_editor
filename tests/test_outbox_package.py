@@ -1,0 +1,434 @@
+# SPDX-FileCopyrightText: 2026 rinbal
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""Pins NIP-65 in MyEditor: the rules, the lookups, the directory, the writer.
+
+The invariants, each pinned below:
+
+  I1  A replaceable write needs a fresh FOUND base, or ABSENT when creating,
+      or a key minted here. UNKNOWN always refuses; nothing is signed.
+  I2  Only validly signed events of the right kind and author count; newest
+      wins, a tie goes to the lowest id.
+  I3  A FOUND list is never downgraded by a timeout or an empty answer.
+  I4  A replacement is timed after what it replaces.
+  I5  Private records are read where they are written.
+  I6  The author's write relays come first and are never pushed out.
+  I7  What the signer returns must match what was asked.
+  I8  One normalizer; I9 curated relays live in outbox/defaults.py only.
+"""
+
+import json
+import os
+import sys
+
+import pytest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from PySide6.QtWidgets import QApplication  # noqa: E402
+
+import nostr  # noqa: E402
+from nostr import bunker  # noqa: E402
+from nostr.outbox import defaults, policy, writer  # noqa: E402
+from nostr.outbox.directory import RelayDirectory  # noqa: E402
+from nostr.outbox.lookup import Lookup, classify  # noqa: E402
+from nostr.outbox.policy import LookupState, RelayList  # noqa: E402
+from tests.outbox_fakes import (  # noqa: E402
+    ABSENT, NOW, OTHER_PK, OTHER_SK, PK, SK, UNKNOWN, FakeClient, FakePool, FakeQuery,
+    FakeSessionPool, Profile, found, settle, signed,
+)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def qt_app():
+    app = QApplication.instance() or QApplication(sys.argv)
+    yield app
+
+
+@pytest.fixture(autouse=True)
+def quick_read_back(monkeypatch):
+    monkeypatch.setattr(writer, "READ_BACK_DELAY_MS", 0)
+
+
+def rl(write=(), read=(), state=LookupState.FOUND):
+    return RelayList(write=list(write), read=list(read), state=state)
+
+
+# -- the defaults (I9) -------------------------------------------------------------------
+
+def test_the_default_relays_are_the_qualified_fallback_set():
+    assert tuple(nostr.DEFAULT_RELAYS) == tuple(defaults.FALLBACK_RELAYS)
+
+
+def test_the_curated_lists_are_clean():
+    for group in (defaults.FALLBACK_RELAYS, defaults.INDEXER_RELAYS,
+                  [u for u, _m in defaults.STARTER_LIST]):
+        assert len(set(group)) == len(group)
+        assert all(policy.normalize_relay_url(u) == u for u in group)
+    assert {u for u, _m in defaults.STARTER_LIST} <= set(defaults.FALLBACK_RELAYS)
+    assert 2 <= len(defaults.STARTER_LIST) <= 4          # NIP-65 asks for a small list
+    # Found unreachable or paid when last qualified.
+    for gone in ("nostr.oxtr.dev", "relay.nostr.band", "theforest.nostr1.com"):
+        assert all(gone not in u for u in defaults.FALLBACK_RELAYS + defaults.INDEXER_RELAYS)
+
+
+def test_pairing_relays_are_separate_from_home_relays():
+    assert "wss://nostr.oxtr.dev" not in bunker.NIP46_RELAYS
+    assert "sign_event:0" in bunker.DEFAULT_PERMS and "sign_event:10002" in bunker.DEFAULT_PERMS
+
+
+# -- normalizing (I8) --------------------------------------------------------------------
+
+@pytest.mark.parametrize("raw,expected", [
+    ("wss://Relay.Example.COM/", "wss://relay.example.com"),
+    ("  wss://relay.example.com/path/ ", "wss://relay.example.com/path"),
+    ("ws://localhost:7777", "ws://localhost:7777"),
+    ("https://relay.example.com", None),
+    ("wss://", None),
+    ("wss://user@host", None),
+    ("not a url", None),
+    (None, None),
+])
+def test_relay_urls_are_normalized_one_way(raw, expected):
+    assert policy.normalize_relay_url(raw) == expected
+
+
+def test_dedupe_keeps_first_and_caps():
+    out = policy.dedupe_relays(["wss://a.com/", "wss://B.com"], ["wss://a.com", "bad"], cap=5)
+    assert out == ["wss://a.com", "wss://b.com"]
+
+
+# -- reading lists (I2) ------------------------------------------------------------------
+
+def test_markers_split_read_and_write():
+    event = signed(10002, [["r", "wss://both.com"], ["r", "wss://w.com", "write"],
+                           ["r", "wss://r.com", "read"], ["r", "https://bad"]])
+    parsed = policy.parse_relay_list(event)
+    assert parsed.write == ["wss://both.com", "wss://w.com"]
+    assert parsed.read == ["wss://both.com", "wss://r.com"]
+    assert parsed.found and parsed.event is event
+
+
+def test_a_forged_newer_event_cannot_hide_the_real_one():
+    real = signed(10002, [["r", "wss://real.com"]], created_at=NOW - 500)
+    forged = dict(signed(10002, [["r", "wss://evil.com"]], created_at=NOW), sig="00" * 64)
+    other = signed(10002, [["r", "wss://other.com"]], sk=OTHER_SK, created_at=NOW)
+    assert policy.newest_valid([forged, other, real], kind=10002, author=PK) is real
+
+
+def test_a_tie_goes_to_the_lowest_id():
+    a = signed(10002, [["r", "wss://a.com"]], created_at=NOW)
+    b = signed(10002, [["r", "wss://b.com"]], created_at=NOW)
+    low = min(a, b, key=lambda e: e["id"])
+    assert policy.newest_valid([a, b], kind=10002, author=PK) is low
+    assert policy.newest_valid([b, a], kind=10002, author=PK) is low
+
+
+def test_absent_needs_a_quorum_including_an_indexer():
+    assert classify(None, ["wss://purplepag.es", "wss://nos.lol"]) is LookupState.ABSENT
+    assert classify(None, ["wss://nos.lol", "wss://relay.damus.io"]) is LookupState.UNKNOWN
+    assert classify(None, ["wss://purplepag.es"]) is LookupState.UNKNOWN
+    assert classify({"id": "x"}, []) is LookupState.FOUND
+
+
+# -- changing lists and profiles (I4) ----------------------------------------------------
+
+def test_adding_keeps_everything_and_refuses_from_nothing():
+    base = signed(10002, [["r", "wss://a.com"], ["r", "wss://b.com", "read"], ["x", "keep"]])
+    tags = policy.relay_list_tags_adding(base, "wss://NEW.com/")
+    assert tags == [["r", "wss://a.com"], ["r", "wss://b.com", "read"], ["x", "keep"],
+                    ["r", "wss://new.com", "write"]]
+    assert policy.relay_list_tags_adding(None, "wss://new.com") is None
+    assert policy.relay_list_tags_adding(base, "wss://b.com/") is None   # read-only stays
+
+
+def test_the_starter_list_has_no_markers_and_no_repeats():
+    tags = policy.starter_relay_list_tags(extra_write=["wss://nos.lol", "wss://m.com"])
+    assert tags[:3] == [["r", u] for u, _m in defaults.STARTER_LIST]
+    assert tags[3:] == [["r", "wss://m.com", "write"]]
+
+
+def test_a_profile_change_keeps_fields_it_does_not_touch():
+    base = json.dumps({"name": "old", "lud16": "me@wallet.com", "website": "https://x"})
+    merged = json.loads(policy.merge_profile_content(base, {"name": "new", "website": ""}))
+    assert merged == {"name": "new", "lud16": "me@wallet.com"}
+    with pytest.raises(ValueError):
+        policy.merge_profile_content("[1, 2]", {"name": "x"})
+
+
+def test_a_replacement_is_always_after_the_original():
+    assert policy.replacement_created_at({"created_at": 500}, now=100) == 501
+    assert policy.replacement_created_at(None, now=100) == 100
+
+
+# -- routing (I5, I6) ----------------------------------------------------------------------
+
+def test_the_authors_write_relays_lead_and_are_never_pushed_out():
+    author = rl(write=[f"wss://w{i}.com" for i in range(6)])
+    plan = policy.plan_publish(author, entitled=["wss://nostr.einundzwanzig.space"])
+    assert list(plan.author[:6]) == [f"wss://w{i}.com" for i in range(6)]
+    assert plan.author[6] == "wss://nostr.einundzwanzig.space"
+
+
+def test_too_few_write_relays_are_topped_up():
+    plan = policy.plan_publish(rl(write=["wss://only.com"]))
+    assert plan.author[0] == "wss://only.com" and len(plan.author) >= 2
+    unknown = policy.plan_publish(RelayList())
+    assert list(unknown.author) == list(defaults.FALLBACK_RELAYS[:3])
+
+
+def test_mentions_reach_their_inboxes():
+    alice, bob, carol = "a" * 64, "b" * 64, "c" * 64
+    plan = policy.plan_publish(
+        rl(write=["wss://me.com", "wss://me2.com"]),
+        mentioned={alice: rl(read=["wss://alice1.com", "wss://alice2.com", "wss://alice3.com"]),
+                   bob: RelayList(),
+                   carol: rl(read=["wss://me.com"])},
+        hints={bob: "wss://bob-hint.com"})
+    assert list(plan.inbox) == ["wss://alice1.com", "wss://alice2.com", "wss://bob-hint.com"]
+    assert plan.targets[:2] == ["wss://me.com", "wss://me2.com"]
+
+
+def test_private_records_are_read_where_they_are_written():
+    author = rl(write=["wss://w.com"], read=["wss://r.com"])
+    relays = policy.private_relays(author, entitled=["wss://e.com"], legacy=["wss://old.com"])
+    assert relays == ["wss://w.com", "wss://r.com", "wss://e.com", "wss://old.com"]
+    assert policy.private_relays(RelayList())[:5] == list(defaults.FALLBACK_RELAYS)
+
+
+def test_reading_someone_uses_their_outbox():
+    assert policy.outbox_relays(rl(write=["wss://theirs.com"]), hints=["wss://h.com"]) == \
+        ["wss://h.com", "wss://theirs.com"]
+    assert policy.outbox_relays(RelayList()) == list(defaults.FALLBACK_RELAYS)
+
+
+def test_a_new_relay_list_also_replaces_the_old_copies():
+    old = rl(write=["wss://old.com"])
+    new = signed(10002, [["r", "wss://new.com"]])
+    targets = policy.relay_list_targets(new, old)
+    assert targets[:2] == ["wss://new.com", "wss://old.com"]
+    assert set(defaults.INDEXER_RELAYS) <= set(targets)
+
+
+# -- the directory (I3) ----------------------------------------------------------------
+
+class Clock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+def directory(query, *, tmp_path=None, own=(), clock=None):
+    return RelayDirectory(FakePool(), query=query, own_pubkeys=lambda: own,
+                          store_path=(tmp_path / "lists.json") if tmp_path else None,
+                          clock=clock or Clock())
+
+
+def test_a_lookup_is_cached_and_coalesced():
+    event = signed(10002, [["r", "wss://mine.com"]])
+    query = FakeQuery({10002: found(event)})
+    d = directory(query)
+    got = []
+    d.lookup(PK, got.append)
+    d.lookup(PK, got.append)
+    settle()
+    assert len(query.calls) == 1 and [g.write for g in got] == [["wss://mine.com"]] * 2
+
+
+def test_a_known_list_is_never_downgraded_by_a_timeout():
+    clock = Clock()
+    event = signed(10002, [["r", "wss://mine.com"]])
+    query = FakeQuery({10002: found(event)})
+    d = directory(query, clock=clock)
+    d.lookup(PK, lambda _r: None)
+    settle()
+    query.answers[10002] = UNKNOWN
+    clock.now += defaults.TTL_FOUND_S + 1
+    got = []
+    d.lookup(PK, got.append)                 # stale: answered at once, refreshed behind
+    settle()
+    assert got[0].found and d.cached(PK).found
+    assert d.cached(PK).write == ["wss://mine.com"]
+
+
+def test_remember_takes_only_newer_valid_lists():
+    d = directory(FakeQuery())
+    old = signed(10002, [["r", "wss://old.com"]], created_at=NOW - 50)
+    new = signed(10002, [["r", "wss://new.com"]], created_at=NOW)
+    changed = []
+    d.changed.connect(changed.append)
+    assert d.remember(new)
+    assert not d.remember(old)
+    assert not d.remember(dict(new, sig="00" * 64, created_at=NOW + 9))
+    assert d.cached(PK).write == ["wss://new.com"] and changed == [PK]
+
+
+def test_own_lists_survive_a_restart_and_tampering_is_dropped(tmp_path):
+    d = directory(FakeQuery(), tmp_path=tmp_path, own=(PK,))
+    d.remember(signed(10002, [["r", "wss://mine.com"]]))
+    again = directory(FakeQuery(), tmp_path=tmp_path, own=(PK,))
+    assert again.cached(PK).write == ["wss://mine.com"]
+    data = json.loads((tmp_path / "lists.json").read_text())
+    data["lists"][PK]["tags"] = [["r", "wss://evil.com"]]
+    (tmp_path / "lists.json").write_text(json.dumps(data))
+    assert not directory(FakeQuery(), tmp_path=tmp_path, own=(PK,)).cached(PK).found
+
+
+def test_other_peoples_lists_are_not_written_to_disk(tmp_path):
+    d = directory(FakeQuery(), tmp_path=tmp_path, own=(PK,))
+    d.remember(signed(10002, [["r", "wss://theirs.com"]], sk=OTHER_SK))
+    assert not (tmp_path / "lists.json").exists()
+
+
+def test_a_publish_plan_combines_author_and_mentions():
+    mine = signed(10002, [["r", "wss://me.com"]])
+    theirs = signed(10002, [["r", "wss://their-inbox.com", "read"]], sk=OTHER_SK)
+
+    def query(pool, relays, *, kind, author, on_done, timeout_ms=0, parent=None):
+        on_done(found(mine if author == PK else theirs))
+
+    d = directory(query)
+    plans = []
+    d.publish_plan(PK, plans.append, mentioned=[(OTHER_PK, "")])
+    settle()
+    assert plans[0].targets[0] == "wss://me.com"
+    assert "wss://their-inbox.com" in plans[0].inbox
+
+
+# -- the writer (I1, I7) ----------------------------------------------------------------
+
+def deps(query, *, client=None, pool=None, d=None):
+    pool = pool or FakePool()
+    return {"pool": pool, "directory": d or directory(FakeQuery()),
+            "session_pool": FakeSessionPool(client or FakeClient()),
+            "profile": Profile(), "query": query, "clock": lambda: NOW}
+
+
+def run(writer_obj):
+    outcomes = []
+    writer_obj.finished.connect(outcomes.append)
+    writer_obj.start()
+    settle(10)
+    return outcomes[0] if outcomes else None
+
+
+def test_an_unreadable_list_is_never_replaced():
+    client = FakeClient()
+    outcome = run(writer.add_relay(url="wss://m.com", **deps(FakeQuery({10002: UNKNOWN}),
+                                                             client=client)))
+    assert outcome.status == writer.UNKNOWN_BASE and client.requests == []
+
+
+def test_adding_to_no_list_is_refused():
+    client = FakeClient()
+    outcome = run(writer.add_relay(url="wss://m.com", **deps(FakeQuery({10002: ABSENT}),
+                                                             client=client)))
+    assert outcome.status == writer.REFUSED and client.requests == []
+
+
+def test_adding_publishes_the_old_list_plus_one():
+    base = signed(10002, [["r", "wss://a.com"]], created_at=NOW + 10)
+    pool = FakePool()
+    d = directory(FakeQuery())
+    outcome = run(writer.add_relay(url="wss://m.com",
+                                   **deps(FakeQuery({10002: found(base)}), pool=pool, d=d)))
+    assert outcome.status == writer.WRITTEN and outcome.verified_on
+    event = outcome.event
+    assert event["tags"] == [["r", "wss://a.com"], ["r", "wss://m.com", "write"]]
+    assert event["created_at"] == NOW + 11              # after the base, despite the clock
+    targets, _published = pool.published[0]
+    assert {"wss://a.com", "wss://m.com", *defaults.INDEXER_RELAYS} <= set(targets)
+    assert d.cached(PK).write == ["wss://a.com", "wss://m.com"]   # seeded, no refetch
+
+
+def test_creating_when_one_exists_sends_nothing():
+    client = FakeClient()
+    outcome = run(writer.create_relay_list(
+        **deps(FakeQuery({10002: found(signed(10002, [["r", "wss://a.com"]]))}), client=client)))
+    assert outcome.status == writer.EXISTS and client.requests == []
+
+
+def test_a_signer_returning_something_else_is_refused():
+    def tamper(event):
+        return signed(10002, [["r", "wss://evil.com"]], created_at=event["created_at"])
+    base = signed(10002, [["r", "wss://a.com"]])
+    pool = FakePool()
+    outcome = run(writer.add_relay(url="wss://m.com", **deps(
+        FakeQuery({10002: found(base)}), client=FakeClient(tamper=tamper), pool=pool)))
+    assert outcome.status == writer.FAILED and pool.published == []
+
+
+def test_one_accepting_relay_is_not_enough():
+    base = signed(10002, [["r", "wss://a.com"]])
+    everyone_but_a = set(defaults.INDEXER_RELAYS) | {"wss://m.com"}
+    outcome = run(writer.add_relay(url="wss://m.com", **deps(
+        FakeQuery({10002: found(base)}), pool=FakePool(refuse=everyone_but_a))))
+    assert outcome.status == writer.FAILED
+
+
+def test_an_accepted_event_that_cannot_be_read_back_is_reported():
+    base = signed(10002, [["r", "wss://a.com"]])
+    outcome = run(writer.add_relay(url="wss://m.com", **deps(
+        FakeQuery({10002: found(base)}), pool=FakePool(keep=False))))
+    assert outcome.status == writer.WRITTEN and outcome.verified_on == ()
+
+
+def test_a_profile_update_keeps_unknown_fields():
+    base = signed(0, content=json.dumps({"name": "old", "lud16": "me@w.com"}))
+    outcome = run(writer.update_profile(changes={"name": "new"},
+                                        **deps(FakeQuery({0: found(base)}))))
+    assert json.loads(outcome.event["content"]) == {"name": "new", "lud16": "me@w.com"}
+
+
+def test_an_unchanged_profile_is_not_republished():
+    base = signed(0, content=json.dumps({"name": "same"}))
+    client = FakeClient()
+    outcome = run(writer.update_profile(changes={"name": "same"},
+                                        **deps(FakeQuery({0: found(base)}), client=client)))
+    assert outcome.status == writer.UNCHANGED and client.requests == []
+
+
+# -- a new account ---------------------------------------------------------------------------
+
+def test_a_new_account_publishes_its_relay_list_then_its_profile():
+    pool = FakePool()
+    query = FakeQuery()
+    setup = writer.AccountSetup(name="Satoshi", deps={
+        "pool": pool, "directory": directory(FakeQuery()),
+        "session_pool": FakeSessionPool(FakeClient()), "profile": Profile(),
+        "query": query, "clock": lambda: NOW})
+    steps, results = [], []
+    setup.step.connect(lambda k, s, d: steps.append((k, s)))
+    setup.finished.connect(lambda ok, msg: results.append(ok))
+    setup.start()
+    settle(20)
+    assert results == [True]
+    assert query.calls == []                     # a key minted here has nothing to read
+    kinds = [event["kind"] for _targets, event in pool.published]
+    assert kinds == [10002, 0]
+    assert json.loads(pool.published[1][1]["content"]) == {"name": "Satoshi",
+                                                           "display_name": "Satoshi"}
+    assert ("relays", "done") in steps and ("profile", "done") in steps
+
+
+def test_a_retry_resends_the_same_signed_events():
+    pool = FakePool(refuse=set(policy.dedupe_relays(
+        [u for u, _m in defaults.STARTER_LIST], defaults.INDEXER_RELAYS)))
+    client = FakeClient()
+    setup = writer.AccountSetup(name="", deps={
+        "pool": pool, "directory": directory(FakeQuery()),
+        "session_pool": FakeSessionPool(client), "profile": Profile(),
+        "query": FakeQuery(), "clock": lambda: NOW})
+    results = []
+    setup.finished.connect(lambda ok, msg: results.append(ok))
+    setup.start()
+    settle(20)
+    assert results == [False]
+    pool.refuse = set()
+    setup.start()
+    settle(20)
+    assert results == [False, True]
+    assert len(client.requests) == 1             # signed once, sent twice
+    assert pool.published[0][1]["id"] == pool.published[1][1]["id"]
