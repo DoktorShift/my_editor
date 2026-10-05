@@ -659,6 +659,31 @@ def test_the_key_is_in_no_log_record_not_even_uvicorns_or_the_http_clients(caplo
     assert all(KEY not in str(record.args) for record in caplog.records)
 
 
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _lines(path):
+    with open(os.path.join(ROOT, path), encoding="utf-8") as handle:
+        return [line.strip() for line in handle if line.strip() and not line.startswith("#")]
+
+
+def test_the_key_file_stays_out_of_git_and_out_of_the_image_build():
+    # sidecar/.env holds the key. Git ignores it, and the Docker build
+    # context (the repository root) lets through exactly the files the
+    # Dockerfile copies, so neither .env nor anything else reaches the
+    # daemon, and the build still has everything it copies.
+    assert "sidecar/.env" in _lines(".gitignore")
+    ignore = _lines("sidecar/Dockerfile.dockerignore")
+    assert ignore[0] == "*" and all(line.startswith("!") for line in ignore[1:])
+    allowed = {line[1:] for line in ignore[1:]}
+    copied = set()
+    for line in _lines("sidecar/Dockerfile"):
+        if line.startswith("COPY "):
+            copied.update(line.split()[1:-1])
+    assert copied == allowed
+    assert not any(path.endswith(".env") or "/." in path for path in allowed)
+
+
 def test_an_unreachable_association_is_a_clear_502():
     def down(request):
         raise httpx.ConnectError("down", request=request)

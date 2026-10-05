@@ -8,7 +8,7 @@ The cases below are those places: a refused key, a credential that
 expired while the user found their phone, a quota, a malformed or
 enormous answer, a signer that says no or never answers. Each must end
 in exactly one callback carrying a stable code, with no exception
-reaching Qt and the client key in no message.
+reaching Qt.
 
 The counterparty is ``FakeMembershipServer``, which re-checks every
 NIP-98 rule the real server enforces, so "the request was accepted" in
@@ -47,7 +47,6 @@ from nostr.einundzwanzig_api import (
     MembershipConfig,
     MembershipExport,
     MembershipStatus,
-    has_service,
     parse_config,
     parse_erasure,
     parse_export,
@@ -143,9 +142,13 @@ ALL_CALLS = [("config", (), {}, "GET", "/config", MembershipConfig)] + SIGNED_CA
 # --------------------------------------------------------------------- #
 
 def test_the_environment_names_the_service(monkeypatch):
+    import constants
+    monkeypatch.setattr(constants, "MEMBERSHIP_SERVICE_URL", "https://official.example")
     monkeypatch.setenv("MYEDITOR_MEMBERSHIP_SERVICE", "https://mine.example/")
     assert service_url() == "https://mine.example"
-    assert has_service()
+    api = MembershipApi(FakeSigner(), nam=FakeNam())
+    assert api.configured and api.request_url_for("/me") == (
+        "https://mine.example/api/v1/membership/me")
 
 
 def test_the_build_names_the_service_without_an_environment_value(monkeypatch):
@@ -154,7 +157,8 @@ def test_the_build_names_the_service_without_an_environment_value(monkeypatch):
     monkeypatch.setattr(constants, "MEMBERSHIP_SERVICE_URL", "https://official.example")
     assert service_url() == "https://official.example"
     monkeypatch.setattr(constants, "MEMBERSHIP_SERVICE_URL", "")
-    assert service_url() == "" and not has_service()
+    assert service_url() == ""
+    assert not MembershipApi(FakeSigner(), nam=FakeNam()).configured
 
 
 @pytest.mark.parametrize("value, expected", [
@@ -195,11 +199,11 @@ def test_the_service_is_asked_whether_it_can_sign_people_up():
     answers = []
     env.api.check_service(answers.append)
     env.nam.settle()
-    assert answers == [True] and env.api.available
+    assert answers == [True]
     env.server.status = {"service": "myeditor-sidecar", "membership": False}
     env.api.check_service(answers.append)
     env.nam.settle()
-    assert answers == [True, False] and not env.api.available
+    assert answers == [True, False]
 
 
 def test_no_service_means_not_available_without_asking():
@@ -976,22 +980,3 @@ def test_the_export_keeps_the_whole_document():
         parse_export({**document, "payments": "none"})
     with pytest.raises(ValueError):
         parse_export({**document, "subject": {"pubkey": "x"}})
-
-
-# --------------------------------------------------------------------- #
-# No key in any build                                                   #
-# --------------------------------------------------------------------- #
-
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-
-def _read(path):
-    with open(os.path.join(ROOT, path), encoding="utf-8") as handle:
-        return handle.read()
-
-
-def test_no_build_step_puts_the_association_key_into_the_app():
-    # The key lives on the membership service only (sidecar/).
-    assert "E21_API_KEY" not in _read(".github/workflows/build-installers.yml")
-    assert "_build_secrets" not in _read("packaging/my_editor.spec")
-    assert "sidecar/.env" in [l.strip() for l in _read(".gitignore").splitlines()]

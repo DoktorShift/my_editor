@@ -201,11 +201,6 @@ def upstream_url() -> str:
     return _usable_service(os.environ.get(ENV_UPSTREAM_URL, "")) or BASE_URL
 
 
-def has_service() -> bool:
-    """True when this build names a membership service at all."""
-    return bool(service_url())
-
-
 # --------------------------------------------------------------------------- #
 # Errors                                                                       #
 # --------------------------------------------------------------------------- #
@@ -251,7 +246,7 @@ class ApiError:
     retry_after: Optional[int] = None
 
 
-def _signer_error(reason: str, secret: str = "") -> ApiError:
+def _signer_error(reason: str) -> ApiError:
     """Sort a signer failure into "said no" and "never answered".
 
     The second is recoverable on the user's phone and gets different
@@ -262,27 +257,22 @@ def _signer_error(reason: str, secret: str = "") -> ApiError:
     lowered = text.lower()
     unreachable = is_signer_silent(text) or "not connected" in lowered
     code = ErrorCode.SIGNER_UNREACHABLE if unreachable else ErrorCode.SIGNER_DECLINED
-    return ApiError(code, message=_clean_text(text, secret))
+    return ApiError(code, message=_clean_text(text))
 
 
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]+")
 
 
-def _clean_text(value: Any, secret: str = "") -> str:
-    """Server or signer text, made safe to keep in an error.
-
-    Control characters go, whitespace collapses, and the client key is
-    removed BEFORE truncating, so a cut can never leave half of it.
-    """
+def _clean_text(value: Any) -> str:
+    """Server or signer text, made safe to keep in an error: control
+    characters go, whitespace collapses, and the result is capped."""
     if not isinstance(value, str):
         return ""
     text = " ".join(_CONTROL_CHARS.sub(" ", value).split())
-    if secret:
-        text = text.replace(secret, "[hidden]")
     return text[:_MAX_MESSAGE_CHARS]
 
 
-def _clean_field_errors(value: Any, secret: str = "") -> Dict[str, List[str]]:
+def _clean_field_errors(value: Any) -> Dict[str, List[str]]:
     """``{"field": ["reason", ...]}`` from a 422 body, whatever arrived."""
     if not isinstance(value, dict):
         return {}
@@ -294,9 +284,9 @@ def _clean_field_errors(value: Any, secret: str = "") -> Dict[str, List[str]]:
             reasons = [reasons]
         if not isinstance(reasons, list):
             continue
-        texts = [_clean_text(r, secret) for r in reasons[:_MAX_MESSAGES_PER_FIELD]]
+        texts = [_clean_text(r) for r in reasons[:_MAX_MESSAGES_PER_FIELD]]
         texts = [t for t in texts if t]
-        cleaned[_clean_text(name, secret)] = texts
+        cleaned[_clean_text(name)] = texts
     return cleaned
 
 
@@ -979,7 +969,6 @@ class MembershipApi(QObject):
         self._sign = sign
         self._service_url = (_usable_service(service_url) if service_url is not None
                              else _resolve_service_url())
-        self._service_ok: Optional[bool] = None
         self._base_url = base
         self._nam = nam or QNetworkAccessManager(self)
         self._clock = clock or time.time
@@ -992,11 +981,6 @@ class MembershipApi(QObject):
     def configured(self) -> bool:
         """This build names a membership service."""
         return bool(self._service_url)
-
-    @property
-    def available(self) -> bool:
-        """The service answered that it can sign people up (check_service)."""
-        return self.configured and self._service_ok is True
 
     def check_service(self, on_done: Callable[[bool], None]) -> None:
         """Ask the service whether joining is possible; ``on_done(bool)`` once.
@@ -1024,7 +1008,6 @@ class MembershipApi(QObject):
                 ok = False
             finally:
                 reply.deleteLater()
-            self._service_ok = ok
             on_done(ok)
 
         reply.finished.connect(finished)
@@ -1226,7 +1209,7 @@ class MembershipApi(QObject):
                 return
             answered["done"] = True
             if self._live(call):
-                self._fail(call, _signer_error(reason, ""))
+                self._fail(call, _signer_error(reason))
 
         try:
             # A copy, so a signer that edits what it is handed cannot
@@ -1238,7 +1221,7 @@ class MembershipApi(QObject):
                 if self._live(call):
                     self._fail(call, ApiError(
                         ErrorCode.SIGNER_UNREACHABLE,
-                        message=_clean_text(f"signer unavailable: {exc}", ""),
+                        message=_clean_text(f"signer unavailable: {exc}"),
                     ))
 
     def _send(self, call: _Call, signed: Optional[dict]) -> None:
@@ -1337,7 +1320,7 @@ class MembershipApi(QObject):
             return (call.parse(envelope["data"]),)
         except (ValueError, TypeError, KeyError, AttributeError, RecursionError) as exc:
             return ApiError(ErrorCode.BAD_RESPONSE, status=status,
-                            message=_clean_text(str(exc), ""))
+                            message=_clean_text(str(exc)))
 
     @staticmethod
     def _transport_error(error) -> ApiError:
@@ -1361,7 +1344,7 @@ class MembershipApi(QObject):
             body = {}
         if not isinstance(body, dict):
             body = {}
-        message = _clean_text(body.get("message"), "")
+        message = _clean_text(body.get("message"))
 
         retry_after = None
         if status in (429, 503):
@@ -1388,7 +1371,7 @@ class MembershipApi(QObject):
         elif status == 422:
             return ApiError(
                 ErrorCode.VALIDATION, status=status, message=message,
-                field_errors=_clean_field_errors(body.get("errors"), ""),
+                field_errors=_clean_field_errors(body.get("errors")),
             )
         elif status == 429:
             code = ErrorCode.RATE_LIMITED
@@ -1422,7 +1405,8 @@ class MembershipApi(QObject):
             traceback.print_exc()
 
 
-# ``api_key`` is shadowed by the constructor argument of the same name.
+# Inside MembershipApi.__init__, ``service_url`` is the argument of that
+# name, which shadows the module function.
 _resolve_service_url = service_url
 
 
