@@ -73,30 +73,71 @@ def capture_editor_tab(ed) -> Optional[TabState]:
     )
 
 
-def capture_tabs(window, *, allow_unprotected: bool):
-    """``(tabs, active)`` for every tab, or None when an unsaved tab could
-    not be written down and ``allow_unprotected`` is False."""
-    tabs, active = [], 0
+class Capture:
+    """Every tab, written down in order.
+
+    A tab whose unsaved content is in no file and no backup cannot be
+    written down by itself: it is listed in ``unprotected`` until the
+    window has asked about it and called ``settle``.
+    """
+
+    def __init__(self, entries: list, current: int):
+        self._entries = entries   # [editor or None, TabState or None] per tab
+        self._current = current   # the active tab's entry
+        self._asked = set()       # entries the person was asked about
+
+    @property
+    def unprotected(self) -> list:
+        """The editors still to be asked about, in tab order."""
+        return [ed for i, (ed, tab) in enumerate(self._entries)
+                if tab is None and i not in self._asked]
+
+    def settle(self, ed, *, saved: bool) -> None:
+        """Write down a tab the person was asked about.
+
+        Saved, it comes back as the file it was saved to. Not saved, it
+        comes back as its file on disk, without the changes, and an
+        untitled tab that was not saved is left out.
+        """
+        slot = next(i for i, (e, _) in enumerate(self._entries) if e is ed)
+        tab = capture_editor_tab(ed) if saved else None
+        path = getattr(ed, "_file_path", None)
+        if tab is None and path:
+            tab = TabState(kind=DOCUMENT, path=path)
+        self._entries[slot][1] = tab
+        self._asked.add(slot)
+
+    def tabs(self) -> tuple:
+        """``(tabs, active)`` for the record. Tabs left out are skipped; if
+        the active tab is one of them, the tab before it becomes active."""
+        tabs, active = [], 0
+        for slot, (_, tab) in enumerate(self._entries):
+            if tab is None:
+                continue
+            if slot <= self._current:
+                active = len(tabs)
+            tabs.append(tab)
+        return tuple(tabs), active
+
+
+def capture_tabs(window) -> Capture:
+    """Write down every tab of the window (see Capture)."""
+    entries, current = [], 0
     for i in range(window.tabs.count()):
         widget = window.tabs.widget(i)
         viewer = window._pdf_viewer_from_widget(widget)
+        ed = window._editor_from_widget(widget) if viewer is None else None
         if viewer is not None:
             viewer.save_view_state()
-            tab = TabState(kind=PDF, path=viewer._file_path)
+            entry = [None, TabState(kind=PDF, path=viewer._file_path)]
+        elif ed is not None:
+            entry = [ed, capture_editor_tab(ed)]
         else:
-            ed = window._editor_from_widget(widget)
-            if ed is None:
-                continue
-            tab = capture_editor_tab(ed)
-            if tab is None:
-                if not allow_unprotected:
-                    return None
-                # The person chose Don't Save for this tab.
-                tab = TabState(kind=DOCUMENT, path=getattr(ed, "_file_path", None))
+            continue
         if i == window.tabs.currentIndex():
-            active = len(tabs)
-        tabs.append(tab)
-    return tuple(tabs), active
+            current = len(entries)
+        entries.append(entry)
+    return Capture(entries, current)
 
 
 # -- reopening them --------------------------------------------------------------

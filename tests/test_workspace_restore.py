@@ -9,7 +9,8 @@ What must hold:
   the crash-recovery backup written at that moment.
 
   Content that is in no file and no backup is reported, never silently
-  left out.
+  left out, and only those tabs are asked about. Not saved, such a tab
+  comes back as its file on disk, or, untitled, not at all.
 
   After a launch, the person hears which version they are on now, or that
   the update did not install. A launch on the same version says nothing.
@@ -20,13 +21,14 @@ The whole restart, with real windows, is pinned in test_update_restart.py.
 import os
 import sys
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QTabWidget  # noqa: E402
 
 import recovery  # noqa: E402
 import workspace_restore  # noqa: E402
@@ -112,6 +114,68 @@ def test_only_an_untouched_welcome_tab_is_written_down_as_the_welcome_tab(tmp_pa
     edited._is_welcome = True
     tab = workspace_restore.capture_editor_tab(edited)
     assert tab.kind == DOCUMENT and tab.backup_file
+
+
+def window_of(*editors, current=0):
+    tabs = QTabWidget()
+    for ed in editors:
+        tabs.addTab(ed, "tab")
+    tabs.setCurrentIndex(current)
+    return SimpleNamespace(
+        tabs=tabs,
+        _editor_from_widget=lambda w: w if isinstance(w, HtmlEditor) else None,
+        _pdf_viewer_from_widget=lambda w: None,
+    )
+
+
+def unprotectable(ed):
+    """An editor whose backup can't be written (a full disk, say)."""
+    ed._backup.write_now = lambda: False
+    return ed
+
+
+def test_only_the_tabs_that_cannot_be_kept_are_asked_about(tmp_path):
+    kept = editor("kept in its backup", modified=True)
+    lost = unprotectable(editor("no room for this", path=str(tmp_path / "a.txt"),
+                                modified=True))
+    saved = editor("on disk", path=str(tmp_path / "b.txt"))
+    window = window_of(kept, lost, saved)   # owns the editors while it lives
+    capture = workspace_restore.capture_tabs(window)
+    assert capture.unprotected == [lost]
+
+
+def test_a_tab_that_was_not_saved_comes_back_as_its_file_on_disk(tmp_path):
+    path = str(tmp_path / "a.txt")
+    lost = unprotectable(editor("unsaved changes", path=path, modified=True))
+    window = window_of(lost)   # owns the editors while it lives
+    capture = workspace_restore.capture_tabs(window)
+    capture.settle(lost, saved=False)
+    assert capture.unprotected == []
+    (tab,), active = capture.tabs()
+    assert (tab.kind, tab.path, tab.backup_file, tab.modified) == (DOCUMENT, path, None, False)
+
+
+def test_an_untitled_tab_that_was_not_saved_is_left_out_and_the_one_before_is_active():
+    first = editor("kept", modified=True)
+    lost = unprotectable(editor("nowhere to keep this", modified=True))
+    last = editor("also kept", modified=True)
+    window = window_of(first, lost, last, current=1)   # owns the editors while it lives
+    capture = workspace_restore.capture_tabs(window)
+    capture.settle(lost, saved=False)
+    tabs, active = capture.tabs()
+    assert [t.backup_file is not None for t in tabs] == [True, True]
+    assert active == 0
+
+
+def test_a_tab_that_was_saved_comes_back_as_the_file_it_was_saved_to(tmp_path):
+    lost = unprotectable(editor("saved after all", modified=True))
+    window = window_of(lost)   # owns the editors while it lives
+    capture = workspace_restore.capture_tabs(window)
+    lost._file_path = str(tmp_path / "saved.txt")   # what Save As does
+    lost.document().setModified(False)
+    capture.settle(lost, saved=True)
+    (tab,), _ = capture.tabs()
+    assert (tab.path, tab.modified) == (str(tmp_path / "saved.txt"), False)
 
 
 def test_the_draft_link_is_written_down():

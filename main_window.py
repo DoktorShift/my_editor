@@ -2899,17 +2899,23 @@ class MainWindow(QMainWindow):
 
         Unsaved and untitled work is kept in its crash-recovery backup,
         written now, so nothing needs to be asked. Only a tab whose backup
-        cannot be written (too large, or a disk error) falls back to the
-        save question; if the record itself cannot be written, so does
-        everything. Returns False only when the person cancels.
+        cannot be written (too large, or a disk error) is asked about, by
+        name, the way closing it would be: saved, it comes back as its file;
+        not saved, as its file on disk, or not at all if it has none. If the
+        record itself cannot be written, the restart brings back nothing
+        unsaved, so every unsaved document is asked about. Returns False
+        when the person cancels.
         """
-        captured = workspace_restore.capture_tabs(self, allow_unprotected=False)
-        if captured is None:
-            if not self._confirm_save_before_update():
+        capture = workspace_restore.capture_tabs(self)
+        for ed in capture.unprotected:
+            answer = self._ask_save_before_update(ed)
+            if answer == "cancel":
                 return False
-            captured = workspace_restore.capture_tabs(self, allow_unprotected=True)
+            if answer == "save" and not self._save_tab_of(ed):
+                return False
+            capture.settle(ed, saved=answer == "save")
         info = getattr(self, "_pending_release", None)
-        tabs, active = captured
+        tabs, active = capture.tabs()
         ws = Workspace(
             tabs=tabs,
             active=active,
@@ -2929,8 +2935,28 @@ class MainWindow(QMainWindow):
         workspace.discard_workspace()
         self._update_workspace = None
 
+    def _ask_save_before_update(self, ed) -> str:
+        """Save, Don't Save or Cancel for one document the update restart
+        can't bring back by itself; the same question closing its tab asks."""
+        path = getattr(ed, "_file_path", None)
+        name = os.path.basename(path) if path else "Untitled"
+        return _ask_save_changes(
+            self, f"Do you want to save the changes you made to “{name}” "
+                  "before updating?",
+            message=("MyEditor couldn't keep a copy of this document for the restart. "
+                     "Your changes will be lost if you don't save them."))
+
+    def _save_tab_of(self, ed) -> bool:
+        """Save the document in ``ed``'s tab, the way Save does."""
+        index = self._editor_widget_index(ed)
+        if index < 0:
+            return False
+        self.tabs.setCurrentIndex(index)
+        return self.save()
+
     def _confirm_save_before_update(self):
-        """Handle unsaved work before the app relaunches for an update. Returns
+        """The record of the tabs could not be written, so the restart brings
+        back only saved files: ask about every unsaved document. Returns
         True if it is safe to proceed, False if the user cancelled."""
         has_unsaved = False
         for i in range(self.tabs.count()):

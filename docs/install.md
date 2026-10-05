@@ -104,7 +104,9 @@ updates in place when you click **Install Update**:
   your system asks for your password before anything is installed.
 - **Every open tab comes back** after the restart, in the same order, with
   its cursor position, its Nostr draft link, and any changes you hadn't
-  saved yet. Nothing is asked and nothing is lost.
+  saved yet, so there is nothing to save first. Only if MyEditor can't keep
+  a copy of a document (for example because the disk is full) does it ask
+  whether to save that document before it closes.
 - Afterwards a banner says which version you're using now. **What's New**
   shows the release notes.
 

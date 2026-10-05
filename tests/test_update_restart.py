@@ -232,6 +232,68 @@ result["saved"] = saved
     assert "Welcome to MyEditor" in r["tabs"][0]["text"]
 
 
+def test_only_documents_that_cannot_be_kept_are_asked_about_by_name(tmp_path):
+    # Three tabs whose backup can't be written (a full disk, say) among tabs
+    # whose backup can. Only those three are asked about, one at a time.
+    r = scenario(tmp_path, r"""
+def unprotectable(ed):
+    ed._backup.write_now = lambda: False
+
+w = main_window.MainWindow()                      # 0: Welcome
+w.new_tab()                                       # 1: kept in its backup
+w.current_editor().insertPlainText("kept")
+notes = write("notes.txt", "on disk\n")
+w.open_path(notes)                                # 2: not saved: back as on disk
+w.current_editor().insertPlainText("lost ")
+unprotectable(w.current_editor())
+w.new_tab()                                       # 3: untitled, not saved: left out
+w.current_editor().insertPlainText("gone")
+unprotectable(w.current_editor())
+w.new_tab()                                       # 4: saved when asked
+w.current_editor().insertPlainText("saved when asked")
+unprotectable(w.current_editor())
+w.tabs.setCurrentIndex(3)
+
+saved = os.path.join(home, "saved.txt")
+main_window.QFileDialog = SimpleNamespace(
+    getSaveFileName=lambda *a, **k: (saved, ".txt (*.txt)"))
+answers[:] = ["discard", "discard", "save"]
+assert close_for_update(w)
+asked_before_restart = list(asked)
+w2 = main_window.MainWindow()
+app.processEvents()
+result["tabs"] = tabs_of(w2)
+result["active"] = w2.tabs.currentIndex()
+result["asked"] = asked_before_restart
+""")
+    assert r["asked"] == [
+        "Do you want to save the changes you made to “notes.txt” before updating?",
+        "Do you want to save the changes you made to “Untitled” before updating?",
+        "Do you want to save the changes you made to “Untitled” before updating?",
+    ]
+    assert titles(r) == ["Welcome", "Untitled*", "notes.txt", "saved.txt"]
+    assert r["tabs"][1]["text"] == "kept"
+    assert r["tabs"][2]["text"] == "on disk\n" and r["tabs"][2]["modified"] is False
+    assert r["tabs"][3]["text"] == "saved when asked"
+    assert r["active"] == 2   # the active tab was left out: the one before it
+
+
+def test_cancelling_the_question_keeps_everything_open_and_writes_nothing_down(tmp_path):
+    r = scenario(tmp_path, r"""
+w = main_window.MainWindow()
+w.new_tab()
+w.current_editor().insertPlainText("no room for this")
+w.current_editor()._backup.write_now = lambda: False
+answers[:] = ["cancel"]
+result["prepared"] = close_for_update(w)
+result["record"] = os.path.exists(os.path.join(home, ".cache", "my_editor", "workspace.json"))
+result["tabs"] = tabs_of(w)
+""")
+    assert r["prepared"] is False and r["record"] is False
+    assert len(r["asked"]) == 1
+    assert titles(r) == ["Welcome", "Untitled*"]
+
+
 def test_after_an_update_the_command_line_file_and_crash_leftovers_still_open(tmp_path):
     # The update restore skips only what it took over: a crash backup it did
     # not take over is still restored, alongside the file on the command line.
