@@ -43,6 +43,8 @@ Everything else gets 404 with `"code": "not_forwarded"`: any other path, any oth
 
 **Limits.** Requests per client address per minute and invoices per Nostr account per day are limited, because everyone shares the key's quota. An IPv6 client counts by its /64 network, since one household or server can use any address in it. Request bodies are capped at 32 KB and refused as soon as they pass that, unread when their declared length already does. Answers from the association are capped at 1 MB, counted after unpacking should the association compress them.
 
+**Exactly one process.** The limits and the record of used signatures live in the sidecar's memory, so run one process: no `--workers` for uvicorn, no `docker compose up --scale`, no several copies behind a load balancer. A second process would double every limit and could accept the same signature a second time.
+
 **Answers.** They pass through unchanged, `Retry-After` included. Two exceptions. If the association ever echoed the key back, the sidecar removes it, also in its JSON-escaped and percent-encoded forms. And if the association refuses with 401 a request that passed every check above (or the fee lookup with 401 or 403), it refused the key or the clocks differ: the sidecar logs a warning and answers 503 with `"code": "upstream_refused"`, and MyEditor says joining in the app isn't available right now and offers the website.
 
 **What it answers itself:**
@@ -59,7 +61,7 @@ Everything else gets 404 with `"code": "not_forwarded"`: any other path, any oth
 - warnings about the association: unreachable, an answer too large or unreadable, the key refused;
 - uvicorn's start and stop messages.
 
-Client addresses are not logged. uvicorn's access log, which would record them, is turned off (`--no-access-log` in the Dockerfile and the systemd unit; keep it when you start uvicorn yourself), and the HTTP client's own request log is kept quiet. Addresses are held in memory only, for a minute, for the per-address limit. Your reverse proxy keeps its own logs: Caddy as configured here keeps no access log; nginx does unless you set `access_log off;`.
+Client addresses are not logged. uvicorn's access log, which would record them, is turned off (`--no-access-log` in the Dockerfile and the systemd unit; keep it when you start uvicorn yourself), and the HTTP client's own request log is kept quiet. Addresses are held in memory only, for a minute or two, for the per-address limit. Your reverse proxy keeps its own logs: Caddy as configured here keeps no access log; nginx does unless you set `access_log off;`.
 
 ---
 
@@ -146,8 +148,6 @@ Use this on a server that already runs a reverse proxy (Caddy or nginx) for HTTP
 
 The service listens on `127.0.0.1:8021`. Point your reverse proxy at it.
 
-**Run exactly one sidecar process.** Do not add `--workers` and do not run several copies behind a load balancer. The limits and the record of used signatures live in the process's memory: a second process would double every limit and could accept the same signature a second time.
-
 Caddy:
 
 ```
@@ -190,7 +190,7 @@ The body limit turns away oversized requests before they reach the sidecar (whic
 | Your own build | Same, with your own sidecar's address. Leave it empty to offer the website only. |
 | Testing, without rebuilding | Start MyEditor with the environment variable set: `MYEDITOR_MEMBERSHIP_SERVICE=https://e21.example.org` |
 
-MyEditor accepts only `https://` addresses, plus `http://localhost` for development.
+MyEditor accepts only `https://` addresses, plus `http://` to exactly `localhost`, `127.0.0.1` or `[::1]` for development, and never an address with a user name, a query or a fragment.
 
 ---
 
