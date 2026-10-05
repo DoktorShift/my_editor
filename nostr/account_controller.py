@@ -266,7 +266,8 @@ class AccountController(QObject):
             else:
                 window.step(STEP_RELAYS, "error", "Couldn’t check right now.")
             window.step(STEP_PROFILE, "active")
-            self._fetch(self._relay_pool, lookup_relays(known=relay_list), kind=KIND_PROFILE,
+            self._fetch(self._relay_pool, lookup_relays(known=relay_list, own=True),
+                        kind=KIND_PROFILE,
                         author=pubkey, on_done=profile_known, parent=self)
 
         def profile_known(result) -> None:

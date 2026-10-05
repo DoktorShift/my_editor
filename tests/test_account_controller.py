@@ -41,11 +41,10 @@ from nostr import bunker, crypto  # noqa: E402
 from nostr.bunker import BunkerSessionPool  # noqa: E402
 from nostr.key_vault import KeyVault  # noqa: E402
 from nostr.local_signer import LocalSigner  # noqa: E402
-from nostr.outbox import writer  # noqa: E402
 from nostr.outbox.directory import RelayDirectory  # noqa: E402
 from nostr.outbox.lookup import Lookup  # noqa: E402
 from nostr.outbox.policy import LookupState  # noqa: E402
-from nostr.profiles import Profile, ProfileStore  # noqa: E402
+from nostr.profiles import ProfileStore  # noqa: E402
 from nostr.ui import account_windows as aw  # noqa: E402
 from nostr.ui.account_windows import (  # noqa: E402
     DONE, SETUP, STEP_PROFILE, STEP_RELAYS, SetupReport, local_profile,
@@ -61,11 +60,6 @@ PK = crypto.get_public_key(SK).hex()
 def qt_app():
     app = QApplication.instance() or QApplication(sys.argv)
     yield app
-
-
-@pytest.fixture(autouse=True)
-def quick(monkeypatch):
-    monkeypatch.setattr(writer, "READ_BACK_DELAY_MS", 0)
 
 
 @pytest.fixture
