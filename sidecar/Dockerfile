@@ -22,5 +22,7 @@ HEALTHCHECK --interval=30s --timeout=5s CMD python -c "import urllib.request, sy
 # only from Caddy on the compose network (it is never published). Running
 # the image with its port exposed to the internet would let clients choose
 # their own address and slip past the per-address limit.
+# --no-access-log: uvicorn's access log would record every client address.
 CMD ["uvicorn", "sidecar.app:app", "--host", "0.0.0.0", "--port", "8021", \
-     "--proxy-headers", "--forwarded-allow-ips", "*", "--no-server-header"]
+     "--proxy-headers", "--forwarded-allow-ips", "*", "--no-server-header", \
+     "--no-access-log"]

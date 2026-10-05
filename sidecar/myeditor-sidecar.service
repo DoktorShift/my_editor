@@ -11,7 +11,8 @@ User=myeditor-sidecar
 Group=myeditor-sidecar
 WorkingDirectory=/opt/myeditor
 EnvironmentFile=/etc/myeditor-sidecar.env
-ExecStart=/opt/myeditor/.venv-sidecar/bin/uvicorn sidecar.app:app --host 127.0.0.1 --port 8021 --proxy-headers --forwarded-allow-ips 127.0.0.1 --no-server-header
+# --no-access-log: uvicorn's access log would record every client address.
+ExecStart=/opt/myeditor/.venv-sidecar/bin/uvicorn sidecar.app:app --host 127.0.0.1 --port 8021 --proxy-headers --forwarded-allow-ips 127.0.0.1 --no-server-header --no-access-log
 Restart=always
 RestartSec=3
 

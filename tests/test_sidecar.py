@@ -28,8 +28,12 @@ import asyncio
 import base64
 import gzip
 import json
+import logging
 import os
+import subprocess
 import sys
+import threading
+import time
 
 import pytest
 
@@ -587,6 +591,72 @@ def test_a_403_on_a_signed_call_passes_through():
     association.answer = lambda r: reply(403, json_body={"message": "Forbidden."})
     response = call(client, "GET", "/me")
     assert response.status_code == 403 and response.json() == {"message": "Forbidden."}
+
+
+def test_the_http_client_does_not_log_its_requests():
+    make()
+    assert logging.getLogger("httpx").getEffectiveLevel() >= logging.WARNING
+    assert logging.getLogger("httpcore").getEffectiveLevel() >= logging.WARNING
+
+
+def test_importing_the_sidecar_configures_no_logging():
+    # The tests import it with SIDECAR_NO_AUTOSTART=1; so does any tool
+    # that only wants create_app(). Neither may get a root handler.
+    script = ("import logging, os; os.environ['SIDECAR_NO_AUTOSTART'] = '1'; "
+              "import sidecar.app as a; "
+              "assert a.app is None and not logging.getLogger().handlers")
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    subprocess.run([sys.executable, "-c", script], cwd=root, check=True)
+
+
+def test_the_key_is_in_no_log_record_not_even_uvicorns_or_the_http_clients(caplog):
+    # The real server, with every logger at DEBUG and uvicorn's access log
+    # on (the worst case), through a refused signature, an echoed key, a
+    # refused key and an unreachable association.
+    uvicorn = pytest.importorskip("uvicorn")
+    association = Association()
+    app = sidecar.create_app(sidecar.Settings(api_key=KEY, upstream=UPSTREAM),
+                             transport=httpx.MockTransport(association.handler))
+    for name in ("", "httpx", "httpcore", "uvicorn", "uvicorn.error", "uvicorn.access",
+                 "myeditor-sidecar"):
+        caplog.set_level(logging.DEBUG, logger=name)
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=0, log_config=None,
+                                           log_level="debug", access_log=True))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 10
+    while not server.started:
+        assert time.monotonic() < deadline and thread.is_alive()
+        time.sleep(0.02)
+    port = server.servers[0].sockets[0].getsockname()[1]
+
+    def down(request):
+        raise httpx.ConnectError(f"down {request.headers['X-Api-Key']}", request=request)
+
+    answers = [
+        lambda r: reply(json_body={"data": {"echo": KEY}}),
+        lambda r: reply(401, json_body={"message": f"Unknown client key {KEY}"}),
+        down,
+    ]
+    try:
+        with httpx.Client(base_url=f"http://127.0.0.1:{port}") as http:
+            http.get("/status")
+            http.get("/api/v1/membership/config")
+            for answer in answers:
+                association.answer = answer
+                http.get("/api/v1/membership/me",
+                         headers={"Authorization": auth("GET", "/me",
+                                                        created_at=int(time.time()))})
+            http.get("/api/v1/membership/me",
+                     headers={"Authorization": auth("GET", "/me", created_at=int(time.time()),
+                                                    tamper=tampered_sig)})
+    finally:
+        server.should_exit = True
+        thread.join(10)
+    names = {record.name for record in caplog.records}
+    assert "uvicorn.access" in names and "myeditor-sidecar" in names
+    assert KEY not in caplog.text
+    assert all(KEY not in str(record.args) for record in caplog.records)
 
 
 def test_an_unreachable_association_is_a_clear_502():

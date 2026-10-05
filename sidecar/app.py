@@ -44,7 +44,13 @@ What it answers itself:
     GET /healthz  {"ok": true}, for uptime monitors.
 
 Configuration is environment variables (see .env.example and README.md).
-The key is never logged and never part of any answer.
+The key is never logged and never part of any answer. The log has one
+line per membership request (method, path, status, the first 8
+characters of the signer's public key, the time taken), a line with the
+reason for each refused signature, and warnings about the association.
+Client addresses are not logged: run uvicorn with ``--no-access-log``
+(the Dockerfile and the systemd unit do), and the HTTP client's own
+request log is kept quiet.
 
 Run: ``uvicorn sidecar.app:app`` from the repository root (the app's own
 ``nostr`` package provides the signature checks).
@@ -360,6 +366,7 @@ def create_app(settings: Optional[Settings] = None, *,
                clock: Callable[[], float] = time.time) -> FastAPI:
     """The sidecar. ``transport`` and ``clock`` are seams for tests."""
     settings = settings or Settings.from_env()
+    quiet_http_client()
     limits = _Limits(clock=clock, per_minute=settings.rate_per_minute,
                      per_day=settings.invoices_per_day)
     config_cache: Dict[str, object] = {}
@@ -510,6 +517,20 @@ def create_app(settings: Optional[Settings] = None, *,
     return app
 
 
-logging.basicConfig(level=os.environ.get("SIDECAR_LOG_LEVEL", "INFO"),
-                    format="%(asctime)s %(levelname)s %(message)s")
-app = create_app() if os.environ.get("SIDECAR_NO_AUTOSTART") != "1" else None
+def quiet_http_client() -> None:
+    """Keep the HTTP client's own logging out of the log. httpx logs every
+    request it makes at INFO, and httpcore logs response headers at DEBUG;
+    the README promises one line per request and nothing else."""
+    for name in ("httpx", "httpcore"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
+# ``uvicorn sidecar.app:app`` imports this module and serves ``app``. Tests
+# set SIDECAR_NO_AUTOSTART=1 and build their own with create_app(), so an
+# import alone configures no logging and reads no key.
+if os.environ.get("SIDECAR_NO_AUTOSTART") == "1":
+    app = None
+else:
+    logging.basicConfig(level=os.environ.get("SIDECAR_LOG_LEVEL", "INFO"),
+                        format="%(asctime)s %(levelname)s %(message)s")
+    app = create_app()

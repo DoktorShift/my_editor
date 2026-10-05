@@ -52,7 +52,14 @@ Everything else gets 404 with `"code": "not_forwarded"`: any other path, any oth
 | `GET /status` | `{"service": "myeditor-sidecar", "version": "1", "membership": true}`. MyEditor asks this before offering to join; `false` means no key is configured. |
 | `GET /healthz` | `{"ok": true}`, for uptime monitors. |
 
-**Privacy.** The key is never logged and never part of an answer. The log has one line per request with the method, path, status, the first 8 characters of the user's public key, and the time taken. Nothing else.
+**Privacy.** The key is never logged and never part of an answer. What the sidecar logs:
+
+- one line per membership request: method, path, status, the first 8 characters of the signer's public key (for signed requests), and the time taken;
+- for a refused signature, one more line with the reason, such as `refused GET /me: time window`;
+- warnings about the association: unreachable, an answer too large or unreadable, the key refused;
+- uvicorn's start and stop messages.
+
+Client addresses are not logged. uvicorn's access log, which would record them, is turned off (`--no-access-log` in the Dockerfile and the systemd unit; keep it when you start uvicorn yourself), and the HTTP client's own request log is kept quiet. Addresses are held in memory only, for a minute, for the per-address limit. Your reverse proxy keeps its own logs: Caddy as configured here keeps no access log; nginx does unless you set `access_log off;`.
 
 ---
 
@@ -208,7 +215,7 @@ From the repository root:
 Run it locally:
 
 ```sh
-E21_API_KEY=your-test-key .venv/bin/uvicorn sidecar.app:app --port 8021
+E21_API_KEY=your-test-key .venv/bin/uvicorn sidecar.app:app --port 8021 --no-access-log
 ```
 
 Then start MyEditor against it:
