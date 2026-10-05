@@ -75,14 +75,46 @@ class FakeJob(QObject):
 
 
 class FakeSubscription(QObject):
+    """A subscription a test drives by hand: ``answer``, ``refuse`` and
+    ``fail`` play one relay's part, as the real Subscription reports it."""
+
     event = Signal(dict)
     eose = Signal()
     closed = Signal(str)
     relay_eose = Signal(str)
     relay_closed = Signal(str, str)
+    relay_failed = Signal(str, str)
+
+    def __init__(self, urls=(), filters=()):
+        super().__init__()
+        self.urls = list(urls)
+        self.filters = list(filters)
+        self.is_closed = False
+        self._ended: set = set()
 
     def close(self):
-        pass
+        self.is_closed = True
+
+    def answer(self, url, *events_):
+        """``url`` sends ``events_`` and ends its stored events."""
+        for event in events_:
+            self.event.emit(event)
+        self._end(url)
+        self.relay_eose.emit(url)
+        if self._ended >= set(self.urls):
+            self.eose.emit()
+
+    def refuse(self, url, reason="blocked: not today"):
+        self._end(url)
+        self.relay_closed.emit(url, reason)
+        self.closed.emit(reason)
+
+    def fail(self, url, reason="socket error: host not found"):
+        self._end(url)
+        self.relay_failed.emit(url, reason)
+
+    def _end(self, url):
+        self._ended.add(url)
 
 
 class FakePool:
@@ -106,7 +138,7 @@ class FakePool:
         return job
 
     def subscribe(self, urls, filters):
-        sub = FakeSubscription()
+        sub = FakeSubscription(urls, filters)
         self.subscriptions.append((list(urls), filters))
 
         def answer():
@@ -186,8 +218,20 @@ class FakeRelayDirectory(QObject):
         return [call for call in self.calls if call[0] == name]
 
 
+class HandPool:
+    """A pool whose subscriptions answer only when a test drives them."""
+
+    def __init__(self):
+        self.subs: List[FakeSubscription] = []
+
+    def subscribe(self, urls, filters):
+        sub = FakeSubscription(urls, filters)
+        self.subs.append(sub)
+        return sub
+
+
 def found(event: dict) -> Lookup:
-    return Lookup(LookupState.FOUND, event=event, answered=("wss://a",), asked=("wss://a",))
+    return Lookup(LookupState.FOUND, event=event, answered=("wss://a",))
 
 
 ABSENT = Lookup(LookupState.ABSENT, answered=("wss://purplepag.es", "wss://nos.lol"))

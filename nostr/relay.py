@@ -335,9 +335,20 @@ class Subscription(QObject):
     """A live subscription across N relays.
 
     Signals:
-      event(dict)        - one inner event from ["EVENT", sub_id, event]
-      eose()             - every relay has signalled EOSE (initial backlog done)
-      closed(str)        - at least one relay closed the sub with the given reason
+      event(dict)               - one inner event from ["EVENT", sub_id, event]
+      eose()                    - every relay has signalled EOSE (initial
+                                  backlog done); never fires when one of
+                                  them closed or failed instead
+      closed(str)               - at least one relay closed the sub with the
+                                  given reason
+      relay_eose(str)           - this relay ended its stored events (url)
+      relay_closed(str, str)    - this relay closed the sub (url, reason)
+      relay_failed(str, str)    - this relay could not be reached, or
+                                  dropped, before it answered (url, reason)
+
+    The per-relay signals let a caller tell "this relay has nothing" apart
+    from "this relay never answered" (nostr/outbox/lookup.py): each relay
+    ends in at most one of relay_eose, relay_closed and relay_failed.
 
     The subscription stays open until ``close()`` is called; new events
     matching the filter continue to fire ``event`` after EOSE.
@@ -346,10 +357,9 @@ class Subscription(QObject):
     event = Signal(dict)
     eose = Signal()
     closed = Signal(str)
-    # Per relay, for callers that must tell "this relay has nothing" apart
-    # from "this relay never answered" (nostr/outbox/lookup.py).
     relay_eose = Signal(str)            # url
     relay_closed = Signal(str, str)     # url, reason
+    relay_failed = Signal(str, str)     # url, reason
 
     def __init__(
         self,
@@ -366,6 +376,7 @@ class Subscription(QObject):
         # 8 random bytes -> 16 hex chars; well under the 64-char NIP-01 cap.
         self._sub_id = sub_id or secrets.token_hex(8)
         self._eose_seen: set[str] = set()
+        self._ended: set[str] = set()       # relays that answered, closed or failed
         self._eose_emitted = False
         self._closed = False
         self._connections: List[tuple[Relay, str, object]] = []
@@ -383,8 +394,14 @@ class Subscription(QObject):
         relay = self._pool.get_or_create(url)
 
         msg_slot = lambda payload, u=url: self._on_message(u, payload)
+        err_slot = lambda err, u=url: self._on_relay_lost(u, f"socket error: {err}")
+        disc_slot = lambda u=url: self._on_relay_lost(u, "disconnected before answering")
         relay.message.connect(msg_slot)
+        relay.error.connect(err_slot)
+        relay.disconnected.connect(disc_slot)
         self._connections.append((relay, "message", msg_slot))
+        self._connections.append((relay, "error", err_slot))
+        self._connections.append((relay, "disconnected", disc_slot))
 
         if relay.is_connected:
             self._send_req(url)
@@ -399,7 +416,8 @@ class Subscription(QObject):
         if self._closed:
             return
         relay = self._pool.get_or_create(url)
-        relay.send(["REQ", self._sub_id] + self._filters)
+        if not relay.send(["REQ", self._sub_id] + self._filters):
+            self._on_relay_lost(url, "send failed (not connected)")
 
     # -- relay signal handlers ---------------------------------------------
 
@@ -412,7 +430,8 @@ class Subscription(QObject):
         if verb == "EVENT" and len(msg) >= 3 and isinstance(msg[2], dict):
             self.event.emit(msg[2])
         elif verb == "EOSE":
-            if url not in self._eose_seen:
+            if url not in self._ended:
+                self._ended.add(url)
                 self.relay_eose.emit(url)
             self._eose_seen.add(url)
             if not self._eose_emitted and self._eose_seen >= set(self._urls):
@@ -420,8 +439,17 @@ class Subscription(QObject):
                 self.eose.emit()
         elif verb == "CLOSED":
             reason = str(msg[2]) if len(msg) >= 3 else ""
-            self.relay_closed.emit(url, reason)
+            if url not in self._ended:
+                self._ended.add(url)
+                self.relay_closed.emit(url, reason)
             self.closed.emit(reason)
+
+    def _on_relay_lost(self, url: str, reason: str) -> None:
+        """A relay that will not answer this subscription any more."""
+        if self._closed or url in self._ended:
+            return
+        self._ended.add(url)
+        self.relay_failed.emit(url, reason)
 
     # -- close --------------------------------------------------------------
 
