@@ -489,3 +489,40 @@ def test_a_retry_resends_the_same_signed_events():
     assert results == [False, True]
     assert len(client.requests) == 1             # signed once, sent twice
     assert pool.published[0][1]["id"] == pool.published[1][1]["id"]
+
+
+def finish_later(query, client, pool=None):
+    setup = writer.AccountSetup(name="Satoshi", fresh=False, deps={
+        "pool": pool or FakePool(), "directory": directory(FakeQuery()),
+        "session_pool": FakeSessionPool(client), "profile": Profile(),
+        "query": query, "clock": lambda: NOW})
+    results = []
+    setup.finished.connect(lambda ok, msg: results.append((ok, msg)))
+    setup.start()
+    settle(20)
+    return results
+
+
+def test_finishing_a_setup_later_creates_only_what_is_missing():
+    existing = signed(10002, [["r", "wss://a.com"]])
+    pool, client = FakePool(), FakeClient()
+    results = finish_later(FakeQuery({10002: found(existing), 0: ABSENT}), client, pool)
+    assert [ok for ok, _msg in results] == [True]
+    assert [request["kind"] for request in client.requests] == [0]   # the list stays
+    assert json.loads(pool.published[0][1]["content"])["name"] == "Satoshi"
+
+
+def test_finishing_later_never_replaces_a_profile_published_since():
+    theirs = signed(0, content=json.dumps({"name": "Chosen elsewhere"}))
+    client = FakeClient()
+    results = finish_later(FakeQuery({10002: ABSENT, 0: found(theirs)}), client)
+    assert [ok for ok, _msg in results] == [True]
+    assert [request["kind"] for request in client.requests] == [10002]
+
+
+def test_finishing_later_waits_when_the_network_cant_be_read():
+    client = FakeClient()
+    results = finish_later(FakeQuery({10002: UNKNOWN}), client)
+    assert results[0][0] is False and client.requests == []
+    # The key may be in a signer app: the message doesn't say where it is.
+    assert "on this computer" not in results[0][1]

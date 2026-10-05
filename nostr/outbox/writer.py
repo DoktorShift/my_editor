@@ -21,7 +21,9 @@ app, with no undo. So every change here is a read-modify-write:
 5. Hand a published relay list to the directory, so routing uses it now.
 
 AccountSetup runs this for a new account: the relay list first, then the
-profile, reporting each step for the window to show.
+profile, reporting each step for the window to show. Finishing a setup
+later (``fresh=False``, a new run of the app) reads first, and creates
+each one only where none exists yet.
 """
 
 from __future__ import annotations
@@ -238,20 +240,28 @@ def update_profile(*, changes: Mapping[str, Optional[str]], **deps) -> Replaceab
 
 class AccountSetup(QObject):
     """Tell the Nostr network about a brand-new account: its relay list, then
-    its profile. A retry sends the very events signed the first time."""
+    its profile. A retry sends the very events signed the first time.
+
+    ``fresh`` is for a key minted in this run of the app, which has nothing
+    to read. Without it (finishing a setup left for later) each event is
+    read first and created only where none exists: something published
+    since, here or in another app, is never replaced.
+    """
 
     step = Signal(str, str, str)      # "relays" | "profile", state, detail
     finished = Signal(bool, str)      # ok, message
 
-    def __init__(self, *, name: str, deps: dict, parent: Optional[QObject] = None) -> None:
+    def __init__(self, *, name: str, deps: dict, fresh: bool = True,
+                 parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._name = name
         self._deps = deps
+        self._fresh = fresh
         self._signed: dict = {}
 
     def start(self) -> None:
         self.step.emit("relays", "active", "")
-        writer = create_relay_list(new_key=True, parent=self, **self._deps)
+        writer = create_relay_list(new_key=self._fresh, parent=self, **self._deps)
         self._run(writer, "relays", self._relays_done)
 
     def _run(self, writer: ReplaceableWriter, key: str, then) -> None:
@@ -271,9 +281,9 @@ class AccountSetup(QObject):
     def _relays_done(self, outcome: WriteOutcome) -> None:
         if not outcome.ok:
             self.step.emit("relays", "error", "The relays didn’t take it yet.")
-            self.finished.emit(False, "Your account is saved on this computer, but it "
-                                      "isn’t known on the network yet. Check your "
-                                      "connection and try again.")
+            self.finished.emit(False, "Your account is saved, but the network doesn’t "
+                                      "know it yet. Check your internet connection and "
+                                      "try again.")
             return
         count = len(outcome.accepted)
         self.step.emit("relays", "done", f"Saved on {count} relays." if count else "")
@@ -282,8 +292,12 @@ class AccountSetup(QObject):
             self.finished.emit(True, "")
             return
         self.step.emit("profile", "active", "")
+        # Finishing later, a profile found on the network is the person's
+        # own by then, and stays as it is.
         writer = update_profile(changes={"name": self._name, "display_name": self._name},
-                                new_key=True, parent=self, **self._deps)
+                                new_key=self._fresh,
+                                on_found="mutate" if self._fresh else "exists",
+                                parent=self, **self._deps)
         self._run(writer, "profile", self._profile_done)
 
     def _profile_done(self, outcome: WriteOutcome) -> None:
