@@ -45,17 +45,19 @@ Avatars and display names are pulled from each profile's kind 0 metadata in the 
 Inside both publish dialogs there's a **Mentions** chip row. Clicking **+ add person** opens a picker that searches:
 
 - your **NIP-02 contact list** first (instant, offline after the first fetch), and
-- **NIP-50 search relays** (`relay.nostr.band`) for anyone you don't already follow.
+- **NIP-50 search relays** (`relay.ditto.pub`, `search.nos.today`) for anyone you don't already follow.
 
 Picked profiles become inline pills and are emitted on publish as `["p", <pubkey>, <relay-hint>]` tags plus a `nostr:nprofile1…` URI appended to the body, so mention rendering works in every client. Inline `nostr:n…` URIs you paste yourself are also picked up and deduplicated automatically.
 
 ### Relays and routing
 
-Publishing follows the **NIP-65 outbox model**:
+Relay choice follows the **NIP-65 outbox model**, decided in one place (`nostr/outbox`):
 
-- Always include a curated base set (Primal, Damus, nos.lol, two YakiHonne relays, `nostr.oxtr.dev`, `theforest.nostr1.com`).
-- Union with the **user's own write relays** from their kind 10002 list, fetched once per profile and cached for 30 minutes.
-- Deduplicate and cap at 10 relays per publish.
+- A note or article goes to **your write relays** from your kind 10002 list first, then a membership relay if you have one, then the **read relays of everyone it mentions** (or the relay hint in the mention when their list is unknown). Your relay list goes along to those people's relays, so readers there can find the rest of what you write. While your list is unknown, or has fewer than two write relays, a small curated set fills in.
+- **Private drafts**, the synced feed list and the private media library are written to and read from the same set: your write and read relays, a membership relay, and the signer relays older versions stored drafts on.
+- **Someone else's article** (an `naddr`, an `npub`'s articles) is read from **their** write relays, never from yours.
+- Relay lists are looked up on your own relays and on indexers, verified by signature, and cached: for 30 minutes when found, while your own list is also kept on disk so routing is right from the first second after a launch.
+- Your own profile and contact list are read the same way, and only a validly signed event counts.
 
 The publisher uses eager-first-accept semantics: as soon as one relay acknowledges the event, the dialog shows the result; remaining relays continue in the background and the final count lands in the status bar (e.g. `Published to Nostr: 6/7 relays · note1xxxxx…`).
 
@@ -71,7 +73,7 @@ The publisher uses eager-first-accept semantics: as soon as one relay acknowledg
 
 In-progress work is saved as a **NIP-37 draft**: a kind 31234 event whose body is NIP-44 encrypted to your own Nostr key. Only you can decrypt it, and the encryption happens inside your signer so the editor never holds the plaintext key.
 
-**Cross-device by design.** Drafts live on the same relays you already publish to. Sign in with the same Nostr profile on another device and the editor pulls those drafts straight back into the panel. No cloud account, no separate service.
+**Cross-device by design.** Drafts live on your own relays, and every device reads them from exactly where they were written. Sign in with the same Nostr profile on another device and the editor pulls those drafts straight back into the panel. No cloud account, no separate service.
 
 ### How to use it
 

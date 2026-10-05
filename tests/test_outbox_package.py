@@ -16,8 +16,11 @@ The invariants, each pinned below:
   I8  One normalizer; I9 curated relays live in outbox/defaults.py only.
 """
 
+import ast
 import json
 import os
+import pathlib
+import re
 import sys
 
 import pytest
@@ -27,7 +30,6 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-import nostr  # noqa: E402
 from nostr import bunker  # noqa: E402
 from nostr.outbox import defaults, policy, writer  # noqa: E402
 from nostr.outbox.directory import RelayDirectory  # noqa: E402
@@ -56,20 +58,75 @@ def rl(write=(), read=(), state=LookupState.FOUND):
 
 # -- the defaults (I9) -------------------------------------------------------------------
 
-def test_the_default_relays_are_the_qualified_fallback_set():
-    assert tuple(nostr.DEFAULT_RELAYS) == tuple(defaults.FALLBACK_RELAYS)
+# The relay names allowed outside defaults.py, each for a reason given
+# there: NIP-46 transport, the members' relay, NostrHub's own relays.
+NAMED_ELSEWHERE = {
+    ("nostr", "bunker.py"): {"NIP46_RELAYS"},
+    ("nostr", "einundzwanzig.py"): {"MEMBER_RELAY"},
+    ("nostr", "imports", "constants.py"): {"NOSTRHUB_RELAYS"},
+}
+_RELAY_NAME = re.compile(r"wss?://([a-z0-9-]+(?:\.[a-z0-9-]+)+)", re.IGNORECASE)
+
+
+def _relays_named_in(path, allowed_constants):
+    """Relay hosts written in a module's code (not its docstrings or
+    comments), outside the constants it may define."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    skipped = set()
+    for node in tree.body:
+        targets = (node.targets if isinstance(node, ast.Assign)
+                   else [node.target] if isinstance(node, ast.AnnAssign) else [])
+        if any(isinstance(t, ast.Name) and t.id in allowed_constants for t in targets):
+            skipped.update(id(n) for n in ast.walk(node))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+            skipped.add(id(node.value))               # a docstring or bare string
+    found = []
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                and id(node) not in skipped):
+            found += [h for h in _RELAY_NAME.findall(node.value)
+                      if not h.lower().endswith(".example")]
+    return found
+
+
+def test_relays_are_named_only_in_the_defaults():
+    root = pathlib.Path(__file__).resolve().parent.parent
+    files = sorted((root / "nostr").rglob("*.py")) + sorted(root.glob("*.py"))
+    offenders = {}
+    for path in files:
+        parts = path.relative_to(root).parts
+        if parts == ("nostr", "outbox", "defaults.py"):
+            continue
+        named = _relays_named_in(path, NAMED_ELSEWHERE.get(parts, set()))
+        if named:
+            offenders["/".join(parts)] = named
+    assert offenders == {}
 
 
 def test_the_curated_lists_are_clean():
     for group in (defaults.FALLBACK_RELAYS, defaults.INDEXER_RELAYS,
-                  [u for u, _m in defaults.STARTER_LIST]):
+                  defaults.SEARCH_RELAYS, [u for u, _m in defaults.STARTER_LIST]):
         assert len(set(group)) == len(group)
         assert all(policy.normalize_relay_url(u) == u for u in group)
     assert {u for u, _m in defaults.STARTER_LIST} <= set(defaults.FALLBACK_RELAYS)
     assert 2 <= len(defaults.STARTER_LIST) <= 4          # NIP-65 asks for a small list
     # Found unreachable or paid when last qualified.
     for gone in ("nostr.oxtr.dev", "relay.nostr.band", "theforest.nostr1.com"):
-        assert all(gone not in u for u in defaults.FALLBACK_RELAYS + defaults.INDEXER_RELAYS)
+        assert all(gone not in u for u in defaults.FALLBACK_RELAYS + defaults.INDEXER_RELAYS
+                   + defaults.SEARCH_RELAYS)
+
+
+def test_people_are_searched_on_relays_that_offer_search():
+    from nostr.search import Nip50SearchClient
+
+    pool = FakePool()
+    client = Nip50SearchClient(pool, people=None)
+    client.search("satoshi")
+    relays, filters = pool.subscriptions[0]
+    assert relays == list(defaults.SEARCH_RELAYS)
+    assert filters[0]["search"] == "satoshi"
+    client.cancel()
 
 
 def test_pairing_relays_are_separate_from_home_relays():

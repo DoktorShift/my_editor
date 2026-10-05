@@ -13,15 +13,8 @@ One package owns every answer to "which relays?":
     directory  RelayDirectory: lookups, caching and the user's own lists
     writer     changing the user's relay list or profile without ever
                overwriting what is already there; setting up new accounts
-
-legacy holds the selection code this package replaces, until every call
-site has moved.
 """
 
-from .legacy import (  # noqa: F401  (re-exported while call sites migrate)
-    RELAY_CAP,
-    RelayListCache,
-)
 from .directory import RelayDirectory, ask_private_relays  # noqa: F401
 from .policy import (  # noqa: F401
     KIND_PROFILE,
@@ -29,10 +22,13 @@ from .policy import (  # noqa: F401
     LookupState,
     PublishPlan,
     RelayList,
+    bulk_profile_relays,
     dedupe_relays,
+    lookup_relays,
     merge_profile_content,
     newest_valid,
     normalize_relay_url,
+    outbox_relays,
     parse_relay_list,
     plan_publish,
     private_relays,

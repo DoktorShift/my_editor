@@ -9,6 +9,7 @@ and, through the pure rules in policy.py, "where does this go":
                     inbox of everyone it mentions (NIP-65)
     private_relays  drafts and other private records; the same set for
                     writing and reading, so other devices find them
+                    (ask_private_relays asks it for a profile)
     outbox_of       where to read what someone else wrote
 
 Caching. A FOUND list is trusted for half an hour; after that it is still
@@ -184,25 +185,6 @@ class RelayDirectory(QObject):
         extra = [r for r in policy.dedupe_relays(relays) if r not in listed]
         if extra:
             self._pool.publish(extra, entry.event)
-
-    # -- compatibility with the RelayListCache callers still migrating ---------
-
-    def fetch(self, pubkey: str, relays: Sequence[str], on_done, *, timeout_ms: int = 6_000) -> None:
-        self.lookup(pubkey, on_done, hints=relays, timeout_ms=timeout_ms)
-
-    def get_cached(self, pubkey: str) -> Optional[RelayList]:
-        entry = self._entries.get((pubkey or "").lower())
-        return entry if entry is not None and not self._expired(entry) else None
-
-    def invalidate(self, pubkey: str) -> None:
-        """Make the next lookup ask relays again. A known list stays the
-        answer meanwhile (it is only ever replaced by a newer one)."""
-        entry = self._entries.get((pubkey or "").lower())
-        if entry is not None:
-            entry.fetched_at = 0.0
-
-    def clear(self) -> None:
-        self._entries.clear()
 
     # ------------------------------------------------------------------ #
     # Internals                                                          #

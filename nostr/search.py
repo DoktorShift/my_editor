@@ -1,14 +1,13 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""NIP-50 search client — global person lookup when local matches run dry.
+"""NIP-50 search client: global person lookup when local matches run dry.
 
 Spec: https://github.com/nostr-protocol/nips/blob/master/50.md
 
 Relays that implement NIP-50 accept a ``"search"`` field on their REQ
 filters and return matching events. For our use case we search ``kind:0``
-profile events on relays known to have the index built — currently just
-``relay.nostr.band``, which can be extended later if other relays add the
-capability.
+profile events on relays that advertise NIP-50 in their NIP-11 document
+and keep a search index (nostr/outbox/defaults.py SEARCH_RELAYS).
 
 Results stream into ``KnownPeople`` so they remain searchable offline on
 the next query.
@@ -23,13 +22,8 @@ from PySide6.QtCore import QObject, QTimer, Signal
 
 from .contacts import parse_metadata_event
 from .known_people import KnownPeople, Person
+from .outbox.defaults import SEARCH_RELAYS
 from .relay import RelayPool, Subscription
-
-
-# Curated set of relays that implement NIP-50 for kind 0.
-DEFAULT_SEARCH_RELAYS: tuple[str, ...] = (
-    "wss://relay.nostr.band",
-)
 
 # Time before we give up and emit whatever we collected so far.
 _SEARCH_TIMEOUT_MS: int = 3_500
@@ -46,8 +40,8 @@ class Nip50SearchClient(QObject):
     an out-of-date query don't trickle in late.
 
     Signals:
-      results(query, list[Person])  — terminal; fired once per call
-      failed(query, str)            — terminal alternative on no relays / error
+      results(query, list[Person])  terminal; fired once per call
+      failed(query, str)            terminal alternative on no relays / error
     """
 
     results = Signal(str, list)
@@ -58,7 +52,7 @@ class Nip50SearchClient(QObject):
         pool: RelayPool,
         people: KnownPeople,
         *,
-        relays: tuple[str, ...] = DEFAULT_SEARCH_RELAYS,
+        relays: tuple[str, ...] = SEARCH_RELAYS,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -99,7 +93,7 @@ class Nip50SearchClient(QObject):
 
     def cancel(self) -> None:
         self._cancel_active()
-        # No signal is emitted on explicit cancel — caller initiated it.
+        # No signal is emitted on explicit cancel: the caller initiated it.
 
     # -- internals ---------------------------------------------------------
 

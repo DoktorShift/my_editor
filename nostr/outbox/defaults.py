@@ -13,9 +13,11 @@ asks for no payment and no login. Relays that failed the check that day
 theforest.nostr1.com asks for payment) are deliberately absent. Check
 again before changing anything here, and update the date.
 
-Two lists live elsewhere on purpose: NostrHub's own relays (an app
-specific source) and the relays used to meet a signer app (NIP-46
-transport, not anyone's home).
+Three relay names live elsewhere on purpose: NostrHub's own relays (an
+app specific source, nostr/imports/constants.py), the relays used to
+meet a signer app (NIP-46 transport, not anyone's home, nostr/bunker.py)
+and the association members' relay (a benefit, nostr/einundzwanzig.py).
+tests/test_outbox_package.py fails if a relay is named anywhere else.
 """
 
 QUALIFIED_ON = "2026-10-05"
@@ -45,6 +47,16 @@ INDEXER_RELAYS = (
     "wss://purplepag.es",
     "wss://user.kindpag.es",
     "wss://indexer.coracle.social",
+)
+
+# Relays that answer NIP-50 search for profiles (kind 0), for finding
+# people to mention. Both list 50 in their NIP-11 supported_nips, ask for
+# no payment or login, and answered a real profile search on
+# QUALIFIED_ON. relay.nostr.band, searched alone before, no longer
+# connects.
+SEARCH_RELAYS = (
+    "wss://relay.ditto.pub",
+    "wss://search.nos.today",
 )
 
 # Limits.

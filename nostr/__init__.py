@@ -13,21 +13,5 @@ via NIP-46. No private key ever lives inside the editor process.
 # out per-event.
 CLIENT_NAME: str = "MyEditor"
 
-
-# General-purpose relays MyEditor uses when nothing better is known.
-#
-# The same list as nostr/outbox/defaults.py FALLBACK_RELAYS, which is
-# where relay choices are made and checked (tests/smoke_relay_qualify.py);
-# a test keeps the two identical. It cannot simply be imported from there:
-# the outbox package imports this module. New code asks nostr/outbox for a
-# set by role instead of using this constant.
-#
-# Frozen as a tuple so a future caller can't accidentally mutate the shared
-# constant; any override must be a deliberate copy.
-DEFAULT_RELAYS: tuple[str, ...] = (
-    "wss://relay.primal.net",
-    "wss://relay.damus.io",
-    "wss://nos.lol",
-    "wss://relay.ditto.pub",
-    "wss://relay.nostr.com",
-)
+# Which relays to use is nostr/outbox's answer, by role; the relays
+# MyEditor picks by itself are in nostr/outbox/defaults.py.
