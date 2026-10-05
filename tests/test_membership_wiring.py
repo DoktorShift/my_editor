@@ -192,3 +192,28 @@ def test_reselecting_the_same_account_does_not_tear_it_down():
         )
     ]
     assert guarded, "the teardown is unconditional, so re-selecting costs prompts"
+
+
+# --------------------------------------------------------------------- #
+# The members' media server in the library                              #
+# --------------------------------------------------------------------- #
+
+def test_the_media_store_knows_the_members_allowance(init_body):
+    call = constructor(init_body, "MediaStore")
+    assert attribute_argument(call, "server_quota") == "_entitled_quota"
+
+
+def test_leaving_an_account_empties_the_media_library():
+    body = method_body("_release_identity_state")
+    source = ast.unparse(body)
+    assert "_media_store.clear()" in source
+
+
+def test_a_stale_roster_does_not_drop_a_members_benefits():
+    source = ast.unparse(method_body("_active_benefits"))
+    assert "last_known_membership" in source
+
+
+def test_the_roster_is_refreshed_before_it_goes_stale(init_body):
+    source = "\n".join(ast.unparse(statement) for statement in init_body)
+    assert "_membership_timer" in source and "_refresh_membership" in source

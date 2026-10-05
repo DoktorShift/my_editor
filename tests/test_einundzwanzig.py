@@ -29,6 +29,7 @@ from PySide6.QtNetwork import QNetworkReply, QNetworkRequest
 
 from nostr.einundzwanzig import (
     JOIN_URL,
+    parse_roster_records,
     MAX_FILE_BYTES,
     MEMBER_BLOSSOM,
     MEMBER_RELAY,
@@ -429,3 +430,55 @@ def test_drafts_are_unchanged_without_an_entitlement():
     assert select_draft_publish_relays(rl, base=["wss://b.example"]) == (
         select_draft_publish_relays(rl, base=["wss://b.example"], entitled=[])
     )
+
+
+# --------------------------------------------------------------------- #
+# Names, confirmations and a steady answer                              #
+# --------------------------------------------------------------------- #
+
+def test_the_roster_remembers_each_members_nostr_address():
+    nam = FakeNam({2026: roster_bytes(MEMBER, OTHER)})
+    directory, _clock = _directory(nam)
+    _resolve(directory, MEMBER)
+    assert directory.cached_handle(MEMBER) == "u0"
+    assert directory.cached_handle(OTHER) == "u1"
+    assert directory.cached_handle("f" * 64) is None
+
+
+def test_a_handle_that_cannot_be_an_address_is_dropped_not_the_member():
+    bad = {"pubkey": "c" * 64, "nip05_handle": "Not A Handle!"}
+    records = parse_roster_records(roster_bytes(MEMBER, extra=[bad]))
+    assert records["c" * 64] is None
+    assert records[MEMBER.lower()] == "u0"
+
+
+def test_a_confirmed_member_is_a_member_before_the_roster_knows():
+    nam = FakeNam({2026: roster_bytes(OTHER)})
+    directory, _clock = _directory(nam)
+    _resolve(directory, MEMBER)
+    assert directory.cached_membership(MEMBER) is False
+    directory.confirm_member(MEMBER)
+    assert directory.cached_membership(MEMBER) is True
+    assert directory.cached_benefits(MEMBER).is_member
+
+
+def test_only_a_real_pubkey_can_be_confirmed():
+    directory, _clock = _directory(FakeNam({}))
+    directory.confirm_member("not a key")
+    assert directory.last_known_membership("not a key") is None
+
+
+def test_a_stale_roster_keeps_its_last_answer_for_steady_benefits():
+    nam = FakeNam({2026: roster_bytes(MEMBER)})
+    directory, clock = _directory(nam)
+    _resolve(directory, MEMBER)
+    clock["t"] += 60 * 60          # well past the refresh interval
+    assert directory.is_stale()
+    assert directory.cached_membership(MEMBER) is None      # not fresh
+    assert directory.last_known_membership(MEMBER) is True  # but still known
+    assert directory.last_known_membership(OTHER) is False
+
+
+def test_nothing_known_yet_is_none_not_false():
+    directory, _clock = _directory(FakeNam({}))
+    assert directory.last_known_membership(MEMBER) is None

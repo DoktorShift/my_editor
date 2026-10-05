@@ -7,7 +7,7 @@ One window with a page for each stage of joining, in the order it happens:
     overview   what membership is, what it costs, and Continue
     apply      the statutes, consent, and the optional details
     pay        the invoice as a QR code, Copy Invoice, Open in Wallet
-    member     what is active now, and the verified name
+    member     what is active now, and the Nostr address
     working    the short wait while the signer and the association answer
 
 The window follows Apple's Human Interface Guidelines the way the rest of
@@ -299,8 +299,8 @@ class MembershipWindow(QDialog):
         for title, detail in (
             ("Members’ relay",
              "A dependable relay that carries your notes and articles to readers."),
-            ("Verified name",
-             f"A name like you@{NIP05_DOMAIN} that people can recognize and share, "
+            ("Nostr address",
+             f"An address like you@{NIP05_DOMAIN} that people can recognize and share, "
              "instead of a long key."),
             ("Media storage",
              f"{PER_USER_LABEL} for images and videos, up to {MAX_FILE_LABEL} per file."),
@@ -480,7 +480,7 @@ class MembershipWindow(QDialog):
         handle_row.addWidget(suffix)
         self._handle_help = _label("Optional. Lowercase letters, digits, - and _.", "help")
         self._handle_error = _label("", "error")
-        form.addRow("Verified name:", self._field(handle_row, self._handle_help,
+        form.addRow("Nostr address:", self._field(handle_row, self._handle_help,
                                                   self._handle_error))
 
         self._email_edit = QLineEdit()
@@ -530,7 +530,7 @@ class MembershipWindow(QDialog):
             self._api.config(lambda c: (self._on_config(c), self._show_apply()),
                              lambda error: self._fail(error, self._show_overview))
             return
-        self._apply_title.setText("Choose a Verified Name" if name_only else "Your Application")
+        self._apply_title.setText("Choose a Nostr Address" if name_only else "Your Application")
         self._statutes_box.setVisible(not name_only)
         self._email_row.setVisible(not name_only)
         self._message_row.setVisible(not name_only)
@@ -547,7 +547,7 @@ class MembershipWindow(QDialog):
             adopted = format_date(self._config.statutes_adopted_at)
             self._statutes_label.setText(f"Version {version}, adopted {adopted}.")
         back = self._show_member if name_only else self._show_overview
-        label = "Save Name" if name_only else "Send Application"
+        label = "Save Address" if name_only else "Send Application"
         self._show(APPLY, [("back", "Go Back", LEADING, back),
                            ("send", label, DEFAULT, self._send_application)])
         self._update_send_button()
@@ -612,7 +612,7 @@ class MembershipWindow(QDialog):
                 kwargs["no_email"] = True
             if message:
                 kwargs["application_text"] = message
-        detail = ("MyEditor is saving your verified name." if self._name_only
+        detail = ("MyEditor is saving your Nostr address." if self._name_only
                   else "MyEditor is sending your application to EINUNDZWANZIG.")
         name_only = self._name_only
         self._working(detail, back=lambda: self._show_apply(name_only=name_only))
@@ -624,7 +624,7 @@ class MembershipWindow(QDialog):
         if handle:
             self._handle = handle
         if name_only:
-            self._show_member(note="Your verified name is saved. It can take a few "
+            self._show_member(note="Your Nostr address is saved. It can take a few "
                                    "minutes to appear everywhere.")
         else:
             self._on_status(status)
@@ -884,12 +884,12 @@ class MembershipWindow(QDialog):
         name_extra = QWidget()
         name_row = QHBoxLayout(name_extra)
         name_row.setContentsMargins(0, 2, 0, 0)
-        self._name_button = QPushButton("Choose a Name…")
+        self._name_button = QPushButton("Choose an Address…")
         self._name_button.setAutoDefault(False)
         self._name_button.clicked.connect(lambda: self._show_apply(name_only=True))
         name_row.addWidget(self._name_button)
         name_row.addStretch(1)
-        name_row_layout, self._name_detail = self._item("Verified name", "", name_extra)
+        name_row_layout, self._name_detail = self._item("Nostr address", "", name_extra)
         col.addLayout(name_row_layout)
 
         self._member_note = _label("", "muted")
@@ -934,10 +934,10 @@ class MembershipWindow(QDialog):
         has_key = self._api is not None and self._api.has_key
         if self._handle:
             self._name_detail.setText(nip05_address(self._handle))
-            self._name_button.setText("Change Name…")
+            self._name_button.setText("Change Address…")
         else:
             self._name_detail.setText("Not chosen yet.")
-            self._name_button.setText("Choose a Name…")
+            self._name_button.setText("Choose an Address…")
         self._name_button.setVisible(has_key)
 
         receipt = status.current_year.receipt_url if status is not None else None

@@ -460,7 +460,7 @@ def test_closing_the_window_stops_checking():
 
 # -- being a member -----------------------------------------------------------------------
 
-def test_choosing_a_name_later_sends_only_the_name():
+def test_choosing_an_address_later_sends_only_the_address():
     api = FakeApi()
     win = window(api, known_member=True)
     assert win._name_detail.text() == "Not chosen yet."
@@ -468,7 +468,7 @@ def test_choosing_a_name_later_sends_only_the_name():
     assert win.page == APPLY
     assert win._statutes_box.isHidden() and win._email_row.isHidden()
     send = win.buttons["send"]
-    assert send.text() == "Save Name" and not send.isEnabled()
+    assert send.text() == "Save Address" and not send.isEnabled()
     win._handle_edit.setText("hal")
     send.click()
     assert api.last("apply").kw == {"statutes_accepted": e21.UNSET, "nip05_handle": "hal"}

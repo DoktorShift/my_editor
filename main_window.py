@@ -135,7 +135,9 @@ from nostr.search import Nip50SearchClient
 from nostr.ui.connect_dialog import ConnectDialog
 from nostr.ui.draft_conflict_banner import DraftConflictBanner
 from nostr.ui.drafts_panel import DEFAULT_PANEL_WIDTH, DraftsPanel
-from nostr.einundzwanzig import MEMBER_RELAY, NO_BENEFITS, Benefits, MembershipDirectory
+from nostr.einundzwanzig import (
+    MEMBER_BENEFITS, MEMBER_RELAY, NO_BENEFITS, Benefits, MembershipDirectory,
+)
 from nostr.einundzwanzig_api import MembershipApi, session_signer
 from nostr.relay_list_addition import ADDED, ALREADY, RelayListAddition, outcome_message
 from nostr.ui.membership_window import MembershipWindow
@@ -341,11 +343,22 @@ class MainWindow(QMainWindow):
         # An account that was already signed in when the app opened never
         # passes through the connect flow, so resolve it here too.
         self._refresh_membership(self._profile_store.default())
+        # The roster answer is cached for a quarter hour; refreshing it a
+        # little sooner means the members' server never drops out of the
+        # library or the uploads while the app is open.
+        self._membership_timer = QTimer(self)
+        self._membership_timer.setInterval(10 * 60 * 1000)
+        self._membership_timer.timeout.connect(
+            lambda: self._refresh_membership(self._profile_store.default()))
+        self._membership_timer.start()
+        self._announced_members = set()
+        self._media_library_dialog = None
         self._media_store = MediaStore(
             session_pool=self._session_pool,
             profile_provider=lambda: self._profile_store.default(),
             blob_cache=self._media_image_loader,
             entitled_servers=self._entitled_blossom_servers,
+            server_quota=self._entitled_quota,
             parent=self,
         )
         # The one object the editor side talks to about images. Every
@@ -3419,7 +3432,13 @@ class MainWindow(QMainWindow):
         profile = self._profile_store.default()
         if profile is None:
             return NO_BENEFITS
-        return self._membership.cached_benefits(profile.user_pubkey) or NO_BENEFITS
+        benefits = self._membership.cached_benefits(profile.user_pubkey)
+        if benefits is None:
+            # Stale or not yet fetched: keep the last answer while the
+            # roster refreshes, rather than dropping a member's benefits.
+            last = self._membership.last_known_membership(profile.user_pubkey)
+            benefits = MEMBER_BENEFITS if last else NO_BENEFITS
+        return benefits
 
     def _entitled_relays(self) -> list:
         relay = self._active_benefits().relay
@@ -3428,6 +3447,22 @@ class MainWindow(QMainWindow):
     def _entitled_blossom_servers(self) -> list:
         server = self._active_benefits().blossom_server
         return [server] if server else []
+
+    def _media_server_label(self, origin: str):
+        """The Media Library's name for a server, when it has a better one
+        than its host: the members' server is the association's."""
+        server = self._active_benefits().blossom_server
+        if server and url_safety.origin_of(server) == origin:
+            return "EINUNDZWANZIG"
+        return None
+
+    def _entitled_quota(self, origin: str):
+        """The space a membership gives on its media server, in bytes."""
+        benefits = self._active_benefits()
+        if benefits.blossom_server and \
+                url_safety.origin_of(benefits.blossom_server) == origin:
+            return benefits.per_user_bytes or None
+        return None
 
     def _refresh_membership(self, profile: Optional[Profile]) -> None:
         if profile is not None:
@@ -3440,11 +3475,19 @@ class MainWindow(QMainWindow):
         active = self._profile_store.default()
         if active is None or active.user_pubkey.lower() != pubkey.lower():
             return
-        if is_member:
+        key = pubkey.lower()
+        if is_member and key not in self._announced_members:
+            self._announced_members.add(key)
             self.status.showMessage(
                 "Einundzwanzig membership recognised. Your association relay "
                 "and media server are available.", 6000,
             )
+        # An open Media Library shows the members' server's files as soon
+        # as the membership is known (the store refetches when its set of
+        # servers changed, and does nothing otherwise).
+        dialog = self._media_library_dialog
+        if dialog is not None and dialog.isVisible():
+            self._media_store.fetch()
 
     # -- joining the association ---------------------------------------------
 
@@ -3575,6 +3618,9 @@ class MainWindow(QMainWindow):
         """
         self._draft_sync.stop()
         self._private_library.stop()
+        # The library lists one account's files; the next account must
+        # never see them, not even until its own fetch lands.
+        self._media_store.clear()
         # The membership window speaks for one identity; never show one
         # account's membership, invoice or name to another.
         window = getattr(self, "_membership_window", None)
@@ -3802,9 +3848,11 @@ class MainWindow(QMainWindow):
             is_dark=self.is_dark_theme,
             pick_mode=False,
             visibility=self._media_visibility,
+            server_label=self._media_server_label,
             parent=self,
         )
         dialog.bind_private_library(self._private_library)
+        self._media_library_dialog = dialog
         dialog.show()
 
     def _on_nostr_insert_image(self):
@@ -3829,6 +3877,7 @@ class MainWindow(QMainWindow):
             is_dark=self.is_dark_theme,
             pick_mode=True,
             visibility=self._media_visibility,
+            server_label=self._media_server_label,
             parent=self,
         )
         dialog.bind_private_library(self._private_library)
@@ -3995,8 +4044,9 @@ class MainWindow(QMainWindow):
         intent gesture, so the outcome of an accidental one has to be
         that nothing was published.
         """
+        # Every server the upload goes to, the members' server included.
         hosts = ", ".join(
-            url_safety.host_of(s) or s for s in BlossomSettings().configured_servers()
+            url_safety.host_of(s) or s for s in self._media_store.target_servers()
         )
         # A paste is a quick, low-intent gesture, so Keep Local is the default.
         upload, remember = ask_with_checkbox(

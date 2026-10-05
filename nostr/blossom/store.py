@@ -53,7 +53,7 @@ from .client import (
 )
 from .errors import ERROR_CODES, friendly_message
 from .hashes import blob_url, url_agrees_with_hash
-from .plan import get_effective_max_file, plan_upload, UploadPlan
+from .plan import get_effective_max_file, lists_publicly, plan_upload, UploadPlan
 from .settings import BlossomSettings
 
 
@@ -132,6 +132,26 @@ class MediaFile:
 
 
 @dataclass
+class ServerListing:
+    """What one server said about this account's files in the last fetch.
+
+    ``ok`` False means the server could not be listed; its files from the
+    previous fetch are kept (``stale``) rather than vanishing, because a
+    server that is briefly down has not deleted anything. ``truncated``
+    is True when the walk stopped at the page limit, so ``count`` and
+    ``bytes`` are a lower bound and must not be shown as a total.
+    """
+
+    origin: str
+    ok: bool = True
+    count: int = 0
+    bytes: int = 0
+    truncated: bool = False
+    error_code: str = ""
+    fetched_at: float = 0.0
+
+
+@dataclass
 class UploadJobState:
     """Per-file state visible to the UI during an upload."""
 
@@ -181,6 +201,12 @@ class MediaStore(QObject):
     # A mirror did not take the copy. Non-fatal: the primary has the
     # file, so the upload still succeeds and the document is untouched.
     mirror_failed = Signal(str, str, str)              # name, host, code
+    # A server was left out of an upload before it started, because the
+    # file would not fit in the space left there. Non-fatal as well.
+    server_skipped = Signal(str, str, str)             # name, host, reason
+
+    # Per-server listing results changed (see ``server_listings``).
+    listings_changed = Signal()
 
     # Delete lifecycle.
     file_deleted = Signal(str)                         # file_hash
@@ -195,6 +221,7 @@ class MediaStore(QObject):
         client: Optional[BlossomClient] = None,
         blob_cache: Optional[BlobCache] = None,
         entitled_servers: Optional[Callable[[], Sequence[str]]] = None,
+        server_quota: Optional[Callable[[str], Optional[int]]] = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -211,8 +238,16 @@ class MediaStore(QObject):
         # each call because entitlement can change while the app is open.
         # This module knows nothing about what grants it.
         self._entitled_servers = entitled_servers
+        # Space this account has on a server (bytes) when one is known,
+        # such as the per-member allowance on an association's server.
+        # Used to show usage and to leave a full server out of an upload.
+        self._server_quota = server_quota
 
         self._files: Dict[str, MediaFile] = {}
+        self._listings: Dict[str, ServerListing] = {}
+        # The servers the last fetch walked. A different set (membership
+        # resolved, a server added) makes the library stale at once.
+        self._last_targets: tuple = ()
         self._last_fetch_at: float = 0.0
         self._fetch_in_flight: bool = False
         self._mirror_by_default: bool = True
@@ -240,6 +275,36 @@ class MediaStore(QObject):
     @property
     def settings(self) -> BlossomSettings:
         return self._settings
+
+    def target_servers(self) -> List[str]:
+        """Every server the library reads and writes, configured ones first."""
+        return self._target_servers()
+
+    def server_listings(self) -> Dict[str, ServerListing]:
+        """What each server said in the last fetch, by origin."""
+        return dict(self._listings)
+
+    def bytes_on(self, origin: str) -> int:
+        """Bytes this account stores on ``origin``, from the library.
+
+        Counts every file the library knows to be there, including ones
+        uploaded during this session, so the number moves as files are
+        added or deleted without waiting for the next fetch.
+        """
+        target = url_safety.origin_of(origin)
+        return sum(f.size for f in self._files.values()
+                   if any(url_safety.origin_of(u.get("server", "")) == target
+                          for u in f.urls))
+
+    def quota_for(self, origin: str) -> Optional[int]:
+        """The space this account has on ``origin``, when one is known."""
+        if self._server_quota is None:
+            return None
+        try:
+            quota = self._server_quota(url_safety.origin_of(origin))
+        except Exception:  # noqa: BLE001, a quota lookup must never break uploads
+            return None
+        return quota if isinstance(quota, int) and quota > 0 else None
 
     def file_list(
         self,
@@ -274,12 +339,20 @@ class MediaStore(QObject):
     def fetch(self, *, force: bool = False) -> None:
         """Repopulate the library from every configured server, deduped
         by sha256. Concurrent calls are coalesced; calls within the 30 s
-        freshness window are no-ops unless ``force`` is set.
+        freshness window are no-ops unless ``force`` is set or the set of
+        servers changed since the last fetch (a membership that resolved
+        adds one, and its files belong in the library at once).
 
         Each server is walked with BUD-12 cursor pagination, reusing one
         signed list token for all of its pages: BUD-11 scopes a list
         token to a server and gives it no ``x`` tag, so an N-page walk
-        still costs a single signer prompt.
+        still costs a single signer prompt. A server known to list
+        publicly is asked without a token first, which costs no prompt
+        at all; a 401 or 403 then falls back to signing.
+
+        A server that cannot be listed keeps the files the library last
+        saw there, marked by its ``ServerListing`` as not ok: a server
+        that is briefly down has not deleted anything.
 
         Quietly no-ops when no profile is active. The UI is expected to
         show its empty or connect-signer state in that case.
@@ -289,10 +362,11 @@ class MediaStore(QObject):
             return
         if self._fetch_in_flight:
             return
-        if not force and (time.monotonic() - self._last_fetch_at) < _FETCH_FRESHNESS_SECONDS:
-            return
-
         servers = self._target_servers()
+        targets = tuple(url_safety.origin_of(s) for s in servers)
+        fresh = (time.monotonic() - self._last_fetch_at) < _FETCH_FRESHNESS_SECONDS
+        if not force and fresh and targets == self._last_targets:
+            return
         if not servers:
             return
 
@@ -301,12 +375,17 @@ class MediaStore(QObject):
 
         merged: Dict[str, MediaFile] = {}
         remaining = {"count": len(servers), "errors": 0}
+        listings: Dict[str, ServerListing] = {
+            url_safety.origin_of(s): ServerListing(origin=url_safety.origin_of(s))
+            for s in servers
+        }
         # What the library held when the walk began. Anything committed
         # into ``self._files`` after this point is an upload that
         # finished mid-fetch, and a /list response is silent about
         # those: it is authoritative about what the server had, not
         # about what this process did while the request was in flight.
         started_with: Set[str] = set(self._files)
+        previous: Dict[str, MediaFile] = dict(self._files)
 
         def finish_one() -> None:
             remaining["count"] -= 1
@@ -314,29 +393,74 @@ class MediaStore(QObject):
                 return
             self._fetch_in_flight = False
             self._last_fetch_at = time.monotonic()
-            if remaining["errors"] >= len(servers):
+            self._last_targets = targets
+            now = time.time()
+            for listing in listings.values():
+                listing.fetched_at = now
+            self._listings = listings
+            if remaining["errors"] >= len(servers) and not previous:
                 self.fetch_error.emit(
                     "Could not reach any Blossom server. Check your network or server list."
                 )
             else:
+                if remaining["errors"] >= len(servers):
+                    self.fetch_error.emit(
+                        "Could not reach any Blossom server. Showing what the "
+                        "library had before."
+                    )
+                failed = {o for o, l in listings.items() if not l.ok}
+                carry_over(failed)
                 for sha, media in self._files.items():
                     if sha not in merged and sha not in started_with:
                         merged[sha] = media
+                order_urls(merged)
                 self._files = merged
                 self.library_changed.emit()
+            self.listings_changed.emit()
             self.fetch_finished.emit()
 
-        def attempt_server(server: str, *, retry_without_auth: bool = False) -> None:
+        def carry_over(failed_origins: Set[str]) -> None:
+            """Keep what unreachable servers held last time."""
+            if not failed_origins:
+                return
+            for sha, old in previous.items():
+                kept = [dict(u) for u in old.urls
+                        if url_safety.origin_of(u.get("server", "")) in failed_origins]
+                if not kept:
+                    continue
+                if sha in merged:
+                    have = {url_safety.origin_of(u.get("server", "")) for u in merged[sha].urls}
+                    merged[sha].urls.extend(u for u in kept
+                                            if url_safety.origin_of(u["server"]) not in have)
+                else:
+                    merged[sha] = MediaFile(
+                        hash=old.hash, url=kept[0]["url"], urls=kept,
+                        mime_type=old.mime_type, size=old.size, alt=old.alt,
+                        uploaded_at_ms=old.uploaded_at_ms, width=old.width,
+                        height=old.height, nip94=list(old.nip94))
+
+        def order_urls(files: Dict[str, MediaFile]) -> None:
+            """Copies in server order, the configured primary first, so the
+            URL the UI copies and inserts does not depend on which server
+            happened to answer first."""
+            rank = {origin: i for i, origin in enumerate(targets)}
+            for media in files.values():
+                media.urls.sort(key=lambda u: rank.get(
+                    url_safety.origin_of(u.get("server", "")), len(rank)))
+                if media.urls:
+                    media.url = str(media.urls[0].get("url") or media.url)
+
+        def attempt_server(server: str, *, signed: bool) -> None:
             origin = server_origin(server)
 
             def do_list(auth_event: Optional[dict]) -> None:
                 seen: Set[str] = set()
                 request_page(origin, auth_event, cursor=None, page=1, seen=seen,
-                             retry_without_auth=retry_without_auth,
-                             server=server)
+                             signed=signed, server=server)
 
-            if retry_without_auth:
-                # Fallback path: skip the bunker round-trip entirely.
+            if not signed:
+                # No bunker round-trip: a public listing, or the fallback
+                # after a signed request was refused.
                 do_list(None)
                 return
 
@@ -348,7 +472,7 @@ class MediaStore(QObject):
                 unsigned,
                 on_signed=do_list,
                 on_failure=lambda reason: handle_list_error(
-                    server, origin, BlossomError(reason), False
+                    server, origin, BlossomError(reason), signed=True, fallback_done=False
                 ),
             )
 
@@ -359,7 +483,7 @@ class MediaStore(QObject):
             cursor: Optional[str],
             page: int,
             seen: Set[str],
-            retry_without_auth: bool,
+            signed: bool,
             server: str,
         ) -> None:
             self._client.list_for_pubkey(
@@ -368,11 +492,10 @@ class MediaStore(QObject):
                 auth_event,
                 on_success=lambda items: handle_page(
                     server, origin, auth_event, items,
-                    cursor=cursor, page=page, seen=seen,
-                    retry_without_auth=retry_without_auth,
+                    cursor=cursor, page=page, seen=seen, signed=signed,
                 ),
                 on_failure=lambda err: handle_list_error(
-                    server, origin, err, retry_without_auth
+                    server, origin, err, signed=signed, fallback_done=page > 1
                 ),
                 cursor=cursor,
                 limit=_LIST_PAGE_SIZE,
@@ -387,8 +510,9 @@ class MediaStore(QObject):
             cursor: Optional[str],
             page: int,
             seen: Set[str],
-            retry_without_auth: bool,
+            signed: bool,
         ) -> None:
+            listing = listings[url_safety.origin_of(origin)]
             novel = 0
             last_sha = ""
             echoed_cursor = False
@@ -404,6 +528,8 @@ class MediaStore(QObject):
                 if sha not in seen:
                     seen.add(sha)
                     novel += 1
+                    listing.count += 1
+                    listing.bytes += _entry_size(entry)
                 merge_entry(origin, sha, entry)
 
             # Stop conditions. Together they mean a server that ignores
@@ -417,15 +543,15 @@ class MediaStore(QObject):
                 finish_one()
                 return
             if page >= _MAX_LIST_PAGES:
+                listing.truncated = True
                 finish_one()
                 return
             request_page(origin, auth_event, cursor=last_sha, page=page + 1,
-                         seen=seen, retry_without_auth=retry_without_auth,
-                         server=server)
+                         seen=seen, signed=signed, server=server)
 
         def merge_entry(origin: str, sha: str, entry: dict) -> None:
             url = entry.get("url") or f"{origin}/{sha}"
-            size = int(entry.get("size") or 0)
+            size = _entry_size(entry)
             mime = str(entry.get("type") or "application/octet-stream")
             uploaded = int(entry.get("uploaded") or entry.get("created") or 0)
             uploaded_ms = uploaded * 1000 if uploaded else int(time.time() * 1000)
@@ -444,27 +570,38 @@ class MediaStore(QObject):
                     uploaded_at_ms=uploaded_ms,
                 )
 
-        def handle_list_error(server: str, origin: str, err: BlossomError, already_retried: bool) -> None:
-            # Match STANDUP: on 401/403 the server is telling us auth was
-            # required but rejected; some operators reject mid-flight
-            # because of a clock skew between the signer and the server.
-            # Retry once without auth, since many servers serve /list
-            # publicly and BUD-11 marks the token optional there.
-            if not already_retried and err.status in (401, 403):
-                attempt_server(server, retry_without_auth=True)
-                return
+        def handle_list_error(server: str, origin: str, err: BlossomError, *,
+                              signed: bool, fallback_done: bool) -> None:
+            # A 401/403 on the first page means the other way of asking may
+            # work: a signed request some operators reject mid-flight (clock
+            # skew between signer and server) can succeed unsigned, since
+            # BUD-11 marks the token optional for /list; an unsigned request
+            # to a server that turned out to want one is retried signed.
+            if not fallback_done and getattr(err, "status", None) in (401, 403):
+                if signed:
+                    attempt_server(server, signed=False)
+                    return
+                if lists_publicly(server):
+                    attempt_server(server, signed=True)
+                    return
+            listing = listings[url_safety.origin_of(origin)]
+            listing.ok = False
+            listing.error_code = _error_code(err)
             remaining["errors"] += 1
             finish_one()
 
         for server in servers:
-            attempt_server(server)
+            attempt_server(server, signed=not lists_publicly(server))
 
     def clear(self) -> None:
         """Drop the library entirely. Used on profile switch / sign-out."""
         self._files = {}
+        self._listings = {}
         self._last_fetch_at = 0.0
+        self._last_targets = ()
         self._committed.clear()
         self.library_changed.emit()
+        self.listings_changed.emit()
 
     # ------------------------------------------------------------------
     # Upload
@@ -549,6 +686,12 @@ class MediaStore(QObject):
             return
 
         sha = hashlib.sha256(body).hexdigest()
+        eligible = [server for server in plan.eligible
+                    if self._has_room(server, sha, len(body), name)]
+        if not eligible:
+            self.upload_failed.emit(
+                name, "There isn\u2019t enough space left on your media servers for this file.")
+            return
         self._seed_cache(body)
         state = UploadJobState(name=name, status="queued", hash=sha)
         self._uploads[name] = state
@@ -556,7 +699,6 @@ class MediaStore(QObject):
         self.upload_status.emit(name, state.status)
 
         configured_primary = servers[0]
-        eligible = list(plan.eligible)
 
         self._resolve_coverage(
             sha,
@@ -572,6 +714,27 @@ class MediaStore(QObject):
                 configured_primary=configured_primary,
             ),
         )
+
+    def _has_room(self, server: str, sha: str, size: int, name: str) -> bool:
+        """Whether a file of ``size`` bytes still fits on ``server``.
+
+        Only servers with a known allowance are checked. A file the
+        library already knows to be there costs nothing more. A server
+        that is full is left out of this upload with a note, never the
+        reason the whole upload fails while another server has room.
+        """
+        quota = self.quota_for(server)
+        if quota is None:
+            return True
+        origin = url_safety.origin_of(server)
+        existing = self._files.get(sha)
+        if existing is not None and any(
+                url_safety.origin_of(u.get("server", "")) == origin for u in existing.urls):
+            return True
+        if self.bytes_on(origin) + size <= quota:
+            return True
+        self.server_skipped.emit(name, _hostname(server), "full")
+        return False
 
     def _target_servers(self) -> List[str]:
         """Configured servers, followed by any this account is entitled to.
@@ -1166,6 +1329,15 @@ def servers_holding(media, planned: Sequence[str]) -> Set[str]:
         if origin:
             held.add(origin)
     return {s for s in planned if _origin_or_empty(s) in held}
+
+
+def _entry_size(entry: dict) -> int:
+    """A /list entry's size in bytes; 0 when it is missing or nonsense."""
+    try:
+        size = int(entry.get("size") or 0)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, size)
 
 
 def _origin_or_empty(value: str) -> str:

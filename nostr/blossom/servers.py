@@ -46,6 +46,8 @@ BLOSSOM_UNPUBLISHED_LIMIT_FALLBACK = 100 * _MiB
 #                   indicator dot in Settings and the warning copy in the
 #                   upload hint
 #   notes         : short key suffix for an operator-specific note
+#   public_list   : (optional) the server answers GET /list without a
+#                   signed token, so listing it costs no signer prompt
 BLOSSOM_SERVER_INFO = MappingProxyType({
     "blossom.band": {
         "free": True,
@@ -91,6 +93,19 @@ BLOSSOM_SERVER_INFO = MappingProxyType({
         "paid_max_file": None,
         "confidence": "partial",
         "notes": "nostrcheck",
+    },
+    # The EINUNDZWANZIG association's members-only server. Membership is
+    # the gate, so there is no per-upload fee: 1 GiB per file and 5 GiB
+    # per member, as the association publishes. It lists publicly.
+    "blossom.einundzwanzig.space": {
+        "free": True,
+        "paid": False,
+        "requires_auth": True,
+        "free_max_file": 1024 * _MiB,
+        "paid_max_file": None,
+        "confidence": "documented",
+        "notes": "einundzwanzig",
+        "public_list": True,
     },
     "cdn.satellite.earth": {
         "free": False,

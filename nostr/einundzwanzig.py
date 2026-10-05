@@ -212,6 +212,25 @@ class MembershipDirectory(QObject):
         known = self.cached_membership(pubkey_hex)
         return None if known is None else benefits_for(known)
 
+    def last_known_membership(self, pubkey_hex: str) -> Optional[bool]:
+        """The latest answer held, fresh or not; None when there never was one.
+
+        For callers that must not flicker while a stale roster is being
+        refreshed: a member's server silently dropping out of uploads and
+        the library every fifteen minutes is worse than an answer that is
+        a few minutes old.
+        """
+        key = (pubkey_hex or "").strip().lower()
+        if key in self._confirmed:
+            return True
+        if self._roster is None:
+            return None
+        return self._match(key)
+
+    def is_stale(self) -> bool:
+        """True when the held roster is older than its refresh interval."""
+        return not self._is_fresh()
+
     def _is_fresh(self) -> bool:
         return (
             self._roster is not None
