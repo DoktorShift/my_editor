@@ -4,7 +4,7 @@ A small service that lets people join the **EINUNDZWANZIG** association from ins
 
 The association gives each application that may sign people up a client key. A key inside a desktop app can be pulled out by anyone, so the key lives here instead. MyEditor sends its membership requests to this service. The service checks them, adds the key, and forwards them to the association.
 
-The service holds nothing else: no accounts, no database, no user data. It runs all the time next to the release channel. For official builds that is rinbal's server. If you build and publish MyEditor yourself, run your own.
+The service holds nothing else: no accounts, no database, no user data. It runs all the time next to the release channel. For official builds that will be rinbal's server; until it is deployed, `MEMBERSHIP_SERVICE_URL` in `constants.py` is empty and official builds offer the association's website. If you build and publish MyEditor yourself, run your own.
 
 **Without a sidecar, or with a sidecar that has no key,** MyEditor does not offer joining in the app. The membership window offers "Join on the Website" instead, so nobody runs into an error. Members still get their relay and media server either way: MyEditor recognizes them from the association's public member list.
 

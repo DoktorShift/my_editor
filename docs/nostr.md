@@ -160,7 +160,8 @@ Each item's draft identifier is derived from its feed id, so re-running the same
 Nostr > EINUNDZWANZIG Membership lets a person apply, pay the annual fee with Lightning and see what membership unlocks (the members' relay, a Nostr address, and media storage).
 
 The association's API needs a client key that must not ship inside the app, so membership requests go through a small service that holds it: the membership sidecar in [`sidecar/`](../sidecar/README.md).
-- Official builds name the maintainers' sidecar in `constants.MEMBERSHIP_SERVICE_URL`.
-- A self-hosted build names its own sidecar, or none.
-- Without a sidecar, or with one that has no key, the window offers the association's website instead of joining in the app.
+- A build names its sidecar in `constants.MEMBERSHIP_SERVICE_URL`. That is empty until the maintainers' sidecar is deployed, so for now official builds offer the association's website; once it runs, official builds name it there.
+- A self-hosted build names its own sidecar, or none. `MYEDITOR_MEMBERSHIP_SERVICE` in the environment names one without rebuilding (an `https://` address, or `http://` on this computer).
+- Without a sidecar, with one that has no key, or with one whose key the association refuses, the window says joining in the app isn't available right now and offers the association's website instead.
 - Members get their relay and media server either way, recognized from the association's public member list.
+- Running a sidecar (Docker with Caddy, or systemd behind Caddy or nginx), its limits and what it logs are in [`sidecar/README.md`](../sidecar/README.md). Its server's clock must be synchronized (NTP), because signatures are valid for a minute only.
