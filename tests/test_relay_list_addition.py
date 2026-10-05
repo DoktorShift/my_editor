@@ -2,20 +2,21 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Pins adding one relay to the user's published relay list.
 
-What must hold:
+What must hold (the membership window relies on these four outcomes):
 
-  No list found means nothing is published: a list built from nothing
-  would replace the person's real one.
-
-  A list that is not this person's, or not validly signed, counts as not
-  found.
+  No list found, or none could be read: nothing is published, because a
+  list built from nothing would replace the person's real one (no_list).
 
   The new list keeps every relay already on it, adds the one relay, is
-  newer than the old list, and goes to the relays the list names.
+  newer than the old list, and goes to the relays the list names (added).
 
-  A relay already listed is not added again and nothing is signed.
+  A relay already listed is not added again and nothing is signed
+  (already).
 
-Relays, the signer and publishing are fakes; signatures are real.
+  A signer that says no, or relays that will not take it, change nothing
+  (failed).
+
+The safe read-modify-write underneath is pinned in test_outbox_package.py.
 """
 
 import os
@@ -26,15 +27,16 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QObject, Signal  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from nostr import crypto, events  # noqa: E402
 from nostr import relay_list_addition as rla  # noqa: E402
+from nostr.outbox import defaults, writer  # noqa: E402
+from nostr.outbox.directory import RelayDirectory  # noqa: E402
+from tests.outbox_fakes import (  # noqa: E402
+    ABSENT, NOW, OTHER_SK, UNKNOWN, FakeClient, FakePool, FakeQuery, FakeSessionPool,
+    Profile, found, settle, signed,
+)
 
-SK = bytes.fromhex("4c" * 32)
-PK = crypto.get_public_key(SK).hex()
-OTHER_SK = bytes.fromhex("5d" * 32)
 E21 = "wss://nostr.einundzwanzig.space"
 
 
@@ -44,131 +46,66 @@ def qt_app():
     yield app
 
 
-class Profile:
-    user_pubkey = PK
-    bunker_relays = ("wss://bunker.example",)
+@pytest.fixture(autouse=True)
+def quick_read_back(monkeypatch):
+    monkeypatch.setattr(writer, "READ_BACK_DELAY_MS", 0)
 
 
-class FakeClient:
-    def __init__(self, fail=None):
-        self.fail = fail
-        self.signed = []
-
-    def sign_event(self, unsigned, on_success, on_failure):
-        if self.fail:
-            on_failure(self.fail)
-            return
-        self.signed.append(unsigned)
-        on_success(events.sign_event(dict(unsigned), SK))
-
-
-class FakeSessionPool:
-    def __init__(self, client):
-        self.client = client
-
-    def get(self, profile, on_ready, on_error):
-        on_ready(self.client)
-
-
-class FakeJob(QObject):
-    all_done = Signal(list)
-
-
-class FakePool:
-    def __init__(self, results):
-        self.results = results
-        self.published = []
-
-    def publish(self, urls, event):
-        self.published.append((list(urls), event))
-        job = FakeJob()
-        self._job = job
-
-        def settle():
-            job.all_done.emit(self.results)
-        from PySide6.QtCore import QTimer
-        QTimer.singleShot(0, settle)
-        return job
-
-
-def relay_list(tags, sk=SK, created_at=1_700_000_000):
-    return events.sign_event({"kind": 10002, "content": "", "tags": tags,
-                              "created_at": created_at}, sk)
-
-
-def run(existing, *, client=None, results=(("wss://a.example", True, ""),), qt_app=None):
+def run(answer, *, client=None, pool=None):
     client = client or FakeClient()
-    pool = FakePool(list(results))
-    outcomes = []
-
-    def fetch(_pool, relays, *, filters, on_done, timeout_ms, parent):
-        run.queried = (relays, filters)
-        on_done(existing)
-
+    pool = pool or FakePool()
+    query = FakeQuery({10002: answer})
+    directory = RelayDirectory(pool, query=query, store_path=None)
     job = rla.RelayListAddition(pool, FakeSessionPool(client), Profile(), E21,
-                                fetch=fetch, clock=lambda: 1_800_000_000)
+                                directory=directory, query=query, clock=lambda: NOW)
+    outcomes = []
     job.finished.connect(outcomes.append)
     job.start()
-    QApplication.processEvents()
+    settle(10)
     return outcomes, client, pool
 
 
 def test_no_list_found_publishes_nothing():
-    outcomes, client, pool = run(None)
+    outcomes, client, pool = run(ABSENT)
     assert outcomes == [rla.NO_LIST]
-    assert client.signed == [] and pool.published == []
+    assert client.requests == [] and pool.published == []
 
 
-def test_someone_elses_list_counts_as_not_found():
-    outcomes, client, _ = run(relay_list([["r", "wss://a.example"]], sk=OTHER_SK))
-    assert outcomes == [rla.NO_LIST] and client.signed == []
-
-
-def test_a_tampered_list_counts_as_not_found():
-    event = relay_list([["r", "wss://a.example"]])
-    event["tags"].append(["r", "wss://evil.example"])
-    outcomes, client, _ = run(event)
-    assert outcomes == [rla.NO_LIST] and client.signed == []
+def test_a_list_that_could_not_be_read_publishes_nothing():
+    outcomes, client, pool = run(UNKNOWN)
+    assert outcomes == [rla.NO_LIST] and client.requests == []
 
 
 def test_the_new_list_keeps_everything_and_adds_the_relay():
-    existing = relay_list([["r", "wss://a.example"], ["r", "wss://b.example", "read"]])
-    outcomes, client, pool = run(existing)
+    existing = signed(10002, [["r", "wss://a.example"], ["r", "wss://b.example", "read"]])
+    outcomes, client, pool = run(found(existing))
     assert outcomes == [rla.ADDED]
-    tags = client.signed[0]["tags"]
-    assert tags[:2] == [["r", "wss://a.example"], ["r", "wss://b.example", "read"]]
-    assert tags[2] == ["r", E21, "write"]
-    assert client.signed[0]["created_at"] > existing["created_at"]
-    targets, published = pool.published[0]
-    assert published["pubkey"] == PK
-    for relay in ("wss://a.example", "wss://b.example", E21, "wss://purplepag.es"):
+    tags = client.requests[0]["tags"]
+    assert tags == [["r", "wss://a.example"], ["r", "wss://b.example", "read"],
+                    ["r", E21, "write"]]
+    assert client.requests[0]["created_at"] > existing["created_at"]
+    targets, _event = pool.published[0]
+    for relay in ("wss://a.example", "wss://b.example", E21, *defaults.INDEXER_RELAYS):
         assert relay in targets
 
 
 def test_a_relay_already_listed_is_left_alone():
-    outcomes, client, pool = run(relay_list([["r", E21 + "/"]]))
+    outcomes, client, pool = run(found(signed(10002, [["r", E21 + "/"]])))
     assert outcomes == [rla.ALREADY]
-    assert client.signed == [] and pool.published == []
+    assert client.requests == [] and pool.published == []
 
 
 def test_a_signer_that_says_no_changes_nothing():
-    outcomes, _, pool = run(relay_list([["r", "wss://a.example"]]),
-                            client=FakeClient(fail="user rejected"))
+    outcomes, _client, pool = run(found(signed(10002, [["r", "wss://a.example"]])),
+                                  client=FakeClient(fail="user rejected"))
     assert outcomes == [rla.FAILED] and pool.published == []
 
 
-def test_no_relay_taking_the_list_is_a_failure():
-    outcomes, _, _ = run(relay_list([["r", "wss://a.example"]]),
-                         results=(("wss://a.example", False, "blocked"),))
+def test_relays_that_will_not_take_it_are_a_failure():
+    existing = signed(10002, [["r", "wss://a.example"]])
+    everyone = {"wss://a.example", E21, *defaults.INDEXER_RELAYS}
+    outcomes, _client, _pool = run(found(existing), pool=FakePool(refuse=everyone))
     assert outcomes == [rla.FAILED]
-
-
-def test_the_lookup_asks_the_users_relays_and_the_list_specialists():
-    run(None)
-    relays, filters = run.queried
-    assert relays[0] == "wss://bunker.example"
-    assert "wss://purplepag.es" in relays
-    assert filters == [{"kinds": [10002], "authors": [PK], "limit": 1}]
 
 
 def test_outcome_messages_are_plain_and_have_no_em_dashes():

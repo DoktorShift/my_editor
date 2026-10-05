@@ -35,8 +35,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import DEFAULT_RELAYS
 from ..bunker import (
+    NIP46_RELAYS,
     BunkerClient,
     build_nostrconnect_uri,
     parse_bunker_uri,
@@ -63,6 +63,7 @@ QDialog { background: #1E1E1E; }
 QLabel { color: #D4D4D4; font-size: 12px; }
 QLabel#connect_hint { color: #858585; }
 QLabel#connect_status { color: #FFB347; }
+QPushButton#connect_link { color: #4FA3F7; border: none; background: transparent; min-width: 0; padding: 2px 6px; }
 QLabel#qr_label { background: #1E1E1E; padding: 8px; }
 QLabel#countdown { color: #858585; font-size: 11px; }
 QLineEdit, QTextEdit {
@@ -105,6 +106,7 @@ QDialog { background: #FFFFFF; }
 QLabel { color: #333333; font-size: 12px; }
 QLabel#connect_hint { color: #777777; }
 QLabel#connect_status { color: #A05000; }
+QPushButton#connect_link { color: #0078D4; border: none; background: transparent; min-width: 0; padding: 2px 6px; }
 QLabel#qr_label { background: #FFFFFF; padding: 8px; }
 QLabel#countdown { color: #999999; font-size: 11px; }
 QLineEdit, QTextEdit {
@@ -156,6 +158,9 @@ class ConnectDialog(QDialog):
     """
 
     profile_connected = Signal(object)  # Profile
+    # The person has no signer app: offer the other ways into an account.
+    create_requested = Signal()
+    restore_requested = Signal()
 
     def __init__(
         self,
@@ -208,6 +213,15 @@ class ConnectDialog(QDialog):
         layout.addWidget(self._status)
 
         footer = QHBoxLayout()
+        for label, signal in (("Create an Account", self.create_requested),
+                              ("Restore from Backup", self.restore_requested)):
+            link = QPushButton(label)
+            link.setObjectName("connect_link")
+            link.setFlat(True)
+            link.setAutoDefault(False)
+            link.setCursor(Qt.PointingHandCursor)
+            link.clicked.connect(lambda _=False, sig=signal: (self._on_cancel(), sig.emit()))
+            footer.addWidget(link)
         footer.addStretch(1)
         self._cancel_btn = QPushButton("Close")
         self._cancel_btn.clicked.connect(self._on_cancel)
@@ -332,14 +346,14 @@ class ConnectDialog(QDialog):
         client = BunkerClient(self._pool, parent=self)
         self._watch_client_diagnostics(client)
         local_pk = client.listen_for_nostrconnect(
-            relays=list(DEFAULT_RELAYS),
+            relays=list(NIP46_RELAYS),
             secret=secret,
             on_success=self._on_pair_success,
             on_failure=self._on_pair_failure,
             timeout_ms=_QR_TTL_SECONDS * 1000,
         )
         uri = build_nostrconnect_uri(
-            local_pk, list(DEFAULT_RELAYS), secret,
+            local_pk, list(NIP46_RELAYS), secret,
         )
         self._client = client
         self._qr_uri_field.setText(uri)

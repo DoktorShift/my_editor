@@ -38,32 +38,27 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
-    QDialog,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
-    QProgressBar,
     QPushButton,
-    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
-import theme
 from alerts import confirm_destructive, inform
-from constants import (
-    DARK_BORDER, DARK_MENU_BG, DARK_MUTED_FG,
-    LIGHT_BORDER, LIGHT_MENU_BG, LIGHT_MUTED_FG, LIGHT_SELECTION,
-)
 from nostr import einundzwanzig_api as e21
 from nostr.einundzwanzig import (
     JOIN_URL, MAX_FILE_LABEL, MEMBER_BLOSSOM, MEMBER_RELAY, NIP05_DOMAIN, PER_USER_LABEL,
     nip05_address,
 )
 from nostr.qr import make_qr_pixmap
+from nostr.ui.assistant import (
+    DEFAULT, LEADING, NORMAL, AssistantWindow, busy_bar, link_button, text_label,
+)
 
 # Pages.
 OVERVIEW = "overview"
@@ -71,11 +66,6 @@ WORKING = "working"
 APPLY = "apply"
 PAY = "pay"
 MEMBER = "member"
-
-# Button placement (see _set_buttons).
-LEADING = "leading"     # Go Back: the leading edge
-NORMAL = "normal"       # Not Now, Close, Cancel: beside the default
-DEFAULT = "default"     # the likely action: the trailing edge, answers Return
 
 _QR_SIZE = 216
 _ASK_SIGNER = "Approve the request in your signer app."
@@ -113,57 +103,7 @@ def open_lightning_invoice(bolt11: str) -> bool:
     return QDesktopServices.openUrl(QUrl(f"lightning:{bolt11}"))
 
 
-def _stylesheet(is_dark: bool) -> str:
-    if is_dark:
-        muted, border, field = DARK_MUTED_FG, DARK_BORDER, DARK_MENU_BG
-        accent, ok, err = "#007ACC", "#43A047", "#E57373"
-    else:
-        muted, border, field = LIGHT_MUTED_FG, LIGHT_BORDER, LIGHT_MENU_BG
-        accent, ok, err = LIGHT_SELECTION, "#2E7D32", "#C62828"
-    link = theme.dialog_link_color(is_dark)
-    return theme.dialog_stylesheet(is_dark) + f"""
-    QLabel#title {{ font-size: 16px; font-weight: 600; }}
-    QLabel#muted, QLabel#help {{ color: {muted}; }}
-    QLabel#help {{ font-size: 11px; }}
-    QLabel#error {{ color: {err}; font-size: 11px; }}
-    QLabel#item_title {{ font-weight: 600; }}
-    QLabel#amount {{ font-size: 22px; font-weight: 600; }}
-    QLabel#check {{ color: {ok}; font-size: 15px; font-weight: 700; }}
-    QLabel#qr {{ background: #FFFFFF; border: 1px solid {border}; border-radius: 8px; padding: 6px; }}
-    QLineEdit, QPlainTextEdit {{
-        background: {field}; border: 1px solid {border}; border-radius: 5px; padding: 4px 6px;
-    }}
-    QLineEdit:focus, QPlainTextEdit:focus {{ border-color: {accent}; }}
-    QPushButton#link {{
-        border: none; background: transparent; color: {link}; padding: 2px 0; min-width: 0;
-    }}
-    QPushButton#link:hover {{ text-decoration: underline; }}
-    QPushButton#link:disabled {{ color: {muted}; }}
-    QProgressBar {{
-        background: {field}; border: 1px solid {border}; border-radius: 3px; max-height: 6px;
-    }}
-    QProgressBar::chunk {{ background: {accent}; border-radius: 2px; }}
-    """
-
-
-def _label(text: str = "", name: str = "", *, wrap: bool = True) -> QLabel:
-    label = QLabel(text)
-    if name:
-        label.setObjectName(name)
-    label.setWordWrap(wrap)
-    label.setTextFormat(Qt.PlainText)   # names and server words are data, not markup
-    return label
-
-
-def _busy_bar() -> QProgressBar:
-    bar = QProgressBar()
-    bar.setRange(0, 0)      # indeterminate: the wait has no known length
-    bar.setTextVisible(False)
-    bar.setAccessibleName("Working")
-    return bar
-
-
-class MembershipWindow(QDialog):
+class MembershipWindow(AssistantWindow):
     """Joining EINUNDZWANZIG, start to finish, for the active Nostr identity."""
 
     connect_requested = Signal()      # the person wants to connect a signer first
@@ -177,28 +117,11 @@ class MembershipWindow(QDialog):
                  watcher_factory: Optional[Callable] = None,
                  open_lightning: Callable[[str], bool] = open_lightning_invoice,
                  parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("EINUNDZWANZIG Membership")
-        self.setMinimumWidth(520)
-        self.setStyleSheet(_stylesheet(is_dark))
-        self._is_dark = is_dark
+        super().__init__("EINUNDZWANZIG Membership", is_dark=is_dark, parent=parent)
         self._watcher_factory = watcher_factory or (
             lambda api_, year, parent_: e21.PaymentWatcher(api_, year, parent=parent_))
         self._open_lightning = open_lightning
         self._watcher = None
-        self._page = None
-        self.buttons = {}
-        self._button_widgets = []
-
-        self._stack = QStackedWidget()
-        self._pages = {}
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 22, 24, 18)
-        layout.setSpacing(18)
-        layout.addWidget(self._stack, 1)
-        self._button_row = QHBoxLayout()
-        self._button_row.setSpacing(8)
-        layout.addLayout(self._button_row)
 
         self._build_overview()
         self._build_working()
@@ -235,52 +158,6 @@ class MembershipWindow(QDialog):
         if api is not None and api.has_key:
             api.config(self._on_config, lambda _error: None)
 
-    @property
-    def page(self) -> str:
-        return self._page
-
-    # ------------------------------------------------------------------ #
-    # Buttons                                                             #
-    # ------------------------------------------------------------------ #
-
-    def _set_buttons(self, specs) -> None:
-        """Lay out ``(key, label, placement, handler)`` buttons.
-
-        Go Back sits at the leading edge; the rest sit at the trailing
-        edge with the one default button last, which is where macOS puts
-        it and where Return lands.
-        """
-        for widget in self._button_widgets:
-            self._button_row.removeWidget(widget)
-            widget.deleteLater()
-        self._button_widgets = []
-        while self._button_row.count():
-            self._button_row.takeAt(0)
-        self.buttons = {}
-
-        def make(key, label, placement, handler):
-            button = QPushButton(label)
-            button.setAutoDefault(False)
-            button.setDefault(placement == DEFAULT)
-            button.clicked.connect(handler)
-            self.buttons[key] = button
-            self._button_widgets.append(button)
-            return button
-
-        for spec in specs:
-            if spec[2] == LEADING:
-                self._button_row.addWidget(make(*spec))
-        self._button_row.addStretch(1)
-        for placement in (NORMAL, DEFAULT):
-            for spec in specs:
-                if spec[2] == placement:
-                    self._button_row.addWidget(make(*spec))
-
-    def _show(self, page: str, buttons) -> None:
-        self._page = page
-        self._stack.setCurrentWidget(self._pages[page])
-        self._set_buttons(buttons)
-
     # ------------------------------------------------------------------ #
     # Overview                                                            #
     # ------------------------------------------------------------------ #
@@ -290,8 +167,8 @@ class MembershipWindow(QDialog):
         col = QVBoxLayout(page)
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(10)
-        col.addWidget(_label("Become an EINUNDZWANZIG Member", "title"))
-        col.addWidget(_label(
+        col.addWidget(text_label("Become an EINUNDZWANZIG Member", "title"))
+        col.addWidget(text_label(
             "EINUNDZWANZIG brings Bitcoiners together across the German-speaking "
             "world, with local meetups, education and exchange. Membership supports "
             "the community and adds services to your Nostr identity."))
@@ -307,26 +184,26 @@ class MembershipWindow(QDialog):
         ):
             col.addLayout(self._item(title, detail)[0])
         col.addSpacing(4)
-        self._fee_label = _label("", "item_title")
+        self._fee_label = text_label("", "item_title")
         self._fee_label.hide()
         col.addWidget(self._fee_label)
-        self._overview_note = _label(
+        self._overview_note = text_label(
             "Membership belongs to your Nostr identity and runs for a calendar year. "
             "You renew it yourself; nothing is charged automatically.", "muted")
         col.addWidget(self._overview_note)
         col.addStretch(1)
-        self._add_page(OVERVIEW, page)
+        self.add_page(OVERVIEW, page)
 
     def _item(self, title: str, detail: str, extra: Optional[QWidget] = None):
         """A checked row: title, detail and optional controls.
         Returns ``(layout, detail_label)``."""
-        mark = _label("✓", "check", wrap=False)
+        mark = text_label("✓", "check", wrap=False)
         mark.setFixedWidth(18)
         mark.setAccessibleName("Included")
         text = QVBoxLayout()
         text.setSpacing(2)
-        text.addWidget(_label(title, "item_title"))
-        detail_label = _label(detail, "muted")
+        text.addWidget(text_label(title, "item_title"))
+        detail_label = text_label(detail, "muted")
         text.addWidget(detail_label)
         if extra is not None:
             text.addWidget(extra, 0, Qt.AlignLeft)
@@ -347,7 +224,7 @@ class MembershipWindow(QDialog):
         else:
             buttons = [("not_now", "Not Now", NORMAL, self.reject),
                        ("continue", "Continue", DEFAULT, self._load_status)]
-        self._show(OVERVIEW, buttons)
+        self.show_page(OVERVIEW, buttons)
 
     def _set_overview_note(self, note: str) -> None:
         if not self._pubkey:
@@ -383,17 +260,17 @@ class MembershipWindow(QDialog):
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(10)
         col.addStretch(1)
-        self._working_title = _label("", "item_title")
+        self._working_title = text_label("", "item_title")
         self._working_title.setAlignment(Qt.AlignCenter)
-        self._working_detail = _label("", "muted")
+        self._working_detail = text_label("", "muted")
         self._working_detail.setAlignment(Qt.AlignCenter)
         col.addWidget(self._working_title)
         col.addWidget(self._working_detail)
-        bar = _busy_bar()
+        bar = busy_bar()
         bar.setMaximumWidth(220)
         col.addWidget(bar, 0, Qt.AlignHCenter)
         col.addStretch(2)
-        self._add_page(WORKING, page)
+        self.add_page(WORKING, page)
 
     def _working(self, detail: str, back: Callable[[], None], title: str = _ASK_SIGNER) -> None:
         """Show the wait. Cancel drops the request and goes back."""
@@ -404,7 +281,7 @@ class MembershipWindow(QDialog):
             self._api.cancel()
             back()
 
-        self._show(WORKING, [("cancel", "Cancel", NORMAL, cancel)])
+        self.show_page(WORKING, [("cancel", "Cancel", NORMAL, cancel)])
 
     def _fail(self, error, back: Callable[[], None]) -> None:
         back()
@@ -440,18 +317,18 @@ class MembershipWindow(QDialog):
         col = QVBoxLayout(page)
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(10)
-        self._apply_title = _label("Your Application", "title")
+        self._apply_title = text_label("Your Application", "title")
         col.addWidget(self._apply_title)
 
         self._statutes_box = QWidget()
         statutes = QVBoxLayout(self._statutes_box)
         statutes.setContentsMargins(0, 0, 0, 0)
         statutes.setSpacing(6)
-        statutes.addWidget(_label(
+        statutes.addWidget(text_label(
             "Joining means agreeing to the association’s statutes. "
             "Please read them first.", ""))
         row = QHBoxLayout()
-        self._statutes_label = _label("", "muted")
+        self._statutes_label = text_label("", "muted")
         self._statutes_button = QPushButton("Open Statutes")
         self._statutes_button.setAutoDefault(False)
         self._statutes_button.clicked.connect(self._open_statutes)
@@ -473,22 +350,22 @@ class MembershipWindow(QDialog):
         self._handle_edit.setPlaceholderText("satoshi")
         self._handle_edit.textEdited.connect(self._lowercase_handle)
         self._handle_edit.textChanged.connect(self._check_handle)
-        suffix = _label(f"@{NIP05_DOMAIN}", "muted", wrap=False)
+        suffix = text_label(f"@{NIP05_DOMAIN}", "muted", wrap=False)
         handle_row = QHBoxLayout()
         handle_row.setSpacing(4)
         handle_row.addWidget(self._handle_edit, 1)
         handle_row.addWidget(suffix)
-        self._handle_help = _label("Optional. Lowercase letters, digits, - and _.", "help")
-        self._handle_error = _label("", "error")
+        self._handle_help = text_label("Optional. Lowercase letters, digits, - and _.", "help")
+        self._handle_error = text_label("", "error")
         form.addRow("Nostr address:", self._field(handle_row, self._handle_help,
                                                   self._handle_error))
 
         self._email_edit = QLineEdit()
         self._email_edit.setPlaceholderText("name@example.com")
         self._email_edit.textChanged.connect(self._check_email)
-        self._email_help = _label("Optional. Only for membership notices, like renewal "
+        self._email_help = text_label("Optional. Only for membership notices, like renewal "
                                   "reminders.", "help")
-        self._email_error = _label("", "error")
+        self._email_error = text_label("", "error")
         self._email_row = self._field(self._email_edit, self._email_help, self._email_error)
         form.addRow("Email:", self._email_row)
 
@@ -496,16 +373,16 @@ class MembershipWindow(QDialog):
         self._message_edit.setFixedHeight(70)
         self._message_edit.setTabChangesFocus(True)
         self._message_edit.textChanged.connect(self._check_message)
-        self._message_help = _label("Optional. Anything you’d like the association "
+        self._message_help = text_label("Optional. Anything you’d like the association "
                                     "to know.", "help")
-        self._message_error = _label("", "error")
+        self._message_error = text_label("", "error")
         self._message_row = self._field(self._message_edit, self._message_help,
                                         self._message_error)
         form.addRow("Message:", self._message_row)
         self._form = form
         col.addLayout(form)
         col.addStretch(1)
-        self._add_page(APPLY, page)
+        self.add_page(APPLY, page)
 
     @staticmethod
     def _field(field, help_label: QLabel, error_label: QLabel) -> QWidget:
@@ -548,7 +425,7 @@ class MembershipWindow(QDialog):
             self._statutes_label.setText(f"Version {version}, adopted {adopted}.")
         back = self._show_member if name_only else self._show_overview
         label = "Save Address" if name_only else "Send Application"
-        self._show(APPLY, [("back", "Go Back", LEADING, back),
+        self.show_page(APPLY, [("back", "Go Back", LEADING, back),
                            ("send", label, DEFAULT, self._send_application)])
         self._update_send_button()
         (self._handle_edit if name_only else self._consent).setFocus()
@@ -656,16 +533,16 @@ class MembershipWindow(QDialog):
         col = QVBoxLayout(page)
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(10)
-        self._pay_title = _label("", "title")
+        self._pay_title = text_label("", "title")
         col.addWidget(self._pay_title)
-        self._pay_intro = _label("Pay with any Lightning wallet. When you’ve paid, "
+        self._pay_intro = text_label("Pay with any Lightning wallet. When you’ve paid, "
                                  "click I’ve Paid and MyEditor confirms it with "
                                  "EINUNDZWANZIG.")
         col.addWidget(self._pay_intro)
-        self._amount = _label("", "amount", wrap=False)
+        self._amount = text_label("", "amount", wrap=False)
         self._amount.setAlignment(Qt.AlignCenter)
         col.addWidget(self._amount)
-        self._amount_detail = _label("", "muted")
+        self._amount_detail = text_label("", "muted")
         self._amount_detail.setAlignment(Qt.AlignCenter)
         col.addWidget(self._amount_detail)
 
@@ -694,14 +571,14 @@ class MembershipWindow(QDialog):
         self._browser_button.clicked.connect(self._pay_in_browser)
         col.addWidget(self._browser_button, 0, Qt.AlignHCenter)
 
-        self._pay_status = _label("", "muted")
+        self._pay_status = text_label("", "muted")
         self._pay_status.setAlignment(Qt.AlignCenter)
-        self._pay_busy = _busy_bar()
+        self._pay_busy = busy_bar()
         self._pay_busy.setMaximumWidth(220)
         col.addWidget(self._pay_status)
         col.addWidget(self._pay_busy, 0, Qt.AlignHCenter)
         col.addStretch(1)
-        self._add_page(PAY, page)
+        self.add_page(PAY, page)
 
     def _fee_year(self) -> int:
         if self._status is not None:
@@ -757,7 +634,7 @@ class MembershipWindow(QDialog):
     def _show_pay_buttons(self, key: str, label: str, enabled: bool = True) -> None:
         handlers = {"paid": self._start_watching, "again": self._start_watching,
                     "new_invoice": self._create_invoice}
-        self._show(PAY, [("close", "Close", NORMAL, self.reject),
+        self.show_page(PAY, [("close", "Close", NORMAL, self.reject),
                          (key, label, DEFAULT, handlers[key])])
         self.buttons[key].setEnabled(enabled)
 
@@ -827,7 +704,7 @@ class MembershipWindow(QDialog):
         self._just_joined = True
 
         def back():
-            self._show(PAY, [("close", "Close", NORMAL, self.reject),
+            self.show_page(PAY, [("close", "Close", NORMAL, self.reject),
                              ("again", "Check Again", DEFAULT, self._load_status)])
             self._set_pay_status("Your payment arrived. Click Check Again to finish.")
 
@@ -855,8 +732,8 @@ class MembershipWindow(QDialog):
         col = QVBoxLayout(page)
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(10)
-        self._member_title = _label("", "title")
-        self._member_subtitle = _label("", "muted")
+        self._member_title = text_label("", "title")
+        self._member_subtitle = text_label("", "muted")
         col.addWidget(self._member_title)
         col.addWidget(self._member_subtitle)
         col.addSpacing(4)
@@ -868,7 +745,7 @@ class MembershipWindow(QDialog):
         self._relay_button = QPushButton("Add to My Relay List")
         self._relay_button.setAutoDefault(False)
         self._relay_button.clicked.connect(self._add_relay)
-        self._relay_result = _label("", "muted")
+        self._relay_result = text_label("", "muted")
         relay_row.addWidget(self._relay_button)
         relay_row.addWidget(self._relay_result, 1)
         col.addLayout(self._item(
@@ -892,31 +769,22 @@ class MembershipWindow(QDialog):
         name_row_layout, self._name_detail = self._item("Nostr address", "", name_extra)
         col.addLayout(name_row_layout)
 
-        self._member_note = _label("", "muted")
+        self._member_note = text_label("", "muted")
         col.addWidget(self._member_note)
         col.addStretch(1)
 
         links = QHBoxLayout()
         links.setSpacing(16)
-        self._receipt_link = self._link("Receipt", self._open_receipt)
-        self._details_link = self._link("Show Membership Details", self._load_status)
-        self._export_link = self._link("Export My Data…", self._export)
-        self._erase_link = self._link("Delete My Data…", self._erase)
+        self._receipt_link = link_button("Receipt", self._open_receipt)
+        self._details_link = link_button("Show Membership Details", self._load_status)
+        self._export_link = link_button("Export My Data…", self._export)
+        self._erase_link = link_button("Delete My Data…", self._erase)
         for link in (self._receipt_link, self._details_link, self._export_link,
                      self._erase_link):
             links.addWidget(link)
         links.addStretch(1)
         col.addLayout(links)
-        self._add_page(MEMBER, page)
-
-    @staticmethod
-    def _link(text: str, handler) -> QPushButton:
-        button = QPushButton(text)
-        button.setObjectName("link")
-        button.setAutoDefault(False)
-        button.setCursor(Qt.PointingHandCursor)
-        button.clicked.connect(handler)
-        return button
+        self.add_page(MEMBER, page)
 
     def _show_member(self, note: str = "") -> None:
         self._stop_watching()
@@ -947,7 +815,7 @@ class MembershipWindow(QDialog):
         self._erase_link.setVisible(has_key)
         self._member_note.setText(note)
         self._member_note.setVisible(bool(note))
-        self._show(MEMBER, [("done", "Done", DEFAULT, self.accept)])
+        self.show_page(MEMBER, [("done", "Done", DEFAULT, self.accept)])
 
     def _add_relay(self) -> None:
         self._relay_button.setEnabled(False)
@@ -1008,10 +876,6 @@ class MembershipWindow(QDialog):
     # ------------------------------------------------------------------ #
     # Plumbing                                                            #
     # ------------------------------------------------------------------ #
-
-    def _add_page(self, key: str, widget: QWidget) -> None:
-        self._pages[key] = widget
-        self._stack.addWidget(widget)
 
     def done(self, result: int) -> None:
         # Closing the window ends the wait; nothing keeps prompting the
