@@ -47,8 +47,7 @@ from nostr.einundzwanzig_api import (
     MembershipConfig,
     MembershipExport,
     MembershipStatus,
-    api_key,
-    has_api_key,
+    has_service,
     parse_config,
     parse_erasure,
     parse_export,
@@ -56,11 +55,13 @@ from nostr.einundzwanzig_api import (
     parse_membership,
     parse_payments,
     parse_retry_after,
+    service_url,
     session_signer,
 )
 from tests.membership_fakes import (
-    API_KEY,
     PREFIX,
+    SERVICE,
+    SERVICE_PREFIX,
     PUBKEY,
     FakeClock,
     FakeMembershipServer,
@@ -85,12 +86,12 @@ def qt_app():
     yield app
 
 
-def make(*, script=None, signer=None, key=API_KEY, clock=None, server=True):
+def make(*, script=None, signer=None, service=SERVICE, clock=None, server=True):
     clock = clock or FakeClock()
     srv = FakeMembershipServer(clock)
     nam = FakeNam(script, responder=srv if server else None)
     signer = signer if signer is not None else FakeSigner(clock=clock)
-    api = MembershipApi(signer, api_key=key, nam=nam, clock=clock)
+    api = MembershipApi(signer, service_url=service, nam=nam, clock=clock)
     return SimpleNamespace(api=api, nam=nam, signer=signer, server=srv, clock=clock)
 
 
@@ -132,66 +133,67 @@ ALL_CALLS = [("config", (), {}, "GET", "/config", MembershipConfig)] + SIGNED_CA
 
 
 # --------------------------------------------------------------------- #
-# The client key                                                        #
+# The membership service                                                #
 # --------------------------------------------------------------------- #
 
-def _secrets_module(value):
-    module = types.ModuleType("_build_secrets")
-    module.E21_API_KEY = value
-    return module
+def test_the_environment_names_the_service(monkeypatch):
+    monkeypatch.setenv("MYEDITOR_MEMBERSHIP_SERVICE", "https://mine.example/")
+    assert service_url() == "https://mine.example"
+    assert has_service()
 
 
-def test_the_environment_wins_over_the_built_in_key(monkeypatch):
-    monkeypatch.setenv("MYEDITOR_E21_API_KEY", "from-env")
-    monkeypatch.setitem(sys.modules, "_build_secrets", _secrets_module("from-build"))
-    assert api_key() == "from-env"
-    assert has_api_key()
+def test_the_build_names_the_service_without_an_environment_value(monkeypatch):
+    import constants
+    monkeypatch.delenv("MYEDITOR_MEMBERSHIP_SERVICE", raising=False)
+    monkeypatch.setattr(constants, "MEMBERSHIP_SERVICE_URL", "https://official.example")
+    assert service_url() == "https://official.example"
+    monkeypatch.setattr(constants, "MEMBERSHIP_SERVICE_URL", "")
+    assert service_url() == "" and not has_service()
 
 
-def test_the_built_in_key_is_used_without_an_environment_key(monkeypatch):
-    monkeypatch.delenv("MYEDITOR_E21_API_KEY", raising=False)
-    monkeypatch.setitem(sys.modules, "_build_secrets", _secrets_module(" from-build \n"))
-    assert api_key() == "from-build"
+@pytest.mark.parametrize("value, expected", [
+    ("http://localhost:8021", "http://localhost:8021"),     # development
+    ("http://e21.example", ""),                              # never plain http on the net
+    ("ftp://e21.example", ""),
+    ("not a url", ""),
+    ("  ", ""),
+])
+def test_only_https_services_count(monkeypatch, value, expected):
+    monkeypatch.setenv("MYEDITOR_MEMBERSHIP_SERVICE", value)
+    import constants
+    monkeypatch.setattr(constants, "MEMBERSHIP_SERVICE_URL", "")
+    assert service_url() == expected
 
 
-def test_a_blank_environment_key_falls_through(monkeypatch):
-    monkeypatch.setenv("MYEDITOR_E21_API_KEY", "   ")
-    monkeypatch.setitem(sys.modules, "_build_secrets", _secrets_module("from-build"))
-    assert api_key() == "from-build"
+def test_the_service_is_asked_whether_it_can_sign_people_up():
+    env = make()
+    answers = []
+    env.api.check_service(answers.append)
+    env.nam.settle()
+    assert answers == [True] and env.api.available
+    env.server.status = {"service": "myeditor-sidecar", "membership": False}
+    env.api.check_service(answers.append)
+    env.nam.settle()
+    assert answers == [True, False] and not env.api.available
 
 
-def test_a_source_checkout_has_no_key(monkeypatch):
-    # The generated module is absent from git; importing it must fail
-    # quietly into "no key", never into a crash at startup.
-    monkeypatch.delenv("MYEDITOR_E21_API_KEY", raising=False)
-    monkeypatch.setitem(sys.modules, "_build_secrets", None)
-    assert api_key() == ""
-    assert not has_api_key()
+def test_no_service_means_not_available_without_asking():
+    env = make(service="")
+    answers = []
+    env.api.check_service(answers.append)
+    QCoreApplication.processEvents()
+    assert answers == [False] and env.nam.calls == []
 
 
-@pytest.mark.parametrize("value", [None, 42, b"bytes", "", "two words", "line\nbreak", "ä"])
-def test_an_unusable_built_in_key_is_no_key(monkeypatch, value):
-    monkeypatch.delenv("MYEDITOR_E21_API_KEY", raising=False)
-    monkeypatch.setitem(sys.modules, "_build_secrets", _secrets_module(value))
-    assert api_key() == ""
-
-
-def test_the_client_resolves_the_key_when_none_is_given(monkeypatch):
-    monkeypatch.setenv("MYEDITOR_E21_API_KEY", API_KEY)
-    clock = FakeClock()
-    srv = FakeMembershipServer(clock)
-    nam = FakeNam(responder=srv)
-    api = MembershipApi(FakeSigner(clock=clock), nam=nam, clock=clock)
-    assert api.has_key
-    ok, failed = [], []
-    api.config(ok.append, failed.append)
-    nam.settle()
-    assert failed == [] and isinstance(ok[0], MembershipConfig)
+def test_a_service_without_a_key_is_no_key():
+    script = [json_reply({"message": "Not available.", "code": "not_configured"}, status=503)]
+    env = make(script=script, server=False)
+    assert failure(env, "config").code == ErrorCode.NO_KEY
 
 
 @pytest.mark.parametrize("name, args, kwargs, verb, path, kind", ALL_CALLS)
-def test_without_a_key_nothing_is_signed_or_sent(name, args, kwargs, verb, path, kind):
-    env = make(key="")
+def test_without_a_service_nothing_is_signed_or_sent(name, args, kwargs, verb, path, kind):
+    env = make(service="")
     error = failure(env, name, *args, **kwargs)
     assert error.code == ErrorCode.NO_KEY
     assert env.signer.requests == []
@@ -209,16 +211,16 @@ def test_every_call_reaches_its_documented_endpoint(name, args, kwargs, verb, pa
     assert failed == [] and isinstance(ok[0], kind)
     called_verb, request, _body = env.nam.calls[0]
     assert called_verb == verb
-    assert request.url().toString() == PREFIX + path
+    assert request.url().toString() == SERVICE_PREFIX + path     # travels to the service
     assert env.server.refusals == []
 
 
 @pytest.mark.parametrize("name, args, kwargs, verb, path, kind", ALL_CALLS)
-def test_every_request_carries_the_key_and_cannot_hang_or_wander(name, args, kwargs, verb, path, kind):
+def test_no_request_carries_a_key_and_none_can_hang_or_wander(name, args, kwargs, verb, path, kind):
     env = make()
     run(env, name, *args, **kwargs)
     request = env.nam.calls[0][1]
-    assert header(request, "X-Api-Key") == API_KEY.encode("ascii")
+    assert header(request, "X-Api-Key") is None          # the key lives on the service only
     assert header(request, "Accept") == b"application/json"
     assert request.transferTimeout() == NETWORK_TIMEOUT_MS
     assert request.attribute(QNetworkRequest.Attribute.RedirectPolicyAttribute) == (
@@ -229,26 +231,26 @@ def test_every_request_carries_the_key_and_cannot_hang_or_wander(name, args, kwa
 
 def test_the_production_server_is_the_documented_one():
     assert BASE_URL == "https://verein.einundzwanzig.space"
-    assert MembershipApi(FakeSigner(), api_key="k", nam=FakeNam()).url_for("/me") == (
+    assert MembershipApi(FakeSigner(), service_url=SERVICE, nam=FakeNam()).url_for("/me") == (
         "https://verein.einundzwanzig.space/api/v1/membership/me"
     )
 
 
 def test_a_trailing_slash_on_the_base_url_does_not_double():
-    api = MembershipApi(FakeSigner(), api_key="k", base_url="http://localhost:8000/", nam=FakeNam())
+    api = MembershipApi(FakeSigner(), service_url=SERVICE, base_url="http://localhost:8000/", nam=FakeNam())
     assert api.url_for("/me") == "http://localhost:8000/api/v1/membership/me"
 
 
 def test_a_relative_base_url_is_refused():
     with pytest.raises(ValueError):
-        MembershipApi(FakeSigner(), api_key="k", base_url="/api", nam=FakeNam())
+        MembershipApi(FakeSigner(), service_url=SERVICE, base_url="/api", nam=FakeNam())
 
 
 # --------------------------------------------------------------------- #
 # Configuration needs no signature                                      #
 # --------------------------------------------------------------------- #
 
-def test_config_is_fetched_with_the_key_alone():
+def test_config_is_fetched_without_a_signature():
     env = make()
     ok, failed = run(env, "config")
     assert failed == []
@@ -429,8 +431,8 @@ def test_the_longest_allowed_application_text_is_sent():
     assert applied_body(application_text="x" * 2000)["application_text"] == "x" * 2000
 
 
-def test_no_key_outranks_a_field_problem():
-    env = make(key="")
+def test_no_service_outranks_a_field_problem():
+    env = make(service="")
     assert failure(env, "apply", nip05_handle="BAD").code == ErrorCode.NO_KEY
 
 
@@ -623,7 +625,7 @@ def test_the_re_sign_happens_once_only():
 def test_a_prompt_refusal_is_not_re_signed():
     # A fresh credential refused anyway means the key or the signature
     # is wrong; another prompt on the phone would not change that.
-    env = make(key="not-the-servers-key")
+    env = make(script=[json_reply({"message": "Unauthenticated."}, status=401)], server=False)
     error = failure(env, "me")
     assert error.code == ErrorCode.UNAUTHORIZED
     assert len(env.signer.requests) == 1
@@ -765,33 +767,10 @@ def test_session_signer_reports_a_pool_failure_as_a_signer_failure():
 
 
 # --------------------------------------------------------------------- #
-# The key never leaks                                                   #
+# Server words                                                          #
 # --------------------------------------------------------------------- #
-
-def _echoing(status):
-    return json_reply({
-        "message": f"Unknown key {API_KEY} for client",
-        "errors": {"email": [f"{API_KEY} is not an email"]},
-    }, status=status, headers={"Retry-After": "5"})
-
-
-@pytest.mark.parametrize("script", [
-    [_echoing(401)], [_echoing(422)], [_echoing(429)], [_echoing(500)], [_echoing(404)],
-    [FakeReply(status=200, body=f'{{"data": "{API_KEY}"}}'.encode())],
-    [transport_failure(QNetworkReply.NetworkError.HostNotFoundError)],
-])
-def test_the_client_key_appears_in_no_error(script):
-    from nostr.einundzwanzig_api import humanize
-    env = make(script=script)
-    error = failure(env, "apply", email="satoshi@example.org")
-    assert API_KEY not in repr(error)
-    assert API_KEY not in " ".join(humanize(error))
-
-
-def test_the_client_key_appears_in_no_signer_error():
-    env = make(signer=FakeSigner(failure=f"bad {API_KEY}"))
-    assert API_KEY not in repr(failure(env, "me"))
-
+# (That the association's key never leaks is the service's promise now:
+# see tests/test_sidecar.py. The app never holds it.)
 
 def test_a_message_is_cleaned_and_capped():
     env = make(script=[json_reply({"message": "line\none\x00\t" + "x" * 1000}, status=500)])
@@ -929,7 +908,7 @@ def test_the_export_keeps_the_whole_document():
 
 
 # --------------------------------------------------------------------- #
-# The key at build time                                                 #
+# No key in any build                                                   #
 # --------------------------------------------------------------------- #
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -940,27 +919,8 @@ def _read(path):
         return handle.read()
 
 
-def test_the_generated_key_module_is_never_committed():
-    lines = [line.strip() for line in _read(".gitignore").splitlines()]
-    assert "_build_secrets.py" in lines
-
-
-def test_the_bundle_includes_the_key_module_only_when_it_exists():
-    spec = _read("packaging/my_editor.spec")
-    assert 'os.path.exists(os.path.join(ROOT, "_build_secrets.py"))' in spec
-    assert 'hiddenimports.append("_build_secrets")' in spec
-
-
-def test_ci_writes_the_key_from_a_secret_before_bundling_and_never_echoes_it():
-    workflow = _read(".github/workflows/build-installers.yml")
-    write = workflow.index("name: Write build secrets")
-    bundle = workflow.index("name: Build app bundle (PyInstaller)")
-    assert write < bundle
-    step = workflow[write:bundle]
-    assert "E21_API_KEY: ${{ secrets.E21_API_KEY }}" in step
-    run = step[step.index("run:"):]
-    # The secret reaches the script through the environment only, so it
-    # is never part of a command line a log could show.
-    assert "${{" not in run
-    assert "echo" not in run and "print" not in run
-    assert "_build_secrets.py" in run
+def test_no_build_step_puts_the_association_key_into_the_app():
+    # The key lives on the membership service only (sidecar/).
+    assert "E21_API_KEY" not in _read(".github/workflows/build-installers.yml")
+    assert "_build_secrets" not in _read("packaging/my_editor.spec")
+    assert "sidecar/.env" in [l.strip() for l in _read(".gitignore").splitlines()]

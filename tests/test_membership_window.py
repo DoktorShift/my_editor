@@ -64,10 +64,24 @@ def alerts(monkeypatch):
 
 
 class FakeApi:
-    def __init__(self, has_key=True):
-        self.has_key = has_key
+    """The client's shape. ``service`` is what the membership service says
+    when asked: True (can sign people up), False (no key), None (no service
+    configured in this build). ``answer_later`` holds the answer back."""
+
+    def __init__(self, service=True, *, answer_later=False):
+        self.configured = service is not None
+        self._service = bool(service)
         self.calls = []
         self.canceled = 0
+        self.pending_check = None
+        self._answer_later = answer_later
+
+    def check_service(self, on_done):
+        self.calls.append(SimpleNamespace(name="check_service", ok=on_done, fail=None, kw={}))
+        if self._answer_later:
+            self.pending_check = lambda: on_done(self._service)
+        else:
+            on_done(self._service)
 
     def _record(self, name, ok, fail, **kw):
         self.calls.append(SimpleNamespace(name=name, ok=ok, fail=fail, kw=kw))
@@ -183,7 +197,7 @@ def test_opening_signs_nothing():
     api = FakeApi()
     win = window(api)
     assert win.page == OVERVIEW
-    assert api.names() == ["config"]   # the fee, unsigned
+    assert api.names() == ["check_service", "config"]   # availability and fee, unsigned
 
 
 def test_the_fee_is_shown_as_the_association_states_it():
@@ -201,21 +215,39 @@ def test_without_a_signer_the_way_on_is_connecting_one():
     assert asked == [()]
 
 
-def test_without_a_client_key_the_way_on_is_the_website():
-    api = FakeApi(has_key=False)
+@pytest.mark.parametrize("service", [None, False])
+def test_without_a_service_that_can_sign_up_the_way_on_is_the_website(service):
+    # None: no service in this build. False: the service has no key.
+    api = FakeApi(service)
     win = window(api)
     links = recorder(win.link_activated)
-    assert api.calls == []
+    assert "config" not in api.names()
     assert default_button(win).text() == "Join on the Website"
     default_button(win).click()
     assert links == [(JOIN_URL,)]
+
+
+def test_continue_waits_until_the_service_has_answered():
+    api = FakeApi(True, answer_later=True)
+    win = window(api)
+    assert default_button(win).text() == "Continue"
+    assert not default_button(win).isEnabled()
+    assert "Checking" in win._overview_note.text()
+    api.pending_check()
+    assert default_button(win).isEnabled()
+    assert "config" in api.names()
+
+
+def test_a_member_page_hides_what_needs_the_service_when_it_has_no_key():
+    win = window(FakeApi(False), known_member=True)
+    assert win._name_button.isHidden() and win._export_link.isHidden()
 
 
 def test_a_known_member_goes_straight_to_what_is_active():
     api = FakeApi()
     win = window(api, known_member=True, handle="satoshi")
     assert win.page == MEMBER
-    assert api.names() == ["config"]
+    assert api.names() == ["check_service", "config"]
     assert win._name_detail.text() == "satoshi@einundzwanzig.space"
     assert not win._details_link.isHidden()   # details cost a signature, so on request
 

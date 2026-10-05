@@ -151,12 +151,30 @@ class MembershipWindow(AssistantWindow):
         self._invoice = None
         self._name_only = False
         self._just_joined = False
+        # Joining in the app needs the membership service (which holds the
+        # association's key). Until it has answered, Continue waits; without
+        # it, the association's website is the way to join.
+        self._service = "checking" if api is not None and api.configured else "unavailable"
         if pubkey and known_member:
             self._show_member()
         else:
             self._show_overview()
-        if api is not None and api.has_key:
+        if self._service == "checking":
+            api.check_service(lambda ok, asked=api: self._on_service_checked(asked, ok))
+
+    def _joining_available(self) -> bool:
+        return self._service == "available"
+
+    def _on_service_checked(self, api, ok: bool) -> None:
+        if api is not self._api:
+            return      # an answer for an identity that is no longer shown
+        self._service = "available" if ok else "unavailable"
+        if ok:
             api.config(self._on_config, lambda _error: None)
+        if self.page == OVERVIEW:
+            self._show_overview()
+        elif self.page == MEMBER:
+            self._show_member()
 
     # ------------------------------------------------------------------ #
     # Overview                                                            #
@@ -218,21 +236,25 @@ class MembershipWindow(AssistantWindow):
         if not self._pubkey:
             buttons = [("not_now", "Not Now", NORMAL, self.reject),
                        ("connect", "Connect Signer…", DEFAULT, self._ask_to_connect)]
-        elif self._api is None or not self._api.has_key:
+        elif self._service == "unavailable":
             buttons = [("not_now", "Not Now", NORMAL, self.reject),
                        ("website", "Join on the Website", DEFAULT, self._join_on_website)]
         else:
             buttons = [("not_now", "Not Now", NORMAL, self.reject),
                        ("continue", "Continue", DEFAULT, self._load_status)]
         self.show_page(OVERVIEW, buttons)
+        if "continue" in self.buttons:
+            self.buttons["continue"].setEnabled(self._joining_available())
 
     def _set_overview_note(self, note: str) -> None:
         if not self._pubkey:
             note = note or ("Membership belongs to a Nostr identity. Connect your "
                             "signer to join.")
-        elif self._api is None or not self._api.has_key:
+        elif self._service == "unavailable":
             note = note or ("This copy of MyEditor can’t sign you up directly. "
                             "You can join on the EINUNDZWANZIG website.")
+        elif self._service == "checking":
+            note = note or "Checking whether you can join from here…"
         self._overview_note.setText(note or (
             "Membership belongs to your Nostr identity and runs for a calendar year. "
             "You renew it yourself; nothing is charged automatically."))
@@ -799,7 +821,7 @@ class MembershipWindow(AssistantWindow):
             subtitle += " Thank you for supporting the community."
         self._member_subtitle.setText(subtitle)
 
-        has_key = self._api is not None and self._api.has_key
+        has_key = self._joining_available()
         if self._handle:
             self._name_detail.setText(nip05_address(self._handle))
             self._name_button.setText("Change Address…")

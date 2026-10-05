@@ -55,13 +55,6 @@ hiddenimports = [
     "lxml.html.clean",
 ]
 
-# The EINUNDZWANZIG membership API client key. CI writes _build_secrets.py
-# from a repository secret before this spec runs, and the app imports it
-# by name at runtime, which static analysis cannot see. Without the file
-# (local builds, forks) the bundle simply ships without in-app joining.
-if os.path.exists(os.path.join(ROOT, "_build_secrets.py")):
-    hiddenimports.append("_build_secrets")
-
 # coincurve ships compiled CFFI extensions (_libsecp256k1 and a vendored
 # _cffi_backend) that the .so files import dynamically at load time, which
 # PyInstaller's static analysis cannot see and coincurve ships no hook for.

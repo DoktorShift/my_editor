@@ -21,6 +21,13 @@ APP_RELEASES_URL = f"{APP_URL}/releases/latest"
 _REPO_OWNER, _REPO_NAME = APP_REPO_SLUG.split("/")
 APP_INSTALL_GUIDE_URL = f"https://{_REPO_OWNER}.github.io/{_REPO_NAME}/install/"
 
+# The membership service (sidecar/) that holds the EINUNDZWANZIG association's
+# API key and forwards sign-up requests. Official builds point at the server
+# the maintainers run; a self-hosted build points at its own, or leaves this
+# empty, and then joining in the app is not offered (the association's
+# website is). MYEDITOR_MEMBERSHIP_SERVICE in the environment overrides it.
+MEMBERSHIP_SERVICE_URL = ""
+
 # UI theme colors
 DARK_BG = "#1E1E1E"
 DARK_FG = "#D4D4D4"

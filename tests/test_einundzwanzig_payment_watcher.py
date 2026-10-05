@@ -31,7 +31,7 @@ from nostr.einundzwanzig_api import (
     parse_invoice,
 )
 from tests.membership_fakes import (
-    API_KEY,
+    SERVICE,
     PREFIX,
     FakeClock,
     FakeMembershipServer,
@@ -268,7 +268,7 @@ def test_polling_uses_refresh_with_one_fresh_signature_per_check():
     server.routes["POST /payments/2026/refresh"] = lambda b, e: data_reply(next(answers))
     nam = FakeNam(responder=server)
     signer = FakeSigner(clock=clock)
-    api = MembershipApi(signer, api_key=API_KEY, nam=nam, clock=clock)
+    api = MembershipApi(signer, service_url=SERVICE, nam=nam, clock=clock)
     timer = FakeTimer()
     w = PaymentWatcher(api, 2026, timer=timer)
     rec = Recorder(w)

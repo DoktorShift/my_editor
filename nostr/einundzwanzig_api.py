@@ -14,16 +14,23 @@ Only the main surface under ``/api/v1/membership`` is used. The "native
 app" branch exists for clients that cannot sign, cannot read a
 membership back and has no refresh; this app can sign.
 
-Two credentials ride on every request, and neither replaces the other:
+Requests go through a membership service, never straight to the
+association. The association names the calling application by a client
+key (``X-Api-Key``) that must stay secret, so it lives only on that
+service (``sidecar/`` in this repository, run 24/7 by whoever publishes
+a build: rinbal's server for official builds, your own if you self-host).
+The app never holds the key. Which service a build talks to is
+:func:`service_url`; without one, or when the service says it has no
+key, joining in the app is simply not offered.
 
-- ``X-Api-Key`` names the calling application. It is issued by the
-  association, injected at build time (see :func:`api_key`) and never
-  appears in a log, an error message or the repository.
-- A NIP-98 signature (``nostr/nip98.py``) names the end user. Every call
-  but :meth:`MembershipApi.config` carries one. The server accepts each
-  event id exactly once and only within 60 seconds of its timestamp, so
-  every attempt builds and signs a FRESH event immediately before it is
-  sent, a retry included.
+What the app does add is a NIP-98 signature (``nostr/nip98.py``) naming
+the end user, on every call but :meth:`MembershipApi.config`. Its ``u``
+tag is the association's own URL for the request (that is what the
+association verifies), even though the request travels to the service;
+the service checks it too before it lends its key. The association
+accepts each event id once and only within 60 seconds of its timestamp,
+so every attempt builds and signs a FRESH event immediately before it is
+sent, a retry included.
 
 Signing goes through a plain callable rather than the bunker, so tests
 can fake it and the window can adapt whatever signer it holds (see
@@ -41,7 +48,6 @@ from __future__ import annotations
 
 import copy
 import email.utils
-import importlib
 import json
 import math
 import os
@@ -118,51 +124,49 @@ _HEX64 = re.compile(r"\A[0-9a-f]{64}\Z")
 
 
 # --------------------------------------------------------------------------- #
-# The client key                                                               #
+# The membership service                                                       #
 # --------------------------------------------------------------------------- #
 
-# Developers and testers set this; it wins over a built-in key.
-ENV_API_KEY: str = "MYEDITOR_E21_API_KEY"
+# Developers and self-hosters set this; it wins over the build's service.
+ENV_SERVICE_URL: str = "MYEDITOR_MEMBERSHIP_SERVICE"
 
-# Release builds get the key from a module CI writes from a repository
-# secret just before PyInstaller runs (see .github/workflows and
-# packaging/my_editor.spec). It is in .gitignore and absent from every
-# source checkout, which then simply has no key.
-_BUILD_SECRETS_MODULE = "_build_secrets"
+# How long the app waits for the service to say whether it can help.
+STATUS_TIMEOUT_MS: int = 8_000
 
 
-# A key travels in a header, so it is printable ASCII without spaces. One
-# that is not (a pasted line break, a stray quote mark) is no key at all
-# rather than a header Qt would mangle.
-_KEY_SHAPE = re.compile(r"\A[\x21-\x7e]{1,512}\Z")
+def _usable_service(value: Any) -> str:
+    """An https URL (or http on this computer, for development), without a
+    trailing slash, or ``""``."""
+    text = value.strip().rstrip("/") if isinstance(value, str) else ""
+    if not text or not url_safety.origin_of(text):
+        return ""
+    lowered = text.lower()
+    if lowered.startswith("https://"):
+        return text
+    local = ("http://localhost", "http://127.0.0.1", "http://[::1]")
+    return text if lowered.startswith(local) else ""
 
 
-def _usable_key(value: Any) -> str:
-    text = value.strip() if isinstance(value, str) else ""
-    return text if _KEY_SHAPE.match(text) else ""
+def service_url() -> str:
+    """The membership service this build uses, or ``""``.
 
-
-def api_key() -> str:
-    """The association's client key for this build, or ``""``.
-
-    ``MYEDITOR_E21_API_KEY`` from the environment first, then
-    ``E21_API_KEY`` from the generated ``_build_secrets`` module. A
-    missing, broken, empty or malformed source falls through to the
-    next one.
+    ``MYEDITOR_MEMBERSHIP_SERVICE`` from the environment first, then the
+    build's ``MEMBERSHIP_SERVICE_URL`` (constants.py). Anything that is
+    not an https URL counts as none.
     """
-    from_env = _usable_key(os.environ.get(ENV_API_KEY, ""))
+    from_env = _usable_service(os.environ.get(ENV_SERVICE_URL, ""))
     if from_env:
         return from_env
     try:
-        module = importlib.import_module(_BUILD_SECRETS_MODULE)
-    except Exception:  # noqa: BLE001, a broken generated file must not crash startup
+        from constants import MEMBERSHIP_SERVICE_URL
+    except ImportError:
         return ""
-    return _usable_key(getattr(module, "E21_API_KEY", ""))
+    return _usable_service(MEMBERSHIP_SERVICE_URL)
 
 
-def has_api_key() -> bool:
-    """True when this build can talk to the membership API at all."""
-    return bool(api_key())
+def has_service() -> bool:
+    """True when this build names a membership service at all."""
+    return bool(service_url())
 
 
 # --------------------------------------------------------------------------- #
@@ -914,16 +918,19 @@ class MembershipApi(QObject):
     is signed, so the user is never asked to approve a request that
     cannot succeed.
 
-    Seams: ``sign`` (see :data:`SignFn`), ``api_key`` (None reads
-    :func:`api_key`), ``nam`` and ``clock`` (unix seconds), so no test
+    Seams: ``sign`` (see :data:`SignFn`), ``service_url`` (None reads
+    :func:`service_url`), ``nam`` and ``clock`` (unix seconds), so no test
     touches the network, a signer or the wall clock.
+
+    ``base_url`` is the association's own address: what the signatures
+    name. ``service_url`` is where the requests travel.
     """
 
     def __init__(
         self,
         sign: SignFn,
         *,
-        api_key: Optional[str] = None,
+        service_url: Optional[str] = None,
         base_url: str = BASE_URL,
         nam: Optional[QNetworkAccessManager] = None,
         clock: Optional[Callable[[], float]] = None,
@@ -934,7 +941,9 @@ class MembershipApi(QObject):
         if not url_safety.origin_of(base):
             raise ValueError("base_url must be an absolute http(s) URL")
         self._sign = sign
-        self._api_key = _usable_key(api_key) if api_key is not None else _resolve_api_key()
+        self._service_url = (_usable_service(service_url) if service_url is not None
+                             else _resolve_service_url())
+        self._service_ok: Optional[bool] = None
         self._base_url = base
         self._nam = nam or QNetworkAccessManager(self)
         self._clock = clock or time.time
@@ -944,16 +953,54 @@ class MembershipApi(QObject):
     # -- public surface ----------------------------------------------------
 
     @property
-    def has_key(self) -> bool:
-        return bool(self._api_key)
+    def configured(self) -> bool:
+        """This build names a membership service."""
+        return bool(self._service_url)
+
+    @property
+    def available(self) -> bool:
+        """The service answered that it can sign people up (check_service)."""
+        return self.configured and self._service_ok is True
+
+    def check_service(self, on_done: Callable[[bool], None]) -> None:
+        """Ask the service whether joining is possible; ``on_done(bool)`` once.
+
+        A service with no key, an unreachable one, or no service at all
+        answers False, and the window then offers the association's
+        website instead of a flow that would end in an error.
+        """
+        if not self._service_url:
+            QTimer.singleShot(0, lambda: on_done(False))
+            return
+        request = QNetworkRequest(QUrl(f"{self._service_url}/status"))
+        request.setRawHeader(b"Accept", b"application/json")
+        request.setRawHeader(b"User-Agent", _USER_AGENT)
+        request.setTransferTimeout(STATUS_TIMEOUT_MS)
+        reply = self._nam.get(request)
+
+        def finished() -> None:
+            ok = False
+            try:
+                if reply.error() == QNetworkReply.NetworkError.NoError:
+                    data = json.loads(bytes(reply.readAll())[:65536].decode("utf-8"))
+                    ok = isinstance(data, dict) and data.get("membership") is True
+            except (ValueError, UnicodeDecodeError):
+                ok = False
+            finally:
+                reply.deleteLater()
+            self._service_ok = ok
+            on_done(ok)
+
+        reply.finished.connect(finished)
 
     def url_for(self, path: str) -> str:
-        """The absolute URL of ``path`` under the membership prefix.
-
-        This string is both what is requested and what the NIP-98 ``u``
-        tag carries, so there is one place it is built.
-        """
+        """The association's own URL for ``path``: what the NIP-98 ``u`` tag
+        names. One place builds it, so signature and request always agree."""
         return f"{self._base_url}{API_PREFIX}{path}"
+
+    def request_url_for(self, path: str) -> str:
+        """Where the request for ``path`` actually travels: the service."""
+        return f"{self._service_url}{API_PREFIX}{path}"
 
     def config(self, on_success: Callable[[MembershipConfig], None],
                on_failure: Callable[[ApiError], None]) -> None:
@@ -1025,9 +1072,9 @@ class MembershipApi(QObject):
                     problems[name] = [problem]
         call = self._new_call("POST", "/applications", _json_body(payload), True,
                               parse_membership, on_success, on_failure)
-        # A missing key outranks a field problem: with no key nothing works,
-        # and fixing the field would only lead to the next refusal.
-        if problems and self._api_key:
+        # A missing service outranks a field problem: without one nothing
+        # works, and fixing the field would only lead to the next refusal.
+        if problems and self._service_url:
             self._fail(call, ApiError(ErrorCode.VALIDATION, field_errors=problems))
             return
         self._run(call)
@@ -1107,7 +1154,7 @@ class MembershipApi(QObject):
         self._run(self._new_call(method, path, body, signed, parse, on_success, on_failure))
 
     def _run(self, call: _Call) -> None:
-        if not self._api_key:
+        if not self._service_url:
             self._fail(call, ApiError(ErrorCode.NO_KEY))
             return
         if call.signed:
@@ -1143,7 +1190,7 @@ class MembershipApi(QObject):
                 return
             answered["done"] = True
             if self._live(call):
-                self._fail(call, _signer_error(reason, self._api_key))
+                self._fail(call, _signer_error(reason, ""))
 
         try:
             # A copy, so a signer that edits what it is handed cannot
@@ -1155,17 +1202,16 @@ class MembershipApi(QObject):
                 if self._live(call):
                     self._fail(call, ApiError(
                         ErrorCode.SIGNER_UNREACHABLE,
-                        message=_clean_text(f"signer unavailable: {exc}", self._api_key),
+                        message=_clean_text(f"signer unavailable: {exc}", ""),
                     ))
 
     def _send(self, call: _Call, signed: Optional[dict]) -> None:
-        request = QNetworkRequest(QUrl(self.url_for(call.path)))
+        request = QNetworkRequest(QUrl(self.request_url_for(call.path)))
         request.setRawHeader(b"Accept", b"application/json")
         request.setRawHeader(b"User-Agent", _USER_AGENT)
-        request.setRawHeader(b"X-Api-Key", self._api_key.encode("utf-8"))
         request.setTransferTimeout(NETWORK_TIMEOUT_MS)
-        # A redirect re-sends the headers, the client key included, so it
-        # may only stay on the association's own origin.
+        # A redirect re-sends the headers, the signature included, so it
+        # may only stay on the service's own origin.
         request.setAttribute(
             QNetworkRequest.Attribute.RedirectPolicyAttribute,
             QNetworkRequest.RedirectPolicy.SameOriginRedirectPolicy,
@@ -1255,7 +1301,7 @@ class MembershipApi(QObject):
             return (call.parse(envelope["data"]),)
         except (ValueError, TypeError, KeyError, AttributeError, RecursionError) as exc:
             return ApiError(ErrorCode.BAD_RESPONSE, status=status,
-                            message=_clean_text(str(exc), self._api_key))
+                            message=_clean_text(str(exc), ""))
 
     @staticmethod
     def _transport_error(error) -> ApiError:
@@ -1279,7 +1325,7 @@ class MembershipApi(QObject):
             body = {}
         if not isinstance(body, dict):
             body = {}
-        message = _clean_text(body.get("message"), self._api_key)
+        message = _clean_text(body.get("message"), "")
 
         retry_after = None
         if status in (429, 503):
@@ -1287,7 +1333,10 @@ class MembershipApi(QObject):
                 _reply_header(reply, "Retry-After"), now=self._clock(),
             )
 
-        if status in (401, 403):
+        if status == 503 and body.get("code") == "not_configured":
+            # The service runs but holds no key: joining isn't offered here.
+            code = ErrorCode.NO_KEY
+        elif status in (401, 403):
             code = ErrorCode.UNAUTHORIZED
         elif status == 404:
             code = ErrorCode.NOT_FOUND
@@ -1296,7 +1345,7 @@ class MembershipApi(QObject):
         elif status == 422:
             return ApiError(
                 ErrorCode.VALIDATION, status=status, message=message,
-                field_errors=_clean_field_errors(body.get("errors"), self._api_key),
+                field_errors=_clean_field_errors(body.get("errors"), ""),
             )
         elif status == 429:
             code = ErrorCode.RATE_LIMITED
@@ -1331,7 +1380,7 @@ class MembershipApi(QObject):
 
 
 # ``api_key`` is shadowed by the constructor argument of the same name.
-_resolve_api_key = api_key
+_resolve_service_url = service_url
 
 
 # --------------------------------------------------------------------------- #

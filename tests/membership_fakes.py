@@ -32,9 +32,12 @@ from nostr import crypto, events
 
 SECRET_KEY = bytes.fromhex("3f" * 32)
 PUBKEY = crypto.get_public_key(SECRET_KEY).hex()
-API_KEY = "test-client-key-0123456789"
 BASE = "https://verein.einundzwanzig.space"
 PREFIX = BASE + "/api/v1/membership"
+# The membership service (sidecar/) the app sends requests to. It adds the
+# association's key; the app never has it.
+SERVICE = "https://e21.sidecar.example"
+SERVICE_PREFIX = SERVICE + "/api/v1/membership"
 NOW = 1_785_062_400
 
 
@@ -340,10 +343,10 @@ class FakeMembershipServer:
     gives, with the reason kept in :attr:`refusals` for assertions.
     """
 
-    def __init__(self, clock: FakeClock, *, api_key: str = API_KEY) -> None:
+    def __init__(self, clock: FakeClock) -> None:
         self.clock = clock
-        self.api_key = api_key
         self.seen_ids: set = set()
+        self.status = {"service": "myeditor-sidecar", "membership": True}
         self.accepted: List[dict] = []
         self.refusals: List[str] = []
         self.bodies: List[Optional[bytes]] = []
@@ -370,13 +373,17 @@ class FakeMembershipServer:
         return json_reply({"message": "Unauthenticated."}, status=401)
 
     def __call__(self, verb: str, request, body: Optional[bytes]) -> FakeReply:
+        """The service and the association as one: requests arrive at the
+        service, and their signatures must name the association's URL."""
         url = request.url().toString()
-        assert url.startswith(PREFIX), url
-        path = url[len(PREFIX):]
+        if url == SERVICE + "/status":
+            return json_reply(self.status)
+        assert url.startswith(SERVICE_PREFIX), url
+        path = url[len(SERVICE_PREFIX):]
         self.bodies.append(body)
 
-        if header(request, "X-Api-Key") != self.api_key.encode("ascii"):
-            return self._refuse("client key")
+        if header(request, "X-Api-Key") is not None:
+            return self._refuse("a client key from the app")   # it must never have one
         if path == "/config" and verb == "GET":
             return self.routes["GET /config"](body, None)
 
@@ -393,7 +400,7 @@ class FakeMembershipServer:
             return self._refuse("kind")
         if str(tag(event, "method") or "").upper() != verb:
             return self._refuse("method")
-        if tag(event, "u") != url:
+        if tag(event, "u") != PREFIX + path:
             return self._refuse("url")
         if abs(int(event.get("created_at", 0)) - self.clock()) > 60:
             return self._refuse("time window")
