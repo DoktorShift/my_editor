@@ -43,7 +43,7 @@ Everything else gets 404.
 
 **Limits.** Requests per client address per minute and invoices per Nostr account per day are limited, because everyone shares the key's quota. Request bodies are capped at 32 KB and refused as soon as they pass that, unread when their declared length already does. Answers from the association are capped at 1 MB, counted after unpacking should the association compress them.
 
-**Answers.** They pass through unchanged, `Retry-After` included. The one exception: if the association ever echoed the key back, the sidecar removes it.
+**Answers.** They pass through unchanged, `Retry-After` included. Two exceptions. If the association ever echoed the key back, the sidecar removes it. And if the association refuses with 401 a request that passed every check above (or the fee lookup with 401 or 403), it refused the key or the clocks differ: the sidecar logs a warning and answers 503 with `"code": "upstream_refused"`, and MyEditor says joining in the app isn't available right now and offers the website.
 
 **What it answers itself:**
 
@@ -226,4 +226,5 @@ MYEDITOR_MEMBERSHIP_SERVICE=http://localhost:8021 .venv/bin/python main.py
 | `/status` says `"membership": false` | `E21_API_KEY` is empty or not loaded. Check `.env` (Docker) or `/etc/myeditor-sidecar.env` (systemd), then restart. |
 | MyEditor offers only "Join on the Website" | MyEditor has no sidecar address, or `/status` cannot be reached or says `false`. Open `https://your-sidecar/status` in a browser. |
 | Every call ends with "could not confirm it is you" (401) | The computer's clock is more than a minute off. Signatures are only valid for a minute. Turn on automatic date and time. |
+| MyEditor says "Joining in the app isn't available right now" although `/status` says `true`, and the log says "association refused the key or clocks differ" | The association no longer accepts `E21_API_KEY` (ask for a new one), or this server's clock is off. Signatures are valid for a minute only, so keep the clock synchronized with NTP (on most systems: `timedatectl set-ntp true`). |
 | 502 "not reachable" | The association's API is down, or this server cannot reach it. |

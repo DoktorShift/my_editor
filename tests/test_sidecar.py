@@ -413,13 +413,42 @@ def test_invoices_per_account_are_limited_per_day():
 def test_the_key_never_leaves_in_an_answer(caplog):
     client, association, _ = make()
     association.answer = lambda r: reply(
-        401, json_body={"message": f"Unknown client key {KEY}"})
+        422, json_body={"message": f"Unknown client key {KEY}"})
     caplog.set_level("INFO", logger="myeditor-sidecar")
     response = call(client, "GET", "/me")
     assert KEY not in response.text and "[redacted]" in response.text
     for path in ("/me", "/payments"):
         call(client, "GET", path, tamper=tampered_sig)
     assert KEY not in caplog.text
+
+
+def test_a_refused_key_is_this_servers_problem_not_the_users(caplog):
+    client, association, _ = make()
+    association.answer = lambda r: reply(401, json_body={"message": "Unauthenticated."})
+    caplog.set_level("INFO", logger="myeditor-sidecar")
+    response = call(client, "GET", "/me")
+    assert response.status_code == 503
+    assert response.json()["code"] == "upstream_refused"
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert any("refused the key or clocks differ" in r.getMessage() for r in warnings)
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_a_refused_fee_lookup_is_the_same_and_is_not_cached(status):
+    client, association, _ = make()
+    association.answer = lambda r: reply(status, json_body={"message": "Forbidden."})
+    response = client.get("/api/v1/membership/config")
+    assert response.status_code == 503 and response.json()["code"] == "upstream_refused"
+    association.answer = lambda r: reply(json_body={"data": {"fee": 21}})
+    assert client.get("/api/v1/membership/config").json() == {"data": {"fee": 21}}
+    assert len(association.requests) == 2
+
+
+def test_a_403_on_a_signed_call_passes_through():
+    client, association, _ = make()
+    association.answer = lambda r: reply(403, json_body={"message": "Forbidden."})
+    response = call(client, "GET", "/me")
+    assert response.status_code == 403 and response.json() == {"message": "Forbidden."}
 
 
 def test_an_unreachable_association_is_a_clear_502():

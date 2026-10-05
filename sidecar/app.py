@@ -28,6 +28,10 @@ What it checks before lending its key:
   per day, are limited, because the key's quota is shared by everyone.
 - Bodies and answers are size-capped; the answer passes through unchanged
   except that the key, should the association ever echo it, is removed.
+- A 401 from the association after all of the above (or a 401 or 403 on
+  ``config``) means it refused the key, or this server's clock is off:
+  that is logged as a warning and answered with 503 ``upstream_refused``,
+  which the app reads as "joining in the app isn't available right now".
 
 What it answers itself:
 
@@ -380,6 +384,17 @@ def create_app(settings: Optional[Settings] = None, *,
                         type(exc).__name__)
             return finish(_json(502, "EINUNDZWANZIG is not reachable right now."))
 
+        # Every check the association makes on a signature was made here
+        # first, so a 401 now means the association refused the key, or
+        # this server's clock and the association's differ. Either way it
+        # is this server's problem, not the user's, and no retry or fresh
+        # signature from the app will help. The fee lookup carries no
+        # signature, so any refusal there is about the key.
+        if status_code == 401 or (path == "/config" and status_code == 403):
+            log.warning("association refused the key or clocks differ: %s %s answered %s",
+                        method, path, status_code)
+            return finish(_json(503, "Joining through this server is not available right now.",
+                                code="upstream_refused"))
         if key_bytes and key_bytes in content:
             content = content.replace(key_bytes, b"[redacted]")
         if path == "/config" and status_code == 200:
