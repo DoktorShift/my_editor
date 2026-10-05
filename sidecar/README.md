@@ -41,7 +41,7 @@ Everything else gets 404.
 - be validly signed;
 - be used for the first time.
 
-**Limits.** Requests per client address per minute and invoices per Nostr account per day are limited, because everyone shares the key's quota. Request bodies and answers are size-capped.
+**Limits.** Requests per client address per minute and invoices per Nostr account per day are limited, because everyone shares the key's quota. Request bodies are capped at 32 KB and refused as soon as they pass that, unread when their declared length already does. Answers from the association are capped at 1 MB, counted after unpacking should the association compress them.
 
 **Answers.** They pass through unchanged, `Retry-After` included. The one exception: if the association ever echoed the key back, the sidecar removes it.
 
@@ -141,11 +141,33 @@ Caddy:
 
 ```
 e21.example.org {
+	request_body {
+		max_size 64KB
+	}
 	reverse_proxy 127.0.0.1:8021
 }
 ```
 
-nginx: proxy to `http://127.0.0.1:8021`, and set `X-Forwarded-For`, so the per-address limit sees real addresses.
+nginx:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name e21.example.org;
+    # ssl_certificate and ssl_certificate_key as for your other sites
+
+    client_max_body_size 64k;
+
+    location / {
+        proxy_pass http://127.0.0.1:8021;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+The body limit turns away oversized requests before they reach the sidecar (which refuses anything over 32 KB itself). `X-Forwarded-For` lets the per-address limit see real addresses; without it, every request seems to come from the proxy and shares one limit.
 
 ---
 

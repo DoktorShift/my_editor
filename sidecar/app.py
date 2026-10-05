@@ -51,6 +51,7 @@ import os
 import re
 import threading
 import time
+import zlib
 from collections import OrderedDict, defaultdict, deque
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -170,6 +171,93 @@ def _route(method: str, path: str) -> Optional[bool]:
     return None
 
 
+_DIGITS = re.compile(r"\A[0-9]{1,18}\Z")
+
+
+def _declares_more(content_length: Optional[str], cap: int) -> bool:
+    """True when a Content-Length value announces more than ``cap`` bytes.
+    A value that is not a plain number counts as more."""
+    if content_length is None:
+        return False
+    value = content_length.strip()
+    return not _DIGITS.match(value) or int(value) > cap
+
+
+class _TooLarge(Exception):
+    """A body or an answer over its cap. Reading stopped there."""
+
+
+class _Unreadable(Exception):
+    """An answer in an encoding the sidecar did not ask for and cannot read."""
+
+
+async def _read_body(request: Request) -> bytes:
+    """The request body, read only up to MAX_BODY_BYTES.
+
+    A declared length over the cap is refused before anything is read;
+    an undeclared (chunked) body is read in pieces and refused as soon as
+    it passes the cap, so no client can make the sidecar hold more."""
+    if _declares_more(request.headers.get("content-length"), MAX_BODY_BYTES):
+        raise _TooLarge()
+    parts, size = [], 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > MAX_BODY_BYTES:
+            raise _TooLarge()
+        parts.append(chunk)
+    return b"".join(parts)
+
+
+def _decoder(answer: httpx.Response):
+    """A zlib decompressor for the answer's Content-Encoding, or None for
+    an answer sent as is. The sidecar asks for ``identity``; this is for
+    an upstream that compresses anyway."""
+    encoding = answer.headers.get("content-encoding", "").strip().lower()
+    if encoding in ("", "identity"):
+        return None
+    if encoding in ("gzip", "x-gzip"):
+        return zlib.decompressobj(16 + zlib.MAX_WBITS)
+    if encoding == "deflate":
+        return zlib.decompressobj()
+    raise _Unreadable()
+
+
+async def _read_answer(answer: httpx.Response) -> bytes:
+    """The answer's content, decoded, read only up to MAX_ANSWER_BYTES.
+
+    The cap applies to the decoded bytes, and decompression itself is
+    bounded, so a small compressed answer cannot unpack into a large one
+    in memory."""
+    if _declares_more(answer.headers.get("content-length"), MAX_ANSWER_BYTES):
+        raise _TooLarge()
+    decoder = _decoder(answer)
+    parts, size, received = [], 0, 0
+    try:
+        async for raw in answer.aiter_raw():
+            received += len(raw)
+            if received > MAX_ANSWER_BYTES:
+                raise _TooLarge()
+            if decoder is None:
+                data = raw
+            else:
+                data = decoder.decompress(raw, MAX_ANSWER_BYTES + 1 - size)
+                if decoder.unconsumed_tail:
+                    raise _TooLarge()
+            size += len(data)
+            if size > MAX_ANSWER_BYTES:
+                raise _TooLarge()
+            parts.append(data)
+        if decoder is not None:
+            tail = decoder.flush()
+            size += len(tail)
+            if size > MAX_ANSWER_BYTES:
+                raise _TooLarge()
+            parts.append(tail)
+    except zlib.error:
+        raise _Unreadable() from None
+    return b"".join(parts)
+
+
 def _json(status: int, message: str, **extra) -> JSONResponse:
     return JSONResponse({"message": message, **extra}, status_code=status)
 
@@ -230,8 +318,9 @@ def create_app(settings: Optional[Settings] = None, *,
             response.headers["Retry-After"] = str(wait)
             return finish(response)
 
-        body = await request.body()
-        if len(body) > MAX_BODY_BYTES:
+        try:
+            body = await _read_body(request)
+        except _TooLarge:
             return finish(_json(413, "Request too large."))
         if body and request.headers.get("content-type") != "application/json":
             return finish(_json(415, "Unsupported Media Type"))
@@ -263,33 +352,40 @@ def create_app(settings: Optional[Settings] = None, *,
                 status_code, content, headers = cached
                 return finish(Response(content, status_code=status_code, headers=headers))
 
-        headers = {"Accept": "application/json", "X-Api-Key": settings.api_key}
+        headers = {"Accept": "application/json", "Accept-Encoding": "identity",
+                   "X-Api-Key": settings.api_key}
         if signed:
             headers["Authorization"] = authorization
         if body:
             headers["Content-Type"] = "application/json"
         try:
-            answer = await client.request(method, upstream_url, content=body or None,
-                                          headers=headers)
+            async with client.stream(method, upstream_url, content=body or None,
+                                     headers=headers) as answer:
+                status_code = answer.status_code
+                if 300 <= status_code < 400:
+                    return finish(_json(502, "EINUNDZWANZIG answered with a redirect."))
+                content = await _read_answer(answer)
+                passed = {"Content-Type": answer.headers.get("content-type",
+                                                             "application/json")}
+                if "retry-after" in answer.headers:
+                    passed["Retry-After"] = answer.headers["retry-after"]
+        except _TooLarge:
+            log.warning("upstream answer too large for %s %s", method, path)
+            return finish(_json(502, "EINUNDZWANZIG sent an answer that was too large."))
+        except _Unreadable:
+            log.warning("upstream answer unreadable for %s %s", method, path)
+            return finish(_json(502, "EINUNDZWANZIG sent an answer that could not be read."))
         except httpx.HTTPError as exc:
             log.warning("upstream unreachable for %s %s: %s", method, path,
                         type(exc).__name__)
             return finish(_json(502, "EINUNDZWANZIG is not reachable right now."))
 
-        content = answer.content
-        if len(content) > MAX_ANSWER_BYTES:
-            return finish(_json(502, "EINUNDZWANZIG sent an answer that was too large."))
         if key_bytes and key_bytes in content:
             content = content.replace(key_bytes, b"[redacted]")
-        passed = {"Content-Type": answer.headers.get("content-type", "application/json")}
-        if "retry-after" in answer.headers:
-            passed["Retry-After"] = answer.headers["retry-after"]
-        if 300 <= answer.status_code < 400:
-            return finish(_json(502, "EINUNDZWANZIG answered with a redirect."))
-        if path == "/config" and answer.status_code == 200:
-            config_cache["answer"] = (answer.status_code, content, passed)
+        if path == "/config" and status_code == 200:
+            config_cache["answer"] = (status_code, content, passed)
             config_cache["at"] = clock()
-        return finish(Response(content, status_code=answer.status_code, headers=passed))
+        return finish(Response(content, status_code=status_code, headers=passed))
 
     return app
 

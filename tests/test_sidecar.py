@@ -24,7 +24,9 @@ What must hold:
   The key never appears in an answer or in the log.
 """
 
+import asyncio
 import base64
+import gzip
 import json
 import os
 import sys
@@ -56,13 +58,25 @@ class Clock:
         return self.now
 
 
+def reply(status=200, *, json_body=None, content=b"", headers=None, declared=True):
+    """An answer the way a connection delivers it: streamed, not pre-read
+    (``httpx.Response(content=...)`` would hand the sidecar a body it has
+    already consumed). ``declared`` sends a Content-Length."""
+    headers = dict(headers or {})
+    if json_body is not None:
+        content = json.dumps(json_body).encode()
+        headers.setdefault("Content-Type", "application/json")
+    if declared:
+        headers.setdefault("Content-Length", str(len(content)))
+    return httpx.Response(status, headers=headers, stream=httpx.ByteStream(content))
+
+
 class Association:
     """A fake association behind the sidecar, recording what reached it."""
 
     def __init__(self):
         self.requests = []
-        self.answer = lambda request: httpx.Response(
-            200, json={"data": {"ok": True}}, headers={"Content-Type": "application/json"})
+        self.answer = lambda request: reply(json_body={"data": {"ok": True}})
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
@@ -144,8 +158,8 @@ def test_a_signed_call_is_forwarded_with_the_key_and_the_signature_unchanged():
 
 def test_the_answer_comes_back_unchanged_with_its_wait():
     client, association, _ = make()
-    association.answer = lambda r: httpx.Response(
-        429, json={"message": "Too Many Attempts."}, headers={"Retry-After": "42"})
+    association.answer = lambda r: reply(
+        429, json_body={"message": "Too Many Attempts."}, headers={"Retry-After": "42"})
     response = call(client, "GET", "/me")
     assert response.status_code == 429 and response.headers["Retry-After"] == "42"
     assert response.json() == {"message": "Too Many Attempts."}
@@ -286,6 +300,95 @@ def test_a_body_must_be_json_and_small():
     assert association.requests == []
 
 
+def asgi_post(app, path, chunks, headers=()):
+    """POST straight through ASGI, recording which body chunks the app
+    actually pulled. Returns (status, chunks read)."""
+    pending, read, sent = list(chunks), [], []
+
+    async def receive():
+        if pending:
+            chunk = pending.pop(0)
+            read.append(chunk)
+            return {"type": "http.request", "body": chunk, "more_body": bool(pending)}
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {
+        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
+        "method": "POST", "scheme": "http", "path": path, "raw_path": path.encode(),
+        "query_string": b"", "root_path": "", "client": ("192.0.2.1", 4242),
+        "server": ("testserver", 80),
+        "headers": [(k.lower().encode(), v.encode()) for k, v in headers],
+    }
+    asyncio.run(app(scope, receive, send))
+    status = next(m["status"] for m in sent if m["type"] == "http.response.start")
+    return status, read
+
+
+def test_a_body_declared_too_large_is_refused_unread():
+    client, association, _ = make()
+    status, read = asgi_post(client.app, "/api/v1/membership/applications",
+                             [b"a" * 1024] * 3,
+                             headers=[("Content-Length", str(10 ** 9)),
+                                      ("Content-Type", "application/json")])
+    assert status == 413 and read == [] and association.requests == []
+
+
+def test_an_undeclared_body_is_read_only_until_it_passes_the_cap():
+    client, association, _ = make()
+    chunk = b"a" * (sidecar.MAX_BODY_BYTES // 2)
+    status, read = asgi_post(client.app, "/api/v1/membership/applications",
+                             [chunk] * 10, headers=[("Content-Type", "application/json")])
+    assert status == 413 and len(read) == 3 and association.requests == []
+
+
+# -- answers are read under a cap ------------------------------------------------------
+
+def test_the_association_is_asked_for_an_uncompressed_answer():
+    client, association, _ = make()
+    call(client, "GET", "/me")
+    assert association.requests[0].headers["Accept-Encoding"] == "identity"
+
+
+@pytest.mark.parametrize("declared", [True, False])
+def test_an_oversized_answer_is_a_502(declared):
+    client, association, _ = make()
+    big = b'{"data":"' + b"a" * sidecar.MAX_ANSWER_BYTES + b'"}'
+    association.answer = lambda r: reply(content=big, declared=declared)
+    response = call(client, "GET", "/me")
+    assert response.status_code == 502 and "too large" in response.json()["message"]
+
+
+def test_a_compressed_answer_is_unpacked_and_passed_on():
+    client, association, _ = make()
+    document = b'{"data":{"ok":true}}'
+    association.answer = lambda r: reply(
+        content=gzip.compress(document),
+        headers={"Content-Encoding": "gzip", "Content-Type": "application/json"})
+    response = call(client, "GET", "/me")
+    assert response.status_code == 200 and response.content == document
+
+
+def test_a_compressed_answer_cannot_unpack_past_the_cap():
+    client, association, _ = make()
+    bomb = gzip.compress(b"0" * (sidecar.MAX_ANSWER_BYTES * 8))
+    assert len(bomb) < sidecar.MAX_ANSWER_BYTES // 10
+    association.answer = lambda r: reply(content=bomb, headers={"Content-Encoding": "gzip"},
+                                         declared=False)
+    response = call(client, "GET", "/me")
+    assert response.status_code == 502 and "too large" in response.json()["message"]
+
+
+@pytest.mark.parametrize("encoding, content", [("br", b"\x0b\x02\x80{}\x03"),
+                                               ("gzip", b"not gzip at all")])
+def test_an_answer_that_cannot_be_unpacked_is_a_502(encoding, content):
+    client, association, _ = make()
+    association.answer = lambda r: reply(content=content, headers={"Content-Encoding": encoding})
+    assert call(client, "GET", "/me").status_code == 502
+
+
 # -- the shared quota ------------------------------------------------------------------
 
 def test_requests_per_address_are_limited():
@@ -309,8 +412,8 @@ def test_invoices_per_account_are_limited_per_day():
 
 def test_the_key_never_leaves_in_an_answer(caplog):
     client, association, _ = make()
-    association.answer = lambda r: httpx.Response(
-        401, json={"message": f"Unknown client key {KEY}"})
+    association.answer = lambda r: reply(
+        401, json_body={"message": f"Unknown client key {KEY}"})
     caplog.set_level("INFO", logger="myeditor-sidecar")
     response = call(client, "GET", "/me")
     assert KEY not in response.text and "[redacted]" in response.text
@@ -330,6 +433,6 @@ def test_an_unreachable_association_is_a_clear_502():
 
 def test_a_redirect_from_upstream_is_not_followed():
     client, association, _ = make()
-    association.answer = lambda r: httpx.Response(302, headers={"Location": "https://evil.example"})
+    association.answer = lambda r: reply(302, headers={"Location": "https://evil.example"})
     response = call(client, "GET", "/me")
     assert response.status_code == 502 and len(association.requests) == 1
