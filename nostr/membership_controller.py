@@ -38,7 +38,9 @@ import url_safety
 from nostr.einundzwanzig import (
     MEMBER_BENEFITS, MEMBER_RELAY, NO_BENEFITS, Benefits, MembershipDirectory,
 )
-from nostr.einundzwanzig_api import MembershipApi, session_signer
+from nostr import profile_address
+from nostr.einundzwanzig_api import MembershipApi, PriceLookup, session_signer
+from nostr.profile_address import ProfileAddress
 from nostr.relay_list_addition import (
     DONE, NO_LIST, RecommendedRelayList, RelayListAddition, outcome_message,
 )
@@ -67,6 +69,9 @@ class MembershipController(QObject):
     # The active account's benefits changed: resolved, lapsed, confirmed,
     # or a different account became the active one.
     benefits_changed = Signal()
+    # This account published a changed profile (its Nostr address); what
+    # the app keeps of the profile should be read again.
+    profile_published = Signal(str)
 
     def __init__(
         self,
@@ -82,8 +87,10 @@ class MembershipController(QObject):
         directory: Optional[MembershipDirectory] = None,
         api_factory: Optional[Callable[[object], object]] = None,
         window_factory: Optional[Callable[..., MembershipWindow]] = None,
+        prices_factory: Optional[Callable[[], object]] = None,
         add_relay_job: Optional[Callable[[object], QObject]] = None,
         publish_list_job: Optional[Callable[[object], QObject]] = None,
+        profile_address_job: Optional[Callable[[object, str], QObject]] = None,
         window_parent=None,
         parent: Optional[QObject] = None,
     ) -> None:
@@ -98,8 +105,12 @@ class MembershipController(QObject):
         self._show_status = show_status
         self._api_factory = api_factory or self._default_api
         self._window_factory = window_factory or MembershipWindow
+        # Today's Bitcoin price, so the window can show the fee in sats, CHF
+        # and EUR. Asked only once a window shows the fee.
+        self._prices_factory = prices_factory or (lambda: PriceLookup())
         self._add_relay_job = add_relay_job or self._default_add_relay_job
         self._publish_list_job = publish_list_job or self._default_publish_list_job
+        self._profile_address_job = profile_address_job or self._default_profile_address_job
         # The window's Qt parent: the main window, so it stays above it.
         self._window_parent = window_parent if window_parent is not None else parent
 
@@ -241,7 +252,8 @@ class MembershipController(QObject):
             profile = self._profile_provider()
             window = self._window_factory(
                 self._api_factory(profile), **self._identity(profile),
-                is_dark=self._is_dark(), parent=self._window_parent)
+                is_dark=self._is_dark(), prices=self._prices_factory(),
+                parent=self._window_parent)
             window.setWindowFlag(Qt.Window, True)
             window.connect_requested.connect(self._on_connect_requested)
             window.link_activated.connect(self._open_link)
@@ -249,6 +261,7 @@ class MembershipController(QObject):
             window.add_relay_requested.connect(self._on_add_relay)
             window.publish_relay_list_requested.connect(self._on_publish_relay_list)
             window.address_saved.connect(self._on_address_saved)
+            window.profile_address_requested.connect(self._on_profile_address)
             window.data_erased.connect(self._on_data_erased)
             self._window = window
         window.show()
@@ -272,6 +285,7 @@ class MembershipController(QObject):
             "known_member": self.directory.last_known_membership(pubkey) if pubkey else None,
             "handle": self.directory.cached_handle(pubkey) if pubkey else None,
             "signs_locally": bool(getattr(profile, "is_local", False)),
+            "profile_address": getattr(profile, "nip05", "") or "",
         }
 
     def _follow_identity(self) -> None:
@@ -340,6 +354,32 @@ class MembershipController(QObject):
         job.start()
 
     # ------------------------------------------------------------------ #
+    # The Nostr address on the account's profile                          #
+    # ------------------------------------------------------------------ #
+
+    def _on_profile_address(self, address: str) -> None:
+        profile = self._profile_provider()
+        window = self.window
+        if profile is None or window is None:
+            return
+        if _key(profile.user_pubkey) != _key(window.pubkey):
+            return      # the window speaks for an account no longer active
+        pubkey = profile.user_pubkey
+        job = self._profile_address_job(profile, address)
+
+        def finished(outcome: str) -> None:
+            if window is self.window and _key(window.pubkey) == _key(pubkey):
+                window.set_profile_address_result(
+                    profile_address.outcome_message(outcome),
+                    done=outcome in profile_address.DONE)
+            if outcome == profile_address.SHOWN:
+                self.profile_published.emit(pubkey)
+            job.deleteLater()
+
+        job.finished.connect(finished)
+        job.start()
+
+    # ------------------------------------------------------------------ #
     # Defaults                                                            #
     # ------------------------------------------------------------------ #
 
@@ -356,6 +396,10 @@ class MembershipController(QObject):
     def _default_add_relay_job(self, profile) -> RelayListAddition:
         return RelayListAddition(self._relay_pool, self._session_pool, profile,
                                  MEMBER_RELAY, directory=self._relay_directory, parent=self)
+
+    def _default_profile_address_job(self, profile, address: str) -> ProfileAddress:
+        return ProfileAddress(self._relay_pool, self._session_pool, profile, address,
+                              directory=self._relay_directory, parent=self)
 
     def _default_publish_list_job(self, profile) -> RecommendedRelayList:
         return RecommendedRelayList(self._relay_pool, self._session_pool, profile,

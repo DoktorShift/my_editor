@@ -247,14 +247,18 @@ def create_relay_list(*, extra_write=(), **deps) -> ReplaceableWriter:
         **deps)
 
 
-def update_profile(*, changes: Mapping[str, Optional[str]], **deps) -> ReplaceableWriter:
-    """Change fields of the user's profile, keeping every other field."""
+def update_profile(*, changes: Mapping[str, Optional[str]], on_absent: str = "create",
+                   **deps) -> ReplaceableWriter:
+    """Change fields of the user's profile, keeping every other field.
+
+    ``on_absent="refuse"`` publishes nothing when no profile is found, for
+    a change that must not stand in for a whole profile."""
     def mutate(base):
         content = policy.merge_profile_content(base.get("content") if base else None, changes)
         if base is not None and json.loads(content) == json.loads(base.get("content") or "{}"):
             return None
         return content, list(base.get("tags", [])) if base else []
-    return ReplaceableWriter(kind=KIND_PROFILE, mutate=mutate, on_absent="create", **deps)
+    return ReplaceableWriter(kind=KIND_PROFILE, mutate=mutate, on_absent=on_absent, **deps)
 
 
 class AccountSetup(QObject):

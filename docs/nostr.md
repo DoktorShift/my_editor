@@ -178,10 +178,14 @@ Each item's draft identifier is derived from its feed id, so re-running the same
 
 ## Joining EINUNDZWANZIG in the app
 
-Nostr > EINUNDZWANZIG Membership lets a person apply, pay the annual fee with Lightning and see what membership unlocks (the members' relay, a Nostr address, and media storage).
+Nostr > EINUNDZWANZIG Membership lets a person apply, pay the annual fee with Lightning and see what membership unlocks.
+- The window names every service the association lists for its members, in its order: the members' relay, a Nostr address, a Lightning watchtower, media storage, the community group and Buzz (experimental). The association publishes that list only as text on its member portal, so `MEMBER_SERVICES` in `nostr/einundzwanzig.py` is a copy, with the source file and commit it was taken from; a link opens the association's own page with every detail and setup guide. MyEditor sets up the relay, the address and the media server itself; the member page links to the association's guide for the others.
+- Which host does what: `wss://nostr.einundzwanzig.space` is the members' relay for ordinary notes and articles (it goes in the relay list); `https://blossom.einundzwanzig.space` is the media server and has no relay that goes with it; the community group and Buzz relays need a login and never go in a relay list.
+- The fee shows in sats first, then CHF, then EUR. The association's own amount is exact; the others are converted with today's Bitcoin price from mempool.space (asked only while the window is open, with no identity attached) and say "about". The invoice's sats are always exact.
+- After a member chooses a Nostr address, the window asks once whether their profile should show it. Not Now leaves a Show on My Profile button on the member page, so they can change their mind later. Writing it reads the profile fresh and keeps every other field; a profile that cannot be found or read is never replaced (`nostr/profile_address.py`).
 
 The association's API needs a client key that must not ship inside the app, so membership requests go through a small service that holds it: the membership sidecar in [`sidecar/`](../sidecar/README.md).
-- A build names its sidecar in `constants.MEMBERSHIP_SERVICE_URL`. That is empty until the maintainers' sidecar is deployed, so for now official builds offer the association's website; once it runs, official builds name it there.
+- A build names its sidecar in `constants.MEMBERSHIP_SERVICE_URL`. Official builds name the maintainers' sidecar, `https://e21.rinbal.de`.
 - A self-hosted build names its own sidecar, or none. `MYEDITOR_MEMBERSHIP_SERVICE` in the environment names one without rebuilding (an `https://` address, or `http://` on this computer).
 - Without a sidecar, with one that has no key, or with one whose key the association refuses, the window says joining in the app isn't available right now and offers the association's website instead.
 - Members get their relay and media server either way, recognized from the association's public member list.

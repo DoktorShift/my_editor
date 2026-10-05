@@ -45,6 +45,7 @@ from PySide6.QtWidgets import QApplication, QDialog  # noqa: E402
 
 from main_window import MainWindow  # noqa: E402
 from nostr import membership_controller as mc  # noqa: E402
+from nostr import profile_address as pa  # noqa: E402
 from nostr import relay_list_addition as rla  # noqa: E402
 from nostr.einundzwanzig import (  # noqa: E402
     MEMBER_BLOSSOM, MEMBER_RELAY, PER_USER_BYTES, MembershipDirectory,
@@ -58,6 +59,7 @@ from tests.test_media_wiring import (  # noqa: E402
 )
 
 MEMBER_KEY = "a" * 64
+OTHER_KEY = "b" * 64
 STRANGER = "b" * 64
 
 # Re-exported so the fixture resolves in this module.
@@ -85,9 +87,10 @@ def flush_deletes():
 # --------------------------------------------------------------------- #
 
 class Profile:
-    def __init__(self, pubkey=MEMBER_KEY, *, local=False):
+    def __init__(self, pubkey=MEMBER_KEY, *, local=False, nip05=""):
         self.user_pubkey = pubkey
         self.is_local = local
+        self.nip05 = nip05
 
 
 class Api(QObject):
@@ -160,6 +163,8 @@ class Harness:
             connect_signer=self.connect,
             add_relay_job=self.make_job,
             publish_list_job=self.make_job,
+            profile_address_job=self.make_address_job,
+            prices_factory=lambda: None,
         )
         self.changes = []
         self.controller.benefits_changed.connect(lambda: self.changes.append(True))
@@ -175,6 +180,11 @@ class Harness:
         job = Job()
         job.profile = profile
         self.jobs.append(job)
+        return job
+
+    def make_address_job(self, profile, address):
+        job = self.make_job(profile)
+        job.address = address
         return job
 
     def connect(self):
@@ -461,6 +471,51 @@ def test_a_finished_relay_job_is_released():
     job.finished.emit(rla.ADDED)
     flush_deletes()
     assert not shiboken6.isValid(job)
+    window.close()
+
+
+# --------------------------------------------------------------------- #
+# The Nostr address on the profile                                       #
+# --------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("outcome,done", [
+    (pa.SHOWN, True),
+    (pa.ALREADY, True),
+    (pa.NO_PROFILE, False),
+    (pa.UNREADABLE, False),
+    (pa.FAILED, False),
+])
+def test_each_profile_address_outcome_reaches_the_window(outcome, done):
+    h = member_harness()
+    published = []
+    h.controller.profile_published.connect(published.append)
+    window = open_member_window(h)
+    assert not window._profile_button.isHidden()
+    window._profile_button.click()
+    job = h.jobs[0]
+    assert job.started == 1 and job.profile is h.profile
+    assert job.address == "u0@einundzwanzig.space"
+    job.finished.emit(outcome)
+    assert window._profile_result.text() == pa.outcome_message(outcome)
+    assert window._profile_button.isHidden() == done
+    # Only a profile that changed is read again.
+    assert published == ([MEMBER_KEY] if outcome == pa.SHOWN else [])
+    window.close()
+
+
+def test_the_profile_address_the_app_knows_reaches_the_window():
+    h = member_harness(profile=Profile(nip05="u0@einundzwanzig.space"))
+    window = open_member_window(h)
+    assert window._profile_button.isHidden()
+    window.close()
+
+
+def test_a_profile_address_for_an_account_no_longer_active_is_not_written():
+    h = member_harness()
+    window = open_member_window(h)
+    h.profile = Profile(OTHER_KEY)              # switched, window not told yet
+    window._profile_button.click()
+    assert h.jobs == []
     window.close()
 
 

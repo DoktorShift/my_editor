@@ -54,11 +54,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from alerts import confirm_destructive, inform
+from alerts import CANCEL, Button, ask, confirm_destructive, inform
+from alerts import DEFAULT as ALERT_DEFAULT
 from nostr import einundzwanzig_api as e21
 from nostr.einundzwanzig import (
-    JOIN_URL, MAX_FILE_LABEL, MEMBER_BLOSSOM, MEMBER_RELAY, NIP05_DOMAIN, PER_USER_LABEL,
-    nip05_address,
+    BENEFITS_URL, JOIN_URL, MAX_FILE_LABEL, MEMBER_BLOSSOM, MEMBER_RELAY, MEMBER_SERVICES,
+    NIP05_DOMAIN, PER_USER_LABEL, nip05_address,
 )
 from nostr.qr import make_qr_pixmap
 from nostr.ui.assistant import (
@@ -80,14 +81,6 @@ _DEFAULT_NOTE = ("Membership belongs to your Nostr identity and runs for a calen
                  "year. You renew it yourself; nothing is charged automatically.")
 
 
-def format_amount(amount: int, currency: str) -> str:
-    """``21,000 sats`` or ``21 CHF``: the fee the way the association states it."""
-    unit = (currency or "").strip().upper()
-    if unit in ("SAT", "SATS"):
-        return f"{amount:,} sats"
-    return f"{amount:,} {unit}".strip()
-
-
 def format_date(iso: str) -> str:
     """``20 April 2024`` from ``2024-04-20``; the input unchanged if it is not a date."""
     try:
@@ -99,6 +92,14 @@ def format_date(iso: str) -> str:
 
 def _host(url: str) -> str:
     return urlsplit(url).hostname or url
+
+
+def _service_title(service) -> str:
+    return f"{service.title} (experimental)" if service.experimental else service.title
+
+
+def _service_detail(service) -> str:
+    return f"{service.summary} {service.note}" if service.note else service.summary
 
 
 def open_lightning_invoice(bolt11: str) -> bool:
@@ -123,19 +124,30 @@ class MembershipWindow(AssistantWindow):
     # account that has none; only ever after the person clicked for it
     publish_relay_list_requested = Signal()
     address_saved = Signal(str, str)  # pubkey, the Nostr address name the association took
+    # show this Nostr address on the profile; only ever after the person
+    # clicked for it
+    profile_address_requested = Signal(str)
     data_erased = Signal(str)         # pubkey whose membership data the association deleted
 
     def __init__(self, api, *, pubkey: Optional[str] = None,
                  known_member: Optional[bool] = None, handle: Optional[str] = None,
-                 signs_locally: bool = False,
+                 signs_locally: bool = False, profile_address: str = "",
                  is_dark: bool = True,
                  watcher_factory: Optional[Callable] = None,
                  open_lightning: Callable[[str], bool] = open_lightning_invoice,
+                 prices=None,
                  parent=None):
         super().__init__("EINUNDZWANZIG Membership", is_dark=is_dark, parent=parent)
         self._watcher_factory = watcher_factory or (
             lambda api_, year, parent_: e21.PaymentWatcher(api_, year, parent=parent_))
         self._open_lightning = open_lightning
+        # Today's Bitcoin price, to show the fee in sats, CHF and EUR. None
+        # shows the association's amount alone.
+        self._price_lookup = prices
+        if isinstance(prices, QObject):
+            prices.setParent(self)
+        self._prices = None
+        self._prices_asked = False
         self._watcher = None
         self._api = None
         self._relay_publishes_list = False
@@ -147,7 +159,7 @@ class MembershipWindow(AssistantWindow):
         self._build_member()
 
         self.set_identity(api, pubkey=pubkey, known_member=known_member, handle=handle,
-                          signs_locally=signs_locally)
+                          signs_locally=signs_locally, profile_address=profile_address)
 
     # ------------------------------------------------------------------ #
     # Identity                                                            #
@@ -159,7 +171,8 @@ class MembershipWindow(AssistantWindow):
         return self._pubkey
 
     def set_identity(self, api, *, pubkey: Optional[str], known_member: Optional[bool] = None,
-                     handle: Optional[str] = None, signs_locally: bool = False) -> None:
+                     handle: Optional[str] = None, signs_locally: bool = False,
+                     profile_address: str = "") -> None:
         """Start over for this identity (after connecting a signer, or a
         profile switch). Anything in flight for the previous one is dropped,
         and so is the client that asked it."""
@@ -173,6 +186,11 @@ class MembershipWindow(AssistantWindow):
         self._pubkey = pubkey
         self._handle = handle
         self._signs_locally = signs_locally
+        # The Nostr address the profile shows now, as last read.
+        self._profile_address = (profile_address or "").strip()
+        self._profile_offered = False
+        self._profile_button.setEnabled(True)
+        self._profile_result.setText("")
         self._config = None
         self._status = None
         self._invoice = None
@@ -227,16 +245,12 @@ class MembershipWindow(AssistantWindow):
             "world, with local meetups, education and exchange. Membership supports "
             "the community and adds services to your Nostr identity."))
         col.addSpacing(4)
-        for title, detail in (
-            ("Members’ relay",
-             "A dependable relay that carries your notes and articles to readers."),
-            ("Nostr address",
-             f"An address like you@{NIP05_DOMAIN} that people can recognize and share, "
-             "instead of a long key."),
-            ("Media storage",
-             f"{PER_USER_LABEL} for images and videos, up to {MAX_FILE_LABEL} per file."),
-        ):
-            col.addLayout(self._item(title, detail)[0])
+        # Everything the association lists for its members, in its order.
+        for service in MEMBER_SERVICES:
+            col.addLayout(self._item(_service_title(service), _service_detail(service))[0])
+        col.addWidget(link_button("Details on the EINUNDZWANZIG Website",
+                                  lambda: self.link_activated.emit(BENEFITS_URL)),
+                      0, Qt.AlignLeft)
         col.addSpacing(4)
         self._fee_label = text_label("", "item_title")
         self._fee_label.hide()
@@ -293,9 +307,32 @@ class MembershipWindow(AssistantWindow):
 
     def _on_config(self, config) -> None:
         self._config = config
-        self._fee_label.setText(
-            f"Annual fee: {format_amount(config.fee, config.currency)} for {config.year}")
+        self._show_fee()
+        self._ask_for_prices()
+
+    def _show_fee(self) -> None:
+        config = self._config
+        if config is None:
+            return
+        first, rest = e21.format_fee(config.fee, config.currency, self._prices)
+        shown = f"{first} ({rest})" if rest else first
+        self._fee_label.setText(f"Annual fee for {config.year}: {shown}")
         self._fee_label.show()
+
+    def _ask_for_prices(self) -> None:
+        """Once per window: the price only converts the fee for display."""
+        if self._price_lookup is None or self._prices_asked:
+            return
+        self._prices_asked = True
+        self._price_lookup.lookup(self._on_prices)
+
+    def _on_prices(self, prices) -> None:
+        if prices is None or self._api is None:
+            return      # no price, or a window already closed
+        self._prices = prices
+        self._show_fee()
+        if self._invoice is not None and self.page == PAY:
+            self._show_invoice_amount(self._invoice)
 
     def _ask_to_connect(self) -> None:
         self.connect_requested.emit()
@@ -562,8 +599,12 @@ class MembershipWindow(AssistantWindow):
                 # So the name shows next time too, before the roster lists it.
                 self.address_saved.emit(self._pubkey, handle)
         if name_only:
+            self._profile_result.setText("")
+            self._profile_button.setEnabled(True)
             self._show_member(note="Your Nostr address is saved. It can take a few "
                                    "minutes to appear everywhere.")
+            self._profile_offered = False
+            self._offer_address_on_profile()
         else:
             self._on_status(status)
 
@@ -656,15 +697,8 @@ class MembershipWindow(AssistantWindow):
         year = invoice.payment.year
         self._pay_title.setText(f"Renew Your Membership for {year}" if renewing
                                 else f"Pay Your {year} Membership Fee")
-        sats = invoice.amount_sats
-        fee = format_amount(invoice.payment.amount, invoice.payment.currency)
-        if sats is not None:
-            self._amount.setText(format_amount(sats, "sats"))
-            self._amount_detail.setText("" if fee.endswith("sats") else fee)
-        else:
-            self._amount.setText(fee)
-            self._amount_detail.setText("")
-        self._amount_detail.setVisible(bool(self._amount_detail.text()))
+        self._show_invoice_amount(invoice)
+        self._ask_for_prices()
 
         has_invoice = bool(invoice.bolt11)
         if has_invoice:
@@ -684,6 +718,23 @@ class MembershipWindow(AssistantWindow):
         self._pay_intro.setVisible(True)
         self._set_pay_status("")
         self._show_pay_buttons("paid", "I’ve Paid")
+
+    def _show_invoice_amount(self, invoice) -> None:
+        """The exact sats the invoice asks for, large; under it the fee in
+        francs and euros (the association's own amount exact, the other
+        converted)."""
+        amounts = e21.fee_amounts(invoice.payment.amount, invoice.payment.currency,
+                                  self._prices)
+        sats = invoice.amount_sats
+        if sats is not None:
+            first = e21.format_one(e21.SATS, sats)
+            rest = [entry for entry in amounts if entry[0] != e21.SATS]
+        else:
+            first = e21.format_one(*amounts[0])
+            rest = amounts[1:]
+        self._amount.setText(first)
+        self._amount_detail.setText(", ".join(e21.format_one(*entry) for entry in rest))
+        self._amount_detail.setVisible(bool(self._amount_detail.text()))
 
     def _show_pay_buttons(self, key: str, label: str, enabled: bool = True) -> None:
         handlers = {"paid": self._start_watching, "again": self._start_watching,
@@ -783,6 +834,7 @@ class MembershipWindow(AssistantWindow):
             if status.is_member:
                 self.member_confirmed.emit(self._pubkey or status.pubkey)
                 self._show_member()
+                self._offer_address_on_profile()
             else:
                 back()
                 self._set_pay_status("Your payment arrived. EINUNDZWANZIG is still "
@@ -823,15 +875,36 @@ class MembershipWindow(AssistantWindow):
             f"total, up to {MAX_FILE_LABEL} per file.")[0])
 
         name_extra = QWidget()
-        name_row = QHBoxLayout(name_extra)
-        name_row.setContentsMargins(0, 2, 0, 0)
+        name_col = QVBoxLayout(name_extra)
+        name_col.setContentsMargins(0, 2, 0, 0)
+        name_col.setSpacing(4)
+        name_row = QHBoxLayout()
+        name_row.setSpacing(8)
         self._name_button = QPushButton("Choose an Address…")
         self._name_button.setAutoDefault(False)
         self._name_button.clicked.connect(lambda: self._show_apply(name_only=True))
+        # A person who said Not Now can still put the address on their
+        # profile later, from here.
+        self._profile_button = QPushButton("Show on My Profile")
+        self._profile_button.setAutoDefault(False)
+        self._profile_button.clicked.connect(self._show_address_on_profile)
         name_row.addWidget(self._name_button)
+        name_row.addWidget(self._profile_button)
         name_row.addStretch(1)
+        name_col.addLayout(name_row)
+        self._profile_result = text_label("", "muted")
+        name_col.addWidget(self._profile_result)
         name_row_layout, self._name_detail = self._item("Nostr address", "", name_extra)
         col.addLayout(name_row_layout)
+
+        # What MyEditor doesn't set up itself: the association's guide does.
+        others = [service for service in MEMBER_SERVICES if not service.in_app]
+        more_extra = link_button("Set Up on the EINUNDZWANZIG Website",
+                                 lambda: self.link_activated.emit(BENEFITS_URL))
+        col.addLayout(self._item(
+            "More for members",
+            "Also yours: " + ", ".join(_service_title(s) for s in others) + ".",
+            more_extra)[0])
 
         self._member_note = text_label("", "muted")
         col.addWidget(self._member_note)
@@ -872,6 +945,7 @@ class MembershipWindow(AssistantWindow):
             self._name_detail.setText("Not chosen yet.")
             self._name_button.setText("Choose an Address…")
         self._name_button.setVisible(has_key)
+        self._update_profile_offer()
 
         receipt = status.current_year.receipt_url if status is not None else None
         self._receipt_link.setVisible(bool(receipt))
@@ -881,6 +955,64 @@ class MembershipWindow(AssistantWindow):
         self._member_note.setText(note)
         self._member_note.setVisible(bool(note))
         self.show_page(MEMBER, [("done", "Done", DEFAULT, self.accept)])
+
+    # -- the Nostr address on the profile -----------------------------------
+
+    def _address(self) -> str:
+        return nip05_address(self._handle) if self._handle else ""
+
+    def _profile_shows_address(self) -> bool:
+        address = self._address()
+        return bool(address) and self._profile_address.lower() == address.lower()
+
+    def _update_profile_offer(self) -> None:
+        """Show on My Profile, whenever there is an address the profile does
+        not show yet (and once it does, a word saying so)."""
+        offer = bool(self._pubkey and self._address()) and not self._profile_shows_address()
+        self._profile_button.setVisible(offer)
+        if self._profile_shows_address() and not self._profile_result.text():
+            self._profile_result.setText("Your profile shows this address.")
+        self._profile_result.setVisible(bool(self._profile_result.text()))
+
+    def _offer_address_on_profile(self) -> None:
+        """Ask once, right after an address was chosen, whether the profile
+        should show it. Saying Not Now leaves the button on the member page."""
+        if (self._profile_offered or not self._pubkey or not self._address()
+                or self._profile_shows_address()):
+            return
+        self._profile_offered = True
+        address = self._address()
+        message = (f"People who look at your profile then see {address} instead of a "
+                   "long key. It shows as confirmed once EINUNDZWANZIG has approved "
+                   "the name.")
+        if self._profile_address:
+            message += f" It replaces {self._profile_address}."
+        message += " You can also do this later, here in EINUNDZWANZIG Membership."
+        choice = ask(self, title="Show Your Nostr Address on Your Profile?", message=message,
+                     buttons=(Button("Not Now", False, CANCEL),
+                              Button("Show on Profile", True, ALERT_DEFAULT)),
+                     is_dark=self._is_dark)
+        if choice is True:
+            self._show_address_on_profile()
+
+    def _show_address_on_profile(self) -> None:
+        address = self._address()
+        if not address:
+            return
+        self._profile_button.setEnabled(False)
+        self._profile_result.setText("Updating your profile…" + self._signer_may_ask())
+        self._profile_result.setVisible(True)
+        self.profile_address_requested.emit(address)
+
+    def set_profile_address_result(self, message: str, *, done: bool = False) -> None:
+        """The outcome of profile_address_requested, from the window that ran
+        it. ``done`` means the profile shows the address now."""
+        if done:
+            self._profile_address = self._address()
+        self._profile_result.setText(message)
+        self._profile_result.setVisible(bool(message))
+        self._profile_button.setEnabled(not done)
+        self._profile_button.setVisible(not done and bool(self._address()))
 
     def _add_relay(self) -> None:
         self._relay_button.setEnabled(False)

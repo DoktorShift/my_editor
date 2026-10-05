@@ -29,6 +29,7 @@ network, no signer, no modal loop.
 
 import os
 import sys
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -61,6 +62,15 @@ def alerts(monkeypatch):
     monkeypatch.setattr(mw, "inform", lambda parent, **kw: shown.append(kw))
     monkeypatch.setattr(mw, "confirm_destructive", lambda parent, **kw: True)
     return shown
+
+
+@pytest.fixture(autouse=True)
+def questions(monkeypatch):
+    """Every question the window asks; each is answered with ``answer``
+    (False is Not Now)."""
+    asked = SimpleNamespace(kw=[], answer=False)
+    monkeypatch.setattr(mw, "ask", lambda parent, **kw: asked.kw.append(kw) or asked.answer)
+    return asked
 
 
 class FakeApi:
@@ -165,7 +175,7 @@ def invoice(*, paid=False, bolt11="lnbcrt1", checkout="https://pay.einundzwanzig
 
 
 def window(api=None, *, pubkey=PUBKEY, known_member=None, handle=None, opened=None,
-           signs_locally=False):
+           signs_locally=False, prices=None, profile_address=""):
     watchers = []
 
     def factory(api_, year, parent):
@@ -175,9 +185,10 @@ def window(api=None, *, pubkey=PUBKEY, known_member=None, handle=None, opened=No
 
     win = MembershipWindow(api if api is not None else FakeApi(), pubkey=pubkey,
                            known_member=known_member, handle=handle, is_dark=False,
-                           signs_locally=signs_locally,
+                           signs_locally=signs_locally, profile_address=profile_address,
                            watcher_factory=factory,
-                           open_lightning=opened if opened is not None else (lambda b: True))
+                           open_lightning=opened if opened is not None else (lambda b: True),
+                           prices=prices)
     win.watchers = watchers
     return win
 
@@ -211,7 +222,97 @@ def test_the_fee_is_shown_as_the_association_states_it():
     api = FakeApi()
     win = window(api)
     api.last("config").ok(config())
-    assert win._fee_label.text() == "Annual fee: 21,000 sats for 2026"
+    assert win._fee_label.text() == "Annual fee for 2026: 21,000 sats"
+
+
+class FakePrices:
+    """The price lookup's shape; ``answer`` hands over today's price."""
+
+    def __init__(self):
+        self.asked = []
+
+    def lookup(self, on_done):
+        self.asked.append(on_done)
+
+    def answer(self, prices):
+        for on_done in self.asked:
+            on_done(prices)
+
+
+PRICES = e21.Prices(chf=100_000.0, eur=110_000.0)    # one bitcoin
+
+
+def labels(widget):
+    from PySide6.QtWidgets import QLabel
+    return [label.text() for label in widget.findChildren(QLabel)]
+
+
+def test_the_overview_names_everything_the_association_lists():
+    win = window()
+    shown = labels(win._pages[OVERVIEW])
+    titles = [t for t in shown if t in {
+        "Members’ relay", "Nostr address", "Lightning watchtower", "Media storage",
+        "Community group", "Buzz (experimental)"}]
+    # All six, in the association's order.
+    assert titles == ["Members’ relay", "Nostr address", "Lightning watchtower",
+                      "Media storage", "Community group", "Buzz (experimental)"]
+    assert any("5 GB in total, up to 1 GB per file." in t for t in shown)
+    assert not any("\u2014" in t for t in shown)
+
+
+def test_the_overview_links_to_the_associations_own_list():
+    from nostr.einundzwanzig import BENEFITS_URL
+    win = window()
+    opened = recorder(win.link_activated)
+    link = [b for b in win._pages[OVERVIEW].findChildren(QPushButton)
+            if b.text() == "Details on the EINUNDZWANZIG Website"][0]
+    link.click()
+    assert opened == [(BENEFITS_URL,)]
+    assert win.result() == 0                       # it opens the page, and stays open
+
+
+def test_the_member_page_points_to_the_services_set_up_elsewhere():
+    from nostr.einundzwanzig import BENEFITS_URL
+    win = window(known_member=True)
+    shown = labels(win._pages[MEMBER])
+    assert ("Also yours: Lightning watchtower, Community group, Buzz (experimental)."
+            in shown)
+    opened = recorder(win.link_activated)
+    [b for b in win._pages[MEMBER].findChildren(QPushButton)
+     if b.text() == "Set Up on the EINUNDZWANZIG Website"][0].click()
+    assert opened == [(BENEFITS_URL,)]
+
+
+def test_the_fee_is_shown_in_sats_then_francs_then_euros():
+    api = FakeApi()
+    prices = FakePrices()
+    win = window(api, prices=prices)
+    api.last("config").ok(config())
+    assert len(prices.asked) == 1
+    prices.answer(PRICES)
+    # 21,000 sats is exact; the francs and euros are converted.
+    assert win._fee_label.text() == ("Annual fee for 2026: 21,000 sats "
+                                     "(about 21 CHF, about 23 EUR)")
+
+
+def test_a_fee_in_francs_leads_with_its_converted_sats():
+    api = FakeApi()
+    prices = FakePrices()
+    win = window(api, prices=prices)
+    api.last("config").ok(replace(config(), fee=21, currency="CHF"))
+    assert win._fee_label.text() == "Annual fee for 2026: 21 CHF"
+    prices.answer(PRICES)
+    assert win._fee_label.text() == ("Annual fee for 2026: about 21,000 sats "
+                                     "(21 CHF, about 23 EUR)")
+
+
+def test_without_a_price_the_fee_stays_as_the_association_states_it():
+    api = FakeApi()
+    prices = FakePrices()
+    win = window(api, prices=prices)
+    api.last("config").ok(config())
+    prices.answer(None)
+    assert win._fee_label.text() == "Annual fee for 2026: 21,000 sats"
 
 
 def test_without_a_signer_the_way_on_is_connecting_one():
@@ -401,6 +502,21 @@ def test_an_application_on_file_goes_to_payment_for_the_current_year(monkeypatch
     assert default_button(win).text() == "I’ve Paid"
 
 
+def test_the_invoice_shows_its_exact_sats_and_the_fee_in_francs_and_euros(monkeypatch):
+    monkeypatch.setattr(e21.Invoice, "amount_sats", property(lambda self: 20_987))
+    api = FakeApi()
+    prices = FakePrices()
+    win = window(api, prices=prices)
+    inv = invoice()
+    to_pay(win, api, inv=replace(inv, payment=replace(inv.payment, amount=21, currency="CHF")))
+    assert win._amount.text() == "20,987 sats"
+    assert win._amount_detail.text() == "21 CHF"
+    prices.answer(PRICES)
+    assert win._amount.text() == "20,987 sats"
+    assert win._amount_detail.text() == "21 CHF, about 23 EUR"
+    assert len(prices.asked) == 1     # once per window, not once per page
+
+
 def test_a_lapsed_membership_is_a_renewal(monkeypatch):
     monkeypatch.setattr(e21.Invoice, "amount_sats", property(lambda self: 21_000))
     api = FakeApi()
@@ -514,6 +630,88 @@ def test_choosing_an_address_later_sends_only_the_address():
     api.last("apply").ok(status(e21.STATUS_MEMBER, paid=True))
     assert win.page == MEMBER
     assert win._name_detail.text() == "hal@einundzwanzig.space"
+
+
+# -- the Nostr address on the profile -------------------------------------------------
+
+def choose_address(win, api, name="hal"):
+    win._name_button.click()
+    win._handle_edit.setText(name)
+    win.buttons["send"].click()
+    api.last("apply").ok(status(e21.STATUS_MEMBER, paid=True))
+
+
+def test_a_chosen_address_is_offered_for_the_profile_once(questions):
+    api = FakeApi()
+    win = window(api, known_member=True)
+    shown = recorder(win.profile_address_requested)
+    choose_address(win, api)
+    assert len(questions.kw) == 1
+    asked = questions.kw[0]
+    assert asked["title"] == "Show Your Nostr Address on Your Profile?"
+    assert "hal@einundzwanzig.space" in asked["message"]
+    assert [b.label for b in asked["buttons"]] == ["Not Now", "Show on Profile"]
+    assert shown == []                                   # Not Now sends nothing
+    # Not Now leaves the way to change one's mind on the member page.
+    assert not win._profile_button.isHidden() and win._profile_button.isEnabled()
+    win._profile_button.click()
+    assert shown == [("hal@einundzwanzig.space",)]
+    assert len(questions.kw) == 1
+
+
+def test_saying_yes_shows_the_address_and_the_result(questions):
+    questions.answer = True
+    api = FakeApi()
+    win = window(api, known_member=True)
+    shown = recorder(win.profile_address_requested)
+    choose_address(win, api)
+    assert shown == [("hal@einundzwanzig.space",)]
+    assert "Updating your profile" in win._profile_result.text()
+    assert "signer app" in win._profile_result.text()
+    assert not win._profile_button.isEnabled()
+    win.set_profile_address_result("Your profile shows it now.", done=True)
+    assert win._profile_button.isHidden()
+    assert win._profile_result.text() == "Your profile shows it now."
+
+
+def test_a_failed_attempt_can_be_tried_again():
+    win = window(known_member=True, handle="hal")
+    shown = recorder(win.profile_address_requested)
+    win._profile_button.click()
+    win.set_profile_address_result("Your profile wasn’t changed. Try again in a moment.")
+    assert win._profile_button.isEnabled() and not win._profile_button.isHidden()
+    win._profile_button.click()
+    assert len(shown) == 2
+
+
+def test_a_profile_that_shows_the_address_is_not_offered_it(questions):
+    win = window(known_member=True, handle="hal", profile_address="HAL@einundzwanzig.space")
+    assert win._profile_button.isHidden()
+    assert win._profile_result.text() == "Your profile shows this address."
+    assert questions.kw == []
+
+
+def test_another_address_on_the_profile_is_named_before_it_is_replaced(questions):
+    api = FakeApi()
+    win = window(api, known_member=True, profile_address="hal@example.com")
+    choose_address(win, api)
+    assert "It replaces hal@example.com." in questions.kw[0]["message"]
+
+
+def test_without_an_address_nothing_is_offered():
+    win = window(known_member=True)
+    assert win._profile_button.isHidden()
+
+
+def test_joining_with_an_address_offers_it_for_the_profile(questions):
+    api = FakeApi()
+    win = window(api, handle="hal")
+    to_pay(win, api)
+    default_button(win).click()
+    win.watchers[0].paid.emit(invoice(paid=True))
+    api.last("me").ok(status(e21.STATUS_MEMBER, paid=True))
+    assert win.page == MEMBER
+    assert len(questions.kw) == 1
 
 
 def test_adding_the_relay_is_asked_of_the_window_and_its_result_shown():

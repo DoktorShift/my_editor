@@ -376,6 +376,7 @@ class MainWindow(QMainWindow):
             parent=self,
         )
         self._membership.benefits_changed.connect(self._on_membership_benefits_changed)
+        self._membership.profile_published.connect(self._on_own_profile_published)
         self._media_store = MediaStore(
             session_pool=self._session_pool,
             profile_provider=lambda: self._profile_store.default(),
@@ -3662,6 +3663,13 @@ class MainWindow(QMainWindow):
             self._draft_sync.start_for(remaining)
 
     # -- metadata / avatar updates ----------------------------------------
+
+    def _on_own_profile_published(self, pubkey: str):
+        """This app just changed the account's profile (its Nostr address):
+        read it back, so the chip and the menus show what was published."""
+        profile = self._profile_store.get(pubkey)
+        if profile is not None:
+            self._metadata_fetcher.fetch(profile)
 
     def _on_metadata_updated(self, profile: Profile):
         """Refreshed display name / picture URL landed - repaint the chip

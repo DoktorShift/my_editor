@@ -18,8 +18,8 @@ Requests go through a membership service, never straight to the
 association. The association names the calling application by a client
 key (``X-Api-Key``) that must stay secret, so it lives only on that
 service (``sidecar/`` in this repository, run 24/7 by whoever publishes
-a build: rinbal's server for official builds once it is deployed, your
-own if you self-host).
+a build: rinbal's server for official builds, your own if you
+self-host).
 The app never holds the key. Which service a build talks to is
 :func:`service_url`; without one, or when the service says it has no
 key, joining in the app is simply not offered.
@@ -53,7 +53,8 @@ public name, so ``nostr.einundzwanzig_api`` is imported as before:
 - ``bolt11``: the amount a Lightning invoice asks for;
 - ``client``: :class:`MembershipApi`, the service and upstream addresses,
   and the signer adapter;
-- ``watcher``: :class:`PaymentWatcher`.
+- ``watcher``: :class:`PaymentWatcher`;
+- ``prices``: the fee in sats, CHF and EUR, and :class:`PriceLookup`.
 """
 
 from .bolt11 import bolt11_amount_sats
@@ -110,21 +111,35 @@ from .models import (
     parse_payments,
     parse_retry_after,
 )
+from .prices import (
+    CHF,
+    EUR,
+    PRICES_URL,
+    SATS,
+    PriceLookup,
+    Prices,
+    fee_amounts,
+    format_fee,
+    format_one,
+    parse_prices,
+)
 from .watcher import POLL_ATTEMPTS, POLL_INTERVAL_MS, PaymentWatcher
 
 __all__ = [
-    "API_PREFIX", "APPLICATION_TEXT_MAX_LENGTH", "BASE_URL", "EMAIL_MAX_LENGTH",
+    "API_PREFIX", "APPLICATION_TEXT_MAX_LENGTH", "BASE_URL", "CHF", "EMAIL_MAX_LENGTH", "EUR",
     "ENV_SERVICE_URL", "ENV_UPSTREAM_URL", "ERROR_CODES", "MAX_RESPONSE_BYTES",
     "MEMBERSHIP_STATUSES", "NETWORK_TIMEOUT_MS", "NIP05_HANDLE_MAX_LENGTH",
-    "POLL_ATTEMPTS", "POLL_INTERVAL_MS", "SIGN_TIMEOUT_MS", "STALE_SIGNATURE_SECONDS",
+    "POLL_ATTEMPTS", "POLL_INTERVAL_MS", "PRICES_URL", "SATS", "SIGN_TIMEOUT_MS",
+    "STALE_SIGNATURE_SECONDS",
     "STATUS_AWAITING_PAYMENT", "STATUS_LAPSED", "STATUS_MEMBER", "STATUS_NONE",
     "STATUS_TIMEOUT_MS", "UNSET",
     "ApiError", "CurrentYear", "Erasure", "ErrorCode", "FeeEntry", "Invoice",
     "MembershipApi", "MembershipConfig", "MembershipExport", "MembershipStatus",
-    "PaymentWatcher", "SignFn",
-    "application_text_problem", "bolt11_amount_sats", "email_problem", "field_message",
-    "handle_field_message", "humanize", "nip05_handle_problem", "parse_config",
+    "PaymentWatcher", "PriceLookup", "Prices", "SignFn",
+    "application_text_problem", "bolt11_amount_sats", "email_problem", "fee_amounts",
+    "field_message", "format_fee", "format_one", "handle_field_message", "humanize",
+    "nip05_handle_problem", "parse_config",
     "parse_erasure", "parse_export", "parse_fee_entry", "parse_invoice",
-    "parse_membership", "parse_payments", "parse_retry_after", "service_url",
+    "parse_membership", "parse_payments", "parse_prices", "parse_retry_after", "service_url",
     "session_signer", "upstream_url",
 ]
