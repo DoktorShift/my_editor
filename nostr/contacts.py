@@ -35,7 +35,7 @@ from PySide6.QtCore import QObject, Signal
 from . import events
 from .known_people import KnownPeople, Person
 from .outbox.lookup import Lookup, fetch_replaceable
-from .outbox.policy import bulk_profile_relays, lookup_relays
+from .outbox.policy import bulk_profile_relays, created_at_of, lookup_relays
 from .relay import RelayPool, Subscription
 
 
@@ -49,6 +49,11 @@ _METADATA_BATCH_SIZE: int = 200
 # Stop waiting for metadata after this many seconds even if EOSE hasn't
 # fired on every relay. The cache picks up whatever did land.
 _METADATA_TIMEOUT_MS: int = 12_000
+
+# How far ahead of this computer's clock a profile's time is believed.
+# Anything later counts as this far ahead: a profile dated years ahead
+# would otherwise outrank every real update its owner makes until then.
+FUTURE_TOLERANCE_S: int = 15 * 60
 
 
 # --------------------------------------------------------------------------- #
@@ -82,11 +87,23 @@ def parse_contact_list(event: dict) -> List[Person]:
     return out
 
 
-def parse_metadata_event(event: dict) -> Optional[Person]:
+def metadata_time(event: dict, *, now: Optional[float] = None) -> int:
+    """When a kind 0 says it was made, never later than FUTURE_TOLERANCE_S
+    past ``now`` (this computer's clock); 0 when it does not say."""
+    value = event.get("created_at") if isinstance(event, dict) else None
+    if isinstance(value, bool) or not isinstance(value, int):
+        return 0
+    ceiling = int(time.time() if now is None else now) + FUTURE_TOLERANCE_S
+    return min(value, ceiling)
+
+
+def parse_metadata_event(event: dict, *, now: Optional[float] = None) -> Optional[Person]:
     """Extract Person fields from a single ``kind:0`` event.
 
     Returns ``None`` if the event has no pubkey or its content isn't a
-    JSON object; both are treated as "no data, move on".
+    JSON object; both are treated as "no data, move on". Its time is
+    capped at a little past ``now`` (metadata_time). The signature is
+    not checked here: callers check it first.
     """
     pk = event.get("pubkey")
     if not isinstance(pk, str) or len(pk) != 64:
@@ -103,7 +120,7 @@ def parse_metadata_event(event: dict) -> Optional[Person]:
         picture=(fields.get("picture") or "").strip(),
         nip05=(fields.get("nip05") or "").strip(),
         source="contact",
-        updated_at=int(event.get("created_at") or time.time()),
+        updated_at=metadata_time(event, now=now) or int(time.time() if now is None else now),
     )
 
 
@@ -220,15 +237,18 @@ class ContactListFetcher(QObject):
         self._sub.eose.connect(self._finalize)
 
     def _on_metadata_event(self, event: dict) -> None:
-        if (event.get("kind") != 0 or event.get("pubkey") not in self._followed_set
-                or not events.verify_event(event)):
+        if event.get("kind") != 0 or event.get("pubkey") not in self._followed_set:
+            return
+        if created_at_of(event) is None:
+            return  # no real time to rank it by
+        existing = self._people.get(event["pubkey"])
+        if existing is not None and existing.updated_at >= metadata_time(event):
+            return  # we already have one as new: no need to check this one at all
+        if not events.verify_event(event):
             return
         person = parse_metadata_event(event)
         if person is None:
             return
-        existing = self._people.get(person.pubkey)
-        if existing is not None and existing.updated_at >= person.updated_at:
-            return  # we already have a newer kind 0 cached
         # Merge: preserve relay_hint from the kind-3 seed if the new record
         # doesn't carry one. upsert handles empty-field preservation.
         merged = self._people.upsert(person)

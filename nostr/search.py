@@ -10,7 +10,10 @@ profile events on relays that advertise NIP-50 in their NIP-11 document
 and keep a search index (nostr/outbox/defaults.py SEARCH_RELAYS).
 
 Results stream into ``KnownPeople`` so they remain searchable offline on
-the next query.
+the next query. A search relay can answer with anything, so only a
+validly signed kind 0 counts: a forged profile, especially one dated far
+ahead, would otherwise put a stranger's name on someone and keep their
+real profile from ever replacing it.
 """
 
 from __future__ import annotations
@@ -20,9 +23,11 @@ from typing import List, Optional
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
+from . import events
 from .contacts import parse_metadata_event
 from .known_people import KnownPeople, Person
 from .outbox.defaults import SEARCH_RELAYS
+from .outbox.policy import created_at_of
 from .relay import RelayPool, Subscription
 
 # Time before we give up and emit whatever we collected so far.
@@ -106,8 +111,14 @@ class Nip50SearchClient(QObject):
             self._timer = None
 
     def _on_event(self, event: dict) -> None:
+        if not isinstance(event, dict) or event.get("kind") != 0:
+            return
+        if event.get("pubkey") in self._seen or created_at_of(event) is None:
+            return
+        if not events.verify_event(event):
+            return
         person = parse_metadata_event(event)
-        if person is None or person.pubkey in self._seen:
+        if person is None:
             return
         self._seen.add(person.pubkey)
         person.source = "search"
