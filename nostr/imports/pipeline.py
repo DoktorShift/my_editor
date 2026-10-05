@@ -64,7 +64,7 @@ from typing import Callable, Iterable, List, Optional, Sequence, Tuple
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from ..blossom import hashes
-from ..outbox import RelayListCache
+from ..outbox import RelayDirectory
 from ..profiles import Profile
 from ..publisher import DraftPublishJob, PublishedMedia, build_article
 from ..relay import RelayPool
@@ -145,7 +145,7 @@ class ImportItemsJob(QObject):
         feed_url: str,
         profile: Profile,
         relay_pool: RelayPool,
-        relay_list_cache: RelayListCache,
+        relay_directory: RelayDirectory,
         session_pool: BunkerSessionPool,
         append_source_link: bool = True,
         fetch_full_text: bool = True,
@@ -168,7 +168,7 @@ class ImportItemsJob(QObject):
         self._feed_url = (feed_url or "").strip()
         self._profile = profile
         self._relay_pool = relay_pool
-        self._relay_list_cache = relay_list_cache
+        self._relay_directory = relay_directory
         self._session_pool = session_pool
         self._append_source_link = append_source_link
         self._fetch_full_text = fetch_full_text
@@ -224,7 +224,7 @@ class ImportItemsJob(QObject):
         # The user's NIP-65 read relays are resolved up front so
         # per-item long-form lookups don't each pay a round-trip.
         self._emit_status("Looking up your relay list…")
-        self._relay_list_cache.fetch(
+        self._relay_directory.fetch(
             self._profile.user_pubkey,
             relays=list(dict.fromkeys(self._profile.bunker_relays)),
             on_done=self._on_relay_list_ready,
@@ -622,7 +622,7 @@ class ImportItemsJob(QObject):
         try:
             job = self._publish_job_factory(
                 relay_pool=self._relay_pool,
-                relay_list_cache=self._relay_list_cache,
+                relay_directory=self._relay_directory,
                 session_pool=self._session_pool,
                 profile=self._profile,
                 inner_event=inner,

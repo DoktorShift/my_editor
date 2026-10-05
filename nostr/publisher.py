@@ -46,7 +46,7 @@ from .drafts import (
     serialize_inner_event,
 )
 from .events import build_event
-from .outbox import RelayListCache, select_draft_publish_relays, select_publish_relays
+from .outbox import RelayDirectory, select_draft_publish_relays, select_publish_relays
 from .profiles import Profile
 from .relay import RelayPool
 
@@ -472,7 +472,7 @@ class PublishJob(QObject):
         self,
         *,
         relay_pool: RelayPool,
-        relay_list_cache: RelayListCache,
+        relay_directory: RelayDirectory,
         session_pool: BunkerSessionPool,
         profile: Profile,
         unsigned_event: dict,
@@ -485,7 +485,7 @@ class PublishJob(QObject):
                 "unsigned event pubkey does not match the publishing profile"
             )
         self._relay_pool = relay_pool
-        self._relay_list_cache = relay_list_cache
+        self._relay_directory = relay_directory
         self._session_pool = session_pool
         # Relays this account has standing on beyond its own list.
         self._entitled_relays = list(entitled_relays)
@@ -498,7 +498,7 @@ class PublishJob(QObject):
         # Always include the profile's bunker relays when querying, even
         # if the user has no NIP-65 published, we still want a fast result.
         relays_to_query = list(dict.fromkeys(list(self._profile.bunker_relays)))
-        self._relay_list_cache.fetch(
+        self._relay_directory.fetch(
             self._profile.user_pubkey,
             relays=relays_to_query,
             on_done=self._on_relay_list_resolved,
@@ -591,7 +591,7 @@ class DraftPublishJob(QObject):
         self,
         *,
         relay_pool: RelayPool,
-        relay_list_cache: RelayListCache,
+        relay_directory: RelayDirectory,
         session_pool: BunkerSessionPool,
         profile: Profile,
         inner_event: dict,
@@ -609,7 +609,7 @@ class DraftPublishJob(QObject):
         if not identifier:
             raise ValueError("draft identifier (d-tag) must not be empty")
         self._relay_pool = relay_pool
-        self._relay_list_cache = relay_list_cache
+        self._relay_directory = relay_directory
         self._session_pool = session_pool
         # Relays this account has standing on beyond its own list.
         self._entitled_relays = list(entitled_relays)
@@ -627,7 +627,7 @@ class DraftPublishJob(QObject):
         """Kick off the stash. Safe to call once per instance."""
         self._emit_status("Looking up your relay list…")
         relays_to_query = list(dict.fromkeys(list(self._profile.bunker_relays)))
-        self._relay_list_cache.fetch(
+        self._relay_directory.fetch(
             self._profile.user_pubkey,
             relays=relays_to_query,
             on_done=self._on_relay_list_resolved,
@@ -780,7 +780,7 @@ class DraftDeleteJob(QObject):
         self,
         *,
         relay_pool: RelayPool,
-        relay_list_cache: RelayListCache,
+        relay_directory: RelayDirectory,
         session_pool: BunkerSessionPool,
         profile: Profile,
         identifier: str,
@@ -797,7 +797,7 @@ class DraftDeleteJob(QObject):
                 f"expected one of {SUPPORTED_INNER_KINDS}"
             )
         self._relay_pool = relay_pool
-        self._relay_list_cache = relay_list_cache
+        self._relay_directory = relay_directory
         self._session_pool = session_pool
         # Relays this account has standing on beyond its own list.
         self._entitled_relays = list(entitled_relays)
@@ -810,7 +810,7 @@ class DraftDeleteJob(QObject):
 
     def start(self) -> None:
         self._emit_status("Looking up your relay list…")
-        self._relay_list_cache.fetch(
+        self._relay_directory.fetch(
             self._profile.user_pubkey,
             relays=list(dict.fromkeys(self._profile.bunker_relays)),
             on_done=self._on_relay_list_resolved,
@@ -918,7 +918,7 @@ class DraftBulkDeleteJob(QObject):
         self,
         *,
         relay_pool: RelayPool,
-        relay_list_cache: RelayListCache,
+        relay_directory: RelayDirectory,
         session_pool: BunkerSessionPool,
         profile: Profile,
         targets: Sequence[Tuple[str, int]],
@@ -941,7 +941,7 @@ class DraftBulkDeleteJob(QObject):
             self._targets.append((identifier, int(inner_kind)))
 
         self._relay_pool = relay_pool
-        self._relay_list_cache = relay_list_cache
+        self._relay_directory = relay_directory
         self._session_pool = session_pool
         self._entitled_relays = list(entitled_relays)
         self._profile = profile
@@ -1009,7 +1009,7 @@ class DraftBulkDeleteJob(QObject):
         try:
             job = DraftDeleteJob(
                 relay_pool=self._relay_pool,
-                relay_list_cache=self._relay_list_cache,
+                relay_directory=self._relay_directory,
                 session_pool=self._session_pool,
                 profile=self._profile,
                 identifier=identifier,

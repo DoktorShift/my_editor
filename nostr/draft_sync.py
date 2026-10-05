@@ -42,7 +42,7 @@ from .drafts import (
     parse_inner_event,
     parse_wrap_event,
 )
-from .outbox import RelayList, RelayListCache
+from .outbox import RelayList, RelayDirectory
 from .profiles import Profile
 from .relay import RelayPool, Subscription
 
@@ -101,14 +101,14 @@ class DraftSync(QObject):
         self,
         *,
         relay_pool: RelayPool,
-        relay_list_cache: RelayListCache,
+        relay_directory: RelayDirectory,
         session_pool: BunkerSessionPool,
         store: DraftStore,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
         self._relay_pool = relay_pool
-        self._relay_list_cache = relay_list_cache
+        self._relay_directory = relay_directory
         self._session_pool = session_pool
         self._store = store
 
@@ -174,7 +174,7 @@ class DraftSync(QObject):
         # likely place the user's recent activity shows up even before
         # the NIP-65 list lands.
         seed_relays = list(dict.fromkeys(profile.bunker_relays))
-        self._relay_list_cache.fetch(
+        self._relay_directory.fetch(
             profile.user_pubkey,
             relays=seed_relays,
             on_done=lambda rl, g=gen: self._on_relay_list_ready(g, rl),

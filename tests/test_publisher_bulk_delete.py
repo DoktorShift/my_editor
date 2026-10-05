@@ -60,7 +60,7 @@ class Signer:
         self.relays_seen: List[List[str]] = []
 
     # -- the seams DraftDeleteJob uses ---------------------------------
-    def relay_list_cache(self):
+    def relay_directory(self):
         cache = MagicMock()
         cache.fetch.side_effect = (
             lambda pubkey, relays, on_done: on_done(MagicMock(write=[], read=[]))
@@ -125,7 +125,7 @@ def run(targets, *, script=(), entitled=(), defer=False):
     signer = Signer(script, defer=defer)
     job = DraftBulkDeleteJob(
         relay_pool=signer.relay_pool(),
-        relay_list_cache=signer.relay_list_cache(),
+        relay_directory=signer.relay_directory(),
         session_pool=signer.session_pool(),
         profile=profile(),
         targets=targets,
@@ -241,7 +241,7 @@ def test_a_deletion_no_relay_accepted_is_not_counted_as_deleted():
     signer._refused_flag = True
     job = DraftBulkDeleteJob(
         relay_pool=signer.relay_pool(),
-        relay_list_cache=signer.relay_list_cache(),
+        relay_directory=signer.relay_directory(),
         session_pool=signer.session_pool(),
         profile=profile(), targets=targets(1),
     )
@@ -321,7 +321,7 @@ def test_a_foreign_inner_kind_is_refused_at_construction():
     # ninth draft has already cost the user eight approvals.
     with pytest.raises(ValueError, match="unsupported inner kind"):
         DraftBulkDeleteJob(
-            relay_pool=MagicMock(), relay_list_cache=MagicMock(),
+            relay_pool=MagicMock(), relay_directory=MagicMock(),
             session_pool=MagicMock(), profile=profile(),
             targets=[("d0", 1), ("d1", 30024)],
         )
@@ -330,7 +330,7 @@ def test_a_foreign_inner_kind_is_refused_at_construction():
 def test_an_empty_identifier_is_refused_at_construction():
     with pytest.raises(ValueError, match="identifier"):
         DraftBulkDeleteJob(
-            relay_pool=MagicMock(), relay_list_cache=MagicMock(),
+            relay_pool=MagicMock(), relay_directory=MagicMock(),
             session_pool=MagicMock(), profile=profile(),
             targets=[("", 1)],
         )
@@ -341,7 +341,7 @@ def test_nothing_is_signed_when_construction_refuses():
     with pytest.raises(ValueError):
         DraftBulkDeleteJob(
             relay_pool=signer.relay_pool(),
-            relay_list_cache=signer.relay_list_cache(),
+            relay_directory=signer.relay_directory(),
             session_pool=signer.session_pool(),
             profile=profile(), targets=[("d0", 1), ("d1", 30024)],
         )

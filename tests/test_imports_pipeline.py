@@ -3,7 +3,7 @@
 """Orchestration tests for ``nostr.imports.pipeline.ImportItemsJob``.
 
 Drives the per-item import state machine through its injectable seams
-(long-form fetcher, publish-job factory, relay-list cache, executor,
+(long-form fetcher, publish-job factory, relay directory, executor,
 pacer), so no network, relays, signer, threads, or timers are involved
 and every test is deterministic. Guards:
 
@@ -72,7 +72,7 @@ def make_job(items, *, factory=None, long_form=None, pacer=None,
         feed_url=feed_url,
         profile=PROFILE,
         relay_pool=None,
-        relay_list_cache=FakeRelayListCache(),
+        relay_directory=FakeRelayListCache(),
         session_pool=None,
         fetcher=page_fetcher or FakeFetcher(),
         long_form_fetcher=long_form or FakeLongFormFetcher(None),
@@ -177,7 +177,7 @@ class TestHappyPath:
         cache = FakeRelayListCache()
         job = ImportItemsJob(
             items=[], feed_url=FEED_URL, profile=PROFILE, relay_pool=None,
-            relay_list_cache=cache, session_pool=None,
+            relay_directory=cache, session_pool=None,
             long_form_fetcher=FakeLongFormFetcher(None),
             publish_job_factory=make_factory()[0],
             run_blocking=inline_run_blocking, pacer=RecordingPacer(),

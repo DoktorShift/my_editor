@@ -65,7 +65,7 @@ def make_panel(fetcher, *, publish_outcomes=None):
         kwargs.update(
             session_pool=FakeSessionPool(),
             relay_pool=None,
-            relay_list_cache=FakeRelayListCache(),
+            relay_directory=FakeRelayListCache(),
             cache_dir=cache_dir,
             publisher=FakePublisher(),
             scheduler=FakeScheduler(),
@@ -76,7 +76,7 @@ def make_panel(fetcher, *, publish_outcomes=None):
     def import_job_factory(**kwargs):
         job_kwargs_seen.append(dict(kwargs))
         kwargs.update(
-            relay_list_cache=FakeRelayListCache(),
+            relay_directory=FakeRelayListCache(),
             # Page fetches (full-text recovery) also settle synchronously
             # against the same fake response table.
             fetcher=fetcher,
@@ -99,7 +99,7 @@ def make_panel(fetcher, *, publish_outcomes=None):
     )
     panel.bind_runtime(
         relay_pool=object(),
-        relay_list_cache=FakeRelayListCache(),
+        relay_directory=FakeRelayListCache(),
         session_pool=object(),
         blossom_settings=type("S", (), {"primary": "https://blossom.test"})(),
     )

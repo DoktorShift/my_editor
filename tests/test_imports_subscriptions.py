@@ -110,7 +110,7 @@ def make_store(tmp_path, *, session_pool=None, publisher=None,
     store = FeedSubscriptionStore(
         session_pool=session_pool or FakeSessionPool(),
         relay_pool=None,
-        relay_list_cache=FakeRelayListCache(),
+        relay_directory=FakeRelayListCache(),
         cache_dir=tmp_path,
         query=query,
         publisher=publisher,

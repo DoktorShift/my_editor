@@ -35,7 +35,7 @@ from ..bech32 import encode_naddr
 from ..blossom.store import MediaFile, MediaStore
 from ..bunker import BunkerSessionPool, humanize_failure
 from ..known_people import KnownPeople
-from ..outbox import RelayListCache
+from ..outbox import RelayDirectory
 from ..profiles import Profile, ProfileStore
 from ..publisher import PublishJob, PublishResult, build_article, slugify
 from ..relay import RelayPool
@@ -323,7 +323,7 @@ class PublishArticleDialog(QDialog):
         active_profile: Profile,
         store: ProfileStore,
         relay_pool: RelayPool,
-        relay_list_cache: RelayListCache,
+        relay_directory: RelayDirectory,
         session_pool: BunkerSessionPool,
         entitled_relays: Optional[Callable[[], Sequence[str]]] = None,
         known_people: KnownPeople,
@@ -346,7 +346,7 @@ class PublishArticleDialog(QDialog):
 
         self._store = store
         self._relay_pool = relay_pool
-        self._relay_list_cache = relay_list_cache
+        self._relay_directory = relay_directory
         self._session_pool = session_pool
         # Relays this account has standing on beyond its own list, resolved
         # when the publish actually happens rather than at dialog open.
@@ -846,7 +846,7 @@ class PublishArticleDialog(QDialog):
 
         self._job = PublishJob(
             relay_pool=self._relay_pool,
-            relay_list_cache=self._relay_list_cache,
+            relay_directory=self._relay_directory,
             session_pool=self._session_pool,
             profile=self._current_profile,
             entitled_relays=list(self._entitled_relays() or ())

@@ -24,6 +24,7 @@ from .legacy import (  # noqa: F401  (re-exported while call sites migrate)
     select_draft_publish_relays,
     select_publish_relays,
 )
+from .directory import RelayDirectory  # noqa: F401
 from .policy import (  # noqa: F401
     KIND_PROFILE,
     KIND_RELAY_LIST,

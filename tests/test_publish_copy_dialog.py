@@ -929,7 +929,7 @@ def _real_library(*, signer):
 
     return PrivateLibrary(
         session_pool=signer,
-        relay_list_cache=FakeRelayListCache(),
+        relay_directory=FakeRelayListCache(),
         query=Query(),
         clock=lambda: 1_700_000_000,
     )

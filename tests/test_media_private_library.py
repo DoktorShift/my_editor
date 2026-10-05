@@ -187,7 +187,7 @@ def make_library(events=None, *, client=None, session_pool=None, query=None,
     pool = session_pool if session_pool is not None else FakeSessionPool(client)
     library = PrivateLibrary(
         session_pool=pool,
-        relay_list_cache=FakeRelayListCache(),
+        relay_directory=FakeRelayListCache(),
         query=query,
         clock=clock or (lambda: NOW),
     )

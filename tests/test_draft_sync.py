@@ -60,7 +60,7 @@ def _make_profile(pubkey: str):
 def _make_sync(store: DraftStore | None = None) -> DraftSync:
     return DraftSync(
         relay_pool=MagicMock(),
-        relay_list_cache=MagicMock(),
+        relay_directory=MagicMock(),
         session_pool=MagicMock(),
         store=store or DraftStore(),
     )

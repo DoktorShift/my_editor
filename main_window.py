@@ -281,13 +281,12 @@ class MainWindow(QMainWindow):
         self._relay_pool = RelayPool(parent=self)
         self._profile_store = ProfileStore()
         # Where everyone reads and writes (NIP-65): verified, cached, and the
-        # user's own lists remembered across launches. It also answers the
-        # older relay-list-cache calls while those move to its routing API.
+        # user's own lists remembered across launches. Every job and panel
+        # that touches relays asks it where to go.
         self._relay_directory = RelayDirectory(
             self._relay_pool,
             own_pubkeys=lambda: [p.user_pubkey for p in self._profile_store.list()],
             parent=self)
-        self._relay_list_cache = self._relay_directory
         # Keys kept on this computer, for accounts that chose that over a
         # signer app (Create Account, Restore Account).
         self._key_vault = KeyVault()
@@ -327,7 +326,7 @@ class MainWindow(QMainWindow):
         self._draft_store.record_changed.connect(self._on_draft_record_changed)
         self._draft_sync = DraftSync(
             relay_pool=self._relay_pool,
-            relay_list_cache=self._relay_list_cache,
+            relay_directory=self._relay_directory,
             session_pool=self._session_pool,
             store=self._draft_store,
             parent=self,
@@ -403,7 +402,7 @@ class MainWindow(QMainWindow):
         self._public_ledger = PublicLedger()
         self._private_library = PrivateLibrary(
             session_pool=self._session_pool,
-            relay_list_cache=self._relay_list_cache,
+            relay_directory=self._relay_directory,
             query=RelayQueryAdapter(self._relay_pool, parent=self),
             parent=self,
         )
@@ -1250,7 +1249,7 @@ class MainWindow(QMainWindow):
         self._drafts_panel.set_preview_image_loader(self._media_image_loader)
         self._drafts_panel.feeds.bind_runtime(
             relay_pool=self._relay_pool,
-            relay_list_cache=self._relay_list_cache,
+            relay_directory=self._relay_directory,
             session_pool=self._session_pool,
             # Lets imports reuse a pre-prefix identifier that already
             # exists locally instead of duplicating the draft.
@@ -3939,7 +3938,7 @@ class MainWindow(QMainWindow):
             active_profile=active,
             store=self._profile_store,
             relay_pool=self._relay_pool,
-            relay_list_cache=self._relay_list_cache,
+            relay_directory=self._relay_directory,
             session_pool=self._session_pool,
             entitled_relays=self._entitled_relays,
             known_people=self._known_people,
@@ -4005,7 +4004,7 @@ class MainWindow(QMainWindow):
             active_profile=active,
             store=self._profile_store,
             relay_pool=self._relay_pool,
-            relay_list_cache=self._relay_list_cache,
+            relay_directory=self._relay_directory,
             session_pool=self._session_pool,
             entitled_relays=self._entitled_relays,
             known_people=self._known_people,
@@ -4479,7 +4478,7 @@ class MainWindow(QMainWindow):
         try:
             job = DraftBulkDeleteJob(
                 relay_pool=self._relay_pool,
-                relay_list_cache=self._relay_list_cache,
+                relay_directory=self._relay_directory,
                 session_pool=self._session_pool,
                 entitled_relays=self._entitled_relays(),
                 profile=profile,
@@ -4795,7 +4794,7 @@ class MainWindow(QMainWindow):
 
         job = DraftPublishJob(
             relay_pool=self._relay_pool,
-            relay_list_cache=self._relay_list_cache,
+            relay_directory=self._relay_directory,
             session_pool=self._session_pool,
             entitled_relays=self._entitled_relays(),
             profile=profile,

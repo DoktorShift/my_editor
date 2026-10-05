@@ -180,8 +180,8 @@ def _library_after(records):
     session_pool = MagicMock()
     session_pool.get.side_effect = lambda profile, on_ready, on_error: on_ready(client)
 
-    relay_list_cache = MagicMock()
-    relay_list_cache.fetch.side_effect = (
+    relay_directory = MagicMock()
+    relay_directory.fetch.side_effect = (
         lambda pubkey, relays, on_done: on_done(MagicMock(write=[], read=[]))
     )
 
@@ -196,7 +196,7 @@ def _library_after(records):
     )
 
     library = PrivateLibrary(
-        session_pool=session_pool, relay_list_cache=relay_list_cache,
+        session_pool=session_pool, relay_directory=relay_directory,
         query=query, clock=lambda: 1_700_000_000,
     )
     profile = MagicMock()

@@ -73,7 +73,7 @@ import time as _time
 from PySide6.QtCore import QObject, Signal
 
 from ..bunker import BunkerClient, BunkerSessionPool
-from ..outbox import RelayListCache, select_draft_publish_relays
+from ..outbox import RelayDirectory, select_draft_publish_relays
 from ..profiles import Profile
 from .assets import is_sha256
 from .visibility import PrivateBlob
@@ -380,14 +380,14 @@ class PrivateLibrary(QObject):
         self,
         *,
         session_pool: BunkerSessionPool,
-        relay_list_cache: RelayListCache,
+        relay_directory: RelayDirectory,
         query: AddressableQuery,
         clock: Optional[Callable[[], int]] = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
         self._session_pool = session_pool
-        self._relay_list_cache = relay_list_cache
+        self._relay_directory = relay_directory
         self._query = query
         self._clock = clock or (lambda: int(_time.time()))
 
@@ -606,7 +606,7 @@ class PrivateLibrary(QObject):
                 lambda events, g=gen: self._on_events(g, events),
             )
 
-        self._relay_list_cache.fetch(
+        self._relay_directory.fetch(
             profile.user_pubkey,
             relays=list(dict.fromkeys(profile.bunker_relays)),
             on_done=_on_relay_list,
