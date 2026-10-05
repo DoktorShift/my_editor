@@ -32,10 +32,11 @@ else in the app may implement it:
    is why :func:`build_server_list_event` is a pure builder here and no
    publish path in this package calls it.
 
-Not wired into the app yet: nothing outside the tests constructs a
-:class:`UserServerList`, so the app reads no kind 10063 today. It is the
-whole of AD-13, ready for the place that turns discovery on (the media
-library, with the relay directory and the active profile at hand).
+MainWindow owns the one :class:`UserServerList`, sharing the media
+store's settings: it reads the active account's list when the account
+becomes active, announces an adoption in the status bar, offers the
+suggestions in the Media Library, and hands :meth:`recovery_servers` to
+the AssetManager.
 
 Only a validly signed list by the right author counts: the read goes
 through the outbox lookup (nostr/outbox/lookup.py), so a relay cannot

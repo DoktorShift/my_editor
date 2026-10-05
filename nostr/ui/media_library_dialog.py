@@ -767,6 +767,8 @@ class MediaLibraryDialog(QDialog):
     actions. The library itself works identically in both modes."""
 
     file_picked = Signal(object, str)   # MediaFile, alt_text (empty when alt row is hidden)
+    # Upload to these servers the profile lists too; only after the click.
+    server_suggestions_accepted = Signal(list)
 
     def __init__(
         self,
@@ -1054,6 +1056,33 @@ class MediaLibraryDialog(QDialog):
         self._servers_label.setTextFormat(Qt.PlainText)
         self._servers_label.setVisible(False)
         layout.addWidget(self._servers_label)
+
+        # Media servers the account's Nostr profile lists that this app
+        # does not upload to. Only an offer: nothing changes without the
+        # click (a published list never becomes an upload target on its
+        # own once servers are configured here).
+        self._suggested_servers: List[str] = []
+        self._suggestions_dismissed = False
+        self._suggestion_box = QWidget()
+        suggestion_row = QHBoxLayout(self._suggestion_box)
+        suggestion_row.setContentsMargins(0, 0, 0, 0)
+        suggestion_row.setSpacing(8)
+        self._suggestion_label = QLabel("")
+        self._suggestion_label.setObjectName("media_notice")
+        self._suggestion_label.setWordWrap(True)
+        self._suggestion_label.setTextFormat(Qt.PlainText)
+        not_now = QPushButton("Not Now")
+        not_now.setAutoDefault(False)
+        not_now.clicked.connect(self._dismiss_server_suggestions)
+        self._suggestion_use = QPushButton("Use for Uploads")
+        self._suggestion_use.setAutoDefault(False)
+        self._suggestion_use.clicked.connect(
+            lambda: self.server_suggestions_accepted.emit(list(self._suggested_servers)))
+        suggestion_row.addWidget(self._suggestion_label, 1)
+        suggestion_row.addWidget(not_now)
+        suggestion_row.addWidget(self._suggestion_use)
+        self._suggestion_box.setVisible(False)
+        layout.addWidget(self._suggestion_box)
 
         # Drop zone.
         self._drop_zone = _DropZone(self)
@@ -1724,6 +1753,24 @@ class MediaLibraryDialog(QDialog):
         self._servers_label.setText(text)
         self._servers_label.setVisible(bool(text))
         self._refresh_storage()
+
+    def set_server_suggestions(self, servers: List[str]) -> None:
+        """Offer the media servers the profile lists that uploads do not
+        go to yet. An empty list, or Not Now, hides the offer."""
+        self._suggested_servers = list(servers or [])
+        hosts = [url_safety.host_of(s) or s for s in self._suggested_servers]
+        if len(hosts) == 1:
+            text = (f"Your Nostr profile also lists {hosts[0]} for media. Use it "
+                    "for uploads here too?")
+        else:
+            text = (f"Your Nostr profile also lists {', '.join(hosts)} for media. "
+                    "Use them for uploads here too?")
+        self._suggestion_label.setText(text if hosts else "")
+        self._suggestion_box.setVisible(bool(hosts) and not self._suggestions_dismissed)
+
+    def _dismiss_server_suggestions(self) -> None:
+        self._suggestions_dismissed = True
+        self._suggestion_box.setVisible(False)
 
     def _has_files_on(self, origin: str) -> bool:
         return any(origin in _origins_of(m) for m in self._store.files.values())

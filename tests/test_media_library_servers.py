@@ -35,7 +35,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import shiboken6  # noqa: E402
 from PySide6.QtCore import QCoreApplication, QEvent  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QPushButton  # noqa: E402
 
 import nostr.ui.media_library_dialog as dialog_module  # noqa: E402
 from nostr.blossom.store import MediaFile, ServerListing  # noqa: E402
@@ -228,3 +228,43 @@ def test_a_closed_library_leaves_nothing_connected_to_the_store(tmp_path, monkey
     store.listings_changed.emit()
     store.library_changed.emit()
     assert errors == []
+
+
+# -- servers the profile lists, offered for uploads --------------------------------------
+
+def test_servers_the_profile_lists_are_offered_not_used(tmp_path, monkeypatch):
+    dialog = build(tmp_path, monkeypatch, ServerStore())
+    accepted = []
+    dialog.server_suggestions_accepted.connect(accepted.append)
+    dialog.set_server_suggestions(["https://cdn.example"])
+    assert not dialog._suggestion_box.isHidden()
+    assert dialog._suggestion_label.text() == (
+        "Your Nostr profile also lists cdn.example for media. Use it for uploads here too?")
+    assert accepted == []                       # nothing without the click
+    dialog._suggestion_use.click()
+    assert accepted == [["https://cdn.example"]]
+
+
+def test_several_servers_are_offered_together(tmp_path, monkeypatch):
+    dialog = build(tmp_path, monkeypatch, ServerStore())
+    dialog.set_server_suggestions(["https://a.example", "https://b.example"])
+    assert dialog._suggestion_label.text() == (
+        "Your Nostr profile also lists a.example, b.example for media. Use them for "
+        "uploads here too?")
+
+
+def test_not_now_hides_the_offer_for_this_window(tmp_path, monkeypatch):
+    dialog = build(tmp_path, monkeypatch, ServerStore())
+    dialog.set_server_suggestions(["https://cdn.example"])
+    not_now = [b for b in dialog._suggestion_box.findChildren(QPushButton)
+               if b.text() == "Not Now"][0]
+    not_now.click()
+    assert dialog._suggestion_box.isHidden()
+    dialog.set_server_suggestions(["https://cdn.example", "https://b.example"])
+    assert dialog._suggestion_box.isHidden()
+
+
+def test_nothing_to_offer_shows_nothing(tmp_path, monkeypatch):
+    dialog = build(tmp_path, monkeypatch, ServerStore())
+    dialog.set_server_suggestions([])
+    assert dialog._suggestion_box.isHidden()

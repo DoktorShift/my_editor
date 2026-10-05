@@ -271,3 +271,47 @@ def test_the_article_dialog_can_open_the_library_for_its_cover_picker():
     assert len(calls_found) == 1
     assert attribute_argument(
         calls_found[0], "private_library") == "_private_library"
+
+
+# --------------------------------------------------------------------- #
+# The media servers the account publishes (kind 10063)                   #
+# --------------------------------------------------------------------- #
+
+def test_the_published_server_list_shares_the_stores_settings(init_body):
+    """What the list adopts must be what the store uploads to. A second
+    settings object would adopt into a file the store never reads again
+    in this session."""
+    call = constructor(init_body, "UserServerList")
+    settings = [k.value for k in call.keywords if k.arg == "settings"]
+    assert len(settings) == 1
+    value = settings[0]
+    assert isinstance(value, ast.Attribute) and value.attr == "settings"
+    assert isinstance(value.value, ast.Attribute) and value.value.attr == "_media_store"
+
+
+def test_dead_image_addresses_are_recovered_from_the_published_servers(init_body):
+    assets = constructor(init_body, "AssetManager")
+    providers = [k.value for k in assets.keywords if k.arg == "recovery_provider"]
+    assert len(providers) == 1
+    assert isinstance(providers[0], ast.Attribute)
+    assert providers[0].attr == "recovery_servers"
+    list_at = statement_index(init_body, assigns("_server_list"))
+    assets_at = statement_index(init_body, calls("AssetManager"))
+    assert 0 <= list_at < assets_at
+
+
+def test_every_library_window_is_offered_the_published_servers():
+    source = textwrap.dedent(inspect.getsource(MainWindow))
+    tree = ast.parse(source)
+    offered = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "attr", "") == "set_server_suggestions"
+    ]
+    libraries = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "id", "") == "MediaLibraryDialog"
+    ]
+    # Each library window when it opens, plus the open one when the list changes.
+    assert len(offered) >= len(libraries) + 1

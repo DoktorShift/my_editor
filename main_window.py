@@ -101,6 +101,7 @@ from recent_files import load_recent, add_recent, clear_recent
 from nostr.avatar_store import AvatarBatchLoader, AvatarStore
 from nostr.bech32 import encode_note
 from nostr.blossom.errors import friendly_message
+from nostr.blossom.server_list import UserServerList
 from nostr.blossom.store import MediaFile, MediaStore
 from nostr.bunker import BunkerSessionPool
 from nostr.contacts import ContactListFetcher
@@ -390,6 +391,16 @@ class MainWindow(QMainWindow):
         # the roster is refreshed while the app is open. Started once the
         # store its answer may concern exists.
         self._membership.start()
+        # The media servers the account publishes (its kind 10063 list):
+        # adopted only when nothing is configured here yet, otherwise
+        # offered in the Media Library, and always tried when an image's
+        # stored address stops answering. It shares the store's settings,
+        # so what it adopts is what the store uploads to.
+        self._server_list = UserServerList(
+            self._relay_pool, relay_directory=self._relay_directory,
+            settings=self._media_store.settings, parent=self)
+        self._server_list.adopted.connect(self._on_media_servers_adopted)
+        self._server_list.suggestions_changed.connect(self._on_media_server_suggestions)
         # The one object the editor side talks to about images. Every
         # boundary it crosses is injected here, so nothing below this
         # line knows anything about Blossom.
@@ -398,6 +409,7 @@ class MainWindow(QMainWindow):
             uploader=self._media_store,
             profile_provider=lambda: self._profile_store.default(),
             decoder=image_safety.decode_image_bytes,
+            recovery_provider=self._server_list.recovery_servers,
             parent=self,
         )
         self._asset_manager.asset_changed.connect(self._refresh_asset_in_documents)
@@ -442,6 +454,7 @@ class MainWindow(QMainWindow):
         if active is not None:
             self._metadata_fetcher.fetch(active)
             self._contact_fetcher.fetch(active.user_pubkey)
+            self._server_list.refresh(active)
             # Start the draft sync in the background. It's idempotent -
             # if the panel is never opened, this still keeps the store
             # warm so opening the panel later is instant.
@@ -3518,6 +3531,41 @@ class MainWindow(QMainWindow):
         than its host: the members' server is the association's."""
         return self._membership.server_label(origin)
 
+    def _on_media_servers_adopted(self, servers: list) -> None:
+        """Nothing was configured here, so the servers the account
+        publishes became its upload servers. Said once, where it shows."""
+        hosts = ", ".join(url_safety.host_of(s) or s for s in servers)
+        self.status.showMessage(
+            f"Media uploads go to the servers your Nostr profile lists: {hosts}", 8000)
+        if self._visible_media_library() is not None:
+            self._media_store.refetch_if_targets_changed()
+
+    def _media_server_suggestions(self) -> list:
+        """Servers the active account publishes and this app does not
+        upload to. Another account's list is never offered."""
+        active = self._profile_store.default()
+        if active is None or (self._server_list.discovered_pubkey.lower()
+                              != active.user_pubkey.lower()):
+            return []
+        return self._server_list.suggestions
+
+    def _on_media_server_suggestions(self, _servers: list) -> None:
+        dialog = self._visible_media_library()
+        if dialog is not None:
+            dialog.set_server_suggestions(self._media_server_suggestions())
+
+    def _use_suggested_media_servers(self, servers: list) -> None:
+        """The person chose to upload to the servers their profile lists,
+        besides the ones configured here. Their files there are listed
+        from now on too."""
+        settings = self._media_store.settings
+        for server in servers:
+            settings.add_server(server)
+        self._media_store.refetch_if_targets_changed()
+        dialog = self._visible_media_library()
+        if dialog is not None:
+            dialog.set_server_suggestions(self._media_server_suggestions())
+
     def _entitled_quota(self, origin: str):
         """The space a membership gives on its media server, in bytes."""
         return self._membership.quota(origin)
@@ -3583,6 +3631,7 @@ class MainWindow(QMainWindow):
         self._metadata_fetcher.fetch(profile)
         # Also prime the mentions cache from this profile's NIP-02 contact list.
         self._contact_fetcher.fetch(profile.user_pubkey)
+        self._server_list.refresh(profile)
         # Bind the draft pipeline to the new profile so the panel
         # (visible or not) starts collecting wraps from the relays.
         self._draft_sync.start_for(profile)
@@ -3638,6 +3687,7 @@ class MainWindow(QMainWindow):
             self._drafts_panel.set_active_profile(profile)
             self._drafts_panel.set_signer_unsupported(False)
             self._drafts_panel.set_signer_unreachable(False)
+        self._server_list.refresh(profile)
         self._accounts.profile_activated(profile)
 
     def _on_nostr_sign_out(self):
@@ -3843,6 +3893,8 @@ class MainWindow(QMainWindow):
             parent=self,
         )
         dialog.bind_private_library(self._private_library)
+        dialog.server_suggestions_accepted.connect(self._use_suggested_media_servers)
+        dialog.set_server_suggestions(self._media_server_suggestions())
         # The dialog deletes itself on close; forget it then, so nothing
         # later asks a deleted object whether it is visible.
         dialog.destroyed.connect(lambda _obj=None, d=dialog: self._forget_media_library(d))
@@ -3875,6 +3927,8 @@ class MainWindow(QMainWindow):
             parent=self,
         )
         dialog.bind_private_library(self._private_library)
+        dialog.server_suggestions_accepted.connect(self._use_suggested_media_servers)
+        dialog.set_server_suggestions(self._media_server_suggestions())
         # Pre-select images in the picker - videos / audio can't be
         # inserted as inline document objects.
         dialog._filter_combo.setCurrentIndex(1)
