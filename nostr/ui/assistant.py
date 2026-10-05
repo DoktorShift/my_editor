@@ -21,15 +21,21 @@ What every assistant gets, following Apple's Human Interface Guidelines:
 - Colours come from the app's theme, light and dark.
 
 ``copy_secret`` puts a secret on the clipboard and takes it off again a
-minute later, but only if it is still there: nothing the person copied
-afterwards is ever cleared.
+minute later, or when MyEditor quits, but only if it is still there:
+nothing the person copied afterwards is ever cleared. It is marked as a
+secret on the way in, so clipboard managers and clipboard history skip it:
+org.nspasteboard.ConcealedType on a Mac (written to the pasteboard
+directly, because Qt renames custom types there), the KDE password-manager
+hint, and Windows' ExcludeClipboardContentFromMonitorProcessing.
 """
 
 from __future__ import annotations
 
+import sys
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QMimeData, Qt, QTimer
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -140,17 +146,149 @@ def page(spacing: int = 10) -> Tuple[QWidget, QVBoxLayout]:
     return widget, column
 
 
-def copy_secret(text: str, *, seconds: int = SECRET_CLIPBOARD_SECONDS) -> None:
-    """Copy a secret, and clear it from the clipboard after ``seconds``
-    unless something else was copied since."""
-    clipboard = QApplication.clipboard()
-    clipboard.setText(text)
+# Clipboard formats that say "this is a secret, don't keep it".
+CONCEALED_MAC = "org.nspasteboard.ConcealedType"
+CONCEALED_KDE = "x-kde-passwordManagerHint"
+CONCEALED_WINDOWS = ('application/x-qt-windows-mime;'
+                     'value="ExcludeClipboardContentFromMonitorProcessing"')
 
-    def clear():
+# Secrets on the clipboard that have not been cleared yet: one clearing
+# function each, run by its timer or when the app quits.
+_pending_clears: List[Callable[[], None]] = []
+_quit_hooked = False
+
+
+def secret_mime_data(text: str) -> QMimeData:
+    """``text`` as clipboard data marked as a secret."""
+    data = QMimeData()
+    data.setText(text)
+    data.setData(CONCEALED_MAC, b"")
+    data.setData(CONCEALED_KDE, b"secret")
+    data.setData(CONCEALED_WINDOWS, b"\x00\x00\x00\x00")
+    return data
+
+
+def copy_secret(text: str, *, seconds: Optional[int] = None) -> None:
+    """Copy a secret, and clear it from the clipboard after ``seconds``
+    (a minute unless given) or when MyEditor quits, unless something else
+    was copied since."""
+    seconds = SECRET_CLIPBOARD_SECONDS if seconds is None else seconds
+    clear_if_unchanged = _put_secret(text)
+
+    def clear() -> None:
+        if clear in _pending_clears:
+            _pending_clears.remove(clear)
+            clear_if_unchanged()
+
+    _pending_clears.append(clear)
+    _clear_on_quit()
+    QTimer.singleShot(seconds * 1000, clear)
+
+
+def clear_pending_secrets() -> None:
+    """Take every secret still on the clipboard off it now."""
+    for clear in list(_pending_clears):
+        clear()
+
+
+def _clear_on_quit() -> None:
+    global _quit_hooked
+    app = QApplication.instance()
+    if not _quit_hooked and app is not None:
+        app.aboutToQuit.connect(clear_pending_secrets)
+        _quit_hooked = True
+
+
+def _put_secret(text: str) -> Callable[[], None]:
+    """Put ``text`` on the clipboard as a secret; return what clears it
+    if it is still the clipboard's content."""
+    if sys.platform == "darwin" and QGuiApplication.platformName() == "cocoa":
+        try:
+            return _MacPasteboard().put_secret(text)
+        except Exception:  # noqa: BLE001, fall back to Qt's clipboard
+            pass
+    clipboard = QApplication.clipboard()
+    clipboard.setMimeData(secret_mime_data(text))
+
+    def clear_if_unchanged() -> None:
         if clipboard.text() == text:
             clipboard.clear()
 
-    QTimer.singleShot(seconds * 1000, clear)
+    return clear_if_unchanged
+
+
+class _MacPasteboard:
+    """Just enough of NSPasteboard, through the Objective-C runtime, to put
+    a concealed string on the pasteboard and clear it while it is unchanged
+    (the change count says whether anything was copied since)."""
+
+    def __init__(self, name: Optional[str] = None) -> None:
+        import ctypes
+        import ctypes.util
+        self._c = ctypes
+        objc = ctypes.CDLL(ctypes.util.find_library("objc"))
+        ctypes.CDLL(ctypes.util.find_library("AppKit"))
+        objc.objc_getClass.restype = ctypes.c_void_p
+        objc.objc_getClass.argtypes = [ctypes.c_char_p]
+        objc.sel_registerName.restype = ctypes.c_void_p
+        objc.sel_registerName.argtypes = [ctypes.c_char_p]
+        objc.objc_autoreleasePoolPush.restype = ctypes.c_void_p
+        objc.objc_autoreleasePoolPop.argtypes = [ctypes.c_void_p]
+        self._objc = objc
+        self._send = ctypes.cast(objc.objc_msgSend, ctypes.c_void_p).value
+        self._name = name
+
+    def _msg(self, obj, selector: bytes, *args, restype=None, argtypes=()):
+        c = self._c
+        function = c.CFUNCTYPE(restype or c.c_void_p, c.c_void_p, c.c_void_p,
+                               *argtypes)(self._send)
+        return function(obj, self._objc.sel_registerName(selector), *args)
+
+    def _string(self, text: str):
+        return self._msg(self._objc.objc_getClass(b"NSString"), b"stringWithUTF8String:",
+                         text.encode("utf-8"), argtypes=(self._c.c_char_p,))
+
+    def _pasteboard(self):
+        cls = self._objc.objc_getClass(b"NSPasteboard")
+        if self._name is None:
+            return self._msg(cls, b"generalPasteboard")
+        return self._msg(cls, b"pasteboardWithName:", self._string(self._name),
+                         argtypes=(self._c.c_void_p,))
+
+    def _in_pool(self, work):
+        pool = self._objc.objc_autoreleasePoolPush()
+        try:
+            return work()
+        finally:
+            self._objc.objc_autoreleasePoolPop(pool)
+
+    def put_secret(self, text: str) -> Callable[[], None]:
+        c = self._c
+
+        def put() -> int:
+            board = self._pasteboard()
+            self._msg(board, b"clearContents", restype=c.c_long)
+            pair = (c.c_void_p, c.c_void_p)
+            wrote = self._msg(board, b"setString:forType:", self._string(text),
+                              self._string("public.utf8-plain-text"),
+                              restype=c.c_bool, argtypes=pair)
+            empty = self._msg(self._objc.objc_getClass(b"NSData"), b"data")
+            marked = self._msg(board, b"setData:forType:", empty,
+                               self._string(CONCEALED_MAC), restype=c.c_bool, argtypes=pair)
+            if not (wrote and marked):
+                raise OSError("the pasteboard didn't take the secret")
+            return self._msg(board, b"changeCount", restype=c.c_long)
+
+        written = self._in_pool(put)
+
+        def clear_if_unchanged() -> None:
+            def clear() -> None:
+                board = self._pasteboard()
+                if self._msg(board, b"changeCount", restype=c.c_long) == written:
+                    self._msg(board, b"clearContents", restype=c.c_long)
+            self._in_pool(clear)
+
+        return clear_if_unchanged
 
 
 def _repolish(widget: QWidget) -> None:
