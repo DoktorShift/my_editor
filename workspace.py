@@ -98,10 +98,12 @@ def write_workspace(workspace: Workspace, path: str = WORKSPACE_FILE) -> bool:
 def take_workspace(path: str = WORKSPACE_FILE) -> Optional[Workspace]:
     """Read the record and delete it, so it is restored at most once.
 
-    A record from a newer build is left on disk untouched. Anything
-    unreadable is deleted and treated as absent: a broken record must not
-    stop MyEditor from starting, and the backups it pointed at are still
-    found by the crash-recovery sweep.
+    A record from a newer build is not read, and not deleted here: this
+    build can't know what it means. (A normal quit still removes it, like
+    any leftover record; see MainWindow.closeEvent.) Anything unreadable is
+    deleted and treated as absent: a broken record must not stop MyEditor
+    from starting, and the backups it pointed at are still found by the
+    crash-recovery sweep.
     """
     if not os.path.isfile(path):
         return None

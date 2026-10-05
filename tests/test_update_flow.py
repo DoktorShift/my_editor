@@ -65,7 +65,7 @@ def test_self_updating_installs_get_the_automatic_plan():
     assert [s.title for s in plan.steps] == ["Download", "Restart"]
     assert "(42 MB)" in plan.steps[0].detail
     assert "intact" in plan.steps[0].detail
-    # Nothing is asked about unsaved work any more: it comes back.
+    # Unsaved work is no longer something to save first: it comes back.
     assert "haven't saved" in plan.intro
     assert "tabs" in plan.steps[-1].detail
     assert _query(plan.guide_url)["os"] == "windows"   # the fallback if it fails
@@ -119,12 +119,15 @@ def test_a_source_checkout_is_updated_with_git():
 def test_no_plan_text_uses_an_em_dash():
     kinds = (updater.MACOS_APP, updater.DEB, updater.WINDOWS_INSTALLER,
              updater.APPIMAGE, updater.LINUX_OTHER, updater.SOURCE)
+    assets = (None, SimpleNamespace(name="my-editor_3.3_amd64.deb", size=41_545_251))
     for kind in kinds:
         for can_self_update in (False, True):
-            plan = plan_for(kind, "3.3", release_url=RELEASE_URL,
-                            can_self_update=can_self_update, machine="x86_64")
-            text = plan.intro + "".join(s.title + s.detail + s.command for s in plan.steps)
-            assert "\u2014" not in text
+            for asset in assets:
+                plan = plan_for(kind, "3.3", release_url=RELEASE_URL, asset=asset,
+                                can_self_update=can_self_update, machine="x86_64")
+                text = plan.intro + plan.primary_label + "".join(
+                    s.title + s.detail + s.command for s in plan.steps)
+                assert "\u2014" not in text
 
 
 def test_a_replaceable_mac_app_updates_itself_with_an_install_step():
@@ -143,13 +146,3 @@ def test_the_deb_says_the_system_will_ask_for_a_password():
                     can_self_update=True, machine="x86_64")
     assert plan.mode == AUTOMATIC
     assert "password" in plan.steps[1].detail
-
-
-def test_no_plan_text_uses_em_dashes():
-    for kind in (updater.WINDOWS_INSTALLER, updater.APPIMAGE, updater.MACOS_APP,
-                 updater.DEB, updater.SOURCE, updater.LINUX_OTHER):
-        for self_update in (True, False):
-            plan = plan_for(kind, "3.4", release_url=RELEASE_URL, asset=None,
-                            can_self_update=self_update, machine="x86_64")
-            text = plan.intro + " ".join(s.title + s.detail for s in plan.steps)
-            assert "\u2014" not in text

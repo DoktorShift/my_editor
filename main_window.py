@@ -2889,8 +2889,9 @@ class MainWindow(QMainWindow):
         self.update_bar.hide()
 
     def _close_for_update(self):
-        # The installer (Windows) or the swap helper (AppImage) is now running
-        # and will relaunch MyEditor; close so it can replace our files.
+        # The installer (Windows) or the swap or relaunch helper (AppImage,
+        # macOS, .deb) is now running and will open MyEditor again; close so
+        # it can replace our files.
         self._closing_for_update = True
         self.close()
 

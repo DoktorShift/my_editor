@@ -167,7 +167,7 @@ def test_it_opens_ready_with_the_three_usual_choices():
     assert dialog.windowTitle() == "Software Update"
 
 
-def test_update_now_starts_the_download_in_the_first_step():
+def test_install_update_starts_the_download_in_the_first_step():
     installer = FakeInstaller()
     dialog = automatic_dialog(installer)
     dialog._buttons["primary"].click()
