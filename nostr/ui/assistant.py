@@ -31,6 +31,7 @@ hint, and Windows' ExcludeClipboardContentFromMonitorProcessing.
 
 from __future__ import annotations
 
+import atexit
 import sys
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
@@ -156,6 +157,7 @@ CONCEALED_WINDOWS = ('application/x-qt-windows-mime;'
 # function each, run by its timer or when the app quits.
 _pending_clears: List[Callable[[], None]] = []
 _quit_hooked = False
+_exit_hooked = False
 
 
 def secret_mime_data(text: str) -> QMimeData:
@@ -188,15 +190,28 @@ def copy_secret(text: str, *, seconds: Optional[int] = None) -> None:
 def clear_pending_secrets() -> None:
     """Take every secret still on the clipboard off it now."""
     for clear in list(_pending_clears):
-        clear()
+        try:
+            clear()
+        except RuntimeError:    # the clipboard went with the application
+            pass
 
 
 def _clear_on_quit() -> None:
-    global _quit_hooked
+    """Clear when the app quits, and in any case when Python exits.
+
+    The exit hook covers every way out that skips aboutToQuit, and it
+    matters for more than the secret: Qt's clipboard outlives Python, and
+    clipboard data made in Python that is still there when Qt tears the
+    clipboard down would be freed after the interpreter is gone.
+    """
+    global _quit_hooked, _exit_hooked
     app = QApplication.instance()
     if not _quit_hooked and app is not None:
         app.aboutToQuit.connect(clear_pending_secrets)
         _quit_hooked = True
+    if not _exit_hooked:
+        atexit.register(clear_pending_secrets)
+        _exit_hooked = True
 
 
 def _put_secret(text: str) -> Callable[[], None]:

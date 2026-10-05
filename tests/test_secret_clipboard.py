@@ -8,12 +8,16 @@ What must hold:
   MyEditor quits, but only while it is still what the clipboard holds:
   nothing the person copied afterwards is ever cleared.
 
+  A secret still waiting for its time is also cleared when Python exits
+  without the app quitting first, and the exit stays clean.
+
   The secret is marked as one, so clipboard managers and clipboard history
   skip it: on a Mac with the real pasteboard type (Qt would rename a custom
   type), on KDE and on Windows with their own hints.
 """
 
 import os
+import subprocess
 import sys
 import uuid
 
@@ -72,6 +76,25 @@ def test_quitting_clears_a_secret_still_waiting_for_its_time(qt_app):
     assistant.clear_pending_secrets()
     assert qt_app.clipboard().text() == "my own note"
 
+
+def test_exiting_without_quitting_clears_the_secret_and_exits_cleanly():
+    # A script, a test run or any exit that skips aboutToQuit. Qt tears its
+    # clipboard down after Python is gone; data made in Python still on it
+    # then crashed the exit after everything had worked.
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    script = (
+        "import sys\n"
+        "from PySide6.QtWidgets import QApplication\n"
+        "app = QApplication(sys.argv)\n"
+        "from nostr.ui.assistant import copy_secret\n"
+        "copy_secret('nsec1waiting')\n"
+        "print(app.clipboard().text())\n"
+    )
+    env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
+    done = subprocess.run([sys.executable, "-c", script], cwd=root, env=env,
+                          capture_output=True, text=True, timeout=60)
+    assert done.stdout.strip() == "nsec1waiting"
+    assert done.returncode == 0, done.stderr[-500:]
 
 def test_the_secret_is_marked_for_clipboard_managers(qt_app):
     copy_secret("nsec1first", seconds=3600)
