@@ -6,8 +6,9 @@ What must hold:
 
   A password-protected key (NIP-49 ncryptsec) opens in other Nostr apps
   and theirs open here: the published test vectors decode, a wrong
-  password is told apart from a damaged key, and weak settings are
-  refused.
+  password is told apart from a damaged key, weaker files from other apps
+  open, and every failure is a Nip49Error in plain words. MyEditor writes
+  only its own settings, and says it doesn't know the key's history.
 
   The key file is readable by this account only, and a key filed under
   the wrong public key is never handed out.
@@ -30,7 +31,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from nostr import crypto, events, nip49  # noqa: E402
+from nostr import bech32, crypto, events, nip49  # noqa: E402
 from nostr.bunker import BunkerSessionPool  # noqa: E402
 from nostr.key_vault import KeyVault  # noqa: E402
 from nostr.local_signer import LocalSigner  # noqa: E402
@@ -74,11 +75,27 @@ def test_a_wrong_password_is_told_apart_from_a_damaged_key():
     assert not damaged.value.wrong_password
 
 
-def test_a_key_survives_the_round_trip_and_records_how_it_was_kept():
-    sealed = nip49.encrypt(SK, "correct horse", key_security=nip49.KEY_SECURE)
-    assert sealed.startswith("ncryptsec1") and nip49.is_ncryptsec(sealed)
+def payload_of(ncryptsec: str) -> bytes:
+    _hrp, data = bech32.bech32_decode(ncryptsec)
+    return bytes(bech32.convertbits(data, 5, 8, False))
+
+
+def crafted(log_n: int, password: str = "pw") -> str:
+    """An ncryptsec as another app might write it, with any work setting."""
+    salt, nonce, aad = bytes(range(16)), bytes(range(24)), bytes([nip49.KEY_UNKNOWN])
+    key = nip49._derive(password, salt, log_n) if 1 <= log_n <= 18 else bytes(32)
+    sealed = nip49._xchacha_seal(key, nonce, SK, aad)
+    payload = bytes([nip49.VERSION, log_n]) + salt + nonce + aad + sealed
+    return bech32.bech32_encode(nip49.HRP, bech32.convertbits(list(payload), 8, 5))
+
+
+def test_a_key_survives_the_round_trip_and_says_its_history_is_unknown():
+    sealed = nip49.encrypt(SK, "correct horse")
+    assert sealed.startswith("ncryptsec1")
     assert nip49.decrypt(sealed, "correct horse") == SK
-    assert nip49.key_security_of(sealed) == nip49.KEY_SECURE
+    # MyEditor doesn't follow where a key has been (copied, pasted), so it
+    # never claims the key was handled securely.
+    assert payload_of(sealed)[42] == nip49.KEY_UNKNOWN
 
 
 def test_passwords_are_normalized_so_the_same_word_opens_everywhere():
@@ -86,10 +103,35 @@ def test_passwords_are_normalized_so_the_same_word_opens_everywhere():
     assert nip49.decrypt(sealed, "Å") == SK   # A + combining ring
 
 
-def test_weak_settings_are_refused_on_import():
-    weak = nip49.encrypt(SK, "pw", log_n=10)
-    with pytest.raises(nip49.Nip49Error):
-        nip49.decrypt(weak, "pw")
+def test_weaker_files_from_other_apps_open_but_are_never_written():
+    assert nip49.decrypt(crafted(10), "pw") == SK
+    with pytest.raises(ValueError):
+        nip49.encrypt(SK, "pw", log_n=10)
+    with pytest.raises(ValueError):
+        nip49.encrypt(SK, "pw", log_n=21)
+
+
+@pytest.mark.parametrize("log_n", [21, 22, 255])
+def test_a_file_too_costly_to_open_is_explained_in_words(log_n):
+    with pytest.raises(nip49.Nip49Error) as err:
+        nip49.decrypt(crafted(log_n), "pw")
+    assert "memory" in str(err.value) and "maxmem" not in str(err.value)
+    assert not err.value.wrong_password
+
+
+def test_every_failure_is_a_nip49_error_in_plain_words(monkeypatch):
+    # Damaged padding inside a valid checksum: convertbits refuses it.
+    data = bech32.convertbits(list(payload_of(SPEC_NCRYPTSEC)), 8, 5) + [31]
+    with pytest.raises(nip49.Nip49Error, match="complete"):
+        nip49.decrypt(bech32.bech32_encode(nip49.HRP, data), "nostr")
+    with pytest.raises(nip49.Nip49Error, match="damaged"):
+        nip49.decrypt(crafted(0), "pw")
+
+    def no_memory(*_args):
+        raise MemoryError()
+    monkeypatch.setattr(nip49, "_derive", no_memory)
+    with pytest.raises(nip49.Nip49Error, match="memory"):
+        nip49.decrypt(SPEC_NCRYPTSEC, "nostr")
 
 
 # -- the key file ------------------------------------------------------------------------

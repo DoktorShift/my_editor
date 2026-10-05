@@ -76,7 +76,7 @@ def backup_text(secret_key: bytes, *, password: Optional[str],
     day = (today or datetime.date.today()).isoformat()
     if password is not None:
         key_heading = "Protected private key (opens with your backup password):"
-        key = nip49.encrypt(secret_key, password, key_security=nip49.KEY_SECURE)
+        key = nip49.encrypt(secret_key, password)
         warning = ("Keep this file and its password apart. Anyone who has both "
                    "can use your account.")
     else:

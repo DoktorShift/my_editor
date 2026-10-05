@@ -21,7 +21,14 @@ are the IETF nonce.
 
 ``key_security`` records how the key was handled before it was encrypted:
 0x00 known to have been handled insecurely, 0x01 known not to have been,
-0x02 unknown. A key MyEditor generated and showed to nobody is 0x01.
+0x02 unknown. MyEditor does not follow a key's history (it can be copied
+to the clipboard, or have come from a paste), so it always writes 0x02.
+
+``log_n`` sets how much work opening the key takes. New files use 2^16;
+files from other apps open with anything up to 2^20 (1 GiB of memory),
+including weaker settings, because refusing them would lock a person out
+of their own key. Above 2^20 Python's scrypt can't allocate the memory, so
+such a file is explained instead of failing with a library message.
 """
 
 from __future__ import annotations
@@ -44,8 +51,8 @@ KEY_INSECURE = 0x00
 KEY_SECURE = 0x01
 KEY_UNKNOWN = 0x02
 
-_MIN_LOG_N = 16             # weaker files are refused on import
-_MAX_LOG_N = 22             # 4 GiB of scrypt memory; anything above cannot be opened here
+_MIN_LOG_N = 16             # the weakest setting MyEditor writes
+_MAX_LOG_N = 20             # 1 GiB of scrypt memory; hashlib.scrypt can't go higher
 
 
 class Nip49Error(ValueError):
@@ -57,18 +64,16 @@ class Nip49Error(ValueError):
         self.wrong_password = wrong_password
 
 
-def is_ncryptsec(text: str) -> bool:
-    return isinstance(text, str) and text.strip().lower().startswith(HRP + "1")
-
-
 def encrypt(secret_key: bytes, password: str, *, log_n: int = DEFAULT_LOG_N,
-            key_security: int = KEY_SECURE, salt: bytes = None, nonce: bytes = None) -> str:
+            key_security: int = KEY_UNKNOWN, salt: bytes = None, nonce: bytes = None) -> str:
     """``ncryptsec1...`` for ``secret_key`` (32 bytes) under ``password``.
     ``salt`` and ``nonce`` exist for test vectors; leave them out."""
     if len(secret_key) != 32:
         raise ValueError("a secret key is 32 bytes")
     if key_security not in (KEY_INSECURE, KEY_SECURE, KEY_UNKNOWN):
         raise ValueError("unknown key security byte")
+    if not _MIN_LOG_N <= log_n <= _MAX_LOG_N:
+        raise ValueError(f"log_n must be between {_MIN_LOG_N} and {_MAX_LOG_N}")
     salt = salt if salt is not None else os.urandom(16)
     nonce = nonce if nonce is not None else os.urandom(24)
     key = _derive(password, salt, log_n)
@@ -86,15 +91,25 @@ def decrypt(ncryptsec: str, password: str) -> bytes:
         raise Nip49Error("This isn’t a complete protected key.") from exc
     if hrp != HRP:
         raise Nip49Error("This isn’t a protected key.")
-    payload = bytes(bech32.convertbits(data, 5, 8, False))
+    try:
+        payload = bytes(bech32.convertbits(data, 5, 8, False))
+    except ValueError as exc:
+        raise Nip49Error("This isn’t a complete protected key.") from exc
     if len(payload) != 1 + 1 + 16 + 24 + 1 + 48 or payload[0] != VERSION:
         raise Nip49Error("This protected key uses a format MyEditor doesn’t know.")
     log_n = payload[1]
-    if not _MIN_LOG_N <= log_n <= _MAX_LOG_N:
-        raise Nip49Error("This protected key uses settings MyEditor can’t open safely.")
+    if log_n == 0:
+        raise Nip49Error("This protected key is damaged.")
+    if log_n > _MAX_LOG_N:
+        raise Nip49Error("This protected key was saved with settings that need more "
+                         "memory to open than MyEditor can use.")
     salt, nonce = payload[2:18], payload[18:42]
     aad, sealed = payload[42:43], payload[43:]
-    key = _derive(password, salt, log_n)
+    try:
+        key = _derive(password, salt, log_n)
+    except (ValueError, MemoryError, OverflowError) as exc:
+        raise Nip49Error("This computer couldn’t open this protected key. It may "
+                         "need more memory than is free right now.") from exc
     try:
         secret = _xchacha_open(key, nonce, sealed, aad)
     except InvalidTag as exc:
@@ -104,19 +119,13 @@ def decrypt(ncryptsec: str, password: str) -> bytes:
     return secret
 
 
-def key_security_of(ncryptsec: str) -> int:
-    """The key-security byte, readable without the password."""
-    _hrp, data = bech32.bech32_decode(ncryptsec.strip().lower())
-    payload = bytes(bech32.convertbits(data, 5, 8, False))
-    return payload[42]
-
-
 # -- primitives ---------------------------------------------------------------------
 
 def _derive(password: str, salt: bytes, log_n: int) -> bytes:
     normalized = unicodedata.normalize("NFKC", password or "").encode("utf-8")
     n = 1 << log_n
-    # scrypt needs 128 * r * N bytes; give it that plus headroom.
+    # scrypt needs 128 * r * (N + 2) bytes; give it that plus headroom.
+    # At log_n 20 this stays under the 2 GiB hashlib.scrypt accepts.
     return hashlib.scrypt(normalized, salt=salt, n=n, r=8, p=1, dklen=32,
                           maxmem=128 * 8 * n + 1024 * 1024)
 
