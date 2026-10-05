@@ -178,7 +178,7 @@ class ContactListFetcher(QObject):
             else:
                 self.completed.emit(0)
 
-        self._query(self._pool, lookup_relays(known=known), kind=KIND_CONTACTS,
+        self._query(self._pool, lookup_relays(known=known, own=True), kind=KIND_CONTACTS,
                     author=pubkey_hex, on_done=_on_contact_list, timeout_ms=8_000,
                     parent=self)
 

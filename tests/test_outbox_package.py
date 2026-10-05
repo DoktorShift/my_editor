@@ -757,3 +757,90 @@ def test_mentioning_yourself_reaches_your_own_inbox_in_one_lookup():
     settle()
     assert plans[0].author[0] == "wss://out.com"
     assert "wss://in.com" in plans[0].inbox
+
+
+# -- relays named by other people --------------------------------------------------------
+
+@pytest.mark.parametrize("url,public", [
+    ("wss://relay.damus.io", True),
+    ("wss://relay.example.com:7447/path", True),
+    ("wss://8.8.8.8", True),
+    ("ws://relay.damus.io", False),               # plain text, rewritable on the way
+    ("wss://localhost:7777", False),
+    ("wss://127.0.0.1", False),
+    ("wss://10.0.0.5:7777", False),
+    ("wss://192.168.1.1", False),
+    ("wss://169.254.169.254", False),
+    ("wss://100.64.0.1", False),
+    ("wss://[::1]", False),
+    ("wss://[fe80::1]", False),
+    ("wss://[::ffff:127.0.0.1]", False),
+    ("wss://224.0.0.1", False),
+    ("wss://printer.local", False),
+    ("wss://router.lan", False),
+    ("wss://abcdefghijklmnop.onion", False),
+    ("wss://nas", False),                          # a single label: someone's own network
+    ("wss://127.1", False),                        # an address in disguise
+    ("wss://0x7f.1", False),
+    ("https://relay.damus.io", False),
+])
+def test_only_public_relays_named_by_others_are_used(url, public):
+    assert policy.is_public_relay(url) is public
+
+
+def test_a_mentions_private_relays_and_hints_are_not_used():
+    alice, bob = "a" * 64, "b" * 64
+    plan = policy.plan_publish(
+        rl(write=["wss://me.com", "wss://me2.com"]),
+        mentioned={alice: rl(read=["wss://192.168.1.10", "ws://alice.com", "wss://alice.com"]),
+                   bob: RelayList()},
+        hints={bob: "wss://localhost:4848"})
+    assert list(plan.inbox) == ["wss://alice.com"]
+
+
+def test_your_own_relays_are_yours_to_choose():
+    me = "c" * 64
+    mine = rl(write=["ws://127.0.0.1:7777"], read=["ws://127.0.0.1:7777"])
+    plan = policy.plan_publish(rl(write=["wss://me.com", "wss://me2.com"]),
+                               mentioned={me: mine}, own=[me])
+    assert list(plan.inbox) == ["ws://127.0.0.1:7777"]
+    assert policy.outbox_relays(mine, own=True) == ["ws://127.0.0.1:7777"]
+    assert policy.lookup_relays(known=mine, own=True)[0] == "ws://127.0.0.1:7777"
+    assert policy.private_relays(mine)[0] == "ws://127.0.0.1:7777"
+
+
+def test_someone_elses_private_relays_are_not_read_from():
+    theirs = rl(write=["wss://10.0.0.2", "wss://router.lan"])
+    assert policy.outbox_relays(theirs, hints=["ws://hint.com", "wss://hint.com"]) == \
+        ["wss://hint.com", *defaults.FALLBACK_RELAYS]
+    assert not set(policy.lookup_relays(known=theirs)) & {"wss://10.0.0.2", "wss://router.lan"}
+
+
+def test_a_lookup_caps_hints_and_write_relays_and_always_asks_an_indexer():
+    hints = [f"wss://hint{i}.com" for i in range(5)]
+    known = rl(write=[f"wss://w{i}.com" for i in range(9)])
+    relays = policy.lookup_relays(hints=hints, known=known)
+    assert len(relays) == defaults.LOOKUP_CAP
+    assert relays[:defaults.HINT_CAP] == hints[:defaults.HINT_CAP]
+    assert sum(r.startswith("wss://w") for r in relays) <= defaults.WRITE_CAP
+    assert relays[-1] == defaults.INDEXER_RELAYS[0]
+
+
+def test_default_ports_are_dropped_and_a_host_is_required():
+    from nostr import relay
+    assert policy.normalize_relay_url("wss://Relay.Example.com:443/") == "wss://relay.example.com"
+    assert policy.normalize_relay_url("ws://relay.example.com:80") == "ws://relay.example.com"
+    assert policy.normalize_relay_url("wss://relay.example.com:80") == "wss://relay.example.com:80"
+    assert policy.normalize_relay_url("WSS://[::1]:443/x") == "wss://[::1]/x"
+    for bad in ("wss://:443", "wss://host:abc", "wss://host?x=1", "wss://[::1"):
+        assert policy.normalize_relay_url(bad) is None
+    # The connection a relay gets is spelt as the routing spells it.
+    assert relay._normalize("wss://Relay.Example.com:443/") == "wss://relay.example.com"
+
+
+def test_a_mention_with_a_private_relay_list_in_the_directory():
+    pool, d = live_directory()
+    plans = []
+    d.publish_plan(PK, plans.append, mentioned=[(OTHER_PK, "ws://192.168.0.2")])
+    batch = [s for s in pool.subs if OTHER_PK in s.filters[0]["authors"]][0]
+    assert "ws://192.168.0.2" not in batch.urls

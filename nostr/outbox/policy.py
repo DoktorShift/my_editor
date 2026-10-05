@@ -19,8 +19,10 @@ call these functions instead, so every rule has one home and one test.
 from __future__ import annotations
 
 import enum
+import ipaddress
 import json
 from dataclasses import dataclass, field
+from urllib.parse import urlsplit
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence
 
 from .. import events
@@ -65,9 +67,13 @@ class RelayList:
 # Relay URLs                                                                  #
 # --------------------------------------------------------------------------- #
 
+_DEFAULT_PORTS = {"ws": 80, "wss": 443}
+
+
 def normalize_relay_url(url) -> Optional[str]:
-    """``wss://host[/path]`` with scheme and host lowercased and no trailing
-    slash, or None for anything that is not a websocket URL."""
+    """``wss://host[:port][/path]`` with scheme and host lowercased, the
+    scheme's default port dropped and no trailing slash, or None for
+    anything that is not a websocket URL with a host."""
     if not isinstance(url, str):
         return None
     text = url.strip().rstrip("/")
@@ -77,10 +83,63 @@ def normalize_relay_url(url) -> Optional[str]:
     scheme = scheme.lower()
     if scheme not in ("ws", "wss") or not rest:
         return None
-    host, _, path = rest.partition("/")
-    if not host or "@" in host:
+    netloc, _, path = rest.partition("/")
+    if not netloc or "@" in netloc or "?" in netloc or "#" in netloc:
         return None
-    return f"{scheme}://{host.lower()}" + (f"/{path}" if path else "")
+    try:
+        parts = urlsplit(f"{scheme}://{netloc}")
+        host, port = parts.hostname, parts.port
+    except ValueError:
+        return None
+    if not host:
+        return None
+    netloc = netloc.lower()
+    if port is not None and port == _DEFAULT_PORTS[scheme]:
+        netloc = netloc[:netloc.rindex(":")]
+    return f"{scheme}://{netloc}" + (f"/{path}" if path else "")
+
+
+# Names that only mean something on the user's own network (or need Tor).
+_PRIVATE_NAMES = ("localhost",)
+_PRIVATE_SUFFIXES = (".localhost", ".local", ".onion", ".internal", ".lan", ".home",
+                     ".home.arpa", ".localdomain", ".intranet", ".corp")
+
+
+def is_public_relay(url) -> bool:
+    """Whether a relay someone else named may be contacted.
+
+    Relays from other people (their lists, relay hints in tags and
+    addresses) are refused when they point into the user's own network or
+    machine: loopback, private, link-local and other non-global addresses,
+    single-label names and local-only suffixes (.local, .lan, ...), .onion,
+    and plain ws://, which anyone on the path can read and rewrite. Such a
+    relay is how a stranger's event makes this app knock on a router or a
+    service on localhost. The user's own relay list is exempt: what they
+    chose for themselves is theirs to choose.
+    """
+    normalized = normalize_relay_url(url)
+    if normalized is None or not normalized.startswith("wss://"):
+        return False
+    host = urlsplit(normalized).hostname or ""
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        address = None
+    if address is not None:
+        return address.is_global and not address.is_multicast
+    labels = host.rstrip(".").split(".")
+    if len(labels) < 2 or host in _PRIVATE_NAMES or host.endswith(_PRIVATE_SUFFIXES):
+        return False
+    last = labels[-1]
+    # A numeric last label is an address in disguise (127.1, 0x7f.1).
+    if last.isdigit() or (last.startswith("0x") and all(c in "0123456789abcdef" for c in last[2:])):
+        return False
+    return True
+
+
+def public_relays(urls: Iterable[str]) -> List[str]:
+    """``urls`` normalized and deduplicated, keeping only is_public_relay ones."""
+    return [url for url in dedupe_relays(urls) if is_public_relay(url)]
 
 
 def dedupe_relays(*groups: Iterable[str], cap: Optional[int] = None) -> List[str]:
@@ -271,12 +330,21 @@ def replacement_created_at(base: Optional[dict], now: float) -> int:
 # Routing                                                                     #
 # --------------------------------------------------------------------------- #
 
-def lookup_relays(*, hints: Iterable[str] = (), known: Optional[RelayList] = None) -> List[str]:
+def lookup_relays(*, hints: Iterable[str] = (), known: Optional[RelayList] = None,
+                  own: bool = False) -> List[str]:
     """Where to ask for someone's relay list, profile or other replaceable
-    event (contact list, media server list): their own write relays when
-    known, then the indexers."""
-    own = known.write if known is not None and known.found else ()
-    return dedupe_relays(hints, own, defaults.INDEXER_RELAYS, defaults.FALLBACK_RELAYS[:3],
+    event (contact list, media server list): relays they were seen on
+    (at most HINT_CAP), their write relays when known (at most WRITE_CAP),
+    then the indexers, at least one of which is always asked.
+
+    ``own`` says ``known`` is the user's own list, whose relays are used
+    as they are; anyone else's, like every hint, only when they are
+    public (is_public_relay)."""
+    writes = known.write if known is not None and known.found else []
+    writes = list(writes) if own else public_relays(writes)
+    head = dedupe_relays(public_relays(hints)[:defaults.HINT_CAP],
+                         writes[:defaults.WRITE_CAP], cap=defaults.LOOKUP_CAP - 1)
+    return dedupe_relays(head, defaults.INDEXER_RELAYS, defaults.FALLBACK_RELAYS[:3],
                          cap=defaults.LOOKUP_CAP)
 
 
@@ -314,7 +382,8 @@ def author_relays(author: RelayList, *, entitled: Iterable[str] = ()) -> List[st
 def plan_publish(author: RelayList, *,
                  mentioned: Mapping[str, RelayList] = (),
                  hints: Mapping[str, str] = (),
-                 entitled: Iterable[str] = ()) -> PublishPlan:
+                 entitled: Iterable[str] = (),
+                 own: Iterable[str] = ()) -> PublishPlan:
     """The outbox and inbox routing for one public event (NIP-65).
 
     NIP-65 sends a note to all of a mentioned person's read relays. Here
@@ -324,18 +393,24 @@ def plan_publish(author: RelayList, *,
     relay, then every person's second, so the people named last are not
     left out because the first ones used up the cap. A person whose list
     is unknown is reached through the relay hint of their mention.
+
+    Other people's relays and every hint are used only when public
+    (is_public_relay); a mention of one of ``own`` (the user's own keys)
+    keeps that list as it is.
     """
+    mine = {p.lower() for p in own}
     own = author_relays(author, entitled=entitled)
     taken = set(own)
     hints = dict(hints)
     choices: List[List[str]] = []
     for pubkey, relay_list in dict(mentioned).items():
+        theirs: List[str] = []
         if relay_list is not None and relay_list.found and relay_list.read:
-            theirs = relay_list.read
-        else:
-            hint = hints.get(pubkey)
-            theirs = [hint] if hint else []
-        choices.append(dedupe_relays(theirs, cap=defaults.INBOX_PER_MENTION))
+            theirs = (dedupe_relays(relay_list.read) if pubkey.lower() in mine
+                      else public_relays(relay_list.read))
+        if not theirs and hints.get(pubkey):
+            theirs = public_relays([hints[pubkey]])
+        choices.append(theirs[:defaults.INBOX_PER_MENTION])
     inbox: List[str] = []
     for rank in range(defaults.INBOX_PER_MENTION):
         for theirs in choices:
@@ -386,12 +461,18 @@ def relays_from(source) -> List[str]:
     return list(source or ())
 
 
-def outbox_relays(author: RelayList, *, hints: Iterable[str] = ()) -> List[str]:
-    """Where to read what someone wrote: their write relays, or the
-    fallback set when their list is unknown."""
+def outbox_relays(author: RelayList, *, hints: Iterable[str] = (),
+                  own: bool = False) -> List[str]:
+    """Where to read what someone wrote: the relays they were seen on (at
+    most HINT_CAP), then their write relays, or the fallback set when
+    their list is unknown. Hints and someone else's relays are used only
+    when public; ``own`` says ``author`` is the user's own list."""
+    seen_on = public_relays(hints)[:defaults.HINT_CAP]
     if author.found and author.write:
-        return dedupe_relays(hints, author.write[:defaults.WRITE_CAP])
-    return dedupe_relays(hints, defaults.FALLBACK_RELAYS)
+        writes = dedupe_relays(author.write) if own else public_relays(author.write)
+        if writes:
+            return dedupe_relays(seen_on, writes[:defaults.WRITE_CAP])
+    return dedupe_relays(seen_on, defaults.FALLBACK_RELAYS)
 
 
 def inbox_relays(user: RelayList) -> List[str]:

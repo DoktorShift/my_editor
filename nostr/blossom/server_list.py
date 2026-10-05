@@ -361,7 +361,7 @@ class UserServerList(QObject):
         # indexers.
         known = (self._relay_directory.cached(pubkey)
                  if self._relay_directory is not None else None)
-        relays = lookup_relays(known=known)
+        relays = lookup_relays(known=known, own=True)
         self._cache.fetch(
             pubkey,
             relays,

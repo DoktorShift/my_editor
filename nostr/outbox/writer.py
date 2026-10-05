@@ -119,7 +119,7 @@ class ReplaceableWriter(QObject):
             self._with_base(None)
             return
         known = self._directory.cached(self._author)
-        relays = policy.lookup_relays(known=known)
+        relays = policy.lookup_relays(known=known, own=True)
         self._query(self._pool, relays, kind=self._kind, author=self._author,
                     on_done=self._on_lookup, parent=self)
 

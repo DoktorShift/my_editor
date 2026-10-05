@@ -130,7 +130,7 @@ class ProfileMetadataFetcher(QObject):
             self._store.upsert(current)
             self.updated.emit(current)
 
-        self._query(self._pool, lookup_relays(known=known), kind=KIND_PROFILE,
+        self._query(self._pool, lookup_relays(known=known, own=True), kind=KIND_PROFILE,
                     author=profile.user_pubkey, on_done=_on_done,
                     timeout_ms=timeout_ms, parent=self)
 

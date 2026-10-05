@@ -65,7 +65,8 @@ MIN_WRITE_TARGETS = 2       # top up from FALLBACK_RELAYS below this
 INBOX_PER_MENTION = 2       # read relays per person a note mentions (NIP-65 says all)
 MENTION_LOOKUP_CAP = 20     # mentions whose relay lists are looked up
 INBOX_TOTAL_CAP = 10        # inbox relays per publish, all mentions together, shared in turn
-LOOKUP_CAP = 8              # relays asked for someone's relay list
+LOOKUP_CAP = 8              # relays asked for someone's relay list, an indexer always among them
+HINT_CAP = 3                # relays from hints (tags, addresses) asked for one person
 PRIVATE_CAP = 10            # relays for drafts and other private records
 
 # How long a looked-up relay list is trusted before it is refreshed.

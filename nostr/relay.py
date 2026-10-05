@@ -39,6 +39,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 from PySide6.QtWebSockets import QWebSocket
 
+from .outbox.policy import normalize_relay_url
+
 
 # Per-relay ceiling for a publish ack. Buho_go uses 8 s; we match it.
 DEFAULT_PUBLISH_TIMEOUT_MS: int = 8000
@@ -474,11 +476,17 @@ class Subscription(QObject):
 # --------------------------------------------------------------------------- #
 
 def _normalize(url: str) -> str:
-    """Strip a single trailing slash and lowercase scheme + host.
+    """The relay URL as nostr/outbox/policy.normalize_relay_url writes it
+    (lowercased scheme and host, no default port, no trailing slash), so
+    a URL the routing chose and the connection it gets are spelt alike.
 
-    Path-aware relays exist (rare) so we leave the path alone other than
-    the trailing slash. This is the same shape the JS ecosystem uses.
+    Anything that normalizer refuses is still kept apart by its own
+    spelling: trailing slashes stripped, scheme and host lowercased, the
+    path left alone (path-aware relays exist).
     """
+    normalized = normalize_relay_url(url)
+    if normalized is not None:
+        return normalized
     s = url.strip().rstrip("/")
     # split scheme://host[/path]
     if "://" in s:

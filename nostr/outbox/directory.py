@@ -202,7 +202,8 @@ class RelayDirectory(QObject):
                 mentions = {k: lists[k] for k in keys if k in lists}
                 on_done(policy.plan_publish(state["author"], mentioned=mentions,
                                             hints={k: v[0] for k, v in hints.items()},
-                                            entitled=entitled))
+                                            entitled=entitled,
+                                            own={author.lower(), *self._own_keys()}))
 
         def got_author(relay_list):
             state["author"] = relay_list
@@ -225,8 +226,10 @@ class RelayDirectory(QObject):
 
     def outbox_of(self, author: str, on_done: Callable[[List[str]], None], *,
                   hints: Sequence[str] = ()) -> None:
+        """Where to read what ``author`` wrote (policy.outbox_relays)."""
+        own = self._is_own(author)
         self.lookup(author, lambda relay_list: on_done(policy.outbox_relays(
-            relay_list, hints=hints)), hints=hints)
+            relay_list, hints=hints, own=own)), hints=hints)
 
     def share_relay_list(self, author: str, relays: Sequence[str]) -> None:
         """Send the author's signed relay list to relays it just published to
@@ -244,6 +247,12 @@ class RelayDirectory(QObject):
     # Internals                                                          #
     # ------------------------------------------------------------------ #
 
+    def _own_keys(self) -> set:
+        return {p.lower() for p in self._own_pubkeys() if p}
+
+    def _is_own(self, pubkey: str) -> bool:
+        return (pubkey or "").lower() in self._own_keys()
+
     def _expired(self, entry: RelayList) -> bool:
         return (self._clock() - entry.fetched_at) >= _TTL[entry.state]
 
@@ -251,7 +260,8 @@ class RelayDirectory(QObject):
         """Look ``key`` up, or join the lookup already running for it. A
         caller bringing relays that lookup does not ask (a new hint) has
         them asked as well, and the answer waits for both."""
-        relays = policy.lookup_relays(hints=hints, known=self._entries.get(key))
+        relays = policy.lookup_relays(hints=hints, known=self._entries.get(key),
+                                      own=self._is_own(key))
         pending = self._pending.get(key)
         if pending is None:
             pending = self._pending[key] = _Pending()
@@ -346,7 +356,7 @@ class RelayDirectory(QObject):
     def _store(self, key: str, relay_list: RelayList) -> None:
         previous = self._entries.get(key)
         self._entries[key] = relay_list
-        if key in {p.lower() for p in self._own_pubkeys()}:
+        if self._is_own(key):
             self._save()
         if previous is None or previous.created_at != relay_list.created_at:
             self.changed.emit(key)
@@ -371,7 +381,7 @@ class RelayDirectory(QObject):
     def _save(self) -> None:
         if self._store_path is None:
             return
-        own = {p.lower() for p in self._own_pubkeys()}
+        own = self._own_keys()
         lists = {k: e.event for k, e in self._entries.items()
                  if k in own and e.found and e.event is not None}
         folder = self._store_path.parent
