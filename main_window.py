@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 from send2trash import send2trash
+import shiboken6
 from PySide6.QtCore import (
     QBuffer, QByteArray, QIODevice, Qt, QMarginsF, QTimer, QUrl, QFileSystemWatcher,
 )
@@ -138,12 +139,7 @@ from nostr.search import Nip50SearchClient
 from nostr.ui.connect_dialog import ConnectDialog
 from nostr.ui.draft_conflict_banner import DraftConflictBanner
 from nostr.ui.drafts_panel import DEFAULT_PANEL_WIDTH, DraftsPanel
-from nostr.einundzwanzig import (
-    MEMBER_BENEFITS, MEMBER_RELAY, NO_BENEFITS, Benefits, MembershipDirectory,
-)
-from nostr.einundzwanzig_api import MembershipApi, session_signer
-from nostr.relay_list_addition import ADDED, ALREADY, RelayListAddition, outcome_message
-from nostr.ui.membership_window import MembershipWindow
+from nostr.membership_controller import MembershipController
 from nostr.key_vault import KeyVault
 from nostr.ui.account_windows import (
     STEP_PROFILE, STEP_RELAYS, BackupAccountWindow, CreateAccountWindow, RestoreAccountWindow,
@@ -356,24 +352,25 @@ class MainWindow(QMainWindow):
         # auth event through the existing bunker pool. It seeds the same
         # cache on the way out, so an upload never has to be downloaded
         # back to be shown.
+        self._media_library_dialog = None
         # Association membership, which grants a relay and a media server.
         # Resolved in the background; until it answers the account simply
         # has no benefits, which is the same state as not being a member.
-        self._membership = MembershipDirectory(parent=self)
-        self._membership.resolved.connect(self._on_membership_resolved)
-        # An account that was already signed in when the app opened never
-        # passes through the connect flow, so resolve it here too.
-        self._refresh_membership(self._profile_store.default())
-        # The roster answer is cached for a quarter hour; refreshing it a
-        # little sooner means the members' server never drops out of the
-        # library or the uploads while the app is open.
-        self._membership_timer = QTimer(self)
-        self._membership_timer.setInterval(10 * 60 * 1000)
-        self._membership_timer.timeout.connect(
-            lambda: self._refresh_membership(self._profile_store.default()))
-        self._membership_timer.start()
-        self._announced_members = set()
-        self._media_library_dialog = None
+        # The controller owns the roster, its refresh, the membership
+        # window and its client; this window only hands its providers on
+        # (see _entitled_relays and the three below it).
+        self._membership = MembershipController(
+            profile_provider=lambda: self._profile_store.default(),
+            relay_pool=self._relay_pool,
+            session_pool=self._session_pool,
+            relay_directory=self._relay_directory,
+            is_dark=lambda: self.is_dark_theme,
+            open_link=self._open_external,
+            connect_signer=self._on_nostr_connect,
+            show_status=self.status.showMessage,
+            parent=self,
+        )
+        self._membership.benefits_changed.connect(self._on_membership_benefits_changed)
         self._media_store = MediaStore(
             session_pool=self._session_pool,
             profile_provider=lambda: self._profile_store.default(),
@@ -382,6 +379,11 @@ class MainWindow(QMainWindow):
             server_quota=self._entitled_quota,
             parent=self,
         )
+        # An account that was already signed in when the app opened never
+        # passes through the connect flow, so it is resolved here too, and
+        # the roster is refreshed while the app is open. Started once the
+        # store its answer may concern exists.
+        self._membership.start()
         # The one object the editor side talks to about images. Every
         # boundary it crosses is injected here, so nothing below this
         # line knows anything about Blossom.
@@ -3625,158 +3627,55 @@ class MainWindow(QMainWindow):
 
     # -- association membership --------------------------------------------
 
-    def _active_benefits(self) -> Benefits:
-        """What the active profile is entitled to, as far as we know.
-
-        An unresolved membership yields no benefits rather than blocking,
-        so nothing in the app ever waits on a third-party host.
-        """
-        profile = self._profile_store.default()
-        if profile is None:
-            return NO_BENEFITS
-        benefits = self._membership.cached_benefits(profile.user_pubkey)
-        if benefits is None:
-            # Stale or not yet fetched: keep the last answer while the
-            # roster refreshes, rather than dropping a member's benefits.
-            last = self._membership.last_known_membership(profile.user_pubkey)
-            benefits = MEMBER_BENEFITS if last else NO_BENEFITS
-        return benefits
-
     def _entitled_relays(self) -> list:
-        relay = self._active_benefits().relay
-        return [relay] if relay else []
+        """The relays the active account's membership adds."""
+        return self._membership.entitled_relays()
 
     def _entitled_blossom_servers(self) -> list:
-        server = self._active_benefits().blossom_server
-        return [server] if server else []
+        """The media servers the active account's membership adds."""
+        return self._membership.entitled_blossom_servers()
 
     def _media_server_label(self, origin: str):
         """The Media Library's name for a server, when it has a better one
         than its host: the members' server is the association's."""
-        server = self._active_benefits().blossom_server
-        if server and url_safety.origin_of(server) == origin:
-            return "EINUNDZWANZIG"
-        return None
+        return self._membership.server_label(origin)
 
     def _entitled_quota(self, origin: str):
         """The space a membership gives on its media server, in bytes."""
-        benefits = self._active_benefits()
-        if benefits.blossom_server and \
-                url_safety.origin_of(benefits.blossom_server) == origin:
-            return benefits.per_user_bytes or None
-        return None
+        return self._membership.quota(origin)
 
-    def _refresh_membership(self, profile: Optional[Profile]) -> None:
-        if profile is not None:
-            self._membership.resolve(profile.user_pubkey)
-
-    def _on_membership_resolved(self, pubkey: str, is_member: bool) -> None:
-        # The media library reads its targets on each call, so a member
-        # who resolves after startup still gets the server without a
-        # restart. Nothing is written to the user's configuration.
-        active = self._profile_store.default()
-        if active is None or active.user_pubkey.lower() != pubkey.lower():
-            return
-        key = pubkey.lower()
-        if is_member and key not in self._announced_members:
-            self._announced_members.add(key)
-            self.status.showMessage(
-                "Einundzwanzig membership recognised. Your association relay "
-                "and media server are available.", 6000,
-            )
-        # An open Media Library shows the members' server's files as soon
-        # as the membership is known (the store refetches when its set of
-        # servers changed, and does nothing otherwise).
-        dialog = self._media_library_dialog
-        if dialog is not None and dialog.isVisible():
-            self._media_store.fetch()
+    def _on_membership_benefits_changed(self) -> None:
+        """The active account's benefits changed (resolved, lapsed,
+        confirmed). Nothing is written to the user's configuration: the
+        relay and media layers read the providers above on each call."""
+        # An open Media Library lists the members' server as soon as it
+        # applies. The store walks again only when its servers changed,
+        # so a check that changed nothing costs no signer prompt.
+        if self._visible_media_library() is not None:
+            self._media_store.refetch_if_targets_changed()
         # Drafts are written to the members' relay as well, so they are
-        # read there too once the membership is known (a no-op when the
-        # set of relays did not change).
+        # read there too (a no-op when the set of relays did not change).
         self._draft_sync.reroute()
 
-    # -- joining the association ---------------------------------------------
+    def _visible_media_library(self):
+        """The Media Library dialog while it is open, else None.
 
-    def _membership_api_for(self, profile: Optional[Profile]) -> MembershipApi:
-        if profile is not None:
-            sign = session_signer(self._session_pool, profile)
-        else:
-            def sign(_unsigned, _on_success, on_failure):
-                on_failure("not connected")
-        return MembershipApi(sign, parent=self)
+        It deletes itself on close, so the reference can outlive the
+        dialog; a deleted one is forgotten here rather than asked
+        anything, which would raise.
+        """
+        dialog = self._media_library_dialog
+        if dialog is not None and not shiboken6.isValid(dialog):
+            dialog = self._media_library_dialog = None
+        return dialog if dialog is not None and dialog.isVisible() else None
+
+    def _forget_media_library(self, dialog) -> None:
+        if self._media_library_dialog is dialog:
+            self._media_library_dialog = None
 
     def _open_membership_window(self) -> None:
-        """Nostr > EINUNDZWANZIG Membership: join, pay, or see what's active.
-
-        Not modal, so paying from a phone never locks the editor. Opening
-        it signs nothing; the window asks the signer only when the person
-        continues.
-        """
-        profile, identity = self._membership_identity()
-        window = getattr(self, "_membership_window", None)
-        if window is not None and not window.isVisible():
-            # Rebuilt on every fresh open: it then follows the current
-            # theme and starts from where the membership stands now.
-            window.deleteLater()
-            window = None
-        if window is None:
-            window = MembershipWindow(
-                self._membership_api_for(profile), **identity,
-                is_dark=self.is_dark_theme, parent=self)
-            window.setWindowFlag(Qt.Window, True)
-            window.connect_requested.connect(self._on_membership_connect_requested)
-            window.link_activated.connect(self._open_external)
-            window.member_confirmed.connect(self._on_member_confirmed)
-            window.add_relay_requested.connect(self._on_add_member_relay)
-            self._membership_window = window
-        window.show()
-        window.raise_()
-        window.activateWindow()
-
-    def _membership_identity(self):
-        """The active profile, and what the window needs to know about it."""
-        profile = self._profile_store.default()
-        pubkey = profile.user_pubkey if profile is not None else None
-        return profile, {
-            "pubkey": pubkey,
-            "known_member": self._membership.cached_membership(pubkey) if pubkey else None,
-            "handle": self._membership.cached_handle(pubkey) if pubkey else None,
-        }
-
-    def _on_membership_connect_requested(self) -> None:
-        self._on_nostr_connect()
-        profile, identity = self._membership_identity()
-        if profile is None:
-            return
-        window = getattr(self, "_membership_window", None)
-        if window is not None and window.isVisible():
-            # Continue joining in the same window, now as the new identity.
-            window.set_identity(self._membership_api_for(profile), **identity)
-        else:
-            self._open_membership_window()
-
-    def _on_member_confirmed(self, pubkey: str) -> None:
-        """The association confirmed the membership: the relay and media
-        server apply from now on, without waiting for the public roster."""
-        self._membership.confirm_member(pubkey)
-        self._on_membership_resolved(pubkey, True)
-
-    def _on_add_member_relay(self) -> None:
-        profile = self._profile_store.default()
-        window = getattr(self, "_membership_window", None)
-        if profile is None or window is None:
-            return
-        job = RelayListAddition(self._relay_pool, self._session_pool, profile,
-                                MEMBER_RELAY, directory=self._relay_directory, parent=self)
-
-        def finished(outcome: str) -> None:
-            if window is getattr(self, "_membership_window", None):
-                window.set_relay_result(outcome_message(outcome),
-                                        done=outcome in (ADDED, ALREADY))
-            job.deleteLater()
-
-        job.finished.connect(finished)
-        job.start()
+        """Nostr > EINUNDZWANZIG Membership."""
+        self._membership.open_window()
 
     def _on_nostr_profile_connected(self, profile: Profile):
         # New (or re-connected) profile becomes the active one.
@@ -3788,7 +3687,7 @@ class MainWindow(QMainWindow):
             # drafts and media keys go with it.
             self._release_identity_state()
         self._profile_store.set_default(profile.user_pubkey)
-        self._refresh_membership(profile)
+        self._membership.account_changed(profile)
         self._update_profile_chip()
         self._refresh_profile_chip_menu()
         self.status.showMessage(
@@ -3827,9 +3726,7 @@ class MainWindow(QMainWindow):
         self._media_store.clear()
         # The membership window speaks for one identity; never show one
         # account's membership, invoice or name to another.
-        window = getattr(self, "_membership_window", None)
-        if window is not None and window.isVisible():
-            window.close()
+        self._membership.close_window()
 
     def _on_nostr_select_profile(self, profile: Profile):
         previous = self._profile_store.default()
@@ -3837,7 +3734,6 @@ class MainWindow(QMainWindow):
             previous.user_pubkey.lower() != profile.user_pubkey.lower()
         )
         self._profile_store.set_default(profile.user_pubkey)
-        self._refresh_membership(profile)
         self._update_profile_chip()
         self._refresh_profile_chip_menu()
         # Only tear down when the account actually changes. Re-selecting
@@ -3845,6 +3741,9 @@ class MainWindow(QMainWindow):
         # decrypted and cost a fresh round of signer prompts.
         if leaving:
             self._release_identity_state()
+        # After the teardown, so the membership follows the account that
+        # stays rather than updating a window about to close.
+        self._membership.account_changed(profile)
         # ``DraftSync.start_for`` is idempotent if the same profile is
         # already active.
         self._draft_sync.start_for(profile)
@@ -4066,6 +3965,9 @@ class MainWindow(QMainWindow):
             parent=self,
         )
         dialog.bind_private_library(self._private_library)
+        # The dialog deletes itself on close; forget it then, so nothing
+        # later asks a deleted object whether it is visible.
+        dialog.destroyed.connect(lambda _obj=None, d=dialog: self._forget_media_library(d))
         self._media_library_dialog = dialog
         dialog.show()
 
