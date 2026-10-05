@@ -135,7 +135,10 @@ from nostr.search import Nip50SearchClient
 from nostr.ui.connect_dialog import ConnectDialog
 from nostr.ui.draft_conflict_banner import DraftConflictBanner
 from nostr.ui.drafts_panel import DEFAULT_PANEL_WIDTH, DraftsPanel
-from nostr.einundzwanzig import NO_BENEFITS, Benefits, MembershipDirectory
+from nostr.einundzwanzig import MEMBER_RELAY, NO_BENEFITS, Benefits, MembershipDirectory
+from nostr.einundzwanzig_api import MembershipApi, session_signer
+from nostr.relay_list_addition import ADDED, ALREADY, RelayListAddition, outcome_message
+from nostr.ui.membership_window import MembershipWindow
 from nostr.ui.media_library_dialog import MediaLibraryDialog
 from nostr.ui.publish_article_dialog import PublishArticleDialog
 from nostr.ui.publish_copy_dialog import resolve_pick
@@ -1092,6 +1095,10 @@ class MainWindow(QMainWindow):
         # Register globally so the shortcut works even when the menu
         # bar is hidden (Linux compact themes, full-screen mode).
         self.addAction(self.act_nostr_drafts)
+        m_nostr.addSeparator()
+        act_membership = QAction("EINUNDZWANZIG Membership\u2026", self)
+        act_membership.triggered.connect(self._open_membership_window)
+        m_nostr.addAction(act_membership)
         m_nostr.addSeparator()
         act_nostr_connect = QAction("Connect Signer…", self)
         act_nostr_connect.triggered.connect(self._on_nostr_connect)
@@ -3383,6 +3390,9 @@ class MainWindow(QMainWindow):
             )
 
         menu.addSeparator()
+        act_membership = menu.addAction("EINUNDZWANZIG Membership\u2026")
+        act_membership.triggered.connect(self._open_membership_window)
+        menu.addSeparator()
         act_add = menu.addAction("Add profile…")
         act_add.triggered.connect(self._on_nostr_connect)
         act_signout = menu.addAction("Sign out active profile")
@@ -3436,6 +3446,91 @@ class MainWindow(QMainWindow):
                 "and media server are available.", 6000,
             )
 
+    # -- joining the association ---------------------------------------------
+
+    def _membership_api_for(self, profile: Optional[Profile]) -> MembershipApi:
+        if profile is not None:
+            sign = session_signer(self._session_pool, profile)
+        else:
+            def sign(_unsigned, _on_success, on_failure):
+                on_failure("not connected")
+        return MembershipApi(sign, parent=self)
+
+    def _open_membership_window(self) -> None:
+        """Nostr > EINUNDZWANZIG Membership: join, pay, or see what's active.
+
+        Not modal, so paying from a phone never locks the editor. Opening
+        it signs nothing; the window asks the signer only when the person
+        continues.
+        """
+        profile, identity = self._membership_identity()
+        window = getattr(self, "_membership_window", None)
+        if window is not None and not window.isVisible():
+            # Rebuilt on every fresh open: it then follows the current
+            # theme and starts from where the membership stands now.
+            window.deleteLater()
+            window = None
+        if window is None:
+            window = MembershipWindow(
+                self._membership_api_for(profile), **identity,
+                is_dark=self.is_dark_theme, parent=self)
+            window.setWindowFlag(Qt.Window, True)
+            window.connect_requested.connect(self._on_membership_connect_requested)
+            window.link_activated.connect(self._open_external)
+            window.member_confirmed.connect(self._on_member_confirmed)
+            window.add_relay_requested.connect(self._on_add_member_relay)
+            self._membership_window = window
+        window.show()
+        window.raise_()
+        window.activateWindow()
+
+    def _membership_identity(self):
+        """The active profile, and what the window needs to know about it."""
+        profile = self._profile_store.default()
+        pubkey = profile.user_pubkey if profile is not None else None
+        return profile, {
+            "pubkey": pubkey,
+            "known_member": self._membership.cached_membership(pubkey) if pubkey else None,
+            "handle": self._membership.cached_handle(pubkey) if pubkey else None,
+        }
+
+    def _on_membership_connect_requested(self) -> None:
+        self._on_nostr_connect()
+        profile, identity = self._membership_identity()
+        if profile is None:
+            return
+        window = getattr(self, "_membership_window", None)
+        if window is not None and window.isVisible():
+            # Continue joining in the same window, now as the new identity.
+            window.set_identity(self._membership_api_for(profile), **identity)
+        else:
+            self._open_membership_window()
+
+    def _on_member_confirmed(self, pubkey: str) -> None:
+        """The association confirmed the membership: the relay and media
+        server apply from now on, without waiting for the public roster."""
+        self._membership.confirm_member(pubkey)
+        self._on_membership_resolved(pubkey, True)
+
+    def _on_add_member_relay(self) -> None:
+        profile = self._profile_store.default()
+        window = getattr(self, "_membership_window", None)
+        if profile is None or window is None:
+            return
+        job = RelayListAddition(self._relay_pool, self._session_pool, profile,
+                                MEMBER_RELAY, parent=self)
+
+        def finished(outcome: str) -> None:
+            if outcome == ADDED:
+                self._relay_list_cache.invalidate(profile.user_pubkey)
+            if window is getattr(self, "_membership_window", None):
+                window.set_relay_result(outcome_message(outcome),
+                                        done=outcome in (ADDED, ALREADY))
+            job.deleteLater()
+
+        job.finished.connect(finished)
+        job.start()
+
     def _on_nostr_profile_connected(self, profile: Profile):
         # New (or re-connected) profile becomes the active one.
         previous = self._profile_store.default()
@@ -3480,6 +3575,11 @@ class MainWindow(QMainWindow):
         """
         self._draft_sync.stop()
         self._private_library.stop()
+        # The membership window speaks for one identity; never show one
+        # account's membership, invoice or name to another.
+        window = getattr(self, "_membership_window", None)
+        if window is not None and window.isVisible():
+            window.close()
 
     def _on_nostr_select_profile(self, profile: Profile):
         previous = self._profile_store.default()

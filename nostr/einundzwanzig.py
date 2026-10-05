@@ -26,7 +26,7 @@ import json
 import re
 import time
 from dataclasses import dataclass
-from typing import Callable, Optional, Set
+from typing import Callable, Dict, Optional, Set
 
 from PySide6.QtCore import QObject, QUrl, Signal
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
@@ -73,6 +73,10 @@ _MAX_ROSTER_BYTES: int = 4 * 1024 * 1024
 
 _HEX64 = re.compile(r"\A[0-9a-f]{64}\Z", re.IGNORECASE)
 
+# The association serves verified names under this domain.
+NIP05_DOMAIN: str = "einundzwanzig.space"
+_HANDLE = re.compile(r"\A[a-z0-9_-]{1,255}\Z")
+
 
 @dataclass(frozen=True)
 class Benefits:
@@ -118,20 +122,37 @@ def parse_roster(payload: bytes) -> Set[str]:
     that is malformed is skipped rather than failing the whole roster,
     since one bad row must not cost every member their benefits.
     """
+    return set(parse_roster_records(payload))
+
+
+def parse_roster_records(payload: bytes) -> Dict[str, Optional[str]]:
+    """Hex pubkey -> verified name handle (or None) from a roster response.
+
+    The handle is the part before ``@einundzwanzig.space``. One that does
+    not look like a handle is dropped, never the member it came with.
+    """
     try:
         data = json.loads(payload.decode("utf-8"))
     except (ValueError, UnicodeDecodeError):
-        return set()
+        return {}
     if not isinstance(data, list):
-        return set()
-    found: Set[str] = set()
+        return {}
+    found: Dict[str, Optional[str]] = {}
     for record in data:
         if not isinstance(record, dict):
             continue
         pubkey = record.get("pubkey")
-        if isinstance(pubkey, str) and _HEX64.match(pubkey.strip()):
-            found.add(pubkey.strip().lower())
+        if not (isinstance(pubkey, str) and _HEX64.match(pubkey.strip())):
+            continue
+        handle = record.get("nip05_handle")
+        handle = handle.strip().lower() if isinstance(handle, str) else ""
+        found[pubkey.strip().lower()] = handle if _HANDLE.match(handle) else None
     return found
+
+
+def nip05_address(handle: str) -> str:
+    """``handle@einundzwanzig.space``."""
+    return f"{handle}@{NIP05_DOMAIN}"
 
 
 # --------------------------------------------------------------------------- #
@@ -162,6 +183,11 @@ class MembershipDirectory(QObject):
         self._nam = nam or QNetworkAccessManager(self)
         self._clock = clock or time.monotonic
         self._roster: Optional[Set[str]] = None
+        self._handles: Dict[str, Optional[str]] = {}
+        # Pubkeys the association itself just confirmed (a signed status
+        # answer), so a fresh member is recognised before the published
+        # roster catches up with them.
+        self._confirmed: Set[str] = set()
         self._fetched_at: float = 0.0
         self._inflight: Optional[QNetworkReply] = None
         self._waiting: list = []
@@ -176,6 +202,8 @@ class MembershipDirectory(QObject):
         loads would flicker a "join the association" prompt at somebody who
         already did.
         """
+        if (pubkey_hex or "").strip().lower() in self._confirmed:
+            return True
         if not self._is_fresh():
             return None
         return self._match(pubkey_hex)
@@ -191,10 +219,27 @@ class MembershipDirectory(QObject):
         )
 
     def _match(self, pubkey_hex: str) -> bool:
+        key = (pubkey_hex or "").strip().lower()
+        if key and key in self._confirmed:
+            return True
         if self._roster is None:
             return False
-        key = (pubkey_hex or "").strip().lower()
         return bool(key) and key in self._roster
+
+    def cached_handle(self, pubkey_hex: str) -> Optional[str]:
+        """The verified name handle the roster lists for this pubkey, if any."""
+        return self._handles.get((pubkey_hex or "").strip().lower())
+
+    def confirm_member(self, pubkey_hex: str) -> None:
+        """Record that the association confirmed this pubkey as a member.
+
+        Only call this with an answer from the association's signed status
+        endpoint. It holds for the rest of the session; the roster takes
+        over from the next launch.
+        """
+        key = (pubkey_hex or "").strip().lower()
+        if _HEX64.match(key):
+            self._confirmed.add(key)
 
     def invalidate(self) -> None:
         """Drop the cached roster so the next resolve refetches."""
@@ -251,7 +296,8 @@ class MembershipDirectory(QObject):
         self._inflight = None
         try:
             ok = reply.error() == QNetworkReply.NoError and not oversize["hit"]
-            roster = parse_roster(bytes(reply.readAll())) if ok else set()
+            records = parse_roster_records(bytes(reply.readAll())) if ok else {}
+            roster = set(records)
         finally:
             reply.deleteLater()
 
@@ -267,6 +313,7 @@ class MembershipDirectory(QObject):
             return
 
         self._roster = roster
+        self._handles = records
         self._fetched_at = self._clock()
         waiting, self._waiting = self._waiting, []
         for key in waiting:

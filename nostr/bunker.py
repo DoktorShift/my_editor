@@ -115,6 +115,9 @@ def humanize_failure(reason: str) -> str:
 DEFAULT_PERMS = (
     "get_public_key,"
     "sign_event:1,sign_event:30023,sign_event:31234,"
+    # Proof of identity for EINUNDZWANZIG membership requests (NIP-98), and
+    # adding the members' relay to the user's relay list (NIP-65).
+    "sign_event:27235,sign_event:10002,"
     "nip44_encrypt,nip44_decrypt,"
     "ping"
 )

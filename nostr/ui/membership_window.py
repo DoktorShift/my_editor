@@ -1,0 +1,1022 @@
+# SPDX-FileCopyrightText: 2026 rinbal
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""EINUNDZWANZIG Membership: join the association, pay the fee, see what it unlocks.
+
+One window with a page for each stage of joining, in the order it happens:
+
+    overview   what membership is, what it costs, and Continue
+    apply      the statutes, consent, and the optional details
+    pay        the invoice as a QR code, Copy Invoice, Open in Wallet
+    member     what is active now, and the verified name
+    working    the short wait while the signer and the association answer
+
+The window follows Apple's Human Interface Guidelines the way the rest of
+the app does: one default button at the trailing edge with Cancel-type
+buttons beside it, Go Back at the leading edge, field problems shown under
+the field they belong to, progress shown where the work happens, and plain
+words throughout (no protocol names, status codes or key formats).
+
+Nothing is signed by opening the window. The fee is read without a
+signature; every request that needs one (status, application, invoice,
+payment check) starts from a button the person clicked, and the working
+page says that their signer app will ask. The window is not modal: paying
+from a phone can take a minute, and the editor stays usable meanwhile.
+
+The association API lives in nostr/einundzwanzig_api.py. This module only
+decides what to show; it never touches the network itself.
+"""
+
+from __future__ import annotations
+
+import datetime
+import json
+from typing import Callable, Optional
+from urllib.parse import urlsplit
+
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QDialog,
+    QFileDialog,
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPlainTextEdit,
+    QProgressBar,
+    QPushButton,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
+import theme
+from alerts import confirm_destructive, inform
+from constants import (
+    DARK_BORDER, DARK_MENU_BG, DARK_MUTED_FG,
+    LIGHT_BORDER, LIGHT_MENU_BG, LIGHT_MUTED_FG, LIGHT_SELECTION,
+)
+from nostr import einundzwanzig_api as e21
+from nostr.einundzwanzig import (
+    JOIN_URL, MAX_FILE_LABEL, MEMBER_BLOSSOM, MEMBER_RELAY, NIP05_DOMAIN, PER_USER_LABEL,
+    nip05_address,
+)
+from nostr.qr import make_qr_pixmap
+
+# Pages.
+OVERVIEW = "overview"
+WORKING = "working"
+APPLY = "apply"
+PAY = "pay"
+MEMBER = "member"
+
+# Button placement (see _set_buttons).
+LEADING = "leading"     # Go Back: the leading edge
+NORMAL = "normal"       # Not Now, Close, Cancel: beside the default
+DEFAULT = "default"     # the likely action: the trailing edge, answers Return
+
+_QR_SIZE = 216
+_ASK_SIGNER = "Approve the request in your signer app."
+
+
+def format_amount(amount: int, currency: str) -> str:
+    """``21,000 sats`` or ``21 CHF``: the fee the way the association states it."""
+    unit = (currency or "").strip().upper()
+    if unit in ("SAT", "SATS"):
+        return f"{amount:,} sats"
+    return f"{amount:,} {unit}".strip()
+
+
+def format_date(iso: str) -> str:
+    """``20 April 2024`` from ``2024-04-20``; the input unchanged if it is not a date."""
+    try:
+        day = datetime.date.fromisoformat((iso or "")[:10])
+    except ValueError:
+        return iso or ""
+    return f"{day.day} {day.strftime('%B')} {day.year}"
+
+
+def _host(url: str) -> str:
+    return urlsplit(url).hostname or url
+
+
+def open_lightning_invoice(bolt11: str) -> bool:
+    """Hand an invoice to whatever wallet app handles Lightning links.
+
+    Only a well-formed invoice is handed over. False when nothing on this
+    computer opened it.
+    """
+    if not bolt11 or e21.bolt11_amount_sats(bolt11) is None:
+        return False
+    return QDesktopServices.openUrl(QUrl(f"lightning:{bolt11}"))
+
+
+def _stylesheet(is_dark: bool) -> str:
+    if is_dark:
+        muted, border, field = DARK_MUTED_FG, DARK_BORDER, DARK_MENU_BG
+        accent, ok, err = "#007ACC", "#43A047", "#E57373"
+    else:
+        muted, border, field = LIGHT_MUTED_FG, LIGHT_BORDER, LIGHT_MENU_BG
+        accent, ok, err = LIGHT_SELECTION, "#2E7D32", "#C62828"
+    link = theme.dialog_link_color(is_dark)
+    return theme.dialog_stylesheet(is_dark) + f"""
+    QLabel#title {{ font-size: 16px; font-weight: 600; }}
+    QLabel#muted, QLabel#help {{ color: {muted}; }}
+    QLabel#help {{ font-size: 11px; }}
+    QLabel#error {{ color: {err}; font-size: 11px; }}
+    QLabel#item_title {{ font-weight: 600; }}
+    QLabel#amount {{ font-size: 22px; font-weight: 600; }}
+    QLabel#check {{ color: {ok}; font-size: 15px; font-weight: 700; }}
+    QLabel#qr {{ background: #FFFFFF; border: 1px solid {border}; border-radius: 8px; padding: 6px; }}
+    QLineEdit, QPlainTextEdit {{
+        background: {field}; border: 1px solid {border}; border-radius: 5px; padding: 4px 6px;
+    }}
+    QLineEdit:focus, QPlainTextEdit:focus {{ border-color: {accent}; }}
+    QPushButton#link {{
+        border: none; background: transparent; color: {link}; padding: 2px 0; min-width: 0;
+    }}
+    QPushButton#link:hover {{ text-decoration: underline; }}
+    QPushButton#link:disabled {{ color: {muted}; }}
+    QProgressBar {{
+        background: {field}; border: 1px solid {border}; border-radius: 3px; max-height: 6px;
+    }}
+    QProgressBar::chunk {{ background: {accent}; border-radius: 2px; }}
+    """
+
+
+def _label(text: str = "", name: str = "", *, wrap: bool = True) -> QLabel:
+    label = QLabel(text)
+    if name:
+        label.setObjectName(name)
+    label.setWordWrap(wrap)
+    label.setTextFormat(Qt.PlainText)   # names and server words are data, not markup
+    return label
+
+
+def _busy_bar() -> QProgressBar:
+    bar = QProgressBar()
+    bar.setRange(0, 0)      # indeterminate: the wait has no known length
+    bar.setTextVisible(False)
+    bar.setAccessibleName("Working")
+    return bar
+
+
+class MembershipWindow(QDialog):
+    """Joining EINUNDZWANZIG, start to finish, for the active Nostr identity."""
+
+    connect_requested = Signal()      # the person wants to connect a signer first
+    link_activated = Signal(str)      # a web address for the window to open
+    member_confirmed = Signal(str)    # the association confirmed this pubkey as a member
+    add_relay_requested = Signal()    # add the members' relay to the relay list
+
+    def __init__(self, api, *, pubkey: Optional[str] = None,
+                 known_member: Optional[bool] = None, handle: Optional[str] = None,
+                 is_dark: bool = True,
+                 watcher_factory: Optional[Callable] = None,
+                 open_lightning: Callable[[str], bool] = open_lightning_invoice,
+                 parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("EINUNDZWANZIG Membership")
+        self.setMinimumWidth(520)
+        self.setStyleSheet(_stylesheet(is_dark))
+        self._is_dark = is_dark
+        self._watcher_factory = watcher_factory or (
+            lambda api_, year, parent_: e21.PaymentWatcher(api_, year, parent=parent_))
+        self._open_lightning = open_lightning
+        self._watcher = None
+        self._page = None
+        self.buttons = {}
+        self._button_widgets = []
+
+        self._stack = QStackedWidget()
+        self._pages = {}
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 22, 24, 18)
+        layout.setSpacing(18)
+        layout.addWidget(self._stack, 1)
+        self._button_row = QHBoxLayout()
+        self._button_row.setSpacing(8)
+        layout.addLayout(self._button_row)
+
+        self._build_overview()
+        self._build_working()
+        self._build_apply()
+        self._build_pay()
+        self._build_member()
+
+        self.set_identity(api, pubkey=pubkey, known_member=known_member, handle=handle)
+
+    # ------------------------------------------------------------------ #
+    # Identity                                                            #
+    # ------------------------------------------------------------------ #
+
+    def set_identity(self, api, *, pubkey: Optional[str], known_member: Optional[bool] = None,
+                     handle: Optional[str] = None) -> None:
+        """Start over for this identity (after connecting a signer, or a
+        profile switch). Anything in flight for the previous one is dropped."""
+        self._stop_watching()
+        previous = getattr(self, "_api", None)
+        if previous is not None and previous is not api:
+            previous.cancel()
+        self._api = api
+        self._pubkey = pubkey
+        self._handle = handle
+        self._config = None
+        self._status = None
+        self._invoice = None
+        self._name_only = False
+        self._just_joined = False
+        if pubkey and known_member:
+            self._show_member()
+        else:
+            self._show_overview()
+        if api is not None and api.has_key:
+            api.config(self._on_config, lambda _error: None)
+
+    @property
+    def page(self) -> str:
+        return self._page
+
+    # ------------------------------------------------------------------ #
+    # Buttons                                                             #
+    # ------------------------------------------------------------------ #
+
+    def _set_buttons(self, specs) -> None:
+        """Lay out ``(key, label, placement, handler)`` buttons.
+
+        Go Back sits at the leading edge; the rest sit at the trailing
+        edge with the one default button last, which is where macOS puts
+        it and where Return lands.
+        """
+        for widget in self._button_widgets:
+            self._button_row.removeWidget(widget)
+            widget.deleteLater()
+        self._button_widgets = []
+        while self._button_row.count():
+            self._button_row.takeAt(0)
+        self.buttons = {}
+
+        def make(key, label, placement, handler):
+            button = QPushButton(label)
+            button.setAutoDefault(False)
+            button.setDefault(placement == DEFAULT)
+            button.clicked.connect(handler)
+            self.buttons[key] = button
+            self._button_widgets.append(button)
+            return button
+
+        for spec in specs:
+            if spec[2] == LEADING:
+                self._button_row.addWidget(make(*spec))
+        self._button_row.addStretch(1)
+        for placement in (NORMAL, DEFAULT):
+            for spec in specs:
+                if spec[2] == placement:
+                    self._button_row.addWidget(make(*spec))
+
+    def _show(self, page: str, buttons) -> None:
+        self._page = page
+        self._stack.setCurrentWidget(self._pages[page])
+        self._set_buttons(buttons)
+
+    # ------------------------------------------------------------------ #
+    # Overview                                                            #
+    # ------------------------------------------------------------------ #
+
+    def _build_overview(self) -> None:
+        page = QWidget()
+        col = QVBoxLayout(page)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(10)
+        col.addWidget(_label("Become an EINUNDZWANZIG Member", "title"))
+        col.addWidget(_label(
+            "EINUNDZWANZIG brings Bitcoiners together across the German-speaking "
+            "world, with local meetups, education and exchange. Membership supports "
+            "the community and adds services to your Nostr identity."))
+        col.addSpacing(4)
+        for title, detail in (
+            ("Members’ relay",
+             "A dependable relay that carries your notes and articles to readers."),
+            ("Verified name",
+             f"A name like you@{NIP05_DOMAIN} that people can recognize and share, "
+             "instead of a long key."),
+            ("Media storage",
+             f"{PER_USER_LABEL} for images and videos, up to {MAX_FILE_LABEL} per file."),
+        ):
+            col.addLayout(self._item(title, detail)[0])
+        col.addSpacing(4)
+        self._fee_label = _label("", "item_title")
+        self._fee_label.hide()
+        col.addWidget(self._fee_label)
+        self._overview_note = _label(
+            "Membership belongs to your Nostr identity and runs for a calendar year. "
+            "You renew it yourself; nothing is charged automatically.", "muted")
+        col.addWidget(self._overview_note)
+        col.addStretch(1)
+        self._add_page(OVERVIEW, page)
+
+    def _item(self, title: str, detail: str, extra: Optional[QWidget] = None):
+        """A checked row: title, detail and optional controls.
+        Returns ``(layout, detail_label)``."""
+        mark = _label("✓", "check", wrap=False)
+        mark.setFixedWidth(18)
+        mark.setAccessibleName("Included")
+        text = QVBoxLayout()
+        text.setSpacing(2)
+        text.addWidget(_label(title, "item_title"))
+        detail_label = _label(detail, "muted")
+        text.addWidget(detail_label)
+        if extra is not None:
+            text.addWidget(extra, 0, Qt.AlignLeft)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        row.addWidget(mark, 0, Qt.AlignTop)
+        row.addLayout(text, 1)
+        return row, detail_label
+
+    def _show_overview(self, note: str = "") -> None:
+        self._set_overview_note(note)
+        if not self._pubkey:
+            buttons = [("not_now", "Not Now", NORMAL, self.reject),
+                       ("connect", "Connect Signer…", DEFAULT, self._ask_to_connect)]
+        elif self._api is None or not self._api.has_key:
+            buttons = [("not_now", "Not Now", NORMAL, self.reject),
+                       ("website", "Join on the Website", DEFAULT, self._join_on_website)]
+        else:
+            buttons = [("not_now", "Not Now", NORMAL, self.reject),
+                       ("continue", "Continue", DEFAULT, self._load_status)]
+        self._show(OVERVIEW, buttons)
+
+    def _set_overview_note(self, note: str) -> None:
+        if not self._pubkey:
+            note = note or ("Membership belongs to a Nostr identity. Connect your "
+                            "signer to join.")
+        elif self._api is None or not self._api.has_key:
+            note = note or ("This copy of MyEditor can’t sign you up directly. "
+                            "You can join on the EINUNDZWANZIG website.")
+        self._overview_note.setText(note or (
+            "Membership belongs to your Nostr identity and runs for a calendar year. "
+            "You renew it yourself; nothing is charged automatically."))
+
+    def _on_config(self, config) -> None:
+        self._config = config
+        self._fee_label.setText(
+            f"Annual fee: {format_amount(config.fee, config.currency)} for {config.year}")
+        self._fee_label.show()
+
+    def _ask_to_connect(self) -> None:
+        self.connect_requested.emit()
+
+    def _join_on_website(self) -> None:
+        self.link_activated.emit(JOIN_URL)
+        self.accept()
+
+    # ------------------------------------------------------------------ #
+    # Working                                                             #
+    # ------------------------------------------------------------------ #
+
+    def _build_working(self) -> None:
+        page = QWidget()
+        col = QVBoxLayout(page)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(10)
+        col.addStretch(1)
+        self._working_title = _label("", "item_title")
+        self._working_title.setAlignment(Qt.AlignCenter)
+        self._working_detail = _label("", "muted")
+        self._working_detail.setAlignment(Qt.AlignCenter)
+        col.addWidget(self._working_title)
+        col.addWidget(self._working_detail)
+        bar = _busy_bar()
+        bar.setMaximumWidth(220)
+        col.addWidget(bar, 0, Qt.AlignHCenter)
+        col.addStretch(2)
+        self._add_page(WORKING, page)
+
+    def _working(self, detail: str, back: Callable[[], None], title: str = _ASK_SIGNER) -> None:
+        """Show the wait. Cancel drops the request and goes back."""
+        self._working_title.setText(title)
+        self._working_detail.setText(detail)
+
+        def cancel():
+            self._api.cancel()
+            back()
+
+        self._show(WORKING, [("cancel", "Cancel", NORMAL, cancel)])
+
+    def _fail(self, error, back: Callable[[], None]) -> None:
+        back()
+        title, message = e21.humanize(error)
+        inform(self, title=title, message=message, is_dark=self._is_dark)
+
+    # ------------------------------------------------------------------ #
+    # Status                                                              #
+    # ------------------------------------------------------------------ #
+
+    def _load_status(self) -> None:
+        self._working("MyEditor is asking EINUNDZWANZIG where your membership stands.",
+                      back=self._show_overview)
+        self._api.me(self._on_status, lambda error: self._fail(error, self._show_overview))
+
+    def _on_status(self, status) -> None:
+        self._status = status
+        if status.is_member:
+            self.member_confirmed.emit(self._pubkey or status.pubkey)
+            self._show_member()
+        elif status.needs_payment:
+            self._create_invoice()
+        else:
+            self._name_only = False
+            self._show_apply()
+
+    # ------------------------------------------------------------------ #
+    # Apply                                                               #
+    # ------------------------------------------------------------------ #
+
+    def _build_apply(self) -> None:
+        page = QWidget()
+        col = QVBoxLayout(page)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(10)
+        self._apply_title = _label("Your Application", "title")
+        col.addWidget(self._apply_title)
+
+        self._statutes_box = QWidget()
+        statutes = QVBoxLayout(self._statutes_box)
+        statutes.setContentsMargins(0, 0, 0, 0)
+        statutes.setSpacing(6)
+        statutes.addWidget(_label(
+            "Joining means agreeing to the association’s statutes. "
+            "Please read them first.", ""))
+        row = QHBoxLayout()
+        self._statutes_label = _label("", "muted")
+        self._statutes_button = QPushButton("Open Statutes")
+        self._statutes_button.setAutoDefault(False)
+        self._statutes_button.clicked.connect(self._open_statutes)
+        row.addWidget(self._statutes_label, 1)
+        row.addWidget(self._statutes_button)
+        statutes.addLayout(row)
+        self._consent = QCheckBox("I have read the statutes and agree to them.")
+        self._consent.toggled.connect(self._update_send_button)
+        statutes.addWidget(self._consent)
+        col.addWidget(self._statutes_box)
+        col.addSpacing(6)
+
+        form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignRight)
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(10)
+
+        self._handle_edit = QLineEdit()
+        self._handle_edit.setPlaceholderText("satoshi")
+        self._handle_edit.textEdited.connect(self._lowercase_handle)
+        self._handle_edit.textChanged.connect(self._check_handle)
+        suffix = _label(f"@{NIP05_DOMAIN}", "muted", wrap=False)
+        handle_row = QHBoxLayout()
+        handle_row.setSpacing(4)
+        handle_row.addWidget(self._handle_edit, 1)
+        handle_row.addWidget(suffix)
+        self._handle_help = _label("Optional. Lowercase letters, digits, - and _.", "help")
+        self._handle_error = _label("", "error")
+        form.addRow("Verified name:", self._field(handle_row, self._handle_help,
+                                                  self._handle_error))
+
+        self._email_edit = QLineEdit()
+        self._email_edit.setPlaceholderText("name@example.com")
+        self._email_edit.textChanged.connect(self._check_email)
+        self._email_help = _label("Optional. Only for membership notices, like renewal "
+                                  "reminders.", "help")
+        self._email_error = _label("", "error")
+        self._email_row = self._field(self._email_edit, self._email_help, self._email_error)
+        form.addRow("Email:", self._email_row)
+
+        self._message_edit = QPlainTextEdit()
+        self._message_edit.setFixedHeight(70)
+        self._message_edit.setTabChangesFocus(True)
+        self._message_edit.textChanged.connect(self._check_message)
+        self._message_help = _label("Optional. Anything you’d like the association "
+                                    "to know.", "help")
+        self._message_error = _label("", "error")
+        self._message_row = self._field(self._message_edit, self._message_help,
+                                        self._message_error)
+        form.addRow("Message:", self._message_row)
+        self._form = form
+        col.addLayout(form)
+        col.addStretch(1)
+        self._add_page(APPLY, page)
+
+    @staticmethod
+    def _field(field, help_label: QLabel, error_label: QLabel) -> QWidget:
+        box = QWidget()
+        col = QVBoxLayout(box)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(3)
+        if isinstance(field, QWidget):
+            col.addWidget(field)
+        else:
+            col.addLayout(field)
+        col.addWidget(help_label)
+        error_label.hide()
+        col.addWidget(error_label)
+        return box
+
+    def _show_apply(self, *, name_only: bool = False) -> None:
+        self._name_only = name_only
+        if self._config is None and not name_only:
+            self._working("Loading the statutes…", back=self._show_overview,
+                          title="One moment.")
+            self._api.config(lambda c: (self._on_config(c), self._show_apply()),
+                             lambda error: self._fail(error, self._show_overview))
+            return
+        self._apply_title.setText("Choose a Verified Name" if name_only else "Your Application")
+        self._statutes_box.setVisible(not name_only)
+        self._email_row.setVisible(not name_only)
+        self._message_row.setVisible(not name_only)
+        for widget in (self._email_row, self._message_row):
+            label = self._form.labelForField(widget)
+            if label is not None:
+                label.setVisible(not name_only)
+        self._handle_help.setText(
+            "Lowercase letters, digits, - and _. It can take a few minutes to "
+            "appear everywhere." if name_only else
+            "Optional. Lowercase letters, digits, - and _.")
+        if self._config is not None:
+            version = self._config.statutes_version
+            adopted = format_date(self._config.statutes_adopted_at)
+            self._statutes_label.setText(f"Version {version}, adopted {adopted}.")
+        back = self._show_member if name_only else self._show_overview
+        label = "Save Name" if name_only else "Send Application"
+        self._show(APPLY, [("back", "Go Back", LEADING, back),
+                           ("send", label, DEFAULT, self._send_application)])
+        self._update_send_button()
+        (self._handle_edit if name_only else self._consent).setFocus()
+
+    def _open_statutes(self) -> None:
+        if self._config is not None:
+            self.link_activated.emit(self._config.statutes_url)
+
+    def _lowercase_handle(self, text: str) -> None:
+        if text != text.lower():
+            position = self._handle_edit.cursorPosition()
+            self._handle_edit.setText(text.lower())
+            self._handle_edit.setCursorPosition(position)
+
+    def _set_error(self, label: QLabel, message: Optional[str]) -> None:
+        label.setText(message or "")
+        label.setVisible(bool(message))
+
+    def _check_handle(self) -> None:
+        text = self._handle_edit.text().strip()
+        self._set_error(self._handle_error, e21.nip05_handle_problem(text) if text else None)
+        self._update_send_button()
+
+    def _check_email(self) -> None:
+        text = self._email_edit.text().strip()
+        self._set_error(self._email_error, e21.email_problem(text) if text else None)
+        self._update_send_button()
+
+    def _check_message(self) -> None:
+        text = self._message_edit.toPlainText()
+        self._set_error(self._message_error,
+                        e21.application_text_problem(text) if text.strip() else None)
+        self._update_send_button()
+
+    def _update_send_button(self, *_args) -> None:
+        button = self.buttons.get("send")
+        if button is None or self._page != APPLY:
+            return
+        problems = any(label.isVisibleTo(self._pages[APPLY]) for label in
+                       (self._handle_error, self._email_error, self._message_error))
+        if self._name_only:
+            ready = bool(self._handle_edit.text().strip())
+        else:
+            ready = self._consent.isChecked()
+        button.setEnabled(ready and not problems)
+
+    def _send_application(self) -> None:
+        handle = self._handle_edit.text().strip()
+        kwargs = {}
+        if self._name_only:
+            kwargs.update(statutes_accepted=e21.UNSET, nip05_handle=handle)
+        else:
+            email = self._email_edit.text().strip()
+            message = self._message_edit.toPlainText().strip()
+            kwargs["statutes_accepted"] = True
+            if handle:
+                kwargs["nip05_handle"] = handle
+            if email:
+                kwargs.update(email=email, no_email=False)
+            else:
+                kwargs["no_email"] = True
+            if message:
+                kwargs["application_text"] = message
+        detail = ("MyEditor is saving your verified name." if self._name_only
+                  else "MyEditor is sending your application to EINUNDZWANZIG.")
+        name_only = self._name_only
+        self._working(detail, back=lambda: self._show_apply(name_only=name_only))
+        self._api.apply(lambda status: self._on_applied(status, handle, name_only),
+                        lambda error: self._on_apply_failed(error, name_only), **kwargs)
+
+    def _on_applied(self, status, handle: str, name_only: bool) -> None:
+        self._status = status
+        if handle:
+            self._handle = handle
+        if name_only:
+            self._show_member(note="Your verified name is saved. It can take a few "
+                                   "minutes to appear everywhere.")
+        else:
+            self._on_status(status)
+
+    def _on_apply_failed(self, error, name_only: bool) -> None:
+        self._show_apply(name_only=name_only)
+        if error.code == e21.ErrorCode.VALIDATION and error.field_errors:
+            shown = False
+            for label, message in (
+                (self._handle_error, e21.handle_field_message(error)),
+                (self._email_error, e21.field_message(error, "email")),
+                (self._message_error, e21.field_message(error, "application_text")),
+            ):
+                if message:
+                    self._set_error(label, message)
+                    shown = True
+            self._update_send_button()
+            if shown:
+                return
+        title, message = e21.humanize(error)
+        inform(self, title=title, message=message, is_dark=self._is_dark)
+
+    # ------------------------------------------------------------------ #
+    # Pay                                                                 #
+    # ------------------------------------------------------------------ #
+
+    def _build_pay(self) -> None:
+        page = QWidget()
+        col = QVBoxLayout(page)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(10)
+        self._pay_title = _label("", "title")
+        col.addWidget(self._pay_title)
+        self._pay_intro = _label("Pay with any Lightning wallet. When you’ve paid, "
+                                 "click I’ve Paid and MyEditor confirms it with "
+                                 "EINUNDZWANZIG.")
+        col.addWidget(self._pay_intro)
+        self._amount = _label("", "amount", wrap=False)
+        self._amount.setAlignment(Qt.AlignCenter)
+        col.addWidget(self._amount)
+        self._amount_detail = _label("", "muted")
+        self._amount_detail.setAlignment(Qt.AlignCenter)
+        col.addWidget(self._amount_detail)
+
+        self._qr = QLabel()
+        self._qr.setObjectName("qr")
+        self._qr.setAlignment(Qt.AlignCenter)
+        self._qr.setAccessibleName("Lightning invoice code to scan with a wallet")
+        col.addWidget(self._qr, 0, Qt.AlignHCenter)
+
+        actions = QHBoxLayout()
+        actions.addStretch(1)
+        self._copy_button = QPushButton("Copy Invoice")
+        self._copy_button.setAutoDefault(False)
+        self._copy_button.clicked.connect(self._copy_invoice)
+        self._wallet_button = QPushButton("Open in Wallet")
+        self._wallet_button.setAutoDefault(False)
+        self._wallet_button.clicked.connect(self._open_wallet)
+        actions.addWidget(self._copy_button)
+        actions.addWidget(self._wallet_button)
+        actions.addStretch(1)
+        col.addLayout(actions)
+        self._browser_button = QPushButton("Pay in Browser Instead")
+        self._browser_button.setObjectName("link")
+        self._browser_button.setAutoDefault(False)
+        self._browser_button.setCursor(Qt.PointingHandCursor)
+        self._browser_button.clicked.connect(self._pay_in_browser)
+        col.addWidget(self._browser_button, 0, Qt.AlignHCenter)
+
+        self._pay_status = _label("", "muted")
+        self._pay_status.setAlignment(Qt.AlignCenter)
+        self._pay_busy = _busy_bar()
+        self._pay_busy.setMaximumWidth(220)
+        col.addWidget(self._pay_status)
+        col.addWidget(self._pay_busy, 0, Qt.AlignHCenter)
+        col.addStretch(1)
+        self._add_page(PAY, page)
+
+    def _fee_year(self) -> int:
+        if self._status is not None:
+            return self._status.current_year.year
+        if self._config is not None:
+            return self._config.year
+        return datetime.date.today().year
+
+    def _create_invoice(self) -> None:
+        self._stop_watching()
+        self._working("MyEditor is asking EINUNDZWANZIG for your invoice.",
+                      back=self._show_overview)
+        self._api.create_invoice(self._fee_year(), self._on_invoice,
+                                 lambda error: self._fail(error, self._show_overview))
+
+    def _on_invoice(self, invoice) -> None:
+        self._invoice = invoice
+        if invoice.payment.paid:
+            self._on_paid(invoice)
+            return
+        renewing = self._status is not None and self._status.membership_status == e21.STATUS_LAPSED
+        year = invoice.payment.year
+        self._pay_title.setText(f"Renew Your Membership for {year}" if renewing
+                                else f"Pay Your {year} Membership Fee")
+        sats = invoice.amount_sats
+        fee = format_amount(invoice.payment.amount, invoice.payment.currency)
+        if sats is not None:
+            self._amount.setText(format_amount(sats, "sats"))
+            self._amount_detail.setText("" if fee.endswith("sats") else fee)
+        else:
+            self._amount.setText(fee)
+            self._amount_detail.setText("")
+        self._amount_detail.setVisible(bool(self._amount_detail.text()))
+
+        has_invoice = bool(invoice.bolt11)
+        if has_invoice:
+            self._qr.setPixmap(make_qr_pixmap(invoice.bolt11.upper(), size=_QR_SIZE,
+                                              dark="#000000", light="#FFFFFF"))
+        self._qr.setVisible(has_invoice)
+        self._copy_button.setVisible(has_invoice)
+        self._wallet_button.setVisible(has_invoice)
+        self._browser_button.setVisible(bool(invoice.checkout_url))
+        self._browser_button.setText("Pay in Browser Instead" if has_invoice
+                                     else "Pay in Browser")
+        self._pay_intro.setText(
+            "Pay with any Lightning wallet. When you’ve paid, click I’ve Paid "
+            "and MyEditor confirms it with EINUNDZWANZIG." if has_invoice else
+            "Pay on the EINUNDZWANZIG payment page. When you’ve paid, click "
+            "I’ve Paid and MyEditor confirms it.")
+        self._set_pay_status("")
+        self._show_pay_buttons("paid", "I’ve Paid")
+
+    def _show_pay_buttons(self, key: str, label: str, enabled: bool = True) -> None:
+        handlers = {"paid": self._start_watching, "again": self._start_watching,
+                    "new_invoice": self._create_invoice}
+        self._show(PAY, [("close", "Close", NORMAL, self.reject),
+                         (key, label, DEFAULT, handlers[key])])
+        self.buttons[key].setEnabled(enabled)
+
+    def _set_pay_status(self, text: str, *, busy: bool = False) -> None:
+        self._pay_status.setText(text)
+        self._pay_status.setVisible(bool(text))
+        self._pay_busy.setVisible(busy)
+
+    def _copy_invoice(self) -> None:
+        if self._invoice is None or not self._invoice.bolt11:
+            return
+        QApplication.clipboard().setText(self._invoice.bolt11)
+        self._copy_button.setText("Copied")
+        QTimer.singleShot(1500, lambda: self._copy_button.setText("Copy Invoice"))
+
+    def _open_wallet(self) -> None:
+        if self._invoice is None or not self._invoice.bolt11:
+            return
+        if not self._open_lightning(self._invoice.bolt11):
+            self._set_pay_status("No app on this computer opens Lightning invoices. Scan "
+                                 "the code with your phone, or copy the invoice.")
+
+    def _pay_in_browser(self) -> None:
+        if self._invoice is not None and self._invoice.checkout_url:
+            self.link_activated.emit(self._invoice.checkout_url)
+
+    def _start_watching(self) -> None:
+        self._stop_watching()
+        watcher = self._watcher_factory(self._api, self._invoice.payment.year, self)
+        watcher.paid.connect(self._on_paid)
+        watcher.still_waiting.connect(lambda _n: self._set_pay_status(
+            "Not confirmed yet. Checking again…", busy=True))
+        watcher.expired.connect(self._on_expired)
+        watcher.gave_up.connect(self._on_gave_up)
+        watcher.failed.connect(self._on_watch_failed)
+        self._watcher = watcher
+        self._set_pay_status("Checking for your payment… Your signer app may ask "
+                             "you to approve.", busy=True)
+        self._show_pay_buttons("paid", "Checking…", enabled=False)
+        watcher.start(poll_now=True)
+
+    def _stop_watching(self) -> None:
+        if self._watcher is not None:
+            self._watcher.stop()
+            self._watcher = None
+
+    def _on_expired(self, _invoice) -> None:
+        self._stop_watching()
+        self._set_pay_status("This invoice has expired. Create a new one to pay.")
+        self._show_pay_buttons("new_invoice", "Create New Invoice")
+
+    def _on_gave_up(self) -> None:
+        self._stop_watching()
+        self._set_pay_status("Your payment isn’t confirmed yet. If you paid, wait a "
+                             "moment, then click Check Again.")
+        self._show_pay_buttons("again", "Check Again")
+
+    def _on_watch_failed(self, error) -> None:
+        self._stop_watching()
+        self._set_pay_status("")
+        self._show_pay_buttons("paid", "I’ve Paid")
+        title, message = e21.humanize(error)
+        inform(self, title=title, message=message, is_dark=self._is_dark)
+
+    def _on_paid(self, _invoice) -> None:
+        self._stop_watching()
+        self._just_joined = True
+
+        def back():
+            self._show(PAY, [("close", "Close", NORMAL, self.reject),
+                             ("again", "Check Again", DEFAULT, self._load_status)])
+            self._set_pay_status("Your payment arrived. Click Check Again to finish.")
+
+        self._working("Your payment arrived. MyEditor is confirming your membership.",
+                      back=back)
+
+        def confirmed(status):
+            self._status = status
+            if status.is_member:
+                self.member_confirmed.emit(self._pubkey or status.pubkey)
+                self._show_member()
+            else:
+                back()
+                self._set_pay_status("Your payment arrived. EINUNDZWANZIG is still "
+                                     "confirming it. Check again in a moment.")
+
+        self._api.me(confirmed, lambda error: self._fail(error, back))
+
+    # ------------------------------------------------------------------ #
+    # Member                                                              #
+    # ------------------------------------------------------------------ #
+
+    def _build_member(self) -> None:
+        page = QWidget()
+        col = QVBoxLayout(page)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(10)
+        self._member_title = _label("", "title")
+        self._member_subtitle = _label("", "muted")
+        col.addWidget(self._member_title)
+        col.addWidget(self._member_subtitle)
+        col.addSpacing(4)
+
+        relay_extra = QWidget()
+        relay_row = QHBoxLayout(relay_extra)
+        relay_row.setContentsMargins(0, 2, 0, 0)
+        relay_row.setSpacing(8)
+        self._relay_button = QPushButton("Add to My Relay List")
+        self._relay_button.setAutoDefault(False)
+        self._relay_button.clicked.connect(self._add_relay)
+        self._relay_result = _label("", "muted")
+        relay_row.addWidget(self._relay_button)
+        relay_row.addWidget(self._relay_result, 1)
+        col.addLayout(self._item(
+            "Members’ relay",
+            f"Your notes and articles also go to {_host(MEMBER_RELAY)}. Add it to your "
+            "relay list so readers find you there too.", relay_extra)[0])
+
+        col.addLayout(self._item(
+            "Media storage",
+            f"Your uploads also go to {_host(MEMBER_BLOSSOM)}: {PER_USER_LABEL} in "
+            f"total, up to {MAX_FILE_LABEL} per file.")[0])
+
+        name_extra = QWidget()
+        name_row = QHBoxLayout(name_extra)
+        name_row.setContentsMargins(0, 2, 0, 0)
+        self._name_button = QPushButton("Choose a Name…")
+        self._name_button.setAutoDefault(False)
+        self._name_button.clicked.connect(lambda: self._show_apply(name_only=True))
+        name_row.addWidget(self._name_button)
+        name_row.addStretch(1)
+        name_row_layout, self._name_detail = self._item("Verified name", "", name_extra)
+        col.addLayout(name_row_layout)
+
+        self._member_note = _label("", "muted")
+        col.addWidget(self._member_note)
+        col.addStretch(1)
+
+        links = QHBoxLayout()
+        links.setSpacing(16)
+        self._receipt_link = self._link("Receipt", self._open_receipt)
+        self._details_link = self._link("Show Membership Details", self._load_status)
+        self._export_link = self._link("Export My Data…", self._export)
+        self._erase_link = self._link("Delete My Data…", self._erase)
+        for link in (self._receipt_link, self._details_link, self._export_link,
+                     self._erase_link):
+            links.addWidget(link)
+        links.addStretch(1)
+        col.addLayout(links)
+        self._add_page(MEMBER, page)
+
+    @staticmethod
+    def _link(text: str, handler) -> QPushButton:
+        button = QPushButton(text)
+        button.setObjectName("link")
+        button.setAutoDefault(False)
+        button.setCursor(Qt.PointingHandCursor)
+        button.clicked.connect(handler)
+        return button
+
+    def _show_member(self, note: str = "") -> None:
+        self._stop_watching()
+        status = self._status
+        self._member_title.setText("You’re a Member" if self._just_joined
+                                   else "You’re an EINUNDZWANZIG Member")
+        if status is not None and status.current_year.paid:
+            subtitle = f"Your membership is paid for {status.current_year.year}."
+        else:
+            subtitle = "Your membership is active."
+        if self._just_joined:
+            subtitle += " Thank you for supporting the community."
+        self._member_subtitle.setText(subtitle)
+
+        has_key = self._api is not None and self._api.has_key
+        if self._handle:
+            self._name_detail.setText(nip05_address(self._handle))
+            self._name_button.setText("Change Name…")
+        else:
+            self._name_detail.setText("Not chosen yet.")
+            self._name_button.setText("Choose a Name…")
+        self._name_button.setVisible(has_key)
+
+        receipt = status.current_year.receipt_url if status is not None else None
+        self._receipt_link.setVisible(bool(receipt))
+        self._details_link.setVisible(has_key and status is None)
+        self._export_link.setVisible(has_key)
+        self._erase_link.setVisible(has_key)
+        self._member_note.setText(note)
+        self._member_note.setVisible(bool(note))
+        self._show(MEMBER, [("done", "Done", DEFAULT, self.accept)])
+
+    def _add_relay(self) -> None:
+        self._relay_button.setEnabled(False)
+        self._relay_result.setText("Adding… Your signer app may ask you to approve.")
+        self.add_relay_requested.emit()
+
+    def set_relay_result(self, message: str, *, done: bool) -> None:
+        """The outcome of add_relay_requested, from the window that ran it."""
+        self._relay_result.setText(message)
+        self._relay_button.setEnabled(not done)
+        self._relay_button.setVisible(not done)
+
+    def _open_receipt(self) -> None:
+        if self._status is not None and self._status.current_year.receipt_url:
+            self.link_activated.emit(self._status.current_year.receipt_url)
+
+    def _export(self) -> None:
+        self._working("MyEditor is asking EINUNDZWANZIG for the data it keeps about you.",
+                      back=self._show_member)
+        self._api.export_data(self._on_exported,
+                              lambda error: self._fail(error, self._show_member))
+
+    def _on_exported(self, export) -> None:
+        self._show_member()
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Membership Data", "einundzwanzig-membership.json",
+            "JSON (*.json)")
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(export.document, f, ensure_ascii=False, indent=2)
+        except OSError as exc:
+            inform(self, title="Couldn’t save your data", message=str(exc),
+                   is_dark=self._is_dark)
+            return
+        self._show_member(note="Your membership data is saved.")
+
+    def _erase(self) -> None:
+        if not confirm_destructive(
+                self, title="Delete your membership data?",
+                message="EINUNDZWANZIG removes the personal details of your "
+                        "membership, such as your email and application. Fees you "
+                        "paid stay on record for bookkeeping. This can’t be undone.",
+                action="Delete Data", caution=True, is_dark=self._is_dark):
+            return
+        self._working("MyEditor is asking EINUNDZWANZIG to delete your data.",
+                      back=self._show_member)
+
+        def erased(_result):
+            self._status = None
+            self._handle = None
+            self._just_joined = False
+            self._show_overview(note="Your membership data was deleted.")
+
+        self._api.erase(erased, lambda error: self._fail(error, self._show_member))
+
+    # ------------------------------------------------------------------ #
+    # Plumbing                                                            #
+    # ------------------------------------------------------------------ #
+
+    def _add_page(self, key: str, widget: QWidget) -> None:
+        self._pages[key] = widget
+        self._stack.addWidget(widget)
+
+    def done(self, result: int) -> None:
+        # Closing the window ends the wait; nothing keeps prompting the
+        # signer for a window nobody is looking at.
+        self._stop_watching()
+        if self._api is not None:
+            self._api.cancel()
+        super().done(result)
