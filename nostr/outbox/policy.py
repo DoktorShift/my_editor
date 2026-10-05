@@ -475,6 +475,15 @@ def outbox_relays(author: RelayList, *, hints: Iterable[str] = (),
     return dedupe_relays(seen_on, defaults.FALLBACK_RELAYS)
 
 
+def retry_relays(asked: Iterable[str]) -> List[str]:
+    """The fallback relays not asked yet: one more try for a one-shot read
+    of someone else's events (an article, an author's articles) when the
+    relays asked had nothing. A relay list can name relays that have
+    since gone, while the event sits on a big public relay."""
+    tried = set(dedupe_relays(asked))
+    return [url for url in dedupe_relays(defaults.FALLBACK_RELAYS) if url not in tried]
+
+
 def relay_list_targets(new_event: dict, old: Optional[RelayList]) -> List[str]:
     """Where a new relay list goes: every relay it names, every relay the old
     one named (so stale copies are replaced there too), and the indexers."""

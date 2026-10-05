@@ -427,6 +427,38 @@ class TestLongFormResolution:
         assert directory.asked("outbox_of") == [
             ("outbox_of", AUTHOR, ("wss://hint.example",))]
 
+    def test_an_article_gone_from_its_authors_relays_is_looked_for_once_more(self):
+        from nostr.outbox import defaults
+
+        class FoundOnRetry(FakeLongFormFetcher):
+            def fetch(self, coord, *, extra_relays, on_success, on_not_found, **_kw):
+                self.calls.append((coord, tuple(extra_relays)))
+                if len(self.calls) == 1:
+                    on_not_found()
+                else:
+                    on_success({"content": LONG_PROSE})
+
+        factory, created = make_factory()
+        long_form = FoundOnRetry()
+        item = make_item("Nostr post", guid="ng1", link=f"nostr:{NADDR}",
+                         content_html=THIN_HTML)
+        job = make_job([item], factory=factory, long_form=long_form)
+        job.start()
+        (_first, asked), (retry_coord, retried) = long_form.calls
+        assert asked == ("wss://hint.example", "wss://author-outbox.example")
+        assert retried == tuple(defaults.FALLBACK_RELAYS)
+        assert retry_coord.relay_hints == ()            # asked already
+        assert created[0].inner_event["content"].startswith("# Full prose from Nostr")
+
+    def test_every_author_is_looked_up_in_one_request_up_front(self):
+        other = "ef" * 32
+        items = [make_item("One", guid="g1", link=f"nostr:{NADDR}", content_html=THIN_HTML),
+                 make_item("Two", guid=f"30023:{other}:post-2", content_html=THIN_HTML)]
+        directory = make_directory()
+        job = make_job(items, directory=directory)
+        job.start()
+        assert directory.asked("lookup_many") == [("lookup_many", (AUTHOR, other), {})]
+
     def test_not_found_falls_back_to_feed_body(self):
         factory, created = make_factory()
         item = make_item("Nostr post", guid="ng1", link=f"nostr:{NADDR}",

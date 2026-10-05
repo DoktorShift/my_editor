@@ -68,6 +68,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 
 from ..blossom import hashes
 from ..outbox import RelayDirectory
+from ..outbox.policy import retry_relays
 from ..profiles import Profile
 from ..publisher import DraftPublishJob, PublishedMedia, build_article
 from ..relay import RelayPool
@@ -228,7 +229,20 @@ class ImportItemsJob(QObject):
         if not self._items:
             self.completed.emit(0, 0)
             return
+        self._look_up_authors()
         self._start_next_item()
+
+    def _look_up_authors(self) -> None:
+        """Ask for the relay lists of every author the items point at in
+        one request, up front: each item then finds its author's lookup
+        already answered or under way instead of starting its own."""
+        authors = []
+        for item in self._items:
+            coord = extract_nostr_coord(item.link) or extract_nostr_coord(item.guid)
+            if coord is not None:
+                authors.append(coord.pubkey_hex)
+        if len(set(authors)) > 1:
+            self._relay_directory.lookup_many(authors, lambda _lists: None)
 
     def cancel(self) -> None:
         """Stop the import. The in-flight draft job (if any) is
@@ -413,8 +427,26 @@ class ImportItemsJob(QObject):
         def _fetch_from(relays) -> None:
             if self._cancelled:
                 return
+            # One more try on the fallback relays not asked yet: the
+            # author's list can name relays that have gone since.
+            retry = retry_relays([*relays, *coord.relay_hints])
             self._long_form_fetcher.fetch(
                 coord,
+                extra_relays=relays,
+                on_success=lambda event, t=template, i=item, ui=title_for_ui: (
+                    self._on_long_form_resolved(event, t, i, ui)
+                ),
+                on_not_found=lambda: _retry(retry),
+            )
+
+        def _retry(relays) -> None:
+            if self._cancelled:
+                return
+            if not relays:
+                self._maybe_recover_full_text(item, template, title_for_ui)
+                return
+            self._long_form_fetcher.fetch(
+                replace(coord, relay_hints=()),
                 extra_relays=relays,
                 on_success=lambda event, t=template, i=item, ui=title_for_ui: (
                     self._on_long_form_resolved(event, t, i, ui)

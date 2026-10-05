@@ -13,6 +13,9 @@ the whole ecosystem behind one resolver instead of per-host cases:
 - a **naddr / nevent / note**: that single event as one draft, read
   from its author's outbox when the reference names the author, with
   NIP-54 wiki bodies (kind 30818) normalised to Markdown;
+- either way, when the relays asked have nothing, the fallback relays
+  not yet asked get one more try (a relay list can name relays that
+  have gone, while the events sit on a big public relay);
 - the same identifiers embedded in any host URL (njump.me, habla.news,
   yakihonne.com, primal.net, ...), since those are just SPAs around the
   same events.
@@ -27,6 +30,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
+from ...outbox.policy import retry_relays
 from ..constants import NOSTR_MAX_ARTICLES
 from ..errors import ERROR_CODES, SourceError
 from ..registry import ResolveContext, ResolveInput, ResolveResult, SourceResolver
@@ -135,6 +139,10 @@ def _resolve_single_event(
     def _on_event(event) -> None:
         if ctx.is_cancelled():
             return
+        if not event and state["retry"]:
+            relays, state["retry"] = state["retry"], []
+            query.latest(relays, filters, _on_event)
+            return
         if not event:
             ctx.on_failure(SourceError(
                 "That Nostr event was not found on the relays",
@@ -149,9 +157,12 @@ def _resolve_single_event(
         ctx.stage("done", item.link or url, hostname="nostr", item_count=1)
         ctx.on_success(ResolveResult(url=item.link or url, feed=feed))
 
+    state = {"retry": []}
+
     def _on_relays(relays: List[str]) -> None:
         if ctx.is_cancelled():
             return
+        state["retry"] = retry_relays(relays)
         query.latest(relays, filters, _on_event)
 
     author_outbox(ctx.relay_directory, entity.pubkey, entity.relays, _on_relays)
@@ -169,15 +180,23 @@ def _resolve_author(
     host = nip05.domain if nip05 is not None else "nostr"
     ctx.stage("parsing", url, hostname=host)
 
+    filters = [{"kinds": [30023], "authors": [pubkey], "limit": NOSTR_MAX_ARTICLES}]
+
     def _on_relays(relays: List[str]) -> None:
         if ctx.is_cancelled():
             return
-        query.addressable(
-            relays,
-            [{"kinds": [30023], "authors": [pubkey],
-              "limit": NOSTR_MAX_ARTICLES}],
-            lambda events: _on_articles(relays, events or []),
-        )
+        query.addressable(relays, filters,
+                          lambda events: _maybe_retry(relays, events or []))
+
+    def _maybe_retry(relays: List[str], events: list) -> None:
+        if ctx.is_cancelled():
+            return
+        retry = retry_relays(relays) if not events else []
+        if not retry:
+            _on_articles(relays, events)
+            return
+        query.addressable(retry, filters,
+                          lambda found: _on_articles(retry if found else relays, found or []))
 
     def _on_articles(relays: List[str], events: list) -> None:
         if ctx.is_cancelled():

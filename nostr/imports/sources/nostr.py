@@ -239,23 +239,6 @@ def nostr_event_to_item(event: dict) -> FeedItem:
     )
 
 
-def dedup_relays(*groups: Iterable[str]) -> List[str]:
-    """Order-preserving dedupe across relay groups; drops falsy values."""
-    seen: set = set()
-    out: List[str] = []
-    for group in groups:
-        for relay in group or ():
-            if not isinstance(relay, str):
-                continue
-            cleaned = relay.strip()
-            key = cleaned.rstrip("/").lower()
-            if not key or key in seen:
-                continue
-            seen.add(key)
-            out.append(cleaned)
-    return out
-
-
 # --------------------------------------------------------------------------- #
 # Relay-query adapter + higher-level lookups                                  #
 # --------------------------------------------------------------------------- #

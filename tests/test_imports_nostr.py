@@ -30,7 +30,6 @@ from nostr.imports.errors import ERROR_CODES
 from nostr.imports.registry import ResolveInput, detect_resolver, resolve_source
 from nostr.imports.sources.mdx import derive_summary
 from nostr.imports.sources.nostr import (
-    dedup_relays,
     event_tag,
     extract_nip05,
     extract_nostr_entity,
@@ -320,16 +319,6 @@ class TestBech32Nevent(unittest.TestCase):
         self.assertEqual((relays, author, kind), ([], None, None))
 
 
-class TestDedupRelays(unittest.TestCase):
-    def test_order_preserving_case_insensitive(self):
-        out = dedup_relays(
-            ["wss://A.example/", "wss://b.example"],
-            ["wss://a.example", "wss://c.example", ""],
-        )
-        self.assertEqual(out, ["wss://A.example/", "wss://b.example",
-                               "wss://c.example"])
-
-
 # --------------------------------------------------------------------------- #
 # Resolvers                                                                   #
 # --------------------------------------------------------------------------- #
@@ -425,10 +414,41 @@ class TestNostrResolver(unittest.TestCase):
         self.assertTrue(sink.result.url.startswith("https://njump.me/"))
 
     def test_an_nprofile_hint_is_asked_first(self):
-        query = FakeNostrQuery([("addressable", []), ("latest", None)])
+        query = FakeNostrQuery([("addressable", []), ("addressable", []), ("latest", None)])
         run(NPROFILE, query, directory=author_directory())
         _m, relays, _f = query.calls[0]
         self.assertEqual(relays, ["wss://hint.example", "wss://write.example"])
+
+    def test_an_article_gone_from_its_authors_relays_is_looked_for_once_more(self):
+        # The author's list names relays that are gone; the article is on
+        # a big public relay.
+        query = FakeNostrQuery([("latest", None), ("latest", article_event())])
+        sink = run(f"nostr:{NADDR_ARTICLE}", query, directory=author_directory())
+        self.assertIsNone(sink.error)
+        _m, retried, _f = query.calls[1]
+        self.assertEqual(retried, list(defaults.FALLBACK_RELAYS))
+
+    def test_an_article_found_nowhere_is_not_found(self):
+        query = FakeNostrQuery([("latest", None), ("latest", None)])
+        sink = run(f"nostr:{NADDR_ARTICLE}", query, directory=author_directory())
+        self.assertEqual(sink.error.code, ERROR_CODES.NOSTR_NOT_FOUND)
+
+    def test_an_authors_articles_are_looked_for_once_more(self):
+        articles = [article_event(d_tag="a", created_at=100)]
+        query = FakeNostrQuery([("addressable", []), ("addressable", articles),
+                                ("latest", None)])
+        sink = run(NPUB, query, directory=author_directory())
+        self.assertEqual(len(sink.result.feed.items), 1)
+        _m, retried, _f = query.calls[1]
+        self.assertEqual(retried, list(defaults.FALLBACK_RELAYS))
+        _m, name_relays, _f = query.calls[2]
+        self.assertEqual(name_relays, retried)        # the name where the articles are
+
+    def test_relays_already_asked_are_not_asked_twice(self):
+        # Read from the fallback relays already: there is nothing left to try.
+        query = FakeNostrQuery([("addressable", []), ("latest", None)])
+        sink = run(NPUB, query, directory=FakeRelayDirectory())
+        self.assertEqual(sink.result.feed.items, ())
 
     def test_an_author_with_no_known_list_is_read_from_the_fallback(self):
         query = FakeNostrQuery([("addressable", []), ("latest", None)])

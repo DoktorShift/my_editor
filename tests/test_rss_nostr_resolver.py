@@ -187,3 +187,24 @@ class BareCoordinateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_an_naddrs_private_relay_hints_are_not_asked(monkeypatch) -> None:
+    from PySide6.QtCore import QCoreApplication
+
+    from nostr.rss import nostr_resolver
+    from nostr.rss.nostr_resolver import LongFormCoord, LongFormFetcher
+
+    QCoreApplication.instance() or QCoreApplication([])
+    asked = []
+    monkeypatch.setattr(nostr_resolver, "fetch_latest_event",
+                        lambda pool, relays, filters, on_done, **_kw: (
+                            asked.append(list(relays)), on_done(None)))
+    coord = LongFormCoord(pubkey_hex="ab" * 32, kind=30023, d_tag="post",
+                          relay_hints=("ws://192.168.1.5", "wss://Hint.example/"))
+    missing = []
+    LongFormFetcher(None).fetch(coord, extra_relays=["wss://outbox.example"],
+                                on_success=lambda _e: None,
+                                on_not_found=lambda: missing.append(True))
+    assert asked == [["wss://outbox.example", "wss://hint.example"]]
+    assert missing == [True]

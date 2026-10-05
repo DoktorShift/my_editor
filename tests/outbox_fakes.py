@@ -220,6 +220,11 @@ class FakeRelayDirectory(QObject):
         self.calls.append(("lookup", pubkey, tuple(hints)))
         on_done(self.cached(pubkey))
 
+    def lookup_many(self, pubkeys, on_done, *, hints=None, timeout_ms=0):
+        keys = list(dict.fromkeys(p.lower() for p in pubkeys if p))
+        self.calls.append(("lookup_many", tuple(keys), dict(hints or {})))
+        on_done({key: self.cached(key) for key in keys})
+
     def publish_plan(self, author, on_done, *, mentioned=(), entitled=()):
         mentioned = list(mentioned)
         self.calls.append(("publish_plan", author, tuple(mentioned), tuple(entitled)))
