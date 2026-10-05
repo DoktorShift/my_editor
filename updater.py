@@ -293,6 +293,10 @@ class UpdateInstaller(QObject):
                              os.path.abspath(deb_path)], done)
 
     def _run(self, program: str, args, on_exit):
+        # The process stays a child of the installer and goes with it. It
+        # used to delete itself when it finished (deleteLater), and when the
+        # installer went first, before that deferred delete ran, the process
+        # was destroyed twice and memory was corrupted.
         process = QProcess(self)
         self._process = process
         # Nobody can type into these processes, so none may wait for input:
@@ -301,14 +305,12 @@ class UpdateInstaller(QObject):
 
         def finished(code, status):
             self._process = None
-            process.deleteLater()
             crashed = status != QProcess.ExitStatus.NormalExit
             on_exit(-1 if crashed else code)
 
         def error(err):
             if err == QProcess.ProcessError.FailedToStart:
                 self._process = None
-                process.deleteLater()
                 on_exit(-1)
 
         process.finished.connect(finished)

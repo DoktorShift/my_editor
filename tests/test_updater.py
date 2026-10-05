@@ -428,6 +428,43 @@ def test_an_image_that_cannot_be_opened_is_reported(tools, mac_install, tmp_path
 
 
 @posix_only
+def test_an_installer_that_goes_away_after_a_system_step_leaves_memory_intact():
+    # The dialog that owns the installer can close right after a step ends.
+    # The finished process used to delete itself later, and if the installer
+    # went first it was destroyed twice. Run in a child: corrupted memory
+    # aborts the whole process.
+    script = textwrap.dedent("""\
+        import gc, os, sys
+        sys.path.insert(0, sys.argv[1])
+        os.environ["QT_QPA_PLATFORM"] = "offscreen"
+        from PySide6.QtTest import QTest
+        from PySide6.QtWidgets import QApplication, QTextEdit
+        app = QApplication(sys.argv[:1])
+        import updater
+        installer = updater.UpdateInstaller(updater.DEB)
+        codes = []
+        installer._run("true", [], codes.append)
+        assert installer._process.waitForFinished(10000)
+        app.processEvents()
+        del installer
+        gc.collect()
+        for _ in range(10):
+            w = QTextEdit()
+            w.setPlainText("x\\n" * 300)
+            w.show()
+            QTest.qWait(5)
+            w.close()
+        print("ok", codes)
+        """)
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    proc = subprocess.run([sys.executable, "-c", script, repo], capture_output=True,
+                          text=True, timeout=120,
+                          env=dict(os.environ, QT_QPA_PLATFORM="offscreen"))
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    assert "ok [0]" in proc.stdout
+
+
+@posix_only
 def test_a_system_step_never_waits_for_typed_input(qt_app):
     # `cat` reads its input until it ends. With nothing attached it would
     # wait forever, the way apt-get waits on a question nobody sees.
