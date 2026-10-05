@@ -199,6 +199,57 @@ def test_a_missing_or_garbled_signature_is_refused():
     assert association.requests == []
 
 
+def raw_credential(event) -> str:
+    return "Nostr " + base64.b64encode(json.dumps(event).encode()).decode()
+
+
+def signed_event(method="GET", path="/me", body=None):
+    unsigned = nip98.build_unsigned_auth_event(
+        f"{UPSTREAM}/api/v1/membership{path}", method, body, now=NOW)
+    return events.sign_event(unsigned, SK)
+
+
+@pytest.mark.parametrize("change", [
+    {"tags": None}, {"tags": 5}, {"tags": "u"}, {"tags": [None]}, {"tags": [5]},
+    {"tags": [[]]}, {"tags": [["u", 5]]}, {"tags": [["u", None]]},
+    {"kind": "27235"}, {"kind": None}, {"created_at": None}, {"created_at": True},
+    {"created_at": "1800000000"}, {"content": None}, {"id": 5}, {"pubkey": None},
+    {"sig": ["x"]},
+])
+def test_a_malformed_credential_is_refused_not_a_crash(change):
+    client, association, _ = make()
+    event = dict(signed_event(), **change)
+    response = client.get("/api/v1/membership/me",
+                          headers={"Authorization": raw_credential(event)})
+    assert response.status_code == 401 and association.requests == []
+
+
+@pytest.mark.parametrize("document", [None, 5, "event", [], [1, 2]])
+def test_a_credential_that_is_not_an_event_is_refused(document):
+    client, association, _ = make()
+    response = client.get("/api/v1/membership/me",
+                          headers={"Authorization": raw_credential(document)})
+    assert response.status_code == 401 and association.requests == []
+
+
+def test_a_tag_named_twice_names_nothing():
+    client, association, _ = make()
+    unsigned = nip98.build_unsigned_auth_event(
+        f"{UPSTREAM}/api/v1/membership/me", "GET", None, now=NOW)
+    unsigned["tags"].append(["u", f"{UPSTREAM}/api/v1/membership/me"])
+    headers = {"Authorization": raw_credential(events.sign_event(unsigned, SK))}
+    assert client.get("/api/v1/membership/me", headers=headers).status_code == 401
+    assert association.requests == []
+
+
+def test_a_payload_tag_without_a_body_is_refused():
+    client, association, _ = make()
+    event = signed_event("POST", "/payments/2026/refresh", b'{"a":1}')
+    response = client.post("/api/v1/membership/payments/2026/refresh",
+                           headers={"Authorization": raw_credential(event)})
+    assert response.status_code == 401 and association.requests == []
+
+
 def test_the_method_must_match():
     client, association, _ = make()
     headers = {"Authorization": auth("GET", "/me")}

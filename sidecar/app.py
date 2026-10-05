@@ -46,9 +46,6 @@ Run: ``uvicorn sidecar.app:app`` from the repository root (the app's own
 
 from __future__ import annotations
 
-import base64
-import binascii
-import json
 import logging
 import os
 import re
@@ -63,15 +60,12 @@ import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
-from nostr import events
-from nostr.nip98 import NIP98_KIND, sha256_hex
+from nostr import nip98
 
 VERSION = "1"
 API_PREFIX = "/api/v1/membership"
 MAX_BODY_BYTES = 32 * 1024
-MAX_AUTH_BYTES = 8 * 1024
 MAX_ANSWER_BYTES = 1024 * 1024
-WINDOW_SECONDS = 60
 REPLAY_SECONDS = 150
 CONFIG_CACHE_SECONDS = 300
 UPSTREAM_TIMEOUT_SECONDS = 15.0
@@ -115,14 +109,6 @@ class Settings:
             rate_per_minute=number("SIDECAR_RATE_PER_MINUTE", cls.rate_per_minute),
             invoices_per_day=number("SIDECAR_INVOICES_PER_DAY", cls.invoices_per_day),
         )
-
-
-class _Refused(Exception):
-    """A request the key is not lent to. ``reason`` is for the log only."""
-
-    def __init__(self, reason: str):
-        super().__init__(reason)
-        self.reason = reason
 
 
 @dataclass
@@ -182,47 +168,6 @@ def _route(method: str, path: str) -> Optional[bool]:
         if verb == method and pattern.match(path):
             return signed
     return None
-
-
-def _tag(event: dict, name: str) -> Optional[str]:
-    values = [t[1] for t in event.get("tags", [])
-              if isinstance(t, list) and len(t) >= 2 and t[0] == name]
-    return values[0] if len(values) == 1 and isinstance(values[0], str) else None
-
-
-def check_nip98(header: str, *, expected_url: str, method: str, body: bytes,
-                now: float) -> dict:
-    """The signed event in ``header`` when it authorizes exactly this
-    request; raises _Refused otherwise."""
-    if not header.startswith("Nostr ") or len(header) > MAX_AUTH_BYTES:
-        raise _Refused("no credential")
-    try:
-        event = json.loads(base64.b64decode(header[6:], validate=True).decode("utf-8"))
-    except (ValueError, binascii.Error, UnicodeDecodeError):
-        raise _Refused("unreadable credential") from None
-    if not isinstance(event, dict) or event.get("kind") != NIP98_KIND:
-        raise _Refused("kind")
-    if _tag(event, "u") != expected_url:
-        raise _Refused("url")
-    if (_tag(event, "method") or "").upper() != method:
-        raise _Refused("method")
-    created = event.get("created_at")
-    if not isinstance(created, int) or isinstance(created, bool) \
-            or abs(created - now) > WINDOW_SECONDS:
-        raise _Refused("time")
-    payload = _tag(event, "payload")
-    if body:
-        if payload != sha256_hex(body):
-            raise _Refused("payload")
-    elif payload is not None:
-        raise _Refused("payload without body")
-    for name, size in (("id", 64), ("pubkey", 64), ("sig", 128)):
-        value = event.get(name)
-        if not isinstance(value, str) or len(value) != size or value != value.lower():
-            raise _Refused(f"{name} shape")
-    if not events.verify_event(event):
-        raise _Refused("signature")
-    return event
 
 
 def _json(status: int, message: str, **extra) -> JSONResponse:
@@ -297,9 +242,9 @@ def create_app(settings: Optional[Settings] = None, *,
         authorization = request.headers.get("authorization", "")
         if signed:
             try:
-                event = check_nip98(authorization, expected_url=upstream_url,
-                                    method=method, body=body, now=clock())
-            except _Refused as refusal:
+                event = nip98.check_auth_header(authorization, url=upstream_url,
+                                                method=method, body=body, now=clock())
+            except nip98.AuthRefused as refusal:
                 log.info("refused %s %s: %s", method, path, refusal.reason)
                 return finish(_json(401, "Unauthenticated."))
             outcome["pubkey"] = event["pubkey"]

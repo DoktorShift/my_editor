@@ -32,18 +32,24 @@ and each rule below exists because the server checks it:
   nothing and prevents a double-click from being refused as a replay.
 
 Pure on purpose: no Qt, no clock, no network. Signing is the caller's
-job (a NIP-46 remote signer in this app).
+job (a NIP-46 remote signer in this app). Checking a credential, which
+is the server's side (the membership sidecar and the tests' stand-in
+association), is :func:`check_auth_header`; remembering which ids were
+already used is the caller's job, because a pure function has no memory.
 """
 
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import json
 import re
 import secrets
-from typing import Optional
+from typing import List, Optional, Union
 from urllib.parse import urlsplit
+
+from . import events
 
 
 # --------------------------------------------------------------------------- #
@@ -175,3 +181,129 @@ def authorization_header_value(signed_event: dict) -> bytes:
     """
     payload = json.dumps(signed_event, separators=(",", ":"), ensure_ascii=False)
     return b"Nostr " + base64.b64encode(payload.encode("utf-8"))
+
+
+# --------------------------------------------------------------------------- #
+# Checking a credential (the server's side)                                    #
+# --------------------------------------------------------------------------- #
+
+# How far ``created_at`` may be from the server's clock, in either direction.
+AUTH_WINDOW_SECONDS: int = 60
+
+# One small event, base64 encoded. Anything longer is not a credential.
+MAX_AUTH_HEADER_CHARS: int = 8 * 1024
+
+
+class AuthRefused(ValueError):
+    """A credential that does not authorize the request.
+
+    ``reason`` is a short phrase for logs and tests. It is never shown to
+    the person making the request: a server answers every refusal with
+    the same 401, so a refusal teaches a forger nothing.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+def _is_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_well_formed(event: object) -> bool:
+    """True when ``event`` has the shape of a Nostr event at all: the
+    fields every later check reads, each of the type it must be. Checked
+    before any of them is read, so a credential with ``tags: null`` or a
+    tag that is a number is refused like any other, not a crash."""
+    if not isinstance(event, dict):
+        return False
+    if not _is_int(event.get("kind")) or not _is_int(event.get("created_at")):
+        return False
+    if not isinstance(event.get("content"), str):
+        return False
+    tags = event.get("tags")
+    if not isinstance(tags, list):
+        return False
+    for entry in tags:
+        if not isinstance(entry, list) or not entry:
+            return False
+        if not all(isinstance(item, str) for item in entry):
+            return False
+    return all(isinstance(event.get(name), str) for name in ("id", "pubkey", "sig"))
+
+
+def _tag_values(event: dict, name: str) -> List[str]:
+    return [entry[1] for entry in event["tags"] if len(entry) >= 2 and entry[0] == name]
+
+
+def _single_tag(event: dict, name: str) -> Optional[str]:
+    """The tag's value when it appears exactly once, else None: two ``u``
+    tags name no URL in particular."""
+    values = _tag_values(event, name)
+    return values[0] if len(values) == 1 else None
+
+
+def check_auth_header(
+    header: Union[str, bytes, None],
+    *,
+    url: str,
+    method: str,
+    body: Optional[bytes],
+    now: float,
+    window: int = AUTH_WINDOW_SECONDS,
+) -> dict:
+    """The signed event in ``header`` when it authorizes exactly this request.
+
+    ``header`` is the Authorization value as received (``str``, ``bytes``
+    or None). ``url`` is the absolute URL the ``u`` tag must name, byte
+    for byte; ``method`` the verb used; ``body`` the exact bytes received
+    (None or empty for none); ``now`` the server's unix time.
+
+    The checks run in the order the association's spec lists them: kind,
+    method, URL, time window, payload hash, lowercase hex, signature.
+    Before any of them, the event must be well formed. Anything else
+    raises :class:`AuthRefused`, whatever arrived: a missing, oversized,
+    undecodable or malformed credential is refused like a forged one and
+    never raises another exception.
+
+    Not checked: that the event id is new. That takes memory, which is
+    the caller's.
+    """
+    if isinstance(header, (bytes, bytearray)):
+        try:
+            header = bytes(header).decode("ascii")
+        except UnicodeDecodeError:
+            raise AuthRefused("unreadable credential") from None
+    if not isinstance(header, str) or not header.startswith("Nostr "):
+        raise AuthRefused("no credential")
+    if len(header) > MAX_AUTH_HEADER_CHARS:
+        raise AuthRefused("credential too long")
+    try:
+        event = json.loads(base64.b64decode(header[len("Nostr "):], validate=True)
+                           .decode("utf-8"))
+    except (ValueError, binascii.Error, UnicodeDecodeError, RecursionError):
+        raise AuthRefused("unreadable credential") from None
+    if not _is_well_formed(event):
+        raise AuthRefused("malformed event")
+
+    if event["kind"] != NIP98_KIND:
+        raise AuthRefused("kind")
+    if (_single_tag(event, "method") or "").upper() != str(method).upper():
+        raise AuthRefused("method")
+    if _single_tag(event, "u") != url:
+        raise AuthRefused("url")
+    if abs(event["created_at"] - now) > window:
+        raise AuthRefused("time window")
+    payloads = _tag_values(event, "payload")
+    if has_body(body):
+        if payloads != [sha256_hex(body)]:
+            raise AuthRefused("payload")
+    elif payloads:
+        raise AuthRefused("payload without body")
+    for name, pattern in (("id", _HEX64), ("pubkey", _HEX64), ("sig", _HEX128)):
+        if not pattern.match(event[name]):
+            raise AuthRefused(f"{name} shape")
+    if not events.verify_event(event):
+        raise AuthRefused("signature")
+    return event

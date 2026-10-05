@@ -5,11 +5,12 @@
 A fake transport (``FakeNam`` / ``FakeReply``) that settles only when a
 test says so, a signer that really signs (with a throwaway key) so the
 server side can verify, a clock, a timer, and :class:`FakeMembershipServer`,
-which applies the spec's NIP-98 checks in the order the spec lists them:
-kind, method, the exact URL, the 60 second window, the Content-Type, the
-payload hash, the lowercase hex and the one-time id. A client change
-that only satisfies our own reader is not a working client, so the tests
-get a counterparty that checks.
+which refuses a body that is not JSON and then applies the spec's NIP-98
+checks through the same :func:`nostr.nip98.check_auth_header` the
+membership sidecar uses (kind, method, the exact URL, the 60 second
+window, the payload hash, the lowercase hex, the signature), plus the
+one-time id. A client change that only satisfies our own reader is not a
+working client, so the tests get a counterparty that checks.
 
 ``FakeReply.rawHeader`` accepts a ``str`` name only, because that is all
 PySide6 6.11 accepts. A ``bytes`` lookup silently lost the Retry-After
@@ -19,15 +20,13 @@ header once; the fake now fails the same way the real binding does.
 from __future__ import annotations
 
 import base64
-import binascii
-import hashlib
 import json
 from typing import Any, Callable, Dict, List, Optional
 
 from PySide6.QtCore import QByteArray, QObject, Signal
 from PySide6.QtNetwork import QNetworkReply, QNetworkRequest
 
-from nostr import crypto, events
+from nostr import crypto, events, nip98
 
 
 SECRET_KEY = bytes.fromhex("3f" * 32)
@@ -387,37 +386,14 @@ class FakeMembershipServer:
         if path == "/config" and verb == "GET":
             return self.routes["GET /config"](body, None)
 
-        auth = header(request, "Authorization")
-        if auth is None:
-            return self._refuse("no credential")
+        if nip98.has_body(body) and header(request, "Content-Type") != b"application/json":
+            return json_reply({"message": "Unsupported Media Type"}, status=415)
         try:
-            event = decode_authorization(auth)
-        except (ValueError, binascii.Error, UnicodeDecodeError):
-            return self._refuse("undecodable credential")
-
-        # The order the spec lists the checks in.
-        if event.get("kind") != 27235:
-            return self._refuse("kind")
-        if str(tag(event, "method") or "").upper() != verb:
-            return self._refuse("method")
-        if tag(event, "u") != PREFIX + path:
-            return self._refuse("url")
-        if abs(int(event.get("created_at", 0)) - self.clock()) > 60:
-            return self._refuse("time window")
-        has_body = body is not None and len(body) > 0
-        if has_body:
-            if header(request, "Content-Type") != b"application/json":
-                return json_reply({"message": "Unsupported Media Type"}, status=415)
-            if tag(event, "payload") != hashlib.sha256(body).hexdigest():
-                return self._refuse("payload")
-        elif tag(event, "payload") is not None:
-            return self._refuse("payload without body")
-        for field, size in (("id", 64), ("pubkey", 64), ("sig", 128)):
-            value = event.get(field)
-            if not isinstance(value, str) or len(value) != size or value != value.lower():
-                return self._refuse(f"{field} shape")
-        if not events.verify_event(event):
-            return self._refuse("signature")
+            event = nip98.check_auth_header(header(request, "Authorization"),
+                                            url=PREFIX + path, method=verb, body=body,
+                                            now=self.clock())
+        except nip98.AuthRefused as refusal:
+            return self._refuse(refusal.reason)
         if event["id"] in self.seen_ids:
             return self._refuse("replay")
         self.seen_ids.add(event["id"])
