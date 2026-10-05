@@ -38,6 +38,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from nostr.blossom.client import BlossomClient  # noqa: E402
 from nostr.blossom.settings import BlossomSettings  # noqa: E402
 from nostr.blossom.store import MediaStore  # noqa: E402
+from nostr.einundzwanzig import PER_USER_BYTES, PER_USER_LABEL  # noqa: E402
 from nostr.ui.media_library_dialog import storage_text  # noqa: E402
 from nostr.blossom.store import ServerListing  # noqa: E402
 from tests.blossom_fakes import (  # noqa: E402
@@ -378,17 +379,32 @@ def test_a_target_change_during_a_walk_is_picked_up_by_refetch(tmp_path):
 
 # -- the storage meter's words ---------------------------------------------------------
 
-GB = 1000 ** 3
+GB = 1024 ** 3          # binary, the unit allowances are stated in
+MB = 1024 ** 2
 
 
 def test_storage_text_says_the_number_and_warns_in_words():
     ok = ServerListing(origin=E21, ok=True)
-    assert storage_text(int(1.2 * GB), 5 * GB, ok) == ("1.2 GB of 5 GB used", 0.24)
-    text, _ = storage_text(int(4.6 * GB), 5 * GB, ok)
+    text, fraction = storage_text(int(1.2 * GB), PER_USER_BYTES, ok)
+    assert text == "1.2 GB of 5 GB used" and fraction == pytest.approx(0.24)
+    text, _ = storage_text(int(4.6 * GB), PER_USER_BYTES, ok)
     assert text.startswith("Almost full:")
-    text, fraction = storage_text(6 * GB, 5 * GB, ok)
+    text, fraction = storage_text(6 * GB, PER_USER_BYTES, ok)
     assert text.startswith("Full:") and fraction == 1.0
-    assert storage_text(640 * 1000 ** 2, 5 * GB, ok)[0] == "640 MB of 5 GB used"
+    assert storage_text(640 * MB, PER_USER_BYTES, ok)[0] == "640 MB of 5 GB used"
+
+
+def test_the_members_allowance_reads_as_the_association_states_it():
+    # 5 x 1024^3 bytes once read "5.4 GB" against a "5 GB" promise.
+    ok = ServerListing(origin=E21, ok=True)
+    text, _ = storage_text(PER_USER_BYTES, PER_USER_BYTES, ok)
+    assert text == "Full: 5 GB of 5 GB used"
+    assert PER_USER_LABEL == "5 GB"
+
+
+def test_storage_text_rounds_up_to_a_gigabyte_rather_than_1024_megabytes():
+    ok = ServerListing(origin=E21, ok=True)
+    assert storage_text(GB - 1, PER_USER_BYTES, ok)[0].startswith("1 GB of")
 
 
 def test_storage_text_is_honest_about_what_it_does_not_know():

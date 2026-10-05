@@ -34,6 +34,7 @@ from typing import Callable, Final, List, Optional
 import itertools
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 from PySide6.QtCore import QBuffer, QIODevice, QRect, QSize, Qt, Signal, QUrl
 from PySide6.QtGui import (
@@ -820,9 +821,12 @@ class MediaLibraryDialog(QDialog):
 
         # Wire store signals.
         store.library_changed.connect(self._refresh_grid)
-        store.fetch_started.connect(lambda: self._set_status("Refreshing library…"))
-        store.fetch_finished.connect(lambda: self._set_status(""))
-        store.fetch_error.connect(lambda reason: self._set_status(reason, error=True))
+        # Bound methods, not lambdas: Qt drops a method's connection when
+        # this dialog is deleted, while a lambda would outlive it and run
+        # against deleted widgets on the store's next fetch.
+        store.fetch_started.connect(self._on_fetch_started)
+        store.fetch_finished.connect(self._on_fetch_finished)
+        store.fetch_error.connect(self._on_fetch_error)
         store.upload_started.connect(self._on_upload_started)
         store.upload_progress.connect(self._on_upload_progress)
         store.upload_status.connect(self._on_upload_status)
@@ -904,6 +908,13 @@ class MediaLibraryDialog(QDialog):
             if (failure.identifier or "").strip().lower() == wanted:
                 return failure.reason
         return ""
+
+    def _may_be_private(self, sha256: str) -> bool:
+        """Whether deleting this file could delete a private one: it is
+        private, or nobody has checked. Asks the state to act on, not
+        the state drawn, which softens "not checked" while the private
+        library loads."""
+        return self._visibility.state_of(sha256) in (*_ENCRYPTED_STATES, UNKNOWN)
 
     def _shown_state(self, sha256: str) -> str:
         """The state to draw, which is not always the state to act on.
@@ -1032,6 +1043,7 @@ class MediaLibraryDialog(QDialog):
         self._storage_rows.setContentsMargins(0, 0, 0, 0)
         self._storage_rows.setSpacing(4)
         self._storage_box.setVisible(False)
+        self._storage_widgets: dict = {}
         layout.addWidget(self._storage_box)
 
         # Servers that could not be listed. Their files from last time
@@ -1507,13 +1519,8 @@ class MediaLibraryDialog(QDialog):
         if not targets:
             return
         count = len(targets)
-        foreign = sum(1 for m in targets if self._shown_state(m.hash) in (PRIVATE, UNKNOWN))
-        if foreign:
-            message = ("Some of these may be private files from another app, such as "
-                       "your Lotus Drive. Deleting them here removes them there too. "
-                       "This can't be undone.")
-        else:
-            message = "This can't be undone."
+        message = delete_warning(
+            count, sum(1 for m in targets if self._may_be_private(m.hash)))
         if not confirm_destructive(
                 self,
                 title=f"Delete {count} file{'s' if count != 1 else ''} from your Blossom servers?",
@@ -1674,6 +1681,25 @@ class MediaLibraryDialog(QDialog):
     def _server_name(self, origin: str) -> str:
         return self._server_label(origin) or (url_safety.host_of(origin) or origin)
 
+    def _name_for_host(self, host: str) -> str:
+        """The name a server goes by here, from the bare host a store
+        signal carries."""
+        wanted = (host or "").lower()
+        for server in self._store.target_servers():
+            origin = url_safety.origin_of(server)
+            if (url_safety.host_of(origin) or "").lower() == wanted:
+                return self._server_name(origin)
+        return host
+
+    def _on_fetch_started(self) -> None:
+        self._set_status("Refreshing library…")
+
+    def _on_fetch_finished(self) -> None:
+        self._set_status("")
+
+    def _on_fetch_error(self, reason: str) -> None:
+        self._set_status(reason, error=True)
+
     def _refresh_servers(self) -> None:
         """Rebuild the Source menu and the per-server notes and meters."""
         current = self._source_combo.currentData() or ""
@@ -1691,69 +1717,86 @@ class MediaLibraryDialog(QDialog):
             self._refresh_grid()
 
         listings = self._store.server_listings()
-        down = [self._server_name(o) for o in origins
-                if o in listings and not listings[o].ok]
-        if down:
-            names = ", ".join(down)
-            self._servers_label.setText(
-                f"Couldn\u2019t reach {names}. Showing the files it had last time."
-                if len(down) == 1 else
-                f"Couldn\u2019t reach {names}. Showing the files they had last time.")
-        self._servers_label.setVisible(bool(down))
+        down = [o for o in origins if o in listings and not listings[o].ok]
+        text = unreachable_text(
+            [self._server_name(o) for o in down],
+            [self._server_name(o) for o in down if self._has_files_on(o)])
+        self._servers_label.setText(text)
+        self._servers_label.setVisible(bool(text))
         self._refresh_storage()
 
+    def _has_files_on(self, origin: str) -> bool:
+        return any(origin in _origins_of(m) for m in self._store.files.values())
+
     def _refresh_storage(self) -> None:
-        while self._storage_rows.count():
-            item = self._storage_rows.takeAt(0)
-            if item.widget() is not None:
-                item.widget().deleteLater()
+        """Show what each server with a known allowance holds.
+
+        The rows are built once for the set of metered servers and then
+        only updated, so the several signals one fetch sends cost text
+        updates rather than a rebuild each. A row that goes is hidden
+        before it is deleted, so it never lingers until the event loop
+        gets to it.
+        """
         listings = self._store.server_listings()
-        shown = False
+        metered = []
         for server in self._store.target_servers():
             origin = url_safety.origin_of(server)
             quota = self._store.quota_for(origin)
-            if quota is None:
-                continue
-            self._storage_rows.addWidget(
-                self._storage_row(origin, quota, listings.get(origin)))
-            shown = True
-        self._storage_box.setVisible(shown)
+            if quota is not None:
+                metered.append((origin, quota))
+        if [origin for origin, _quota in metered] != list(self._storage_widgets):
+            for row in self._storage_widgets.values():
+                self._storage_rows.removeWidget(row.widget)
+                row.widget.hide()
+                row.widget.deleteLater()
+            self._storage_widgets = {}
+            for origin, _quota in metered:
+                row = self._storage_row(origin)
+                self._storage_widgets[origin] = row
+                self._storage_rows.addWidget(row.widget)
+        for origin, quota in metered:
+            self._update_storage_row(self._storage_widgets[origin], origin, quota,
+                                     listings.get(origin))
+        self._storage_box.setVisible(bool(metered))
 
-    def _storage_row(self, origin: str, quota: int, listing) -> QWidget:
-        row = QWidget()
-        line = QHBoxLayout(row)
+    def _storage_row(self, origin: str) -> SimpleNamespace:
+        widget = QWidget()
+        line = QHBoxLayout(widget)
         line.setContentsMargins(0, 0, 0, 0)
         line.setSpacing(10)
         name = QLabel(f"{self._server_name(origin)} storage")
         name.setObjectName("media_hint")
-        used = self._store.bytes_on(origin)
-        text, fraction = storage_text(used, quota, listing)
         bar = QProgressBar()
         bar.setRange(0, 1000)
-        bar.setValue(int(fraction * 1000))
         bar.setTextVisible(False)
         bar.setFixedWidth(180)
         bar.setFixedHeight(6)
         bar.setAccessibleName(f"{self._server_name(origin)} storage")
-        bar.setAccessibleDescription(text)
-        bar.setVisible(listing is not None and listing.ok)
-        value = QLabel(text)
+        value = QLabel("")
         value.setObjectName("media_hint")
         line.addWidget(name)
         line.addWidget(bar)
         line.addWidget(value, 1)
-        return row
+        return SimpleNamespace(widget=widget, name=name, bar=bar, value=value)
+
+    def _update_storage_row(self, row: SimpleNamespace, origin: str, quota: int,
+                            listing) -> None:
+        text, fraction = storage_text(self._store.bytes_on(origin), quota, listing)
+        row.bar.setValue(int(fraction * 1000))
+        row.bar.setAccessibleDescription(text)
+        row.bar.setVisible(listing is not None and listing.ok)
+        row.value.setText(text)
 
     def _on_source_changed(self, _index: int) -> None:
         self._refresh_grid()
 
     def _on_server_skipped(self, name: str, host: str, reason: str) -> None:
-        self._set_status(f"{name}: not stored on {host}, there isn\u2019t enough "
-                         "space left there.", error=False)
+        self._set_status(f"{name}: not stored on {self._name_for_host(host)}, there "
+                         "isn\u2019t enough space left there.", error=False)
 
     def _on_mirror_failed(self, name: str, host: str, _code: str) -> None:
-        self._set_status(f"{name} is saved, but {host} didn\u2019t take a copy.",
-                         error=False)
+        self._set_status(f"{name} is saved, but {self._name_for_host(host)} didn\u2019t "
+                         "take a copy.", error=False)
 
     def _set_status(self, text: str, *, error: bool = False) -> None:
         self._status_label.setText(text)
@@ -2026,11 +2069,59 @@ def _origins_of(media: MediaFile) -> set:
     return {url_safety.origin_of(u.get("server", "")) for u in media.urls}
 
 
+_MiB = 1024 ** 2
+_GiB = 1024 ** 3
+
+
 def _gb(byte_count: int) -> str:
-    """Storage the way a person reads it: 1.2 GB, 640 MB."""
-    if byte_count >= 1000 ** 3:
-        return f"{byte_count / 1000 ** 3:.1f} GB".replace(".0 GB", " GB")
-    return f"{max(0, byte_count) / 1000 ** 2:.0f} MB"
+    """Storage the way a person reads it: 1.2 GB, 640 MB.
+
+    Binary units throughout, the ones allowances are stated in: the
+    members' 5 GB is 5 x 1024^3 bytes, and must read "5 GB", not "5.4 GB".
+    """
+    byte_count = max(0, byte_count)
+    if byte_count < _GiB:
+        megabytes = round(byte_count / _MiB)
+        if megabytes < 1024:
+            return f"{megabytes} MB"
+    return f"{byte_count / _GiB:.1f} GB".replace(".0 GB", " GB")
+
+
+def unreachable_text(down: List[str], kept: List[str]) -> str:
+    """The note for servers that could not be listed, or "" for none.
+
+    ``kept`` names the ones whose files from last time are still shown;
+    a server that had nothing shown is not said to be showing anything.
+    """
+    if not down:
+        return ""
+    text = f"Couldn\u2019t reach {', '.join(down)}."
+    if not kept:
+        return text
+    if kept == down:
+        whose = "it" if len(down) == 1 else "they"
+    else:
+        whose = ", ".join(kept)
+    return f"{text} Showing the files {whose} had last time."
+
+
+def delete_warning(count: int, may_be_private: int) -> str:
+    """The message under "Delete N files from your Blossom servers?".
+
+    ``may_be_private`` counts the selected files that are private, or
+    that nobody has checked. Another app can keep private files on the
+    same servers, and deleting one here deletes it there as well.
+    """
+    if may_be_private <= 0:
+        return "This can't be undone."
+    if count == 1:
+        return ("This may be a private file from another app. Deleting it here "
+                "removes it there too. This can't be undone.")
+    if may_be_private >= count:
+        return ("These may be private files from another app. Deleting them here "
+                "removes them there too. This can't be undone.")
+    return ("Some of these may be private files from another app. Deleting them "
+            "here removes them there too. This can't be undone.")
 
 
 def storage_text(used: int, quota: int, listing) -> tuple:
