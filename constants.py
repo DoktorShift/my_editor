@@ -22,12 +22,13 @@ _REPO_OWNER, _REPO_NAME = APP_REPO_SLUG.split("/")
 APP_INSTALL_GUIDE_URL = f"https://{_REPO_OWNER}.github.io/{_REPO_NAME}/install/"
 
 # The membership service (sidecar/) that holds the EINUNDZWANZIG association's
-# API key and forwards sign-up requests. Empty means joining in the app is not
-# offered (the association's website is). It stays empty until the
-# maintainers' sidecar is deployed; official builds then point at it, and a
-# self-hosted build points at its own or leaves this empty.
+# API key and forwards sign-up requests. Official builds point at the
+# maintainers' sidecar; a self-hosted build points at its own, or leaves this
+# empty, which means joining in the app is not offered (the association's
+# website is). The app also offers the website whenever the sidecar cannot be
+# reached or reports that it has no key.
 # MYEDITOR_MEMBERSHIP_SERVICE in the environment overrides it.
-MEMBERSHIP_SERVICE_URL = ""
+MEMBERSHIP_SERVICE_URL = "https://e21.rinbal.de"
 
 # UI theme colors
 DARK_BG = "#1E1E1E"
