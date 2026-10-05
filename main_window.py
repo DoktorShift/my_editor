@@ -11,7 +11,6 @@ import platform
 import re
 import sys
 import time
-import dataclasses
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
@@ -46,7 +45,7 @@ import url_safety
 from highlighter import SyntaxHighlighter, detect_language, detect_language_from_content, LANGUAGE_DISPLAY_NAMES
 from settings import load_settings, save_setting
 from welcome import welcome_html
-from update_check import UpdateChecker, version_tuple
+from update_check import UpdateChecker
 from updater import detect_install_kind, supports_in_app_update, select_asset, UpdateInstaller
 from alerts import (
     CANCEL, DEFAULT, DESTRUCTIVE, NORMAL, Button, ask, ask_with_checkbox,
@@ -96,10 +95,11 @@ def _extension_from_filter(selected_filter: str) -> Optional[str]:
     m = re.search(r'\(\*(\.[0-9A-Za-z]+)', selected_filter)
     return m.group(1) if m else None
 from recovery import (
-    BACKUP_VERSION, EditorBackup, classify_backup, find_all_backups, read_backup,
+    EditorBackup, classify_backup, find_all_backups, is_restorable, load_backup_content,
 )
 import workspace
-from workspace import DOCUMENT, PDF, WELCOME, TabState, Workspace
+import workspace_restore
+from workspace import Workspace
 from recent_files import load_recent, add_recent, clear_recent
 
 from nostr.avatar_store import AvatarBatchLoader, AvatarStore
@@ -1261,7 +1261,7 @@ class MainWindow(QMainWindow):
             if os.path.abspath(backup.get("_backup_file", "")) in skip:
                 continue
             try:
-                if self._restore_one_backup(backup):
+                if self._restore_one_backup(backup) is not None:
                     restored += 1
             except Exception:
                 # One unreadable record must never cost the user the
@@ -1269,18 +1269,15 @@ class MainWindow(QMainWindow):
                 continue
         return restored > 0
 
-    def _restore_one_backup(self, backup: dict) -> bool:
-        version = backup.get("version")
-        if version is not None and (not isinstance(version, int)
-                                    or isinstance(version, bool)
-                                    or version > BACKUP_VERSION
-                                    or backup.get("format") not in ("html",)):
+    def _restore_one_backup(self, backup: dict) -> Optional[HtmlEditor]:
+        """Open one backup record as a recovered tab; returns its editor,
+        or None for a record this build must leave alone."""
+        if not is_restorable(backup):
             # Written by a newer build. Leave it on disk untouched rather
             # than guess at a format this build does not know.
-            return False
+            return None
 
         original_path = backup.get("original_path")
-        content = backup.get("content", "")
         backup_file = backup["_backup_file"]
         freshness = classify_backup(backup)
 
@@ -1290,15 +1287,7 @@ class MainWindow(QMainWindow):
         # Set before the content: image names beside the original file
         # resolve against it.
         ed._file_path = None if freshness == "stale" else original_path
-        if version is None:
-            # Version 1 stored plain text. Restoring it as HTML would
-            # render the user's angle brackets as markup.
-            ed.setPlainText(content)
-        else:
-            ed.setHtml(content)
-            normalize_lists_after_set_html(ed.document())
-        ed.document().clearUndoRedoStacks()
-        ed.document().setModified(True)
+        load_backup_content(ed, backup, modified=True)
 
         container = QWidget()
         vbox = QVBoxLayout(container)
@@ -1335,26 +1324,17 @@ class MainWindow(QMainWindow):
         elif ed._file_path:
             self._watcher.addPath(ed._file_path)
 
-        # Write the replacement first: removing the old file before its
-        # successor exists is a window in which a second crash loses
-        # everything. A restored document that kept its path derives the
-        # same backup ID, so the replacement IS this record's file and
-        # deleting it would leave the recovered work unprotected.
         ed._backup = EditorBackup(
             ed, ed._file_path, externalize=self._asset_manager.adopt_data_uri
         )
-        if (ed._backup.write_now()
-                and os.path.abspath(backup_file) != os.path.abspath(ed._backup.path)):
-            try:
-                os.remove(backup_file)
-            except OSError:
-                pass
-        return True
+        ed._backup.take_over(backup_file)
+        return ed
 
     # ----------------------------------------------------------------------
     # FILE I/O
     # ----------------------------------------------------------------------
-    def new_tab(self):
+    def new_tab(self) -> HtmlEditor:
+        """Open an untitled tab, make it current, and return its editor."""
         ed = self._new_wired_editor()
 
         container = QWidget()
@@ -1402,16 +1382,17 @@ class MainWindow(QMainWindow):
         )
         ed.setFocus()
         self._update_window_title()
+        return ed
 
-    def show_welcome_tab(self):
-        """Open a friendly first-run tab introducing the app."""
-        self.new_tab()
-        ed = self.current_editor()
+    def show_welcome_tab(self) -> HtmlEditor:
+        """Open a friendly first-run tab introducing the app; returns its editor."""
+        ed = self.new_tab()
         ed.setHtml(welcome_html())
         ed.document().setModified(False)
         ed._is_welcome = True   # so an update restart reopens it as the welcome tab
         self.tabs.setTabText(self.tabs.currentIndex(), "Welcome")
         self._update_status_bar()
+        return ed
 
     def _on_tab_context_menu(self, pos):
         idx = self.tabs.tabBar().tabAt(pos)
@@ -1771,17 +1752,22 @@ class MainWindow(QMainWindow):
             ed.setPlainText(content)
 
     def open_path(self, path: str):
+        """Open ``path`` in a new tab and make it current.
+
+        Returns the new tab's editor, or its PDF viewer. Returns None when
+        no tab was opened: the file is open already (its tab becomes
+        current) or it could not be read (the person is told why).
+        """
         for i in range(self.tabs.count()):
             if self._tab_file_path(self.tabs.widget(i)) == path:
                 self.tabs.setCurrentIndex(i)
                 bar = self._bar_from_widget(self.tabs.widget(i))
                 if bar:
                     bar.show_already_open()
-                return
+                return None
 
         if path.lower().endswith('.pdf'):
-            self._open_pdf_tab(path)
-            return
+            return self._open_pdf_tab(path)
 
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -1789,7 +1775,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             inform(self, title=f"Couldn't open \u201c{os.path.basename(path)}\u201d",
                    message=str(e))
-            return
+            return None
 
         ed = self._new_wired_editor()
         # The path first: image names in the content resolve against the
@@ -1835,15 +1821,17 @@ class MainWindow(QMainWindow):
         self._populate_recent_menu()
         ed.setFocus()
         self._update_window_title()
+        return ed
 
-    def _open_pdf_tab(self, path: str):
-        """Open ``path`` read-only in the built-in PDF viewer."""
+    def _open_pdf_tab(self, path: str) -> Optional[PdfViewerTab]:
+        """Open ``path`` read-only in the built-in PDF viewer; returns the
+        viewer, or None when the file could not be read."""
         viewer = PdfViewerTab(path, is_dark=self.is_dark_theme)
         if not viewer.load_ok:
             inform(self, title=f"Couldn't open \u201c{os.path.basename(path)}\u201d",
                    message=str(viewer.load_error))
             viewer.deleteLater()
-            return
+            return None
         viewer.page_changed.connect(self._on_pdf_page_changed)
 
         idx = self.tabs.addTab(viewer, os.path.basename(path))
@@ -1858,6 +1846,7 @@ class MainWindow(QMainWindow):
         viewer.setFocus()
         self._update_window_title()
         self._update_status_bar()
+        return viewer
 
     def _on_pdf_page_changed(self):
         if self.sender() is self.tabs.currentWidget():
@@ -2907,11 +2896,11 @@ class MainWindow(QMainWindow):
         save question; if the record itself cannot be written, so does
         everything. Returns False only when the person cancels.
         """
-        captured = self._capture_workspace(allow_unprotected=False)
+        captured = workspace_restore.capture_tabs(self, allow_unprotected=False)
         if captured is None:
             if not self._confirm_save_before_update():
                 return False
-            captured = self._capture_workspace(allow_unprotected=True)
+            captured = workspace_restore.capture_tabs(self, allow_unprotected=True)
         info = getattr(self, "_pending_release", None)
         tabs, active = captured
         ws = Workspace(
@@ -2932,63 +2921,6 @@ class MainWindow(QMainWindow):
         """The restart did not happen: the record must not reopen anything later."""
         workspace.discard_workspace()
         self._update_workspace = None
-
-    def _capture_workspace(self, *, allow_unprotected: bool):
-        """``(tabs, active)`` for every tab, or None when an unsaved tab could
-        not be written down and ``allow_unprotected`` is False."""
-        tabs, active = [], 0
-        for i in range(self.tabs.count()):
-            widget = self.tabs.widget(i)
-            viewer = self._pdf_viewer_from_widget(widget)
-            if viewer is not None:
-                viewer.save_view_state()
-                tab = TabState(kind=PDF, path=viewer._file_path)
-            else:
-                ed = self._editor_from_widget(widget)
-                if ed is None:
-                    continue
-                tab = self._capture_editor_tab(ed)
-                if tab is None:
-                    if not allow_unprotected:
-                        return None
-                    # The person chose Don't Save for this tab.
-                    tab = TabState(kind=DOCUMENT, path=getattr(ed, "_file_path", None))
-            if i == self.tabs.currentIndex():
-                active = len(tabs)
-            tabs.append(tab)
-        return tuple(tabs), active
-
-    def _capture_editor_tab(self, ed) -> Optional[TabState]:
-        """One editor tab, or None when its unsaved content could not be kept."""
-        path = getattr(ed, "_file_path", None)
-        doc = ed.document()
-        modified = doc.isModified()
-        if getattr(ed, "_is_welcome", False) and not modified:
-            return TabState(kind=WELCOME)
-        backup_file = None
-        if modified or not path:
-            backup = getattr(ed, "_backup", None)
-            if backup is not None and backup.write_now():
-                backup_file = os.path.abspath(backup.path)
-            elif modified or not self._document_is_empty(doc):
-                # Content exists that is in no file and no backup.
-                return None
-        cursor = ed.textCursor()
-        binding = getattr(ed, "_draft_binding", None)
-        return TabState(
-            kind=DOCUMENT,
-            path=path,
-            backup_file=backup_file,
-            modified=modified,
-            cursor=cursor.position(),
-            anchor=cursor.anchor(),
-            scroll=ed.verticalScrollBar().value(),
-            draft=dataclasses.asdict(binding) if binding is not None else None,
-        )
-
-    @staticmethod
-    def _document_is_empty(doc) -> bool:
-        return doc.characterCount() <= 1 and not any(True for _ in iter_image_names(doc))
 
     def _confirm_save_before_update(self):
         """Handle unsaved work before the app relaunches for an update. Returns
@@ -3431,112 +3363,12 @@ class MainWindow(QMainWindow):
     # -- reopening the workspace after an update restart ---------------------
 
     def _resume_workspace(self) -> Optional[Workspace]:
-        """Reopen the tabs an update restart wrote down, if it wrote any.
-
-        Each tab is reopened on its own: one that cannot come back (a file
-        deleted meanwhile) never costs the others. A backup that could not
-        be reopened stays on disk, where the crash-recovery sweep finds it.
-        """
+        """Reopen the tabs an update restart wrote down, if it wrote any
+        (see workspace_restore.resume)."""
         ws = workspace.take_workspace()
-        if ws is None:
-            return None
-        active_widget = None
-        for index, tab in enumerate(ws.tabs):
-            before = self.tabs.count()
-            try:
-                self._resume_tab(tab)
-            except Exception:
-                continue
-            if index == ws.active and self.tabs.count() > before:
-                active_widget = self.tabs.widget(self.tabs.count() - 1)
-        if active_widget is not None:
-            self.tabs.setCurrentWidget(active_widget)
+        if ws is not None:
+            workspace_restore.resume(self, ws, draft_type=DraftBinding)
         return ws
-
-    def _resume_tab(self, tab: TabState) -> None:
-        if tab.kind == PDF:
-            if tab.path and os.path.isfile(tab.path):
-                self.open_path(tab.path)
-            return
-        if tab.kind == WELCOME:
-            self.show_welcome_tab()
-            return
-
-        record = read_backup(tab.backup_file) if tab.backup_file else None
-        if record is not None and not self._backup_record_usable(record):
-            return   # a newer build wrote it; leave it for that build
-        if tab.path and record is not None and (
-                not os.path.isfile(tab.path) or classify_backup(record) == "stale"):
-            # The file moved on, or went away, while MyEditor was closed:
-            # restore the work the way crash recovery does, as a copy.
-            self._restore_one_backup(record)
-            return
-        if tab.path:
-            if not os.path.isfile(tab.path):
-                return
-            count = self.tabs.count()
-            self.open_path(tab.path)
-            if self.tabs.count() == count:
-                return   # already open, or it could not be read
-        elif record is not None or not tab.backup_file:
-            self.new_tab()
-        else:
-            return   # its backup is gone: there is nothing to bring back
-
-        ed = self.current_editor()
-        if ed is None:
-            return
-        if record is not None:
-            self._load_backup_content(ed, record, modified=tab.modified)
-            # Protect the restored content under this editor's own backup
-            # before the record it came from is removed.
-            if (ed._backup.write_now()
-                    and os.path.abspath(record["_backup_file"]) != os.path.abspath(ed._backup.path)):
-                try:
-                    os.remove(record["_backup_file"])
-                except OSError:
-                    pass
-        if tab.draft:
-            ed._draft_binding = self._draft_binding_from(tab.draft)
-        self._update_tab_title()
-        self._restore_cursor_and_scroll(ed, tab)
-
-    @staticmethod
-    def _backup_record_usable(record: dict) -> bool:
-        version = record.get("version")
-        if version is None:
-            return True
-        return (isinstance(version, int) and not isinstance(version, bool)
-                and version <= BACKUP_VERSION and record.get("format") == "html")
-
-    @staticmethod
-    def _load_backup_content(ed, record: dict, *, modified: bool) -> None:
-        content = record.get("content", "")
-        if record.get("version") is None:
-            ed.setPlainText(content)
-        else:
-            ed.setHtml(content)
-            normalize_lists_after_set_html(ed.document())
-        ed.document().clearUndoRedoStacks()
-        ed.document().setModified(modified)
-
-    @staticmethod
-    def _draft_binding_from(data: dict) -> Optional[DraftBinding]:
-        known = {f.name for f in dataclasses.fields(DraftBinding)}
-        try:
-            return DraftBinding(**{k: v for k, v in data.items() if k in known})
-        except TypeError:
-            return None
-
-    @staticmethod
-    def _restore_cursor_and_scroll(ed, tab: TabState) -> None:
-        last = max(0, ed.document().characterCount() - 1)
-        cursor = ed.textCursor()
-        cursor.setPosition(min(tab.anchor, last))
-        cursor.setPosition(min(tab.cursor, last), QTextCursor.KeepAnchor)
-        ed.setTextCursor(cursor)
-        # The scroll range exists only once the document is laid out.
-        QTimer.singleShot(0, lambda: ed.verticalScrollBar().setValue(tab.scroll))
 
     def _live_backup_paths(self) -> set:
         """Backup files that belong to tabs already open."""
@@ -3551,24 +3383,18 @@ class MainWindow(QMainWindow):
 
     def _announce_version_change(self, ws: Optional[Workspace]) -> None:
         """Say so when this launch is a new version, or when an update that
-        was meant to happen did not."""
+        was meant to happen did not (workspace_restore.version_news decides)."""
         last_run = load_settings().get("last_run_version")
         save_setting("last_run_version", APP_VERSION)
-        current = version_tuple(APP_VERSION)
-        if ws is not None and ws.to_version:
-            target = version_tuple(ws.to_version)
-            if current is not None and target is not None and current < target:
-                self._report_unfinished_update(ws.to_version)
-                return
-            self._show_updated(ws.release_notes, ws.release_url)
+        news = workspace_restore.version_news(
+            ws, last_run, APP_VERSION,
+            release_page=f"{APP_URL}/releases/tag/v{APP_VERSION}")
+        if news is None:
             return
-        previous = version_tuple(last_run) if isinstance(last_run, str) else None
-        if previous is not None and current is not None and previous < current:
-            # Updated by hand (an install guide, a package manager).
-            self._show_updated("", f"{APP_URL}/releases/tag/v{APP_VERSION}")
-
-    def _show_updated(self, notes: str, release_url: str) -> None:
-        self._whats_new = (notes, release_url)
+        if not news.updated:
+            self._report_unfinished_update(news.version)
+            return
+        self._whats_new = (news.notes, news.release_url)
         self.update_bar.show_updated(APP_VERSION)
 
     def _on_whats_new_requested(self) -> None:
