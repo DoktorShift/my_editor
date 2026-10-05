@@ -38,6 +38,7 @@ from nostr.media.private_library import (
     parse_file_record,
 )
 
+from nostr.outbox import defaults
 from tests.outbox_fakes import FakeRelayDirectory
 
 
@@ -369,10 +370,10 @@ def test_the_library_is_read_from_the_accounts_private_relays():
 
     relays, _filters = query.calls[0]
     assert relays == ["wss://home.example", "wss://members.example",
-                      "wss://bunker.example"]
+                      "wss://bunker.example", *defaults.FALLBACK_RELAYS]
     assert directory.asked("private_relays") == [
         ("private_relays", PUBKEY, ("wss://members.example",),
-         ("wss://bunker.example",))]
+         ("wss://bunker.example",), True)]
 
 
 def test_an_event_from_another_author_is_ignored():

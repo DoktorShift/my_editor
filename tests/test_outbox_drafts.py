@@ -5,9 +5,10 @@
 The contract: a draft saved from device A must be found by device B on
 the same account. The old code chose the publish set and the read set
 with two different functions that only mostly agreed. Now one function
-(policy.private_relays, asked through the relay directory) answers both,
-and these tests pin the set itself and that every writer and the reader
-really use it.
+(policy.private_relays, asked through the relay directory) answers both:
+reading asks every relay writing goes to, plus the fallback relays that
+records saved while the account's list was unknown went to. These tests
+pin the set itself and that every writer and the reader really use it.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ from PySide6.QtCore import QCoreApplication  # noqa: E402
 from nostr.draft_store import DraftStore  # noqa: E402
 from nostr.draft_sync import DraftSync  # noqa: E402
 from nostr.drafts import build_inner_event  # noqa: E402
-from nostr.outbox import defaults  # noqa: E402
+from nostr.outbox import ask_private_relays, defaults  # noqa: E402
 from nostr.outbox.policy import LookupState, RelayList, private_relays  # noqa: E402
 from nostr.publisher import DraftDeleteJob, DraftPublishJob  # noqa: E402
 from tests.outbox_fakes import FakeRelayDirectory  # noqa: E402
@@ -147,10 +148,47 @@ def test_a_saved_draft_lands_where_drafts_are_read():
     written = _published_to(
         DraftPublishJob, identifier="d1",
         inner_event=build_inner_event(kind=1, content="hi", pubkey_hex=PK))
-    assert written == _read_from() == [
-        "wss://w.example", "wss://r.example", MEMBER_RELAY, BUNKER]
+    assert written == ["wss://w.example", "wss://r.example", MEMBER_RELAY, BUNKER]
+    assert _read_from() == [*written, *defaults.FALLBACK_RELAYS]
 
 
-def test_a_deletion_lands_where_drafts_are_read():
+def test_a_deletion_lands_wherever_the_draft_may_be():
     written = _published_to(DraftDeleteJob, identifier="d1", inner_kind=1)
     assert written == _read_from()
+
+
+# --------------------------------------------------------------------------- #
+# Written while the list was unknown, still found once it is known            #
+# --------------------------------------------------------------------------- #
+
+def test_a_draft_saved_before_the_list_was_known_is_still_read():
+    unknown_then = private_relays(RelayList(), legacy=[BUNKER])
+    known_now = private_relays(own(write=["wss://w.example"]), legacy=[BUNKER],
+                               reading=True)
+    assert set(unknown_then) <= set(known_now)
+
+
+def test_reading_asks_every_relay_writing_goes_to():
+    for author in (RelayList(), own(write=["wss://w.example"], read=["wss://r.example"]),
+                   own(write=[f"wss://w{i}.example" for i in range(50)])):
+        written = private_relays(author, entitled=[MEMBER_RELAY], legacy=[BUNKER])
+        read = private_relays(author, entitled=[MEMBER_RELAY], legacy=[BUNKER], reading=True)
+        assert read[:len(written)] == written
+
+
+def test_a_long_list_never_pushes_out_the_members_or_the_signer_relays():
+    relays = private_relays(own(write=[f"wss://w{i}.example" for i in range(50)]),
+                            entitled=[MEMBER_RELAY], legacy=[BUNKER])
+    assert len(relays) == defaults.PRIVATE_CAP
+    assert relays[-2:] == [MEMBER_RELAY, BUNKER]
+    assert relays[0] == "wss://w0.example"
+
+
+def test_entitled_relays_may_be_asked_for_when_needed():
+    directory = FakeRelayDirectory({PK: own(write=["wss://w.example"])})
+    membership = []
+    got = []
+    ask_private_relays(directory, _profile(), got.append, entitled=lambda: list(membership))
+    membership.append(MEMBER_RELAY)
+    ask_private_relays(directory, _profile(), got.append, entitled=lambda: list(membership))
+    assert MEMBER_RELAY not in got[0] and MEMBER_RELAY in got[1]

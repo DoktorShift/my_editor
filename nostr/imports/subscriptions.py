@@ -287,11 +287,13 @@ class FeedSubscriptionStore(QObject):
 
     # -- internals: relay sync ---------------------------------------------
 
-    def _with_relays(self, profile: Profile, on_done: Callable[[List[str]], None]) -> None:
+    def _with_relays(self, profile: Profile, on_done: Callable[[List[str]], None], *,
+                     reading: bool = False) -> None:
         """The account's private relays: where the list is written and,
-        so every device finds it, where it is read."""
-        entitled = list(self._entitled_relays() or ()) if self._entitled_relays else []
-        ask_private_relays(self._relay_directory, profile, on_done, entitled=entitled)
+        so every device finds it, where it is read (which also asks the
+        relays a list written before the account's own was known went)."""
+        ask_private_relays(self._relay_directory, profile, on_done,
+                           entitled=self._entitled_relays, reading=reading)
 
     def _refresh_from_relays(self) -> None:
         profile = self._profile
@@ -321,7 +323,7 @@ class FeedSubscriptionStore(QObject):
                 return
             self._decrypt_and_adopt(profile, str(event["content"]))
 
-        self._with_relays(profile, _on_relays)
+        self._with_relays(profile, _on_relays, reading=True)
 
     def _decrypt_and_adopt(self, profile: Profile, ciphertext: str) -> None:
         def _on_ready(client) -> None:

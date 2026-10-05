@@ -20,7 +20,8 @@ Shape of the flow:
   4. Emit ``completed(results)`` with per-relay outcomes.
 
 Drafts are private and go where every device of the author reads them
-back: the same set for writing and reading (RelayDirectory.private_relays).
+back (RelayDirectory.private_relays): reading asks every relay writing
+goes to.
 
 The builders also attach NIP-92 ``imeta`` tags for media, from records
 the caller hands them. One rule governs every field: describe only media
@@ -619,7 +620,7 @@ class DraftPublishJob(QObject):
       4. Wrap the ciphertext in a kind-31234 event.
       5. Bunker signs the wrap.
       6. Publish to the account's private relays
-         (RelayDirectory.private_relays), the very set DraftSync reads
+         (RelayDirectory.private_relays), all of which DraftSync reads
          drafts from, so every device of the author finds this one.
 
     Signals (in firing order on the happy path):
@@ -806,8 +807,10 @@ class DraftDeleteJob(QObject):
 
     Per NIP-37 the deletion mechanism is *not* NIP-09; the addressable
     event is replaced with one whose ``content`` is empty. Same shape
-    as ``DraftPublishJob`` minus the encryption step (no plaintext), and
-    the same relays, so the replacement lands wherever the draft is read.
+    as ``DraftPublishJob`` minus the encryption step (no plaintext). It
+    goes to every relay drafts are read from, so the replacement lands
+    wherever the draft may be, including where it went while the
+    account's own list was unknown.
 
     Signals:
       status_changed(str)
@@ -858,8 +861,11 @@ class DraftDeleteJob(QObject):
 
     def start(self) -> None:
         self._emit_status("Looking up your relay list…")
+        # Wherever the draft may be, including the relays it went to while
+        # the account's own list was unknown: the tombstone replaces it there.
         ask_private_relays(self._relay_directory, self._profile,
-                           self._on_relays_ready, entitled=self._entitled_relays)
+                           self._on_relays_ready, entitled=self._entitled_relays,
+                           reading=True)
 
     def cancel(self) -> None:
         self._cancelled = True

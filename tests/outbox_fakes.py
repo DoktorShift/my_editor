@@ -229,9 +229,10 @@ class FakeRelayDirectory(QObject):
             hints={p.lower(): h for p, h in mentioned if h},
             entitled=entitled))
 
-    def private_relays(self, author, on_done, *, entitled=(), legacy=()):
-        self.calls.append(("private_relays", author, tuple(entitled), tuple(legacy)))
-        on_done(policy.private_relays(self.cached(author), entitled=entitled, legacy=legacy))
+    def private_relays(self, author, on_done, *, entitled=(), legacy=(), reading=False):
+        self.calls.append(("private_relays", author, tuple(entitled), tuple(legacy), reading))
+        on_done(policy.private_relays(self.cached(author), entitled=entitled, legacy=legacy,
+                                      reading=reading))
 
     def outbox_of(self, author, on_done, *, hints=()):
         self.calls.append(("outbox_of", author, tuple(hints)))

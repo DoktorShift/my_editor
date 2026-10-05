@@ -32,6 +32,7 @@ from .policy import (  # noqa: F401
     parse_relay_list,
     plan_publish,
     private_relays,
+    relays_from,
     relay_list_tags_adding,
     replacement_created_at,
     starter_relay_list_tags,

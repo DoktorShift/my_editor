@@ -36,7 +36,7 @@ from nostr.drafts import (
     build_inner_event,
     serialize_inner_event,
 )
-from nostr.outbox import RelayList, policy
+from nostr.outbox import RelayList, defaults, policy
 from nostr.outbox.policy import LookupState
 from tests.outbox_fakes import FakeRelayDirectory
 
@@ -439,10 +439,11 @@ def test_drafts_are_read_from_the_private_relays():
         {PK: _own_list(write=["wss://w.example"], read=["wss://r.example"])})
     _sync, pool, profile = _running_sync(directory, entitled=[MEMBER_RELAY])
     expected = policy.private_relays(
-        directory.cached(PK), entitled=[MEMBER_RELAY], legacy=profile.bunker_relays)
+        directory.cached(PK), entitled=[MEMBER_RELAY], legacy=profile.bunker_relays,
+        reading=True)
     assert _subscribed(pool) == [expected]
     assert expected == ["wss://w.example", "wss://r.example", MEMBER_RELAY,
-                        "wss://bunker.test"]
+                        "wss://bunker.test", *defaults.FALLBACK_RELAYS]
 
 
 def test_a_newer_relay_list_moves_the_subscription():

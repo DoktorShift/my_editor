@@ -607,10 +607,10 @@ class PrivateLibrary(QObject):
                 lambda events, g=gen: self._on_events(g, events),
             )
 
-        # The account's private relays, the same set other private
-        # records are written to, so files saved on any device are found.
-        entitled = list(self._entitled_relays() or ()) if self._entitled_relays else []
-        ask_private_relays(self._relay_directory, profile, _on_relays, entitled=entitled)
+        # The account's private relays, where other private records are
+        # written (and read), so files saved on any device are found.
+        ask_private_relays(self._relay_directory, profile, _on_relays,
+                           entitled=self._entitled_relays, reading=True)
 
     # -- internal: cancellation -------------------------------------------
 

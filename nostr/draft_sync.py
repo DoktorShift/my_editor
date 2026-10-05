@@ -310,8 +310,8 @@ class DraftSync(QObject):
     # -- internal: resolve relays, then subscribe -------------------------
 
     def _ask_relays(self, on_done: Callable[[List[str]], None]) -> None:
-        entitled = list(self._entitled_relays() or ()) if self._entitled_relays else []
-        ask_private_relays(self._relay_directory, self._profile, on_done, entitled=entitled)
+        ask_private_relays(self._relay_directory, self._profile, on_done,
+                           entitled=self._entitled_relays, reading=True)
 
     def _on_relays_ready(self, gen: int, relays: List[str]) -> None:
         if not self._is_current(gen):

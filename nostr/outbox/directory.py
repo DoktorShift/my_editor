@@ -7,8 +7,9 @@ and, through the pure rules in policy.py, "where does this go":
 
     publish_plan    a public note or article: the author's outbox, plus the
                     inbox of everyone it mentions (NIP-65)
-    private_relays  drafts and other private records; the same set for
-                    writing and reading, so other devices find them
+    private_relays  drafts and other private records; reading asks where
+                    writing goes, plus the fallback relays records went to
+                    while the list was unknown, so other devices find them
                     (ask_private_relays asks it for a profile)
     outbox_of       where to read what someone else wrote
 
@@ -215,9 +216,12 @@ class RelayDirectory(QObject):
         self.lookup_many(keys, got_mentions, hints=hints)
 
     def private_relays(self, author: str, on_done: Callable[[List[str]], None], *,
-                       entitled: Sequence[str] = (), legacy: Sequence[str] = ()) -> None:
+                       entitled: Sequence[str] = (), legacy: Sequence[str] = (),
+                       reading: bool = False) -> None:
+        """Where the author's private records are written, or with
+        ``reading`` read from (policy.private_relays)."""
         self.lookup(author, lambda relay_list: on_done(policy.private_relays(
-            relay_list, entitled=entitled, legacy=legacy)))
+            relay_list, entitled=entitled, legacy=legacy, reading=reading)))
 
     def outbox_of(self, author: str, on_done: Callable[[List[str]], None], *,
                   hints: Sequence[str] = ()) -> None:
@@ -383,13 +387,19 @@ class RelayDirectory(QObject):
 
 
 def ask_private_relays(directory, profile, on_done: Callable[[List[str]], None], *,
-                       entitled: Sequence[str] = ()) -> None:
+                       entitled=(), reading: bool = False) -> None:
     """Where ``profile``'s private records live (drafts, synced settings,
-    private files), for writing and reading alike.
+    private files): written to, or with ``reading`` read from.
 
-    The signer relays the profile was paired through are passed as the
-    legacy set: MyEditor kept private records there before it read relay
-    lists, so they stay in the set and those records stay readable.
+    ``entitled`` is a list of relays, or a callable answering one (asked
+    now, so a membership that changed since is followed). The signer
+    relays the profile was paired through are passed as the legacy set:
+    MyEditor kept private records there before it read relay lists, so
+    they keep their room in the set and those records stay readable.
+    Reading also asks the fallback relays, where records written before
+    the account's own list was known went (policy.private_relays).
     """
-    directory.private_relays(profile.user_pubkey, on_done, entitled=list(entitled),
-                             legacy=list(getattr(profile, "bunker_relays", None) or ()))
+    directory.private_relays(profile.user_pubkey, on_done,
+                             entitled=policy.relays_from(entitled),
+                             legacy=list(getattr(profile, "bunker_relays", None) or ()),
+                             reading=reading)

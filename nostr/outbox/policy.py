@@ -348,18 +348,42 @@ def plan_publish(author: RelayList, *,
 
 
 def private_relays(author: RelayList, *, entitled: Iterable[str] = (),
-                   legacy: Iterable[str] = ()) -> List[str]:
+                   legacy: Iterable[str] = (), reading: bool = False) -> List[str]:
     """Where the author's private records live (drafts, app data, private
-    files). One function serves both writing and reading, so what one
-    device stores is exactly where another device looks.
+    files).
 
-    ``legacy`` are relays such records were kept on before, appended so
-    they stay readable (and keep receiving updates)."""
+    Writing goes to the author's own relays (write and read, at most
+    PRIVATE_CAP less what follows), then ``entitled`` relays (a
+    membership's) and ``legacy`` ones (where such records were kept
+    before), which always keep their room so a long list cannot push
+    them out. While the author's list is unknown, the fallback relays
+    stand in for their own.
+
+    Reading (``reading=True``) asks the same relays plus the fallback
+    ones: a record written while the list was still unknown went there,
+    and must stay reachable once the list is known. Otherwise the two
+    sets are the same, so what one device stores is where another looks.
+    """
+    extras = dedupe_relays(entitled, legacy)
     if author.found and not author.is_empty:
-        own = dedupe_relays(author.write, author.read, entitled)
+        primary = dedupe_relays(author.write, author.read)
     else:
-        own = dedupe_relays(defaults.FALLBACK_RELAYS, entitled)
-    return dedupe_relays(own, legacy, cap=defaults.PRIVATE_CAP)
+        primary = dedupe_relays(defaults.FALLBACK_RELAYS)
+    room = max(defaults.PRIVATE_CAP - len(extras), defaults.PRIVATE_CAP // 2)
+    relays = dedupe_relays(primary[:room], extras, cap=defaults.PRIVATE_CAP)
+    if reading:
+        relays = dedupe_relays(relays, defaults.FALLBACK_RELAYS)
+    return relays
+
+
+def relays_from(source) -> List[str]:
+    """Relays given as a list, as a callable answering one (asked now, so
+    a membership that changed since is followed), or as None."""
+    if source is None:
+        return []
+    if callable(source):
+        source = source()
+    return list(source or ())
 
 
 def outbox_relays(author: RelayList, *, hints: Iterable[str] = ()) -> List[str]:

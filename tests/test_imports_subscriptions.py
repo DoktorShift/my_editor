@@ -24,6 +24,7 @@ from nostr.imports.constants import (
     SUBSCRIPTIONS_KIND,
 )
 from nostr.imports.subscriptions import FeedSubscriptionStore, _parse_payload
+from nostr.outbox import defaults
 
 from tests.imports_fakes import PROFILE
 from tests.outbox_fakes import FakeRelayDirectory
@@ -243,7 +244,8 @@ class TestRelaySync:
 
     def test_the_list_is_read_where_it_is_written(self, tmp_path):
         # Every device of the account must find what one device saved,
-        # so reading and writing ask for the same private relays.
+        # so reading asks every relay writing goes to, plus the fallback
+        # relays a list saved before the account's own was known went to.
         directory = FakeRelayDirectory({PROFILE.user_pubkey: ["wss://home.example"]})
         query = FakeQuery(None)
         store, publisher, scheduler = make_store(
@@ -255,8 +257,9 @@ class TestRelaySync:
 
         read_relays, _filters = query.calls[0]
         written_relays, _signed = publisher.calls[0]
-        assert read_relays == written_relays == [
+        assert written_relays == [
             "wss://home.example", "wss://members.example", "wss://bunker.example"]
+        assert read_relays == written_relays + list(defaults.FALLBACK_RELAYS)
 
     def test_relay_refresh_never_clobbers_unsynced_edits(self, tmp_path):
         # The remote answer arrives while a local add is still pending.
