@@ -131,6 +131,12 @@ _HEX64 = re.compile(r"\A[0-9a-f]{64}\Z")
 # Developers and self-hosters set this; it wins over the build's service.
 ENV_SERVICE_URL: str = "MYEDITOR_MEMBERSHIP_SERVICE"
 
+# Development only: the association's address the signatures name, for a
+# sidecar whose E21_UPSTREAM is a test system or a stand-in. Signatures
+# must name the URL the association behind the sidecar checks, so the two
+# settings go together. Unset (always, in production), it is BASE_URL.
+ENV_UPSTREAM_URL: str = "MYEDITOR_MEMBERSHIP_UPSTREAM"
+
 # How long the app waits for the service to say whether it can help.
 STATUS_TIMEOUT_MS: int = 8_000
 
@@ -172,8 +178,8 @@ def service_url() -> str:
     """The membership service this build uses, or ``""``.
 
     ``MYEDITOR_MEMBERSHIP_SERVICE`` from the environment first, then the
-    build's ``MEMBERSHIP_SERVICE_URL`` (constants.py). Anything that is
-    not an https URL counts as none.
+    build's ``MEMBERSHIP_SERVICE_URL`` (constants.py). An address
+    :func:`_usable_service` refuses counts as none.
     """
     from_env = _usable_service(os.environ.get(ENV_SERVICE_URL, ""))
     if from_env:
@@ -183,6 +189,16 @@ def service_url() -> str:
     except ImportError:
         return ""
     return _usable_service(MEMBERSHIP_SERVICE_URL)
+
+
+def upstream_url() -> str:
+    """The association's address the signatures name.
+
+    :data:`BASE_URL`, unless ``MYEDITOR_MEMBERSHIP_UPSTREAM`` names a
+    usable address (the same rules as the service's): a developer's way
+    to test against the sidecar's ``E21_UPSTREAM``.
+    """
+    return _usable_service(os.environ.get(ENV_UPSTREAM_URL, "")) or BASE_URL
 
 
 def has_service() -> bool:
@@ -938,8 +954,9 @@ class MembershipApi(QObject):
     cannot succeed.
 
     Seams: ``sign`` (see :data:`SignFn`), ``service_url`` (None reads
-    :func:`service_url`), ``nam`` and ``clock`` (unix seconds), so no test
-    touches the network, a signer or the wall clock.
+    :func:`service_url`), ``base_url`` (None reads :func:`upstream_url`),
+    ``nam`` and ``clock`` (unix seconds), so no test touches the network,
+    a signer or the wall clock.
 
     ``base_url`` is the association's own address: what the signatures
     name. ``service_url`` is where the requests travel.
@@ -950,13 +967,13 @@ class MembershipApi(QObject):
         sign: SignFn,
         *,
         service_url: Optional[str] = None,
-        base_url: str = BASE_URL,
+        base_url: Optional[str] = None,
         nam: Optional[QNetworkAccessManager] = None,
         clock: Optional[Callable[[], float]] = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
-        base = str(base_url or "").rstrip("/")
+        base = str(base_url).rstrip("/") if base_url is not None else upstream_url()
         if not url_safety.origin_of(base):
             raise ValueError("base_url must be an absolute http(s) URL")
         self._sign = sign

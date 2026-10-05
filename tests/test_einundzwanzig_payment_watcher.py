@@ -50,6 +50,12 @@ def qt_app():
     yield app
 
 
+@pytest.fixture(autouse=True)
+def production_association(monkeypatch):
+    # A developer's shell may point the app at a test association.
+    monkeypatch.delenv("MYEDITOR_MEMBERSHIP_UPSTREAM", raising=False)
+
+
 UNPAID = parse_invoice(invoice_data(created=False))
 PAID = parse_invoice(invoice_data(paid=True, created=False))
 EXPIRED = parse_invoice(invoice_data(checkout_url=None, created=False))

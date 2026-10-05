@@ -200,7 +200,7 @@ MyEditor accepts only `https://` addresses, plus `http://localhost` for developm
 |---|---|---|
 | `E21_API_KEY` | empty | The association's client key. Empty means joining in the app is not offered. |
 | `SIDECAR_DOMAIN` | | The server's public name, for the HTTPS certificate (Docker setup only). |
-| `E21_UPSTREAM` | `https://verein.einundzwanzig.space` | The association's API. Change it only for a test system. |
+| `E21_UPSTREAM` | `https://verein.einundzwanzig.space` | The association's API. Change it only for a test system, and start MyEditor with `MYEDITOR_MEMBERSHIP_UPSTREAM` set to the same address (see "Develop and test"). |
 | `SIDECAR_RATE_PER_MINUTE` | `60` | Requests per client address per minute. |
 | `SIDECAR_INVOICES_PER_DAY` | `10` | Invoices per Nostr account per day. |
 | `SIDECAR_LOG_LEVEL` | `INFO` | `WARNING` logs only problems. |
@@ -227,6 +227,21 @@ Then start MyEditor against it:
 ```sh
 MYEDITOR_MEMBERSHIP_SERVICE=http://localhost:8021 .venv/bin/python main.py
 ```
+
+**Against a test system of the association.** MyEditor's signatures name the association's address, because that is what the association checks, and the sidecar refuses any signature that does not name its own `E21_UPSTREAM`. So when the sidecar forwards to a test system or a local stand-in, tell MyEditor the same address with `MYEDITOR_MEMBERSHIP_UPSTREAM`:
+
+```sh
+E21_API_KEY=your-test-key E21_UPSTREAM=http://localhost:8000 \
+    .venv/bin/uvicorn sidecar.app:app --port 8021 --no-access-log
+
+MYEDITOR_MEMBERSHIP_SERVICE=http://localhost:8021 \
+MYEDITOR_MEMBERSHIP_UPSTREAM=http://localhost:8000 \
+    .venv/bin/python main.py
+```
+
+Both take `https://` addresses, or `http://` on this computer (`localhost`, `127.0.0.1`, `[::1]`). Without `MYEDITOR_MEMBERSHIP_UPSTREAM`, MyEditor signs for `https://verein.einundzwanzig.space`, as every shipped build does, and a sidecar with another `E21_UPSTREAM` refuses every signed request with 401.
+
+`tests/smoke_sidecar_e2e.py` does all of this with a stand-in association: it runs the app's own client through the real sidecar.
 
 ---
 

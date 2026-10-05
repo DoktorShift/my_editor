@@ -86,6 +86,12 @@ def qt_app():
     yield app
 
 
+@pytest.fixture(autouse=True)
+def production_association(monkeypatch):
+    # A developer's shell may point the app at a test association.
+    monkeypatch.delenv("MYEDITOR_MEMBERSHIP_UPSTREAM", raising=False)
+
+
 def make(*, script=None, signer=None, service=SERVICE, clock=None, server=True):
     clock = clock or FakeClock()
     srv = FakeMembershipServer(clock)
@@ -272,6 +278,33 @@ def test_the_production_server_is_the_documented_one():
     assert MembershipApi(FakeSigner(), service_url=SERVICE, nam=FakeNam()).url_for("/me") == (
         "https://verein.einundzwanzig.space/api/v1/membership/me"
     )
+
+
+def test_signatures_name_the_production_association_unless_a_developer_says_otherwise(
+        monkeypatch):
+    monkeypatch.delenv("MYEDITOR_MEMBERSHIP_UPSTREAM", raising=False)
+    assert e21.upstream_url() == BASE_URL
+    api = MembershipApi(FakeSigner(), service_url=SERVICE, nam=FakeNam())
+    assert api.url_for("/me") == BASE_URL + "/api/v1/membership/me"
+
+    monkeypatch.setenv("MYEDITOR_MEMBERSHIP_UPSTREAM", "http://localhost:8000/")
+    api = MembershipApi(FakeSigner(), service_url=SERVICE, nam=FakeNam())
+    assert api.url_for("/me") == "http://localhost:8000/api/v1/membership/me"
+    assert api.request_url_for("/me") == SERVICE_PREFIX + "/me"     # still travels there
+
+
+@pytest.mark.parametrize("value", ["http://test.example", "http://localhost@evil.example",
+                                   "https://test.example/?x", "not a url", ""])
+def test_an_unusable_upstream_override_is_ignored(monkeypatch, value):
+    monkeypatch.setenv("MYEDITOR_MEMBERSHIP_UPSTREAM", value)
+    assert e21.upstream_url() == BASE_URL
+
+
+def test_an_explicit_base_url_wins_over_the_override(monkeypatch):
+    monkeypatch.setenv("MYEDITOR_MEMBERSHIP_UPSTREAM", "https://test.example")
+    api = MembershipApi(FakeSigner(), service_url=SERVICE, base_url="https://other.example",
+                        nam=FakeNam())
+    assert api.url_for("/me") == "https://other.example/api/v1/membership/me"
 
 
 def test_a_trailing_slash_on_the_base_url_does_not_double():
