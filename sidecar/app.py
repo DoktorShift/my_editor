@@ -50,13 +50,14 @@ Run: ``uvicorn sidecar.app:app`` from the repository root (the app's own
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
 import re
 import threading
 import time
 import zlib
-from collections import OrderedDict, defaultdict, deque
+from collections import OrderedDict, deque
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional, Tuple
@@ -71,6 +72,7 @@ VERSION = "1"
 API_PREFIX = "/api/v1/membership"
 MAX_BODY_BYTES = 32 * 1024
 MAX_ANSWER_BYTES = 1024 * 1024
+RATE_WINDOW_SECONDS = 60
 REPLAY_SECONDS = 150
 CONFIG_CACHE_SECONDS = 300
 UPSTREAM_TIMEOUT_SECONDS = 15.0
@@ -116,30 +118,71 @@ class Settings:
         )
 
 
+def client_bucket(host: str) -> str:
+    """What the per-address limit counts a client under.
+
+    An IPv4 address as it is. An IPv6 address by its /64: one household
+    or one server is usually given a whole /64 and can use any address in
+    it, so counting single IPv6 addresses would let one client have more
+    of them than anyone could list. An IPv4 address written as IPv6
+    (``::ffff:192.0.2.1``) counts as the IPv4 address.
+    """
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return host
+    if isinstance(address, ipaddress.IPv6Address):
+        if address.ipv4_mapped is not None:
+            return str(address.ipv4_mapped)
+        prefix = int(address) >> 64 << 64
+        return str(ipaddress.IPv6Network((prefix, 64)))
+    return str(address)
+
+
 @dataclass
 class _Limits:
     """In-memory limits. A restart resets them, which only ever loosens them
-    for a moment; nothing here is worth a database."""
+    for a moment; nothing here is worth a database. They live in this one
+    process, which is why the sidecar runs exactly one worker."""
 
     clock: Callable[[], float]
     per_minute: int
     per_day: int
-    _hits: Dict[str, deque] = field(default_factory=lambda: defaultdict(deque))
+    _hits: Dict[str, deque] = field(default_factory=dict)
+    _swept_at: float = 0.0
     _invoices: Dict[Tuple[str, int], int] = field(default_factory=dict)
     _seen: "OrderedDict[str, float]" = field(default_factory=OrderedDict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
+    @property
+    def tracked_clients(self) -> int:
+        """How many client buckets are remembered right now."""
+        with self._lock:
+            return len(self._hits)
+
     def allow_request(self, client: str) -> Optional[int]:
         """None when allowed, else seconds to wait."""
         now = self.clock()
+        bucket = client_bucket(client)
         with self._lock:
-            hits = self._hits[client]
-            while hits and now - hits[0] >= 60:
+            if now - self._swept_at >= RATE_WINDOW_SECONDS:
+                self._sweep(now)
+            hits = self._hits.setdefault(bucket, deque())
+            while hits and now - hits[0] >= RATE_WINDOW_SECONDS:
                 hits.popleft()
             if len(hits) >= self.per_minute:
-                return max(1, int(60 - (now - hits[0])) + 1)
+                return max(1, int(RATE_WINDOW_SECONDS - (now - hits[0])) + 1)
             hits.append(now)
             return None
+
+    def _sweep(self, now: float) -> None:
+        """Forget every client not seen for a whole window, so the table
+        holds the last minute's clients, not every address ever seen."""
+        stale = [bucket for bucket, hits in self._hits.items()
+                 if not hits or now - hits[-1] >= RATE_WINDOW_SECONDS]
+        for bucket in stale:
+            del self._hits[bucket]
+        self._swept_at = now
 
     def allow_invoice(self, pubkey: str) -> Optional[int]:
         now = self.clock()
@@ -286,6 +329,7 @@ def create_app(settings: Optional[Settings] = None, *,
 
     app = FastAPI(title="MyEditor membership sidecar", version=VERSION, lifespan=lifespan,
                   docs_url=None, redoc_url=None, openapi_url=None)
+    app.state.limits = limits
 
     @app.get("/status")
     async def status() -> dict:

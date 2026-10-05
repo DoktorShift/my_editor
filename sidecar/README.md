@@ -41,7 +41,7 @@ Everything else gets 404.
 - be validly signed;
 - be used for the first time.
 
-**Limits.** Requests per client address per minute and invoices per Nostr account per day are limited, because everyone shares the key's quota. Request bodies are capped at 32 KB and refused as soon as they pass that, unread when their declared length already does. Answers from the association are capped at 1 MB, counted after unpacking should the association compress them.
+**Limits.** Requests per client address per minute and invoices per Nostr account per day are limited, because everyone shares the key's quota. An IPv6 client counts by its /64 network, since one household or server can use any address in it. Request bodies are capped at 32 KB and refused as soon as they pass that, unread when their declared length already does. Answers from the association are capped at 1 MB, counted after unpacking should the association compress them.
 
 **Answers.** They pass through unchanged, `Retry-After` included. Two exceptions. If the association ever echoed the key back, the sidecar removes it. And if the association refuses with 401 a request that passed every check above (or the fee lookup with 401 or 403), it refused the key or the clocks differ: the sidecar logs a warning and answers 503 with `"code": "upstream_refused"`, and MyEditor says joining in the app isn't available right now and offers the website.
 

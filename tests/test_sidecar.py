@@ -399,6 +399,58 @@ def test_requests_per_address_are_limited():
     assert call(client, "GET", "/me", created_at=int(clock.now)).status_code == 200
 
 
+def test_clients_not_seen_for_a_minute_are_forgotten():
+    client, association, clock = make()
+    limits = client.app.state.limits
+    for n in range(50):
+        assert limits.allow_request(f"198.51.100.{n}") is None
+    assert limits.tracked_clients == 50
+    clock.now += 61
+    assert limits.allow_request("203.0.113.9") is None
+    assert limits.tracked_clients == 1
+
+
+@pytest.mark.parametrize("host, bucket", [
+    ("192.0.2.7", "192.0.2.7"),
+    ("2001:db8:1:2:aaaa::1", "2001:db8:1:2::/64"),
+    ("2001:db8:1:2:ffff:ffff:ffff:ffff", "2001:db8:1:2::/64"),
+    ("::ffff:192.0.2.7", "192.0.2.7"),
+    ("testclient", "testclient"),
+])
+def test_an_ipv6_client_counts_by_its_64(host, bucket):
+    assert sidecar.client_bucket(host) == bucket
+
+
+def test_one_ipv6_network_shares_one_limit():
+    client, association, clock = make(per_minute=2)
+    limits = client.app.state.limits
+    assert limits.allow_request("2001:db8::1") is None
+    assert limits.allow_request("2001:db8::2") is None
+    assert limits.allow_request("2001:db8::ffff:3") is not None
+    assert limits.allow_request("2001:db8:0:1::1") is None      # the next /64
+
+
+def test_the_limit_counts_the_address_the_proxy_reports():
+    # Behind Caddy or nginx, uvicorn's --proxy-headers makes the forwarded
+    # address the client; this is that middleware in front of the app.
+    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+    association = Association()
+    app = sidecar.create_app(
+        sidecar.Settings(api_key=KEY, upstream=UPSTREAM, rate_per_minute=1),
+        transport=httpx.MockTransport(association.handler), clock=Clock())
+    proxied = TestClient(ProxyHeadersMiddleware(app, trusted_hosts="*"))
+
+    def from_address(address):
+        headers = {"Authorization": auth("GET", "/me"), "X-Forwarded-For": address}
+        return proxied.get("/api/v1/membership/me", headers=headers).status_code
+
+    assert from_address("203.0.113.1") == 200
+    assert from_address("203.0.113.2") == 200
+    assert from_address("203.0.113.1") == 429
+    assert from_address("2001:db8::1") == 200
+    assert from_address("2001:db8::2") == 429
+
+
 def test_invoices_per_account_are_limited_per_day():
     client, association, clock = make(invoices=2)
     codes = [call(client, "POST", "/payments/2026/invoice").status_code for _ in range(3)]
