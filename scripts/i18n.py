@@ -15,6 +15,13 @@
                                        copy the translations in PART.po into
                                        the .po of the same language (the file's
                                        Language header), then update
+    python scripts/i18n.py part LANG OUT.po FILE.py [...]
+                                       write OUT.po with the texts of these
+                                       files only (and any translation the
+                                       language has already), to translate one
+                                       part of the app on its own
+    python scripts/i18n.py check-part OUT.po FILE.py [...]
+                                       the check, for a part file
 
 The texts are found by reading the code, not by running it: every call
 of ``_()``, ``ngettext()``, ``pgettext()`` or ``N_()`` with literal
@@ -70,11 +77,53 @@ def python_files() -> List[str]:
     return found
 
 
-def extract() -> Tuple["OrderedDict[Key, Message]", List[str]]:
-    """Every text in the code, and every call that cannot be read."""
+def _shadowing(tree: ast.AST, rel: str) -> List[str]:
+    """Functions that call _() and also use ``_`` as a variable of their
+    own (``path, _ = ...``, ``for _ in``, a parameter named ``_``): Python
+    then treats ``_`` as that variable everywhere in the function, and the
+    call fails when the window opens."""
+    problems = []
+    for func in ast.walk(tree):
+        if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            continue
+        args = func.args
+        params = [a.arg for a in args.args + args.kwonlyargs + args.posonlyargs]
+        if args.vararg:
+            params.append(args.vararg.arg)
+        if args.kwarg:
+            params.append(args.kwarg.arg)
+        body = func.body if isinstance(func.body, list) else [func.body]
+        assigns = "_" in params
+        calls = False
+        stack = list(body)
+        while stack:
+            node = stack.pop()
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda,
+                                 ast.ClassDef)):
+                continue        # its own scope, checked on its own
+            if isinstance(node, ast.Name) and node.id == "_":
+                if isinstance(node.ctx, ast.Store):
+                    assigns = True
+            if isinstance(node, ast.ExceptHandler) and node.name == "_":
+                assigns = True
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id == "_"):
+                calls = True
+            stack.extend(ast.iter_child_nodes(node))
+        if assigns and calls:
+            line = getattr(func, "lineno", 0)
+            problems.append(f"{rel}:{line}: this function calls _() and also uses _ as a "
+                            "variable; rename the variable (for example to _unused)")
+    return problems
+
+
+def extract(only: Optional[List[str]] = None) -> Tuple["OrderedDict[Key, Message]", List[str]]:
+    """Every text in the code (or in the files ``only`` names), and every
+    call that cannot be read."""
     messages: "OrderedDict[Key, Message]" = OrderedDict()
     problems: List[str] = []
-    for path in python_files():
+    paths = python_files() if not only else [os.path.join(ROOT, p) for p in only]
+    for path in paths:
         rel = os.path.relpath(path, ROOT)
         with open(path, "r", encoding="utf-8") as f:
             source = f.read()
@@ -83,6 +132,7 @@ def extract() -> Tuple["OrderedDict[Key, Message]", List[str]]:
         except SyntaxError as exc:
             problems.append(f"{rel}: cannot parse ({exc})")
             continue
+        problems.extend(_shadowing(tree, rel))
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
@@ -229,9 +279,9 @@ def placeholders(text: str) -> List[str]:
     return sorted(PLACEHOLDER.findall(text))
 
 
-def check(messages) -> List[str]:
+def check(messages, paths: Optional[List[str]] = None) -> List[str]:
     problems = []
-    for path in po_files():
+    for path in (paths if paths is not None else po_files()):
         name = os.path.relpath(path, ROOT)
         found, _language, _plural = _read_po(path)
         for key, message in messages.items():
@@ -280,8 +330,38 @@ def merge(parts: List[str]) -> None:
             f.write("\n".join(body))
 
 
+def write_part(language: str, out: str, files: List[str]) -> int:
+    messages, problems = extract(files)
+    known = {}
+    target = os.path.join(LOCALE, f"{language}.po")
+    if os.path.exists(target):
+        known = _read_po(target)[0]
+    if os.path.exists(out):
+        known.update(_read_po(out)[0])
+    body = [_header(language, "nplurals=2; plural=(n != 1);")]
+    for message in messages.values():
+        forms, fuzzy = known.get(message.key, (None, False))
+        body.append(_entry(message, forms, fuzzy=fuzzy))
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+    with open(out, "w", encoding="utf-8") as f:
+        f.write("\n".join(body))
+    for problem in problems:
+        print(problem)
+    print(f"{len(messages)} texts in {out}")
+    return 1 if problems else 0
+
+
 def main(argv: List[str]) -> int:
     command = argv[1] if len(argv) > 1 else "check"
+    if command == "part":
+        return write_part(argv[2], argv[3], argv[4:])
+    if command == "check-part":
+        messages, problems = extract(argv[3:])
+        problems += check(messages, [os.path.join(ROOT, argv[2])])
+        for problem in problems:
+            print(problem)
+        print(f"{len(messages)} texts, {len(problems)} problems")
+        return 1 if problems else 0
     messages, problems = extract()
     if command == "merge":
         merge(argv[2:])
