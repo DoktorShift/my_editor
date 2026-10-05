@@ -152,8 +152,27 @@ def test_the_build_names_the_service_without_an_environment_value(monkeypatch):
 
 
 @pytest.mark.parametrize("value, expected", [
+    ("https://e21.example/", "https://e21.example"),
+    ("https://e21.example:8443/sidecar", "https://e21.example:8443/sidecar"),
+    ("HTTPS://e21.example", "HTTPS://e21.example"),
     ("http://localhost:8021", "http://localhost:8021"),     # development
+    ("http://LOCALHOST:8021/", "http://LOCALHOST:8021"),
+    ("http://127.0.0.1:8021", "http://127.0.0.1:8021"),
+    ("http://[::1]:8021", "http://[::1]:8021"),
     ("http://e21.example", ""),                              # never plain http on the net
+    ("http://localhost.evil.example", ""),                   # not this computer
+    ("http://127.0.0.1.evil.example", ""),
+    ("http://localhost@evil.example", ""),                   # evil.example, with a user name
+    ("http://localhost:8021@evil.example", ""),
+    ("https://user:secret@e21.example", ""),                 # no credentials in the address
+    ("http://localhost:8021?next=https://evil.example", ""), # no query
+    ("https://e21.example/?x=1", ""),
+    ("https://e21.example/#top", ""),                        # no fragment
+    ("http://localhost:8021#", ""),
+    ("https://e21.example/a b", ""),
+    ("http://localhost:99999", ""),                          # not a port
+    ("https://", ""),
+    ("https:e21.example", ""),
     ("ftp://e21.example", ""),
     ("not a url", ""),
     ("  ", ""),

@@ -56,6 +56,7 @@ import time
 import traceback
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from urllib.parse import urlsplit
 
 from PySide6.QtCore import QByteArray, QObject, QTimer, QUrl, Signal
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
@@ -134,17 +135,37 @@ ENV_SERVICE_URL: str = "MYEDITOR_MEMBERSHIP_SERVICE"
 STATUS_TIMEOUT_MS: int = 8_000
 
 
+# Plain http is allowed to exactly these hosts, for development.
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+_UNSAFE_URL_CHARS = re.compile(r"[\x00-\x20\x7f?#@]")
+
+
 def _usable_service(value: Any) -> str:
-    """An https URL (or http on this computer, for development), without a
-    trailing slash, or ``""``."""
+    """``value`` as an address this app may send signed requests to,
+    without a trailing slash, or ``""``.
+
+    https to any host. Plain http only to this computer, for development:
+    the host must be exactly ``localhost``, ``127.0.0.1`` or ``[::1]``,
+    so ``http://localhost.evil.example`` is not local. No user name or
+    password (``http://localhost@evil.example`` names evil.example), no
+    query and no fragment: none of them belongs in a base address, which
+    the request path is appended to.
+    """
     text = value.strip().rstrip("/") if isinstance(value, str) else ""
-    if not text or not url_safety.origin_of(text):
+    try:
+        parts = urlsplit(text)
+        parts.port  # an invalid port raises here
+    except ValueError:
         return ""
-    lowered = text.lower()
-    if lowered.startswith("https://"):
-        return text
-    local = ("http://localhost", "http://127.0.0.1", "http://[::1]")
-    return text if lowered.startswith(local) else ""
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return ""
+    after_scheme = text[len(parts.scheme) + len("://"):]
+    if not text.lower().startswith(parts.scheme + "://") or _UNSAFE_URL_CHARS.search(after_scheme):
+        return ""
+    if parts.scheme == "http" and parts.hostname not in _LOOPBACK_HOSTS:
+        return ""
+    return text
 
 
 def service_url() -> str:
