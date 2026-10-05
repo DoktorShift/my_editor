@@ -1,5 +1,9 @@
 .venv/
 __pycache__/
+
+# Written by CI from a repository secret just before PyInstaller runs
+# (the EINUNDZWANZIG client key). Never commit it.
+_build_secrets.py
 .pytest_cache/
 *.pyc
 *.pyo

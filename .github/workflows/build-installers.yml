@@ -45,6 +45,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
 
+      # The EINUNDZWANZIG membership API wants a client key that must not
+      # live in git. Write it into an ignored module for this build only.
+      # The key reaches Python through the environment and is never echoed;
+      # without the secret (a fork, a manual test run) nothing is written and
+      # the build ships without in-app joining.
+      - name: Write build secrets
+        shell: bash
+        env:
+          E21_API_KEY: ${{ secrets.E21_API_KEY }}
+        run: python -c "import os; k = os.environ.get('E21_API_KEY', '').strip(); k and open('_build_secrets.py', 'w', encoding='utf-8').write('E21_API_KEY = ' + repr(k) + '\n')"
+
       - name: Build app bundle (PyInstaller)
         run: pyinstaller --noconfirm packaging/my_editor.spec
 
