@@ -73,7 +73,7 @@ Say that the key is for a MyEditor membership sidecar, the server it runs on, an
 
 ## Run it with Docker (recommended)
 
-You need a server with Docker, and a domain name pointing at it (for example `e21.example.org`). Caddy, included here, gets and renews the HTTPS certificate on its own.
+You need a server with Docker, and a domain name pointing at it (for example `e21.example.org`). Caddy, included here, gets and renews the HTTPS certificate on its own. The server's clock must be right, because signatures are valid for a minute only: keep it synchronized with NTP (on most systems `timedatectl set-ntp true`).
 
 1. Get the code:
 
@@ -106,11 +106,13 @@ You need a server with Docker, and a domain name pointing at it (for example `e2
 
 To update, run `git pull`, then `docker compose up -d --build` in the `sidecar` folder.
 
+**IPv6 clients behind Docker.** Unless Docker itself has IPv6 enabled, the Docker proxy that serves the published ports 80 and 443 hands IPv6 connections to Caddy as if they came from the Docker network's gateway. Caddy, and so the per-address limit, then sees one address for every IPv6 client, and they all share one limit. If many of your users connect over IPv6, enable IPv6 in Docker (`"ipv6": true` and `"ip6tables": true` in `/etc/docker/daemon.json`, and `enable_ipv6: true` with an IPv6 subnet for the compose network), or run Caddy with `network_mode: host`.
+
 ---
 
 ## Run it without Docker
 
-Use this on a server that already runs a reverse proxy (Caddy or nginx) for HTTPS.
+Use this on a server that already runs a reverse proxy (Caddy or nginx) for HTTPS. As with Docker, keep the server's clock synchronized with NTP.
 
 1. Create a user and get the code:
 
@@ -143,6 +145,8 @@ Use this on a server that already runs a reverse proxy (Caddy or nginx) for HTTP
    ```
 
 The service listens on `127.0.0.1:8021`. Point your reverse proxy at it.
+
+**Run exactly one sidecar process.** Do not add `--workers` and do not run several copies behind a load balancer. The limits and the record of used signatures live in the process's memory: a second process would double every limit and could accept the same signature a second time.
 
 Caddy:
 

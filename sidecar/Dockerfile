@@ -1,5 +1,6 @@
 # The MyEditor membership sidecar. Build from the repository root:
 #   docker build -f sidecar/Dockerfile -t myeditor-sidecar .
+# Dockerfile.dockerignore next to this file limits what the build sees.
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
@@ -23,6 +24,9 @@ HEALTHCHECK --interval=30s --timeout=5s CMD python -c "import urllib.request, sy
 # the image with its port exposed to the internet would let clients choose
 # their own address and slip past the per-address limit.
 # --no-access-log: uvicorn's access log would record every client address.
+# One process, no --workers, and one replica: the limits and the record of
+# used signatures live in memory, so a second process would double every
+# limit and could accept a signature a second time.
 CMD ["uvicorn", "sidecar.app:app", "--host", "0.0.0.0", "--port", "8021", \
      "--proxy-headers", "--forwarded-allow-ips", "*", "--no-server-header", \
      "--no-access-log"]
