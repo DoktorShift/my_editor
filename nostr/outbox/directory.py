@@ -30,6 +30,7 @@ have it yet.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 import time
@@ -44,6 +45,8 @@ from .lookup import Lookup, fetch_replaceable
 from .policy import KIND_RELAY_LIST, LookupState, RelayList
 
 RELAY_LISTS_FILE = Path.home() / ".config" / "my_editor" / "nostr_relay_lists.json"
+
+logger = logging.getLogger(__name__)
 
 _TTL = {
     LookupState.FOUND: defaults.TTL_FOUND_S,
@@ -124,11 +127,11 @@ class RelayDirectory(QObject):
         Only a validly signed one newer than what is known is kept."""
         if not isinstance(event, dict) or event.get("kind") != KIND_RELAY_LIST:
             return False
-        if not events.verify_event(event):
+        if policy.created_at_of(event) is None or not events.verify_event(event):
             return False
         key = str(event.get("pubkey", "")).lower()
         current = self._entries.get(key)
-        if current is not None and current.found and current.created_at >= int(event.get("created_at", 0)):
+        if current is not None and current.found and not policy.is_newer(event, current.event):
             return False
         self._store(key, self._found(event))
         return True
@@ -206,22 +209,35 @@ class RelayDirectory(QObject):
                     timeout_ms=timeout_ms, parent=self)
 
     def _answered(self, key: str, result: Lookup) -> None:
-        current = self._entries.get(key)
-        if result.state is LookupState.FOUND:
-            if current is None or not current.found or result.event.get("created_at", 0) >= current.created_at:
-                self._store(key, self._found(result.event))
-            else:
-                current.fetched_at = self._clock()
-        elif current is not None and current.found:
-            current.fetched_at = self._clock() - _TTL[LookupState.FOUND] + defaults.TTL_UNKNOWN_S
-        else:
-            self._entries[key] = RelayList(state=result.state, fetched_at=self._clock())
-        answer = self._entries[key]
-        for callback in self._waiting.pop(key, []):
+        # The waiters leave first: whatever happens below, a later lookup
+        # of this person starts afresh instead of queueing behind this one.
+        callbacks = self._waiting.pop(key, [])
+        answer = RelayList(state=LookupState.UNKNOWN)
+        try:
+            answer = self._settle(key, result)
+        except Exception:  # noqa: BLE001, a bad answer must not strand the callers
+            logger.exception("relay list lookup for %s could not be settled", key)
+        for callback in callbacks:
             try:
                 callback(answer)
             except Exception:  # noqa: BLE001, one caller's bug must not break the others
-                pass
+                logger.exception("relay list callback for %s failed", key)
+
+    def _settle(self, key: str, result: Lookup) -> RelayList:
+        """Fold one lookup into what is known, and return what is known."""
+        current = self._entries.get(key)
+        event = result.event if result.state is LookupState.FOUND else None
+        if event is not None and policy.created_at_of(event) is not None:
+            if current is None or not current.found or policy.is_newer(event, current.event):
+                self._store(key, self._found(event))
+            else:
+                current.fetched_at = self._clock()   # what we hold is as new, or newer
+        elif current is not None and current.found:
+            current.fetched_at = self._clock() - _TTL[LookupState.FOUND] + defaults.TTL_UNKNOWN_S
+        else:
+            state = LookupState.UNKNOWN if result.state is LookupState.FOUND else result.state
+            self._entries[key] = RelayList(state=state, fetched_at=self._clock())
+        return self._entries[key]
 
     def _found(self, event: dict) -> RelayList:
         relay_list = policy.parse_relay_list(event)
@@ -247,6 +263,7 @@ class RelayDirectory(QObject):
             return
         for event in (data.get("lists") or {}).values() if isinstance(data, dict) else ():
             if (isinstance(event, dict) and event.get("kind") == KIND_RELAY_LIST
+                    and policy.created_at_of(event) is not None
                     and events.verify_event(event)):
                 relay_list = policy.parse_relay_list(event)
                 relay_list.fetched_at = 0.0   # known, but due for a refresh

@@ -30,7 +30,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from nostr import bunker  # noqa: E402
+from nostr import bunker, events  # noqa: E402
 from nostr.outbox import defaults, policy, writer  # noqa: E402
 from nostr.outbox.directory import RelayDirectory  # noqa: E402
 from nostr.outbox.lookup import Lookup, classify  # noqa: E402
@@ -526,3 +526,62 @@ def test_finishing_later_waits_when_the_network_cant_be_read():
     assert results[0][0] is False and client.requests == []
     # The key may be in a signer app: the message doesn't say where it is.
     assert "on this computer" not in results[0][1]
+
+
+# -- one bad answer never jams the directory (I2, I3) ---------------------------------------
+
+class ParkedQuery:
+    """A lookup that answers only when the test says so."""
+
+    def __init__(self):
+        self.pending = []
+
+    def __call__(self, pool, relays, *, kind, author, on_done, timeout_ms=0, parent=None):
+        self.pending.append(on_done)
+
+
+def test_a_copy_with_a_string_timestamp_cannot_jam_the_directory():
+    real = signed(10002, [["r", "wss://mine.com"]])
+    stringy = dict(real, created_at=str(real["created_at"]))
+    assert events.verify_event(stringy)            # the signature still checks out
+    assert policy.newest_valid([stringy], kind=10002, author=PK) is None
+    assert policy.newest_valid([stringy, real], kind=10002, author=PK) is real
+    clock = Clock()
+    query = FakeQuery({10002: found(real)})
+    d = directory(query, clock=clock)
+    d.lookup(PK, lambda _r: None)
+    settle()
+    query.answers[10002] = found(stringy)          # as a careless query might pass it on
+    got = []
+    d.lookup(PK, got.append, fresh=True)
+    d.lookup(PK, got.append, fresh=True)           # not stuck behind the first
+    settle()
+    assert [g.write for g in got] == [["wss://mine.com"]] * 2
+    assert len(query.calls) == 3
+
+
+def test_remember_breaks_a_tie_by_the_lowest_id():
+    a = signed(10002, [["r", "wss://a.com"]], created_at=NOW)
+    b = signed(10002, [["r", "wss://b.com"]], created_at=NOW)
+    low, high = sorted((a, b), key=lambda e: e["id"])
+    d = directory(FakeQuery())
+    assert d.remember(high) and d.remember(low)
+    assert not d.remember(high)
+    assert d.cached(PK).event["id"] == low["id"]
+    assert not d.remember(dict(low, created_at=str(NOW)))
+
+
+def test_one_failing_caller_is_logged_and_the_others_still_answered(caplog):
+    query = ParkedQuery()
+    d = directory(query)
+    got = []
+
+    def broken(_relay_list):
+        raise RuntimeError("caller bug")
+
+    d.lookup(PK, broken)
+    d.lookup(PK, got.append)
+    assert len(query.pending) == 1                 # coalesced
+    query.pending[0](found(signed(10002, [["r", "wss://mine.com"]])))
+    assert [g.write for g in got] == [["wss://mine.com"]]
+    assert "caller bug" in caplog.text

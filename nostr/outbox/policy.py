@@ -58,7 +58,7 @@ class RelayList:
 
     @property
     def created_at(self) -> int:
-        return int(self.event.get("created_at", 0)) if self.event else 0
+        return created_at_of(self.event) or 0
 
 
 # --------------------------------------------------------------------------- #
@@ -124,12 +124,43 @@ def parse_relay_list(event: dict) -> RelayList:
                      event=event if isinstance(event, dict) else None)
 
 
+def created_at_of(event) -> Optional[int]:
+    """An event's ``created_at`` when it is a real integer, else None.
+
+    A relay can re-serve a validly signed event with ``created_at`` as a
+    string or a float: the signature still checks out (the id is computed
+    over the integer), but comparing it with an integer raises or lies.
+    Such a copy is not competed with at all.
+    """
+    if not isinstance(event, dict):
+        return None
+    value = event.get("created_at")
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def is_newer(event: dict, than: Optional[dict]) -> bool:
+    """Whether ``event`` replaces ``than`` (NIP-01): a later ``created_at``
+    wins, and on equal ones the lowest id. Neither is verified here."""
+    created = created_at_of(event)
+    if created is None:
+        return False
+    if than is None:
+        return True
+    previous = created_at_of(than)
+    if previous is None or created > previous:
+        return True
+    return created == previous and str(event.get("id", "")) < str(than.get("id", ""))
+
+
 def newest_valid(candidates: Iterable[dict], *, kind: int, author: str) -> Optional[dict]:
     """The newest event that really is ``author``'s ``kind``.
 
     The signature is checked before anything competes, so a forged event
     with a large timestamp cannot hide the real one. NIP-01: on equal
-    ``created_at`` the lowest id wins.
+    ``created_at`` the lowest id wins. An event whose ``created_at`` is
+    not an integer does not compete (see created_at_of).
     """
     author = (author or "").lower()
     best: Optional[dict] = None
@@ -138,19 +169,11 @@ def newest_valid(candidates: Iterable[dict], *, kind: int, author: str) -> Optio
             continue
         if str(event.get("pubkey", "")).lower() != author:
             continue
-        try:
-            created = int(event.get("created_at", 0))
-        except (TypeError, ValueError):
-            continue
+        if not is_newer(event, best):
+            continue                      # cheap, before the signature check
         if not events.verify_event(event):
             continue
-        if best is None:
-            best = event
-            continue
-        best_created = int(best.get("created_at", 0))
-        if created > best_created or (created == best_created
-                                      and str(event.get("id")) < str(best.get("id"))):
-            best = event
+        best = event
     return best
 
 
@@ -240,7 +263,7 @@ def merge_profile_content(existing_content: Optional[str],
 def replacement_created_at(base: Optional[dict], now: float) -> int:
     """A replaceable event's time: now, but always after the one it replaces,
     even when this computer's clock runs behind."""
-    previous = int(base.get("created_at", 0)) if isinstance(base, dict) else 0
+    previous = created_at_of(base) or 0
     return max(int(now), previous + 1)
 
 
