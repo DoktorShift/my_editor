@@ -12,10 +12,10 @@ Style brief:
   - Theme-aware (dark + light pair) and Unicode-only glyphs so the
     dialog renders identically on macOS, Windows, and Linux.
 
-The dialog is a static, declarative description of the editor's
-shortcut surface. Editing the shortcuts in code does not need to know
-about this file; we only update ``SHORTCUT_GROUPS`` below when a new
-binding lands.
+The window's commands and their shortcuts come from the command list
+(commands.py, see ``CommandRegistry.shortcut_groups``), so a new or
+changed shortcut shows here by itself. Only keys that are not commands
+(Tab, Esc, the PDF reader's keys) are listed in ``OTHER_KEYS`` below.
 """
 
 from __future__ import annotations
@@ -54,93 +54,53 @@ class ShortcutGroup:
     items: Tuple[Shortcut, ...]
 
 
-SHORTCUT_GROUPS: Tuple[ShortcutGroup, ...] = (
-    ShortcutGroup(
-        title="File",
-        items=(
-            Shortcut("Ctrl+N",          "New tab"),
-            Shortcut("Ctrl+O",          "Open file"),
-            Shortcut("Ctrl+S",          "Save"),
-            Shortcut("Ctrl+Shift+S",    "Save As"),
-            Shortcut("Ctrl+P",          "Print"),
-            Shortcut("Ctrl+Shift+K",    "Knit R Markdown to HTML"),
-            Shortcut("Ctrl+W",          "Close tab"),
-            Shortcut("Ctrl+Q",          "Quit"),
-        ),
-    ),
-    ShortcutGroup(
-        title="Editing",
-        items=(
-            Shortcut("Ctrl+Z",          "Undo"),
-            Shortcut("Ctrl+Y",          "Redo"),
-            Shortcut("Ctrl+Shift+Z",    "Redo"),
-            Shortcut("Tab",             "Indent"),
-            Shortcut("Shift+Tab",       "Outdent"),
-            Shortcut("Enter",           "New line"),
-        ),
-    ),
-    ShortcutGroup(
-        title="Formatting",
-        items=(
-            Shortcut("Ctrl+B",          "Bold"),
-            Shortcut("Ctrl+I",          "Italic"),
-            Shortcut("Ctrl+U",          "Underline"),
-            Shortcut("Ctrl+D",          "Reset to default format"),
-        ),
-    ),
-    ShortcutGroup(
-        title="Search",
-        items=(
-            Shortcut("Ctrl+F",          "Find"),
-            Shortcut("F3",              "Find next"),
-            Shortcut("Shift+F3",        "Find previous"),
-            Shortcut("Enter",           "Next match"),
-            Shortcut("Shift+Enter",     "Previous match"),
-            Shortcut("Esc",             "Close find bar"),
-        ),
-    ),
-    ShortcutGroup(
-        title="View",
-        items=(
-            Shortcut("Ctrl+Shift+T",    "Toggle theme"),
-            Shortcut("Ctrl+Shift+L",    "Toggle line numbers"),
-            Shortcut("Ctrl+Shift+H",    "Toggle syntax highlighting"),
-            Shortcut("F11",             "Full screen (Ctrl+Cmd+F on macOS)"),
-        ),
-    ),
-    ShortcutGroup(
-        title="PDF Reading",
-        items=(
-            Shortcut("Ctrl+F",          "Find in PDF"),
-            Shortcut("Ctrl+C",          "Copy selected text"),
-            Shortcut("Esc",             "Clear selection"),
-            Shortcut("Space",           "Next screenful"),
-            Shortcut("Shift+Space",     "Previous screenful"),
-            Shortcut("J",               "Scroll down"),
-            Shortcut("K",               "Scroll up"),
-            Shortcut("N",               "Next page"),
-            Shortcut("P",               "Previous page"),
-            Shortcut("G",               "Go to page"),
-            Shortcut("Home",            "First page"),
-            Shortcut("End",             "Last page"),
-            Shortcut("Ctrl+=",          "Zoom in (also Ctrl+wheel)"),
-            Shortcut("Ctrl+-",          "Zoom out (also Ctrl+wheel)"),
-            Shortcut("Ctrl+0",          "Fit page width"),
-            Shortcut("Ctrl+1",          "Actual size"),
-            Shortcut("Ctrl+2",          "Fit whole page"),
-            Shortcut("F12",             "Toggle table of contents"),
-        ),
-    ),
-    ShortcutGroup(
-        title="Nostr",
-        items=(
-            Shortcut("Ctrl+Shift+P",    "Publish as note"),
-            Shortcut("Ctrl+Shift+A",    "Publish as article"),
-            Shortcut("Ctrl+Shift+D",    "Toggle Drafts panel"),
-            Shortcut("Ctrl+Shift+S",    "Save As (local or draft)"),
-        ),
-    ),
+# Keys that are not commands of the window: the editor, the find bar
+# and the PDF reader handle them themselves. Everything that IS a command
+# (a menu item with a shortcut) comes from the command list in
+# commands.py, so the two can never disagree.
+OTHER_KEYS: Tuple[Tuple[str, Tuple[Tuple[str, str], ...]], ...] = (
+    ("Editing", (
+        ("Ctrl+Z", "Undo"),
+        ("Ctrl+Y", "Redo"),
+        ("Ctrl+Shift+Z", "Redo"),
+        ("Tab", "Indent"),
+        ("Shift+Tab", "Outdent"),
+        ("Enter", "New line"),
+    )),
+    ("Search", (
+        ("Enter", "Next match"),
+        ("Shift+Enter", "Previous match"),
+        ("Esc", "Close find bar"),
+    )),
+    ("PDF Reading", (
+        ("Ctrl+F", "Find in PDF"),
+        ("Ctrl+C", "Copy selected text"),
+        ("Esc", "Clear selection"),
+        ("Space", "Next screenful"),
+        ("Shift+Space", "Previous screenful"),
+        ("J", "Scroll down"),
+        ("K", "Scroll up"),
+        ("N", "Next page"),
+        ("P", "Previous page"),
+        ("G", "Go to page"),
+        ("Home", "First page"),
+        ("End", "Last page"),
+        ("Ctrl+=", "Zoom in (also Ctrl+wheel)"),
+        ("Ctrl+-", "Zoom out (also Ctrl+wheel)"),
+        ("Ctrl+0", "Fit page width"),
+        ("Ctrl+1", "Actual size"),
+        ("Ctrl+2", "Fit whole page"),
+        ("F12", "Toggle table of contents"),
+    )),
 )
+
+
+def groups_from(rows) -> Tuple[ShortcutGroup, ...]:
+    """``[(title, [(keys, action), ...]), ...]`` (as
+    CommandRegistry.shortcut_groups returns it) as dialog groups."""
+    return tuple(ShortcutGroup(title=title,
+                               items=tuple(Shortcut(keys, action) for keys, action in items))
+                 for title, items in rows)
 
 
 # --------------------------------------------------------------------------- #
@@ -349,9 +309,13 @@ class _ShortcutCard(QFrame):
             action = QLabel(shortcut.action)
             action.setObjectName("shortcut_action")
             action.setWordWrap(True)
+            action.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             row_idx = self._grid.rowCount()
             self._grid.addWidget(keycap, row_idx, 0, Qt.AlignTop | Qt.AlignLeft)
-            self._grid.addWidget(action, row_idx, 1, Qt.AlignTop | Qt.AlignLeft)
+            # No alignment in the cell: the label then takes the column's
+            # width, and a long (or translated) action wraps onto a
+            # second line instead of being cut off.
+            self._grid.addWidget(action, row_idx, 1)
             self._rows.append((keycap, action, shortcut))
 
     def apply_filter(self, needle: str) -> int:
@@ -389,8 +353,10 @@ class ShortcutsDialog(QDialog):
     columns, kbd-style key caps, and a live search across all groups.
     """
 
-    def __init__(self, *, is_dark: bool = True, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, groups, *, is_dark: bool = True,
+                 parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        self._groups = tuple(groups)
         self.setObjectName("shortcuts_dialog")
         self.setWindowTitle("Keyboard Shortcuts")
         self.setModal(True)
@@ -450,7 +416,7 @@ class ShortcutsDialog(QDialog):
         # Build every card up front; ``_reflow_cards`` decides where
         # each one sits in the two-column grid. Reflow runs on every
         # filter change so hidden cards don't leave holes in the layout.
-        for group in SHORTCUT_GROUPS:
+        for group in self._groups:
             self._cards.append(_ShortcutCard(group))
         self._reflow_cards()
 

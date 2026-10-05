@@ -39,6 +39,7 @@ from constants import (
     DARK_BORDER, LIGHT_BORDER, MONO_FONT, APP_DISPLAY_NAME, APP_VERSION, APP_URL
 )
 from widgets import FindBar, HeaderWidget, LineNumberGutter, FileChangedBar, UpdateBar
+from commands import FILE, FORMAT, HELP, NOSTR, SEARCH, VIEW, Command, CommandRegistry
 from doc_walk import iter_blocks, iter_image_names, serialize_plain_with_images
 from markdown_writer import document_to, document_to_markdown, has_local_only_formatting
 from editor import HtmlEditor
@@ -926,89 +927,70 @@ class MainWindow(QMainWindow):
     # ACTIONS / MENU
     # ----------------------------------------------------------------------
     def _build_actions(self):
-        self.act_new = QAction("New", self)
-        self.act_new.setShortcut(QKeySequence.New)
-        self.act_new.triggered.connect(self.new_tab)
+        """Every command of the window, through the one command list
+        (commands.py), which also feeds the Keyboard Shortcuts window."""
+        self.commands = CommandRegistry(self)
+        add = self.commands.add
 
-        self.act_open = QAction("Open…", self)
-        self.act_open.setShortcut(QKeySequence.Open)
-        self.act_open.triggered.connect(self.open_dialog)
-
-        self.act_save = QAction("Save", self)
-        self.act_save.setShortcut(QKeySequence.Save)
-        self.act_save.triggered.connect(self.save)
-
-        self.act_save_as = QAction("Save As…", self)
-        self.act_save_as.setShortcut(QKeySequence("Ctrl+Shift+S"))
+        self.act_new = add(Command("file.new", "New", FILE, QKeySequence.StandardKey.New,
+                                   listed_as="New tab", keywords=("tab", "document")),
+                           triggered=self.new_tab)
+        self.act_open = add(Command("file.open", "Open…", FILE,
+                                    QKeySequence.StandardKey.Open, listed_as="Open file"),
+                            triggered=self.open_dialog)
+        self.act_save = add(Command("file.save", "Save", FILE, QKeySequence.StandardKey.Save),
+                            triggered=self.save)
         # Contextual: behaves as classic Save As when no Nostr profile
         # is connected; otherwise asks where to save (local file vs.
         # encrypted Nostr draft) and remembers the per-tab choice. See
         # ``_on_save_as_pressed`` for the full decision tree.
-        self.act_save_as.triggered.connect(self._on_save_as_pressed)
-
-        self.act_page_setup = QAction("Page Setup…", self)
-        self.act_page_setup.triggered.connect(self._on_page_setup)
-
+        self.act_save_as = add(Command("file.save_as", "Save As…", FILE, "Ctrl+Shift+S"),
+                               triggered=self._on_save_as_pressed)
+        self.act_page_setup = add(Command("file.page_setup", "Page Setup…", FILE),
+                                  triggered=self._on_page_setup)
         # Print prints the current tab as formatted pages (see printing.py);
         # both actions dim when the current tab has nothing to print.
-        self.act_print = QAction("Print\u2026", self)
-        self.act_print.setShortcut(QKeySequence.StandardKey.Print)
-        self.act_print.triggered.connect(self._on_print)
-        self.act_print_preview = QAction("Print Preview\u2026", self)
-        self.act_print_preview.triggered.connect(self._on_print_preview)
-
+        self.act_print = add(Command("file.print", "Print\u2026", FILE,
+                                     QKeySequence.StandardKey.Print),
+                             triggered=self._on_print)
+        self.act_print_preview = add(Command("file.print_preview", "Print Preview\u2026", FILE),
+                                     triggered=self._on_print_preview)
         # Knitting renders the on-disk .Rmd through the R toolchain, so the
         # actions only light up for .Rmd tabs (see _update_knit_actions).
-        self.act_knit_html = QAction("Knit to HTML", self)
-        self.act_knit_html.setShortcut(QKeySequence("Ctrl+Shift+K"))
-        self.act_knit_html.setEnabled(False)
-        self.act_knit_html.triggered.connect(lambda: self._on_knit("html"))
-        self.addAction(self.act_knit_html)
-
-        self.act_knit_pdf = QAction("Knit to PDF", self)
-        self.act_knit_pdf.setEnabled(False)
-        self.act_knit_pdf.triggered.connect(lambda: self._on_knit("pdf"))
-
-        self.act_rmd_toolchain = QAction("R Markdown Toolchain…", self)
-        self.act_rmd_toolchain.triggered.connect(self._on_rmd_toolchain)
-
-        self.act_close_tab = QAction("Close Tab", self)
-        self.act_close_tab.setShortcut(QKeySequence("Ctrl+W"))
-        self.act_close_tab.triggered.connect(self._close_current_tab)
-
-        self.act_quit = QAction("Quit", self)
-        self.act_quit.setShortcut(QKeySequence("Ctrl+Q"))
-        self.act_quit.triggered.connect(self._quit_application)
+        self.act_knit_html = add(Command("file.knit_html", "Knit to HTML", FILE, "Ctrl+Shift+K",
+                                         listed_as="Knit R Markdown to HTML"),
+                                 triggered=lambda: self._on_knit("html"), enabled=False)
+        self.act_knit_pdf = add(Command("file.knit_pdf", "Knit to PDF", FILE),
+                                triggered=lambda: self._on_knit("pdf"), enabled=False)
+        self.act_rmd_toolchain = add(Command("file.rmd_toolchain", "R Markdown Toolchain…", FILE),
+                                     triggered=self._on_rmd_toolchain)
+        self.act_close_tab = add(Command("file.close_tab", "Close Tab", FILE, "Ctrl+W",
+                                         listed_as="Close tab"),
+                                 triggered=self._close_current_tab)
+        self.act_quit = add(Command("file.quit", "Quit", FILE, "Ctrl+Q"),
+                            triggered=self._quit_application)
 
         # Formatting
-        self.act_bold = QAction("Bold", self)
-        self.act_bold.setShortcut(QKeySequence("Ctrl+B"))
-        self.act_bold.triggered.connect(self._fmt_bold)
-
-        self.act_italic = QAction("Italic", self)
-        self.act_italic.setShortcut(QKeySequence("Ctrl+I"))
-        self.act_italic.triggered.connect(self._fmt_italic)
-
-        self.act_underline = QAction("Underline", self)
-        self.act_underline.setShortcut(QKeySequence("Ctrl+U"))
-        self.act_underline.triggered.connect(self._fmt_underline)
-
-        self.act_reset_format = QAction("Reset Format", self)
-        self.act_reset_format.setShortcut(QKeySequence("Ctrl+D"))
-        self.act_reset_format.triggered.connect(self._reset_format)
+        self.act_bold = add(Command("format.bold", "Bold", FORMAT, "Ctrl+B"),
+                            triggered=self._fmt_bold)
+        self.act_italic = add(Command("format.italic", "Italic", FORMAT, "Ctrl+I"),
+                              triggered=self._fmt_italic)
+        self.act_underline = add(Command("format.underline", "Underline", FORMAT, "Ctrl+U"),
+                                 triggered=self._fmt_underline)
+        self.act_reset_format = add(Command("format.reset", "Reset Format", FORMAT, "Ctrl+D",
+                                            listed_as="Reset to default format",
+                                            keywords=("clear", "plain")),
+                                    triggered=self._reset_format)
 
         # Search
-        self.act_find = QAction("Find", self)
-        self.act_find.setShortcut(QKeySequence("Ctrl+F"))
-        self.act_find.triggered.connect(self._toggle_findbar)
-
-        self.act_find_next = QAction("Find Next", self)
-        self.act_find_next.setShortcut(QKeySequence("F3"))
-        self.act_find_next.triggered.connect(self._find_next)
-
-        self.act_find_prev = QAction("Find Previous", self)
-        self.act_find_prev.setShortcut(QKeySequence("Shift+F3"))
-        self.act_find_prev.triggered.connect(self._find_prev)
+        self.act_find = add(Command("search.find", "Find", SEARCH, "Ctrl+F"),
+                            triggered=self._toggle_findbar)
+        self.act_find_next = add(Command("search.next", "Find Next", SEARCH, "F3",
+                                         listed_as="Find next"),
+                                 triggered=self._find_next)
+        self.act_find_prev = add(Command("search.previous", "Find Previous", SEARCH, "Shift+F3",
+                                         listed_as="Find previous"),
+                                 triggered=self._find_prev)
 
         self._search_matches = []
         self._current_match_index = -1
@@ -1016,70 +998,118 @@ class MainWindow(QMainWindow):
         self._search_extra_selections = []
 
         # Theme + line numbers
-        self.act_toggle_theme = QAction("Toggle Dark/Light Theme", self)
-        self.act_toggle_theme.setShortcut(QKeySequence("Ctrl+Shift+T"))
-        self.act_toggle_theme.triggered.connect(self._toggle_theme)
-
-        self.act_toggle_line_numbers = QAction("Show Line Numbers", self)
-        self.act_toggle_line_numbers.setShortcut(QKeySequence("Ctrl+Shift+L"))
-        self.act_toggle_line_numbers.triggered.connect(self._toggle_line_numbers)
-        self.act_toggle_line_numbers.setCheckable(True)
-
-        self.act_toggle_syntax_hl = QAction("Syntax Highlighting", self)
-        self.act_toggle_syntax_hl.setShortcut(QKeySequence("Ctrl+Shift+H"))
-        self.act_toggle_syntax_hl.triggered.connect(self._toggle_syntax_highlighting)
-        self.act_toggle_syntax_hl.setCheckable(True)
-        self.act_toggle_syntax_hl.setChecked(False)
+        self.act_toggle_theme = add(Command("view.theme", "Toggle Dark/Light Theme", VIEW,
+                                            "Ctrl+Shift+T", listed_as="Toggle theme",
+                                            keywords=("dark", "light")),
+                                    triggered=self._toggle_theme)
+        self.act_toggle_line_numbers = add(
+            Command("view.line_numbers", "Show Line Numbers", VIEW, "Ctrl+Shift+L",
+                    checkable=True, listed_as="Toggle line numbers"),
+            triggered=self._toggle_line_numbers)
+        self.act_toggle_syntax_hl = add(
+            Command("view.syntax_highlighting", "Syntax Highlighting", VIEW, "Ctrl+Shift+H",
+                    checkable=True, listed_as="Toggle syntax highlighting"),
+            triggered=self._toggle_syntax_highlighting, checked=False)
 
         # View menu: background viewing aids. All four toggles are independent
         # and composable except the background pattern, which is a radio pick.
-        self.act_paper_mode = QAction("Paper Mode", self)
-        self.act_paper_mode.setCheckable(True)
-        self.act_paper_mode.setChecked(self.paper_mode)
-        self.act_paper_mode.toggled.connect(self._toggle_paper_mode)
+        self.act_paper_mode = add(Command("view.paper_mode", "Paper Mode", VIEW, checkable=True),
+                                  toggled=self._toggle_paper_mode, checked=self.paper_mode)
 
         self._bg_pattern_group = QActionGroup(self)
         self._bg_pattern_group.setExclusive(True)
-
-        self.act_bg_none = QAction("None", self)
-        self.act_bg_lines = QAction("Lines", self)
-        self.act_bg_dashed = QAction("Dashed", self)
-        self.act_bg_dots = QAction("Dots", self)
-        self.act_bg_grid = QAction("Grid", self)
-
-        for name, action in (
-            ("none", self.act_bg_none),
-            ("lines", self.act_bg_lines),
-            ("dashed", self.act_bg_dashed),
-            ("dots", self.act_bg_dots),
-            ("grid", self.act_bg_grid),
-        ):
-            action.setCheckable(True)
-            action.setChecked(self.editor_background == name)
-            action.triggered.connect(lambda checked, n=name: self._set_background_pattern(n))
+        backgrounds = {}
+        for name, title in (("none", "None"), ("lines", "Lines"), ("dashed", "Dashed"),
+                            ("dots", "Dots"), ("grid", "Grid")):
+            action = add(Command(f"view.background.{name}", title, VIEW, checkable=True,
+                                 keywords=("background", "pattern")),
+                         triggered=lambda n=name: self._set_background_pattern(n),
+                         checked=self.editor_background == name)
             self._bg_pattern_group.addAction(action)
+            backgrounds[name] = action
+        self.act_bg_none = backgrounds["none"]
+        self.act_bg_lines = backgrounds["lines"]
+        self.act_bg_dashed = backgrounds["dashed"]
+        self.act_bg_dots = backgrounds["dots"]
+        self.act_bg_grid = backgrounds["grid"]
 
-        self.act_highlight_line = QAction("Highlight Current Line", self)
-        self.act_highlight_line.setCheckable(True)
-        self.act_highlight_line.setChecked(self.highlight_current_line)
-        self.act_highlight_line.toggled.connect(self._toggle_highlight_line)
-
+        self.act_highlight_line = add(Command("view.highlight_line", "Highlight Current Line",
+                                              VIEW, checkable=True),
+                                      toggled=self._toggle_highlight_line,
+                                      checked=self.highlight_current_line)
         # Distraction-free reading and writing: the whole window can go
         # full screen. QKeySequence.FullScreen is F11 on Windows/Linux
         # and Ctrl+Cmd+F on macOS, matching each platform's convention.
-        self.act_fullscreen = QAction("Full Screen", self)
-        self.act_fullscreen.setShortcut(QKeySequence.FullScreen)
-        self.act_fullscreen.setCheckable(True)
-        self.act_fullscreen.toggled.connect(self._toggle_fullscreen)
+        self.act_fullscreen = add(Command("view.fullscreen", "Full Screen", VIEW,
+                                          QKeySequence.StandardKey.FullScreen, checkable=True,
+                                          listed_as="Full screen"),
+                                  toggled=self._toggle_fullscreen)
 
-        self.addAction(self.act_bold)
-        self.addAction(self.act_italic)
-        self.addAction(self.act_underline)
-        self.addAction(self.act_reset_format)
-        self.addAction(self.act_toggle_theme)
-        self.addAction(self.act_toggle_line_numbers)
-        self.addAction(self.act_toggle_syntax_hl)
-        self.addAction(self.act_fullscreen)
+        # Nostr. Only the ones that need an account are marked: Create
+        # Account, Connect Signer, Restore and the membership window are
+        # how a person starts using Nostr.
+        self.act_nostr_publish_note = add(
+            Command("nostr.publish_note", "Publish as Note…", NOSTR, "Ctrl+Shift+P",
+                    nostr=True, listed_as="Publish as note", keywords=("post", "kind 1")),
+            triggered=self._on_nostr_publish_note)
+        self.act_nostr_publish_article = add(
+            Command("nostr.publish_article", "Publish as Article…", NOSTR, "Ctrl+Shift+A",
+                    nostr=True, listed_as="Publish as article", keywords=("long", "blog")),
+            triggered=self._on_nostr_publish_article)
+        # Media (Blossom) - browse the user's uploaded blobs, upload new
+        # ones, or insert one into the current document at the cursor.
+        self.act_nostr_media = add(
+            Command("nostr.media_library", "Media Library…", NOSTR, "Ctrl+Shift+M",
+                    nostr=True, listed_as="Media library", keywords=("images", "upload")),
+            triggered=self._on_nostr_media_library)
+        self.act_nostr_insert_image = add(
+            Command("nostr.insert_image", "Insert Image…", NOSTR, "Ctrl+Shift+I",
+                    nostr=True, listed_as="Insert image", keywords=("picture", "photo")),
+            triggered=self._on_nostr_insert_image)
+        # Drafts surface - the side-docked panel. ``Ctrl+Shift+D`` (D
+        # for Draft) toggles it, sitting alongside the other Ctrl+Shift
+        # Nostr shortcuts.
+        self.act_nostr_drafts = add(
+            Command("nostr.drafts", "Drafts…", NOSTR, "Ctrl+Shift+D", checkable=True,
+                    nostr=True, listed_as="Toggle Drafts panel"),
+            triggered=self._on_toggle_drafts_panel)
+        self.act_membership = add(
+            Command("nostr.membership", "EINUNDZWANZIG Membership\u2026", NOSTR,
+                    keywords=("einundzwanzig", "21", "join")),
+            triggered=self._open_membership_window)
+        self.act_create_account = add(
+            Command("nostr.create_account", "Create Account\u2026", NOSTR,
+                    keywords=("new", "key", "sign up")),
+            triggered=self._on_create_account)
+        self.act_nostr_connect = add(
+            Command("nostr.connect", "Connect Signer…", NOSTR, keywords=("login", "bunker")),
+            triggered=self._on_nostr_connect)
+        self.act_restore_account = add(
+            Command("nostr.restore_account", "Restore Account\u2026", NOSTR,
+                    keywords=("backup", "import")),
+            triggered=self._on_restore_account)
+        self._act_backup_account = add(
+            Command("nostr.backup_account", "Back Up Account\u2026", NOSTR, nostr=True,
+                    keywords=("export", "key")),
+            triggered=self._on_backup_account)
+        self.act_nostr_sign_out = add(
+            Command("nostr.sign_out", "Sign Out Active Profile", NOSTR, nostr=True,
+                    keywords=("log out",)),
+            triggered=self._on_nostr_sign_out)
+
+        # Help
+        self.act_welcome = add(Command("help.welcome", "Welcome", HELP),
+                               triggered=self.show_welcome_tab)
+        self.act_shortcuts = add(Command("help.shortcuts", "Keyboard Shortcuts", HELP,
+                                         keywords=("keys", "cheat sheet")),
+                                 triggered=self._show_shortcuts)
+        self.act_install_help = add(Command("help.install", "Installation Help", HELP),
+                                    triggered=self._open_install_guide)
+        self.act_check_updates = add(Command("help.check_updates", "Check for Updates\u2026",
+                                             HELP, keywords=("upgrade", "version")),
+                                     triggered=self._check_for_updates_manual)
+        self.act_about = add(Command("help.about", "About", HELP),
+                             triggered=self._show_about)
 
     def _build_menu(self):
         m_file = self.menuBar().addMenu("&File")
@@ -1109,7 +1139,18 @@ class MainWindow(QMainWindow):
         m_find.addAction(self.act_find_next)
         m_find.addAction(self.act_find_prev)
 
+        m_format = self.menuBar().addMenu("F&ormat")
+        m_format.addAction(self.act_bold)
+        m_format.addAction(self.act_italic)
+        m_format.addAction(self.act_underline)
+        m_format.addSeparator()
+        m_format.addAction(self.act_reset_format)
+
         m_view = self.menuBar().addMenu("&View")
+        m_view.addAction(self.act_toggle_theme)
+        m_view.addAction(self.act_toggle_line_numbers)
+        m_view.addAction(self.act_toggle_syntax_hl)
+        m_view.addSeparator()
         m_view.addAction(self.act_paper_mode)
         m_view.addSeparator()
         m_background = m_view.addMenu("Background")
@@ -1123,79 +1164,31 @@ class MainWindow(QMainWindow):
         m_view.addAction(self.act_fullscreen)
 
         m_nostr = self.menuBar().addMenu("&Nostr")
-        act_nostr_publish = QAction("Publish as Note…", self)
-        act_nostr_publish.setShortcut(QKeySequence("Ctrl+Shift+P"))
-        act_nostr_publish.triggered.connect(self._on_nostr_publish_note)
-        m_nostr.addAction(act_nostr_publish)
-        act_nostr_publish_article = QAction("Publish as Article…", self)
-        act_nostr_publish_article.setShortcut(QKeySequence("Ctrl+Shift+A"))
-        act_nostr_publish_article.triggered.connect(self._on_nostr_publish_article)
-        m_nostr.addAction(act_nostr_publish_article)
+        m_nostr.addAction(self.act_nostr_publish_note)
+        m_nostr.addAction(self.act_nostr_publish_article)
         m_nostr.addSeparator()
-        # Media (Blossom) - browse the user's uploaded blobs, upload new
-        # ones, or insert one into the current document at the cursor.
-        act_nostr_media = QAction("Media Library…", self)
-        act_nostr_media.setShortcut(QKeySequence("Ctrl+Shift+M"))
-        act_nostr_media.triggered.connect(self._on_nostr_media_library)
-        m_nostr.addAction(act_nostr_media)
-        self.addAction(act_nostr_media)
-        act_nostr_insert_image = QAction("Insert image…", self)
-        act_nostr_insert_image.setShortcut(QKeySequence("Ctrl+Shift+I"))
-        act_nostr_insert_image.triggered.connect(self._on_nostr_insert_image)
-        m_nostr.addAction(act_nostr_insert_image)
-        self.addAction(act_nostr_insert_image)
+        m_nostr.addAction(self.act_nostr_media)
+        m_nostr.addAction(self.act_nostr_insert_image)
         m_nostr.addSeparator()
-        # Drafts surface - the side-docked panel. ``Ctrl+Shift+D`` (D
-        # for Draft) toggles it, sitting alongside the other Ctrl+Shift
-        # Nostr shortcuts.
-        self.act_nostr_drafts = QAction("Drafts…", self)
-        self.act_nostr_drafts.setShortcut(QKeySequence("Ctrl+Shift+D"))
-        self.act_nostr_drafts.setCheckable(True)
-        self.act_nostr_drafts.triggered.connect(self._on_toggle_drafts_panel)
         m_nostr.addAction(self.act_nostr_drafts)
-        # Register globally so the shortcut works even when the menu
-        # bar is hidden (Linux compact themes, full-screen mode).
-        self.addAction(self.act_nostr_drafts)
         m_nostr.addSeparator()
-        act_membership = QAction("EINUNDZWANZIG Membership\u2026", self)
-        act_membership.triggered.connect(self._open_membership_window)
-        m_nostr.addAction(act_membership)
+        m_nostr.addAction(self.act_membership)
         m_nostr.addSeparator()
-        act_create_account = QAction("Create Account\u2026", self)
-        act_create_account.triggered.connect(self._on_create_account)
-        m_nostr.addAction(act_create_account)
-        act_nostr_connect = QAction("Connect Signer…", self)
-        act_nostr_connect.triggered.connect(self._on_nostr_connect)
-        m_nostr.addAction(act_nostr_connect)
-        act_restore_account = QAction("Restore Account\u2026", self)
-        act_restore_account.triggered.connect(self._on_restore_account)
-        m_nostr.addAction(act_restore_account)
-        self._act_backup_account = QAction("Back Up Account\u2026", self)
-        self._act_backup_account.triggered.connect(self._on_backup_account)
+        m_nostr.addAction(self.act_create_account)
+        m_nostr.addAction(self.act_nostr_connect)
+        m_nostr.addAction(self.act_restore_account)
         m_nostr.addAction(self._act_backup_account)
         self._update_account_actions()
-        act_nostr_sign_out = QAction("Sign Out Active Profile", self)
-        act_nostr_sign_out.triggered.connect(self._on_nostr_sign_out)
-        m_nostr.addAction(act_nostr_sign_out)
+        m_nostr.addAction(self.act_nostr_sign_out)
 
         help_menu = self.menuBar().addMenu("&Help")
-        welcome_action = QAction("Welcome", self)
-        welcome_action.triggered.connect(self.show_welcome_tab)
-        help_menu.addAction(welcome_action)
-        shortcuts_action = QAction("Keyboard Shortcuts", self)
-        shortcuts_action.triggered.connect(self._show_shortcuts)
-        help_menu.addAction(shortcuts_action)
+        help_menu.addAction(self.act_welcome)
+        help_menu.addAction(self.act_shortcuts)
         help_menu.addSeparator()
-        install_help_action = QAction("Installation Help", self)
-        install_help_action.triggered.connect(self._open_install_guide)
-        help_menu.addAction(install_help_action)
-        check_updates_action = QAction("Check for Updates\u2026", self)
-        check_updates_action.triggered.connect(self._check_for_updates_manual)
-        help_menu.addAction(check_updates_action)
+        help_menu.addAction(self.act_install_help)
+        help_menu.addAction(self.act_check_updates)
         help_menu.addSeparator()
-        about_action = QAction("About", self)
-        about_action.triggered.connect(self._show_about)
-        help_menu.addAction(about_action)
+        help_menu.addAction(self.act_about)
 
     def _build_status_bar_view_toggle(self):
         """Quick status-bar toggle for Paper Mode, mirroring the View menu item."""
@@ -2851,8 +2844,9 @@ class MainWindow(QMainWindow):
         searchable, themed, category-grouped surface in keeping with
         how major desktop apps display their keyboard reference.
         """
-        from shortcuts_dialog import ShortcutsDialog
-        dlg = ShortcutsDialog(is_dark=self.is_dark_theme, parent=self)
+        from shortcuts_dialog import OTHER_KEYS, ShortcutsDialog, groups_from
+        groups = groups_from(self.commands.shortcut_groups(OTHER_KEYS))
+        dlg = ShortcutsDialog(groups, is_dark=self.is_dark_theme, parent=self)
         dlg.exec()
 
     def _show_about(self):

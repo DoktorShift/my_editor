@@ -1,0 +1,215 @@
+# SPDX-FileCopyrightText: 2026 rinbal
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""Pins the one command list behind the menus and the shortcut list.
+
+What must hold:
+
+  A command becomes one action of the window, with its title, shortcut
+  and handler, and works without the menu bar.
+
+  No two commands share an id or a shortcut: the second is refused when
+  it is added, so a clash fails here and not in a user's hands.
+
+  Every action in the menus is a registered command, and every
+  registered command is in a menu.
+
+  The Keyboard Shortcuts window lists exactly the commands' shortcuts
+  (plus keys that are not commands), so it cannot drift from the menus.
+
+  Nostr commands are marked, so surfaces that follow the Nostr state
+  can leave them out.
+"""
+
+import ast
+import inspect
+import os
+import sys
+import textwrap
+
+import pytest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from PySide6.QtGui import QKeySequence  # noqa: E402
+from PySide6.QtWidgets import QApplication, QMainWindow, QMenu  # noqa: E402
+
+import commands  # noqa: E402
+from commands import Command, CommandRegistry, key_text  # noqa: E402
+
+
+@pytest.fixture(scope="module", autouse=True)
+def qt_app():
+    return QApplication.instance() or QApplication([])
+
+
+@pytest.fixture
+def window():
+    return QMainWindow()
+
+
+# -- the registry ---------------------------------------------------------------------
+
+def test_a_command_becomes_an_action_of_the_window(window):
+    ran = []
+    registry = CommandRegistry(window)
+    action = registry.add(Command("file.save", "Save", commands.FILE, "Ctrl+S"),
+                          triggered=lambda: ran.append(True))
+    assert action.text() == "Save"
+    assert action.shortcut() == QKeySequence("Ctrl+S")
+    assert action in window.actions()           # works without the menu bar
+    assert registry.action("file.save") is action
+    action.trigger()
+    assert ran == [True]
+
+
+def test_a_checkable_command_reports_its_state(window):
+    states = []
+    registry = CommandRegistry(window)
+    action = registry.add(Command("view.paper", "Paper Mode", commands.VIEW, checkable=True),
+                          toggled=states.append, checked=False)
+    action.trigger()
+    assert action.isChecked() and states == [True]
+
+
+def test_two_commands_never_share_an_id(window):
+    registry = CommandRegistry(window)
+    registry.add(Command("a", "A", commands.FILE))
+    with pytest.raises(ValueError):
+        registry.add(Command("a", "Another A", commands.FILE))
+
+
+def test_two_commands_never_share_a_shortcut(window):
+    registry = CommandRegistry(window)
+    registry.add(Command("one", "One", commands.FILE, "Ctrl+Shift+S"))
+    with pytest.raises(ValueError, match="Ctrl\\+Shift\\+S"):
+        registry.add(Command("two", "Two", commands.NOSTR, QKeySequence("Ctrl+Shift+S")))
+
+
+def test_a_command_needs_a_known_group(window):
+    with pytest.raises(ValueError):
+        CommandRegistry(window).add(Command("x", "X", "Somewhere"))
+
+
+def test_finding_commands_by_words(window):
+    registry = CommandRegistry(window)
+    registry.add(Command("nostr.publish_note", "Publish as Note…", commands.NOSTR, nostr=True,
+                         keywords=("post",)), triggered=lambda: None)
+    registry.add(Command("file.print", "Print…", commands.FILE), triggered=lambda: None)
+    assert [c.id for c in registry.find("post", nostr=True)] == ["nostr.publish_note"]
+    assert registry.find("post", nostr=False) == []            # Nostr not in use
+    assert [c.id for c in registry.find("PRI", nostr=False)] == ["file.print"]
+    registry.action("file.print").setEnabled(False)
+    assert registry.find("print", nostr=False) == []           # not now
+
+
+def test_the_shortcut_list_comes_from_the_commands(window):
+    registry = CommandRegistry(window)
+    registry.add(Command("file.save", "Save", commands.FILE, "Ctrl+S"))
+    registry.add(Command("file.save_as", "Save As…", commands.FILE, "Ctrl+Shift+S"))
+    registry.add(Command("view.theme", "Toggle Dark/Light Theme", commands.VIEW, "Ctrl+Shift+T",
+                         listed_as="Toggle theme"))
+    registry.add(Command("file.page_setup", "Page Setup…", commands.FILE))    # no shortcut
+    registry.add(Command("nostr.drafts", "Drafts…", commands.NOSTR, "Ctrl+Shift+D",
+                         nostr=True))
+    groups = registry.shortcut_groups([("Editing", [("Tab", "Indent")])])
+    assert groups == [
+        ("File", [("Ctrl+S", "Save"), ("Ctrl+Shift+S", "Save As")]),
+        ("Editing", [("Tab", "Indent")]),
+        ("View", [("Ctrl+Shift+T", "Toggle theme")]),
+        ("Nostr", [("Ctrl+Shift+D", "Drafts")]),
+    ]
+    assert ("Nostr", [("Ctrl+Shift+D", "Drafts")]) not in registry.shortcut_groups(nostr=False)
+
+
+def test_standard_keys_are_written_out():
+    assert key_text(QKeySequence.StandardKey.Save) == "Ctrl+S"
+    assert key_text(None) == ""
+
+
+# -- the window's own commands -----------------------------------------------------------
+
+class StandIn(QMainWindow):
+    """Just enough of MainWindow to build its actions and menus."""
+
+    paper_mode = False
+    editor_background = "none"
+    highlight_current_line = False
+
+    def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return lambda *args, **kwargs: None
+
+
+@pytest.fixture(scope="module")
+def main_window_commands(qt_app):
+    from main_window import MainWindow
+    stand_in = StandIn()
+    MainWindow._build_actions(stand_in)
+    MainWindow._build_menu(stand_in)
+    return stand_in
+
+
+def menu_actions(menu: QMenu, skip=("Recent Files",)):
+    for action in menu.actions():
+        if action.menu() is not None:
+            if action.text() not in skip:
+                yield from menu_actions(action.menu(), skip)
+        elif not action.isSeparator():
+            yield action
+
+
+def test_every_menu_item_is_a_registered_command(main_window_commands):
+    win = main_window_commands
+    in_menus = [a for top in win.menuBar().actions() for a in menu_actions(top.menu())]
+    assert in_menus
+    for action in in_menus:
+        assert action.objectName() in win.commands, f"{action.text()} is not a command"
+    registered = {c.id for c in win.commands.commands()}
+    shown = {a.objectName() for a in in_menus}
+    # Print Preview is offered only where the platform has one.
+    assert registered - shown <= {"file.print_preview"}
+
+
+def test_the_menus_build_their_actions_through_the_registry():
+    from main_window import MainWindow
+    for method in (MainWindow._build_actions, MainWindow._build_menu):
+        tree = ast.parse(textwrap.dedent(inspect.getsource(method)))
+        made = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+                and getattr(n.func, "id", "") == "QAction"]
+        assert made == [], f"{method.__name__} makes a QAction outside the command list"
+
+
+def test_the_shortcut_window_lists_every_command_shortcut(main_window_commands):
+    from shortcuts_dialog import OTHER_KEYS
+    win = main_window_commands
+    listed = {(keys, words) for _group, items in win.commands.shortcut_groups(OTHER_KEYS)
+              for keys, words in items}
+    for command in win.commands.commands():
+        if command.shortcut is not None:
+            assert any(keys == key_text(command.shortcut) for keys, _w in listed), command.id
+    # The Media Library's shortcut was missing from the old hand-kept list.
+    assert ("Ctrl+Shift+M", "Media library") in listed
+
+
+def test_the_nostr_commands_that_need_an_account_are_marked(main_window_commands):
+    win = main_window_commands
+    marked = {c.id for c in win.commands.commands() if c.nostr}
+    assert {"nostr.publish_note", "nostr.publish_article", "nostr.drafts",
+            "nostr.media_library", "nostr.insert_image", "nostr.sign_out",
+            "nostr.backup_account"} <= marked
+    # How a person starts using Nostr is never hidden behind Nostr.
+    assert not marked & {"nostr.connect", "nostr.create_account", "nostr.restore_account",
+                         "nostr.membership"}
+
+
+def test_menu_titles_follow_title_case_and_no_em_dashes(main_window_commands):
+    small = {"a", "an", "and", "as", "for", "in", "of", "on", "or", "the", "to"}
+    for command in main_window_commands.commands.commands():
+        assert "\u2014" not in command.title
+        words = command.title.rstrip("…").replace("/", " ").split()
+        for index, word in enumerate(words):
+            if word.lower() in small and index:
+                continue
+            assert word[0].isupper() or not word[0].isalpha(), command.title

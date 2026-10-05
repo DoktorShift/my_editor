@@ -70,10 +70,26 @@ def test_the_header_checkbox_starts_unchecked():
     assert values[0] is False
 
 
+def registered_checked(path, command_id):
+    """The literal ``checked=`` a command is registered with (commands.py),
+    for the call whose Command names ``command_id``."""
+    tree = ast.parse((ROOT / path).read_text())
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not node.args:
+            continue
+        first = node.args[0]
+        if not (isinstance(first, ast.Call) and getattr(first.func, "id", "") == "Command"
+                and first.args and isinstance(first.args[0], ast.Constant)
+                and first.args[0].value == command_id):
+            continue
+        for keyword in node.keywords:
+            if keyword.arg == "checked" and isinstance(keyword.value, ast.Constant):
+                return keyword.value.value
+    return None
+
+
 def test_the_menu_item_starts_unchecked():
-    values = calls_with_bool("main_window.py", "act_toggle_syntax_hl", "setChecked")
-    assert values, "the menu action never gets a literal state"
-    assert values[0] is False
+    assert registered_checked("main_window.py", "view.syntax_highlighting") is False
 
 
 def test_it_matches_line_numbers_which_were_already_off():
