@@ -21,15 +21,16 @@ Reading is forgiving on purpose, because the file may have been printed,
 retyped, or pasted into an email: the first ``ncryptsec1...`` or
 ``nsec1...`` anywhere in the text is the key, and a bare 64-character hex
 key is accepted from the paste field. Never from a file: a file full of
-hex (an event id, a hash) would be guessed at.
+hex (an event id, a hash) would be guessed at. A pasted hex key that is the
+public key of an account MyEditor knows is refused as what it is.
 """
 
 from __future__ import annotations
 
 import datetime
 import re
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Iterable, Optional
 
 from nostr import bech32, crypto, nip49
 
@@ -45,12 +46,13 @@ class FoundKey:
     """A key found in a file or a paste.
 
     ``protected`` keys need ``open_with(password)``; an unprotected one
-    already carries ``secret``.
+    already carries ``secret``. Neither the key text nor the secret is
+    part of its repr, so a log line or a traceback never carries a key.
     """
 
-    text: str
+    text: str = field(repr=False)
     protected: bool
-    secret: Optional[bytes] = None
+    secret: Optional[bytes] = field(default=None, repr=False)
 
     def open_with(self, password: str) -> bytes:
         """The secret key, or nip49.Nip49Error."""
@@ -103,8 +105,17 @@ def backup_text(secret_key: bytes, *, password: Optional[str],
     ])
 
 
-def find_key(text: str, *, allow_hex: bool = False) -> FoundKey:
-    """The key in ``text``, protected or not. BackupError when there is none."""
+_PUBLIC_KEY = ("That is a public key. It shows who you are but can’t sign in. "
+               "Use the private key from your backup.")
+
+
+def find_key(text: str, *, allow_hex: bool = False,
+             public_keys: Iterable[str] = ()) -> FoundKey:
+    """The key in ``text``, protected or not. BackupError when there is none.
+
+    ``public_keys`` are the hex public keys of accounts MyEditor knows: a
+    pasted hex key equal to one of them is a public key, not a private one.
+    """
     text = text or ""
     match = _NCRYPTSEC.search(text)
     if match:
@@ -120,11 +131,12 @@ def find_key(text: str, *, allow_hex: bool = False) -> FoundKey:
                         secret=_checked(secret))
     candidate = text.strip()
     if allow_hex and _HEX.match(candidate):
+        if candidate.lower() in {(k or "").lower() for k in public_keys}:
+            raise BackupError(_PUBLIC_KEY)
         return FoundKey(text=candidate.lower(), protected=False,
                         secret=_checked(bytes.fromhex(candidate)))
     if candidate.lower().startswith("npub1"):
-        raise BackupError("That is a public key. It shows who you are but can’t "
-                          "sign in. Use the private key from your backup.")
+        raise BackupError(_PUBLIC_KEY)
     raise BackupError("No private key was found. Choose the backup file you saved "
                       "when you created the account, or paste the whole key.")
 

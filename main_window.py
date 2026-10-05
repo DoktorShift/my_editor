@@ -3490,12 +3490,17 @@ class MainWindow(QMainWindow):
         window.finished.connect(window.deleteLater)
         window.open()
 
-    def _pair_signer_for_account(self, on_profile) -> None:
-        """Pair a signer app for Create Account, which checks the account."""
-        dialog = ConnectDialog(self._relay_pool, self._profile_store, parent=self,
-                               is_dark=self.is_dark_theme)
+    def _pair_signer_for_account(self, on_profile, parent=None) -> None:
+        """Pair a signer app for Create Account, over its window. Nothing is
+        saved here: the window checks the account first."""
+        dialog = ConnectDialog(self._relay_pool, self._profile_store, parent=parent or self,
+                               is_dark=self.is_dark_theme, persist=False, start_on_qr=True,
+                               offer_alternatives=False)
         dialog.profile_connected.connect(on_profile)
-        dialog.exec()
+        try:
+            dialog.exec()
+        finally:
+            dialog.deleteLater()
 
     # -- the network side of an account (NIP-65 and the profile) ---------------
 

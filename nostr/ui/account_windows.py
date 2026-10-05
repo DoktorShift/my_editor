@@ -1,22 +1,26 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Create a Nostr account, or restore one from its backup.
+"""Create a Nostr account, restore one from its backup, or back one up.
 
-Two assistant windows (nostr/ui/assistant.py), reached from the Nostr menu
-and from the connect dialog. They follow nostrdesign.org as well as
-Apple's guidelines:
+In this module, in order: the backup form and Back Up Account (any time,
+for an account whose key is kept here), then Create Account, then Restore
+Account. Each window is an assistant (nostr/ui/assistant.py), reached from
+the Nostr menu and from the connect dialog. They follow nostrdesign.org as
+well as Apple's guidelines:
 
 - Plain words. A private key is explained as a password that can never be
   reset; protocol names stay out of the copy.
 - The private key is never shown on screen, not even partly. It can be
-  copied (and is taken off the clipboard again after a minute) or saved
-  in a backup file. The one exception is the code Amber scans, which is
-  shown only on request, on the page that says what it is for.
+  copied (marked as a secret, and taken off the clipboard again after a
+  minute) or saved in a backup file. The one exception is the code Amber
+  scans, which is shown only on request, on the page that says what it is
+  for.
 - The backup is asked for right after the key exists, because there is no
   reset. Skipping is allowed, after an alert that says what it costs.
 - The backup file is protected by a password by default (NIP-49, which
   other Nostr apps import as well); an unprotected file needs a second,
-  explicit choice.
+  explicit choice. Protecting it takes a second of deliberate work, done
+  off the UI thread like unlocking one.
 - Pasting a private key is the least prominent way in, with a warning,
   because a pasted key is how keys leak.
 
@@ -24,8 +28,9 @@ Create Account then asks where the key should live: on this computer
 (MyEditor signs with it, nostr/local_signer.py), or in Amber on the
 person's phone, with a guided import and pairing (the Lotus "move to a
 signer" flow). Either way the window hands the finished profile to the
-main window, which publishes the profile and relay list and reports each
-step back through a SetupReport.
+account controller (nostr/account_controller.py), which publishes the
+relay list and then the profile, and reports each step back through a
+SetupReport. The window can be closed while that runs; the work goes on.
 """
 
 from __future__ import annotations
@@ -33,7 +38,8 @@ from __future__ import annotations
 import os
 from typing import Callable, Optional
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Qt, Signal
+import shiboken6
+from PySide6.QtCore import QEvent, QObject, QRunnable, QThreadPool, Qt, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -76,10 +82,15 @@ DONE = "done"
 OPEN = "open"
 PASSWORD = "password"
 
-# Setup steps, reported by the main window.
+# Setup steps, in the order the account controller works through them.
 STEP_SAVED = "saved"
-STEP_PROFILE = "profile"
 STEP_RELAYS = "relays"
+STEP_PROFILE = "profile"
+
+KEY_NOT_SAVED = ("Your key couldn’t be saved on this computer. Make sure the disk "
+                 "has free space, then try again.")
+CLOSE_ANY_TIME = "You can close this window. MyEditor keeps going in the background."
+FINISH_LATER = "If you finish later, MyEditor tries again the next time you open it."
 
 
 def short_npub(pubkey_hex: str) -> str:
@@ -95,10 +106,13 @@ def local_profile(pubkey_hex: str, *, relays=None) -> Profile:
 
 
 class SetupReport(QObject):
-    """How the main window reports publishing a new or restored account.
+    """How the account controller reports publishing a new or restored
+    account to the window that shows it.
 
-    ``retry``, when the main window sets it, sends the same work again
-    (for a new account: the very events signed the first time).
+    ``retry``, when the controller sets it, sends the same work again (for
+    a new account: the very events signed the first time). The report
+    belongs to the window; the controller never relies on it outliving
+    the window.
     """
 
     step = Signal(str, str, str)     # step key, state, detail
@@ -110,7 +124,7 @@ class SetupReport(QObject):
 
 
 class _Job(QRunnable):
-    """Run ``work`` off the UI thread (unlocking a protected key takes a
+    """Run ``work`` off the UI thread (protecting or unlocking a key takes a
     second of deliberate effort) and deliver its result on the UI thread."""
 
     class _Signals(QObject):
@@ -146,22 +160,28 @@ def _password_row(form: QFormLayout, label: str, placeholder: str = "") -> QLine
     return field
 
 
-def _save_backup_file(parent, secret: bytes, *, password: Optional[str]) -> Optional[str]:
-    """Ask where, write the file, return its path (None when canceled)."""
-    pubkey = crypto.get_public_key(secret).hex()
-    start = os.path.join(os.path.expanduser("~"), "Documents", suggested_file_name(pubkey))
+def choose_backup_path(parent, pubkey_hex: str) -> Optional[str]:
+    """Ask where the backup goes; None when canceled."""
+    start = os.path.join(os.path.expanduser("~"), "Documents", suggested_file_name(pubkey_hex))
     path, _ = QFileDialog.getSaveFileName(parent, "Save Backup File", start,
                                           "Text files (*.txt)")
-    if not path:
-        return None
-    text = backup_text(secret, password=password)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(text)
+    return path or None
+
+
+def write_backup_file(path: str, text: str) -> None:
+    """Write ``text`` to ``path``, readable by this user only from the
+    first byte on: the file is created with those permissions, and an
+    existing file gets them before anything is written to it."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
-    return path
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
+        data = text.encode("utf-8")
+        while data:
+            data = data[os.write(fd, data):]
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 # =============================================================================
@@ -176,11 +196,15 @@ class BackupForm(QWidget):
     backed_up = Signal(str)
 
     def __init__(self, *, secret: Callable[[], Optional[bytes]],
-                 save_backup=_save_backup_file, is_dark: bool = True, parent=None):
+                 choose_path=choose_backup_path, write_file=write_backup_file,
+                 is_dark: bool = True, parent=None):
         super().__init__(parent)
         self._secret = secret
-        self._save_backup = save_backup
+        self._choose_path = choose_path
+        self._write_file = write_file
         self._is_dark = is_dark
+        self._saving = False
+        self._keep_alive: list = []
         col = QVBoxLayout(self)
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(10)
@@ -209,16 +233,22 @@ class BackupForm(QWidget):
             "help"))
         for field in (self.password, self.confirm):
             field.textChanged.connect(self._check_password)
+            # Return in a password field saves the file; it must never reach
+            # the window's default button, which would close the window or
+            # move on without a backup.
+            field.installEventFilter(self)
 
         actions = QHBoxLayout()
-        self.save_button = QPushButton("Save Backup File\u2026")
+        self.save_button = QPushButton("Save Backup File…")
         self.save_button.setAutoDefault(False)
         self.save_button.clicked.connect(self.save_protected)
         actions.addWidget(self.save_button)
         actions.addSpacing(16)
-        actions.addWidget(link_button("Copy Private Key", self.copy_private_key))
+        self._copy_link = link_button("Copy Private Key", self.copy_private_key)
+        actions.addWidget(self._copy_link)
         actions.addSpacing(16)
-        actions.addWidget(link_button("Save Without a Password\u2026", self.save_plain))
+        self._plain_link = link_button("Save Without a Password…", self.save_plain)
+        actions.addWidget(self._plain_link)
         actions.addStretch(1)
         col.addLayout(actions)
         self.note = text_label("", "muted")
@@ -233,11 +263,28 @@ class BackupForm(QWidget):
             self._npub_label.setToolTip(bech32.encode_npub(pubkey))
         self._check_password()
 
+    @property
+    def saving(self) -> bool:
+        return self._saving
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802, Qt's name
+        # Only Return is looked at, and nothing else is touched for any
+        # other event: filters also see the fields' events while the form
+        # is being torn down.
+        if event.type() != QEvent.KeyPress or event.key() not in (Qt.Key_Return,
+                                                                   Qt.Key_Enter):
+            return False
+        if watched is self.password and not self.confirm.text():
+            self.confirm.setFocus()
+        else:
+            self.save_protected()
+        return True
+
     def _check_password(self) -> None:
         problem = password_problem(self.password.text(), self.confirm.text())
         self._password_error.setText(problem or "")
         self._password_error.setVisible(bool(problem) and bool(self.confirm.text()))
-        self.save_button.setEnabled(problem is None)
+        self.save_button.setEnabled(problem is None and not self._saving)
 
     def _done(self, note: str) -> None:
         self.note.setText(note)
@@ -246,6 +293,7 @@ class BackupForm(QWidget):
 
     def save_protected(self) -> None:
         if password_problem(self.password.text(), self.confirm.text()):
+            self._check_password()
             return
         self._write(self.password.text())
 
@@ -259,19 +307,50 @@ class BackupForm(QWidget):
         if choice is True:
             self._write(None)
 
-    def _write(self, password: Optional[str]) -> None:
-        try:
-            path = self._save_backup(self.window(), self._secret(), password=password)
-        except OSError as exc:
-            self.note.setText(f"The backup couldn\u2019t be saved: {exc}")
+    def _set_saving(self, saving: bool) -> None:
+        self._saving = saving
+        for widget in (self.password, self.confirm, self._copy_link, self._plain_link):
+            widget.setEnabled(not saving)
+        if saving:
+            self.note.setText("Saving the backup…")
             self.note.show()
+        self._check_password()
+
+    def _write(self, password: Optional[str]) -> None:
+        secret = self._secret()
+        if self._saving or secret is None:
             return
-        if path:
-            self._done(f"\u2713 Backup saved to {path}")
+        path = self._choose_path(self.window(), crypto.get_public_key(secret).hex())
+        if not path:
+            return
+        self._set_saving(True)
+        write_file = self._write_file
+
+        def work() -> str:
+            write_file(path, backup_text(secret, password=password))
+            return path
+
+        def done(_result, error) -> None:
+            # The file is written even when the window was closed meanwhile;
+            # only the words about it have nowhere to go.
+            if not shiboken6.isValid(self):
+                return
+            self._set_saving(False)
+            if error is not None:
+                self.note.setText("The backup couldn’t be saved there. Choose "
+                                  "another folder and try again.")
+                self.note.show()
+                return
+            self._done(f"✓ Backup saved to {path}")
+
+        run_in_background(work, done, keep_alive=self._keep_alive)
 
     def copy_private_key(self) -> None:
-        copy_secret(bech32.encode_nsec(self._secret().hex()))
-        self._done("\u2713 Private key copied. Paste it somewhere only you can reach. "
+        secret = self._secret()
+        if secret is None:
+            return
+        copy_secret(bech32.encode_nsec(secret.hex()))
+        self._done("✓ Private key copied. Paste it somewhere only you can reach. "
                    "MyEditor clears it from the clipboard in a minute.")
 
     def _copy_npub(self) -> None:
@@ -284,8 +363,8 @@ class BackupForm(QWidget):
 class BackupAccountWindow(AssistantWindow):
     """Back up an account whose key is kept on this computer, any time."""
 
-    def __init__(self, *, secret: bytes, save_backup=_save_backup_file,
-                 is_dark: bool = True, parent=None):
+    def __init__(self, *, secret: bytes, choose_path=choose_backup_path,
+                 write_file=write_backup_file, is_dark: bool = True, parent=None):
         super().__init__("Back Up Account", is_dark=is_dark, parent=parent)
         self._secret = secret
         widget, col = page()
@@ -293,8 +372,8 @@ class BackupAccountWindow(AssistantWindow):
         col.addWidget(text_label(
             "Nostr has no password reset. A backup lets you restore this account on "
             "another computer, or here if this one is reset."))
-        self.backup_form = BackupForm(secret=lambda: self._secret,
-                                      save_backup=save_backup, is_dark=is_dark)
+        self.backup_form = BackupForm(secret=lambda: self._secret, choose_path=choose_path,
+                                      write_file=write_file, is_dark=is_dark)
         col.addWidget(self.backup_form)
         col.addStretch(1)
         self.add_page(BACKUP, widget)
@@ -316,22 +395,24 @@ class CreateAccountWindow(AssistantWindow):
     account_ready = Signal(object, str, object)   # Profile, name, SetupReport
     link_activated = Signal(str)
 
-    def __init__(self, *, store, vault, connect_signer: Callable[[Callable[[object], None]], None],
+    def __init__(self, *, store, vault, connect_signer: Callable[..., None],
                  is_dark: bool = True, generate=crypto.generate_secret_key,
-                 save_backup=_save_backup_file, parent=None):
-        """``connect_signer(on_profile)`` opens the signer pairing and calls
-        back with the paired Profile. ``generate`` and ``save_backup`` are
-        seams for tests."""
+                 choose_path=choose_backup_path, write_file=write_backup_file, parent=None):
+        """``connect_signer(on_profile, parent=window)`` opens the signer
+        pairing over this window and calls back with the paired Profile,
+        unsaved: this window saves it once it is the new account.
+        ``generate``, ``choose_path`` and ``write_file`` are seams for tests."""
         super().__init__("Create Nostr Account", is_dark=is_dark, parent=parent)
         self._store = store
         self._vault = vault
         self._connect_signer = connect_signer
         self._generate = generate
-        self._save_backup = save_backup
+        self._choose_path = choose_path
+        self._write_file = write_file
         self._secret: Optional[bytes] = None
         self._pubkey = ""
         self._backed_up = False
-        self._keep_alive: list = []
+        self._report: Optional[SetupReport] = None
 
         self._build_name()
         self._build_backup()
@@ -393,7 +474,8 @@ class CreateAccountWindow(AssistantWindow):
             "that can never be changed, and it is the only way back into this "
             "account. Save a backup now."))
         self.backup_form = BackupForm(secret=lambda: self._secret,
-                                      save_backup=self._save_backup, is_dark=self._is_dark)
+                                      choose_path=self._choose_path,
+                                      write_file=self._write_file, is_dark=self._is_dark)
         self.backup_form.backed_up.connect(self._backup_done)
         col.addWidget(self.backup_form)
         col.addStretch(1)
@@ -444,6 +526,9 @@ class CreateAccountWindow(AssistantWindow):
         col.addWidget(self._indented(text_label(
             "Your private key lives in Amber on your Android phone, and you approve "
             "what MyEditor signs there. Safer, and a few more steps.", "muted")))
+        self._choose_error = text_label("", "error")
+        self._choose_error.hide()
+        col.addWidget(self._choose_error)
         col.addStretch(1)
         self.add_page(CHOOSE, widget)
 
@@ -456,6 +541,7 @@ class CreateAccountWindow(AssistantWindow):
         return box
 
     def _show_choose(self) -> None:
+        self._choose_error.hide()
         self.show_page(CHOOSE, [("back", "Go Back", LEADING, self._show_backup),
                                 ("continue", "Continue", DEFAULT, self._chosen)])
 
@@ -466,10 +552,15 @@ class CreateAccountWindow(AssistantWindow):
             self._finish_local()
 
     def _finish_local(self) -> None:
-        self._vault.store(self._secret)
         profile = local_profile(self._pubkey)
         profile.display_name = self.name
-        self._store.upsert(profile)
+        try:
+            self._vault.store(self._secret)
+            self._store.upsert(profile)
+        except OSError:
+            self._choose_error.setText(KEY_NOT_SAVED)
+            self._choose_error.show()
+            return
         self._start_setup(profile, saved_detail="Your key is kept on this computer.")
 
     # -- Amber -------------------------------------------------------------------
@@ -535,9 +626,9 @@ class CreateAccountWindow(AssistantWindow):
             self._qr.hide()
             self._qr_button.setText("Show Code for Amber")
             return
+        # The key exactly as Amber imports it: a lowercase nsec.
         nsec = bech32.encode_nsec(self._secret.hex())
-        self._qr.setPixmap(make_qr_pixmap(nsec.upper(), size=200,
-                                          dark="#000000", light="#FFFFFF"))
+        self._qr.setPixmap(make_qr_pixmap(nsec, size=200, dark="#000000", light="#FFFFFF"))
         self._qr.show()
         self._qr_button.setText("Hide Code")
 
@@ -567,15 +658,16 @@ class CreateAccountWindow(AssistantWindow):
         self.show_page(AMBER_CONNECT, [
             ("back", "Go Back", LEADING, self._show_amber_import),
             ("connect", "Show Connection Code…", DEFAULT,
-             lambda: self._connect_signer(self._on_paired)),
+             lambda: self._connect_signer(self._on_paired, parent=self)),
         ])
 
     def _on_paired(self, profile) -> None:
         if profile is None:
             return
         if profile.user_pubkey.lower() != self._pubkey:
-            # Amber paired as another account. That pairing is not wanted.
-            self._store.remove(profile.user_pubkey)
+            # Amber paired as another account. That pairing is not wanted,
+            # and nothing was saved for it: a profile already here for that
+            # account stays exactly as it was.
             self._connect_error.setText(
                 "Amber is signing as a different account. In Amber, select the "
                 "account you just added, then try again.")
@@ -583,7 +675,14 @@ class CreateAccountWindow(AssistantWindow):
             return
         self._connect_error.hide()
         profile.display_name = self.name or profile.display_name
-        self._store.upsert(profile)
+        try:
+            self._store.upsert(profile)
+        except OSError:
+            self._connect_error.setText("This account couldn’t be saved on this "
+                                        "computer. Make sure the disk has free space, "
+                                        "then try again.")
+            self._connect_error.show()
+            return
         self._start_setup(profile, saved_detail="Amber holds your key.")
 
     # -- setup -------------------------------------------------------------------
@@ -595,12 +694,11 @@ class CreateAccountWindow(AssistantWindow):
         col.addWidget(self._setup_intro)
         self._steps = StepList([
             (STEP_SAVED, "Account saved"),
-            (STEP_PROFILE, "Publishing your profile"),
             (STEP_RELAYS, "Publishing your relay list"),
+            (STEP_PROFILE, "Publishing your profile"),
         ])
         col.addWidget(self._steps)
         self._setup_note = text_label("", "muted")
-        self._setup_note.hide()
         col.addWidget(self._setup_note)
         col.addStretch(1)
         self.add_page(SETUP, widget)
@@ -615,36 +713,35 @@ class CreateAccountWindow(AssistantWindow):
             "Approve the requests in Amber when it asks." if remote else
             "MyEditor tells the Nostr network about your new account.")
         self._steps.set_state(STEP_SAVED, "done", saved_detail)
-        self._steps.set_state(STEP_PROFILE, "active")
-        self._steps.set_state(STEP_RELAYS, "pending")
-        self._setup_note.hide()
-        self.show_page(SETUP, [])
+        self._steps.set_state(STEP_RELAYS, "active")
+        self._steps.set_state(STEP_PROFILE, "pending")
+        self._show_working()
         report = SetupReport(self)
         report.step.connect(self._steps.set_state)
         report.finished.connect(self._on_setup_finished)
         self._report = report
         self.account_ready.emit(profile, self.name, report)
 
+    def _show_working(self) -> None:
+        self._setup_note.setText(CLOSE_ANY_TIME)
+        self.show_page(SETUP, [("close", "Close", NORMAL, self.accept)])
+
     def _on_setup_finished(self, ok: bool, message: str) -> None:
         if ok:
             self._show_done()
             return
-        self._setup_note.setText(message or "Your account is saved. MyEditor can finish "
-                                            "publishing it later.")
-        self._setup_note.show()
-        self.show_page(SETUP, [("later", "Finish Later", NORMAL, self.accept),
-                               ("retry", "Try Again", DEFAULT, self._retry_setup)])
+        first = message or "Your account is saved, but it isn’t published yet."
+        self._setup_note.setText(f"{first} {FINISH_LATER}")
+        buttons = [("later", "Finish Later", NORMAL, self.accept)]
+        if self._report is not None and self._report.retry is not None:
+            buttons.append(("retry", "Try Again", DEFAULT, self._retry_setup))
+        self.show_page(SETUP, buttons)
 
     def _retry_setup(self) -> None:
-        report = getattr(self, "_report", None)
-        if report is None or report.retry is None:
-            self._start_setup(self._profile, saved_detail="")
-            return
-        self._steps.set_state(STEP_PROFILE, "pending")
         self._steps.set_state(STEP_RELAYS, "active")
-        self._setup_note.hide()
-        self.show_page(SETUP, [])
-        report.retry()
+        self._steps.set_state(STEP_PROFILE, "pending")
+        self._show_working()
+        self._report.retry()
 
     # -- done ----------------------------------------------------------------------
 
@@ -685,6 +782,9 @@ class RestoreAccountWindow(AssistantWindow):
         self._open_file = open_file or self._choose_file
         self._found: Optional[FoundKey] = None
         self._keep_alive: list = []
+        # Bumped whenever an unlock's answer stops being wanted (the window
+        # closed), so a late answer is dropped instead of signing in.
+        self._unlock_round = 0
         self._build_open()
         self._build_password()
         self._build_setup()
@@ -758,20 +858,27 @@ class RestoreAccountWindow(AssistantWindow):
     def _use_file(self) -> None:
         try:
             text = self._open_file()
-        except (BackupError, OSError) as exc:
+        except BackupError as exc:
             self._show_open_error(str(exc))
+            return
+        except OSError:
+            self._show_open_error("That file couldn’t be opened. Choose the backup "
+                                  "file again, or paste the key instead.")
             return
         if text is None:
             return
         self._use_text(text, allow_hex=False)
 
     def _use_paste(self) -> None:
-        self._use_text(self._paste_edit.text(), allow_hex=True)
-        self._paste_edit.clear()
+        try:
+            self._use_text(self._paste_edit.text(), allow_hex=True)
+        finally:
+            self._paste_edit.clear()
 
     def _use_text(self, text: str, *, allow_hex: bool) -> None:
         try:
-            found = find_key(text, allow_hex=allow_hex)
+            found = find_key(text, allow_hex=allow_hex,
+                             public_keys=[p.user_pubkey for p in self._store])
         except BackupError as exc:
             self._show_open_error(str(exc))
             return
@@ -816,17 +923,29 @@ class RestoreAccountWindow(AssistantWindow):
 
     def _unlock(self) -> None:
         found, password = self._found, self._backup_password.text()
+        if found is None:
+            return
         self._backup_password.clear()
+        self._password_error.hide()
         self._unlocking.show()
+        # While the password is checked there is nowhere else to go.
         self.buttons["restore"].setEnabled(False)
+        self.buttons["back"].setEnabled(False)
+        round_ = self._unlock_round
 
         def done(secret, error):
+            if round_ != self._unlock_round or not shiboken6.isValid(self):
+                return
             self._unlocking.hide()
             if error is not None:
                 self.buttons["restore"].setEnabled(True)
-                wrong = isinstance(error, nip49.Nip49Error) and error.wrong_password
-                self._password_error.setText(
-                    "The password is wrong. Try again." if wrong else str(error))
+                self.buttons["back"].setEnabled(True)
+                if isinstance(error, nip49.Nip49Error):
+                    text = ("The password is wrong. Try again." if error.wrong_password
+                            else str(error))
+                else:
+                    text = "This backup couldn’t be opened."
+                self._password_error.setText(text)
                 self._password_error.show()
                 return
             self._restore(secret)
@@ -843,39 +962,54 @@ class RestoreAccountWindow(AssistantWindow):
         col.addWidget(self._who)
         self._steps = StepList([
             (STEP_SAVED, "Account saved on this computer"),
-            (STEP_PROFILE, "Finding your profile"),
             (STEP_RELAYS, "Finding your relay list"),
+            (STEP_PROFILE, "Finding your profile"),
         ])
         col.addWidget(self._steps)
         self._setup_note = text_label("", "muted")
-        self._setup_note.hide()
         col.addWidget(self._setup_note)
         col.addStretch(1)
         self.add_page(SETUP, widget)
 
     def _restore(self, secret: bytes) -> None:
-        pubkey = self._vault.store(secret)
+        pubkey = crypto.get_public_key(secret).hex()
         existing = self._store.get(pubkey)
         profile = local_profile(pubkey, relays=getattr(existing, "bunker_relays", None))
         if existing is not None:
-            profile.display_name = existing.display_name
-            profile.picture = existing.picture
-            profile.nip05 = existing.nip05
-        self._store.upsert(profile)
+            # The account is already known here: keep what was learned about it.
+            for name in ("display_name", "picture", "nip05", "avatar_path",
+                         "metadata_cached_at", "setup_pending"):
+                setattr(profile, name, getattr(existing, name))
+        try:
+            self._vault.store(secret)
+            self._store.upsert(profile)
+        except OSError:
+            error = self._password_error if self.page == PASSWORD else self._open_error
+            error.setText(KEY_NOT_SAVED)
+            error.show()
+            if "restore" in self.buttons:
+                self.buttons["restore"].setEnabled(True)
+                self.buttons["back"].setEnabled(True)
+            return
         self._profile = profile
         self._found = None
         self._who.setText(short_npub(pubkey))
         self._steps.set_state(STEP_SAVED, "done")
-        self._steps.set_state(STEP_PROFILE, "active")
-        self._steps.set_state(STEP_RELAYS, "pending")
-        self.show_page(SETUP, [])
+        self._steps.set_state(STEP_RELAYS, "active")
+        self._steps.set_state(STEP_PROFILE, "pending")
+        self._setup_note.setText(CLOSE_ANY_TIME)
+        self.show_page(SETUP, [("close", "Close", NORMAL, self.accept)])
         report = SetupReport(self)
         report.step.connect(self._steps.set_state)
         report.finished.connect(self._on_restored)
         self.account_ready.emit(profile, "", report)
 
     def _on_restored(self, ok: bool, message: str) -> None:
-        if message:
-            self._setup_note.setText(message)
-            self._setup_note.show()
+        self._setup_note.setText(message)
+        self._setup_note.setVisible(bool(message))
         self.show_page(SETUP, [("done", "Done", DEFAULT, self.accept)])
+
+    def done(self, result: int) -> None:
+        self._unlock_round += 1
+        self._found = None
+        super().done(result)
