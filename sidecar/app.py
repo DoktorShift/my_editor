@@ -5,11 +5,11 @@
 The association names each application that may sign people up by a
 client key (``X-Api-Key``). A key inside a desktop app can be extracted
 by anyone, so it lives here instead, on a small service that runs next to
-the app's release channel (rinbal's server for official builds; your own
-if you build and publish MyEditor yourself). MyEditor sends its
-membership requests here; this service checks them, adds the key, and
-forwards them to the association. It holds nothing else: no accounts, no
-database, no user data.
+the app's release channel (rinbal's server for official builds, once it
+is deployed; your own if you build and publish MyEditor yourself).
+MyEditor sends its membership requests here; this service checks them,
+adds the key, and forwards them to the association. It holds nothing
+else: no accounts, no database, no user data.
 
 What it forwards, and only that: the association's membership API under
 ``/api/v1/membership`` (config, me, applications, invoice, refresh,
