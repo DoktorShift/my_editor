@@ -13,7 +13,9 @@ database, no user data.
 
 What it forwards, and only that: the association's membership API under
 ``/api/v1/membership`` (config, me, applications, invoice, refresh,
-payments, export, erase). Everything else is 404.
+payments, export, erase). Everything else, another path, another method
+or a query string, is 404 with ``"code": "not_forwarded"``. GET and
+DELETE carry no body; one sent anyway is refused.
 
 What it checks before lending its key:
 
@@ -65,6 +67,7 @@ from typing import Callable, Dict, Optional, Tuple
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
+from starlette.exceptions import HTTPException
 
 from nostr import nip98
 
@@ -309,6 +312,23 @@ def _json(status: int, message: str, **extra) -> JSONResponse:
     return JSONResponse({"message": message, **extra}, status_code=status)
 
 
+def _not_forwarded() -> JSONResponse:
+    """The one answer to anything the sidecar does not forward: any other
+    path, any other method, a query string. Always 404, with its own code,
+    so the app can tell "this server does not do that" from the
+    association's "nothing on record" (also 404)."""
+    return _json(404, "Not Found", code="not_forwarded")
+
+
+_UNPRINTABLE = re.compile(r"[^\x21-\x7e]")
+
+
+def _loggable(path: str) -> str:
+    """A path as it may appear in the log: printable ASCII, and short.
+    Starlette decodes the path, so ``%0A`` would otherwise be a newline."""
+    return _UNPRINTABLE.sub("?", path)[:100]
+
+
 def create_app(settings: Optional[Settings] = None, *,
                transport: Optional[httpx.AsyncBaseTransport] = None,
                clock: Callable[[], float] = time.time) -> FastAPI:
@@ -340,6 +360,15 @@ def create_app(settings: Optional[Settings] = None, *,
     async def healthz() -> dict:
         return {"ok": True}
 
+    @app.exception_handler(HTTPException)
+    async def http_exception(_request: Request, exc: HTTPException) -> Response:
+        # An unknown path (404) and a known one with another method (405,
+        # e.g. PUT /api/v1/membership/me or POST /status) get the same
+        # answer as everything else not forwarded.
+        if exc.status_code in (404, 405):
+            return _not_forwarded()
+        return _json(exc.status_code, str(exc.detail))
+
     @app.api_route(API_PREFIX + "/{path:path}", methods=["GET", "POST", "DELETE"])
     async def membership(path: str, request: Request) -> Response:
         started = time.monotonic()
@@ -350,8 +379,9 @@ def create_app(settings: Optional[Settings] = None, *,
 
         def finish(response: Response) -> Response:
             outcome["status"] = response.status_code
-            log.info("%s %s %s %s %.0fms", method, path, response.status_code,
-                     outcome["pubkey"][:8], (time.monotonic() - started) * 1000)
+            log.info("%s %s %s %s %.0fms", _loggable(method), _loggable(path),
+                     response.status_code, outcome["pubkey"][:8],
+                     (time.monotonic() - started) * 1000)
             return response
 
         if not settings.api_key:
@@ -359,7 +389,7 @@ def create_app(settings: Optional[Settings] = None, *,
                                 code="not_configured"))
         signed = _route(method, path)
         if signed is None or request.url.query:
-            return finish(_json(404, "Not Found"))
+            return finish(_not_forwarded())
         wait = limits.allow_request(client_host)
         if wait is not None:
             response = _json(429, "Too many requests.")
@@ -370,9 +400,15 @@ def create_app(settings: Optional[Settings] = None, *,
             body = await _read_body(request)
         except _TooLarge:
             return finish(_json(413, "Request too large."))
-        if body and request.headers.get("content-type") != "application/json":
-            return finish(_json(415, "Unsupported Media Type"))
-        if not body and method == "GET" and request.headers.get("content-type"):
+        content_type = request.headers.get("content-type")
+        if method in ("GET", "DELETE"):
+            # Neither carries a body in this API; one sent anyway is not
+            # covered by the signature (no payload tag) and is not passed on.
+            if body:
+                return finish(_json(400, "This request takes no body."))
+            if content_type:
+                return finish(_json(415, "Unsupported Media Type"))
+        elif body and content_type != "application/json":
             return finish(_json(415, "Unsupported Media Type"))
 
         upstream_url = f"{settings.upstream}{API_PREFIX}{path}"

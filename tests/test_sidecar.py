@@ -143,6 +143,27 @@ def test_the_fee_lookup_needs_no_signature_and_is_cached():
     assert "authorization" not in forwarded.headers
 
 
+def test_the_fee_lookup_is_asked_again_once_the_cache_expires():
+    client, association, clock = make()
+    client.get("/api/v1/membership/config")
+    clock.now += sidecar.CONFIG_CACHE_SECONDS - 1
+    client.get("/api/v1/membership/config")
+    assert len(association.requests) == 1
+    clock.now += 2
+    client.get("/api/v1/membership/config")
+    assert len(association.requests) == 2
+
+
+@pytest.mark.parametrize("status", [404, 422, 429, 500, 503])
+def test_a_fee_lookup_that_failed_is_not_cached(status):
+    client, association, _ = make()
+    association.answer = lambda r: reply(status, json_body={"message": "Nope."})
+    assert client.get("/api/v1/membership/config").status_code == status
+    association.answer = lambda r: reply(json_body={"data": {"fee": 21}})
+    response = client.get("/api/v1/membership/config")
+    assert response.status_code == 200 and len(association.requests) == 2
+
+
 def test_a_signed_call_is_forwarded_with_the_key_and_the_signature_unchanged():
     client, association, _ = make()
     body = json.dumps({"statutes_accepted": True}).encode()
@@ -177,13 +198,32 @@ def test_every_membership_call_is_forwarded(method, path):
 
 @pytest.mark.parametrize("method, path", [
     ("GET", "/admin"), ("POST", "/me"), ("GET", "/payments/26/invoice"),
-    ("PUT", "/applications"), ("GET", "/../secret"),
+    ("PUT", "/applications"), ("PATCH", "/me"), ("OPTIONS", "/config"),
+    ("GET", "/../secret"), ("GET", "/me?debug=1"), ("GET", "/config?x"),
 ])
 def test_anything_else_is_not_forwarded(method, path):
     client, association, _ = make()
     response = client.request(method, f"/api/v1/membership{path}")
-    assert response.status_code in (404, 405)
+    assert response.status_code == 404
+    assert response.json()["code"] == "not_forwarded"
     assert association.requests == []
+
+
+@pytest.mark.parametrize("method, path", [
+    ("POST", "/status"), ("DELETE", "/healthz"), ("GET", "/"), ("GET", "/docs"),
+    ("GET", "/api/v1/other"),
+])
+def test_the_sidecars_own_paths_answer_404_the_same_way(method, path):
+    client, *_ = make()
+    response = client.request(method, path)
+    assert response.status_code == 404 and response.json()["code"] == "not_forwarded"
+
+
+def test_a_signed_call_with_a_query_string_is_not_forwarded():
+    client, association, _ = make()
+    headers = {"Authorization": auth("GET", "/me", url=f"{UPSTREAM}/api/v1/membership/me?x=1")}
+    response = client.get("/api/v1/membership/me?x=1", headers=headers)
+    assert response.status_code == 404 and association.requests == []
 
 
 # -- what is refused before the key is spent ------------------------------------------
@@ -342,6 +382,25 @@ def test_an_undeclared_body_is_read_only_until_it_passes_the_cap():
     status, read = asgi_post(client.app, "/api/v1/membership/applications",
                              [chunk] * 10, headers=[("Content-Type", "application/json")])
     assert status == 413 and len(read) == 3 and association.requests == []
+
+
+@pytest.mark.parametrize("method, path", [("GET", "/me"), ("DELETE", "/me"),
+                                          ("GET", "/config")])
+def test_get_and_delete_carry_no_body(method, path):
+    client, association, _ = make()
+    headers = {"Authorization": auth(method, path), "Content-Type": "application/json"}
+    response = client.request(method, f"/api/v1/membership{path}", content=b"{}",
+                              headers=headers)
+    assert response.status_code == 400 and association.requests == []
+
+
+@pytest.mark.parametrize("method, path", [("GET", "/me"), ("DELETE", "/me"),
+                                          ("GET", "/config")])
+def test_get_and_delete_carry_no_content_type(method, path):
+    client, association, _ = make()
+    headers = {"Authorization": auth(method, path), "Content-Type": "application/json"}
+    response = client.request(method, f"/api/v1/membership{path}", headers=headers)
+    assert response.status_code == 415 and association.requests == []
 
 
 # -- answers are read under a cap ------------------------------------------------------

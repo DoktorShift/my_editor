@@ -30,7 +30,7 @@ MyEditor ──HTTPS──▶ sidecar ──HTTPS + X-Api-Key──▶ verein.ei
 | GET | `/payments` |
 | GET | `/export` |
 
-Everything else gets 404.
+Everything else gets 404 with `"code": "not_forwarded"`: any other path, any other method on these paths (`PUT /me` too, not 405), and any request with a query string. GET and DELETE requests carry no body; one sent anyway is refused (400), and so is a Content-Type on them (415). A POST body must be `application/json`.
 
 **What it checks before lending the key.** Every call except `/config` must carry a NIP-98 signature from the person joining, and the signature must:
 
