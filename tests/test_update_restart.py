@@ -7,8 +7,16 @@ linked to a Nostr draft, selects some text, and closes for an update. A
 second window starts the way the relaunched app does. What must hold:
 
   Every tab comes back in its order, with its unsaved content still
-  marked unsaved, its file, its draft link and its selection, and the
-  tab that was active is active again.
+  marked unsaved, its file, its draft link, its selection and its scroll
+  position, and the tab that was active is active again. PDF tabs come
+  back at their page. A Welcome tab saved as a file comes back as that
+  file.
+
+  A file that changed while MyEditor was closed comes back as a copy that
+  cannot overwrite it; one that was deleted comes back with its unsaved
+  work; a saved file that was deleted is simply not reopened.
+
+  Only documents whose backup can't be written are asked about, by name.
 
   Crash recovery does not open the same work a second time, and skips
   nothing else: a crash backup of the file named on the command line, or
@@ -178,6 +186,15 @@ def close_for_update(w, version=None):
         w.close()
     return prepared
 
+def wait_until(check, ms=5000):
+    # Lets the event loop run until check() holds, or the time is up.
+    from PySide6.QtTest import QTest
+    waited = 0
+    while not check() and waited < ms:
+        QTest.qWait(20)
+        waited += 20
+    return check()
+
 def finish():
     result["informed"] = informed
     result["asked"] = asked
@@ -315,18 +332,117 @@ assert close_for_update(w)
 w2 = main_window.MainWindow()
 w2.resize(900, 700)
 w2.show()
-QTest.qWait(50)
 after = {}
 for i in (1, 2):
     w2.tabs.setCurrentIndex(i)
-    QTest.qWait(50)
-    after[w2.tabs.tabText(i)] = w2._editor_from_widget(w2.tabs.widget(i)).verticalScrollBar().value()
+    bar = w2._editor_from_widget(w2.tabs.widget(i)).verticalScrollBar()
+    wait_until(lambda: bar.value() == before[w2.tabs.tabText(i)], ms=1500)
+    after[w2.tabs.tabText(i)] = bar.value()
 result["before"] = before
 result["after"] = after
 """)
     assert set(r["before"]) == {"one.txt", "two.txt"}
     assert all(value > 0 for value in r["before"].values())
     assert r["after"] == r["before"]
+
+
+CHANGED_WHILE_CLOSED = r"""
+notes = write("notes.txt", "on disk\n")
+w = main_window.MainWindow()
+w.open_path(notes)
+w.current_editor().insertPlainText("UNSAVED ")
+assert close_for_update(w)
+{change}
+w2 = main_window.MainWindow()
+app.processEvents()
+result["tabs"] = tabs_of(w2)
+result["on_disk"] = open(notes).read() if os.path.exists(notes) else None
+result["notes"] = notes
+"""
+
+
+def test_a_file_changed_while_closed_comes_back_as_a_copy_that_cannot_overwrite_it(tmp_path):
+    r = scenario(tmp_path, CHANGED_WHILE_CLOSED.format(change=r"""
+with open(notes, "w") as f:
+    f.write("newer work from elsewhere\n")
+later = os.stat(notes).st_mtime + 60
+os.utime(notes, (later, later))
+"""))
+    assert titles(r) == ["Welcome", "notes.txt (recovered copy)*"]
+    copy = r["tabs"][1]
+    assert copy["text"].startswith("UNSAVED on disk")
+    assert copy["path"] is None          # Save goes through Save As
+    assert r["on_disk"] == "newer work from elsewhere\n"
+
+
+def test_a_file_deleted_while_closed_comes_back_with_its_unsaved_work(tmp_path):
+    r = scenario(tmp_path, CHANGED_WHILE_CLOSED.format(change="os.remove(notes)"))
+    assert titles(r) == ["Welcome", "notes.txt (recovered)*"]
+    assert r["tabs"][1]["text"].startswith("UNSAVED on disk")
+    assert r["tabs"][1]["path"] == r["notes"]   # Save puts the file back
+    assert r["on_disk"] is None
+
+
+def test_a_saved_file_deleted_while_closed_is_simply_not_reopened(tmp_path):
+    r = scenario(tmp_path, r"""
+gone = write("gone.txt", "saved\n")
+kept = write("kept.txt", "saved too\n")
+w = main_window.MainWindow()
+w.open_path(gone)
+w.open_path(kept)
+assert close_for_update(w)
+os.remove(gone)
+w2 = main_window.MainWindow()
+app.processEvents()
+result["tabs"] = tabs_of(w2)
+""")
+    assert titles(r) == ["Welcome", "kept.txt"]
+    assert r["informed"] == []   # no error about the missing file
+
+
+def test_a_pdf_tab_comes_back_active_at_its_page(tmp_path):
+    r = scenario(tmp_path, r"""
+from PySide6.QtCore import QMarginsF
+from PySide6.QtGui import QPageLayout, QPageSize, QPainter, QPdfWriter
+from PySide6.QtTest import QTest
+pdf = os.path.join(home, "paper.pdf")
+writer = QPdfWriter(pdf)
+writer.setPageLayout(QPageLayout(QPageSize(QPageSize.PageSizeId.A5),
+                                 QPageLayout.Orientation.Portrait, QMarginsF()))
+painter = QPainter(writer)
+for page in range(4):
+    painter.drawText(100, 100, f"page {page + 1}")
+    if page < 3:
+        writer.newPage()
+painter.end()
+
+w = main_window.MainWindow()
+w.resize(900, 700)
+w.show()
+w.open_path(write("notes.txt", "text\n"))
+viewer = w.open_path(pdf)
+QTest.qWait(100)
+viewer.jump_to_page(2)
+wait_until(lambda: viewer.current_page() == 2)
+result["page_before"] = viewer.current_page()
+assert close_for_update(w)
+
+w2 = main_window.MainWindow()
+w2.resize(900, 700)
+w2.show()
+current = w2._pdf_viewer_from_widget(w2.tabs.currentWidget())
+if current is not None:
+    wait_until(lambda: current.current_page() == 2)
+result["tabs"] = tabs_of(w2)
+result["active"] = w2.tabs.currentIndex()
+result["page_after"] = current.current_page() if current is not None else None
+result["pdf"] = pdf
+""")
+    assert titles(r) == ["Welcome", "notes.txt", "paper.pdf"]
+    assert r["tabs"][2]["path"] == r["pdf"]
+    assert r["active"] == 2
+    assert r["page_before"] == 2
+    assert r["page_after"] == 2
 
 
 def test_after_an_update_the_command_line_file_and_crash_leftovers_still_open(tmp_path):
