@@ -2,20 +2,23 @@
 
 MyEditor doubles as a Nostr publishing client. Write in the editor, then publish
 to Nostr as a short note or a long-form article, signed by your own NIP-46 signer
-so your private key never enters the app. You also get private encrypted drafts
-that sync across your devices, a media library on your own Blossom servers, and
-one-way import of any blog via RSS.
+so your private key never enters the app, or by a key MyEditor keeps for you on
+this computer. You can create a new account in the app, back it up and restore
+it. You also get private encrypted drafts that sync across your devices, a media
+library on your own Blossom servers, one-way import of any blog via RSS, and
+EINUNDZWANZIG membership.
 
 - [Publishing](#publishing)
 - [Private encrypted drafts](#private-encrypted-drafts)
 - [Media library (Blossom)](#media-library-blossom)
 - [Import from RSS, Atom, and JSON feeds](#import-from-rss-atom-and-json-feeds)
+- [Joining EINUNDZWANZIG in the app](#joining-einundzwanzig-in-the-app)
 
 ---
 
 ## Publishing
 
-Write in the editor, hit publish, approve on your phone. The document goes out as a Nostr event. Your private key stays in your signer (Amber, nsec.app, nsec.bunker, etc.) and never enters this app.
+Write in the editor, hit publish, approve on your phone. The document goes out as a Nostr event. With a signer, your private key stays in it (Amber, nsec.app, nsec.bunker, etc.) and never enters this app. An account kept on this computer signs in MyEditor itself, without a prompt (see [Accounts](#accounts-create-restore-back-up)).
 
 ### What you can publish
 
@@ -33,6 +36,19 @@ Three pairing flows in one dialog (`Nostr → Connect Signer…`):
 3. **Manual**: supply the bunker pubkey, relay list, and optional secret separately.
 
 Connected profiles are saved to `~/.config/my_editor/nostr_profiles.json` with `chmod 600`. The local channel keypair lives there too; your real `nsec` does not.
+
+### Accounts: create, restore, back up
+
+For people new to Nostr, `Nostr → Create Account…` makes a new account in a few steps:
+
+1. **Name.** Optional; it becomes the profile's name.
+2. **Backup.** Right after the key exists, because nobody can reset it: **Save Backup File…** writes a small text file with the public key and the private key protected by a password (NIP-49 `ncryptsec`, which other Nostr apps import too). Saving it unprotected is a second, explicit choice; skipping the backup asks first.
+3. **Where the key lives.** *On this computer*: MyEditor keeps the key and signs with it. *In a signer app*: a guided import into Amber on Android, then pairing, after which the key on this computer is no longer needed.
+4. **Setup.** MyEditor publishes a starter relay list (NIP-65), then the profile, and shows each step. If that can't finish now, **Finish Later** keeps the account and MyEditor completes the setup the next time the account is used, creating only what is still missing.
+
+`Nostr → Restore Account…` opens a backup file (or a pasted key), asks for its password, and brings the account back with its existing relay list and profile; nothing on the network is replaced. `Nostr → Back Up Account…` saves a new backup file at any time for an account kept on this computer.
+
+The private key is never shown on screen. It can be copied (marked as a secret for clipboard managers, and cleared again after a minute) or saved in a backup file. The one exception is the code Amber scans, shown only on request.
 
 ### Multiple identities
 
@@ -65,7 +81,8 @@ The publisher uses eager-first-accept semantics: as soon as one relay acknowledg
 
 ### Security model
 
-- **No private key in the editor.** All signing goes through NIP-46 over NIP-44 v2 encryption. Every `sign_event` call surfaces an approval prompt in your signer.
+- **With a signer, no private key in the editor.** All signing goes through NIP-46 over NIP-44 v2 encryption. Every `sign_event` call surfaces an approval prompt in your signer.
+- **An account kept on this computer** has its key in `~/.config/my_editor/nostr_keys.json` (`chmod 600`, folder `chmod 700`), separate from the profiles. It is never shown on screen, and Sign Out deletes it, after an alert that says what a missing backup costs. A damaged key file is set aside, never overwritten.
 - **Connection spoof protection.** The `nostrconnect://` flow generates a one-time secret that the editor verifies against the signer's response before completing the handshake.
 - **Profile file permissions.** The on-disk profile store is restricted to the owner. The local channel keypair stored there only authorizes the existing bunker session; it cannot sign anything itself.
 
@@ -121,9 +138,11 @@ Two operators, chosen for vendor diversity and a published per-file cap:
 
 The list lives in `~/.config/my_editor/blossom_servers.json`. Edit the file to add custom servers; an empty `custom` list falls back to the defaults. (A Settings dialog for in-app management is planned.)
 
+**EINUNDZWANZIG members** also get the members' server, `https://blossom.einundzwanzig.space` (1 GiB per file, 5 GiB per member), added while the membership is active. Its files show up in the library even when another app uploaded them. **Show files from** narrows the grid to one server, and a storage meter shows how much of the members' space is used. Deleting a file the library can't confirm is public asks first.
+
 ### Upload sizing
 
-The planner checks each configured server's documented per-file limit before sending. If your primary can't take the file but a mirror can, the upload is **rerouted** to the mirror automatically and the status line shows a short note (`blossom.band can't take this file, routing to nostr.download instead`). The hard ceiling is 100 MiB.
+The planner checks each configured server's documented per-file limit before sending. If your primary can't take the file but a mirror can, the upload is **rerouted** to the mirror automatically and the status line shows a short note (`blossom.band can't take this file, routing to nostr.download instead`). Each server's own published limit decides: 100 MiB on the defaults, 1 GiB on the members' server.
 
 ### Security model
 
