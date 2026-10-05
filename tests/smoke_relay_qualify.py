@@ -8,12 +8,20 @@ default relays, and after, update QUALIFIED_ON there:
     .venv/bin/python tests/smoke_relay_qualify.py            # the built-in candidates
     .venv/bin/python tests/smoke_relay_qualify.py wss://x    # or relays of your choice
     .venv/bin/python tests/smoke_relay_qualify.py --json     # machine-readable
+    .venv/bin/python tests/smoke_relay_qualify.py --wait=6   # read back after 6 s, not 2.5
+
+``--wait=SECONDS`` sets how long to wait between a write and its
+read-back, for relays that store what they accept with a delay; a relay
+that only passes with a longer wait is slow to keep things, and worth
+knowing about.
 
 For each relay it asks four questions, using MyEditor's own relay code so
 the answer is what the app will meet:
 
   1. Its NIP-11 document: does it ask for payment or a login, or limit
-     who may write?
+     who may write? (Fetched over https for wss://, http for ws://, on
+     worker threads, so a relay whose web server never answers holds up
+     nothing else.)
   2. A read: does it end the stored events (EOSE) for an ordinary query,
      and how quickly?
   3. A write: does it accept a relay list (kind 10002) and a profile
@@ -21,9 +29,10 @@ the answer is what the app will meet:
   4. A read-back: can what it accepted be fetched again by id? An "OK"
      alone proves nothing; some relays acknowledge and keep nothing.
 
-The writes come from a throwaway key made for this run, carry no content
-of note, and expire after ten minutes (NIP-40), so the check leaves
-nothing lasting behind.
+The writes come from a throwaway key made for this run and carry no
+content of note. They are marked to expire after ten minutes (NIP-40),
+so relays that honour expiration drop them; a relay that does not keeps
+two small events from a key nobody uses again.
 
 A relay qualifies as a home relay when it is free, open, answers in
 under three seconds, and passes write and read-back for both kinds. An
@@ -37,6 +46,7 @@ import pathlib
 import sys
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 from PySide6.QtCore import QCoreApplication, QTimer
 
@@ -67,14 +77,18 @@ READ_TIMEOUT_MS = 8_000
 WRITE_TIMEOUT_MS = 8_000
 READ_BACK_DELAY_MS = 2_500     # --wait=SECONDS for relays that store with a delay
 FAST_EOSE_S = 3.0
+NIP11_TIMEOUT_S = 6
 
 
 def nip11(url: str) -> dict:
-    http = "https://" + url.split("://", 1)[1]
+    """The relay's NIP-11 document, at the same address over http(s).
+    Blocking: run it on a worker thread, never on the Qt event loop."""
+    scheme, rest = url.split("://", 1)
+    http = ("http://" if scheme.lower() == "ws" else "https://") + rest
     request = urllib.request.Request(http, headers={"Accept": "application/nostr+json",
                                                     "User-Agent": "MyEditor relay check"})
     try:
-        with urllib.request.urlopen(request, timeout=6) as response:
+        with urllib.request.urlopen(request, timeout=NIP11_TIMEOUT_S) as response:
             data = json.loads(response.read(256 * 1024).decode("utf-8", "replace"))
     except Exception as exc:  # noqa: BLE001, a missing document is a finding, not a crash
         return {"error": type(exc).__name__}
@@ -195,10 +209,12 @@ def main(argv) -> int:
     pool = RelayPool()
     key = crypto.generate_secret_key()
     rows = []
+    # NIP-11 documents come over plain HTTP, which blocks: on worker
+    # threads, started now, so the relay probes below never wait on them.
+    workers = ThreadPoolExecutor(max_workers=16)
+    documents = {url: workers.submit(nip11, url) for url in relays}
 
     def done(result):
-        result["nip11"] = nip11(result["relay"])
-        result["verdict"] = verdict(result)
         rows.append(result)
         if len(rows) == len(relays):
             app.quit()
@@ -208,6 +224,13 @@ def main(argv) -> int:
     QTimer.singleShot(60_000 + READ_BACK_DELAY_MS, app.quit)
     app.exec()
     pool.close_all()
+    for row in rows:
+        try:
+            row["nip11"] = documents[row["relay"]].result(timeout=NIP11_TIMEOUT_S + 2)
+        except Exception as exc:  # noqa: BLE001, a missing document is a finding
+            row["nip11"] = {"error": type(exc).__name__}
+        row["verdict"] = verdict(row)
+    workers.shutdown(wait=False, cancel_futures=True)
 
     rows.sort(key=lambda r: relays.index(r["relay"]))
     if as_json:
