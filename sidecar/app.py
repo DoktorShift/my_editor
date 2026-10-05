@@ -90,18 +90,19 @@ UPSTREAM_TIMEOUT_SECONDS = 15.0
 
 log = logging.getLogger("myeditor-sidecar")
 
-# (method, path pattern) -> signed?
+# (method, path pattern) -> signed? The year is [0-9], not \d, which would
+# also match digits of other scripts.
 _ROUTES = (
     ("GET", re.compile(r"\A/config\Z"), False),
     ("GET", re.compile(r"\A/me\Z"), True),
     ("DELETE", re.compile(r"\A/me\Z"), True),
     ("POST", re.compile(r"\A/applications\Z"), True),
-    ("POST", re.compile(r"\A/payments/\d{4}/invoice\Z"), True),
-    ("POST", re.compile(r"\A/payments/\d{4}/refresh\Z"), True),
+    ("POST", re.compile(r"\A/payments/[0-9]{4}/invoice\Z"), True),
+    ("POST", re.compile(r"\A/payments/[0-9]{4}/refresh\Z"), True),
     ("GET", re.compile(r"\A/payments\Z"), True),
     ("GET", re.compile(r"\A/export\Z"), True),
 )
-_INVOICE = re.compile(r"\A/payments/\d{4}/invoice\Z")
+_INVOICE = re.compile(r"\A/payments/[0-9]{4}/invoice\Z")
 
 
 @dataclass(frozen=True)

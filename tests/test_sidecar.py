@@ -204,6 +204,7 @@ def test_every_membership_call_is_forwarded(method, path):
     ("GET", "/admin"), ("POST", "/me"), ("GET", "/payments/26/invoice"),
     ("PUT", "/applications"), ("PATCH", "/me"), ("OPTIONS", "/config"),
     ("GET", "/../secret"), ("GET", "/me?debug=1"), ("GET", "/config?x"),
+    ("POST", "/payments/\u0662\u0660\u0662\u0666/invoice"),     # digits, but not 0-9
 ])
 def test_anything_else_is_not_forwarded(method, path):
     client, association, _ = make()
