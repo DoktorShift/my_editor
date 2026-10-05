@@ -294,6 +294,41 @@ result["tabs"] = tabs_of(w)
     assert titles(r) == ["Welcome", "Untitled*"]
 
 
+def test_every_tab_comes_back_at_its_scroll_position_not_only_the_active_one(tmp_path):
+    r = scenario(tmp_path, r"""
+from PySide6.QtTest import QTest
+w = main_window.MainWindow()
+w.resize(900, 700)
+w.show()
+for name in ("one.txt", "two.txt"):
+    w.open_path(write(name, "\n".join(f"{name} line {i}" for i in range(600))))
+before = {}
+for i in (1, 2):
+    w.tabs.setCurrentIndex(i)
+    QTest.qWait(30)
+    bar = w._editor_from_widget(w.tabs.widget(i)).verticalScrollBar()
+    bar.setValue(bar.maximum() // (i + 1))
+    before[w.tabs.tabText(i)] = bar.value()
+w.tabs.setCurrentIndex(1)                         # two.txt is a tab in the background
+assert close_for_update(w)
+
+w2 = main_window.MainWindow()
+w2.resize(900, 700)
+w2.show()
+QTest.qWait(50)
+after = {}
+for i in (1, 2):
+    w2.tabs.setCurrentIndex(i)
+    QTest.qWait(50)
+    after[w2.tabs.tabText(i)] = w2._editor_from_widget(w2.tabs.widget(i)).verticalScrollBar().value()
+result["before"] = before
+result["after"] = after
+""")
+    assert set(r["before"]) == {"one.txt", "two.txt"}
+    assert all(value > 0 for value in r["before"].values())
+    assert r["after"] == r["before"]
+
+
 def test_after_an_update_the_command_line_file_and_crash_leftovers_still_open(tmp_path):
     # The update restore skips only what it took over: a crash backup it did
     # not take over is still restored, alongside the file on the command line.

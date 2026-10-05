@@ -12,6 +12,10 @@ What must hold:
   left out, and only those tabs are asked about. Not saved, such a tab
   comes back as its file on disk, or, untitled, not at all.
 
+  A tab's scroll position comes back when the tab is first shown, not only
+  for the tab that was active, and never overrides what the person did
+  first.
+
   After a launch, the person hears which version they are on now, or that
   the update did not install. A launch on the same version says nothing.
 
@@ -28,6 +32,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QTabWidget  # noqa: E402
 
 import recovery  # noqa: E402
@@ -189,6 +194,43 @@ def test_a_draft_link_is_rebuilt_from_the_fields_it_knows():
     rebuild = workspace_restore._dataclass_from
     assert rebuild(Binding, {"identifier": "abc", "unknown": 1}) == Binding("abc")
     assert rebuild(Binding, {"title": "no identifier"}) is None
+
+
+# -- the scroll position ---------------------------------------------------------
+
+def long_editor():
+    ed = HtmlEditor()
+    ed.setPlainText("\n".join(f"line {i}" for i in range(400)))
+    ed.resize(400, 300)
+    return ed
+
+
+def test_a_scroll_position_waits_until_the_tab_is_shown():
+    # A tab that isn't current has no scroll range yet: setting the value at
+    # once would leave it at the top.
+    ed = long_editor()
+    pending = workspace_restore.PendingScroll(ed, 1500)
+    QTest.qWait(20)
+    assert ed.verticalScrollBar().value() == 0 and not pending.done
+    ed.show()
+    try:
+        QTest.qWait(50)
+        assert ed.verticalScrollBar().value() == 1500
+    finally:
+        ed.hide()
+
+
+def test_an_edit_before_the_tab_is_shown_lets_the_old_position_go():
+    ed = long_editor()
+    pending = workspace_restore.PendingScroll(ed, 1500)
+    ed.textCursor().insertText("typed first ")
+    assert pending.done
+    ed.show()
+    try:
+        QTest.qWait(50)
+        assert ed.verticalScrollBar().value() != 1500
+    finally:
+        ed.hide()
 
 
 # -- what a launch says ------------------------------------------------------------

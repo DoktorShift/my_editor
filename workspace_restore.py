@@ -27,7 +27,7 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QEvent, QObject, QTimer
 from PySide6.QtGui import QTextCursor
 
 from recovery import (
@@ -226,8 +226,89 @@ def restore_cursor_and_scroll(ed, tab: TabState) -> None:
     cursor.setPosition(min(tab.anchor, last))
     cursor.setPosition(min(tab.cursor, last), QTextCursor.MoveMode.KeepAnchor)
     ed.setTextCursor(cursor)
-    # The scroll range exists only once the document is laid out.
-    QTimer.singleShot(0, lambda: ed.verticalScrollBar().setValue(tab.scroll))
+    if tab.scroll > 0:
+        PendingScroll(ed, tab.scroll)
+
+
+class PendingScroll(QObject):
+    """Puts an editor's scroll bar back at a saved value once the editor is
+    on screen and its range can hold the value.
+
+    A tab that is not the current one has no scroll range until it is
+    shown and laid out (in steps, for a long document), so setting the
+    value straight away is clamped to the top. And a QTextEdit scrolls its
+    cursor into view on its first show, which would undo a value set
+    before. So this waits until the editor has been shown, then applies
+    the value as soon as the range can hold it. It gives up when the person
+    edits, moves the cursor or scrolls first, and a little while after the
+    editor is first shown, so a document that grows later never jumps to
+    an old position.
+    """
+
+    GIVE_UP_AFTER_SHOWN_MS = 2000
+
+    def __init__(self, ed, value: int):
+        super().__init__(ed)
+        self._ed = ed
+        self._bar = ed.verticalScrollBar()
+        self._value = value
+        self._done = False
+        self._shown = ed.isVisible()
+        # One turn of the event loop after the first show, once the
+        # editor's own showEvent has scrolled its cursor into view.
+        self._after_show = QTimer(self)
+        self._after_show.setSingleShot(True)
+        self._after_show.setInterval(0)
+        self._after_show.timeout.connect(self._apply_if_room)
+        self._give_up = QTimer(self)
+        self._give_up.setSingleShot(True)
+        self._give_up.setInterval(self.GIVE_UP_AFTER_SHOWN_MS)
+        self._give_up.timeout.connect(self.stop)
+        self._bar.rangeChanged.connect(self._on_range)
+        self._bar.actionTriggered.connect(self.stop)
+        ed.cursorPositionChanged.connect(self.stop)
+        ed.document().contentsChanged.connect(self.stop)
+        ed.installEventFilter(self)
+        if self._shown:
+            self._give_up.start()
+            self._apply_if_room()
+
+    @property
+    def done(self) -> bool:
+        return self._done
+
+    def eventFilter(self, watched, event) -> bool:
+        if event.type() == QEvent.Type.Show and not self._shown:
+            self._shown = True
+            self._after_show.start()
+            self._give_up.start()
+        return False
+
+    def _on_range(self, _minimum: int, _maximum: int) -> None:
+        if self._shown and not self._after_show.isActive():
+            self._apply_if_room()
+
+    def _apply_if_room(self) -> None:
+        if not self._done and self._bar.maximum() >= self._value:
+            self._bar.setValue(self._value)
+            self.stop()
+
+    def stop(self, *_args) -> None:
+        if self._done:
+            return
+        self._done = True
+        self._after_show.stop()
+        self._give_up.stop()
+        for signal, slot in ((self._bar.rangeChanged, self._on_range),
+                             (self._bar.actionTriggered, self.stop),
+                             (self._ed.cursorPositionChanged, self.stop),
+                             (self._ed.document().contentsChanged, self.stop)):
+            try:
+                signal.disconnect(slot)
+            except (RuntimeError, TypeError):
+                pass
+        self._ed.removeEventFilter(self)
+        self.deleteLater()
 
 
 def _tab_index(window, widget) -> int:
