@@ -147,6 +147,22 @@ def test_the_subscription_is_let_go_of():
     assert destroyed == [True]
 
 
+
+def test_a_finished_query_is_let_go_of_by_its_parent_and_goes_once():
+    owner = QObject()
+    pool, results = HandPool(), []
+    query = lookup.fetch_replaceable(pool, [A], kind=10002, author=PK,
+                                     on_done=results.append, parent=owner)
+    gone = []
+    query.destroyed.connect(lambda *_: gone.append(True))
+    pool.subs[0].answer(A)
+    settle()
+    assert len(results) == 1
+    assert query.parent() is None              # its delete is the only way it goes
+    del owner                                  # the parent goes before the event loop runs
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    assert gone == [True]
+
 # -- the real Subscription reports each relay's end once ------------------------------------
 
 class StubRelay(QObject):

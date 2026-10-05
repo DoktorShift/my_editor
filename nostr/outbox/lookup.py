@@ -174,6 +174,12 @@ class _ReplaceableQuery(QObject):
         try:
             self._on_done(results)
         finally:
+            # A finished query belongs to nobody: let go of the parent
+            # first, so the deferred delete is the only way it goes. Left
+            # as a child, a parent torn down before the event loop runs
+            # again (a directory freed by the garbage collector) deleted
+            # it a second time.
+            self.setParent(None)
             self.deleteLater()
 
 
