@@ -48,7 +48,7 @@ class RelayList:
     read: List[str] = field(default_factory=list)
     state: LookupState = LookupState.UNKNOWN
     event: Optional[dict] = None          # the verified kind 10002, when FOUND
-    fetched_at: float = 0.0
+    fetched_at: float = 0.0               # on the directory's clock (monotonic)
 
     @property
     def is_empty(self) -> bool:
@@ -473,13 +473,6 @@ def outbox_relays(author: RelayList, *, hints: Iterable[str] = (),
         if writes:
             return dedupe_relays(seen_on, writes[:defaults.WRITE_CAP])
     return dedupe_relays(seen_on, defaults.FALLBACK_RELAYS)
-
-
-def inbox_relays(user: RelayList) -> List[str]:
-    """Where to send things addressed to someone: their read relays."""
-    if user.found and user.read:
-        return dedupe_relays(user.read[:defaults.INBOX_PER_MENTION])
-    return []
 
 
 def relay_list_targets(new_event: dict, old: Optional[RelayList]) -> List[str]:

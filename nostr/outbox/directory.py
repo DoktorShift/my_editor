@@ -21,7 +21,13 @@ minutes, UNKNOWN for thirty seconds, just long enough not to hammer relays.
 
 The user's own lists are kept on disk as the signed events themselves
 (re-verified on load), so routing is right from the first second after a
-launch, even offline. Everyone else's are kept in memory only.
+launch, even offline. Everyone else's are kept in memory only, at most
+DIRECTORY_CAP of them, the least recently used dropped first. Ages are
+measured on a monotonic clock, so a clock change cannot make a list look
+fresh for hours, or stale at once.
+
+Every answer is a copy: a caller changing the RelayList it was handed
+changes nothing here.
 
 Every list MyEditor publishes goes through ``remember``, which seeds the
 cache with the known-good event instead of asking relays that may not
@@ -30,13 +36,15 @@ have it yet.
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
 import tempfile
 import time
-from pathlib import Path
+from collections import OrderedDict
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QObject, QTimer, Signal
@@ -78,7 +86,7 @@ class RelayDirectory(QObject):
     def __init__(self, pool, *, query=fetch_replaceable, query_many=fetch_replaceable_many,
                  store_path: Optional[Path] = RELAY_LISTS_FILE,
                  own_pubkeys: Callable[[], Iterable[str]] = tuple,
-                 clock: Callable[[], float] = time.time,
+                 clock: Callable[[], float] = time.monotonic,
                  parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._pool = pool
@@ -87,8 +95,11 @@ class RelayDirectory(QObject):
         self._store_path = Path(store_path) if store_path else None
         self._own_pubkeys = own_pubkeys
         self._clock = clock
-        self._entries: Dict[str, RelayList] = {}
+        self._entries: "OrderedDict[str, RelayList]" = OrderedDict()
         self._pending: Dict[str, _Pending] = {}
+        # author -> {relay: id of the relay list sent there}, so a list is
+        # shared with a relay once, not with every note that reaches it.
+        self._shared: Dict[str, Dict[str, str]] = {}
         self._load()
 
     # ------------------------------------------------------------------ #
@@ -97,7 +108,8 @@ class RelayDirectory(QObject):
 
     def cached(self, pubkey: str) -> RelayList:
         """What is known now, however old; UNKNOWN when nothing is."""
-        return self._entries.get((pubkey or "").lower()) or RelayList()
+        entry = self._entries.get((pubkey or "").lower())
+        return _copy(entry) if entry is not None else RelayList()
 
     def lookup(self, pubkey: str, on_done: Callable[[RelayList], None], *,
                hints: Sequence[str] = (), fresh: bool = False,
@@ -107,11 +119,13 @@ class RelayDirectory(QObject):
         key = (pubkey or "").lower()
         entry = self._entries.get(key)
         if entry is not None and not fresh:
+            self._entries.move_to_end(key)
+            answer = _copy(entry)
             if not self._expired(entry):
-                QTimer.singleShot(0, lambda: on_done(entry))
+                QTimer.singleShot(0, lambda: on_done(answer))
                 return
             if entry.found:
-                QTimer.singleShot(0, lambda: on_done(entry))
+                QTimer.singleShot(0, lambda: on_done(answer))
                 self._start(key, hints, timeout_ms, None)
                 return
         self._start(key, hints, timeout_ms, on_done)
@@ -148,7 +162,8 @@ class RelayDirectory(QObject):
         for key in keys:
             entry = self._entries.get(key)
             if entry is not None and (not self._expired(entry) or entry.found):
-                QTimer.singleShot(0, lambda e=entry, d=one(key): d(e))
+                self._entries.move_to_end(key)
+                QTimer.singleShot(0, lambda e=_copy(entry), d=one(key): d(e))
                 if not self._expired(entry):
                     continue
                 callback = None                    # stale but known: refresh behind it
@@ -174,10 +189,6 @@ class RelayDirectory(QObject):
             return False
         self._store(key, self._found(event))
         return True
-
-    def forget(self, pubkey: str) -> None:
-        if self._entries.pop((pubkey or "").lower(), None) is not None:
-            self._save()
 
     # ------------------------------------------------------------------ #
     # Routing                                                            #
@@ -234,14 +245,32 @@ class RelayDirectory(QObject):
     def share_relay_list(self, author: str, relays: Sequence[str]) -> None:
         """Send the author's signed relay list to relays it just published to
         but that do not hold it (NIP-65). Needs no signer: it is the event
-        we already have."""
-        entry = self.cached(author)
-        if not entry.found or entry.event is None:
+        we already have. A relay that already took this very list is not
+        sent it again; one that refused it is tried again next time."""
+        key = (author or "").lower()
+        entry = self._entries.get(key)
+        if entry is None or not entry.found or entry.event is None:
             return
+        event_id = str(entry.event.get("id", ""))
         listed = set(entry.write) | set(entry.read)
-        extra = [r for r in policy.dedupe_relays(relays) if r not in listed]
-        if extra:
-            self._pool.publish(extra, entry.event)
+        sent = self._shared.setdefault(key, {})
+        extra = [r for r in policy.dedupe_relays(relays)
+                 if r not in listed and sent.get(r) != event_id]
+        if not extra:
+            return
+        for url in extra:
+            sent[url] = event_id
+        while len(sent) > defaults.DIRECTORY_CAP:
+            sent.pop(next(iter(sent)))
+        job = self._pool.publish(extra, entry.event)
+
+        def done(results):
+            for url, ok, _message in results:
+                url = policy.normalize_relay_url(url) or url
+                if not ok and sent.get(url) == event_id:
+                    del sent[url]
+
+        job.all_done.connect(done)
 
     # ------------------------------------------------------------------ #
     # Internals                                                          #
@@ -328,7 +357,7 @@ class RelayDirectory(QObject):
             logger.exception("relay list lookup for %s could not be settled", key)
         for callback in callbacks:
             try:
-                callback(answer)
+                callback(_copy(answer))
             except Exception:  # noqa: BLE001, one caller's bug must not break the others
                 logger.exception("relay list callback for %s failed", key)
 
@@ -345,7 +374,7 @@ class RelayDirectory(QObject):
             current.fetched_at = self._clock() - _TTL[LookupState.FOUND] + defaults.TTL_UNKNOWN_S
         else:
             state = LookupState.UNKNOWN if result.state is LookupState.FOUND else result.state
-            self._entries[key] = RelayList(state=state, fetched_at=self._clock())
+            self._put(key, RelayList(state=state, fetched_at=self._clock()))
         return self._entries[key]
 
     def _found(self, event: dict) -> RelayList:
@@ -355,11 +384,23 @@ class RelayDirectory(QObject):
 
     def _store(self, key: str, relay_list: RelayList) -> None:
         previous = self._entries.get(key)
-        self._entries[key] = relay_list
+        self._put(key, relay_list)
         if self._is_own(key):
             self._save()
         if previous is None or previous.created_at != relay_list.created_at:
             self.changed.emit(key)
+
+    def _put(self, key: str, relay_list: RelayList) -> None:
+        """Keep ``relay_list`` as the newest used, and drop the least
+        recently used of other people's beyond DIRECTORY_CAP."""
+        self._entries[key] = relay_list
+        self._entries.move_to_end(key)
+        if len(self._entries) <= defaults.DIRECTORY_CAP:
+            return
+        own = self._own_keys()
+        others = [k for k in self._entries if k not in own]
+        for old in others[:len(others) - defaults.DIRECTORY_CAP]:
+            del self._entries[old]
 
     # -- persistence of the user's own lists -----------------------------------
 
@@ -375,7 +416,7 @@ class RelayDirectory(QObject):
                     and policy.created_at_of(event) is not None
                     and events.verify_event(event)):
                 relay_list = policy.parse_relay_list(event)
-                relay_list.fetched_at = 0.0   # known, but due for a refresh
+                relay_list.fetched_at = float("-inf")   # known, but due for a refresh
                 self._entries[str(event["pubkey"]).lower()] = relay_list
 
     def _save(self) -> None:
@@ -385,15 +426,32 @@ class RelayDirectory(QObject):
         lists = {k: e.event for k, e in self._entries.items()
                  if k in own and e.found and e.event is not None}
         folder = self._store_path.parent
+        tmp: Optional[str] = None
         try:
             folder.mkdir(parents=True, exist_ok=True)
             fd, tmp = tempfile.mkstemp(prefix=".relay_lists_", dir=str(folder))
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump({"version": 1, "lists": lists}, f)
+                f.flush()
+                os.fsync(f.fileno())
             os.chmod(tmp, 0o600)
             os.replace(tmp, self._store_path)
-        except OSError:
-            pass
+            tmp = None
+        except (OSError, TypeError, ValueError) as exc:
+            # The lists are still known for this session; only the head
+            # start on the next launch is lost.
+            logger.warning("could not save the relay lists: %s", exc)
+        finally:
+            if tmp is not None:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+
+
+def _copy(relay_list: RelayList) -> RelayList:
+    """A RelayList nobody else holds, event and all."""
+    return copy.deepcopy(relay_list)
 
 
 def ask_private_relays(directory, profile, on_done: Callable[[List[str]], None], *,

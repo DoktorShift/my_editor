@@ -5,7 +5,8 @@
 One package owns every answer to "which relays?":
 
     defaults   the relays MyEditor picks by itself, by role, with the date
-               they were last checked (the only place relay URLs live)
+               they were last checked (the only place general-purpose
+               relay URLs live; the three exceptions are named there)
     policy     the rules, as pure functions (publish routing, private
                storage, reading someone's notes, safe list changes)
     lookup     finding a verified relay list or profile, and telling
@@ -13,9 +14,12 @@ One package owns every answer to "which relays?":
     directory  RelayDirectory: lookups, caching and the user's own lists
     writer     changing the user's relay list or profile without ever
                overwriting what is already there; setting up new accounts
+
+defaults and policy are plain Python: importing them (or the rules
+re-exported here) loads no Qt. RelayDirectory and ask_private_relays are
+loaded from directory.py on first use.
 """
 
-from .directory import RelayDirectory, ask_private_relays  # noqa: F401
 from .policy import (  # noqa: F401
     KIND_PROFILE,
     KIND_RELAY_LIST,
@@ -39,3 +43,14 @@ from .policy import (  # noqa: F401
     replacement_created_at,
     starter_relay_list_tags,
 )
+
+_FROM_DIRECTORY = ("RelayDirectory", "ask_private_relays")
+
+
+def __getattr__(name):
+    # PEP 562: the Qt half of the package is imported only when asked for,
+    # so the pure rules can be used (and tested) without Qt.
+    if name in _FROM_DIRECTORY:
+        from . import directory
+        return getattr(directory, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

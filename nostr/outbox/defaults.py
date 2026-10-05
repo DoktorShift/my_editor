@@ -7,8 +7,9 @@ else asks nostr/outbox for a set by role, so a relay that goes down or
 starts charging is replaced in one place.
 
 Each relay here was checked on QUALIFIED_ON: it answered a read with a
-real end-of-stored-events within about a second, and its NIP-11 document
-asks for no payment and no login. Relays that failed the check that day
+real end-of-stored-events in under three seconds (the bar
+tests/smoke_relay_qualify.py sets), and its NIP-11 document asks for no
+payment and no login. Relays that failed the check that day
 (relay.nostr.band, nostr.oxtr.dev and relay.nsec.app did not connect;
 theforest.nostr1.com asks for payment) are deliberately absent. Check
 again before changing anything here, and update the date.
@@ -68,6 +69,7 @@ INBOX_TOTAL_CAP = 10        # inbox relays per publish, all mentions together, s
 LOOKUP_CAP = 8              # relays asked for someone's relay list, an indexer always among them
 HINT_CAP = 3                # relays from hints (tags, addresses) asked for one person
 PRIVATE_CAP = 10            # relays for drafts and other private records
+DIRECTORY_CAP = 500         # other people's relay lists kept in memory
 
 # How long a looked-up relay list is trusted before it is refreshed.
 TTL_FOUND_S = 30 * 60

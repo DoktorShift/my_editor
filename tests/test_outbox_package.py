@@ -844,3 +844,91 @@ def test_a_mention_with_a_private_relay_list_in_the_directory():
     d.publish_plan(PK, plans.append, mentioned=[(OTHER_PK, "ws://192.168.0.2")])
     batch = [s for s in pool.subs if OTHER_PK in s.filters[0]["authors"]][0]
     assert "ws://192.168.0.2" not in batch.urls
+
+
+# -- what the directory hands out and keeps ------------------------------------------------
+
+def test_a_caller_changing_its_answer_changes_nothing_here():
+    d = directory(FakeQuery())
+    d.remember(signed(10002, [["r", "wss://mine.com"]]))
+    handed = d.cached(PK)
+    handed.write.append("wss://evil.com")
+    handed.event["tags"].append(["r", "wss://evil.com"])
+    got = []
+    d.lookup(PK, got.append)
+    settle()
+    got[0].write.clear()
+    assert d.cached(PK).write == ["wss://mine.com"]
+    assert d.cached(PK).event["tags"] == [["r", "wss://mine.com"]]
+
+
+def test_other_peoples_lists_are_capped_least_recently_used_first(monkeypatch):
+    monkeypatch.setattr(defaults, "DIRECTORY_CAP", 3)
+    keys = [bytes([i]) * 32 for i in range(10, 15)]
+    d = directory(FakeQuery(), own=(PK,))
+    d.remember(signed(10002, [["r", "wss://mine.com"]]))
+    pubkeys = []
+    for sk in keys:
+        event = signed(10002, [["r", "wss://theirs.com"]], sk=sk)
+        pubkeys.append(event["pubkey"])
+        d.remember(event)
+        if len(pubkeys) == 3:
+            d.lookup(pubkeys[0], lambda _r: None)        # used again: kept longer
+    known = [p for p in pubkeys if d.cached(p).found]
+    assert known == [pubkeys[0], *pubkeys[3:]]
+    assert d.cached(PK).found                              # the user's own are never dropped
+
+
+def test_ages_are_measured_on_a_monotonic_clock(tmp_path):
+    import time
+    assert RelayDirectory(FakePool(), store_path=None)._clock is time.monotonic
+    saved = directory(FakeQuery(), tmp_path=tmp_path, own=(PK,))
+    saved.remember(signed(10002, [["r", "wss://mine.com"]]))
+    # Just after a boot the monotonic clock is small; a list loaded from
+    # disk is still due for a refresh, never mistaken for a fresh one.
+    query = FakeQuery()
+    again = directory(query, tmp_path=tmp_path, own=(PK,), clock=lambda: 5.0)
+    got = []
+    again.lookup(PK, got.append)
+    settle()
+    assert got[0].write == ["wss://mine.com"] and len(query.calls) == 1
+
+
+def test_a_failed_save_leaves_no_temporary_file(tmp_path, monkeypatch, caplog):
+    import os as os_module
+    d = directory(FakeQuery(), tmp_path=tmp_path, own=(PK,))
+
+    def refuse(*_args):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(os_module, "replace", refuse)
+    d.remember(signed(10002, [["r", "wss://mine.com"]]))
+    assert list(tmp_path.iterdir()) == []
+    assert "disk full" in caplog.text
+    assert d.cached(PK).found                              # still known for this session
+
+
+def test_the_rules_load_without_qt():
+    import subprocess
+    code = ("import sys; import nostr.outbox.policy, nostr.outbox.defaults; "
+            "from nostr.outbox import plan_publish, private_relays; "
+            "sys.exit(any(m.startswith('PySide6') for m in sys.modules))")
+    root = pathlib.Path(__file__).resolve().parent.parent
+    assert subprocess.run([sys.executable, "-c", code], cwd=root).returncode == 0
+
+
+def test_a_relay_list_is_shared_with_a_relay_once():
+    pool = FakePool(refuse={"wss://refusing.com"})
+    d = RelayDirectory(pool, store_path=None, clock=Clock())
+    d.remember(signed(10002, [["r", "wss://mine.com"]]))
+    d.share_relay_list(PK, ["wss://inbox.com", "wss://refusing.com", "wss://mine.com"])
+    settle()
+    d.share_relay_list(PK, ["wss://inbox.com", "wss://refusing.com"])
+    settle()
+    assert [targets for targets, _event in pool.published] == [
+        ["wss://inbox.com", "wss://refusing.com"],
+        ["wss://refusing.com"]]                            # the refusal is tried again
+    d.remember(signed(10002, [["r", "wss://mine.com"], ["r", "wss://more.com"]],
+                      created_at=NOW))
+    d.share_relay_list(PK, ["wss://inbox.com"])            # a newer list goes out again
+    assert pool.published[-1][0] == ["wss://inbox.com"]
