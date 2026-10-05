@@ -39,6 +39,10 @@ else:
 # Bundle the window icon, preserving its repo-relative path so resource_path()
 # in main.py finds it identically from source and when frozen.
 datas = [(os.path.join(ICON_DIR, "icon-256.png"), os.path.join("packaging", "icons"))]
+# The translations (i18n.py reads locale/<language>.po at startup).
+datas += [(os.path.join(ROOT, "locale", name), "locale")
+          for name in sorted(os.listdir(os.path.join(ROOT, "locale")))
+          if name.endswith(".po")]
 
 # Static analysis misses these (native ext / lazily-imported Qt submodules).
 hiddenimports = [

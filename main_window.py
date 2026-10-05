@@ -39,6 +39,7 @@ from constants import (
     DARK_BORDER, LIGHT_BORDER, MONO_FONT, APP_DISPLAY_NAME, APP_VERSION, APP_URL
 )
 from widgets import FindBar, HeaderWidget, LineNumberGutter, FileChangedBar, UpdateBar
+import i18n
 from commands import FILE, FORMAT, HELP, NOSTR, SEARCH, VIEW, Command, CommandRegistry
 from doc_walk import iter_blocks, iter_image_names, serialize_plain_with_images
 from markdown_writer import document_to, document_to_markdown, has_local_only_formatting
@@ -1062,6 +1063,22 @@ class MainWindow(QMainWindow):
         self.act_bg_dots = backgrounds["dots"]
         self.act_bg_grid = backgrounds["grid"]
 
+        # The language MyEditor speaks. Applied at the next start: many
+        # texts are read once, when their module loads (see i18n.py).
+        self._language_group = QActionGroup(self)
+        self._language_group.setExclusive(True)
+        chosen = i18n.chosen_language()
+        self.act_languages = []
+        for code in [i18n.SYSTEM] + i18n.available():
+            title = ("System Language" if code == i18n.SYSTEM
+                     else i18n.LANGUAGE_NAMES.get(code, code))
+            action = add(Command(f"view.language.{code}", title, VIEW, checkable=True,
+                                 keywords=("language", "sprache")),
+                         triggered=lambda c=code: self._choose_language(c),
+                         checked=chosen == code)
+            self._language_group.addAction(action)
+            self.act_languages.append(action)
+
         self.act_highlight_line = add(Command("view.highlight_line", "Highlight Current Line",
                                               VIEW, checkable=True),
                                       toggled=self._toggle_highlight_line,
@@ -1189,6 +1206,10 @@ class MainWindow(QMainWindow):
         m_background.addAction(self.act_bg_dots)
         m_background.addAction(self.act_bg_grid)
         m_view.addAction(self.act_highlight_line)
+        m_view.addSeparator()
+        m_language = m_view.addMenu("Language")
+        for action in self.act_languages:
+            m_language.addAction(action)
         m_view.addSeparator()
         m_view.addAction(self.act_fullscreen)
 
@@ -2860,6 +2881,17 @@ class MainWindow(QMainWindow):
                 cursor.setPosition(cursor.selectionStart())
                 ed.setTextCursor(cursor)
                 ed.setFocus()
+
+    def _choose_language(self, code: str) -> None:
+        """Remember the language; it is used from the next start on."""
+        save_setting(i18n.SETTING, code)
+        target = i18n.resolve(code)
+        if target == i18n.language():
+            return
+        name = i18n.LANGUAGE_NAMES.get(target, target)
+        inform(self, title="Restart MyEditor to Change the Language",
+               message=f"MyEditor will be in {name} the next time you open it.",
+               is_dark=self.is_dark_theme)
 
     def _show_shortcuts(self):
         """Open the cheat-sheet style ``ShortcutsDialog``.
