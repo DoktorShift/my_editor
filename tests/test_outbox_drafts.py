@@ -30,7 +30,7 @@ from nostr.drafts import build_inner_event  # noqa: E402
 from nostr.outbox import ask_private_relays, defaults  # noqa: E402
 from nostr.outbox.policy import LookupState, RelayList, private_relays  # noqa: E402
 from nostr.publisher import DraftDeleteJob, DraftPublishJob  # noqa: E402
-from tests.outbox_fakes import FakeRelayDirectory  # noqa: E402
+from tests.outbox_fakes import FakeRelayDirectory, settle  # noqa: E402
 
 PK = "a" * 64
 BUNKER = "wss://bunker.example"
@@ -130,6 +130,7 @@ def _published_to(job_class, **kwargs):
                     session_pool=_signer(), profile=_profile(),
                     entitled_relays=[MEMBER_RELAY], **kwargs)
     job.start()
+    settle()
     (relays, _event), _kw = relay_pool.publish.call_args
     return relays
 
@@ -140,6 +141,7 @@ def _read_from():
                      session_pool=_signer(), store=DraftStore(),
                      entitled_relays=lambda: [MEMBER_RELAY])
     sync.start_for(_profile())
+    settle()
     (relays, _filters), _kw = relay_pool.subscribe.call_args
     return relays
 
@@ -191,4 +193,5 @@ def test_entitled_relays_may_be_asked_for_when_needed():
     ask_private_relays(directory, _profile(), got.append, entitled=lambda: list(membership))
     membership.append(MEMBER_RELAY)
     ask_private_relays(directory, _profile(), got.append, entitled=lambda: list(membership))
+    settle()
     assert MEMBER_RELAY not in got[0] and MEMBER_RELAY in got[1]

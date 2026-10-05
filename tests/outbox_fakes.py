@@ -9,13 +9,14 @@ starts with "only a validly signed event counts".
 
 from __future__ import annotations
 
+import copy
 from typing import Dict, List, Optional
 
 from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtWidgets import QApplication
 
 from nostr import crypto, events
-from nostr.outbox import policy
+from nostr.outbox import defaults, policy
 from nostr.outbox.lookup import Lookup
 from nostr.outbox.policy import LookupState, RelayList
 
@@ -190,12 +191,17 @@ def one_by_one(query):
 
 
 class FakeRelayDirectory(QObject):
-    """RelayDirectory's routing surface, answering at once from known lists.
+    """RelayDirectory's routing surface, answering from known lists.
 
     Routing runs through the real policy functions, so a test sees where
     the app would really go with those lists. ``lists`` maps a pubkey to
     its RelayList (or to relay URLs, read as a list with no markers);
     anyone else is UNKNOWN. ``calls`` records each question asked.
+
+    Like the real directory, every answer arrives on the next turn of the
+    event loop (QTimer 0), never inside the call, so code that assumes
+    otherwise fails here too; ``settle()`` delivers. Its public methods
+    take what RelayDirectory's take (a test compares the two).
     """
 
     changed = Signal(str)
@@ -207,6 +213,7 @@ class FakeRelayDirectory(QObject):
             self.set(pubkey, value)
         self.calls: List[tuple] = []
         self.shared: List[tuple] = []
+        self.remembered: List[dict] = []
 
     def set(self, pubkey: str, value) -> None:
         if not isinstance(value, RelayList):
@@ -214,34 +221,46 @@ class FakeRelayDirectory(QObject):
         self.lists[pubkey.lower()] = value
 
     def cached(self, pubkey: str) -> RelayList:
-        return self.lists.get((pubkey or "").lower()) or RelayList()
+        return copy.deepcopy(self.lists.get((pubkey or "").lower()) or RelayList())
 
-    def lookup(self, pubkey, on_done, *, hints=(), fresh=False, timeout_ms=0):
+    @staticmethod
+    def _later(on_done, answer) -> None:
+        QTimer.singleShot(0, lambda: on_done(answer))
+
+    def lookup(self, pubkey, on_done, *, hints=(), fresh=False, timeout_ms=6_000):
         self.calls.append(("lookup", pubkey, tuple(hints)))
-        on_done(self.cached(pubkey))
+        self._later(on_done, self.cached(pubkey))
 
-    def lookup_many(self, pubkeys, on_done, *, hints=None, timeout_ms=0):
+    def lookup_many(self, pubkeys, on_done, *, hints=None, timeout_ms=3_000):
         keys = list(dict.fromkeys(p.lower() for p in pubkeys if p))
+        keys = keys[:defaults.MENTION_LOOKUP_CAP]
         self.calls.append(("lookup_many", tuple(keys), dict(hints or {})))
-        on_done({key: self.cached(key) for key in keys})
+        self._later(on_done, {key: self.cached(key) for key in keys})
+
+    def remember(self, event):
+        self.remembered.append(event)
+        return False
 
     def publish_plan(self, author, on_done, *, mentioned=(), entitled=()):
         mentioned = list(mentioned)
         self.calls.append(("publish_plan", author, tuple(mentioned), tuple(entitled)))
-        on_done(policy.plan_publish(
+        looked_up = list(dict.fromkeys(p.lower() for p, _hint in mentioned))
+        looked_up = looked_up[:defaults.MENTION_LOOKUP_CAP]
+        self._later(on_done, policy.plan_publish(
             self.cached(author),
-            mentioned={p.lower(): self.cached(p) for p, _hint in mentioned},
+            mentioned={p: self.cached(p) for p in looked_up},
             hints={p.lower(): h for p, h in mentioned if h},
-            entitled=entitled))
+            entitled=entitled,
+            own={author.lower()}))
 
     def private_relays(self, author, on_done, *, entitled=(), legacy=(), reading=False):
         self.calls.append(("private_relays", author, tuple(entitled), tuple(legacy), reading))
-        on_done(policy.private_relays(self.cached(author), entitled=entitled, legacy=legacy,
-                                      reading=reading))
+        self._later(on_done, policy.private_relays(self.cached(author), entitled=entitled,
+                                                   legacy=legacy, reading=reading))
 
     def outbox_of(self, author, on_done, *, hints=()):
         self.calls.append(("outbox_of", author, tuple(hints)))
-        on_done(policy.outbox_relays(self.cached(author), hints=hints))
+        self._later(on_done, policy.outbox_relays(self.cached(author), hints=hints))
 
     def share_relay_list(self, author, relays):
         self.shared.append((author, list(relays)))

@@ -58,6 +58,7 @@ from nostr.ui.publish_copy_dialog import (
 )
 
 from tests.media_fakes import PNG_BYTES, make_media, sha_of
+from tests.outbox_fakes import settle
 
 
 KEY = "7e" * 32
@@ -932,6 +933,7 @@ def _real_library(*, signer):
         relay_directory=FakeRelayDirectory(),
         query=Query(),
         clock=lambda: 1_700_000_000,
+        entitled_relays=lambda: [],      # MainWindow's answer for a non-member
     )
 
 
@@ -1012,6 +1014,7 @@ def test_a_signer_that_never_answers_does_not_make_private_files_public(tmp_path
     library.status_changed.connect(seen.append)
     library.bind_profile(SimpleNamespace(
         user_pubkey="ab" * 32, bunker_relays=["wss://bunker.example"]))
+    settle()
 
     # The library is done trying, for the whole session.
     assert library.loading is False
@@ -1034,6 +1037,7 @@ def test_a_public_file_still_inserts_while_the_library_is_unreadable(tmp_path):
     library = _real_library(signer=_AbsentSigner())
     library.bind_profile(SimpleNamespace(
         user_pubkey="ab" * 32, bunker_relays=["wss://bunker.example"]))
+    settle()
 
     ledger = PublicLedger(path=tmp_path / "public.json")
     window = _insert_window(library, ledger)

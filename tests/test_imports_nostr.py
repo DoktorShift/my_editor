@@ -41,7 +41,7 @@ from nostr.outbox import defaults
 from nostr.outbox.policy import LookupState, RelayList
 
 from tests.imports_fakes import FakeFetcher
-from tests.outbox_fakes import FakeRelayDirectory
+from tests.outbox_fakes import FakeRelayDirectory, settle
 
 PK = "ab" * 32
 PK2 = "cd" * 32
@@ -113,6 +113,7 @@ def run(url, query=None, fetcher=None, directory=None):
         nostr_query=query,
         relay_directory=directory,
     )
+    settle()                      # the directory answers on the next turn
     return sink
 
 

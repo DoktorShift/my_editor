@@ -38,7 +38,7 @@ from nostr.drafts import (
 )
 from nostr.outbox import RelayList, defaults, policy
 from nostr.outbox.policy import LookupState
-from tests.outbox_fakes import FakeRelayDirectory
+from tests.outbox_fakes import FakeRelayDirectory, settle
 
 
 PK = "a" * 64
@@ -427,6 +427,7 @@ def _running_sync(directory, *, entitled=()):
     )
     profile = _make_profile(PK)
     sync.start_for(profile)
+    settle()
     return sync, pool, profile
 
 
@@ -454,6 +455,7 @@ def test_a_newer_relay_list_moves_the_subscription():
 
     directory.set(PK, _own_list(write=["wss://new-home.example"]))
     directory.changed.emit(PK)
+    settle()
 
     assert len(_subscribed(pool)) == 2
     assert _subscribed(pool)[1][0] == "wss://new-home.example"
@@ -465,6 +467,7 @@ def test_someone_elses_relay_list_leaves_the_subscription_alone():
     _sync, pool, _profile = _running_sync(directory)
     directory.set(OTHER_PK, _own_list(write=["wss://theirs.example"]))
     directory.changed.emit(OTHER_PK)
+    settle()
     assert len(_subscribed(pool)) == 1
 
 
@@ -472,6 +475,7 @@ def test_an_unchanged_set_is_not_resubscribed():
     directory = FakeRelayDirectory({PK: _own_list(write=["wss://w.example"])})
     _sync, pool, _profile = _running_sync(directory)
     directory.changed.emit(PK)
+    settle()
     assert len(_subscribed(pool)) == 1
 
 
@@ -486,8 +490,10 @@ def test_a_membership_relay_is_followed_on_reroute():
                      session_pool=session_pool, store=DraftStore(),
                      entitled_relays=lambda: list(entitled))
     sync.start_for(_make_profile(PK))
+    settle()
     entitled.append(MEMBER_RELAY)
     sync.reroute()
+    settle()
     assert MEMBER_RELAY in _subscribed(pool)[-1]
 
 
@@ -535,6 +541,7 @@ def _sync_with(session_pool, directory):
     sync = DraftSync(relay_pool=pool, relay_directory=directory,
                      session_pool=session_pool, store=DraftStore())
     sync.start_for(_make_profile(PK))
+    settle()
     return sync, pool
 
 
@@ -547,6 +554,7 @@ def test_the_signer_coming_back_does_not_leave_a_second_subscription_open():
     first = sync._subscription
     assert first is not None
     sync.retry_signer()
+    settle()
     ready, _failed = session_pool.waiting.pop()
     ready(MagicMock())
     assert pool.subscribe.call_count == 2
@@ -561,6 +569,7 @@ def test_a_newer_list_while_the_signer_is_pending_is_where_drafts_are_read():
     assert pool.subscribe.call_count == 0                 # waiting for the signer
     directory.set(PK, _own_list(write=["wss://new.example"]))
     directory.changed.emit(PK)
+    settle()
     assert pool.subscribe.call_count == 0                 # nothing to move yet
     ready, _failed = session_pool.waiting.pop()
     ready(MagicMock())

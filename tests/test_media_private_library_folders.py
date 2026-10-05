@@ -165,7 +165,7 @@ def _library_after(records):
     from PySide6.QtCore import QCoreApplication
 
     from nostr.media.private_library import PrivateLibrary
-    from tests.outbox_fakes import FakeRelayDirectory
+    from tests.outbox_fakes import FakeRelayDirectory, settle
 
     QCoreApplication.instance() or QCoreApplication(sys.argv)
 
@@ -201,6 +201,7 @@ def _library_after(records):
     profile.user_pubkey = HASH_A
     profile.bunker_relays = ["wss://r.test/"]
     library.bind_profile(profile)
+    settle()
     return library
 
 

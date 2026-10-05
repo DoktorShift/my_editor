@@ -932,3 +932,47 @@ def test_a_relay_list_is_shared_with_a_relay_once():
                       created_at=NOW))
     d.share_relay_list(PK, ["wss://inbox.com"])            # a newer list goes out again
     assert pool.published[-1][0] == ["wss://inbox.com"]
+
+
+# -- the fake directory the other tests route through -----------------------------------
+
+def test_the_fake_directory_takes_what_the_real_one_takes():
+    import inspect
+
+    from tests.outbox_fakes import FakeRelayDirectory
+
+    def public(cls):
+        return {name: inspect.signature(member) for name, member in vars(cls).items()
+                if inspect.isfunction(member) and not name.startswith("_")}
+
+    real, fake = public(RelayDirectory), public(FakeRelayDirectory)
+    assert set(real) <= set(fake)
+    for name, signature in real.items():
+        assert [(p.name, p.kind) for p in signature.parameters.values()] == \
+            [(p.name, p.kind) for p in fake[name].parameters.values()], name
+
+
+def test_the_fake_directory_answers_on_the_next_turn_as_the_real_one_does():
+    from tests.outbox_fakes import FakeRelayDirectory
+
+    real = directory(FakeQuery())
+    real.remember(signed(10002, [["r", "wss://mine.com"]]))      # known: no relay asked
+    for d in (FakeRelayDirectory({PK: ["wss://mine.com"]}), real):
+        got = []
+        d.lookup(PK, got.append)
+        d.outbox_of(PK, got.append)
+        assert got == []
+        settle()
+        assert len(got) == 2
+
+
+def test_at_most_mention_lookup_cap_people_are_looked_up():
+    from tests.outbox_fakes import FakeRelayDirectory
+
+    people = [f"{i:064x}" for i in range(defaults.MENTION_LOOKUP_CAP + 5)]
+    pool, d = live_directory()
+    d.lookup_many(people, lambda _lists: None)
+    assert len(pool.subs[0].filters[0]["authors"]) == defaults.MENTION_LOOKUP_CAP
+    fake = FakeRelayDirectory()
+    fake.lookup_many(people, lambda _lists: None)
+    assert len(fake.asked("lookup_many")[0][1]) == defaults.MENTION_LOOKUP_CAP
