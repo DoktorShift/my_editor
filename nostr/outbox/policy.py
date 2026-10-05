@@ -303,7 +303,10 @@ def private_relays(author: RelayList, *, entitled: Iterable[str] = (),
                    legacy: Iterable[str] = ()) -> List[str]:
     """Where the author's private records live (drafts, app data, private
     files). One function serves both writing and reading, so what one
-    device stores is exactly where another device looks."""
+    device stores is exactly where another device looks.
+
+    ``legacy`` are relays such records were kept on before, appended so
+    they stay readable (and keep receiving updates)."""
     if author.found and not author.is_empty:
         own = dedupe_relays(author.write, author.read, entitled)
     else:

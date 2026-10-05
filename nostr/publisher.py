@@ -53,7 +53,7 @@ from .drafts import (
     serialize_inner_event,
 )
 from .events import build_event
-from .outbox import RelayDirectory, normalize_relay_url, select_draft_publish_relays
+from .outbox import RelayDirectory, ask_private_relays, normalize_relay_url
 from .profiles import Profile
 from .relay import RelayPool
 
@@ -613,14 +613,14 @@ class DraftPublishJob(QObject):
     """End-to-end stash of one inner event as a NIP-37 draft wrap.
 
     Pipeline:
-      1. Resolve NIP-65 relay list.
+      1. Ask the relay directory where the account's private records live.
       2. Acquire bunker session.
       3. Bunker NIP-44 encrypts ``serialize_inner_event(inner)``.
       4. Wrap the ciphertext in a kind-31234 event.
       5. Bunker signs the wrap.
-      6. Publish to ``select_draft_publish_relays`` (write ∪ read ∪
-         bunker ∪ base) so other devices reading from any of those
-         sets can decrypt the same draft.
+      6. Publish to the account's private relays
+         (RelayDirectory.private_relays), the very set DraftSync reads
+         drafts from, so every device of the author finds this one.
 
     Signals (in firing order on the happy path):
       status_changed(str)        progress text
@@ -682,12 +682,8 @@ class DraftPublishJob(QObject):
     def start(self) -> None:
         """Kick off the stash. Safe to call once per instance."""
         self._emit_status("Looking up your relay list…")
-        relays_to_query = list(dict.fromkeys(list(self._profile.bunker_relays)))
-        self._relay_directory.fetch(
-            self._profile.user_pubkey,
-            relays=relays_to_query,
-            on_done=self._on_relay_list_resolved,
-        )
+        ask_private_relays(self._relay_directory, self._profile,
+                           self._on_relays_ready, entitled=self._entitled_relays)
 
     def cancel(self) -> None:
         """Suppress further signal emissions; the in-flight RPC runs out."""
@@ -705,14 +701,9 @@ class DraftPublishJob(QObject):
 
     # -- pipeline ----------------------------------------------------------
 
-    def _on_relay_list_resolved(self, relay_list) -> None:
+    def _on_relays_ready(self, publish_relays: List[str]) -> None:
         if self._cancelled:
             return
-        publish_relays = select_draft_publish_relays(
-            relay_list,
-            bunker_relays=self._profile.bunker_relays,
-            entitled=self._entitled_relays,
-        )
         self._emit_status("Connecting to your signer…")
         self._session_pool.get(
             self._profile,
@@ -815,7 +806,8 @@ class DraftDeleteJob(QObject):
 
     Per NIP-37 the deletion mechanism is *not* NIP-09; the addressable
     event is replaced with one whose ``content`` is empty. Same shape
-    as ``DraftPublishJob`` minus the encryption step (no plaintext).
+    as ``DraftPublishJob`` minus the encryption step (no plaintext), and
+    the same relays, so the replacement lands wherever the draft is read.
 
     Signals:
       status_changed(str)
@@ -866,11 +858,8 @@ class DraftDeleteJob(QObject):
 
     def start(self) -> None:
         self._emit_status("Looking up your relay list…")
-        self._relay_directory.fetch(
-            self._profile.user_pubkey,
-            relays=list(dict.fromkeys(self._profile.bunker_relays)),
-            on_done=self._on_relay_list_resolved,
-        )
+        ask_private_relays(self._relay_directory, self._profile,
+                           self._on_relays_ready, entitled=self._entitled_relays)
 
     def cancel(self) -> None:
         self._cancelled = True
@@ -887,14 +876,9 @@ class DraftDeleteJob(QObject):
 
     # -- pipeline ----------------------------------------------------------
 
-    def _on_relay_list_resolved(self, relay_list) -> None:
+    def _on_relays_ready(self, publish_relays: List[str]) -> None:
         if self._cancelled:
             return
-        publish_relays = select_draft_publish_relays(
-            relay_list,
-            bunker_relays=self._profile.bunker_relays,
-            entitled=self._entitled_relays,
-        )
         self._session_pool.get(
             self._profile,
             on_ready=lambda client: self._on_bunker_ready(client, publish_relays),

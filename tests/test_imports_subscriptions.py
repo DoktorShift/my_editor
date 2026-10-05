@@ -25,7 +25,8 @@ from nostr.imports.constants import (
 )
 from nostr.imports.subscriptions import FeedSubscriptionStore, _parse_payload
 
-from tests.imports_fakes import PROFILE, FakeRelayListCache
+from tests.imports_fakes import PROFILE
+from tests.outbox_fakes import FakeRelayDirectory
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -104,13 +105,15 @@ class FakeQuery:
 
 
 def make_store(tmp_path, *, session_pool=None, publisher=None,
-               scheduler=None, query=None, clock=None):
+               scheduler=None, query=None, clock=None, directory=None,
+               entitled=None):
     publisher = publisher or FakePublisher()
     scheduler = scheduler or FakeScheduler()
     store = FeedSubscriptionStore(
         session_pool=session_pool or FakeSessionPool(),
         relay_pool=None,
-        relay_directory=FakeRelayListCache(),
+        relay_directory=directory or FakeRelayDirectory(),
+        entitled_relays=entitled,
         cache_dir=tmp_path,
         query=query,
         publisher=publisher,
@@ -237,6 +240,23 @@ class TestRelaySync:
         # The query asked for exactly our namespaced d-tag.
         _relays, filters = query.calls[0]
         assert filters[0]["#d"] == [FEED_LIST_DTAG]
+
+    def test_the_list_is_read_where_it_is_written(self, tmp_path):
+        # Every device of the account must find what one device saved,
+        # so reading and writing ask for the same private relays.
+        directory = FakeRelayDirectory({PROFILE.user_pubkey: ["wss://home.example"]})
+        query = FakeQuery(None)
+        store, publisher, scheduler = make_store(
+            tmp_path, query=query, directory=directory,
+            entitled=lambda: ["wss://members.example"])
+        store.bind_profile(PROFILE)
+        store.add_feed(FEED_URL)
+        scheduler.fire_last()
+
+        read_relays, _filters = query.calls[0]
+        written_relays, _signed = publisher.calls[0]
+        assert read_relays == written_relays == [
+            "wss://home.example", "wss://members.example", "wss://bunker.example"]
 
     def test_relay_refresh_never_clobbers_unsynced_edits(self, tmp_path):
         # The remote answer arrives while a local add is still pending.

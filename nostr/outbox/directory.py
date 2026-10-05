@@ -286,3 +286,16 @@ class RelayDirectory(QObject):
             os.replace(tmp, self._store_path)
         except OSError:
             pass
+
+
+def ask_private_relays(directory, profile, on_done: Callable[[List[str]], None], *,
+                       entitled: Sequence[str] = ()) -> None:
+    """Where ``profile``'s private records live (drafts, synced settings,
+    private files), for writing and reading alike.
+
+    The signer relays the profile was paired through are passed as the
+    legacy set: MyEditor kept private records there before it read relay
+    lists, so they stay in the set and those records stay readable.
+    """
+    directory.private_relays(profile.user_pubkey, on_done, entitled=list(entitled),
+                             legacy=list(getattr(profile, "bunker_relays", None) or ()))

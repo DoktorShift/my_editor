@@ -21,9 +21,8 @@ site has moved.
 from .legacy import (  # noqa: F401  (re-exported while call sites migrate)
     RELAY_CAP,
     RelayListCache,
-    select_draft_publish_relays,
 )
-from .directory import RelayDirectory  # noqa: F401
+from .directory import RelayDirectory, ask_private_relays  # noqa: F401
 from .policy import (  # noqa: F401
     KIND_PROFILE,
     KIND_RELAY_LIST,

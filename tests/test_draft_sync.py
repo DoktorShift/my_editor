@@ -16,7 +16,8 @@ Three critical correctness properties from the code-review pass live here:
   3. Inner-pubkey verification: a misbehaving signer cannot smuggle an
      inner event whose declared pubkey differs from the active profile.
 
-Plus relay-selection precedence for ``_select_read_relays``.
+Plus where drafts are read from: the account's private relays, the set
+drafts are written to, followed again when a newer relay list arrives.
 """
 
 from __future__ import annotations
@@ -29,13 +30,15 @@ import pytest
 from PySide6.QtCore import QCoreApplication
 
 from nostr.draft_store import DraftState, DraftStore
-from nostr.draft_sync import DraftSync, _select_read_relays
+from nostr.draft_sync import DraftSync
 from nostr.drafts import (
     DraftWrapMeta,
     build_inner_event,
     serialize_inner_event,
 )
-from nostr.outbox import RelayList
+from nostr.outbox import RelayList, policy
+from nostr.outbox.policy import LookupState
+from tests.outbox_fakes import FakeRelayDirectory
 
 
 PK = "a" * 64
@@ -111,8 +114,8 @@ def test_relay_list_callback_from_stopped_session_does_not_proceed():
     gen_a = sync._generation
     sync.stop()
 
-    # The session_pool.get is the next step after _on_relay_list_ready.
-    sync._on_relay_list_ready(gen_a, RelayList(write=["wss://x/"], read=[]))
+    # The session_pool.get is the next step after _on_relays_ready.
+    sync._on_relays_ready(gen_a, ["wss://x/"])
     sync._session_pool.get.assert_not_called()
 
 
@@ -402,32 +405,89 @@ def test_set_decrypted_clears_ciphertext_on_success():
 
 
 # --------------------------------------------------------------------------- #
-# 5. _select_read_relays precedence                                           #
+# 5. Drafts are read where they are written                                   #
 # --------------------------------------------------------------------------- #
 
-def test_read_relays_prefer_user_read_over_write_over_bunker():
-    rl = RelayList(write=["wss://w.example"], read=["wss://r.example"])
-    result = _select_read_relays(rl, bunker_relays=["wss://b.example"])
-    # Read first, then write, then bunker: most-trusted-user-choice first.
-    assert result.index("wss://r.example") < result.index("wss://w.example")
-    assert result.index("wss://w.example") < result.index("wss://b.example")
+MEMBER_RELAY = "wss://members.example"
 
 
-def test_read_relays_fall_back_to_defaults_when_nothing_specific():
-    result = _select_read_relays(RelayList(write=[], read=[]), bunker_relays=())
-    assert result  # never empty
-    # The DEFAULT_RELAYS set lives in nostr/__init__.py, so checking
-    # length-non-zero is the contract.
+def _own_list(write=(), read=()):
+    return RelayList(write=list(write), read=list(read), state=LookupState.FOUND)
 
 
-def test_read_relays_deduplicate_case_and_slash():
-    rl = RelayList(
-        write=["wss://X.example/"],
-        read=["wss://x.example", "wss://X.example/"],
+def _running_sync(directory, *, entitled=()):
+    """A DraftSync bound to PK whose signer answers at once."""
+    pool = MagicMock()
+    session_pool = MagicMock()
+    session_pool.get.side_effect = (
+        lambda profile, on_ready, on_error: on_ready(MagicMock()))
+    sync = DraftSync(
+        relay_pool=pool, relay_directory=directory, session_pool=session_pool,
+        store=DraftStore(), entitled_relays=lambda: list(entitled),
     )
-    result = _select_read_relays(rl, bunker_relays=())
-    # All three normalize to one key.
-    assert sum(1 for u in result if "x.example" in u.lower()) == 1
+    profile = _make_profile(PK)
+    sync.start_for(profile)
+    return sync, pool, profile
+
+
+def _subscribed(pool):
+    return [call.args[0] for call in pool.subscribe.call_args_list]
+
+
+def test_drafts_are_read_from_the_private_relays():
+    directory = FakeRelayDirectory(
+        {PK: _own_list(write=["wss://w.example"], read=["wss://r.example"])})
+    _sync, pool, profile = _running_sync(directory, entitled=[MEMBER_RELAY])
+    expected = policy.private_relays(
+        directory.cached(PK), entitled=[MEMBER_RELAY], legacy=profile.bunker_relays)
+    assert _subscribed(pool) == [expected]
+    assert expected == ["wss://w.example", "wss://r.example", MEMBER_RELAY,
+                        "wss://bunker.test"]
+
+
+def test_a_newer_relay_list_moves_the_subscription():
+    directory = FakeRelayDirectory()                 # nothing known yet
+    _sync, pool, _profile = _running_sync(directory)
+    first = pool.subscribe.return_value
+    assert "wss://bunker.test" in _subscribed(pool)[0]
+
+    directory.set(PK, _own_list(write=["wss://new-home.example"]))
+    directory.changed.emit(PK)
+
+    assert len(_subscribed(pool)) == 2
+    assert _subscribed(pool)[1][0] == "wss://new-home.example"
+    first.close.assert_called()
+
+
+def test_someone_elses_relay_list_leaves_the_subscription_alone():
+    directory = FakeRelayDirectory({PK: _own_list(write=["wss://w.example"])})
+    _sync, pool, _profile = _running_sync(directory)
+    directory.set(OTHER_PK, _own_list(write=["wss://theirs.example"]))
+    directory.changed.emit(OTHER_PK)
+    assert len(_subscribed(pool)) == 1
+
+
+def test_an_unchanged_set_is_not_resubscribed():
+    directory = FakeRelayDirectory({PK: _own_list(write=["wss://w.example"])})
+    _sync, pool, _profile = _running_sync(directory)
+    directory.changed.emit(PK)
+    assert len(_subscribed(pool)) == 1
+
+
+def test_a_membership_relay_is_followed_on_reroute():
+    directory = FakeRelayDirectory({PK: _own_list(write=["wss://w.example"])})
+    entitled: list = []
+    pool = MagicMock()
+    session_pool = MagicMock()
+    session_pool.get.side_effect = (
+        lambda profile, on_ready, on_error: on_ready(MagicMock()))
+    sync = DraftSync(relay_pool=pool, relay_directory=directory,
+                     session_pool=session_pool, store=DraftStore(),
+                     entitled_relays=lambda: list(entitled))
+    sync.start_for(_make_profile(PK))
+    entitled.append(MEMBER_RELAY)
+    sync.reroute()
+    assert MEMBER_RELAY in _subscribed(pool)[-1]
 
 
 # --------------------------------------------------------------------------- #

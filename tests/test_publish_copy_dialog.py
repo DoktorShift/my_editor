@@ -921,7 +921,7 @@ def _private_event():
 def _real_library(*, signer):
     """The real PrivateLibrary, wired the way ``MainWindow`` wires it."""
     from nostr.media.private_library import PrivateLibrary
-    from tests.imports_fakes import FakeRelayListCache
+    from tests.outbox_fakes import FakeRelayDirectory
 
     class Query:
         def addressable(self, relays, filters, on_done):
@@ -929,7 +929,7 @@ def _real_library(*, signer):
 
     return PrivateLibrary(
         session_pool=signer,
-        relay_directory=FakeRelayListCache(),
+        relay_directory=FakeRelayDirectory(),
         query=Query(),
         clock=lambda: 1_700_000_000,
     )

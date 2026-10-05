@@ -47,7 +47,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Sequence
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QKeySequence, QShortcut
@@ -273,6 +273,7 @@ class FeedsPanel(QFrame):
         self._relay_pool: Optional[RelayPool] = None
         self._relay_directory: Optional[RelayDirectory] = None
         self._session_pool: Optional[BunkerSessionPool] = None
+        self._entitled_relays: Optional[Callable[[], Sequence[str]]] = None
         self._draft_store = None
         self._active_profile: Optional[Profile] = None
 
@@ -581,6 +582,7 @@ class FeedsPanel(QFrame):
         session_pool: BunkerSessionPool,
         draft_store=None,
         blossom_settings=None,
+        entitled_relays: Optional[Callable[[], Sequence[str]]] = None,
     ) -> None:
         """Inject the runtime dependencies needed to publish drafts.
 
@@ -590,10 +592,14 @@ class FeedsPanel(QFrame):
         the new prefixed d-tag. ``blossom_settings`` (anything with a
         ``primary`` attribute) overrides where mirrored images land;
         the user's configured Blossom settings are read by default.
+        ``entitled_relays`` answers which relays the account has standing
+        on beyond its own list (a membership's); imported drafts and the
+        synced feed list go there as well.
         """
         self._relay_pool = relay_pool
         self._relay_directory = relay_directory
         self._session_pool = session_pool
+        self._entitled_relays = entitled_relays
         self._draft_store = draft_store
         self._blossom_settings = blossom_settings
         # The relay-query surface Nostr-facing resolvers use (author
@@ -610,6 +616,7 @@ class FeedsPanel(QFrame):
                 session_pool=session_pool,
                 relay_pool=relay_pool,
                 relay_directory=relay_directory,
+                entitled_relays=entitled_relays,
                 parent=self,
             )
             self._subscriptions.feeds_changed.connect(
@@ -1197,6 +1204,8 @@ class FeedsPanel(QFrame):
                 if self._rehost_check.isChecked() else ""
             ),
             skip_image_urls=set(self._skip_image_urls),
+            entitled_relays=(list(self._entitled_relays() or ())
+                             if self._entitled_relays else ()),
             parent=self,
         )
         self._job.status_changed.connect(self._set_status)

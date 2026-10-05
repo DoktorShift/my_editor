@@ -376,7 +376,7 @@ def test_an_oversized_roster_is_aborted_and_resolves_false():
 # The entitled relay reaching the publish targets                       #
 # --------------------------------------------------------------------- #
 
-from nostr.outbox import RELAY_CAP, RelayList, plan_publish, select_draft_publish_relays
+from nostr.outbox import RelayList, defaults, plan_publish, private_relays
 from nostr.outbox.policy import LookupState
 
 
@@ -401,7 +401,7 @@ def test_a_non_member_publishes_exactly_as_before():
 
 def test_the_cap_cannot_drop_the_entitled_relay():
     # Being silently trimmed would cost a member the benefit they paid for.
-    crowded = [f"wss://r{i}.example" for i in range(RELAY_CAP * 2)]
+    crowded = [f"wss://r{i}.example" for i in range(defaults.WRITE_CAP * 3)]
     plan = plan_publish(_own(*crowded), entitled=[MEMBER_RELAY])
     assert MEMBER_RELAY in plan.author
 
@@ -413,20 +413,14 @@ def test_an_entitled_relay_already_configured_is_not_duplicated():
 
 
 def test_drafts_reach_the_members_relay_but_after_the_users_own():
-    out = select_draft_publish_relays(
-        RelayList(write=["wss://mine.example"], read=[]),
-        base=["wss://base.example"],
-        entitled=[MEMBER_RELAY],
-    )
-    assert out.index("wss://mine.example") < out.index(MEMBER_RELAY)
-    assert out.index(MEMBER_RELAY) < out.index("wss://base.example")
+    out = private_relays(_own("wss://mine.example"), entitled=[MEMBER_RELAY],
+                         legacy=["wss://bunker.example"])
+    assert out == ["wss://mine.example", MEMBER_RELAY, "wss://bunker.example"]
 
 
 def test_drafts_are_unchanged_without_an_entitlement():
-    rl = RelayList(write=["wss://mine.example"], read=[])
-    assert select_draft_publish_relays(rl, base=["wss://b.example"]) == (
-        select_draft_publish_relays(rl, base=["wss://b.example"], entitled=[])
-    )
+    own = _own("wss://mine.example")
+    assert private_relays(own) == private_relays(own, entitled=[])
 
 
 # --------------------------------------------------------------------- #

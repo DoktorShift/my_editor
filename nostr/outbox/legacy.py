@@ -5,12 +5,11 @@
 Kept only while call sites move to RelayDirectory and the policy
 functions; nothing new should use it. Each name here has a successor:
 
-    select_draft_publish_relays  -> policy.private_relays / RelayDirectory.private_relays
     RelayListCache               -> RelayDirectory
 
 What follows is the original description.
 
-NIP-65 outbox: per-pubkey relay-list cache + publish-set selection.
+NIP-65 outbox: per-pubkey relay-list cache.
 
 Spec: https://github.com/nostr-protocol/nips/blob/master/65.md
 
@@ -50,60 +49,6 @@ RELAY_CAP: int = 10
 # kind:10002 sees their preferences honoured on the next publish.
 _TTL_HIT_S: int = 30 * 60
 _TTL_EMPTY_S: int = 3 * 60
-
-
-# --------------------------------------------------------------------------- #
-# Pure parsing & selection                                                    #
-# --------------------------------------------------------------------------- #
-
-def select_draft_publish_relays(
-    relay_list: "RelayList",
-    *,
-    bunker_relays: Iterable[str] = (),
-    base: Iterable[str] = DEFAULT_RELAYS,
-    entitled: Iterable[str] = (),
-    cap: int = RELAY_CAP,
-) -> List[str]:
-    """Choose where to *publish* a NIP-37 private draft.
-
-    Drafts must land somewhere the user's other devices will read back.
-    The reader path (``draft_sync._select_read_relays``) consults
-    ``read`` → ``write`` → bunker, so we mirror that by publishing to
-    the union ``write`` ∪ ``read`` ∪ bunker, with the curated base set
-    as a backstop for brand-new profiles. Deduped and capped at ``cap``.
-
-    Drafts need the read set as well as the write set because asymmetric
-    read / write sets are common (paid read relays + free write relays,
-    etc.) and we cannot afford drafts written on device A to be invisible
-    on device B.
-    """
-    seen: set[str] = set()
-    out: List[str] = []
-    # The user's own relays lead, since those are where their other devices
-    # look. An entitled relay comes next, ahead of the generic backstop, so
-    # a member's draft reaches it before the cap runs out.
-    for url in (
-        list(relay_list.write)
-        + list(relay_list.read)
-        + list(bunker_relays)
-        + list(entitled)
-        + list(base)
-    ):
-        normalized = _normalize_for_dedup(url)
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        out.append(url)
-        if len(out) >= cap:
-            break
-    return out
-
-
-def _normalize_for_dedup(url: str) -> str:
-    """Lowercase + strip trailing slash, just for set membership. The original
-    URL is preserved in the output so we don't accidentally rewrite a path."""
-    s = url.strip().rstrip("/").lower()
-    return s
 
 
 # --------------------------------------------------------------------------- #

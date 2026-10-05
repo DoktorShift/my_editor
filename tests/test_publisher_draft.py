@@ -161,7 +161,7 @@ def test_publish_job_cancel_silences_all_signals():
     job._emit_status("ignored")
     job._emit_failed("ignored")
     # Late callbacks from RPC layers must also be silenced
-    job._on_relay_list_resolved(MagicMock(write=[], read=[]))
+    job._on_relays_ready(["wss://r/"])
     job._on_signed({"id": "x", "kind": 31234, "created_at": 1, "pubkey": PK, "tags": [], "content": ""}, ["wss://r/"])
     job._on_publish_done([("wss://r/", True, "ok")])
     assert captured == []
@@ -181,7 +181,7 @@ def test_delete_job_cancel_silences_all_signals():
 
     job.cancel()
     job._emit_failed("ignored")
-    job._on_relay_list_resolved(MagicMock(write=[], read=[]))
+    job._on_relays_ready(["wss://r/"])
     job._on_signed(
         {"id": "tomb", "kind": 31234, "created_at": 1, "pubkey": PK, "tags": [], "content": ""},
         ["wss://r/"],

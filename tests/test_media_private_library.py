@@ -38,7 +38,7 @@ from nostr.media.private_library import (
     parse_file_record,
 )
 
-from tests.imports_fakes import FakeRelayListCache
+from tests.outbox_fakes import FakeRelayDirectory
 
 
 PUBKEY = "ab" * 32
@@ -182,14 +182,15 @@ def event(payload, *, d=None, created_at=1000, pubkey=PUBKEY, event_id=None):
 
 
 def make_library(events=None, *, client=None, session_pool=None, query=None,
-                 clock=None):
+                 clock=None, directory=None, entitled=None):
     query = query if query is not None else FakeQuery(events)
     pool = session_pool if session_pool is not None else FakeSessionPool(client)
     library = PrivateLibrary(
         session_pool=pool,
-        relay_directory=FakeRelayListCache(),
+        relay_directory=directory or FakeRelayDirectory(),
         query=query,
         clock=clock or (lambda: NOW),
+        entitled_relays=entitled,
     )
     return library, query, pool
 
@@ -355,6 +356,23 @@ def test_the_query_asks_only_for_this_users_own_library():
 
     _relays, filters = query.calls[0]
     assert filters == [{"kinds": [PRIVATE_FILE_KIND], "authors": [PUBKEY]}]
+
+
+def test_the_library_is_read_from_the_accounts_private_relays():
+    # The same set drafts are written to and read from, so a file saved
+    # on one device is found on every other.
+    directory = FakeRelayDirectory({PUBKEY: ["wss://home.example"]})
+    library, query, _pool = make_library(
+        [event(record())], directory=directory,
+        entitled=lambda: ["wss://members.example"])
+    library.bind_profile(PROFILE)
+
+    relays, _filters = query.calls[0]
+    assert relays == ["wss://home.example", "wss://members.example",
+                      "wss://bunker.example"]
+    assert directory.asked("private_relays") == [
+        ("private_relays", PUBKEY, ("wss://members.example",),
+         ("wss://bunker.example",))]
 
 
 def test_an_event_from_another_author_is_ignored():

@@ -23,6 +23,7 @@ import pytest
 from PySide6.QtCore import QCoreApplication
 
 from nostr.publisher import DraftBulkDeleteJob
+from tests.outbox_fakes import FakeRelayDirectory
 
 PK = "a" * 64
 OK = [("wss://r/", True, "ok")]
@@ -61,11 +62,7 @@ class Signer:
 
     # -- the seams DraftDeleteJob uses ---------------------------------
     def relay_directory(self):
-        cache = MagicMock()
-        cache.fetch.side_effect = (
-            lambda pubkey, relays, on_done: on_done(MagicMock(write=[], read=[]))
-        )
-        return cache
+        return FakeRelayDirectory()
 
     def session_pool(self):
         pool = MagicMock()

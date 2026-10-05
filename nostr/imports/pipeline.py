@@ -161,10 +161,15 @@ class ImportItemsJob(QObject):
         publish_job_factory: Optional[Callable[..., DraftPublishJob]] = None,
         run_blocking: Optional[Callable[..., None]] = None,
         pacer: Optional[Callable[[int, Callable[[], None]], None]] = None,
+        entitled_relays: Sequence[str] = (),
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
         self._items: List[FeedItem] = list(items)
+        # Relays this account has standing on beyond its own list. Drafts
+        # go there as they do from the editor, so DraftSync, which reads
+        # there, finds the imported ones too.
+        self._entitled_relays = list(entitled_relays)
         self._feed_url = (feed_url or "").strip()
         self._profile = profile
         self._relay_pool = relay_pool
@@ -627,6 +632,7 @@ class ImportItemsJob(QObject):
                 profile=self._profile,
                 inner_event=inner,
                 identifier=template.slug,
+                entitled_relays=self._entitled_relays,
                 parent=self,
             )
         except ValueError as exc:

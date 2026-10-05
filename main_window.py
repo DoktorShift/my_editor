@@ -329,6 +329,7 @@ class MainWindow(QMainWindow):
             relay_directory=self._relay_directory,
             session_pool=self._session_pool,
             store=self._draft_store,
+            entitled_relays=self._entitled_relays,
             parent=self,
         )
         self._draft_sync.status_changed.connect(self._on_draft_sync_status)
@@ -404,6 +405,7 @@ class MainWindow(QMainWindow):
             session_pool=self._session_pool,
             relay_directory=self._relay_directory,
             query=RelayQueryAdapter(self._relay_pool, parent=self),
+            entitled_relays=self._entitled_relays,
             parent=self,
         )
         self._media_visibility = MediaVisibility(
@@ -1254,6 +1256,7 @@ class MainWindow(QMainWindow):
             # Lets imports reuse a pre-prefix identifier that already
             # exists locally instead of duplicating the draft.
             draft_store=self._draft_store,
+            entitled_relays=self._entitled_relays,
         )
         self._drafts_panel.set_active_profile(self._profile_store.default())
         # The panel's outbound actions all route back through the host.
@@ -3685,6 +3688,10 @@ class MainWindow(QMainWindow):
         dialog = self._media_library_dialog
         if dialog is not None and dialog.isVisible():
             self._media_store.fetch()
+        # Drafts are written to the members' relay as well, so they are
+        # read there too once the membership is known (a no-op when the
+        # set of relays did not change).
+        self._draft_sync.reroute()
 
     # -- joining the association ---------------------------------------------
 
