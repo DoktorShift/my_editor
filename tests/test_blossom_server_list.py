@@ -26,7 +26,6 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication
 
-from nostr import DEFAULT_RELAYS
 from nostr.blossom import server_list
 from nostr.blossom.server_list import (
     BLOSSOM_SERVER_LIST_KIND,
@@ -44,7 +43,9 @@ from nostr.blossom.settings import (
     CONFIG_ORIGIN_USER,
     BlossomSettings,
 )
+from nostr.outbox.policy import LookupState, RelayList, lookup_relays
 from tests.blossom_fakes import PUBKEY
+from tests.outbox_fakes import FakeRelayDirectory
 
 
 # The example event from specs/bud-03.md lines 15-28, verbatim.
@@ -358,10 +359,11 @@ def test_the_cache_never_touches_disk(tmp_path, monkeypatch):
 class Ctx:
     """A policy object wired to a fake pool and a temp settings file."""
 
-    def __init__(self, tmp_path, profile=None) -> None:
+    def __init__(self, tmp_path, profile=None, directory=None) -> None:
         self.pool = FakePool()
         self.settings = _settings(tmp_path)
-        self.policy = UserServerList(self.pool, settings=self.settings)
+        self.policy = UserServerList(self.pool, settings=self.settings,
+                                     relay_directory=directory)
         self.profile = profile if profile is not None else _profile()
         self.discovered: list = []
         self.adopted: list = []
@@ -543,10 +545,23 @@ def test_discovery_is_recorded_but_never_enters_the_upload_list(tmp_path):
     assert reopened.configured_servers == CHOSEN
 
 
-def test_refresh_queries_the_default_relays_plus_the_bunker_relays(tmp_path):
-    ctx = Ctx(tmp_path, profile=_profile(relays=["wss://bunker.example"]))
+def test_refresh_asks_where_the_users_own_lists_are(tmp_path):
+    # The same relays as the user's profile and contact list: their write
+    # relays first, then the indexers. A signer's relay is not a home.
+    directory = FakeRelayDirectory({PUBKEY: RelayList(
+        write=["wss://mine.example"], state=LookupState.FOUND)})
+    ctx = Ctx(tmp_path, profile=_profile(relays=["wss://bunker.example"]),
+              directory=directory)
     ctx.policy.refresh(ctx.profile)
-    assert ctx.pool.relay_sets[0] == list(DEFAULT_RELAYS) + ["wss://bunker.example"]
+    assert ctx.pool.relay_sets[0] == lookup_relays(known=directory.cached(PUBKEY))
+    assert ctx.pool.relay_sets[0][0] == "wss://mine.example"
+    assert "wss://bunker.example" not in ctx.pool.relay_sets[0]
+
+
+def test_refresh_without_a_directory_asks_the_indexers(tmp_path):
+    ctx = Ctx(tmp_path)
+    ctx.policy.refresh(ctx.profile)
+    assert ctx.pool.relay_sets[0] == lookup_relays()
 
 
 def test_refresh_without_a_profile_pubkey_asks_nothing(tmp_path):

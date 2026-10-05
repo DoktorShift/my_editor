@@ -293,7 +293,8 @@ class MainWindow(QMainWindow):
         self._session_pool = BunkerSessionPool(self._relay_pool, parent=self,
                                                vault=self._key_vault)
         self._metadata_fetcher = ProfileMetadataFetcher(
-            self._relay_pool, self._profile_store, parent=self
+            self._relay_pool, self._profile_store, parent=self,
+            relay_directory=self._relay_directory,
         )
         self._metadata_fetcher.updated.connect(self._on_metadata_updated)
         self._avatar_loader = AvatarLoader(parent=self)
@@ -314,7 +315,8 @@ class MainWindow(QMainWindow):
         )
         self._search_client.results.connect(self._on_search_results)
         self._contact_fetcher = ContactListFetcher(
-            self._relay_pool, self._known_people, parent=self
+            self._relay_pool, self._known_people, parent=self,
+            relay_directory=self._relay_directory,
         )
         self._contact_fetcher.person_updated.connect(self._on_person_updated)
 
@@ -431,7 +433,7 @@ class MainWindow(QMainWindow):
         active = self._profile_store.default()
         if active is not None:
             self._metadata_fetcher.fetch(active)
-            self._contact_fetcher.fetch(active.user_pubkey, active.bunker_relays)
+            self._contact_fetcher.fetch(active.user_pubkey)
             # Start the draft sync in the background. It's idempotent -
             # if the panel is never opened, this still keeps the store
             # warm so opening the panel later is instant.
@@ -3796,7 +3798,7 @@ class MainWindow(QMainWindow):
         # refresh itself when the fetcher signals back.
         self._metadata_fetcher.fetch(profile)
         # Also prime the mentions cache from this profile's NIP-02 contact list.
-        self._contact_fetcher.fetch(profile.user_pubkey, profile.bunker_relays)
+        self._contact_fetcher.fetch(profile.user_pubkey)
         # Bind the draft pipeline to the new profile so the panel
         # (visible or not) starts collecting wraps from the relays.
         self._draft_sync.start_for(profile)

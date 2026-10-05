@@ -249,10 +249,20 @@ def replacement_created_at(base: Optional[dict], now: float) -> int:
 # --------------------------------------------------------------------------- #
 
 def lookup_relays(*, hints: Iterable[str] = (), known: Optional[RelayList] = None) -> List[str]:
-    """Where to ask for someone's relay list or profile."""
+    """Where to ask for someone's relay list, profile or other replaceable
+    event (contact list, media server list): their own write relays when
+    known, then the indexers."""
     own = known.write if known is not None and known.found else ()
     return dedupe_relays(hints, own, defaults.INDEXER_RELAYS, defaults.FALLBACK_RELAYS[:3],
                          cap=defaults.LOOKUP_CAP)
+
+
+def bulk_profile_relays() -> List[str]:
+    """Where to ask for many people's profiles in one request (everyone a
+    user follows): the indexers, which collect everyone's, then the
+    fallback set. Looking up each person's outbox would be hundreds of
+    lookups for a picker that only needs names and pictures."""
+    return dedupe_relays(defaults.INDEXER_RELAYS, defaults.FALLBACK_RELAYS)
 
 
 @dataclass(frozen=True)

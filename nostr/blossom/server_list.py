@@ -44,8 +44,8 @@ from PySide6.QtCore import QObject, Signal
 
 import url_safety
 
-from .. import DEFAULT_RELAYS
 from ..events import build_event
+from ..outbox.policy import lookup_relays
 from ..queries import fetch_latest_event
 from .settings import BlossomSettings
 
@@ -175,8 +175,7 @@ class _CacheEntry:
 class ServerListCache(QObject):
     """Fetches kind 10063 events on demand and caches them per pubkey.
 
-    Shaped like ``nostr.outbox.RelayListCache``, for the same reasons:
-    concurrent asks coalesce into one REQ, and a hit resolves without
+    Concurrent asks coalesce into one REQ, and a hit resolves without
     touching a relay.
 
     In memory only, on purpose. A disk cache of other people's server
@@ -285,11 +284,15 @@ class UserServerList(QObject):
         *,
         settings: Optional[BlossomSettings] = None,
         cache: Optional[ServerListCache] = None,
+        relay_directory=None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
         self._settings = settings if settings is not None else BlossomSettings()
         self._cache = cache if cache is not None else ServerListCache(pool, parent=self)
+        # Knows the user's own relay list, which leads the lookup, as it
+        # does for their profile and contact list.
+        self._relay_directory = relay_directory
         self._servers: List[str] = list(self._settings.discovered_servers)
         self._pubkey: str = self._settings.discovered_pubkey
 
@@ -353,8 +356,12 @@ class UserServerList(QObject):
             return
         if force:
             self._cache.invalidate(pubkey)
-        extra = list(getattr(profile, "bunker_relays", None) or [])
-        relays = list(dict.fromkeys(list(DEFAULT_RELAYS) + extra))
+        # A server list is one of the user's replaceable events, found
+        # where their profile is found: their write relays, then the
+        # indexers.
+        known = (self._relay_directory.cached(pubkey)
+                 if self._relay_directory is not None else None)
+        relays = lookup_relays(known=known)
         self._cache.fetch(
             pubkey,
             relays,
