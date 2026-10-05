@@ -154,3 +154,13 @@ Some publishers (Habla, Yakihonne, Pareto, self-hosted Nostr-aware blogs) emit f
 ### Idempotent re-runs
 
 Each item's draft identifier is derived from its feed id, so re-running the same import replaces existing drafts on relays rather than duplicating them. Safe to schedule daily, weekly, or whenever you publish a new post.
+
+## Joining EINUNDZWANZIG in the app
+
+Nostr > EINUNDZWANZIG Membership lets a person apply, pay the annual fee with Lightning and see what membership unlocks (the members' relay, a Nostr address, and media storage).
+
+The association's API needs a client key that must not ship inside the app, so membership requests go through a small service that holds it: the membership sidecar in [`sidecar/`](../sidecar/README.md).
+- Official builds name the maintainers' sidecar in `constants.MEMBERSHIP_SERVICE_URL`.
+- A self-hosted build names its own sidecar, or none.
+- Without a sidecar, or with one that has no key, the window offers the association's website instead of joining in the app.
+- Members get their relay and media server either way, recognized from the association's public member list.
