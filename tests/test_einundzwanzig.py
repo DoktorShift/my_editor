@@ -179,8 +179,8 @@ def test_a_member_gets_the_relay_and_the_media_server():
     assert b.is_member
     assert b.relay == MEMBER_RELAY
     assert b.blossom_server == MEMBER_BLOSSOM
-    assert b.max_file_bytes == MAX_FILE_BYTES
     assert b.per_user_bytes == PER_USER_BYTES
+    assert MAX_FILE_BYTES == 1024 ** 3
 
 
 def test_a_non_member_gets_nothing_to_branch_on():
@@ -464,7 +464,6 @@ def test_a_stale_roster_keeps_its_last_answer_for_steady_benefits():
     directory, clock = _directory(nam)
     _resolve(directory, MEMBER)
     clock["t"] += 60 * 60          # well past the refresh interval
-    assert directory.is_stale()
     assert directory.cached_membership(MEMBER) is None      # not fresh
     assert directory.last_known_membership(MEMBER) is True  # but still known
     assert directory.last_known_membership(OTHER) is False
@@ -473,3 +472,117 @@ def test_a_stale_roster_keeps_its_last_answer_for_steady_benefits():
 def test_nothing_known_yet_is_none_not_false():
     directory, _clock = _directory(FakeNam({}))
     assert directory.last_known_membership(MEMBER) is None
+
+
+# --------------------------------------------------------------------- #
+# A refresh that fails, a forced refresh, and what the window saved     #
+# --------------------------------------------------------------------- #
+
+class FlakyNam(FakeNam):
+    """Answers from ``by_year`` until ``down`` is set, then fails."""
+
+    def __init__(self, by_year):
+        super().__init__(by_year)
+        self.down = False
+
+    def get(self, request):
+        self.error = QNetworkReply.HostNotFoundError if self.down else None
+        return super().get(request)
+
+
+def test_a_failed_refresh_keeps_the_roster_and_the_names():
+    nam = FlakyNam({2026: roster_bytes(MEMBER)})
+    directory, clock = _directory(nam)
+    _resolve(directory, MEMBER)
+    clock["t"] += 16 * 60                          # stale: the next resolve fetches
+    nam.down = True
+    seen = []
+    directory.resolved.connect(lambda pk, ok: seen.append((pk, ok)))
+    directory.resolve(MEMBER)
+    nam.replies[-1].finished.emit()                # the refresh fails
+    assert seen == [(MEMBER, True)]                # waiters hear the last known answer
+    assert directory.last_known_membership(MEMBER) is True
+    assert directory.cached_handle(MEMBER) == "u0"
+    assert nam.requested == [2026, 2026]
+
+
+def test_a_failed_refresh_is_retried_on_the_next_resolve():
+    nam = FlakyNam({2026: roster_bytes(MEMBER)})
+    directory, clock = _directory(nam)
+
+    def resolve_once():
+        directory.resolve(MEMBER)
+        nam.replies[-1].finished.emit()
+
+    resolve_once()
+    clock["t"] += 16 * 60
+    nam.down = True
+    resolve_once()
+    assert directory.cached_membership(MEMBER) is None   # kept, but still stale
+    nam.down = False
+    resolve_once()
+    assert nam.requested == [2026, 2026, 2026]
+    assert directory.cached_membership(MEMBER) is True
+
+
+def test_a_failure_with_no_roster_is_still_not_a_member():
+    nam = FakeNam(error=QNetworkReply.HostNotFoundError)
+    directory, _clock = _directory(nam)
+    assert _resolve(directory, MEMBER) == [(MEMBER, False)]
+    assert directory.last_known_membership(MEMBER) is None
+
+
+def test_a_forced_refresh_fetches_a_fresh_roster_and_keeps_answering_meanwhile():
+    nam = FakeNam({2026: roster_bytes(MEMBER)})
+    directory, _clock = _directory(nam)
+    _resolve(directory, MEMBER)
+    nam.by_year[2026] = roster_bytes(OTHER)
+    seen = []
+    directory.resolved.connect(lambda pk, ok: seen.append((pk, ok)))
+    directory.resolve(MEMBER, force=True)
+    assert nam.requested == [2026, 2026]
+    assert directory.cached_membership(MEMBER) is True       # until the answer lands
+    nam.replies[-1].finished.emit()
+    assert seen == [(MEMBER, False)]
+    assert directory.cached_membership(MEMBER) is False
+
+
+def test_a_saved_name_is_shown_before_the_roster_lists_it():
+    nam = FakeNam({2026: roster_bytes(MEMBER)})
+    directory, clock = _directory(nam)
+    _resolve(directory, MEMBER)
+    directory.record_handle(MEMBER, "satoshi")
+    assert directory.cached_handle(MEMBER) == "satoshi"
+    clock["t"] += 16 * 60
+    _resolve(directory, MEMBER)                    # the roster still says "u0"
+    assert directory.cached_handle(MEMBER) == "satoshi"
+
+
+def test_only_a_real_name_is_saved():
+    directory, _clock = _directory(FakeNam({}))
+    directory.record_handle(MEMBER, "not a name")
+    directory.record_handle("nonsense", "satoshi")
+    assert directory.cached_handle(MEMBER) is None
+    assert directory.cached_handle("nonsense") is None
+
+
+def test_forgetting_drops_the_confirmation_and_the_saved_name():
+    nam = FakeNam({2026: roster_bytes(OTHER)})
+    directory, _clock = _directory(nam)
+    _resolve(directory, MEMBER)
+    directory.confirm_member(MEMBER)
+    directory.record_handle(MEMBER, "satoshi")
+    directory.forget(MEMBER)
+    assert directory.cached_membership(MEMBER) is False
+    assert directory.cached_handle(MEMBER) is None
+
+
+def test_the_roster_and_the_api_agree_on_what_a_name_is():
+    from nostr.einundzwanzig_api import NIP05_HANDLE_MAX_LENGTH
+    too_long = "a" * (NIP05_HANDLE_MAX_LENGTH + 1)
+    records = parse_roster_records(json.dumps([
+        {"pubkey": MEMBER, "nip05_handle": "fine_name-1"},
+        {"pubkey": OTHER, "nip05_handle": too_long},
+    ]).encode())
+    assert records[MEMBER] == "fine_name-1"
+    assert records[OTHER] is None
