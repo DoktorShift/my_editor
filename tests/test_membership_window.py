@@ -126,12 +126,17 @@ class FakeWatcher(QObject):
         self.year = year
         self.started = []
         self.stopped = 0
+        self.released = False
 
     def start(self, *, poll_now=False):
         self.started.append(poll_now)
 
     def stop(self):
         self.stopped += 1
+
+    def deleteLater(self):
+        self.released = True
+        super().deleteLater()
 
 
 def config():
@@ -159,7 +164,8 @@ def invoice(*, paid=False, bolt11="lnbcrt1", checkout="https://pay.einundzwanzig
                              receipt_url=None))
 
 
-def window(api=None, *, pubkey=PUBKEY, known_member=None, handle=None, opened=None):
+def window(api=None, *, pubkey=PUBKEY, known_member=None, handle=None, opened=None,
+           signs_locally=False):
     watchers = []
 
     def factory(api_, year, parent):
@@ -169,6 +175,7 @@ def window(api=None, *, pubkey=PUBKEY, known_member=None, handle=None, opened=No
 
     win = MembershipWindow(api if api is not None else FakeApi(), pubkey=pubkey,
                            known_member=known_member, handle=handle, is_dark=False,
+                           signs_locally=signs_locally,
                            watcher_factory=factory,
                            open_lightning=opened if opened is not None else (lambda b: True))
     win.watchers = watchers
@@ -527,6 +534,164 @@ def test_deleting_data_asks_first_and_returns_to_the_start():
     api.last("erase").ok(SimpleNamespace(erased=True, retained_payments=1))
     assert win.page == OVERVIEW
     assert "deleted" in win._overview_note.text()
+
+
+def test_deleting_data_says_what_happens_and_tells_the_app(monkeypatch):
+    seen = []
+    api = FakeApi()
+    win = window(api, known_member=True)
+    erased = recorder(win.data_erased)
+    monkeypatch.setattr(mw, "confirm_destructive",
+                        lambda parent, **kw: seen.append(kw) or True)
+    win._erase_link.click()
+    assert "deletes the personal details of your membership" in seen[0]["message"]
+    assert "Fees you paid stay on record for bookkeeping." in seen[0]["message"]
+    assert erased == []                            # nothing is gone until it answers
+    api.last("erase").ok(SimpleNamespace(erased=True, retained_payments=1))
+    assert erased == [(PUBKEY,)]
+
+
+def test_a_saved_address_is_told_to_the_app():
+    api = FakeApi()
+    win = window(api, known_member=True)
+    saved = recorder(win.address_saved)
+    win._name_button.click()
+    win._handle_edit.setText("hal")
+    win.buttons["send"].click()
+    api.last("apply").ok(status(e21.STATUS_MEMBER, paid=True))
+    assert saved == [(PUBKEY, "hal")]
+
+
+def test_membership_details_come_back_to_the_member_page():
+    # Cancel and failure from the member page's details go back there,
+    # not to the join page.
+    api = FakeApi()
+    win = window(api, known_member=True)
+    win._details_link.click()
+    assert win.page == WORKING
+    win.buttons["cancel"].click()
+    assert win.page == MEMBER
+    win._details_link.click()
+    api.last("me").fail(e21.ApiError(e21.ErrorCode.SIGNER_UNREACHABLE))
+    assert win.page == MEMBER
+
+
+def test_an_account_that_signs_here_is_not_sent_to_a_signer_app():
+    api = FakeApi()
+    win = window(api, signs_locally=True)
+    win.buttons["continue"].click()
+    assert win.page == WORKING
+    assert "signer" not in win._working_title.text().lower()
+    api.last("me").ok(status(e21.STATUS_AWAITING_PAYMENT))
+    api.last("create_invoice").ok(invoice())
+    default_button(win).click()                    # I've Paid
+    assert "signer" not in win._pay_status.text().lower()
+
+
+def test_a_signer_account_is_told_where_to_look():
+    win = window(FakeApi(), known_member=True)
+    win._relay_button.click()
+    assert "signer app" in win._relay_result.text()
+    local = window(FakeApi(), known_member=True, signs_locally=True)
+    local._relay_button.click()
+    assert "signer" not in local._relay_result.text().lower()
+
+
+def test_no_relay_list_offers_the_recommended_one_on_request():
+    win = window(known_member=True)
+    asked = recorder(win.add_relay_requested)
+    publish = recorder(win.publish_relay_list_requested)
+    win._relay_button.click()
+    win.set_relay_result("You don’t have a relay list yet.", offer_list=True)
+    assert publish == []                           # never without a click
+    assert win._relay_button.text() == "Publish Recommended Relay List"
+    assert win._relay_button.isEnabled() and not win._relay_button.isHidden()
+    win._relay_button.click()
+    assert publish == [()] and asked == [()]
+
+
+def test_a_list_that_could_not_be_read_offers_to_try_again():
+    win = window(known_member=True)
+    asked = recorder(win.add_relay_requested)
+    win._relay_button.click()
+    win.set_relay_result("Try again later.")
+    assert win._relay_button.text() == "Add to My Relay List"
+    assert win._relay_button.isEnabled()
+    win._relay_button.click()
+    assert asked == [(), ()]
+
+
+def test_once_paid_the_invoice_and_its_buttons_go_away():
+    api = FakeApi()
+    win = window(api)
+    to_pay(win, api)
+    default_button(win).click()
+    win.watchers[0].paid.emit(invoice(paid=True))
+    api.last("me").ok(status(e21.STATUS_AWAITING_PAYMENT))   # not confirmed yet
+    assert win.page == PAY
+    for widget in (win._qr, win._copy_button, win._wallet_button, win._browser_button):
+        assert widget.isHidden()
+    assert "payment arrived" in win._pay_status.text()
+    assert default_button(win).text() == "Check Again"
+
+
+def test_a_finished_watcher_is_released():
+    api = FakeApi()
+    win = window(api)
+    to_pay(win, api)
+    default_button(win).click()
+    watcher = win.watchers[0]
+    watcher.gave_up.emit()
+    assert watcher.released
+
+
+def test_the_copied_label_resets_on_a_timer_tied_to_the_button(monkeypatch):
+    calls = []
+    monkeypatch.setattr(mw, "QTimer", SimpleNamespace(
+        singleShot=lambda *args: calls.append(args)))
+    api = FakeApi()
+    win = window(api)
+    to_pay(win, api, inv=invoice(bolt11="lnbc1copyme"))
+    win._copy_button.click()
+    (ms, context, reset), = calls
+    assert context is win._copy_button             # gone with the window, never late
+    reset()
+    assert win._copy_button.text() == "Copy Invoice"
+
+
+def test_a_late_service_answer_after_closing_is_ignored():
+    api = FakeApi(True, answer_later=True)
+    win = window(api)
+    win.reject()
+    api.pending_check()                            # arrives after the window closed
+    assert "config" not in api.names()
+
+
+def test_the_window_owns_its_client_and_lets_go_of_a_replaced_one(qt_app):
+    from PySide6.QtCore import QCoreApplication, QEvent
+    import shiboken6
+
+    class QtApi(QObject):
+        configured = False
+
+        def __init__(self):
+            super().__init__()
+            self.canceled = 0
+
+        def check_service(self, on_done):
+            on_done(False)
+
+        def cancel(self):
+            self.canceled += 1
+
+    first, second = QtApi(), QtApi()
+    win = window(first)
+    assert first.parent() is win
+    win.set_identity(second, pubkey=PUBKEY)
+    assert first.canceled == 1 and second.parent() is win
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    assert not shiboken6.isValid(first)
+    assert shiboken6.isValid(second)
 
 
 def test_no_text_in_the_window_uses_an_em_dash():

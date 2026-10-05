@@ -19,8 +19,13 @@ words throughout (no protocol names, status codes or key formats).
 Nothing is signed by opening the window. The fee is read without a
 signature; every request that needs one (status, application, invoice,
 payment check) starts from a button the person clicked, and the working
-page says that their signer app will ask. The window is not modal: paying
-from a phone can take a minute, and the editor stays usable meanwhile.
+page says when their signer app will ask (an account whose key is kept
+on this computer signs without asking, and is not told to look for a
+prompt). The window is not modal: paying from a phone can take a minute,
+and the editor stays usable meanwhile.
+
+The window owns the API client it is given, so closing it ends every
+request, and an answer that arrives after it closed is dropped.
 
 The association API lives in nostr/einundzwanzig_api.py. This module only
 decides what to show; it never touches the network itself.
@@ -33,7 +38,7 @@ import json
 from typing import Callable, Optional
 from urllib.parse import urlsplit
 
-from PySide6.QtCore import Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
@@ -57,7 +62,7 @@ from nostr.einundzwanzig import (
 )
 from nostr.qr import make_qr_pixmap
 from nostr.ui.assistant import (
-    DEFAULT, LEADING, NORMAL, AssistantWindow, busy_bar, link_button, text_label,
+    DEFAULT, LEADING, NORMAL, AssistantWindow, busy_bar, link_button, page, text_label,
 )
 
 # Pages.
@@ -69,6 +74,10 @@ MEMBER = "member"
 
 _QR_SIZE = 216
 _ASK_SIGNER = "Approve the request in your signer app."
+_ONE_MOMENT = "One moment."
+_SIGNER_MAY_ASK = " Your signer app may ask you to approve."
+_DEFAULT_NOTE = ("Membership belongs to your Nostr identity and runs for a calendar "
+                 "year. You renew it yourself; nothing is charged automatically.")
 
 
 def format_amount(amount: int, currency: str) -> str:
@@ -110,9 +119,15 @@ class MembershipWindow(AssistantWindow):
     link_activated = Signal(str)      # a web address for the window to open
     member_confirmed = Signal(str)    # the association confirmed this pubkey as a member
     add_relay_requested = Signal()    # add the members' relay to the relay list
+    # publish the recommended relay list (with the members' relay) for an
+    # account that has none; only ever after the person clicked for it
+    publish_relay_list_requested = Signal()
+    address_saved = Signal(str, str)  # pubkey, the Nostr address name the association took
+    data_erased = Signal(str)         # pubkey whose membership data the association deleted
 
     def __init__(self, api, *, pubkey: Optional[str] = None,
                  known_member: Optional[bool] = None, handle: Optional[str] = None,
+                 signs_locally: bool = False,
                  is_dark: bool = True,
                  watcher_factory: Optional[Callable] = None,
                  open_lightning: Callable[[str], bool] = open_lightning_invoice,
@@ -122,6 +137,8 @@ class MembershipWindow(AssistantWindow):
             lambda api_, year, parent_: e21.PaymentWatcher(api_, year, parent=parent_))
         self._open_lightning = open_lightning
         self._watcher = None
+        self._api = None
+        self._relay_publishes_list = False
 
         self._build_overview()
         self._build_working()
@@ -129,28 +146,43 @@ class MembershipWindow(AssistantWindow):
         self._build_pay()
         self._build_member()
 
-        self.set_identity(api, pubkey=pubkey, known_member=known_member, handle=handle)
+        self.set_identity(api, pubkey=pubkey, known_member=known_member, handle=handle,
+                          signs_locally=signs_locally)
 
     # ------------------------------------------------------------------ #
     # Identity                                                            #
     # ------------------------------------------------------------------ #
 
+    @property
+    def pubkey(self) -> Optional[str]:
+        """The identity the window speaks for, or None before a signer."""
+        return self._pubkey
+
     def set_identity(self, api, *, pubkey: Optional[str], known_member: Optional[bool] = None,
-                     handle: Optional[str] = None) -> None:
+                     handle: Optional[str] = None, signs_locally: bool = False) -> None:
         """Start over for this identity (after connecting a signer, or a
-        profile switch). Anything in flight for the previous one is dropped."""
+        profile switch). Anything in flight for the previous one is dropped,
+        and so is the client that asked it."""
         self._stop_watching()
-        previous = getattr(self, "_api", None)
+        previous = self._api
         if previous is not None and previous is not api:
-            previous.cancel()
+            self._release(previous)
+        if isinstance(api, QObject):
+            api.setParent(self)
         self._api = api
         self._pubkey = pubkey
         self._handle = handle
+        self._signs_locally = signs_locally
         self._config = None
         self._status = None
         self._invoice = None
         self._name_only = False
         self._just_joined = False
+        self._relay_publishes_list = False
+        self._relay_button.setText("Add to My Relay List")
+        self._relay_button.setEnabled(True)
+        self._relay_button.setVisible(True)
+        self._relay_result.setText("")
         # Joining in the app needs the membership service (which holds the
         # association's key). Until it has answered, Continue waits; without
         # it, the association's website is the way to join.
@@ -162,12 +194,19 @@ class MembershipWindow(AssistantWindow):
         if self._service == "checking":
             api.check_service(lambda ok, asked=api: self._on_service_checked(asked, ok))
 
+    def _release(self, api) -> None:
+        """End a client: nothing it still has in flight is answered, and a
+        client this window owns is deleted with its connections."""
+        api.cancel()
+        if isinstance(api, QObject) and api.parent() is self:
+            api.deleteLater()
+
     def _joining_available(self) -> bool:
         return self._service == "available"
 
     def _on_service_checked(self, api, ok: bool) -> None:
-        if api is not self._api:
-            return      # an answer for an identity that is no longer shown
+        if api is None or api is not self._api:
+            return      # an identity no longer shown, or a window already closed
         self._service = "available" if ok else "unavailable"
         if ok:
             api.config(self._on_config, lambda _error: None)
@@ -181,10 +220,7 @@ class MembershipWindow(AssistantWindow):
     # ------------------------------------------------------------------ #
 
     def _build_overview(self) -> None:
-        page = QWidget()
-        col = QVBoxLayout(page)
-        col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(10)
+        body, col = page()
         col.addWidget(text_label("Become an EINUNDZWANZIG Member", "title"))
         col.addWidget(text_label(
             "EINUNDZWANZIG brings Bitcoiners together across the German-speaking "
@@ -205,12 +241,10 @@ class MembershipWindow(AssistantWindow):
         self._fee_label = text_label("", "item_title")
         self._fee_label.hide()
         col.addWidget(self._fee_label)
-        self._overview_note = text_label(
-            "Membership belongs to your Nostr identity and runs for a calendar year. "
-            "You renew it yourself; nothing is charged automatically.", "muted")
+        self._overview_note = text_label("", "muted")
         col.addWidget(self._overview_note)
         col.addStretch(1)
-        self.add_page(OVERVIEW, page)
+        self.add_page(OVERVIEW, body)
 
     def _item(self, title: str, detail: str, extra: Optional[QWidget] = None):
         """A checked row: title, detail and optional controls.
@@ -241,7 +275,7 @@ class MembershipWindow(AssistantWindow):
                        ("website", "Join on the Website", DEFAULT, self._join_on_website)]
         else:
             buttons = [("not_now", "Not Now", NORMAL, self.reject),
-                       ("continue", "Continue", DEFAULT, self._load_status)]
+                       ("continue", "Continue", DEFAULT, lambda: self._load_status())]
         self.show_page(OVERVIEW, buttons)
         if "continue" in self.buttons:
             self.buttons["continue"].setEnabled(self._joining_available())
@@ -255,9 +289,7 @@ class MembershipWindow(AssistantWindow):
                             "You can join on the EINUNDZWANZIG website.")
         elif self._service == "checking":
             note = note or "Checking whether you can join from here…"
-        self._overview_note.setText(note or (
-            "Membership belongs to your Nostr identity and runs for a calendar year. "
-            "You renew it yourself; nothing is charged automatically."))
+        self._overview_note.setText(note or _DEFAULT_NOTE)
 
     def _on_config(self, config) -> None:
         self._config = config
@@ -277,10 +309,7 @@ class MembershipWindow(AssistantWindow):
     # ------------------------------------------------------------------ #
 
     def _build_working(self) -> None:
-        page = QWidget()
-        col = QVBoxLayout(page)
-        col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(10)
+        body, col = page()
         col.addStretch(1)
         self._working_title = text_label("", "item_title")
         self._working_title.setAlignment(Qt.AlignCenter)
@@ -288,14 +317,21 @@ class MembershipWindow(AssistantWindow):
         self._working_detail.setAlignment(Qt.AlignCenter)
         col.addWidget(self._working_title)
         col.addWidget(self._working_detail)
-        bar = busy_bar()
-        bar.setMaximumWidth(220)
-        col.addWidget(bar, 0, Qt.AlignHCenter)
+        col.addWidget(busy_bar(), 0, Qt.AlignHCenter)
         col.addStretch(2)
-        self.add_page(WORKING, page)
+        self.add_page(WORKING, body)
 
-    def _working(self, detail: str, back: Callable[[], None], title: str = _ASK_SIGNER) -> None:
-        """Show the wait. Cancel drops the request and goes back."""
+    def _signer_may_ask(self) -> str:
+        """The sentence that warns of a signer prompt, or nothing for an
+        account whose key is kept on this computer (it never prompts)."""
+        return "" if self._signs_locally else _SIGNER_MAY_ASK
+
+    def _working(self, detail: str, back: Callable[[], None],
+                 title: Optional[str] = None) -> None:
+        """Show the wait. Cancel drops the request and goes back. The title
+        names the signer app only when there is one to look at."""
+        if title is None:
+            title = _ONE_MOMENT if self._signs_locally else _ASK_SIGNER
         self._working_title.setText(title)
         self._working_detail.setText(detail)
 
@@ -314,10 +350,13 @@ class MembershipWindow(AssistantWindow):
     # Status                                                              #
     # ------------------------------------------------------------------ #
 
-    def _load_status(self) -> None:
+    def _load_status(self, back: Optional[Callable[[], None]] = None) -> None:
+        """Ask where the membership stands. Cancel and failure go ``back``:
+        to the start by default, to the member page from its details link."""
+        back = back or self._show_overview
         self._working("MyEditor is asking EINUNDZWANZIG where your membership stands.",
-                      back=self._show_overview)
-        self._api.me(self._on_status, lambda error: self._fail(error, self._show_overview))
+                      back=back)
+        self._api.me(self._on_status, lambda error: self._fail(error, back))
 
     def _on_status(self, status) -> None:
         self._status = status
@@ -335,10 +374,7 @@ class MembershipWindow(AssistantWindow):
     # ------------------------------------------------------------------ #
 
     def _build_apply(self) -> None:
-        page = QWidget()
-        col = QVBoxLayout(page)
-        col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(10)
+        body, col = page()
         self._apply_title = text_label("Your Application", "title")
         col.addWidget(self._apply_title)
 
@@ -404,7 +440,7 @@ class MembershipWindow(AssistantWindow):
         self._form = form
         col.addLayout(form)
         col.addStretch(1)
-        self.add_page(APPLY, page)
+        self.add_page(APPLY, body)
 
     @staticmethod
     def _field(field, help_label: QLabel, error_label: QLabel) -> QWidget:
@@ -522,6 +558,9 @@ class MembershipWindow(AssistantWindow):
         self._status = status
         if handle:
             self._handle = handle
+            if self._pubkey:
+                # So the name shows next time too, before the roster lists it.
+                self.address_saved.emit(self._pubkey, handle)
         if name_only:
             self._show_member(note="Your Nostr address is saved. It can take a few "
                                    "minutes to appear everywhere.")
@@ -551,10 +590,7 @@ class MembershipWindow(AssistantWindow):
     # ------------------------------------------------------------------ #
 
     def _build_pay(self) -> None:
-        page = QWidget()
-        col = QVBoxLayout(page)
-        col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(10)
+        body, col = page()
         self._pay_title = text_label("", "title")
         col.addWidget(self._pay_title)
         self._pay_intro = text_label("Pay with any Lightning wallet. When you’ve paid, "
@@ -586,21 +622,16 @@ class MembershipWindow(AssistantWindow):
         actions.addWidget(self._wallet_button)
         actions.addStretch(1)
         col.addLayout(actions)
-        self._browser_button = QPushButton("Pay in Browser Instead")
-        self._browser_button.setObjectName("link")
-        self._browser_button.setAutoDefault(False)
-        self._browser_button.setCursor(Qt.PointingHandCursor)
-        self._browser_button.clicked.connect(self._pay_in_browser)
+        self._browser_button = link_button("Pay in Browser Instead", self._pay_in_browser)
         col.addWidget(self._browser_button, 0, Qt.AlignHCenter)
 
         self._pay_status = text_label("", "muted")
         self._pay_status.setAlignment(Qt.AlignCenter)
         self._pay_busy = busy_bar()
-        self._pay_busy.setMaximumWidth(220)
         col.addWidget(self._pay_status)
         col.addWidget(self._pay_busy, 0, Qt.AlignHCenter)
         col.addStretch(1)
-        self.add_page(PAY, page)
+        self.add_page(PAY, body)
 
     def _fee_year(self) -> int:
         if self._status is not None:
@@ -650,6 +681,7 @@ class MembershipWindow(AssistantWindow):
             "and MyEditor confirms it with EINUNDZWANZIG." if has_invoice else
             "Pay on the EINUNDZWANZIG payment page. When you’ve paid, click "
             "I’ve Paid and MyEditor confirms it.")
+        self._pay_intro.setVisible(True)
         self._set_pay_status("")
         self._show_pay_buttons("paid", "I’ve Paid")
 
@@ -670,7 +702,10 @@ class MembershipWindow(AssistantWindow):
             return
         QApplication.clipboard().setText(self._invoice.bolt11)
         self._copy_button.setText("Copied")
-        QTimer.singleShot(1500, lambda: self._copy_button.setText("Copy Invoice"))
+        # The button is the timer's context: closing the window before it
+        # fires cancels it rather than touching a deleted button.
+        button = self._copy_button
+        QTimer.singleShot(1500, button, lambda: button.setText("Copy Invoice"))
 
     def _open_wallet(self) -> None:
         if self._invoice is None or not self._invoice.bolt11:
@@ -693,15 +728,17 @@ class MembershipWindow(AssistantWindow):
         watcher.gave_up.connect(self._on_gave_up)
         watcher.failed.connect(self._on_watch_failed)
         self._watcher = watcher
-        self._set_pay_status("Checking for your payment… Your signer app may ask "
-                             "you to approve.", busy=True)
+        self._set_pay_status("Checking for your payment…" + self._signer_may_ask(),
+                             busy=True)
         self._show_pay_buttons("paid", "Checking…", enabled=False)
         watcher.start(poll_now=True)
 
     def _stop_watching(self) -> None:
         if self._watcher is not None:
-            self._watcher.stop()
-            self._watcher = None
+            watcher, self._watcher = self._watcher, None
+            watcher.stop()
+            if isinstance(watcher, QObject):
+                watcher.deleteLater()
 
     def _on_expired(self, _invoice) -> None:
         self._stop_watching()
@@ -726,8 +763,16 @@ class MembershipWindow(AssistantWindow):
         self._just_joined = True
 
         def back():
+            # Paid: the invoice and the ways to pay it are no longer the point.
+            for widget in (self._qr, self._copy_button, self._wallet_button,
+                           self._browser_button):
+                widget.setVisible(False)
+            self._pay_title.setText("Payment Received")
+            self._pay_intro.setText("")
+            self._pay_intro.setVisible(False)
             self.show_page(PAY, [("close", "Close", NORMAL, self.reject),
-                             ("again", "Check Again", DEFAULT, self._load_status)])
+                             ("again", "Check Again", DEFAULT,
+                              lambda: self._load_status(back=back))])
             self._set_pay_status("Your payment arrived. Click Check Again to finish.")
 
         self._working("Your payment arrived. MyEditor is confirming your membership.",
@@ -750,10 +795,7 @@ class MembershipWindow(AssistantWindow):
     # ------------------------------------------------------------------ #
 
     def _build_member(self) -> None:
-        page = QWidget()
-        col = QVBoxLayout(page)
-        col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(10)
+        body, col = page()
         self._member_title = text_label("", "title")
         self._member_subtitle = text_label("", "muted")
         col.addWidget(self._member_title)
@@ -798,7 +840,8 @@ class MembershipWindow(AssistantWindow):
         links = QHBoxLayout()
         links.setSpacing(16)
         self._receipt_link = link_button("Receipt", self._open_receipt)
-        self._details_link = link_button("Show Membership Details", self._load_status)
+        self._details_link = link_button(
+            "Show Membership Details", lambda: self._load_status(back=self._show_member))
         self._export_link = link_button("Export My Data…", self._export)
         self._erase_link = link_button("Delete My Data…", self._erase)
         for link in (self._receipt_link, self._details_link, self._export_link,
@@ -806,7 +849,7 @@ class MembershipWindow(AssistantWindow):
             links.addWidget(link)
         links.addStretch(1)
         col.addLayout(links)
-        self.add_page(MEMBER, page)
+        self.add_page(MEMBER, body)
 
     def _show_member(self, note: str = "") -> None:
         self._stop_watching()
@@ -841,12 +884,23 @@ class MembershipWindow(AssistantWindow):
 
     def _add_relay(self) -> None:
         self._relay_button.setEnabled(False)
-        self._relay_result.setText("Adding… Your signer app may ask you to approve.")
-        self.add_relay_requested.emit()
+        if self._relay_publishes_list:
+            self._relay_result.setText("Publishing…" + self._signer_may_ask())
+            self.publish_relay_list_requested.emit()
+        else:
+            self._relay_result.setText("Adding…" + self._signer_may_ask())
+            self.add_relay_requested.emit()
 
-    def set_relay_result(self, message: str, *, done: bool) -> None:
-        """The outcome of add_relay_requested, from the window that ran it."""
+    def set_relay_result(self, message: str, *, done: bool = False,
+                         offer_list: bool = False) -> None:
+        """The outcome of add_relay_requested (or of publishing a list),
+        from the window that ran it. ``done`` hides the button; with
+        ``offer_list`` it offers to publish the recommended relay list,
+        for an account that has none; otherwise it offers to add again."""
         self._relay_result.setText(message)
+        self._relay_publishes_list = offer_list and not done
+        self._relay_button.setText("Publish Recommended Relay List"
+                                   if self._relay_publishes_list else "Add to My Relay List")
         self._relay_button.setEnabled(not done)
         self._relay_button.setVisible(not done)
 
@@ -879,9 +933,9 @@ class MembershipWindow(AssistantWindow):
     def _erase(self) -> None:
         if not confirm_destructive(
                 self, title="Delete your membership data?",
-                message="EINUNDZWANZIG removes the personal details of your "
-                        "membership, such as your email and application. Fees you "
-                        "paid stay on record for bookkeeping. This can’t be undone.",
+                message="EINUNDZWANZIG deletes the personal details of your "
+                        "membership. Fees you paid stay on record for bookkeeping. "
+                        "This can’t be undone.",
                 action="Delete Data", caution=True, is_dark=self._is_dark):
             return
         self._working("MyEditor is asking EINUNDZWANZIG to delete your data.",
@@ -891,6 +945,9 @@ class MembershipWindow(AssistantWindow):
             self._status = None
             self._handle = None
             self._just_joined = False
+            if self._pubkey:
+                # What the app knew from the association no longer holds.
+                self.data_erased.emit(self._pubkey)
             self._show_overview(note="Your membership data was deleted.")
 
         self._api.erase(erased, lambda error: self._fail(error, self._show_member))
@@ -901,8 +958,10 @@ class MembershipWindow(AssistantWindow):
 
     def done(self, result: int) -> None:
         # Closing the window ends the wait; nothing keeps prompting the
-        # signer for a window nobody is looking at.
+        # signer for a window nobody is looking at, and an answer that
+        # arrives later finds no client to belong to and is dropped.
         self._stop_watching()
-        if self._api is not None:
-            self._api.cancel()
+        api, self._api = self._api, None
+        if api is not None:
+            self._release(api)
         super().done(result)
