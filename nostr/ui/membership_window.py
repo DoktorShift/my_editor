@@ -27,7 +27,7 @@ and the editor stays usable meanwhile.
 The window owns the API client it is given, so closing it ends every
 request, and an answer that arrives after it closed is dropped.
 
-The association API lives in nostr/einundzwanzig_api.py. This module only
+The association API lives in nostr/einundzwanzig_api/. This module only
 decides what to show; it never touches the network itself.
 """
 
