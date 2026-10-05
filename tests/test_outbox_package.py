@@ -30,14 +30,14 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from nostr import bunker, events  # noqa: E402
+from nostr import bunker, crypto, events  # noqa: E402
 from nostr.outbox import defaults, policy, writer  # noqa: E402
 from nostr.outbox.directory import RelayDirectory  # noqa: E402
 from nostr.outbox.lookup import Lookup, classify  # noqa: E402
 from nostr.outbox.policy import LookupState, RelayList  # noqa: E402
 from tests.outbox_fakes import (  # noqa: E402
-    ABSENT, NOW, OTHER_PK, OTHER_SK, PK, SK, UNKNOWN, FakeClient, FakePool, FakeQuery,
-    FakeSessionPool, Profile, found, settle, signed,
+    ABSENT, NOW, OTHER_PK, OTHER_SK, PK, SK, UNKNOWN, FakeClient, FakePool, FakeQuery, HandPool,
+    FakeSessionPool, Profile, found, one_by_one, settle, signed,
 )
 
 
@@ -278,7 +278,9 @@ class Clock:
 
 
 def directory(query, *, tmp_path=None, own=(), clock=None):
-    return RelayDirectory(FakePool(), query=query, own_pubkeys=lambda: own,
+    many = query.many if isinstance(query, FakeQuery) else one_by_one(query)
+    return RelayDirectory(FakePool(), query=query, query_many=many,
+                          own_pubkeys=lambda: own,
                           store_path=(tmp_path / "lists.json") if tmp_path else None,
                           clock=clock or Clock())
 
@@ -585,3 +587,82 @@ def test_one_failing_caller_is_logged_and_the_others_still_answered(caplog):
     query.pending[0](found(signed(10002, [["r", "wss://mine.com"]])))
     assert [g.write for g in got] == [["wss://mine.com"]]
     assert "caller bug" in caplog.text
+
+
+# -- many people at once -------------------------------------------------------------------
+
+THIRD_SK = bytes.fromhex("4c" * 32)
+THIRD_PK = crypto.get_public_key(THIRD_SK).hex()
+
+
+def live_directory(own=()):
+    """The real lookups, against relays the test answers by hand."""
+    pool = HandPool()
+    return pool, RelayDirectory(pool, own_pubkeys=lambda: own, store_path=None,
+                                clock=Clock())
+
+
+def test_everyone_a_note_mentions_is_looked_up_in_one_request():
+    pool, d = live_directory()
+    got = []
+    d.lookup_many([OTHER_PK, THIRD_PK, PK], got.append)
+    assert len(pool.subs) == 1
+    sub = pool.subs[0]
+    assert sub.filters[0]["kinds"] == [10002]
+    assert sorted(sub.filters[0]["authors"]) == sorted([OTHER_PK, THIRD_PK, PK])
+    theirs = signed(10002, [["r", "wss://their-inbox.com", "read"]], sk=OTHER_SK)
+    mine = signed(10002, [["r", "wss://mine.com"]])
+    sub.answer(sub.urls[0], theirs, mine)
+    for url in sub.urls[1:]:
+        sub.answer(url)
+    settle()
+    lists = got[0]
+    assert lists[OTHER_PK].read == ["wss://their-inbox.com"]
+    assert lists[PK].write == ["wss://mine.com"]
+    assert lists[THIRD_PK].state is LookupState.ABSENT    # every relay, an indexer among them, said so
+
+
+def test_a_mentions_relay_hint_is_asked_too():
+    pool, d = live_directory()
+    d.publish_plan(PK, lambda _plan: None,
+                   mentioned=[(OTHER_PK, "wss://hint.example"), (THIRD_PK, "")])
+    batch = [s for s in pool.subs if len(s.filters[0]["authors"]) == 2]
+    assert len(pool.subs) == 2 and len(batch) == 1          # the author, and one for both mentions
+    assert batch[0].urls[0] == "wss://hint.example"
+
+
+def test_a_later_caller_with_a_new_hint_widens_the_running_lookup():
+    pool, d = live_directory()
+    got = []
+    d.lookup(OTHER_PK, got.append)
+    d.lookup(OTHER_PK, got.append, hints=["wss://where-they-are.example"])
+    assert len(pool.subs) == 2
+    assert pool.subs[1].urls == ["wss://where-they-are.example"]
+    for url in pool.subs[0].urls:
+        pool.subs[0].answer(url)
+    assert got == []                                       # still waiting for the hint
+    theirs = signed(10002, [["r", "wss://theirs.com"]], sk=OTHER_SK)
+    pool.subs[1].answer("wss://where-they-are.example", theirs)
+    settle()
+    assert [g.write for g in got] == [["wss://theirs.com"]] * 2
+
+
+def test_the_same_caller_again_joins_without_a_second_request():
+    pool, d = live_directory()
+    d.lookup(OTHER_PK, lambda _r: None, hints=["wss://h.example"])
+    d.lookup(OTHER_PK, lambda _r: None, hints=["wss://h.example"])
+    assert len(pool.subs) == 1
+
+
+def test_mentioning_yourself_reaches_your_own_inbox_in_one_lookup():
+    pool, d = live_directory(own=(PK,))
+    plans = []
+    d.publish_plan(PK, plans.append, mentioned=[(PK, "")])
+    assert len(pool.subs) == 1                              # the mention joined the author's lookup
+    mine = signed(10002, [["r", "wss://out.com", "write"], ["r", "wss://in.com", "read"]])
+    sub = pool.subs[0]
+    for url in sub.urls:
+        sub.answer(url, mine)
+    settle()
+    assert plans[0].author[0] == "wss://out.com"
+    assert "wss://in.com" in plans[0].inbox

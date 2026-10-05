@@ -152,7 +152,8 @@ class FakePool:
 
 
 class FakeQuery:
-    """Stands in for lookup.fetch_replaceable: answers from a table by kind."""
+    """Stands in for lookup.fetch_replaceable (and, as ``many``, for
+    fetch_replaceable_many): answers from a table by kind."""
 
     def __init__(self, answers: Optional[Dict[int, Lookup]] = None):
         self.answers = answers or {}
@@ -161,6 +162,31 @@ class FakeQuery:
     def __call__(self, pool, relays, *, kind, author, on_done, timeout_ms=6000, parent=None):
         self.calls.append({"relays": list(relays), "kind": kind, "author": author})
         on_done(self.answers.get(kind, Lookup(LookupState.UNKNOWN)))
+
+    def many(self, pool, relays, *, kind, authors, on_done, timeout_ms=6000, parent=None):
+        self.calls.append({"relays": list(relays), "kind": kind, "authors": list(authors)})
+        answer = self.answers.get(kind, Lookup(LookupState.UNKNOWN))
+        on_done({author: answer for author in authors})
+
+
+def one_by_one(query):
+    """A many-author lookup made of a one-author fake, for tests that
+    answer each person differently: each author is asked alone."""
+    def many(pool, relays, *, kind, authors, on_done, timeout_ms=6000, parent=None):
+        results: Dict[str, Lookup] = {}
+        keys = list(dict.fromkeys(a.lower() for a in authors))
+
+        def one(author):
+            def done(result):
+                results[author] = result
+                if len(results) == len(keys):
+                    on_done(dict(results))
+            return done
+
+        for author in keys:
+            query(pool, relays, kind=kind, author=author, on_done=one(author),
+                  timeout_ms=timeout_ms, parent=parent)
+    return many
 
 
 class FakeRelayDirectory(QObject):

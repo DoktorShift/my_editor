@@ -35,13 +35,14 @@ import os
 import tempfile
 import time
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from dataclasses import dataclass, field
+from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from .. import events
 from . import defaults, policy
-from .lookup import Lookup, fetch_replaceable
+from .lookup import Lookup, classify, fetch_replaceable, fetch_replaceable_many
 from .policy import KIND_RELAY_LIST, LookupState, RelayList
 
 RELAY_LISTS_FILE = Path.home() / ".config" / "my_editor" / "nostr_relay_lists.json"
@@ -55,12 +56,25 @@ _TTL = {
 }
 
 
+@dataclass
+class _Pending:
+    """A lookup under way: who waits for it, which relays it asked, and
+    the best answer so far from each request it made."""
+
+    callbacks: List[Callable[[RelayList], None]] = field(default_factory=list)
+    asked: set = field(default_factory=set)
+    outstanding: int = 0
+    best: Optional[dict] = None
+    answered: set = field(default_factory=set)
+    unchecked: bool = False
+
+
 class RelayDirectory(QObject):
     """Relay lists by pubkey, and the routing built on them."""
 
     changed = Signal(str)       # pubkey whose known list became newer
 
-    def __init__(self, pool, *, query=fetch_replaceable,
+    def __init__(self, pool, *, query=fetch_replaceable, query_many=fetch_replaceable_many,
                  store_path: Optional[Path] = RELAY_LISTS_FILE,
                  own_pubkeys: Callable[[], Iterable[str]] = tuple,
                  clock: Callable[[], float] = time.time,
@@ -68,11 +82,12 @@ class RelayDirectory(QObject):
         super().__init__(parent)
         self._pool = pool
         self._query = query
+        self._query_many = query_many
         self._store_path = Path(store_path) if store_path else None
         self._own_pubkeys = own_pubkeys
         self._clock = clock
         self._entries: Dict[str, RelayList] = {}
-        self._waiting: Dict[str, List[Callable[[RelayList], None]]] = {}
+        self._pending: Dict[str, _Pending] = {}
         self._load()
 
     # ------------------------------------------------------------------ #
@@ -102,25 +117,48 @@ class RelayDirectory(QObject):
 
     def lookup_many(self, pubkeys: Sequence[str],
                     on_done: Callable[[Dict[str, RelayList]], None], *,
+                    hints: Optional[Mapping[str, Sequence[str]]] = None,
                     timeout_ms: int = 3_000) -> None:
-        """Several people's lists at once (the people a note mentions)."""
-        keys = list(dict.fromkeys(p.lower() for p in pubkeys if p))[:defaults.MENTION_LOOKUP_CAP]
+        """Several people's lists at once (the people a note mentions).
+
+        Whoever is not answered from cache is asked for in one request, one
+        filter naming every author, rather than one request each; ``hints``
+        maps a pubkey to relays it was seen on (a mention's relay hint).
+        At most MENTION_LOOKUP_CAP people are looked up.
+        """
+        keys = list(dict.fromkeys((p or "").lower() for p in pubkeys if p))
+        keys = keys[:defaults.MENTION_LOOKUP_CAP]
+        hints = {k.lower(): list(v or ()) for k, v in (hints or {}).items()}
         result: Dict[str, RelayList] = {}
         if not keys:
             QTimer.singleShot(0, lambda: on_done(result))
             return
-        remaining = {"n": len(keys)}
+        remaining = set(keys)
 
         def one(key):
             def done(relay_list):
                 result[key] = relay_list
-                remaining["n"] -= 1
-                if remaining["n"] == 0:
+                remaining.discard(key)
+                if not remaining:
                     on_done(result)
             return done
 
+        batch: Dict[str, Optional[Callable[[RelayList], None]]] = {}
         for key in keys:
-            self.lookup(key, one(key), timeout_ms=timeout_ms)
+            entry = self._entries.get(key)
+            if entry is not None and (not self._expired(entry) or entry.found):
+                QTimer.singleShot(0, lambda e=entry, d=one(key): d(e))
+                if not self._expired(entry):
+                    continue
+                callback = None                    # stale but known: refresh behind it
+            else:
+                callback = one(key)
+            if key in self._pending:
+                self._start(key, hints.get(key, ()), timeout_ms, callback)
+            else:
+                batch[key] = callback
+        if batch:
+            self._start_batch(batch, hints, timeout_ms)
 
     def remember(self, event: dict) -> bool:
         """Take a relay list we hold (one we just published, or were handed).
@@ -149,12 +187,21 @@ class RelayDirectory(QObject):
                      entitled: Sequence[str] = ()) -> None:
         """Where a public event goes; mentions are ``(pubkey, hint)`` pairs."""
         state: dict = {}
-        hints = {p.lower(): h for p, h in mentioned if h}
+        keys = list(dict.fromkeys(p.lower() for p, _hint in mentioned))
+        hints: Dict[str, List[str]] = {}
+        for pubkey, hint in mentioned:
+            if hint:
+                hints.setdefault(pubkey.lower(), []).append(hint)
 
         def maybe_done():
             if "author" in state and "mentions" in state:
-                on_done(policy.plan_publish(state["author"], mentioned=state["mentions"],
-                                            hints=hints, entitled=entitled))
+                # In the order the event mentions them, whatever order the
+                # answers came in: the inbox slots go round in that order.
+                lists = state["mentions"]
+                mentions = {k: lists[k] for k in keys if k in lists}
+                on_done(policy.plan_publish(state["author"], mentioned=mentions,
+                                            hints={k: v[0] for k, v in hints.items()},
+                                            entitled=entitled))
 
         def got_author(relay_list):
             state["author"] = relay_list
@@ -165,7 +212,7 @@ class RelayDirectory(QObject):
             maybe_done()
 
         self.lookup(author, got_author)
-        self.lookup_many([p for p, _hint in mentioned], got_mentions)
+        self.lookup_many(keys, got_mentions, hints=hints)
 
     def private_relays(self, author: str, on_done: Callable[[List[str]], None], *,
                        entitled: Sequence[str] = (), legacy: Sequence[str] = ()) -> None:
@@ -197,21 +244,69 @@ class RelayDirectory(QObject):
         return (self._clock() - entry.fetched_at) >= _TTL[entry.state]
 
     def _start(self, key: str, hints, timeout_ms: int, on_done) -> None:
-        waiting = self._waiting.get(key)
-        if waiting is not None:
-            if on_done is not None:
-                waiting.append(on_done)
-            return
-        self._waiting[key] = [on_done] if on_done is not None else []
+        """Look ``key`` up, or join the lookup already running for it. A
+        caller bringing relays that lookup does not ask (a new hint) has
+        them asked as well, and the answer waits for both."""
         relays = policy.lookup_relays(hints=hints, known=self._entries.get(key))
+        pending = self._pending.get(key)
+        if pending is None:
+            pending = self._pending[key] = _Pending()
+        if on_done is not None:
+            pending.callbacks.append(on_done)
+        relays = [r for r in relays if r not in pending.asked]
+        if not relays and pending.outstanding:
+            return
+        pending.asked.update(relays)
+        pending.outstanding += 1
         self._query(self._pool, relays, kind=KIND_RELAY_LIST, author=key,
-                    on_done=lambda result: self._answered(key, result),
+                    on_done=lambda result: self._contribute(key, result),
                     timeout_ms=timeout_ms, parent=self)
 
-    def _answered(self, key: str, result: Lookup) -> None:
-        # The waiters leave first: whatever happens below, a later lookup
-        # of this person starts afresh instead of queueing behind this one.
-        callbacks = self._waiting.pop(key, [])
+    def _start_batch(self, batch: Mapping[str, Optional[Callable[[RelayList], None]]],
+                     hints: Mapping[str, Sequence[str]], timeout_ms: int) -> None:
+        """One request for everyone in ``batch``: their lists are wherever
+        the indexers and the relays they were seen on are."""
+        keys = list(batch)
+        relays = policy.lookup_relays(hints=[h for k in keys for h in hints.get(k, ())])
+        for key in keys:
+            pending = self._pending[key] = _Pending(asked=set(relays), outstanding=1)
+            if batch[key] is not None:
+                pending.callbacks.append(batch[key])
+
+        def answered(results):
+            for key in keys:
+                self._contribute(key, results.get(key) or Lookup(LookupState.UNKNOWN))
+
+        self._query_many(self._pool, relays, kind=KIND_RELAY_LIST, authors=keys,
+                         on_done=answered, timeout_ms=timeout_ms, parent=self)
+
+    def _contribute(self, key: str, result: Lookup) -> None:
+        """One request's answer about ``key``; the lookup is answered when
+        every request it made has."""
+        pending = self._pending.get(key)
+        if pending is None:
+            return
+        event = result.event if result.state is LookupState.FOUND else None
+        if event is not None and policy.is_newer(event, pending.best):
+            pending.best = event
+        pending.answered.update(result.answered)
+        pending.unchecked = pending.unchecked or result.unchecked
+        pending.outstanding -= 1
+        if pending.outstanding > 0:
+            return
+        del self._pending[key]
+        answered = tuple(sorted(pending.answered))
+        if pending.unchecked:
+            final = Lookup(LookupState.UNKNOWN, answered=answered, unchecked=True)
+        else:
+            final = Lookup(classify(pending.best, answered), event=pending.best,
+                           answered=answered)
+        self._answered(key, pending.callbacks, final)
+
+    def _answered(self, key: str, callbacks, result: Lookup) -> None:
+        # The callers were let go of first (_contribute): whatever happens
+        # below, a later lookup of this person starts afresh instead of
+        # queueing behind this one.
         answer = RelayList(state=LookupState.UNKNOWN)
         try:
             answer = self._settle(key, result)

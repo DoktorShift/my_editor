@@ -48,6 +48,7 @@ class Lookup:
     event: Optional[dict] = None
     answered: tuple = ()     # relays that ended their stored events (EOSE)
     refused: tuple = ()      # relays that closed the request or could not be reached
+    unchecked: bool = False  # candidates went unchecked (VERIFY_CAP): UNKNOWN, whoever answered
 
 
 def classify(event: Optional[dict], answered: Sequence[str]) -> LookupState:
@@ -67,6 +68,20 @@ def fetch_replaceable(pool, relays: Sequence[str], *, kind: int, author: str,
     key = (author or "").lower()
     return _ReplaceableQuery(pool, dedupe_relays(relays), kind, [key],
                              lambda results: on_done(results[key]), timeout_ms, parent)
+
+
+def fetch_replaceable_many(pool, relays: Sequence[str], *, kind: int,
+                           authors: Sequence[str],
+                           on_done: Callable[[Dict[str, Lookup]], None],
+                           timeout_ms: int = 6_000,
+                           parent: Optional[QObject] = None) -> "_ReplaceableQuery":
+    """Ask ``relays`` for the newest ``kind`` of every one of ``authors`` in
+    one request (one filter naming them all); ``on_done`` once, with a
+    Lookup per author. A relay's end of stored events answers for all of
+    them, so each is classified from the same answers."""
+    keys = list(dict.fromkeys((a or "").lower() for a in authors if a))
+    return _ReplaceableQuery(pool, dedupe_relays(relays), kind, keys, on_done,
+                             timeout_ms, parent)
 
 
 class _ReplaceableQuery(QObject):
@@ -152,7 +167,7 @@ class _ReplaceableQuery(QObject):
         for author, event in self._best.items():
             if author in self._overflow:
                 results[author] = Lookup(LookupState.UNKNOWN, answered=answered,
-                                         refused=tuple(self._refused))
+                                         refused=tuple(self._refused), unchecked=True)
                 continue
             results[author] = Lookup(state=classify(event, answered), event=event,
                                      answered=answered, refused=tuple(self._refused))
