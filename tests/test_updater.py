@@ -12,19 +12,28 @@ What must hold:
   be moved in, and opens whichever is there.
 
   A .deb is installed while the window is still open, so a closed password
-  prompt is "nothing changed", not an error.
+  prompt is "nothing changed", not an error. Nothing the updater runs can
+  wait for typed input, and apt-get never removes other packages.
 
   The helper scripts quote every path: a folder with spaces or quotes in
-  its name must not break, or change, what runs.
+  its name must not break, or change, what runs. A swap that fails leaves
+  the old version in place and opens it, and leaves no half-copied app or
+  stray download behind.
 
-No network, no process and no file swap happens here: replies and
-processes are fakes, and scripts are checked as text.
+No network is used: replies are fakes. The helper scripts really run (on
+POSIX), in temporary folders, with the system tools they call (hdiutil,
+ditto, codesign, open) replaced by stand-ins on PATH.
 """
 
 import hashlib
 import os
 import shlex
+import shutil
+import stat
+import subprocess
 import sys
+import textwrap
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -162,36 +171,251 @@ def test_the_staging_copy_sits_hidden_beside_the_app():
         "/Applications/.MyEditor.app.update"
 
 
-# -- the scripts --------------------------------------------------------------------
+# -- the scripts, run for real --------------------------------------------------------
 
-AWKWARD = "/Users/Jo O'Neil/Apps & Tools/MyEditor.app"
+posix_only = pytest.mark.skipif(os.name != "posix", reason="the helper scripts are POSIX shell")
 
-
-def test_the_staging_script_mounts_privately_and_checks_the_signature():
-    script = updater.mac_stage_script("/tmp/My Editor.dmg", updater.mac_staging_path(AWKWARD))
-    assert "-nobrowse" in script and "-readonly" in script
-    assert "codesign --verify --deep --strict" in script
-    assert shlex.quote("/tmp/My Editor.dmg") in script
-    assert shlex.quote(updater.mac_staging_path(AWKWARD)) in script
-    for code in updater._MAC_STAGE_ERRORS:
-        assert f"exit {code}" in script
+# Spaces, quotes and an ampersand: quoting mistakes break here, or run something else.
+AWKWARD = "Jo O'Neil's \"Apps\" & Tools"
 
 
-def test_the_swap_script_waits_puts_the_old_app_back_on_failure_and_opens_it():
-    staged = updater.mac_staging_path(AWKWARD)
-    script = updater.mac_swap_script(4242, staged, AWKWARD)
-    assert script.startswith('p=4242; while kill -0 "$p"')
-    old = shlex.quote(os.path.join(os.path.dirname(AWKWARD), ".MyEditor.app.previous"))
-    # Old app out, new app in; if the second move fails, the first is undone.
-    assert f"mv -f {shlex.quote(AWKWARD)} {old}" in script
-    assert f"else mv -f {old} {shlex.quote(AWKWARD)}" in script
-    assert script.rstrip().endswith(f"open {shlex.quote(AWKWARD)}")
+def dead_pid() -> int:
+    """The id of a process that has already exited, so the helper's wait ends at once."""
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    proc.wait()
+    return proc.pid
 
 
-def test_the_relaunch_script_waits_for_this_process():
-    script = updater.relaunch_script(7, "/opt/my-editor/my-editor")
-    assert script.startswith('p=7; while kill -0 "$p"')
-    assert script.endswith("exec /opt/my-editor/my-editor")
+def stub(bin_dir, name: str, body: str) -> None:
+    """A stand-in for a system tool, found first on PATH."""
+    path = bin_dir / name
+    path.write_text("#!/bin/sh\n" + textwrap.dedent(body))
+    path.chmod(0o755)
+
+
+def run_script(script: str, bin_dir) -> subprocess.CompletedProcess:
+    env = dict(os.environ, PATH=f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+    return subprocess.run(["sh", "-c", script], env=env, capture_output=True,
+                          text=True, timeout=60)
+
+
+@pytest.fixture
+def tools(tmp_path):
+    """A folder of stand-in tools and the log they write to."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "tools.log"
+    log.write_text("")
+    # `open` only records what it was asked to open.
+    stub(bin_dir, "open", f'printf "%s\\n" "$@" >> {shlex.quote(str(log))}\n')
+    return SimpleNamespace(bin=bin_dir, log=log)
+
+
+def fail_mv_for(bin_dir, pattern: str) -> None:
+    """`mv` refuses any move involving a path that matches ``pattern``."""
+    real_mv = shutil.which("mv")
+    stub(bin_dir, "mv", f"""\
+        for arg in "$@"; do
+          case "$arg" in {pattern}) exit 1;; esac
+        done
+        exec {shlex.quote(real_mv)} "$@"
+        """)
+
+
+def make_app(folder, version: str) -> None:
+    (folder / "Contents" / "MacOS").mkdir(parents=True)
+    (folder / "Contents" / "version").write_text(version)
+
+
+def app_version(folder) -> str:
+    return (folder / "Contents" / "version").read_text().strip()
+
+
+@pytest.fixture
+def mac_install(tmp_path):
+    apps = tmp_path / AWKWARD
+    apps.mkdir()
+    bundle = apps / "MyEditor.app"
+    make_app(bundle, "old")
+    staged = apps / ".MyEditor.app.update"
+    assert str(staged) == updater.mac_staging_path(str(bundle))
+    return SimpleNamespace(apps=apps, bundle=bundle, staged=staged)
+
+
+@posix_only
+def test_the_mac_swap_puts_the_new_app_in_place_and_opens_it(tools, mac_install):
+    make_app(mac_install.staged, "new")
+    script = updater.mac_swap_script(dead_pid(), str(mac_install.staged), str(mac_install.bundle))
+    assert run_script(script, tools.bin).returncode == 0
+    assert app_version(mac_install.bundle) == "new"
+    assert sorted(os.listdir(mac_install.apps)) == ["MyEditor.app"]   # no copy left over
+    assert tools.log.read_text().splitlines() == [str(mac_install.bundle)]
+
+
+@posix_only
+def test_a_mac_swap_that_cannot_move_the_new_app_in_puts_the_old_one_back(tools, mac_install):
+    make_app(mac_install.staged, "new")
+    fail_mv_for(tools.bin, "*.update")
+    script = updater.mac_swap_script(dead_pid(), str(mac_install.staged), str(mac_install.bundle))
+    run_script(script, tools.bin)
+    assert app_version(mac_install.bundle) == "old"
+    assert sorted(os.listdir(mac_install.apps)) == ["MyEditor.app"]
+    assert tools.log.read_text().splitlines() == [str(mac_install.bundle)]
+
+
+@posix_only
+def test_a_mac_swap_that_cannot_move_the_old_app_out_opens_it_unchanged(tools, mac_install):
+    make_app(mac_install.staged, "new")
+    fail_mv_for(tools.bin, "*.previous")
+    script = updater.mac_swap_script(dead_pid(), str(mac_install.staged), str(mac_install.bundle))
+    run_script(script, tools.bin)
+    assert app_version(mac_install.bundle) == "old"
+    assert sorted(os.listdir(mac_install.apps)) == ["MyEditor.app"]
+    assert tools.log.read_text().splitlines() == [str(mac_install.bundle)]
+
+
+def make_appimage(path, version: str, ran) -> None:
+    path.write_text(f"#!/bin/sh\necho {version} > {shlex.quote(str(ran))}\n")
+
+
+@pytest.fixture
+def appimage_install(tmp_path):
+    folder = tmp_path / AWKWARD
+    folder.mkdir()
+    ran = tmp_path / "ran.txt"
+    app = folder / "MyEditor.AppImage"
+    make_appimage(app, "old", ran)
+    app.chmod(0o755)
+    new = folder / "MyEditor.AppImage.new"
+    make_appimage(new, "new", ran)
+    new.chmod(0o644)   # the swap is what makes it executable
+    return SimpleNamespace(folder=folder, app=app, new=new, ran=ran)
+
+
+@posix_only
+def test_the_appimage_swap_moves_the_new_file_in_and_opens_it(tools, appimage_install):
+    a = appimage_install
+    run_script(updater.appimage_swap_script(dead_pid(), str(a.new), str(a.app)), tools.bin)
+    assert a.ran.read_text().strip() == "new"
+    assert os.listdir(a.folder) == ["MyEditor.AppImage"]
+    assert os.stat(a.app).st_mode & stat.S_IXUSR
+
+
+@posix_only
+def test_an_appimage_swap_that_fails_opens_the_old_one_and_removes_the_new_file(
+        tools, appimage_install):
+    a = appimage_install
+    fail_mv_for(tools.bin, "*.new")
+    run_script(updater.appimage_swap_script(dead_pid(), str(a.new), str(a.app)), tools.bin)
+    assert a.ran.read_text().strip() == "old"
+    assert os.listdir(a.folder) == ["MyEditor.AppImage"]
+
+
+@posix_only
+def test_the_relaunch_helper_waits_for_this_process_then_opens_the_app(tools, tmp_path):
+    folder = tmp_path / AWKWARD
+    folder.mkdir()
+    ran = tmp_path / "ran.txt"
+    app = folder / "my-editor"
+    make_appimage(app, "relaunched", ran)
+    app.chmod(0o755)
+    # A process that is still running, and not this test's child: once it
+    # exits, the system reaps it, as it does MyEditor's.
+    sleeper = subprocess.run(["sh", "-c", "sleep 1 >/dev/null 2>&1 & echo $!"],
+                             capture_output=True, text=True, check=True)
+    pid = int(sleeper.stdout.strip())
+    started = time.monotonic()
+    run_script(updater.relaunch_script(pid, str(app)), tools.bin)
+    assert time.monotonic() - started > 0.5
+    assert ran.read_text().strip() == "relaunched"
+
+
+def stage_tools(tools, *, image_has_app=True, copy_works=True, signature_ok=True):
+    """Stand-ins for hdiutil, ditto and codesign. The fake image holds a
+    MyEditor.app when ``image_has_app``; every attach and detach is logged."""
+    log = shlex.quote(str(tools.log))
+    make = ('mkdir -p "$mnt/MyEditor.app/Contents/MacOS"; '
+            'echo new > "$mnt/MyEditor.app/Contents/version"') if image_has_app else ":"
+    stub(tools.bin, "hdiutil", f"""\
+        case "$1" in
+          attach)
+            while [ $# -gt 0 ]; do
+              if [ "$1" = "-mountpoint" ]; then mnt="$2"; fi
+              shift
+            done
+            echo "attach $mnt" >> {log}
+            {make}
+            ;;
+          detach)
+            echo "detach $2" >> {log}
+            rm -rf "$2/MyEditor.app"
+            ;;
+        esac
+        """)
+    if copy_works:
+        stub(tools.bin, "ditto", 'exec cp -R "$1" "$2"\n')
+    else:
+        # Fails halfway, the way a full disk does: part of the app is there.
+        stub(tools.bin, "ditto", 'mkdir -p "$2/Contents"; echo partial > "$2/Contents/x"; exit 1\n')
+    stub(tools.bin, "codesign", "exit 0\n" if signature_ok else "exit 1\n")
+
+
+def stage(tools, mac_install, tmp_path):
+    dmg = tmp_path / "My Editor 3.4.dmg"
+    dmg.write_bytes(b"image")
+    result = run_script(updater.mac_stage_script(str(dmg), str(mac_install.staged)), tools.bin)
+    mounts = [line.split(" ", 1)[1] for line in tools.log.read_text().splitlines()]
+    return result.returncode, mounts
+
+
+@posix_only
+def test_staging_copies_the_new_app_beside_the_old_one_and_closes_the_image(
+        tools, mac_install, tmp_path):
+    stage_tools(tools)
+    code, mounts = stage(tools, mac_install, tmp_path)
+    assert code == 0
+    assert app_version(mac_install.staged) == "new"
+    assert app_version(mac_install.bundle) == "old"
+    attached, detached = mounts
+    assert attached == detached and not os.path.exists(attached)
+
+
+@pytest.mark.parametrize("failure, code", [
+    ({"image_has_app": False}, 12),
+    ({"copy_works": False}, 13),
+    ({"signature_ok": False}, 14),
+])
+@posix_only
+def test_a_failed_staging_leaves_no_copy_and_no_open_image(
+        tools, mac_install, tmp_path, failure, code):
+    stage_tools(tools, **failure)
+    result, mounts = stage(tools, mac_install, tmp_path)
+    assert result == code and code in updater._MAC_STAGE_ERRORS
+    assert not mac_install.staged.exists()   # no half-copied app beside the real one
+    assert sorted(os.listdir(mac_install.apps)) == ["MyEditor.app"]
+    assert app_version(mac_install.bundle) == "old"
+    attached, detached = mounts
+    assert attached == detached and not os.path.exists(attached)
+
+
+@posix_only
+def test_an_image_that_cannot_be_opened_is_reported(tools, mac_install, tmp_path):
+    stub(tools.bin, "hdiutil", "exit 1\n")
+    result, _ = stage(tools, mac_install, tmp_path)
+    assert result == 11
+    assert not mac_install.staged.exists()
+
+
+@posix_only
+def test_a_system_step_never_waits_for_typed_input(qt_app):
+    # `cat` reads its input until it ends. With nothing attached it would
+    # wait forever, the way apt-get waits on a question nobody sees.
+    installer = updater.UpdateInstaller(updater.DEB)
+    codes = []
+    installer._run("cat", [], codes.append)
+    assert installer._process.waitForFinished(10_000)
+    qt_app.processEvents()
+    assert codes == [0]
 
 
 # -- preparing ------------------------------------------------------------------------
@@ -223,7 +447,7 @@ def test_windows_and_appimage_have_nothing_to_prepare(tmp_path, monkeypatch):
 def test_the_deb_is_installed_with_a_password_prompt(tmp_path, monkeypatch):
     seen, calls, path = prepare_with_exit_code(
         updater.DEB, 0, tmp_path, monkeypatch, executable="/opt/my-editor/my-editor")
-    assert calls == [["pkexec", "apt-get", "install", "-y", str(path)]]
+    assert calls == [["pkexec", "apt-get", "install", "-y", "--no-remove", str(path)]]
     assert seen["prepared"] == [os.path.realpath("/opt/my-editor/my-editor")]
     assert not path.exists()   # the package file is not left in the temp folder
 

@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """In-app updater for the packaged builds that can safely replace themselves.
 
-Every update runs the same four stages, and only the last happens after
+Every update runs the same three stages, and only the last happens after
 MyEditor has closed:
 
     download  fetch the release file and check it against the SHA-256
@@ -275,11 +275,17 @@ class UpdateInstaller(QObject):
                 self.failed.emit("The package couldn't be installed. Another "
                                  "installation may be running. Try again in a moment.")
 
-        self._run("pkexec", ["apt-get", "install", "-y", os.path.abspath(deb_path)], done)
+        # --no-remove: an update that would take other packages off the
+        # system is refused instead of carried out unseen.
+        self._run("pkexec", ["apt-get", "install", "-y", "--no-remove",
+                             os.path.abspath(deb_path)], done)
 
     def _run(self, program: str, args, on_exit):
         process = QProcess(self)
         self._process = process
+        # Nobody can type into these processes, so none may wait for input:
+        # apt-get and hdiutil read an empty input and go on.
+        process.setStandardInputFile(QProcess.nullDevice())
 
         def finished(code, status):
             self._process = None
@@ -424,8 +430,8 @@ def _download_destination(kind: str, asset) -> str:
 
 # -- scripts ------------------------------------------------------------------
 #
-# Each script is built as a string by a pure function, so tests can read
-# exactly what will run without running it.
+# Each script is built as a string by a pure function, so tests can run
+# exactly what will run, against stand-in folders and tools.
 
 def mac_stage_script(dmg_path: str, staged: str) -> str:
     """Open the disk image, copy the app out, close it, check the copy.
@@ -434,16 +440,20 @@ def mac_stage_script(dmg_path: str, staged: str) -> str:
     (no Finder window, no desktop icon) and read-only.
     """
     q = shlex.quote
+    # Every way out closes the image again, and every failure after the
+    # copy started removes the copy: a half-copied app must never be left
+    # beside the real one, let alone be taken for the new version.
+    detach = ('hdiutil detach "$mnt" -quiet || hdiutil detach "$mnt" -force -quiet; '
+              'rmdir "$mnt" 2>/dev/null')
     return (
         f'mnt=$(mktemp -d) || exit 11; '
         f'hdiutil attach -nobrowse -noautoopen -readonly -mountpoint "$mnt" {q(dmg_path)} '
         f'>/dev/null 2>&1 || {{ rmdir "$mnt"; exit 11; }}; '
         f'app=$(find "$mnt" -maxdepth 1 -name "*.app" -type d | head -n 1); '
-        f'if [ -z "$app" ]; then hdiutil detach "$mnt" -quiet; rmdir "$mnt"; exit 12; fi; '
+        f'if [ -z "$app" ]; then {detach}; exit 12; fi; '
         f'rm -rf {q(staged)}; '
-        f'ditto "$app" {q(staged)} || {{ hdiutil detach "$mnt" -quiet; rmdir "$mnt"; exit 13; }}; '
-        f'hdiutil detach "$mnt" -quiet || hdiutil detach "$mnt" -force -quiet; '
-        f'rmdir "$mnt" 2>/dev/null; '
+        f'ditto "$app" {q(staged)} || {{ rm -rf {q(staged)}; {detach}; exit 13; }}; '
+        f'{detach}; '
         f'codesign --verify --deep --strict {q(staged)} >/dev/null 2>&1 '
         f'|| {{ rm -rf {q(staged)}; exit 14; }}; '
         f'exit 0'
@@ -475,11 +485,19 @@ def mac_swap_script(pid: int, staged: str, bundle: str) -> str:
 
 
 def appimage_swap_script(pid: int, new_path: str, appimage: str) -> str:
+    """Wait for MyEditor to quit, move the new AppImage over the old one,
+    and open whichever is there.
+
+    If the move fails, the new file is removed and the old AppImage opens
+    again, so a failed swap still leaves a working MyEditor (which then
+    says the update didn't install).
+    """
     q = shlex.quote
     return (
         _wait_for_exit(pid)
-        + f'mv -f {q(new_path)} {q(appimage)} && '
-        f'chmod +x {q(appimage)} && exec {q(appimage)}'
+        + f'if mv -f {q(new_path)} {q(appimage)}; then chmod +x {q(appimage)}; '
+        f'else rm -f {q(new_path)}; fi; '
+        f'exec {q(appimage)}'
     )
 
 
