@@ -43,7 +43,8 @@ from doc_walk import (
     iter_block_runs, iter_blocks, iter_image_names, serialize_plain_with_images,
 )
 from editor import HtmlEditor
-from export_html import document_to_html
+from export_html import document_to_html  # noqa: E402
+from markdown_writer import document_to_markdown
 from main_window import MainWindow
 from nostr.media.assets import ASSET_SCHEME, AssetIndex
 from nostr.media.manager import AssetManager
@@ -76,7 +77,6 @@ class _Window:
     _encode_document_image = MainWindow._encode_document_image
     _make_rmd_image_copier = MainWindow._make_rmd_image_copier
     _markdown_reference_for = MainWindow._markdown_reference_for
-    _markdown_with_mapped_images = MainWindow._markdown_with_mapped_images
     _publish_payload = MainWindow._publish_payload
     _publish_text = MainWindow._publish_text
     _unpublishable_images = MainWindow._unpublishable_images
@@ -379,7 +379,8 @@ def test_no_serializer_ever_writes_the_asset_key(tmp_path):
             image_roots=win._image_roots_for(save_path),
             asset_resolver=win._asset_manager.export_view,
         ),
-        "markdown tab": win._markdown_with_mapped_images(ed, target),
+        "markdown tab": document_to_markdown(ed.document(),
+                                             win._markdown_reference_for(target)),
         "plain tab": serialize_plain_with_images(
             ed.document(), win._markdown_reference_for(target)
         ),
@@ -407,7 +408,7 @@ def test_markdown_save_keeps_images_out_of_the_replacement_character(tmp_path):
     target = win._image_target_for_file_save(ed.document(),
                                              str(tmp_path / "story.md"))
 
-    content = win._markdown_with_mapped_images(ed, target)
+    content = document_to_markdown(ed.document(), win._markdown_reference_for(target))
 
     assert f"![a kitten]({asset.remote_url})" in content
     assert "￼" not in content
@@ -455,15 +456,15 @@ def test_publish_note_emits_the_bare_url_padded_away_from_the_text(tmp_path):
     assert win._publish_text(ed, "note") == f"Look: {asset.remote_url} "
 
 
-def test_publish_text_matches_plain_text_without_images(tmp_path):
-    # The text half has to reproduce toPlainText exactly, which is what
-    # lets it stand in for it at every publish site.
+def test_an_article_carries_the_formatting_and_a_note_the_words(tmp_path):
+    # An article (and its draft) is the Markdown a .md file would hold,
+    # so bold reaches Nostr. A note is plain text: the words, no markup.
     win = _Window(tmp_path / "cache")
     ed = HtmlEditor()
     ed.setHtml("<p>first line</p><p>second <b>bold</b> line</p>")
 
-    for flavor in ("markdown", "note"):
-        assert win._publish_text(ed, flavor) == ed.toPlainText()
+    assert win._publish_text(ed, "markdown") == "first line\n\nsecond **bold** line"
+    assert win._publish_text(ed, "note") == "first line\n\nsecond bold line"
 
 
 def test_publish_text_never_emits_the_replacement_character(tmp_path):

@@ -40,6 +40,7 @@ from constants import (
 )
 from widgets import FindBar, HeaderWidget, LineNumberGutter, FileChangedBar, UpdateBar
 from doc_walk import iter_blocks, iter_image_names, serialize_plain_with_images
+from markdown_writer import document_to, document_to_markdown, has_local_only_formatting
 from editor import HtmlEditor
 import image_safety
 import url_safety
@@ -2065,8 +2066,11 @@ class MainWindow(QMainWindow):
             # and unlinkable, so it always keeps its own whitespace.
             return f" {url} " if url else None
 
+        # One writer for every flavor: an article (and its draft) is the
+        # Markdown a .md file would hold; a note is the same walk as plain
+        # text, which is what apps show for a note.
         target = as_markdown if flavor == "markdown" else as_note
-        content = serialize_plain_with_images(ed.document(), target)
+        content = document_to(ed.document(), flavor, target).rstrip("\n")
         return content, list(records.values())
 
     def _publish_text(self, ed, flavor: str) -> str:
@@ -2087,7 +2091,11 @@ class MainWindow(QMainWindow):
             return False
         if lowered.endswith('.rtf'):
             return self._has_images(ed)
-        if lowered.endswith(('.md', '.rmd')):
+        if lowered.endswith('.md'):
+            # Markdown carries bold, italic, lists, headings and links;
+            # only underline and colors stay behind.
+            return has_local_only_formatting(ed.document())
+        if lowered.endswith('.rmd'):
             return self._has_formatting(ed)
         return self._has_formatting(ed) or self._has_images(ed)
 
@@ -2236,13 +2244,11 @@ class MainWindow(QMainWindow):
             elif ext.endswith('.rmd'):
                 content = self._to_rmd_content(ed, path)
             elif ext.endswith('.md'):
+                # The same Markdown an article publishes, whether the tab
+                # came from a .md file or was typed here.
                 target = self._image_target_for_file_save(ed.document(), path)
-                if getattr(ed, '_loaded_as_markdown', False):
-                    content = self._markdown_with_mapped_images(ed, target)
-                else:
-                    content = serialize_plain_with_images(
-                        ed.document(), self._markdown_reference_for(target)
-                    )
+                content = document_to_markdown(
+                    ed.document(), self._markdown_reference_for(target))
             else:
                 # .txt and anything unknown: images cannot be carried, so
                 # they are omitted rather than left as the raw U+FFFC
@@ -2347,35 +2353,6 @@ class MainWindow(QMainWindow):
             return f"![{alt}]({destination})"
 
         return reference
-
-    def _markdown_with_mapped_images(self, ed, target) -> str:
-        """toMarkdown() with every image name rewritten to its destination.
-
-        The rewrite happens on a clone: the live document keeps its
-        asset keys, so the open tab still renders and the user's undo
-        stack is untouched.
-        """
-        clone = ed.document().clone()
-        cursor = QTextCursor(clone)
-        cursor.beginEditBlock()
-        for block in iter_blocks(clone):
-            it = block.begin()
-            while not it.atEnd():
-                frag = it.fragment()
-                fmt = frag.charFormat()
-                if frag.isValid() and fmt.isImageFormat():
-                    imf = fmt.toImageFormat()
-                    destination = target(imf)
-                    if destination:
-                        new_fmt = QTextImageFormat(imf)
-                        new_fmt.setName(destination)
-                        cursor.setPosition(frag.position())
-                        cursor.setPosition(frag.position() + frag.length(),
-                                           QTextCursor.KeepAnchor)
-                        cursor.setCharFormat(new_fmt)
-                it += 1
-        cursor.endEditBlock()
-        return clone.toMarkdown()
 
     def _image_target_for_file_save(self, doc, save_path: str):
         """Where each image should point once written to ``save_path``.
@@ -4185,7 +4162,7 @@ class MainWindow(QMainWindow):
         ed = self.current_editor()
         if ed is None:
             return
-        ed.setPlainText(record.content)
+        self._load_draft_content(ed, record)
         ed.document().setModified(False)
         active = self._profile_store.default()
         ed._draft_binding = DraftBinding(
@@ -4920,7 +4897,7 @@ class MainWindow(QMainWindow):
             # If the tab isn't dirty, silently refresh - there's
             # nothing to conflict with.
             if not ed.document().isModified():
-                ed.setPlainText(record.content)
+                self._load_draft_content(ed, record)
                 ed.document().setModified(False)
                 binding.event_id = record.event_id
                 binding.created_at = record.created_at
@@ -4929,6 +4906,20 @@ class MainWindow(QMainWindow):
                 continue
             # Local edits + remote update → show the banner.
             self._show_conflict_banner(container, ed, record)
+
+    @staticmethod
+    def _load_draft_content(ed, record) -> None:
+        """Put a draft's text in the editor the way it was written.
+
+        An article draft is Markdown (written here by the one Markdown
+        writer, or imported from a feed), so it is read as Markdown and
+        shows its formatting; read as plain text, its markup would show
+        and then be escaped on the next save. A note is plain text."""
+        if record.inner_kind == INNER_KIND_LONG_FORM:
+            ed.document().setMarkdown(record.content)
+            ed._loaded_as_markdown = True
+        else:
+            ed.setPlainText(record.content)
 
     def _show_conflict_banner(self, container, ed, record) -> None:
         """Insert (or update) the per-tab conflict banner."""
@@ -4970,7 +4961,7 @@ class MainWindow(QMainWindow):
         record = self._draft_store.get(identifier)
         if record is None or record.state is not DraftState.READY:
             return
-        ed.setPlainText(record.content)
+        self._load_draft_content(ed, record)
         ed.document().setModified(False)
         binding = getattr(ed, "_draft_binding", None)
         if binding is not None:
