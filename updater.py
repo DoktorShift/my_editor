@@ -33,8 +33,10 @@ import os
 import platform
 import shlex
 import shutil
+import stat
 import sys
 import tempfile
+import time
 
 from PySide6.QtCore import QObject, QProcess, QUrl, Signal
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
@@ -457,6 +459,42 @@ def _discard(path: str):
             os.rmdir(folder)
         except OSError:
             pass
+
+
+# A download folder younger than this may belong to an update another
+# MyEditor window is running right now.
+_STALE_DOWNLOAD_AGE_S = 24 * 60 * 60
+
+
+def sweep_stale_downloads(temp_dir: str = None, *, now: float = None) -> None:
+    """Remove download folders earlier updates left behind.
+
+    The Windows installer runs from its folder after MyEditor has quit, so
+    nothing can delete it then; a later launch does. Only folders this
+    updater makes are touched (its prefix, a real folder, owned by this
+    account), and only once they are a day old.
+    """
+    root = temp_dir or tempfile.gettempdir()
+    now = time.time() if now is None else now
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return
+    for name in names:
+        if not name.startswith(_DOWNLOAD_DIR_PREFIX):
+            continue
+        path = os.path.join(root, name)
+        try:
+            info = os.lstat(path)
+        except OSError:
+            continue
+        if not stat.S_ISDIR(info.st_mode):
+            continue   # never follow a link out of the temp folder
+        if hasattr(os, "getuid") and info.st_uid != os.getuid():
+            continue
+        if now - info.st_mtime < _STALE_DOWNLOAD_AGE_S:
+            continue
+        shutil.rmtree(path, ignore_errors=True)
 
 
 def _download_destination(kind: str, asset) -> str:

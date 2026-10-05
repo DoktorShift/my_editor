@@ -46,7 +46,10 @@ from highlighter import SyntaxHighlighter, detect_language, detect_language_from
 from settings import load_settings, save_setting
 from welcome import is_pristine_welcome, welcome_html
 from update_check import UpdateChecker
-from updater import detect_install_kind, supports_in_app_update, select_asset, UpdateInstaller
+from updater import (
+    UpdateInstaller, detect_install_kind, select_asset, supports_in_app_update,
+    sweep_stale_downloads,
+)
 from alerts import (
     CANCEL, DEFAULT, DESTRUCTIVE, NORMAL, Button, ask, ask_with_checkbox,
     confirm_destructive, inform,
@@ -443,6 +446,9 @@ class MainWindow(QMainWindow):
         self._start_ipc_server()
         QTimer.singleShot(0, lambda ws=resumed: self._announce_version_change(ws))
         QTimer.singleShot(3000, self._maybe_auto_check_for_updates)
+        # Downloads an earlier update could not delete (the Windows
+        # installer runs from its folder after MyEditor has quit).
+        QTimer.singleShot(5000, sweep_stale_downloads)
 
 
     # ----------------------------------------------------------------------

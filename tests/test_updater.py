@@ -605,6 +605,39 @@ def test_a_swap_that_cannot_start_says_so_in_a_sentence(monkeypatch):
         updater.UpdateInstaller(updater.SOURCE).apply("/tmp/x")
 
 
+@posix_only   # the symlink case needs POSIX
+def test_download_folders_left_behind_are_swept_once_they_are_old(tmp_path):
+    # The Windows installer runs from its folder after MyEditor quits, so
+    # nothing deletes it then; a later launch does.
+    now = time.time()
+    day = 24 * 60 * 60
+
+    def folder(name, age):
+        path = tmp_path / name
+        path.mkdir()
+        (path / "my-editor-3.4-windows-setup.exe").write_bytes(b"x")
+        os.utime(path, (now - age, now - age))
+        return path
+
+    old = folder("my-editor-update-old", 2 * day)
+    fresh = folder("my-editor-update-fresh", 60)        # maybe another window's update
+    other = folder("someone-elses-folder", 2 * day)
+    target = folder("outside", 2 * day)
+    link = tmp_path / "my-editor-update-link"
+    link.symlink_to(target)
+    os.utime(link, (now - 2 * day, now - 2 * day), follow_symlinks=False)
+
+    updater.sweep_stale_downloads(str(tmp_path), now=now)
+
+    assert not old.exists()
+    assert fresh.exists() and other.exists()
+    assert link.is_symlink() and (target / "my-editor-3.4-windows-setup.exe").exists()
+
+
+def test_sweeping_a_missing_temp_folder_is_harmless(tmp_path):
+    updater.sweep_stale_downloads(str(tmp_path / "missing"))
+
+
 def test_downloads_land_in_a_private_folder_that_goes_away_with_them():
     asset = SimpleNamespace(name="my-editor_3.4_amd64.deb")
     dest = updater._download_destination(updater.DEB, asset)
