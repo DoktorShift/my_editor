@@ -10,7 +10,9 @@ second window starts the way the relaunched app does. What must hold:
   marked unsaved, its file, its draft link and its selection, and the
   tab that was active is active again.
 
-  Crash recovery does not open the same work a second time.
+  Crash recovery does not open the same work a second time, and skips
+  nothing else: a crash backup of the file named on the command line, or
+  any leftover the restart did not take over, still comes back.
 
   A finished update says so ("You're now using MyEditor ..."); an update
   that did not install says that instead, and the tabs still come back.
@@ -105,15 +107,131 @@ print("RESULT " + json.dumps(result))
 """
 
 
-def restart(tmp_path, target: str) -> dict:
+def run(tmp_path, script: str, *args: str) -> dict:
     env = dict(os.environ, HOME=str(tmp_path), QT_QPA_PLATFORM="offscreen")
     proc = subprocess.run(
-        [sys.executable, "-c", SCRIPT, REPO, target],
+        [sys.executable, "-c", script, REPO, *args],
         env=env, capture_output=True, text=True, timeout=120,
     )
     line = next((l for l in proc.stdout.splitlines() if l.startswith("RESULT ")), None)
     assert line, f"child failed:\n{proc.stdout}\n{proc.stderr}"
     return json.loads(line[len("RESULT "):])
+
+
+def restart(tmp_path, target: str) -> dict:
+    return run(tmp_path, SCRIPT, target)
+
+
+# Shared by the scenarios below: a QApplication, alerts and questions that
+# never block (each is recorded, and a question gets the answer a scenario
+# sets), and helpers to describe the tabs and to close for an update.
+PRELUDE = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from types import SimpleNamespace
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window, recovery
+from constants import APP_VERSION
+from editor import HtmlEditor
+
+home = os.environ["HOME"]
+result = {}
+informed, asked = [], []
+answers = []          # what each question is answered, in order
+main_window.inform = lambda parent, **kw: informed.append(kw.get("title", ""))
+
+def ask(parent, title="", **kw):
+    asked.append(title)
+    return answers.pop(0) if answers else "cancel"
+
+main_window.ask = ask
+
+def write(name, text):
+    path = os.path.join(home, name)
+    with open(path, "w") as f:
+        f.write(text)
+    return path
+
+def tabs_of(w):
+    tabs = []
+    for i in range(w.tabs.count()):
+        page = w.tabs.widget(i)
+        e = w._editor_from_widget(page)
+        viewer = w._pdf_viewer_from_widget(page)
+        tabs.append({
+            "title": w.tabs.tabText(i),
+            "text": e.toPlainText() if e is not None else None,
+            "modified": e.document().isModified() if e is not None else None,
+            "path": getattr(e if e is not None else viewer, "_file_path", None),
+        })
+    return tabs
+
+def close_for_update(w, version=None):
+    w._pending_release = SimpleNamespace(
+        version=version or APP_VERSION, notes="- New",
+        page_url="https://github.com/rinbal/my_editor/releases")
+    prepared = w._prepare_workspace_for_update()
+    if prepared:
+        w._closing_for_update = True
+        w.close()
+    return prepared
+
+def finish():
+    result["informed"] = informed
+    result["asked"] = asked
+    print("RESULT " + json.dumps(result))
+"""
+
+
+def scenario(tmp_path, body: str) -> dict:
+    return run(tmp_path, PRELUDE + body + "\nfinish()\n")
+
+
+def titles(r) -> list:
+    return [t["title"] for t in r["tabs"]]
+
+
+def test_a_crash_backup_of_the_file_named_on_the_command_line_comes_back(tmp_path):
+    # A file tab's backup is named after its path. Starting with that file
+    # as the argument must not make the crash sweep take its backup for the
+    # clean tab's own, skip it, and let the clean tab overwrite it later.
+    r = scenario(tmp_path, r"""
+doc = write("notes.txt", "line one\n")
+crashed = HtmlEditor()
+crashed.setPlainText("UNSAVED line one\n")
+assert recovery.EditorBackup(crashed, doc).write_now()
+w = main_window.MainWindow(doc)
+app.processEvents()
+result["tabs"] = tabs_of(w)
+""")
+    assert titles(r) == ["notes.txt", "notes.txt (recovered)*"]
+    assert r["tabs"][1]["text"].startswith("UNSAVED line one")
+    assert r["tabs"][1]["modified"] is True
+
+
+def test_after_an_update_the_command_line_file_and_crash_leftovers_still_open(tmp_path):
+    # The update restore skips only what it took over: a crash backup it did
+    # not take over is still restored, alongside the file on the command line.
+    r = scenario(tmp_path, r"""
+w = main_window.MainWindow()
+w.new_tab()
+w.current_editor().insertPlainText("kept across the update")
+assert close_for_update(w)
+
+other = write("other.txt", "other on disk\n")
+stray = HtmlEditor()
+stray.setPlainText("a crash leftover")
+assert recovery.EditorBackup(stray, None).write_now()
+
+w2 = main_window.MainWindow(other)
+app.processEvents()
+result["tabs"] = tabs_of(w2)
+""")
+    assert titles(r) == ["Welcome", "Untitled*", "other.txt", "Untitled (recovered)*"]
+    assert r["tabs"][1]["text"] == "kept across the update"
+    assert r["tabs"][3]["text"] == "a crash leftover"
 
 
 def test_every_tab_comes_back_after_an_update(tmp_path):

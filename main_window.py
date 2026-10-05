@@ -416,13 +416,18 @@ class MainWindow(QMainWindow):
         if not self.is_dark_theme:
             self._set_theme(self.is_dark_theme, announce=False)
 
-        # An update restart comes back first, in its own tab order; crash
-        # leftovers and a file named on the command line follow it.
-        resumed = self._resume_workspace()
+        # Startup order: the tabs an update restart wrote down come back
+        # first, in their own order; then the file named on the command
+        # line; then any crash leftovers. The crash sweep skips only the
+        # backups the update restore took over. A file tab's backup is
+        # named after its path, so skipping "every open tab's backup" would
+        # also skip the crash backup of the very file named on the command
+        # line, and the clean tab would later overwrite it.
+        resumed, adopted = self._resume_workspace()
         if initial_path and os.path.isfile(initial_path):
             self.open_path(initial_path)
 
-        restored = self._restore_backups(skip=self._live_backup_paths())
+        restored = self._restore_backups(skip=adopted)
         session = (self._restore_session()
                    if not initial_path and not restored and resumed is None else False)
         if not initial_path and not restored and not session and not self.tabs.count():
@@ -1252,8 +1257,8 @@ class MainWindow(QMainWindow):
     def _restore_backups(self, skip=frozenset()) -> bool:
         """Silently restore any backup files left over from a previous crash.
 
-        ``skip`` holds backup paths that already belong to an open tab (the
-        ones an update restart just reopened), so none opens twice.
+        ``skip`` holds the backup files an update restart just reopened its
+        tabs from, or that those tabs write to, so none opens twice.
         Returns True if at least one backup was restored.
         """
         restored = 0
@@ -3362,22 +3367,16 @@ class MainWindow(QMainWindow):
 
     # -- reopening the workspace after an update restart ---------------------
 
-    def _resume_workspace(self) -> Optional[Workspace]:
-        """Reopen the tabs an update restart wrote down, if it wrote any
-        (see workspace_restore.resume)."""
-        ws = workspace.take_workspace()
-        if ws is not None:
-            workspace_restore.resume(self, ws, draft_type=DraftBinding)
-        return ws
+    def _resume_workspace(self) -> Tuple[Optional[Workspace], frozenset]:
+        """Reopen the tabs an update restart wrote down, if it wrote any.
 
-    def _live_backup_paths(self) -> set:
-        """Backup files that belong to tabs already open."""
-        paths = set()
-        for i in range(self.tabs.count()):
-            ed = self._editor_from_widget(self.tabs.widget(i))
-            if ed is not None and hasattr(ed, "_backup"):
-                paths.add(os.path.abspath(ed._backup.path))
-        return paths
+        Returns the record (None when there was none) and the backup files
+        the reopened tabs took over (see workspace_restore.resume).
+        """
+        ws = workspace.take_workspace()
+        if ws is None:
+            return None, frozenset()
+        return ws, workspace_restore.resume(self, ws, draft_type=DraftBinding)
 
     # -- after a version change ------------------------------------------------
 

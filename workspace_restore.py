@@ -100,7 +100,7 @@ def capture_tabs(window, *, allow_unprotected: bool):
 
 # -- reopening them --------------------------------------------------------------
 
-def resume(window, ws, *, draft_type) -> None:
+def resume(window, ws, *, draft_type) -> frozenset:
     """Reopen every tab of the workspace ``ws``, in order, and make the tab
     that was active current again.
 
@@ -108,19 +108,33 @@ def resume(window, ws, *, draft_type) -> None:
     deleted meanwhile) never costs the others. A backup that could not be
     reopened stays on disk, where the crash-recovery sweep finds it.
     ``draft_type`` is the class a tab's Nostr draft link is rebuilt as.
+
+    Returns the backup files this took over: the records the reopened tabs
+    came from, and the backups those tabs now write to. The crash-recovery
+    sweep must skip exactly these and nothing else; any other backup on
+    disk is work that still has to come back.
     """
     active = None
+    adopted = set()
     for index, tab in enumerate(ws.tabs):
         try:
             widget = resume_tab(window, tab, draft_type=draft_type)
         except Exception:
             continue
-        if index == ws.active and widget is not None:
+        if widget is None:
+            continue
+        if tab.backup_file:
+            adopted.add(os.path.abspath(tab.backup_file))
+        backup = getattr(widget, "_backup", None)
+        if backup is not None:
+            adopted.add(os.path.abspath(backup.path))
+        if index == ws.active:
             active = widget
     if active is not None:
         index = _tab_index(window, active)
         if index >= 0:
             window.tabs.setCurrentIndex(index)
+    return frozenset(adopted)
 
 
 def resume_tab(window, tab: TabState, *, draft_type):
