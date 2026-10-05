@@ -47,11 +47,6 @@ def qt_app():
     yield app
 
 
-@pytest.fixture(autouse=True)
-def quick_read_back(monkeypatch):
-    monkeypatch.setattr(writer, "READ_BACK_DELAY_MS", 0)
-
-
 def rl(write=(), read=(), state=LookupState.FOUND):
     return RelayList(write=list(write), read=list(read), state=state)
 
@@ -403,7 +398,8 @@ def test_adding_publishes_the_old_list_plus_one():
     d = directory(FakeQuery())
     outcome = run(writer.add_relay(url="wss://m.com",
                                    **deps(FakeQuery({10002: found(base)}), pool=pool, d=d)))
-    assert outcome.status == writer.WRITTEN and outcome.verified_on
+    assert outcome.status == writer.WRITTEN
+    assert pool.subscriptions == []                     # done once accepted: no read-back wait
     event = outcome.event
     assert event["tags"] == [["r", "wss://a.com"], ["r", "wss://m.com", "write"]]
     assert event["created_at"] == NOW + 11              # after the base, despite the clock
@@ -429,19 +425,64 @@ def test_a_signer_returning_something_else_is_refused():
     assert outcome.status == writer.FAILED and pool.published == []
 
 
-def test_one_accepting_relay_is_not_enough():
+def test_one_accepting_relay_is_not_enough_and_the_refusals_are_named():
     base = signed(10002, [["r", "wss://a.com"]])
     everyone_but_a = set(defaults.INDEXER_RELAYS) | {"wss://m.com"}
     outcome = run(writer.add_relay(url="wss://m.com", **deps(
         FakeQuery({10002: found(base)}), pool=FakePool(refuse=everyone_but_a))))
     assert outcome.status == writer.FAILED
+    assert outcome.accepted == ("wss://a.com",)
+    assert ("wss://m.com", "blocked") in outcome.refused
+    assert "wss://m.com: blocked" in outcome.reason
 
 
-def test_an_accepted_event_that_cannot_be_read_back_is_reported():
+def test_a_write_is_done_once_enough_relays_accept_it():
+    # An acknowledgement is all a write waits for; whether the default
+    # relays keep what they accept is checked when they are chosen.
     base = signed(10002, [["r", "wss://a.com"]])
+    pool = FakePool(keep=False, refuse={"wss://m.com"})
     outcome = run(writer.add_relay(url="wss://m.com", **deps(
-        FakeQuery({10002: found(base)}), pool=FakePool(keep=False))))
-    assert outcome.status == writer.WRITTEN and outcome.verified_on == ()
+        FakeQuery({10002: found(base)}), pool=pool)))
+    assert outcome.status == writer.WRITTEN and pool.subscriptions == []
+    assert outcome.refused == (("wss://m.com", "blocked"),)
+
+
+def test_a_base_dated_far_ahead_is_refused_before_signing():
+    client = FakeClient()
+    base = signed(10002, [["r", "wss://a.com"]],
+                  created_at=NOW + defaults.MAX_BASE_AHEAD_S + 3 * 86_400)
+    outcome = run(writer.add_relay(url="wss://m.com", **deps(
+        FakeQuery({10002: found(base)}), client=client)))
+    assert outcome.status == writer.FAILED and client.requests == []
+    assert "clock" in outcome.reason
+
+
+def test_a_base_a_little_ahead_is_followed():
+    base = signed(10002, [["r", "wss://a.com"]], created_at=NOW + 3_600)
+    outcome = run(writer.add_relay(url="wss://m.com", **deps(FakeQuery({10002: found(base)}))))
+    assert outcome.status == writer.WRITTEN
+    assert outcome.event["created_at"] == NOW + 3_601
+
+
+def test_creating_sends_nothing_when_a_known_list_has_not_reached_the_relays_yet():
+    client = FakeClient()
+    d = directory(FakeQuery())
+    d.remember(signed(10002, [["r", "wss://mine.com"]]))
+    outcome = run(writer.create_relay_list(**deps(FakeQuery({10002: ABSENT}), client=client,
+                                                  d=d)))
+    assert outcome.status == writer.EXISTS and client.requests == []
+    assert outcome.event["tags"] == [["r", "wss://mine.com"]]
+
+
+def test_adding_to_a_list_the_relays_say_is_absent_is_still_refused():
+    # Only creating may lean on what this app remembers; a change is
+    # always made to what the relays hand back.
+    client = FakeClient()
+    d = directory(FakeQuery())
+    d.remember(signed(10002, [["r", "wss://mine.com"]]))
+    outcome = run(writer.add_relay(url="wss://m.com", **deps(FakeQuery({10002: ABSENT}),
+                                                             client=client, d=d)))
+    assert outcome.status == writer.REFUSED and client.requests == []
 
 
 def test_a_profile_update_keeps_unknown_fields():
@@ -480,6 +521,46 @@ def test_a_new_account_publishes_its_relay_list_then_its_profile():
     assert json.loads(pool.published[1][1]["content"]) == {"name": "Satoshi",
                                                            "display_name": "Satoshi"}
     assert ("relays", "done") in steps and ("profile", "done") in steps
+
+
+class ProfileShyClient(FakeClient):
+    """Signs the relay list, refuses the profile the first time."""
+
+    def __init__(self):
+        super().__init__()
+        self.refused_profile = False
+
+    def sign_event(self, unsigned, on_success, on_failure, **kw):
+        if unsigned["kind"] == 0 and not self.refused_profile:
+            self.refused_profile = True
+            self.requests.append(dict(unsigned))
+            on_failure("not now")
+            return
+        super().sign_event(unsigned, on_success, on_failure, **kw)
+
+
+def test_a_retry_skips_the_steps_already_done():
+    pool = FakePool()
+    client = ProfileShyClient()
+    setup = writer.AccountSetup(name="Satoshi", deps={
+        "pool": pool, "directory": directory(FakeQuery()),
+        "session_pool": FakeSessionPool(client), "profile": Profile(),
+        "query": FakeQuery(), "clock": lambda: NOW})
+    results, steps = [], []
+    setup.finished.connect(lambda ok, msg: results.append(ok))
+    setup.step.connect(lambda k, s, d: steps.append((k, s)))
+    setup.start()
+    settle(20)
+    assert results == [False] and [e["kind"] for _t, e in pool.published] == [10002]
+    steps.clear()
+    setup.start()
+    settle(20)
+    assert results == [False, True]
+    assert [e["kind"] for _t, e in pool.published] == [10002, 0]   # the list went out once
+    assert ("relays", "active") not in steps and ("relays", "done") in steps
+    setup.start()                                   # everything done: nothing more is sent
+    settle(20)
+    assert results == [False, True, True] and len(pool.published) == 2
 
 
 def test_a_retry_resends_the_same_signed_events():

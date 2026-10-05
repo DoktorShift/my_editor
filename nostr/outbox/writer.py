@@ -16,14 +16,22 @@ app, with no undo. So every change here is a read-modify-write:
 3. Time it after the base, sign it, and check the signer returned exactly
    what was asked (kind, content, tags, time, author) with a valid
    signature.
-4. Publish where it belongs (policy.relay_list_targets / profile_targets),
-   require at least two relays to accept it, then read it back by id.
+4. Publish where it belongs (policy.relay_list_targets / profile_targets)
+   and require at least two relays to accept it. What they said is kept
+   in the outcome, and a refusal names it. (There is no read-back: no
+   caller would act on it and every change would wait for it. Whether
+   the default relays keep what they accept is checked when they are
+   chosen, by tests/smoke_relay_qualify.py.)
 5. Hand a published relay list to the directory, so routing uses it now.
 
+A base dated far in the future (MAX_BASE_AHEAD_S) is refused: the change
+would have to be dated after it, and every later one with it.
+
 AccountSetup runs this for a new account: the relay list first, then the
-profile, reporting each step for the window to show. Finishing a setup
-later (``fresh=False``, a new run of the app) reads first, and creates
-each one only where none exists yet.
+profile, reporting each step for the window to show. Running it again
+sends only the steps not yet done. Finishing a setup later
+(``fresh=False``, a new run of the app) reads first, and creates each
+one only where none exists yet.
 """
 
 from __future__ import annotations
@@ -33,11 +41,11 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Mapping, Optional, Tuple
 
-from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtCore import QObject, Signal
 
 from .. import events
-from . import policy
-from .lookup import Lookup, fetch_by_ids, fetch_replaceable
+from . import defaults, policy
+from .lookup import Lookup, fetch_replaceable
 from .policy import KIND_PROFILE, KIND_RELAY_LIST, LookupState
 
 # Outcomes.
@@ -49,7 +57,6 @@ REFUSED = "refused"             # nothing to change from (no list exists); nothi
 FAILED = "failed"               # the signer said no, or too few relays took it
 
 MIN_ACCEPTED = 2
-READ_BACK_DELAY_MS = 1_500
 
 # base event (or None) -> (content, tags), or None for "nothing to change"
 Mutation = Callable[[Optional[dict]], Optional[Tuple[str, list]]]
@@ -59,8 +66,8 @@ Mutation = Callable[[Optional[dict]], Optional[Tuple[str, list]]]
 class WriteOutcome:
     status: str
     event: Optional[dict] = None
-    accepted: tuple = ()
-    verified_on: tuple = ()
+    accepted: tuple = ()     # relays that accepted it
+    refused: tuple = ()      # (relay, what it said) for the others
     reason: str = ""
 
     @property
@@ -87,7 +94,7 @@ class ReplaceableWriter(QObject):
     def __init__(self, *, pool, directory, session_pool, profile, kind: int,
                  mutate: Mutation, on_absent: str = "refuse", on_found: str = "mutate",
                  new_key: bool = False, min_accepted: int = MIN_ACCEPTED,
-                 read_back: bool = True, query=fetch_replaceable,
+                 query=fetch_replaceable,
                  clock: Callable[[], float] = time.time,
                  parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -102,7 +109,6 @@ class ReplaceableWriter(QObject):
         self._on_found = on_found
         self._new_key = new_key
         self._min_accepted = min_accepted
-        self._read_back = read_back
         self._query = query
         self._clock = clock
         self._done = False
@@ -129,6 +135,13 @@ class ReplaceableWriter(QObject):
             self._finish(WriteOutcome(UNKNOWN_BASE, reason="The current one couldn’t be read."))
             return
         if result.state is LookupState.ABSENT:
+            remembered = (self._directory.cached(self._author)
+                          if self._kind == KIND_RELAY_LIST else None)
+            if remembered is not None and remembered.found and self._on_found == "exists":
+                # The relays asked have not caught up with a list this app
+                # holds (published here, or read earlier): one exists.
+                self._finish(WriteOutcome(EXISTS, event=remembered.event))
+                return
             if self._on_absent != "create":
                 self._finish(WriteOutcome(REFUSED, reason="There is none to change."))
                 return
@@ -154,6 +167,15 @@ class ReplaceableWriter(QObject):
             return
         if change is None:
             self._finish(WriteOutcome(UNCHANGED, event=base))
+            return
+        ahead = (policy.created_at_of(base) or 0) - int(self._clock())
+        if ahead > defaults.MAX_BASE_AHEAD_S:
+            days = max(1, round(ahead / 86_400))
+            self._finish(WriteOutcome(
+                FAILED, event=base,
+                reason=(f"The current one is dated about {days} day{'s' if days != 1 else ''} "
+                        "ahead of this computer’s clock, and a change would have to be "
+                        "dated after it. Check the clock first.")))
             return
         content, tags = change
         unsigned = {"kind": self._kind, "content": content, "tags": tags,
@@ -183,21 +205,18 @@ class ReplaceableWriter(QObject):
 
         def published(results):
             accepted = tuple(url for url, ok, _message in results if ok)
+            refused = tuple((url, str(message or "no answer"))
+                            for url, ok, message in results if not ok)
             if len(accepted) < min(self._min_accepted, len(targets)):
-                self._finish(WriteOutcome(FAILED, event=event, accepted=accepted,
-                                          reason="Too few relays accepted it."))
+                said = "; ".join(f"{url}: {message}" for url, message in refused[:4])
+                self._finish(WriteOutcome(
+                    FAILED, event=event, accepted=accepted, refused=refused,
+                    reason="Too few relays accepted it." + (f" ({said})" if said else "")))
                 return
             if self._kind == KIND_RELAY_LIST:
                 self._directory.remember(event)
-            if not self._read_back:
-                self._finish(WriteOutcome(WRITTEN, event=event, accepted=accepted))
-                return
-            QTimer.singleShot(READ_BACK_DELAY_MS, lambda: fetch_by_ids(
-                self._pool, list(accepted), [event["id"]],
-                lambda found: self._finish(WriteOutcome(
-                    WRITTEN, event=event, accepted=accepted,
-                    verified_on=tuple(accepted) if event["id"] in found else ())),
-                parent=self))
+            self._finish(WriteOutcome(WRITTEN, event=event, accepted=accepted,
+                                      refused=refused))
 
         job.all_done.connect(published)
 
@@ -258,8 +277,13 @@ class AccountSetup(QObject):
         self._deps = deps
         self._fresh = fresh
         self._signed: dict = {}
+        self._done: dict = {}           # step -> its outcome, once it succeeded
 
     def start(self) -> None:
+        """Run the steps not yet done; a retry skips what already went out."""
+        if "relays" in self._done:
+            self._relays_done(self._done["relays"])
+            return
         self.step.emit("relays", "active", "")
         writer = create_relay_list(new_key=self._fresh, parent=self, **self._deps)
         self._run(writer, "relays", self._relays_done)
@@ -279,6 +303,8 @@ class AccountSetup(QObject):
         writer.start()
 
     def _relays_done(self, outcome: WriteOutcome) -> None:
+        if outcome.ok:
+            self._done["relays"] = outcome
         if not outcome.ok:
             self.step.emit("relays", "error", "The relays didn’t take it yet.")
             self.finished.emit(False, "Your account is saved, but the network doesn’t "
@@ -291,6 +317,9 @@ class AccountSetup(QObject):
             self.step.emit("profile", "done", "No name to publish.")
             self.finished.emit(True, "")
             return
+        if "profile" in self._done:
+            self._profile_done(self._done["profile"])
+            return
         self.step.emit("profile", "active", "")
         # Finishing later, a profile found on the network is the person's
         # own by then, and stays as it is.
@@ -301,6 +330,8 @@ class AccountSetup(QObject):
         self._run(writer, "profile", self._profile_done)
 
     def _profile_done(self, outcome: WriteOutcome) -> None:
+        if outcome.ok:
+            self._done["profile"] = outcome
         if not outcome.ok:
             self.step.emit("profile", "error", "Your name isn’t published yet.")
             self.finished.emit(False, "Your account is ready, but your profile isn’t "

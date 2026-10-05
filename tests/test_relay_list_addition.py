@@ -32,7 +32,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from nostr import relay_list_addition as rla  # noqa: E402
-from nostr.outbox import defaults, writer  # noqa: E402
+from nostr.outbox import defaults  # noqa: E402
 from nostr.outbox.directory import RelayDirectory  # noqa: E402
 from tests.outbox_fakes import (  # noqa: E402
     ABSENT, NOW, OTHER_SK, UNKNOWN, FakeClient, FakePool, FakeQuery, FakeSessionPool,
@@ -46,11 +46,6 @@ E21 = "wss://nostr.einundzwanzig.space"
 def qt_app():
     app = QApplication.instance() or QApplication(sys.argv)
     yield app
-
-
-@pytest.fixture(autouse=True)
-def quick_read_back(monkeypatch):
-    monkeypatch.setattr(writer, "READ_BACK_DELAY_MS", 0)
 
 
 def run(answer, *, client=None, pool=None):

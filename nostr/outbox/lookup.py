@@ -184,27 +184,3 @@ def _fingerprint(event: dict) -> str:
         return json.dumps(event, sort_keys=True, separators=(",", ":"), default=str)
     except (TypeError, ValueError):
         return repr(event)
-
-
-def fetch_by_ids(pool, relays: Sequence[str], ids: Sequence[str],
-                 on_done: Callable[[set], None], *, timeout_ms: int = 4_000,
-                 parent: Optional[QObject] = None) -> None:
-    """Which of ``ids`` the relays return: the read-back after a publish,
-    because an acknowledgement alone does not prove a relay kept anything."""
-    found: set = set()
-    if not relays or not ids:
-        QTimer.singleShot(0, lambda: on_done(found))
-        return
-    sub = pool.subscribe(dedupe_relays(relays), [{"ids": list(ids)}])
-    state = {"done": False}
-
-    def finish():
-        if state["done"]:
-            return
-        state["done"] = True
-        sub.close()
-        on_done(found)
-
-    sub.event.connect(lambda event: event.get("id") in ids and found.add(event["id"]))
-    sub.eose.connect(finish)
-    QTimer.singleShot(timeout_ms, finish)

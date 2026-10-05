@@ -76,3 +76,8 @@ TTL_UNKNOWN_S = 30
 # A list counts as absent only when at least this many relays answered
 # "nothing stored", one of them an indexer. Anything less is "unknown".
 ABSENT_QUORUM = 2
+
+# A relay list or profile to change that is dated further ahead than this
+# is refused (the change would be dated after it): a day covers any clock
+# that is merely off.
+MAX_BASE_AHEAD_S = 24 * 60 * 60
