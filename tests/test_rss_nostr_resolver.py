@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Unit tests for ``nostr.rss.nostr_resolver`` — the pure parser layer.
+"""Unit tests for ``nostr.rss.nostr_resolver``: the pure parser layer.
 
 The async ``LongFormFetcher`` is exercised indirectly via the importer
 integration; testing it in isolation needs a Qt event loop and a relay
@@ -123,8 +123,8 @@ class ExtractNostrCoordTests(unittest.TestCase):
         self.assertEqual(coord.d_tag, "my-post")
 
     def test_returns_first_decodable_when_multiple_naddrs_present(self) -> None:
-        # If a URL crams two full naddrs, return the first that decodes
-        # — document-order is the canonical pick.
+        # If a URL crams two full naddrs, return the first that decodes:
+        # document order is the canonical pick.
         other = encode_naddr("other-post", "d" * 64, 30023, [])
         url = f"https://example.com/{_LONGFORM_NADDR}?then={other}"
         coord = extract_nostr_coord(url)

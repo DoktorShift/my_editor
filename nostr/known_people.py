@@ -34,8 +34,8 @@ class Person:
     picture: str = ""                   # avatar URL
     nip05: str = ""                     # NIP-05 identifier (alice@example.com)
     relay_hint: str = ""                # best-known relay for them
-    source: str = ""                    # "contact" / "search" / "mention" — provenance
-    updated_at: int = 0                 # unix seconds — when metadata last refreshed
+    source: str = ""                    # provenance: "contact", "search" or "mention"
+    updated_at: int = 0                 # unix seconds when metadata last refreshed
 
     def search_haystack(self) -> str:
         """Lowercased blob the picker matches against."""
@@ -137,7 +137,7 @@ class KnownPeople:
         return self._people[person.pubkey]
 
     def upsert_many(self, people: Iterable[Person]) -> None:
-        """Bulk version — single disk write at the end."""
+        """Bulk version: a single disk write at the end."""
         for p in people:
             self.upsert(p, defer_save=True)
         self._save()
