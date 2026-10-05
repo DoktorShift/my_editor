@@ -12,6 +12,9 @@ Answers arrive on the next turn of the event loop, never inside the call,
 because every caller was written against a signer that answers later.
 Answering immediately would run their callbacks before the code that
 follows the call, which is a different program.
+
+``close()`` overwrites the key in memory: a signer that was signed out of,
+or replaced by a signer app, holds no key any more.
 """
 
 from __future__ import annotations
@@ -30,8 +33,8 @@ class LocalSigner(QObject):
 
     def __init__(self, secret_key: bytes, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
-        self._sk = bytes(secret_key)
-        self._pubkey = crypto.get_public_key(self._sk).hex()
+        self._sk = bytearray(secret_key)
+        self._pubkey = crypto.get_public_key(bytes(self._sk)).hex()
         self._open = True
 
     # -- what callers read ------------------------------------------------------
@@ -59,20 +62,20 @@ class LocalSigner(QObject):
                 "tags": unsigned_event.get("tags", []),
                 "created_at": int(unsigned_event["created_at"]),
             }
-            return events.sign_event(payload, self._sk)
+            return events.sign_event(payload, bytes(self._sk))
         self._answer(work, on_success, on_failure)
 
     def nip44_encrypt(self, peer_pubkey_hex: str, plaintext: str,
                       on_success: Callable[[str], None], on_failure: Callable[[str], None],
                       *, timeout_ms: int = 0) -> None:
-        self._answer(lambda: crypto.encrypt_to(plaintext, self._sk,
+        self._answer(lambda: crypto.encrypt_to(plaintext, bytes(self._sk),
                                                bytes.fromhex(peer_pubkey_hex)),
                      on_success, on_failure)
 
     def nip44_decrypt(self, peer_pubkey_hex: str, ciphertext_b64: str,
                       on_success: Callable[[str], None], on_failure: Callable[[str], None],
                       *, timeout_ms: int = 0) -> None:
-        self._answer(lambda: crypto.decrypt_from(ciphertext_b64, self._sk,
+        self._answer(lambda: crypto.decrypt_from(ciphertext_b64, bytes(self._sk),
                                                  bytes.fromhex(peer_pubkey_hex)),
                      on_success, on_failure)
 
@@ -86,6 +89,9 @@ class LocalSigner(QObject):
 
     def close(self, reason: str = "closed by client") -> None:
         self._open = False
+        for i in range(len(self._sk)):
+            self._sk[i] = 0
+        self._sk = bytearray()
 
     # -- plumbing ----------------------------------------------------------------
 

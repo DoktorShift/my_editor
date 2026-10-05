@@ -19,7 +19,9 @@ What must hold:
   inside the call, and its signatures verify.
 
   A profile that signs locally gets a local signer from the session pool;
-  without its key it gets a plain explanation, not a crash.
+  without its key it gets a plain explanation, not a crash. When an
+  account changes how it signs, the old signer is dropped (closed, its
+  key overwritten, deleted), never handed out again.
 """
 
 import os
@@ -31,9 +33,11 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import shiboken6  # noqa: E402
+from PySide6.QtCore import QCoreApplication, QEvent, QObject  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from nostr import bech32, crypto, events, nip49  # noqa: E402
+from nostr import bech32, bunker, crypto, events, nip49  # noqa: E402
 from nostr.bunker import BunkerSessionPool  # noqa: E402
 from nostr.key_vault import KeyVault, KeyVaultError  # noqa: E402
 from nostr.local_signer import LocalSigner  # noqa: E402
@@ -265,3 +269,107 @@ def test_old_profile_files_load_as_signer_app_accounts():
     profile = Profile(user_pubkey="a" * 64, bunker_pubkey="b" * 64,
                       bunker_relays=[], local_secret_hex="c" * 64)
     assert profile.signer == "remote" and not profile.is_local
+
+
+# -- changing how an account signs ---------------------------------------------------------
+
+class FakeRemote(QObject):
+    """Stands in for BunkerClient: a reattach that answers when told to."""
+
+    made = []
+
+    def __init__(self, pool, parent=None):
+        super().__init__(parent)
+        self.is_connected = False
+        self.closed = False
+        self.answer = None
+        FakeRemote.made.append(self)
+
+    def reattach(self, *, on_success, on_failure, **_kw):
+        def answer():
+            self.is_connected = True
+            on_success()
+        self.answer = answer
+
+    def close(self, reason=""):
+        self.closed = True
+        self.is_connected = False
+
+
+def remote_profile(pubkey):
+    return Profile(user_pubkey=pubkey, bunker_pubkey="b" * 64, bunker_relays=["wss://nos.lol"],
+                   local_secret_hex="c" * 64)
+
+
+@pytest.fixture
+def fake_remote(monkeypatch):
+    FakeRemote.made = []
+    monkeypatch.setattr(bunker, "BunkerClient", FakeRemote)
+    return FakeRemote.made
+
+
+def deleted(obj) -> bool:
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    return not shiboken6.isValid(obj)
+
+
+def test_restoring_the_key_of_an_app_paired_account_stops_signing_through_the_app(
+        tmp_path, fake_remote):
+    vault = KeyVault(tmp_path / "nostr_keys.json")
+    pubkey = vault.store(SK)
+    pool = BunkerSessionPool(pool=None, vault=vault)
+    got = []
+    pool.get(remote_profile(pubkey), got.append, print)
+    fake_remote[0].answer()
+    assert got == [fake_remote[0]]
+    pool.get(local_profile(pubkey), got.append, print)
+    assert isinstance(got[1], LocalSigner)
+    assert fake_remote[0].closed and deleted(fake_remote[0])
+
+
+def test_a_reattach_still_in_flight_is_given_up_for_the_local_key(tmp_path, fake_remote):
+    vault = KeyVault(tmp_path / "nostr_keys.json")
+    pubkey = vault.store(SK)
+    pool = BunkerSessionPool(pool=None, vault=vault)
+    waited, local = [], []
+    pool.get(remote_profile(pubkey), waited.append, print)
+    pool.get(local_profile(pubkey), local.append, print)
+    assert isinstance(local[0], LocalSigner) and waited == local
+    fake_remote[0].answer()                    # the signer app answers late
+    assert fake_remote[0].closed
+    again = []
+    pool.get(local_profile(pubkey), again.append, print)
+    assert again[0] is local[0]
+
+
+def test_pairing_a_local_account_with_an_app_closes_the_local_signer(tmp_path, fake_remote):
+    vault = KeyVault(tmp_path / "nostr_keys.json")
+    pubkey = vault.store(SK)
+    pool = BunkerSessionPool(pool=None, vault=vault)
+    got = []
+    pool.get(local_profile(pubkey), got.append, print)
+    local = got[0]
+    pool.get(remote_profile(pubkey), got.append, print)
+    fake_remote[0].answer()
+    assert got[1] is fake_remote[0]
+    assert not local.is_connected and local._sk == bytearray()
+
+
+def test_closing_the_local_signer_overwrites_its_key():
+    signer = LocalSigner(SK)
+    held = signer._sk
+    signer.close()
+    assert held == bytearray(32) and signer._sk == bytearray()
+
+
+def test_a_dropped_signer_is_closed_and_deleted(tmp_path):
+    vault = KeyVault(tmp_path / "nostr_keys.json")
+    pubkey = vault.store(SK)
+    pool = BunkerSessionPool(pool=None, vault=vault)
+    got = []
+    pool.get(local_profile(pubkey), got.append, print)
+    pool.drop(pubkey)
+    assert not got[0].is_connected and deleted(got[0])
+    pool.get(local_profile(pubkey), got.append, print)
+    pool.close_all()
+    assert deleted(got[1])
