@@ -536,6 +536,21 @@ def test_calling_off_the_restart_removes_what_was_prepared(tmp_path):
     assert other.exists()
 
 
+def test_only_the_deb_is_installed_before_the_restart():
+    kinds = (updater.WINDOWS_INSTALLER, updater.APPIMAGE, updater.MACOS_APP, updater.DEB)
+    assert [updater.UpdateInstaller(k).installs_before_restart for k in kinds] == \
+        [False, False, False, True]
+
+
+def test_a_download_called_off_before_preparing_is_deleted_with_its_folder():
+    asset = SimpleNamespace(name="my-editor-3.4-macos-arm64.dmg")
+    dest = updater._download_destination(updater.MACOS_APP, asset)
+    with open(dest, "wb") as f:
+        f.write(b"x")
+    updater.UpdateInstaller(updater.MACOS_APP).discard_download(dest)
+    assert not os.path.exists(os.path.dirname(dest))
+
+
 def test_messages_are_sentences_without_em_dashes():
     texts = [m for m, _ in updater._MAC_STAGE_ERRORS.values()]
     texts += [updater._MAC_STAGE_FAILED[0], updater._CANNOT_SAVE,

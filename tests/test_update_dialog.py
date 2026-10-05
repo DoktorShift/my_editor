@@ -12,15 +12,19 @@ Every state is load-bearing:
   installer's own sentences plus one next step, and Try Again is offered
   only where trying again can help.
 
-  Cancelling before the restart leaves nothing behind: the downloaded file is
-  deleted and the app keeps running on the old version.
+  The window writes its tabs down (and may ask about unsaved work) before
+  anything is installed, so cancelling there leaves nothing behind: the
+  downloaded file is deleted and the app keeps running on the old version.
 
   Installs that prepare the update while the window is open (macOS, .deb)
-  report failures inside the Install step, offer no Cancel while it runs,
-  and a closed password prompt is not an error.
+  report failures inside the Install step, and a closed password prompt is
+  not an error. While that step or the restart runs, nothing can interrupt
+  it: no Cancel, and Esc and the close box do nothing.
 
-  Only a started swap asks the window to close; a swap that cannot start
-  tells the window, so the tabs it wrote down are not reopened later.
+  Only a started swap asks the window to close; whenever no restart is
+  coming after the tabs were written down, the window is told, so they are
+  not reopened later. An installed .deb that could not restart is tried
+  again without downloading or installing it a second time.
 
   The release notes are shown in the dialog, without their own heading.
 
@@ -38,14 +42,15 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QObject, Signal  # noqa: E402
+from PySide6.QtCore import QObject, Qt, Signal  # noqa: E402
+from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QDialog  # noqa: E402
 
 import updater  # noqa: E402
 import update_dialog  # noqa: E402
 from update_dialog import (  # noqa: E402
-    DOWNLOADING, FAILED, GUIDE_ONLY, PREPARING, READY, RESTARTING, UpdateDialog,
-    WhatsNewDialog,
+    DOWNLOADING, FAILED, GUIDE_ONLY, INSTALLED, PREPARING, READY, RESTARTING,
+    UpdateDialog, WhatsNewDialog,
 )
 from update_flow import DOWNLOAD, PREPARE, RESTART, plan_for  # noqa: E402
 
@@ -66,14 +71,16 @@ class FakeInstaller(QObject):
     declined = Signal(str)
     failed = Signal(str, bool)
 
-    def __init__(self, apply_error=None, prepare_at_once=True):
+    def __init__(self, apply_error=None, prepare_at_once=True, installs=False):
         super().__init__()
         self.started = []
         self.canceled = 0
         self.applied = []
         self.preparing = []
         self.discarded = []
-        self._apply_error = apply_error
+        self.events = []   # what happened, in order
+        self.installs_before_restart = installs
+        self.apply_error = apply_error
         self._prepare_at_once = prepare_at_once
 
     def start(self, asset):
@@ -83,9 +90,15 @@ class FakeInstaller(QObject):
         self.canceled += 1
 
     def prepare(self, path):
+        self.events.append("prepare")
         self.preparing.append(path)
         if self._prepare_at_once:
             self.prepared.emit(path)
+
+    def discard_download(self, path):
+        self.discarded.append(path)
+        if os.path.exists(path):
+            os.remove(path)
 
     def discard_prepared(self, path):
         self.discarded.append(path)
@@ -93,8 +106,9 @@ class FakeInstaller(QObject):
             os.remove(path)
 
     def apply(self, path):
-        if self._apply_error:
-            raise RuntimeError(self._apply_error)
+        self.events.append("apply")
+        if self.apply_error:
+            raise RuntimeError(self.apply_error)
         self.applied.append(path)
 
 
@@ -110,6 +124,21 @@ def mac_dialog(installer, before_restart=lambda: True):
                     asset=ASSET, can_self_update=True, machine="arm64")
     return UpdateDialog("3.3", "3.2", plan, release_url=RELEASE_URL, asset=ASSET,
                         installer=installer, before_restart=before_restart, is_dark=False)
+
+
+def deb_dialog(installer, before_restart=lambda: True):
+    plan = plan_for(updater.DEB, "3.3", release_url=RELEASE_URL, asset=ASSET,
+                    can_self_update=True, machine="x86_64")
+    return UpdateDialog("3.3", "3.2", plan, release_url=RELEASE_URL, asset=ASSET,
+                        installer=installer, before_restart=before_restart, is_dark=False)
+
+
+def capturing(installer, answer=True):
+    """A before_restart that logs itself into the installer's event list."""
+    def before_restart():
+        installer.events.append("capture")
+        return answer
+    return before_restart
 
 
 def guided_dialog():
@@ -270,7 +299,7 @@ def test_cancelling_before_the_restart_deletes_the_download_and_changes_nothing(
     installer.ready.emit(str(path))
 
     assert not path.exists()
-    assert installer.applied == []
+    assert installer.preparing == [] and installer.applied == []
     assert restarts == []
     assert dialog.state == READY
     assert "Nothing was changed" in dialog._note.text()
@@ -314,10 +343,9 @@ def test_a_swap_that_cannot_start_tells_the_window(tmp_path):
     assert failures == [()]
 
 
-def test_a_mac_update_prepares_before_anything_closes(tmp_path):
+def test_a_mac_update_writes_the_tabs_down_then_prepares_before_anything_closes(tmp_path):
     installer = FakeInstaller(prepare_at_once=False)
-    asked = []
-    dialog = mac_dialog(installer, before_restart=lambda: asked.append(True) or True)
+    dialog = mac_dialog(installer, before_restart=capturing(installer))
     restarts = recorder(dialog.restart_ready)
     assert [s.role for s in dialog._plan.steps] == [DOWNLOAD, PREPARE, RESTART]
 
@@ -326,11 +354,11 @@ def test_a_mac_update_prepares_before_anything_closes(tmp_path):
     assert dialog.state == PREPARING
     assert visible_buttons(dialog) == []          # nothing half-installed to cancel
     assert dialog._roles[PREPARE].badge.property("state") == "active"
-    assert asked == [] and restarts == []
+    assert installer.events == ["capture", "prepare"] and restarts == []
 
     staged = str(tmp_path / ".MyEditor.app.update")
     installer.prepared.emit(staged)
-    assert asked == [True]
+    assert installer.events == ["capture", "prepare", "apply"]
     assert installer.applied == [staged]
     assert restarts == [()]
 
@@ -338,6 +366,7 @@ def test_a_mac_update_prepares_before_anything_closes(tmp_path):
 def test_a_failed_preparation_is_reported_in_the_install_step(tmp_path):
     installer = FakeInstaller(prepare_at_once=False)
     dialog = mac_dialog(installer)
+    failures = recorder(dialog.restart_failed)
     dialog._buttons["primary"].click()
     installer.ready.emit(str(tmp_path / "x.dmg"))
     installer.failed.emit("The downloaded disk image couldn't be opened.", True)
@@ -347,14 +376,13 @@ def test_a_failed_preparation_is_reported_in_the_install_step(tmp_path):
     assert "couldn't be opened" in row.error.text()
     assert "didn't finish" not in row.error.text()   # not worded as a download error
     assert visible_buttons(dialog) == ["guide", "later", "retry"]
+    assert failures == [()]   # the tabs written down for the restart are let go
 
 
 def test_a_closed_password_prompt_is_not_an_error(tmp_path):
-    installer = FakeInstaller(prepare_at_once=False)
-    plan = plan_for(updater.DEB, "3.3", release_url=RELEASE_URL, asset=ASSET,
-                    can_self_update=True, machine="x86_64")
-    dialog = UpdateDialog("3.3", "3.2", plan, release_url=RELEASE_URL, asset=ASSET,
-                          installer=installer, is_dark=False)
+    installer = FakeInstaller(prepare_at_once=False, installs=True)
+    dialog = deb_dialog(installer)
+    failures = recorder(dialog.restart_failed)
     dialog._buttons["primary"].click()
     installer.ready.emit(str(tmp_path / "x.deb"))
     installer.declined.emit("The update wasn't installed because the password prompt "
@@ -362,18 +390,92 @@ def test_a_closed_password_prompt_is_not_an_error(tmp_path):
     assert dialog.state == READY
     assert "Nothing was changed" in dialog._note.text()
     assert all(row.badge.property("state") == "pending" for row in dialog._rows)
+    assert failures == [()]
 
 
-def test_cancelling_after_preparation_discards_what_was_prepared(tmp_path):
-    installer = FakeInstaller(prepare_at_once=False)
-    dialog = mac_dialog(installer, before_restart=lambda: False)
+def test_saying_no_to_the_save_question_installs_nothing(tmp_path):
+    # The .deb is installed by the Install step, so the question has to come
+    # before it: afterwards "Nothing was changed" would no longer be true.
+    installer = FakeInstaller(prepare_at_once=False, installs=True)
+    dialog = deb_dialog(installer, before_restart=capturing(installer, answer=False))
+    package = tmp_path / "x.deb"
+    package.write_bytes(b"x")
     dialog._buttons["primary"].click()
-    installer.ready.emit(str(tmp_path / "x.dmg"))
-    staged = str(tmp_path / ".MyEditor.app.update")
-    installer.prepared.emit(staged)
-    assert installer.discarded == [staged]
-    assert installer.applied == []
+    installer.ready.emit(str(package))
+    assert installer.events == ["capture"]
+    assert installer.preparing == [] and installer.applied == []
+    assert not package.exists()
     assert dialog.state == READY
+    assert dialog._note.text() == "Update canceled. Nothing was changed."
+
+
+def test_esc_and_the_close_box_cannot_interrupt_an_install(tmp_path):
+    installer = FakeInstaller(prepare_at_once=False, installs=True)
+    dialog = deb_dialog(installer)
+    closed = recorder(dialog.finished)
+    dialog.show()
+    try:
+        dialog._buttons["primary"].click()
+        installer.ready.emit(str(tmp_path / "x.deb"))
+        assert dialog.state == PREPARING
+
+        QTest.keyClick(dialog, Qt.Key.Key_Escape)
+        dialog.close()
+        dialog.reject()
+        assert dialog.isVisible() and dialog.state == PREPARING
+        assert closed == [] and installer.canceled == 0
+
+        # The step still finishes and the restart goes ahead.
+        installer.prepared.emit("/opt/my-editor/my-editor")
+        assert installer.applied == ["/opt/my-editor/my-editor"]
+    finally:
+        dialog.hide()
+
+
+def test_esc_still_means_later_before_anything_started():
+    dialog = automatic_dialog(FakeInstaller())
+    dialog.show()
+    QTest.keyClick(dialog, Qt.Key.Key_Escape)
+    assert not dialog.isVisible()
+    assert dialog.result() == QDialog.Rejected
+
+
+def test_an_installed_package_that_cannot_restart_only_retries_the_restart(tmp_path):
+    installer = FakeInstaller(prepare_at_once=False, installs=True,
+                              apply_error="MyEditor couldn't start the update helper.")
+    dialog = deb_dialog(installer, before_restart=capturing(installer))
+    failures = recorder(dialog.restart_failed)
+    restarts = recorder(dialog.restart_ready)
+    dialog._buttons["primary"].click()
+    installer.ready.emit(str(tmp_path / "x.deb"))
+    installer.prepared.emit("/opt/my-editor/my-editor")
+
+    assert dialog.state == INSTALLED
+    assert visible_buttons(dialog) == ["later", "retry"]   # the guide would install it again
+    assert dialog._roles[RESTART].error.text() == (
+        "MyEditor couldn't start the update helper. The update is installed. "
+        "Try again, or quit MyEditor and open it again.")
+    assert failures == []   # the tabs stay written down for the restart
+
+    installer.apply_error = None
+    dialog._buttons["retry"].click()
+    assert installer.events == ["capture", "prepare", "apply", "apply"]
+    assert len(installer.started) == 1 and len(installer.preparing) == 1
+    assert installer.applied == ["/opt/my-editor/my-editor"]
+    assert restarts == [()] and failures == []
+
+
+def test_leaving_an_installed_package_unrestarted_lets_the_tabs_go(tmp_path):
+    installer = FakeInstaller(prepare_at_once=False, installs=True,
+                              apply_error="MyEditor couldn't start the update helper.")
+    dialog = deb_dialog(installer)
+    failures = recorder(dialog.restart_failed)
+    dialog._buttons["primary"].click()
+    installer.ready.emit(str(tmp_path / "x.deb"))
+    installer.prepared.emit("/opt/my-editor/my-editor")
+    dialog._buttons["later"].click()
+    assert failures == [()]
+    assert installer.discarded == []   # an installed package is never "undone"
 
 
 NOTES = "# MyEditor v3.3\n\n## Highlights\n\n- **A universal importer** - more sources.\n"

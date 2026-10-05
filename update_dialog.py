@@ -9,16 +9,20 @@ the usual macOS order and Apple's Human Interface Guidelines:
 
 - Skip This Version on the left, Later and the default action on the right.
   Closing the window means Later; skipping is only ever an explicit click.
+  While the update is being installed or the restart started, Esc and the
+  close box do nothing: that work can't be stopped halfway.
 - Progress and errors appear inside the step they belong to, not in a second
   window, and every error says what to do next.
 - Nothing is downloaded or replaced until the default button is clicked.
 
 For AUTOMATIC plans the dialog drives an updater.UpdateInstaller: download
-and check the file, prepare it while the window is still open (macOS and the
-.deb), let the window write down its open tabs (``before_restart``), then
-start the swap and emit ``restart_ready`` so the window can close. Every
-other plan hands off to a URL (the install guide in update mode, or the
-release notes).
+and check the file, let the window write down its open tabs
+(``before_restart``, the last point at which the person can still say no),
+prepare the update while the window is still open (macOS and the .deb),
+then start the swap and emit ``restart_ready`` so the window can close.
+Asking first matters for the .deb: preparing it installs it, and from then
+on the restart is the only thing left to do. Every other plan hands off to
+a URL (the install guide in update mode, or the release notes).
 
 The release notes are shown in the dialog itself, the way Mac apps present
 an update, so nobody has to leave the app to decide.
@@ -57,6 +61,7 @@ DOWNLOADING = "downloading"
 PREPARING = "preparing"
 FAILED = "failed"            # trying again can help
 GUIDE_ONLY = "guide_only"    # it can't: the update guide is the way on
+INSTALLED = "installed"      # the update is in place, but the restart failed
 RESTARTING = "restarting"
 
 # Which buttons each state shows. One table, so a state can never leave a
@@ -68,9 +73,11 @@ _BUTTONS = {
     PREPARING: (),
     FAILED: ("later", "guide", "retry"),
     GUIDE_ONLY: ("later", "guide"),
+    INSTALLED: ("later", "retry"),
     RESTARTING: (),
 }
-_DEFAULT_BUTTON = {READY: "primary", FAILED: "retry", GUIDE_ONLY: "guide"}
+_DEFAULT_BUTTON = {READY: "primary", FAILED: "retry", GUIDE_ONLY: "guide",
+                   INSTALLED: "retry"}
 
 # What to do after an error, added to the installer's own sentences. "Try
 # again" is offered only where trying again can help.
@@ -78,6 +85,9 @@ _NEXT_STEP = {
     True: "Try again, or use the update guide.",
     False: "Use the update guide to install this update.",
 }
+# The guide would only install the same version a second time.
+_INSTALLED_NEXT_STEP = ("The update is installed. Try again, or quit MyEditor "
+                        "and open it again.")
 
 _NOTES_MAX_HEIGHT = 180
 
@@ -220,7 +230,7 @@ class UpdateDialog(QDialog):
     skip_requested = Signal(str)   # the version the person chose to skip
     link_activated = Signal(str)   # a URL for the window to open in the browser
     restart_ready = Signal()       # the swap is running; the window should close
-    restart_failed = Signal()      # before_restart ran, but the swap never started
+    restart_failed = Signal()      # before_restart ran, but no restart is coming
 
     def __init__(self, version: str, current_version: str, plan, *,
                  release_url: str, asset=None, installer=None,
@@ -234,6 +244,9 @@ class UpdateDialog(QDialog):
         self._before_restart = before_restart or (lambda: True)
         self._release_notes = _notes_body(release_notes)
         self._state = READY
+        # An update that is installed already (the .deb) and only waits for
+        # the restart. Trying again then restarts, and nothing more.
+        self._installed = None
 
         self.setWindowTitle("Software Update")
         self.setMinimumWidth(520)
@@ -392,7 +405,10 @@ class UpdateDialog(QDialog):
         self._installer.start(self._asset)
 
     def _retry(self) -> None:
-        self._start_download()
+        if self._installed is not None:
+            self._restart(self._installed)   # never download or install it twice
+        else:
+            self._start_download()
 
     def _cancel_download(self) -> None:
         # The installer discards its partial file and emits nothing more.
@@ -401,9 +417,22 @@ class UpdateDialog(QDialog):
         self._set_state(READY)
 
     def reject(self) -> None:
+        # Esc and the close box land here. An install or a restart that is
+        # under way can't be stopped halfway, and closing the dialog would
+        # destroy the installer that is watching it.
+        if self._state in (PREPARING, RESTARTING):
+            return
         if self._state == DOWNLOADING:
             self._installer.cancel()
         super().reject()
+
+    def done(self, result: int) -> None:
+        if self._installed is not None:
+            # Installed but not restarted, and the person moved on: the
+            # tabs written down for the restart must not reopen later.
+            self._installed = None
+            self.restart_failed.emit()
+        super().done(result)
 
     # -- installer signals --------------------------------------------------
     def _on_progress(self, percent: int) -> None:
@@ -414,12 +443,23 @@ class UpdateDialog(QDialog):
         if self._state == DOWNLOADING:
             self._fail(DOWNLOAD, message, retryable=retryable)
         elif self._state == PREPARING:
+            self.restart_failed.emit()
             self._fail(PREPARE, message, retryable=retryable)
 
     def _on_downloaded(self, path: str) -> None:
         download = self._roles[DOWNLOAD]
         download.progress.hide()
         download.set_state("done")
+        # The window writes its tabs down (and asks about anything it can't
+        # keep) before anything is installed, so saying no here really does
+        # leave everything as it was.
+        if not self._before_restart():
+            self._installer.discard_download(path)
+            self._reset_rows()
+            self._note.setText("Update canceled. Nothing was changed.")
+            self._note.show()
+            self._set_state(READY)
+            return
         prepare = self._roles.get(PREPARE)
         if prepare is not None:
             prepare.set_state("active")
@@ -429,6 +469,7 @@ class UpdateDialog(QDialog):
         self._installer.prepare(path)
 
     def _on_declined(self, message: str) -> None:
+        self.restart_failed.emit()
         self._reset_rows()
         self._note.setText(message)
         self._note.show()
@@ -439,33 +480,41 @@ class UpdateDialog(QDialog):
         if prepare is not None:
             prepare.progress.hide()
             prepare.set_state("done")
+        self._restart(path)
+
+    def _restart(self, path: str) -> None:
         restart = self._roles[RESTART]
+        restart.set_error("")
         restart.set_state("active")
-        if not self._before_restart():
-            self._installer.discard_prepared(path)
-            self._reset_rows()
-            self._note.setText("Update canceled. Nothing was changed.")
-            self._note.show()
-            self._set_state(READY)
-            return
         self._set_state(RESTARTING)
+        installed = self._installer.installs_before_restart
         try:
             self._installer.apply(path)
         except Exception as exc:
-            self._installer.discard_prepared(path)
-            self.restart_failed.emit()
             # apply() words its own failures; anything else gets one sentence.
             reason = str(exc).strip() if isinstance(exc, RuntimeError) else ""
-            self._fail(RESTART, reason or "MyEditor couldn't start the update.")
+            reason = reason or "MyEditor couldn't start the update."
+            if installed:
+                # The new version is in place: only the restart is left, and
+                # the tabs stay written down for it.
+                self._installed = path
+                self._fail(RESTART, reason, next_step=_INSTALLED_NEXT_STEP,
+                           state=INSTALLED)
+            else:
+                self._installer.discard_prepared(path)
+                self.restart_failed.emit()
+                self._fail(RESTART, reason)
             return
+        self._installed = None
         self.restart_ready.emit()
         self.accept()
 
-    def _fail(self, role: str, message: str, *, retryable: bool = True) -> None:
+    def _fail(self, role: str, message: str, *, retryable: bool = True,
+              next_step: str = None, state: str = None) -> None:
         row = self._roles[role]
         row.set_state("error")
-        row.set_error(f"{message} {_NEXT_STEP[retryable]}")
-        self._set_state(FAILED if retryable else GUIDE_ONLY)
+        row.set_error(f"{message} {next_step or _NEXT_STEP[retryable]}")
+        self._set_state(state or (FAILED if retryable else GUIDE_ONLY))
 
 
 def _quiet_headings(view: QTextBrowser) -> None:

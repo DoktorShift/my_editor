@@ -11,7 +11,9 @@ MyEditor has closed:
               GitHub published for it. A file that does not match is
               deleted, never run.
     prepare   everything that can fail while the window is still open, so
-              a failure is reported where the person can see it:
+              a failure is reported where the person can see it. It runs
+              after the window has written its tabs down, the last point
+              at which the person can call the update off:
                 Windows   nothing to do; the installer runs at restart.
                 AppImage  nothing to do; the file is already beside the old one.
                 macOS     open the disk image, copy the new app next to the
@@ -330,8 +332,22 @@ class UpdateInstaller(QObject):
         else:
             raise RuntimeError("This copy of MyEditor can't update itself.")
 
+    @property
+    def installs_before_restart(self) -> bool:
+        """True when prepare() installs the update for good (the .deb).
+
+        Once that succeeds there is nothing left to undo or to download
+        again: the new version is in place and only the restart remains.
+        """
+        return self._kind == DEB
+
+    def discard_download(self, path: str):
+        """Delete a verified download the update was called off for, before
+        prepare() ran."""
+        _discard(path)
+
     def discard_prepared(self, path: str):
-        """Undo download and prepare() when the restart is called off.
+        """Undo download and prepare() when the swap can't start.
 
         The downloaded installer or AppImage is deleted and a staged Mac app
         removed. An installed package stays installed: the next launch
