@@ -449,7 +449,10 @@ class AssistantWindow(QDialog):
     def _tallest_page(self) -> int:
         """The most page height the screen has room for, with the window's
         title bar, margins and buttons around it."""
-        screen = self.screen() or QGuiApplication.primaryScreen()
+        # A window not shown yet has no screen of its own to ask.
+        handle = self.windowHandle()
+        screen = (handle.screen() if handle is not None else None) \
+            or QGuiApplication.primaryScreen()
         if screen is None:
             return 10_000
         margins = self.layout().contentsMargins()
