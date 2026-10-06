@@ -174,11 +174,11 @@ macOS shows a preview inside its print dialog. On Windows and Linux,
 | Format | Notes |
 |---|---|
 | `.txt` | Plain text, no formatting |
-| `.html` | Clean semantic HTML5; bullets become real lists, images are embedded as data URIs so the single file is shareable; adapts to the reader's light/dark mode |
+| `.html` | Clean semantic HTML5: headings, lists (bulleted, numbered, checklists), links, strikethrough and inline code are kept, and bullets typed as text become real lists; images are embedded as data URIs so the single file is shareable; adapts to the reader's light/dark mode. Opened again, its lists are real lists |
 | `.pdf` | Native PDF export: document metadata, locale-aware page size (A4/Letter), page-number footer, images scaled to the printable width; configure via `File > Page Setup…` |
 | `.md` | Markdown: bold, italic, strikethrough, inline code, links, headings, lists, quotes, code blocks, tables and task lists are kept; underline and colors are not (MyEditor asks first when the document has them). It is the same Markdown an article publishes. |
 | `.rtf` | Rich Text Format |
-| `.Rmd` | R Markdown: YAML frontmatter plus Pandoc markdown; colors and underline use Pandoc spans, images go into a `<name>_media/` folder next to the file |
+| `.Rmd` | R Markdown: YAML frontmatter plus Pandoc markdown with headings, lists, links, strikethrough and inline code; colors and underline use Pandoc spans, images go into a `<name>_media/` folder next to the file |
 
 ---
 

@@ -72,7 +72,7 @@ from alerts import (
 from update_dialog import UpdateDialog, WhatsNewDialog
 from update_flow import AUTOMATIC, guide_url, plan_for
 import theme
-from export_html import document_to_html, normalize_lists_after_set_html, sniff_image_ext
+from export_html import document_to_html, normalize_after_set_html, sniff_image_ext
 from export_pdf import export_pdf, load_page_setup
 from page_setup_dialog import PageSetupDialog
 import printing
@@ -2081,10 +2081,9 @@ class MainWindow(QMainWindow):
         ext = path.lower()
         if ext.endswith(('.html', '.htm')):
             ed.setHtml(content)
-            # Real <ul><li> lists (our own exports, foreign HTML) become
-            # QTextList objects, which the editor's bullet handlers don't
-            # manage; convert them back to literal "• " lines.
-            normalize_lists_after_set_html(ed.document())
+            # Lists stay real lists (the editor edits them as such); what
+            # the reader leaves behind is tidied.
+            normalize_after_set_html(ed.document())
             ed.document().clearUndoRedoStacks()
         elif ext.endswith('.md'):
             self._load_markdown(ed, content)

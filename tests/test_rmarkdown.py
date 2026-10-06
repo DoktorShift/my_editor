@@ -123,6 +123,27 @@ def test_bullets_nest_and_get_blank_line_before():
     assert "intro\n\n- one\n  - two\n\nafter" in body
 
 
+def _body_of(markdown: str) -> str:
+    from markdown_writer import READ_FEATURES
+    doc = QTextDocument()
+    doc.setMarkdown(markdown, READ_FEATURES)
+    return document_to_rmd(doc, "T").split("---\n\n", 1)[1]
+
+
+def test_real_lists_nest_by_four_spaces_and_keep_numbers_and_checks():
+    body = _body_of("intro\n\n- one\n    - two\n\n3. three\n4. four\n\n- [x] done\n")
+    assert "intro\n\n- one\n    - two\n" in body
+    assert "3. three\n4. four" in body
+    assert "- [x] done" in body
+
+
+def test_headings_strike_code_and_links_are_pandoc_markdown():
+    body = _body_of("## A *heading*\n\nSome ~~old~~ `x = 1` and [a site](https://x.example).\n")
+    assert body.startswith("## A *heading*\n\n")
+    assert "~~old~~" in body and "`x = 1`" in body
+    assert "[a site](https://x.example)" in body
+
+
 def test_line_structure_uses_hard_breaks():
     out = document_to_rmd(_doc(["line one", "line two", "", "para two"]), "T")
     assert "line one\\\nline two\n\npara two" in out

@@ -35,7 +35,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtGui import QTextFormat, QTextImageFormat
 
 from doc_walk import iter_block_runs, iter_blocks, iter_image_names
-from export_html import normalize_lists_after_set_html
+from export_html import normalize_after_set_html
 from markdown_writer import (
     READ_FEATURES, document_to_markdown, has_local_only_formatting, image_markdown,
 )
@@ -132,7 +132,7 @@ def load_backup_content(editor, record: dict, *, modified: bool = True) -> None:
         normalize_after_markdown_load(editor.document())
     else:
         editor.setHtml(content)
-        normalize_lists_after_set_html(editor.document())
+        normalize_after_set_html(editor.document())
     if record.get("markdown_source"):
         # Opened as its Markdown text: it is still saved as written.
         editor._markdown_source = True
