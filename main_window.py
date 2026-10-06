@@ -116,7 +116,9 @@ from recent_files import load_recent, add_recent, clear_recent
 from nostr.avatar_store import AvatarBatchLoader, AvatarStore
 from nostr.bech32 import encode_note
 from nostr.blossom.errors import friendly_message
+from nostr.profile_editing import ProfileEditing
 from nostr.state import NostrState
+from nostr.ui.profile_window import ProfileWindow
 from nostr.blossom.server_list import UserServerList
 from nostr.blossom.store import MediaFile, MediaStore
 from nostr.bunker import BunkerSessionPool
@@ -1161,6 +1163,10 @@ class MainWindow(QMainWindow):
             Command("nostr.backup_account", _("Back Up Account\u2026"), NOSTR, nostr=True,
                     keywords=("export", "key")),
             triggered=self._on_backup_account)
+        self.act_edit_profile = add(
+            Command("nostr.edit_profile", _("Edit Profile\u2026"), NOSTR, nostr=True,
+                    keywords=("name", "picture", "about", "lightning address")),
+            triggered=self._on_edit_profile)
         self.act_nostr_sign_out = add(
             Command("nostr.sign_out", _("Sign Out Active Profile"), NOSTR, nostr=True,
                     keywords=("log out",)),
@@ -1250,6 +1256,7 @@ class MainWindow(QMainWindow):
         m_nostr.addAction(self.act_create_account)
         m_nostr.addAction(self.act_nostr_connect)
         m_nostr.addAction(self.act_restore_account)
+        m_nostr.addAction(self.act_edit_profile)
         m_nostr.addAction(self._act_backup_account)
         self._update_account_actions()
         m_nostr.addAction(self.act_nostr_sign_out)
@@ -3710,6 +3717,9 @@ class MainWindow(QMainWindow):
         act_membership = menu.addAction(_("EINUNDZWANZIG Membership\u2026"))
         act_membership.triggered.connect(self._open_membership_window)
         menu.addSeparator()
+        if active is not None:
+            act_edit = menu.addAction(_("Edit Profile\u2026"))
+            act_edit.triggered.connect(self._on_edit_profile)
         if active is not None and active.is_local:
             act_backup = menu.addAction(_("Back Up Account\u2026"))
             act_backup.triggered.connect(self._on_backup_account)
@@ -3746,6 +3756,35 @@ class MainWindow(QMainWindow):
 
     def _on_backup_account(self) -> None:
         self._accounts.backup_account()
+
+    def _on_edit_profile(self) -> None:
+        """Edit Profile for the active account. The window reads the
+        profile fresh before anything can be changed (nostr/ui/profile_window.py)."""
+        active = self._profile_store.default()
+        if active is None:
+            inform(self, title=_("Connect a signer first"),
+                   message=_("Connect a Nostr signer (Nostr > Connect Signer\u2026) "
+                             "before editing your profile."),
+                   is_dark=self.is_dark_theme)
+            return
+        editing = ProfileEditing(profile=active, pool=self._relay_pool,
+                                 session_pool=self._session_pool,
+                                 directory=self._relay_directory, parent=self)
+        window = ProfileWindow(read=editing.read, save=editing.save,
+                               signs_locally=active.is_local, is_dark=self.is_dark_theme,
+                               parent=self)
+        # Closing the window ends what is still running for it.
+        editing.setParent(window)
+        window.setWindowFlag(Qt.Window, True)
+        window.setAttribute(Qt.WA_DeleteOnClose, True)
+
+        def saved() -> None:
+            self.status.showMessage(_("Profile saved."), 5000)
+            # Read back what was published, so the chip and menus show it.
+            self._metadata_fetcher.fetch(active)
+
+        window.saved.connect(saved)
+        window.show()
 
     def _on_nostr_connect(self):
         dialog = ConnectDialog(
