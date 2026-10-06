@@ -174,7 +174,7 @@ def invoice(*, paid=False, bolt11="lnbcrt1", checkout="https://pay.einundzwanzig
                              receipt_url=None))
 
 
-def window(api=None, *, pubkey=PUBKEY, known_member=None, handle=None, opened=None,
+def window(api=None, *, pubkey=PUBKEY, known_member=None, handle=None,
            signs_locally=False, prices=None, profile_address=""):
     watchers = []
 
@@ -187,7 +187,6 @@ def window(api=None, *, pubkey=PUBKEY, known_member=None, handle=None, opened=No
                            known_member=known_member, handle=handle, is_dark=False,
                            signs_locally=signs_locally, profile_address=profile_address,
                            watcher_factory=factory,
-                           open_lightning=opened if opened is not None else (lambda b: True),
                            prices=prices)
     win.watchers = watchers
     return win
@@ -534,12 +533,17 @@ def test_copy_invoice_puts_the_invoice_on_the_clipboard(qt_app):
     assert win._copy_button.text() == "Copied"
 
 
-def test_open_in_wallet_says_what_to_do_when_no_wallet_answers():
+def test_paying_is_the_code_and_its_text_twin():
+    # Owner decision (Q6): the code is the way to pay, with Copy Invoice for
+    # a wallet on this computer or anyone who cannot scan. No wallet hand-off,
+    # and no browser while there is a code.
     api = FakeApi()
-    win = window(api, opened=lambda bolt11: False)
+    win = window(api)
     to_pay(win, api)
-    win._wallet_button.click()
-    assert "Scan the code" in win._pay_status.text()
+    assert not win._qr.isHidden() and not win._copy_button.isHidden()
+    assert win._browser_button.isHidden()
+    assert "Scan the code" in win._pay_intro.text()
+    assert not hasattr(win, "_wallet_button")
 
 
 def test_without_an_invoice_code_the_payment_page_is_the_way():
@@ -827,7 +831,7 @@ def test_once_paid_the_invoice_and_its_buttons_go_away():
     win.watchers[0].paid.emit(invoice(paid=True))
     api.last("me").ok(status(e21.STATUS_AWAITING_PAYMENT))   # not confirmed yet
     assert win.page == PAY
-    for widget in (win._qr, win._copy_button, win._wallet_button, win._browser_button):
+    for widget in (win._qr, win._copy_button, win._browser_button):
         assert widget.isHidden()
     assert "payment arrived" in win._pay_status.text()
     assert default_button(win).text() == "Check Again"
