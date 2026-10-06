@@ -181,6 +181,10 @@ class SpellChecker(QObject):
 
     def _right(self, word: str, language: str) -> bool:
         key = (language, _for_checker(word))
+        if not self._backend.is_own_thread():
+            # The neutral answer another thread gets is not remembered as
+            # what the word is.
+            return self._backend.check(key[1], language)
         known = self._known.get(key)
         if known is None:
             known = self._backend.check(key[1], language)

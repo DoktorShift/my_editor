@@ -194,8 +194,13 @@ class SpellBackend:
 
     # -- the guard ------------------------------------------------------------
 
+    def is_own_thread(self) -> bool:
+        """Whether the calling thread is the one the backend belongs to
+        (others get neutral answers)."""
+        return threading.get_ident() == self._thread
+
     def _on_own_thread(self) -> bool:
-        if threading.get_ident() == self._thread:
+        if self.is_own_thread():
             return True
         if not self._warned_thread:
             self._warned_thread = True

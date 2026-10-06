@@ -3,6 +3,7 @@
 """Spell checking a document as it changes, without blocking typing."""
 
 import json
+import threading
 
 from PySide6.QtCore import QCoreApplication, QEvent, Qt
 from PySide6.QtGui import QTextCharFormat, QTextCursor, QTextDocument
@@ -92,6 +93,16 @@ def test_each_word_is_asked_once_until_it_is_learned():
     assert accepted == ["Nostr"]
     assert checker.check("Nostr", "en-US") is True
     assert backend.checked_words().count("Nostr") == 2
+
+
+def test_another_threads_answer_is_not_remembered_for_everyone():
+    checker = SpellChecker(FakeBackend())
+    answers = []
+    worker = threading.Thread(target=lambda: answers.append(checker.check("helo", "en-US")))
+    worker.start()
+    worker.join()
+    assert answers == [True]                        # the neutral answer, with a warning
+    assert checker.check("helo", "en-US") is False  # the backend's own thread asks it
 
 
 def test_suggestions_keep_a_typographic_apostrophe():
