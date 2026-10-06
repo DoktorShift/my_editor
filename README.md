@@ -1,6 +1,6 @@
 # MyEditor
 
-**A clean, distraction-free desktop text editor. Write locally, publish to Nostr, keep your keys in your own signer.**
+**A clean, distraction-free desktop text editor. Write locally, publish to Nostr, keep your key on this computer or in your own signer app.**
 
 <p align="center">
   <img src="assets/MyEditor_screenshot_v3.png" width="780" alt="MyEditor screenshot"/>
@@ -8,8 +8,9 @@
 
 MyEditor is a fast, local-first note editor for lecture notes, quick drafts, and
 long-form writing. Write in a calm, focused window, then publish straight to Nostr
-as a short note or a full article. Your files stay on your disk and your private
-key stays in your signer.
+as a short note or a full article. Your files stay on your disk, and your private
+key stays where you put it: protected on this computer, or in a signer app on your
+phone, where it can move any time.
 
 <p align="center">
   <a href="https://github.com/rinbal/my_editor/releases/latest"><b>Download for Windows, macOS, or Linux</b></a>
