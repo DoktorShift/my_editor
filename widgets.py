@@ -200,6 +200,11 @@ class FindBar(QFrame):
             grid.addWidget(self.replace_edit, 1, 0)
             grid.addLayout(buttons, 1, 1, 1, 5)
             self.show_replace(False)
+            # Tab goes from what to find to what to put instead, as in
+            # every find and replace panel.
+            QWidget.setTabOrder(self.edit, self.replace_edit)
+            QWidget.setTabOrder(self.replace_edit, self.replace_btn)
+            QWidget.setTabOrder(self.replace_btn, self.replace_all_btn)
 
         self._update_theme()
 

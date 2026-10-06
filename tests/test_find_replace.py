@@ -106,6 +106,7 @@ def test_the_find_bar_offers_replace_and_options():
     bar.replace_btn.click()
     bar.replace_all_btn.click()
     assert asked == ["one", "all"]
+    assert bar.edit.nextInFocusChain() is bar.replace_edit     # Tab: find, then replace
 
 
 WINDOW_SCRIPT = r"""

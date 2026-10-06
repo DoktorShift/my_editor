@@ -151,6 +151,14 @@ r["pdf_hidden"] = tb.isHidden()
 w.tabs.setCurrentIndex(w.tabs.indexOf(ed.parent().parent()))
 app.processEvents()
 r["text_again"] = tb.isVisible()
+txt = os.path.join(os.environ["HOME"], "plain.txt")
+with open(txt, "w") as f:
+    f.write("plain text\n")
+w.open_path(txt)
+app.processEvents()
+r["txt_style"] = tb.style_button.isEnabled()
+r["txt_bold"] = tb.buttons["bold"].isEnabled()
+r["txt_list"] = tb.buttons["bullets"].isEnabled()
 ed.document().setModified(False)
 for i in range(w.tabs.count()):
     e = w._editor_from_widget(w.tabs.widget(i))
@@ -173,3 +181,5 @@ def test_the_toolbar_in_the_window(tmp_path):
     assert r["style_body"] == "Body" and r["style_heading"] == "Heading 1"
     assert r["hidden"] and r["remembered"] is False and r["back"]
     assert r["pdf_hidden"] and r["text_again"]
+    # Plain text keeps bold and italic, but has no paragraph styles or lists.
+    assert r["txt_bold"] and not r["txt_style"] and not r["txt_list"]

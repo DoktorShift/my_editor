@@ -3899,8 +3899,9 @@ class MainWindow(QMainWindow):
             return
         kind = self._editor_kind(self.current_editor())
         if getattr(self, "format_toolbar", None) is not None:
-            # A PDF has nothing to format.
+            # A PDF has nothing to format; plain text has no paragraph styles.
             self.format_toolbar.setVisible(self.show_toolbar and bool(kind))
+            self.format_toolbar.style_button.setEnabled(kind == "rich")
         for action in self._editor_actions:
             action.setEnabled(bool(kind))
         for action in self._rich_actions:
