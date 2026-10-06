@@ -51,6 +51,7 @@ from markdown_writer import (
     holds_faithfully, image_markdown,
 )
 from editor import HtmlEditor
+import link_url
 import rich_text
 from rich_text import normalize_after_markdown_load
 import image_safety
@@ -825,6 +826,8 @@ class MainWindow(QMainWindow):
         ed.urls_dropped.connect(self._handle_dropped_urls)
         ed.set_context_menu_filler(self._fill_editor_context_menu)
         ed.set_structure_check(lambda e=ed: self._editor_kind(e) == "rich")
+        ed.set_link_opener(self._open_link)
+        ed.set_nostr_check(lambda: self.nostr_state.active)
         return ed
 
     def _resolve_local_image(self, editor, name: str):
@@ -1011,6 +1014,9 @@ class MainWindow(QMainWindow):
         self.act_bullets.setChecked(kind == rich_text.BULLET)
         self.act_numbers.setChecked(kind == rich_text.NUMBER)
         self.act_quote.setChecked(cursor is not None and rich_text.in_quote(cursor))
+        in_link = (cursor is not None and self._editor_kind(ed) == "rich"
+                   and rich_text.link_range(cursor) is not None)
+        self.act_link.setText(_("Edit Link\u2026") if in_link else _("Add Link\u2026"))
 
     # ----------------------------------------------------------------------
     # ACTIONS / MENU
@@ -1144,7 +1150,11 @@ class MainWindow(QMainWindow):
                                      checkable=True, keywords=(_("citation"),)),
                              triggered=lambda: self._editor_call("toggle_quote"))
 
-        # Insert
+        # Insert. Command-K, as in Pages, Mail and Notes; the title says
+        # Edit Link… while the caret is in a link.
+        self.act_link = add(Command("insert.link", _("Add Link\u2026"), INSERT, "Ctrl+K",
+                                    keywords=(_("web address"), "url", _("hyperlink"))),
+                            triggered=lambda: self._editor_call("show_link_popover"))
         self.act_divider = add(Command("insert.divider", _("Divider"), INSERT,
                                        keywords=(_("horizontal rule"), _("line"))),
                                triggered=lambda: self._editor_call("insert_divider"))
@@ -1191,7 +1201,7 @@ class MainWindow(QMainWindow):
         # (headings, lists, links): off in plain-text tabs as well.
         self._rich_actions = [self.act_strike, self.act_code, *self.act_styles,
                               self.act_bullets, self.act_numbers, self.act_quote,
-                              self.act_divider]
+                              self.act_divider, self.act_link]
 
         self._search_matches = []
         self._current_match_index = -1
@@ -1388,6 +1398,8 @@ class MainWindow(QMainWindow):
 
         # Insert, between Edit and Format, as in Pages.
         self.m_insert = self.menuBar().addMenu(_("&Insert"))
+        self.m_insert.addAction(self.act_link)
+        self.m_insert.addSeparator()
         self.m_insert.addAction(self.act_divider)
 
         m_format = self.menuBar().addMenu(_("F&ormat"))
@@ -3576,6 +3588,23 @@ class MainWindow(QMainWindow):
             getattr(ed, name)()
             self._update_format_buttons()
 
+    def _open_link(self, href: str) -> None:
+        """Open a link from the document: a web page in the browser, a
+        Nostr link through njump.me, an email in the mail app."""
+        web = link_url.web_address_for(href)
+        if web:
+            self._open_external(web)
+        elif href.lower().startswith("mailto:"):
+            QDesktopServices.openUrl(QUrl(href))
+        else:
+            self.status.showMessage(_("That link cannot be opened."), 5000)
+
+    @staticmethod
+    def _copy_link(href: str) -> None:
+        """The link's address on the clipboard (an email without mailto:)."""
+        QGuiApplication.clipboard().setText(
+            href[len("mailto:"):] if href.lower().startswith("mailto:") else href)
+
     def _toggle_list(self, kind: str) -> None:
         ed = self.current_editor()
         if ed:
@@ -3695,9 +3724,23 @@ class MainWindow(QMainWindow):
         if kind:
             self._update_undo_redo_buttons()
 
-    def _fill_editor_context_menu(self, menu, editor) -> None:
+    def _fill_editor_context_menu(self, menu, editor, pos) -> None:
         """The editor's context menu: the window's own commands, so it
-        offers what the menus offer, under the same names."""
+        offers what the menus offer, under the same names. On a link, the
+        link's own commands come first."""
+        if editor.anchorAt(pos) and not editor.textCursor().hasSelection():
+            editor.setTextCursor(editor.cursorForPosition(pos))
+            self._update_format_buttons()
+        link = editor.link_at_caret() if self._editor_kind(editor) == "rich" else None
+        if link is not None:
+            # A link's own commands, here only: they mean something only
+            # where a link is.
+            href = link[2]
+            menu.addAction(_("Open Link"), lambda: self._open_link(href))
+            menu.addAction(self.act_link)
+            menu.addAction(_("Copy Link"), lambda: self._copy_link(href))
+            menu.addAction(_("Remove Link"), editor.remove_link)
+            menu.addSeparator()
         for action in (self.act_cut, self.act_copy, self.act_paste, self.act_paste_plain):
             menu.addAction(action)
         menu.addSeparator()

@@ -6,19 +6,23 @@ HTML Editor widget with bullet and format logic.
 """
 
 import os
+import sys
 
-from PySide6.QtCore import Qt, QTimer, QRect, QPoint, QMetaMethod, Signal
+from PySide6.QtCore import Qt, QTimer, QRect, QPoint, QMetaMethod, QEvent, QUrl, Signal
 from PySide6.QtGui import (
     QPainter, QTextBlockFormat, QTextCursor, QTextCharFormat, QColor, QClipboard, QPen,
-    QTextOption, QImage, QTextDocument, QTextFormat,
+    QTextOption, QImage, QTextDocument, QTextFormat, QDesktopServices,
 )
-from PySide6.QtWidgets import QTextEdit, QMenu, QApplication
+from PySide6.QtWidgets import QTextEdit, QMenu, QApplication, QToolTip
 from constants import (
     DARK_BG, DARK_FG, LIGHT_BG, LIGHT_FG, DARK_SELECTION, LIGHT_SELECTION, MONO_FONT,
     DARK_GUIDE, LIGHT_GUIDE, DARK_CURRENT_LINE, LIGHT_CURRENT_LINE, DARK_PAPER, LIGHT_PAPER,
 )
 from i18n import _
+import link_url
 import rich_text
+import url_safety
+from link_popover import LinkPopover, clipboard_address
 
 
 # Stand-in painted for an image whose bytes have not arrived yet. Its
@@ -64,6 +68,12 @@ class HtmlEditor(QTextEdit):
         # Whether the document can hold Markdown structure (lists,
         # headings): the window answers per tab; on its own, it can.
         self._holds_structure = lambda: True
+        # Who opens a link Command-clicked (Ctrl-clicked elsewhere): the
+        # window, which knows where each kind of link goes.
+        self._link_opener = None
+        # Whether a Nostr account is in use: Nostr shows up in the editor
+        # only then (nostr/state.py).
+        self._nostr_active = lambda: False
 
         # Resource seam: a resolver plus the URL scheme it answers for.
         # Injected by the window so the editor carries no knowledge of
@@ -332,6 +342,7 @@ class HtmlEditor(QTextEdit):
 
     def _update_active_format(self):
         """Update active format state based on current cursor position."""
+        self._leave_link_at_end()
         fmt = self.currentCharFormat()
         self.active_format['bold'] = (fmt.fontWeight() > 400)
         self.active_format['italic'] = fmt.fontItalic()
@@ -567,6 +578,116 @@ class HtmlEditor(QTextEdit):
         if has_bullet:
             self._indent_typed_bullet(line, start, spaces, has_bullet, delta)
 
+    # -------- Links --------
+    def set_nostr_check(self, check) -> None:
+        """Install ``check()``: whether a Nostr account is in use."""
+        self._nostr_active = check
+
+    def set_link_opener(self, opener) -> None:
+        """Install ``opener(href)``, which opens a Command-clicked link."""
+        self._link_opener = opener
+
+    def link_at_caret(self):
+        """``(start, end, href)`` of the link at the caret, or None."""
+        return rich_text.link_range(self.textCursor())
+
+    def show_link_popover(self) -> None:
+        """Add Link, or Edit Link when the caret is in one: the popover
+        under the words, prefilled with what is known."""
+        cursor = self.textCursor()
+        found = rich_text.link_range(cursor)
+        if found is not None:
+            start, end, href = found
+            cursor.setPosition(start)
+            cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+            self.setTextCursor(cursor)
+            text = cursor.selectedText()
+        else:
+            href = clipboard_address()
+            text = cursor.selectedText().replace("\u2029", " ").replace("\u2028", " ")
+        popover = LinkPopover(text=text, href=href, editing=found is not None,
+                              nostr=self._nostr_active(), parent=self)
+        popover.applied.connect(self.apply_link)
+        popover.removed.connect(self.remove_link)
+        # Escape, Cancel or a click elsewhere: the writing goes on here.
+        popover.destroyed.connect(lambda _obj=None: self.setFocus())
+        popover.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        start_rect = self.cursorRect(self._selection_start_cursor())
+        popover.show_below(start_rect, self.viewport())
+
+    def _selection_start_cursor(self) -> QTextCursor:
+        cursor = QTextCursor(self.textCursor())
+        cursor.setPosition(cursor.selectionStart())
+        return cursor
+
+    def apply_link(self, text: str, href: str) -> None:
+        """Link the selection (or insert ``text``, or the address itself,
+        when nothing is selected) to ``href``."""
+        cursor = self.textCursor()
+        if not cursor.hasSelection() and not text:
+            text = link_url.display_href(href, limit=10_000)
+        rich_text.set_link(cursor, text, href)
+        cursor.setPosition(cursor.selectionEnd())
+        self.setTextCursor(cursor)
+        self._leave_link_at_end()
+        self.setFocus()
+
+    def remove_link(self) -> None:
+        cursor = self.textCursor()
+        rich_text.remove_link(cursor)
+        self.setTextCursor(cursor)
+
+    def _open_link(self, href: str) -> None:
+        if self._link_opener is not None:
+            self._link_opener(href)
+            return
+        web = link_url.web_address_for(href)
+        if web and url_safety.is_safe_external_url(web):
+            QDesktopServices.openUrl(QUrl(web))
+        elif href.lower().startswith("mailto:"):
+            QDesktopServices.openUrl(QUrl(href))
+
+    def _leave_link_at_end(self) -> None:
+        """Typing right before or right after a link is not part of it
+        (links are not "sticky", as in every word processor); typing
+        inside one is."""
+        cursor = self.textCursor()
+        fmt = self.currentCharFormat()
+        if cursor.hasSelection() or not fmt.isAnchor():
+            return
+        if not cursor.atBlockStart() and not cursor.atBlockEnd():
+            after = QTextCursor(cursor)
+            after.movePosition(QTextCursor.MoveOperation.NextCharacter)
+            before, following = cursor.charFormat(), after.charFormat()
+            if (before.isAnchor() and following.isAnchor()
+                    and before.anchorHref() == following.anchorHref()):
+                return              # inside the link
+        self.setCurrentCharFormat(rich_text.without_link(fmt))
+
+    def mousePressEvent(self, event):
+        # Command-click (Ctrl-click on Windows and Linux) opens a link.
+        if (event.button() == Qt.MouseButton.LeftButton
+                and event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            href = self.anchorAt(event.position().toPoint())
+            if href:
+                self._open_link(href)
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def viewportEvent(self, event):
+        if event.type() == QEvent.Type.ToolTip:
+            href = self.anchorAt(event.pos())
+            if href:
+                how = (_("Command-click to open") if sys.platform == "darwin"
+                       else _("Ctrl+click to open"))
+                QToolTip.showText(event.globalPos(),
+                                  link_url.display_href(href) + "\n" + how, self)
+            else:
+                QToolTip.hideText()
+            return True
+        return super().viewportEvent(event)
+
     # -------- Quotes and dividers --------
     def toggle_quote(self) -> None:
         """Quote the paragraphs under the cursor, or take the quote away."""
@@ -584,8 +705,9 @@ class HtmlEditor(QTextEdit):
 
     # -------- Context menu --------
     def set_context_menu_filler(self, filler) -> None:
-        """Install ``filler(menu, editor)``, which puts the commands in the
-        context menu. Injected, so the editor holds no command list."""
+        """Install ``filler(menu, editor, pos)``, which puts the commands in
+        the context menu (``pos`` is where it was asked for, in viewport
+        coordinates). Injected, so the editor holds no command list."""
         self._context_menu_filler = filler
 
     def contextMenuEvent(self, event):
@@ -617,7 +739,7 @@ class HtmlEditor(QTextEdit):
                 QMenu::separator { height: 1px; background: #E1E1E1; margin: 4px 0px; }
             """)
         if self._context_menu_filler is not None:
-            self._context_menu_filler(menu, self)
+            self._context_menu_filler(menu, self, event.pos())
         else:
             menu.addAction(_("Cut"), self.cut)
             menu.addAction(_("Copy"), self.copy)
@@ -698,6 +820,11 @@ class HtmlEditor(QTextEdit):
         if e.key() == Qt.Key_V and e.modifiers() == Qt.ControlModifier:
             self.paste_from_clipboard()
             return
+
+        if e.text() and e.text().isprintable():
+            # The caret may have arrived at a link's edge without moving
+            # (a document loaded around it): what is typed is not the link.
+            self._leave_link_at_end()
 
         if self._structure_key(e):
             self.ensureCursorVisible()
@@ -972,6 +1099,16 @@ class HtmlEditor(QTextEdit):
         whoever owns media handling; with nobody listening it falls
         through to the plain-text path that strips foreign formatting."""
         clip = QApplication.clipboard()
+        cursor = self.textCursor()
+        text = (clip.text() or "").strip()
+        if (cursor.hasSelection() and link_url.is_bare_http_url(text) and self._holds_structure()
+                and "\u2029" not in cursor.selectedText()):
+            # A web address pasted over words makes them a link to it.
+            rich_text.set_link(cursor, "", text)
+            cursor.setPosition(cursor.selectionEnd())
+            self.setTextCursor(cursor)
+            self._leave_link_at_end()
+            return
         if clip.mimeData().hasImage():
             image = clip.image()
             if not image.isNull() and self.isSignalConnected(

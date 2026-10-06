@@ -603,3 +603,106 @@ def insert_divider(cursor: QTextCursor) -> None:
 def remove_divider(block) -> None:
     """The divider becomes an empty paragraph again."""
     QTextCursor(block).setBlockFormat(QTextBlockFormat())
+
+
+# --------------------------------------------------------------------------- #
+# Links                                                                        #
+# --------------------------------------------------------------------------- #
+
+_LINK_PROPERTIES = (QTextFormat.Property.IsAnchor, QTextFormat.Property.AnchorHref,
+                    QTextFormat.Property.AnchorName)
+
+
+def link_range(cursor: QTextCursor):
+    """``(start, end, href)`` of the link at the caret (touching it from
+    either side) or holding the whole selection; None when there is none.
+    Pieces of one link in different styles count as one link."""
+    if cursor.isNull():
+        return None
+    doc = cursor.document()
+    block = doc.findBlock(cursor.selectionStart())
+    pieces = []
+    it = block.begin()
+    while not it.atEnd():
+        fragment = it.fragment()
+        if fragment.isValid():
+            fmt = fragment.charFormat()
+            pieces.append((fragment.position(), fragment.position() + fragment.length(),
+                           fmt.anchorHref() if fmt.isAnchor() else ""))
+        it += 1
+    start, end = cursor.selectionStart(), cursor.selectionEnd()
+    for index, (first, last, href) in enumerate(pieces):
+        if not href:
+            continue
+        touches = (first <= start <= last and first <= end <= last) if start != end else \
+            first <= start <= last
+        if not touches:
+            continue
+        low, high = index, index
+        while low > 0 and pieces[low - 1][2] == href and pieces[low - 1][1] == pieces[low][0]:
+            low -= 1
+        while high + 1 < len(pieces) and pieces[high + 1][2] == href \
+                and pieces[high + 1][0] == pieces[high][1]:
+            high += 1
+        return pieces[low][0], pieces[high][1], href
+    return None
+
+
+def set_link(cursor: QTextCursor, text: str, href: str) -> None:
+    """Make the selection a link to ``href``, as one step on the undo
+    stack. With ``text`` that differs from the selection (or with nothing
+    selected), the words are replaced by ``text``, in the style of the
+    first selected character; otherwise their bold or italic stays."""
+    cursor.beginEditBlock()
+    anchor = QTextCharFormat()
+    anchor.setAnchor(True)
+    anchor.setAnchorHref(href)
+    selected = cursor.selectedText()
+    if text and text != selected:
+        style = QTextCharFormat(cursor.charFormat()) if not cursor.hasSelection() else \
+            _first_char_format(cursor)
+        for prop in _LINK_PROPERTIES:
+            style.clearProperty(prop)
+        style.merge(anchor)
+        cursor.insertText(text, style)
+        cursor.setPosition(cursor.position() - len(text), QTextCursor.MoveMode.KeepAnchor)
+    elif cursor.hasSelection():
+        cursor.mergeCharFormat(anchor)
+    cursor.endEditBlock()
+
+
+def _first_char_format(cursor: QTextCursor) -> QTextCharFormat:
+    probe = QTextCursor(cursor.document())
+    probe.setPosition(cursor.selectionStart() + 1)
+    return QTextCharFormat(probe.charFormat())
+
+
+def remove_link(cursor: QTextCursor) -> bool:
+    """Take the link at the cursor away; the words stay, plain. One step
+    on the undo stack. False when there is no link there."""
+    found = link_range(cursor)
+    if found is None:
+        return False
+    start, end, _href = found
+    whole = QTextCursor(cursor.document())
+    whole.setPosition(start)
+    whole.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+    whole.beginEditBlock()
+    # A link read from Markdown also carries the link color: that goes
+    # with it, or the words would keep a color of their own.
+    _clear_properties(whole, (*_LINK_PROPERTIES, QTextFormat.Property.ForegroundBrush,
+                              QTextFormat.Property.FontUnderline,
+                              QTextFormat.Property.TextUnderlineStyle),
+                      keep=lambda fmt, prop: not fmt.isAnchor())
+    whole.endEditBlock()
+    return True
+
+
+def without_link(fmt: QTextCharFormat) -> QTextCharFormat:
+    """``fmt`` with no link: what is typed right after a link is not part
+    of it."""
+    plain = QTextCharFormat(fmt)
+    for prop in (*_LINK_PROPERTIES, QTextFormat.Property.ForegroundBrush,
+                 QTextFormat.Property.FontUnderline, QTextFormat.Property.TextUnderlineStyle):
+        plain.clearProperty(prop)
+    return plain

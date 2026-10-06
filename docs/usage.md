@@ -33,7 +33,10 @@ On macOS, `Ctrl` in these tables is the Command key (`⌘`) and `Alt` is Option 
 | `Ctrl+Shift+9` | Numbered List (again: no list) |
 | `Ctrl+]` / `Ctrl+[` | Increase / Decrease Indent of list items |
 | `Ctrl+'` | Quote (again: no quote) |
+| `Ctrl+K` | Add Link (Edit Link when the caret is in a link) |
 | | `Insert > Divider`: a horizontal rule (`---`) after the paragraph |
+
+Links: `Ctrl+K` opens a small panel under the words with the link's text and address. It accepts web addresses (`https://` is added when you leave it out), email addresses and, while a Nostr account is in use, Nostr links; it says right there why anything else cannot be a link. Pasting a web address over selected words links them. `Ctrl`-click (`Cmd`-click on macOS) opens a link: web pages in your browser, Nostr links through njump.me. Typing right after a link is not part of it.
 
 Return at the end of a heading starts a Body paragraph; Backspace at the start of a heading makes it Body. Strikethrough, inline code and the paragraph styles are Markdown, so they are offered in documents that can hold Markdown structure (Markdown, HTML and new documents), not in plain-text and code files. Text colors are in `Format > Color`.
 
@@ -147,6 +150,7 @@ or `F12`); the button stays greyed out when the PDF has no outline.
 
 Right-clicking in the editor opens a context menu with the same commands as the menus:
 
+- on a link: Open Link, Edit Link, Copy Link, Remove Link
 - Cut / Copy / Paste / Paste and Match Style
 - Bold / Italic / Underline / Strikethrough / Inline Code
 - **Color**: one of six text colors (Red, Green, Orange, Yellow, Blue, Purple), or **Remove Color**
