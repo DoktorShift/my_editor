@@ -187,6 +187,35 @@ def test_html_comments_can_span_lines():
 
 def test_reference_definitions_are_skipped():
     assert blocks('[label]: https://example.com "Titel"', "Text") == [[], ["Text"]]
+    assert blocks("[label]: <https://example.com/a b>", "[other]: /pfad (Titl)") == [[], []]
+
+
+def test_footnote_definitions_and_lines_that_only_look_like_references_are_prose():
+    assert words("[^1]: Eine Fusnote mit einem Fehlr darin.") == [
+        "Eine", "Fusnote", "mit", "einem", "Fehlr", "darin"]
+    assert words("[Hinweis]: Das ist wichtig mit Fehlr.") == [
+        "Hinweis", "Das", "ist", "wichtig", "mit", "Fehlr"]
+
+
+def test_the_indented_paragraphs_of_a_list_item_are_prose():
+    assert blocks("- Erster Punkt", "", "    Ein zweiter Absatz im Punkt mit Fehlr.")[2] == [
+        "Ein", "zweiter", "Absatz", "im", "Punkt", "mit", "Fehlr"]
+    assert blocks("1. First item", "", "    A second paragraph wrod.")[2] == [
+        "second", "paragraph", "wrod"]
+    assert blocks("- one", "  - nestd", "", "      a paragraph of it")[3] == [
+        "paragraph", "of", "it"]
+    # Code inside an item is indented four more; after the list, four is code.
+    assert blocks("- item", "", "        cde lne") == [["item"], [], []]
+    assert blocks("- item", "", "Back at the margin", "", "    cde lne") == [
+        ["item"], [], ["Back", "at", "the", "margin"], [], []]
+    # A fence inside a list keeps the list going.
+    assert blocks("- item", "", "  ```", "  cde", "  ```", "", "    more of the item")[6] == [
+        "more", "of", "the", "item"]
+
+
+def test_a_rule_then_prose_at_the_top_is_prose():
+    assert blocks("---", "Hinweis: Das ist wichtig mit Fehlr.") == [
+        [], ["Hinweis", "Das", "ist", "wichtig", "mit", "Fehlr"]]
 
 
 def test_line_breaks_inside_a_block_are_lines():

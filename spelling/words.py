@@ -63,6 +63,8 @@ class State(NamedTuple):
     """The line before was indented code."""
     first: bool = True
     """No line yet: front matter can still begin."""
+    in_list: bool = False
+    """Inside a list, whose items' own paragraphs are indented too."""
 
 
 START = State()
@@ -169,13 +171,18 @@ _NOT_PROSE = re.compile("|".join(f"(?:{pattern})" for pattern in (
 
 # Lines that are not prose as a whole.
 _FENCE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)")
-_INDENTED = re.compile(r"(?: {0,3}\t| {4})")
 _LIST_ITEM = re.compile(r"\s*(?:[-*+\u2022]|\d{1,9}[.)])(?:\s|$)")
-_REFERENCE = re.compile(r" {0,3}\[[^\]]+\]:\s*\S")
+# A link reference definition, whole: [label]: address "title". Not a
+# footnote ([^1]: ...), whose text is prose, and not a line that only
+# begins like one ("[Note]: Read this first.").
+_REFERENCE = re.compile(r" {0,3}\[(?!\^)[^\]]+\]:[ \t]*(?:<[^<>]*>|\S+)"
+                        r"(?:[ \t]+(?:\"[^\"]*\"|'[^']*'|\([^()]*\)))?[ \t]*")
 _FRONT_MATTER = re.compile(r"---[ \t]*")
 _FRONT_MATTER_END = re.compile(r"(?:---|\.\.\.)[ \t]*")
 # What YAML lines look like: indented, a comment, a list item, a key.
-_YAML_LINE = re.compile(r"(?:\s.*|#.*|-(?:\s.*)?|[\w\"'][\w .\"'\-]*:(?:\s.*)?|)")
+# Keys start in lower case (title, tags, output), so a document that
+# begins with a rule and then "Note: ..." is read as prose.
+_YAML_LINE = re.compile(r"(?:\s.*|#.*|-(?:\s.*)?|[a-z_\"'][\w .\"'\-]*:(?:\s.*)?|)")
 
 # What a system checker must not read: line and object breaks become spaces.
 _BLANKS = str.maketrans({LINE_SEPARATOR: " ", OBJECT_REPLACEMENT: " ", "\x00": " "})
@@ -226,6 +233,19 @@ def advance(text: str, state: State = START) -> State:
     return state
 
 
+def _indent(line: str) -> int:
+    """How many columns a line is indented (a tab reaches the next four)."""
+    column = 0
+    for ch in line:
+        if ch == " ":
+            column += 1
+        elif ch == "\t":
+            column += 4 - column % 4
+        else:
+            break
+    return column
+
+
 def passed_code(state: State) -> State:
     """The state after a block that is code by its formatting (a code
     block Qt read from Markdown): it opens or closes nothing."""
@@ -239,7 +259,7 @@ def _line(line: str, state: State) -> Tuple[State, bool, List[Span]]:
         match = _FENCE.fullmatch(line)
         if (match and match.group(1)[0] == state.fence[0]
                 and len(match.group(1)) >= len(state.fence) and not match.group(2).strip()):
-            return State(blank=False, first=False), True, []
+            return state._replace(fence="", blank=False, first=False), True, []
         return state._replace(first=False), True, []
     if state.front_matter:
         if _FRONT_MATTER_END.fullmatch(line):
@@ -251,23 +271,34 @@ def _line(line: str, state: State) -> Tuple[State, bool, List[Span]]:
     if state.first and _FRONT_MATTER.fullmatch(line):
         return State(front_matter=True, first=False), True, []
 
+    blank = not line.strip()
+    indent = _indent(line)
+    item = bool(_LIST_ITEM.match(line))
+    # A list goes on through blank and indented lines, and ends at the
+    # first line back at the margin after a blank line.
+    in_list = item or (state.in_list and (blank or indent > 0 or not state.blank))
     partial: List[Span] = []
     position = 0
     if state.comment:
         end = line.find("-->")
         if end < 0:
-            return state._replace(first=False), True, []
+            return state._replace(first=False, in_list=in_list), True, []
         partial.append((0, end + 3))
         position = end + 3
     else:
         match = _FENCE.fullmatch(line)
         if match and not (match.group(1)[0] == "`" and "`" in match.group(2)):
-            return State(fence=match.group(1), blank=False, first=False), True, []
-        if (line.strip() and (state.blank or state.indented_code)
-                and _INDENTED.match(line) and not _LIST_ITEM.match(line)):
-            return State(indented_code=True, blank=False, first=False), True, []
-        if _REFERENCE.match(line):
-            return State(blank=False, first=False), True, []
+            return State(fence=match.group(1), blank=False, first=False,
+                         in_list=in_list), True, []
+        # Indented code: four columns in after a blank line. In a list,
+        # where an item's further paragraphs are indented by four, code
+        # needs four more.
+        if (not blank and not item and (state.blank or state.indented_code)
+                and indent >= (8 if state.in_list else 4)):
+            return State(indented_code=True, blank=False, first=False,
+                         in_list=in_list), True, []
+        if _REFERENCE.fullmatch(line):
+            return State(blank=False, first=False, in_list=in_list), True, []
 
     comment = False
     while True:
@@ -281,7 +312,7 @@ def _line(line: str, state: State) -> Tuple[State, bool, List[Span]]:
             break
         partial.append((start, end + 3))
         position = end + 3
-    return State(comment=comment, blank=not line.strip(), first=False), False, partial
+    return State(comment=comment, blank=blank, first=False, in_list=in_list), False, partial
 
 
 def checkable(word: str) -> bool:
