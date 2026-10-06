@@ -40,6 +40,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from i18n import _, ngettext
 
 from .bunker import BunkerClient, BunkerSessionPool, is_signer_silent
+from .draft_relays import PrivateDraftRelays
 from .draft_store import DraftState, DraftStore
 from .drafts import (
     DRAFT_WRAP_KIND,
@@ -49,7 +50,7 @@ from .drafts import (
     supersedes,
 )
 from .events import verify_event
-from .outbox import RelayDirectory, ask_private_relays
+from .outbox import RelayDirectory, ask_draft_relays
 from .outbox.policy import normalize_relay_url
 from .profiles import Profile
 from .relay import RelayPool, Subscription
@@ -110,9 +111,15 @@ class DraftSync(QObject):
         store: DraftStore,
         entitled_relays: Optional[Callable[[], Sequence[str]]] = None,
         clock: Callable[[], float] = time.time,
+        read_draft_list: Optional[
+            Callable[[Profile, Callable[[Optional[List[str]]], None]], None]] = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
+        # Reads the account's own draft relays (NIP-37, kind 10013); a seam
+        # for tests.
+        self._read_draft_list = read_draft_list or self._read_draft_list_from_relays
+        self._draft_list_reader: Optional[PrivateDraftRelays] = None
         # For NIP-40: expired wraps are ignored, whichever relay sends them.
         self._clock = clock
         self._relay_pool = relay_pool
@@ -184,7 +191,25 @@ class DraftSync(QObject):
         self._store.bind_profile(profile.user_pubkey)
         self._store.set_loading(True)
         self.status_changed.emit(_("Looking up your relay list…"))
+        # Where this account chose to keep its drafts, if it did: read
+        # first, and every draft relay question waits for it, so nothing is
+        # saved or looked for elsewhere in the meantime.
+        author = profile.user_pubkey.lower()
+        directory = self._relay_directory
+        directory.expect_draft_relays(author)
+        self._read_draft_list(profile, lambda relays: directory.set_draft_relays(author, relays))
         self._ask_relays(lambda relays, g=gen: self._on_relays_ready(g, relays))
+
+    def _read_draft_list_from_relays(
+            self, profile: Profile, on_done: Callable[[Optional[List[str]]], None]) -> None:
+        # One reader at a time, kept until the next account replaces it; an
+        # older one still answering only updates what it read, by author.
+        if self._draft_list_reader is not None:
+            self._draft_list_reader.deleteLater()
+        self._draft_list_reader = PrivateDraftRelays(
+            profile=profile, pool=self._relay_pool, session_pool=self._session_pool,
+            directory=self._relay_directory, parent=self)
+        self._draft_list_reader.read(on_done)
 
     def stop(self) -> None:
         """Tear down the subscription and invalidate in-flight callbacks.
@@ -321,8 +346,8 @@ class DraftSync(QObject):
     # -- internal: resolve relays, then subscribe -------------------------
 
     def _ask_relays(self, on_done: Callable[[List[str]], None]) -> None:
-        ask_private_relays(self._relay_directory, self._profile, on_done,
-                           entitled=self._entitled_relays, reading=True)
+        ask_draft_relays(self._relay_directory, self._profile, on_done,
+                         entitled=self._entitled_relays, reading=True)
 
     def _on_relays_ready(self, gen: int, relays: List[str]) -> None:
         if not self._is_current(gen):

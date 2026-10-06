@@ -442,6 +442,28 @@ def private_relays(author: RelayList, *, entitled: Iterable[str] = (),
     return relays
 
 
+def draft_relays(author: RelayList, private: Iterable[str] = (), *,
+                 entitled: Iterable[str] = (), legacy: Iterable[str] = (),
+                 reading: bool = False) -> List[str]:
+    """Where the author's drafts live.
+
+    ``private`` is the account's own list of relays for drafts (NIP-37,
+    kind 10013), decrypted. With one, drafts are written only there: the
+    person chose those relays to keep drafts away from the others. They
+    are read from there and from wherever private records live otherwise
+    (``private_relays``), so drafts saved before the list existed, or by
+    an app that does not know it, are still found, and a deletion
+    reaches every copy. Without one, drafts are private records like any
+    other. The list is the person's own, so a relay on their own network
+    is fine in it.
+    """
+    chosen = dedupe_relays(private, cap=defaults.PRIVATE_CAP)
+    usual = private_relays(author, entitled=entitled, legacy=legacy, reading=reading)
+    if not chosen:
+        return usual
+    return dedupe_relays(chosen, usual) if reading else chosen
+
+
 def relays_from(source) -> List[str]:
     """Relays given as a list, as a callable answering one (asked now, so
     a membership that changed since is followed), or as None."""

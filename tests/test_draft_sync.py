@@ -60,12 +60,18 @@ def _make_profile(pubkey: str):
     return p
 
 
+def no_draft_list(_profile, on_done):
+    """The account has chosen no relays for its drafts."""
+    on_done([])
+
+
 def _make_sync(store: DraftStore | None = None) -> DraftSync:
     return DraftSync(
         relay_pool=MagicMock(),
         relay_directory=MagicMock(),
         session_pool=MagicMock(),
         store=store or DraftStore(),
+        read_draft_list=no_draft_list,
     )
 
 
@@ -415,7 +421,7 @@ def _own_list(write=(), read=()):
     return RelayList(write=list(write), read=list(read), state=LookupState.FOUND)
 
 
-def _running_sync(directory, *, entitled=()):
+def _running_sync(directory, *, entitled=(), read_draft_list=no_draft_list):
     """A DraftSync bound to PK whose signer answers at once."""
     pool = MagicMock()
     session_pool = MagicMock()
@@ -424,6 +430,7 @@ def _running_sync(directory, *, entitled=()):
     sync = DraftSync(
         relay_pool=pool, relay_directory=directory, session_pool=session_pool,
         store=DraftStore(), entitled_relays=lambda: list(entitled),
+        read_draft_list=read_draft_list,
     )
     profile = _make_profile(PK)
     sync.start_for(profile)
@@ -486,7 +493,7 @@ def test_a_membership_relay_is_followed_on_reroute():
     session_pool = MagicMock()
     session_pool.get.side_effect = (
         lambda profile, on_ready, on_error: on_ready(MagicMock()))
-    sync = DraftSync(relay_pool=pool, relay_directory=directory,
+    sync = DraftSync(read_draft_list=no_draft_list, relay_pool=pool, relay_directory=directory,
                      session_pool=session_pool, store=DraftStore(),
                      entitled_relays=lambda: list(entitled))
     sync.start_for(_make_profile(PK))
@@ -538,7 +545,7 @@ class _ParkedSessionPool:
 def _sync_with(session_pool, directory):
     pool = MagicMock()
     pool.subscribe.side_effect = lambda relays, filters: MagicMock(name=f"sub{len(relays)}")
-    sync = DraftSync(relay_pool=pool, relay_directory=directory,
+    sync = DraftSync(read_draft_list=no_draft_list, relay_pool=pool, relay_directory=directory,
                      session_pool=session_pool, store=DraftStore())
     sync.start_for(_make_profile(PK))
     settle()

@@ -36,7 +36,7 @@ from i18n import _
 from ..draft_deletions import DELETION_KIND, deleted_identifiers
 from ..drafts import DRAFT_WRAP_KIND
 from ..events import verify_event
-from ..outbox import ask_private_relays
+from ..outbox import ask_draft_relays
 from ..outbox.policy import normalize_relay_url
 from .inbox_store import DRAFTED, PUBLISHED, REMOVED
 
@@ -133,8 +133,8 @@ class ExistingCatalogue(QObject):
                        for batch in batches]
             self._ask(relays, filters, pubkey, found, set(tags), _set_done)
 
-        ask_private_relays(self._relay_directory, profile, _private,
-                           entitled=self._entitled_relays, reading=True)
+        ask_draft_relays(self._relay_directory, profile, _private,
+                         entitled=self._entitled_relays, reading=True)
         self._relay_directory.outbox_of(pubkey, _outbox)
 
     # -- internals -------------------------------------------------------------

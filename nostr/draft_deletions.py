@@ -33,7 +33,7 @@ from PySide6.QtCore import QObject, Signal
 
 from . import events
 from .drafts import DRAFT_WRAP_KIND
-from .outbox import RelayDirectory, ask_private_relays
+from .outbox import RelayDirectory, ask_draft_relays
 from .profiles import Profile
 from .relay import RelayPool
 
@@ -116,9 +116,9 @@ class DraftDeletions(QObject):
         self.stop()
         self._profile = profile
         generation = self._generation
-        ask_private_relays(self._relay_directory, profile,
-                           lambda relays: self._subscribe(generation, relays),
-                           entitled=self._entitled_relays, reading=True)
+        ask_draft_relays(self._relay_directory, profile,
+                         lambda relays: self._subscribe(generation, relays),
+                         entitled=self._entitled_relays, reading=True)
 
     def stop(self) -> None:
         self._generation += 1
