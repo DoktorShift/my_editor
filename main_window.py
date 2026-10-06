@@ -149,6 +149,7 @@ from nostr.publisher import (
     DraftBulkDeleteJob,
     DraftPublishJob,
     PublishedMedia,
+    published_at_of,
 )
 from nostr.relay import RelayPool
 from nostr.search import Nip50SearchClient
@@ -4267,9 +4268,15 @@ class MainWindow(QMainWindow):
         binding = getattr(ed, "_draft_binding", None) if ed else None
         default_title = ""
         default_slug = ""
+        first_published = None
         if binding is not None and binding.inner_kind == INNER_KIND_LONG_FORM:
             default_title = binding.title
             default_slug = binding.identifier
+            # A draft of a published article (an import, an edit) carries
+            # when it first went out; a new version keeps that date.
+            record = self._draft_store.get(binding.identifier)
+            if record is not None:
+                first_published = published_at_of({"tags": record.inner_tags})
         if not default_title:
             first_line = next((ln for ln in body.splitlines() if ln.strip()), "")
             default_title = first_line.lstrip("# ").strip()
@@ -4296,6 +4303,7 @@ class MainWindow(QMainWindow):
             private_library=self._private_library,
             default_title=default_title,
             default_slug=default_slug,
+            first_published=first_published,
             parent=self,
             is_dark=self.is_dark_theme,
         )
