@@ -27,7 +27,6 @@ grows as pages are examined and ``countChanged`` fires along the way,
 so the match label updates live without blocking on large documents.
 """
 
-import json
 import os
 import time
 
@@ -43,6 +42,7 @@ from PySide6.QtWidgets import (
     QTreeView, QVBoxLayout, QWidget,
 )
 
+from atomic_file import read_json, write_json
 from i18n import _, ngettext
 from url_safety import is_safe_external_url
 from widgets import FindBar
@@ -63,14 +63,7 @@ _MAX_ZOOM = 8.0
 # --------------------------------------------------------------------------- #
 
 def _load_positions() -> dict:
-    try:
-        with open(_POSITIONS_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, dict):
-            return data
-    except (OSError, json.JSONDecodeError):
-        pass
-    return {}
+    return read_json(_POSITIONS_PATH, dict)
 
 
 def load_view_state(path: str) -> dict | None:
@@ -81,21 +74,16 @@ def load_view_state(path: str) -> dict | None:
 
 def save_view_state(path: str, state: dict) -> None:
     """Persist the view state for ``path``, evicting the oldest entries
-    beyond the cap. Failures are swallowed: losing a reading position
-    must never interfere with closing a tab or quitting."""
-    try:
-        positions = _load_positions()
-        state = dict(state, ts=int(time.time()))
-        positions[os.path.abspath(path)] = state
-        if len(positions) > _MAX_POSITIONS:
-            oldest_first = sorted(positions.items(),
-                                  key=lambda kv: kv[1].get("ts", 0) if isinstance(kv[1], dict) else 0)
-            positions = dict(oldest_first[len(positions) - _MAX_POSITIONS:])
-        os.makedirs(os.path.dirname(_POSITIONS_PATH), exist_ok=True)
-        with open(_POSITIONS_PATH, "w", encoding="utf-8") as f:
-            json.dump(positions, f)
-    except OSError:
-        pass
+    beyond the cap. A failed write is only logged: losing a reading
+    position must never interfere with closing a tab or quitting."""
+    positions = _load_positions()
+    state = dict(state, ts=int(time.time()))
+    positions[os.path.abspath(path)] = state
+    if len(positions) > _MAX_POSITIONS:
+        oldest_first = sorted(positions.items(),
+                              key=lambda kv: kv[1].get("ts", 0) if isinstance(kv[1], dict) else 0)
+        positions = dict(oldest_first[len(positions) - _MAX_POSITIONS:])
+    write_json(_POSITIONS_PATH, positions)
 
 
 # --------------------------------------------------------------------------- #

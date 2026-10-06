@@ -26,6 +26,7 @@ import uuid
 
 from PySide6.QtCore import QTimer
 
+from atomic_file import write_text
 from doc_walk import iter_image_names
 from export_html import normalize_lists_after_set_html
 from nostr.media.assets import ASSET_SCHEME
@@ -294,10 +295,11 @@ class EditorBackup:
             self._oversize_until = time.monotonic() + _OVERSIZE_RETRY_S
             return False
 
+        # In one step: a crash while writing must leave the previous
+        # backup whole, since that is exactly when it is needed.
         try:
             _ensure_backup_dir()
-            with open(self.path, "w", encoding="utf-8") as f:
-                f.write(payload)
+            write_text(self.path, payload)
         except OSError:
             return False  # backup is best-effort; never raise to the user
         self._last_hash = fingerprint

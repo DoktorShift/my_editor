@@ -25,7 +25,6 @@ Geometry notes, established empirically against QPdfDocument:
   outside the trusted-root policy.
 """
 
-import json
 import os
 from dataclasses import dataclass
 
@@ -45,6 +44,7 @@ from PySide6.QtGui import (
     QTextImageFormat,
 )
 
+from atomic_file import read_json, write_json
 from constants import MONO_FONT
 from i18n import _
 from image_safety import ImageRootPolicy, data_uri_bytes, decode_image_bytes
@@ -86,12 +86,8 @@ def default_page_setup() -> dict:
 
 def load_page_setup() -> dict:
     setup = default_page_setup()
-    try:
-        with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return setup
-    if isinstance(data, dict):
+    data = read_json(_CONFIG_PATH, dict)
+    if data:
         if data.get("page_size") in PAGE_SIZES:
             setup["page_size"] = data["page_size"]
         if data.get("orientation") in ("portrait", "landscape"):
@@ -103,9 +99,7 @@ def load_page_setup() -> dict:
 
 
 def save_page_setup(setup: dict) -> None:
-    os.makedirs(os.path.dirname(_CONFIG_PATH), exist_ok=True)
-    with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(setup, f, indent=2)
+    write_json(_CONFIG_PATH, setup, indent=2)
 
 
 def make_page_layout(setup: dict) -> QPageLayout:

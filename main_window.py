@@ -5,7 +5,6 @@
 
 import hashlib
 import itertools
-import json
 import os
 import platform
 import re
@@ -39,6 +38,7 @@ from constants import (
     DARK_BORDER, LIGHT_BORDER, MONO_FONT, APP_DISPLAY_NAME, APP_VERSION, APP_URL
 )
 from widgets import FindBar, HeaderWidget, LineNumberGutter, FileChangedBar, UpdateBar
+from atomic_file import read_json, write_json
 import diagnostics
 import i18n
 from i18n import _, ngettext, pgettext
@@ -3566,27 +3566,27 @@ class MainWindow(QMainWindow):
         if not paths:
             return
         data = {"paths": paths, "active": self.tabs.currentIndex()}
-        os.makedirs(os.path.dirname(self._SESSION_FILE), exist_ok=True)
-        with open(self._SESSION_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f)
+        write_json(self._SESSION_FILE, data)
 
     def _restore_session(self) -> bool:
         if not os.path.isfile(self._SESSION_FILE):
             return False
+        data = read_json(self._SESSION_FILE, dict)
+        # Restored at most once, and a damaged record never restores.
         try:
-            with open(self._SESSION_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception:
-            return False
-        os.remove(self._SESSION_FILE)
-        paths = [p for p in data.get("paths", []) if os.path.isfile(p)]
+            os.remove(self._SESSION_FILE)
+        except OSError:
+            pass
+        listed = data.get("paths")
+        listed = listed if isinstance(listed, list) else []
+        paths = [p for p in listed if isinstance(p, str) and os.path.isfile(p)]
         if not paths:
             return False
-        missing = len(data.get("paths", [])) - len(paths)
+        missing = len(listed) - len(paths)
         for path in paths:
             self.open_path(path)
         active = data.get("active", 0)
-        if 0 <= active < self.tabs.count():
+        if isinstance(active, int) and 0 <= active < self.tabs.count():
             self.tabs.setCurrentIndex(active)
         if missing:
             self.status.showMessage(

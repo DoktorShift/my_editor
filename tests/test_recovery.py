@@ -491,3 +491,21 @@ def test_a_stale_restore_cannot_overwrite_the_newer_file(tmp_path):
 
     assert win.editors[-1]._file_path is None, "Ctrl+S has to go through Save As"
     assert win.tabs.titles == ["note.html (recovered copy)*"]
+
+
+def test_a_backup_that_cannot_be_finished_leaves_the_previous_one_whole(tmp_path, monkeypatch):
+    # The moment a backup matters most is a crash, which is also when its
+    # own write may be cut short. The previous backup must survive that.
+    import atomic_file
+
+    ed = _editor("first version")
+    backup = recovery.EditorBackup(ed, str(tmp_path / "note.html"))
+    assert backup.write_now()
+    before = _record_of(backup)["content"]
+
+    ed.setHtml("<p>second version</p>")
+    monkeypatch.setattr(atomic_file, "_replace",
+                        lambda *_: (_ for _ in ()).throw(OSError(5, "I/O error")))
+    assert backup.write_now() is False
+    assert _record_of(backup)["content"] == before
+    assert not [n for n in os.listdir(os.path.dirname(backup.path)) if n.endswith(".tmp")]
