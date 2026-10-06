@@ -316,6 +316,11 @@ class MainWindow(QMainWindow):
         self._word_count_timer.setSingleShot(True)
         self._word_count_timer.setInterval(300)
         self._word_count_timer.timeout.connect(self._update_word_count)
+        self._selection_words_timer = QTimer(self)
+        self._selection_words_timer.setSingleShot(True)
+        self._selection_words_timer.setInterval(150)
+        self._selection_words_timer.timeout.connect(
+            lambda: self._show_word_count(self.current_editor()))
         self._document_words = 0
         self._line_label = QLabel()
         self._line_label.setContentsMargins(0, 0, 8, 0)
@@ -846,8 +851,8 @@ class MainWindow(QMainWindow):
         ed.document().contentsChanged.connect(
             lambda e=ed: self._on_document_changed_for_words(e))
         ed.selectionChanged.connect(lambda e=ed: self._on_selection_changed_for_words(e))
-        ed.currentCharFormatChanged.connect(self._update_format_buttons)
-        ed.selectionChanged.connect(self._update_format_buttons)
+        ed.currentCharFormatChanged.connect(self._schedule_format_buttons)
+        ed.selectionChanged.connect(self._schedule_format_buttons)
         self._update_editor_theme(ed)
         self._apply_view_prefs_to_editor(ed)
         ed.set_resource_resolver(self._asset_manager.resolve_image, ASSET_SCHEME)
@@ -964,7 +969,7 @@ class MainWindow(QMainWindow):
         self.status.showMessage(" | ".join(parts))
         self._line_label.setText(
             _("Ln {line} / {total}").format(line=current_line, total=total_lines))
-        self._update_format_buttons()
+        self._schedule_format_buttons()
 
     def _update_window_title(self, *_):
         self.setWindowTitle("")
@@ -1002,7 +1007,8 @@ class MainWindow(QMainWindow):
 
     def _on_selection_changed_for_words(self, ed) -> None:
         if ed is self.current_editor():
-            self._show_word_count(ed)
+            # Counted once the selection settles, not at every step of it.
+            self._selection_words_timer.start()
 
     def _update_word_count(self) -> None:
         """Count the current document's words again (after it changed, or
@@ -1044,6 +1050,18 @@ class MainWindow(QMainWindow):
             getattr(ed, f'toggle_{fmt}')()
             self._update_format_buttons()
 
+    def _schedule_format_buttons(self):
+        """Show the style at the caret once the event loop is free: moving
+        the caret or extending a selection reports several changes at
+        once, and they need one update, not three."""
+        timer = getattr(self, "_format_buttons_timer", None)
+        if timer is None:
+            timer = self._format_buttons_timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.setInterval(0)
+            timer.timeout.connect(self._update_format_buttons)
+        timer.start()
+
     def _update_format_buttons(self):
         """The format commands show the style at the caret (or of the whole
         selection): in the Format menu and on the format toolbar alike."""
@@ -1054,14 +1072,16 @@ class MainWindow(QMainWindow):
                   self.act_underline: rich_text.UNDERLINE, self.act_strike: rich_text.STRIKE,
                   self.act_code: rich_text.CODE}
         cursor = ed.textCursor() if ed else None
+        if cursor is None or cursor.isNull():
+            state = {}
+        elif cursor.hasSelection():
+            # One bounded pass over the selection for all five.
+            state = rich_text.selection_state(cursor, tuple(styles.values()))
+        else:
+            fmt = ed.currentCharFormat()
+            state = {style: rich_text.has_style(fmt, style) for style in styles.values()}
         for action, style in styles.items():
-            if cursor is None or cursor.isNull():
-                on = False
-            elif cursor.hasSelection():
-                on = rich_text.selection_has(cursor, style)
-            else:
-                on = rich_text.has_style(ed.currentCharFormat(), style)
-            action.setChecked(on)
+            action.setChecked(state.get(style, False))
         self._update_style_checks(ed)
 
     def _update_style_checks(self, ed) -> None:
@@ -1071,7 +1091,9 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "act_styles"):
             return
         cursor = ed.textCursor() if ed else None
-        level = rich_text.heading_level(cursor) if cursor is not None else -1
+        paragraphs = (rich_text.paragraph_state(cursor) if cursor is not None
+                      else rich_text.ParagraphState())
+        level = paragraphs.heading
         for index, action in enumerate(self.act_styles):
             action.setChecked(index == level)
         if getattr(self, "format_toolbar", None) is not None:
@@ -1082,10 +1104,9 @@ class MainWindow(QMainWindow):
             else:
                 name = pgettext("paragraph style", "Mixed")
             self.format_toolbar.set_style_name(name)
-        kind = rich_text.list_kind(cursor) if cursor is not None else ""
-        self.act_bullets.setChecked(kind == rich_text.BULLET)
-        self.act_numbers.setChecked(kind == rich_text.NUMBER)
-        self.act_quote.setChecked(cursor is not None and rich_text.in_quote(cursor))
+        self.act_bullets.setChecked(paragraphs.list_kind == rich_text.BULLET)
+        self.act_numbers.setChecked(paragraphs.list_kind == rich_text.NUMBER)
+        self.act_quote.setChecked(paragraphs.quoted)
         in_link = (cursor is not None and self._editor_kind(ed) == "rich"
                    and rich_text.link_range(cursor) is not None)
         self.act_link.setText(_("Edit Link\u2026") if in_link else _("Add Link\u2026"))

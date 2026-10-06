@@ -18,7 +18,8 @@ test can call it without a window.
 
 from __future__ import annotations
 
-from typing import List, Tuple
+from dataclasses import dataclass
+from typing import Iterator, List, Tuple
 
 from PySide6.QtGui import (
     QFont, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextFormat, QTextListFormat,
@@ -113,12 +114,11 @@ def style_format(style: str, on: bool) -> QTextCharFormat:
     return fmt
 
 
-def _text_runs(cursor: QTextCursor) -> List[Tuple[int, int, QTextCharFormat]]:
-    """``(start, end, format)`` of every piece of text in the selection
-    (images left out), cut to the selection."""
+def _iter_text_runs(cursor: QTextCursor) -> Iterator[Tuple[int, int, QTextCharFormat]]:
+    """``(start, end, format)`` of each piece of text in the selection
+    (images left out), cut to the selection, one after the other."""
     doc = cursor.document()
     start, end = cursor.selectionStart(), cursor.selectionEnd()
-    runs = []
     block = doc.findBlock(start)
     while block.isValid() and block.position() < end:
         it = block.begin()
@@ -129,18 +129,55 @@ def _text_runs(cursor: QTextCursor) -> List[Tuple[int, int, QTextCharFormat]]:
                 last = first + fragment.length()
                 fmt = fragment.charFormat()
                 if last > start and first < end and not fmt.isImageFormat():
-                    runs.append((max(first, start), min(last, end), fmt))
+                    yield max(first, start), min(last, end), fmt
             it += 1
         block = block.next()
-    return runs
+
+
+def _text_runs(cursor: QTextCursor) -> List[Tuple[int, int, QTextCharFormat]]:
+    """Every piece of text in the selection (see _iter_text_runs)."""
+    return list(_iter_text_runs(cursor))
 
 
 def selection_has(cursor: QTextCursor, style: str) -> bool:
     """Whether all of the selected text carries ``style``: a selection that
     is only partly bold counts as not bold, so the command makes it all
     bold (the way Pages and Google Docs do it)."""
-    runs = _text_runs(cursor)
-    return bool(runs) and all(has_style(fmt, style) for _s, _e, fmt in runs)
+    found = False
+    for _start, _end, fmt in _iter_text_runs(cursor):
+        if not has_style(fmt, style):
+            return False
+        found = True
+    return found
+
+
+# What the menus and the toolbar show about a selection is read from at
+# most this many pieces of text, or paragraphs: far more than any
+# selection someone reads at once, and a bound on the time one update
+# takes while a long selection is being extended. Past it, a style that
+# could not be checked all the way counts as not applied throughout (its
+# button shows off); the commands themselves always act on all of it.
+STATE_BUDGET = 1500
+
+
+def selection_state(cursor: QTextCursor, styles=INLINE, *,
+                    budget: int = STATE_BUDGET) -> dict:
+    """``{style: bool}``: for each style, whether all of the selected text
+    carries it, read in one pass that stops as soon as every answer is
+    known, or after ``budget`` pieces of text."""
+    still = set(styles)
+    seen = 0
+    for _start, _end, fmt in _iter_text_runs(cursor):
+        seen += 1
+        if seen > budget:
+            still.clear()
+            break
+        for style in list(still):
+            if not has_style(fmt, style):
+                still.discard(style)
+        if not still:
+            break
+    return {style: seen > 0 and style in still for style in styles}
 
 
 def toggle_style(cursor: QTextCursor, style: str) -> bool:
@@ -237,29 +274,37 @@ BODY = 0
 HEADING_SIZE = {1: 3, 2: 2, 3: 1, 4: 0, 5: -1, 6: -1}
 
 
-def _blocks_of(cursor: QTextCursor):
+def _iter_blocks_of(cursor: QTextCursor):
     """The blocks the cursor's selection touches (the caret's block
-    without one), in order. None for a null cursor (an editor's cursor is
-    one while its whole document is being replaced)."""
+    without one), in order, one after the other. None for a null cursor
+    (an editor's cursor is one while its whole document is replaced)."""
     if cursor.isNull():
-        return []
+        return
     doc = cursor.document()
     block = doc.findBlock(cursor.selectionStart())
     last = doc.findBlock(cursor.selectionEnd())
-    blocks = []
     while block.isValid():
-        blocks.append(block)
+        yield block
         if block == last:
             break
         block = block.next()
-    return blocks
+
+
+def _blocks_of(cursor: QTextCursor):
+    """The blocks the cursor's selection touches (see _iter_blocks_of)."""
+    return list(_iter_blocks_of(cursor))
 
 
 def heading_level(cursor: QTextCursor) -> int:
     """The paragraph style under the cursor: 0 for Body, 1 to 6 for a
     heading, -1 when the selection spans different ones."""
-    levels = {block.blockFormat().headingLevel() for block in _blocks_of(cursor)}
-    return levels.pop() if len(levels) == 1 else -1
+    level = None
+    for block in _iter_blocks_of(cursor):
+        this = block.blockFormat().headingLevel()
+        if level is not None and this != level:
+            return -1
+        level = this
+    return -1 if level is None else level
 
 
 def heading_char_format(level: int) -> QTextCharFormat:
@@ -545,8 +590,47 @@ def set_quote_depth(block, depth: int) -> None:
 
 def in_quote(cursor: QTextCursor) -> bool:
     """Whether every paragraph under the cursor is quoted."""
-    blocks = _blocks_of(cursor)
-    return bool(blocks) and all(quote_depth(b) for b in blocks)
+    found = False
+    for block in _iter_blocks_of(cursor):
+        if not quote_depth(block):
+            return False
+        found = True
+    return found
+
+
+@dataclass(frozen=True)
+class ParagraphState:
+    """What the menus and the toolbar show about the paragraphs under the
+    cursor: their style (-1 for mixed), their list (BULLET, NUMBER, "" or
+    "mixed") and whether all of them are quoted."""
+
+    heading: int = -1
+    list_kind: str = ""
+    quoted: bool = False
+
+
+def paragraph_state(cursor: QTextCursor, *, budget: int = STATE_BUDGET) -> ParagraphState:
+    """The paragraphs' state, read in one pass that stops once every
+    answer is known, or after ``budget`` paragraphs (STATE_BUDGET: past it,
+    the state reads as mixed)."""
+    level = None
+    kind = None
+    quoted = True
+    seen = 0
+    for block in _iter_blocks_of(cursor):
+        seen += 1
+        if seen > budget:
+            return ParagraphState(-1, "mixed", False)
+        this_level = block.blockFormat().headingLevel()
+        this_kind = list_kind_of(block.textList()) if block.textList() is not None else ""
+        level = this_level if level is None or level == this_level else -1
+        kind = this_kind if kind is None or kind == this_kind else "mixed"
+        quoted = quoted and bool(quote_depth(block))
+        if level == -1 and kind == "mixed" and not quoted:
+            break
+    if not seen:
+        return ParagraphState()
+    return ParagraphState(level, kind, quoted)
 
 
 def toggle_quote(cursor: QTextCursor) -> None:

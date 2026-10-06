@@ -230,3 +230,59 @@ def test_a_null_cursor_has_no_style():
     # An editor's cursor is null while setHtml replaces its document, and
     # the window asks for the style at the caret right then.
     assert rich_text.heading_level(QTextCursor()) == -1
+
+
+# -- what the menus show about a selection, in bounded time ---------------------------
+
+def _bold_pieces(count: int) -> QTextDocument:
+    """A document of ``count`` bold pieces that differ (bold, bold italic),
+    so no answer about bold is known before the end."""
+    doc = QTextDocument()
+    cursor = QTextCursor(doc)
+    for index in range(count):
+        fmt = rich_text.style_format(rich_text.BOLD, True)
+        fmt.setFontItalic(index % 2 == 1)
+        cursor.insertText("word ", fmt)
+    return doc
+
+
+def test_the_state_of_a_selection_is_read_in_one_pass():
+    doc = from_markdown("**all bold** and plain\n")
+    state = rich_text.selection_state(select(doc, "all bold"))
+    assert state[rich_text.BOLD] is True and state[rich_text.ITALIC] is False
+    assert rich_text.selection_state(select(doc, "bold and"))[rich_text.BOLD] is False
+
+
+def test_reading_the_state_stops_at_the_budget(monkeypatch):
+    calls = []
+    real = rich_text.has_style
+    monkeypatch.setattr(rich_text, "has_style",
+                        lambda fmt, style: calls.append(style) or real(fmt, style))
+    doc = _bold_pieces(3 * 40)
+    cursor = QTextCursor(doc)
+    cursor.select(QTextCursor.SelectionType.Document)
+    state = rich_text.selection_state(cursor, budget=40)
+    # Past the budget, bold could not be checked throughout: shown off.
+    assert state[rich_text.BOLD] is False
+    assert len(calls) <= 40 * len(rich_text.INLINE)
+    calls.clear()
+    assert rich_text.selection_state(cursor, budget=1000)[rich_text.BOLD] is True
+    # The command itself always reads all of it.
+    assert rich_text.selection_has(cursor, rich_text.BOLD) is True
+
+
+def test_the_window_reads_selections_within_the_budget():
+    assert rich_text.STATE_BUDGET <= 2000
+
+
+def test_the_state_of_paragraphs_stops_at_the_budget():
+    doc = from_markdown("\n\n".join(f"> quoted {i}" for i in range(30)) + "\n")
+    cursor = QTextCursor(doc)
+    cursor.select(QTextCursor.SelectionType.Document)
+    assert rich_text.paragraph_state(cursor).quoted is True
+    assert rich_text.paragraph_state(cursor, budget=10).quoted is False
+    mixed = from_markdown("# Title\n\n- item\n\nplain\n")
+    cursor = QTextCursor(mixed)
+    cursor.select(QTextCursor.SelectionType.Document)
+    state = rich_text.paragraph_state(cursor)
+    assert (state.heading, state.list_kind, state.quoted) == (-1, "mixed", False)
