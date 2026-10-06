@@ -169,6 +169,8 @@ Auto-discovery reads `<link rel="alternate" type="application/rss+xml">` from th
 
 Supports RSS 2.0, Atom, and JSON Feed (WordPress, Ghost, Hugo, Jekyll, Substack, Bear, Mataroa, and friends).
 
+Nothing an import reads may point into your own network: feeds, pages, podcast chapters and images on `localhost`, local-only names (`router`, `nas.local`, `.lan`), private or link-local addresses, or names that resolve to one are refused, and every redirect is checked the same way before it is followed (five at most).
+
 ### Nostr-native publishers
 
 Some publishers (Habla, Yakihonne, Pareto, self-hosted Nostr-aware blogs) emit feeds where the body is a teaser and the real article lives on Nostr as a kind:30023 long-form event. When the feed's link is a `nostr:naddr...` URI, or contains a bech32 naddr embedded in an HTTP URL (njump.me, habla.news, yakihonne.com, etc.), the importer fetches the event from your NIP-65 read relays plus the relay hints encoded in the address and uses its prose as the draft body. If the fetch times out or the event is empty, the feed-provided teaser is published instead so the draft always ships.

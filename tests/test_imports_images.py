@@ -26,6 +26,7 @@ from PySide6.QtWidgets import QApplication
 
 from nostr.blossom.client import BlossomClient
 from nostr.imports.fetch import BlobFetcher
+from nostr.imports.netguard import NetGuard
 from nostr.imports.images import (
     RehostedImage,
     blossom_rehost,
@@ -623,12 +624,22 @@ class TestBlossomRehost(unittest.TestCase):
         )
 
 
+def fake_guard(answers=None):
+    """A network guard whose names resolve from ``answers`` (host to
+    addresses), every other name to a public address; nothing is asked
+    of the network."""
+    table = dict(answers or {})
+    return NetGuard(resolver=lambda host, on_done: on_done(
+        table.get(host, ["93.184.216.34"])))
+
+
 class TestBlobFetcher(unittest.TestCase):
     """The download half. The bytes belong to a stranger until checked."""
 
-    def fetcher(self, replies=None, *, max_bytes=25 * 1024 * 1024):
+    def fetcher(self, replies=None, *, max_bytes=25 * 1024 * 1024, answers=None):
         nam = FakeNam(replies)
-        return BlobFetcher(max_bytes=max_bytes, nam=nam), nam
+        return BlobFetcher(max_bytes=max_bytes, nam=nam,
+                           guard=fake_guard(answers)), nam
 
     def fetch(self, fetcher, url):
         out = {}
@@ -702,6 +713,37 @@ class TestBlobFetcher(unittest.TestCase):
         out = self.fetch(fetcher, "https://a.example/x.png")
         reply.finish()
         self.assertEqual(out["error"], "Could not download the image")
+
+    def test_a_name_that_resolves_into_the_local_network_is_refused(self):
+        fetcher, nam = self.fetcher(answers={"rebind.example": ["192.168.1.1"]})
+        out = self.fetch(fetcher, "https://rebind.example/x.png")
+        self.assertEqual(nam.calls, [])
+        self.assertEqual(out["error"], "URL was not allowed")
+
+    def test_a_redirect_into_the_local_network_is_not_followed(self):
+        from PySide6.QtCore import QUrl
+        reply = FakeReply(body=PNG)
+        allowed = []
+        reply.redirectAllowed.connect(lambda: allowed.append(True))
+        fetcher, _nam = self.fetcher([reply])
+        out = self.fetch(fetcher, "https://a.example/x.png")
+        reply.redirected.emit(QUrl("http://10.0.0.7/x.png"))
+        self.assertEqual(allowed, [])
+        self.assertTrue(reply.aborted)
+        reply.finish()
+        self.assertEqual(out["error"], "URL was not allowed")
+
+    def test_a_public_redirect_is_followed(self):
+        from PySide6.QtCore import QUrl
+        reply = FakeReply(body=PNG)
+        allowed = []
+        reply.redirectAllowed.connect(lambda: allowed.append(True))
+        fetcher, _nam = self.fetcher([reply])
+        out = self.fetch(fetcher, "https://a.example/x.png")
+        reply.redirected.emit(QUrl("https://cdn.example/x.png"))
+        self.assertEqual(allowed, [True])
+        reply.finish()
+        self.assertEqual(out["data"], PNG)
 
     def test_an_empty_body_is_reported_rather_than_uploaded(self):
         reply = FakeReply(body=b"")

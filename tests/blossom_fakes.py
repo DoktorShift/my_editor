@@ -114,6 +114,8 @@ class FakeReply(QObject):
     finished = Signal()
     uploadProgress = Signal(int, int)
     downloadProgress = Signal(int, int)
+    redirected = Signal(QUrl)
+    redirectAllowed = Signal()
 
     def __init__(
         self,

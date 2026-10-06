@@ -3218,149 +3218,153 @@ msgstr "{amount} Sats"
 msgid "about {amount}"
 msgstr "etwa {amount}"
 
-#: nostr/imports/errors.py:73
+#: nostr/imports/errors.py:74
+msgid "This address points to your local network, which MyEditor doesn't read from for safety."
+msgstr "Diese Adresse zeigt in dein lokales Netzwerk. Von dort liest MyEditor zu deiner Sicherheit nichts."
+
+#: nostr/imports/errors.py:80
 msgid "No feed found at this site. Try pasting the feed URL directly, or look for an RSS / Atom link in the page footer."
 msgstr "Auf dieser Website wurde kein Feed gefunden. Füge die Feed-Adresse direkt ein oder suche im Seitenfuß nach einem RSS- oder Atom-Link."
 
-#: nostr/imports/errors.py:78
+#: nostr/imports/errors.py:85
 msgid "That response isn't a feed. Expected RSS, Atom, or JSON Feed."
 msgstr "Diese Antwort ist kein Feed. Erwartet wurde RSS, Atom oder JSON Feed."
 
-#: nostr/imports/errors.py:81
+#: nostr/imports/errors.py:88
 msgid "This kind of source can't be imported yet."
 msgstr "Diese Art von Quelle kann noch nicht importiert werden."
 
-#: nostr/imports/errors.py:84
+#: nostr/imports/errors.py:91
 msgid "The server returned an empty response."
 msgstr "Der Server hat eine leere Antwort geschickt."
 
-#: nostr/imports/errors.py:87
+#: nostr/imports/errors.py:94
 msgid "That isn't a recognisable Nostr address."
 msgstr "Diese Nostr-Adresse wurde nicht erkannt."
 
-#: nostr/imports/errors.py:90
+#: nostr/imports/errors.py:97
 msgid "That Nostr event was not found on the relays."
 msgstr "Dieses Nostr-Event wurde auf den Relays nicht gefunden."
 
-#: nostr/imports/errors.py:93
+#: nostr/imports/errors.py:100
 msgid "No Nostr profile is published at that address."
 msgstr "Unter dieser Adresse ist kein Nostr-Profil veröffentlicht."
 
-#: nostr/imports/errors.py:96
+#: nostr/imports/errors.py:103
 msgid "Importing from Nostr needs a relay connection, which isn't available right now."
 msgstr "Für den Import aus Nostr ist eine Verbindung zu einem Relay nötig, die gerade nicht besteht."
 
-#: nostr/imports/errors.py:100
+#: nostr/imports/errors.py:107
 msgid "No published posts or pages were found in that WordPress export."
 msgstr "In diesem WordPress-Export wurden keine veröffentlichten Beiträge oder Seiten gefunden."
 
-#: nostr/imports/errors.py:103
+#: nostr/imports/errors.py:110
 msgid "No published posts were found in that Ghost export."
 msgstr "In diesem Ghost-Export wurden keine veröffentlichten Beiträge gefunden."
 
-#: nostr/imports/errors.py:106
+#: nostr/imports/errors.py:113
 msgid "Couldn't read that archive. Export it again from the platform and retry."
 msgstr "Dieses Archiv konnte nicht gelesen werden. Exportiere es erneut von der Plattform und versuche es noch einmal."
 
-#: nostr/imports/errors.py:110
+#: nostr/imports/errors.py:117
 msgid "That sitemap had no importable article URLs."
 msgstr "Diese Sitemap enthält keine Artikeladressen, die sich importieren lassen."
 
-#: nostr/imports/errors.py:113
+#: nostr/imports/errors.py:120
 msgid "That is not a Bluesky post link."
 msgstr "Das ist kein Link zu einem Bluesky-Beitrag."
 
-#: nostr/imports/errors.py:116
+#: nostr/imports/errors.py:123
 msgid "That Bluesky post could not be found."
 msgstr "Dieser Bluesky-Beitrag wurde nicht gefunden."
 
-#: nostr/imports/errors.py:119
+#: nostr/imports/errors.py:126
 msgid "That is a single Bluesky post, not a thread. Only multi-post threads stitch into an article."
 msgstr "Das ist ein einzelner Bluesky-Beitrag, kein Thread. Nur Threads aus mehreren Beiträgen werden zu einem Artikel zusammengefügt."
 
-#: nostr/imports/errors.py:139
+#: nostr/imports/errors.py:146
 msgid "Something went wrong while importing."
 msgstr "Beim Importieren ist etwas schiefgegangen."
 
-#: nostr/imports/errors.py:135
+#: nostr/imports/errors.py:142
 #, python-brace-format
 msgid "Couldn't reach that URL: {reason}."
 msgstr "Diese Adresse ist nicht erreichbar: {reason}."
 
-#: nostr/imports/errors.py:134
-#: nostr/imports/fetch.py:146
+#: nostr/imports/errors.py:141
+#: nostr/imports/fetch.py:164
 #: nostr/ui/thumbnail_loader.py:272
 msgid "network error"
 msgstr "Netzwerkfehler"
 
-#: nostr/imports/fetch.py:62
+#: nostr/imports/fetch.py:64
 #: nostr/imports/images.py:67
 msgid "URL was not allowed"
 msgstr "Adresse nicht erlaubt"
 
-#: nostr/imports/fetch.py:63
+#: nostr/imports/fetch.py:65
 msgid "Image is too large to rehost"
 msgstr "Bild ist zu groß zum Kopieren"
 
-#: nostr/imports/fetch.py:64
+#: nostr/imports/fetch.py:66
 msgid "Image was empty"
 msgstr "Bild war leer"
 
-#: nostr/imports/fetch.py:52
+#: nostr/imports/fetch.py:54
 #, python-brace-format
 msgid "Feed exceeds the {size} MiB size limit"
 msgstr "Der Feed überschreitet die Größengrenze von {size} MiB"
 
-#: nostr/imports/fetch.py:100
+#: nostr/imports/fetch.py:106
 msgid "Feed URL must be http(s)"
 msgstr "Die Feed-Adresse muss mit http oder https beginnen"
 
-#: nostr/imports/fetch.py:258
+#: nostr/imports/fetch.py:289
 msgid "Could not download the image"
 msgstr "Bild konnte nicht heruntergeladen werden"
 
-#: nostr/imports/images.py:266
+#: nostr/imports/images.py:273
 msgid "Empty mirror response"
 msgstr "Leere Antwort beim Kopieren"
 
-#: nostr/imports/pipeline.py:282
+#: nostr/imports/pipeline.py:283
 #: nostr/ui/feeds_panel.py:139
 msgid "(untitled)"
 msgstr "(ohne Titel)"
 
-#: nostr/imports/pipeline.py:593
+#: nostr/imports/pipeline.py:594
 #, python-brace-format
 msgid "{failed} of {total} image(s) couldn't be mirrored; originals kept."
 msgid_plural "{failed} of {total} image(s) couldn't be mirrored; originals kept."
 msgstr[0] "{failed} von {total} Bild nicht kopiert, das Original bleibt verlinkt."
 msgstr[1] "{failed} von {total} Bildern nicht kopiert, die Originale bleiben verlinkt."
 
-#: nostr/imports/pipeline.py:284
+#: nostr/imports/pipeline.py:285
 #, python-brace-format
 msgid "Item {n}/{total}: {title}"
 msgstr "Beitrag {n}/{total}: {title}"
 
-#: nostr/imports/pipeline.py:304
+#: nostr/imports/pipeline.py:305
 #, python-brace-format
 msgid "Could not normalise item: {error}"
 msgstr "Beitrag konnte nicht aufbereitet werden: {error}"
 
-#: nostr/imports/pipeline.py:389
+#: nostr/imports/pipeline.py:390
 #, python-brace-format
 msgid "Fetching chapters for '{title}'…"
 msgstr "Kapitel für „{title}“ werden geladen …"
 
-#: nostr/imports/pipeline.py:426
+#: nostr/imports/pipeline.py:427
 #, python-brace-format
 msgid "Resolving '{title}' from Nostr…"
 msgstr "„{title}“ wird aus Nostr geladen …"
 
-#: nostr/imports/pipeline.py:509
+#: nostr/imports/pipeline.py:510
 #, python-brace-format
 msgid "Fetching full text for '{title}'…"
 msgstr "Volltext für „{title}“ wird geladen …"
 
-#: nostr/imports/pipeline.py:583
+#: nostr/imports/pipeline.py:584
 #, python-brace-format
 msgid "Mirroring images {n}/{total}…"
 msgstr "Bild {n} von {total} wird kopiert …"
@@ -4805,32 +4809,32 @@ msgid_plural "Subscribed to {added} feed(s) from {file}."
 msgstr[0] "{added} Feed aus {file} abonniert."
 msgstr[1] "{added} Feeds aus {file} abonniert."
 
-#: nostr/ui/feeds_panel.py:1266
+#: nostr/ui/feeds_panel.py:1270
 msgid "Starting import…"
 msgstr "Import wird gestartet …"
 
-#: nostr/ui/feeds_panel.py:1312
+#: nostr/ui/feeds_panel.py:1316
 #, python-brace-format
 msgid "{done}/{total} images, {failed} kept original"
 msgid_plural "{done}/{total} images, {failed} kept original"
 msgstr[0] "{done}/{total} Bild, {failed} beim Original belassen"
 msgstr[1] "{done}/{total} Bilder, {failed} beim Original belassen"
 
-#: nostr/ui/feeds_panel.py:1318
+#: nostr/ui/feeds_panel.py:1322
 #, python-brace-format
 msgid "{done}/{total} images"
 msgid_plural "{done}/{total} images"
 msgstr[0] "{done}/{total} Bild"
 msgstr[1] "{done}/{total} Bilder"
 
-#: nostr/ui/feeds_panel.py:1330
+#: nostr/ui/feeds_panel.py:1334
 #, python-brace-format
 msgid "{accepted}/{total} relays"
 msgid_plural "{accepted}/{total} relays"
 msgstr[0] "{accepted}/{total} Relay"
 msgstr[1] "{accepted}/{total} Relays"
 
-#: nostr/ui/feeds_panel.py:1348
+#: nostr/ui/feeds_panel.py:1352
 #, python-brace-format
 msgid "Done. {succeeded}/{attempted} item(s) imported as drafts."
 msgid_plural "Done. {succeeded}/{attempted} item(s) imported as drafts."
@@ -4852,19 +4856,19 @@ msgid_plural "Subscribed to {added} feed(s) from {file}; {skipped} skipped (alre
 msgstr[0] "{added} Feed aus {file} abonniert, {skipped} übersprungen (schon abonniert oder ungültig)."
 msgstr[1] "{added} Feeds aus {file} abonniert, {skipped} übersprungen (schon abonniert oder ungültig)."
 
-#: nostr/ui/feeds_panel.py:1283
+#: nostr/ui/feeds_panel.py:1287
 msgid "Load cancelled."
 msgstr "Laden abgebrochen."
 
-#: nostr/ui/feeds_panel.py:1288
+#: nostr/ui/feeds_panel.py:1292
 msgid "Import cancelled."
 msgstr "Import abgebrochen."
 
-#: nostr/ui/feeds_panel.py:1338
+#: nostr/ui/feeds_panel.py:1342
 msgid "no relay accepted it yet"
 msgstr "noch von keinem Relay angenommen"
 
-#: nostr/ui/feeds_panel.py:1346
+#: nostr/ui/feeds_panel.py:1350
 msgid "Done. Nothing to import."
 msgstr "Fertig. Nichts zu importieren."
 
@@ -4914,7 +4918,7 @@ msgstr "{source}: keine Beiträge zum Importieren."
 msgid "Subscribed to {source}."
 msgstr "{source} abonniert."
 
-#: nostr/ui/feeds_panel.py:1166
+#: nostr/ui/feeds_panel.py:1170
 #, python-brace-format
 msgid "Review images ({kept}/{total})…"
 msgstr "Bilder prüfen ({kept}/{total}) …"
