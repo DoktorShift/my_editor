@@ -35,7 +35,7 @@ import atexit
 import sys
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
-from PySide6.QtCore import QEvent, QMimeData, Qt, QTimer
+from PySide6.QtCore import QEvent, QMimeData, QSize, Qt, QTimer
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
@@ -366,6 +366,22 @@ class StepList(QWidget):
         return self._rows[key]["state"]
 
 
+class _ShownPageStack(QStackedWidget):
+    """A stack of pages that asks for the room of the page it shows.
+
+    QStackedWidget asks for the room of its largest page, so a narrow page
+    would be laid out as wide as the widest one and cut off at the side of
+    a window sized for it."""
+
+    def sizeHint(self) -> QSize:
+        page = self.currentWidget()
+        return page.sizeHint() if page is not None else super().sizeHint()
+
+    def minimumSizeHint(self) -> QSize:
+        page = self.currentWidget()
+        return page.minimumSizeHint() if page is not None else super().minimumSizeHint()
+
+
 class AssistantWindow(QDialog):
     """A window of pages with one row of buttons, laid out the Apple way."""
 
@@ -374,6 +390,7 @@ class AssistantWindow(QDialog):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setMinimumWidth(min_width)
+        self._base_width = min_width
         self.setStyleSheet(stylesheet(is_dark))
         self._is_dark = is_dark
         self._page: Optional[str] = None
@@ -381,7 +398,7 @@ class AssistantWindow(QDialog):
         self.buttons: Dict[str, QPushButton] = {}
         self._button_widgets: List[QPushButton] = []
 
-        self._stack = QStackedWidget()
+        self._stack = _ShownPageStack()
         # A page taller than the screen scrolls, so the buttons stay in
         # reach; otherwise the window simply grows to fit it.
         self._scroll = QScrollArea()
@@ -421,6 +438,7 @@ class AssistantWindow(QDialog):
     def show_page(self, key: str, buttons: Iterable[ButtonSpec]) -> None:
         self._page = key
         self._stack.setCurrentWidget(self._pages[key])
+        self._stack.updateGeometry()
         self.set_buttons(buttons)
         self.fit_page()
 
@@ -459,13 +477,19 @@ class AssistantWindow(QDialog):
         shown = min(needed, self._tallest_page())
         if shown != self._scroll.minimumHeight():
             self._scroll.setMinimumHeight(shown)
-        # As wide as the page needs, plus the scroll bar when it scrolls,
-        # so nothing is cut off at the right edge.
+        # As wide as the page shown needs, plus the scroll bar when it
+        # scrolls, so nothing is cut off at the right edge; the window
+        # widens with it (its own minimum width keeps it from growing by
+        # itself).
         bar = (self._scroll.verticalScrollBar().sizeHint().width() if needed > shown
                else 0)
         wide = self._stack.minimumSizeHint().width() + bar
         if wide != self._scroll.minimumWidth():
             self._scroll.setMinimumWidth(wide)
+        margins = self.layout().contentsMargins()
+        window = max(self._base_width, wide + margins.left() + margins.right())
+        if window != self.minimumWidth():
+            self.setMinimumWidth(window)
 
     def _tallest_page(self) -> int:
         """The most page height the screen has room for, with the window's
