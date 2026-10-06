@@ -3,10 +3,10 @@
 """Syntax highlighting starts off.
 
 The setting is not persisted, so the default is what the user meets on
-every launch, not just the first. It lives in three places: the flag the
-editor reads, the menu item's check state, and the header checkbox. They
-have to agree, because two of them are what the user is looking at and
-the third is what is actually happening.
+every launch, not just the first. It lives in two places: the flag the
+editor reads and the menu item's check state. They have to agree,
+because one is what the user is looking at and the other is what is
+actually happening.
 """
 
 from __future__ import annotations
@@ -38,35 +38,9 @@ def assignments(path, target):
     return found
 
 
-def calls_with_bool(path, attr, method):
-    """Booleans passed to ``self.<attr>.<method>(...)``, in order."""
-    tree = ast.parse((ROOT / path).read_text(encoding="utf-8"))
-    found = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or not node.args:
-            continue
-        func = node.func
-        if (
-            isinstance(func, ast.Attribute)
-            and func.attr == method
-            and isinstance(func.value, ast.Attribute)
-            and func.value.attr == attr
-            and isinstance(node.args[0], ast.Constant)
-            and isinstance(node.args[0].value, bool)
-        ):
-            found.append(node.args[0].value)
-    return found
-
-
 def test_the_editor_flag_starts_off():
     values = assignments("main_window.py", "syntax_highlighting")
     assert values, "syntax_highlighting is never assigned a literal"
-    assert values[0] is False
-
-
-def test_the_header_checkbox_starts_unchecked():
-    values = calls_with_bool("widgets.py", "syntax_highlight_checkbox", "setChecked")
-    assert values, "the checkbox never gets a literal state"
     assert values[0] is False
 
 

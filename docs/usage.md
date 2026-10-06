@@ -92,7 +92,7 @@ Lists are real lists, written to Markdown as `- item` and `1. item`, nested by f
 | `Ctrl+Shift+T` | Toggle dark / light theme |
 | `Ctrl+Shift+H` | Toggle syntax highlighting |
 
-The **`View`** menu holds the appearance options: theme, line numbers, syntax highlighting, background style (lined, dashed, dotted, grid), paper mode, and highlight current line.
+The **`View`** menu holds the appearance options: theme, line numbers, syntax highlighting, background style (lined, dashed, dotted, grid), paper mode, and highlight current line. Nothing around the document repeats a menu: the window shows the format toolbar, the tabs and the text.
 
 `Help > Keyboard Shortcuts` lists every shortcut as it is on the computer in use: on a Mac in Apple's symbols (`⇧⌘S`), elsewhere with your keyboard's key names (`Strg+Umschalt+S` on a German one). It is built from the same command list as the menus (`commands.py`), so the two always agree; the Nostr shortcuts appear there once an account is in use.
 
@@ -107,7 +107,7 @@ The **`View`** menu holds the appearance options: theme, line numbers, syntax hi
 | `Ctrl+Shift+D` | Open or close the Drafts panel |
 | `Ctrl+Shift+S` | Save current document (chooser: local file or private Nostr draft) |
 
-The **`Nostr`** menu also exposes `Drafts…`, `Connect Signer…`, and `Sign Out Active Profile` for managing identities. The avatar chip at the far right of the header is a one-click profile switcher. See the [Nostr guide](nostr.md) for the full workflow.
+The **`Nostr`** menu also exposes `Drafts…`, `Connect Signer…`, and `Sign Out Active Profile` for managing identities. While an account is in use, its avatar sits at the right end of the tab row: a one-click profile switcher. See the [Nostr guide](nostr.md) for the full workflow.
 
 ---
 

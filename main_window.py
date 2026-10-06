@@ -38,7 +38,7 @@ from constants import (
     DARK_BORDER, LIGHT_BORDER, APP_DISPLAY_NAME, APP_VERSION, APP_URL, TEXT_COLORS,
     DARK_MUTED_FG, LIGHT_MUTED_FG,
 )
-from widgets import FindBar, HeaderWidget, LineNumberGutter, FileChangedBar, UpdateBar
+from widgets import FindBar, LineNumberGutter, FileChangedBar, UpdateBar
 from format_toolbar import FormatToolbar
 from atomic_file import (
     read_json, read_text_document, save_document, save_text_document, write_json,
@@ -172,6 +172,7 @@ from nostr.publisher import (
 from nostr.relay import RelayPool
 from nostr.search import Nip50SearchClient
 from nostr.ui.connect_dialog import ConnectDialog
+from nostr.ui.profile_chip import ProfileChip
 from nostr.ui.draft_conflict_banner import DraftConflictBanner
 from nostr.ui.drafts_panel import DEFAULT_PANEL_WIDTH, DraftsPanel
 from nostr.membership_controller import MembershipController
@@ -289,8 +290,19 @@ class MainWindow(QMainWindow):
         self.plus_btn = QToolButton()
         self.plus_btn.setText("+")
         self.plus_btn.setAutoRaise(True)
+        self.plus_btn.setToolTip(_("New Tab"))
+        self.plus_btn.setAccessibleName(_("New Tab"))
         self.plus_btn.clicked.connect(self.new_tab)
-        self.tabs.setCornerWidget(self.plus_btn, Qt.TopRightCorner)
+        # The account in use, at the end of the tab row (where browsers
+        # show theirs); there only while Nostr is in use.
+        self.profile_chip = ProfileChip()
+        corner = QWidget()
+        corner_row = QHBoxLayout(corner)
+        corner_row.setContentsMargins(0, 0, 4, 0)
+        corner_row.setSpacing(6)
+        corner_row.addWidget(self.plus_btn)
+        corner_row.addWidget(self.profile_chip)
+        self.tabs.setCornerWidget(corner, Qt.TopRightCorner)
 
         self.status = QStatusBar()
         self.setStatusBar(self.status)
@@ -311,13 +323,6 @@ class MainWindow(QMainWindow):
 
         self._apply_theme()
 
-        self.header_widget = HeaderWidget()
-        self.header_widget.theme_checkbox.toggled.connect(self._toggle_theme)
-        self.header_widget.line_numbers_checkbox.toggled.connect(self._toggle_line_numbers)
-        self.header_widget.syntax_highlight_checkbox.toggled.connect(self._toggle_syntax_highlighting)
-        self.header_widget.undo_btn.clicked.connect(self._undo)
-        self.header_widget.redo_btn.clicked.connect(self._redo)
-
         # Nostr publishing infrastructure. All pieces are process-wide
         # singletons living on the window; they are cheap to create and stay
         # alive for the lifetime of the editor.
@@ -326,6 +331,8 @@ class MainWindow(QMainWindow):
         # Whether Nostr is in use (an account is active): the one signal the
         # editor's Nostr features follow (nostr/state.py).
         self.nostr_state = NostrState(lambda: self._profile_store.default(), parent=self)
+        self.profile_chip.setVisible(self.nostr_state.active)
+        self.nostr_state.changed.connect(self.profile_chip.setVisible)
         # Where everyone reads and writes (NIP-65): verified, cached, and the
         # user's own lists remembered across launches. Every job and panel
         # that touches relays asks it where to go.
@@ -525,7 +532,7 @@ class MainWindow(QMainWindow):
         self._build_status_bar_view_toggle()
         self._build_findbar()
 
-        # header_widget and findbar always construct themselves in dark
+        # The find bar and the account chip construct themselves in dark
         # mode; bring them in line with a light theme detected above.
         if not self.is_dark_theme:
             self._set_theme(self.is_dark_theme, announce=False)
@@ -1027,8 +1034,6 @@ class MainWindow(QMainWindow):
         ed = self.current_editor()
         can_undo = ed.document().isUndoAvailable() if ed else False
         can_redo = ed.document().isRedoAvailable() if ed else False
-        self.header_widget.undo_btn.setEnabled(can_undo)
-        self.header_widget.redo_btn.setEnabled(can_redo)
         if hasattr(self, "act_undo"):
             self.act_undo.setEnabled(can_undo)
             self.act_redo.setEnabled(can_redo)
@@ -1529,6 +1534,7 @@ class MainWindow(QMainWindow):
         self.m_format = m_format
 
         m_view = self.menuBar().addMenu(_("&View"))
+        self.m_view = m_view
         m_view.addAction(self.act_show_toolbar)
         m_view.addSeparator()
         m_view.addAction(self.act_toggle_theme)
@@ -1662,7 +1668,6 @@ class MainWindow(QMainWindow):
         v = QVBoxLayout(editor_side)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
-        v.addWidget(self.header_widget, 0)
         self.format_toolbar = FormatToolbar(
             {"bold": self.act_bold, "italic": self.act_italic, "strike": self.act_strike,
              "link": self.act_link, "bullets": self.act_bullets, "numbers": self.act_numbers,
@@ -3394,8 +3399,8 @@ class MainWindow(QMainWindow):
     def _show_about(self):
         answer = ask(
             self, title=APP_DISPLAY_NAME,
-            message=_("Version {version}\nA minimal distraction-free text editor.").format(
-                version=APP_VERSION),
+            message=_("Version {version}\nA minimal distraction-free text editor.\n"
+                      "Built by rinbal.").format(version=APP_VERSION),
             buttons=(Button(_("Source Code"), "source", NORMAL),
                      Button(_("OK"), "ok", DEFAULT)))
         if answer == "source":
@@ -3965,16 +3970,11 @@ class MainWindow(QMainWindow):
         place instead of being duplicated.
         """
         self.is_dark_theme = is_dark
-        if hasattr(self, 'header_widget'):
-            self.header_widget.theme_checkbox.blockSignals(True)
-            self.header_widget.theme_checkbox.setChecked(self.is_dark_theme)
-            self.header_widget.theme_checkbox.blockSignals(False)
         self._apply_theme()
         if hasattr(self, 'findbar'):
             self.findbar.is_dark = self.is_dark_theme
             self.findbar._update_theme()
-        if hasattr(self, 'header_widget'):
-            self.header_widget.update_theme(self.is_dark_theme)
+        self.profile_chip.set_dark_theme(self.is_dark_theme)
         if getattr(self, 'format_toolbar', None) is not None:
             self.format_toolbar.set_dark(self.is_dark_theme)
         if hasattr(self, 'update_bar'):
@@ -4000,10 +4000,7 @@ class MainWindow(QMainWindow):
             self.status.showMessage(message, 2000)
 
     def _toggle_theme(self):
-        if hasattr(self, 'header_widget') and self.header_widget.theme_checkbox.isChecked() != self.is_dark_theme:
-            target = self.header_widget.theme_checkbox.isChecked()
-        else:
-            target = not self.is_dark_theme
+        target = not self.is_dark_theme
         self._set_theme(target)
         # The user made an explicit choice - stop following the OS scheme
         # and remember this choice across restarts.
@@ -4026,14 +4023,7 @@ class MainWindow(QMainWindow):
     # LINE NUMBERS
     # ----------------------------------------------------------------------
     def _toggle_line_numbers(self):
-        if hasattr(self, 'header_widget') and self.header_widget.line_numbers_checkbox.isChecked() != self.show_line_numbers:
-            self.show_line_numbers = self.header_widget.line_numbers_checkbox.isChecked()
-        else:
-            self.show_line_numbers = not self.show_line_numbers
-        if hasattr(self, 'header_widget'):
-            self.header_widget.line_numbers_checkbox.blockSignals(True)
-            self.header_widget.line_numbers_checkbox.setChecked(self.show_line_numbers)
-            self.header_widget.line_numbers_checkbox.blockSignals(False)
+        self.show_line_numbers = not self.show_line_numbers
         self.act_toggle_line_numbers.setChecked(self.show_line_numbers)
 
         for i in range(self.tabs.count()):
@@ -4058,15 +4048,8 @@ class MainWindow(QMainWindow):
     # SYNTAX HIGHLIGHTING
     # ----------------------------------------------------------------------
     def _toggle_syntax_highlighting(self):
-        if hasattr(self, 'header_widget') and self.header_widget.syntax_highlight_checkbox.isChecked() != self.syntax_highlighting:
-            self.syntax_highlighting = self.header_widget.syntax_highlight_checkbox.isChecked()
-        else:
-            self.syntax_highlighting = not self.syntax_highlighting
-
+        self.syntax_highlighting = not self.syntax_highlighting
         self.act_toggle_syntax_hl.setChecked(self.syntax_highlighting)
-        self.header_widget.syntax_highlight_checkbox.blockSignals(True)
-        self.header_widget.syntax_highlight_checkbox.setChecked(self.syntax_highlighting)
-        self.header_widget.syntax_highlight_checkbox.blockSignals(False)
 
         for i in range(self.tabs.count()):
             container = self.tabs.widget(i)
@@ -4266,7 +4249,7 @@ class MainWindow(QMainWindow):
         passed in; otherwise the chip falls back to initials on a
         deterministic color disc.
         """
-        chip = self.header_widget.profile_chip
+        chip = self.profile_chip
         default = self._profile_store.default()
         if default is None:
             chip.set_disconnected()
@@ -4279,7 +4262,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_profile_chip_menu(self):
         """Rebuild the chip's dropdown - fast and idempotent."""
-        menu = self.header_widget.profile_chip.menu()
+        menu = self.profile_chip.menu()
         menu.clear()
         self._update_account_actions()
 

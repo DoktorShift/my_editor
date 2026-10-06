@@ -3,17 +3,15 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 
-from PySide6.QtCore import Qt, QRect, QSize, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPainter, QColor
 from PySide6.QtWidgets import (
-    QWidget, QGridLayout, QHBoxLayout, QVBoxLayout, QLineEdit, QLabel, QPushButton, QFrame, QMenu,
-    QCheckBox, QToolButton,
+    QWidget, QGridLayout, QHBoxLayout, QLineEdit, QLabel, QPushButton, QFrame, QMenu, QToolButton,
 )
-from constants import DARK_BG, LIGHT_BG
+from constants import DARK_BG
 from find_replace import FindOptions
 from fonts import monospace_font
 from i18n import _, pgettext
-from nostr.ui.profile_chip import ProfileChip
 
 
 class LineNumberGutter(QWidget):
@@ -320,153 +318,6 @@ class FindBar(QFrame):
     def focusIn(self):
         self.edit.setFocus()
         self.edit.selectAll()
-
-
-class HeaderWidget(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedHeight(40)
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 5, 10, 5)
-        layout.setSpacing(0)
-
-        # Left: checkboxes in an expanding widget, left-aligned
-        left = QWidget()
-        left.setObjectName("HeaderLeft")
-        left_layout = QHBoxLayout(left)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(8)
-
-        self.theme_checkbox = QCheckBox(_("Dark Theme"))
-        self.theme_checkbox.setToolTip(_("Toggle Theme (Ctrl+Shift+T)"))
-        self.theme_checkbox.setChecked(True)
-
-        self.line_numbers_checkbox = QCheckBox(_("Line Numbers"))
-        self.line_numbers_checkbox.setToolTip(_("Toggle Line Numbers (Ctrl+Shift+L)"))
-
-        self.syntax_highlight_checkbox = QCheckBox(_("Syntax Highlighting"))
-        self.syntax_highlight_checkbox.setToolTip(_("Toggle Syntax Highlighting (Ctrl+Shift+H)"))
-        # Unchecked at startup, matching MainWindow.syntax_highlighting.
-        # These three defaults have to agree or the box shows a state the
-        # editor is not in.
-        self.syntax_highlight_checkbox.setChecked(False)
-
-        # Left half: the view checkboxes. Formatting has its own toolbar
-        # (format_toolbar.py), right above the document.
-        left_layout.addWidget(self.theme_checkbox)
-        left_layout.addWidget(self.line_numbers_checkbox)
-        left_layout.addWidget(self.syntax_highlight_checkbox)
-        left_layout.addStretch(1)
-
-        # Center: undo / redo, exactly centred by the equal left(1) / right(1) halves
-        self.undo_btn = QPushButton("↺")
-        self.undo_btn.setToolTip(_("Undo (Ctrl+Z)"))
-        self.undo_btn.setFixedSize(26, 26)
-        self.undo_btn.setEnabled(False)
-
-        self.redo_btn = QPushButton("↻")
-        self.redo_btn.setToolTip(_("Redo (Ctrl+Y / Ctrl+Shift+Z)"))
-        self.redo_btn.setFixedSize(26, 26)
-        self.redo_btn.setEnabled(False)
-
-        # Right half: credit label right-aligned, with the Nostr profile chip
-        # tucked just after it. The credit stays exactly where it was, the
-        # chip is additive.
-        right = QWidget()
-        right.setObjectName("HeaderRight")
-        right_layout = QHBoxLayout(right)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        self.credit_label = QLabel(_("built by rinbal"))
-        self.profile_chip = ProfileChip()
-        right_layout.addStretch()
-        right_layout.addWidget(self.credit_label)
-        right_layout.addSpacing(10)
-        right_layout.addWidget(self.profile_chip)
-
-        # left(1) and right(1) give equal weight → ↺↻ land exactly in the window centre
-        layout.addWidget(left, 1)
-        layout.addWidget(self.undo_btn)
-        layout.addSpacing(4)
-        layout.addWidget(self.redo_btn)
-        layout.addWidget(right, 1)
-
-        # Apply initial dark theme
-        self.update_theme(True)
-
-    def update_theme(self, is_dark):
-        if is_dark:
-            self.setStyleSheet("""
-                QWidget {
-                    background: #252526;
-                    border-bottom: 1px solid #3C3C3C;
-                }
-                QCheckBox {
-                    spacing: 6px; color: #CCCCCC; font-size: 12px;
-                    background: transparent; border-radius: 4px; padding: 2px 6px;
-                }
-                QCheckBox:hover { background: rgba(255, 255, 255, 0.07); color: #FFFFFF; }
-                QCheckBox::indicator {
-                    width: 11px; height: 11px;
-                    border: 1px solid #3C3C3C;
-                    border-radius: 2px;
-                    background: #2D2D30;
-                }
-                QCheckBox::indicator:checked { background: #FF8C00; border: 1px solid #FF8C00; }
-                QCheckBox::indicator:unchecked { background: #2D2D30; border: 1px solid #3C3C3C; }
-                QLabel { color: #CCCCCC; font-size: 12px; background: transparent; }
-                #HeaderLeft, #HeaderRight { background: transparent; }
-                QPushButton {
-                    background: #2D2D30;
-                    color: #D4D4D4;
-                    border: 1px solid #3C3C3C;
-                    border-radius: 13px;
-                    font-size: 15px;
-                }
-                QPushButton:hover { background: #3C3C3C; }
-                QPushButton:pressed { background: #1E1E1E; }
-                QPushButton:disabled { background: #252526; color: #3C3C3C; border-color: #2D2D2D; }
-            """)
-            self.theme_checkbox.setChecked(True)
-            self.credit_label.setStyleSheet("QLabel { font-size: 12px; font-style: italic; color: #858585; }")
-        else:
-            self.setStyleSheet("""
-                QWidget {
-                    background: #F8F8F8;
-                    border-bottom: 1px solid #E1E1E1;
-                }
-                QCheckBox {
-                    spacing: 6px; color: #333333; font-size: 12px;
-                    background: transparent; border-radius: 4px; padding: 2px 6px;
-                }
-                QCheckBox:hover { background: rgba(0, 0, 0, 0.06); color: #000000; }
-                QCheckBox::indicator {
-                    width: 11px; height: 11px;
-                    border: 1px solid #666666;
-                    border-radius: 2px;
-                    background: #FFFFFF;
-                }
-                QCheckBox::indicator:checked { background: #FF8C00; border: 1px solid #FF8C00; }
-                QCheckBox::indicator:unchecked { background: #FFFFFF; border: 1px solid #666666; }
-                QLabel { color: #333333; font-size: 12px; background: transparent; }
-                #HeaderLeft, #HeaderRight { background: transparent; }
-                QPushButton {
-                    background: #ECECEC;
-                    color: #333333;
-                    border: 1px solid #CCCCCC;
-                    border-radius: 13px;
-                    font-size: 15px;
-                }
-                QPushButton:hover { background: #E1E1E1; }
-                QPushButton:pressed { background: #D0D0D0; }
-                QPushButton:disabled { background: #F8F8F8; color: #CCCCCC; border-color: #EBEBEB; }
-            """)
-            self.theme_checkbox.setChecked(False)
-            self.credit_label.setStyleSheet("QLabel { font-size: 12px; font-style: italic; color: #555555; }")
-
-        # Let the profile chip re-paint its placeholder/disconnected glyph
-        # in colours that read on the new background.
-        self.profile_chip.set_dark_theme(is_dark)
 
 
 class FileChangedBar(QWidget):

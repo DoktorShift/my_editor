@@ -52,7 +52,7 @@ The private key is never shown on screen. It can be copied (marked as a secret f
 
 ### Multiple identities
 
-The avatar chip at the far right of the header is a profile switcher. Add as many profiles as you want, switch with a single click, and the change takes effect on the next publish. Switching mid-write is fine; the active profile is finalised only when you actually press **Publish** inside the publish dialog (which also has its own inline switcher).
+While an account is in use, its avatar sits at the right end of the tab row, as a profile switcher. Add as many profiles as you want, switch with a single click, and the change takes effect on the next publish. Switching mid-write is fine; the active profile is finalised only when you actually press **Publish** inside the publish dialog (which also has its own inline switcher).
 
 Avatars and display names are pulled from each profile's kind 0 metadata in the background; until they land the chip shows colored initials.
 
