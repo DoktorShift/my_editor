@@ -132,7 +132,6 @@ class PostListModel(QAbstractListModel):
         if [(p.key, p) for p in posts] == [(p.key, p) for p in self._posts] and \
                 more == self._more:
             return
-        keys = {p.key for p in posts}
         self.layoutAboutToBeChanged.emit()
         old_keys = [p.key for p in self._posts]
         persistent = self.persistentIndexList()
@@ -144,7 +143,9 @@ class PostListModel(QAbstractListModel):
             self.changePersistentIndex(index, self.index(row) if row >= 0 else QModelIndex())
         self.layoutChanged.emit()
         before = set(self._checked)
-        self._checked &= {k for k in keys if selectable(self.post_by_key(k))}
+        # One pass, not a search per check (review M10: quadratic with
+        # thousands of posts checked).
+        self._checked &= {p.key for p in posts if selectable(p, self._busy)}
         if self._checked != before:
             self.checks_changed.emit()
 
