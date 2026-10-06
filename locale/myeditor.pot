@@ -2744,6 +2744,7 @@ msgid "Preview"
 msgstr ""
 
 #: nostr/preview.py:124
+#: nostr/ui/imports_article.py:111
 msgid "Article"
 msgstr ""
 
@@ -5054,6 +5055,23 @@ msgstr ""
 
 #: nostr/ui/image_review_dialog.py:57
 msgid "Images to mirror"
+msgstr ""
+
+#: nostr/ui/imports_article.py:90
+#: nostr/ui/imports_article.py:93
+msgid "Open Original"
+msgstr ""
+
+#: nostr/ui/imports_article.py:92
+msgid "Read this post on its website"
+msgstr ""
+
+#: nostr/ui/imports_article.py:94
+msgid "Opens the post on its website in your browser."
+msgstr ""
+
+#: nostr/ui/imports_article.py:109
+msgid "Select a post to read it here."
 msgstr ""
 
 #: nostr/ui/media_library_dialog.py:450

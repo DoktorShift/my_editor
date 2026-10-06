@@ -2758,6 +2758,7 @@ msgid "Preview"
 msgstr "Vorschau"
 
 #: nostr/preview.py:124
+#: nostr/ui/imports_article.py:111
 msgid "Article"
 msgstr "Artikel"
 
@@ -5069,6 +5070,23 @@ msgstr "Markierte Bilder werden auf deinen Medienserver kopiert, damit der Entwu
 #: nostr/ui/image_review_dialog.py:57
 msgid "Images to mirror"
 msgstr "Zu kopierende Bilder"
+
+#: nostr/ui/imports_article.py:90
+#: nostr/ui/imports_article.py:93
+msgid "Open Original"
+msgstr "Original öffnen"
+
+#: nostr/ui/imports_article.py:92
+msgid "Read this post on its website"
+msgstr "Diesen Beitrag auf seiner Website lesen"
+
+#: nostr/ui/imports_article.py:94
+msgid "Opens the post on its website in your browser."
+msgstr "Öffnet den Beitrag auf seiner Website in deinem Browser."
+
+#: nostr/ui/imports_article.py:109
+msgid "Select a post to read it here."
+msgstr "Wähle einen Beitrag aus, um ihn hier zu lesen."
 
 #: nostr/ui/media_library_dialog.py:450
 msgid "This picture is private. Using it in something you publish creates a separate public copy that anyone can open. The original stays private, and you can confirm or cancel before anything is uploaded."
