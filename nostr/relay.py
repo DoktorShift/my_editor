@@ -39,6 +39,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 from PySide6.QtWebSockets import QWebSocket
 
+from i18n import _
+
 from .outbox.policy import normalize_relay_url
 
 
@@ -231,7 +233,7 @@ class PublishJob(QObject):
         self._sent.add(url)
         relay = self._pool.get_or_create(url)
         if not relay.send(["EVENT", self._event]):
-            self._finish(url, False, "send failed (not connected)")
+            self._finish(url, False, _("send failed (not connected)"))
 
     # -- relay signal handlers ---------------------------------------------
 
@@ -247,15 +249,15 @@ class PublishJob(QObject):
 
     def _on_disconnected(self, url: str) -> None:
         if url in self._pending:
-            self._finish(url, False, "relay disconnected before ack")
+            self._finish(url, False, _("relay disconnected before ack"))
 
     def _on_error(self, url: str, err: str) -> None:
         if url in self._pending:
-            self._finish(url, False, f"socket error: {err}")
+            self._finish(url, False, _("socket error: {error}").format(error=err))
 
     def _on_overall_timeout(self) -> None:
         for url in list(self._pending):
-            self._finish(url, False, "publish timeout")
+            self._finish(url, False, _("publish timeout"))
 
     # -- finalize -----------------------------------------------------------
 

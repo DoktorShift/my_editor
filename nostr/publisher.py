@@ -37,9 +37,10 @@ import re
 from dataclasses import dataclass
 from typing import Iterable, List, Optional, Sequence, Tuple
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QLocale, QObject, Signal
 
 import url_safety
+from i18n import _, language, ngettext
 
 from . import CLIENT_NAME
 from .bech32 import decode_npub, decode_nprofile, encode_nprofile
@@ -72,7 +73,7 @@ def _safe_reason(reason: str) -> str:
     signer echoing the request payload into the error text.
     """
     if not reason:
-        return "unknown error"
+        return _("unknown error")
     if len(reason) <= _MAX_REASON_CHARS:
         return reason
     return reason[:_MAX_REASON_CHARS - 1].rstrip() + "…"
@@ -516,7 +517,7 @@ class PublishJob(QObject):
 
     def start(self) -> None:
         """Kick off the publish. Safe to call once per instance."""
-        self.status_changed.emit("Connecting to your signer…")
+        self.status_changed.emit(_("Connecting to your signer…"))
         self._relay_directory.publish_plan(
             self._profile.user_pubkey,
             self._on_plan_ready,
@@ -543,7 +544,7 @@ class PublishJob(QObject):
         if self._failed or self._cancelled:
             return
         self.status_changed.emit(
-            "Waiting for signature. Approve the request on your signer…"
+            _("Waiting for signature. Approve the request on your signer…")
         )
         client.sign_event(
             self._unsigned,
@@ -557,7 +558,7 @@ class PublishJob(QObject):
         self._signed_event = signed_event
         self.signed.emit(signed_event["id"])
         if self._plan is None:
-            self.status_changed.emit("Finding your relays…")
+            self.status_changed.emit(_("Finding your relays…"))
         self._publish_when_ready()
 
     def _publish_when_ready(self) -> None:
@@ -566,7 +567,9 @@ class PublishJob(QObject):
             return
         self._sent = True
         relays = self._plan.targets
-        self.status_changed.emit(f"Publishing to {len(relays)} relays…")
+        self.status_changed.emit(ngettext(
+            "Publishing to {n} relay…", "Publishing to {n} relays…", len(relays),
+        ).format(n=len(relays)))
         job = self._relay_pool.publish(relays, self._signed_event)
         job.first_accept.connect(self._on_first_accept)
         job.all_done.connect(self._on_publish_done)
@@ -582,22 +585,23 @@ class PublishJob(QObject):
             return
         # Surface the win immediately so the dialog can flip to a success
         # state even before the slower relays finish reporting.
-        self.status_changed.emit(f"Accepted by {url}. Waiting for the rest…")
+        self.status_changed.emit(_("Accepted by {url}. Waiting for the rest…").format(url=url))
 
     def _on_publish_done(self, results: List[PublishResult]) -> None:
-        accepted = sum(1 for _, ok, _ in results if ok)
+        accepted = sum(1 for _url, ok, _message in results if ok)
         # NIP-65: the mentioned people's relays that now hold this event
         # also get the author's relay list, so whoever reads it there can
         # find the rest of what the author writes.
-        took_it = {normalize_relay_url(url) for url, ok, _ in results if ok}
+        took_it = {normalize_relay_url(url) for url, ok, _message in results if ok}
         reached = [url for url in self._plan.inbox if url in took_it]
         if reached:
             self._relay_directory.share_relay_list(self._profile.user_pubkey, reached)
         if self._cancelled:
             return
-        self.status_changed.emit(
-            f"Published. {accepted}/{len(results)} relays accepted."
-        )
+        self.status_changed.emit(ngettext(
+            "Published. {accepted}/{total} relay accepted.",
+            "Published. {accepted}/{total} relays accepted.", len(results),
+        ).format(accepted=accepted, total=len(results)))
         self.completed.emit(results)
 
 
@@ -697,7 +701,7 @@ class DraftPublishJob(QObject):
 
     def start(self) -> None:
         """Kick off the stash. Safe to call once per instance."""
-        self._emit_status("Looking up your relay list…")
+        self._emit_status(_("Looking up your relay list…"))
         ask_private_relays(self._relay_directory, self._profile,
                            self._on_relays_ready, entitled=self._entitled_relays)
 
@@ -720,7 +724,7 @@ class DraftPublishJob(QObject):
     def _on_relays_ready(self, publish_relays: List[str]) -> None:
         if self._cancelled:
             return
-        self._emit_status("Connecting to your signer…")
+        self._emit_status(_("Connecting to your signer…"))
         self._session_pool.get(
             self._profile,
             on_ready=lambda client: self._on_bunker_ready(client, publish_relays),
@@ -733,7 +737,7 @@ class DraftPublishJob(QObject):
         try:
             plaintext = serialize_inner_event(self._inner_event)
         except (KeyError, TypeError, ValueError) as exc:
-            self._emit_failed(f"Could not serialize draft: {exc}")
+            self._emit_failed(_("Could not serialize draft: {reason}").format(reason=exc))
             return
         # Pre-flight against the NIP-44 v2 plaintext cap (65535 bytes
         # post-encode). The bunker would reject larger payloads anyway,
@@ -741,20 +745,21 @@ class DraftPublishJob(QObject):
         # round-trip + approval prompt for an inevitable failure.
         payload_bytes = len(plaintext.encode("utf-8"))
         if payload_bytes > MAX_INNER_PAYLOAD_BYTES:
-            self._emit_failed(
-                f"Draft is too large to encrypt "
-                f"({payload_bytes:,} of {MAX_INNER_PAYLOAD_BYTES:,} bytes). "
+            numbers = QLocale(language())
+            self._emit_failed(_(
+                "Draft is too large to encrypt ({size} of {limit} bytes). "
                 "Split it across smaller drafts or publish directly."
-            )
+            ).format(size=numbers.toString(payload_bytes),
+                     limit=numbers.toString(MAX_INNER_PAYLOAD_BYTES)))
             return
         self._emit_status(
-            "Encrypting draft. Approve on your signer if prompted…"
+            _("Encrypting draft. Approve on your signer if prompted…")
         )
         client.nip44_encrypt_self(
             plaintext,
             on_success=lambda ct: self._on_encrypted(ct, client, publish_relays),
             on_failure=lambda reason: self._emit_failed(
-                f"Could not encrypt draft: {_safe_reason(reason)}"
+                _("Could not encrypt draft: {reason}").format(reason=_safe_reason(reason))
             ),
         )
 
@@ -777,11 +782,11 @@ class DraftPublishJob(QObject):
                 extra_tags=self._extra_wrap_tags,
             )
         except ValueError as exc:
-            self._emit_failed(f"Could not build draft wrap: {exc}")
+            self._emit_failed(_("Could not build draft wrap: {reason}").format(reason=exc))
             return
 
         self._emit_status(
-            "Waiting for signature. Approve the request on your signer…"
+            _("Waiting for signature. Approve the request on your signer…")
         )
         client.sign_event(
             self._wrap_unsigned,
@@ -797,19 +802,21 @@ class DraftPublishJob(QObject):
             signed_event["id"],
             int(signed_event["created_at"]),
         )
-        self._emit_status(
-            f"Publishing draft to {len(publish_relays)} relays…"
-        )
+        self._emit_status(ngettext(
+            "Publishing draft to {n} relay…", "Publishing draft to {n} relays…",
+            len(publish_relays),
+        ).format(n=len(publish_relays)))
         job = self._relay_pool.publish(publish_relays, signed_event)
         job.all_done.connect(self._on_publish_done)
 
     def _on_publish_done(self, results: List[PublishResult]) -> None:
         if self._cancelled:
             return
-        accepted = sum(1 for _, ok, _ in results if ok)
-        self._emit_status(
-            f"Draft saved to {accepted}/{len(results)} relays."
-        )
+        accepted = sum(1 for _url, ok, _message in results if ok)
+        self._emit_status(ngettext(
+            "Draft saved to {accepted}/{total} relay.",
+            "Draft saved to {accepted}/{total} relays.", len(results),
+        ).format(accepted=accepted, total=len(results)))
         self.completed.emit(results)
 
 
@@ -875,7 +882,7 @@ class DraftDeleteJob(QObject):
     # -- public API --------------------------------------------------------
 
     def start(self) -> None:
-        self._emit_status("Looking up your relay list…")
+        self._emit_status(_("Looking up your relay list…"))
         # Wherever the draft may be, including the relays it went to while
         # the account's own list was unknown: the tombstone replaces it there.
         ask_private_relays(self._relay_directory, self._profile,
@@ -916,7 +923,7 @@ class DraftDeleteJob(QObject):
             client_name=CLIENT_NAME,
         )
         self._emit_status(
-            "Waiting for signature. Approve the deletion on your signer…"
+            _("Waiting for signature. Approve the deletion on your signer…")
         )
         client.sign_event(
             unsigned,
@@ -928,17 +935,21 @@ class DraftDeleteJob(QObject):
         if self._cancelled:
             return
         self.tombstoned.emit(self._identifier, signed_event["id"])
-        self._emit_status(f"Removing draft from {len(publish_relays)} relays…")
+        self._emit_status(ngettext(
+            "Removing draft from {n} relay…", "Removing draft from {n} relays…",
+            len(publish_relays),
+        ).format(n=len(publish_relays)))
         job = self._relay_pool.publish(publish_relays, signed_event)
         job.all_done.connect(self._on_publish_done)
 
     def _on_publish_done(self, results: List[PublishResult]) -> None:
         if self._cancelled:
             return
-        accepted = sum(1 for _, ok, _ in results if ok)
-        self._emit_status(
-            f"Draft removed on {accepted}/{len(results)} relays."
-        )
+        accepted = sum(1 for _url, ok, _message in results if ok)
+        self._emit_status(ngettext(
+            "Draft removed on {accepted}/{total} relay.",
+            "Draft removed on {accepted}/{total} relays.", len(results),
+        ).format(accepted=accepted, total=len(results)))
         self.completed.emit(results)
 
 
@@ -1099,14 +1110,15 @@ class DraftBulkDeleteJob(QObject):
         # results decide whether this counts as deleted. Reporting a
         # deletion no relay accepted would tell the user a draft is gone
         # from a place it is still on.
-        if any(ok for _, ok, _ in results):
+        if any(ok for _url, ok, _message in results):
             self._settle(identifier)
             return
         reasons = "; ".join(msg for _url, ok, msg in results if not ok and msg)
-        self._settle(
-            identifier,
-            reason=f"no relay accepted the deletion{f' ({reasons})' if reasons else ''}",
-        )
+        if reasons:
+            reason = _("no relay accepted the deletion ({reasons})").format(reasons=reasons)
+        else:
+            reason = _("no relay accepted the deletion")
+        self._settle(identifier, reason=reason)
 
     def _settle(self, identifier: str, *, reason: str = "") -> None:
         if self._done:

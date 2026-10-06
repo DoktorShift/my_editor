@@ -13,7 +13,7 @@ from __future__ import annotations
 import time
 from typing import Callable, List, Optional, Sequence
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QLocale, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtWidgets import (
     QDialog,
@@ -29,6 +29,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from i18n import _, language, ngettext
 
 from ..avatar_store import AvatarStore
 from ..bech32 import encode_naddr
@@ -339,7 +341,7 @@ class PublishArticleDialog(QDialog):
         is_dark: bool = True,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Publish as Article")
+        self.setWindowTitle(_("Publish as Article"))
         self.setModal(True)
         self.resize(760, 680)
         self.setMinimumSize(640, 520)
@@ -417,7 +419,7 @@ class PublishArticleDialog(QDialog):
         # ---- Title (large, prominent) -----------------------------------
         self._title_edit = QLineEdit()
         self._title_edit.setObjectName("article_title")
-        self._title_edit.setPlaceholderText("Article title")
+        self._title_edit.setPlaceholderText(_("Article title"))
         self._title_edit.setText(default_title)
         self._title_edit.textChanged.connect(self._on_title_changed)
         root.addWidget(self._title_edit)
@@ -425,7 +427,7 @@ class PublishArticleDialog(QDialog):
         # ---- Summary (quieter, italic-feel via lower contrast) ----------
         self._summary_edit = QLineEdit()
         self._summary_edit.setObjectName("article_summary")
-        self._summary_edit.setPlaceholderText("Short summary (one sentence)")
+        self._summary_edit.setPlaceholderText(_("Short summary (one sentence)"))
         root.addWidget(self._summary_edit)
 
         root.addWidget(_make_divider(self))
@@ -436,7 +438,7 @@ class PublishArticleDialog(QDialog):
         self._body_edit.setObjectName("article_body")
         self._body_edit.setAcceptRichText(False)
         self._body_edit.setPlainText(body_markdown)
-        self._body_edit.setPlaceholderText("Write your article in Markdown…")
+        self._body_edit.setPlaceholderText(_("Write your article in Markdown…"))
         self._body_edit.textChanged.connect(self._on_body_changed)
         root.addWidget(self._body_edit, 1)
 
@@ -474,7 +476,7 @@ class PublishArticleDialog(QDialog):
         adv.setSpacing(12)
 
         self._slug_edit = QLineEdit()
-        self._slug_edit.setPlaceholderText("article-slug")
+        self._slug_edit.setPlaceholderText(_("article-slug"))
         seed_slug = default_slug or (slugify(default_title) if default_title else "")
         self._slug_edit.setText(seed_slug)
         self._slug_edit.textEdited.connect(self._on_slug_edited)
@@ -486,13 +488,13 @@ class PublishArticleDialog(QDialog):
         self._image_edit.textChanged.connect(self._on_cover_url_changed)
 
         self._tags_edit = QLineEdit()
-        self._tags_edit.setPlaceholderText("comma, separated, hashtags")
+        self._tags_edit.setPlaceholderText(_("comma, separated, hashtags"))
 
         compact_row = QHBoxLayout()
         compact_row.setContentsMargins(0, 0, 0, 0)
         compact_row.setSpacing(12)
-        compact_row.addWidget(_make_field("Slug (article ID)", self._slug_edit), 1)
-        compact_row.addWidget(_make_field("Hashtags", self._tags_edit), 1)
+        compact_row.addWidget(_make_field(_("Slug (article ID)"), self._slug_edit), 1)
+        compact_row.addWidget(_make_field(_("Hashtags"), self._tags_edit), 1)
         adv.addLayout(compact_row)
 
         adv.addWidget(self._build_cover_field())
@@ -504,12 +506,20 @@ class PublishArticleDialog(QDialog):
         root.addWidget(_make_divider(self))
         root.addSpacing(4)
 
-        # ---- Footer: Publishing-as + status + buttons -------------------
+        # ---- Status: a full-width line above the buttons, hidden while
+        # empty, so a long message never squeezes the footer -------------
+        self._status = QLabel("")
+        self._status.setObjectName("article_status")
+        self._status.setWordWrap(True)
+        self._status.setVisible(False)
+        root.addWidget(self._status)
+
+        # ---- Footer: Publishing-as + buttons ----------------------------
         footer = QHBoxLayout()
         footer.setContentsMargins(0, 0, 0, 0)
         footer.setSpacing(8)
 
-        footer.addWidget(QLabel("Publishing as"))
+        footer.addWidget(QLabel(_("Publishing as")))
 
         self._profile_switch = QToolButton()
         self._profile_switch.setObjectName("profile_switch")
@@ -522,14 +532,9 @@ class PublishArticleDialog(QDialog):
         footer.addWidget(self._profile_switch)
         footer.addStretch(1)
 
-        self._status = QLabel("")
-        self._status.setObjectName("article_status")
-        self._status.setWordWrap(True)
-        footer.addWidget(self._status, 2)
-
         buttons = QDialogButtonBox()
         self._cancel_btn = buttons.addButton(QDialogButtonBox.Cancel)
-        self._publish_btn = buttons.addButton("Publish", QDialogButtonBox.AcceptRole)
+        self._publish_btn = buttons.addButton(_("Publish"), QDialogButtonBox.AcceptRole)
         self._publish_btn.setDefault(True)
         self._cancel_btn.clicked.connect(self._on_cancel)
         self._publish_btn.clicked.connect(self._on_publish)
@@ -587,7 +592,7 @@ class PublishArticleDialog(QDialog):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(12)
 
-        self._cover_preview = QLabel("No cover\nselected")
+        self._cover_preview = QLabel(_("No cover\nselected"))
         self._cover_preview.setObjectName("article_cover_preview")
         self._cover_preview.setFixedSize(
             self._COVER_THUMB_WIDTH, self._COVER_THUMB_HEIGHT
@@ -599,7 +604,7 @@ class PublishArticleDialog(QDialog):
         controls.setContentsMargins(0, 0, 0, 0)
         controls.setSpacing(4)
 
-        label = QLabel("Cover image")
+        label = QLabel(_("Cover image"))
         label.setObjectName("article_field_label")
         controls.addWidget(label)
 
@@ -608,7 +613,7 @@ class PublishArticleDialog(QDialog):
         input_row.setSpacing(6)
         input_row.addWidget(self._image_edit, 1)
         if self._media_store is not None:
-            self._image_pick_btn = QPushButton("Choose or upload…")
+            self._image_pick_btn = QPushButton(_("Choose or upload…"))
             self._image_pick_btn.setCursor(Qt.PointingHandCursor)
             self._image_pick_btn.clicked.connect(self._on_choose_cover_image)
             input_row.addWidget(self._image_pick_btn)
@@ -619,9 +624,9 @@ class PublishArticleDialog(QDialog):
         # similar so users know where the asset comes from without us
         # having to write docs.
         hint = QLabel(
-            "Picked images upload to your Blossom servers automatically."
+            _("Picked images upload to your Blossom servers automatically.")
             if self._media_store is not None
-            else "Paste an image URL hosted anywhere on the public web."
+            else _("Paste an image URL hosted anywhere on the public web.")
         )
         hint.setObjectName("article_field_hint")
         controls.addWidget(hint)
@@ -651,7 +656,7 @@ class PublishArticleDialog(QDialog):
         )
         if self._private_library is not None:
             picker.bind_private_library(self._private_library)
-        picker.setWindowTitle("Choose hero image")
+        picker.setWindowTitle(_("Choose hero image"))
         # Pre-filter to images: videos / audio can't be a NIP-23 cover.
         picker._filter_combo.setCurrentIndex(1)
         picker.file_picked.connect(self._on_cover_image_picked)
@@ -688,11 +693,11 @@ class PublishArticleDialog(QDialog):
         committed to it by typing the URL; downloading + previewing
         arbitrary remote URLs from a publish dialog would be a surprise."""
         if not text.strip():
-            self._clear_cover_preview("No cover\nselected")
+            self._clear_cover_preview(_("No cover\nselected"))
         elif not self._cover_thumb_hash:
             # Manual entry, so we have no hash, so no thumbnail. Make the
             # preview state honest rather than misleading.
-            self._clear_cover_preview("Preview shown\nfor library picks")
+            self._clear_cover_preview(_("Preview shown\nfor library picks"))
 
     def _clear_cover_preview(self, placeholder: str) -> None:
         self._cover_thumb_hash = ""
@@ -722,9 +727,9 @@ class PublishArticleDialog(QDialog):
 
     def _refresh_advanced_toggle_label(self) -> None:
         if self._advanced_open:
-            self._advanced_toggle.setText("▾  Advanced")
+            self._advanced_toggle.setText(_("▾  Advanced"))
         else:
-            self._advanced_toggle.setText("▸  Advanced  ·  slug, cover image, hashtags")
+            self._advanced_toggle.setText(_("▸  Advanced  ·  slug, cover image, hashtags"))
 
     # -- meta strip --------------------------------------------------------
 
@@ -734,7 +739,9 @@ class PublishArticleDialog(QDialog):
             self._meta_label.setText("")
             return
         minutes = max(1, round(words / _WPM_READ_SPEED))
-        self._meta_label.setText(f"{words:,} words · ~{minutes} min read")
+        self._meta_label.setText(ngettext(
+            "{words} word · ~{minutes} min read", "{words} words · ~{minutes} min read", words,
+        ).format(words=QLocale(language()).toString(words), minutes=minutes))
 
     # -- profile switcher --------------------------------------------------
 
@@ -759,7 +766,7 @@ class PublishArticleDialog(QDialog):
         menu.clear()
         profiles = self._store.list()
         if not profiles:
-            act = menu.addAction("(no profiles)")
+            act = menu.addAction(_("(no profiles)"))
             act.setEnabled(False)
             return
         for profile in profiles:
@@ -791,6 +798,7 @@ class PublishArticleDialog(QDialog):
 
     def _set_status(self, text: str, *, error: bool = False) -> None:
         self._status.setText(text)
+        self._status.setVisible(bool(text))
         if error:
             color = "#FF6B6B" if self._is_dark else "#C0392B"
         else:
@@ -838,7 +846,7 @@ class PublishArticleDialog(QDialog):
             # when we flag it as the offender.
             if not self._advanced_open:
                 self._toggle_advanced()
-            self._set_status(f"Cannot build article: {exc}", error=True)
+            self._set_status(_("Cannot build article: {reason}").format(reason=exc), error=True)
             return
 
         self._set_busy(True)
@@ -864,15 +872,15 @@ class PublishArticleDialog(QDialog):
 
     def _on_completed(self, results: List[PublishResult]) -> None:
         self._job = None
-        accepted = sum(1 for _, ok, _ in results if ok)
+        accepted = sum(1 for _url, ok, _message in results if ok)
         if accepted == 0:
             self._set_status(
-                "No relay accepted the article. See log for details.", error=True
+                _("No relay accepted the article. See log for details."), error=True
             )
             self._set_busy(False)
             return
 
-        hint_relays = [url for url, ok, _ in results if ok][:2]
+        hint_relays = [url for url, ok, _message in results if ok][:2]
         naddr = encode_naddr(
             identifier=self._slug_edit.text().strip(),
             author_pubkey_hex=self._current_profile.user_pubkey,
@@ -884,7 +892,8 @@ class PublishArticleDialog(QDialog):
 
     def _on_failed(self, reason: str) -> None:
         self._job = None
-        self._set_status(f"Publish failed: {humanize_failure(reason)}", error=True)
+        self._set_status(_("Publish failed: {reason}").format(reason=humanize_failure(reason)),
+                         error=True)
         self._set_busy(False)
 
     def _on_cancel(self) -> None:

@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
     QTreeView, QVBoxLayout, QWidget,
 )
 
+from i18n import _, ngettext
 from url_safety import is_safe_external_url
 from widgets import FindBar
 
@@ -523,7 +524,7 @@ class PdfViewerTab(QWidget):
         self._build_toolbar()
 
         self.findbar = FindBar(self.find_next, self.find_prev, self._close_findbar, self)
-        self.findbar.hint_label.setText("Enter: next  |  Shift+Enter: prev  |  Esc: close")
+        self.findbar.hint_label.setText(_("Enter: next  |  Shift+Enter: prev  |  Esc: close"))
         self.findbar.edit.textChanged.connect(self._on_search_text_changed)
         self.findbar.setVisible(False)
 
@@ -570,15 +571,15 @@ class PdfViewerTab(QWidget):
         bar.setSpacing(6)
 
         self._outline_btn = QToolButton()
-        self._outline_btn.setText("Contents")
-        self._outline_btn.setToolTip("Table of contents (F12)")
+        self._outline_btn.setText(_("Contents"))
+        self._outline_btn.setToolTip(_("Table of contents (F12)"))
         self._outline_btn.setCheckable(True)
         self._outline_btn.setEnabled(False)
         self._outline_btn.clicked.connect(self.toggle_outline)
         bar.addWidget(self._outline_btn)
         bar.addSpacing(8)
 
-        bar.addWidget(QLabel("Page"))
+        bar.addWidget(QLabel(_("Page")))
         self._page_edit = QLineEdit()
         self._page_edit.setFixedWidth(48)
         self._page_edit.setAlignment(Qt.AlignCenter)
@@ -594,34 +595,34 @@ class PdfViewerTab(QWidget):
 
         self._zoom_out_btn = QToolButton()
         self._zoom_out_btn.setText("−")
-        self._zoom_out_btn.setToolTip("Zoom out (Ctrl+-)")
+        self._zoom_out_btn.setToolTip(_("Zoom out (Ctrl+-)"))
         self._zoom_out_btn.clicked.connect(self.zoom_out)
         bar.addWidget(self._zoom_out_btn)
 
-        self._zoom_label = QLabel("Fit")
+        self._zoom_label = QLabel(_("Fit"))
         self._zoom_label.setMinimumWidth(42)
         self._zoom_label.setAlignment(Qt.AlignCenter)
         bar.addWidget(self._zoom_label)
 
         self._zoom_in_btn = QToolButton()
         self._zoom_in_btn.setText("+")
-        self._zoom_in_btn.setToolTip("Zoom in (Ctrl++)")
+        self._zoom_in_btn.setToolTip(_("Zoom in (Ctrl++)"))
         self._zoom_in_btn.clicked.connect(self.zoom_in)
         bar.addWidget(self._zoom_in_btn)
 
         bar.addSpacing(8)
 
         self._fit_width_btn = QToolButton()
-        self._fit_width_btn.setText("Fit Width")
-        self._fit_width_btn.setToolTip("Fit page width (Ctrl+0)")
+        self._fit_width_btn.setText(_("Fit Width"))
+        self._fit_width_btn.setToolTip(_("Fit page width (Ctrl+0)"))
         self._fit_width_btn.setCheckable(True)
         self._fit_width_btn.setChecked(True)
         self._fit_width_btn.clicked.connect(lambda: self._set_zoom_mode(QPdfView.ZoomMode.FitToWidth))
         bar.addWidget(self._fit_width_btn)
 
         self._fit_page_btn = QToolButton()
-        self._fit_page_btn.setText("Fit Page")
-        self._fit_page_btn.setToolTip("Fit whole page")
+        self._fit_page_btn.setText(_("Fit Page"))
+        self._fit_page_btn.setToolTip(_("Fit whole page"))
         self._fit_page_btn.setCheckable(True)
         self._fit_page_btn.clicked.connect(lambda: self._set_zoom_mode(QPdfView.ZoomMode.FitInView))
         bar.addWidget(self._fit_page_btn)
@@ -672,13 +673,13 @@ class PdfViewerTab(QWidget):
         error = self.document.load(self._file_path)
         while error == QPdfDocument.Error.IncorrectPassword:
             password, ok = QInputDialog.getText(
-                self, "Password required",
-                f"'{os.path.basename(self._file_path)}' is password protected.\n"
-                "Enter the password to open it:",
+                self, _("Password required"),
+                _("'{name}' is password protected.\nEnter the password to open it:").format(
+                    name=os.path.basename(self._file_path)),
                 QLineEdit.Password,
             )
             if not ok:
-                self.load_error = "The document is password protected."
+                self.load_error = _("The document is password protected.")
                 self.load_ok = False
                 return False
             self.document.setPassword(password)
@@ -686,12 +687,12 @@ class PdfViewerTab(QWidget):
 
         if error != QPdfDocument.Error.None_:
             messages = {
-                QPdfDocument.Error.FileNotFound: "The file could not be found.",
-                QPdfDocument.Error.InvalidFileFormat: "The file is not a valid PDF.",
+                QPdfDocument.Error.FileNotFound: _("The file could not be found."),
+                QPdfDocument.Error.InvalidFileFormat: _("The file is not a valid PDF."),
                 QPdfDocument.Error.UnsupportedSecurityScheme:
-                    "The document uses an unsupported security scheme.",
+                    _("The document uses an unsupported security scheme."),
             }
-            self.load_error = messages.get(error, "The document could not be opened.")
+            self.load_error = messages.get(error, _("The document could not be opened."))
             self.load_ok = False
             return False
 
@@ -792,7 +793,8 @@ class PdfViewerTab(QWidget):
 
     def page_display(self) -> str:
         """Status-bar text, e.g. "Page 3 / 42"."""
-        return f"Page {self.current_page() + 1} / {self.document.pageCount()}"
+        return _("Page {page} / {total}").format(page=self.current_page() + 1,
+                                                  total=self.document.pageCount())
 
     def _on_page_changed(self, *_):
         self._sync_page_edit()
@@ -896,9 +898,10 @@ class PdfViewerTab(QWidget):
 
     def _update_zoom_label(self):
         if self.view.zoomMode() == QPdfView.ZoomMode.Custom:
-            self._zoom_label.setText(f"{round(self.view.zoomFactor() * 100)}%")
+            self._zoom_label.setText(_("{percent}%").format(
+                percent=round(self.view.zoomFactor() * 100)))
         else:
-            self._zoom_label.setText("Fit")
+            self._zoom_label.setText(_("Fit"))
 
     # -- find --------------------------------------------------------------
 
@@ -959,9 +962,10 @@ class PdfViewerTab(QWidget):
             return
         count = self._search.count()
         if count == 0:
-            self.findbar.set_match_info("No matches")
+            self.findbar.set_match_info(_("No matches"))
         elif self._current_result < 0:
-            self.findbar.set_match_info(f"{count} matches")
+            self.findbar.set_match_info(
+                ngettext("{count} match", "{count} matches", count).format(count=count))
         else:
             self.findbar.set_match_info(f"{self._current_result + 1} / {count}")
 
