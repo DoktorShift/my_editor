@@ -16,6 +16,7 @@ import constants
 import diagnostics
 import file_paths
 import i18n
+from main_thread_gc import GuiThreadCollector
 
 # The language is chosen before any module that holds texts is imported:
 # many texts are constants, read once when their module loads. A change
@@ -89,6 +90,9 @@ def main():
     # First, so even a failure while starting up is in the log.
     diagnostics.install(constants.APP_VERSION)
     app = EditorApplication(sys.argv)
+    # Garbage is collected on this thread only, never on a worker's: Qt
+    # objects must be destroyed on the thread they belong to.
+    GuiThreadCollector(app)
     # Qt's own words (file dialogs, standard buttons) in the same language.
     i18n.install_qt_translations(app)
     app.setApplicationName(constants.APP_DISPLAY_NAME)

@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""One QApplication for the whole test run.
+"""One QApplication for the whole test run, and garbage collected on its
+thread only.
 
 Qt allows one application object per process. A test module that made
 a plain QCoreApplication first left every widget test after it in the
@@ -9,14 +10,35 @@ aborted ("Fatal Python error: Aborted"). Making the QApplication here,
 before any test module is imported, means every module's own
 ``QCoreApplication.instance() or ...`` fixture finds it, whatever order
 the files run in.
+
+Python's cycle collector runs on whichever thread is executing Python
+when it is due. On Windows that was often one of the threads reading a
+child process's output while a test waited for it; Qt objects a cycle
+held were destroyed there, a timer stayed registered with this thread,
+and it later fired into freed memory and ended the whole run. So the
+run collects the way the app does (main_thread_gc): never
+automatically, and on this thread after every test, as much as
+Python's own thresholds call for.
 """
 
+import gc
 import os
 import sys
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
+from main_thread_gc import collect_due  # noqa: E402
+
 _APP = QApplication.instance() or QApplication(sys.argv[:1])
+
+gc.disable()
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_runtest_teardown(item, nextitem):
+    collect_due()
