@@ -123,7 +123,11 @@ from recent_files import load_recent, add_recent, clear_recent
 from nostr.avatar_store import AvatarBatchLoader, AvatarStore
 from nostr.bech32 import encode_note
 from nostr.blossom.errors import friendly_message
+from nostr.media_server_list import publish_server_list
+from nostr.outbox import writer as outbox_writer
+from nostr.profile_editing import ProfileEditing
 from nostr.state import NostrState
+from nostr.ui.profile_window import ProfileWindow
 from nostr.blossom.server_list import UserServerList
 from nostr.blossom.store import MediaFile, MediaStore
 from nostr.bunker import BunkerSessionPool
@@ -1302,6 +1306,14 @@ class MainWindow(QMainWindow):
             Command("nostr.backup_account", _("Back Up Account\u2026"), NOSTR, nostr=True,
                     keywords=("export", "key")),
             triggered=self._on_backup_account)
+        self.act_move_to_signer = add(
+            Command("nostr.move_to_signer", _("Move Key to Signer App\u2026"), NOSTR,
+                    nostr=True, keywords=("amber", "phone", "key")),
+            triggered=self._on_move_to_signer)
+        self.act_edit_profile = add(
+            Command("nostr.edit_profile", _("Edit Profile\u2026"), NOSTR, nostr=True,
+                    keywords=("name", "picture", "about", "lightning address")),
+            triggered=self._on_edit_profile)
         self.act_nostr_sign_out = add(
             Command("nostr.sign_out", _("Sign Out Active Profile"), NOSTR, nostr=True,
                     keywords=("log out",)),
@@ -1423,7 +1435,9 @@ class MainWindow(QMainWindow):
         m_nostr.addAction(self.act_create_account)
         m_nostr.addAction(self.act_nostr_connect)
         m_nostr.addAction(self.act_restore_account)
+        m_nostr.addAction(self.act_edit_profile)
         m_nostr.addAction(self._act_backup_account)
+        m_nostr.addAction(self.act_move_to_signer)
         self._update_account_actions()
         m_nostr.addAction(self.act_nostr_sign_out)
 
@@ -4023,17 +4037,23 @@ class MainWindow(QMainWindow):
         act_membership = menu.addAction(_("EINUNDZWANZIG Membership\u2026"))
         act_membership.triggered.connect(self._open_membership_window)
         menu.addSeparator()
+        if active is not None:
+            act_edit = menu.addAction(_("Edit Profile\u2026"))
+            act_edit.triggered.connect(self._on_edit_profile)
         if active is not None and active.is_local:
             act_backup = menu.addAction(_("Back Up Account\u2026"))
             act_backup.triggered.connect(self._on_backup_account)
+            act_move = menu.addAction(_("Move Key to Signer App\u2026"))
+            act_move.triggered.connect(self._on_move_to_signer)
         act_add = menu.addAction(_("Add Profile\u2026"))
         act_add.triggered.connect(self._on_nostr_connect)
         act_signout = menu.addAction(_("Sign Out"))
         act_signout.triggered.connect(self._on_nostr_sign_out)
 
     def _update_account_actions(self) -> None:
-        """Back Up Account is for an account whose key is kept here. The
-        menu bar is built after the first chip refresh, so both call this.
+        """Back Up Account and Move Key to Signer App are for an account
+        whose key is kept here. The menu bar is built after the first chip
+        refresh, so both call this.
 
         Every change of the active account passes through here (connect,
         switch, sign out, create, restore), so this is also where the one
@@ -4041,10 +4061,11 @@ class MainWindow(QMainWindow):
         state = getattr(self, "nostr_state", None)
         if state is not None:
             state.refresh()
-        action = getattr(self, "_act_backup_account", None)
-        if action is not None:
-            current = self._profile_store.default()
-            action.setEnabled(current is not None and current.is_local)
+        current = self._profile_store.default()
+        for name in ("_act_backup_account", "act_move_to_signer"):
+            action = getattr(self, name, None)
+            if action is not None:
+                action.setEnabled(current is not None and current.is_local)
 
     # -- creating, restoring and backing up accounts ---------------------------
     # The windows and the network work behind them are the account
@@ -4059,6 +4080,38 @@ class MainWindow(QMainWindow):
 
     def _on_backup_account(self) -> None:
         self._accounts.backup_account()
+
+    def _on_move_to_signer(self) -> None:
+        self._accounts.move_to_signer()
+
+    def _on_edit_profile(self) -> None:
+        """Edit Profile for the active account. The window reads the
+        profile fresh before anything can be changed (nostr/ui/profile_window.py)."""
+        active = self._profile_store.default()
+        if active is None:
+            inform(self, title=_("Connect a signer first"),
+                   message=_("Connect a Nostr signer (Nostr > Connect Signer\u2026) "
+                             "before editing your profile."),
+                   is_dark=self.is_dark_theme)
+            return
+        editing = ProfileEditing(profile=active, pool=self._relay_pool,
+                                 session_pool=self._session_pool,
+                                 directory=self._relay_directory, parent=self)
+        window = ProfileWindow(read=editing.read, save=editing.save,
+                               signs_locally=active.is_local, is_dark=self.is_dark_theme,
+                               parent=self)
+        # Closing the window ends what is still running for it.
+        editing.setParent(window)
+        window.setWindowFlag(Qt.Window, True)
+        window.setAttribute(Qt.WA_DeleteOnClose, True)
+
+        def saved() -> None:
+            self.status.showMessage(_("Profile saved."), 5000)
+            # Read back what was published, so the chip and menus show it.
+            self._metadata_fetcher.fetch(active)
+
+        window.saved.connect(saved)
+        window.show()
 
     def _on_nostr_connect(self):
         dialog = ConnectDialog(
@@ -4127,6 +4180,49 @@ class MainWindow(QMainWindow):
         dialog = self._visible_media_library()
         if dialog is not None:
             dialog.set_server_suggestions(self._media_server_suggestions())
+
+    def _share_media_server_list(self) -> None:
+        """Publish the servers uploads go to as the account's media server
+        list (kind 10063), after asking: it replaces the list other apps
+        read now, if the account published one."""
+        active = self._profile_store.default()
+        if active is None:
+            return
+        servers = [url_safety.origin_of(s) or s for s in self._media_store.target_servers()]
+        hosts = ", ".join(url_safety.host_of(s) or s for s in servers)
+        parent = self._visible_media_library() or self
+        choice = ask(parent, title=_("Tell Other Apps Where Your Media Is?"),
+                     message=_("Other Nostr apps then look on {hosts} for your pictures, "
+                               "in this order. This replaces the list they use now, if "
+                               "you shared one before.").format(hosts=hosts),
+                     buttons=(Button(_("Cancel"), False, CANCEL),
+                              Button(_("Share List"), True, DEFAULT)),
+                     is_dark=self.is_dark_theme)
+        if choice is not True:
+            return
+        try:
+            writer = publish_server_list(
+                servers=servers, pool=self._relay_pool, directory=self._relay_directory,
+                session_pool=self._session_pool, profile=active, parent=self)
+        except ValueError:
+            self.status.showMessage(_("There is no media server to share."), 5000)
+            return
+        messages = {
+            outbox_writer.WRITTEN: _("Your media server list is shared."),
+            outbox_writer.UNCHANGED: _("Other apps already have this list."),
+            outbox_writer.UNKNOWN_BASE: _("Your current list couldn’t be read, so nothing "
+                                          "was changed. Try again later."),
+        }
+
+        def finished(outcome) -> None:
+            self.status.showMessage(messages.get(outcome.status, _(
+                "The list wasn’t shared. Try again in a moment.")), 6000)
+            if outcome.status == outbox_writer.WRITTEN:
+                self._server_list.refresh(active, force=True)
+            writer.deleteLater()
+
+        writer.finished.connect(finished)
+        writer.start()
 
     def _entitled_quota(self, origin: str):
         """The space a membership gives on its media server, in bytes."""
@@ -4465,6 +4561,7 @@ class MainWindow(QMainWindow):
         )
         dialog.bind_private_library(self._private_library)
         dialog.server_suggestions_accepted.connect(self._use_suggested_media_servers)
+        dialog.share_server_list_requested.connect(self._share_media_server_list)
         dialog.set_server_suggestions(self._media_server_suggestions())
         # The dialog deletes itself on close; forget it then, so nothing
         # later asks a deleted object whether it is visible.
@@ -4499,6 +4596,7 @@ class MainWindow(QMainWindow):
         )
         dialog.bind_private_library(self._private_library)
         dialog.server_suggestions_accepted.connect(self._use_suggested_media_servers)
+        dialog.share_server_list_requested.connect(self._share_media_server_list)
         dialog.set_server_suggestions(self._media_server_suggestions())
         # Pre-select images in the picker - videos / audio can't be
         # inserted as inline document objects.

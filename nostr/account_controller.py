@@ -41,7 +41,8 @@ from nostr.outbox.defaults import STARTER_LIST
 from nostr.outbox.lookup import fetch_replaceable
 from nostr.outbox.policy import KIND_PROFILE, LookupState, lookup_relays
 from nostr.ui.account_windows import (
-    STEP_PROFILE, STEP_RELAYS, BackupAccountWindow, CreateAccountWindow, RestoreAccountWindow,
+    STEP_PROFILE, STEP_RELAYS, BackupAccountWindow, CreateAccountWindow, MoveToSignerWindow,
+    RestoreAccountWindow,
 )
 from nostr.ui.connect_dialog import ConnectDialog
 
@@ -156,6 +157,38 @@ class AccountController(QObject):
         window.finished.connect(window.deleteLater)
         window.open()
         return window
+
+    def move_to_signer(self) -> Optional[MoveToSignerWindow]:
+        """Move the active account's key from this computer into Amber."""
+        active = self._store.default()
+        if active is None or not active.is_local:
+            return None
+        secret = self._vault.load(active.user_pubkey)
+        if secret is None:
+            inform(self._window, title=_("This account’s key isn’t on this computer"),
+                   message=_("MyEditor can’t find the private key it kept for this "
+                             "account. If you saved a backup, restore the account "
+                             "from it."),
+                   is_dark=self._is_dark())
+            return None
+        window = MoveToSignerWindow(secret=secret, name=active.display_name,
+                                    connect_signer=self._pair_signer,
+                                    is_dark=self._is_dark(), parent=self._window)
+        window.moved.connect(self._signer_moved_in)
+        window.link_activated.connect(self.link_activated)
+        window.finished.connect(window.deleteLater)
+        window.open()
+        return window
+
+    def _signer_moved_in(self, profile) -> None:
+        """Amber signs as the account now: it becomes the account's signer
+        (the local one is let go), and the key kept here is offered for
+        deletion."""
+        self._save(profile)
+        self._session_pool.drop(profile.user_pubkey)
+        self.activate.emit(profile)
+        # After the window has shown that Amber holds the key.
+        QTimer.singleShot(0, lambda: self.signer_paired(profile))
 
     def _pair_signer(self, on_profile, parent=None) -> None:
         """Pair a signer app for Create Account, over its window. Nothing is

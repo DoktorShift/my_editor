@@ -8,7 +8,7 @@ The language follows the operating system (View > Language > System Language), o
 
 1. Copy `locale/de.po` to `locale/<code>.po` (the two-letter code, for example `fr.po`), and change its `Language:` and, if your language needs it, `Plural-Forms:` header.
 2. Empty every `msgstr` and translate. Poedit opens the file directly.
-3. Add the language's own name to `LANGUAGE_NAMES` in `i18n.py` (for example `"fr": "Français"`).
+3. Add the language's own name to `LANGUAGE_NAMES` in `i18n.py` (for example `"fr": "Français"`), and its code to `CFBundleLocalizations` in `packaging/my_editor.spec`, so macOS shows its own panels in it too.
 4. Run `python scripts/i18n.py check`. It lists every text that is still missing or whose placeholders differ from the English.
 5. Start MyEditor with `MYEDITOR_LANGUAGE=<code>` to see it without changing the setting, and look at every window for text that is cut off.
 

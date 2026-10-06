@@ -204,6 +204,10 @@ if sys.platform == "darwin":
             "CFBundleVersion": VERSION,
             "NSHighResolutionCapable": True,
             "LSApplicationCategoryType": "public.app-category.productivity",
+            # The languages the app speaks, so macOS shows its own panels
+            # (Open, Save, the app menu) in the same one.
+            "CFBundleLocalizations": ["en", "de"],
+            "CFBundleDevelopmentRegion": "en",
             "CFBundleDocumentTypes": [
                 {
                     "CFBundleTypeName": "Text Document",

@@ -33,6 +33,7 @@ from __future__ import annotations
 import ast
 import os
 import re
+import symtable
 import sys
 from collections import OrderedDict
 from typing import Dict, List, Optional, Tuple
@@ -77,44 +78,110 @@ def python_files() -> List[str]:
     return found
 
 
-def _shadowing(tree: ast.AST, rel: str) -> List[str]:
-    """Functions that call _() and also use ``_`` as a variable of their
-    own (``path, _ = ...``, ``for _ in``, a parameter named ``_``): Python
-    then treats ``_`` as that variable everywhere in the function, and the
-    call fails when the window opens."""
+def _shadowing(source: str, tree: ast.AST, rel: str) -> List[str]:
+    """Scopes where ``_`` is a variable of its own (``path, _ = ...``,
+    ``for _ in``, a parameter, an import) while _() is called in that
+    scope or in one nested in it that sees the same ``_``: Python then
+    calls the variable, and the window fails when it opens or a button
+    is clicked. Read with Python's own scope rules (symtable), so a
+    comprehension's own ``_`` or a nested scope's own one is told apart.
+    The module itself counts too: rebinding the imported _ there breaks
+    every function in the file."""
+    try:
+        top = symtable.symtable(source, rel, "exec")
+    except SyntaxError:
+        return []
+    calls = {}      # (first line of a scope, kind) -> lines where _() is called
+    scopes = [(tree, top)]
     problems = []
-    for func in ast.walk(tree):
-        if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
-            continue
-        args = func.args
-        params = [a.arg for a in args.args + args.kwonlyargs + args.posonlyargs]
-        if args.vararg:
-            params.append(args.vararg.arg)
-        if args.kwarg:
-            params.append(args.kwarg.arg)
-        body = func.body if isinstance(func.body, list) else [func.body]
-        assigns = "_" in params
-        calls = False
-        stack = list(body)
+
+    def called_here(table) -> List[int]:
+        """Lines of _() calls made directly in this scope."""
+        node = _node_of(tree, table)
+        if node is None:
+            return []
+        found = []
+        stack = list(ast.iter_child_nodes(node)) if node is not tree else list(tree.body)
         while stack:
-            node = stack.pop()
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda,
-                                 ast.ClassDef)):
-                continue        # its own scope, checked on its own
-            if isinstance(node, ast.Name) and node.id == "_":
-                if isinstance(node.ctx, ast.Store):
-                    assigns = True
-            if isinstance(node, ast.ExceptHandler) and node.name == "_":
-                assigns = True
-            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-                    and node.func.id == "_"):
-                calls = True
-            stack.extend(ast.iter_child_nodes(node))
-        if assigns and calls:
-            line = getattr(func, "lineno", 0)
-            problems.append(f"{rel}:{line}: this function calls _() and also uses _ as a "
-                            "variable; rename the variable (for example to _unused)")
+            child = stack.pop()
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda,
+                                  ast.ClassDef, ast.ListComp, ast.SetComp, ast.DictComp,
+                                  ast.GeneratorExp)):
+                continue
+            if (isinstance(child, ast.Call) and isinstance(child.func, ast.Name)
+                    and child.func.id == "_"):
+                found.append(child.lineno)
+            stack.extend(ast.iter_child_nodes(child))
+        return found
+
+    def sees_outer(table) -> bool:
+        if "_" not in table.get_identifiers():
+            return True
+        symbol = table.lookup("_")
+        return symbol.is_free() or (not symbol.is_local() and not symbol.is_parameter())
+
+    def calls_through(table) -> List[int]:
+        """_() calls in this scope and in the nested scopes that see its _."""
+        lines = called_here(table)
+        for child in table.get_children():
+            if sees_outer(child):
+                lines.extend(calls_through(child))
+        return lines
+
+    def visit(table) -> None:
+        if "_" in table.get_identifiers():
+            symbol = table.lookup("_")
+            own = symbol.is_assigned() or symbol.is_parameter() or symbol.is_imported()
+            if table.get_type() == "module":
+                # Importing _ from i18n is the point; any other binding is not.
+                own = symbol.is_assigned() and not _only_imported(tree)
+            elif symbol.is_global() or symbol.is_free():
+                own = False
+            if own:
+                lines = calls_through(table)
+                if lines:
+                    problems.append(
+                        f"{rel}:{table.get_lineno()}: _ is used as a variable here and "
+                        f"_() is called (line {min(lines)}); rename the variable "
+                        "(for example to _unused)")
+        for child in table.get_children():
+            visit(child)
+
+    visit(top)
     return problems
+
+
+def _only_imported(tree: ast.AST) -> bool:
+    """Whether the module code itself (not its functions, classes or
+    comprehensions) never binds ``_`` other than by importing it."""
+    stack = list(tree.body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
+                             ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp,
+                             ast.GeneratorExp)):
+            continue
+        if isinstance(node, ast.Name) and node.id == "_" and isinstance(node.ctx, ast.Store):
+            return False
+        stack.extend(ast.iter_child_nodes(node))
+    return True
+
+
+def _node_of(tree: ast.AST, table):
+    """The AST node a symbol table describes, found by kind and line."""
+    if table.get_type() == "module":
+        return tree
+    kinds = {"function": (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda),
+             "class": (ast.ClassDef,)}.get(table.get_type(),
+                                           (ast.ListComp, ast.SetComp, ast.DictComp,
+                                            ast.GeneratorExp))
+    for node in ast.walk(tree):
+        if isinstance(node, kinds) and getattr(node, "lineno", None) == table.get_lineno():
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                if node.name != table.get_name():
+                    continue
+            return node
+    return None
 
 
 def extract(only: Optional[List[str]] = None) -> Tuple["OrderedDict[Key, Message]", List[str]]:
@@ -132,7 +199,7 @@ def extract(only: Optional[List[str]] = None) -> Tuple["OrderedDict[Key, Message
         except SyntaxError as exc:
             problems.append(f"{rel}: cannot parse ({exc})")
             continue
-        problems.extend(_shadowing(tree, rel))
+        problems.extend(_shadowing(source, tree, rel))
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
@@ -148,6 +215,11 @@ def extract(only: Optional[List[str]] = None) -> Tuple["OrderedDict[Key, Message
             if any(isinstance(a, ast.JoinedStr) for a in args):
                 problems.append(f"{where}: an f-string passed to {name}() is never "
                                 "found in a translation; use {{name}} and .format()")
+                continue
+            if any(isinstance(a, (ast.BinOp, ast.Call)) for a in args):
+                problems.append(f"{where}: a text built before {name}() looks it up is "
+                                "never found in a translation; pass the literal text "
+                                "and fill it in after")
                 continue
             if len(args) < len(fields) or not all(
                     isinstance(a, ast.Constant) and isinstance(a.value, str) for a in args):
@@ -283,12 +355,18 @@ def check(messages, paths: Optional[List[str]] = None) -> List[str]:
     problems = []
     for path in (paths if paths is not None else po_files()):
         name = os.path.relpath(path, ROOT)
-        found, _language, _plural = _read_po(path)
+        found, _language, plural_forms = _read_po(path)
+        counted = re.search(r"nplurals\s*=\s*(\d+)", plural_forms or "")
+        nplurals = int(counted.group(1)) if counted else 2
         for key, message in messages.items():
             forms, fuzzy = found.get(key, ([], False))
             label = f"{name}: {message.msgid[:60]!r}"
             if not forms or not all(forms) or fuzzy:
                 problems.append(f"{label} is not translated")
+                continue
+            if message.plural and len(forms) != nplurals:
+                problems.append(f"{label} has {len(forms)} plural forms, the language "
+                                f"needs {nplurals}")
                 continue
             expected = placeholders(message.msgid)
             for index, form in enumerate(forms):

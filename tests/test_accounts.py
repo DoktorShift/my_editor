@@ -591,3 +591,35 @@ def test_an_account_kept_here_can_be_backed_up_any_time(tmp_path):
     settle()
     assert files.opens_with("correct horse") == SK
     assert "Backup saved" in win.backup_form.note.text()
+
+
+# -- moving a key kept here into Amber --------------------------------------------------------
+
+def test_moving_to_amber_keeps_the_key_off_the_screen_and_checks_the_account(qt_app):
+    from nostr.ui.account_windows import AMBER_CONNECT, AMBER_GET, AMBER_IMPORT, MOVED
+    from nostr.ui.account_windows import MoveToSignerWindow
+    from types import SimpleNamespace
+
+    pairings = []
+    win = MoveToSignerWindow(secret=SK, name="Alice",
+                             connect_signer=lambda on_profile, parent=None:
+                             pairings.append(on_profile), is_dark=False)
+    moved = []
+    win.moved.connect(moved.append)
+    win.buttons["continue"].click()
+    assert win.page == AMBER_GET
+    win.buttons["continue"].click()
+    assert win.page == AMBER_IMPORT
+    # The key is never on screen as text.
+    from PySide6.QtWidgets import QLabel
+    assert not any(NSEC in label.text() for label in win.findChildren(QLabel))
+    win.buttons["continue"].click()
+    assert win.page == AMBER_CONNECT
+    win.buttons["connect"].click()
+    other = SimpleNamespace(user_pubkey="cd" * 32, display_name="")
+    pairings[0](other)                                  # Amber signs as someone else
+    assert moved == [] and not win._connect_error.isHidden()
+    same = SimpleNamespace(user_pubkey=PK, display_name="")
+    pairings[0](same)
+    assert moved == [same] and same.display_name == "Alice"
+    assert win.page == MOVED
