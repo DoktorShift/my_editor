@@ -142,7 +142,13 @@ from nostr.blossom.store import MediaFile, MediaStore
 from nostr.bunker import BunkerSessionPool
 from nostr.contacts import ContactListFetcher
 from nostr.draft_store import DraftState, DraftStore
+from nostr.draft_deletions import DraftDeletions
 from nostr.draft_sync import DraftSync
+from nostr.imports_controller import ImportsController
+from nostr.ui.imports_window import SETTINGS_KEY as IMPORTS_SETTINGS_KEY
+from nostr.ui.imports_window import ImportsWindow
+from nostr.imports.constants import IDENTIFIER_PREFIX as IMPORT_IDENTIFIER_PREFIX
+from nostr.imports.constants import SOURCE_TAG as IMPORT_SOURCE_TAG
 from nostr.drafts import (
     INNER_KIND_LONG_FORM,
     INNER_KIND_SHORT_NOTE,
@@ -241,6 +247,10 @@ def _ask_save_changes(parent, title: str, *, save_label: str = "",
         Button(_("Cancel"), "cancel", CANCEL),
         Button(save_label or _("Save"), "save", DEFAULT),
     ))
+
+
+# How long quitting waits for unsent changes to the list of sources.
+QUIT_SYNC_WAIT_MS = 5_000
 
 
 class MainWindow(QMainWindow):
@@ -408,6 +418,29 @@ class MainWindow(QMainWindow):
         self._draft_sync.signer_unreachable.connect(
             self._on_draft_sync_signer_unreachable
         )
+        # Deletions other apps announce as NIP-09 requests (STANDUP does),
+        # which the wraps alone would not show (nostr/draft_deletions.py).
+        self._draft_deletions = DraftDeletions(
+            relay_pool=self._relay_pool,
+            relay_directory=self._relay_directory,
+            store=self._draft_store,
+            entitled_relays=self._entitled_relays,
+            parent=self,
+        )
+        # Imports: the sources shared with STANDUP, the inbox, the checks
+        # while the app runs, the import jobs and the Imports window, for
+        # the account in use (nostr/imports_controller.py). It binds only
+        # while Nostr is in use (see _update_account_actions).
+        self._imports = ImportsController(
+            relay_pool=self._relay_pool,
+            relay_directory=self._relay_directory,
+            session_pool=self._session_pool,
+            draft_store=self._draft_store,
+            entitled_relays=self._entitled_relays,
+            blossom_primary=lambda: self._media_store.settings.primary,
+            window_factory=self._make_imports_window,
+            parent=self,
+        )
         # Created lazily inside ``_build_findbar`` so its parent is the
         # central widget rather than ``self`` - keeps Qt's geometry
         # reasoning straightforward.
@@ -526,6 +559,7 @@ class MainWindow(QMainWindow):
             # if the panel is never opened, this still keeps the store
             # warm so opening the panel later is instant.
             self._draft_sync.start_for(active)
+            self._draft_deletions.start_for(active)
             # An account created here whose setup was left for later is
             # finished now, once the window is up.
             QTimer.singleShot(0, lambda: self._accounts.profile_activated(
@@ -1444,6 +1478,12 @@ class MainWindow(QMainWindow):
             Command("nostr.drafts", _("Drafts…"), NOSTR, "Ctrl+Shift+D", checkable=True,
                     nostr=True, listed_as=_("Toggle Drafts panel")),
             triggered=self._on_toggle_drafts_panel)
+        # Imports: the window of sources, their posts and the open one. No
+        # shortcut: no platform has a convention for it.
+        self.act_nostr_imports = add(
+            Command("nostr.imports", _("Imports\u2026"), NOSTR, nostr=True,
+                    keywords=("rss", "feed", "import", "sources")),
+            triggered=self._open_imports_window)
         self.act_membership = add(
             Command("nostr.membership", _("EINUNDZWANZIG Membership\u2026"), NOSTR,
                     keywords=("einundzwanzig", "21", "join")),
@@ -1603,6 +1643,7 @@ class MainWindow(QMainWindow):
         m_nostr.addAction(self.act_nostr_insert_image)
         m_nostr.addSeparator()
         m_nostr.addAction(self.act_nostr_drafts)
+        m_nostr.addAction(self.act_nostr_imports)
         m_nostr.addSeparator()
         m_nostr.addAction(self.act_membership)
         m_nostr.addSeparator()
@@ -1730,6 +1771,8 @@ class MainWindow(QMainWindow):
             # exists locally instead of duplicating the draft.
             draft_store=self._draft_store,
             entitled_relays=self._entitled_relays,
+            # One list of sources in the app: the imports controller's.
+            subscriptions=self._imports.subscriptions,
         )
         self._drafts_panel.set_active_profile(self._profile_store.default())
         # The panel's outbound actions all route back through the host.
@@ -4041,6 +4084,9 @@ class MainWindow(QMainWindow):
             self._drafts_panel.apply_theme(self.is_dark_theme)
         for banner in getattr(self, "_tab_conflict_banners", {}).values():
             banner.apply_theme(self.is_dark_theme)
+        imports_window = getattr(self, "_imports", None) and self._imports.window()
+        if imports_window is not None:
+            imports_window.apply_theme(self.is_dark_theme)
         if announce:
             message = (_("Switched to Dark theme") if self.is_dark_theme
                        else _("Switched to Light theme"))
@@ -4273,10 +4319,16 @@ class MainWindow(QMainWindow):
             viewer = self._pdf_viewer_from_widget(self.tabs.widget(i))
             if viewer is not None:
                 viewer.save_view_state()
-        # Publish any pending feed-subscription changes before the relay
-        # sockets go away (best effort; the local cache survives anyway).
-        if hasattr(self, "_drafts_panel"):
-            self._drafts_panel.feeds.flush_subscriptions()
+        # Publish any pending changes to the list of sources before the
+        # signer and the relay sockets go away, waiting a few seconds at
+        # most: a key kept here signs on a later turn of the event loop,
+        # and what does not arrive in time is sent on the next launch.
+        imports = getattr(self, "_imports", None)
+        if imports is not None:
+            imports.flush()
+            if imports.subscriptions.is_busy:
+                self.status.showMessage(_("Saving your list of sources…"))
+                imports.subscriptions.wait_until_settled(QUIT_SYNC_WAIT_MS)
         # Close any warm relay sockets and bunker channels so the WebSocket
         # layer can flush close frames before the QApplication tears down.
         if hasattr(self, "_session_pool"):
@@ -4361,6 +4413,10 @@ class MainWindow(QMainWindow):
         state = getattr(self, "nostr_state", None)
         if state is not None:
             state.refresh()
+            imports = getattr(self, "_imports", None)
+            if imports is not None:
+                imports.account_changed(self._profile_store.default() if state.active
+                                        else None)
         current = self._profile_store.default()
         for name in ("_act_backup_account", "act_move_to_signer"):
             action = getattr(self, name, None)
@@ -4561,6 +4617,18 @@ class MainWindow(QMainWindow):
         """Nostr > EINUNDZWANZIG Membership."""
         self._membership.open_window()
 
+    def _open_imports_window(self) -> None:
+        """Nostr > Imports: sources, their posts, and the open one."""
+        self._imports.open_window()
+
+    def _make_imports_window(self, controller):
+        """The Imports window, remembered in settings.json between runs."""
+        return ImportsWindow(
+            controller, dark=self.is_dark_theme,
+            load_settings=lambda: load_settings().get(IMPORTS_SETTINGS_KEY) or {},
+            save_settings=lambda value: save_setting(IMPORTS_SETTINGS_KEY, value),
+            open_url=lambda url: self._open_external(url.toString()))
+
     def _on_nostr_profile_connected(self, profile: Profile):
         # New (or re-connected) profile becomes the active one.
         previous = self._profile_store.default()
@@ -4594,6 +4662,7 @@ class MainWindow(QMainWindow):
         # Bind the draft pipeline to the new profile so the panel
         # (visible or not) starts collecting wraps from the relays.
         self._draft_sync.start_for(profile)
+        self._draft_deletions.start_for(profile)
         if self._drafts_panel is not None:
             self._drafts_panel.set_active_profile(profile)
             self._drafts_panel.set_signer_unsupported(False)
@@ -4615,6 +4684,7 @@ class MainWindow(QMainWindow):
         memory is a privacy problem and not merely untidy.
         """
         self._draft_sync.stop()
+        self._draft_deletions.stop()
         self._private_library.stop()
         self._server_list.forget_account()
         # The library lists one account's files; the next account must
@@ -4643,6 +4713,7 @@ class MainWindow(QMainWindow):
         # ``DraftSync.start_for`` is idempotent if the same profile is
         # already active.
         self._draft_sync.start_for(profile)
+        self._draft_deletions.start_for(profile)
         if self._drafts_panel is not None:
             self._drafts_panel.set_active_profile(profile)
             self._drafts_panel.set_signer_unsupported(False)
@@ -4671,6 +4742,7 @@ class MainWindow(QMainWindow):
             self._drafts_panel.set_signer_unreachable(False)
         if remaining is not None:
             self._draft_sync.start_for(remaining)
+            self._draft_deletions.start_for(remaining)
 
     # -- metadata / avatar updates ----------------------------------------
 
@@ -5115,6 +5187,7 @@ class MainWindow(QMainWindow):
             self._central_splitter.setSizes([total - panel_w, panel_w])
         self.act_nostr_drafts.setChecked(True)
         self._draft_sync.refresh()
+        self._draft_deletions.refresh()
 
     def _hide_drafts_panel(self) -> None:
         if self._drafts_panel is None:
@@ -5209,12 +5282,12 @@ class MainWindow(QMainWindow):
         """Delete one draft or twenty, through one question and one run.
 
         Drafts written by other Nostr clients can use inner kinds this
-        editor does not speak (kind 30024, used by Habla and Yakihonne
-        for long-form drafts, is the common one). Tombstoning one of
-        those from here could leave it visible in the client that made
-        it, so they are separated out before anything is confirmed and
-        named in the confirmation rather than failing partway through a
-        run the user already approved.
+        editor does not speak (an article draft, kind 30024, is read as
+        an article: nostr/drafts.py). Tombstoning one of those from here
+        could leave it visible in the client that made it, so they are
+        separated out before anything is confirmed and named in the
+        confirmation rather than failing partway through a run the user
+        already approved.
         """
         profile = self._profile_store.default()
         if profile is None or not identifiers:
@@ -5310,6 +5383,7 @@ class MainWindow(QMainWindow):
                 entitled_relays=self._entitled_relays(),
                 profile=profile,
                 targets=deletable,
+                announce=self._imported_draft_wraps(deletable),
                 parent=self,
             )
         except ValueError as exc:
@@ -5348,6 +5422,22 @@ class MainWindow(QMainWindow):
             )
         )
         job.start()
+
+    def _imported_draft_wraps(self, deletable: List[Tuple[str, int]]) -> dict:
+        """``{d: wrap id}`` for the imported drafts among ``deletable``.
+
+        Their deletion is announced to apps that read only NIP-09
+        requests too (EINUNDZWANZIG STANDUP), so a post deleted here is
+        never imported there again."""
+        found = {}
+        for identifier, _kind in deletable:
+            record = self._draft_store.get(identifier)
+            if record is None:
+                continue
+            if identifier.startswith(IMPORT_IDENTIFIER_PREFIX) or any(
+                    tag and tag[0] == IMPORT_SOURCE_TAG for tag in record.inner_tags):
+                found[identifier] = record.event_id
+        return found
 
     def _on_draft_deletion_finished(
         self, deleted: int, failures: list, total: int, progress,

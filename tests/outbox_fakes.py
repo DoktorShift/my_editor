@@ -214,6 +214,8 @@ class FakeRelayDirectory(QObject):
         self.calls: List[tuple] = []
         self.shared: List[tuple] = []
         self.remembered: List[dict] = []
+        # pubkey -> the account's own draft relays ([] for none).
+        self.draft_lists: Dict[str, List[str]] = {}
 
     def set(self, pubkey: str, value) -> None:
         if not isinstance(value, RelayList):
@@ -257,6 +259,25 @@ class FakeRelayDirectory(QObject):
         self.calls.append(("private_relays", author, tuple(entitled), tuple(legacy), reading))
         self._later(on_done, policy.private_relays(self.cached(author), entitled=entitled,
                                                    legacy=legacy, reading=reading))
+
+    def expect_draft_relays(self, author, *, timeout_ms=15_000):
+        self.calls.append(("expect_draft_relays", author))
+
+    def set_draft_relays(self, author, relays):
+        self.calls.append(("set_draft_relays", author, None if relays is None else tuple(relays)))
+        if relays is not None:
+            self.draft_lists[author.lower()] = list(relays)
+            self.changed.emit(author.lower())
+
+    def draft_relays_of(self, author):
+        known = self.draft_lists.get((author or "").lower())
+        return list(known) if known is not None else None
+
+    def draft_relays(self, author, on_done, *, entitled=(), legacy=(), reading=False):
+        self.calls.append(("draft_relays", author, tuple(entitled), tuple(legacy), reading))
+        self._later(on_done, policy.draft_relays(
+            self.cached(author), self.draft_lists.get(author.lower(), ()),
+            entitled=entitled, legacy=legacy, reading=reading))
 
     def outbox_of(self, author, on_done, *, hints=()):
         self.calls.append(("outbox_of", author, tuple(hints)))

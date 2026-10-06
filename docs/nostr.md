@@ -108,9 +108,9 @@ If your signer (Amber, nsec.app) times out a decrypt approval or you dismiss the
 
 ### Storage notes
 
-- Drafts are kept on relays for ~90 days then expire (NIP-40). Re-saving extends the window.
+- Drafts you write never expire. An imported draft you don't change is removed after 90 days (NIP-40); once you change and save it, it stays like any other draft.
 - Notes are tagged with a private UUID; articles use a stable slug, so the draft and its eventual published article share the same address.
-- Deleting a draft publishes an empty replacement so your other devices see it removed.
+- Deleting a draft publishes an empty replacement so your other devices see it removed; it never expires, so a relay that kept an old copy cannot bring the draft back.
 
 ---
 
@@ -169,13 +169,25 @@ Auto-discovery reads `<link rel="alternate" type="application/rss+xml">` from th
 
 Supports RSS 2.0, Atom, and JSON Feed (WordPress, Ghost, Hugo, Jekyll, Substack, Bear, Mataroa, and friends).
 
+Nothing an import reads may point into your own network: feeds, pages, podcast chapters and images on `localhost`, local-only names (`router`, `nas.local`, `.lan`), private or link-local addresses, or names that resolve to one are refused, and every redirect is checked the same way before it is followed (five at most).
+
 ### Nostr-native publishers
 
 Some publishers (Habla, Yakihonne, Pareto, self-hosted Nostr-aware blogs) emit feeds where the body is a teaser and the real article lives on Nostr as a kind:30023 long-form event. When the feed's link is a `nostr:naddr...` URI, or contains a bech32 naddr embedded in an HTTP URL (njump.me, habla.news, yakihonne.com, etc.), the importer fetches the event from your NIP-65 read relays plus the relay hints encoded in the address and uses its prose as the draft body. If the fetch times out or the event is empty, the feed-provided teaser is published instead so the draft always ships.
 
-### Idempotent re-runs
+### Sources you follow, shared with EINUNDZWANZIG STANDUP
 
-Each item's draft identifier is derived from its feed id, so re-running the same import replaces existing drafts on relays rather than duplicating them. Safe to schedule daily, weekly, or whenever you publish a new post.
+The sources you subscribe to are one private list on your relays, the same list EINUNDZWANZIG STANDUP keeps (a kind 30078 event, `d` = `einundzwanzig:feed-sources`, encrypted to yourself with NIP-44). A source followed in one app shows up in the other, together with its defaults for new drafts (copy images, fetch the full article).
+
+- Both apps' edits are kept: before saving, MyEditor reads the list again and merges (sources added in either app stay, sources removed in either app go, a title or a default changed here wins over the other app's unchanged one).
+- Whatever MyEditor does not understand (sources only STANDUP reads, keys it does not know) is written back unchanged.
+- A list MyEditor cannot read (one saved with an older kind of encryption, or while the signer is unreachable) is never written over; your changes stay on this computer until it can be read.
+- The list MyEditor kept before (`d` = `myeditor:feed-sources`) is merged in once and not written again.
+- Quitting waits a few seconds for changes that are still on their way. Changes that could not be sent yet are kept with the list on this computer and sent at the next start.
+
+### Importing again never overwrites a draft
+
+Each item's draft identifier is derived from its feed id the same way EINUNDZWANZIG STANDUP derives it, so the same post gets the same identifier in both apps. Before anything is fetched or signed, MyEditor asks your relays which of the chosen posts already have a draft (also one you deleted), an article or a deletion request, and leaves those alone: a draft you edited after importing it stays exactly as it is, and a deleted one does not come back. When no relay answers, the import does not start. The question is asked once more right before each draft is signed, in case the other app made it in the meantime.
 
 ## Joining EINUNDZWANZIG in the app
 

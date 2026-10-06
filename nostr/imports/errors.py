@@ -24,6 +24,8 @@ class ERROR_CODES:
     FETCH_ERROR = "FETCH_ERROR"
     TOO_LARGE = "TOO_LARGE"
     EMPTY_RESPONSE = "EMPTY_RESPONSE"
+    # The address, or a redirect, points into the local network.
+    LOCAL_NETWORK = "LOCAL_NETWORK"
 
     # Resolution / format layer.
     NOT_A_FEED = "NOT_A_FEED"
@@ -69,7 +71,12 @@ class SourceError(Exception):
 # and (per the platform writing guidelines) never "we", never blame,
 # always a next step where one exists. Codes absent here fall back to
 # the error's own message.
+LOCAL_NETWORK_MESSAGE = _(
+    "This address points to your local network, which MyEditor doesn't read "
+    "from for safety.")
+
 _FRIENDLY = {
+    ERROR_CODES.LOCAL_NETWORK: LOCAL_NETWORK_MESSAGE,
     ERROR_CODES.NO_FEED_FOUND: _(
         "No feed found at this site. "
         "Try pasting the feed URL directly, "

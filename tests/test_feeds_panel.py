@@ -43,7 +43,7 @@ def qt_app():
     yield app
 
 
-def make_panel(fetcher, *, publish_outcomes=None, entitled_relays=None):
+def make_panel(fetcher, *, publish_outcomes=None, entitled_relays=None, catalogue=None):
     """A fully wired panel whose import jobs run on fakes.
 
     Returns (panel, created_publish_jobs, job_kwargs_seen): the last
@@ -52,11 +52,13 @@ def make_panel(fetcher, *, publish_outcomes=None, entitled_relays=None):
     import tempfile
     from nostr.imports.subscriptions import FeedSubscriptionStore
     from tests.test_imports_subscriptions import (
-        FakePublisher,
+        FakeRelay,
         FakeScheduler,
         FakeSessionPool,
     )
 
+    from tests.imports_fakes import FakeCatalogue
+    catalogue = catalogue or FakeCatalogue()
     publish_factory, created_jobs = make_factory(publish_outcomes)
     job_kwargs_seen = []
     cache_dir = tempfile.mkdtemp(prefix="feeds-panel-test-")
@@ -67,7 +69,7 @@ def make_panel(fetcher, *, publish_outcomes=None, entitled_relays=None):
             relay_pool=None,
             relay_directory=FakeRelayDirectory(),
             cache_dir=cache_dir,
-            publisher=FakePublisher(),
+            publisher=FakeRelay(),
             scheduler=FakeScheduler(),
             clock=lambda: 1_700_000_000,
         )
@@ -96,6 +98,7 @@ def make_panel(fetcher, *, publish_outcomes=None, entitled_relays=None):
         import_job_factory=import_job_factory,
         run_blocking=inline_run_blocking,
         subscription_store_factory=subscription_store_factory,
+        catalogue_factory=lambda **_kw: catalogue,
     )
     panel.bind_runtime(
         relay_pool=object(),

@@ -16,8 +16,8 @@ One package owns every answer to "which relays?":
                overwriting what is already there; setting up new accounts
 
 defaults and policy are plain Python: importing them (or the rules
-re-exported here) loads no Qt. RelayDirectory and ask_private_relays are
-loaded from directory.py on first use.
+re-exported here) loads no Qt. RelayDirectory, ask_draft_relays and
+ask_private_relays are loaded from directory.py on first use.
 """
 
 from .policy import (  # noqa: F401
@@ -28,6 +28,7 @@ from .policy import (  # noqa: F401
     RelayList,
     bulk_profile_relays,
     dedupe_relays,
+    draft_relays,
     is_public_relay,
     lookup_relays,
     merge_profile_content,
@@ -45,7 +46,7 @@ from .policy import (  # noqa: F401
     starter_relay_list_tags,
 )
 
-_FROM_DIRECTORY = ("RelayDirectory", "ask_private_relays")
+_FROM_DIRECTORY = ("RelayDirectory", "ask_draft_relays", "ask_private_relays")
 
 
 def __getattr__(name):

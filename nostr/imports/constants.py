@@ -69,10 +69,12 @@ NOSTR_WIKI_KIND: int = 30818
 # Feed subscriptions                                                    #
 # --------------------------------------------------------------------- #
 
-# Kind 30078 (NIP-78 app data) event carrying the encrypted feed list;
-# the d-tag namespaces it so it never collides with other apps' data.
+# Kind 30078 (NIP-78 app data) event carrying the encrypted feed list.
+# The d-tag is EINUNDZWANZIG STANDUP's, so both apps share one list
+# (feed_list.py); the one this app wrote before is read once, to merge.
 SUBSCRIPTIONS_KIND: int = 30078
-FEED_LIST_DTAG: str = "myeditor:feed-sources"
+FEED_LIST_DTAG: str = "einundzwanzig:feed-sources"
+LEGACY_FEED_LIST_DTAG: str = "myeditor:feed-sources"
 
 # Debounce for publishing subscription changes: rapid add/remove/refresh
 # batches into one signed event per window.

@@ -164,6 +164,19 @@ def test_parse_tolerates_unknown_kind():
     assert parsed["kind"] == 9999
 
 
+def test_parse_reads_an_article_draft_as_an_article():
+    # EINUNDZWANZIG STANDUP keeps article drafts as NIP-23's kind 30024.
+    s = json.dumps({"kind": 30024, "content": "x", "tags": [["title", "T"]],
+                    "created_at": 1, "pubkey": PK})
+    assert parse_inner_event(s)["kind"] == INNER_KIND_LONG_FORM
+
+
+def test_parse_wrap_reads_an_article_draft_k_tag_as_an_article():
+    event = {"kind": DRAFT_WRAP_KIND, "id": "e" * 64, "pubkey": PK, "created_at": 5,
+             "content": "ct", "tags": [["d", "rss-0123456789abcdef"], ["k", "30024"]]}
+    assert parse_wrap_event(event).inner_kind == INNER_KIND_LONG_FORM
+
+
 # --------------------------------------------------------------------------- #
 # build_draft_wrap, outer 31234                                              #
 # --------------------------------------------------------------------------- #
@@ -219,6 +232,17 @@ def test_build_tombstone_is_empty_content():
     # Same d + k so addressable replacement targets the right event.
     assert ["d", "x"] in t["tags"]
     assert ["k", "1"] in t["tags"]
+
+
+def test_a_draft_expires_only_when_asked_and_a_deletion_never():
+    # D-3: drafts the person writes never expire; only imports pass an
+    # expiration. A deletion must outlive any copy a lagging relay keeps.
+    plain = build_draft_wrap(identifier="x", inner_kind=1, encrypted_content="ct",
+                             pubkey_hex=PK, client_name="X", created_at=100)
+    assert [t[0] for t in plain["tags"]] == ["d", "k", "client"]
+    tombstone = build_tombstone_wrap(identifier="x", inner_kind=1, pubkey_hex=PK,
+                                     client_name="X")
+    assert not any(t[0] == "expiration" for t in tombstone["tags"])
 
 
 # --------------------------------------------------------------------------- #

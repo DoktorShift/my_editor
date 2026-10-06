@@ -75,9 +75,9 @@ from i18n import _, ngettext
 
 from ..bunker import BunkerSessionPool
 from ..imports import workers
+from ..imports.catalogue import ExistingCatalogue
 from ..imports.errors import SourceError, friendly_message
 from ..imports.fetch import SourceFetcher
-from ..imports.images import scan_html_images
 from ..imports.pipeline import ImportItemsJob
 from ..imports.preview import (
     SCOPE_PRESETS,
@@ -85,6 +85,7 @@ from ..imports.preview import (
     filter_items,
     read_minutes,
 )
+from ..imports.snapshots import has_images, identifier_of, images_to_copy
 from ..imports.registry import (
     ResolveInput,
     ResolveResult,
@@ -113,6 +114,9 @@ _STATUS_LABEL = {
     "saved": _("saved"),
     "published": _("published"),
     "failed": _("failed"),
+    # A draft, an article or a deletion exists for it (in this app or
+    # another): never imported again, so an edited draft stays as it is.
+    "existing": _("already imported"),
 }
 
 
@@ -268,6 +272,7 @@ class FeedsPanel(QFrame):
         run_blocking: Optional[Callable[..., None]] = None,
         subscription_store_factory: Optional[
             Callable[..., FeedSubscriptionStore]] = None,
+        catalogue_factory: Optional[Callable[..., ExistingCatalogue]] = None,
     ) -> None:
         super().__init__(parent)
         self.setObjectName("feeds_panel")
@@ -310,7 +315,11 @@ class FeedsPanel(QFrame):
         self._subscription_store_factory = (
             subscription_store_factory or FeedSubscriptionStore)
         self._subscriptions: Optional[FeedSubscriptionStore] = None
+        self._owns_subscriptions = True
         self._feed_title = ""
+        self._catalogue_factory = catalogue_factory or ExistingCatalogue
+        self._catalogue: Optional[ExistingCatalogue] = None
+        self._existing_count = 0
 
         self._build_ui()
         # Escape cancels whatever is in flight, matching platform
@@ -507,7 +516,7 @@ class FeedsPanel(QFrame):
         )
         self._rehost_check.toggled.connect(
             lambda _checked: self._update_import_button())
-        self._review_images_btn = QPushButton(_("Review images"))
+        self._review_images_btn = QPushButton(_("Review Images\u2026"))
         self._review_images_btn.setObjectName("feeds_panel_chip")
         self._review_images_btn.setCursor(Qt.PointingHandCursor)
         self._review_images_btn.clicked.connect(self._on_review_images)
@@ -592,6 +601,7 @@ class FeedsPanel(QFrame):
         draft_store=None,
         blossom_settings=None,
         entitled_relays: Optional[Callable[[], Sequence[str]]] = None,
+        subscriptions: Optional[FeedSubscriptionStore] = None,
     ) -> None:
         """Inject the runtime dependencies needed to publish drafts.
 
@@ -603,7 +613,10 @@ class FeedsPanel(QFrame):
         the user's configured Blossom settings are read by default.
         ``entitled_relays`` answers which relays the account has standing
         on beyond its own list (a membership's); imported drafts and the
-        synced feed list go there as well.
+        synced feed list go there as well. ``subscriptions`` is the list
+        of sources the app already keeps (the imports controller's); the
+        panel then shows and edits that one, and leaves binding it to an
+        account to its owner. Without it the panel keeps its own.
         """
         self._relay_pool = relay_pool
         self._relay_directory = relay_directory
@@ -618,10 +631,16 @@ class FeedsPanel(QFrame):
             self._nostr_query = RelayQueryAdapter(relay_pool, parent=self)
         else:
             self._nostr_query = None
+        # What already exists for the account, so an import never
+        # overwrites a draft (also one made or edited in another app).
+        self._catalogue = self._catalogue_factory(
+            relay_pool=relay_pool, relay_directory=relay_directory,
+            draft_store=draft_store, entitled_relays=entitled_relays, parent=self)
         # Subscriptions: the user's remembered sources, synced privately
         # as an encrypted kind 30078 event.
         if self._subscriptions is None:
-            self._subscriptions = self._subscription_store_factory(
+            self._owns_subscriptions = subscriptions is None
+            self._subscriptions = subscriptions or self._subscription_store_factory(
                 session_pool=session_pool,
                 relay_pool=relay_pool,
                 relay_directory=relay_directory,
@@ -631,14 +650,10 @@ class FeedsPanel(QFrame):
             self._subscriptions.feeds_changed.connect(
                 self._refresh_sources_list)
             self._subscriptions.sync_status.connect(self._on_sync_status)
-            if self._active_profile is not None:
+            if self._owns_subscriptions and self._active_profile is not None:
                 self._subscriptions.bind_profile(self._active_profile)
+            self._refresh_sources_list()
         self._refresh_controls()
-
-    def flush_subscriptions(self) -> None:
-        """Publish pending subscription changes now (app quit / logout)."""
-        if self._subscriptions is not None:
-            self._subscriptions.flush()
 
     def set_active_profile(self, profile: Optional[Profile]) -> None:
         """Track the active Nostr profile. Without one, imports are disabled."""
@@ -648,7 +663,7 @@ class FeedsPanel(QFrame):
         # a preview or a job signed by the old key.
         self._abort_activity()
         self._active_profile = profile
-        if self._subscriptions is not None:
+        if self._subscriptions is not None and self._owns_subscriptions:
             self._subscriptions.bind_profile(profile)
         self._reset_to_idle()
 
@@ -1138,34 +1153,28 @@ class FeedsPanel(QFrame):
         self._import_btn.setEnabled(len(selected) > 0)
         self._update_image_review_button(selected)
 
-    def _selected_image_urls(self, selected: List[FeedItem]) -> List[str]:
-        seen: List[str] = []
-        for item in selected:
-            for url in scan_html_images(item.content_html):
-                if url not in seen:
-                    seen.append(url)
-        return seen
-
     def _update_image_review_button(self, selected: List[FeedItem]) -> None:
-        images = self._selected_image_urls(selected)
-        show = bool(images) and self._rehost_check.isChecked()
+        show = self._rehost_check.isChecked() and any(has_images(i) for i in selected)
         self._review_images_btn.setVisible(show)
-        if show:
-            kept = sum(1 for u in images if u not in self._skip_image_urls)
-            self._review_images_btn.setText(
-                _("Review images ({kept}/{total})…").format(
-                    kept=kept, total=len(images)))
 
     def _on_review_images(self) -> None:
         if self._state != "preview":
             return
-        from .image_review_dialog import ImageReviewDialog
+        selected = self._checked_items()
+        generation = self._load_generation
+        # The list is made the way the import works (from the Markdown),
+        # off the UI thread: converting many bodies takes a moment.
+        self._run_blocking(
+            lambda: images_to_copy(selected),
+            lambda images, g=generation: self._show_image_review(g, images),
+            lambda _exc: None)
 
-        images = self._selected_image_urls(self._checked_items())
-        if not images:
+    def _show_image_review(self, generation: int, images: List[str]) -> None:
+        if generation != self._load_generation or self._state != "preview" or not images:
             return
+        from .image_review_dialog import ImageReviewDialog
         dialog = ImageReviewDialog(images, self._skip_image_urls, parent=self)
-        if dialog.exec() == ImageReviewDialog.Accepted:
+        if dialog.exec() == ImageReviewDialog.DialogCode.Accepted:
             self._skip_image_urls = dialog.skip_urls()
             self._update_import_button()
 
@@ -1216,6 +1225,48 @@ class FeedsPanel(QFrame):
         finally:
             self._populating = False
 
+        # Ask what already exists before anything is fetched or signed.
+        # No answer from any relay means no import, never a guess.
+        self._state = "importing"
+        self._existing_count = 0
+        self._progress_bar.setRange(0, 0)
+        self._set_status(_("Checking your existing drafts…"))
+        self._refresh_controls()
+        generation = self._load_generation
+        identifiers = []
+        for item in selected:
+            try:
+                identifiers.append(identifier_of(item))
+            except ValueError:
+                continue
+        self._catalogue.look_up(
+            self._active_profile, identifiers,
+            on_ready=lambda found, g=generation: self._start_import(g, selected, found),
+            on_unavailable=lambda reason, g=generation: self._import_unavailable(
+                g, reason, selected))
+
+    def _import_unavailable(self, generation: int, reason: str,
+                            selected: List[FeedItem]) -> None:
+        if generation != self._load_generation or self._state != "importing":
+            return
+        self._state = "preview"
+        self._populate_preview_list()
+        # The person's choice stays as it was.
+        for row, item in zip(self._rows, self._preview_items):
+            if item not in selected:
+                row.setCheckState(Qt.Unchecked)
+        self._update_import_button()
+        self._refresh_controls()
+        self._set_status(reason, error=True)
+
+    def _start_import(self, generation: int, selected: List[FeedItem], found) -> None:
+        if generation != self._load_generation or self._state != "importing":
+            return
+        catalogue = self._catalogue
+
+        def is_imported(identifier: str) -> bool:
+            return identifier in found or catalogue.known_locally(identifier) is not None
+
         store = self._draft_store
         identifier_exists = (
             (lambda identifier: identifier in store) if store is not None else None
@@ -1228,6 +1279,7 @@ class FeedsPanel(QFrame):
             relay_directory=self._relay_directory,
             session_pool=self._session_pool,
             identifier_exists=identifier_exists,
+            is_imported=is_imported,
             fetch_full_text=self._fulltext_check.isChecked(),
             rehost_images=self._rehost_check.isChecked(),
             blossom_server=(
@@ -1246,10 +1298,10 @@ class FeedsPanel(QFrame):
         self._job.item_succeeded.connect(self._on_item_succeeded)
         self._job.item_published.connect(self._on_item_published)
         self._job.item_failed.connect(self._on_item_failed)
+        self._job.item_existing.connect(self._on_item_existing)
         self._job.progress.connect(self._on_job_progress)
         self._job.completed.connect(self._on_completed)
 
-        self._state = "importing"
         # The import has a known length: determinate bar, item by item.
         self._progress_bar.setRange(0, len(selected))
         self._progress_bar.setValue(0)
@@ -1272,8 +1324,10 @@ class FeedsPanel(QFrame):
             self._refresh_controls()
             self._set_status(_("Load cancelled."))
             return
-        if self._state == "importing" and self._job is not None:
-            self._job.cancel()
+        if self._state == "importing":
+            if self._job is not None:
+                self._job.cancel()
+            self._load_generation += 1
             self._finish_import()
             self._set_status(_("Import cancelled."))
 
@@ -1331,16 +1385,31 @@ class FeedsPanel(QFrame):
         title = self._row_title(index)
         self._set_row(index, title, "failed", reason)
 
+    def _on_item_existing(self, index: int, _identifier: str) -> None:
+        self._existing_count += 1
+        self._set_row(index, self._row_title(index), "existing")
+
     def _on_completed(self, succeeded: int, attempted: int) -> None:
-        if attempted == 0:
+        existing = self._existing_count
+        if attempted == 0 and existing:
+            self._set_status(ngettext(
+                "Done. The item was already imported; nothing was changed.",
+                "Done. All {count} items were already imported; nothing was changed.",
+                existing).format(count=existing))
+        elif attempted == 0:
             self._set_status(_("Done. Nothing to import."))
         else:
             text = ngettext(
                 "Done. {succeeded}/{attempted} item(s) imported as drafts.",
                 "Done. {succeeded}/{attempted} item(s) imported as drafts.",
                 attempted,
-            )
-            self._set_status(text.format(succeeded=succeeded, attempted=attempted))
+            ).format(succeeded=succeeded, attempted=attempted)
+            if existing:
+                text += " " + ngettext(
+                    "{count} was already imported and left as it is.",
+                    "{count} were already imported and left as they are.",
+                    existing).format(count=existing)
+            self._set_status(text)
         # Stamp the subscription so "New since last import" has a floor.
         if (
             succeeded > 0

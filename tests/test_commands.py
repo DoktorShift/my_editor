@@ -218,7 +218,7 @@ def test_the_nostr_commands_that_need_an_account_are_marked(main_window_commands
     marked = {c.id for c in win.commands.commands() if c.nostr}
     assert {"nostr.publish_note", "nostr.publish_article", "nostr.drafts",
             "nostr.media_library", "nostr.insert_image", "nostr.sign_out",
-            "nostr.backup_account"} <= marked
+            "nostr.backup_account", "nostr.imports"} <= marked
     # How a person starts using Nostr is never hidden behind Nostr.
     assert not marked & {"nostr.connect", "nostr.create_account", "nostr.restore_account",
                          "nostr.membership"}
@@ -398,3 +398,10 @@ def test_the_app_invented_view_keys_are_retired(fresh_window):
         action = fresh_window.commands.action(command_id)
         assert action.shortcut().isEmpty(), command_id
         assert action in fresh_window.m_view.actions()
+
+
+def test_imports_is_in_the_nostr_menu_without_a_shortcut(main_window_commands):
+    # No platform has a convention for it, so it gets no shortcut.
+    command = main_window_commands.commands.command("nostr.imports")
+    assert command.shortcut is None
+    assert command.group == "Nostr"

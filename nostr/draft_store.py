@@ -21,7 +21,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, Iterator, List, Optional
+import time
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
 from PySide6.QtCore import QObject, Signal
 
@@ -113,8 +114,11 @@ class DraftStore(QObject):
     cleared = Signal()
     loading_state_changed = Signal(bool)
 
-    def __init__(self, parent: Optional[QObject] = None) -> None:
+    def __init__(self, parent: Optional[QObject] = None, *,
+                 clock: Callable[[], float] = time.time) -> None:
         super().__init__(parent)
+        # For NIP-40: an expired wrap never enters the store.
+        self._clock = clock
         self._profile_pubkey: Optional[str] = None
         self._records: Dict[str, DraftRecord] = {}
         # Drafts deleted, by d tag: the deletion's (created_at, event id).
@@ -198,18 +202,12 @@ class DraftStore(QObject):
         Tombstones (empty ciphertext) are handled here too, they remove
         any existing record for that ``d`` and emit ``record_removed``.
         """
+        if meta.is_expired(self._clock()):
+            # Gone (NIP-40): neither a row nor a version that replaces one.
+            return
         existing = self._records.get(meta.identifier)
         if meta.is_tombstone:
-            # A deletion removes only what it is newer than: a relay that
-            # lags behind can hand out a deletion older than a draft
-            # written since. Its time is remembered, so a copy the
-            # deletion replaced, still held by another relay, does not
-            # bring the draft back.
-            if existing is None or supersedes(meta.created_at, meta.event_id,
-                                              existing.created_at, existing.event_id):
-                self._deleted[meta.identifier] = (meta.created_at, meta.event_id)
-                if existing is not None:
-                    self.remove(meta.identifier)
+            self.apply_deletion(meta.identifier, meta.created_at, meta.event_id)
             return
         deleted = self._deleted.get(meta.identifier)
         if deleted is not None and not supersedes(meta.created_at, meta.event_id, *deleted):
@@ -299,6 +297,31 @@ class DraftStore(QObject):
         record.state = DraftState.FAILED
         record.failure_reason = reason or _("decryption failed")
         self.record_changed.emit(identifier)
+
+    def apply_deletion(self, identifier: str, created_at: int, event_id: str) -> bool:
+        """A deletion of ``identifier`` made at ``created_at``: a blanked
+        wrap (NIP-37), or a deletion request naming the draft (NIP-09,
+        how EINUNDZWANZIG STANDUP deletes). Returns whether a draft left.
+
+        A deletion removes only what it is newer than: a relay that lags
+        behind can hand out a deletion older than a draft written since.
+        Its time is remembered, so a copy the deletion replaced, still
+        held by another relay, does not bring the draft back.
+        """
+        remembered = self._deleted.get(identifier)
+        if remembered is None or supersedes(created_at, event_id, *remembered):
+            self._deleted[identifier] = (int(created_at), event_id or "")
+        existing = self._records.get(identifier)
+        if existing is not None and supersedes(created_at, event_id,
+                                               existing.created_at, existing.event_id):
+            self.remove(identifier)
+            return True
+        return False
+
+    def deleted_identifiers(self) -> List[str]:
+        """The drafts known to be deleted (this session), newest version
+        or not: an import must never bring one back."""
+        return list(self._deleted)
 
     def remove(self, identifier: str) -> None:
         if identifier not in self._records:
