@@ -344,3 +344,30 @@ def test_paragraph_styles_use_each_platform_keys(fresh_window):
         "format.style.body", "format.style.h1", "format.style.h2", "format.style.h3"]
     # Structure commands are off where there is no Markdown to hold them.
     assert action in fresh_window._rich_actions
+
+
+
+@pytest.mark.parametrize("platform, keys", [
+    ("darwin", {"format.strike": "Ctrl+Shift+X", "format.list.bullet": "Ctrl+Shift+7",
+                "format.list.number": "Ctrl+Shift+9", "format.quote": "Ctrl+'",
+                "format.style.h2": "Ctrl+Alt+2", "edit.paste_plain": "Ctrl+Alt+Shift+V",
+                "search.use_selection": "Ctrl+E", "format.reset": "Ctrl+\\",
+                "insert.link": "Ctrl+K"}),
+    ("win32", {"format.strike": "Alt+Shift+5", "format.list.bullet": "Ctrl+Shift+8",
+               "format.list.number": "Ctrl+Shift+7", "format.quote": "",
+               "format.style.h2": "Ctrl+2", "edit.paste_plain": "Ctrl+Shift+V",
+               "search.use_selection": "", "format.reset": "Ctrl+\\",
+               "insert.link": "Ctrl+K"}),
+    ("linux", {"format.list.bullet": "Ctrl+Shift+8", "format.quote": "",
+               "format.style.body": "Ctrl+0"}),
+])
+def test_each_platform_gets_its_own_conventions(qt_app, monkeypatch, platform, keys):
+    import types
+    from main_window import MainWindow
+    monkeypatch.setattr(commands, "sys", types.SimpleNamespace(platform=platform))
+    win = StandIn()
+    MainWindow._build_actions(win)        # no two commands share a key here either
+    for command_id, expected in keys.items():
+        shortcut = win.commands.action(command_id).shortcut()
+        assert shortcut.toString(QKeySequence.SequenceFormat.PortableText) == expected, \
+            command_id

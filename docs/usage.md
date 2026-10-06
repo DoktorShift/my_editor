@@ -24,17 +24,19 @@ On macOS, `Ctrl` in these tables is the Command key (`⌘`) and `Alt` is Option 
 | `Ctrl+B` | Bold |
 | `Ctrl+I` | Italic |
 | `Ctrl+U` | Underline (stays in local files: Markdown and Nostr have no underline) |
-| `Ctrl+Shift+X` | Strikethrough |
+| `Ctrl+Shift+X` on macOS, `Alt+Shift+5` on Windows and Linux | Strikethrough |
 | | Inline Code (`Format` menu) |
-| `Ctrl+D` | Clear Formatting (a link stays a link) |
-| `Ctrl+Alt+0` (`Ctrl+0` on Windows and Linux) | Style: Body |
-| `Ctrl+Alt+1` to `Ctrl+Alt+3` (`Ctrl+1` to `Ctrl+3`) | Style: Heading 1 to 3 (the same heading again makes it Body) |
-| `Ctrl+Shift+7` | Bulleted List (again: no list) |
-| `Ctrl+Shift+9` | Numbered List (again: no list) |
+| `Ctrl+\` | Clear Formatting (a link stays a link) |
+| `Ctrl+Alt+0` on macOS, `Ctrl+0` on Windows and Linux | Style: Body |
+| `Ctrl+Alt+1` to `Ctrl+Alt+3` on macOS, `Ctrl+1` to `Ctrl+3` on Windows and Linux | Style: Heading 1 to 3 (the same heading again makes it Body) |
+| `Ctrl+Shift+7` on macOS, `Ctrl+Shift+8` on Windows and Linux | Bulleted List (again: no list) |
+| `Ctrl+Shift+9` on macOS, `Ctrl+Shift+7` on Windows and Linux | Numbered List (again: no list) |
 | `Ctrl+]` / `Ctrl+[` | Increase / Decrease Indent of list items |
-| `Ctrl+'` | Quote (again: no quote) |
+| `Ctrl+'` on macOS (no shortcut on Windows and Linux) | Quote (again: no quote) |
 | `Ctrl+K` | Add Link (Edit Link when the caret is in a link) |
 | | `Insert > Divider`: a horizontal rule (`---`) after the paragraph |
+
+The keys follow each platform's own conventions: Apple Notes and Pages on macOS, Google Docs and LibreOffice on Windows and Linux. A command no convention has a key for has none.
 
 Links: `Ctrl+K` opens a small panel under the words with the link's text and address. It accepts web addresses (`https://` is added when you leave it out), email addresses and, while a Nostr account is in use, Nostr links; it says right there why anything else cannot be a link. Pasting a web address over selected words links them. `Ctrl`-click (`Cmd`-click on macOS) opens a link: web pages in your browser, Nostr links through njump.me. Typing right after a link is not part of it.
 

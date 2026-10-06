@@ -1104,18 +1104,23 @@ class MainWindow(QMainWindow):
         # files, and is left out of what is published.
         self.act_underline.setToolTip(_("Underline stays in local files; Markdown and "
                                         "Nostr have none."))
+        # Shift-Command-X on a Mac, Alt+Shift+5 elsewhere, as in Google Docs
+        # (Word and LibreOffice have none).
         self.act_strike = add(Command("format.strike", _("Strikethrough"), FORMAT,
-                                      "Ctrl+Shift+X", keywords=(_("cross out"),)),
+                                      platform_keys("Ctrl+Shift+X", "Alt+Shift+5"),
+                                      keywords=(_("cross out"),)),
                               triggered=lambda: self._toggle_style(rich_text.STRIKE))
         self.act_code = add(Command("format.code", _("Inline Code"), FORMAT,
                                     keywords=(_("monospace"),)),
                             triggered=lambda: self._toggle_style(rich_text.CODE))
+        # Command-\ and Ctrl+\, Google Docs' keys for it.
         self.act_reset_format = add(Command("format.reset", _("Clear Formatting"), FORMAT,
-                                            "Ctrl+D", keywords=(_("plain"),)),
+                                            "Ctrl+\\", keywords=(_("plain"),)),
                                     triggered=self._reset_format)
-        # Paragraph styles. Option-Command-0 to 3 on a Mac, as in Pages and
-        # standup; Ctrl+0 to 3 elsewhere, because Ctrl+Alt is AltGr there
-        # and types characters (² and ³ on a German keyboard).
+        # Paragraph styles. Option-Command-0 to 3 on a Mac, as in Google Docs
+        # (Notes' Shift-Command-T, H and J belong to View commands here);
+        # Ctrl+0 to 3 elsewhere, as in LibreOffice, because Ctrl+Alt is
+        # AltGr there and types characters (² and ³ on a German keyboard).
         self._style_group = QActionGroup(self)
         self._style_group.setExclusionPolicy(QActionGroup.ExclusionPolicy.ExclusiveOptional)
         self.act_styles = []
@@ -1130,13 +1135,15 @@ class MainWindow(QMainWindow):
                          triggered=lambda n=level: self._set_heading(n))
             self._style_group.addAction(action)
             self.act_styles.append(action)
-        # Lists, with Apple Notes' keys (Shift-Command-7 and 9).
+        # Lists: Apple Notes' keys on a Mac (Shift-Command-7 and 9), Google
+        # Docs' elsewhere (Ctrl+Shift+8 and 7).
         self.act_bullets = add(Command("format.list.bullet", _("Bulleted List"), FORMAT,
-                                       "Ctrl+Shift+7", checkable=True,
-                                       keywords=(_("bullets"), _("list"))),
+                                       platform_keys("Ctrl+Shift+7", "Ctrl+Shift+8"),
+                                       checkable=True, keywords=(_("bullets"), _("list"))),
                                triggered=lambda: self._toggle_list(rich_text.BULLET))
         self.act_numbers = add(Command("format.list.number", _("Numbered List"), FORMAT,
-                                       "Ctrl+Shift+9", checkable=True,
+                                       platform_keys("Ctrl+Shift+9", "Ctrl+Shift+7"),
+                                       checkable=True,
                                        keywords=(_("numbers"), _("list"), _("ordered"))),
                                triggered=lambda: self._toggle_list(rich_text.NUMBER))
         self.act_indent = add(Command("format.indent", _("Increase Indent"), FORMAT, "Ctrl+]",
@@ -1145,8 +1152,10 @@ class MainWindow(QMainWindow):
         self.act_outdent = add(Command("format.outdent", _("Decrease Indent"), FORMAT,
                                        "Ctrl+["),
                                triggered=lambda: self._change_indent(-1))
-        # Apple Notes' Block Quote key.
-        self.act_quote = add(Command("format.quote", _("Quote"), FORMAT, "Ctrl+'",
+        # Apple Notes' Block Quote key on a Mac; Word, Google Docs and
+        # LibreOffice have none.
+        self.act_quote = add(Command("format.quote", _("Quote"), FORMAT,
+                                     platform_keys("Ctrl+'", None),
                                      checkable=True, keywords=(_("citation"),)),
                              triggered=lambda: self._editor_call("toggle_quote"))
 
