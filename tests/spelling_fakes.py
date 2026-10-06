@@ -108,6 +108,7 @@ class FakeTextBackend(FakeBackend):
     def _check_text(self, text: str, language: str) -> Optional[TextCheck]:
         self.calls.append(("check_text", text, language))
         self._boom("check_text")
+        text.encode("utf-16-le")        # as strict as macOS: a lone surrogate fails
         if language == AUTOMATIC:
             language = self.identify(text)
         languages = list(self.words) if language == AUTOMATIC else [language]

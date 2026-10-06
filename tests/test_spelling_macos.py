@@ -6,6 +6,7 @@ Nothing here learns a word: that would write into the person's own
 dictionary, which every app on the Mac shares. Learn Spelling is tested
 with the stand-in checker; Ignore lasts only for this process."""
 
+import json
 import sys
 import uuid
 
@@ -79,6 +80,13 @@ def test_mistakes_inside_underscore_emphasis_are_found(backend):
                         ("Das ist ein __Fehlr__ in einem Satz hier.", "Fehlr"),
                         ("This is a _mistaek_ in a sentence here.", "mistaek")):
         assert [m.word for m in checker.find_misspellings(text, AUTOMATIC)] == [wrong], text
+
+
+def test_half_an_emoji_does_not_turn_spelling_off(backend):
+    checker = SpellChecker(backend)
+    title = json.loads('"Ein Titel mit Fehlr \\ud83d"')
+    assert [m.word for m in checker.find_misspellings(title, "de")] == ["Fehlr"]
+    assert backend.problem is None and checker.is_available()
 
 
 def test_an_ignored_word_counts_as_right_until_the_app_quits(backend):

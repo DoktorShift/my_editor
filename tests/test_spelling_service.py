@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Spell checking a document as it changes, without blocking typing."""
 
+import json
+
 from PySide6.QtCore import QCoreApplication, QEvent, Qt
 from PySide6.QtGui import QTextCharFormat, QTextCursor, QTextDocument
 from PySide6.QtTest import QTest
@@ -122,6 +124,18 @@ def test_a_paragraph_checker_tells_the_language():
     assert checker.default_language() == AUTOMATIC
     found = checker.find_misspellings("das ist ein Huas\nthis is a wrod")
     assert [(m.word, m.language) for m in found] == [("Huas", "de-DE"), ("wrod", "en-US")]
+
+
+def test_text_cut_inside_an_emoji_does_not_turn_spelling_off():
+    # A title from relay JSON, cut by a client between the two halves of
+    # an emoji: a lone surrogate. Bad input, not a broken checker.
+    title = json.loads('"the helo wrld \\ud83d"')
+    for backend in (FakeTextBackend(), FakeBackend()):
+        checker = SpellChecker(backend)
+        assert [m.word for m in checker.find_misspellings(title, "en-US")] == ["helo", "wrld"]
+        assert checker.check("wrld\ud83d", "en-US") is True
+        assert checker.suggestions("wrld\ud83d", "en-US") == []
+        assert checker.is_available() is True
 
 
 def test_an_unavailable_checker_finds_nothing_and_says_so_once():
