@@ -922,11 +922,20 @@ def test_the_page_sits_on_the_windows_own_background():
     assert not win._scroll.viewport().autoFillBackground()
 
 
-def test_a_scrolling_page_is_never_cut_off_at_the_side():
-    win = window()
-    win._overview_note.setText("A very long note that wraps over many lines. " * 400)
+@pytest.mark.parametrize("long_note", [False, True])
+def test_a_page_is_never_cut_off_at_the_side(long_note):
+    # The pay page is narrower than the application page; it must be laid
+    # out for its own width, inside the window, scrolling or not.
+    api = FakeApi()
+    win = window(api)
+    to_pay(win, api, inv=invoice(bolt11="lnbc210n1pjexample"))
+    if long_note:
+        win._pay_intro.setText("A very long note that wraps over many lines. " * 400)
     win.show()
     QApplication.processEvents()
-    viewport = win._scroll.viewport().width()
-    assert viewport >= win._stack.minimumSizeHint().width()
+    page = win._pages[PAY]
+    assert win._stack.minimumSizeHint().width() == page.minimumSizeHint().width()
+    assert win._scroll.viewport().width() >= page.minimumSizeHint().width()
+    assert win._scroll.geometry().right() <= win.width()
+    assert win._pay_intro.width() <= win._scroll.viewport().width()
     win.close()
