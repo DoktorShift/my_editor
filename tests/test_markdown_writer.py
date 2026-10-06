@@ -13,9 +13,10 @@ What must hold:
   Lines typed one under the other stay separate, as paragraphs: the one
   break every Nostr reader shows alike.
 
-  Typed text is Markdown and is written as typed; only a web address
-  that holds a character a reader would take for emphasis is written as
-  <address>, so it survives being read back.
+  Typed text is Markdown and is written as typed (footnote marks
+  included); only a web address that holds a character a reader would
+  take for emphasis is written as <address>, so it survives being read
+  back.
 
   A short note is plain text: no markup, list markers and link addresses
   kept.
@@ -184,6 +185,21 @@ def test_an_address_with_markup_characters_is_kept_whole(address):
     assert written == f"see <{address}> now\n"
     # Read back and written again, it is the same address.
     assert document_to_markdown(from_markdown(written)) == written
+
+
+def test_footnote_marks_are_written_as_typed():
+    # A reference and its definition, typed by hand, reach the reader as
+    # Markdown footnotes: nothing in them is escaped.
+    doc = typed("A claim[^1] and another[^note].\n\n[^1]: The source.\n[^note]: More.")
+    assert document_to_markdown(doc) == (
+        "A claim[^1] and another[^note].\n\n[^1]: The source.\n\n[^note]: More.\n")
+    assert document_to_note_text(doc) == (
+        "A claim[^1] and another[^note].\n\n[^1]: The source.\n[^note]: More.")
+
+
+def test_a_footnote_mark_in_bold_text_stays_one():
+    doc = typed(("a claim[^1]", {"bold": True}))
+    assert document_to_markdown(doc) == "**a claim[^1]**\n"
 
 
 @pytest.mark.parametrize("address", ["https://example.com/plain", "nostr:npub1abcdef"])

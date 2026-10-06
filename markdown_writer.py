@@ -25,8 +25,9 @@ What is written follows what the editor shows ("Markdown first"):
   alike (NIP-23 asks for no hard line breaks inside a paragraph). Only
   Shift+Enter, an explicit line break, is written as one.
 - Typed text is Markdown: what is typed is written as typed, so
-  "## Heading", "[label](url)" or a code fence typed by hand reach
-  Nostr as such (the preview shows what they become). A web address
+  "## Heading", "[label](url)", a footnote mark ("[^1]", and its
+  "[^1]: note") or a code fence typed by hand reach Nostr as such (the
+  preview shows what they become). A web address
   that holds a character Markdown would read as emphasis is written as
   ``<address>``, which every reader keeps intact.
 - A link that shows its own address (a pasted web address, an email) is
