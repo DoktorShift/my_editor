@@ -139,9 +139,29 @@ def _rebuild_member_benefits(module) -> None:
                                              per_user_bytes=module.PER_USER_BYTES)
 
 
+def _allow_the_test_bed_host(module) -> None:
+    """HARNESS-ONLY: let images and mirror sources named by other people be
+    on localhost, where every server of this test bed runs.
+
+    url_safety.is_local_name refuses names that point into the person's
+    own network (localhost, router, nas.local) for addresses a stranger's
+    event names, by design. The test bed's avatars, feed images and media
+    servers are all on localhost, so they can only be fetched with this
+    patch. Private IP literals stay refused."""
+    real = getattr(module, "is_local_name", None)
+    if real is None:
+        return      # an app from before the rule
+
+    def is_local_name(host: str) -> bool:
+        return False if is_local_host(host) else real(host)
+
+    module.is_local_name = is_local_name
+
+
 # Callables run right after a module is imported: module name -> [fn(module)].
 POST_IMPORT_HOOKS: Dict[str, List[Callable[[Any], None]]] = {
     "nostr.einundzwanzig": [_rebuild_member_benefits],
+    "url_safety": [_allow_the_test_bed_host],
 }
 
 HOME: Optional[Path] = None
