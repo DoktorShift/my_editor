@@ -916,3 +916,21 @@ def test_a_very_long_page_scrolls_instead_of_leaving_the_screen():
     assert win._scroll.verticalScrollBar().maximum() > 0
     assert default_button(win).isVisible()
     win.close()
+
+
+def test_the_page_sits_on_the_windows_own_background():
+    # A scroll area paints its page by default, which washed out the text
+    # (and made it unreadable in dark mode).
+    win = window()
+    assert not win._stack.autoFillBackground()
+    assert not win._scroll.viewport().autoFillBackground()
+
+
+def test_a_scrolling_page_is_never_cut_off_at_the_side():
+    win = window()
+    win._overview_note.setText("A very long note that wraps over many lines. " * 400)
+    win.show()
+    QApplication.processEvents()
+    viewport = win._scroll.viewport().width()
+    assert viewport >= win._stack.minimumSizeHint().width()
+    win.close()
