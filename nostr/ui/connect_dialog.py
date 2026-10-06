@@ -275,6 +275,7 @@ class ConnectDialog(QDialog):
 
         self._paste_edit = QTextEdit()
         self._paste_edit.setPlaceholderText("bunker://<pubkey>?relay=wss://...&secret=...")
+        self._paste_edit.setAccessibleName(_("Bunker URL"))
         self._paste_edit.setAcceptRichText(False)
         self._paste_edit.setFixedHeight(80)
         self._paste_edit.textChanged.connect(self._update_paste_button)
@@ -348,6 +349,7 @@ class ConnectDialog(QDialog):
         self._qr_uri_field = QLineEdit()
         self._qr_uri_field.setReadOnly(True)
         self._qr_uri_field.setPlaceholderText("nostrconnect://…")
+        self._qr_uri_field.setAccessibleName(_("Connection link"))
         layout.addWidget(self._qr_uri_field)
 
         button_row = QHBoxLayout()
@@ -443,14 +445,18 @@ class ConnectDialog(QDialog):
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
-        layout.addWidget(QLabel(_("Bunker pubkey (hex):")))
+        pk_label = QLabel(_("Bunker pubkey (hex):"))
+        layout.addWidget(pk_label)
         self._manual_pk = QLineEdit()
+        pk_label.setBuddy(self._manual_pk)
         self._manual_pk.setPlaceholderText(_("64 hex chars"))
         self._manual_pk.textChanged.connect(self._update_manual_button)
         layout.addWidget(self._manual_pk)
 
-        layout.addWidget(QLabel(_("Relays (one per line):")))
+        relays_label = QLabel(_("Relays (one per line):"))
+        layout.addWidget(relays_label)
         self._manual_relays = QTextEdit()
+        relays_label.setBuddy(self._manual_relays)
         self._manual_relays.setPlaceholderText(
             "wss://relay.example\nwss://another.example"
         )
@@ -459,8 +465,10 @@ class ConnectDialog(QDialog):
         self._manual_relays.textChanged.connect(self._update_manual_button)
         layout.addWidget(self._manual_relays)
 
-        layout.addWidget(QLabel(_("Secret (optional):")))
+        secret_label = QLabel(_("Secret (optional):"))
+        layout.addWidget(secret_label)
         self._manual_secret = QLineEdit()
+        secret_label.setBuddy(self._manual_secret)
         self._manual_secret.setPlaceholderText(_("Pairing token if your signer gave you one"))
         layout.addWidget(self._manual_secret)
 

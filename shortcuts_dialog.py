@@ -470,6 +470,8 @@ class ShortcutsDialog(QDialog):
         self._search = QLineEdit()
         self._search.setObjectName("shortcuts_search")
         self._search.setPlaceholderText(_("Filter Shortcuts"))
+        # A placeholder is not a name; a screen reader needs one of its own.
+        self._search.setAccessibleName(_("Filter Shortcuts"))
         self._search.setClearButtonEnabled(True)
         self._search.textChanged.connect(self._on_filter_changed)
         root.addWidget(self._search)

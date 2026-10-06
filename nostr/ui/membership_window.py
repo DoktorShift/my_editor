@@ -446,8 +446,9 @@ class MembershipWindow(AssistantWindow):
         self._handle_help = text_label(_("Optional. Lowercase letters, digits, - and _."),
                                        "help")
         self._handle_error = text_label("", "error")
-        form.addRow(_("Nostr address:"), self._field(handle_row, self._handle_help,
-                                                     self._handle_error))
+        handle_field = self._field(handle_row, self._handle_help, self._handle_error)
+        form.addRow(_("Nostr address:"), handle_field)
+        self._name_field(form, handle_field, self._handle_edit, self._handle_help)
 
         self._email_edit = QLineEdit()
         self._email_edit.setPlaceholderText(_("name@example.com"))
@@ -457,6 +458,7 @@ class MembershipWindow(AssistantWindow):
         self._email_error = text_label("", "error")
         self._email_row = self._field(self._email_edit, self._email_help, self._email_error)
         form.addRow(_("Email:"), self._email_row)
+        self._name_field(form, self._email_row, self._email_edit, self._email_help)
 
         self._message_edit = QPlainTextEdit()
         self._message_edit.setFixedHeight(70)
@@ -468,6 +470,7 @@ class MembershipWindow(AssistantWindow):
         self._message_row = self._field(self._message_edit, self._message_help,
                                         self._message_error)
         form.addRow(_("Message:"), self._message_row)
+        self._name_field(form, self._message_row, self._message_edit, self._message_help)
         self._form = form
         col.addLayout(form)
         col.addStretch(1)
@@ -487,6 +490,18 @@ class MembershipWindow(AssistantWindow):
         error_label.hide()
         col.addWidget(error_label)
         return box
+
+    @staticmethod
+    def _name_field(form: QFormLayout, row: QWidget, field: QWidget, help_label: QLabel) -> None:
+        """Let a screen reader announce ``field`` by its row's label and read
+        its help. The field sits in a box with its help and error lines, so
+        the form's label points at the box, and Qt names a field only after
+        a label beside it; a click on the label now reaches the field too."""
+        label = form.labelForField(row)
+        if isinstance(label, QLabel):
+            label.setBuddy(field)
+            field.setAccessibleName(label.text().rstrip(":").strip())
+        field.setAccessibleDescription(help_label.text())
 
     def _show_apply(self, *, name_only: bool = False) -> None:
         self._name_only = name_only
