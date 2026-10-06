@@ -156,7 +156,7 @@ def test_media_dir_for():
 def test_parse_output_path_from_stderr_line(tmp_path):
     rmd = str(tmp_path / "doc.Rmd")
     produced = tmp_path / "doc.html"
-    produced.write_text("x")
+    produced.write_text("x", encoding="utf-8")
     out = f"processing...\nOutput created: doc.html\n"
     assert parse_output_path(out, rmd, "html") == str(produced)
 
@@ -164,7 +164,7 @@ def test_parse_output_path_from_stderr_line(tmp_path):
 def test_parse_output_path_falls_back_to_extension_swap(tmp_path):
     rmd = str(tmp_path / "doc.Rmd")
     produced = tmp_path / "doc.html"
-    produced.write_text("x")
+    produced.write_text("x", encoding="utf-8")
     assert parse_output_path("no marker here", rmd, "html") == str(produced)
     assert parse_output_path("no marker here", rmd, "pdf") is None
 
@@ -191,7 +191,7 @@ def test_classify_failure_kinds():
 
 def _fake_rscript(tmp_path, body: str) -> str:
     path = tmp_path / "Rscript"
-    path.write_text("#!/bin/sh\n" + body)
+    path.write_text("#!/bin/sh\n" + body, encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IEXEC)
     return str(path)
 
@@ -212,7 +212,7 @@ def _run_knit(monkeypatch, rscript, rmd_path, fmt="html", timeout_ms=5000):
 
 def test_knit_success_via_fake_rscript(tmp_path, monkeypatch):
     rmd = tmp_path / "doc.Rmd"
-    rmd.write_text("---\ntitle: x\n---\nbody\n")
+    rmd.write_text("---\ntitle: x\n---\nbody\n", encoding="utf-8")
     script = _fake_rscript(
         tmp_path,
         'echo "Output created: doc.html" 1>&2\n'
@@ -223,7 +223,7 @@ def test_knit_success_via_fake_rscript(tmp_path, monkeypatch):
 
 def test_knit_failure_classified(tmp_path, monkeypatch):
     rmd = tmp_path / "doc.Rmd"
-    rmd.write_text("x\n")
+    rmd.write_text("x\n", encoding="utf-8")
     script = _fake_rscript(
         tmp_path,
         'echo "there is no package called \'rmarkdown\'" 1>&2\nexit 1\n')
@@ -234,7 +234,7 @@ def test_knit_failure_classified(tmp_path, monkeypatch):
 
 def test_knit_missing_r_reported(monkeypatch, tmp_path):
     rmd = tmp_path / "doc.Rmd"
-    rmd.write_text("x\n")
+    rmd.write_text("x\n", encoding="utf-8")
     monkeypatch.setattr(rmarkdown, "find_rscript", lambda: None)
     runner = KnitRunner()
     seen = {}

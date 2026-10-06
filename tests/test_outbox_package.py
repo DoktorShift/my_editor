@@ -338,9 +338,9 @@ def test_own_lists_survive_a_restart_and_tampering_is_dropped(tmp_path):
     d.remember(signed(10002, [["r", "wss://mine.com"]]))
     again = directory(FakeQuery(), tmp_path=tmp_path, own=(PK,))
     assert again.cached(PK).write == ["wss://mine.com"]
-    data = json.loads((tmp_path / "lists.json").read_text())
+    data = json.loads((tmp_path / "lists.json").read_text(encoding="utf-8"))
     data["lists"][PK]["tags"] = [["r", "wss://evil.com"]]
-    (tmp_path / "lists.json").write_text(json.dumps(data))
+    (tmp_path / "lists.json").write_text(json.dumps(data), encoding="utf-8")
     assert not directory(FakeQuery(), tmp_path=tmp_path, own=(PK,)).cached(PK).found
 
 

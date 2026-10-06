@@ -50,7 +50,7 @@ def test_line_endings_are_the_same_on_every_system(tmp_path):
                     reason="Windows has no owner-only file mode bits")
 def test_the_file_is_readable_by_this_account_only(tmp_path):
     path = tmp_path / "keys.json"
-    path.write_text("{}")
+    path.write_text("{}", encoding="utf-8")
     os.chmod(path, 0o644)
     write_bytes(path, b"{}")
     assert stat.S_IMODE(os.stat(path).st_mode) & 0o077 == 0

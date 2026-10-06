@@ -90,7 +90,7 @@ def test_the_log_stays_small(folder):
 
 def test_a_folder_that_cannot_be_written_leaves_the_app_as_it_was(tmp_path, folder):
     blocked = tmp_path / "file"
-    blocked.write_text("not a folder")
+    blocked.write_text("not a folder", encoding="utf-8")
     hook = sys.excepthook
     assert diagnostics.install("1.0", folder=str(blocked / "logs")) is False
     assert sys.excepthook is hook

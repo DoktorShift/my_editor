@@ -91,7 +91,7 @@ def test_view_state_round_trip(sample_pdf):
 
 def test_view_state_missing_and_corrupt(tmp_path, sample_pdf):
     assert load_view_state(sample_pdf) is None
-    with open(pdf_viewer._POSITIONS_PATH, "w") as f:
+    with open(pdf_viewer._POSITIONS_PATH, "w", encoding="utf-8") as f:
         f.write("{ not json")
     assert load_view_state(sample_pdf) is None
     # A corrupt store must not break saving either.
@@ -105,7 +105,7 @@ def test_view_state_lru_eviction(monkeypatch):
     monkeypatch.setattr(pdf_viewer.time, "time", lambda: next(ts))
     for i in range(5):
         save_view_state(f"/books/{i}.pdf", {"page": i})
-    with open(pdf_viewer._POSITIONS_PATH) as f:
+    with open(pdf_viewer._POSITIONS_PATH, encoding="utf-8") as f:
         stored = json.load(f)
     assert len(stored) == 3
     # The oldest two entries were evicted, the newest survive.
@@ -133,7 +133,7 @@ def test_load_missing_file(tmp_path):
 
 def test_load_not_a_pdf(tmp_path):
     path = str(tmp_path / "fake.pdf")
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         f.write("just text")
     tab = PdfViewerTab(path)
     assert not tab.load_ok

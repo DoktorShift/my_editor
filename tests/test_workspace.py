@@ -70,7 +70,7 @@ def test_no_record_means_nothing_to_restore(tmp_path):
 def test_an_unreadable_record_is_dropped_without_raising(tmp_path):
     path = tmp_path / "workspace.json"
     for junk in ("{not json", "[]", '"text"', json.dumps({"tabs": "nope"})):
-        path.write_text(junk)
+        path.write_text(junk, encoding="utf-8")
         assert workspace.take_workspace(str(path)) is None
         assert not path.exists()
 
@@ -87,7 +87,7 @@ def test_one_broken_tab_does_not_cost_the_others(tmp_path):
             {"kind": "document", "cursor": "12", "scroll": -5, "modified": "yes"},
         ],
         "active": 7,
-    }))
+    }), encoding="utf-8")
     restored = workspace.take_workspace(str(path))
     assert [t.path for t in restored.tabs] == ["/a.txt", None]
     last = restored.tabs[1]
@@ -97,7 +97,7 @@ def test_one_broken_tab_does_not_cost_the_others(tmp_path):
 
 def test_a_record_from_a_newer_build_is_left_untouched(tmp_path):
     path = tmp_path / "workspace.json"
-    path.write_text(json.dumps({"version": workspace.WORKSPACE_VERSION + 1, "tabs": []}))
+    path.write_text(json.dumps({"version": workspace.WORKSPACE_VERSION + 1, "tabs": []}), encoding="utf-8")
     assert workspace.take_workspace(str(path)) is None
     assert path.exists()
 
@@ -117,7 +117,7 @@ def test_discarding_removes_the_record(tmp_path):
 
 def test_a_failed_write_reports_false_and_leaves_no_partial_file(tmp_path):
     blocker = tmp_path / "file"
-    blocker.write_text("x")
+    blocker.write_text("x", encoding="utf-8")
     path = str(blocker / "workspace.json")   # a file where a folder should be
     assert workspace.write_workspace(sample(), path) is False
     assert not os.path.exists(path + ".tmp")

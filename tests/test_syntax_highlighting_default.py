@@ -23,7 +23,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 def assignments(path, target):
     """Every literal assigned to ``target`` in the file, in order."""
-    tree = ast.parse((ROOT / path).read_text())
+    tree = ast.parse((ROOT / path).read_text(encoding="utf-8"))
     found = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Assign):
@@ -40,7 +40,7 @@ def assignments(path, target):
 
 def calls_with_bool(path, attr, method):
     """Booleans passed to ``self.<attr>.<method>(...)``, in order."""
-    tree = ast.parse((ROOT / path).read_text())
+    tree = ast.parse((ROOT / path).read_text(encoding="utf-8"))
     found = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call) or not node.args:
@@ -73,7 +73,7 @@ def test_the_header_checkbox_starts_unchecked():
 def registered_checked(path, command_id):
     """The literal ``checked=`` a command is registered with (commands.py),
     for the call whose Command names ``command_id``."""
-    tree = ast.parse((ROOT / path).read_text())
+    tree = ast.parse((ROOT / path).read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call) or not node.args:
             continue
@@ -98,6 +98,6 @@ def test_it_matches_line_numbers_which_were_already_off():
 
 
 def test_the_toggle_still_exists_so_this_is_a_default_not_a_removal():
-    source = (ROOT / "main_window.py").read_text()
+    source = (ROOT / "main_window.py").read_text(encoding="utf-8")
     assert "_toggle_syntax_highlighting" in source
     assert "Ctrl+Shift+H" in source
