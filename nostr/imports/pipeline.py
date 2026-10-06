@@ -77,6 +77,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from i18n import _, ngettext
 
 from ..blossom import hashes
+from ..drafts import DEFAULT_EXPIRATION_SECONDS
 from ..outbox import RelayDirectory
 from ..outbox.policy import retry_relays
 from ..profiles import Profile
@@ -687,6 +688,9 @@ class ImportItemsJob(QObject):
                 inner_event=inner,
                 identifier=template.slug,
                 entitled_relays=self._entitled_relays,
+                # An imported draft nobody changes goes after 90 days
+                # (the owner's choice); saving it from the editor keeps it.
+                expiration_seconds=DEFAULT_EXPIRATION_SECONDS,
                 parent=self,
             )
         except ValueError as exc:

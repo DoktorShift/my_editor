@@ -66,9 +66,11 @@ def _as_supported_kind(kind: int) -> int:
     """The kind this app handles ``kind`` as: an article draft is an article."""
     return INNER_KIND_LONG_FORM if kind == INNER_KIND_ARTICLE_DRAFT else kind
 
-# Default expiration window per the NIP-37 recommendation. Relays SHOULD
-# honour NIP-40 and reap drafts after this falls in the past; users
-# expect "stale drafts age out" semantics.
+# How long an imported draft is kept when nobody changes it (NIP-40).
+# Only imports carry it: a draft the person writes, or an imported one
+# the person changed and saved, never expires (the owner's decision D-3,
+# and how EINUNDZWANZIG STANDUP keeps drafts too). A draft that vanished
+# after three months without a word was a loss nobody expected.
 DEFAULT_EXPIRATION_SECONDS: int = 90 * 24 * 60 * 60  # 90 days
 
 # NIP-44 v2 caps the *plaintext* (pre-padding) at 65,535 bytes. The wrap
@@ -232,7 +234,7 @@ def build_draft_wrap(
     encrypted_content: str,
     pubkey_hex: str,
     client_name: str,
-    expiration_seconds: int = DEFAULT_EXPIRATION_SECONDS,
+    expiration_seconds: Optional[int] = None,
     extra_tags: Optional[List[List[str]]] = None,
     created_at: Optional[int] = None,
 ) -> Dict[str, Any]:
@@ -244,7 +246,8 @@ def build_draft_wrap(
                                       filter "drafts of articles" vs.
                                       "drafts of notes" without
                                       decryption.
-      ``["expiration", ...]``      , NIP-40, recommended by NIP-37.
+      ``["expiration", ...]``      , NIP-40, only with
+                                      ``expiration_seconds`` (imports).
       ``["client", client_name]``  , NIP-89 attribution.
       ``*extra_tags``              , opaque pass-through (reserved for
                                       future use, e.g. RSS-source tags).
@@ -262,14 +265,15 @@ def build_draft_wrap(
         raise ValueError("pubkey_hex must be 64 hex chars")
     if created_at is None:
         created_at = wrap_time(pubkey_hex, identifier)
-    expiration_unix = int(created_at) + max(0, int(expiration_seconds))
 
     tags: List[List[str]] = [
         ["d", identifier],
         ["k", str(int(inner_kind))],
-        ["expiration", str(expiration_unix)],
-        ["client", client_name],
     ]
+    if expiration_seconds is not None:
+        tags.append(["expiration",
+                     str(int(created_at) + max(0, int(expiration_seconds)))])
+    tags.append(["client", client_name])
     if extra_tags:
         tags.extend(list(t) for t in extra_tags)
 
@@ -298,10 +302,9 @@ def build_tombstone_wrap(
     been deleted." Same ``d`` + ``k`` (so the addressable replacement
     targets the right event), empty content, no encryption needed.
 
-    The expiration tag is intentionally short here. A tombstone only
-    needs to live long enough for other clients to observe the empty
-    content; we still set 90 days because some relays drop events with
-    expiration in the near past.
+    A tombstone never expires: a draft without an expiration that a
+    lagging relay still holds must stay deleted for good, and an
+    expired tombstone would let it come back.
     """
     return build_draft_wrap(
         identifier=identifier,

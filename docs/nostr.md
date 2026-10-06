@@ -108,9 +108,9 @@ If your signer (Amber, nsec.app) times out a decrypt approval or you dismiss the
 
 ### Storage notes
 
-- Drafts are kept on relays for ~90 days then expire (NIP-40). Re-saving extends the window.
+- Drafts you write never expire. An imported draft you don't change is removed after 90 days (NIP-40); once you change and save it, it stays like any other draft.
 - Notes are tagged with a private UUID; articles use a stable slug, so the draft and its eventual published article share the same address.
-- Deleting a draft publishes an empty replacement so your other devices see it removed.
+- Deleting a draft publishes an empty replacement so your other devices see it removed; it never expires, so a relay that kept an old copy cannot bring the draft back.
 
 ---
 

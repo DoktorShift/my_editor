@@ -43,6 +43,7 @@ from nostr.crypto import (
     get_public_key,
 )
 from nostr.drafts import (
+    DEFAULT_EXPIRATION_SECONDS,
     DRAFT_WRAP_KIND,
     build_draft_wrap,
     parse_inner_event,
@@ -146,6 +147,7 @@ class TestWrapNip37:
             encrypted_content=ciphertext,
             pubkey_hex=pubkey,
             client_name=CLIENT_NAME,
+            expiration_seconds=DEFAULT_EXPIRATION_SECONDS,
         )
         return wrap, conv, identifier
 
@@ -156,8 +158,9 @@ class TestWrapNip37:
         assert tag_values(wrap, "d") == [identifier]
         assert tag_values(wrap, "k") == [str(inner["kind"])]
         assert tag_values(wrap, "client") == [CLIENT_NAME]
+        # An imported draft nobody changes goes after 90 days (D-3).
         (expiration,) = tag_values(wrap, "expiration")
-        assert int(expiration) > wrap["created_at"]
+        assert int(expiration) == wrap["created_at"] + DEFAULT_EXPIRATION_SECONDS
         # parse_wrap_event accepts what we built.
         meta = parse_wrap_event({**wrap, "id": "e" * 64})
         assert meta is not None

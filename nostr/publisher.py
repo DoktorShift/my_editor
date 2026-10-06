@@ -47,7 +47,6 @@ from .bech32 import decode_npub, decode_nprofile, encode_nprofile
 from .blossom.hashes import blob_url
 from .bunker import BunkerClient, BunkerSessionPool
 from .drafts import (
-    DEFAULT_EXPIRATION_SECONDS,
     DRAFT_WRAP_KIND,
     MAX_INNER_PAYLOAD_BYTES,
     SUPPORTED_INNER_KINDS,
@@ -661,6 +660,11 @@ class DraftPublishJob(QObject):
     meanwhile, the relays keep the edit: an older replaceable event
     loses (NIP-01). A retry can never overwrite an edit.
 
+    ``expiration_seconds`` dates the draft's end (NIP-40); only imports
+    pass it (drafts.DEFAULT_EXPIRATION_SECONDS). Without it the draft
+    never expires, which is what a save from the editor makes, also of
+    an imported draft: once the person saved it, it is theirs.
+
     Cancellation: ``cancel()`` flips a flag that suppresses all future
     signal emissions. The in-flight NIP-46 RPC can't actually be
     recalled, but the dialog (now destroyed) will no longer be
@@ -683,7 +687,7 @@ class DraftPublishJob(QObject):
         profile: Profile,
         inner_event: Optional[dict],
         identifier: str,
-        expiration_seconds: int = DEFAULT_EXPIRATION_SECONDS,
+        expiration_seconds: Optional[int] = None,
         extra_wrap_tags: Optional[List[List[str]]] = None,
         entitled_relays: Sequence[str] = (),
         parent: Optional[QObject] = None,

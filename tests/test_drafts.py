@@ -234,6 +234,17 @@ def test_build_tombstone_is_empty_content():
     assert ["k", "1"] in t["tags"]
 
 
+def test_a_draft_expires_only_when_asked_and_a_deletion_never():
+    # D-3: drafts the person writes never expire; only imports pass an
+    # expiration. A deletion must outlive any copy a lagging relay keeps.
+    plain = build_draft_wrap(identifier="x", inner_kind=1, encrypted_content="ct",
+                             pubkey_hex=PK, client_name="X", created_at=100)
+    assert [t[0] for t in plain["tags"]] == ["d", "k", "client"]
+    tombstone = build_tombstone_wrap(identifier="x", inner_kind=1, pubkey_hex=PK,
+                                     client_name="X")
+    assert not any(t[0] == "expiration" for t in tombstone["tags"])
+
+
 # --------------------------------------------------------------------------- #
 # parse_wrap_event                                                            #
 # --------------------------------------------------------------------------- #
