@@ -223,3 +223,26 @@ class RecordingPacer:
             fn()
         else:
             self.pending.append(fn)
+
+
+class FakeCatalogue:
+    """Stands in for ExistingCatalogue: ``existing`` maps identifiers to
+    their state; ``unavailable`` is the reason given when no relay
+    answers (empty: they do)."""
+
+    def __init__(self, existing=None, unavailable="", **_kwargs):
+        self.existing = dict(existing or {})
+        self.unavailable = unavailable
+        self.local = {}
+        self.asked = []
+
+    def look_up(self, profile, tags, *, on_ready, on_unavailable):
+        from nostr.imports.catalogue import Existing
+        self.asked.append(list(tags))
+        if self.unavailable:
+            on_unavailable(self.unavailable)
+            return
+        on_ready(Existing({d: s for d, s in self.existing.items() if d in tags}))
+
+    def known_locally(self, d_tag):
+        return self.local.get(d_tag)

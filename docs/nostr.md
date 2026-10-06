@@ -185,9 +185,9 @@ The sources you subscribe to are one private list on your relays, the same list 
 - The list MyEditor kept before (`d` = `myeditor:feed-sources`) is merged in once and not written again.
 - Quitting waits a few seconds for changes that are still on their way. Changes that could not be sent yet are kept with the list on this computer and sent at the next start.
 
-### Idempotent re-runs
+### Importing again never overwrites a draft
 
-Each item's draft identifier is derived from its feed id, so re-running the same import replaces existing drafts on relays rather than duplicating them. Safe to schedule daily, weekly, or whenever you publish a new post.
+Each item's draft identifier is derived from its feed id the same way EINUNDZWANZIG STANDUP derives it, so the same post gets the same identifier in both apps. Before anything is fetched or signed, MyEditor asks your relays which of the chosen posts already have a draft (also one you deleted), an article or a deletion request, and leaves those alone: a draft you edited after importing it stays exactly as it is, and a deleted one does not come back. When no relay answers, the import does not start. The question is asked once more right before each draft is signed, in case the other app made it in the meantime.
 
 ## Joining EINUNDZWANZIG in the app
 

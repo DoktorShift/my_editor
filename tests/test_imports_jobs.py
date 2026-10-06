@@ -11,30 +11,11 @@ from __future__ import annotations
 from PySide6.QtCore import QObject, Signal
 
 from nostr.imports import snapshots
-from nostr.imports.catalogue import Existing
 from nostr.imports.inbox_store import InboxStore
 from nostr.imports.jobs import NO_RELAY, ImportRunner
-from tests.imports_fakes import make_item
+from tests.imports_fakes import FakeCatalogue, make_item
 
 PROFILE = object()
-
-
-class FakeCatalogue:
-    def __init__(self, existing=None, unavailable=""):
-        self.existing = dict(existing or {})
-        self.unavailable = unavailable
-        self.local = {}
-        self.asked = []
-
-    def look_up(self, profile, tags, *, on_ready, on_unavailable):
-        self.asked.append(list(tags))
-        if self.unavailable:
-            on_unavailable(self.unavailable)
-            return
-        on_ready(Existing({d: s for d, s in self.existing.items() if d in tags}))
-
-    def known_locally(self, d_tag):
-        return self.local.get(d_tag)
 
 
 class FakeItemJob(QObject):
