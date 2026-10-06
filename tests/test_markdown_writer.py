@@ -10,8 +10,8 @@ What must hold:
 
   A .md file read and written again comes back the same.
 
-  Lines typed one under the other stay separate lines; an empty line
-  starts a new paragraph.
+  Lines typed one under the other stay separate, as paragraphs: the one
+  break every Nostr reader shows alike.
 
   Typed characters that Markdown would read as markup are escaped, and
   web addresses and nostr: links are never touched.
@@ -136,7 +136,7 @@ def test_a_link_keeps_its_words_and_address():
 def test_lines_typed_one_under_the_other_stay_separate():
     doc = typed("Roses are red\nViolets are blue\n\nNew stanza")
     assert document_to_markdown(doc) == (
-        "Roses are red  \nViolets are blue\n\nNew stanza\n")
+        "Roses are red\n\nViolets are blue\n\nNew stanza\n")
 
 
 def test_several_empty_lines_are_one_paragraph_break():
