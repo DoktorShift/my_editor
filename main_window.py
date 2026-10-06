@@ -124,6 +124,7 @@ from nostr.contacts import ContactListFetcher
 from nostr.draft_store import DraftState, DraftStore
 from nostr.draft_deletions import DraftDeletions
 from nostr.draft_sync import DraftSync
+from nostr.imports_controller import ImportsController
 from nostr.imports.constants import IDENTIFIER_PREFIX as IMPORT_IDENTIFIER_PREFIX
 from nostr.imports.constants import SOURCE_TAG as IMPORT_SOURCE_TAG
 from nostr.drafts import (
@@ -381,6 +382,19 @@ class MainWindow(QMainWindow):
             relay_directory=self._relay_directory,
             store=self._draft_store,
             entitled_relays=self._entitled_relays,
+            parent=self,
+        )
+        # Imports: the sources shared with STANDUP, the inbox, the checks
+        # while the app runs and the import jobs, for the account in use
+        # (nostr/imports_controller.py). It binds only while Nostr is in
+        # use (see _update_account_actions).
+        self._imports = ImportsController(
+            relay_pool=self._relay_pool,
+            relay_directory=self._relay_directory,
+            session_pool=self._session_pool,
+            draft_store=self._draft_store,
+            entitled_relays=self._entitled_relays,
+            blossom_primary=lambda: self._media_store.settings.primary,
             parent=self,
         )
         # Created lazily inside ``_build_findbar`` so its parent is the
@@ -1370,6 +1384,8 @@ class MainWindow(QMainWindow):
             # exists locally instead of duplicating the draft.
             draft_store=self._draft_store,
             entitled_relays=self._entitled_relays,
+            # One list of sources in the app: the imports controller's.
+            subscriptions=self._imports.subscriptions,
         )
         self._drafts_panel.set_active_profile(self._profile_store.default())
         # The panel's outbound actions all route back through the host.
@@ -3667,10 +3683,12 @@ class MainWindow(QMainWindow):
         # signer and the relay sockets go away, waiting a few seconds at
         # most: a key kept here signs on a later turn of the event loop,
         # and what does not arrive in time is sent on the next launch.
-        feeds = getattr(getattr(self, "_drafts_panel", None), "feeds", None)
-        if feeds is not None and not feeds.flush_subscriptions():
-            self.status.showMessage(_("Saving your list of sources…"))
-            feeds.wait_for_subscriptions(QUIT_SYNC_WAIT_MS)
+        imports = getattr(self, "_imports", None)
+        if imports is not None:
+            imports.flush()
+            if imports.subscriptions.is_busy:
+                self.status.showMessage(_("Saving your list of sources…"))
+                imports.subscriptions.wait_until_settled(QUIT_SYNC_WAIT_MS)
         # Close any warm relay sockets and bunker channels so the WebSocket
         # layer can flush close frames before the QApplication tears down.
         if hasattr(self, "_session_pool"):
@@ -3749,6 +3767,10 @@ class MainWindow(QMainWindow):
         state = getattr(self, "nostr_state", None)
         if state is not None:
             state.refresh()
+            imports = getattr(self, "_imports", None)
+            if imports is not None:
+                imports.account_changed(self._profile_store.default() if state.active
+                                        else None)
         action = getattr(self, "_act_backup_account", None)
         if action is not None:
             current = self._profile_store.default()

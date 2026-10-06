@@ -316,6 +316,7 @@ class FeedsPanel(QFrame):
         self._subscription_store_factory = (
             subscription_store_factory or FeedSubscriptionStore)
         self._subscriptions: Optional[FeedSubscriptionStore] = None
+        self._owns_subscriptions = True
         self._feed_title = ""
         self._catalogue_factory = catalogue_factory or ExistingCatalogue
         self._catalogue: Optional[ExistingCatalogue] = None
@@ -601,6 +602,7 @@ class FeedsPanel(QFrame):
         draft_store=None,
         blossom_settings=None,
         entitled_relays: Optional[Callable[[], Sequence[str]]] = None,
+        subscriptions: Optional[FeedSubscriptionStore] = None,
     ) -> None:
         """Inject the runtime dependencies needed to publish drafts.
 
@@ -612,7 +614,10 @@ class FeedsPanel(QFrame):
         the user's configured Blossom settings are read by default.
         ``entitled_relays`` answers which relays the account has standing
         on beyond its own list (a membership's); imported drafts and the
-        synced feed list go there as well.
+        synced feed list go there as well. ``subscriptions`` is the list
+        of sources the app already keeps (the imports controller's); the
+        panel then shows and edits that one, and leaves binding it to an
+        account to its owner. Without it the panel keeps its own.
         """
         self._relay_pool = relay_pool
         self._relay_directory = relay_directory
@@ -635,7 +640,8 @@ class FeedsPanel(QFrame):
         # Subscriptions: the user's remembered sources, synced privately
         # as an encrypted kind 30078 event.
         if self._subscriptions is None:
-            self._subscriptions = self._subscription_store_factory(
+            self._owns_subscriptions = subscriptions is None
+            self._subscriptions = subscriptions or self._subscription_store_factory(
                 session_pool=session_pool,
                 relay_pool=relay_pool,
                 relay_directory=relay_directory,
@@ -645,24 +651,10 @@ class FeedsPanel(QFrame):
             self._subscriptions.feeds_changed.connect(
                 self._refresh_sources_list)
             self._subscriptions.sync_status.connect(self._on_sync_status)
-            if self._active_profile is not None:
+            if self._owns_subscriptions and self._active_profile is not None:
                 self._subscriptions.bind_profile(self._active_profile)
+            self._refresh_sources_list()
         self._refresh_controls()
-
-    def flush_subscriptions(self) -> bool:
-        """Publish pending subscription changes now (app quit / logout).
-        True when nothing is left on its way."""
-        if self._subscriptions is None:
-            return True
-        self._subscriptions.flush()
-        return not self._subscriptions.is_busy
-
-    def wait_for_subscriptions(self, wait_ms: int) -> bool:
-        """Wait ``wait_ms`` at most for flushed changes to arrive (quitting:
-        the signer and the relays go away right after)."""
-        if self._subscriptions is None:
-            return True
-        return self._subscriptions.wait_until_settled(wait_ms)
 
     def set_active_profile(self, profile: Optional[Profile]) -> None:
         """Track the active Nostr profile. Without one, imports are disabled."""
@@ -672,7 +664,7 @@ class FeedsPanel(QFrame):
         # a preview or a job signed by the old key.
         self._abort_activity()
         self._active_profile = profile
-        if self._subscriptions is not None:
+        if self._subscriptions is not None and self._owns_subscriptions:
             self._subscriptions.bind_profile(profile)
         self._reset_to_idle()
 

@@ -474,7 +474,13 @@ class InboxStore:
 
     @staticmethod
     def cursor(post: PostRow) -> tuple:
-        return (_position(post.found_at, post.published_at), post.source_key, post.d_tag)
+        return InboxStore.cursor_of(post.found_at, post.published_at, post.source_key,
+                                    post.d_tag)
+
+    @staticmethod
+    def cursor_of(found_at: int, published_at: int, source_key: str, d_tag: str) -> tuple:
+        """Where a page ends: the next page starts after this post."""
+        return (_position(found_at, published_at), source_key, d_tag)
 
     def _view_filter(self, view: View) -> Tuple[List[str], list]:
         if view.scope == "source":
