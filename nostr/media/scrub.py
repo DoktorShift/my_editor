@@ -31,8 +31,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final, Optional
 
-from PySide6.QtCore import QBuffer, QIODevice, Qt
-from PySide6.QtGui import QImage, QPainter
+from PySide6.QtCore import QBuffer, QIODevice
+from PySide6.QtGui import QImage
 
 import image_safety
 from i18n import _
@@ -130,16 +130,19 @@ def _pixels_only(image: QImage) -> QImage:
 
     QImage keeps the text a decoder found (PNG text chunks, a JPEG
     comment, XMP) and writes it back out on save, location included; so
-    the pixels are painted onto a fresh image that never had any."""
+    the pixel rows are copied into a fresh image that never had any. A
+    plain copy of the bytes keeps the result the same on every run."""
     # Kept opaque when it was, so a photo does not grow an alpha channel.
     form = (QImage.Format.Format_ARGB32 if image.hasAlphaChannel()
             else QImage.Format.Format_RGB32)
     source = image.convertToFormat(form)
-    clean = QImage(source.size(), form)
-    clean.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(clean)
-    painter.drawImage(0, 0, source)
-    painter.end()
+    pixels = bytes(source.constBits())
+    clean = QImage(pixels, source.width(), source.height(), source.bytesPerLine(),
+                   form).copy()
+    # A new image takes its density from the screen; the picture's own
+    # keeps the file the same wherever it is made.
+    clean.setDotsPerMeterX(source.dotsPerMeterX())
+    clean.setDotsPerMeterY(source.dotsPerMeterY())
     return clean
 
 
