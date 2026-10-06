@@ -53,13 +53,12 @@ from commands import (
 )
 from doc_walk import iter_blocks, iter_image_names, serialize_plain_with_images
 from markdown_writer import (
-    READ_FEATURES, document_to, document_to_markdown, has_local_only_formatting,
-    holds_faithfully, image_markdown,
+    document_to, document_to_markdown, has_local_only_formatting, holds_faithfully,
+    image_markdown, read_markdown,
 )
 from editor import HtmlEditor
 import link_url
 import rich_text
-from rich_text import normalize_after_markdown_load
 import image_safety
 import url_safety
 from highlighter import (
@@ -6043,8 +6042,7 @@ class MainWindow(QMainWindow):
         earlier version) opens as its Markdown text, and is saved and
         published exactly as written."""
         if holds_faithfully(content):
-            ed.document().setMarkdown(content, READ_FEATURES)
-            normalize_after_markdown_load(ed.document())
+            read_markdown(ed.document(), content)
             ed._loaded_as_markdown = True
             ed._markdown_source = False
         else:

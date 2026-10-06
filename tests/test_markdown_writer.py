@@ -197,6 +197,34 @@ def test_footnote_marks_are_written_as_typed():
         "A claim[^1] and another[^note].\n\n[^1]: The source.\n[^note]: More.")
 
 
+FOOTNOTES = ("A claim[^1] and another[^2].\n\n[^1]: https://example.com/source\n\n"
+             "[^2]: Ibid.\n")
+
+
+def test_footnotes_read_back_as_the_text_they_are():
+    # Review H3: Qt's reader took "[^1]: Ibid." for a link definition,
+    # dropped it and made the mark a link.
+    from markdown_writer import read_markdown
+    doc = QTextDocument()
+    read_markdown(doc, FOOTNOTES)
+    assert doc.toPlainText() == ("A claim[^1] and another[^2].\n"
+                                 "[^1]: https://example.com/source\n[^2]: Ibid.")
+    assert document_to_markdown(doc) == FOOTNOTES
+
+
+@pytest.mark.parametrize("markdown, kept", [
+    ("[^1]: Ibid.\n", "\\[^1]: Ibid.\n"),
+    ("> [^q]: quoted\n", "> \\[^q]: quoted\n"),
+    ("```\n[^1]: code\n```\n", "```\n[^1]: code\n```\n"),
+    ("~~~~\n[^1]: code\n~~~\n[^2]: still code\n~~~~\n[^3]: text\n",
+     "~~~~\n[^1]: code\n~~~\n[^2]: still code\n~~~~\n\\[^3]: text\n"),
+    ("A claim[^1].\n", "A claim[^1].\n"),
+])
+def test_only_definitions_outside_code_are_marked_literal(markdown, kept):
+    from markdown_writer import literal_footnotes
+    assert literal_footnotes(markdown) == kept
+
+
 def test_a_footnote_mark_in_bold_text_stays_one():
     doc = typed(("a claim[^1]", {"bold": True}))
     assert document_to_markdown(doc) == "**a claim[^1]**\n"

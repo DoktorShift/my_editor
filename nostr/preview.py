@@ -55,8 +55,7 @@ from PySide6.QtWidgets import QTextBrowser
 import i18n
 import word_count
 from i18n import _, ngettext
-from markdown_writer import READ_FEATURES
-from rich_text import normalize_after_markdown_load
+from markdown_writer import READ_FEATURES, read_markdown
 from nostr import bech32
 
 # person's pubkey (hex) -> the name to show, or None
@@ -296,8 +295,7 @@ def article_document(markdown: str, article: Article, *, names: Optional[NameLoo
     doc = QTextDocument(parent)
     doc.setDocumentMargin(0)
     # The body, rendered from exactly the published Markdown.
-    doc.setMarkdown(markdown_for_preview(markdown, names), MARKDOWN_FEATURES)
-    normalize_after_markdown_load(doc)
+    read_markdown(doc, markdown_for_preview(markdown, names), MARKDOWN_FEATURES)
     _tidy_tables(doc)
     _style_body(doc.begin(), colors)
 

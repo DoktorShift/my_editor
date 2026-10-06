@@ -55,7 +55,7 @@ from PySide6.QtGui import (
 
 from doc_walk import iter_blocks
 from link_url import normalize_link_input
-from markdown_writer import READ_FEATURES, document_to_markdown, image_markdown
+from markdown_writer import document_to_markdown, image_markdown, read_markdown
 import rich_text
 
 MARKDOWN_MIME = "text/markdown"
@@ -346,8 +346,7 @@ class Pasted:
 def document_from_markdown(markdown: str) -> QTextDocument:
     """Markdown read the way a .md file is opened."""
     doc = QTextDocument()
-    doc.setMarkdown(markdown, READ_FEATURES)
-    rich_text.normalize_after_markdown_load(doc)
+    read_markdown(doc, markdown)
     return doc
 
 

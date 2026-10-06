@@ -62,6 +62,7 @@ from doc_walk import (
     parse_bullet_line,
     skip_prefix,
 )
+from rich_text import normalize_after_markdown_load
 
 ImageTarget = Callable[[object], Optional[str]]
 
@@ -699,6 +700,45 @@ def _fingerprint(doc) -> list:
     return prints
 
 
+# A footnote definition as typed ("[^1]: Ibid.") at a line's start, maybe
+# inside a quote, and the fence lines around code, where it is code.
+_FOOTNOTE_DEFINITION = re.compile(r"^((?: {0,3}>)* {0,3})\[(?=\^[^\]\s]+\]:)")
+_FENCE_LINE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+
+
+def literal_footnotes(markdown: str) -> str:
+    """``markdown`` with every footnote definition outside code written
+    ``\\[^1]:``, so a reader takes it for the text it is.
+
+    Qt's reader takes a definition whose text is one word or a web address
+    for a link reference definition: the line disappears and the mark
+    that refers to it becomes a link. Footnotes are kept as typed text in
+    the editor (D5), so they must read back as text."""
+    out = []
+    fence = ""
+    for line in markdown.split("\n"):
+        found = _FENCE_LINE.match(line)
+        if fence:
+            if (found and found.group(1)[0] == fence[0] and len(found.group(1)) >= len(fence)
+                    and not found.group(2).strip()):
+                fence = ""
+        elif found:
+            fence = found.group(1)
+        else:
+            line = _FOOTNOTE_DEFINITION.sub(r"\1\\[", line)
+        out.append(line)
+    return "\n".join(out)
+
+
+def read_markdown(doc: QTextDocument, markdown: str, features=READ_FEATURES) -> None:
+    """Read Markdown into ``doc`` the way the editor holds it: the one way
+    the app reads Markdown it wrote or accepted (an opened file or draft,
+    the publish preview, a paste), so what was typed comes back as typed.
+    Replaces what ``doc`` held."""
+    doc.setMarkdown(literal_footnotes(markdown), features)
+    normalize_after_markdown_load(doc)
+
+
 def holds_faithfully(markdown: str) -> bool:
     """Whether the editor can hold this Markdown and write it back without
     losing anything. When it cannot, open it as its Markdown text."""
@@ -727,5 +767,5 @@ def document_to(doc, flavor: str, image_target: Optional[ImageTarget] = None) ->
 __all__: Tuple[str, ...] = (
     "MARKDOWN", "NOTE", "document_blocks", "document_to", "document_to_markdown",
     "document_to_note_text", "has_local_only_formatting", "holds_faithfully",
-    "image_markdown", "READ_FEATURES",
+    "image_markdown", "literal_footnotes", "read_markdown", "READ_FEATURES",
 )
