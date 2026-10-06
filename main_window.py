@@ -5473,15 +5473,27 @@ class MainWindow(QMainWindow):
             "A blank-content replacement will be published to your relays. "
             "Other clients (and your other devices) will treat them as removed. "
             "This action can't be undone.", count)]
-        if count > 1:
-            # Said before the first prompt appears rather than discovered
-            # at the fourth: each deletion is separately signed, so this
-            # is a row of approvals on the user's phone, not one.
+        # Said before the first prompt appears rather than discovered at
+        # the fourth: each deletion is separately signed, and an imported
+        # draft's takes a second request that tells other apps it is gone
+        # (engine review M7), so this is a row of approvals on the phone.
+        imported = len(self._imported_draft_wraps(deletable))
+        requests = count + imported
+        profile = self._profile_store.default()
+        signs_here = profile is not None and getattr(profile, "is_local", False)
+        if requests > 1 and not signs_here:
             lines.append(ngettext(
                 "Your signer will ask you to approve each one, so expect "
                 "{count} request. You can stop partway through.",
                 "Your signer will ask you to approve each one, so expect "
-                "{count} requests. You can stop partway through.", count).format(count=count))
+                "{count} requests. You can stop partway through.",
+                requests).format(count=requests))
+            if imported:
+                lines.append(ngettext(
+                    "An imported draft takes a second request, which tells other apps "
+                    "it is gone.",
+                    "Imported drafts take a second request each, which tells other "
+                    "apps they are gone.", imported))
         if skipped:
             n = len(skipped)
             lines.append(ngettext(

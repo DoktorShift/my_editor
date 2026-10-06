@@ -24,7 +24,7 @@ msgstr ""
 #: alerts.py:275
 #: link_popover.py:90
 #: main_window.py:2644
-#: main_window.py:6078
+#: main_window.py:6090
 #: main_window.py:249
 #: main_window.py:2517
 #: main_window.py:4635
@@ -460,15 +460,15 @@ msgid_plural "A blank-content replacement will be published to your relays. Othe
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:5585
+#: main_window.py:5597
 msgid "No drafts were deleted"
 msgstr ""
 
-#: main_window.py:6003
+#: main_window.py:6015
 msgid "Already saving this draft - wait for it to finish."
 msgstr ""
 
-#: main_window.py:6066
+#: main_window.py:6078
 msgid "(unknown profile)"
 msgstr ""
 
@@ -925,23 +925,23 @@ msgstr ""
 msgid "Delete “this draft” from your Nostr drafts?"
 msgstr ""
 
-#: main_window.py:5525
+#: main_window.py:5537
 msgid "Deleting drafts…"
 msgstr ""
 
-#: main_window.py:5525
+#: main_window.py:5537
 msgid "Stop"
 msgstr ""
 
-#: main_window.py:5526
+#: main_window.py:5538
 msgid "Deleting drafts"
 msgstr ""
 
-#: main_window.py:5608
+#: main_window.py:5620
 msgid "Your signer is not responding. Open your signer app and make sure it is running."
 msgstr ""
 
-#: main_window.py:6084
+#: main_window.py:6096
 msgid "Saving under the current profile would create a separate draft. How would you like to handle it?"
 msgstr ""
 
@@ -1218,22 +1218,28 @@ msgid_plural "Delete {count} Drafts"
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:5581
+#: main_window.py:5492
+msgid "An imported draft takes a second request, which tells other apps it is gone."
+msgid_plural "Imported drafts take a second request each, which tells other apps they are gone."
+msgstr[0] ""
+msgstr[1] ""
+
+#: main_window.py:5593
 #, python-brace-format
 msgid "{deleted} of {total} draft deleted"
 msgid_plural "{deleted} of {total} drafts deleted"
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:5824
+#: main_window.py:5836
 msgid "Nothing to save as a draft"
 msgstr ""
 
-#: main_window.py:5825
+#: main_window.py:5837
 msgid "The current document is empty. Add some content first."
 msgstr ""
 
-#: main_window.py:5837
+#: main_window.py:5849
 msgid "This draft is too large"
 msgstr ""
 
@@ -1536,51 +1542,51 @@ msgstr[1] ""
 msgid "Delete “{name}” from your Nostr drafts?"
 msgstr ""
 
-#: main_window.py:5480
+#: main_window.py:5485
 #, python-brace-format
 msgid "Your signer will ask you to approve each one, so expect {count} request. You can stop partway through."
 msgid_plural "Your signer will ask you to approve each one, so expect {count} requests. You can stop partway through."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:5487
+#: main_window.py:5499
 #, python-brace-format
 msgid "{count} draft from another Nostr client is not included, and will be left alone."
 msgid_plural "{count} drafts from another Nostr client are not included, and will be left alone."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:5513
+#: main_window.py:5525
 msgid "Couldn't start the deletion"
 msgstr ""
 
-#: main_window.py:5572
+#: main_window.py:5584
 msgid "Draft deleted."
 msgid_plural "{count} drafts deleted."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:5589
+#: main_window.py:5601
 #, python-brace-format
 msgid "{count} could not be removed and is still on your relays. You can try again."
 msgid_plural "{count} could not be removed and are still on your relays. You can try again."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:5833
-#: main_window.py:5933
+#: main_window.py:5845
+#: main_window.py:5945
 msgid "Couldn't prepare the draft"
 msgstr ""
 
-#: main_window.py:5834
+#: main_window.py:5846
 msgid "Its contents could not be prepared for encryption."
 msgstr ""
 
-#: main_window.py:5861
+#: main_window.py:5873
 msgid "Couldn't save the draft"
 msgstr ""
 
-#: main_window.py:6081
+#: main_window.py:6093
 #, python-brace-format
 msgid "This draft was last saved as {original}, but you're signed in as {active}"
 msgstr ""
@@ -1608,36 +1614,36 @@ msgstr ""
 msgid "Couldn't open “{name}”"
 msgstr ""
 
-#: main_window.py:5496
+#: main_window.py:5508
 msgid "Not included:"
 msgstr ""
 
-#: main_window.py:5536
+#: main_window.py:5548
 #, python-brace-format
 msgid "Deleting draft {current} of {total}…"
 msgstr ""
 
-#: main_window.py:5668
+#: main_window.py:5680
 #: main_window.py:2681
 msgid "That profile isn't connected anymore"
 msgstr ""
 
-#: main_window.py:5669
+#: main_window.py:5681
 #: main_window.py:2682
 msgid "Pair it again from Nostr > Connect Signer to save here."
 msgstr ""
 
-#: main_window.py:5838
+#: main_window.py:5850
 #, python-brace-format
 msgid "It has {size} bytes, and NIP-44 encryption allows {limit}. Split it into smaller drafts or publish it directly."
 msgstr ""
 
-#: main_window.py:6073
+#: main_window.py:6085
 #, python-brace-format
 msgid "Switch to {name} and Save"
 msgstr ""
 
-#: main_window.py:6076
+#: main_window.py:6088
 #, python-brace-format
 msgid "Save a Copy as {name}"
 msgstr ""
@@ -1663,7 +1669,7 @@ msgstr ""
 msgid "{error} Check that it's turned on and connected, then try again."
 msgstr ""
 
-#: main_window.py:5514
+#: main_window.py:5526
 #, python-brace-format
 msgid ""
 "These drafts can't be removed from here.\n"
@@ -3667,11 +3673,11 @@ msgstr ""
 msgid "Couldn't check your existing drafts. Try again when you're online."
 msgstr ""
 
-#: nostr/imports/checker.py:57
+#: nostr/imports/checker.py:65
 msgid "This feed is too large."
 msgstr ""
 
-#: nostr/imports/checker.py:58
+#: nostr/imports/checker.py:66
 msgid "Couldn't check this feed. MyEditor will try again automatically."
 msgstr ""
 
@@ -3948,44 +3954,44 @@ msgstr ""
 msgid "Failed"
 msgstr ""
 
-#: nostr/imports/workspace.py:247
+#: nostr/imports/workspace.py:256
 #, python-brace-format
 msgid "{count} of {total} selected"
 msgid_plural "{count} of {total} selected"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/imports/workspace.py:225
+#: nostr/imports/workspace.py:234
 msgid "just now"
 msgstr ""
 
-#: nostr/imports/workspace.py:225
+#: nostr/imports/workspace.py:234
 msgid "Just now"
 msgstr ""
 
-#: nostr/imports/workspace.py:234
+#: nostr/imports/workspace.py:243
 msgid "yesterday"
 msgstr ""
 
-#: nostr/imports/workspace.py:234
+#: nostr/imports/workspace.py:243
 msgid "Yesterday"
 msgstr ""
 
-#: nostr/imports/workspace.py:235
+#: nostr/imports/workspace.py:244
 #, python-brace-format
 msgid "{n} day ago"
 msgid_plural "{n} days ago"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/imports/workspace.py:228
+#: nostr/imports/workspace.py:237
 #, python-brace-format
 msgid "{n} min ago"
 msgid_plural "{n} min ago"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/imports/workspace.py:231
+#: nostr/imports/workspace.py:240
 #, python-brace-format
 msgid "{n} h ago"
 msgid_plural "{n} h ago"
@@ -5520,18 +5526,18 @@ msgstr ""
 msgid "Select a post to read it here."
 msgstr ""
 
-#: nostr/ui/imports_post_list.py:535
+#: nostr/ui/imports_post_list.py:536
 msgid "Posts"
 msgstr ""
 
-#: nostr/ui/imports_post_list.py:414
+#: nostr/ui/imports_post_list.py:415
 #, python-brace-format
 msgid "{n} min"
 msgid_plural "{n} min"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/imports_post_list.py:417
+#: nostr/ui/imports_post_list.py:418
 #, python-brace-format
 msgid "{n} image"
 msgid_plural "{n} images"

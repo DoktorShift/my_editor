@@ -24,7 +24,7 @@ msgstr "Details ausblenden"
 #: alerts.py:275
 #: link_popover.py:90
 #: main_window.py:2644
-#: main_window.py:6078
+#: main_window.py:6090
 #: main_window.py:249
 #: main_window.py:2517
 #: main_window.py:4635
@@ -460,15 +460,15 @@ msgid_plural "A blank-content replacement will be published to your relays. Othe
 msgstr[0] "Auf deinen Relays wird ein leerer Ersatz veröffentlicht. Andere Apps (und deine anderen Geräte) behandeln den Entwurf dann als gelöscht. Das lässt sich nicht rückgängig machen."
 msgstr[1] "Auf deinen Relays wird ein leerer Ersatz veröffentlicht. Andere Apps (und deine anderen Geräte) behandeln die Entwürfe dann als gelöscht. Das lässt sich nicht rückgängig machen."
 
-#: main_window.py:5585
+#: main_window.py:5597
 msgid "No drafts were deleted"
 msgstr "Es wurden keine Entwürfe gelöscht"
 
-#: main_window.py:6003
+#: main_window.py:6015
 msgid "Already saving this draft - wait for it to finish."
 msgstr "Dieser Entwurf wird schon gespeichert. Warte, bis das fertig ist."
 
-#: main_window.py:6066
+#: main_window.py:6078
 msgid "(unknown profile)"
 msgstr "(unbekanntes Profil)"
 
@@ -930,23 +930,23 @@ msgstr ""
 msgid "Delete “this draft” from your Nostr drafts?"
 msgstr "Diesen Entwurf aus deinen Nostr-Entwürfen löschen?"
 
-#: main_window.py:5525
+#: main_window.py:5537
 msgid "Deleting drafts…"
 msgstr "Entwürfe werden gelöscht …"
 
-#: main_window.py:5525
+#: main_window.py:5537
 msgid "Stop"
 msgstr "Stoppen"
 
-#: main_window.py:5526
+#: main_window.py:5538
 msgid "Deleting drafts"
 msgstr "Entwürfe werden gelöscht"
 
-#: main_window.py:5608
+#: main_window.py:5620
 msgid "Your signer is not responding. Open your signer app and make sure it is running."
 msgstr "Dein Signer antwortet nicht. Öffne deine Signer-App und prüfe, ob sie läuft."
 
-#: main_window.py:6084
+#: main_window.py:6096
 msgid "Saving under the current profile would create a separate draft. How would you like to handle it?"
 msgstr "Wenn du unter dem aktuellen Profil speicherst, entsteht ein eigener Entwurf. Wie möchtest du vorgehen?"
 
@@ -1225,22 +1225,28 @@ msgid_plural "Delete {count} Drafts"
 msgstr[0] "{count} Entwurf löschen"
 msgstr[1] "{count} Entwürfe löschen"
 
-#: main_window.py:5581
+#: main_window.py:5492
+msgid "An imported draft takes a second request, which tells other apps it is gone."
+msgid_plural "Imported drafts take a second request each, which tells other apps they are gone."
+msgstr[0] "Ein importierter Entwurf braucht eine zweite Anfrage, die anderen Apps sagt, dass er gelöscht ist."
+msgstr[1] "Importierte Entwürfe brauchen je eine zweite Anfrage, die anderen Apps sagt, dass sie gelöscht sind."
+
+#: main_window.py:5593
 #, python-brace-format
 msgid "{deleted} of {total} draft deleted"
 msgid_plural "{deleted} of {total} drafts deleted"
 msgstr[0] "{deleted} von {total} Entwurf gelöscht"
 msgstr[1] "{deleted} von {total} Entwürfen gelöscht"
 
-#: main_window.py:5824
+#: main_window.py:5836
 msgid "Nothing to save as a draft"
 msgstr "Nichts als Entwurf zu speichern"
 
-#: main_window.py:5825
+#: main_window.py:5837
 msgid "The current document is empty. Add some content first."
 msgstr "Das aktuelle Dokument ist leer. Füge zuerst Inhalt hinzu."
 
-#: main_window.py:5837
+#: main_window.py:5849
 msgid "This draft is too large"
 msgstr "Dieser Entwurf ist zu groß"
 
@@ -1546,51 +1552,51 @@ msgstr[1] "Diese {count} Entwürfe wurden mit anderen Nostr-Apps erstellt"
 msgid "Delete “{name}” from your Nostr drafts?"
 msgstr "„{name}“ aus deinen Nostr-Entwürfen löschen?"
 
-#: main_window.py:5480
+#: main_window.py:5485
 #, python-brace-format
 msgid "Your signer will ask you to approve each one, so expect {count} request. You can stop partway through."
 msgid_plural "Your signer will ask you to approve each one, so expect {count} requests. You can stop partway through."
 msgstr[0] "Deine Signer-App fragt bei jedem einzeln nach, rechne also mit {count} Anfrage. Du kannst zwischendurch aufhören."
 msgstr[1] "Deine Signer-App fragt bei jedem einzeln nach, rechne also mit {count} Anfragen. Du kannst zwischendurch aufhören."
 
-#: main_window.py:5487
+#: main_window.py:5499
 #, python-brace-format
 msgid "{count} draft from another Nostr client is not included, and will be left alone."
 msgid_plural "{count} drafts from another Nostr client are not included, and will be left alone."
 msgstr[0] "{count} Entwurf aus einer anderen Nostr-App ist nicht dabei und bleibt unverändert."
 msgstr[1] "{count} Entwürfe aus einer anderen Nostr-App sind nicht dabei und bleiben unverändert."
 
-#: main_window.py:5513
+#: main_window.py:5525
 msgid "Couldn't start the deletion"
 msgstr "Das Löschen konnte nicht gestartet werden"
 
-#: main_window.py:5572
+#: main_window.py:5584
 msgid "Draft deleted."
 msgid_plural "{count} drafts deleted."
 msgstr[0] "Entwurf gelöscht."
 msgstr[1] "{count} Entwürfe gelöscht."
 
-#: main_window.py:5589
+#: main_window.py:5601
 #, python-brace-format
 msgid "{count} could not be removed and is still on your relays. You can try again."
 msgid_plural "{count} could not be removed and are still on your relays. You can try again."
 msgstr[0] "{count} konnte nicht entfernt werden und ist noch auf deinen Relays. Du kannst es erneut versuchen."
 msgstr[1] "{count} konnten nicht entfernt werden und sind noch auf deinen Relays. Du kannst es erneut versuchen."
 
-#: main_window.py:5833
-#: main_window.py:5933
+#: main_window.py:5845
+#: main_window.py:5945
 msgid "Couldn't prepare the draft"
 msgstr "Der Entwurf konnte nicht vorbereitet werden"
 
-#: main_window.py:5834
+#: main_window.py:5846
 msgid "Its contents could not be prepared for encryption."
 msgstr "Sein Inhalt konnte nicht für die Verschlüsselung vorbereitet werden."
 
-#: main_window.py:5861
+#: main_window.py:5873
 msgid "Couldn't save the draft"
 msgstr "Der Entwurf konnte nicht gespeichert werden"
 
-#: main_window.py:6081
+#: main_window.py:6093
 #, python-brace-format
 msgid "This draft was last saved as {original}, but you're signed in as {active}"
 msgstr "Dieser Entwurf wurde zuletzt als {original} gespeichert, aber du bist als {active} angemeldet"
@@ -1618,36 +1624,36 @@ msgstr "„{name}“ gibt es bereits"
 msgid "Couldn't open “{name}”"
 msgstr "„{name}“ konnte nicht geöffnet werden"
 
-#: main_window.py:5496
+#: main_window.py:5508
 msgid "Not included:"
 msgstr "Nicht dabei:"
 
-#: main_window.py:5536
+#: main_window.py:5548
 #, python-brace-format
 msgid "Deleting draft {current} of {total}…"
 msgstr "Entwurf {current} von {total} wird gelöscht …"
 
-#: main_window.py:5668
+#: main_window.py:5680
 #: main_window.py:2681
 msgid "That profile isn't connected anymore"
 msgstr "Dieses Profil ist nicht mehr verbunden"
 
-#: main_window.py:5669
+#: main_window.py:5681
 #: main_window.py:2682
 msgid "Pair it again from Nostr > Connect Signer to save here."
 msgstr "Verbinde es erneut unter Nostr > Signer verbinden, um hier zu speichern."
 
-#: main_window.py:5838
+#: main_window.py:5850
 #, python-brace-format
 msgid "It has {size} bytes, and NIP-44 encryption allows {limit}. Split it into smaller drafts or publish it directly."
 msgstr "Er hat {size} Bytes, die Verschlüsselung erlaubt höchstens {limit}. Teile ihn in kleinere Entwürfe auf oder veröffentliche ihn direkt."
 
-#: main_window.py:6073
+#: main_window.py:6085
 #, python-brace-format
 msgid "Switch to {name} and Save"
 msgstr "Zu {name} wechseln und speichern"
 
-#: main_window.py:6076
+#: main_window.py:6088
 #, python-brace-format
 msgid "Save a Copy as {name}"
 msgstr "Kopie als {name} speichern"
@@ -1673,7 +1679,7 @@ msgstr "„{name}“ konnte nicht neu geladen werden"
 msgid "{error} Check that it's turned on and connected, then try again."
 msgstr "{error} Prüfe, ob der Drucker eingeschaltet und verbunden ist, und versuche es dann erneut."
 
-#: main_window.py:5514
+#: main_window.py:5526
 #, python-brace-format
 msgid ""
 "These drafts can't be removed from here.\n"
@@ -3682,11 +3688,11 @@ msgstr "etwa {amount}"
 msgid "Couldn't check your existing drafts. Try again when you're online."
 msgstr "Deine vorhandenen Entwürfe konnten nicht geprüft werden. Versuche es noch einmal, wenn du online bist."
 
-#: nostr/imports/checker.py:57
+#: nostr/imports/checker.py:65
 msgid "This feed is too large."
 msgstr "Dieser Feed ist zu groß."
 
-#: nostr/imports/checker.py:58
+#: nostr/imports/checker.py:66
 msgid "Couldn't check this feed. MyEditor will try again automatically."
 msgstr "Dieser Feed konnte nicht geprüft werden. MyEditor versucht es automatisch noch einmal."
 
@@ -3963,44 +3969,44 @@ msgstr "Übersprungen"
 msgid "Failed"
 msgstr "Fehlgeschlagen"
 
-#: nostr/imports/workspace.py:247
+#: nostr/imports/workspace.py:256
 #, python-brace-format
 msgid "{count} of {total} selected"
 msgid_plural "{count} of {total} selected"
 msgstr[0] "{count} von {total} ausgewählt"
 msgstr[1] "{count} von {total} ausgewählt"
 
-#: nostr/imports/workspace.py:225
+#: nostr/imports/workspace.py:234
 msgid "just now"
 msgstr "gerade eben"
 
-#: nostr/imports/workspace.py:225
+#: nostr/imports/workspace.py:234
 msgid "Just now"
 msgstr "Gerade eben"
 
-#: nostr/imports/workspace.py:234
+#: nostr/imports/workspace.py:243
 msgid "yesterday"
 msgstr "gestern"
 
-#: nostr/imports/workspace.py:234
+#: nostr/imports/workspace.py:243
 msgid "Yesterday"
 msgstr "Gestern"
 
-#: nostr/imports/workspace.py:235
+#: nostr/imports/workspace.py:244
 #, python-brace-format
 msgid "{n} day ago"
 msgid_plural "{n} days ago"
 msgstr[0] "vor {n} Tag"
 msgstr[1] "vor {n} Tagen"
 
-#: nostr/imports/workspace.py:228
+#: nostr/imports/workspace.py:237
 #, python-brace-format
 msgid "{n} min ago"
 msgid_plural "{n} min ago"
 msgstr[0] "vor {n} Min."
 msgstr[1] "vor {n} Min."
 
-#: nostr/imports/workspace.py:231
+#: nostr/imports/workspace.py:240
 #, python-brace-format
 msgid "{n} h ago"
 msgid_plural "{n} h ago"
@@ -5535,18 +5541,18 @@ msgstr "Öffnet den Beitrag auf seiner Website in deinem Browser."
 msgid "Select a post to read it here."
 msgstr "Wähle einen Beitrag aus, um ihn hier zu lesen."
 
-#: nostr/ui/imports_post_list.py:535
+#: nostr/ui/imports_post_list.py:536
 msgid "Posts"
 msgstr "Beiträge"
 
-#: nostr/ui/imports_post_list.py:414
+#: nostr/ui/imports_post_list.py:415
 #, python-brace-format
 msgid "{n} min"
 msgid_plural "{n} min"
 msgstr[0] "{n} Min."
 msgstr[1] "{n} Min."
 
-#: nostr/ui/imports_post_list.py:417
+#: nostr/ui/imports_post_list.py:418
 #, python-brace-format
 msgid "{n} image"
 msgid_plural "{n} images"
