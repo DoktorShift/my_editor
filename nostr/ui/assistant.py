@@ -462,8 +462,6 @@ class AssistantWindow(QDialog):
         margins = self.layout().contentsMargins()
         sides = margins.left() + margins.right()
         narrowest = layout.totalMinimumSize().width()
-        if narrowest + sides > self.minimumWidth():
-            self.setMinimumWidth(narrowest + sides)
         width = self._scroll.viewport().width()
         if not self.isVisible() or width <= 0:
             width = max(self.width(), self.minimumWidth()) - sides
@@ -486,8 +484,7 @@ class AssistantWindow(QDialog):
         wide = self._stack.minimumSizeHint().width() + bar
         if wide != self._scroll.minimumWidth():
             self._scroll.setMinimumWidth(wide)
-        margins = self.layout().contentsMargins()
-        window = max(self._base_width, wide + margins.left() + margins.right())
+        window = max(self._base_width, wide + sides, narrowest + sides)
         if window != self.minimumWidth():
             self.setMinimumWidth(window)
 
