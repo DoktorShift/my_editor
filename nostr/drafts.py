@@ -55,6 +55,17 @@ SUPPORTED_INNER_KINDS: Tuple[int, ...] = (
     INNER_KIND_LONG_FORM,
 )
 
+# NIP-23's kind for an article draft. EINUNDZWANZIG STANDUP keeps its
+# article drafts (imports among them) as this kind inside the wrap; read
+# here, it is an article like 30023, and the drafts this app writes stay
+# 30023, which STANDUP reads as well.
+INNER_KIND_ARTICLE_DRAFT: int = 30024
+
+
+def _as_supported_kind(kind: int) -> int:
+    """The kind this app handles ``kind`` as: an article draft is an article."""
+    return INNER_KIND_LONG_FORM if kind == INNER_KIND_ARTICLE_DRAFT else kind
+
 # Default expiration window per the NIP-37 recommendation. Relays SHOULD
 # honour NIP-40 and reap drafts after this falls in the past; users
 # expect "stale drafts age out" semantics.
@@ -156,7 +167,7 @@ def parse_inner_event(plaintext: str) -> Dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError(_("draft payload must be a JSON object"))
     try:
-        kind = int(data["kind"])
+        kind = _as_supported_kind(int(data["kind"]))
         content = str(data.get("content", ""))
         tags = list(data.get("tags", []))
         created_at = int(data.get("created_at", 0))
@@ -333,7 +344,7 @@ def parse_wrap_event(event: Dict[str, Any]) -> Optional[DraftWrapMeta]:
         # No d-tag → not addressable → not a NIP-37 draft we can manage.
         return None
     try:
-        inner_kind = int(inner_kind_str) if inner_kind_str else 0
+        inner_kind = _as_supported_kind(int(inner_kind_str)) if inner_kind_str else 0
     except ValueError:
         inner_kind = 0
 

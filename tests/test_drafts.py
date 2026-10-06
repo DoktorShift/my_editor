@@ -164,6 +164,19 @@ def test_parse_tolerates_unknown_kind():
     assert parsed["kind"] == 9999
 
 
+def test_parse_reads_an_article_draft_as_an_article():
+    # EINUNDZWANZIG STANDUP keeps article drafts as NIP-23's kind 30024.
+    s = json.dumps({"kind": 30024, "content": "x", "tags": [["title", "T"]],
+                    "created_at": 1, "pubkey": PK})
+    assert parse_inner_event(s)["kind"] == INNER_KIND_LONG_FORM
+
+
+def test_parse_wrap_reads_an_article_draft_k_tag_as_an_article():
+    event = {"kind": DRAFT_WRAP_KIND, "id": "e" * 64, "pubkey": PK, "created_at": 5,
+             "content": "ct", "tags": [["d", "rss-0123456789abcdef"], ["k", "30024"]]}
+    assert parse_wrap_event(event).inner_kind == INNER_KIND_LONG_FORM
+
+
 # --------------------------------------------------------------------------- #
 # build_draft_wrap, outer 31234                                              #
 # --------------------------------------------------------------------------- #
