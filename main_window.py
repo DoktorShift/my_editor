@@ -48,6 +48,7 @@ from markdown_writer import (
     holds_faithfully, image_markdown,
 )
 from editor import HtmlEditor
+from rich_text import normalize_after_markdown_load
 import image_safety
 import url_safety
 from highlighter import SyntaxHighlighter, detect_language, detect_language_from_content, LANGUAGE_DISPLAY_NAMES
@@ -5218,6 +5219,7 @@ class MainWindow(QMainWindow):
         published exactly as written."""
         if holds_faithfully(content):
             ed.document().setMarkdown(content, READ_FEATURES)
+            normalize_after_markdown_load(ed.document())
             ed._loaded_as_markdown = True
             ed._markdown_source = False
         else:
