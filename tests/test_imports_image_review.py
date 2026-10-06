@@ -16,9 +16,8 @@ from PySide6.QtGui import QColor, QImage
 
 from nostr.imports.snapshots import has_images, images_to_copy
 from nostr.ui.image_review_dialog import ImageReviewDialog
-from tests.imports_fakes import TWO_ITEM_FEED, FakeFetcher, make_item
-from tests.test_feeds_panel import make_panel
 from tests.accessibility import unnamed_controls
+from tests.imports_fakes import make_item
 
 
 class Images(QObject):
@@ -92,24 +91,3 @@ class TestTheSheet:
     def test_every_control_has_a_name(self):
         dialog = ImageReviewDialog(["https://x.example/a.png"], image_source=Images())
         assert unnamed_controls(dialog) == []
-
-
-def test_the_feeds_page_reviews_the_list_the_import_uses(monkeypatch):
-    feed = TWO_ITEM_FEED.replace(
-        "<description>body text</description>",
-        "<description>&lt;img src='https://x.example/a.png'&gt;</description>", 1)
-    panel, _jobs, _kw = make_panel(FakeFetcher({"https://example.com/feed": ("ok", feed)}))
-    panel._url_edit.setText("https://example.com/feed")
-    panel._on_load_clicked()
-    assert panel._review_images_btn.isVisibleTo(panel)
-    shown = []
-
-    def accept(dialog):
-        shown.append(sorted(dialog._items))
-        dialog._items["https://x.example/a.png"].setCheckState(Qt.CheckState.Unchecked)
-        return ImageReviewDialog.DialogCode.Accepted
-
-    monkeypatch.setattr(ImageReviewDialog, "exec", accept)
-    panel._on_review_images()
-    assert shown == [["https://x.example/a.png"]]
-    assert panel._skip_image_urls == {"https://x.example/a.png"}

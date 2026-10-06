@@ -504,6 +504,14 @@ class ImportsController(QObject):
             self._announce()
         return key
 
+    def unfollow(self, key: str) -> bool:
+        """Stop following a source. Its posts leave the inbox; the drafts
+        made from them, and the record of what was imported, stay."""
+        source = self.source(key)
+        if source is None or self.read_only:
+            return False
+        return self.subscriptions.remove_feed(source.url)
+
     def follow_all(self, document) -> Tuple[int, int, int]:
         """Follow every source of a list (OPML): how many were followed
         now, were followed already, and could not be followed (not a

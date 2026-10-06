@@ -232,7 +232,7 @@ class ImportsWindow(QMainWindow):
                  save_settings: Callable[[dict], None] = lambda _value: None,
                  open_url: Callable[[QUrl], bool] = QDesktopServices.openUrl,
                  show_drafts: Optional[Callable[[], None]] = None,
-                 confirm_stop: Optional[Callable[[QWidget], bool]] = None,
+                 confirm: Optional[Callable[..., bool]] = None,
                  parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("imports_window")
@@ -271,7 +271,13 @@ class ImportsWindow(QMainWindow):
         self._drop_overlay = _DropOverlay(self)
         self._drop_overlay.hide()
 
-        self.job_card = JobCard(self, confirm_stop=confirm_stop or _confirm_stop)
+        # Asks before something cannot be undone: the app's alert, as
+        # alerts.confirm_destructive (title, message, action) -> bool.
+        self._confirm = confirm or (lambda **kw: alerts.confirm_destructive(self, **kw))
+        self.job_card = JobCard(self, confirm_stop=lambda _parent: self._confirm(
+            title=_("Stop this import?"),
+            message=_("Drafts already created stay. The other posts are not imported."),
+            action=_("Stop Import")))
         self.job_card.pause.connect(controller.pause_import)
         self.job_card.resume.connect(controller.resume_import)
         self.job_card.stop.connect(controller.stop_import)
@@ -646,6 +652,19 @@ class ImportsWindow(QMainWindow):
         website.triggered.connect(lambda: self._open_url(QUrl(entry.url)))
         copy = menu.addAction(_("Copy Address"))
         copy.triggered.connect(lambda: QApplication.clipboard().setText(entry.url))
+        menu.addSeparator()
+        unsubscribe = menu.addAction(_("Unsubscribe\u2026"))
+        unsubscribe.setEnabled(not self._controller.read_only)
+        unsubscribe.triggered.connect(lambda: self.unsubscribe(entry))
+
+    def unsubscribe(self, entry: Entry) -> None:
+        """Stop following a source, after asking: its posts leave the
+        lists, the drafts made from them stay."""
+        if self._confirm(
+                title=_("Unsubscribe from \u201c{title}\u201d?").format(title=entry.title),
+                message=_("Its posts leave Imports. Drafts you already created stay."),
+                action=_("Unsubscribe")):
+            self._controller.unfollow(entry.key)
 
     def check_now(self, entry: Entry) -> None:
         started = self._controller.check_now(entry.key)
@@ -1322,13 +1341,6 @@ class _DropOverlay(QWidget):
         painter.setFont(font)
         painter.setPen(self.palette().color(QPalette.ColorRole.WindowText))
         painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, _("Drop to Import"))
-
-
-def _confirm_stop(parent: QWidget) -> bool:
-    return alerts.confirm_destructive(
-        parent, title=_("Stop this import?"),
-        message=_("Drafts already created stay. The other posts are not imported."),
-        action=_("Stop Import"))
 
 
 def _is_text_field(widget) -> bool:

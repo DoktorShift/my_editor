@@ -47,7 +47,8 @@ class Jobs:
         return FakeItemJob(self, kwargs["items"], kwargs["is_imported"], kwargs)
 
 
-def make_controller(tmp_path, jobs, *, signer="remote"):
+def make_controller(tmp_path, jobs, *, signer="remote", catalogue=None,
+                    entitled_relays=None):
     relay = FakeRelay()
     store = FeedSubscriptionStore(
         session_pool=FakeSessionPool(), relay_pool=None,
@@ -58,7 +59,8 @@ def make_controller(tmp_path, jobs, *, signer="remote"):
         config_dir=tmp_path, subscription_store=store, fetcher=FakeFetcher({}),
         images=Images(), run_blocking=inline_run_blocking,
         checker_factory=lambda inbox: FakeChecker(),
-        catalogue_factory=lambda inbox: FakeCatalogue(), item_job_factory=jobs.factory)
+        catalogue_factory=lambda inbox: catalogue or FakeCatalogue(),
+        item_job_factory=jobs.factory, entitled_relays=entitled_relays)
     controller.account_changed(SimpleNamespace(user_pubkey=PK, bunker_relays=[],
                                                display_name="Ada", signer=signer))
     settle()
@@ -276,3 +278,72 @@ class TestFlowLayout:
         _host, layout, buttons = self.make([80, 90, 120])
         buttons[1].hide()
         assert layout.sizeHint().width() == 80 + 8 + 120
+
+
+class TestWhatExistsAlready:
+    """Importing again never overwrites a draft (T-M3-1): what exists is
+    asked first, and nothing of it is signed again."""
+
+    def test_an_imported_post_is_left_alone(self, tmp_path, jobs):
+        from nostr.imports.snapshots import identifier_of
+        controller = make_controller(tmp_path, jobs)
+        win = ImportsWindow(controller)
+        model = win.posts.model_
+        first, second = model.post(0), model.post(1)
+        controller.catalogue.existing = {first.d_tag: "drafted"}
+        model.set_checked(0, True)
+        model.set_checked(1, True)
+        win.create_drafts()
+        settle()
+        assert [identifier_of(kw["items"][0]) for kw in jobs.kwargs] == [second.d_tag]
+        assert win.banner.label.text() == (
+            "Import finished. 1 draft created. 1 was already there.")
+        controller.account_changed(None)
+
+    def test_no_answer_means_nothing_is_signed(self, tmp_path, jobs):
+        catalogue = FakeCatalogue(unavailable="Couldn't check your existing drafts.")
+        controller = make_controller(tmp_path, jobs, catalogue=catalogue)
+        win = ImportsWindow(controller)
+        win.create_drafts()
+        settle()
+        assert jobs.kwargs == []
+        job = controller.activity()
+        assert (job.status, job.error) == ("paused", "Couldn't check your existing drafts.")
+        win._show_job_card()
+        assert "Couldn't check your existing drafts." in win.job_card.problem.text()
+        win.job_card.hide()
+        controller.account_changed(None)
+
+
+def test_imported_drafts_go_where_the_editors_drafts_go(tmp_path, jobs):
+    # A membership relay is one of the account's private relays: the
+    # import hands it to its drafts as the editor does.
+    controller = make_controller(tmp_path, jobs,
+                                 entitled_relays=lambda: ["wss://members.example"])
+    job = controller._make_item_job(items=[], feed_url="", fetch_full_text=True,
+                                    rehost_images=False, skip_image_urls=set(),
+                                    is_imported=lambda _d: False, parent=None)
+    assert job._entitled_relays == ["wss://members.example"]
+    controller.account_changed(None)
+
+
+def test_the_review_shows_what_the_import_copies(window, monkeypatch):
+    from nostr.imports import snapshots
+    from nostr.ui.image_review_dialog import ImageReviewDialog
+    controller = window._controller
+    post = window.posts.model_.post(0)
+    import dataclasses
+    item = dataclasses.replace(controller.item(post),
+                               content_html="<p><img src='https://x.example/a.png'></p>")
+    shown = []
+
+    def accept(dialog):
+        shown.append(sorted(dialog._items))
+        dialog._items["https://x.example/a.png"].setCheckState(Qt.CheckState.Unchecked)
+        dialog.done(ImageReviewDialog.DialogCode.Accepted)
+
+    monkeypatch.setattr(controller, "item", lambda _post: item)
+    monkeypatch.setattr(ImageReviewDialog, "open", accept)
+    window._review_images()
+    assert shown == [sorted(snapshots.images_to_copy([item]))]
+    assert window._skip_images == {"https://x.example/a.png"}

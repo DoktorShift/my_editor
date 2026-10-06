@@ -146,6 +146,7 @@ from nostr.draft_store import DraftState, DraftStore
 from nostr.draft_deletions import DraftDeletions
 from nostr.draft_sync import DraftSync
 from nostr.imports_controller import ImportsController
+from nostr.ui.imports_activity import activity_line
 from nostr.ui.imports_window import SETTINGS_KEY as IMPORTS_SETTINGS_KEY
 from nostr.ui.imports_window import ImportsWindow
 from nostr.imports.constants import IDENTIFIER_PREFIX as IMPORT_IDENTIFIER_PREFIX
@@ -1759,17 +1760,6 @@ class MainWindow(QMainWindow):
         # already owns, so there is one cache, one URL policy and one
         # place where an image request can be made.
         self._drafts_panel.set_preview_image_loader(self._media_image_loader)
-        self._drafts_panel.feeds.bind_runtime(
-            relay_pool=self._relay_pool,
-            relay_directory=self._relay_directory,
-            session_pool=self._session_pool,
-            # Lets imports reuse a pre-prefix identifier that already
-            # exists locally instead of duplicating the draft.
-            draft_store=self._draft_store,
-            entitled_relays=self._entitled_relays,
-            # One list of sources in the app: the imports controller's.
-            subscriptions=self._imports.subscriptions,
-        )
         self._drafts_panel.set_active_profile(self._profile_store.default())
         # The panel's outbound actions all route back through the host.
         self._drafts_panel.open_draft.connect(self._on_panel_open_draft)
@@ -1780,6 +1770,15 @@ class MainWindow(QMainWindow):
         self._drafts_panel.copy_event_id.connect(self._on_panel_copy_event_id)
         self._drafts_panel.refresh_requested.connect(self._draft_sync.refresh)
         self._drafts_panel.close_requested.connect(self._hide_drafts_panel)
+        # The panel's one row about imports (D-2): new posts, how an
+        # import goes, and the Imports window.
+        self._drafts_panel.open_imports.connect(self._open_imports_window)
+        self._drafts_panel.pause_import.connect(self._imports.pause_import)
+        self._drafts_panel.resume_import.connect(self._resume_import)
+        for signal in (self._imports.bound_changed, self._imports.inbox_count_changed,
+                       self._imports.activity_changed):
+            signal.connect(self._update_imports_row)
+        self._update_imports_row()
 
         self._central_splitter = QSplitter(Qt.Horizontal)
         self._central_splitter.setObjectName("central_splitter")
@@ -4639,6 +4638,27 @@ class MainWindow(QMainWindow):
     def _open_imports_window(self) -> None:
         """Nostr > Imports: sources, their posts, and the open one."""
         self._imports.open_window()
+
+    def _update_imports_row(self, *_args) -> None:
+        """What the Drafts panel's Imports row says."""
+        imports = self._imports
+        job = imports.activity()
+        action = ""
+        if job is not None and not imports.read_only:
+            if job.status == "running":
+                action = "pause"
+            elif job.status == "paused":
+                action = "resume"
+            elif job.status == "partial":
+                action = "retry"
+        self._drafts_panel.set_imports_state(
+            available=imports.bound, new_posts=imports.counts().inbox,
+            activity=activity_line(job), action=action)
+
+    def _resume_import(self) -> None:
+        job = self._imports.activity()
+        if job is not None:
+            self._imports.resume_import(job.id)
 
     def _make_imports_window(self, controller):
         """The Imports window, remembered in settings.json between runs."""

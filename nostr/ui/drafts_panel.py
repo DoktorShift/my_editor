@@ -5,7 +5,8 @@
 Layout, top to bottom:
 
   ┌──────────────────────────────────────────┐
-  │  [ Drafts | Feeds ]              ⟲    ×  │  chrome band 1
+  │  Drafts                          ⟲    ×  │  chrome band 1
+  │  [▢] Imports                    14 new › │  the Imports row
   │  [ Search drafts…                      ] │  chrome band 2
   │  Drafts for Alice                        │  status line
   ├──────────────────────────────────────────┤
@@ -17,13 +18,23 @@ Layout, top to bottom:
   │   (empty state placeholder)              │
   └──────────────────────────────────────────┘
 
-Everything starts at the same 12 px gutter: the segmented control, the
-search field, the status line, the empty state and both row lines.
+Everything starts at the same 12 px gutter: the title or the view
+switch, the Imports row, the search field, the status line, the empty
+state and both row lines.
 
-Band 1 is one line only for as long as its two halves fit on one. Once
-the application font has grown enough to crowd them, the refresh and
-close pair drops to a second line and the mode switch keeps the first,
-so its labels stay whole instead of being clipped to fit.
+Band 1 names the panel's view. With one view (Drafts) it is a title;
+when another view is added (``add_view``), a segmented switch takes its
+place, and where the segments do not fit beside the refresh and close
+buttons it becomes a pop-up button naming the current view, as Apple's
+guidelines ask for tight spaces. Words are never cut to fit: the band
+first changes control, then moves the two buttons to a second line.
+Its narrowest width never depends on how long a label is, so wide
+Windows and Linux fonts, German words and text at 200 percent do not
+widen the panel.
+
+The Imports row (the owner's decision D-2: one place for imports, the
+Imports window) says how many new posts wait and opens the window; while
+an import has posts to do, it says how far it is, with Pause or Resume.
 
 Each row is two stacked lines with exactly one inline item, the age.
 ``typography.md`` warns that in a horizontally constrained context
@@ -95,6 +106,7 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QStyle,
     QStyleOptionButton,
+    QStyleOptionToolButton,
     QStylePainter,
     QToolButton,
     QVBoxLayout,
@@ -122,7 +134,7 @@ from .drafts_preview import (
     preview_announcement,
     preview_is_eligible,
 )
-from .feeds_panel import FeedsPanel
+from .imports_glyphs import glyph
 
 
 # Width hints. The host can resize through a QSplitter; these are the
@@ -169,10 +181,36 @@ QFrame#drafts_panel {{
     border-left: 1px solid {t["border"]};
 }}
 QFrame#drafts_panel_top_band,
+QFrame#drafts_panel_imports,
 QFrame#drafts_panel_search_band {{
     background: {t["chrome_bg"]};
     border: none;
 }}
+QLabel#drafts_panel_title {{ color: {t["chrome_fg"]}; font-weight: 600; }}
+QLabel#drafts_panel_imports_activity {{ color: {t["muted"]}; }}
+QPushButton#drafts_panel_imports_open {{
+    background: transparent;
+    color: {t["row_fg"]};
+    border: 1px solid transparent;
+    border-radius: 6px;
+}}
+QPushButton#drafts_panel_imports_open:hover {{ background: {t["hover_bg"]}; }}
+QPushButton#drafts_panel_imports_action {{
+    background: transparent;
+    color: {t["row_fg"]};
+    border: 1px solid {t["border"]};
+    border-radius: 4px;
+    padding: 2px 10px;
+}}
+QPushButton#drafts_panel_imports_action:hover {{ background: {t["hover_bg"]}; }}
+QToolButton#drafts_panel_view_popup {{
+    background: transparent;
+    color: {t["row_fg"]};
+    border: 1px solid {t["border"]};
+    border-radius: 4px;
+    padding: 2px 8px;
+}}
+QToolButton#drafts_panel_view_popup:hover {{ background: {t["hover_bg"]}; }}
 /* One hairline, where the chrome meets the list. The two bands read as
    a single surface so nothing divides them. layout.md: "Group related
    items to help people find the information they want... use negative
@@ -200,7 +238,7 @@ QPushButton#drafts_panel_segment {{
     background: transparent;
     color: {t["muted"]};
     border: 1px solid {t["border"]};
-    padding: 2px {_segment_padding_px()}px;
+    padding: 2px {_SEGMENT_INSET_PX}px;
 }}
 QPushButton#drafts_panel_segment[seg="first"] {{
     border-top-left-radius: 4px;
@@ -228,6 +266,9 @@ QPushButton#drafts_panel_segment:checked {{
    distinguishable from one another as well as from rest. */
 QPushButton#drafts_panel_segment:focus,
 QToolButton#drafts_panel_icon_btn:focus,
+QToolButton#drafts_panel_view_popup:focus,
+QPushButton#drafts_panel_imports_open:focus,
+QPushButton#drafts_panel_imports_action:focus,
 QPushButton#drafts_panel_empty_action:focus {{ border-color: {t["accent"]}; }}
 
 QLineEdit#drafts_panel_search {{
@@ -349,38 +390,10 @@ def _row_metrics() -> _RowMetrics:
     return _RowMetrics(title_font, secondary_font, height, age_width)
 
 
-# The inset a segment carries at the size the panel was drawn for, and
-# the least it may shrink to before the control stops reading as a
-# button rather than as bare text.
-_SEGMENT_PADDING_PX = 14
-_MIN_SEGMENT_PADDING_PX = 8
-
-# The two labels the switch has to fit. Kept here rather than read off
-# the widgets because the stylesheet is built before they exist.
-_SEGMENT_LABELS = (_("Drafts"), _("Feeds"))
-
-
-def _segment_padding_px() -> int:
-    """Horizontal inset for one segment of the mode switch.
-
-    Both segments share one line at the panel's narrowest width, and at
-    200 percent type the two labels plus a 14 px inset each need more
-    room than that line has. Something has to give, and the inset is the
-    right thing: a generous margin around a word that has been cut in
-    half helps nobody, while a tighter one around the whole word still
-    reads as a button.
-
-    Derived from the constraint rather than from a scaling curve, so it
-    stays correct if the labels, the gutter or the minimum width change.
-    The floor means a truly enormous font still elides, which the
-    segment already does legibly, rather than collapsing the control.
-    """
-    metrics = QFontMetrics(QApplication.font())
-    widest = max(metrics.horizontalAdvance(label) for label in _SEGMENT_LABELS)
-    line = MIN_PANEL_WIDTH - 2 * GUTTER
-    # Two segments, each one label, two insets and a one pixel border.
-    room = (line - 2 * (widest + 2)) // 4
-    return max(_MIN_SEGMENT_PADDING_PX, min(_SEGMENT_PADDING_PX, room))
+# The inset around a segment's label. Segments are only shown when they
+# fit with it whole; where they do not, the switch becomes a pop-up button
+# instead of squeezing them.
+_SEGMENT_INSET_PX = 14
 
 
 def _control_height() -> int:
@@ -611,16 +624,16 @@ class _ElidingLabel(QLabel):
 
 
 class _SegmentButton(QPushButton):
-    """Mode-switch segment that elides its own label at paint time.
+    """A segment of the view switch, which elides its own label at paint
+    time should it ever be squeezed.
 
-    QPushButton does not elide. When the layout hands it less than its
-    sizeHint it clips the centred string from both ends, so at 200
-    percent type on a narrow panel "Drafts" painted as "raf" with no
-    ellipsis to say anything had been cut. That is the opposite of what
-    ``accessibility.md`` asks for: "Support larger text sizes. Make sure
-    people can adjust the size of your text or icons to make them more
-    legible, visible, and comfortable to read. Ideally, give people the
-    option to enlarge text by at least 200 percent."
+    The band shows segments only where they fit whole (``_TopBand``), so
+    this is a safety net. It matters because QPushButton does not elide:
+    handed less than its sizeHint it clips the centred string from both
+    ends, so at 200 percent type "Drafts" once painted as "raf" with no
+    ellipsis to say anything had been cut. ``accessibility.md``: "Support
+    larger text sizes... Ideally, give people the option to enlarge text
+    by at least 200 percent."
 
     Elision happens at paint time for the same reason it does in
     ``_ElidingLabel``: eliding through ``setText`` would shrink the
@@ -675,77 +688,433 @@ class _SegmentButton(QPushButton):
         QStylePainter(self).drawControl(QStyle.CE_PushButton, option)
 
 
-class _TopBand(QFrame):
-    """Band 1, which drops to two lines when the type outgrows one.
+class _ViewPopup(QToolButton):
+    """The view switch where its segments do not fit: a pop-up button
+    naming the current view. ``buttons.md``: a pop-up button "displays a
+    menu of mutually exclusive options" and suits tight spaces where a
+    segmented control does not fit.
 
-    The mode switch and the two icon buttons share a single line only
-    for as long as they fit on one. At 200 percent type on a 260 px
-    panel they need 356 px of a 240 px line, and the layout pays for
-    that by squeezing the segments to 65 px each, which is less than
-    the word "Drafts" occupies.
-
-    ``typography.md``: "Consider adjusting your layout at large font
-    sizes. When font size increases in a horizontally constrained
-    context, inline items (like glyphs and timestamps) and container
-    boundaries can crowd text and cause truncation or overlapping." The
-    row widget already answers that with a stacked layout; this is the
-    same answer for the band, and it hands the segments the whole line,
-    which is enough for the label to survive intact at every size the
-    panel is likely to meet.
-
-    Reflowing is one ``setDirection`` call, with no reparenting, so the
-    button group, the focus chain and the tab order are untouched by it.
-    It cannot oscillate either: neither the band's width nor the two
-    holders' size hints change when the direction does, so the test that
-    chose vertical keeps choosing vertical.
+    It claims no minimum width of its own: the band only shows it where
+    it fits whole, so the panel never grows for a long view name. Past
+    every size that can happen (text far beyond 200 percent on a 260 px
+    panel), it elides as a last resort, and its tooltip keeps the name.
     """
 
-    def __init__(
-        self,
-        segments: QWidget,
-        icons: QWidget,
-        parent: Optional[QWidget] = None,
-    ) -> None:
+    def __init__(self, control_h: int, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("drafts_panel_view_popup")
+        self.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.setMinimumHeight(control_h)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.setMenu(QMenu(self))
+
+    def minimumSizeHint(self) -> QSize:
+        hint = super().minimumSizeHint()
+        hint.setWidth(0)
+        return hint
+
+    def painted_text(self) -> str:
+        """The string ``paintEvent`` draws at the current width: the whole
+        name wherever the button has the room it asks for."""
+        if self.width() >= self.sizeHint().width():
+            return self.text()
+        inner = self.width() - (self.sizeHint().width()
+                                - self.fontMetrics().horizontalAdvance(self.text()))
+        return self.fontMetrics().elidedText(self.text(), Qt.ElideRight, max(0, inner))
+
+    def paintEvent(self, event) -> None:
+        option = QStyleOptionToolButton()
+        self.initStyleOption(option)
+        option.text = self.painted_text()
+        QStylePainter(self).drawComplexControl(QStyle.CC_ToolButton, option)
+
+
+class _ViewSwitch(QWidget):
+    """Segments for the panel's views, or a pop-up button where they do
+    not fit (see ``_TopBand``).
+
+    Signals:
+      view_chosen(str)   a view was picked (its key)
+    """
+
+    view_chosen = Signal(str)
+
+    def __init__(self, control_h: int, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("drafts_panel_view_switch")
+        self._control_h = control_h
+        self._views: List[Tuple[str, str, str]] = []
+        self._current = ""
+        self.segments: List[_SegmentButton] = []
+        self._segments = QWidget()
+        self._segments_layout = QHBoxLayout(self._segments)
+        self._segments_layout.setContentsMargins(0, 0, 0, 0)
+        self._segments_layout.setSpacing(0)
+        self._group = QButtonGroup(self)
+        self._group.setExclusive(True)
+        self._group.idClicked.connect(self._on_segment)
+        self.popup = _ViewPopup(control_h)
+        self.popup.setAccessibleName(_("View"))
+        self.popup.hide()
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(0)
+        row.addWidget(self._segments)
+        row.addWidget(self.popup)
+        # The band shows the segments only where they fit, and the pop-up
+        # button claims no width of its own: the switch never widens the
+        # panel. (By default a layout would hold its widget at least as
+        # wide as everything in it.)
+        row.setSizeConstraint(QBoxLayout.SetNoConstraint)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(0, self._control_h)
+
+    def sizeHint(self) -> QSize:
+        shown = self.popup if self.is_popup() else self._segments
+        return QSize(shown.sizeHint().width(), self._control_h)
+
+    def has_choice(self) -> bool:
+        return len(self._views) > 1
+
+    def is_popup(self) -> bool:
+        return not self.popup.isHidden()
+
+    def segments_width(self) -> int:
+        return self._segments.sizeHint().width()
+
+    def popup_width(self) -> int:
+        """The pop-up button's width for the longest view name, so the
+        band keeps its shape whichever view is up."""
+        metrics = self.popup.fontMetrics()
+        chrome = self.popup.sizeHint().width() - metrics.horizontalAdvance(self.popup.text())
+        return chrome + max((metrics.horizontalAdvance(title)
+                             for _key, title, _hint in self._views), default=0)
+
+    def use_popup(self, popup: bool) -> None:
+        if popup == self.is_popup():
+            return
+        self.popup.setVisible(popup)
+        self._segments.setVisible(not popup)
+        self.updateGeometry()
+
+    def set_views(self, views, current: str) -> None:
+        self._views = list(views)
+        for button in self.segments:
+            self._group.removeButton(button)
+            self._segments_layout.removeWidget(button)
+            button.hide()
+            button.deleteLater()
+        self.segments = []
+        menu = self.popup.menu()
+        menu.clear()
+        for index, (key, title, hint) in enumerate(self._views):
+            button = _SegmentButton(title, hint)
+            button.setProperty("seg", "first" if index == 0 else (
+                "last" if index == len(self._views) - 1 else "middle"))
+            button.setMinimumHeight(self._control_h)
+            self._group.addButton(button, index)
+            self._segments_layout.addWidget(button)
+            self.segments.append(button)
+            action = menu.addAction(title)
+            action.setCheckable(True)
+            action.setToolTip(hint)
+            action.triggered.connect(lambda _checked=False, k=key: self.view_chosen.emit(k))
+        self.set_current(current)
+
+    def set_current(self, key: str) -> None:
+        self._current = key
+        for index, (view_key, title, _hint) in enumerate(self._views):
+            chosen = view_key == key
+            if index < len(self.segments):
+                self.segments[index].setChecked(chosen)
+            actions = self.popup.menu().actions()
+            if index < len(actions):
+                actions[index].setChecked(chosen)
+            if chosen:
+                self.popup.setText(title)
+                self.popup.setToolTip(title)
+                # The control is named for what it switches, and says
+                # which view is up, as a pop-up button reads.
+                self.popup.setAccessibleName(_("View: {title}").format(title=title))
+        self.updateGeometry()
+
+    def _on_segment(self, index: int) -> None:
+        if 0 <= index < len(self._views):
+            self.view_chosen.emit(self._views[index][0])
+
+
+class _TopBand(QFrame):
+    """Band 1: the view's title or the switch, then refresh and close.
+
+    With one view the title leads, and it elides rather than wrap, so
+    band 1 is always one line. With more, the band picks the first of
+    these that fits, so a word is never cut to fit (``typography.md``:
+    "Consider adjusting your layout at large font sizes"):
+
+    1. the segments, beside the two buttons;
+    2. the pop-up button, beside the two buttons;
+    3. the pop-up button on its own line, the two buttons on the next.
+
+    The band's narrowest width never depends on a label: the title
+    elides and the switch claims no width of its own, so wide fonts and
+    long words do not widen the panel.
+
+    Reflowing is one ``setDirection`` call and two visibility flips,
+    with no reparenting, so focus chain and tab order are untouched. It
+    cannot oscillate: the choice depends on the band's width and on the
+    size hints of the candidates, which the choice does not change.
+    """
+
+    def __init__(self, title: QWidget, switch: "_ViewSwitch", icons: QWidget,
+                 parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("drafts_panel_top_band")
-        self._segments = segments
+        self._title = title
+        self._switch = switch
         self._icons = icons
         self._box = QBoxLayout(QBoxLayout.LeftToRight, self)
         self._box.setContentsMargins(GUTTER, 5, 8, 5)
         self._box.setSpacing(6)
-        self._box.addWidget(segments)
+        self._box.addWidget(title, 1)
+        self._box.addWidget(switch)
         # Collapses to nothing in the vertical direction, because the
         # band is only ever given its sizeHint height.
-        self._box.addStretch(1)
+        self._box.addStretch(0)
         self._box.addWidget(icons)
+        switch.hide()
 
     def is_stacked(self) -> bool:
         """True when the icon buttons have moved to their own line."""
         return self._box.direction() == QBoxLayout.TopToBottom
 
-    def _reflow(self) -> None:
+    def reflow(self) -> None:
         margins = self._box.contentsMargins()
         available = self.width() - margins.left() - margins.right()
-        needed = (
-            self._segments.sizeHint().width()
-            + self._icons.sizeHint().width()
-            + self._box.spacing()
-        )
-        wanted = (
-            QBoxLayout.LeftToRight if needed <= available
-            else QBoxLayout.TopToBottom
-        )
+        beside = self._icons.sizeHint().width() + self._box.spacing()
+        stacked = False
+        if not self._switch.has_choice():
+            self._switch.hide()
+            self._title.show()
+        else:
+            self._title.hide()
+            self._switch.show()
+            if self._switch.segments_width() + beside <= available:
+                self._switch.use_popup(False)
+            else:
+                self._switch.use_popup(True)
+                stacked = self._switch.popup_width() + beside > available
+        wanted = QBoxLayout.TopToBottom if stacked else QBoxLayout.LeftToRight
         if self._box.direction() != wanted:
             self._box.setDirection(wanted)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self._reflow()
+        self.reflow()
 
     def changeEvent(self, event) -> None:
         super().changeEvent(event)
         if event.type() == QEvent.FontChange:
-            self._reflow()
+            self.reflow()
+
+
+class _LauncherButton(QPushButton):
+    """The Imports row's button: a tray, "Imports", how many new posts
+    wait, and a chevron that says it opens something.
+
+    Painted rather than laid out, so its narrowest width never depends on
+    its words. Where the count does not fit beside the title (large text
+    on a narrow panel), it moves under the title and the button grows a
+    line, so both stay whole; only past every ordinary size does the
+    title elide, and the full words stay in the accessible name and the
+    tooltip.
+    """
+
+    _PAD, _GAP, _COUNT_GAP = 6, 8, 12
+
+    def __init__(self, control_h: int, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("drafts_panel_imports_open")
+        self.setCursor(Qt.PointingHandCursor)
+        self._control_h = control_h
+        self._count_text = ""
+        self.setText(_("Imports"))
+        self.setToolTip(_("Open the Imports window"))
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)
+        self.set_count(0)
+
+    def set_count(self, new_posts: int) -> None:
+        self._count_text = (ngettext("{count} new", "{count} new", new_posts).format(
+            count=new_posts) if new_posts else "")
+        self.setAccessibleName(
+            ngettext("Imports, {count} new post", "Imports, {count} new posts",
+                     new_posts).format(count=new_posts) if new_posts else _("Imports"))
+        self._fit_height()
+        self.updateGeometry()
+        self.update()
+
+    def count_text(self) -> str:
+        return self._count_text
+
+    def _count_font(self) -> QFont:
+        font = QFont(self.font())
+        font.setBold(True)
+        return font
+
+    def _sizes(self):
+        """Icon, chevron, title and count widths, and the line height."""
+        metrics = self.fontMetrics()
+        count = (QFontMetrics(self._count_font()).horizontalAdvance(self._count_text)
+                 if self._count_text else 0)
+        return (metrics.height(), metrics.horizontalAdvance("›"),
+                metrics.horizontalAdvance(self.text()), count, metrics.height())
+
+    def _one_line_width(self) -> int:
+        icon, chevron, title, count, _line = self._sizes()
+        width = self._PAD + icon + self._GAP + title + self._GAP + chevron + self._PAD
+        return width + (self._COUNT_GAP + count if count else 0)
+
+    def is_stacked(self) -> bool:
+        """True when the count sits under the title."""
+        return bool(self._count_text) and self.width() < self._one_line_width()
+
+    def _height(self, lines: int) -> int:
+        line = self._sizes()[4]
+        return max(self._control_h, line * lines + 10 + (2 if lines > 1 else 0))
+
+    def sizeHint(self) -> QSize:
+        return QSize(self._one_line_width(), self._height(2 if self.is_stacked() else 1))
+
+    def minimumSizeHint(self) -> QSize:
+        icon, chevron, _title, _count, _line = self._sizes()
+        return QSize(self._PAD + icon + self._GAP + chevron + self._PAD, self._height(1))
+
+    def heightForWidth(self, width: int) -> int:
+        stacked = bool(self._count_text) and width < self._one_line_width()
+        return self._height(2 if stacked else 1)
+
+    def _fit_height(self) -> None:
+        """A line taller while the count sits under the title. Only the
+        height follows the width, so this settles at once."""
+        wanted = self.heightForWidth(self.width())
+        if self.minimumHeight() != wanted:
+            self.setMinimumHeight(wanted)
+            self.updateGeometry()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._fit_height()
+
+    def painted_title(self) -> str:
+        icon, chevron, _title, count, _line = self._sizes()
+        used = self._PAD + icon + self._GAP + self._GAP + chevron + self._PAD
+        if self._count_text and not self.is_stacked():
+            used += self._COUNT_GAP + count
+        return self.fontMetrics().elidedText(self.text(), Qt.ElideRight,
+                                             max(0, self.width() - used))
+
+    def paintEvent(self, event) -> None:
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        option.text = ""
+        painter = QStylePainter(self)
+        painter.drawControl(QStyle.CE_PushButton, option)
+        icon, chevron, _title, count, line = self._sizes()
+        rect = self.rect()
+        stacked = self.is_stacked()
+        first = QRect(rect.left(), rect.top() + 5, rect.width(), line) if stacked else rect
+        colour = self.palette().color(QPalette.ButtonText)
+        left = self._PAD
+        painter.drawPixmap(left, first.center().y() - icon // 2 + 1,
+                           glyph("inbox", icon, colour, self.devicePixelRatioF()))
+        left += icon + self._GAP
+        painter.setPen(colour)
+        right = rect.right() - self._PAD
+        painter.drawText(QRect(right - chevron + 1, first.top(), chevron, first.height()),
+                         int(Qt.AlignRight | Qt.AlignVCenter), "›")
+        right -= chevron + self._GAP
+        if self._count_text:
+            painter.setFont(self._count_font())
+            if stacked:
+                painter.drawText(QRect(left, first.bottom() + 3, max(0, right - left + 1), line),
+                                 int(Qt.AlignLeft | Qt.AlignVCenter), self._count_text)
+            else:
+                painter.drawText(QRect(right - count + 1, rect.top(), count, rect.height()),
+                                 int(Qt.AlignRight | Qt.AlignVCenter), self._count_text)
+                right -= count + self._COUNT_GAP
+            painter.setFont(self.font())
+        painter.drawText(QRect(left, first.top(), max(0, right - left + 1), first.height()),
+                         int(Qt.AlignLeft | Qt.AlignVCenter), self.painted_title())
+
+
+class _ImportsRow(QFrame):
+    """The Drafts panel's one row about imports (D-2).
+
+    Signals:
+      open_requested()     the row: open the Imports window
+      pause_requested()    Pause
+      resume_requested()   Resume, or Try Again
+    """
+
+    open_requested = Signal()
+    pause_requested = Signal()
+    resume_requested = Signal()
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("drafts_panel_imports")
+        control_h = _control_height()
+        column = QVBoxLayout(self)
+        column.setContentsMargins(GUTTER - 6, 4, GUTTER - 6, 4)
+        column.setSpacing(2)
+        self.button = _LauncherButton(control_h)
+        self.button.clicked.connect(self.open_requested)
+        column.addWidget(self.button)
+        line = QHBoxLayout()
+        line.setContentsMargins(6, 0, 0, 2)
+        line.setSpacing(8)
+        self.activity = QLabel()
+        self.activity.setObjectName("drafts_panel_imports_activity")
+        self.activity.setFont(_secondary_font())
+        self.activity.setTextFormat(Qt.PlainText)
+        self.activity.setWordWrap(True)
+        self.activity.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        line.addWidget(self.activity, 1)
+        self.action = QPushButton()
+        self.action.setObjectName("drafts_panel_imports_action")
+        self.action.setText(_("Pause"))
+        self.action.clicked.connect(self._act)
+        line.addWidget(self.action, 0, Qt.AlignTop)
+        self._activity_line = QWidget()
+        self._activity_line.setLayout(line)
+        column.addWidget(self._activity_line)
+        self._action = ""
+        self._activity_line.hide()
+        self.hide()
+
+    def minimumSizeHint(self) -> QSize:
+        hint = super().minimumSizeHint()
+        hint.setWidth(min(hint.width(), self.button.minimumSizeHint().width() + 2 * GUTTER))
+        return hint
+
+    def show_state(self, *, available: bool, new_posts: int, activity: str,
+                   action: str) -> None:
+        self.setVisible(available)
+        self.button.set_count(new_posts)
+        self._action = action
+        self.activity.setText(activity)
+        words = {"pause": _("Pause"), "resume": _("Resume"), "retry": _("Try Again")}
+        self.action.setText(words.get(action, _("Pause")))
+        self.action.setVisible(bool(action))
+        self._activity_line.setVisible(bool(activity))
+
+    def _act(self) -> None:
+        if self._action == "pause":
+            self.pause_requested.emit()
+        elif self._action in ("resume", "retry"):
+            self.resume_requested.emit()
 
 
 class _DraftRowWidget(QWidget):
@@ -910,6 +1279,10 @@ class DraftsPanel(QFrame):
       copy_event_id(str)         , copy outer wrap event id to clipboard
       refresh_requested()        , manual refresh tap on the header
       close_requested()          , × on the header
+      view_changed(str)          , another view was chosen (its key)
+      open_imports()             , the Imports row: open the Imports window
+      pause_import()             , the Imports row's Pause
+      resume_import()            , the Imports row's Resume or Try Again
 
     Switching profiles is not one of these: the editor header's
     ProfileChip owns that menu, and the panel names the bound account
@@ -922,6 +1295,9 @@ class DraftsPanel(QFrame):
       set_signer_unsupported(bool), show the "signer lacks NIP-44" state
       apply_theme(is_dark)       , switch dark/light
       set_preview_image_loader(l), hand the hover preview a ThumbnailLoader
+      add_view(key, title, hint, widget), another view beside Drafts
+      show_view(key) / current_view()
+      set_imports_state(...)     , what the Imports row says
 
     Hovering a row opens a preview of that draft after half a second.
     That surface lives in ``drafts_preview.py``; the panel owns one
@@ -943,6 +1319,12 @@ class DraftsPanel(QFrame):
     copy_event_id = Signal(str)
     refresh_requested = Signal()
     close_requested = Signal()
+    view_changed = Signal(str)
+    open_imports = Signal()
+    pause_import = Signal()
+    resume_import = Signal()
+
+    DRAFTS_VIEW = "drafts"
 
     def __init__(self, *, is_dark: bool = True, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -963,6 +1345,10 @@ class DraftsPanel(QFrame):
         # Maps draft identifier → QListWidgetItem so signal updates can
         # find their row without scanning.
         self._items: dict[str, QListWidgetItem] = {}
+        # The panel's views: (key, title, hint) each, Drafts first.
+        self._views: List[Tuple[str, str, str]] = [
+            (self.DRAFTS_VIEW, _("Drafts"), _("Your saved private drafts"))]
+        self._view_pages: dict = {}
 
         self._status_timer = QTimer(self)
         self._status_timer.setSingleShot(True)
@@ -989,77 +1375,43 @@ class DraftsPanel(QFrame):
         outer.addWidget(self._build_mode_stack(), 1)
 
     def _build_mode_stack(self) -> QWidget:
-        """Top-level page switcher: ``Drafts`` vs ``Feeds``.
-
-        Each segment button maps to one index in this stack. The search
-        band only applies to the drafts list so it lives inside the
-        drafts-mode container, not at the outer level.
-        """
+        """The views, one page each: Drafts, and whatever ``add_view``
+        adds. The Imports row and the search band belong to the drafts
+        list, so they live on its page."""
         self._mode_stack = QStackedWidget()
         self._mode_stack.setObjectName("drafts_panel_mode_stack")
 
-        # Drafts mode: search band + body.
         drafts_mode = QWidget()
         drafts_mode_layout = QVBoxLayout(drafts_mode)
         drafts_mode_layout.setContentsMargins(0, 0, 0, 0)
         drafts_mode_layout.setSpacing(0)
+        self._imports_row = _ImportsRow()
+        self._imports_row.open_requested.connect(self.open_imports)
+        self._imports_row.pause_requested.connect(self.pause_import)
+        self._imports_row.resume_requested.connect(self.resume_import)
+        drafts_mode_layout.addWidget(self._imports_row)
         drafts_mode_layout.addWidget(self._build_search_band())
         drafts_mode_layout.addWidget(self._build_body(), 1)
         self._mode_stack.addWidget(drafts_mode)
-
-        # Feeds mode: RSS / Atom / JSON Feed importer.
-        self._feeds_panel = FeedsPanel(is_dark=self._is_dark, parent=self)
-        self._mode_stack.addWidget(self._feeds_panel)
-
+        self._view_pages[self.DRAFTS_VIEW] = drafts_mode
         return self._mode_stack
 
     def _build_top_band(self) -> QWidget:
-        """Band 1: the mode switch on the leading edge, refresh and close.
+        """Band 1: the view's title (or the switch between views) on the
+        leading edge, refresh and close on the trailing one.
 
-        This was two stacked bands, a 44 px header holding nothing but
-        the trailing buttons and a 40 px row holding a centred segmented
-        control. Together with the old chip row that put 146 px of chrome
-        above the first draft; it is now 76 px, and the freed space is
-        deliberately not backfilled.
-
-        ``_TopBand`` takes the two halves back to two lines, but only
-        when the application font has grown enough that they no longer
-        share one.
+        ``_TopBand`` chooses between the title, the segments and the
+        pop-up button, and takes the two buttons to a second line only
+        when even the pop-up button does not fit beside them.
         """
         control_h = _control_height()
+        self._title = _ElidingLabel()
+        self._title.setObjectName("drafts_panel_title")
+        self._title.setMinimumHeight(control_h)
+        self._title.set_full_text(self._views[0][1])
 
-        # A button group with the cosmetic ``checked`` look, flat buttons
-        # reading as a segmented control. The corner rounding is a
-        # ``seg`` property rather than a per-button stylesheet so that
-        # the panel sheet stays the single owner of the segments' look
-        # and its :focus rule is not shadowed.
-        # Both segments elide their own label rather than clipping it,
-        # so the band survives its own type scale at any panel width.
-        self._seg_drafts = _SegmentButton(
-            _SEGMENT_LABELS[0], _("Your saved private drafts"),
-        )
-        self._seg_drafts.setProperty("seg", "first")
-        self._seg_drafts.setChecked(True)
-        self._seg_drafts.setMinimumHeight(control_h)
-
-        self._seg_feeds = _SegmentButton(
-            _SEGMENT_LABELS[1], _("Import RSS, Atom, or JSON feeds as private drafts"),
-        )
-        self._seg_feeds.setProperty("seg", "last")
-        self._seg_feeds.setMinimumHeight(control_h)
-
-        segments = QWidget()
-        segments_layout = QHBoxLayout(segments)
-        segments_layout.setContentsMargins(0, 0, 0, 0)
-        segments_layout.setSpacing(0)
-        segments_layout.addWidget(self._seg_drafts)
-        segments_layout.addWidget(self._seg_feeds)
-
-        group = QButtonGroup(segments)
-        group.setExclusive(True)
-        group.addButton(self._seg_drafts, 0)
-        group.addButton(self._seg_feeds, 1)
-        group.idToggled.connect(self._on_segment_changed)
+        self._view_switch = _ViewSwitch(control_h)
+        self._view_switch.view_chosen.connect(self.show_view)
 
         # Icon-only, so the accessible name is the only string that
         # announces them; the glyph alone reads as "⟲" and "×".
@@ -1082,7 +1434,7 @@ class DraftsPanel(QFrame):
         )
         icons_layout.addWidget(self._close_btn)
 
-        self._top_band = _TopBand(segments, icons)
+        self._top_band = _TopBand(self._title, self._view_switch, icons)
         return self._top_band
 
     def _make_icon_button(
@@ -1156,6 +1508,7 @@ class DraftsPanel(QFrame):
 
         self._list = QListWidget()
         self._list.setObjectName("drafts_panel_list")
+        self._list.setAccessibleName(_("Drafts"))
         self._list.setSpacing(0)
         self._list.setUniformItemSizes(True)
         self._list.setVerticalScrollMode(QListWidget.ScrollPerPixel)
@@ -1195,40 +1548,63 @@ class DraftsPanel(QFrame):
         # or link to do so if possible." The label and the handler both
         # belong to the branch, so the button dispatches through
         # ``_empty_action_handler`` rather than being wired to one of them
-        # for the life of the panel.
+        # for the life of the panel. It joins the panel only while a branch
+        # offers one, so no unnamed button waits hidden for screen readers.
         self._empty_action = QPushButton()
         self._empty_action.setObjectName("drafts_panel_empty_action")
         self._empty_action.setMinimumHeight(_control_height())
         self._empty_action_handler: Optional[Callable[[], None]] = None
         self._empty_action.clicked.connect(self._on_empty_action)
         self._empty_action.hide()
-        empty_layout.addWidget(self._empty_action, 0, Qt.AlignHCenter)
+        self._empty_layout = empty_layout
         empty_layout.addStretch(2)
         self._body_stack.addWidget(self._empty_widget)
         return container
 
-    # -- public API: feeds page wiring ------------------------------------
+    # -- public API: views --------------------------------------------------
 
-    @property
-    def feeds(self) -> FeedsPanel:
-        """The RSS importer page. Host wires its runtime via this handle."""
-        return self._feeds_panel
+    def add_view(self, key: str, title: str, hint: str, widget: QWidget) -> None:
+        """Add a view beside Drafts (another page of the panel). From the
+        second view on, band 1 offers the switch between them."""
+        if key in self._view_pages:
+            raise ValueError(f"the panel already has a view {key!r}")
+        self._views.append((key, title, hint))
+        self._view_pages[key] = widget
+        self._mode_stack.addWidget(widget)
+        self._view_switch.set_views(self._views, self.current_view())
+        self._top_band.reflow()
 
-    def _on_segment_changed(self, button_id: int, checked: bool) -> None:
-        """Switch the top-level mode stack when a segment toggles on.
+    def views(self) -> List[str]:
+        return [key for key, _title, _hint in self._views]
 
-        Guarded with ``hasattr`` because the button group's ``idToggled``
-        signal is connected during ``_build_top_band``, which runs
-        before ``_build_mode_stack``. Any future reordering of the build
-        sequence shouldn't crash on the early signal path.
-        """
-        if not checked or not hasattr(self, "_mode_stack"):
+    def current_view(self) -> str:
+        page = self._mode_stack.currentWidget()
+        return next((key for key, widget in self._view_pages.items() if widget is page),
+                    self.DRAFTS_VIEW)
+
+    def show_view(self, key: str) -> None:
+        page = self._view_pages.get(key)
+        if page is None or key == self.current_view():
+            self._view_switch.set_current(self.current_view())
             return
-        if 0 <= button_id < self._mode_stack.count():
-            self._mode_stack.setCurrentIndex(button_id)
-        # Feeds is different data and different rows, so the drafts
+        self._mode_stack.setCurrentWidget(page)
+        self._view_switch.set_current(key)
+        self._top_band.reflow()
+        # Another view is other data and other rows, so the drafts
         # preview has nothing to describe there.
         self._preview.close(disarm=True)
+        self.view_changed.emit(key)
+
+    # -- public API: the Imports row ------------------------------------------
+
+    def set_imports_state(self, *, available: bool, new_posts: int = 0,
+                          activity: str = "", action: str = "") -> None:
+        """What the Imports row says: shown while imports are ``available``
+        (an account is in use), with ``new_posts`` waiting, an import's
+        ``activity`` line, and its ``action`` ("pause", "resume", "retry"
+        or "")."""
+        self._imports_row.show_state(available=available, new_posts=new_posts,
+                                     activity=activity, action=action)
 
     # -- public API: theming ----------------------------------------------
 
@@ -1239,8 +1615,8 @@ class DraftsPanel(QFrame):
         # Re-styled in place rather than closed: a theme switch is not a
         # reason to take a surface away from someone reading it.
         self._preview.apply_theme(is_dark)
-        if hasattr(self, "_feeds_panel") and self._feeds_panel is not None:
-            self._feeds_panel.apply_theme(is_dark)
+        if hasattr(self, "_imports_row"):
+            self._imports_row.update()
         if not hasattr(self, "_list") or self._list is None:
             return
         self._list.viewport().update()
@@ -1313,8 +1689,6 @@ class DraftsPanel(QFrame):
         # The status line names the account, so it has to be re-rendered
         # whenever the binding changes.
         self._render_status()
-        if hasattr(self, "_feeds_panel") and self._feeds_panel is not None:
-            self._feeds_panel.set_active_profile(profile)
 
     def set_status(self, text: str) -> None:
         """Narrate one sync step. Never writes the label directly.
@@ -1415,7 +1789,7 @@ class DraftsPanel(QFrame):
         panel has to be on screen, in drafts mode, and inside the active
         window.
         """
-        if not self.isVisible() or self._mode_stack.currentIndex() != 0:
+        if not self.isVisible() or self.current_view() != self.DRAFTS_VIEW:
             return False
         window = self.window()
         return window is not None and window.isActiveWindow()
@@ -1573,9 +1947,17 @@ class DraftsPanel(QFrame):
         self._empty_title.setText(title)
         self._empty_body.setText(body)
         self._empty_action_handler = on_action if action else None
+        button = self._empty_action
         if action:
-            self._empty_action.setText(action)
-        self._empty_action.setVisible(bool(action))
+            button.setText(action)
+            if button.parentWidget() is None:
+                # After the title and the body, before the space below.
+                self._empty_layout.insertWidget(3, button, 0, Qt.AlignHCenter)
+            button.show()
+        elif button.parentWidget() is not None:
+            self._empty_layout.removeWidget(button)
+            button.hide()
+            button.setParent(None)
         self._body_stack.setCurrentIndex(1)
 
     def _on_empty_action(self) -> None:

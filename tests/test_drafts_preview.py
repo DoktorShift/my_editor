@@ -970,10 +970,13 @@ def test_a_context_menu_closes_the_popover_before_it_is_built(panel):
     assert controller.is_disarmed() is True
 
 
-def test_switching_to_feeds_closes_the_preview(panel):
+def test_switching_to_another_view_closes_the_preview(panel):
+    # Another view of the panel (Published) is other data and other rows.
+    from PySide6.QtWidgets import QWidget
     controller = panel._preview
+    panel.add_view("published", "Published", "", QWidget())
     open_preview(panel, 0)
-    panel._seg_feeds.setChecked(True)
+    panel.show_view("published")
     assert controller.is_open() is False
     assert panel.preview_is_available() is False
 

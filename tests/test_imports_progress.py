@@ -39,7 +39,7 @@ def setup(tmp_path, jobs):
     shown = []
     stops = []
     win = ImportsWindow(controller, show_drafts=lambda: shown.append(True),
-                        confirm_stop=lambda parent: stops.append(parent) or win.allow_stop)
+                        confirm=lambda **asked: stops.append(asked) or win.allow_stop)
     win.allow_stop = True
     win.resize(1180, 760)
     win.show()
@@ -128,7 +128,9 @@ class TestTheCard:
         win._show_job_card()
         win.allow_stop = False
         win.job_card.stop_button.click()
-        assert stops and controller.activity().status == "running"
+        assert stops[0]["title"] == "Stop this import?"
+        assert stops[0]["action"] == "Stop Import"
+        assert controller.activity().status == "running"
         win._show_job_card()
         win.allow_stop = True
         win.job_card.stop_button.click()
@@ -196,3 +198,42 @@ def test_the_words():
     assert activity_line(None) == ""
     done = job("completed", rows=[row("done"), row("existing"), row("existing")])
     assert finished_text(done) == ("Import finished. 1 draft created. 2 were already there.")
+
+
+def test_the_drafts_panel_row_follows_the_import(setup):
+    """The Drafts panel's Imports row (D-2) says what the Imports window's
+    toolbar says, and its Pause and Resume act on the same import."""
+    from types import SimpleNamespace
+    from main_window import MainWindow
+    from nostr.ui.drafts_panel import DraftsPanel
+    win, controller, jobs, _shown, _stops = setup
+    panel = DraftsPanel(is_dark=True)
+    panel.pause_import.connect(controller.pause_import)
+    host = SimpleNamespace(_imports=controller, _drafts_panel=panel)
+    host._resume_import = lambda: MainWindow._resume_import(host)
+    panel.resume_import.connect(host._resume_import)
+    MainWindow._update_imports_row(host)
+    row = panel._imports_row
+    assert not row.isHidden()
+    assert row.button.count_text() == f"{controller.counts().inbox} new"
+    assert row._activity_line.isHidden()
+    hold_all(win, jobs)
+    start_two(win)
+    MainWindow._update_imports_row(host)
+    assert row.activity.text() == "Creating drafts, 0 of 2"
+    assert row.action.text() == "Pause"
+    row.action.click()
+    jobs.held.pop(0).play("ok")
+    settle()
+    MainWindow._update_imports_row(host)
+    assert row.activity.text() == "Import paused, 1 of 2"
+    assert row.action.text() == "Resume"
+    row.action.click()
+    settle()
+    jobs.held.pop(0).play("ok")
+    settle()
+    MainWindow._update_imports_row(host)
+    assert row._activity_line.isHidden()
+    controller.read_only = True
+    MainWindow._update_imports_row(host)
+    assert row.action.isHidden()

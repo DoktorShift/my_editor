@@ -396,3 +396,29 @@ class TestScreenReaders:
         assert win.placeholder_button is not None
         assert unnamed_controls(win) == []
         controller.account_changed(None)
+
+
+class TestUnsubscribe:
+    def test_it_asks_first_and_keeps_the_drafts(self, tmp_path):
+        controller = controller_for(tmp_path)
+        fill(controller)
+        asked = []
+        answer = {"yes": False}
+        win = ImportsWindow(controller, confirm=lambda **kw: asked.append(kw) or answer["yes"])
+        entry = next(e for e in entries(win) if e.kind == SOURCE and e.title == "field notes")
+        win.unsubscribe(entry)
+        assert asked[0]["title"] == "Unsubscribe from \u201cfield notes\u201d?"
+        assert asked[0]["message"] == "Its posts leave Imports. Drafts you already created stay."
+        assert controller.is_followed(FIELD)
+        answer["yes"] = True
+        win.unsubscribe(entry)
+        assert not controller.is_followed(FIELD)
+        assert all(e.key != entry.key for e in entries(win))
+        controller.account_changed(None)
+
+    def test_it_is_in_the_sources_menu(self, window):
+        from PySide6.QtWidgets import QMenu
+        entry = next(e for e in entries(window) if e.kind == SOURCE)
+        menu = QMenu()
+        window._source_actions(menu, entry)
+        assert [a.text() for a in menu.actions() if a.text()][-1] == "Unsubscribe\u2026"
