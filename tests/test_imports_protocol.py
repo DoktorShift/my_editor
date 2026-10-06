@@ -202,18 +202,18 @@ class TestEncryptionFloor:
         import pathlib
         import tempfile
 
-        from tests.imports_fakes import PROFILE
         from tests.test_imports_subscriptions import (
-            FakeScheduler, make_store,
+            PROFILE, FakeScheduler, make_store,
         )
         scheduler = FakeScheduler()
-        store, publisher, _ = make_store(
+        store, relay, _ = make_store(
             pathlib.Path(tempfile.mkdtemp()), scheduler=scheduler)
         store.bind_profile(PROFILE)
-        store.add_feed("https://secret-reading-list.example/feed")
-        scheduler.fire_last()
         settle()
-        _relays, signed = publisher.calls[0]
+        store.add_feed("https://secret-reading-list.example/feed")
+        scheduler.fire()
+        settle()
+        _relays, signed = relay.published[0]
         outer = json.dumps(
             {k: v for k, v in signed.items() if k != "content"})
         assert "secret-reading-list" not in outer

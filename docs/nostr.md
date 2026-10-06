@@ -173,6 +173,16 @@ Supports RSS 2.0, Atom, and JSON Feed (WordPress, Ghost, Hugo, Jekyll, Substack,
 
 Some publishers (Habla, Yakihonne, Pareto, self-hosted Nostr-aware blogs) emit feeds where the body is a teaser and the real article lives on Nostr as a kind:30023 long-form event. When the feed's link is a `nostr:naddr...` URI, or contains a bech32 naddr embedded in an HTTP URL (njump.me, habla.news, yakihonne.com, etc.), the importer fetches the event from your NIP-65 read relays plus the relay hints encoded in the address and uses its prose as the draft body. If the fetch times out or the event is empty, the feed-provided teaser is published instead so the draft always ships.
 
+### Sources you follow, shared with EINUNDZWANZIG STANDUP
+
+The sources you subscribe to are one private list on your relays, the same list EINUNDZWANZIG STANDUP keeps (a kind 30078 event, `d` = `einundzwanzig:feed-sources`, encrypted to yourself with NIP-44). A source followed in one app shows up in the other, together with its defaults for new drafts (copy images, fetch the full article).
+
+- Both apps' edits are kept: before saving, MyEditor reads the list again and merges (sources added in either app stay, sources removed in either app go, a title or a default changed here wins over the other app's unchanged one).
+- Whatever MyEditor does not understand (sources only STANDUP reads, keys it does not know) is written back unchanged.
+- A list MyEditor cannot read (one saved with an older kind of encryption, or while the signer is unreachable) is never written over; your changes stay on this computer until it can be read.
+- The list MyEditor kept before (`d` = `myeditor:feed-sources`) is merged in once and not written again.
+- Changes that could not be sent yet are kept with the list on this computer and sent at the next start.
+
 ### Idempotent re-runs
 
 Each item's draft identifier is derived from its feed id, so re-running the same import replaces existing drafts on relays rather than duplicating them. Safe to schedule daily, weekly, or whenever you publish a new post.

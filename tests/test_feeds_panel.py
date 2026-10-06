@@ -52,7 +52,7 @@ def make_panel(fetcher, *, publish_outcomes=None, entitled_relays=None):
     import tempfile
     from nostr.imports.subscriptions import FeedSubscriptionStore
     from tests.test_imports_subscriptions import (
-        FakePublisher,
+        FakeRelay,
         FakeScheduler,
         FakeSessionPool,
     )
@@ -67,7 +67,7 @@ def make_panel(fetcher, *, publish_outcomes=None, entitled_relays=None):
             relay_pool=None,
             relay_directory=FakeRelayDirectory(),
             cache_dir=cache_dir,
-            publisher=FakePublisher(),
+            publisher=FakeRelay(),
             scheduler=FakeScheduler(),
             clock=lambda: 1_700_000_000,
         )

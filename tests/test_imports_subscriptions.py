@@ -2,43 +2,50 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Tests for ``nostr.imports.subscriptions.FeedSubscriptionStore``.
 
-Every boundary is faked (bunker crypto/signing, relay publish, queries,
-timer, clock, cache dir), so debounce, sync, encryption shape, and the
-never-clobber-local-edits rule are all pinned deterministically.
+The list is shared with EINUNDZWANZIG STANDUP, so most of what is pinned
+here is that both apps can use it at once: this app reads STANDUP's
+list, writes exactly its format, keeps what it does not understand,
+merges instead of overwriting (also with a relay answer that arrives
+while a publish is on its way), never writes over a list it could not
+read, and merges its own older list in once.
+
+Every boundary is faked (signer, relays, timer, clock, cache dir). The
+fake relay keeps what is published and answers queries from it, so two
+stores on one relay behave like two apps on one account. Events are
+really signed, because only the account's own signature counts.
 """
 
 import json
-import os
-import sys
 from types import SimpleNamespace
 
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
-from PySide6.QtWidgets import QApplication
-
+from nostr import events
 from nostr.imports.constants import (
     FEED_LIST_DTAG,
+    LEGACY_FEED_LIST_DTAG,
     SUBSCRIPTIONS_KIND,
 )
-from nostr.imports.subscriptions import FeedSubscriptionStore, _parse_payload
+from nostr.imports.subscriptions import FeedSubscriptionStore
 from nostr.outbox import defaults
+from tests.outbox_fakes import OTHER_SK, PK, SK, FakeRelayDirectory, settle
 
-from tests.imports_fakes import PROFILE
-from tests.outbox_fakes import FakeRelayDirectory, settle
-
-
-@pytest.fixture(scope="module", autouse=True)
-def qt_app():
-    app = QApplication.instance() or QApplication(sys.argv)
-    yield app
+PROFILE = SimpleNamespace(user_pubkey=PK, bunker_relays=["wss://bunker.example"])
+FEED_URL = "https://blog.example/feed"
+NOW = 1_800_000_000
 
 
-class FakeBunkerClient:
-    def __init__(self):
+class FakeSigner:
+    """Encrypts as ``ENC[...]`` and signs for real. ``hold`` keeps each
+    request waiting until :meth:`release` (a phone signer)."""
+
+    def __init__(self, *, nip04=False, hold=False):
         self.signed = []
+        self.hold = hold
+        self.waiting = []
+        if nip04:
+            self.nip04_decrypt_self = lambda ct, on_success, on_failure, **_kw: on_success(
+                ct[4:-1])
 
     def nip44_encrypt_self(self, plaintext, on_success, on_failure, **_kw):
         on_success("ENC[" + plaintext + "]")
@@ -50,14 +57,23 @@ class FakeBunkerClient:
             on_failure("bad ciphertext")
 
     def sign_event(self, unsigned, on_success, on_failure, **_kw):
-        signed = {**unsigned, "id": f"ev{len(self.signed)}", "sig": "s" * 8}
-        self.signed.append(signed)
-        on_success(signed)
+        def answer():
+            signed = events.sign_event(dict(unsigned), SK)
+            self.signed.append(signed)
+            on_success(signed)
+        if self.hold:
+            self.waiting.append(answer)
+        else:
+            answer()
+
+    def release(self):
+        while self.waiting:
+            self.waiting.pop(0)()
 
 
 class FakeSessionPool:
     def __init__(self, client=None, error=None):
-        self.client = client or FakeBunkerClient()
+        self.client = client or FakeSigner()
         self.error = error
 
     def get(self, profile, on_ready=None, on_error=None):
@@ -67,48 +83,69 @@ class FakeSessionPool:
             on_ready(self.client)
 
 
-class FakePublisher:
-    def __init__(self, accepted=1, total=2):
-        self.calls = []
-        self.accepted = accepted
-        self.total = total
+class FakeRelay:
+    """One relay the stores share: keeps the newest event per d tag."""
 
+    def __init__(self, accepted=True):
+        self.stored = {}
+        self.published = []
+        self.queries = []
+        self.accepted = accepted
+
+    # The query surface (RelayQueryAdapter.latest).
+    def latest(self, relays, filters, on_done):
+        self.queries.append((list(relays), filters))
+        d_tag = filters[0]["#d"][0]
+        on_done(self.stored.get(d_tag))
+
+    # The publisher seam.
     def __call__(self, relays, signed, *, on_done):
-        self.calls.append((list(relays), signed))
-        on_done(self.accepted, self.total)
+        self.published.append((list(relays), signed))
+        if self.accepted:
+            d_tag = next(t[1] for t in signed["tags"] if t[0] == "d")
+            self.stored[d_tag] = signed
+        on_done(1 if self.accepted else 0, 2)
+
+    def put(self, d_tag, payload, *, tag=("encrypted", "nip44"), created_at=NOW - 100,
+            sk=SK, encrypt=True):
+        content = json.dumps(payload)
+        if encrypt:
+            content = "ENC[" + content + "]"
+        tags = [["d", d_tag]] + ([list(tag)] if tag else [])
+        self.stored[d_tag] = events.sign_event(
+            {"kind": SUBSCRIPTIONS_KIND, "content": content, "tags": tags,
+             "created_at": created_at}, sk)
+
+    def payload(self, d_tag=FEED_LIST_DTAG):
+        content = self.stored[d_tag]["content"]
+        return json.loads(content[4:-1])
 
 
 class FakeScheduler:
     def __init__(self):
-        self.scheduled = []   # (ms, fn)
+        self.scheduled = []
         self.cancelled = 0
 
     def __call__(self, ms, fn):
-        self.scheduled.append((ms, fn))
+        entry = [ms, fn, True]
+        self.scheduled.append(entry)
 
         def _cancel():
+            entry[2] = False
             self.cancelled += 1
 
         return _cancel
 
-    def fire_last(self):
-        self.scheduled[-1][1]()
+    def fire(self):
+        live = [e for e in self.scheduled if e[2]]
+        assert live, "nothing scheduled"
+        live[-1][2] = False
+        live[-1][1]()
 
 
-class FakeQuery:
-    def __init__(self, event=None):
-        self.event = event
-        self.calls = []
-
-    def latest(self, relays, filters, on_done):
-        self.calls.append((list(relays), list(filters)))
-        on_done(self.event)
-
-
-def make_store(tmp_path, *, session_pool=None, publisher=None,
-               scheduler=None, query=None, clock=None, directory=None,
-               entitled=None):
-    publisher = publisher or FakePublisher()
+def make_store(tmp_path, *, relay=None, session_pool=None, directory=None,
+               entitled=None, clock=None, scheduler=None):
+    relay = relay if relay is not None else FakeRelay()
     scheduler = scheduler or FakeScheduler()
     store = FeedSubscriptionStore(
         session_pool=session_pool or FakeSessionPool(),
@@ -116,224 +153,420 @@ def make_store(tmp_path, *, session_pool=None, publisher=None,
         relay_directory=directory or FakeRelayDirectory(),
         entitled_relays=entitled,
         cache_dir=tmp_path,
-        query=query,
-        publisher=publisher,
+        query=relay,
+        publisher=relay,
         scheduler=scheduler,
-        clock=clock or (lambda: 1_700_000_000),
+        clock=clock or (lambda: NOW),
     )
-    return store, publisher, scheduler
+    return store, relay, scheduler
 
 
-FEED_URL = "https://blog.example/feed"
+def bound(tmp_path, **kw):
+    store, relay, scheduler = make_store(tmp_path, **kw)
+    store.bind_profile(PROFILE)
+    settle()
+    return store, relay, scheduler
+
+
+def publish(store, scheduler):
+    scheduler.fire()
+    settle()
+
+
+STANDUP_PAYLOAD = {
+    "feeds": [
+        {"url": "https://standup.example/feed", "title": "From STANDUP",
+         "lastFetchedAt": 1_700_000_000, "pinned": True},
+        # Not a source this app can read; it is STANDUP's to keep.
+        {"url": "something-standup-reads", "title": "Other"},
+    ],
+    "sourceOptions": {
+        "https://standup.example/feed": {"rehostImages": False, "fetchFullText": True},
+        "https://server-checked.example/rss": {"fetchFullText": False},
+    },
+    "updatedAt": 1_700_000_000,
+    "futureKey": {"keep": "me"},
+}
 
 
 class TestMutations:
     def test_add_validates_through_registry(self, tmp_path):
-        store, _, _ = make_store(tmp_path)
-        store.bind_profile(PROFILE)
-        settle()
+        store, _, _ = bound(tmp_path)
         assert store.add_feed(FEED_URL, "My Blog") == {"added": True}
-        assert store.add_feed("not a url <xml>") == {
+        assert store.add_feed("not a url <xml>") == {"added": False, "invalid": True}
+        assert store.add_feed("<rss>https://x.example/feed") == {
             "added": False, "invalid": True}
-        assert store.add_feed(FEED_URL) == {"added": False, "duplicate": True}
+        assert store.add_feed(FEED_URL.upper()) == {"added": False, "duplicate": True}
         assert store.has_feed(FEED_URL)
         assert store.get(FEED_URL).title == "My Blog"
 
     def test_remove(self, tmp_path):
-        store, _, _ = make_store(tmp_path)
-        store.bind_profile(PROFILE)
-        settle()
+        store, _, _ = bound(tmp_path)
         store.add_feed(FEED_URL)
         assert store.remove_feed(FEED_URL) is True
         assert store.remove_feed(FEED_URL) is False
         assert store.feeds == []
 
-    def test_mark_fetched_uses_clock(self, tmp_path):
-        store, _, _ = make_store(tmp_path, clock=lambda: 42)
-        store.bind_profile(PROFILE)
-        settle()
+    def test_options_default_on_and_are_remembered(self, tmp_path):
+        store, _, _ = bound(tmp_path)
         store.add_feed(FEED_URL)
-        store.mark_fetched(FEED_URL)
-        assert store.get(FEED_URL).last_fetched_at == 42
+        assert store.options_for(FEED_URL).rehost_images is True
+        store.set_source_options(FEED_URL, rehost_images=False)
+        options = store.options_for(FEED_URL)
+        assert (options.rehost_images, options.fetch_full_text) == (False, True)
 
     def test_cache_round_trip(self, tmp_path):
-        store, _, scheduler = make_store(tmp_path)
-        store.bind_profile(PROFILE)
-        settle()
+        store, _, _ = bound(tmp_path)
         store.add_feed(FEED_URL, "My Blog")
         store.mark_fetched(FEED_URL, when=99)
-        # A second store instance sees the cached list immediately.
-        store2, _, _ = make_store(tmp_path)
-        store2.bind_profile(PROFILE)
-        settle()
+        store2, _, _ = bound(tmp_path, relay=FakeRelay(accepted=False))
         assert [f.url for f in store2.feeds] == [FEED_URL]
         assert store2.get(FEED_URL).last_fetched_at == 99
 
-
-class TestPublish:
-    def test_debounced_changes_publish_once_encrypted(self, tmp_path):
-        store, publisher, scheduler = make_store(tmp_path)
+    def test_older_cache_is_read(self, tmp_path):
+        (tmp_path / f"feed_sources_{PK}.json").write_text(json.dumps({
+            "feeds": [{"url": FEED_URL, "title": "Old", "last_fetched_at": 7}],
+            "updated_at": 1}))
+        store, _, _ = make_store(tmp_path, relay=FakeRelay(accepted=False))
         store.bind_profile(PROFILE)
-        settle()
+        assert store.get(FEED_URL).last_fetched_at == 7
+
+
+class TestStandupFormat:
+    def test_reads_standups_list(self, tmp_path):
+        relay = FakeRelay()
+        relay.put(FEED_LIST_DTAG, STANDUP_PAYLOAD)
+        store, _, _ = bound(tmp_path, relay=relay)
+        assert [f.url for f in store.feeds] == ["https://standup.example/feed"]
+        assert store.get("https://standup.example/feed").title == "From STANDUP"
+        assert store.options_for("https://standup.example/feed").rehost_images is False
+        # Its query asked for the shared list.
+        assert relay.queries[0][1][0]["#d"] == [FEED_LIST_DTAG]
+
+    def test_writes_exactly_standups_format(self, tmp_path):
+        store, relay, scheduler = bound(tmp_path)
         store.add_feed(FEED_URL, "My Blog")
-        store.add_feed("https://other.example/rss.xml")
-        # Two mutations, re-scheduled each time, nothing published yet.
-        assert publisher.calls == []
-        assert len(scheduler.scheduled) == 2
-        scheduler.fire_last()
-        settle()
-        assert len(publisher.calls) == 1
-
-        _relays, signed = publisher.calls[0]
+        store.set_source_options(FEED_URL, fetch_full_text=False)
+        publish(store, scheduler)
+        _relays, signed = relay.published[-1]
         assert signed["kind"] == SUBSCRIPTIONS_KIND
-        assert ["d", FEED_LIST_DTAG] in signed["tags"]
-        assert ["encrypted", "nip44_v2"] in signed["tags"]
-        # Content is ciphertext; the URLs never appear in plaintext.
+        assert signed["tags"] == [["d", FEED_LIST_DTAG], ["client", "MyEditor"],
+                                  ["encrypted", "nip44"]]
         assert signed["content"].startswith("ENC[")
-        payload = json.loads(signed["content"][4:-1])
-        assert [f["url"] for f in payload["feeds"]] == [
-            FEED_URL, "https://other.example/rss.xml"]
+        payload = relay.payload()
+        assert set(payload) == {"feeds", "sourceOptions", "updatedAt"}
+        assert payload["feeds"] == [{"url": FEED_URL, "title": "My Blog"}]
+        assert payload["sourceOptions"] == {FEED_URL: {"fetchFullText": False}}
+        assert payload["updatedAt"] == NOW
 
-    def test_flush_publishes_pending_changes_immediately(self, tmp_path):
-        store, publisher, scheduler = make_store(tmp_path)
-        store.bind_profile(PROFILE)
-        settle()
+    def test_keeps_what_it_does_not_understand(self, tmp_path):
+        relay = FakeRelay()
+        relay.put(FEED_LIST_DTAG, STANDUP_PAYLOAD)
+        store, _, scheduler = bound(tmp_path, relay=relay)
         store.add_feed(FEED_URL)
-        assert publisher.calls == []
-        store.flush()
-        settle()
-        assert len(publisher.calls) == 1
-        # The parked debounce was cancelled, not left to double-publish.
-        assert scheduler.cancelled >= 1
+        publish(store, scheduler)
+        payload = relay.payload()
+        assert payload["futureKey"] == {"keep": "me"}
+        urls = [f["url"] for f in payload["feeds"]]
+        assert urls == ["https://standup.example/feed", "something-standup-reads", FEED_URL]
+        assert payload["feeds"][0]["pinned"] is True
+        assert payload["feeds"][0]["lastFetchedAt"] == 1_700_000_000
+        assert payload["sourceOptions"]["https://server-checked.example/rss"] == {
+            "fetchFullText": False}
 
-    def test_flush_without_changes_is_a_noop(self, tmp_path):
-        store, publisher, _ = make_store(tmp_path)
-        store.bind_profile(PROFILE)
-        settle()
-        store.flush()
-        settle()
-        assert publisher.calls == []
+    def test_reads_a_list_with_the_older_tag_value(self, tmp_path):
+        relay = FakeRelay()
+        relay.put(FEED_LIST_DTAG, {"feeds": [{"url": FEED_URL}]}, tag=("encrypted", "nip44_v2"))
+        store, _, _ = bound(tmp_path, relay=relay)
+        assert store.has_feed(FEED_URL)
 
-    def test_signer_failure_keeps_changes_queued(self, tmp_path):
-        store, publisher, scheduler = make_store(
-            tmp_path, session_pool=FakeSessionPool(error="signer offline"))
+    def test_reads_a_list_without_encryption(self, tmp_path):
+        relay = FakeRelay()
+        relay.put(FEED_LIST_DTAG, {"feeds": [{"url": FEED_URL}]}, tag=None, encrypt=False)
+        store, _, _ = bound(tmp_path, relay=relay)
+        assert store.has_feed(FEED_URL)
+
+    def test_reads_nip04_when_the_signer_can(self, tmp_path):
+        relay = FakeRelay()
+        relay.put(FEED_LIST_DTAG, {"feeds": [{"url": FEED_URL}]}, tag=("encrypted", "nip04"))
+        store, _, _ = bound(tmp_path, relay=relay,
+                            session_pool=FakeSessionPool(FakeSigner(nip04=True)))
+        assert store.has_feed(FEED_URL)
+
+    def test_never_writes_over_a_list_it_cannot_read(self, tmp_path):
+        relay = FakeRelay()
+        relay.put(FEED_LIST_DTAG, {"feeds": [{"url": "https://standup.example/feed"}]},
+                  tag=("encrypted", "nip04"))
         statuses = []
+        store, _, scheduler = make_store(tmp_path, relay=relay)
         store.sync_status.connect(statuses.append)
         store.bind_profile(PROFILE)
         settle()
         store.add_feed(FEED_URL)
-        scheduler.fire_last()
+        publish(store, scheduler)
+        assert relay.published == []
+        assert store.has_feed(FEED_URL)            # kept here
+        assert store._dirty is True               # and still to be sent
+        assert any("older kind of encryption" in s for s in statuses)
+
+    def test_a_list_signed_by_someone_else_is_ignored(self, tmp_path):
+        relay = FakeRelay()
+        relay.put(FEED_LIST_DTAG, {"feeds": [{"url": "https://planted.example/feed"}]},
+                  sk=OTHER_SK)
+        store, _, _ = bound(tmp_path, relay=relay)
+        assert store.feeds == []
+
+    def test_undecryptable_remote_state_is_ignored(self, tmp_path):
+        relay = FakeRelay()
+        relay.put(FEED_LIST_DTAG, {"feeds": []}, encrypt=False)
+        relay.stored[FEED_LIST_DTAG] = events.sign_event(
+            {"kind": SUBSCRIPTIONS_KIND, "content": "garbage",
+             "tags": [["d", FEED_LIST_DTAG], ["encrypted", "nip44"]], "created_at": 1}, SK)
+        store, _, _ = bound(tmp_path, relay=relay)
+        assert store.feeds == []
+
+
+class TestMigration:
+    def test_the_older_list_is_merged_in_once(self, tmp_path):
+        relay = FakeRelay()
+        relay.put(FEED_LIST_DTAG, STANDUP_PAYLOAD)
+        relay.put(LEGACY_FEED_LIST_DTAG, {
+            "feeds": [{"url": FEED_URL, "title": "Mine", "last_fetched_at": 5},
+                      {"url": "https://standup.example/feed"}],
+            "updated_at": 1}, tag=("encrypted", "nip44_v2"))
+        store, _, scheduler = bound(tmp_path, relay=relay)
+        assert store.get(FEED_URL).last_fetched_at == 5
+        publish(store, scheduler)
+        urls = [f["url"] for f in relay.payload()["feeds"]]
+        assert urls == ["https://standup.example/feed", "something-standup-reads", FEED_URL]
+        assert relay.payload()["feeds"][2] == {"url": FEED_URL, "title": "Mine",
+                                               "lastFetchedAt": 5}
+        # The older list is never written again, and not read again.
+        assert all(signed["tags"][0] == ["d", FEED_LIST_DTAG]
+                   for _relays, signed in relay.published)
+        asked = len(relay.queries)
+        store2, _, _ = bound(tmp_path, relay=relay)
+        assert [q[1][0]["#d"] for q in relay.queries[asked:]] == [[FEED_LIST_DTAG]]
+
+
+class TestPublish:
+    def test_debounced_changes_publish_once(self, tmp_path):
+        store, relay, scheduler = bound(tmp_path)
+        store.add_feed(FEED_URL, "My Blog")
+        store.add_feed("https://other.example/rss.xml")
+        assert relay.published == []
+        publish(store, scheduler)
+        assert len(relay.published) == 1
+        assert [f["url"] for f in relay.payload()["feeds"]] == [
+            FEED_URL, "https://other.example/rss.xml"]
+
+    def test_flush_publishes_pending_changes_immediately(self, tmp_path):
+        store, relay, scheduler = bound(tmp_path)
+        store.add_feed(FEED_URL)
+        store.flush()
         settle()
-        assert publisher.calls == []
+        assert len(relay.published) == 1
+        assert scheduler.cancelled >= 1
+
+    def test_flush_without_changes_is_a_noop(self, tmp_path):
+        store, relay, _ = bound(tmp_path)
+        store.flush()
+        settle()
+        assert relay.published == []
+
+    def test_signer_failure_keeps_changes_queued(self, tmp_path):
+        statuses = []
+        store, relay, scheduler = make_store(
+            tmp_path, session_pool=FakeSessionPool(error="signer offline"))
+        store.sync_status.connect(statuses.append)
+        store.bind_profile(PROFILE)
+        settle()
+        store.add_feed(FEED_URL)
+        publish(store, scheduler)
+        assert relay.published == []
         assert store._dirty is True
         assert any("signer offline" in s for s in statuses)
 
     def test_zero_relay_acceptance_keeps_dirty(self, tmp_path):
-        store, publisher, scheduler = make_store(
-            tmp_path, publisher=FakePublisher(accepted=0, total=2))
-        store.bind_profile(PROFILE)
-        settle()
+        store, relay, scheduler = bound(tmp_path, relay=FakeRelay(accepted=False))
         store.add_feed(FEED_URL)
-        scheduler.fire_last()
-        settle()
+        publish(store, scheduler)
         assert store._dirty is True
 
-
-class TestRelaySync:
-    def _remote_event(self, urls):
-        payload = {"feeds": [{"url": u} for u in urls], "updated_at": 1}
-        return {
-            "kind": SUBSCRIPTIONS_KIND,
-            "content": "ENC[" + json.dumps(payload) + "]",
-            "tags": [["d", FEED_LIST_DTAG]],
-        }
-
-    def test_relay_list_adopted_on_bind(self, tmp_path):
-        query = FakeQuery(self._remote_event(["https://remote.example/feed"]))
-        store, _, _ = make_store(tmp_path, query=query)
-        store.bind_profile(PROFILE)
-        settle()
-        assert [f.url for f in store.feeds] == ["https://remote.example/feed"]
-        # The query asked for exactly our namespaced d-tag.
-        _relays, filters = query.calls[0]
-        assert filters[0]["#d"] == [FEED_LIST_DTAG]
+    def test_dated_after_the_list_it_replaces(self, tmp_path):
+        relay = FakeRelay()
+        relay.put(FEED_LIST_DTAG, {"feeds": []}, created_at=NOW + 50)
+        store, _, scheduler = bound(tmp_path, relay=relay)
+        store.add_feed(FEED_URL)
+        publish(store, scheduler)
+        assert relay.published[-1][1]["created_at"] == NOW + 51
 
     def test_the_list_is_read_where_it_is_written(self, tmp_path):
-        # Every device of the account must find what one device saved,
-        # so reading asks every relay writing goes to, plus the fallback
-        # relays a list saved before the account's own was known went to.
-        directory = FakeRelayDirectory({PROFILE.user_pubkey: ["wss://home.example"]})
-        query = FakeQuery(None)
-        store, publisher, scheduler = make_store(
-            tmp_path, query=query, directory=directory,
-            entitled=lambda: ["wss://members.example"])
-        store.bind_profile(PROFILE)
-        settle()
+        directory = FakeRelayDirectory({PK: ["wss://home.example"]})
+        store, relay, scheduler = bound(tmp_path, directory=directory,
+                                        entitled=lambda: ["wss://members.example"])
         store.add_feed(FEED_URL)
-        scheduler.fire_last()
-        settle()
-
-        read_relays, _filters = query.calls[0]
-        written_relays, _signed = publisher.calls[0]
+        publish(store, scheduler)
+        read_relays = relay.queries[0][0]
+        written_relays = relay.published[0][0]
         assert written_relays == [
             "wss://home.example", "wss://members.example", "wss://bunker.example"]
         assert read_relays == written_relays + list(defaults.FALLBACK_RELAYS)
 
-    def test_relay_refresh_never_clobbers_unsynced_edits(self, tmp_path):
-        # The remote answer arrives while a local add is still pending.
-        class SlowQuery(FakeQuery):
-            def __init__(self, event, store_ref):
-                super().__init__(event)
-                self.store_ref = store_ref
-
-            def latest(self, relays, filters, on_done):
-                # A local edit lands before the relay answers.
-                self.store_ref["store"].add_feed(FEED_URL, "Local")
-                super().latest(relays, filters, on_done)
-
-        ref = {}
-        query = SlowQuery(self._remote_event(["https://remote.example/feed"]), ref)
-        store, _, _ = make_store(tmp_path, query=query)
-        ref["store"] = store
-        store.bind_profile(PROFILE)
-        settle()
-        # The local, unsynced edit survives; remote state did not clobber.
-        assert store.has_feed(FEED_URL)
-
-    def test_undecryptable_remote_state_is_ignored(self, tmp_path):
-        query = FakeQuery({
-            "kind": SUBSCRIPTIONS_KIND, "content": "garbage", "tags": []})
-        store, _, _ = make_store(tmp_path, query=query)
-        store.bind_profile(PROFILE)
-        settle()
-        assert store.feeds == []
-
-    def test_profile_switch_clears_list(self, tmp_path):
-        store, _, _ = make_store(tmp_path)
-        store.bind_profile(PROFILE)
-        settle()
+    def test_profile_switch_sends_pending_edits_first(self, tmp_path):
+        store, relay, _ = bound(tmp_path)
         store.add_feed(FEED_URL)
         other = SimpleNamespace(user_pubkey="cd" * 32, bunker_relays=[])
         store.bind_profile(other)
         settle()
         assert store.feeds == []
+        assert [f["url"] for f in relay.payload()["feeds"]] == [FEED_URL]
+        cached = json.loads((tmp_path / f"feed_sources_{PK}.json").read_text())
+        assert cached["dirty"] is False
 
 
-class TestPayloadParsing:
-    def test_junk_rows_dropped(self):
-        payload = {"feeds": [
-            {"url": FEED_URL, "title": "ok", "last_fetched_at": 5},
-            {"url": "<?xml paste>"},
-            {"url": ""},
-            "not a dict",
-            {"url": FEED_URL},  # duplicate
-            {"url": "https://b.example/feed", "last_fetched_at": "bad"},
-        ]}
-        feeds = _parse_payload(payload)
-        assert [f.url for f in feeds] == [FEED_URL, "https://b.example/feed"]
-        assert feeds[0].last_fetched_at == 5
-        assert feeds[1].last_fetched_at == 0
+class TestMerging:
+    """Two stores on one relay: two apps on one account."""
 
-    def test_non_dict_payload(self):
-        assert _parse_payload(None) == []
-        assert _parse_payload([1, 2]) == []
+    def test_edits_in_both_apps_survive(self, tmp_path):
+        relay = FakeRelay()
+        relay.put(FEED_LIST_DTAG, {"feeds": [{"url": "https://shared.example/feed"}]})
+        one, _, one_timer = bound(tmp_path / "one", relay=relay)
+        two, _, two_timer = bound(tmp_path / "two", relay=relay)
+        one.add_feed(FEED_URL)
+        two.add_feed("https://two.example/feed")
+        two.remove_feed("https://shared.example/feed")
+        publish(one, one_timer)
+        publish(two, two_timer)
+        urls = [f["url"] for f in relay.payload()["feeds"]]
+        assert urls == [FEED_URL, "https://two.example/feed"]
+        # And the first app picks the second's edits up on its next read.
+        one.refresh()
+        settle()
+        assert [f.url for f in one.feeds] == urls
+
+    def test_a_title_changed_here_wins_otherwise_the_remote_one(self, tmp_path):
+        relay = FakeRelay()
+        relay.put(FEED_LIST_DTAG, {"feeds": [{"url": FEED_URL, "title": "Old"},
+                                             {"url": "https://b.example/feed",
+                                              "title": "B"}]})
+        one, _, one_timer = bound(tmp_path / "one", relay=relay)
+        two, _, two_timer = bound(tmp_path / "two", relay=relay)
+        two.update_title("https://b.example/feed", "B renamed")
+        publish(two, two_timer)
+        one.update_title(FEED_URL, "New")
+        publish(one, one_timer)
+        titles = [f.get("title") for f in relay.payload()["feeds"]]
+        assert titles == ["New", "B renamed"]
+
+    def test_a_relay_answer_during_a_publish_does_not_undo_an_edit(self, tmp_path):
+        # The relay still has the old list while this publish waits for the
+        # signer; a refresh that lands then must not drop the new source.
+        relay = FakeRelay()
+        relay.put(FEED_LIST_DTAG, {"feeds": [{"url": "https://shared.example/feed"}]})
+        signer = FakeSigner(hold=True)
+        store, _, scheduler = bound(tmp_path, relay=relay,
+                                    session_pool=FakeSessionPool(signer))
+        store.add_feed(FEED_URL)
+        publish(store, scheduler)       # waits for the signer
+        store.refresh()                 # the old list arrives meanwhile
+        settle()
+        assert store.has_feed(FEED_URL)
+        signer.release()
+        settle()
+        assert store.has_feed(FEED_URL)
+        assert [f["url"] for f in relay.payload()["feeds"]] == [
+            "https://shared.example/feed", FEED_URL]
+
+    def test_an_edit_made_during_a_publish_goes_out_right_after(self, tmp_path):
+        signer = FakeSigner(hold=True)
+        store, relay, _ = bound(tmp_path, session_pool=FakeSessionPool(signer))
+        store.add_feed(FEED_URL)
+        store.flush()
+        settle()
+        store.add_feed("https://later.example/feed")
+        store.flush()
+        assert store.is_busy
+        signer.release()
+        settle()
+        signer.release()
+        settle()
+        assert [f["url"] for f in relay.payload()["feeds"]] == [
+            FEED_URL, "https://later.example/feed"]
+        assert not store.is_busy
+
+    def test_nothing_is_published_when_the_relays_have_it_already(self, tmp_path):
+        relay = FakeRelay()
+        relay.put(FEED_LIST_DTAG, {"feeds": [{"url": FEED_URL}]})
+        store, _, scheduler = bound(tmp_path, relay=relay)
+        store.add_feed("https://x.example/feed")
+        store.remove_feed("https://x.example/feed")
+        publish(store, scheduler)
+        assert relay.published == []
+        assert store._dirty is False
+
+
+class TestReadTimes:
+    def test_a_read_time_alone_is_not_published(self, tmp_path):
+        relay = FakeRelay()
+        relay.put(FEED_LIST_DTAG, {"feeds": [{"url": FEED_URL}]})
+        store, _, scheduler = bound(tmp_path, relay=relay)
+        store.mark_fetched(FEED_URL, when=123)
+        assert not [e for e in scheduler.scheduled if e[2]]
+        assert relay.published == []
+
+    def test_a_read_time_travels_with_a_real_change(self, tmp_path):
+        relay = FakeRelay()
+        relay.put(FEED_LIST_DTAG, {"feeds": [{"url": FEED_URL}]})
+        store, _, scheduler = bound(tmp_path, relay=relay)
+        store.mark_fetched(FEED_URL, when=123)
+        store.add_feed("https://other.example/feed")
+        publish(store, scheduler)
+        assert relay.payload()["feeds"][0]["lastFetchedAt"] == 123
+
+    def test_opening_a_manual_source_publishes_its_read_time(self, tmp_path):
+        relay = FakeRelay()
+        relay.put(FEED_LIST_DTAG, {"feeds": [{"url": FEED_URL}]})
+        store, _, scheduler = bound(tmp_path, relay=relay)
+        store.mark_fetched(FEED_URL, when=123, publish=True)
+        publish(store, scheduler)
+        assert relay.payload()["feeds"][0]["lastFetchedAt"] == 123
+
+
+class TestQuitting:
+    def test_waiting_for_a_flush_ends_when_it_is_sent(self, tmp_path):
+        # The signer answers on a later turn of the event loop (as a key
+        # kept on this computer does); quitting waits for that.
+        from PySide6.QtCore import QTimer
+
+        class LaterSigner(FakeSigner):
+            def sign_event(self, unsigned, on_success, on_failure, **_kw):
+                QTimer.singleShot(0, lambda: FakeSigner.sign_event(
+                    self, unsigned, on_success, on_failure))
+
+        store, relay, _ = bound(tmp_path, session_pool=FakeSessionPool(LaterSigner()))
+        store.add_feed(FEED_URL)
+        store.flush()
+        assert store.is_busy
+        assert store.wait_until_settled(2_000) is True
+        assert [f["url"] for f in relay.payload()["feeds"]] == [FEED_URL]
+
+    def test_waiting_gives_up_after_the_limit(self, tmp_path):
+        signer = FakeSigner(hold=True)
+        store, _, _ = bound(tmp_path, session_pool=FakeSessionPool(signer))
+        store.add_feed(FEED_URL)
+        store.flush()
+        assert store.wait_until_settled(50) is False
+        # What was not sent is sent on the next launch.
+        cached = json.loads((tmp_path / f"feed_sources_{PK}.json").read_text())
+        assert cached["dirty"] is True
+
+    def test_nothing_to_wait_for(self, tmp_path):
+        store, _, _ = bound(tmp_path)
+        assert store.wait_until_settled(10) is True
+
+
+@pytest.fixture(autouse=True)
+def _settled():
+    yield
+    settle()
