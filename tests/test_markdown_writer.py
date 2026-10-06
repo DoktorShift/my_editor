@@ -206,6 +206,38 @@ def test_a_link_that_shows_its_address_is_an_autolink():
     assert document_to_markdown(doc) == "<https://x.example/a_b>\n"
 
 
+@pytest.mark.parametrize("words, href, written", [
+    ("https://example.com/photo.jpg", "https://example.com/photo.jpg",
+     "https://example.com/photo.jpg"),
+    ("www.example.com", "http://www.example.com", "www.example.com"),
+    ("ada@example.com", "mailto:ada@example.com", "ada@example.com"),
+])
+def test_a_link_that_shows_its_own_address_is_written_bare(words, href, written):
+    doc = typed(("see ", {}), (words, {"href": href}), (". Next", {}))
+    out = document_to_markdown(doc)
+    assert out == f"see {written}. Next\n"
+    # Read back, it is the same link, written the same way.
+    assert document_to_markdown(from_markdown(out)) == out
+
+
+def test_a_media_address_alone_on_its_line_stays_bare():
+    url = "https://cdn.example/clip.mp4"
+    doc = typed("Watch this:\n", (url, {"href": url}), "\nThanks")
+    assert document_to_markdown(doc) == f"Watch this:\n\n{url}\n\nThanks\n"
+
+
+@pytest.mark.parametrize("after", ["word", "-x", "/more"])
+def test_an_own_address_followed_by_text_is_kept_whole(after):
+    url = "https://example.com"
+    out = document_to_markdown(typed((url, {"href": url}), after))
+    assert out == f"<{url}>{after}\n"
+
+
+def test_an_own_address_after_a_word_is_kept_whole():
+    url = "https://example.com"
+    assert document_to_markdown(typed("see:", (url, {"href": url}))) == f"see:<{url}>\n"
+
+
 def test_a_link_label_with_a_bracket_is_escaped():
     doc = typed(("see [1]", {"href": "https://x.example"}))
     assert document_to_markdown(doc) == "[see [1\\]](https://x.example)\n"

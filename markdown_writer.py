@@ -29,6 +29,10 @@ What is written follows what the editor shows ("Markdown first"):
   Nostr as such (the preview shows what they become). A web address
   that holds a character Markdown would read as emphasis is written as
   ``<address>``, which every reader keeps intact.
+- A link that shows its own address (a pasted web address, an email) is
+  written bare too, where readers find it by themselves: a picture or a
+  video whose address stands alone on its line plays in the apps that
+  look for one.
 
 Images are written by the caller's ``image_target(QTextImageFormat)``,
 which returns the text to put in the image's place (``![alt](url)`` or a
@@ -351,6 +355,51 @@ def _wrap(text: str, marker: str) -> str:
     return f"{lead}{marker}{core}{marker}{trail}"
 
 
+def _own_address(words: str, href: str) -> str:
+    """The address a link shows when its words are its own address (a web
+    address, ``www.…`` or an email), as the words spell it; else ""."""
+    if words == href:
+        return words
+    if href == "http://" + words and words.lower().startswith("www."):
+        return words
+    if href == "mailto:" + words and "@" in words:
+        return words
+    return ""
+
+
+def _autolink(address: str, href: str, before: str, following: Optional[_Span]) -> str:
+    """A link that shows its own address, written so every reader links it.
+
+    Bare, the way it was typed, where a reader finds it by itself: a web
+    address or an email between spaces, with no character a reader would
+    take for emphasis. Readers that look for a bare address (a picture or
+    a video alone on its line becomes a player) find it there. Anywhere
+    else it is written ``<address>``, which every reader keeps whole.
+    """
+    is_email = "@" in address and "://" not in address
+    findable = (address.lower().startswith(("https://", "http://", "www.")) or is_email)
+    if (findable and not any(ch in _MARKUP_IN_ADDRESS for ch in address)
+            and (not before or before[-1].isspace() or before[-1] == "(")
+            and _ends_a_bare_address(address, following)):
+        return address
+    return f"<{address}>" if is_email else f"<{href}>"
+
+
+def _ends_a_bare_address(address: str, following: Optional[_Span]) -> bool:
+    """Whether the text after a bare address leaves it whole: nothing, a
+    space, or punctuation that readers leave out of an address."""
+    if following is None:
+        return True
+    if following.raw or following.href or following.bold or following.italic \
+            or following.strike or following.code:
+        return False
+    text = following.text
+    if text[0].isspace():
+        return True
+    rest = text.lstrip(".,:;!?" + ("" if "(" in address or ")" in address else ")"))
+    return len(rest) < len(text) and (not rest or rest[0].isspace())
+
+
 def _inline_markdown(spans: List[_Span], hard_break: str = "  \n") -> str:
     out = []
     i = 0
@@ -367,10 +416,10 @@ def _inline_markdown(spans: List[_Span], hard_break: str = "  \n") -> str:
                 group.append(spans[i])
                 i += 1
             words = "".join(s.text for s in group).replace(LINE_SEPARATOR, " ")
-            if words.strip() == span.href and not any(s.bold or s.italic or s.strike
-                                                      for s in group):
-                # A link that shows its own address is an autolink.
-                out.append(f"<{span.href}>")
+            address = _own_address(words.strip(), span.href)
+            if address and not any(s.bold or s.italic or s.strike for s in group):
+                following = spans[i] if i < len(spans) else None
+                out.append(_autolink(address, span.href, "".join(out), following))
                 continue
             inner = "".join(_styled(s) for s in group)
             label = inner.replace(LINE_SEPARATOR, " ").replace("]", "\\]")
