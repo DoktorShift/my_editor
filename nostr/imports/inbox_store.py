@@ -228,6 +228,11 @@ def database_path(config_dir: Path, pubkey: str) -> Path:
     return Path(config_dir) / "imports" / f"{pubkey.lower()}.sqlite3"
 
 
+def _fold(text) -> str:
+    """The search form of a text: case folded (German ß matches SS)."""
+    return str(text or "").casefold()
+
+
 class InboxStore:
     """One account's inbox. ``path`` ``:memory:`` keeps it in memory (tests)."""
 
@@ -237,6 +242,7 @@ class InboxStore:
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(str(path), timeout=5)
         self._db.row_factory = sqlite3.Row
+        self._db.create_function("fold", 1, _fold, deterministic=True)
         if path != ":memory:":
             self._db.execute("PRAGMA journal_mode=WAL")
         self._migrate()
@@ -477,9 +483,13 @@ class InboxStore:
         the last row of the previous page."""
         where, args = self._view_filter(view)
         if query.strip():
-            like = f"%{_escape_like(query.strip())}%"
-            where.append("(i.title LIKE ? ESCAPE '\\' OR i.excerpt LIKE ? ESCAPE '\\' "
-                         "OR s.title LIKE ? ESCAPE '\\' OR s.feed_title LIKE ? ESCAPE '\\')")
+            # Case folded beyond ASCII, as held lists search (str.casefold):
+            # SQLite's LIKE folds ASCII only, and "über" must find "Über".
+            like = f"%{_escape_like(query.strip().casefold())}%"
+            where.append("(fold(i.title) LIKE ? ESCAPE '\\' "
+                         "OR fold(i.excerpt) LIKE ? ESCAPE '\\' "
+                         "OR fold(s.title) LIKE ? ESCAPE '\\' "
+                         "OR fold(s.feed_title) LIKE ? ESCAPE '\\')")
             args += [like, like, like, like]
         if after is not None:
             where.append("(i.position, i.source_key, i.d_tag) < (?, ?, ?)")

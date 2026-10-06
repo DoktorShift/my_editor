@@ -379,3 +379,19 @@ def test_an_inbox_from_before_skips_were_remembered_is_upgraded(tmp_path):
     store.skip("k", post.d_tag, post.revision)
     store.sync_sources([])
     store.close()
+
+
+@pytest.mark.parametrize("query, found", [
+    ("über", ["Über Bitcoin"]),
+    ("öl", ["Straße und Öl"]),
+    ("STRASSE", ["Straße und Öl"]),
+    ("ärzteblatt", ["Straße und Öl", "Über Bitcoin"]),     # the source's title
+])
+def test_search_ignores_case_beyond_ascii(query, found):
+    """Both reviews (M3, L8): SQLite's LIKE folds ASCII only."""
+    store = InboxStore(":memory:", clock=lambda: 1_800_000_000)
+    store.sync_sources([("k", "https://blog.example/feed", "Ärzteblatt", True)])
+    store.ingest("k", [make_item("Über Bitcoin", guid="g1"),
+                       make_item("Straße und Öl", guid="g2")])
+    rows = store.page(View(OLDER_POSTS), query=query)
+    assert sorted(row.title for row in rows) == found
