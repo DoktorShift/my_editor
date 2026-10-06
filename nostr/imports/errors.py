@@ -71,9 +71,11 @@ class SourceError(Exception):
 # and (per the platform writing guidelines) never "we", never blame,
 # always a next step where one exists. Codes absent here fall back to
 # the error's own message.
+# The owner's decision Q-6: such an address is not followed, and the
+# message says why in plain words.
 LOCAL_NETWORK_MESSAGE = _(
-    "This address points to your local network, which MyEditor doesn't read "
-    "from for safety.")
+    "This address is on this computer or its local network. MyEditor follows "
+    "public websites only.")
 
 _FRIENDLY = {
     ERROR_CODES.LOCAL_NETWORK: LOCAL_NETWORK_MESSAGE,

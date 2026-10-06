@@ -1891,6 +1891,7 @@ msgstr "Versionshinweise"
 #: nostr/ui/account_windows.py:384
 #: nostr/ui/account_windows.py:767
 #: nostr/ui/account_windows.py:1016
+#: nostr/ui/image_review_dialog.py:122
 #: nostr/ui/media_library_dialog.py:1932
 #: nostr/ui/membership_window.py:971
 msgid "Done"
@@ -2586,9 +2587,9 @@ msgid "your signer did not answer"
 msgstr "Signer antwortet nicht"
 
 #: nostr/draft_sync.py:186
-#: nostr/publisher.py:720
-#: nostr/publisher.py:738
-#: nostr/publisher.py:934
+#: nostr/publisher.py:724
+#: nostr/publisher.py:742
+#: nostr/publisher.py:938
 msgid "Looking up your relay list…"
 msgstr "Deine Relay-Liste wird abgerufen …"
 
@@ -2598,8 +2599,8 @@ msgstr "Entwürfe werden aktualisiert …"
 
 #: nostr/draft_sync.py:333
 #: nostr/draft_sync.py:293
-#: nostr/publisher.py:522
-#: nostr/publisher.py:763
+#: nostr/publisher.py:521
+#: nostr/publisher.py:767
 msgid "Connecting to your signer…"
 msgstr "Verbindung zu deinem Signer wird hergestellt …"
 
@@ -2636,20 +2637,20 @@ msgstr "Signer kann keine Entwürfe entschlüsseln"
 msgid "malformed draft payload: {error}"
 msgstr "Entwurf ist beschädigt: {error}"
 
-#: nostr/drafts.py:168
+#: nostr/drafts.py:170
 msgid "draft payload must be a JSON object"
 msgstr "Inhalt ist kein JSON-Objekt"
 
-#: nostr/drafts.py:183
+#: nostr/drafts.py:185
 msgid "draft payload tags must be list[list[str]]"
 msgstr "Tags haben ein ungültiges Format"
 
-#: nostr/drafts.py:166
+#: nostr/drafts.py:168
 #, python-brace-format
 msgid "draft payload is not valid JSON: {error}"
 msgstr "Inhalt ist kein gültiges JSON: {error}"
 
-#: nostr/drafts.py:177
+#: nostr/drafts.py:179
 #, python-brace-format
 msgid "draft payload missing required fields: {error}"
 msgstr "Pflichtfelder fehlen: {error}"
@@ -2804,99 +2805,99 @@ msgstr "MyEditor konnte dein Profil gerade nicht lesen, deshalb wurde nichts ge�
 msgid "Your profile wasn’t changed. Try again in a moment."
 msgstr "Dein Profil wurde nicht geändert. Versuche es gleich noch einmal."
 
-#: nostr/publisher.py:78
+#: nostr/publisher.py:77
 msgid "unknown error"
 msgstr "unbekannter Fehler"
 
-#: nostr/publisher.py:549
-#: nostr/publisher.py:825
+#: nostr/publisher.py:548
+#: nostr/publisher.py:829
 msgid "Waiting for signature. Approve the request on your signer…"
 msgstr "Warte auf die Signatur. Bestätige die Anfrage in deinem Signer …"
 
-#: nostr/publisher.py:792
+#: nostr/publisher.py:796
 msgid "Encrypting draft. Approve on your signer if prompted…"
 msgstr "Der Entwurf wird verschlüsselt. Bestätige in deinem Signer, wenn er fragt …"
 
-#: nostr/publisher.py:975
+#: nostr/publisher.py:979
 msgid "Waiting for signature. Approve the deletion on your signer…"
 msgstr "Warte auf die Signatur. Bestätige das Löschen in deinem Signer …"
 
-#: nostr/publisher.py:1197
+#: nostr/publisher.py:1201
 msgid "no relay accepted the deletion"
 msgstr "kein Relay hat das Löschen angenommen"
 
-#: nostr/publisher.py:563
+#: nostr/publisher.py:562
 msgid "Finding your relays…"
 msgstr "Deine Relays werden gesucht …"
 
-#: nostr/publisher.py:572
+#: nostr/publisher.py:571
 #, python-brace-format
 msgid "Publishing to {n} relay…"
 msgid_plural "Publishing to {n} relays…"
 msgstr[0] "Wird auf {n} Relay veröffentlicht …"
 msgstr[1] "Wird auf {n} Relays veröffentlicht …"
 
-#: nostr/publisher.py:590
+#: nostr/publisher.py:589
 #, python-brace-format
 msgid "Accepted by {url}. Waiting for the rest…"
 msgstr "Von {url} angenommen. Warte auf die übrigen …"
 
-#: nostr/publisher.py:603
+#: nostr/publisher.py:602
 #, python-brace-format
 msgid "Published. {accepted}/{total} relay accepted."
 msgid_plural "Published. {accepted}/{total} relays accepted."
 msgstr[0] "Veröffentlicht. Angenommen von {accepted}/{total} Relay."
 msgstr[1] "Veröffentlicht. Angenommen von {accepted}/{total} Relays."
 
-#: nostr/publisher.py:844
+#: nostr/publisher.py:848
 #, python-brace-format
 msgid "Publishing draft to {n} relay…"
 msgid_plural "Publishing draft to {n} relays…"
 msgstr[0] "Der Entwurf wird auf {n} Relay gespeichert …"
 msgstr[1] "Der Entwurf wird auf {n} Relays gespeichert …"
 
-#: nostr/publisher.py:855
+#: nostr/publisher.py:859
 #, python-brace-format
 msgid "Draft saved to {accepted}/{total} relay."
 msgid_plural "Draft saved to {accepted}/{total} relays."
 msgstr[0] "Entwurf auf {accepted}/{total} Relay gespeichert."
 msgstr[1] "Entwurf auf {accepted}/{total} Relays gespeichert."
 
-#: nostr/publisher.py:1009
+#: nostr/publisher.py:1013
 #, python-brace-format
 msgid "Removing draft from {n} relay…"
 msgid_plural "Removing draft from {n} relays…"
 msgstr[0] "Der Entwurf wird von {n} Relay entfernt …"
 msgstr[1] "Der Entwurf wird von {n} Relays entfernt …"
 
-#: nostr/publisher.py:1020
+#: nostr/publisher.py:1024
 #, python-brace-format
 msgid "Draft removed on {accepted}/{total} relay."
 msgid_plural "Draft removed on {accepted}/{total} relays."
 msgstr[0] "Entwurf auf {accepted}/{total} Relay entfernt."
 msgstr[1] "Entwurf auf {accepted}/{total} Relays entfernt."
 
-#: nostr/publisher.py:1195
+#: nostr/publisher.py:1199
 #, python-brace-format
 msgid "no relay accepted the deletion ({reasons})"
 msgstr "kein Relay hat das Löschen angenommen ({reasons})"
 
-#: nostr/publisher.py:785
+#: nostr/publisher.py:789
 #, python-brace-format
 msgid "Draft is too large to encrypt ({size} of {limit} bytes). Split it across smaller drafts or publish directly."
 msgstr "Der Entwurf ist zu groß zum Verschlüsseln ({size} von {limit} Bytes). Teile ihn auf kleinere Entwürfe auf oder veröffentliche ihn direkt."
 
-#: nostr/publisher.py:776
+#: nostr/publisher.py:780
 #, python-brace-format
 msgid "Could not serialize draft: {reason}"
 msgstr "Der Entwurf konnte nicht vorbereitet werden: {reason}"
 
-#: nostr/publisher.py:821
+#: nostr/publisher.py:825
 #, python-brace-format
 msgid "Could not build draft wrap: {reason}"
 msgstr "Der Entwurf konnte nicht verpackt werden: {reason}"
 
-#: nostr/publisher.py:798
+#: nostr/publisher.py:802
 #, python-brace-format
 msgid "Could not encrypt draft: {reason}"
 msgstr "Der Entwurf konnte nicht verschlüsselt werden: {reason}"
@@ -3258,80 +3259,80 @@ msgstr "Dieser Feed ist zu groß."
 msgid "Couldn't check this feed. MyEditor will try again automatically."
 msgstr "Dieser Feed konnte nicht geprüft werden. MyEditor versucht es automatisch noch einmal."
 
-#: nostr/imports/errors.py:74
-msgid "This address points to your local network, which MyEditor doesn't read from for safety."
-msgstr "Diese Adresse zeigt in dein lokales Netzwerk. Von dort liest MyEditor zu deiner Sicherheit nichts."
+#: nostr/imports/errors.py:76
+msgid "This address is on this computer or its local network. MyEditor follows public websites only."
+msgstr "Diese Adresse liegt auf diesem Computer oder in seinem lokalen Netzwerk. MyEditor folgt nur öffentlichen Websites."
 
-#: nostr/imports/errors.py:80
+#: nostr/imports/errors.py:82
 msgid "No feed found at this site. Try pasting the feed URL directly, or look for an RSS / Atom link in the page footer."
 msgstr "Auf dieser Website wurde kein Feed gefunden. Füge die Feed-Adresse direkt ein oder suche im Seitenfuß nach einem RSS- oder Atom-Link."
 
-#: nostr/imports/errors.py:85
+#: nostr/imports/errors.py:87
 msgid "That response isn't a feed. Expected RSS, Atom, or JSON Feed."
 msgstr "Diese Antwort ist kein Feed. Erwartet wurde RSS, Atom oder JSON Feed."
 
-#: nostr/imports/errors.py:88
+#: nostr/imports/errors.py:90
 msgid "This kind of source can't be imported yet."
 msgstr "Diese Art von Quelle kann noch nicht importiert werden."
 
-#: nostr/imports/errors.py:91
+#: nostr/imports/errors.py:93
 msgid "The server returned an empty response."
 msgstr "Der Server hat eine leere Antwort geschickt."
 
-#: nostr/imports/errors.py:94
+#: nostr/imports/errors.py:96
 msgid "That isn't a recognisable Nostr address."
 msgstr "Diese Nostr-Adresse wurde nicht erkannt."
 
-#: nostr/imports/errors.py:97
+#: nostr/imports/errors.py:99
 msgid "That Nostr event was not found on the relays."
 msgstr "Dieses Nostr-Event wurde auf den Relays nicht gefunden."
 
-#: nostr/imports/errors.py:100
+#: nostr/imports/errors.py:102
 msgid "No Nostr profile is published at that address."
 msgstr "Unter dieser Adresse ist kein Nostr-Profil veröffentlicht."
 
-#: nostr/imports/errors.py:103
+#: nostr/imports/errors.py:105
 msgid "Importing from Nostr needs a relay connection, which isn't available right now."
 msgstr "Für den Import aus Nostr ist eine Verbindung zu einem Relay nötig, die gerade nicht besteht."
 
-#: nostr/imports/errors.py:107
+#: nostr/imports/errors.py:109
 msgid "No published posts or pages were found in that WordPress export."
 msgstr "In diesem WordPress-Export wurden keine veröffentlichten Beiträge oder Seiten gefunden."
 
-#: nostr/imports/errors.py:110
+#: nostr/imports/errors.py:112
 msgid "No published posts were found in that Ghost export."
 msgstr "In diesem Ghost-Export wurden keine veröffentlichten Beiträge gefunden."
 
-#: nostr/imports/errors.py:113
+#: nostr/imports/errors.py:115
 msgid "Couldn't read that archive. Export it again from the platform and retry."
 msgstr "Dieses Archiv konnte nicht gelesen werden. Exportiere es erneut von der Plattform und versuche es noch einmal."
 
-#: nostr/imports/errors.py:117
+#: nostr/imports/errors.py:119
 msgid "That sitemap had no importable article URLs."
 msgstr "Diese Sitemap enthält keine Artikeladressen, die sich importieren lassen."
 
-#: nostr/imports/errors.py:120
+#: nostr/imports/errors.py:122
 msgid "That is not a Bluesky post link."
 msgstr "Das ist kein Link zu einem Bluesky-Beitrag."
 
-#: nostr/imports/errors.py:123
+#: nostr/imports/errors.py:125
 msgid "That Bluesky post could not be found."
 msgstr "Dieser Bluesky-Beitrag wurde nicht gefunden."
 
-#: nostr/imports/errors.py:126
+#: nostr/imports/errors.py:128
 msgid "That is a single Bluesky post, not a thread. Only multi-post threads stitch into an article."
 msgstr "Das ist ein einzelner Bluesky-Beitrag, kein Thread. Nur Threads aus mehreren Beiträgen werden zu einem Artikel zusammengefügt."
 
-#: nostr/imports/errors.py:146
+#: nostr/imports/errors.py:148
 msgid "Something went wrong while importing."
 msgstr "Beim Importieren ist etwas schiefgegangen."
 
-#: nostr/imports/errors.py:142
+#: nostr/imports/errors.py:144
 #, python-brace-format
 msgid "Couldn't reach that URL: {reason}."
 msgstr "Diese Adresse ist nicht erreichbar: {reason}."
 
-#: nostr/imports/errors.py:141
+#: nostr/imports/errors.py:143
 #: nostr/imports/fetch.py:201
 #: nostr/ui/thumbnail_loader.py:272
 msgid "network error"
@@ -3376,54 +3377,54 @@ msgstr "Diese Quelle hat die Grenze ihres Eingangs erreicht. Beende das Abonneme
 msgid "No relay accepted the draft yet. Try again to send it."
 msgstr "Noch kein Relay hat den Entwurf angenommen. Versuche es noch einmal, um ihn zu senden."
 
-#: nostr/imports/pipeline.py:298
+#: nostr/imports/pipeline.py:299
 #: nostr/ui/feeds_panel.py:143
 msgid "(untitled)"
 msgstr "(ohne Titel)"
 
-#: nostr/imports/pipeline.py:611
+#: nostr/imports/pipeline.py:612
 #, python-brace-format
 msgid "{failed} of {total} image(s) couldn't be mirrored; originals kept."
 msgid_plural "{failed} of {total} image(s) couldn't be mirrored; originals kept."
 msgstr[0] "{failed} von {total} Bild nicht kopiert, das Original bleibt verlinkt."
 msgstr[1] "{failed} von {total} Bildern nicht kopiert, die Originale bleiben verlinkt."
 
-#: nostr/imports/pipeline.py:300
+#: nostr/imports/pipeline.py:301
 #, python-brace-format
 msgid "Item {n}/{total}: {title}"
 msgstr "Beitrag {n}/{total}: {title}"
 
-#: nostr/imports/pipeline.py:320
+#: nostr/imports/pipeline.py:321
 #, python-brace-format
 msgid "Could not normalise item: {error}"
 msgstr "Beitrag konnte nicht aufbereitet werden: {error}"
 
-#: nostr/imports/pipeline.py:407
+#: nostr/imports/pipeline.py:408
 #, python-brace-format
 msgid "Fetching chapters for '{title}'…"
 msgstr "Kapitel für „{title}“ werden geladen …"
 
-#: nostr/imports/pipeline.py:444
+#: nostr/imports/pipeline.py:445
 #, python-brace-format
 msgid "Resolving '{title}' from Nostr…"
 msgstr "„{title}“ wird aus Nostr geladen …"
 
-#: nostr/imports/pipeline.py:527
+#: nostr/imports/pipeline.py:528
 #, python-brace-format
 msgid "Fetching full text for '{title}'…"
 msgstr "Volltext für „{title}“ wird geladen …"
 
-#: nostr/imports/pipeline.py:601
+#: nostr/imports/pipeline.py:602
 #, python-brace-format
 msgid "Mirroring images {n}/{total}…"
 msgstr "Bild {n} von {total} wird kopiert …"
 
-#: nostr/imports/pipeline.py:678
+#: nostr/imports/pipeline.py:679
 #, python-brace-format
 msgid "Could not build article: {error}"
 msgstr "Artikel konnte nicht erstellt werden: {error}"
 
-#: nostr/imports/pipeline.py:693
+#: nostr/imports/pipeline.py:697
 #, python-brace-format
 msgid "Could not start draft job: {error}"
 msgstr "Entwurf konnte nicht gespeichert werden: {error}"
@@ -5070,19 +5071,19 @@ msgid_plural "{count} were already imported and left as they are."
 msgstr[0] "{count} war bereits importiert und bleibt, wie er ist."
 msgstr[1] "{count} waren bereits importiert und bleiben, wie sie sind."
 
-#: nostr/ui/image_review_dialog.py:58
+#: nostr/ui/image_review_dialog.py:59
 msgid "Review Images"
 msgstr "Bilder prüfen"
 
-#: nostr/ui/image_review_dialog.py:74
+#: nostr/ui/image_review_dialog.py:77
 msgid "Checked images are copied to your media server, so the draft keeps working if the website removes them. Uncheck any you'd rather leave where they are."
 msgstr "Markierte Bilder werden auf deinen Medienserver kopiert, damit der Entwurf vollständig bleibt, auch wenn die Website sie entfernt. Entferne das Häkchen bei Bildern, die bleiben sollen, wo sie sind."
 
-#: nostr/ui/image_review_dialog.py:87
+#: nostr/ui/image_review_dialog.py:90
 msgid "Images to copy"
 msgstr "Zu kopierende Bilder"
 
-#: nostr/ui/image_review_dialog.py:141
+#: nostr/ui/image_review_dialog.py:145
 #, python-brace-format
 msgid "{kept} of {total} image will be copied."
 msgid_plural "{kept} of {total} images will be copied."

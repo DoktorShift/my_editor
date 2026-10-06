@@ -228,5 +228,7 @@ def test_error_words(code, expected):
 
 
 def test_a_local_address_says_so():
+    # Q-6: on this computer or its network, and only public websites.
     text = error_text(SourceError("", ERROR_CODES.LOCAL_NETWORK))
-    assert "local network" in text
+    assert "on this computer or its local network" in text
+    assert "public websites only" in text
