@@ -209,14 +209,18 @@ for wrap in sorted(wraps, key=lambda w: w["id"], reverse=True):
     a.publish_raw([RNOSTR, NRS], wrap)
 nd.wait_until(lambda: B.ready(same_id), 15_000)
 kept = wrap_on_relays(same_id, (RNOSTR,))
-b_record = B.store.get(same_id)
 rep.check("relays keep the wrap with the lowest id", kept is not None
           and kept["id"] == min(w["id"] for w in wraps), kept["id"][:12] if kept else "")
+# B decrypts whichever version reaches it first and must then move to the
+# one the relays keep once that arrives too; checking at the first
+# decryption would race the second wrap's delivery.
+nd.wait_until(lambda: kept is not None and B.store.get(same_id) is not None
+              and B.store.get(same_id).event_id == kept["id"] and B.ready(same_id), 5_000)
+b_record = B.store.get(same_id)
 rep.check("device B shows the version the relays keep",
           b_record is not None and kept is not None and b_record.event_id == kept["id"],
           f"B shows {b_record.event_id[:12] if b_record else None}, relays keep "
-          f"{kept['id'][:12] if kept else None} (draft_sync.py: a wrap with created_at <= "
-          "the stored one is ignored, so the first one seen wins)")
+          f"{kept['id'][:12] if kept else None}")
 B.sync.refresh()
 nd.wait_until(lambda: not B.store.is_loading, 10_000)
 nd.spin(1500)
