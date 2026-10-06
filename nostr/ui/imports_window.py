@@ -24,7 +24,9 @@ source that is read when it is opened (a Nostr author, a sitemap) is
 read when it is chosen; one that is checked on its own shows its new or
 older posts. A file or a link opened to import once is listed under
 Files and Links with all its posts checked; a file dropped anywhere on
-the window opens the same way.
+the window opens the same way. Under the list, the action bar
+(imports_actions.py) makes drafts of the checked posts, or of the open
+one when none is checked.
 
 Following Apple's guidelines for split views and sidebars: the selection
 stays visible in every pane, the panes keep a minimum width so no divider
@@ -93,7 +95,9 @@ from ..imports.inbox_store import (
     View,
 )
 from ..imports_controller import ELSEWHERE
-from ..imports.workspace import Post, Scope, checked_text, date_text, matches
+from ..imports.workspace import Post, Scope, checked_text, date_text, matches, targets
+from .image_review_dialog import ImageReviewDialog
+from .imports_actions import ActionBar, OptionsPopover
 from .imports_article import ArticlePane
 from .imports_glyphs import glyph_icon
 from .imports_post_list import PostList
@@ -119,6 +123,15 @@ QLabel#imports_notice { background: palette(alternate-base); }
 QFrame#imports_banner { background: palette(alternate-base); border: none;
     border-bottom: 1px solid palette(mid); }
 QToolButton#imports_banner_close { border: none; padding: 2px; }
+QWidget#imports_actions { background: palette(window); border-top: 1px solid palette(mid); }
+QLabel#imports_footnote, QLabel#imports_hint { color: palette(placeholder-text); }
+QPushButton#imports_create {
+    background: palette(highlight); color: palette(highlighted-text);
+    border: none; border-radius: 5px; padding: 4px 14px; min-height: 18px;
+}
+QPushButton#imports_create:disabled {
+    background: palette(button); color: palette(placeholder-text);
+}
 QPushButton#imports_segment {
     border: 1px solid palette(mid); padding: 3px 12px; min-width: 0;
     background: palette(base); color: palette(text);
@@ -213,6 +226,10 @@ class ImportsWindow(QMainWindow):
         self._source_state = NEW
         self._auto_hidden = False
         self._sheet = None
+        # What the person chose for the next drafts (this run only), and
+        # the images they chose to leave where they are.
+        self._choices: Dict[str, bool] = {}
+        self._skip_images: set = set()
         # Files and links get all their posts checked when first shown.
         self._checked_once: set = set()
         # Nothing is saved until the window has been restored.
@@ -310,6 +327,7 @@ class ImportsWindow(QMainWindow):
         self.posts = PostList(images=self._controller.images)
         self.posts.open_post.connect(self._on_open_post)
         self.posts.model_.checks_changed.connect(self._update_selection_band)
+        self.posts.model_.checks_changed.connect(self._choices_for_new_targets)
         self.posts.model_.modelReset.connect(self._update_list_state)
         self.posts.model_.rowsInserted.connect(lambda *_a: self._update_list_state())
         self.posts.model_.layoutChanged.connect(self._update_list_state)
@@ -340,6 +358,16 @@ class ImportsWindow(QMainWindow):
         self.list_stack.addWidget(self.posts)
         self.list_stack.addWidget(self._build_placeholder())
         column.addWidget(self.list_stack, 1)
+        self.action_bar = ActionBar()
+        self.action_bar.create_clicked.connect(self.create_drafts)
+        self.action_bar.options_clicked.connect(self._show_options)
+        # Skipping arrives with Undo.
+        self.action_bar.skip.hide()
+        column.addWidget(self.action_bar)
+        self.options_popover = OptionsPopover(self)
+        self.options_popover.changed.connect(self._choose)
+        self.options_popover.review_requested.connect(self._review_images)
+        self.posts.open_post.connect(lambda _post: self._update_actions())
 
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.splitter.setObjectName("imports_splitter")
@@ -466,6 +494,11 @@ class ImportsWindow(QMainWindow):
         close.setShortcut(QKeySequence.StandardKey.Close)
         close.triggered.connect(self.close)
         self.addAction(close)
+        # Command-Return or Ctrl+Return, as Send in Mail.
+        create = QAction(self)
+        create.setShortcut(QKeySequence(Qt.Modifier.CTRL | Qt.Key.Key_Return))
+        create.triggered.connect(self.create_drafts)
+        self.addAction(create)
         self.addAction(self.act_sidebar)
 
     # ------------------------------------------------------------------ #
@@ -585,6 +618,7 @@ class ImportsWindow(QMainWindow):
         return self.search.text().strip()
 
     def _show_list(self) -> None:
+        self._reset_choices()
         scope, query = self._scope, self._query()
         hidden = {SKIPPED_POSTS: _("Skipped"), IMPORTED: _("Imported"), INBOX: _("New")}
         if scope.is_collection:
@@ -675,8 +709,10 @@ class ImportsWindow(QMainWindow):
             self.article.show_post(None)
         self.selection_band.setVisible(model.rowCount() > 0)
         self._update_selection_band()
+        self._update_actions()
 
     def _update_selection_band(self) -> None:
+        self._update_actions()
         model = self.posts.model_
         checked = len(model.checked())
         self.select_all.setCheckState(model.check_state())
@@ -707,6 +743,85 @@ class ImportsWindow(QMainWindow):
         else:
             model.check_all()
         self._update_selection_band()
+
+    # ------------------------------------------------------------------ #
+    # Creating drafts                                                      #
+    # ------------------------------------------------------------------ #
+
+    def targets(self) -> List[Post]:
+        """What an action applies to: the checked posts, or the open one."""
+        model = self.posts.model_
+        return targets(model.checked(), self.posts.current_post(),
+                       busy=model.busy_identifiers())
+
+    def _update_actions(self) -> None:
+        model = self.posts.model_
+        chosen = self.targets()
+        controller = self._controller
+        copy, _full = self._copy_and_full(chosen)
+        self.action_bar.show_targets(
+            len(chosen), can_create=not controller.read_only,
+            busy=not controller.can_create(), skip_text=_("Skip"), can_skip=False,
+            prompts=controller.signer_prompts(chosen, copy_images=copy is not False))
+        self.action_bar.setVisible(model.selectable_count() > 0)
+
+    def _copy_and_full(self, posts: List[Post]):
+        """The options the next drafts get: the sources' defaults, and over
+        them what the person chose for this run."""
+        copy, full = self._controller.defaults_for(posts)
+        return (self._choices.get("rehost_images", copy),
+                self._choices.get("fetch_full_text", full))
+
+    def _reset_choices(self) -> None:
+        self._choices.clear()
+        self._skip_images = set()
+
+    def _choices_for_new_targets(self) -> None:
+        # Images left out apply to the posts they were chosen for.
+        self._skip_images = set()
+
+    def _choose(self, key: str, on: bool) -> None:
+        self._choices[key] = on
+        self._update_actions()
+
+    def _show_options(self) -> None:
+        chosen = self.targets()
+        copy, full = self._copy_and_full(chosen)
+        self.options_popover.show_choices(
+            copy=copy, full=full, has_images=any(p.image_count or p.image for p in chosen))
+        self.options_popover.open_below(self.action_bar.options)
+
+    def _review_images(self) -> None:
+        chosen = self.targets()
+
+        def ready(images: List[str]) -> None:
+            if not images or chosen != self.targets():
+                return
+            dialog = ImageReviewDialog(images, self._skip_images, parent=self,
+                                       image_source=self._controller.images)
+
+            def done(result: int) -> None:
+                if result == ImageReviewDialog.DialogCode.Accepted:
+                    self._skip_images = dialog.skip_urls()
+                dialog.deleteLater()
+
+            dialog.finished.connect(done)
+            dialog.open()
+
+        self._controller.images_of(chosen, on_ready=ready)
+
+    def create_drafts(self) -> None:
+        """Create N Drafts: an import of the targets, as private drafts."""
+        chosen = self.targets()
+        if not chosen or not self._controller.can_create():
+            return
+        job = self._controller.create_drafts(
+            chosen, label=self.list_title.text(), choices=dict(self._choices),
+            skip_image_urls=self._skip_images)
+        if job:
+            self.posts.model_.clear_checks()
+            self._reset_choices()
+            self._update_selection_band()
 
     def _fill_placeholder(self) -> None:
         title, text, button = self._placeholder()

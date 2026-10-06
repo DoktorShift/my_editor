@@ -290,9 +290,12 @@ class ImportRunner(QObject):
         return job.source_url if job else ""
 
     def _options(self, row: JobRow) -> dict:
-        options = dict(self._job.options) if self._job else {}
-        by_source = options.pop("by_source", {}) or {}
-        options.update(by_source.get(row.source_key, {}))
+        """A row's options: its source's defaults (``by_source``), and over
+        them what the person chose for this run."""
+        chosen = dict(self._job.options) if self._job else {}
+        by_source = chosen.pop("by_source", {}) or {}
+        options = dict(by_source.get(row.source_key, {}))
+        options.update(chosen)
         return options
 
     def _make(self, row: JobRow) -> None:

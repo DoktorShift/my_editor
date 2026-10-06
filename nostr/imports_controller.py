@@ -226,6 +226,7 @@ class ImportsController(QObject):
             parent=self)
         self.runner.job_changed.connect(lambda _id: self.activity_changed.emit())
         self.runner.job_finished.connect(self._on_job_finished)
+        self.runner.draft_created.connect(self._on_draft_created)
         self.checker = self._checker_factory(self.inbox)
         self.checker.source_checked.connect(self._on_source_checked)
         self.checker.checking.connect(lambda *_args: self.sources_changed.emit())
@@ -644,10 +645,97 @@ class ImportsController(QObject):
         self._run_blocking(make, made, failed)
 
     # ------------------------------------------------------------------ #
+    # Creating drafts                                                      #
+    # ------------------------------------------------------------------ #
+
+    def defaults_for(self, posts: Sequence[Post]) -> Tuple[Optional[bool], Optional[bool]]:
+        """What the sources of ``posts`` choose for new drafts: copy images,
+        fetch the full article. Each is None when the sources differ."""
+        found = {(self._source_defaults(post.source_key)) for post in posts} or {(True, True)}
+        copy = {pair[0] for pair in found}
+        full = {pair[1] for pair in found}
+        return (copy.pop() if len(copy) == 1 else None,
+                full.pop() if len(full) == 1 else None)
+
+    def _source_defaults(self, key: str) -> Tuple[bool, bool]:
+        source = self.source(key) if key else None
+        if source is None:
+            return True, True
+        options = self.subscriptions.options_for(source.url)
+        return options.rehost_images, options.fetch_full_text
+
+    def signer_prompts(self, posts: Sequence[Post], *, copy_images: bool) -> int:
+        """How often a signer app may ask while ``posts`` become drafts: once
+        a draft, and once an image copied. 0 when the key is kept here."""
+        if self._profile is None or getattr(self._profile, "signer", "remote") == "local":
+            return 0
+        images = sum(max(post.image_count, 1 if post.image else 0) for post in posts)
+        return len(posts) + (images if copy_images else 0)
+
+    def can_create(self) -> bool:
+        """Whether drafts can be created now (one import at a time)."""
+        return self.runner is not None and not self.read_only and not self.runner.busy()
+
+    def create_drafts(self, posts: Sequence[Post], *, label: str,
+                      choices: Optional[dict] = None, skip_image_urls=()) -> str:
+        """Start making drafts of ``posts``. ``choices`` are the person's for
+        this run (rehost_images, fetch_full_text); where it says nothing,
+        each source's defaults apply. Returns the import's id, or "" when
+        none could start."""
+        if not self.can_create():
+            return ""
+        pairs, by_source, collections = [], {}, set()
+        for post in posts:
+            item = self.item(post)
+            if item is None or not post.d_tag:
+                continue
+            pairs.append((item, post.source_key))
+            collections.add(post.collection)
+            if post.source_key and post.source_key not in by_source:
+                copy, full = self._source_defaults(post.source_key)
+                by_source[post.source_key] = {"rehost_images": copy, "fetch_full_text": full}
+        if not pairs:
+            return ""
+        collection = (self._collections.get(next(iter(collections)))
+                      if len(collections) == 1 else None)
+        options = {"by_source": by_source, **(choices or {})}
+        if skip_image_urls:
+            options["skip_image_urls"] = sorted(skip_image_urls)
+        job = self.runner.create(
+            label=label, source_type=collection.kind if collection else "inbox",
+            posts=pairs, source_url=collection.source_url if collection else "",
+            options=options)
+        self.runner.run(job.id)
+        self.activity_changed.emit()
+        self.posts_changed.emit()
+        return job.id
+
+    def images_of(self, posts: Sequence[Post], *,
+                  on_ready: Callable[[List[str]], None]) -> None:
+        """Every image an import of ``posts`` would copy, for the review
+        (found off the UI thread: it converts each post)."""
+        items = [item for item in map(self.item, posts) if item is not None]
+        generation = self._generation
+
+        def found(images) -> None:
+            if generation == self._generation:
+                on_ready(list(images))
+
+        self._run_blocking(lambda: snapshots.images_to_copy(items), found,
+                           lambda _exc: found([]))
+
+    # ------------------------------------------------------------------ #
     # Imports                                                              #
     # ------------------------------------------------------------------ #
 
     def _on_job_finished(self, _job_id: str) -> None:
+        self._announce()
+
+    def _on_draft_created(self, d_tag: str) -> None:
+        """A post became a draft: it is Imported everywhere it is shown."""
+        for collection in self._collections.values():
+            if collection.item(d_tag) is not None:
+                collection.states[d_tag] = DRAFTED
         self._announce()
 
     def _make_item_job(self, *, items, feed_url, fetch_full_text, rehost_images,

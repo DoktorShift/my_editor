@@ -231,14 +231,26 @@ def test_an_account_change_pauses_at_once():
     assert h.status(job) == ("paused", ["pending", "pending"])
 
 
-def test_per_source_options_override_the_run():
+def test_a_sources_defaults_apply_where_the_run_chose_nothing():
     h = Harness()
     item = make_item("a", guid="g-a")
     job = h.runner.create(label="x", source_type="inbox", posts=[(item, "src")],
-                          options={"rehost_images": True, "fetch_full_text": True,
-                                   "skip_image_urls": ["https://x/1.png"],
-                                   "by_source": {"src": {"rehost_images": False}}})
+                          options={"skip_image_urls": ["https://x/1.png"],
+                                   "by_source": {"src": {"rehost_images": False,
+                                                         "fetch_full_text": True}}})
     h.runner.run(job.id)
     kwargs = h.kwargs[0]
     assert (kwargs["rehost_images"], kwargs["fetch_full_text"]) == (False, True)
     assert kwargs["skip_image_urls"] == {"https://x/1.png"}
+
+
+def test_a_choice_for_the_run_wins_over_a_sources_default():
+    h = Harness()
+    item = make_item("a", guid="g-a")
+    job = h.runner.create(label="x", source_type="inbox", posts=[(item, "src")],
+                          options={"rehost_images": True,
+                                   "by_source": {"src": {"rehost_images": False,
+                                                         "fetch_full_text": False}}})
+    h.runner.run(job.id)
+    kwargs = h.kwargs[0]
+    assert (kwargs["rehost_images"], kwargs["fetch_full_text"]) == (True, False)
