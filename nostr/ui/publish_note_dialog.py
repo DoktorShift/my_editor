@@ -28,6 +28,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from i18n import _, ngettext
+
 from ..avatar_store import AvatarStore
 from ..bunker import BunkerSessionPool, humanize_failure
 from ..known_people import KnownPeople
@@ -175,7 +177,7 @@ class PublishNoteDialog(QDialog):
         is_dark: bool = True,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Publish as Note")
+        self.setWindowTitle(_("Publish as Note"))
         self.setModal(True)
         self.setMinimumSize(560, 380)
 
@@ -214,13 +216,13 @@ class PublishNoteDialog(QDialog):
         layout.setContentsMargins(20, 18, 20, 16)
         layout.setSpacing(10)
 
-        header = QLabel("Publish a short note (kind 1) to Nostr.")
+        header = QLabel(_("Publish a short note (kind 1) to Nostr."))
         layout.addWidget(header)
 
-        hint = QLabel(
+        hint = QLabel(_(
             "Formatting is stripped. Short notes are plain text. "
             "For richer documents, use Publish as Article."
-        )
+        ))
         hint.setObjectName("publish_hint")
         hint.setWordWrap(True)
         layout.addWidget(hint)
@@ -233,6 +235,7 @@ class PublishNoteDialog(QDialog):
 
         self._char_count = QLabel("")
         self._char_count.setObjectName("publish_count")
+        self._char_count.setWordWrap(True)
         layout.addWidget(self._char_count)
 
         # Mentions chip row, picks become ["p", hex, relay-hint] tags + URI
@@ -246,12 +249,20 @@ class PublishNoteDialog(QDialog):
         )
         layout.addWidget(self._mention_row)
 
+        # Progress and errors get a full-width line of their own above the
+        # buttons, so a long message never squeezes them. Hidden while empty.
+        self._status = QLabel("")
+        self._status.setObjectName("publish_status")
+        self._status.setWordWrap(True)
+        self._status.setVisible(False)
+        layout.addWidget(self._status)
+
         # Bottom row: "Publishing as [chip] · switch ▾"  +  Cancel / Publish.
         bottom = QHBoxLayout()
         bottom.setContentsMargins(0, 4, 0, 0)
         bottom.setSpacing(6)
 
-        publishing_as = QLabel("Publishing as")
+        publishing_as = QLabel(_("Publishing as"))
         bottom.addWidget(publishing_as)
 
         self._profile_switch = QToolButton()
@@ -265,14 +276,9 @@ class PublishNoteDialog(QDialog):
         bottom.addWidget(self._profile_switch)
         bottom.addStretch(1)
 
-        self._status = QLabel("")
-        self._status.setObjectName("publish_status")
-        self._status.setWordWrap(True)
-        bottom.addWidget(self._status, 2)
-
         buttons = QDialogButtonBox()
         self._cancel_btn = buttons.addButton(QDialogButtonBox.Cancel)
-        self._publish_btn = buttons.addButton("Publish", QDialogButtonBox.AcceptRole)
+        self._publish_btn = buttons.addButton(_("Publish"), QDialogButtonBox.AcceptRole)
         self._publish_btn.setDefault(True)
         self._cancel_btn.clicked.connect(self._on_cancel)
         self._publish_btn.clicked.connect(self._on_publish)
@@ -313,7 +319,7 @@ class PublishNoteDialog(QDialog):
         menu.clear()
         profiles = self._store.list()
         if not profiles:
-            act = menu.addAction("(no profiles)")
+            act = menu.addAction(_("(no profiles)"))
             act.setEnabled(False)
             return
         for profile in profiles:
@@ -341,14 +347,16 @@ class PublishNoteDialog(QDialog):
 
     def _refresh_char_count(self) -> None:
         n = len(self._content())
-        msg = f"{n} characters"
+        msg = ngettext("{n} character", "{n} characters", n).format(n=n)
         if n >= _LONGFORM_HINT_CHARS:
-            msg += " · long note, consider Publish as Article instead"
+            msg = _("{count} · long note, consider Publish as Article instead").format(
+                count=msg)
         self._char_count.setText(msg)
         self._publish_btn.setEnabled(n > 0 and self._job is None)
 
     def _set_status(self, text: str, *, error: bool = False) -> None:
         self._status.setText(text)
+        self._status.setVisible(bool(text))
         if error:
             color = "#FF6B6B" if self._is_dark else "#C0392B"
         else:
@@ -397,9 +405,9 @@ class PublishNoteDialog(QDialog):
 
     def _on_completed(self, results: List[PublishResult]) -> None:
         self._job = None
-        accepted = sum(1 for _, ok, _ in results if ok)
+        accepted = sum(1 for _url, ok, _message in results if ok)
         if accepted == 0:
-            self._set_status("No relay accepted the note. See log for details.", error=True)
+            self._set_status(_("No relay accepted the note. See log for details."), error=True)
             self._set_busy(False)
             return
         self.published.emit(self._signed_event_id or "", results)
@@ -407,7 +415,8 @@ class PublishNoteDialog(QDialog):
 
     def _on_failed(self, reason: str) -> None:
         self._job = None
-        self._set_status(f"Publish failed: {humanize_failure(reason)}", error=True)
+        self._set_status(_("Publish failed: {reason}").format(reason=humanize_failure(reason)),
+                         error=True)
         self._set_busy(False)
 
     def _on_cancel(self) -> None:

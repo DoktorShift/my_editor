@@ -41,6 +41,7 @@ import time
 from PySide6.QtCore import QObject, QProcess, QUrl, Signal
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
+from i18n import _
 from release_assets import WINDOWS, appimage_key, asset_key, deb_key, mac_key
 
 # Install kinds.
@@ -64,12 +65,14 @@ _DEB_PREFIX = "/opt/my-editor/"
 # same file: an image without the app, or an app that fails the signature
 # check, fails again.
 _MAC_STAGE_ERRORS = {
-    11: ("The downloaded disk image couldn't be opened.", True),
-    12: ("The disk image doesn't contain MyEditor.", False),
-    13: ("MyEditor couldn't copy the new version. Check that your disk has free space.", True),
-    14: ("The new version didn't pass the macOS integrity check, so it wasn't installed.", False),
+    11: (_("The downloaded disk image couldn't be opened."), True),
+    12: (_("The disk image doesn't contain MyEditor."), False),
+    13: (_("MyEditor couldn't copy the new version. Check that your disk has free space."),
+         True),
+    14: (_("The new version didn't pass the macOS integrity check, so it wasn't installed."),
+         False),
 }
-_MAC_STAGE_FAILED = ("MyEditor couldn't prepare the new version.", True)
+_MAC_STAGE_FAILED = (_("MyEditor couldn't prepare the new version."), True)
 
 # pkexec's own exit codes (pkexec(1)): 126 means the person dismissed the
 # password prompt; 127 means permission was not granted, because the account
@@ -219,8 +222,8 @@ class UpdateInstaller(QObject):
         if not self._expected_sha256:
             # Never install what cannot be checked. update_flow only offers an
             # automatic update when the release names a hash, so this is a guard.
-            self.failed.emit("MyEditor couldn't check this download, so it wasn't "
-                             "installed.", False)
+            self.failed.emit(_("MyEditor couldn't check this download, so it wasn't "
+                               "installed."), False)
             return
         try:
             self._dest = _download_destination(self._kind, asset)
@@ -261,7 +264,7 @@ class UpdateInstaller(QObject):
     def _stage_mac(self, dmg_path: str):
         bundle = mac_bundle_path(self._executable)
         if bundle is None:
-            self.failed.emit("MyEditor couldn't find where it is installed.", False)
+            self.failed.emit(_("MyEditor couldn't find where it is installed."), False)
             return
         script = mac_stage_script(dmg_path, mac_staging_path(bundle))
 
@@ -280,14 +283,14 @@ class UpdateInstaller(QObject):
             if code == 0:
                 self.prepared.emit(os.path.realpath(self._executable))
             elif code == _PKEXEC_DISMISSED:
-                self.declined.emit("The update wasn't installed because the password "
-                                   "prompt was closed. Nothing was changed.")
+                self.declined.emit(_("The update wasn't installed because the password "
+                                     "prompt was closed. Nothing was changed."))
             elif code == _PKEXEC_NOT_AUTHORIZED:
-                self.failed.emit("MyEditor didn't get permission to install the update.",
+                self.failed.emit(_("MyEditor didn't get permission to install the update."),
                                  True)
             else:
-                self.failed.emit("The package couldn't be installed. Another "
-                                 "installation may be running.", True)
+                self.failed.emit(_("The package couldn't be installed. Another "
+                                   "installation may be running."), True)
 
         # --no-remove: an update that would take other packages off the
         # system is refused instead of carried out unseen.
@@ -334,7 +337,7 @@ class UpdateInstaller(QObject):
         elif self._kind == DEB:
             _relaunch_after_exit(path)
         else:
-            raise RuntimeError("This copy of MyEditor can't update itself.")
+            raise RuntimeError(_("This copy of MyEditor can't update itself."))
 
     @property
     def installs_before_restart(self) -> bool:
@@ -413,12 +416,12 @@ class UpdateInstaller(QObject):
             return
         if self._expected_size and os.path.getsize(self._dest) != self._expected_size:
             self._discard()
-            self.failed.emit("The download was incomplete.", True)
+            self.failed.emit(_("The download was incomplete."), True)
             return
         if self._hash.hexdigest() != self._expected_sha256:
             self._discard()
-            self.failed.emit("The download was damaged or changed on the way, "
-                             "so it wasn't installed.", True)
+            self.failed.emit(_("The download was damaged or changed on the way, "
+                               "so it wasn't installed."), True)
             return
         self.ready.emit(self._dest)
 
@@ -434,7 +437,7 @@ class UpdateInstaller(QObject):
 
 _DOWNLOAD_DIR_PREFIX = "my-editor-update-"
 
-_CANNOT_SAVE = "MyEditor couldn't save the download. Check that your disk has free space."
+_CANNOT_SAVE = _("MyEditor couldn't save the download. Check that your disk has free space.")
 
 
 def download_failure(detail: str) -> str:
@@ -442,8 +445,8 @@ def download_failure(detail: str) -> str:
     unless it is empty or names the (long, signed) download URL."""
     reason = (detail or "").strip().rstrip(".")
     if not reason or "://" in reason:
-        return "The download didn't finish."
-    return f"The download didn't finish ({reason})."
+        return _("The download didn't finish.")
+    return _("The download didn't finish ({reason}).").format(reason=reason)
 
 
 def _discard(path: str):
@@ -587,27 +590,27 @@ def relaunch_script(pid: int, executable: str) -> str:
 
 def _start_helper(script: str):
     # Runs detached from us, so it outlives this process.
-    started, _ = QProcess.startDetached("sh", ["-c", script])
+    started, _pid = QProcess.startDetached("sh", ["-c", script])
     if not started:
-        raise RuntimeError("MyEditor couldn't start the update helper.")
+        raise RuntimeError(_("MyEditor couldn't start the update helper."))
 
 
 def _apply_windows(installer_path: str):
     # /SILENT shows a small progress window; /CLOSEAPPLICATIONS lets the
     # installer replace the running exe; the installer's [Run] entry relaunches
     # MyEditor once install finishes. startDetached returns (ok, pid) in PySide6.
-    started, _ = QProcess.startDetached(
+    started, _pid = QProcess.startDetached(
         installer_path,
         ["/SILENT", "/SUPPRESSMSGBOXES", "/CLOSEAPPLICATIONS", "/NORESTARTAPPLICATIONS"],
     )
     if not started:
-        raise RuntimeError("MyEditor couldn't open the installer.")
+        raise RuntimeError(_("MyEditor couldn't open the installer."))
 
 
 def _apply_appimage(new_path: str):
     appimage = os.environ.get("APPIMAGE")
     if not appimage:
-        raise RuntimeError("MyEditor couldn't find its AppImage.")
+        raise RuntimeError(_("MyEditor couldn't find its AppImage."))
     try:
         os.chmod(new_path, 0o755)
     except OSError:
@@ -617,7 +620,7 @@ def _apply_appimage(new_path: str):
 
 def _apply_mac(staged: str, bundle: str):
     if not bundle or not os.path.isdir(staged):
-        raise RuntimeError("The prepared update is missing.")
+        raise RuntimeError(_("The prepared update is missing."))
     _start_helper(mac_swap_script(os.getpid(), staged, bundle))
 
 

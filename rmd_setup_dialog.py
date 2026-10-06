@@ -20,6 +20,7 @@ from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
@@ -29,6 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 import rmd_toolchain
+from i18n import _
 from rmd_toolchain import Cancelled, ToolchainError
 from url_safety import is_safe_external_url
 
@@ -93,10 +95,10 @@ QPushButton:disabled { color: #AAAAAA; }
 """
 
 _COMPONENTS = [
-    ("r", "R interpreter", "from CRAN (cran.r-project.org)"),
-    ("pandoc", "pandoc", "from the official pandoc releases (github.com/jgm/pandoc)"),
-    ("rmarkdown", "rmarkdown package", "from CRAN into the app's private library"),
-    ("latex", "LaTeX (optional, for PDF)", "TinyTeX via the official tinytex package"),
+    ("r", _("R interpreter"), _("from CRAN (cran.r-project.org)")),
+    ("pandoc", "pandoc", _("from the official pandoc releases (github.com/jgm/pandoc)")),
+    ("rmarkdown", _("rmarkdown package"), _("from CRAN into the app's private library")),
+    ("latex", _("LaTeX (optional, for PDF)"), _("TinyTeX via the official tinytex package")),
 ]
 
 
@@ -147,7 +149,7 @@ class RmdSetupDialog(QDialog):
 
     def __init__(self, is_dark: bool = True, parent=None, want_pdf: bool = False):
         super().__init__(parent)
-        self.setWindowTitle("R Markdown Toolchain")
+        self.setWindowTitle(_("R Markdown Toolchain"))
         self.setModal(True)
         self.setMinimumWidth(560)
         self.setStyleSheet(_DARK_CSS if is_dark else _LIGHT_CSS)
@@ -159,37 +161,41 @@ class RmdSetupDialog(QDialog):
         root.setContentsMargins(20, 18, 20, 16)
         root.setSpacing(10)
 
-        title = QLabel("R Markdown Toolchain")
+        title = QLabel(_("R Markdown Toolchain"))
         title.setObjectName("rmd_setup_title")
         root.addWidget(title)
 
-        intro = QLabel(
+        intro = QLabel(_(
             "Knitting R Markdown needs the components below. Anything "
             "missing can be installed for you, each from its official "
-            "source. Nothing is downloaded until you click Install.")
+            "source. Nothing is downloaded until you click Install."))
         intro.setWordWrap(True)
         root.addWidget(intro)
 
+        # One grid, so the status column grows to its longest word in any
+        # language (90 px at least) and the component names still line up.
         self._status_labels: dict[str, QLabel] = {}
-        for key, name, source in _COMPONENTS:
-            row = QHBoxLayout()
-            state = QLabel("checking...")
-            state.setFixedWidth(90)
+        components = QGridLayout()
+        components.setVerticalSpacing(root.spacing())
+        components.setColumnMinimumWidth(0, 90)
+        components.setColumnStretch(1, 1)
+        for row, (key, name, source) in enumerate(_COMPONENTS):
+            state = QLabel(_("checking..."))
             self._status_labels[key] = state
-            row.addWidget(state)
+            components.addWidget(state, row, 0)
             label = QLabel(f"{name}  ({source})")
             label.setWordWrap(True)
-            row.addWidget(label, 1)
-            root.addLayout(row)
+            components.addWidget(label, row, 1)
+        root.addLayout(components)
 
         self._tinytex_box = QCheckBox(
-            "Also install TinyTeX to enable Knit to PDF (about 100 MB)")
+            _("Also install TinyTeX to enable Knit to PDF (about 100 MB)"))
         root.addWidget(self._tinytex_box)
 
-        note = QLabel(
+        note = QLabel(_(
             "System installations are always preferred; the editor never "
             "replaces an R you already have. R packages go into the app's "
-            "own library, not your system library.")
+            "own library, not your system library."))
         note.setObjectName("rmd_setup_note")
         note.setWordWrap(True)
         root.addWidget(note)
@@ -205,15 +211,15 @@ class RmdSetupDialog(QDialog):
         root.addWidget(self._log)
 
         buttons = QHBoxLayout()
-        self._page_btn = QPushButton("Open download page")
+        self._page_btn = QPushButton(_("Open download page"))
         self._page_btn.setVisible(False)
         buttons.addWidget(self._page_btn)
         buttons.addStretch(1)
-        self._install_btn = QPushButton("Install")
+        self._install_btn = QPushButton(_("Install"))
         self._install_btn.setDefault(True)
         self._install_btn.clicked.connect(self._start_install)
         buttons.addWidget(self._install_btn)
-        self._close_btn = QPushButton("Close")
+        self._close_btn = QPushButton(_("Close"))
         self._close_btn.clicked.connect(self.reject)
         buttons.addWidget(self._close_btn)
         root.addLayout(buttons)
@@ -238,10 +244,10 @@ class RmdSetupDialog(QDialog):
             comp = snapshot[key]
             label = self._status_labels[key]
             if comp.present:
-                label.setText("installed")
+                label.setText(_("installed"))
                 label.setProperty("status", "ok")
             else:
-                label.setText("missing")
+                label.setText(_("missing"))
                 label.setProperty("status", "missing")
                 if key != "latex":
                     required_missing = True
@@ -282,7 +288,7 @@ class RmdSetupDialog(QDialog):
 
     def _on_succeeded(self):
         self._progress.setVisible(False)
-        self._append_log("\nAll components are ready.")
+        self._append_log("\n" + _("All components are ready."))
         self._succeeded = True
         self._refresh_status()
         self._tinytex_box.setEnabled(True)
@@ -290,7 +296,7 @@ class RmdSetupDialog(QDialog):
 
     def _on_failed(self, message: str, instructions: str, page: str):
         self._progress.setVisible(False)
-        self._append_log(f"\nFAILED: {message}")
+        self._append_log("\n" + _("FAILED: {message}").format(message=message))
         if instructions:
             self._append_log(instructions)
         if page and is_safe_external_url(page):
@@ -306,7 +312,7 @@ class RmdSetupDialog(QDialog):
 
     def _on_cancelled(self):
         self._progress.setVisible(False)
-        self._append_log("\nInstall cancelled.")
+        self._append_log("\n" + _("Install cancelled."))
         self._tinytex_box.setEnabled(True)
         self._refresh_status()
 

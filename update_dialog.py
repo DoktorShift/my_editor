@@ -48,6 +48,7 @@ from PySide6.QtWidgets import (
 )
 
 import theme
+from i18n import _
 from constants import (
     DARK_BORDER, DARK_FG, DARK_MENU_BG, DARK_MUTED_FG,
     LIGHT_BORDER, LIGHT_FG, LIGHT_MENU_BG, LIGHT_MUTED_FG,
@@ -82,12 +83,12 @@ _DEFAULT_BUTTON = {READY: "primary", FAILED: "retry", GUIDE_ONLY: "guide",
 # What to do after an error, added to the installer's own sentences. "Try
 # again" is offered only where trying again can help.
 _NEXT_STEP = {
-    True: "Try again, or use the update guide.",
-    False: "Use the update guide to install this update.",
+    True: _("Try again, or use the update guide."),
+    False: _("Use the update guide to install this update."),
 }
 # The guide would only install the same version a second time.
-_INSTALLED_NEXT_STEP = ("The update is installed. Try again, or quit MyEditor "
-                        "and open it again.")
+_INSTALLED_NEXT_STEP = _("The update is installed. Try again, or quit MyEditor "
+                         "and open it again.")
 
 _NOTES_MAX_HEIGHT = 180
 
@@ -183,13 +184,13 @@ class _StepRow(QWidget):
         field = QLineEdit(command)
         field.setObjectName("update_command")
         field.setReadOnly(True)
-        copy = QPushButton("Copy")
+        copy = QPushButton(_("Copy"))
         copy.setAutoDefault(False)
 
         def on_copy():
             QApplication.clipboard().setText(command)
-            copy.setText("Copied")
-            QTimer.singleShot(1500, lambda: copy.setText("Copy"))
+            copy.setText(_("Copied"))
+            QTimer.singleShot(1500, lambda: copy.setText(_("Copy")))
 
         copy.clicked.connect(on_copy)
         row = QHBoxLayout()
@@ -248,7 +249,7 @@ class UpdateDialog(QDialog):
         # the restart. Trying again then restarts, and nothing more.
         self._installed = None
 
-        self.setWindowTitle("Software Update")
+        self.setWindowTitle(_("Software Update"))
         self.setMinimumWidth(520)
         self.setStyleSheet(_stylesheet(is_dark))
 
@@ -269,12 +270,12 @@ class UpdateDialog(QDialog):
     # -- layout -------------------------------------------------------------
     def _make_buttons(self) -> dict:
         buttons = {
-            "skip": QPushButton("Skip This Version"),
-            "later": QPushButton("Later"),
+            "skip": QPushButton(_("Skip This Version")),
+            "later": QPushButton(_("Later")),
             "primary": QPushButton(self._plan.primary_label),
-            "cancel": QPushButton("Cancel"),
-            "guide": QPushButton("Open Update Guide"),
-            "retry": QPushButton("Try Again"),
+            "cancel": QPushButton(_("Cancel")),
+            "guide": QPushButton(_("Open Update Guide")),
+            "retry": QPushButton(_("Try Again")),
         }
         buttons["skip"].clicked.connect(self._skip)
         buttons["later"].clicked.connect(self.reject)
@@ -291,9 +292,9 @@ class UpdateDialog(QDialog):
             icon.setPixmap(pixmap)
         icon.setFixedSize(64, 64)
 
-        title = QLabel(f"MyEditor {self._version} is available")
+        title = QLabel(_("MyEditor {version} is available").format(version=self._version))
         title.setObjectName("update_title")
-        subtitle = QLabel(f"You have version {current_version}.")
+        subtitle = QLabel(_("You have version {version}.").format(version=current_version))
         subtitle.setObjectName("update_subtitle")
         intro = QLabel(self._plan.intro)
         intro.setWordWrap(True)
@@ -303,8 +304,9 @@ class UpdateDialog(QDialog):
         self._note.setWordWrap(True)
         self._note.hide()
 
+        link_text = html.escape(_("Release Notes"))
         notes_link = QLabel(f'<a href="{html.escape(release_url)}" '
-                            f'style="color:{link_color}">Release Notes</a>')
+                            f'style="color:{link_color}">{link_text}</a>')
         notes_link.setTextFormat(Qt.RichText)
         notes_link.setOpenExternalLinks(False)
         notes_link.linkActivated.connect(self.link_activated)
@@ -341,7 +343,7 @@ class UpdateDialog(QDialog):
         grid.addLayout(buttons, 1, 0, 1, 2)
 
     def _notes_view(self) -> QWidget:
-        label = QLabel("What\u2019s New")
+        label = QLabel(_("What\u2019s New"))
         label.setObjectName("update_notes_label")
         self.notes_view = QTextBrowser()
         self.notes_view.setObjectName("update_notes")
@@ -349,7 +351,7 @@ class UpdateDialog(QDialog):
         self.notes_view.setMarkdown(self._release_notes)
         _quiet_headings(self.notes_view)
         self.notes_view.setMaximumHeight(_NOTES_MAX_HEIGHT)
-        self.notes_view.setAccessibleName("Release notes")
+        self.notes_view.setAccessibleName(_("Release notes"))
         self.notes_view.anchorClicked.connect(
             lambda url: self.link_activated.emit(QUrl(url).toString()))
         box = QWidget()
@@ -456,9 +458,10 @@ class UpdateDialog(QDialog):
         if not self._before_restart():
             self._installer.discard_download(path)
             self._reset_rows()
-            self._note.setText("Update canceled. Nothing was changed.")
+            self._note.setText(_("Update canceled. Nothing was changed."))
             self._note.show()
             self._set_state(READY)
+            self._fit_to_content()
             return
         prepare = self._roles.get(PREPARE)
         if prepare is not None:
@@ -474,6 +477,7 @@ class UpdateDialog(QDialog):
         self._note.setText(message)
         self._note.show()
         self._set_state(READY)
+        self._fit_to_content()
 
     def _on_prepared(self, path: str) -> None:
         prepare = self._roles.get(PREPARE)
@@ -493,7 +497,7 @@ class UpdateDialog(QDialog):
         except Exception as exc:
             # apply() words its own failures; anything else gets one sentence.
             reason = str(exc).strip() if isinstance(exc, RuntimeError) else ""
-            reason = reason or "MyEditor couldn't start the update."
+            reason = reason or _("MyEditor couldn't start the update.")
             if installed:
                 # The new version is in place: only the restart is left, and
                 # the tabs stay written down for it.
@@ -515,6 +519,14 @@ class UpdateDialog(QDialog):
         row.set_state("error")
         row.set_error(f"{message} {next_step or _NEXT_STEP[retryable]}")
         self._set_state(state or (FAILED if retryable else GUIDE_ONLY))
+        self._fit_to_content()
+
+    def _fit_to_content(self) -> None:
+        # An open window does not grow by itself when an error or a note
+        # adds lines (and a translation can add several), so the new text
+        # would be squeezed into the old height.
+        if self.isVisible():
+            self.adjustSize()
 
 
 def _quiet_headings(view: QTextBrowser) -> None:
@@ -569,7 +581,7 @@ class WhatsNewDialog(QDialog):
             icon.setPixmap(pixmap)
         icon.setFixedSize(64, 64)
 
-        title = QLabel(f"What’s New in MyEditor {version}")
+        title = QLabel(_("What’s New in MyEditor {version}").format(version=version))
         title.setObjectName("update_title")
         self.notes_view = QTextBrowser()
         self.notes_view.setObjectName("update_notes")
@@ -577,7 +589,7 @@ class WhatsNewDialog(QDialog):
         self.notes_view.setMarkdown(_notes_body(notes))
         _quiet_headings(self.notes_view)
         self.notes_view.setMinimumHeight(220)
-        self.notes_view.setAccessibleName("Release notes")
+        self.notes_view.setAccessibleName(_("Release notes"))
         self.notes_view.anchorClicked.connect(
             lambda url: self.link_activated.emit(QUrl(url).toString()))
 
@@ -589,14 +601,15 @@ class WhatsNewDialog(QDialog):
         buttons = QHBoxLayout()
         if release_url:
             link_color = theme.dialog_link_color(is_dark)
+            link_text = html.escape(_("Full Release Notes"))
             more = QLabel(f'<a href="{html.escape(release_url)}" '
-                          f'style="color:{link_color}">Full Release Notes</a>')
+                          f'style="color:{link_color}">{link_text}</a>')
             more.setTextFormat(Qt.RichText)
             more.setOpenExternalLinks(False)
             more.linkActivated.connect(self.link_activated)
             buttons.addWidget(more)
         buttons.addStretch(1)
-        self.done_button = QPushButton("Done")
+        self.done_button = QPushButton(_("Done"))
         self.done_button.setDefault(True)
         self.done_button.clicked.connect(self.accept)
         buttons.addWidget(self.done_button)

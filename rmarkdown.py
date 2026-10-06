@@ -38,6 +38,7 @@ from doc_walk import (
     skip_prefix,
 )
 import rmd_toolchain
+from i18n import _
 
 # Shift+Enter line separator and the inline-object placeholder.
 _LINE_SEP = "\u2028"
@@ -265,7 +266,7 @@ class KnitRunner(QObject):
             return
         rscript = find_rscript()
         if not rscript:
-            self.failed.emit("missing-r", "No R installation was found.")
+            self.failed.emit("missing-r", _("No R installation was found."))
             return
 
         self._rmd_path = rmd_path
@@ -303,8 +304,8 @@ class KnitRunner(QObject):
     def _on_error(self, error):
         if error == QProcess.FailedToStart:
             self.failed.emit("missing-r",
-                             "Rscript could not be started. It may have been "
-                             "removed or is not executable.")
+                             _("Rscript could not be started. It may have been "
+                               "removed or is not executable."))
             self._proc = None
 
     def _on_finished(self, exit_code, _status):
@@ -319,7 +320,7 @@ class KnitRunner(QObject):
                 self.finished.emit(out_path)
             else:
                 self.failed.emit("render-error",
-                                 "Render reported success but no output file "
-                                 "was found.\n\n" + detail)
+                                 _("Render reported success but no output file "
+                                   "was found.") + "\n\n" + detail)
         else:
             self.failed.emit(classify_failure(self._output), detail)

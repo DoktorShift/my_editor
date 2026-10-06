@@ -29,6 +29,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from i18n import _
+
 from ..avatar_store import AvatarStore
 from ..known_people import KnownPeople, Person
 from ..search import Nip50SearchClient
@@ -152,7 +154,7 @@ class _ResultRow(QWidget):
         layout.addLayout(text_col, 1)
 
         if person.source == "contact":
-            badge = QLabel("you follow")
+            badge = QLabel(_("you follow"))
             badge.setObjectName("row_badge")
             layout.addWidget(badge)
 
@@ -243,7 +245,7 @@ class MentionPicker(QWidget):
 
         self._search_edit = _SearchEdit(self._list, self)
         self._search_edit.setObjectName("mention_search")
-        self._search_edit.setPlaceholderText("Search people…")
+        self._search_edit.setPlaceholderText(_("Search people…"))
         self._search_edit.textChanged.connect(self._on_text_changed)
 
         self._hint = QLabel("")
@@ -319,11 +321,12 @@ class MentionPicker(QWidget):
             self._list.setCurrentRow(0)
 
         if searching:
-            self._hint.setText("Searching Nostr…")
+            self._hint.setText(_("Searching Nostr…"))
             self._hint.setVisible(True)
         elif not people:
             query = self._search_edit.text().strip()
-            self._hint.setText("No matches yet. Keep typing" if query else "Type to search people")
+            self._hint.setText(_("No matches yet. Keep typing") if query
+                               else _("Type to search people"))
             self._hint.setVisible(True)
         else:
             self._hint.setVisible(False)

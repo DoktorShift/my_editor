@@ -26,6 +26,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from i18n import _
+
 from ..avatar_store import AvatarStore
 from ..known_people import KnownPeople, Person
 from ..publisher import Mention
@@ -136,6 +138,9 @@ class _MentionChip(QWidget):
 
         remove_btn = QPushButton("×")
         remove_btn.setObjectName("chip_remove")
+        remove_text = _("Remove {name}").format(name=name)
+        remove_btn.setToolTip(remove_text)
+        remove_btn.setAccessibleName(remove_text)
         remove_btn.setCursor(Qt.PointingHandCursor)
         remove_btn.setFixedSize(QSize(18, 22))
         remove_btn.clicked.connect(lambda: self.removed.emit(self._pubkey))
@@ -161,7 +166,7 @@ class MentionChipRow(QWidget):
     """Horizontal row of mention chips + "+ add person" trigger.
 
     Signals:
-      mentions_changed(list)  — list[Person] reflecting current selection
+      mentions_changed(list)  list[Person] reflecting current selection
     """
 
     mentions_changed = Signal(list)
@@ -196,13 +201,13 @@ class MentionChipRow(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(6)
 
-        label = QLabel("Mentions")
+        label = QLabel(_("Mentions"))
         label.setObjectName("mentions_label")
         outer.addWidget(label)
 
         self._add_btn = QToolButton()
         self._add_btn.setObjectName("add_mention")
-        self._add_btn.setText("+ add person")
+        self._add_btn.setText(_("+ add person"))
         self._add_btn.setCursor(Qt.PointingHandCursor)
         self._add_btn.clicked.connect(self._open_picker)
 
@@ -229,7 +234,7 @@ class MentionChipRow(QWidget):
     # -- internals ---------------------------------------------------------
 
     def _open_picker(self) -> None:
-        # Build the picker lazily — first open spawns the widget; subsequent
+        # Build the picker lazily: the first open spawns the widget; later
         # opens reuse it so its event filters / debounce timer survive.
         if self._picker is None:
             self._picker = MentionPicker(
@@ -268,7 +273,7 @@ class MentionChipRow(QWidget):
     def _remove_chip(self, pubkey_hex: str, *, emit: bool = True) -> None:
         # Drop from internal list
         self._picked = [p for p in self._picked if p.pubkey != pubkey_hex]
-        # Drop the chip widget — it's the only _MentionChip with this pubkey
+        # Drop the chip widget: it's the only _MentionChip with this pubkey
         for i in range(self._outer.count()):
             item = self._outer.itemAt(i)
             widget = item.widget() if item else None
