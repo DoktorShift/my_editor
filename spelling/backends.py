@@ -232,6 +232,9 @@ def create_backend() -> SpellBackend:
     if sys.platform == "win32":
         from .windows import WindowsBackend
         return WindowsBackend()
+    if sys.platform.startswith(("linux", "freebsd", "openbsd", "netbsd")):
+        from .enchant import EnchantBackend
+        return EnchantBackend()
     return NullBackend()
 
 

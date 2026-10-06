@@ -75,6 +75,11 @@ if sys.platform == "darwin":
     datas += copy_metadata("rubicon-objc")
 elif sys.platform == "win32":
     hiddenimports += ["spelling.windows"]   # ctypes and COM only, nothing to collect
+else:
+    # Enchant is the system's library, loaded at run time and deliberately
+    # not bundled: it finds its providers and dictionaries where it was
+    # installed. The .deb recommends it (build_deb.sh).
+    hiddenimports += ["spelling.enchant"]
 
 # QtPdf backs the built-in PDF viewer (pdf_viewer.py) and must ship in
 # every bundle. Trim the rest and make sure the giant, unused Qt
