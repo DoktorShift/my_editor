@@ -296,6 +296,23 @@ def test_a_source_read_when_opened(tmp_path):
     settle()
 
 
+def test_reading_a_source_notes_when_without_asking_the_signer(tmp_path):
+    fetcher = FakeFetcher({"https://example.com/feed": ("ok", TWO_ITEM_FEED)})
+    harness = Harness(tmp_path, fetcher=fetcher)
+    harness.controller.account_changed(profile())
+    settle()
+    harness.controller.subscriptions.add_feed("https://example.com/feed", "Example")
+    harness.controller.subscriptions.flush()
+    settle()
+    sent = len(harness.relay.published)
+    harness.controller.read_source("https://example.com/feed")
+    assert harness.controller.subscriptions.get("https://example.com/feed").last_fetched_at
+    settle()
+    assert len(harness.relay.published) == sent
+    harness.controller.account_changed(None)
+    settle()
+
+
 def test_an_answer_for_the_account_left_is_dropped(tmp_path):
     pending = []
 

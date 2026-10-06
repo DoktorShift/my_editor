@@ -125,6 +125,8 @@ from nostr.draft_store import DraftState, DraftStore
 from nostr.draft_deletions import DraftDeletions
 from nostr.draft_sync import DraftSync
 from nostr.imports_controller import ImportsController
+from nostr.ui.imports_window import SETTINGS_KEY as IMPORTS_SETTINGS_KEY
+from nostr.ui.imports_window import ImportsWindow
 from nostr.imports.constants import IDENTIFIER_PREFIX as IMPORT_IDENTIFIER_PREFIX
 from nostr.imports.constants import SOURCE_TAG as IMPORT_SOURCE_TAG
 from nostr.drafts import (
@@ -385,9 +387,9 @@ class MainWindow(QMainWindow):
             parent=self,
         )
         # Imports: the sources shared with STANDUP, the inbox, the checks
-        # while the app runs and the import jobs, for the account in use
-        # (nostr/imports_controller.py). It binds only while Nostr is in
-        # use (see _update_account_actions).
+        # while the app runs, the import jobs and the Imports window, for
+        # the account in use (nostr/imports_controller.py). It binds only
+        # while Nostr is in use (see _update_account_actions).
         self._imports = ImportsController(
             relay_pool=self._relay_pool,
             relay_directory=self._relay_directory,
@@ -395,6 +397,7 @@ class MainWindow(QMainWindow):
             draft_store=self._draft_store,
             entitled_relays=self._entitled_relays,
             blossom_primary=lambda: self._media_store.settings.primary,
+            window_factory=self._make_imports_window,
             parent=self,
         )
         # Created lazily inside ``_build_findbar`` so its parent is the
@@ -1173,6 +1176,12 @@ class MainWindow(QMainWindow):
             Command("nostr.drafts", _("Drafts…"), NOSTR, "Ctrl+Shift+D", checkable=True,
                     nostr=True, listed_as=_("Toggle Drafts panel")),
             triggered=self._on_toggle_drafts_panel)
+        # Imports: the window of sources, their posts and the open one. No
+        # shortcut: no platform has a convention for it.
+        self.act_nostr_imports = add(
+            Command("nostr.imports", _("Imports\u2026"), NOSTR, nostr=True,
+                    keywords=("rss", "feed", "import", "sources")),
+            triggered=self._open_imports_window)
         self.act_membership = add(
             Command("nostr.membership", _("EINUNDZWANZIG Membership\u2026"), NOSTR,
                     keywords=("einundzwanzig", "21", "join")),
@@ -1275,6 +1284,7 @@ class MainWindow(QMainWindow):
         m_nostr.addAction(self.act_nostr_insert_image)
         m_nostr.addSeparator()
         m_nostr.addAction(self.act_nostr_drafts)
+        m_nostr.addAction(self.act_nostr_imports)
         m_nostr.addSeparator()
         m_nostr.addAction(self.act_membership)
         m_nostr.addSeparator()
@@ -3425,6 +3435,9 @@ class MainWindow(QMainWindow):
             self._drafts_panel.apply_theme(self.is_dark_theme)
         for banner in getattr(self, "_tab_conflict_banners", {}).values():
             banner.apply_theme(self.is_dark_theme)
+        imports_window = getattr(self, "_imports", None) and self._imports.window()
+        if imports_window is not None:
+            imports_window.apply_theme(self.is_dark_theme)
         if announce:
             message = (_("Switched to Dark theme") if self.is_dark_theme
                        else _("Switched to Light theme"))
@@ -3894,6 +3907,18 @@ class MainWindow(QMainWindow):
     def _open_membership_window(self) -> None:
         """Nostr > EINUNDZWANZIG Membership."""
         self._membership.open_window()
+
+    def _open_imports_window(self) -> None:
+        """Nostr > Imports: sources, their posts, and the open one."""
+        self._imports.open_window()
+
+    def _make_imports_window(self, controller):
+        """The Imports window, remembered in settings.json between runs."""
+        return ImportsWindow(
+            controller, dark=self.is_dark_theme,
+            load_settings=lambda: load_settings().get(IMPORTS_SETTINGS_KEY) or {},
+            save_settings=lambda value: save_setting(IMPORTS_SETTINGS_KEY, value),
+            open_url=lambda url: self._open_external(url.toString()))
 
     def _on_nostr_profile_connected(self, profile: Profile):
         # New (or re-connected) profile becomes the active one.

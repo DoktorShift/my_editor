@@ -360,6 +360,9 @@ class ImportsController(QObject):
                 return
             collection.loading = False
             collection.items = list(result.feed.items)
+            # Remembered with the list, and sent with its next real change:
+            # reading a source never asks the signer by itself.
+            self.subscriptions.mark_fetched(url)
             if not _title_known(source) and result.feed.title:
                 collection.label = result.feed.title
                 self.inbox.set_site(key, feed_title=result.feed.title,
