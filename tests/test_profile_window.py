@@ -225,4 +225,8 @@ def test_edit_profile_opens_a_window_that_reads_the_active_account(monkeypatch):
     windows = host.findChildren(pw.ProfileWindow)
     assert len(windows) == 1 and windows[0].isVisible()
     assert reads == [profile]
+    # Leave nothing behind for the tests that run after this one.
+    from PySide6.QtCore import QCoreApplication, QEvent
     windows[0].close()
+    host.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
