@@ -111,12 +111,48 @@ class SourceFetcher(QObject):
             on_refused=lambda reason: on_failure(
                 SourceError(reason, ERROR_CODES.LOCAL_NETWORK)))
 
-    def _start(self, qurl: QUrl, on_success, on_failure) -> None:
+    def fetch_feed(
+        self,
+        url: str,
+        *,
+        etag: str = "",
+        last_modified: str = "",
+        on_body: Callable[[str, dict], None],
+        on_not_modified: Callable[[], None],
+        on_failure: Callable[[SourceError], None],
+    ) -> None:
+        """A conditional GET for a feed check: with the validators of the
+        last answer, a feed that did not change answers 304 and costs no
+        download (``on_not_modified``). ``on_body`` gets the text and the
+        new validators: ``{"etag", "last_modified", "final_url"}``."""
+        qurl = QUrl(url)
+        if not qurl.isValid() or qurl.scheme() not in ("http", "https"):
+            on_failure(SourceError(
+                _("Feed URL must be http(s)"), ERROR_CODES.FETCH_ERROR))
+            return
+        headers = []
+        if etag:
+            headers.append((b"If-None-Match", etag.encode("latin-1", "ignore")))
+        if last_modified:
+            headers.append((b"If-Modified-Since", last_modified.encode("latin-1", "ignore")))
+        meta: dict = {}
+        self._guard.check(
+            url,
+            on_allowed=lambda: self._start(
+                qurl, lambda text: on_body(text, meta), on_failure, headers=headers,
+                meta=meta, on_not_modified=on_not_modified),
+            on_refused=lambda reason: on_failure(
+                SourceError(reason, ERROR_CODES.LOCAL_NETWORK)))
+
+    def _start(self, qurl: QUrl, on_success, on_failure, *, headers=(), meta=None,
+               on_not_modified=None) -> None:
         if not shiboken6.isValid(self):
             return  # torn down while the name was being resolved
         request = QNetworkRequest(qurl)
         request.setTransferTimeout(_TRANSFER_TIMEOUT_MS)
         NetGuard.prepare(request)
+        for name, value in headers:
+            request.setRawHeader(name, value)
         request.setRawHeader(b"User-Agent", _USER_AGENT)
         request.setRawHeader(
             b"Accept",
@@ -130,7 +166,8 @@ class SourceFetcher(QObject):
         # surfaces in ``finished`` as OperationCanceledError; the flag
         # lets the handler report a size rejection rather than a
         # generic network failure.
-        oversize = {"hit": False, "refused": ""}
+        oversize = {"hit": False, "refused": "", "meta": meta,
+                    "not_modified": on_not_modified}
 
         def _size_guard(received: int, _total: int, r=reply) -> None:
             if received > _MAX_BODY_BYTES and not oversize["hit"]:
@@ -165,6 +202,17 @@ class SourceFetcher(QObject):
                     ERROR_CODES.FETCH_ERROR,
                 ))
                 return
+            status = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
+            if oversize.get("not_modified") is not None and status == 304:
+                oversize["not_modified"]()
+                return
+            meta = oversize.get("meta")
+            if meta is not None:
+                meta.update(
+                    etag=bytes(reply.rawHeader("ETag")).decode("latin-1").strip(),
+                    last_modified=bytes(reply.rawHeader("Last-Modified")).decode(
+                        "latin-1").strip(),
+                    final_url=reply.url().toString())
 
             data = bytes(reply.readAll())
             if not data:

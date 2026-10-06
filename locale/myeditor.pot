@@ -3209,6 +3209,14 @@ msgstr ""
 msgid "Couldn't check your existing drafts. Try again when you're online."
 msgstr ""
 
+#: nostr/imports/checker.py:57
+msgid "This feed is too large."
+msgstr ""
+
+#: nostr/imports/checker.py:58
+msgid "Couldn't check this feed. MyEditor will try again automatically."
+msgstr ""
+
 #: nostr/imports/errors.py:74
 msgid "This address points to your local network, which MyEditor doesn't read from for safety."
 msgstr ""
@@ -3283,7 +3291,7 @@ msgid "Couldn't reach that URL: {reason}."
 msgstr ""
 
 #: nostr/imports/errors.py:141
-#: nostr/imports/fetch.py:164
+#: nostr/imports/fetch.py:201
 #: nostr/ui/thumbnail_loader.py:272
 msgid "network error"
 msgstr ""
@@ -3307,10 +3315,11 @@ msgid "Feed exceeds the {size} MiB size limit"
 msgstr ""
 
 #: nostr/imports/fetch.py:106
+#: nostr/imports/fetch.py:131
 msgid "Feed URL must be http(s)"
 msgstr ""
 
-#: nostr/imports/fetch.py:289
+#: nostr/imports/fetch.py:337
 msgid "Could not download the image"
 msgstr ""
 

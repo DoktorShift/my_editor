@@ -3223,6 +3223,14 @@ msgstr "etwa {amount}"
 msgid "Couldn't check your existing drafts. Try again when you're online."
 msgstr "Deine vorhandenen Entwürfe konnten nicht geprüft werden. Versuche es noch einmal, wenn du online bist."
 
+#: nostr/imports/checker.py:57
+msgid "This feed is too large."
+msgstr "Dieser Feed ist zu groß."
+
+#: nostr/imports/checker.py:58
+msgid "Couldn't check this feed. MyEditor will try again automatically."
+msgstr "Dieser Feed konnte nicht geprüft werden. MyEditor versucht es automatisch noch einmal."
+
 #: nostr/imports/errors.py:74
 msgid "This address points to your local network, which MyEditor doesn't read from for safety."
 msgstr "Diese Adresse zeigt in dein lokales Netzwerk. Von dort liest MyEditor zu deiner Sicherheit nichts."
@@ -3297,7 +3305,7 @@ msgid "Couldn't reach that URL: {reason}."
 msgstr "Diese Adresse ist nicht erreichbar: {reason}."
 
 #: nostr/imports/errors.py:141
-#: nostr/imports/fetch.py:164
+#: nostr/imports/fetch.py:201
 #: nostr/ui/thumbnail_loader.py:272
 msgid "network error"
 msgstr "Netzwerkfehler"
@@ -3321,10 +3329,11 @@ msgid "Feed exceeds the {size} MiB size limit"
 msgstr "Der Feed überschreitet die Größengrenze von {size} MiB"
 
 #: nostr/imports/fetch.py:106
+#: nostr/imports/fetch.py:131
 msgid "Feed URL must be http(s)"
 msgstr "Die Feed-Adresse muss mit http oder https beginnen"
 
-#: nostr/imports/fetch.py:289
+#: nostr/imports/fetch.py:337
 msgid "Could not download the image"
 msgstr "Bild konnte nicht heruntergeladen werden"
 
