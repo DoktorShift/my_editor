@@ -31,7 +31,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final, Optional
 
-from PySide6.QtCore import QBuffer, QIODevice
+from PySide6.QtCore import QBuffer, QIODevice, Qt
+from PySide6.QtGui import QImage, QPainter
 
 import image_safety
 from i18n import _
@@ -105,6 +106,7 @@ def scrub_for_publication(data: bytes, declared_mime: str = "") -> ScrubResult:
     if image is None or image.isNull():
         raise ScrubError(_("this image could not be read"))
 
+    image = _pixels_only(image)
     fmt, out_mime = target
     buffer = QBuffer()
     buffer.open(QIODevice.WriteOnly)
@@ -121,6 +123,24 @@ def scrub_for_publication(data: bytes, declared_mime: str = "") -> ScrubResult:
     if not out:
         raise ScrubError(_("re-encoding produced nothing"))
     return ScrubResult(data=out, mime=out_mime, scrubbed=True)
+
+
+def _pixels_only(image: QImage) -> QImage:
+    """A new image holding the pixels and nothing else.
+
+    QImage keeps the text a decoder found (PNG text chunks, a JPEG
+    comment, XMP) and writes it back out on save, location included; so
+    the pixels are painted onto a fresh image that never had any."""
+    # Kept opaque when it was, so a photo does not grow an alpha channel.
+    form = (QImage.Format.Format_ARGB32 if image.hasAlphaChannel()
+            else QImage.Format.Format_RGB32)
+    source = image.convertToFormat(form)
+    clean = QImage(source.size(), form)
+    clean.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(clean)
+    painter.drawImage(0, 0, source)
+    painter.end()
+    return clean
 
 
 def would_scrub(data: bytes) -> Optional[bool]:
