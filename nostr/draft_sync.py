@@ -45,8 +45,11 @@ from .drafts import (
     DraftWrapMeta,
     parse_inner_event,
     parse_wrap_event,
+    supersedes,
 )
+from .events import verify_event
 from .outbox import RelayDirectory, ask_private_relays
+from .outbox.policy import normalize_relay_url
 from .profiles import Profile
 from .relay import RelayPool, Subscription
 
@@ -120,6 +123,8 @@ class DraftSync(QObject):
 
         self._profile: Optional[Profile] = None
         self._subscription: Optional[Subscription] = None
+        # Read relays that have not ended their stored drafts yet.
+        self._unanswered: set = set()
         self._bunker: Optional[BunkerClient] = None
         self._read_relays: List[str] = []
 
@@ -383,7 +388,17 @@ class DraftSync(QObject):
         }]
         self._subscription = self._relay_pool.subscribe(self._read_relays, filters)
         self._subscription.event.connect(self._on_wrap_event)
-        self._subscription.eose.connect(self._on_eose)
+        # Loading is over when every relay has ended one way or another: a
+        # relay that cannot be reached must not keep it going for good.
+        self._unanswered = {normalize_relay_url(u) or u for u in self._read_relays}
+        for signal in (self._subscription.relay_eose, self._subscription.relay_closed,
+                       self._subscription.relay_failed):
+            signal.connect(self._on_relay_ended)
+
+    def _on_relay_ended(self, url: str, *_reason) -> None:
+        self._unanswered.discard(normalize_relay_url(url) or url)
+        if not self._unanswered and self._store.is_loading:
+            self._on_eose()
 
     # -- internal: handle inbound wraps -----------------------------------
 
@@ -395,19 +410,29 @@ class DraftSync(QObject):
             return
         if meta.pubkey != self._profile.user_pubkey.lower():
             return  # relay returned an unrelated event; ignore defensively
+        # Only the account's own signature counts: a relay must not be able
+        # to hide a draft behind a forged deletion, or change its text.
+        if not verify_event(event):
+            return
 
         existing = self._store.get(meta.identifier)
         if meta.is_tombstone:
             self._store.upsert_skeleton(meta)
-            self._pending.pop(meta.identifier, None)
+            if self._store.get(meta.identifier) is None:
+                self._pending.pop(meta.identifier, None)
             return
 
-        # Skip stale wraps so we don't re-decrypt the same draft.
-        if existing is not None and meta.created_at <= existing.created_at:
+        # Skip versions the store already has (or that an older relay
+        # still hands out) so the same draft is not decrypted again.
+        if existing is not None and not supersedes(meta.created_at, meta.event_id,
+                                                   existing.created_at, existing.event_id):
             return
 
+        before = self._store.get(meta.identifier)
         self._store.upsert_skeleton(meta)
-        self._enqueue_decrypt(meta)
+        after = self._store.get(meta.identifier)
+        if after is not None and (before is None or after.event_id == meta.event_id):
+            self._enqueue_decrypt(meta)
 
     def _on_eose(self) -> None:
         self._store.set_loading(False)
