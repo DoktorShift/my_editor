@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import re
+import weakref
 from dataclasses import dataclass
 from typing import Callable, Dict, Optional
 
@@ -132,9 +133,9 @@ class ProfileWindow(AssistantWindow):
         self._signs_locally = signs_locally
         self._loaded: Dict[str, str] = {}
         self._new_profile = False
+        self._closed = False
         self._edits: Dict[str, QWidget] = {}
         self._errors: Dict[str, QLabel] = {}
-        self._closed = False
         self._build_reading()
         self._build_form()
         self._build_saving()
@@ -188,15 +189,24 @@ class ProfileWindow(AssistantWindow):
         form = QFormLayout()
         form.setSpacing(8)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        # A text box still reports a change while it is being destroyed;
+        # through a weak reference that report never reaches a window that
+        # is already going.
+        window = weakref.ref(self)
+
+        def edited(*_args) -> None:
+            alive = window()
+            if alive is not None and not alive._closed:
+                alive._on_edited()
+
         for field in FIELDS:
             if field.kind == "about":
                 edit = QPlainTextEdit()
                 edit.setFixedHeight(84)
-                edit.textChanged.connect(self._on_edited)
             else:
                 edit = QLineEdit()
                 edit.setPlaceholderText(_(field.placeholder) if field.placeholder else "")
-                edit.textChanged.connect(self._on_edited)
+            edit.textChanged.connect(edited)
             edit.setAccessibleName(_(field.label))
             error = text_label("", "error")
             error.hide()
