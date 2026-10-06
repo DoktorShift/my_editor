@@ -360,10 +360,14 @@ class MembershipController(QObject):
     def _on_profile_address(self, address: str) -> None:
         profile = self._profile_provider()
         window = self.window
-        if profile is None or window is None:
+        if window is None:
             return
-        if _key(profile.user_pubkey) != _key(window.pubkey):
-            return      # the window speaks for an account no longer active
+        if profile is None or _key(profile.user_pubkey) != _key(window.pubkey):
+            # The window speaks for an account no longer active: nothing is
+            # written, and the window says so instead of waiting.
+            window.set_profile_address_result(
+                profile_address.outcome_message(profile_address.FAILED))
+            return
         pubkey = profile.user_pubkey
         job = self._profile_address_job(profile, address)
 
