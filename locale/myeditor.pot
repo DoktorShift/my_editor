@@ -1848,7 +1848,7 @@ msgstr ""
 #: nostr/ui/account_windows.py:1095
 #: nostr/ui/connect_dialog.py:250
 #: nostr/ui/media_library_dialog.py:1241
-#: nostr/ui/membership_window.py:734
+#: nostr/ui/membership_window.py:749
 msgid "Close"
 msgstr ""
 
@@ -2142,10 +2142,11 @@ msgid "Every key MyEditor answers to on this computer. Type to filter."
 msgstr ""
 
 #: shortcuts_dialog.py:472
+#: shortcuts_dialog.py:474
 msgid "Filter Shortcuts"
 msgstr ""
 
-#: shortcuts_dialog.py:505
+#: shortcuts_dialog.py:507
 msgid "No shortcuts match your filter."
 msgstr ""
 
@@ -2292,7 +2293,7 @@ msgid "Done"
 msgstr ""
 
 #: update_dialog.py:193
-#: nostr/ui/membership_window.py:747
+#: nostr/ui/membership_window.py:762
 msgid "Copied"
 msgstr ""
 
@@ -2313,7 +2314,7 @@ msgstr ""
 
 #: update_dialog.py:279
 #: nostr/ui/account_windows.py:769
-#: nostr/ui/connect_dialog.py:358
+#: nostr/ui/connect_dialog.py:360
 #: nostr/ui/imports_window.py:653
 #: nostr/ui/profile_window.py:331
 msgid "Try Again"
@@ -2875,7 +2876,7 @@ msgstr ""
 #: nostr/ui/membership_window.py:277
 #: nostr/ui/membership_window.py:280
 #: nostr/ui/membership_window.py:283
-#: nostr/ui/membership_window.py:981
+#: nostr/ui/membership_window.py:996
 msgid "Not Now"
 msgstr ""
 
@@ -3040,7 +3041,7 @@ msgid "draft payload missing required fields: {error}"
 msgstr ""
 
 #: nostr/einundzwanzig.py:126
-#: nostr/ui/membership_window.py:852
+#: nostr/ui/membership_window.py:867
 msgid "Members’ relay"
 msgstr ""
 
@@ -3049,7 +3050,7 @@ msgid "Publish to EINUNDZWANZIG’s own relay, which carries your notes and arti
 msgstr ""
 
 #: nostr/einundzwanzig.py:130
-#: nostr/ui/membership_window.py:883
+#: nostr/ui/membership_window.py:898
 msgid "Nostr address"
 msgstr ""
 
@@ -3062,7 +3063,7 @@ msgid "Protects your Lightning channels, even while your node is offline."
 msgstr ""
 
 #: nostr/einundzwanzig.py:137
-#: nostr/ui/membership_window.py:858
+#: nostr/ui/membership_window.py:873
 msgid "Media storage"
 msgstr ""
 
@@ -4556,7 +4557,7 @@ msgstr ""
 #: nostr/ui/account_windows.py:622
 #: nostr/ui/account_windows.py:681
 #: nostr/ui/account_windows.py:1014
-#: nostr/ui/membership_window.py:519
+#: nostr/ui/membership_window.py:534
 msgid "Go Back"
 msgstr ""
 
@@ -4724,72 +4725,80 @@ msgstr ""
 msgid "Your signer (Amber, nsec.app, nsec.bunker, …) has an option to generate a bunker URL. Copy it and paste it below. You'll be asked to approve the connection on the signer side."
 msgstr ""
 
-#: nostr/ui/connect_dialog.py:287
-#: nostr/ui/connect_dialog.py:471
+#: nostr/ui/connect_dialog.py:278
+msgid "Bunker URL"
+msgstr ""
+
+#: nostr/ui/connect_dialog.py:288
+#: nostr/ui/connect_dialog.py:479
 msgid "Connect"
 msgstr ""
 
-#: nostr/ui/connect_dialog.py:318
+#: nostr/ui/connect_dialog.py:319
 msgid "Scan this QR with your signer."
 msgstr ""
 
-#: nostr/ui/connect_dialog.py:322
+#: nostr/ui/connect_dialog.py:323
 msgid "Open Amber (or any NIP-46 compatible signer), choose <b>Add account</b> → <b>Scan QR</b>, and approve the connection."
 msgstr ""
 
-#: nostr/ui/connect_dialog.py:355
+#: nostr/ui/connect_dialog.py:352
+msgid "Connection link"
+msgstr ""
+
+#: nostr/ui/connect_dialog.py:357
 msgid "Copy URI"
 msgstr ""
 
-#: nostr/ui/connect_dialog.py:391
+#: nostr/ui/connect_dialog.py:393
 msgid "Waiting for your signer to scan…"
 msgstr ""
 
-#: nostr/ui/connect_dialog.py:434
+#: nostr/ui/connect_dialog.py:436
 msgid "Enter the signer's pubkey and its relays."
 msgstr ""
 
-#: nostr/ui/connect_dialog.py:438
+#: nostr/ui/connect_dialog.py:440
 msgid "Useful when you have a long-lived bunker setup whose pieces you keep separately rather than as one URL."
 msgstr ""
 
 #: nostr/ui/connect_dialog.py:448
-msgid "64 hex chars"
-msgstr ""
-
-#: nostr/ui/connect_dialog.py:464
-msgid "Pairing token if your signer gave you one"
-msgstr ""
-
-#: nostr/ui/connect_dialog.py:511
-msgid "Contacting signer. Approve the request on your phone…"
-msgstr ""
-
-#: nostr/ui/connect_dialog.py:546
-msgid "A signer replied but the message could not be read. It may be using an older encryption format than this app supports."
-msgstr ""
-
-#: nostr/ui/connect_dialog.py:415
-msgid "Code expired, press Try Again"
-msgstr ""
-
-#: nostr/ui/connect_dialog.py:446
 msgid "Bunker pubkey (hex):"
 msgstr ""
 
 #: nostr/ui/connect_dialog.py:452
+msgid "64 hex chars"
+msgstr ""
+
+#: nostr/ui/connect_dialog.py:456
 msgid "Relays (one per line):"
 msgstr ""
 
-#: nostr/ui/connect_dialog.py:462
+#: nostr/ui/connect_dialog.py:468
 msgid "Secret (optional):"
 msgstr ""
 
-#: nostr/ui/connect_dialog.py:528
+#: nostr/ui/connect_dialog.py:472
+msgid "Pairing token if your signer gave you one"
+msgstr ""
+
+#: nostr/ui/connect_dialog.py:519
+msgid "Contacting signer. Approve the request on your phone…"
+msgstr ""
+
+#: nostr/ui/connect_dialog.py:554
+msgid "A signer replied but the message could not be read. It may be using an older encryption format than this app supports."
+msgstr ""
+
+#: nostr/ui/connect_dialog.py:417
+msgid "Code expired, press Try Again"
+msgstr ""
+
+#: nostr/ui/connect_dialog.py:536
 msgid "Your signer needs you to approve this in the browser window that just opened. Waiting…"
 msgstr ""
 
-#: nostr/ui/connect_dialog.py:534
+#: nostr/ui/connect_dialog.py:542
 msgid "Your signer asked for approval at an address that cannot be opened safely, so the connection was not continued."
 msgstr ""
 
@@ -4801,27 +4810,27 @@ msgstr ""
 msgid "Restore from Backup"
 msgstr ""
 
-#: nostr/ui/connect_dialog.py:563
+#: nostr/ui/connect_dialog.py:571
 #, python-brace-format
 msgid "Connected as {name}."
 msgstr ""
 
-#: nostr/ui/connect_dialog.py:569
+#: nostr/ui/connect_dialog.py:577
 #, python-brace-format
 msgid "Connect failed: {reason}"
 msgstr ""
 
-#: nostr/ui/connect_dialog.py:412
+#: nostr/ui/connect_dialog.py:414
 #, python-brace-format
 msgid "Code expires in {seconds}s"
 msgstr ""
 
-#: nostr/ui/connect_dialog.py:306
+#: nostr/ui/connect_dialog.py:307
 #, python-brace-format
 msgid "Invalid URI: {error}"
 msgstr ""
 
-#: nostr/ui/connect_dialog.py:501
+#: nostr/ui/connect_dialog.py:509
 #, python-brace-format
 msgid "Invalid input: {error}"
 msgstr ""
@@ -5987,7 +5996,7 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: nostr/ui/media_library_dialog.py:2244
-#: nostr/ui/membership_window.py:769
+#: nostr/ui/membership_window.py:784
 msgid "Checking…"
 msgstr ""
 
@@ -6259,8 +6268,8 @@ msgid "EINUNDZWANZIG Membership"
 msgstr ""
 
 #: nostr/ui/membership_window.py:192
-#: nostr/ui/membership_window.py:845
-#: nostr/ui/membership_window.py:1025
+#: nostr/ui/membership_window.py:860
+#: nostr/ui/membership_window.py:1040
 msgid "Add to My Relay List"
 msgstr ""
 
@@ -6273,7 +6282,7 @@ msgid "MyEditor is asking EINUNDZWANZIG where your membership stands."
 msgstr ""
 
 #: nostr/ui/membership_window.py:408
-#: nostr/ui/membership_window.py:500
+#: nostr/ui/membership_window.py:515
 msgid "Your Application"
 msgstr ""
 
@@ -6286,149 +6295,149 @@ msgid "I have read the statutes and agree to them."
 msgstr ""
 
 #: nostr/ui/membership_window.py:446
-#: nostr/ui/membership_window.py:511
+#: nostr/ui/membership_window.py:526
 msgid "Optional. Lowercase letters, digits, - and _."
 msgstr ""
 
-#: nostr/ui/membership_window.py:449
+#: nostr/ui/membership_window.py:450
 msgid "Nostr address:"
 msgstr ""
 
-#: nostr/ui/membership_window.py:453
+#: nostr/ui/membership_window.py:454
 msgid "name@example.com"
 msgstr ""
 
-#: nostr/ui/membership_window.py:455
+#: nostr/ui/membership_window.py:456
 msgid "Optional. Only for membership notices, like renewal reminders."
 msgstr ""
 
-#: nostr/ui/membership_window.py:459
+#: nostr/ui/membership_window.py:460
 msgid "Email:"
 msgstr ""
 
-#: nostr/ui/membership_window.py:465
+#: nostr/ui/membership_window.py:467
 msgid "Optional. Anything you’d like the association to know."
 msgstr ""
 
-#: nostr/ui/membership_window.py:470
+#: nostr/ui/membership_window.py:472
 msgid "Message:"
 msgstr ""
 
-#: nostr/ui/membership_window.py:518
+#: nostr/ui/membership_window.py:533
 msgid "Save Address"
 msgstr ""
 
-#: nostr/ui/membership_window.py:518
+#: nostr/ui/membership_window.py:533
 msgid "Send Application"
 msgstr ""
 
-#: nostr/ui/membership_window.py:583
+#: nostr/ui/membership_window.py:598
 msgid "MyEditor is saving your Nostr address."
 msgstr ""
 
-#: nostr/ui/membership_window.py:584
+#: nostr/ui/membership_window.py:599
 msgid "MyEditor is sending your application to EINUNDZWANZIG."
 msgstr ""
 
-#: nostr/ui/membership_window.py:645
+#: nostr/ui/membership_window.py:660
 msgid "Lightning invoice code to scan with a wallet"
 msgstr ""
 
-#: nostr/ui/membership_window.py:653
-#: nostr/ui/membership_window.py:751
+#: nostr/ui/membership_window.py:668
+#: nostr/ui/membership_window.py:766
 msgid "Copy Invoice"
 msgstr ""
 
-#: nostr/ui/membership_window.py:660
+#: nostr/ui/membership_window.py:675
 msgid "Pay in Browser"
 msgstr ""
 
-#: nostr/ui/membership_window.py:680
+#: nostr/ui/membership_window.py:695
 msgid "MyEditor is asking EINUNDZWANZIG for your invoice."
 msgstr ""
 
-#: nostr/ui/membership_window.py:692
+#: nostr/ui/membership_window.py:707
 #, python-brace-format
 msgid "Renew Your Membership for {year}"
 msgstr ""
 
-#: nostr/ui/membership_window.py:693
+#: nostr/ui/membership_window.py:708
 #, python-brace-format
 msgid "Pay Your {year} Membership Fee"
 msgstr ""
 
-#: nostr/ui/membership_window.py:712
-#: nostr/ui/membership_window.py:793
+#: nostr/ui/membership_window.py:727
+#: nostr/ui/membership_window.py:808
 msgid "I’ve Paid"
 msgstr ""
 
-#: nostr/ui/membership_window.py:781
+#: nostr/ui/membership_window.py:796
 msgid "This invoice has expired. Create a new one to pay."
 msgstr ""
 
-#: nostr/ui/membership_window.py:782
+#: nostr/ui/membership_window.py:797
 msgid "Create New Invoice"
 msgstr ""
 
-#: nostr/ui/membership_window.py:786
+#: nostr/ui/membership_window.py:801
 msgid "Your payment isn’t confirmed yet. If you paid, wait a moment, then click Check Again."
 msgstr ""
 
-#: nostr/ui/membership_window.py:788
-#: nostr/ui/membership_window.py:809
+#: nostr/ui/membership_window.py:803
+#: nostr/ui/membership_window.py:824
 msgid "Check Again"
 msgstr ""
 
-#: nostr/ui/membership_window.py:813
+#: nostr/ui/membership_window.py:828
 msgid "Your payment arrived. MyEditor is confirming your membership."
 msgstr ""
 
-#: nostr/ui/membership_window.py:869
-#: nostr/ui/membership_window.py:934
+#: nostr/ui/membership_window.py:884
+#: nostr/ui/membership_window.py:949
 msgid "Choose an Address…"
 msgstr ""
 
-#: nostr/ui/membership_window.py:874
+#: nostr/ui/membership_window.py:889
 msgid "Show on My Profile"
 msgstr ""
 
-#: nostr/ui/membership_window.py:888
+#: nostr/ui/membership_window.py:903
 msgid "Set Up on the EINUNDZWANZIG Website"
 msgstr ""
 
-#: nostr/ui/membership_window.py:902
+#: nostr/ui/membership_window.py:917
 msgid "Receipt"
 msgstr ""
 
-#: nostr/ui/membership_window.py:904
+#: nostr/ui/membership_window.py:919
 msgid "Show Membership Details"
 msgstr ""
 
-#: nostr/ui/membership_window.py:905
+#: nostr/ui/membership_window.py:920
 msgid "Export My Data…"
 msgstr ""
 
-#: nostr/ui/membership_window.py:906
+#: nostr/ui/membership_window.py:921
 msgid "Delete My Data…"
 msgstr ""
 
-#: nostr/ui/membership_window.py:923
+#: nostr/ui/membership_window.py:938
 msgid "Your membership is active."
 msgstr ""
 
-#: nostr/ui/membership_window.py:978
+#: nostr/ui/membership_window.py:993
 msgid "You can also do this later, here in EINUNDZWANZIG Membership."
 msgstr ""
 
-#: nostr/ui/membership_window.py:1034
+#: nostr/ui/membership_window.py:1049
 msgid "MyEditor is asking EINUNDZWANZIG for the data it keeps about you."
 msgstr ""
 
-#: nostr/ui/membership_window.py:1042
+#: nostr/ui/membership_window.py:1057
 msgid "Export Membership Data"
 msgstr ""
 
-#: nostr/ui/membership_window.py:1063
+#: nostr/ui/membership_window.py:1078
 msgid "MyEditor is asking EINUNDZWANZIG to delete your data."
 msgstr ""
 
@@ -6457,80 +6466,80 @@ msgstr ""
 msgid "Joining means agreeing to the association’s statutes. Please read them first."
 msgstr ""
 
-#: nostr/ui/membership_window.py:494
+#: nostr/ui/membership_window.py:509
 msgid "Loading the statutes…"
 msgstr ""
 
-#: nostr/ui/membership_window.py:499
+#: nostr/ui/membership_window.py:514
 msgid "Choose a Nostr Address"
 msgstr ""
 
-#: nostr/ui/membership_window.py:509
+#: nostr/ui/membership_window.py:524
 msgid "Lowercase letters, digits, - and _. It can take a few minutes to appear everywhere."
 msgstr ""
 
-#: nostr/ui/membership_window.py:706
+#: nostr/ui/membership_window.py:721
 msgid "Scan the code with any Lightning wallet. When you’ve paid, click I’ve Paid and MyEditor confirms it with EINUNDZWANZIG."
 msgstr ""
 
-#: nostr/ui/membership_window.py:708
+#: nostr/ui/membership_window.py:723
 msgid "Pay on the EINUNDZWANZIG payment page. When you’ve paid, click I’ve Paid and MyEditor confirms it."
 msgstr ""
 
-#: nostr/ui/membership_window.py:767
+#: nostr/ui/membership_window.py:782
 msgid "Checking for your payment…"
 msgstr ""
 
-#: nostr/ui/membership_window.py:805
+#: nostr/ui/membership_window.py:820
 msgid "Payment Received"
 msgstr ""
 
-#: nostr/ui/membership_window.py:811
+#: nostr/ui/membership_window.py:826
 msgid "Your payment arrived. Click Check Again to finish."
 msgstr ""
 
-#: nostr/ui/membership_window.py:917
+#: nostr/ui/membership_window.py:932
 msgid "You’re a Member"
 msgstr ""
 
-#: nostr/ui/membership_window.py:918
+#: nostr/ui/membership_window.py:933
 msgid "You’re an EINUNDZWANZIG Member"
 msgstr ""
 
-#: nostr/ui/membership_window.py:925
+#: nostr/ui/membership_window.py:940
 msgid "Thank you for supporting the community."
 msgstr ""
 
-#: nostr/ui/membership_window.py:931
+#: nostr/ui/membership_window.py:946
 msgid "Change Address…"
 msgstr ""
 
-#: nostr/ui/membership_window.py:933
+#: nostr/ui/membership_window.py:948
 msgid "Not chosen yet."
 msgstr ""
 
-#: nostr/ui/membership_window.py:962
+#: nostr/ui/membership_window.py:977
 msgid "Your profile shows this address."
 msgstr ""
 
-#: nostr/ui/membership_window.py:973
+#: nostr/ui/membership_window.py:988
 #, python-brace-format
 msgid "People who look at your profile then see {address} instead of a long key. It shows as confirmed once EINUNDZWANZIG has approved the name."
 msgstr ""
 
-#: nostr/ui/membership_window.py:979
+#: nostr/ui/membership_window.py:994
 msgid "Show Your Nostr Address on Your Profile?"
 msgstr ""
 
-#: nostr/ui/membership_window.py:992
+#: nostr/ui/membership_window.py:1007
 msgid "Updating your profile…"
 msgstr ""
 
-#: nostr/ui/membership_window.py:1023
+#: nostr/ui/membership_window.py:1038
 msgid "Publish Recommended Relay List"
 msgstr ""
 
-#: nostr/ui/membership_window.py:1053
+#: nostr/ui/membership_window.py:1068
 msgid "Your membership data is saved."
 msgstr ""
 
@@ -6543,48 +6552,48 @@ msgstr ""
 msgid "Annual fee for {year}: {fee}"
 msgstr ""
 
-#: nostr/ui/membership_window.py:600
+#: nostr/ui/membership_window.py:615
 msgid "Your Nostr address is saved. It can take a few minutes to appear everywhere."
 msgstr ""
 
-#: nostr/ui/membership_window.py:762
+#: nostr/ui/membership_window.py:777
 msgid "Not confirmed yet. Checking again…"
 msgstr ""
 
-#: nostr/ui/membership_window.py:824
+#: nostr/ui/membership_window.py:839
 msgid "Your payment arrived. EINUNDZWANZIG is still confirming it. Check again in a moment."
 msgstr ""
 
-#: nostr/ui/membership_window.py:891
+#: nostr/ui/membership_window.py:906
 msgid "More for members"
 msgstr ""
 
-#: nostr/ui/membership_window.py:920
+#: nostr/ui/membership_window.py:935
 #, python-brace-format
 msgid "Your membership is paid for {year}."
 msgstr ""
 
-#: nostr/ui/membership_window.py:1009
+#: nostr/ui/membership_window.py:1024
 msgid "Publishing…"
 msgstr ""
 
-#: nostr/ui/membership_window.py:1012
+#: nostr/ui/membership_window.py:1027
 msgid "Adding…"
 msgstr ""
 
-#: nostr/ui/membership_window.py:1057
+#: nostr/ui/membership_window.py:1072
 msgid "Delete your membership data?"
 msgstr ""
 
-#: nostr/ui/membership_window.py:1058
+#: nostr/ui/membership_window.py:1073
 msgid "EINUNDZWANZIG deletes the personal details of your membership. Fees you paid stay on record for bookkeeping. This can’t be undone."
 msgstr ""
 
-#: nostr/ui/membership_window.py:1061
+#: nostr/ui/membership_window.py:1076
 msgid "Delete Data"
 msgstr ""
 
-#: nostr/ui/membership_window.py:1073
+#: nostr/ui/membership_window.py:1088
 msgid "Your membership data was deleted."
 msgstr ""
 
@@ -6596,35 +6605,35 @@ msgstr ""
 msgid "Checking whether you can join from here…"
 msgstr ""
 
-#: nostr/ui/membership_window.py:515
+#: nostr/ui/membership_window.py:530
 #, python-brace-format
 msgid "Version {version}, adopted {date}."
 msgstr ""
 
-#: nostr/ui/membership_window.py:977
+#: nostr/ui/membership_window.py:992
 #, python-brace-format
 msgid "It replaces {address}."
 msgstr ""
 
-#: nostr/ui/membership_window.py:982
+#: nostr/ui/membership_window.py:997
 msgid "Show on Profile"
 msgstr ""
 
-#: nostr/ui/membership_window.py:1050
+#: nostr/ui/membership_window.py:1065
 msgid "Couldn’t save your data"
 msgstr ""
 
-#: nostr/ui/membership_window.py:853
+#: nostr/ui/membership_window.py:868
 #, python-brace-format
 msgid "Your notes and articles also go to {relay}. Add it to your relay list so readers find you there too."
 msgstr ""
 
-#: nostr/ui/membership_window.py:859
+#: nostr/ui/membership_window.py:874
 #, python-brace-format
 msgid "Your uploads also go to {server}: {total} in total, up to {per_file} per file."
 msgstr ""
 
-#: nostr/ui/membership_window.py:892
+#: nostr/ui/membership_window.py:907
 #, python-brace-format
 msgid "Also yours: {services}."
 msgstr ""
