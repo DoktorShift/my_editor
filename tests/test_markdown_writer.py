@@ -264,6 +264,30 @@ def test_a_link_that_shows_its_own_address_is_written_bare(words, href, written)
     assert document_to_markdown(from_markdown(out)) == out
 
 
+@pytest.mark.parametrize("address", [
+    "https://de.wikipedia.org/wiki/M%C3%BCnchen",          # a percent sign
+    "https://example.com:8080/x",                          # a port
+    "https://mastodon.social/@user",                       # an @
+    "https://example.com/a,b",                             # a comma
+    "https://example.com/wow!",                            # an exclamation mark
+    "https://example.com/c++",                             # a plus
+    "https://example.com/page_(info)",                     # parentheses
+    "https://example.com/cdn-cgi/image/width=80,quality=75/a.jpg",
+])
+def test_an_own_address_qt_would_not_read_back_whole_is_kept_whole(address):
+    # Review F2: written bare, these came back as no link, or cut short.
+    from markdown_writer import holds_faithfully
+    doc = typed(("see ", {}), (address, {"href": address}), (" now", {}))
+    out = document_to_markdown(doc)
+    assert out == f"see <{address}> now\n"
+    back = from_markdown(out)
+    links = [(text, fmt.anchorHref()) for block in [back.begin()]
+             for text, fmt in __import__("doc_walk").iter_block_runs(block) if fmt.isAnchor()]
+    assert links == [(address, address)]
+    assert document_to_markdown(back) == out
+    assert holds_faithfully(out)             # an older file with it opens formatted
+
+
 def test_a_media_address_alone_on_its_line_stays_bare():
     url = "https://cdn.example/clip.mp4"
     doc = typed("Watch this:\n", (url, {"href": url}), "\nThanks")

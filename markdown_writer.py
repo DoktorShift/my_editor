@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Callable, List, Optional, Tuple
 
 from PySide6.QtGui import (
@@ -369,20 +370,37 @@ def _own_address(words: str, href: str) -> str:
     return ""
 
 
+@lru_cache(maxsize=4096)
+def _reads_back_whole(address: str, href: str) -> bool:
+    """Whether Qt's reader (the editor's, the preview's, every reopen)
+    reads ``address``, written bare, back as one link to ``href`` over all
+    of it. It takes only some characters in a bare address: one with a
+    percent sign, a port, an @, a + or an = is not linked at all, one with
+    a comma or ! is cut there."""
+    doc = QTextDocument()
+    doc.setMarkdown(address, READ_FEATURES)
+    block = doc.begin()
+    runs = list(iter_block_runs(block))
+    return (doc.blockCount() == 1 and block.text() == address and bool(runs)
+            and all(fmt.isAnchor() and fmt.anchorHref() == href for _text, fmt in runs))
+
+
 def _autolink(address: str, href: str, before: str, following: Optional[_Span]) -> str:
     """A link that shows its own address, written so every reader links it.
 
     Bare, the way it was typed, where a reader finds it by itself: a web
     address or an email between spaces, with no character a reader would
-    take for emphasis. Readers that look for a bare address (a picture or
-    a video alone on its line becomes a player) find it there. Anywhere
-    else it is written ``<address>``, which every reader keeps whole.
+    take for emphasis, and only one that Qt's reader takes back whole.
+    Readers that look for a bare address (a picture or a video alone on
+    its line becomes a player) find it there. Anywhere else it is written
+    ``<address>``, which every reader keeps whole.
     """
     is_email = "@" in address and "://" not in address
     findable = (address.lower().startswith(("https://", "http://", "www.")) or is_email)
     if (findable and not any(ch in _MARKUP_IN_ADDRESS for ch in address)
             and (not before or before[-1].isspace() or before[-1] == "(")
-            and _ends_a_bare_address(address, following)):
+            and _ends_a_bare_address(address, following)
+            and _reads_back_whole(address, href)):
         return address
     return f"<{address}>" if is_email else f"<{href}>"
 
