@@ -5088,6 +5088,28 @@ msgstr "Öffnet den Beitrag auf seiner Website in deinem Browser."
 msgid "Select a post to read it here."
 msgstr "Wähle einen Beitrag aus, um ihn hier zu lesen."
 
+#: nostr/ui/imports_post_list.py:511
+msgid "Posts"
+msgstr "Beiträge"
+
+#: nostr/ui/imports_post_list.py:202
+msgid "selected"
+msgstr "ausgewählt"
+
+#: nostr/ui/imports_post_list.py:398
+#, python-brace-format
+msgid "{n} min"
+msgid_plural "{n} min"
+msgstr[0] "{n} Min."
+msgstr[1] "{n} Min."
+
+#: nostr/ui/imports_post_list.py:401
+#, python-brace-format
+msgid "{n} image"
+msgid_plural "{n} images"
+msgstr[0] "{n} Bild"
+msgstr[1] "{n} Bilder"
+
 #: nostr/ui/media_library_dialog.py:450
 msgid "This picture is private. Using it in something you publish creates a separate public copy that anyone can open. The original stays private, and you can confirm or cancel before anything is uploaded."
 msgstr "Dieses Bild ist privat. Wenn du es in etwas verwendest, das du veröffentlichst, entsteht eine separate öffentliche Kopie, die alle öffnen können. Das Original bleibt privat, und du kannst bestätigen oder abbrechen, bevor etwas hochgeladen wird."
