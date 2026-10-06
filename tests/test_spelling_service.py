@@ -545,6 +545,22 @@ def test_closing_stops_following_the_document():
     assert spelling.misspelling_at(0) is None
 
 
+def test_a_spelling_whose_document_is_gone_stays_quiet():
+    doc = document("the helo")
+    spelling, *_ = follow(doc)
+    spelling.check_all()
+    doc.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    # The editor may still hold the object, and turn checking off later.
+    spelling.close()
+    spelling.set_visible_blocks(0, 3)
+    spelling.set_language("de-DE")
+    spelling.set_cursor_position(0)
+    spelling.check_all()
+    assert spelling.misspelling_at(0) is None
+    assert spelling.is_checking() is False
+
+
 def test_a_document_that_goes_away_takes_its_spelling_along():
     doc = document("the helo")
     spelling, *_ = follow(doc)

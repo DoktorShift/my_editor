@@ -23,6 +23,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
+import shiboken6
 from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtGui import QTextBlock, QTextDocument, QTextFormat
 
@@ -293,7 +294,7 @@ class DocumentSpelling(QObject):
         """Check in ``language`` from now on (``AUTOMATIC``, a BCP 47 tag,
         or None for the system's default); every block is checked again."""
         language = language or None
-        if language != self._language:
+        if self._alive() and language != self._language:
             self._language = language
             self._mark_all()
 
@@ -301,7 +302,8 @@ class DocumentSpelling(QObject):
         """The blocks on screen, from the first to the last block number:
         they are checked before the rest."""
         self._visible = (first, last)
-        self._schedule()
+        if self._alive():
+            self._schedule()
 
     def set_cursor_position(self, position: int) -> None:
         """Where the editor's cursor is: call it whenever the cursor moves.
@@ -309,7 +311,7 @@ class DocumentSpelling(QObject):
         ``misspellings`` until it is: a space, punctuation or Return
         after it, the cursor moving away, or a pause in typing. Then
         ``misspellingsChanged`` names its block."""
-        if self._closed:
+        if not self._alive():
             return
         self._cursor = position
         if position != self._edit_end:
@@ -321,7 +323,7 @@ class DocumentSpelling(QObject):
         """The misspelled words of ``block``, empty until it is checked,
         without the word being typed at the cursor."""
         number = block.blockNumber()
-        if self._closed or not 0 <= number < len(self._found) or self._stale(number, block):
+        if not self._alive() or not 0 <= number < len(self._found) or self._stale(number, block):
             return ()
         return self._without_typing(block, self._found[number])
 
@@ -329,7 +331,7 @@ class DocumentSpelling(QObject):
         """The misspelled word at a document position (for the context
         menu), checking its block right now if it is not checked yet.
         Its ``start`` counts from the start of the block."""
-        if self._closed:
+        if not self._alive():
             return None
         block = self._document.findBlock(position)
         if not block.isValid():
@@ -350,18 +352,18 @@ class DocumentSpelling(QObject):
 
     def check_all(self) -> None:
         """Check every block that is not checked yet, now."""
-        while not self._closed and self._run(deadline=None):
+        while self._alive() and self._run(deadline=None):
             pass
 
     def is_checking(self) -> bool:
         """Whether some block still waits to be checked (never while the
         system checker does not work)."""
-        return (not self._closed and self._dirty.find(1) >= 0
+        return (self._alive() and self._dirty.find(1) >= 0
                 and self._checker.is_available())
 
     def close(self) -> None:
         """Stop following the document (spell checking was turned off)."""
-        if self._closed:
+        if not self._alive():
             return
         self._closed = True
         self._timer.stop()
@@ -375,6 +377,14 @@ class DocumentSpelling(QObject):
                 pass
 
     # -- following the document ---------------------------------------------
+
+    def _alive(self) -> bool:
+        """Whether this still follows its document: not closed, and the
+        document (whose child this is) not deleted, which the editor's
+        own reference to this object does not prevent."""
+        if not self._closed and not shiboken6.isValid(self):
+            self._closed = True
+        return not self._closed
 
     def _restart(self) -> None:
         count = self._document.blockCount()
@@ -534,13 +544,13 @@ class DocumentSpelling(QObject):
     # -- checking -----------------------------------------------------------
 
     def _schedule(self) -> None:
-        if not self._closed and self._dirty.find(1) >= 0 and not self._timer.isActive():
+        if self._alive() and self._dirty.find(1) >= 0 and not self._timer.isActive():
             self._timer.start()
 
     def _run(self, deadline: Optional[float] = -1.0) -> bool:
         """Check blocks until the slice is used up (``deadline`` None:
         until all are). Returns whether blocks are left."""
-        if self._closed or not self._checker.is_available():
+        if not self._alive() or not self._checker.is_available():
             return False
         if deadline is not None and deadline < 0:
             deadline = self._clock() + self.SLICE_SECONDS
