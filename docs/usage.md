@@ -29,6 +29,9 @@ On macOS, `Ctrl` in these tables is the Command key (`⌘`) and `Alt` is Option 
 | `Ctrl+D` | Clear Formatting (a link stays a link) |
 | `Ctrl+Alt+0` (`Ctrl+0` on Windows and Linux) | Style: Body |
 | `Ctrl+Alt+1` to `Ctrl+Alt+3` (`Ctrl+1` to `Ctrl+3`) | Style: Heading 1 to 3 (the same heading again makes it Body) |
+| `Ctrl+Shift+7` | Bulleted List (again: no list) |
+| `Ctrl+Shift+9` | Numbered List (again: no list) |
+| `Ctrl+]` / `Ctrl+[` | Increase / Decrease Indent of list items |
 
 Return at the end of a heading starts a Body paragraph; Backspace at the start of a heading makes it Body. Strikethrough, inline code and the paragraph styles are Markdown, so they are offered in documents that can hold Markdown structure (Markdown, HTML and new documents), not in plain-text and code files. Text colors are in `Format > Color`.
 
@@ -62,10 +65,13 @@ Cut, Copy, Paste and Select All act on whatever has the focus: the document, the
 
 | Shortcut | Action |
 |---|---|
-| `Tab` | Indent / create bullet |
-| `Shift+Tab` | Outdent / remove bullet indent |
-| `Enter` | New line (continues bullet if active) |
-| `Enter` (on empty bullet) | Exit bullet mode |
+| `Tab` | In a list: nest the item one level deeper. At the start of a paragraph: start a bulleted list |
+| `Shift+Tab` | In a list: one level up, and out of the list from the top level |
+| `Enter` | New paragraph (a new item in a list) |
+| `Enter` (on an empty item) | One level up, and out of the list from the top level |
+| `Backspace` (at an item's start) | The same as `Shift+Tab` |
+
+Lists are real lists, written to Markdown as `- item` and `1. item`, nested by four spaces. In plain-text files (`.txt`, code, R Markdown), `Tab` types a bullet as text (`    • item`) instead, as before.
 | `Ctrl+Shift+L` | Toggle line numbers |
 | `Ctrl+Shift+T` | Toggle dark / light theme |
 | `Ctrl+Shift+H` | Toggle syntax highlighting |

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import List, Tuple
 
-from PySide6.QtGui import QFont, QTextCharFormat, QTextCursor, QTextFormat
+from PySide6.QtGui import QFont, QTextCharFormat, QTextCursor, QTextFormat, QTextListFormat
 
 from doc_walk import iter_blocks
 
@@ -301,3 +301,196 @@ def restyled(fmt: QTextCharFormat, level: int) -> QTextCharFormat:
     if level:
         body.merge(heading_char_format(level))
     return body
+
+
+# --------------------------------------------------------------------------- #
+# Lists                                                                        #
+# --------------------------------------------------------------------------- #
+
+BULLET = "bullet"
+NUMBER = "number"
+# Deepest nesting a command makes. Markdown has no limit; readers have.
+MAX_LIST_DEPTH = 6
+
+_BULLET_STYLES = (QTextListFormat.Style.ListDisc, QTextListFormat.Style.ListCircle,
+                  QTextListFormat.Style.ListSquare)
+_ORDERED = {QTextListFormat.Style.ListDecimal, QTextListFormat.Style.ListLowerAlpha,
+            QTextListFormat.Style.ListUpperAlpha, QTextListFormat.Style.ListLowerRoman,
+            QTextListFormat.Style.ListUpperRoman}
+
+
+def list_kind_of(text_list) -> str:
+    """BULLET or NUMBER for a QTextList (Markdown knows only these two)."""
+    return NUMBER if text_list.format().style() in _ORDERED else BULLET
+
+
+def list_format(kind: str, depth: int) -> QTextListFormat:
+    """A list of ``kind`` nested ``depth`` deep. Bullets change shape with
+    depth (disc, circle, square), as in Pages and every browser."""
+    fmt = QTextListFormat()
+    if kind == NUMBER:
+        fmt.setStyle(QTextListFormat.Style.ListDecimal)
+    else:
+        fmt.setStyle(_BULLET_STYLES[(depth - 1) % len(_BULLET_STYLES)])
+    fmt.setIndent(depth)
+    return fmt
+
+
+def list_kind(cursor: QTextCursor) -> str:
+    """The list under the cursor: BULLET, NUMBER, "" for none, "mixed"
+    when the selection holds more than one kind (or list and not)."""
+    kinds = {list_kind_of(b.textList()) if b.textList() is not None else ""
+             for b in _blocks_of(cursor)}
+    if not kinds:
+        return ""
+    return kinds.pop() if len(kinds) == 1 else "mixed"
+
+
+def leave_list(block) -> None:
+    """Take a paragraph out of its list; it stays where it is, as Body text
+    at the left margin (Qt would keep the list's indent as its own)."""
+    text_list = block.textList()
+    if text_list is not None:
+        text_list.remove(block)
+    fmt = block.blockFormat()
+    fmt.setIndent(0)
+    fmt.clearProperty(QTextFormat.Property.BlockMarker)
+    QTextCursor(block).setBlockFormat(fmt)
+
+
+def _list_to_join(block, depth: int, kind: str):
+    """The list a paragraph moved to ``depth`` belongs to: the one an item
+    before it already has at that depth (only deeper items between)."""
+    previous = block.previous()
+    while previous.isValid() and previous.textList() is not None \
+            and previous.textList().format().indent() > depth:
+        previous = previous.previous()
+    if (previous.isValid() and previous.textList() is not None
+            and previous.textList().format().indent() == depth
+            and list_kind_of(previous.textList()) == kind):
+        return previous.textList()
+    return None
+
+
+def _move_to_depth(block, depth: int, kind: str) -> None:
+    target = _list_to_join(block, depth, kind)
+    if target is not None:
+        if block.textList() is not target:
+            target.add(block)
+    else:
+        QTextCursor(block).createList(list_format(kind, depth))
+    _no_own_indent(block)
+
+
+def _no_own_indent(block) -> None:
+    fmt = block.blockFormat()
+    if fmt.indent():
+        fmt.setIndent(0)
+        QTextCursor(block).setBlockFormat(fmt)
+
+
+def _item_run(block):
+    """The first and last block of the run of list items ``block`` is in."""
+    first = last = block
+    while first.previous().isValid() and first.previous().textList() is not None:
+        first = first.previous()
+    while last.next().isValid() and last.next().textList() is not None:
+        last = last.next()
+    return first, last
+
+
+def _tidy_lists(doc, around) -> None:
+    """Items next to each other at the same depth and of the same kind are
+    one list, as Markdown reads them: a list a command made right after
+    another, or the children left behind when an item moved, join it.
+    Only the runs of items ``around`` touches are looked at."""
+    runs = []
+    for block in around:
+        if block.isValid() and block.textList() is not None:
+            run = _item_run(block)
+            if run not in runs:
+                runs.append(run)
+    for first, last in runs:
+        open_lists = {}
+        block = first
+        while block.isValid():
+            text_list = block.textList()
+            depth = text_list.format().indent()
+            for deeper in [d for d in open_lists if d > depth]:
+                del open_lists[deeper]
+            current = open_lists.get(depth)
+            if (current is not None and current is not text_list
+                    and list_kind_of(current) == list_kind_of(text_list)):
+                current.add(block)
+                text_list = current
+            open_lists[depth] = text_list
+            if block == last:
+                break
+            block = block.next()
+
+
+def toggle_list(cursor: QTextCursor, kind: str) -> None:
+    """Bulleted List or Numbered List over the paragraphs under the
+    cursor, as one step on the undo stack:
+
+    - all of them in lists of this kind: they leave the list;
+    - all of them in lists, some of another kind: those lists change
+      kind in place, nesting kept;
+    - otherwise they become one list of this kind (a heading becomes
+      Body first: a list item is not a heading)."""
+    blocks = _blocks_of(cursor)
+    if not blocks:
+        return
+    doc = cursor.document()
+    edit = QTextCursor(doc)
+    edit.beginEditBlock()
+    current = list_kind(cursor)
+    all_items = all(b.textList() is not None for b in blocks)
+    if current == kind:
+        for block in blocks:
+            leave_list(block)
+    elif all_items:
+        changed = []
+        for block in blocks:
+            text_list = block.textList()
+            if any(text_list is seen for seen in changed):
+                continue
+            changed.append(text_list)
+            text_list.setFormat(list_format(kind, text_list.format().indent()))
+    else:
+        for block in blocks:
+            if block.blockFormat().headingLevel():
+                set_heading(QTextCursor(block), BODY)
+            if block.textList() is not None:
+                leave_list(block)
+        new_list = QTextCursor(blocks[0]).createList(list_format(kind, 1))
+        for block in blocks:
+            if block.textList() is not new_list:
+                new_list.add(block)
+            _no_own_indent(block)
+    _tidy_lists(doc, [blocks[0].previous(), *blocks, blocks[-1].next()])
+    edit.endEditBlock()
+
+
+def change_indent(cursor: QTextCursor, delta: int) -> bool:
+    """Increase (+1) or decrease (-1) the nesting of the list items under
+    the cursor, as one step on the undo stack. An item at the top level
+    that is decreased leaves the list. False when there is no list item
+    under the cursor (nothing done)."""
+    items = [b for b in _blocks_of(cursor) if b.textList() is not None]
+    if not items:
+        return False
+    doc = cursor.document()
+    edit = QTextCursor(doc)
+    edit.beginEditBlock()
+    for block in items:
+        text_list = block.textList()
+        kind = list_kind_of(text_list)
+        depth = text_list.format().indent() + delta
+        if depth < 1:
+            leave_list(block)
+        else:
+            _move_to_depth(block, min(depth, MAX_LIST_DEPTH), kind)
+    _tidy_lists(doc, [items[0].previous(), *items, items[-1].next()])
+    edit.endEditBlock()
+    return True

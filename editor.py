@@ -61,6 +61,9 @@ class HtmlEditor(QTextEdit):
         # there (the same ones as in its menus). Without one, the menu has
         # Cut, Copy and Paste.
         self._context_menu_filler = None
+        # Whether the document can hold Markdown structure (lists,
+        # headings): the window answers per tab; on its own, it can.
+        self._holds_structure = lambda: True
 
         # Resource seam: a resolver plus the URL scheme it answers for.
         # Injected by the window so the editor carries no knowledge of
@@ -514,6 +517,32 @@ class HtmlEditor(QTextEdit):
         self._blink_timer.stop()
         self.viewport().update(self._block_cursor_rect())
 
+    def set_structure_check(self, check) -> None:
+        """Install ``check()``: whether this document holds Markdown
+        structure. Where it does not (a .txt file, code, Markdown opened
+        as its text), Tab keeps typing bullets as text."""
+        self._holds_structure = check
+
+    # -------- Lists --------
+    def toggle_list(self, kind: str) -> None:
+        """Bulleted (rich_text.BULLET) or Numbered List (rich_text.NUMBER)
+        for the paragraphs under the cursor; again, it is taken away."""
+        cursor = self.textCursor()
+        rich_text.toggle_list(cursor, kind)
+        self.setTextCursor(cursor)
+
+    def change_indent(self, delta: int) -> None:
+        """Increase (+1) or Decrease (-1) Indent: list nesting, or the
+        indent of a bullet typed as text."""
+        cursor = self.textCursor()
+        if rich_text.change_indent(cursor, delta):
+            self.setTextCursor(cursor)
+            return
+        line, start = self._line_info(cursor)
+        spaces, has_bullet = self._indent_level_and_has_bullet(line)
+        if has_bullet:
+            self._indent_typed_bullet(line, start, spaces, has_bullet, delta)
+
     # -------- Context menu --------
     def set_context_menu_filler(self, filler) -> None:
         """Install ``filler(menu, editor)``, which puts the commands in the
@@ -592,6 +621,25 @@ class HtmlEditor(QTextEdit):
         nc.setPosition(cursor_pos_after)
         self.setTextCursor(nc)
 
+    def _indent_typed_bullet(self, line: str, start: int, spaces: int, has_bullet: bool,
+                             delta: int) -> None:
+        """Tab and Shift+Tab on a line with a bullet typed as text ("• "):
+        four spaces more or less, and a bullet for a line that has none."""
+        tab_width = 4
+        if delta > 0:
+            new_line = " " * (spaces + tab_width)
+            if not has_bullet:
+                new_line += "• " + line.lstrip()
+            else:
+                new_line += line[spaces:]
+        else:
+            new_line = " " * max(0, spaces - tab_width) + line[spaces:]
+        bullet_pos = new_line.find("• ")
+        move_to = start + bullet_pos + 2 if bullet_pos >= 0 else start + len(new_line.rstrip())
+        self._set_line_text(start, new_line, move_to)
+        if delta > 0:
+            self._apply_active_format_to_cursor()
+
     def keyPressEvent(self, e):
         # Keep cursor solid immediately after a keypress; blink restarts from now
         old_cursor_rect = self._block_cursor_rect()
@@ -622,29 +670,13 @@ class HtmlEditor(QTextEdit):
 
         if e.key() == Qt.Key_Tab:
             if c.atBlockStart() or (c.positionInBlock() <= spaces + (2 if has_bullet else 0)):
-                tab_width = 4
-                new_spaces = spaces + tab_width
-                new_line = " " * new_spaces
-                if not has_bullet:
-                    new_line += "• "
-                    new_line += line.lstrip()
-                else:
-                    new_line += line[spaces:]
-                bullet_pos = new_line.find("• ")
-                move_to = start + bullet_pos + 2 if bullet_pos >= 0 else start + len(new_line.rstrip())
-                self._set_line_text(start, new_line, move_to)
-                self._apply_active_format_to_cursor()
+                self._indent_typed_bullet(line, start, spaces, has_bullet, +1)
                 self.ensureCursorVisible()
                 return
 
         elif e.key() == Qt.Key_Backtab:
             if c.atBlockStart() or (c.positionInBlock() <= spaces + (2 if has_bullet else 0)):
-                tab_width = 4
-                new_spaces = max(0, spaces - tab_width)
-                new_line = " " * new_spaces + line[spaces:]
-                bullet_pos = new_line.find("• ")
-                move_to = start + bullet_pos + 2 if bullet_pos >= 0 else start + len(new_line.rstrip())
-                self._set_line_text(start, new_line, move_to)
+                self._indent_typed_bullet(line, start, spaces, has_bullet, -1)
                 self.ensureCursorVisible()
                 return
 
@@ -761,13 +793,37 @@ class HtmlEditor(QTextEdit):
     # -------- Keys inside Markdown structure --------
     def _structure_key(self, e) -> bool:
         """Enter, Backspace and Tab where the paragraph has a structure of
-        its own (a heading). True when the key was handled here."""
+        its own (a heading, a list item). True when the key was handled."""
         cursor = self.textCursor()
+        block = cursor.block()
+        plain = e.modifiers() in (Qt.NoModifier, Qt.KeypadModifier)
+        key = e.key()
+        if key in (Qt.Key_Tab, Qt.Key_Backtab) and e.modifiers() in (
+                Qt.NoModifier, Qt.ShiftModifier):
+            delta = -1 if key == Qt.Key_Backtab or e.modifiers() == Qt.ShiftModifier else 1
+            if rich_text.change_indent(cursor, delta):
+                self.setTextCursor(cursor)
+                return True
+            # Tab at the start of a plain paragraph starts a list (the
+            # habit typed bullets taught), where lists can be kept.
+            if (delta > 0 and not cursor.hasSelection() and cursor.atBlockStart()
+                    and self._holds_structure()
+                    and not self._indent_level_and_has_bullet(block.text())[0]
+                    and not self._indent_level_and_has_bullet(block.text())[1]):
+                self.toggle_list(rich_text.BULLET)
+                return True
+            return False
         if cursor.hasSelection():
             return False
-        block = cursor.block()
+        if block.textList() is not None and plain and (
+                (key in (Qt.Key_Return, Qt.Key_Enter) and not block.text())
+                or (key == Qt.Key_Backspace and cursor.atBlockStart())):
+            # Return on an empty item, or Backspace at an item's start: one
+            # level up, and out of the list from the top level.
+            rich_text.change_indent(cursor, -1)
+            self.setTextCursor(cursor)
+            return True
         heading = block.blockFormat().headingLevel()
-        plain = e.modifiers() in (Qt.NoModifier, Qt.KeypadModifier)
         if heading and e.key() in (Qt.Key_Return, Qt.Key_Enter) and plain:
             # Return at the end of a heading starts a Body paragraph, the
             # way Pages and every Markdown editor continue after a title;

@@ -819,6 +819,7 @@ class MainWindow(QMainWindow):
         ed.image_pasted.connect(lambda img, e=ed: self._handle_pasted_image(e, img))
         ed.urls_dropped.connect(self._handle_dropped_urls)
         ed.set_context_menu_filler(self._fill_editor_context_menu)
+        ed.set_structure_check(lambda e=ed: self._editor_kind(e) == "rich")
         return ed
 
     def _resolve_local_image(self, editor, name: str):
@@ -997,9 +998,13 @@ class MainWindow(QMainWindow):
         which come from Markdown files)."""
         if not hasattr(self, "act_styles"):
             return
-        level = rich_text.heading_level(ed.textCursor()) if ed else -1
+        cursor = ed.textCursor() if ed else None
+        level = rich_text.heading_level(cursor) if cursor is not None else -1
         for index, action in enumerate(self.act_styles):
             action.setChecked(index == level)
+        kind = rich_text.list_kind(cursor) if cursor is not None else ""
+        self.act_bullets.setChecked(kind == rich_text.BULLET)
+        self.act_numbers.setChecked(kind == rich_text.NUMBER)
 
     # ----------------------------------------------------------------------
     # ACTIONS / MENU
@@ -1113,6 +1118,21 @@ class MainWindow(QMainWindow):
                          triggered=lambda n=level: self._set_heading(n))
             self._style_group.addAction(action)
             self.act_styles.append(action)
+        # Lists, with Apple Notes' keys (Shift-Command-7 and 9).
+        self.act_bullets = add(Command("format.list.bullet", _("Bulleted List"), FORMAT,
+                                       "Ctrl+Shift+7", checkable=True,
+                                       keywords=(_("bullets"), _("list"))),
+                               triggered=lambda: self._toggle_list(rich_text.BULLET))
+        self.act_numbers = add(Command("format.list.number", _("Numbered List"), FORMAT,
+                                       "Ctrl+Shift+9", checkable=True,
+                                       keywords=(_("numbers"), _("list"), _("ordered"))),
+                               triggered=lambda: self._toggle_list(rich_text.NUMBER))
+        self.act_indent = add(Command("format.indent", _("Increase Indent"), FORMAT, "Ctrl+]",
+                                      keywords=(_("nest"),)),
+                              triggered=lambda: self._change_indent(+1))
+        self.act_outdent = add(Command("format.outdent", _("Decrease Indent"), FORMAT,
+                                       "Ctrl+["),
+                               triggered=lambda: self._change_indent(-1))
         # Text colors stay in the document and in local files; Markdown
         # has none, so they never reach Nostr.
         self.act_colors = []
@@ -1148,12 +1168,14 @@ class MainWindow(QMainWindow):
         self._editor_actions = [
             self.act_undo, self.act_redo, self.act_cut, self.act_paste, self.act_paste_plain,
             self.act_delete, self.act_select_all, self.act_use_selection,
+            self.act_indent, self.act_outdent,
             self.act_bold, self.act_italic, self.act_underline, self.act_reset_format,
             *self.act_colors, self.act_remove_color,
         ]
         # Structure that only a document holding Markdown can carry
         # (headings, lists, links): off in plain-text tabs as well.
-        self._rich_actions = [self.act_strike, self.act_code, *self.act_styles]
+        self._rich_actions = [self.act_strike, self.act_code, *self.act_styles,
+                              self.act_bullets, self.act_numbers]
 
         self._search_matches = []
         self._current_match_index = -1
@@ -1350,6 +1372,12 @@ class MainWindow(QMainWindow):
         m_format.addAction(self.act_underline)
         m_format.addAction(self.act_strike)
         m_format.addAction(self.act_code)
+        m_format.addSeparator()
+        m_format.addAction(self.act_bullets)
+        m_format.addAction(self.act_numbers)
+        m_format.addSeparator()
+        m_format.addAction(self.act_indent)
+        m_format.addAction(self.act_outdent)
         m_format.addSeparator()
         self.m_color = m_format.addMenu(_("Color"))
         for action in self.act_colors:
@@ -2157,9 +2185,12 @@ class MainWindow(QMainWindow):
             self._update_status_bar()
 
     def _has_formatting(self, ed: HtmlEditor) -> bool:
-        """Return True if the document contains any bold, italic, underline, or color formatting."""
+        """Return True if the document contains any bold, italic, underline, or color
+        formatting, or structure plain text cannot keep (lists, headings)."""
         block = ed.document().begin()
         while block.isValid():
+            if block.textList() is not None or block.blockFormat().headingLevel():
+                return True
             it = block.begin()
             while not it.atEnd():
                 fragment = it.fragment()
@@ -3506,6 +3537,18 @@ class MainWindow(QMainWindow):
         ed = self.current_editor()
         if ed:
             ed.redo()
+
+    def _toggle_list(self, kind: str) -> None:
+        ed = self.current_editor()
+        if ed:
+            ed.toggle_list(kind)
+            self._update_format_buttons()
+
+    def _change_indent(self, delta: int) -> None:
+        ed = self.current_editor()
+        if ed:
+            ed.change_indent(delta)
+            self._update_format_buttons()
 
     def _set_heading(self, level: int) -> None:
         ed = self.current_editor()
