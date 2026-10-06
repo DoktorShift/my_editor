@@ -6,18 +6,24 @@ HTML Editor widget with bullet and format logic.
 """
 
 import os
+import sys
 
-from PySide6.QtCore import Qt, QTimer, QRect, QPoint, QMetaMethod, Signal
+from PySide6.QtCore import Qt, QTimer, QRect, QPoint, QMetaMethod, QEvent, QUrl, Signal
 from PySide6.QtGui import (
-    QPainter, QTextCursor, QTextCharFormat, QColor, QClipboard, QPen, QTextOption,
-    QImage, QTextDocument,
+    QPainter, QTextBlockFormat, QTextCursor, QTextCharFormat, QColor, QClipboard, QPen,
+    QTextOption, QImage, QTextDocument, QTextFormat, QDesktopServices,
 )
-from PySide6.QtWidgets import QTextEdit, QMenu, QApplication
+from PySide6.QtWidgets import QTextEdit, QMenu, QApplication, QToolTip
 from constants import (
-    DARK_BG, DARK_FG, LIGHT_BG, LIGHT_FG, DARK_SELECTION, LIGHT_SELECTION, MONO_FONT, TEXT_COLORS,
+    DARK_BG, DARK_FG, LIGHT_BG, LIGHT_FG, DARK_SELECTION, LIGHT_SELECTION,
     DARK_GUIDE, LIGHT_GUIDE, DARK_CURRENT_LINE, LIGHT_CURRENT_LINE, DARK_PAPER, LIGHT_PAPER,
 )
+from fonts import monospace_family
 from i18n import _
+import link_url
+import rich_text
+import url_safety
+from link_popover import LinkPopover, clipboard_address
 
 
 # Stand-in painted for an image whose bytes have not arrived yet. Its
@@ -56,6 +62,20 @@ class HtmlEditor(QTextEdit):
         self.setAcceptRichText(True)
         self.setUndoRedoEnabled(True)
 
+        # Who fills the context menu: the window puts its own commands
+        # there (the same ones as in its menus). Without one, the menu has
+        # Cut, Copy and Paste.
+        self._context_menu_filler = None
+        # Whether the document can hold Markdown structure (lists,
+        # headings): the window answers per tab; on its own, it can.
+        self._holds_structure = lambda: True
+        # Who opens a link Command-clicked (Ctrl-clicked elsewhere): the
+        # window, which knows where each kind of link goes.
+        self._link_opener = None
+        # Whether a Nostr account is in use: Nostr shows up in the editor
+        # only then (nostr/state.py).
+        self._nostr_active = lambda: False
+
         # Resource seam: a resolver plus the URL scheme it answers for.
         # Injected by the window so the editor carries no knowledge of
         # what an asset is or where its bytes live.
@@ -76,7 +96,7 @@ class HtmlEditor(QTextEdit):
                 color: {DARK_FG};
                 border: none;
                 selection-background-color: {DARK_SELECTION};
-                font-family: {MONO_FONT};
+                font-family: "{monospace_family()}";
                 font-size: 14px;
                 line-height: 1.5;
                 padding: 8px;
@@ -269,19 +289,51 @@ class HtmlEditor(QTextEdit):
         self.active_format['color'] = qcolor
         self.ensureCursorVisible()
 
-    def reset_to_default(self):
-        """Reset text formatting to default (no bold, italic, underline, color)."""
+    def toggle_style(self, style: str) -> bool:
+        """Turn an inline style (rich_text.INLINE) on or off: over the
+        whole selection, or for what is typed next. Returns the new state."""
         cursor = self.textCursor()
-        fmt = QTextCharFormat()
-        fmt.setFontWeight(400)
-        fmt.setFontItalic(False)
-        fmt.setFontUnderline(False)
-        fmt.clearForeground()
-
         if cursor.hasSelection():
-            cursor.mergeCharFormat(fmt)
+            on = rich_text.toggle_style(cursor, style)
+            self.setTextCursor(cursor)
+            return on
+        on = not rich_text.has_style(self.currentCharFormat(), style)
+        if on or style != rich_text.CODE:
+            self.mergeCurrentCharFormat(rich_text.style_format(style, on))
         else:
-            self.mergeCurrentCharFormat(fmt)
+            fmt = self.currentCharFormat()
+            fmt.setFontFixedPitch(False)
+            fmt.clearProperty(QTextFormat.Property.FontFamilies)
+            fmt.clearProperty(QTextFormat.Property.FontFamily)
+            self.setCurrentCharFormat(fmt)
+        return on
+
+    def set_heading(self, level: int) -> None:
+        """Body (0) or Heading 1 to 3 for the paragraphs under the cursor;
+        the style they already have turns them back into Body."""
+        cursor = self.textCursor()
+        rich_text.set_heading(cursor, level)
+        self.setTextCursor(cursor)
+        now = cursor.block().blockFormat().headingLevel()
+        self.setCurrentCharFormat(rich_text.restyled(self.currentCharFormat(), now))
+        self._update_active_format()
+
+    def toggle_strike(self):
+        return self.toggle_style(rich_text.STRIKE)
+
+    def toggle_code(self):
+        return self.toggle_style(rich_text.CODE)
+
+    def reset_to_default(self):
+        """Clear Formatting: no bold, italic, underline, strikethrough,
+        inline code or color, over the selection or for what is typed
+        next. A link stays a link."""
+        cursor = self.textCursor()
+        if cursor.hasSelection():
+            rich_text.clear_formatting(cursor)
+            self.setTextCursor(cursor)
+        else:
+            self.setCurrentCharFormat(rich_text.typing_format_without(self.currentCharFormat()))
 
         self.active_format['bold'] = False
         self.active_format['italic'] = False
@@ -291,6 +343,7 @@ class HtmlEditor(QTextEdit):
 
     def _update_active_format(self):
         """Update active format state based on current cursor position."""
+        self._leave_link_at_end()
         fmt = self.currentCharFormat()
         self.active_format['bold'] = (fmt.fontWeight() > 400)
         self.active_format['italic'] = fmt.fontItalic()
@@ -362,6 +415,7 @@ class HtmlEditor(QTextEdit):
         if self._bg_pattern != "none" or self._paper_mode:
             self._paint_guides(painter)
 
+        self._paint_quote_bars(painter)
         painter.end()
 
         super().paintEvent(event)
@@ -375,6 +429,29 @@ class HtmlEditor(QTextEdit):
         p2 = QPainter(vp)
         p2.fillRect(rect, color)
         p2.end()
+
+    def _paint_quote_bars(self, painter):
+        """A bar beside each level of a quote, as every reader draws one.
+        Only painted: nothing of it is in the document."""
+        vp = self.viewport()
+        block = self.cursorForPosition(QPoint(0, 0)).block()
+        layout = self.document().documentLayout()
+        dx = self.horizontalScrollBar().value()
+        dy = self.verticalScrollBar().value()
+        color = QColor("#5A5D63") if self._is_dark() else QColor("#C9CDD2")
+        while block.isValid():
+            rect = layout.blockBoundingRect(block)
+            top = int(rect.top()) - dy
+            if top > vp.height():
+                break
+            depth = rich_text.quote_depth(block)
+            if depth:
+                fmt = block.blockFormat()
+                height = int(rect.height() - fmt.topMargin() - fmt.bottomMargin())
+                for level in range(depth):
+                    x = int(rect.left()) - dx + level * rich_text.QUOTE_INDENT + 12
+                    painter.fillRect(QRect(x, top + int(fmt.topMargin()), 3, height), color)
+            block = block.next()
 
     def _paint_guides(self, painter):
         vp = self.viewport()
@@ -476,11 +553,167 @@ class HtmlEditor(QTextEdit):
         self._blink_timer.stop()
         self.viewport().update(self._block_cursor_rect())
 
-    # -------- Context menu with colors --------
+    def set_structure_check(self, check) -> None:
+        """Install ``check()``: whether this document holds Markdown
+        structure. Where it does not (a .txt file, code, Markdown opened
+        as its text), Tab keeps typing bullets as text."""
+        self._holds_structure = check
+
+    # -------- Lists --------
+    def toggle_list(self, kind: str) -> None:
+        """Bulleted (rich_text.BULLET) or Numbered List (rich_text.NUMBER)
+        for the paragraphs under the cursor; again, it is taken away."""
+        cursor = self.textCursor()
+        rich_text.toggle_list(cursor, kind)
+        self.setTextCursor(cursor)
+
+    def change_indent(self, delta: int) -> None:
+        """Increase (+1) or Decrease (-1) Indent: list nesting, or the
+        indent of a bullet typed as text."""
+        cursor = self.textCursor()
+        if rich_text.change_indent(cursor, delta):
+            self.setTextCursor(cursor)
+            return
+        line, start = self._line_info(cursor)
+        spaces, has_bullet = self._indent_level_and_has_bullet(line)
+        if has_bullet:
+            self._indent_typed_bullet(line, start, spaces, has_bullet, delta)
+
+    # -------- Links --------
+    def set_nostr_check(self, check) -> None:
+        """Install ``check()``: whether a Nostr account is in use."""
+        self._nostr_active = check
+
+    def set_link_opener(self, opener) -> None:
+        """Install ``opener(href)``, which opens a Command-clicked link."""
+        self._link_opener = opener
+
+    def link_at_caret(self):
+        """``(start, end, href)`` of the link at the caret, or None."""
+        return rich_text.link_range(self.textCursor())
+
+    def show_link_popover(self) -> None:
+        """Add Link, or Edit Link when the caret is in one: the popover
+        under the words, prefilled with what is known."""
+        cursor = self.textCursor()
+        found = rich_text.link_range(cursor)
+        if found is not None:
+            start, end, href = found
+            cursor.setPosition(start)
+            cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+            self.setTextCursor(cursor)
+            text = cursor.selectedText()
+        else:
+            href = clipboard_address()
+            text = cursor.selectedText().replace("\u2029", " ").replace("\u2028", " ")
+        popover = LinkPopover(text=text, href=href, editing=found is not None,
+                              nostr=self._nostr_active(), parent=self)
+        popover.applied.connect(self.apply_link)
+        popover.removed.connect(self.remove_link)
+        # Escape, Cancel or a click elsewhere: the writing goes on here.
+        popover.destroyed.connect(lambda _obj=None: self.setFocus())
+        popover.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        start_rect = self.cursorRect(self._selection_start_cursor())
+        popover.show_below(start_rect, self.viewport())
+
+    def _selection_start_cursor(self) -> QTextCursor:
+        cursor = QTextCursor(self.textCursor())
+        cursor.setPosition(cursor.selectionStart())
+        return cursor
+
+    def apply_link(self, text: str, href: str) -> None:
+        """Link the selection (or insert ``text``, or the address itself,
+        when nothing is selected) to ``href``."""
+        cursor = self.textCursor()
+        if not cursor.hasSelection() and not text:
+            text = link_url.display_href(href, limit=10_000)
+        rich_text.set_link(cursor, text, href)
+        cursor.setPosition(cursor.selectionEnd())
+        self.setTextCursor(cursor)
+        self._leave_link_at_end()
+        self.setFocus()
+
+    def remove_link(self) -> None:
+        cursor = self.textCursor()
+        rich_text.remove_link(cursor)
+        self.setTextCursor(cursor)
+
+    def _open_link(self, href: str) -> None:
+        if self._link_opener is not None:
+            self._link_opener(href)
+            return
+        web = link_url.web_address_for(href)
+        if web and url_safety.is_safe_external_url(web):
+            QDesktopServices.openUrl(QUrl(web))
+        elif href.lower().startswith("mailto:"):
+            QDesktopServices.openUrl(QUrl(href))
+
+    def _leave_link_at_end(self) -> None:
+        """Typing right before or right after a link is not part of it
+        (links are not "sticky", as in every word processor); typing
+        inside one is."""
+        cursor = self.textCursor()
+        fmt = self.currentCharFormat()
+        if cursor.hasSelection() or not fmt.isAnchor():
+            return
+        if not cursor.atBlockStart() and not cursor.atBlockEnd():
+            after = QTextCursor(cursor)
+            after.movePosition(QTextCursor.MoveOperation.NextCharacter)
+            before, following = cursor.charFormat(), after.charFormat()
+            if (before.isAnchor() and following.isAnchor()
+                    and before.anchorHref() == following.anchorHref()):
+                return              # inside the link
+        self.setCurrentCharFormat(rich_text.without_link(fmt))
+
+    def mousePressEvent(self, event):
+        # Command-click (Ctrl-click on Windows and Linux) opens a link.
+        if (event.button() == Qt.MouseButton.LeftButton
+                and event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            href = self.anchorAt(event.position().toPoint())
+            if href:
+                self._open_link(href)
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def viewportEvent(self, event):
+        if event.type() == QEvent.Type.ToolTip:
+            href = self.anchorAt(event.pos())
+            if href:
+                how = (_("Command-click to open") if sys.platform == "darwin"
+                       else _("Ctrl+click to open"))
+                QToolTip.showText(event.globalPos(),
+                                  link_url.display_href(href) + "\n" + how, self)
+            else:
+                QToolTip.hideText()
+            return True
+        return super().viewportEvent(event)
+
+    # -------- Quotes and dividers --------
+    def toggle_quote(self) -> None:
+        """Quote the paragraphs under the cursor, or take the quote away."""
+        cursor = self.textCursor()
+        rich_text.toggle_quote(cursor)
+        self.setTextCursor(cursor)
+        self.viewport().update()
+
+    def insert_divider(self) -> None:
+        """A divider after the paragraph at the cursor; typing goes on below it."""
+        cursor = self.textCursor()
+        rich_text.insert_divider(cursor)
+        self.setTextCursor(cursor)
+        self.ensureCursorVisible()
+
+    # -------- Context menu --------
+    def set_context_menu_filler(self, filler) -> None:
+        """Install ``filler(menu, editor, pos)``, which puts the commands in
+        the context menu (``pos`` is where it was asked for, in viewport
+        coordinates). Injected, so the editor holds no command list."""
+        self._context_menu_filler = filler
+
     def contextMenuEvent(self, event):
         menu = QMenu(self)
-        is_dark = hasattr(self, '_theme_colors') and self._theme_colors['bg'] == DARK_BG
-        if is_dark:
+        if self._is_dark():
             menu.setStyleSheet("""
                 QMenu {
                     background: #252526;
@@ -506,46 +739,13 @@ class HtmlEditor(QTextEdit):
                 QMenu::item:disabled { color: #999999; }
                 QMenu::separator { height: 1px; background: #E1E1E1; margin: 4px 0px; }
             """)
-
-        act_copy = menu.addAction(_("Copy"))
-        act_cut = menu.addAction(_("Cut"))
-        act_paste = menu.addAction(_("Paste"))
-        menu.addSeparator()
-        fmt_menu = menu.addMenu(_("Color"))
-        for name, col in TEXT_COLORS.items():
-            a = fmt_menu.addAction(_(name))
-            a.setData(("color", col))
-        fmt_menu.addSeparator()
-        a_clear = fmt_menu.addAction(_("Remove Color"))
-        a_clear.setData(("color", None))
-        menu.addSeparator()
-        act_b = menu.addAction(_("Bold (Ctrl+B)"))
-        act_i = menu.addAction(_("Italic (Ctrl+I)"))
-        act_u = menu.addAction(_("Underline (Ctrl+U)"))
-        menu.addSeparator()
-        act_reset = menu.addAction(_("Reset Format (Ctrl+D)"))
-
-        chosen = menu.exec(event.globalPos())
-        if not chosen:
-            return
-        if chosen == act_copy:
-            self.copy()
-        elif chosen == act_cut:
-            self.cut()
-        elif chosen == act_paste:
-            self.paste_normalized()
-        elif chosen == act_b:
-            self.toggle_bold()
-        elif chosen == act_i:
-            self.toggle_italic()
-        elif chosen == act_u:
-            self.toggle_underline()
-        elif chosen == act_reset:
-            self.reset_to_default()
+        if self._context_menu_filler is not None:
+            self._context_menu_filler(menu, self, event.pos())
         else:
-            data = chosen.data()
-            if isinstance(data, tuple) and data and data[0] == "color":
-                self.apply_color(data[1])
+            menu.addAction(_("Cut"), self.cut)
+            menu.addAction(_("Copy"), self.copy)
+            menu.addAction(_("Paste"), self.paste_from_clipboard)
+        menu.exec(event.globalPos())
 
     # -------- Bullet Logic (•) --------
     @staticmethod
@@ -583,6 +783,25 @@ class HtmlEditor(QTextEdit):
         nc.setPosition(cursor_pos_after)
         self.setTextCursor(nc)
 
+    def _indent_typed_bullet(self, line: str, start: int, spaces: int, has_bullet: bool,
+                             delta: int) -> None:
+        """Tab and Shift+Tab on a line with a bullet typed as text ("• "):
+        four spaces more or less, and a bullet for a line that has none."""
+        tab_width = 4
+        if delta > 0:
+            new_line = " " * (spaces + tab_width)
+            if not has_bullet:
+                new_line += "• " + line.lstrip()
+            else:
+                new_line += line[spaces:]
+        else:
+            new_line = " " * max(0, spaces - tab_width) + line[spaces:]
+        bullet_pos = new_line.find("• ")
+        move_to = start + bullet_pos + 2 if bullet_pos >= 0 else start + len(new_line.rstrip())
+        self._set_line_text(start, new_line, move_to)
+        if delta > 0:
+            self._apply_active_format_to_cursor()
+
     def keyPressEvent(self, e):
         # Keep cursor solid immediately after a keypress; blink restarts from now
         old_cursor_rect = self._block_cursor_rect()
@@ -599,18 +818,17 @@ class HtmlEditor(QTextEdit):
             self.redo()
             return
 
-        # Ctrl+V, image-aware paste. A clipboard image is reported to
-        # whoever owns media handling; with nobody listening it falls
-        # through to the plain-text path that strips foreign formatting.
         if e.key() == Qt.Key_V and e.modifiers() == Qt.ControlModifier:
-            clip = QApplication.clipboard()
-            if clip.mimeData().hasImage():
-                image = clip.image()
-                if not image.isNull() and self.isSignalConnected(
-                        QMetaMethod.fromSignal(self.image_pasted)):
-                    self.image_pasted.emit(image)
-                    return
-            self.paste_normalized()
+            self.paste_from_clipboard()
+            return
+
+        if e.text() and e.text().isprintable():
+            # The caret may have arrived at a link's edge without moving
+            # (a document loaded around it): what is typed is not the link.
+            self._leave_link_at_end()
+
+        if self._structure_key(e):
+            self.ensureCursorVisible()
             return
 
         c = self.textCursor()
@@ -619,29 +837,13 @@ class HtmlEditor(QTextEdit):
 
         if e.key() == Qt.Key_Tab:
             if c.atBlockStart() or (c.positionInBlock() <= spaces + (2 if has_bullet else 0)):
-                tab_width = 4
-                new_spaces = spaces + tab_width
-                new_line = " " * new_spaces
-                if not has_bullet:
-                    new_line += "• "
-                    new_line += line.lstrip()
-                else:
-                    new_line += line[spaces:]
-                bullet_pos = new_line.find("• ")
-                move_to = start + bullet_pos + 2 if bullet_pos >= 0 else start + len(new_line.rstrip())
-                self._set_line_text(start, new_line, move_to)
-                self._apply_active_format_to_cursor()
+                self._indent_typed_bullet(line, start, spaces, has_bullet, +1)
                 self.ensureCursorVisible()
                 return
 
         elif e.key() == Qt.Key_Backtab:
             if c.atBlockStart() or (c.positionInBlock() <= spaces + (2 if has_bullet else 0)):
-                tab_width = 4
-                new_spaces = max(0, spaces - tab_width)
-                new_line = " " * new_spaces + line[spaces:]
-                bullet_pos = new_line.find("• ")
-                move_to = start + bullet_pos + 2 if bullet_pos >= 0 else start + len(new_line.rstrip())
-                self._set_line_text(start, new_line, move_to)
+                self._indent_typed_bullet(line, start, spaces, has_bullet, -1)
                 self.ensureCursorVisible()
                 return
 
@@ -755,6 +957,106 @@ class HtmlEditor(QTextEdit):
         super().keyPressEvent(e)
         self.ensureCursorVisible()
 
+    # -------- Keys inside Markdown structure --------
+    def _structure_key(self, e) -> bool:
+        """Enter, Backspace and Tab where the paragraph has a structure of
+        its own (a heading, a list item). True when the key was handled."""
+        cursor = self.textCursor()
+        block = cursor.block()
+        plain = e.modifiers() in (Qt.NoModifier, Qt.KeypadModifier)
+        key = e.key()
+        if key in (Qt.Key_Tab, Qt.Key_Backtab) and e.modifiers() in (
+                Qt.NoModifier, Qt.ShiftModifier):
+            delta = -1 if key == Qt.Key_Backtab or e.modifiers() == Qt.ShiftModifier else 1
+            if rich_text.change_indent(cursor, delta):
+                self.setTextCursor(cursor)
+                return True
+            # Tab at the start of a plain paragraph starts a list (the
+            # habit typed bullets taught), where lists can be kept.
+            if (delta > 0 and not cursor.hasSelection() and cursor.atBlockStart()
+                    and self._holds_structure()
+                    and not self._indent_level_and_has_bullet(block.text())[0]
+                    and not self._indent_level_and_has_bullet(block.text())[1]):
+                self.toggle_list(rich_text.BULLET)
+                return True
+            return False
+        if cursor.hasSelection():
+            return False
+        if rich_text.is_divider(block):
+            return self._divider_key(e, cursor, block)
+        previous = block.previous()
+        if (key == Qt.Key_Backspace and plain and cursor.atBlockStart()
+                and previous.isValid() and rich_text.is_divider(previous)):
+            # Backspace just below a divider takes the divider away.
+            rich_text.remove_divider(previous)
+            return True
+        if (rich_text.quote_depth(block) and block.textList() is None and plain and (
+                (key in (Qt.Key_Return, Qt.Key_Enter) and not block.text())
+                or (key == Qt.Key_Backspace and cursor.atBlockStart()))):
+            # Return on an empty quoted line, or Backspace at the start of
+            # a quoted paragraph: one level of quote less.
+            cursor.beginEditBlock()
+            rich_text.set_quote_depth(block, rich_text.quote_depth(block) - 1)
+            cursor.endEditBlock()
+            self.viewport().update()
+            return True
+        if block.textList() is not None and plain and (
+                (key in (Qt.Key_Return, Qt.Key_Enter) and not block.text())
+                or (key == Qt.Key_Backspace and cursor.atBlockStart())):
+            # Return on an empty item, or Backspace at an item's start: one
+            # level up, and out of the list from the top level.
+            rich_text.change_indent(cursor, -1)
+            self.setTextCursor(cursor)
+            return True
+        heading = block.blockFormat().headingLevel()
+        if heading and e.key() in (Qt.Key_Return, Qt.Key_Enter) and plain:
+            # Return at the end of a heading starts a Body paragraph, the
+            # way Pages and every Markdown editor continue after a title;
+            # anywhere else in it, both halves stay headings.
+            cursor.beginEditBlock()
+            fmt = block.blockFormat()
+            if cursor.atBlockEnd():
+                fmt = rich_text.heading_block_format(fmt, 0)
+                char = rich_text.body_char_format(cursor.charFormat())
+            else:
+                char = cursor.charFormat()
+            cursor.insertBlock(fmt, char)
+            cursor.endEditBlock()
+            self.setTextCursor(cursor)
+            self.setCurrentCharFormat(char)
+            self._update_active_format()
+            return True
+        if heading and e.key() == Qt.Key_Backspace and plain and cursor.atBlockStart():
+            # Backspace at the start of a heading makes it Body first.
+            self.set_heading(0)
+            return True
+        return False
+
+    def _divider_key(self, e, cursor, block) -> bool:
+        """A divider holds no text: typing on it goes into the paragraph
+        below (made when there is none), Backspace and Delete take it
+        away."""
+        key = e.key()
+        if key in (Qt.Key_Backspace, Qt.Key_Delete):
+            rich_text.remove_divider(block)
+            return True
+        if key in (Qt.Key_Return, Qt.Key_Enter) or (
+                e.text() and e.text().isprintable()
+                and not e.modifiers() & (Qt.ControlModifier | Qt.MetaModifier)):
+            below = block.next()
+            if not below.isValid() or rich_text.is_divider(below) or \
+                    key in (Qt.Key_Return, Qt.Key_Enter):
+                cursor.beginEditBlock()
+                cursor.movePosition(QTextCursor.EndOfBlock)
+                cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
+                cursor.endEditBlock()
+            else:
+                cursor.setPosition(below.position())
+            self.setTextCursor(cursor)
+            # Return is done; a character is typed where the caret is now.
+            return key in (Qt.Key_Return, Qt.Key_Enter)
+        return False
+
     def _apply_active_format_to_cursor(self):
         """Apply the active formatting state to the current cursor position."""
         fmt = QTextCharFormat()
@@ -792,6 +1094,29 @@ class HtmlEditor(QTextEdit):
             event.acceptProposedAction()
         else:
             super().dropEvent(event)
+
+    def paste_from_clipboard(self):
+        """Paste (Ctrl+V, Edit > Paste). A clipboard image is reported to
+        whoever owns media handling; with nobody listening it falls
+        through to the plain-text path that strips foreign formatting."""
+        clip = QApplication.clipboard()
+        cursor = self.textCursor()
+        text = (clip.text() or "").strip()
+        if (cursor.hasSelection() and link_url.is_bare_http_url(text) and self._holds_structure()
+                and "\u2029" not in cursor.selectedText()):
+            # A web address pasted over words makes them a link to it.
+            rich_text.set_link(cursor, "", text)
+            cursor.setPosition(cursor.selectionEnd())
+            self.setTextCursor(cursor)
+            self._leave_link_at_end()
+            return
+        if clip.mimeData().hasImage():
+            image = clip.image()
+            if not image.isNull() and self.isSignalConnected(
+                    QMetaMethod.fromSignal(self.image_pasted)):
+                self.image_pasted.emit(image)
+                return
+        self.paste_normalized()
 
     def paste_normalized(self):
         """Paste plain text with default formatting (no external styles, no baked colors)."""

@@ -28,6 +28,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QObject  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from nostr.outbox.lookup import Lookup  # noqa: E402
@@ -192,3 +193,40 @@ def test_an_answer_after_closing_is_dropped():
     win.reject()
     net.reads[0](found(name="alice"))         # nothing happens, nothing raises
     assert win.page == READING
+
+
+# -- the menu entry --------------------------------------------------------------------------
+
+def test_edit_profile_opens_a_window_that_reads_the_active_account(monkeypatch):
+    import main_window as mw_module
+    from types import SimpleNamespace
+    from PySide6.QtWidgets import QMainWindow
+
+    reads = []
+
+    class FakeEditing(QObject):
+        def __init__(self, *, profile, **_kw):
+            super().__init__(_kw.get("parent"))
+            self.profile = profile
+
+        def read(self, done):
+            reads.append(self.profile)
+
+        def save(self, changes, done):
+            pass
+
+    monkeypatch.setattr(mw_module, "ProfileEditing", FakeEditing)
+    profile = SimpleNamespace(user_pubkey="ab" * 32, is_local=True)
+    host = QMainWindow()
+    host._profile_store = SimpleNamespace(default=lambda: profile)
+    host._relay_pool = host._session_pool = host._relay_directory = None
+    host.is_dark_theme = False
+    mw_module.MainWindow._on_edit_profile(host)
+    windows = host.findChildren(pw.ProfileWindow)
+    assert len(windows) == 1 and windows[0].isVisible()
+    assert reads == [profile]
+    # Leave nothing behind for the tests that run after this one.
+    from PySide6.QtCore import QCoreApplication, QEvent
+    windows[0].close()
+    host.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)

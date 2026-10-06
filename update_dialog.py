@@ -52,8 +52,9 @@ from i18n import _
 from constants import (
     DARK_BORDER, DARK_FG, DARK_MENU_BG, DARK_MUTED_FG,
     LIGHT_BORDER, LIGHT_FG, LIGHT_MENU_BG, LIGHT_MUTED_FG,
-    LIGHT_SELECTION, MONO_FONT,
+    LIGHT_SELECTION,
 )
+from fonts import monospace_family
 from update_flow import AUTOMATIC, DOWNLOAD, PREPARE, RESTART
 
 # Dialog states.
@@ -115,7 +116,7 @@ def _stylesheet(is_dark: bool) -> str:
     QLabel#update_step_badge[state="error"] {{ border-color: {err}; color: {err}; }}
     QLineEdit#update_command {{
         background: {field}; color: {fg}; border: 1px solid {border};
-        border-radius: 4px; padding: 4px 6px; font-family: "{MONO_FONT}"; font-size: 12px;
+        border-radius: 4px; padding: 4px 6px; font-family: "{monospace_family()}"; font-size: 12px;
     }}
     QProgressBar {{
         background: {field}; border: 1px solid {border}; border-radius: 3px;

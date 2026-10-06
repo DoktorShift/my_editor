@@ -70,6 +70,7 @@ from PySide6.QtWidgets import (
 )
 
 from alerts import confirm_destructive
+from atomic_file import save_document
 
 import i18n
 import url_safety
@@ -767,6 +768,8 @@ class MediaLibraryDialog(QDialog):
     file_picked = Signal(object, str)   # MediaFile, alt_text (empty when alt row is hidden)
     # Upload to these servers the profile lists too; only after the click.
     server_suggestions_accepted = Signal(list)
+    # Publish the servers uploads go to, for other Nostr apps; asked first.
+    share_server_list_requested = Signal()
 
     def __init__(
         self,
@@ -1087,6 +1090,19 @@ class MediaLibraryDialog(QDialog):
         suggestion_row.addWidget(self._suggestion_use)
         self._suggestion_box.setVisible(False)
         layout.addWidget(self._suggestion_box)
+
+        # Other Nostr apps look for this account's pictures on the servers
+        # its published list names. Publishing it is the person's choice.
+        self._share_servers = QPushButton(_("Share Server List…"))
+        self._share_servers.setFlat(True)
+        self._share_servers.setAutoDefault(False)
+        self._share_servers.setToolTip(
+            _("Tell other Nostr apps which servers hold your media."))
+        self._share_servers.clicked.connect(self.share_server_list_requested)
+        share_row = QHBoxLayout()
+        share_row.addWidget(self._share_servers)
+        share_row.addStretch(1)
+        layout.addLayout(share_row)
 
         # Drop zone.
         self._drop_zone = _DropZone(self)
@@ -1710,9 +1726,8 @@ class MediaLibraryDialog(QDialog):
         """Copy a cached file to the user-chosen destination. ``src`` is
         a ``Path``-compatible source already in the Blossom cache."""
         try:
-            data = src.read_bytes() if hasattr(src, "read_bytes") else open(src, "rb").read()
-            with open(dest, "wb") as f:
-                f.write(data)
+            data = Path(src).read_bytes()
+            save_document(dest, data)
         except OSError as exc:
             self._set_status(_("Could not save: {error}").format(error=exc), error=True)
             return

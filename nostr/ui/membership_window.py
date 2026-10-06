@@ -6,7 +6,7 @@ One window with a page for each stage of joining, in the order it happens:
 
     overview   what membership is, what it costs, and Continue
     apply      the statutes, consent, and the optional details
-    pay        the invoice as a QR code, Copy Invoice, Open in Wallet
+    pay        the invoice as a QR code to scan with a wallet, and Copy Invoice
     member     what is active now, and the Nostr address
     working    the short wait while the signer and the association answer
 
@@ -38,8 +38,7 @@ import json
 from typing import Callable, Optional
 from urllib.parse import urlsplit
 
-from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -55,6 +54,7 @@ from PySide6.QtWidgets import (
 )
 
 from alerts import CANCEL, Button, ask, confirm_destructive, inform
+from atomic_file import save_text_document
 from alerts import DEFAULT as ALERT_DEFAULT
 from i18n import _
 from nostr import einundzwanzig_api as e21
@@ -107,17 +107,6 @@ def _service_detail(service) -> str:
     return f"{service.summary} {service.note}" if service.note else service.summary
 
 
-def open_lightning_invoice(bolt11: str) -> bool:
-    """Hand an invoice to whatever wallet app handles Lightning links.
-
-    Only a well-formed invoice is handed over. False when nothing on this
-    computer opened it.
-    """
-    if not bolt11 or e21.bolt11_amount_sats(bolt11) is None:
-        return False
-    return QDesktopServices.openUrl(QUrl(f"lightning:{bolt11}"))
-
-
 class MembershipWindow(AssistantWindow):
     """Joining EINUNDZWANZIG, start to finish, for the active Nostr identity."""
 
@@ -139,13 +128,11 @@ class MembershipWindow(AssistantWindow):
                  signs_locally: bool = False, profile_address: str = "",
                  is_dark: bool = True,
                  watcher_factory: Optional[Callable] = None,
-                 open_lightning: Callable[[str], bool] = open_lightning_invoice,
                  prices=None,
                  parent=None):
         super().__init__(_("EINUNDZWANZIG Membership"), is_dark=is_dark, parent=parent)
         self._watcher_factory = watcher_factory or (
             lambda api_, year, parent_: e21.PaymentWatcher(api_, year, parent=parent_))
-        self._open_lightning = open_lightning
         # Today's Bitcoin price, to show the fee in sats, CHF and EUR. None
         # shows the association's amount alone.
         self._price_lookup = prices
@@ -643,9 +630,7 @@ class MembershipWindow(AssistantWindow):
         body, col = page()
         self._pay_title = text_label("", "title")
         col.addWidget(self._pay_title)
-        self._pay_intro = text_label(_("Pay with any Lightning wallet. When you’ve paid, "
-                                       "click I’ve Paid and MyEditor confirms it with "
-                                       "EINUNDZWANZIG."))
+        self._pay_intro = text_label("")
         col.addWidget(self._pay_intro)
         self._amount = text_label("", "amount", wrap=False)
         self._amount.setAlignment(Qt.AlignCenter)
@@ -660,19 +645,19 @@ class MembershipWindow(AssistantWindow):
         self._qr.setAccessibleName(_("Lightning invoice code to scan with a wallet"))
         col.addWidget(self._qr, 0, Qt.AlignHCenter)
 
+        # The code is the way to pay (owner decision, Q6). Copy Invoice is
+        # its text twin: for a wallet on this computer, and for anyone who
+        # cannot scan, such as a VoiceOver user.
         actions = QHBoxLayout()
         actions.addStretch(1)
         self._copy_button = QPushButton(_("Copy Invoice"))
         self._copy_button.setAutoDefault(False)
         self._copy_button.clicked.connect(self._copy_invoice)
-        self._wallet_button = QPushButton(_("Open in Wallet"))
-        self._wallet_button.setAutoDefault(False)
-        self._wallet_button.clicked.connect(self._open_wallet)
         actions.addWidget(self._copy_button)
-        actions.addWidget(self._wallet_button)
         actions.addStretch(1)
         col.addLayout(actions)
-        self._browser_button = link_button(_("Pay in Browser Instead"), self._pay_in_browser)
+        # Only when there is no invoice to show as a code: the payment page.
+        self._browser_button = link_button(_("Pay in Browser"), self._pay_in_browser)
         col.addWidget(self._browser_button, 0, Qt.AlignHCenter)
 
         self._pay_status = text_label("", "muted")
@@ -716,13 +701,10 @@ class MembershipWindow(AssistantWindow):
                                               dark="#000000", light="#FFFFFF"))
         self._qr.setVisible(has_invoice)
         self._copy_button.setVisible(has_invoice)
-        self._wallet_button.setVisible(has_invoice)
-        self._browser_button.setVisible(bool(invoice.checkout_url))
-        self._browser_button.setText(_("Pay in Browser Instead") if has_invoice
-                                     else _("Pay in Browser"))
+        self._browser_button.setVisible(not has_invoice and bool(invoice.checkout_url))
         self._pay_intro.setText(
-            _("Pay with any Lightning wallet. When you’ve paid, click I’ve Paid "
-              "and MyEditor confirms it with EINUNDZWANZIG.") if has_invoice else
+            _("Scan the code with any Lightning wallet. When you’ve paid, click "
+              "I’ve Paid and MyEditor confirms it with EINUNDZWANZIG.") if has_invoice else
             _("Pay on the EINUNDZWANZIG payment page. When you’ve paid, click "
               "I’ve Paid and MyEditor confirms it."))
         self._pay_intro.setVisible(True)
@@ -767,13 +749,6 @@ class MembershipWindow(AssistantWindow):
         # fires cancels it rather than touching a deleted button.
         button = self._copy_button
         QTimer.singleShot(1500, button, lambda: button.setText(_("Copy Invoice")))
-
-    def _open_wallet(self) -> None:
-        if self._invoice is None or not self._invoice.bolt11:
-            return
-        if not self._open_lightning(self._invoice.bolt11):
-            self._set_pay_status(_("No app on this computer opens Lightning invoices. "
-                                   "Scan the code with your phone, or copy the invoice."))
 
     def _pay_in_browser(self) -> None:
         if self._invoice is not None and self._invoice.checkout_url:
@@ -825,8 +800,7 @@ class MembershipWindow(AssistantWindow):
 
         def back():
             # Paid: the invoice and the ways to pay it are no longer the point.
-            for widget in (self._qr, self._copy_button, self._wallet_button,
-                           self._browser_button):
+            for widget in (self._qr, self._copy_button, self._browser_button):
                 widget.setVisible(False)
             self._pay_title.setText(_("Payment Received"))
             self._pay_intro.setText("")
@@ -1070,8 +1044,8 @@ class MembershipWindow(AssistantWindow):
         if not path:
             return
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(export.document, f, ensure_ascii=False, indent=2)
+            save_text_document(path, json.dumps(export.document, ensure_ascii=False,
+                                                indent=2))
         except OSError as exc:
             inform(self, title=_("Couldn’t save your data"), message=str(exc),
                    is_dark=self._is_dark)

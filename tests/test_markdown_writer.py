@@ -13,9 +13,10 @@ What must hold:
   Lines typed one under the other stay separate, as paragraphs: the one
   break every Nostr reader shows alike.
 
-  Typed text is Markdown and is written as typed; only a web address
-  that holds a character a reader would take for emphasis is written as
-  <address>, so it survives being read back.
+  Typed text is Markdown and is written as typed (footnote marks
+  included); only a web address that holds a character a reader would
+  take for emphasis is written as <address>, so it survives being read
+  back.
 
   A short note is plain text: no markup, list markers and link addresses
   kept.
@@ -186,6 +187,21 @@ def test_an_address_with_markup_characters_is_kept_whole(address):
     assert document_to_markdown(from_markdown(written)) == written
 
 
+def test_footnote_marks_are_written_as_typed():
+    # A reference and its definition, typed by hand, reach the reader as
+    # Markdown footnotes: nothing in them is escaped.
+    doc = typed("A claim[^1] and another[^note].\n\n[^1]: The source.\n[^note]: More.")
+    assert document_to_markdown(doc) == (
+        "A claim[^1] and another[^note].\n\n[^1]: The source.\n\n[^note]: More.\n")
+    assert document_to_note_text(doc) == (
+        "A claim[^1] and another[^note].\n\n[^1]: The source.\n[^note]: More.")
+
+
+def test_a_footnote_mark_in_bold_text_stays_one():
+    doc = typed(("a claim[^1]", {"bold": True}))
+    assert document_to_markdown(doc) == "**a claim[^1]**\n"
+
+
 @pytest.mark.parametrize("address", ["https://example.com/plain", "nostr:npub1abcdef"])
 def test_a_plain_address_stays_bare(address):
     assert document_to_markdown(typed(f"see {address}")) == f"see {address}\n"
@@ -204,6 +220,38 @@ def test_indented_code_stays_code():
 def test_a_link_that_shows_its_address_is_an_autolink():
     doc = typed(("https://x.example/a_b", {"href": "https://x.example/a_b"}))
     assert document_to_markdown(doc) == "<https://x.example/a_b>\n"
+
+
+@pytest.mark.parametrize("words, href, written", [
+    ("https://example.com/photo.jpg", "https://example.com/photo.jpg",
+     "https://example.com/photo.jpg"),
+    ("www.example.com", "http://www.example.com", "www.example.com"),
+    ("ada@example.com", "mailto:ada@example.com", "ada@example.com"),
+])
+def test_a_link_that_shows_its_own_address_is_written_bare(words, href, written):
+    doc = typed(("see ", {}), (words, {"href": href}), (". Next", {}))
+    out = document_to_markdown(doc)
+    assert out == f"see {written}. Next\n"
+    # Read back, it is the same link, written the same way.
+    assert document_to_markdown(from_markdown(out)) == out
+
+
+def test_a_media_address_alone_on_its_line_stays_bare():
+    url = "https://cdn.example/clip.mp4"
+    doc = typed("Watch this:\n", (url, {"href": url}), "\nThanks")
+    assert document_to_markdown(doc) == f"Watch this:\n\n{url}\n\nThanks\n"
+
+
+@pytest.mark.parametrize("after", ["word", "-x", "/more"])
+def test_an_own_address_followed_by_text_is_kept_whole(after):
+    url = "https://example.com"
+    out = document_to_markdown(typed((url, {"href": url}), after))
+    assert out == f"<{url}>{after}\n"
+
+
+def test_an_own_address_after_a_word_is_kept_whole():
+    url = "https://example.com"
+    assert document_to_markdown(typed("see:", (url, {"href": url}))) == f"see:<{url}>\n"
 
 
 def test_a_link_label_with_a_bracket_is_escaped():

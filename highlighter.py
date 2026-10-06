@@ -9,6 +9,8 @@ import re
 import os
 from PySide6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor, QFont
 
+from fonts import monospace_family
+
 
 _EXT_TO_LANG: dict[str, str] = {
     '.py': 'python', '.pyw': 'python',
@@ -512,3 +514,63 @@ class SyntaxHighlighter(QSyntaxHighlighter):
                 self.setFormat(m_s.start(), len(text) - m_s.start(), fmt)
                 self.setCurrentBlockState(i + 1)
             break  # handle only the first multiline found per line
+
+
+class RichTextLook(QSyntaxHighlighter):
+    """How a document with Markdown structure looks on screen.
+
+    Some of what a Markdown document holds has no look of its own in a
+    monospaced editor: inline code is set in the same font as the text
+    around it, and a link keeps whatever color the file it came from gave
+    it. This adds the look (a tinted chip behind inline code, links in
+    the theme's link color) without putting anything into the document,
+    so nothing of it is saved, published, or counted as formatting.
+
+    One highlighter per document: a code file gets SyntaxHighlighter, a
+    document with Markdown structure this one.
+    """
+
+    _CODE_BACKGROUND = {True: "#33363B", False: "#EEF0F2"}
+    _LINK = {True: "#4AA3FF", False: "#0A66C2"}
+
+    def __init__(self, document, is_dark: bool = True):
+        super().__init__(document)
+        self._is_dark = is_dark
+        self._build_formats()
+
+    def set_theme(self, is_dark: bool):
+        if self._is_dark != is_dark:
+            self._is_dark = is_dark
+            self._build_formats()
+            self.rehighlight()
+
+    def _build_formats(self):
+        self._code = QTextCharFormat()
+        self._code.setBackground(QColor(self._CODE_BACKGROUND[self._is_dark]))
+        # A font that is monospaced on this system: "monospace", which
+        # Markdown gives inline code, is not a font on macOS or Windows.
+        self._code.setFontFamilies([monospace_family(), "monospace"])
+        # A link reads as one in either theme, whatever color the file
+        # it came from gave it.
+        self._link = QTextCharFormat()
+        self._link.setForeground(QColor(self._LINK[self._is_dark]))
+        self._link.setFontUnderline(True)
+
+    def highlightBlock(self, text: str):
+        block = self.currentBlock()
+        start = block.position()
+        it = block.begin()
+        while not it.atEnd():
+            fragment = it.fragment()
+            if fragment.isValid():
+                fmt = fragment.charFormat()
+                if fmt.isImageFormat():
+                    pass
+                elif fmt.isAnchor():
+                    look = QTextCharFormat(self._link)
+                    if fmt.fontFixedPitch():
+                        look.merge(self._code)
+                    self.setFormat(fragment.position() - start, fragment.length(), look)
+                elif fmt.fontFixedPitch():
+                    self.setFormat(fragment.position() - start, fragment.length(), self._code)
+            it += 1

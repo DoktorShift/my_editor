@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
 from PySide6.QtNetwork import QLocalSocket
 import constants
+import diagnostics
 import i18n
 
 # The language is chosen before any module that holds texts is imported:
@@ -84,6 +85,8 @@ def _forward_to_running_instance(path: str) -> bool:
 
 
 def main():
+    # First, so even a failure while starting up is in the log.
+    diagnostics.install(constants.APP_VERSION)
     app = EditorApplication(sys.argv)
     # Qt's own words (file dialogs, standard buttons) in the same language.
     i18n.install_qt_translations(app)

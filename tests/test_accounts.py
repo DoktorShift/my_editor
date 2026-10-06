@@ -172,10 +172,10 @@ def test_the_suggested_file_name_says_whose_account_it_is():
 @pytest.mark.skipif(os.name != "posix", reason="POSIX permissions")
 def test_the_backup_file_is_private_from_the_first_byte(tmp_path):
     path = tmp_path / "backup.txt"
-    path.write_text("an older file anyone could read")
+    path.write_text("an older file anyone could read", encoding="utf-8")
     os.chmod(path, 0o644)
     aw.write_backup_file(str(path), "the backup")
-    assert path.read_text() == "the backup"
+    assert path.read_text(encoding="utf-8") == "the backup"
     assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
     fresh = tmp_path / "fresh.txt"
     aw.write_backup_file(str(fresh), "x")
@@ -591,3 +591,35 @@ def test_an_account_kept_here_can_be_backed_up_any_time(tmp_path):
     settle()
     assert files.opens_with("correct horse") == SK
     assert "Backup saved" in win.backup_form.note.text()
+
+
+# -- moving a key kept here into Amber --------------------------------------------------------
+
+def test_moving_to_amber_keeps_the_key_off_the_screen_and_checks_the_account(qt_app):
+    from nostr.ui.account_windows import AMBER_CONNECT, AMBER_GET, AMBER_IMPORT, MOVED
+    from nostr.ui.account_windows import MoveToSignerWindow
+    from types import SimpleNamespace
+
+    pairings = []
+    win = MoveToSignerWindow(secret=SK, name="Alice",
+                             connect_signer=lambda on_profile, parent=None:
+                             pairings.append(on_profile), is_dark=False)
+    moved = []
+    win.moved.connect(moved.append)
+    win.buttons["continue"].click()
+    assert win.page == AMBER_GET
+    win.buttons["continue"].click()
+    assert win.page == AMBER_IMPORT
+    # The key is never on screen as text.
+    from PySide6.QtWidgets import QLabel
+    assert not any(NSEC in label.text() for label in win.findChildren(QLabel))
+    win.buttons["continue"].click()
+    assert win.page == AMBER_CONNECT
+    win.buttons["connect"].click()
+    other = SimpleNamespace(user_pubkey="cd" * 32, display_name="")
+    pairings[0](other)                                  # Amber signs as someone else
+    assert moved == [] and not win._connect_error.isHidden()
+    same = SimpleNamespace(user_pubkey=PK, display_name="")
+    pairings[0](same)
+    assert moved == [same] and same.display_name == "Alice"
+    assert win.page == MOVED

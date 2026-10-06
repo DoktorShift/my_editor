@@ -174,7 +174,7 @@ def invoice(*, paid=False, bolt11="lnbcrt1", checkout="https://pay.einundzwanzig
                              receipt_url=None))
 
 
-def window(api=None, *, pubkey=PUBKEY, known_member=None, handle=None, opened=None,
+def window(api=None, *, pubkey=PUBKEY, known_member=None, handle=None,
            signs_locally=False, prices=None, profile_address=""):
     watchers = []
 
@@ -187,7 +187,6 @@ def window(api=None, *, pubkey=PUBKEY, known_member=None, handle=None, opened=No
                            known_member=known_member, handle=handle, is_dark=False,
                            signs_locally=signs_locally, profile_address=profile_address,
                            watcher_factory=factory,
-                           open_lightning=opened if opened is not None else (lambda b: True),
                            prices=prices)
     win.watchers = watchers
     return win
@@ -534,12 +533,17 @@ def test_copy_invoice_puts_the_invoice_on_the_clipboard(qt_app):
     assert win._copy_button.text() == "Copied"
 
 
-def test_open_in_wallet_says_what_to_do_when_no_wallet_answers():
+def test_paying_is_the_code_and_its_text_twin():
+    # Owner decision (Q6): the code is the way to pay, with Copy Invoice for
+    # a wallet on this computer or anyone who cannot scan. No wallet hand-off,
+    # and no browser while there is a code.
     api = FakeApi()
-    win = window(api, opened=lambda bolt11: False)
+    win = window(api)
     to_pay(win, api)
-    win._wallet_button.click()
-    assert "Scan the code" in win._pay_status.text()
+    assert not win._qr.isHidden() and not win._copy_button.isHidden()
+    assert win._browser_button.isHidden()
+    assert "Scan the code" in win._pay_intro.text()
+    assert not hasattr(win, "_wallet_button")
 
 
 def test_without_an_invoice_code_the_payment_page_is_the_way():
@@ -827,7 +831,7 @@ def test_once_paid_the_invoice_and_its_buttons_go_away():
     win.watchers[0].paid.emit(invoice(paid=True))
     api.last("me").ok(status(e21.STATUS_AWAITING_PAYMENT))   # not confirmed yet
     assert win.page == PAY
-    for widget in (win._qr, win._copy_button, win._wallet_button, win._browser_button):
+    for widget in (win._qr, win._copy_button, win._browser_button):
         assert widget.isHidden()
     assert "payment arrived" in win._pay_status.text()
     assert default_button(win).text() == "Check Again"
@@ -911,4 +915,31 @@ def test_a_very_long_page_scrolls_instead_of_leaving_the_screen():
     assert win.height() <= available
     assert win._scroll.verticalScrollBar().maximum() > 0
     assert default_button(win).isVisible()
+    win.close()
+
+
+def test_the_page_sits_on_the_windows_own_background():
+    # A scroll area paints its page by default, which washed out the text
+    # (and made it unreadable in dark mode).
+    win = window()
+    assert not win._stack.autoFillBackground()
+    assert not win._scroll.viewport().autoFillBackground()
+
+
+@pytest.mark.parametrize("long_note", [False, True])
+def test_a_page_is_never_cut_off_at_the_side(long_note):
+    # The pay page is narrower than the application page; it must be laid
+    # out for its own width, inside the window, scrolling or not.
+    api = FakeApi()
+    win = window(api)
+    to_pay(win, api, inv=invoice(bolt11="lnbc210n1pjexample"))
+    if long_note:
+        win._pay_intro.setText("A very long note that wraps over many lines. " * 400)
+    win.show()
+    QApplication.processEvents()
+    page = win._pages[PAY]
+    assert win._stack.minimumSizeHint().width() == page.minimumSizeHint().width()
+    assert win._scroll.viewport().width() >= page.minimumSizeHint().width()
+    assert win._scroll.geometry().right() <= win.width()
+    assert win._pay_intro.width() <= win._scroll.viewport().width()
     win.close()

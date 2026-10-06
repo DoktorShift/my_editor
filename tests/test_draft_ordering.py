@@ -28,8 +28,10 @@ from unittest.mock import MagicMock
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QCoreApplication, QObject, Signal  # noqa: E402
+from PySide6.QtCore import QObject, Signal  # noqa: E402
+from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from nostr import crypto, events  # noqa: E402
 from nostr.draft_store import DraftStore  # noqa: E402
@@ -44,7 +46,9 @@ PK = crypto.get_public_key(SK).hex()
 
 @pytest.fixture(scope="module", autouse=True)
 def qt_app():
-    return QCoreApplication.instance() or QCoreApplication(sys.argv)
+    # A widget-capable application, as every other test file creates:
+    # a plain QCoreApplication made first would stop the GUI tests.
+    return QApplication.instance() or QApplication(sys.argv)
 
 
 def meta(event_id, created_at, ciphertext="CT", ident="x"):
@@ -112,7 +116,7 @@ def test_a_deleted_draft_is_not_brought_back_by_an_older_copy():
 def make_sync():
     # The wraps below are dated in 1970, so the clock is too: they expire
     # 90 days after it (NIP-40), as every draft wrap does.
-    sync = DraftSync(relay_pool=MagicMock(), relay_directory=MagicMock(),
+    sync = DraftSync(read_draft_list=lambda _profile, done: done([]), relay_pool=MagicMock(), relay_directory=MagicMock(),
                      session_pool=MagicMock(), store=DraftStore(clock=lambda: 1_000),
                      clock=lambda: 1_000)
     profile = MagicMock()

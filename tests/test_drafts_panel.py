@@ -646,7 +646,7 @@ def test_menu_commands_use_title_style_capitalisation():
     source = (
         pathlib.Path(__file__).resolve().parent.parent
         / "nostr" / "ui" / "drafts_panel.py"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     for command in (
         "Retry Decryption", "Open in New Tab", "Publish…",
         "Copy Event ID", "Delete Draft",

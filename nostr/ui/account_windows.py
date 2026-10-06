@@ -79,6 +79,10 @@ AMBER_CONNECT = "amber_connect"
 SETUP = "setup"
 DONE = "done"
 
+# Move to Signer App pages (the Amber ones are shared).
+INTRO = "intro"
+MOVED = "moved"
+
 # Restore Account pages.
 OPEN = "open"
 PASSWORD = "password"
@@ -393,7 +397,137 @@ class BackupAccountWindow(AssistantWindow):
 # Create Account
 # =============================================================================
 
-class CreateAccountWindow(AssistantWindow):
+class _AmberSteps:
+    """The three Amber pages, shared by Create Account and Move to Signer
+    App: get Amber, add the key to it, connect it.
+
+    A window using them holds ``_secret`` (the key, bytes), ``_pubkey``
+    and ``_connect_signer``, builds them with :meth:`_build_amber_pages`,
+    and says where Go Back from the first leads (``_before_amber``) and
+    what a pairing as the right account does (``_amber_paired``). A
+    pairing as another account is refused here, before anything is saved.
+    """
+
+    def _build_amber_pages(self) -> None:
+        self._build_amber_get()
+        self._build_amber_import()
+        self._build_amber_connect()
+
+    def _build_amber_get(self) -> None:
+        widget, col = page()
+        col.addWidget(text_label(_("Get Amber"), "title"))
+        col.addWidget(text_label(
+            _("Amber is a free signer app for Android. It keeps your private key on "
+              "your phone and asks you before anything is signed.")))
+        col.addWidget(link_button(_("Get Amber from Zapstore"),
+                                  lambda: self.link_activated.emit(AMBER_URL)),
+                      0, Qt.AlignLeft)
+        col.addSpacing(6)
+        col.addWidget(text_label(
+            _("Amber runs on Android only. On an iPhone, go back and keep the key on "
+              "this computer for now."), "muted"))
+        col.addStretch(1)
+        self.add_page(AMBER_GET, widget)
+
+    def _show_amber_get(self) -> None:
+        self.show_page(AMBER_GET, [("back", _("Go Back"), LEADING, self._before_amber),
+                                   ("continue", _("Continue"), DEFAULT,
+                                    self._show_amber_import)])
+
+    def _build_amber_import(self) -> None:
+        widget, col = page()
+        col.addWidget(text_label(_("Add Your Key to Amber"), "title"))
+        col.addWidget(StepList([
+            ("add", _("In Amber, choose Add account. Not Connect app.")),
+            ("key", _("Choose to use a private key, then scan the code below or paste "
+                      "the key you copy here.")),
+        ]))
+        self._qr = QLabel()
+        self._qr.setObjectName("qr")
+        self._qr.setAlignment(Qt.AlignCenter)
+        self._qr.setAccessibleName(_("Private key code for Amber"))
+        self._qr.hide()
+        col.addWidget(self._qr, 0, Qt.AlignHCenter)
+        row = QHBoxLayout()
+        self._qr_button = link_button(_("Show Code for Amber"), self._toggle_qr)
+        row.addWidget(self._qr_button)
+        row.addSpacing(16)
+        row.addWidget(link_button(_("Copy Private Key"), self._copy_for_amber))
+        row.addStretch(1)
+        col.addLayout(row)
+        self._amber_note = text_label(
+            _("This code is your private key. Scan it only with your own Amber, on its "
+              "Add account screen."), "muted")
+        col.addWidget(self._amber_note)
+        col.addStretch(1)
+        self.add_page(AMBER_IMPORT, widget)
+
+    def _show_amber_import(self) -> None:
+        self._qr.hide()
+        self._qr_button.setText(_("Show Code for Amber"))
+        self.show_page(AMBER_IMPORT, [("back", _("Go Back"), LEADING, self._show_amber_get),
+                                      ("continue", _("I’ve Added It"), DEFAULT,
+                                       self._show_amber_connect)])
+
+    def _toggle_qr(self) -> None:
+        if not self._qr.isHidden():
+            self._qr.clear()
+            self._qr.hide()
+            self._qr_button.setText(_("Show Code for Amber"))
+            return
+        # The key exactly as Amber imports it: a lowercase nsec.
+        nsec = bech32.encode_nsec(self._secret.hex())
+        self._qr.setPixmap(make_qr_pixmap(nsec, size=200, dark="#000000", light="#FFFFFF"))
+        self._qr.show()
+        self._qr_button.setText(_("Hide Code"))
+
+    def _copy_for_amber(self) -> None:
+        copy_secret(bech32.encode_nsec(self._secret.hex()))
+        self._amber_note.setText(_("Private key copied. Paste it in Amber’s Add account "
+                                   "screen. MyEditor clears it from the clipboard in a "
+                                   "minute."))
+
+    def _build_amber_connect(self) -> None:
+        widget, col = page()
+        col.addWidget(text_label(_("Connect Amber to MyEditor"), "title"))
+        col.addWidget(StepList([
+            ("open", _("In Amber, open Connect app (the scan icon).")),
+            ("scan", _("Scan the code MyEditor shows, and approve the request.")),
+        ]))
+        col.addWidget(text_label(
+            _("MyEditor then checks that Amber signs as this account."), "muted"))
+        self._connect_error = text_label("", "error")
+        self._connect_error.hide()
+        col.addWidget(self._connect_error)
+        col.addStretch(1)
+        self.add_page(AMBER_CONNECT, widget)
+
+    def _show_amber_connect(self) -> None:
+        self._qr.clear()
+        self._qr.hide()
+        self.show_page(AMBER_CONNECT, [
+            ("back", _("Go Back"), LEADING, self._show_amber_import),
+            ("connect", _("Show Connection Code…"), DEFAULT,
+             lambda: self._connect_signer(self._on_paired, parent=self)),
+        ])
+
+    def _on_paired(self, profile) -> None:
+        if profile is None:
+            return
+        if profile.user_pubkey.lower() != self._pubkey:
+            # Amber paired as another account. That pairing is not wanted,
+            # and nothing was saved for it: a profile already here for that
+            # account stays exactly as it was.
+            self._connect_error.setText(
+                _("Amber is signing as a different account. In Amber, select the "
+                  "account you just added, then try again."))
+            self._connect_error.show()
+            return
+        self._connect_error.hide()
+        self._amber_paired(profile)
+
+
+class CreateAccountWindow(_AmberSteps, AssistantWindow):
     """From nothing to a signed-in Nostr account with a backup."""
 
     account_ready = Signal(object, str, object)   # Profile, name, SetupReport
@@ -421,9 +555,7 @@ class CreateAccountWindow(AssistantWindow):
         self._build_name()
         self._build_backup()
         self._build_choose()
-        self._build_amber_get()
-        self._build_amber_import()
-        self._build_amber_connect()
+        self._build_amber_pages()
         self._build_setup()
         self._build_done()
         self._show_name()
@@ -567,119 +699,13 @@ class CreateAccountWindow(AssistantWindow):
             return
         self._start_setup(profile, saved_detail=_("Your key is kept on this computer."))
 
-    # -- Amber -------------------------------------------------------------------
+    # -- Amber (the pages are _AmberSteps') ------------------------------------------
 
-    def _build_amber_get(self) -> None:
-        widget, col = page()
-        col.addWidget(text_label(_("Get Amber"), "title"))
-        col.addWidget(text_label(
-            _("Amber is a free signer app for Android. It keeps your private key on "
-              "your phone and asks you before anything is signed.")))
-        col.addWidget(link_button(_("Get Amber from Zapstore"),
-                                  lambda: self.link_activated.emit(AMBER_URL)),
-                      0, Qt.AlignLeft)
-        col.addSpacing(6)
-        col.addWidget(text_label(
-            _("Amber runs on Android only. On an iPhone, go back and keep the key on "
-              "this computer for now."), "muted"))
-        col.addStretch(1)
-        self.add_page(AMBER_GET, widget)
+    def _before_amber(self) -> None:
+        self._show_choose()
 
-    def _show_amber_get(self) -> None:
-        self.show_page(AMBER_GET, [("back", _("Go Back"), LEADING, self._show_choose),
-                                   ("continue", _("Continue"), DEFAULT,
-                                    self._show_amber_import)])
-
-    def _build_amber_import(self) -> None:
-        widget, col = page()
-        col.addWidget(text_label(_("Add Your Key to Amber"), "title"))
-        col.addWidget(StepList([
-            ("add", _("In Amber, choose Add account. Not Connect app.")),
-            ("key", _("Choose to use a private key, then scan the code below or paste "
-                      "the key you copy here.")),
-        ]))
-        self._qr = QLabel()
-        self._qr.setObjectName("qr")
-        self._qr.setAlignment(Qt.AlignCenter)
-        self._qr.setAccessibleName(_("Private key code for Amber"))
-        self._qr.hide()
-        col.addWidget(self._qr, 0, Qt.AlignHCenter)
-        row = QHBoxLayout()
-        self._qr_button = link_button(_("Show Code for Amber"), self._toggle_qr)
-        row.addWidget(self._qr_button)
-        row.addSpacing(16)
-        row.addWidget(link_button(_("Copy Private Key"), self._copy_for_amber))
-        row.addStretch(1)
-        col.addLayout(row)
-        self._amber_note = text_label(
-            _("This code is your private key. Scan it only with your own Amber, on its "
-              "Add account screen."), "muted")
-        col.addWidget(self._amber_note)
-        col.addStretch(1)
-        self.add_page(AMBER_IMPORT, widget)
-
-    def _show_amber_import(self) -> None:
-        self._qr.hide()
-        self._qr_button.setText(_("Show Code for Amber"))
-        self.show_page(AMBER_IMPORT, [("back", _("Go Back"), LEADING, self._show_amber_get),
-                                      ("continue", _("I’ve Added It"), DEFAULT,
-                                       self._show_amber_connect)])
-
-    def _toggle_qr(self) -> None:
-        if not self._qr.isHidden():
-            self._qr.clear()
-            self._qr.hide()
-            self._qr_button.setText(_("Show Code for Amber"))
-            return
-        # The key exactly as Amber imports it: a lowercase nsec.
-        nsec = bech32.encode_nsec(self._secret.hex())
-        self._qr.setPixmap(make_qr_pixmap(nsec, size=200, dark="#000000", light="#FFFFFF"))
-        self._qr.show()
-        self._qr_button.setText(_("Hide Code"))
-
-    def _copy_for_amber(self) -> None:
-        copy_secret(bech32.encode_nsec(self._secret.hex()))
-        self._amber_note.setText(_("Private key copied. Paste it in Amber’s Add account "
-                                   "screen. MyEditor clears it from the clipboard in a "
-                                   "minute."))
-
-    def _build_amber_connect(self) -> None:
-        widget, col = page()
-        col.addWidget(text_label(_("Connect Amber to MyEditor"), "title"))
-        col.addWidget(StepList([
-            ("open", _("In Amber, open Connect app (the scan icon).")),
-            ("scan", _("Scan the code MyEditor shows, and approve the request.")),
-        ]))
-        col.addWidget(text_label(
-            _("MyEditor then checks that Amber signs as your new account."), "muted"))
-        self._connect_error = text_label("", "error")
-        self._connect_error.hide()
-        col.addWidget(self._connect_error)
-        col.addStretch(1)
-        self.add_page(AMBER_CONNECT, widget)
-
-    def _show_amber_connect(self) -> None:
-        self._qr.clear()
-        self._qr.hide()
-        self.show_page(AMBER_CONNECT, [
-            ("back", _("Go Back"), LEADING, self._show_amber_import),
-            ("connect", _("Show Connection Code…"), DEFAULT,
-             lambda: self._connect_signer(self._on_paired, parent=self)),
-        ])
-
-    def _on_paired(self, profile) -> None:
-        if profile is None:
-            return
-        if profile.user_pubkey.lower() != self._pubkey:
-            # Amber paired as another account. That pairing is not wanted,
-            # and nothing was saved for it: a profile already here for that
-            # account stays exactly as it was.
-            self._connect_error.setText(
-                _("Amber is signing as a different account. In Amber, select the "
-                  "account you just added, then try again."))
-            self._connect_error.show()
-            return
-        self._connect_error.hide()
+    def _amber_paired(self, profile) -> None:
+        """Amber signs as the new account: save it and set it up."""
         profile.display_name = self.name or profile.display_name
         try:
             self._store.upsert(profile)
@@ -774,6 +800,68 @@ class CreateAccountWindow(AssistantWindow):
 # =============================================================================
 # Restore Account
 # =============================================================================
+
+class MoveToSignerWindow(_AmberSteps, AssistantWindow):
+    """Move an account whose key is kept on this computer into Amber.
+
+    The key goes into Amber (scanned from a code shown only on request, or
+    pasted from a clipboard that forgets it after a minute; it is never
+    shown as text), then Amber is paired, and the pairing must sign as
+    this same account. ``moved`` then hands the paired profile, unsaved,
+    to the account controller, which makes it the account's signer and
+    offers to delete the copy of the key kept here.
+    """
+
+    moved = Signal(object)          # the paired Profile, signing as this account
+    link_activated = Signal(str)
+
+    def __init__(self, *, secret: bytes, name: str, connect_signer: Callable[..., None],
+                 is_dark: bool = True, parent=None) -> None:
+        super().__init__(_("Move Key to Signer App"), is_dark=is_dark, parent=parent)
+        self._secret = secret
+        self._pubkey = crypto.get_public_key(secret).hex()
+        self._name = name
+        self._connect_signer = connect_signer
+        self._build_intro()
+        self._build_amber_pages()
+        self._build_moved()
+        self._show_intro()
+
+    def _build_intro(self) -> None:
+        widget, col = page()
+        col.addWidget(text_label(_("Move Your Key to a Signer App"), "title"))
+        col.addWidget(text_label(
+            _("Your private key is kept on this computer now. A signer app on your "
+              "phone can keep it instead, and asks you before anything is signed. "
+              "MyEditor then signs through the app.")))
+        col.addWidget(text_label(
+            _("Before you start, make sure you have a backup of this account "
+              "(Nostr > Back Up Account…). It is the way back if your phone is lost."),
+            "muted"))
+        col.addStretch(1)
+        self.add_page(INTRO, widget)
+
+    def _show_intro(self) -> None:
+        self.show_page(INTRO, [("cancel", _("Cancel"), NORMAL, self.reject),
+                               ("continue", _("Continue"), DEFAULT, self._show_amber_get)])
+
+    def _before_amber(self) -> None:
+        self._show_intro()
+
+    def _amber_paired(self, profile) -> None:
+        profile.display_name = profile.display_name or self._name
+        self.moved.emit(profile)
+        self.show_page(MOVED, [("done", _("Done"), DEFAULT, self.accept)])
+
+    def _build_moved(self) -> None:
+        widget, col = page()
+        col.addWidget(text_label(_("Amber Holds Your Key"), "title"))
+        col.addWidget(text_label(
+            _("MyEditor signs through Amber from now on. Amber asks you before "
+              "anything is signed.")))
+        col.addStretch(1)
+        self.add_page(MOVED, widget)
+
 
 class RestoreAccountWindow(AssistantWindow):
     """Back into an account from its backup file or its private key."""

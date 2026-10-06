@@ -47,6 +47,7 @@ import urllib.request
 import zipfile
 from dataclasses import dataclass
 
+from atomic_file import read_json, write_json
 from i18n import _
 
 TOOLCHAIN_DIR = os.path.expanduser("~/.config/my_editor/rmd_toolchain")
@@ -107,18 +108,11 @@ class ComponentStatus:
 # --------------------------------------------------------------------------- #
 
 def _load_state() -> dict:
-    try:
-        with open(_STATE_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except (OSError, json.JSONDecodeError):
-        return {}
+    return read_json(_STATE_PATH, dict)
 
 
 def _save_state(state: dict) -> None:
-    os.makedirs(TOOLCHAIN_DIR, exist_ok=True)
-    with open(_STATE_PATH, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2)
+    write_json(_STATE_PATH, state, indent=2)
 
 
 # --------------------------------------------------------------------------- #

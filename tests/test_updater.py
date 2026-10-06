@@ -153,7 +153,7 @@ def test_a_release_without_a_hash_is_never_downloaded():
 def make_bundle(root, name="MyEditor.app"):
     exe = root / name / "Contents" / "MacOS" / "my-editor"
     exe.parent.mkdir(parents=True)
-    exe.write_text("")
+    exe.write_text("", encoding="utf-8")
     return str(exe)
 
 
@@ -210,7 +210,7 @@ def dead_pid() -> int:
 def stub(bin_dir, name: str, body: str) -> None:
     """A stand-in for a system tool, found first on PATH."""
     path = bin_dir / name
-    path.write_text("#!/bin/sh\n" + textwrap.dedent(body))
+    path.write_text("#!/bin/sh\n" + textwrap.dedent(body), encoding="utf-8")
     path.chmod(0o755)
 
 
@@ -226,7 +226,7 @@ def tools(tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     log = tmp_path / "tools.log"
-    log.write_text("")
+    log.write_text("", encoding="utf-8")
     # `open` only records what it was asked to open.
     stub(bin_dir, "open", f'printf "%s\\n" "$@" >> {shlex.quote(str(log))}\n')
     return SimpleNamespace(bin=bin_dir, log=log)
@@ -245,11 +245,11 @@ def fail_mv_for(bin_dir, pattern: str) -> None:
 
 def make_app(folder, version: str) -> None:
     (folder / "Contents" / "MacOS").mkdir(parents=True)
-    (folder / "Contents" / "version").write_text(version)
+    (folder / "Contents" / "version").write_text(version, encoding="utf-8")
 
 
 def app_version(folder) -> str:
-    return (folder / "Contents" / "version").read_text().strip()
+    return (folder / "Contents" / "version").read_text(encoding="utf-8").strip()
 
 
 @pytest.fixture
@@ -270,7 +270,7 @@ def test_the_mac_swap_puts_the_new_app_in_place_and_opens_it(tools, mac_install)
     assert run_script(script, tools.bin).returncode == 0
     assert app_version(mac_install.bundle) == "new"
     assert sorted(os.listdir(mac_install.apps)) == ["MyEditor.app"]   # no copy left over
-    assert tools.log.read_text().splitlines() == [str(mac_install.bundle)]
+    assert tools.log.read_text(encoding="utf-8").splitlines() == [str(mac_install.bundle)]
 
 
 @posix_only
@@ -281,7 +281,7 @@ def test_a_mac_swap_that_cannot_move_the_new_app_in_puts_the_old_one_back(tools,
     run_script(script, tools.bin)
     assert app_version(mac_install.bundle) == "old"
     assert sorted(os.listdir(mac_install.apps)) == ["MyEditor.app"]
-    assert tools.log.read_text().splitlines() == [str(mac_install.bundle)]
+    assert tools.log.read_text(encoding="utf-8").splitlines() == [str(mac_install.bundle)]
 
 
 @posix_only
@@ -292,11 +292,11 @@ def test_a_mac_swap_that_cannot_move_the_old_app_out_opens_it_unchanged(tools, m
     run_script(script, tools.bin)
     assert app_version(mac_install.bundle) == "old"
     assert sorted(os.listdir(mac_install.apps)) == ["MyEditor.app"]
-    assert tools.log.read_text().splitlines() == [str(mac_install.bundle)]
+    assert tools.log.read_text(encoding="utf-8").splitlines() == [str(mac_install.bundle)]
 
 
 def make_appimage(path, version: str, ran) -> None:
-    path.write_text(f"#!/bin/sh\necho {version} > {shlex.quote(str(ran))}\n")
+    path.write_text(f"#!/bin/sh\necho {version} > {shlex.quote(str(ran))}\n", encoding="utf-8")
 
 
 @pytest.fixture
@@ -317,7 +317,7 @@ def appimage_install(tmp_path):
 def test_the_appimage_swap_moves_the_new_file_in_and_opens_it(tools, appimage_install):
     a = appimage_install
     run_script(updater.appimage_swap_script(dead_pid(), str(a.new), str(a.app)), tools.bin)
-    assert a.ran.read_text().strip() == "new"
+    assert a.ran.read_text(encoding="utf-8").strip() == "new"
     assert os.listdir(a.folder) == ["MyEditor.AppImage"]
     assert os.stat(a.app).st_mode & stat.S_IXUSR
 
@@ -328,7 +328,7 @@ def test_an_appimage_swap_that_fails_opens_the_old_one_and_removes_the_new_file(
     a = appimage_install
     fail_mv_for(tools.bin, "*.new")
     run_script(updater.appimage_swap_script(dead_pid(), str(a.new), str(a.app)), tools.bin)
-    assert a.ran.read_text().strip() == "old"
+    assert a.ran.read_text(encoding="utf-8").strip() == "old"
     assert os.listdir(a.folder) == ["MyEditor.AppImage"]
 
 
@@ -348,7 +348,7 @@ def test_the_relaunch_helper_waits_for_this_process_then_opens_the_app(tools, tm
     started = time.monotonic()
     run_script(updater.relaunch_script(pid, str(app)), tools.bin)
     assert time.monotonic() - started > 0.5
-    assert ran.read_text().strip() == "relaunched"
+    assert ran.read_text(encoding="utf-8").strip() == "relaunched"
 
 
 def stage_tools(tools, *, image_has_app=True, copy_works=True, signature_ok=True):
@@ -385,7 +385,7 @@ def stage(tools, mac_install, tmp_path):
     dmg = tmp_path / "My Editor 3.4.dmg"
     dmg.write_bytes(b"image")
     result = run_script(updater.mac_stage_script(str(dmg), str(mac_install.staged)), tools.bin)
-    mounts = [line.split(" ", 1)[1] for line in tools.log.read_text().splitlines()]
+    mounts = [line.split(" ", 1)[1] for line in tools.log.read_text(encoding="utf-8").splitlines()]
     return result.returncode, mounts
 
 

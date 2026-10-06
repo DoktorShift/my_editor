@@ -2,6 +2,8 @@
 
 ## Keyboard shortcuts
 
+On macOS, `Ctrl` in these tables is the Command key (`⌘`) and `Alt` is Option (`⌥`). Where a Mac app uses a different key than Windows and Linux, both are given.
+
 ### File
 
 | Shortcut | Action |
@@ -21,44 +23,75 @@
 |---|---|
 | `Ctrl+B` | Bold |
 | `Ctrl+I` | Italic |
-| `Ctrl+U` | Underline |
-| `Ctrl+D` | Reset all formatting |
+| `Ctrl+U` | Underline (stays in local files: Markdown and Nostr have no underline) |
+| `Ctrl+Shift+X` on macOS, `Alt+Shift+5` on Windows and Linux | Strikethrough |
+| | Inline Code (`Format` menu) |
+| `Ctrl+\` | Clear Formatting (a link stays a link) |
+| `Ctrl+Alt+0` on macOS, `Ctrl+0` on Windows and Linux | Style: Body |
+| `Ctrl+Alt+1` to `Ctrl+Alt+3` on macOS, `Ctrl+1` to `Ctrl+3` on Windows and Linux | Style: Heading 1 to 3 (the same heading again makes it Body) |
+| `Ctrl+Shift+7` on macOS, `Ctrl+Shift+8` on Windows and Linux | Bulleted List (again: no list) |
+| `Ctrl+Shift+9` on macOS, `Ctrl+Shift+7` on Windows and Linux | Numbered List (again: no list) |
+| `Ctrl+]` / `Ctrl+[` | Increase / Decrease Indent of list items |
+| `Ctrl+'` on macOS (no shortcut on Windows and Linux) | Quote (again: no quote) |
+| `Ctrl+K` | Add Link (Edit Link when the caret is in a link) |
+| | `Insert > Divider`: a horizontal rule (`---`) after the paragraph |
 
-The **B**, **I**, and **U** buttons in the header bar and the **Format** menu mirror these shortcuts; the buttons highlight orange when the format is active at the cursor position.
+The status bar says, quietly, how long the document is: its words and how long it takes to read (225 words a minute, as the long-form Nostr readers count), or how many words are selected.
 
-### Undo / Redo
+The **format toolbar** above the document holds the controls used most: the paragraph style (Body, Heading 1 to 3), Bold, Italic, Strikethrough, Add Link, Bulleted List, Numbered List and Quote. Everything else is in the `Format` and `Insert` menus. `View > Show Toolbar` (`Ctrl+Alt+T` on macOS) hides it; a PDF tab has none.
+
+The keys follow each platform's own conventions: Apple Notes and Pages on macOS, Google Docs and LibreOffice on Windows and Linux. A command no convention has a key for has none.
+
+Links: `Ctrl+K` opens a small panel under the words with the link's text and address. It accepts web addresses (`https://` is added when you leave it out), email addresses and, while a Nostr account is in use, Nostr links; it says right there why anything else cannot be a link. Pasting a web address over selected words links them. `Ctrl`-click (`Cmd`-click on macOS) opens a link: web pages in your browser, Nostr links through njump.me. Typing right after a link is not part of it.
+
+Return at the end of a heading starts a Body paragraph; Backspace at the start of a heading makes it Body. Strikethrough, inline code and the paragraph styles are Markdown, so they are offered in documents that can hold Markdown structure (Markdown, HTML and new documents), not in plain-text and code files. Text colors are in `Format > Color`.
+
+### Edit
+
+The `Edit` menu has what every Mac app has there, in the same order:
 
 | Shortcut | Action |
 |---|---|
 | `Ctrl+Z` | Undo |
-| `Ctrl+Y` / `Ctrl+Shift+Z` | Redo |
+| `Ctrl+Shift+Z` (`Ctrl+Y` on Windows) | Redo |
+| `Ctrl+X` / `Ctrl+C` / `Ctrl+V` | Cut / Copy / Paste |
+| `Ctrl+Alt+Shift+V` (`Ctrl+Shift+V` on Windows and Linux) | Paste and Match Style: paste as plain text in the style around it |
+| `Ctrl+A` | Select All |
 
-### Search
+Cut, Copy, Paste and Select All act on whatever has the focus: the document, the find field, or the PDF reader.
+
+### Find
+
+`Edit > Find`:
 
 | Shortcut | Action |
 |---|---|
-| `Ctrl+F` | Open find bar |
-| `Enter` | Next match (while find bar is open) |
-| `Shift+Enter` | Previous match (while find bar is open) |
-| `F3` | Find next |
-| `Shift+F3` | Find previous |
+| `Ctrl+F` | Find (opens the find bar) |
+| `Ctrl+Alt+F` on macOS, `Ctrl+H` on Windows and Linux | Find and Replace: the find bar with a Replace row (Replace, Replace All) |
+| `Enter` / `Shift+Enter` | Next / previous match, while the find bar is open (`Enter` in the Replace field replaces) |
+| `Ctrl+G` / `Ctrl+Shift+G` on macOS, `F3` / `Shift+F3` elsewhere | Find Next / Find Previous |
+| `Ctrl+E` (macOS) | Use Selection for Find: the selected words become what Find Next looks for |
 | `Escape` | Close find bar and return to editor |
+
+The find bar's Options menu offers Match Case and Whole Words. A replacement takes the style of the text it replaces (a bold word stays bold, a link stays the same link), and Replace All is one step to undo.
 
 ### Editor
 
 | Shortcut | Action |
 |---|---|
-| `Tab` | Indent / create bullet |
-| `Shift+Tab` | Outdent / remove bullet indent |
-| `Enter` | New line (continues bullet if active) |
-| `Enter` (on empty bullet) | Exit bullet mode |
-| `Ctrl+Shift+L` | Toggle line numbers |
-| `Ctrl+Shift+T` | Toggle dark / light theme |
-| `Ctrl+Shift+H` | Toggle syntax highlighting |
+| `Tab` | In a list: nest the item one level deeper. At the start of a paragraph: start a bulleted list |
+| `Shift+Tab` | In a list: one level up, and out of the list from the top level |
+| `Enter` | New paragraph (a new item in a list) |
+| `Enter` (on an empty item) | One level up, and out of the list from the top level |
+| `Backspace` (at an item's start) | The same as `Shift+Tab` |
+| `Enter` (on an empty quoted line), `Backspace` (at a quote's start) | One level of quote less |
+| `Backspace` (just below a divider) | Removes the divider |
 
-The **`View`** menu holds the appearance options: theme, line numbers, syntax highlighting, background style (lined, dashed, dotted, grid), paper mode, and highlight current line.
+Lists are real lists, written to Markdown as `- item` and `1. item`, nested by four spaces. In plain-text files (`.txt`, code, R Markdown), `Tab` types a bullet as text (`    • item`) instead, as before.
 
-`Help > Keyboard Shortcuts` lists every shortcut. It is built from the same command list as the menus (`commands.py`), so the two always agree; the Nostr shortcuts appear there once an account is in use.
+The **`View`** menu holds the appearance options: theme, line numbers, syntax highlighting, background style (lined, dashed, dotted, grid), paper mode, and highlight current line. Nothing around the document repeats a menu: the window shows the format toolbar, the tabs and the text.
+
+`Help > Keyboard Shortcuts` lists every shortcut as it is on the computer in use: on a Mac in Apple's symbols (`⇧⌘S`), elsewhere with your keyboard's key names (`Strg+Umschalt+S` on a German one). It is built from the same command list as the menus (`commands.py`), so the two always agree; the Nostr shortcuts appear there once an account is in use.
 
 ### Nostr
 
@@ -71,7 +104,7 @@ The **`View`** menu holds the appearance options: theme, line numbers, syntax hi
 | `Ctrl+Shift+D` | Open or close the Drafts panel |
 | `Ctrl+Shift+S` | Save current document (chooser: local file or private Nostr draft) |
 
-The **`Nostr`** menu also exposes `Drafts…`, `Connect Signer…`, and `Sign Out Active Profile` for managing identities. The avatar chip at the far right of the header is a one-click profile switcher. See the [Nostr guide](nostr.md) for the full workflow.
+The **`Nostr`** menu also exposes `Drafts…`, `Connect Signer…`, and `Sign Out Active Profile` for managing identities. While an account is in use, its avatar sits at the right end of the tab row: a one-click profile switcher. See the [Nostr guide](nostr.md) for the full workflow.
 
 ---
 
@@ -121,13 +154,13 @@ or `F12`); the button stays greyed out when the PDF has no outline.
 
 ## Right-click menu
 
-Right-clicking in the editor opens a context menu with:
+Right-clicking in the editor opens a context menu with the same commands as the menus:
 
-- Copy / Cut / Paste
-- **Color**: apply one of six text colors (Red, Green, Orange, Yellow, Blue, Purple)
-- **Remove Color**: restore default text color
-- Bold / Italic / Underline toggles
-- **Reset Format**: clear all formatting at once
+- on a link: Open Link, Edit Link, Copy Link, Remove Link
+- Cut / Copy / Paste / Paste and Match Style
+- Bold / Italic / Underline / Strikethrough / Inline Code
+- **Color**: one of six text colors (Red, Green, Orange, Yellow, Blue, Purple), or **Remove Color**
+- **Clear Formatting**: every style and color at once; links stay links
 
 Right-clicking a **tab** opens a context menu with:
 
@@ -155,11 +188,11 @@ macOS shows a preview inside its print dialog. On Windows and Linux,
 | Format | Notes |
 |---|---|
 | `.txt` | Plain text, no formatting |
-| `.html` | Clean semantic HTML5; bullets become real lists, images are embedded as data URIs so the single file is shareable; adapts to the reader's light/dark mode |
+| `.html` | Clean semantic HTML5: headings, lists (bulleted, numbered, checklists), links, strikethrough and inline code are kept, and bullets typed as text become real lists; images are embedded as data URIs so the single file is shareable; adapts to the reader's light/dark mode. Opened again, its lists are real lists |
 | `.pdf` | Native PDF export: document metadata, locale-aware page size (A4/Letter), page-number footer, images scaled to the printable width; configure via `File > Page Setup…` |
 | `.md` | Markdown: bold, italic, strikethrough, inline code, links, headings, lists, quotes, code blocks, tables and task lists are kept; underline and colors are not (MyEditor asks first when the document has them). It is the same Markdown an article publishes. |
 | `.rtf` | Rich Text Format |
-| `.Rmd` | R Markdown: YAML frontmatter plus Pandoc markdown; colors and underline use Pandoc spans, images go into a `<name>_media/` folder next to the file |
+| `.Rmd` | R Markdown: YAML frontmatter plus Pandoc markdown with headings, lists, links, strikethrough and inline code; colors and underline use Pandoc spans, images go into a `<name>_media/` folder next to the file |
 
 ---
 

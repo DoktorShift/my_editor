@@ -27,7 +27,6 @@ grows as pages are examined and ``countChanged`` fires along the way,
 so the match label updates live without blocking on large documents.
 """
 
-import json
 import os
 import time
 
@@ -43,6 +42,7 @@ from PySide6.QtWidgets import (
     QTreeView, QVBoxLayout, QWidget,
 )
 
+from atomic_file import read_json, write_json
 from i18n import _, ngettext
 from url_safety import is_safe_external_url
 from widgets import FindBar
@@ -63,14 +63,7 @@ _MAX_ZOOM = 8.0
 # --------------------------------------------------------------------------- #
 
 def _load_positions() -> dict:
-    try:
-        with open(_POSITIONS_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, dict):
-            return data
-    except (OSError, json.JSONDecodeError):
-        pass
-    return {}
+    return read_json(_POSITIONS_PATH, dict)
 
 
 def load_view_state(path: str) -> dict | None:
@@ -81,21 +74,16 @@ def load_view_state(path: str) -> dict | None:
 
 def save_view_state(path: str, state: dict) -> None:
     """Persist the view state for ``path``, evicting the oldest entries
-    beyond the cap. Failures are swallowed: losing a reading position
-    must never interfere with closing a tab or quitting."""
-    try:
-        positions = _load_positions()
-        state = dict(state, ts=int(time.time()))
-        positions[os.path.abspath(path)] = state
-        if len(positions) > _MAX_POSITIONS:
-            oldest_first = sorted(positions.items(),
-                                  key=lambda kv: kv[1].get("ts", 0) if isinstance(kv[1], dict) else 0)
-            positions = dict(oldest_first[len(positions) - _MAX_POSITIONS:])
-        os.makedirs(os.path.dirname(_POSITIONS_PATH), exist_ok=True)
-        with open(_POSITIONS_PATH, "w", encoding="utf-8") as f:
-            json.dump(positions, f)
-    except OSError:
-        pass
+    beyond the cap. A failed write is only logged: losing a reading
+    position must never interfere with closing a tab or quitting."""
+    positions = _load_positions()
+    state = dict(state, ts=int(time.time()))
+    positions[os.path.abspath(path)] = state
+    if len(positions) > _MAX_POSITIONS:
+        oldest_first = sorted(positions.items(),
+                              key=lambda kv: kv[1].get("ts", 0) if isinstance(kv[1], dict) else 0)
+        positions = dict(oldest_first[len(positions) - _MAX_POSITIONS:])
+    write_json(_POSITIONS_PATH, positions)
 
 
 # --------------------------------------------------------------------------- #
@@ -254,6 +242,25 @@ class _ReaderView(QPdfView):
         # Hover feedback (pointing hand over links) needs move events
         # without a button held.
         self.viewport().setMouseTracking(True)
+
+    # -- copying -----------------------------------------------------------
+
+    def event(self, e):
+        # The copy key is the reader's own while it has the focus, the way
+        # a text field claims it: the window's Edit > Copy has the same key,
+        # and two shortcuts on one key would cancel each other out.
+        if (e.type() == QEvent.Type.ShortcutOverride
+                and e.matches(QKeySequence.StandardKey.Copy)):
+            e.accept()
+            return True
+        return super().event(e)
+
+    def keyPressEvent(self, e):
+        if e.matches(QKeySequence.StandardKey.Copy):
+            self.copy_selection()
+            e.accept()
+            return
+        super().keyPressEvent(e)
 
     # -- geometry (mirror of QPdfView's private layout) --------------------
 
@@ -524,7 +531,6 @@ class PdfViewerTab(QWidget):
         self._build_toolbar()
 
         self.findbar = FindBar(self.find_next, self.find_prev, self._close_findbar, self)
-        self.findbar.hint_label.setText(_("Enter: next  |  Shift+Enter: prev  |  Esc: close"))
         self.findbar.edit.textChanged.connect(self._on_search_text_changed)
         self.findbar.setVisible(False)
 
@@ -658,7 +664,6 @@ class PdfViewerTab(QWidget):
             (QKeySequence(Qt.Key_Plus), self.zoom_in),
             (QKeySequence(Qt.Key_Minus), self.zoom_out),
             (QKeySequence(Qt.Key_G), self._focus_page_box),
-            (QKeySequence.Copy, self.view.copy_selection),
             (QKeySequence(Qt.Key_Escape), self.view.clear_selection),
         ):
             sc = QShortcut(keys, self.view)

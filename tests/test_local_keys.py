@@ -158,7 +158,7 @@ def test_a_key_filed_under_the_wrong_public_key_is_not_handed_out(tmp_path):
     path = tmp_path / "nostr_keys.json"
     vault = KeyVault(path)
     other = "ab" * 32
-    path.write_text('{"version": 1, "keys": {"%s": "%s"}}' % (other, SK.hex()))
+    path.write_text('{"version": 1, "keys": {"%s": "%s"}}' % (other, SK.hex()), encoding="utf-8")
     assert vault.load(other) is None
 
 
@@ -172,7 +172,7 @@ def test_forgetting_a_key_removes_it(tmp_path):
 def test_a_missing_or_broken_file_means_no_keys(tmp_path):
     path = tmp_path / "nostr_keys.json"
     assert KeyVault(path).load("ab" * 32) is None
-    path.write_text("{not json")
+    path.write_text("{not json", encoding="utf-8")
     assert KeyVault(path).load("ab" * 32) is None
     path.write_bytes(b"\xff\xfe not text")
     assert KeyVault(path).load("ab" * 32) is None
@@ -180,11 +180,11 @@ def test_a_missing_or_broken_file_means_no_keys(tmp_path):
 
 def test_a_damaged_key_file_is_kept_aside_before_a_new_one_is_written(tmp_path):
     path = tmp_path / "nostr_keys.json"
-    path.write_text('{"version": 1, "keys": [')        # cut off mid-write
+    path.write_text('{"version": 1, "keys": [', encoding="utf-8")        # cut off mid-write
     pubkey = KeyVault(path).store(SK)
     assert KeyVault(path).load(pubkey) == SK
     aside = list(tmp_path.glob("nostr_keys.json.corrupt-*"))
-    assert len(aside) == 1 and aside[0].read_text() == '{"version": 1, "keys": ['
+    assert len(aside) == 1 and aside[0].read_text(encoding="utf-8") == '{"version": 1, "keys": ['
 
 
 @pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0,

@@ -31,7 +31,7 @@ confirm_destructive). They all build the dialog through the module-level
 from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -44,7 +44,7 @@ from PySide6.QtWidgets import (
 )
 
 import theme
-from constants import MONO_FONT
+from fonts import monospace_font
 from i18n import _
 
 DEFAULT = "default"
@@ -164,7 +164,7 @@ class Alert(QDialog):
     def _details(self, details: str) -> QPushButton:
         self.details_view = QPlainTextEdit(details)
         self.details_view.setReadOnly(True)
-        self.details_view.setFont(QFont(MONO_FONT, 10))
+        self.details_view.setFont(monospace_font(10))
         self.details_view.setMaximumHeight(140)
         self.details_view.hide()
         toggle = QPushButton(_("Show Details"))

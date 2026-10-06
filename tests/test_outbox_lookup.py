@@ -243,3 +243,18 @@ def test_a_subscription_asks_again_when_its_relay_comes_back():
     assert events == [{"id": "x"}]           # still delivered after the drop
     sub.close()
     assert a.holds == 0
+
+
+def test_one_article_is_found_by_its_identifier():
+    pool = HandPool()
+    results = []
+    pool.query = lookup.fetch_replaceable(pool, [A], kind=30023, author=PK, d_tag="my-post",
+                                          on_done=results.append)
+    sub = pool.subs[0]
+    assert sub.filters[0]["#d"] == ["my-post"]
+    mine = signed(30023, [["d", "my-post"], ["published_at", "1700000000"]],
+                  created_at=NOW - 100)
+    other = signed(30023, [["d", "another-post"]], created_at=NOW)    # newer, but not it
+    sub.answer(A, mine, other)
+    assert results[0].state is LookupState.FOUND
+    assert results[0].event["id"] == mine["id"]

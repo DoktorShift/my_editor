@@ -30,7 +30,7 @@ import re
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-from i18n import N_, _
+from i18n import _
 
 from ..rss.parser import FeedItem
 from .errors import ERROR_CODES, SourceError, friendly_message
@@ -44,9 +44,6 @@ FEED, AUTHOR, COLLECTION, SINGLE = "feed", "author", "collection", "single"
 FOLLOWABLE = (FEED, AUTHOR, COLLECTION)
 FEED_FORMATS = ("rss", "atom", "jsonfeed")
 
-# What a source is, as a found card names it.
-KIND_WORDS = {FEED: N_("Feed"), AUTHOR: N_("Nostr author"), COLLECTION: N_("Collection"),
-              SINGLE: N_("Single post")}
 
 MAX_FILE_BYTES = 64 * 1024 * 1024
 MARKDOWN_SUFFIXES = (".md", ".mdx", ".markdown")
@@ -86,7 +83,9 @@ def kind_of(url: str, feed_format: str = "") -> str:
 
 
 def kind_word(kind: str) -> str:
-    return _(KIND_WORDS.get(kind, KIND_WORDS[SINGLE]))
+    """What a source is, as a found card names it."""
+    words = {FEED: _("Feed"), AUTHOR: _("Nostr author"), COLLECTION: _("Collection")}
+    return words.get(kind) or _("Single post")
 
 
 def is_list_address(url: str) -> bool:

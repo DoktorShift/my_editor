@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Callable, Iterable, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QLocale, QObject, Signal
 
@@ -56,7 +56,8 @@ from .drafts import (
 )
 from .draft_deletions import build_deletion_request
 from .events import build_event, verify_event
-from .outbox import RelayDirectory, ask_private_relays, normalize_relay_url
+from .outbox import RelayDirectory, ask_draft_relays, normalize_relay_url
+from .outbox.lookup import fetch_replaceable
 from .profiles import Profile
 from .relay import RelayPool
 
@@ -440,6 +441,51 @@ def build_article(
 
 
 # --------------------------------------------------------------------------- #
+# When an article was first published                                         #
+# --------------------------------------------------------------------------- #
+
+def published_at_of(event: Optional[dict]) -> Optional[int]:
+    """When an article was first published, read from a version of it: its
+    ``published_at`` (NIP-23), or, for a version without one, the time
+    that version was made, which is no later than the first publication
+    of what it replaced. None for no event or no usable time."""
+    if not isinstance(event, dict):
+        return None
+    for tag in event.get("tags", []) or []:
+        if isinstance(tag, list) and len(tag) >= 2 and tag[0] == "published_at":
+            try:
+                value = int(str(tag[1]).strip())
+            except ValueError:
+                break
+            if value > 0:
+                return value
+            break
+    created = event.get("created_at")
+    if isinstance(created, int) and not isinstance(created, bool) and created > 0:
+        return created
+    return None
+
+
+def find_first_publication(relay_pool: RelayPool, relay_directory: RelayDirectory,
+                           author: str, slug: str,
+                           on_done: Callable[[Optional[int]], None], *,
+                           parent: QObject, timeout_ms: int = 4_000) -> None:
+    """When the author's article ``slug`` was first published, or None
+    when it was never published (or no relay could say). The question
+    lives as long as ``parent`` (the dialog asking it).
+
+    NIP-23 makes ``published_at`` the time of the first publication, so a
+    new version of an article carries the old value: readers date it by
+    that, and an edit must not move it. Asked of the relays the author
+    publishes to, where the current version is."""
+    def got_relays(relays: List[str]) -> None:
+        fetch_replaceable(relay_pool, relays, kind=30023, author=author, d_tag=slug,
+                          on_done=lambda found: on_done(published_at_of(found.event)),
+                          timeout_ms=timeout_ms, parent=parent)
+    relay_directory.outbox_of(author, got_relays)
+
+
+# --------------------------------------------------------------------------- #
 # Slug helper                                                                  #
 # --------------------------------------------------------------------------- #
 
@@ -722,8 +768,8 @@ class DraftPublishJob(QObject):
         if self._inner_event is None:
             raise ValueError("no inner event to stash")
         self._emit_status(_("Looking up your relay list…"))
-        ask_private_relays(self._relay_directory, self._profile,
-                           self._on_relays_ready, entitled=self._entitled_relays)
+        ask_draft_relays(self._relay_directory, self._profile,
+                         self._on_relays_ready, entitled=self._entitled_relays)
 
     def send_signed(self, signed_event: dict) -> None:
         """Send a wrap signed earlier (by :attr:`signed`) as it is: no
@@ -740,7 +786,7 @@ class DraftPublishJob(QObject):
                 or not verify_event(signed_event)):
             raise ValueError("not a signed draft of this account and identifier")
         self._emit_status(_("Looking up your relay list…"))
-        ask_private_relays(
+        ask_draft_relays(
             self._relay_directory, self._profile,
             lambda relays: self._on_signed(signed_event, relays, checkpoint=False),
             entitled=self._entitled_relays)
@@ -938,9 +984,9 @@ class DraftDeleteJob(QObject):
         self._emit_status(_("Looking up your relay list…"))
         # Wherever the draft may be, including the relays it went to while
         # the account's own list was unknown: the tombstone replaces it there.
-        ask_private_relays(self._relay_directory, self._profile,
-                           self._on_relays_ready, entitled=self._entitled_relays,
-                           reading=True)
+        ask_draft_relays(self._relay_directory, self._profile,
+                         self._on_relays_ready, entitled=self._entitled_relays,
+                         reading=True)
 
     def cancel(self) -> None:
         self._cancelled = True

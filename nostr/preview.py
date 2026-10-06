@@ -33,7 +33,6 @@ images from an injected loader (no loader, no network).
 from __future__ import annotations
 
 import html
-import math
 import re
 from dataclasses import dataclass, field
 from typing import Callable, Iterable, Optional, Sequence
@@ -54,8 +53,10 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QTextBrowser
 
 import i18n
+import word_count
 from i18n import _, ngettext
 from markdown_writer import READ_FEATURES
+from rich_text import normalize_after_markdown_load
 from nostr import bech32
 
 # person's pubkey (hex) -> the name to show, or None
@@ -64,7 +65,7 @@ NameLookup = Callable[[str], Optional[str]]
 ImageLookup = Callable[[str], Optional[QImage]]
 
 COLUMN_WIDTH = 680
-WORDS_PER_MINUTE = 225
+WORDS_PER_MINUTE = word_count.WORDS_PER_MINUTE
 SERIF = ["Charter", "Iowan Old Style", "Source Serif Pro", "Georgia", "serif"]
 MEDIA_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
 
@@ -167,8 +168,9 @@ def markdown_for_preview(markdown: str, names: Optional[NameLookup] = None) -> s
 # --------------------------------------------------------------------------- #
 
 def reading_minutes(markdown: str) -> int:
-    words = len(re.findall(r"\w+", markdown))
-    return max(1, math.ceil(words / WORDS_PER_MINUTE))
+    """Minutes to read the article, by the one rule (word_count.py); at
+    least one, since a byline never says "0 min read"."""
+    return max(1, word_count.reading_minutes(word_count.count_words(markdown)))
 
 
 def _date_text(published_at: int) -> str:
@@ -295,6 +297,7 @@ def article_document(markdown: str, article: Article, *, names: Optional[NameLoo
     doc.setDocumentMargin(0)
     # The body, rendered from exactly the published Markdown.
     doc.setMarkdown(markdown_for_preview(markdown, names), MARKDOWN_FEATURES)
+    normalize_after_markdown_load(doc)
     _tidy_tables(doc)
     _style_body(doc.begin(), colors)
 

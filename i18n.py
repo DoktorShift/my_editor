@@ -108,7 +108,10 @@ class Catalog:
             return None
         if n is None or len(forms) == 1:
             return forms[0]
-        index = self.plural(n)
+        try:
+            index = int(self.plural(n))
+        except Exception:  # noqa: BLE001
+            index = _english_plural(n)
         return forms[index] if 0 <= index < len(forms) else forms[-1]
 
 
@@ -154,6 +157,8 @@ def _po_entries(text: str):
         elif line.startswith("msgstr["):
             close = line.index("]")
             index = int(line[len("msgstr["):close])
+            if not 0 <= index < _MAX_PLURAL_FORMS:
+                raise ValueError(f"plural form {index} is out of range")
             forms = entry.setdefault("msgstr", [])
             while len(forms) <= index:
                 forms.append("")
@@ -175,14 +180,31 @@ def _po_entries(text: str):
         yield entry
 
 
+# No language has more plural forms than this (Arabic has six).
+_MAX_PLURAL_FORMS = 16
+
+
+def _english_plural(n: int) -> int:
+    return 0 if n == 1 else 1
+
+
 def _plural_rule(header: str) -> Callable[[int], int]:
+    """The language's plural rule from the Plural-Forms header, tried on
+    every count from 0 to 200 first: a rule that fails or answers a form
+    the language does not have is replaced by English's, so a broken
+    header cannot break a window that shows a count."""
     match = re.search(r"plural=([^;\n]+)", header or "")
-    if match:
-        try:
-            return _gettext.c2py(match.group(1).strip())
-        except (ValueError, SyntaxError):
-            pass
-    return lambda n: 0 if n == 1 else 1
+    forms = re.search(r"nplurals\s*=\s*(\d+)", header or "")
+    if not match:
+        return _english_plural
+    try:
+        rule = _gettext.c2py(match.group(1).strip())
+        count = int(forms.group(1)) if forms else _MAX_PLURAL_FORMS
+        if all(0 <= int(rule(n)) < count for n in range(201)):
+            return rule
+    except Exception:  # noqa: BLE001, whatever the header holds
+        pass
+    return _english_plural
 
 
 # --------------------------------------------------------------------------- #
@@ -245,16 +267,20 @@ def language() -> str:
     return _language
 
 
-def available() -> List[str]:
-    """English, and every language with a translation in ``locale/``."""
+_LANGUAGE_CODE = re.compile(r"\A[a-z]{2,3}\Z")
+
+
+def available(locale_dir: Optional[str] = None) -> List[str]:
+    """English, and every language with a translation in ``locale/``
+    (files named by a two- or three-letter code, like ``de.po``)."""
     found = [ENGLISH]
     try:
-        names = sorted(os.listdir(_locale_dir()))
+        names = sorted(os.listdir(locale_dir or _locale_dir()))
     except OSError:
         names = []
     for name in names:
         code, ext = os.path.splitext(name)
-        if ext == ".po" and code not in found:
+        if ext == ".po" and _LANGUAGE_CODE.match(code) and code not in found:
             found.append(code)
     return found
 
@@ -275,12 +301,12 @@ def system_languages() -> List[str]:
     return codes
 
 
-def resolve(choice: str) -> str:
+def resolve(choice: str, locale_dir: Optional[str] = None) -> str:
     """The language a setting means: the system's first language that has
     a translation (English otherwise), or the one chosen."""
     if choice == PSEUDO:
         return PSEUDO
-    have = available()
+    have = available(locale_dir)
     if choice and choice != SYSTEM:
         return choice if choice in have else ENGLISH
     for code in system_languages():
@@ -292,9 +318,10 @@ def resolve(choice: str) -> str:
 def load_catalog(code: str, locale_dir: Optional[str] = None) -> Optional[Catalog]:
     path = os.path.join(locale_dir or _locale_dir(), f"{code}.po")
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        # utf-8-sig: an editor may have saved the file with a BOM.
+        with open(path, "r", encoding="utf-8-sig") as f:
             return Catalog.from_po(f.read())
-    except (OSError, ValueError):
+    except Exception:  # noqa: BLE001, a broken translation must never stop the app
         return None
 
 
@@ -304,7 +331,7 @@ def install(choice: str = SYSTEM, *, locale_dir: Optional[str] = None) -> str:
 
     Call before the modules whose constants hold texts are imported."""
     global _catalogs, _language, _pseudo
-    code = resolve(choice)
+    code = resolve(choice, locale_dir)
     _pseudo = code == PSEUDO
     _catalogs = []
     if code not in (ENGLISH, PSEUDO):

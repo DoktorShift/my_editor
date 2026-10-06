@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import word_count
 from i18n import _, language, ngettext
 
 from ..avatar_store import AvatarStore
@@ -39,7 +40,9 @@ from ..bunker import BunkerSessionPool, humanize_failure
 from ..known_people import KnownPeople
 from ..outbox import RelayDirectory, relays_from
 from ..profiles import Profile, ProfileStore
-from ..publisher import PublishJob, PublishResult, build_article, slugify
+from ..publisher import (
+    PublishJob, PublishResult, build_article, find_first_publication, slugify,
+)
 from ..relay import RelayPool
 from ..search import Nip50SearchClient
 from .avatar import (
@@ -57,9 +60,6 @@ from .mention_chips import MentionChipRow
 from .thumbnail_loader import ThumbnailLoader
 
 
-# Rough words-per-minute used for the read-time hint. Public-facing prose
-# tends to be ~200 wpm; long enough that the badge feels truthful.
-_WPM_READ_SPEED: int = 200
 
 
 # --------------------------------------------------------------------------- #
@@ -337,6 +337,9 @@ class PublishArticleDialog(QDialog):
         private_library: Optional[PrivateLibrary] = None,
         default_title: str = "",
         default_slug: str = "",
+        first_published: Optional[int] = None,
+        published_at_lookup: Optional[
+            Callable[[str, str, Callable[[Optional[int]], None]], None]] = None,
         parent=None,
         is_dark: bool = True,
     ) -> None:
@@ -373,6 +376,14 @@ class PublishArticleDialog(QDialog):
         self._current_profile = active_profile
         self._job: Optional[PublishJob] = None
         self._signed_event_id: Optional[str] = None
+        # NIP-23: ``published_at`` is when the article first went out, and
+        # an edit keeps it. Known here when the tab came from a draft that
+        # carries it (for that draft's identifier); otherwise asked of the
+        # relays at publish time, and "now" only for a first publication.
+        self._first_published = (
+            {default_slug: first_published} if default_slug and first_published else {})
+        self._published_at_lookup = published_at_lookup or self._look_up_published_at
+        self._looking_up = False
         # Tracks whether the user has manually edited the slug. As long as
         # they haven't, slug stays in sync with title.
         self._slug_is_auto = True
@@ -734,11 +745,11 @@ class PublishArticleDialog(QDialog):
     # -- meta strip --------------------------------------------------------
 
     def _refresh_meta(self) -> None:
-        words = len(self._body_edit.toPlainText().split())
+        words = word_count.count_words(self._body_edit.toPlainText())
         if words == 0:
             self._meta_label.setText("")
             return
-        minutes = max(1, round(words / _WPM_READ_SPEED))
+        minutes = word_count.reading_minutes(words)
         self._meta_label.setText(ngettext(
             "{words} word · ~{minutes} min read", "{words} words · ~{minutes} min read", words,
         ).format(words=QLocale(language()).toString(words), minutes=minutes))
@@ -794,7 +805,8 @@ class PublishArticleDialog(QDialog):
         slug = self._slug_edit.text().strip()
         body = self._body_edit.toPlainText().strip()
         # NIP-23 requires the d-tag; body without anything to say isn't useful.
-        self._publish_btn.setEnabled(self._job is None and bool(slug) and bool(body))
+        self._publish_btn.setEnabled(self._job is None and not self._looking_up
+                                     and bool(slug) and bool(body))
 
     def _set_status(self, text: str, *, error: bool = False) -> None:
         self._status.setText(text)
@@ -823,12 +835,45 @@ class PublishArticleDialog(QDialog):
 
     # -- publish flow ------------------------------------------------------
 
+    def _look_up_published_at(self, author: str, slug: str,
+                              on_done: Callable[[Optional[int]], None]) -> None:
+        find_first_publication(self._relay_pool, self._relay_directory, author, slug,
+                               on_done, parent=self)
+
     def _on_publish(self) -> None:
         slug = self._slug_edit.text().strip()
         body = self._body_edit.toPlainText().strip()
-        if not slug or not body or self._job is not None:
+        if not slug or not body or self._job is not None or self._looking_up:
             return
+        known = self._first_published.get(slug)
+        if known:
+            self._publish(slug, body, known)
+            return
+        # An article published before keeps its date: find it first.
+        self._looking_up = True
+        self._set_busy(True)
+        self._set_status(_("Checking whether this article was published before…"))
+        author = self._current_profile.user_pubkey
+        self._published_at_lookup(
+            author, slug, lambda when, s=slug, a=author: self._on_published_at(s, a, when))
 
+    def _on_published_at(self, slug: str, author: str, when: Optional[int]) -> None:
+        if not self._looking_up:
+            return                                     # the dialog was closed meanwhile
+        self._looking_up = False
+        if (author != self._current_profile.user_pubkey
+                or slug != self._slug_edit.text().strip()):
+            # Changed while asking (another account, another identifier).
+            self._set_busy(False)
+            self._set_status("")
+            return
+        if when:
+            self._first_published[slug] = when
+        body = self._body_edit.toPlainText().strip()
+        self._set_busy(False)
+        self._publish(slug, body, when or int(time.time()))
+
+    def _publish(self, slug: str, body: str, published_at: int) -> None:
         try:
             unsigned = build_article(
                 content=body,
@@ -837,7 +882,7 @@ class PublishArticleDialog(QDialog):
                 title=self._title_edit.text(),
                 summary=self._summary_edit.text(),
                 image=self._image_edit.text(),
-                published_at=int(time.time()),
+                published_at=published_at,
                 hashtags=self._hashtag_list(),
                 mentions=self._mention_row.mentions(),
             )
@@ -906,4 +951,5 @@ class PublishArticleDialog(QDialog):
         if self._job is not None:
             self._job.cancel()
             self._job = None
+        self._looking_up = False
         super().reject()

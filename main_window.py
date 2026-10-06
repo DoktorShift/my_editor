@@ -5,7 +5,6 @@
 
 import hashlib
 import itertools
-import json
 import os
 import platform
 import re
@@ -27,8 +26,8 @@ from PySide6.QtGui import (
 )
 from PySide6.QtPrintSupport import QPrintDialog, QPrintPreviewDialog
 from PySide6.QtWidgets import (
-    QMainWindow, QFileDialog, QInputDialog, QMenu, QWidget,
-    QVBoxLayout, QTextEdit, QTabWidget, QToolButton, QHBoxLayout, QStatusBar,
+    QApplication, QMainWindow, QFileDialog, QInputDialog, QLineEdit, QMenu, QWidget,
+    QVBoxLayout, QPlainTextEdit, QTextEdit, QTabWidget, QToolButton, QHBoxLayout, QStatusBar,
     QPushButton, QTabBar, QWidgetAction, QLabel, QDialog, QSplitter,
     QProgressDialog
 )
@@ -36,21 +35,37 @@ from PySide6.QtWidgets import (
 from constants import (
     DARK_BG, DARK_FG, LIGHT_BG, LIGHT_FG, DARK_SELECTION, LIGHT_SELECTION,
     DARK_MENU_BG, DARK_MENU_FG, LIGHT_MENU_BG, LIGHT_MENU_FG,
-    DARK_BORDER, LIGHT_BORDER, MONO_FONT, APP_DISPLAY_NAME, APP_VERSION, APP_URL
+    DARK_BORDER, LIGHT_BORDER, APP_DISPLAY_NAME, APP_VERSION, APP_URL, TEXT_COLORS,
+    DARK_MUTED_FG, LIGHT_MUTED_FG,
 )
-from widgets import FindBar, HeaderWidget, LineNumberGutter, FileChangedBar, UpdateBar
+from widgets import FindBar, LineNumberGutter, FileChangedBar, UpdateBar
+from format_toolbar import FormatToolbar
+from atomic_file import (
+    read_json, read_text_document, save_document, save_text_document, write_json,
+)
+import diagnostics
+from fonts import monospace_family
 import i18n
 from i18n import _, ngettext, pgettext
-from commands import FILE, FORMAT, HELP, NOSTR, SEARCH, VIEW, Command, CommandRegistry
+from commands import (
+    EDIT, FILE, FORMAT, HELP, INSERT, NOSTR, SEARCH, VIEW, Command, CommandRegistry,
+    platform_keys,
+)
 from doc_walk import iter_blocks, iter_image_names, serialize_plain_with_images
 from markdown_writer import (
     READ_FEATURES, document_to, document_to_markdown, has_local_only_formatting,
     holds_faithfully, image_markdown,
 )
 from editor import HtmlEditor
+import link_url
+import rich_text
+from rich_text import normalize_after_markdown_load
 import image_safety
 import url_safety
-from highlighter import SyntaxHighlighter, detect_language, detect_language_from_content, LANGUAGE_DISPLAY_NAMES
+from highlighter import (
+    LANGUAGE_DISPLAY_NAMES, RichTextLook, SyntaxHighlighter, detect_language,
+    detect_language_from_content,
+)
 from settings import load_settings, save_setting
 from welcome import is_pristine_welcome, welcome_html
 from update_check import UpdateChecker
@@ -65,7 +80,9 @@ from alerts import (
 from update_dialog import UpdateDialog, WhatsNewDialog
 from update_flow import AUTOMATIC, guide_url, plan_for
 import theme
-from export_html import document_to_html, normalize_lists_after_set_html, sniff_image_ext
+from export_html import document_to_html, normalize_after_set_html, sniff_image_ext
+from find_replace import find_all, replace_all, replace_match
+from word_count import count_words, reading_minutes
 from export_pdf import export_pdf, load_page_setup
 from page_setup_dialog import PageSetupDialog
 import printing
@@ -116,7 +133,11 @@ from recent_files import load_recent, add_recent, clear_recent
 from nostr.avatar_store import AvatarBatchLoader, AvatarStore
 from nostr.bech32 import encode_note
 from nostr.blossom.errors import friendly_message
+from nostr.media_server_list import publish_server_list
+from nostr.outbox import writer as outbox_writer
+from nostr.profile_editing import ProfileEditing
 from nostr.state import NostrState
+from nostr.ui.profile_window import ProfileWindow
 from nostr.blossom.server_list import UserServerList
 from nostr.blossom.store import MediaFile, MediaStore
 from nostr.bunker import BunkerSessionPool
@@ -152,10 +173,12 @@ from nostr.publisher import (
     DraftBulkDeleteJob,
     DraftPublishJob,
     PublishedMedia,
+    published_at_of,
 )
 from nostr.relay import RelayPool
 from nostr.search import Nip50SearchClient
 from nostr.ui.connect_dialog import ConnectDialog
+from nostr.ui.profile_chip import ProfileChip
 from nostr.ui.draft_conflict_banner import DraftConflictBanner
 from nostr.ui.drafts_panel import DEFAULT_PANEL_WIDTH, DraftsPanel
 from nostr.membership_controller import MembershipController
@@ -245,8 +268,8 @@ class MainWindow(QMainWindow):
         else:
             self.is_dark_theme = self._detect_os_dark_theme()
         # While True, the app follows OS color scheme changes live. Set to
-        # False the moment the user picks a theme explicitly (checkbox or
-        # Ctrl+Shift+T) so their choice sticks.
+        # False the moment the user picks a theme explicitly (with
+        # View > Toggle Dark/Light Theme) so their choice sticks.
         self._follow_os_theme = theme_pref is None
         QGuiApplication.styleHints().colorSchemeChanged.connect(self._on_os_color_scheme_changed)
 
@@ -277,26 +300,43 @@ class MainWindow(QMainWindow):
         self.plus_btn = QToolButton()
         self.plus_btn.setText("+")
         self.plus_btn.setAutoRaise(True)
+        self.plus_btn.setToolTip(_("New Tab"))
+        self.plus_btn.setAccessibleName(_("New Tab"))
         self.plus_btn.clicked.connect(self.new_tab)
-        self.tabs.setCornerWidget(self.plus_btn, Qt.TopRightCorner)
+        # The account in use, at the end of the tab row (where browsers
+        # show theirs); there only while Nostr is in use.
+        self.profile_chip = ProfileChip()
+        corner = QWidget()
+        corner_row = QHBoxLayout(corner)
+        corner_row.setContentsMargins(0, 0, 4, 0)
+        corner_row.setSpacing(6)
+        corner_row.addWidget(self.plus_btn)
+        corner_row.addWidget(self.profile_chip)
+        self.tabs.setCornerWidget(corner, Qt.TopRightCorner)
 
         self.status = QStatusBar()
         self.setStatusBar(self.status)
+        # How long the document is, quietly: words and reading time, or
+        # the words of the selection while there is one.
+        self._words_label = QLabel()
+        self._words_label.setObjectName("WordCount")
+        self._words_label.setContentsMargins(0, 0, 12, 0)
+        self.status.addPermanentWidget(self._words_label)
+        self._word_count_timer = QTimer(self)
+        self._word_count_timer.setSingleShot(True)
+        self._word_count_timer.setInterval(300)
+        self._word_count_timer.timeout.connect(self._update_word_count)
+        self._selection_words_timer = QTimer(self)
+        self._selection_words_timer.setSingleShot(True)
+        self._selection_words_timer.setInterval(150)
+        self._selection_words_timer.timeout.connect(
+            lambda: self._show_word_count(self.current_editor()))
+        self._document_words = 0
         self._line_label = QLabel()
         self._line_label.setContentsMargins(0, 0, 8, 0)
         self.status.addPermanentWidget(self._line_label)
 
         self._apply_theme()
-
-        self.header_widget = HeaderWidget()
-        self.header_widget.theme_checkbox.toggled.connect(self._toggle_theme)
-        self.header_widget.line_numbers_checkbox.toggled.connect(self._toggle_line_numbers)
-        self.header_widget.syntax_highlight_checkbox.toggled.connect(self._toggle_syntax_highlighting)
-        self.header_widget.undo_btn.clicked.connect(self._undo)
-        self.header_widget.redo_btn.clicked.connect(self._redo)
-        self.header_widget.bold_btn.clicked.connect(lambda: self._toggle_format('bold'))
-        self.header_widget.italic_btn.clicked.connect(lambda: self._toggle_format('italic'))
-        self.header_widget.underline_btn.clicked.connect(lambda: self._toggle_format('underline'))
 
         # Nostr publishing infrastructure. All pieces are process-wide
         # singletons living on the window; they are cheap to create and stay
@@ -306,6 +346,8 @@ class MainWindow(QMainWindow):
         # Whether Nostr is in use (an account is active): the one signal the
         # editor's Nostr features follow (nostr/state.py).
         self.nostr_state = NostrState(lambda: self._profile_store.default(), parent=self)
+        self.profile_chip.setVisible(self.nostr_state.active)
+        self.nostr_state.changed.connect(self.profile_chip.setVisible)
         # Where everyone reads and writes (NIP-65): verified, cached, and the
         # user's own lists remembered across launches. Every job and panel
         # that touches relays asks it where to go.
@@ -529,7 +571,7 @@ class MainWindow(QMainWindow):
         self._build_status_bar_view_toggle()
         self._build_findbar()
 
-        # header_widget and findbar always construct themselves in dark
+        # The find bar and the account chip construct themselves in dark
         # mode; bring them in line with a light theme detected above.
         if not self.is_dark_theme:
             self._set_theme(self.is_dark_theme, announce=False)
@@ -717,6 +759,8 @@ class MainWindow(QMainWindow):
 
         label_color = DARK_MENU_FG if self.is_dark_theme else LIGHT_FG
         self._line_label.setStyleSheet(f"color: {label_color}; font-size: 12px;")
+        muted = DARK_MUTED_FG if self.is_dark_theme else LIGHT_MUTED_FG
+        self._words_label.setStyleSheet(f"color: {muted}; font-size: 12px;")
 
         for i in range(self.tabs.count()):
             ed = self._editor_from_widget(self.tabs.widget(i))
@@ -731,24 +775,33 @@ class MainWindow(QMainWindow):
         lang = detect_language_from_content(editor.toPlainText())
         if lang and self.syntax_highlighting:
             editor._language = lang
+            self._drop_highlighter(editor)
             editor._highlighter = SyntaxHighlighter(
                 editor.document(), lang, self.is_dark_theme
             )
             self._update_status_bar()
 
-    def _attach_highlighter(self, editor, path: str | None):
-        """Detect language from path and attach / replace syntax highlighter."""
-        lang = detect_language(path)
-        editor._language = lang
-        # Remove existing highlighter if any
+    @staticmethod
+    def _drop_highlighter(editor) -> None:
         if hasattr(editor, '_highlighter'):
             editor._highlighter.setDocument(None)
             del editor._highlighter
+
+    def _attach_highlighter(self, editor, path: str | None):
+        """Detect language from path and attach / replace the highlighter:
+        syntax colors for a code file (while Syntax Highlighting is on),
+        the look of inline code and code blocks for a document with
+        Markdown structure. One per document: two would undo each other."""
+        lang = detect_language(path)
+        editor._language = lang
+        self._drop_highlighter(editor)
         # Only highlight plain-text source files, not rendered rich documents
         if lang and path and not path.lower().endswith(_RICH_DOC_EXTS) and self.syntax_highlighting:
             editor._highlighter = SyntaxHighlighter(
                 editor.document(), lang, self.is_dark_theme
             )
+        elif self._editor_kind(editor) == "rich":
+            editor._highlighter = RichTextLook(editor.document(), self.is_dark_theme)
 
     def _update_editor_theme(self, editor):
         bg = DARK_BG if self.is_dark_theme else LIGHT_BG
@@ -764,7 +817,7 @@ class MainWindow(QMainWindow):
                 border: none;
                 selection-background-color: {selection};
                 selection-color: {fg};
-                font-family: {MONO_FONT};
+                font-family: "{monospace_family()}";
                 font-size: 14px;
                 line-height: 1.5;
                 padding: 8px;
@@ -827,14 +880,23 @@ class MainWindow(QMainWindow):
         ed.document().undoAvailable.connect(self._update_undo_redo_buttons)
         ed.document().redoAvailable.connect(self._update_undo_redo_buttons)
         ed.cursorPositionChanged.connect(self._update_status_bar)
-        ed.currentCharFormatChanged.connect(self._update_format_buttons)
-        ed.selectionChanged.connect(self._update_format_buttons)
+        ed.document().contentsChanged.connect(
+            lambda e=ed: self._on_document_changed_for_find(e))
+        ed.document().contentsChanged.connect(
+            lambda e=ed: self._on_document_changed_for_words(e))
+        ed.selectionChanged.connect(lambda e=ed: self._on_selection_changed_for_words(e))
+        ed.currentCharFormatChanged.connect(self._schedule_format_buttons)
+        ed.selectionChanged.connect(self._schedule_format_buttons)
         self._update_editor_theme(ed)
         self._apply_view_prefs_to_editor(ed)
         ed.set_resource_resolver(self._asset_manager.resolve_image, ASSET_SCHEME)
         ed.set_local_image_resolver(lambda name, e=ed: self._resolve_local_image(e, name))
         ed.image_pasted.connect(lambda img, e=ed: self._handle_pasted_image(e, img))
         ed.urls_dropped.connect(self._handle_dropped_urls)
+        ed.set_context_menu_filler(self._fill_editor_context_menu)
+        ed.set_structure_check(lambda e=ed: self._editor_kind(e) == "rich")
+        ed.set_link_opener(self._open_link)
+        ed.set_nostr_check(lambda: self.nostr_state.active)
         return ed
 
     def _resolve_local_image(self, editor, name: str):
@@ -898,7 +960,10 @@ class MainWindow(QMainWindow):
         path = getattr(ed, "_file_path", None)
         binding = getattr(ed, "_draft_binding", None)
         dirty = "*" if ed.document().isModified() else ""
-        if path:
+        recovered = getattr(ed, "_recovered_title", "")
+        if recovered:
+            base = recovered
+        elif path:
             base = os.path.basename(path)
         elif binding and binding.title:
             base = binding.title
@@ -910,15 +975,18 @@ class MainWindow(QMainWindow):
         return f"{prefix}{base}{dirty}"
 
     def _update_status_bar(self):
+        self._update_editor_commands()
         viewer = self.current_pdf_viewer()
         if viewer is not None:
             self.status.showMessage(viewer._file_path)
             self._line_label.setText(viewer.page_display())
+            self._words_label.setText("")
             self._update_format_buttons()
             return
         ed = self.current_editor()
         if not ed:
             self._line_label.setText("")
+            self._words_label.setText("")
             return
         path = getattr(ed, "_file_path", None)
         file_info = path if path else _("(Untitled)")
@@ -935,13 +1003,14 @@ class MainWindow(QMainWindow):
         self.status.showMessage(" | ".join(parts))
         self._line_label.setText(
             _("Ln {line} / {total}").format(line=current_line, total=total_lines))
-        self._update_format_buttons()
+        self._schedule_format_buttons()
 
     def _update_window_title(self, *_):
         self.setWindowTitle("")
 
     def _on_tab_changed(self, index=None):
         self._update_window_title()
+        self._update_word_count()
         self._update_undo_redo_buttons()
         self._update_status_bar()  # also calls _update_format_buttons
         self._update_knit_actions()
@@ -964,12 +1033,50 @@ class MainWindow(QMainWindow):
             self._last_search_text = ""
             self._on_search_text_changed()
 
+    # -- words --------------------------------------------------------------
+
+    def _on_document_changed_for_words(self, ed) -> None:
+        if ed is self.current_editor():
+            self._word_count_timer.start()
+
+    def _on_selection_changed_for_words(self, ed) -> None:
+        if ed is self.current_editor():
+            # Counted once the selection settles, not at every step of it.
+            self._selection_words_timer.start()
+
+    def _update_word_count(self) -> None:
+        """Count the current document's words again (after it changed, or
+        another tab came to the front)."""
+        ed = self.current_editor()
+        self._document_words = count_words(ed.toPlainText()) if ed is not None else 0
+        self._show_word_count(ed)
+
+    def _show_word_count(self, ed) -> None:
+        """"1,234 words · 6 min read", or "12 of 1,234 words" while words
+        are selected; nothing for an empty document or a PDF."""
+        total = self._document_words
+        if ed is None or total == 0:
+            self._words_label.setText("")
+            return
+        selected = ed.textCursor().selectedText() if ed.textCursor().hasSelection() else ""
+        if selected:
+            self._words_label.setText(ngettext(
+                "{selected} of {count} word", "{selected} of {count} words", total).format(
+                selected=_number(count_words(selected)), count=_number(total)))
+            return
+        minutes = reading_minutes(total)
+        self._words_label.setText(ngettext(
+            "{count} word", "{count} words", total).format(count=_number(total))
+            + " · " + ngettext("{minutes} min read", "{minutes} min read", minutes).format(
+                minutes=_number(minutes)))
+
     def _update_undo_redo_buttons(self):
         ed = self.current_editor()
         can_undo = ed.document().isUndoAvailable() if ed else False
         can_redo = ed.document().isRedoAvailable() if ed else False
-        self.header_widget.undo_btn.setEnabled(can_undo)
-        self.header_widget.redo_btn.setEnabled(can_redo)
+        if hasattr(self, "act_undo"):
+            self.act_undo.setEnabled(can_undo)
+            self.act_redo.setEnabled(can_redo)
 
     def _toggle_format(self, fmt: str):
         ed = self.current_editor()
@@ -977,27 +1084,66 @@ class MainWindow(QMainWindow):
             getattr(ed, f'toggle_{fmt}')()
             self._update_format_buttons()
 
+    def _schedule_format_buttons(self):
+        """Show the style at the caret once the event loop is free: moving
+        the caret or extending a selection reports several changes at
+        once, and they need one update, not three."""
+        timer = getattr(self, "_format_buttons_timer", None)
+        if timer is None:
+            timer = self._format_buttons_timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.setInterval(0)
+            timer.timeout.connect(self._update_format_buttons)
+        timer.start()
+
     def _update_format_buttons(self):
-        ed = self.current_editor()
-        if not ed:
-            self.header_widget.bold_btn.setChecked(False)
-            self.header_widget.italic_btn.setChecked(False)
-            self.header_widget.underline_btn.setChecked(False)
+        """The format commands show the style at the caret (or of the whole
+        selection): in the Format menu and on the format toolbar alike."""
+        if not hasattr(self, "act_bold"):
             return
-        cursor = ed.textCursor()
-        if cursor.hasSelection():
-            bold = ed._all_in_selection(cursor, lambda f: f.fontWeight() > 400)
-            italic = ed._all_in_selection(cursor, lambda f: f.fontItalic())
-            underline = ed._all_in_selection(cursor, lambda f: f.fontUnderline())
+        ed = self.current_editor()
+        styles = {self.act_bold: rich_text.BOLD, self.act_italic: rich_text.ITALIC,
+                  self.act_underline: rich_text.UNDERLINE, self.act_strike: rich_text.STRIKE,
+                  self.act_code: rich_text.CODE}
+        cursor = ed.textCursor() if ed else None
+        if cursor is None or cursor.isNull():
+            state = {}
+        elif cursor.hasSelection():
+            # One bounded pass over the selection for all five.
+            state = rich_text.selection_state(cursor, tuple(styles.values()))
         else:
             fmt = ed.currentCharFormat()
-            bold = fmt.fontWeight() > 400
-            italic = fmt.fontItalic()
-            underline = fmt.fontUnderline()
-        self.header_widget.bold_btn.setChecked(bold)
-        self.header_widget.italic_btn.setChecked(italic)
-        self.header_widget.underline_btn.setChecked(underline)
+            state = {style: rich_text.has_style(fmt, style) for style in styles.values()}
+        for action, style in styles.items():
+            action.setChecked(state.get(style, False))
+        self._update_style_checks(ed)
 
+    def _update_style_checks(self, ed) -> None:
+        """The Style menu checks the style of the paragraph at the caret
+        (none for a selection of mixed styles, or Heading 4 and lower,
+        which come from Markdown files)."""
+        if not hasattr(self, "act_styles"):
+            return
+        cursor = ed.textCursor() if ed else None
+        paragraphs = (rich_text.paragraph_state(cursor) if cursor is not None
+                      else rich_text.ParagraphState())
+        level = paragraphs.heading
+        for index, action in enumerate(self.act_styles):
+            action.setChecked(index == level)
+        if getattr(self, "format_toolbar", None) is not None:
+            if 0 <= level < len(self.act_styles):
+                name = self.act_styles[level].text()
+            elif level > 0:
+                name = _("Heading {level}").format(level=level)
+            else:
+                name = pgettext("paragraph style", "Mixed")
+            self.format_toolbar.set_style_name(name)
+        self.act_bullets.setChecked(paragraphs.list_kind == rich_text.BULLET)
+        self.act_numbers.setChecked(paragraphs.list_kind == rich_text.NUMBER)
+        self.act_quote.setChecked(paragraphs.quoted)
+        in_link = (cursor is not None and self._editor_kind(ed) == "rich"
+                   and rich_text.link_range(cursor) is not None)
+        self.act_link.setText(_("Edit Link\u2026") if in_link else _("Add Link\u2026"))
 
     # ----------------------------------------------------------------------
     # ACTIONS / MENU
@@ -1045,47 +1191,183 @@ class MainWindow(QMainWindow):
         self.act_close_tab = add(Command("file.close_tab", _("Close Tab"), FILE, "Ctrl+W",
                                          listed_as=_("Close tab")),
                                  triggered=self._close_current_tab)
-        self.act_quit = add(Command("file.quit", _("Quit"), FILE, "Ctrl+Q"),
+        self.act_quit = add(Command("file.quit", _("Quit"), FILE, "Ctrl+Q",
+                                    role=QAction.MenuRole.QuitRole),
                             triggered=self._quit_application)
 
-        # Formatting
-        self.act_bold = add(Command("format.bold", _("Bold"), FORMAT, "Ctrl+B"),
-                            triggered=self._fmt_bold)
-        self.act_italic = add(Command("format.italic", _("Italic"), FORMAT, "Ctrl+I"),
-                              triggered=self._fmt_italic)
-        self.act_underline = add(Command("format.underline", _("Underline"), FORMAT, "Ctrl+U"),
-                                 triggered=self._fmt_underline)
-        self.act_reset_format = add(Command("format.reset", _("Reset Format"), FORMAT, "Ctrl+D",
-                                            listed_as=_("Reset to default format"),
-                                            keywords=("clear", "plain")),
-                                    triggered=self._reset_format)
+        # Edit, as in every Mac app. Cut, Copy, Paste and Select All act on
+        # whatever has the keyboard focus: the document, the find field,
+        # the PDF reader (see _edit_focused).
+        self.act_undo = add(Command("edit.undo", _("Undo"), EDIT, QKeySequence.StandardKey.Undo),
+                            triggered=self._undo)
+        self.act_redo = add(Command("edit.redo", _("Redo"), EDIT, QKeySequence.StandardKey.Redo),
+                            triggered=self._redo)
+        self.act_cut = add(Command("edit.cut", _("Cut"), EDIT, QKeySequence.StandardKey.Cut),
+                           triggered=lambda: self._edit_focused("cut"))
+        self.act_copy = add(Command("edit.copy", _("Copy"), EDIT, QKeySequence.StandardKey.Copy),
+                            triggered=lambda: self._edit_focused("copy"))
+        self.act_paste = add(Command("edit.paste", _("Paste"), EDIT,
+                                     QKeySequence.StandardKey.Paste),
+                             triggered=lambda: self._edit_focused("paste"))
+        # Paste as plain text, in the style of the text around it.
+        self.act_paste_plain = add(
+            Command("edit.paste_plain", _("Paste and Match Style"), EDIT,
+                    platform_keys("Ctrl+Alt+Shift+V", "Ctrl+Shift+V"),
+                    keywords=(_("plain text"),)),
+            triggered=self._paste_plain)
+        self.act_delete = add(Command("edit.delete", _("Delete"), EDIT),
+                              triggered=lambda: self._edit_focused("delete"))
+        self.act_select_all = add(Command("edit.select_all", _("Select All"), EDIT,
+                                          QKeySequence.StandardKey.SelectAll),
+                                  triggered=lambda: self._edit_focused("select_all"))
 
-        # Search
-        self.act_find = add(Command("search.find", _("Find"), SEARCH, "Ctrl+F"),
-                            triggered=self._toggle_findbar)
-        self.act_find_next = add(Command("search.next", _("Find Next"), SEARCH, "F3",
+        # Formatting
+        self.act_bold = add(Command("format.bold", _("Bold"), FORMAT, "Ctrl+B",
+                                    checkable=True),
+                            triggered=self._fmt_bold)
+        self.act_italic = add(Command("format.italic", _("Italic"), FORMAT, "Ctrl+I",
+                                    checkable=True),
+                              triggered=self._fmt_italic)
+        self.act_underline = add(Command("format.underline", _("Underline"), FORMAT, "Ctrl+U",
+                                    checkable=True),
+                                 triggered=self._fmt_underline)
+        # Underline has no Markdown: it stays in the document and in local
+        # files, and is left out of what is published.
+        self.act_underline.setToolTip(_("Underline stays in local files; Markdown and "
+                                        "Nostr have none."))
+        # Shift-Command-X on a Mac, Alt+Shift+5 elsewhere, as in Google Docs
+        # (Word and LibreOffice have none).
+        self.act_strike = add(Command("format.strike", _("Strikethrough"), FORMAT,
+                                      platform_keys("Ctrl+Shift+X", "Alt+Shift+5"),
+                                      checkable=True, keywords=(_("cross out"),)),
+                              triggered=lambda: self._toggle_style(rich_text.STRIKE))
+        self.act_code = add(Command("format.code", _("Inline Code"), FORMAT,
+                                    checkable=True, keywords=(_("monospace"),)),
+                            triggered=lambda: self._toggle_style(rich_text.CODE))
+        # Command-\ and Ctrl+\, Google Docs' keys for it.
+        self.act_reset_format = add(Command("format.reset", _("Clear Formatting"), FORMAT,
+                                            "Ctrl+\\", keywords=(_("plain"),)),
+                                    triggered=self._reset_format)
+        # Paragraph styles. Option-Command-0 to 3 on a Mac, as in Google Docs
+        # (Notes' Shift-Command-T, H and J belong to View commands here);
+        # Ctrl+0 to 3 elsewhere, as in LibreOffice, because Ctrl+Alt is
+        # AltGr there and types characters (² and ³ on a German keyboard).
+        self._style_group = QActionGroup(self)
+        self._style_group.setExclusionPolicy(QActionGroup.ExclusionPolicy.ExclusiveOptional)
+        self.act_styles = []
+        for level, title, words in (
+                (0, _("Body"), (_("paragraph"), _("text"))),
+                (1, _("Heading 1"), (_("title"), "h1")),
+                (2, _("Heading 2"), (_("subtitle"), "h2")),
+                (3, _("Heading 3"), ("h3",))):
+            action = add(Command(f"format.style.{'body' if not level else f'h{level}'}", title,
+                                 FORMAT, platform_keys(f"Ctrl+Alt+{level}", f"Ctrl+{level}"),
+                                 checkable=True, keywords=words),
+                         triggered=lambda n=level: self._set_heading(n))
+            self._style_group.addAction(action)
+            self.act_styles.append(action)
+        # Lists: Apple Notes' keys on a Mac (Shift-Command-7 and 9), Google
+        # Docs' elsewhere (Ctrl+Shift+8 and 7).
+        self.act_bullets = add(Command("format.list.bullet", _("Bulleted List"), FORMAT,
+                                       platform_keys("Ctrl+Shift+7", "Ctrl+Shift+8"),
+                                       checkable=True, keywords=(_("bullets"), _("list"))),
+                               triggered=lambda: self._toggle_list(rich_text.BULLET))
+        self.act_numbers = add(Command("format.list.number", _("Numbered List"), FORMAT,
+                                       platform_keys("Ctrl+Shift+9", "Ctrl+Shift+7"),
+                                       checkable=True,
+                                       keywords=(_("numbers"), _("list"), _("ordered"))),
+                               triggered=lambda: self._toggle_list(rich_text.NUMBER))
+        self.act_indent = add(Command("format.indent", _("Increase Indent"), FORMAT, "Ctrl+]",
+                                      keywords=(_("nest"),)),
+                              triggered=lambda: self._change_indent(+1))
+        self.act_outdent = add(Command("format.outdent", _("Decrease Indent"), FORMAT,
+                                       "Ctrl+["),
+                               triggered=lambda: self._change_indent(-1))
+        # Apple Notes' Block Quote key on a Mac; Word, Google Docs and
+        # LibreOffice have none.
+        self.act_quote = add(Command("format.quote", _("Quote"), FORMAT,
+                                     platform_keys("Ctrl+'", None),
+                                     checkable=True, keywords=(_("citation"),)),
+                             triggered=lambda: self._editor_call("toggle_quote"))
+
+        # Insert. Command-K, as in Pages, Mail and Notes; the title says
+        # Edit Link… while the caret is in a link.
+        self.act_link = add(Command("insert.link", _("Add Link\u2026"), INSERT, "Ctrl+K",
+                                    keywords=(_("web address"), "url", _("hyperlink"))),
+                            triggered=lambda: self._editor_call("show_link_popover"))
+        self.act_divider = add(Command("insert.divider", _("Divider"), INSERT,
+                                       keywords=(_("horizontal rule"), _("line"))),
+                               triggered=lambda: self._editor_call("insert_divider"))
+        # Text colors stay in the document and in local files; Markdown
+        # has none, so they never reach Nostr.
+        self.act_colors = []
+        for name, color in TEXT_COLORS.items():
+            self.act_colors.append(add(
+                Command(f"format.color.{name.lower()}", _(name), FORMAT,
+                        keywords=(_("color"),)),
+                triggered=lambda c=color: self._apply_color(c)))
+        self.act_remove_color = add(Command("format.color.none", _("Remove Color"), FORMAT),
+                                    triggered=lambda: self._apply_color(None))
+
+        # Find, in the Edit menu. Find Next and Find Previous use each
+        # platform's own keys (Command-G on a Mac, F3 on Windows).
+        self.act_find = add(Command("search.find", _("Find\u2026"), SEARCH, "Ctrl+F",
+                                    listed_as=_("Find")),
+                            triggered=lambda: self._show_find(replace=False))
+        # Option-Command-F on a Mac (TextEdit, Pages); Ctrl+H elsewhere
+        # (Word, Google Docs, LibreOffice). Never QKeySequence.Replace,
+        # which is Command-H, Hide, on a Mac.
+        self.act_replace = add(Command("search.replace", _("Find and Replace\u2026"), SEARCH,
+                                       platform_keys("Ctrl+Alt+F", "Ctrl+H"),
+                                       listed_as=_("Find and replace")),
+                               triggered=lambda: self._show_find(replace=True))
+        self.act_find_next = add(Command("search.next", _("Find Next"), SEARCH,
+                                         QKeySequence.StandardKey.FindNext,
                                          listed_as=_("Find next")),
                                  triggered=self._find_next)
         self.act_find_prev = add(Command("search.previous", _("Find Previous"), SEARCH,
-                                         "Shift+F3", listed_as=_("Find previous")),
+                                         QKeySequence.StandardKey.FindPrevious,
+                                         listed_as=_("Find previous")),
                                  triggered=self._find_prev)
+        # Command-E on a Mac: the selection becomes what Find Next looks for.
+        self.act_use_selection = add(
+            Command("search.use_selection", _("Use Selection for Find"), SEARCH,
+                    platform_keys("Ctrl+E", None)),
+            triggered=self._use_selection_for_find)
+
+        # Disabled where there is no editor (a PDF tab), so the shortcuts
+        # the PDF reader has for itself stay its own.
+        self._editor_actions = [
+            self.act_undo, self.act_redo, self.act_cut, self.act_paste, self.act_paste_plain,
+            self.act_delete, self.act_select_all, self.act_use_selection, self.act_replace,
+            self.act_indent, self.act_outdent,
+            self.act_bold, self.act_italic, self.act_underline, self.act_reset_format,
+            *self.act_colors, self.act_remove_color,
+        ]
+        # Structure that only a document holding Markdown can carry
+        # (headings, lists, links): off in plain-text tabs as well.
+        self._rich_actions = [self.act_strike, self.act_code, *self.act_styles,
+                              self.act_bullets, self.act_numbers, self.act_quote,
+                              self.act_divider, self.act_link]
 
         self._search_matches = []
         self._current_match_index = -1
         self._last_search_text = ""
         self._search_extra_selections = []
 
-        # Theme + line numbers
+        # Theme, line numbers and syntax highlighting: menu items without
+        # keys, since no platform convention gives them one (their old keys
+        # were this app's own; Shift-Command-L is Notes' Checklist).
         self.act_toggle_theme = add(Command("view.theme", _("Toggle Dark/Light Theme"), VIEW,
-                                            "Ctrl+Shift+T", listed_as=_("Toggle theme"),
+                                            listed_as=_("Toggle theme"),
                                             keywords=("dark", "light")),
                                     triggered=self._toggle_theme)
         self.act_toggle_line_numbers = add(
-            Command("view.line_numbers", _("Show Line Numbers"), VIEW, "Ctrl+Shift+L",
+            Command("view.line_numbers", _("Show Line Numbers"), VIEW,
                     checkable=True, listed_as=_("Toggle line numbers")),
             triggered=self._toggle_line_numbers)
         self.act_toggle_syntax_hl = add(
-            Command("view.syntax_highlighting", _("Syntax Highlighting"), VIEW, "Ctrl+Shift+H",
+            Command("view.syntax_highlighting", _("Syntax Highlighting"), VIEW,
                     checkable=True, listed_as=_("Toggle syntax highlighting")),
             triggered=self._toggle_syntax_highlighting, checked=False)
 
@@ -1135,6 +1417,13 @@ class MainWindow(QMainWindow):
             self._language_group.addAction(action)
             self.act_languages.append(action)
 
+        # Option-Command-T on a Mac, as every Mac app's Show Toolbar; no key
+        # elsewhere, where none is common (Ctrl+Alt+T opens a terminal).
+        self.show_toolbar = bool(load_settings().get("show_toolbar", True))
+        self.act_show_toolbar = add(Command("view.toolbar", _("Show Toolbar"), VIEW,
+                                            platform_keys("Ctrl+Alt+T", None),
+                                            checkable=True),
+                                    toggled=self._set_toolbar_shown, checked=self.show_toolbar)
         self.act_highlight_line = add(Command("view.highlight_line",
                                               _("Highlight Current Line"), VIEW,
                                               checkable=True),
@@ -1201,6 +1490,14 @@ class MainWindow(QMainWindow):
             Command("nostr.backup_account", _("Back Up Account\u2026"), NOSTR, nostr=True,
                     keywords=("export", "key")),
             triggered=self._on_backup_account)
+        self.act_move_to_signer = add(
+            Command("nostr.move_to_signer", _("Move Key to Signer App\u2026"), NOSTR,
+                    nostr=True, keywords=("amber", "phone", "key")),
+            triggered=self._on_move_to_signer)
+        self.act_edit_profile = add(
+            Command("nostr.edit_profile", _("Edit Profile\u2026"), NOSTR, nostr=True,
+                    keywords=("name", "picture", "about", "lightning address")),
+            triggered=self._on_edit_profile)
         self.act_nostr_sign_out = add(
             Command("nostr.sign_out", _("Sign Out Active Profile"), NOSTR, nostr=True,
                     keywords=("log out",)),
@@ -1217,7 +1514,11 @@ class MainWindow(QMainWindow):
         self.act_check_updates = add(Command("help.check_updates", _("Check for Updates\u2026"),
                                              HELP, keywords=("upgrade", "version")),
                                      triggered=self._check_for_updates_manual)
-        self.act_about = add(Command("help.about", pgettext("help menu", "About"), HELP),
+        self.act_show_logs = add(Command("help.show_logs", _("Show Log Files"), HELP,
+                                         keywords=("diagnostics", "bug report", "crash")),
+                                 triggered=self._show_log_files)
+        self.act_about = add(Command("help.about", pgettext("help menu", "About"), HELP,
+                                     role=QAction.MenuRole.AboutRole),
                              triggered=self._show_about)
 
     def _build_menu(self):
@@ -1243,19 +1544,62 @@ class MainWindow(QMainWindow):
         m_file.addAction(self.act_close_tab)
         m_file.addAction(self.act_quit)
 
-        m_find = self.menuBar().addMenu(_("&Search"))
-        m_find.addAction(self.act_find)
-        m_find.addAction(self.act_find_next)
-        m_find.addAction(self.act_find_prev)
+        m_edit = self.menuBar().addMenu(_("&Edit"))
+        m_edit.addAction(self.act_undo)
+        m_edit.addAction(self.act_redo)
+        m_edit.addSeparator()
+        m_edit.addAction(self.act_cut)
+        m_edit.addAction(self.act_copy)
+        m_edit.addAction(self.act_paste)
+        m_edit.addAction(self.act_paste_plain)
+        m_edit.addAction(self.act_delete)
+        m_edit.addAction(self.act_select_all)
+        m_edit.addSeparator()
+        self.m_find = m_edit.addMenu(pgettext("menu", "Find"))
+        self.m_find.addAction(self.act_find)
+        self.m_find.addAction(self.act_replace)
+        self.m_find.addAction(self.act_find_next)
+        self.m_find.addAction(self.act_find_prev)
+        self.m_find.addAction(self.act_use_selection)
+        self.m_edit = m_edit
+
+        # Insert, between Edit and Format, as in Pages.
+        self.m_insert = self.menuBar().addMenu(_("&Insert"))
+        self.m_insert.addAction(self.act_link)
+        self.m_insert.addSeparator()
+        self.m_insert.addAction(self.act_divider)
 
         m_format = self.menuBar().addMenu(_("F&ormat"))
+        self.m_style = m_format.addMenu(_("Style"))
+        for action in self.act_styles:
+            self.m_style.addAction(action)
+        m_format.addSeparator()
         m_format.addAction(self.act_bold)
         m_format.addAction(self.act_italic)
         m_format.addAction(self.act_underline)
+        m_format.addAction(self.act_strike)
+        m_format.addAction(self.act_code)
+        m_format.addSeparator()
+        m_format.addAction(self.act_bullets)
+        m_format.addAction(self.act_numbers)
+        m_format.addAction(self.act_quote)
+        m_format.addSeparator()
+        m_format.addAction(self.act_indent)
+        m_format.addAction(self.act_outdent)
+        m_format.addSeparator()
+        self.m_color = m_format.addMenu(_("Color"))
+        for action in self.act_colors:
+            self.m_color.addAction(action)
+        self.m_color.addSeparator()
+        self.m_color.addAction(self.act_remove_color)
         m_format.addSeparator()
         m_format.addAction(self.act_reset_format)
+        self.m_format = m_format
 
         m_view = self.menuBar().addMenu(_("&View"))
+        self.m_view = m_view
+        m_view.addAction(self.act_show_toolbar)
+        m_view.addSeparator()
         m_view.addAction(self.act_toggle_theme)
         m_view.addAction(self.act_toggle_line_numbers)
         m_view.addAction(self.act_toggle_syntax_hl)
@@ -1291,7 +1635,9 @@ class MainWindow(QMainWindow):
         m_nostr.addAction(self.act_create_account)
         m_nostr.addAction(self.act_nostr_connect)
         m_nostr.addAction(self.act_restore_account)
+        m_nostr.addAction(self.act_edit_profile)
         m_nostr.addAction(self._act_backup_account)
+        m_nostr.addAction(self.act_move_to_signer)
         self._update_account_actions()
         m_nostr.addAction(self.act_nostr_sign_out)
 
@@ -1301,6 +1647,7 @@ class MainWindow(QMainWindow):
         help_menu.addSeparator()
         help_menu.addAction(self.act_install_help)
         help_menu.addAction(self.act_check_updates)
+        help_menu.addAction(self.act_show_logs)
         help_menu.addSeparator()
         help_menu.addAction(self.act_about)
 
@@ -1355,9 +1702,19 @@ class MainWindow(QMainWindow):
         self._populate_recent_menu()
 
     def _build_findbar(self):
-        self.findbar = FindBar(self._find_next, self._find_prev, self._toggle_findbar, self)
+        self.findbar = FindBar(self._find_next, self._find_prev, self._close_findbar, self,
+                               replace=True, options=True)
         self.findbar.setVisible(False)
         self.findbar.edit.textChanged.connect(self._on_search_text_changed)
+        self.findbar.options_changed.connect(self._on_find_options_changed)
+        self.findbar.replace_requested.connect(self._replace_current)
+        self.findbar.replace_all_requested.connect(self._replace_all)
+        # Matches are found again shortly after the document changes, so
+        # the count and the highlights never describe text that is gone.
+        self._find_refresh = QTimer(self)
+        self._find_refresh.setSingleShot(True)
+        self._find_refresh.setInterval(250)
+        self._find_refresh.timeout.connect(self._refresh_matches)
 
         self.update_bar = UpdateBar()
         self.update_bar.update_theme(self.is_dark_theme)
@@ -1375,7 +1732,12 @@ class MainWindow(QMainWindow):
         v = QVBoxLayout(editor_side)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
-        v.addWidget(self.header_widget, 0)
+        self.format_toolbar = FormatToolbar(
+            {"bold": self.act_bold, "italic": self.act_italic, "strike": self.act_strike,
+             "link": self.act_link, "bullets": self.act_bullets, "numbers": self.act_numbers,
+             "quote": self.act_quote},
+            self.m_style, dark=self.is_dark_theme)
+        v.addWidget(self.format_toolbar, 0)
         v.addWidget(self.findbar, 0)
         v.addWidget(self.update_bar, 0)
         v.addWidget(self.tabs, 1)
@@ -1464,6 +1826,7 @@ class MainWindow(QMainWindow):
         # resolve against it.
         ed._file_path = None if freshness == "stale" else original_path
         load_backup_content(ed, backup, modified=True)
+        self._attach_highlighter(ed, ed._file_path)
 
         container = QWidget()
         vbox = QVBoxLayout(container)
@@ -1493,6 +1856,8 @@ class MainWindow(QMainWindow):
             tab_title = _("{name} (recovered copy)").format(name=base_name)
         else:
             tab_title = _("{name} (recovered)").format(name=base_name)
+        # The tab says so until the work is saved (_compose_tab_title).
+        ed._recovered_title = tab_title
         idx = self.tabs.addTab(container, tab_title + "*")
         self._attach_close_button(idx, container)
 
@@ -1557,6 +1922,7 @@ class MainWindow(QMainWindow):
         ed._lang_detect_timer = _timer
 
         ed.setHtml("<div></div>")
+        self._attach_highlighter(ed, None)
         ed._backup = EditorBackup(
             ed, None, externalize=self._asset_manager.adopt_data_uri
         )
@@ -1933,10 +2299,9 @@ class MainWindow(QMainWindow):
         ext = path.lower()
         if ext.endswith(('.html', '.htm')):
             ed.setHtml(content)
-            # Real <ul><li> lists (our own exports, foreign HTML) become
-            # QTextList objects, which the editor's bullet handlers don't
-            # manage; convert them back to literal "• " lines.
-            normalize_lists_after_set_html(ed.document())
+            # Lists stay real lists (the editor edits them as such); what
+            # the reader leaves behind is tidied.
+            normalize_after_set_html(ed.document())
             ed.document().clearUndoRedoStacks()
         elif ext.endswith('.md'):
             self._load_markdown(ed, content)
@@ -1966,9 +2331,8 @@ class MainWindow(QMainWindow):
             return self._open_pdf_tab(path)
 
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                content = f.read()
-        except Exception as e:
+            content, newline = read_text_document(path)
+        except (OSError, ValueError) as e:
             inform(self, title=_("Couldn't open \u201c{name}\u201d").format(
                        name=os.path.basename(path)),
                    message=str(e))
@@ -1979,6 +2343,8 @@ class MainWindow(QMainWindow):
         # document's own directory, and Qt caches whatever the first
         # lookup answered.
         ed._file_path = path
+        # Saved back with the line endings it came with.
+        ed._newline = newline
         self._set_editor_content(ed, path, content)
 
         ed.document().setModified(False)
@@ -2051,9 +2417,13 @@ class MainWindow(QMainWindow):
             self._update_status_bar()
 
     def _has_formatting(self, ed: HtmlEditor) -> bool:
-        """Return True if the document contains any bold, italic, underline, or color formatting."""
+        """Return True if the document contains any bold, italic, underline, or color
+        formatting, or structure plain text cannot keep (lists, headings)."""
         block = ed.document().begin()
         while block.isValid():
+            if (block.textList() is not None or block.blockFormat().headingLevel()
+                    or rich_text.quote_depth(block) or rich_text.is_divider(block)):
+                return True
             it = block.begin()
             while not it.atEnd():
                 fragment = it.fragment()
@@ -2389,8 +2759,8 @@ class MainWindow(QMainWindow):
                 # placeholder the old toPlainText call wrote out.
                 content = serialize_plain_with_images(ed.document(), lambda fmt: None)
 
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(content)
+            save_text_document(path, content, newline=getattr(ed, "_newline", None))
+            ed._recovered_title = ""
             ed.document().setModified(False)
             self._update_tab_title()
             self.status.showMessage(_("Saved: {path}").format(path=path))
@@ -2435,15 +2805,17 @@ class MainWindow(QMainWindow):
         if not path or not os.path.exists(path):
             return
         try:
-            with open(path, 'r', encoding='utf-8') as f:
-                content = f.read()
-        except Exception as e:
+            content, newline = read_text_document(path)
+        except (OSError, ValueError) as e:
             inform(self, title=_("Couldn't reload \u201c{name}\u201d").format(
                        name=os.path.basename(path)),
                    message=str(e))
             return
+        ed._newline = newline
 
         self._set_editor_content(ed, path, content)
+        self._attach_highlighter(ed, path)
+        ed._recovered_title = ""
 
         ed.document().setModified(False)
         bar.hide()
@@ -2510,8 +2882,7 @@ class MainWindow(QMainWindow):
                 return written[name]
             try:
                 os.makedirs(media_dir, exist_ok=True)
-                with open(os.path.join(media_dir, name), "wb") as f:
-                    f.write(data)
+                save_document(os.path.join(media_dir, name), data)
             except OSError:
                 return None
             written[name] = f"{os.path.basename(media_dir)}/{name}"
@@ -2658,8 +3029,7 @@ class MainWindow(QMainWindow):
             os.makedirs(media_dir, exist_ok=True)
             target = os.path.join(media_dir, filename)
             try:
-                with open(target, "wb") as f:
-                    f.write(data)
+                save_document(target, data)
             except OSError:
                 return None
             return f"{os.path.basename(media_dir)}/{filename}"
@@ -2669,8 +3039,9 @@ class MainWindow(QMainWindow):
     def _save_as_rtf(self, editor, path: str) -> bool:
         try:
             content = self._to_rtf(editor)
-            with open(path, "w", encoding="ascii") as f:
-                f.write(content)
+            save_text_document(path, content, encoding="ascii",
+                               newline=getattr(editor, "_newline", None))
+            editor._recovered_title = ""
             editor.document().setModified(False)
             self._update_tab_title()
             self.status.showMessage(_("Saved: {path}").format(path=path))
@@ -2783,6 +3154,7 @@ class MainWindow(QMainWindow):
                        title=self._export_title_for(path),
                        image_roots=self._image_roots_for(path),
                        asset_resolver=self._asset_manager.export_view)
+            editor._recovered_title = ""
             editor.document().setModified(False)
             self._update_tab_title()
             self.status.showMessage(_("Saved: {path}").format(path=path))
@@ -2970,25 +3342,98 @@ class MainWindow(QMainWindow):
     # ----------------------------------------------------------------------
     # SEARCH
     # ----------------------------------------------------------------------
-    def _toggle_findbar(self):
+    def _show_find(self, replace: bool = False):
+        """Find… or Find and Replace…: the find bar, its field focused
+        (Find and Replace adds the Replace row). In a PDF tab, the PDF
+        reader's own find bar."""
         viewer = self.current_pdf_viewer()
         if viewer is not None:
-            viewer.toggle_findbar()
+            if viewer.findbar.isVisible():
+                viewer.findbar.focusIn()
+            else:
+                viewer.toggle_findbar()
             return
-        vis = not self.findbar.isVisible()
-        self.findbar.setVisible(vis)
-        if vis:
-            self.findbar.focusIn()
-            self._on_search_text_changed()
+        if self.current_editor() is None:
+            return
+        self.findbar.show_replace(replace or (self.findbar.isVisible()
+                                              and self.findbar.replace_shown()))
+        self.findbar.setVisible(True)
+        self.findbar.focusIn()
+        self._last_search_text = None
+        self._on_search_text_changed()
+
+    def _close_findbar(self):
+        """Done or Escape: the bar goes, the highlights with it, and the
+        writing goes on where the match was."""
+        self.findbar.setVisible(False)
+        self.findbar.set_match_info("")
+        self._clear_search_highlights()
+        ed = self.current_editor()
+        if ed:
+            cursor = ed.textCursor()
+            cursor.setPosition(cursor.selectionStart())
+            ed.setTextCursor(cursor)
+            ed.setFocus()
+
+    def _on_find_options_changed(self):
+        self._last_search_text = None
+        self._on_search_text_changed()
+
+    def _on_document_changed_for_find(self, ed):
+        if ed is self.current_editor() and self.findbar.isVisible():
+            self._find_refresh.start()
+
+    def _refresh_matches(self):
+        if not self.findbar.isVisible():
+            return
+        self._last_search_text = None
+        self._on_search_text_changed()
+
+    def _replace_current(self):
+        """Replace: the match that is selected becomes the replacement (in
+        its style), and the next match is selected. With no match
+        selected, the next one is found first."""
+        ed = self.current_editor()
+        needle = self.findbar.text()
+        if ed is None or not needle:
+            return
+        self._update_search_matches(needle)
+        self._last_search_text = needle
+        cursor = ed.textCursor()
+        selected = (cursor.selectionStart(), cursor.selectionEnd())
+        if selected in self._search_matches:
+            _start, end = replace_match(ed.document(), selected, self.findbar.replacement())
+            cursor.setPosition(end)
+            ed.setTextCursor(cursor)
+            self._find_refresh.stop()          # found again right here
+            self._update_search_matches(needle)
+            self._last_search_text = needle
+            following = [i for i, (start, _e) in enumerate(self._search_matches) if start >= end]
+            self._current_match_index = (following[0] if following else 0) - 1
+            if not self._search_matches:
+                self._highlight_all_matches()
+                self._update_match_display()
+                return
+        self._find_once(True)
+
+    def _replace_all(self):
+        """Replace All: every match, as one step to undo."""
+        ed = self.current_editor()
+        needle = self.findbar.text()
+        if ed is None or not needle:
+            return
+        count = replace_all(ed.document(), needle, self.findbar.replacement(),
+                            self.findbar.options())
+        self._find_refresh.stop()              # found again right here
+        self._update_search_matches(needle)
+        self._last_search_text = needle
+        self._highlight_all_matches()
+        if count:
+            self.findbar.set_match_info(
+                ngettext("{count} replaced", "{count} replaced", count).format(
+                    count=_number(count)))
         else:
-            self.findbar.set_match_info("")
-            self._clear_search_highlights()
-            ed = self.current_editor()
-            if ed:
-                cursor = ed.textCursor()
-                cursor.setPosition(cursor.selectionStart())
-                ed.setTextCursor(cursor)
-                ed.setFocus()
+            self.findbar.set_match_info(_("No matches"))
 
     def _choose_language(self, code: str) -> None:
         """Remember the language; it is used from the next start on."""
@@ -3020,8 +3465,8 @@ class MainWindow(QMainWindow):
     def _show_about(self):
         answer = ask(
             self, title=APP_DISPLAY_NAME,
-            message=_("Version {version}\nA minimal distraction-free text editor.").format(
-                version=APP_VERSION),
+            message=_("Version {version}\nA minimal distraction-free text editor.\n"
+                      "Built by rinbal.").format(version=APP_VERSION),
             buttons=(Button(_("Source Code"), "source", NORMAL),
                      Button(_("OK"), "ok", DEFAULT)))
         if answer == "source":
@@ -3093,6 +3538,14 @@ class MainWindow(QMainWindow):
         # it can replace our files.
         self._closing_for_update = True
         self.close()
+
+    def _show_log_files(self):
+        """Help > Show Log Files: the folder with the log, for a bug report."""
+        folder = diagnostics.log_folder()
+        os.makedirs(folder, exist_ok=True)
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(folder)):
+            self.statusBar().showMessage(
+                _("The log files are in {folder}").format(folder=folder), 8000)
 
     def _open_install_guide(self):
         """Help > Installation Help: the web guide, opened on this system."""
@@ -3229,18 +3682,13 @@ class MainWindow(QMainWindow):
         ed = self.current_editor()
         if not ed:
             return
-        self._search_matches = []
-        if not needle:
-            self._current_match_index = -1
-            return
-        cursor = QTextCursor(ed.document())
-        cursor.movePosition(QTextCursor.Start)
-        while True:
-            cursor = ed.document().find(needle, cursor, QTextDocument.FindFlags())
-            if cursor.isNull():
-                break
-            self._search_matches.append((cursor.selectionStart(), cursor.selectionEnd()))
-        self._current_match_index = -1
+        self._search_matches = find_all(ed.document(), needle, self.findbar.options())
+        # The match that is selected stays the current one when the matches
+        # are found again (after typing, after a replacement).
+        cursor = ed.textCursor()
+        selected = (cursor.selectionStart(), cursor.selectionEnd())
+        self._current_match_index = (self._search_matches.index(selected)
+                                     if selected in self._search_matches else -1)
 
     def _highlight_all_matches(self):
         ed = self.current_editor()
@@ -3344,6 +3792,10 @@ class MainWindow(QMainWindow):
             self.findbar.set_match_info(_("No matches"))
             return
         total = len(self._search_matches)
+        if self._current_match_index < 0:
+            self.findbar.set_match_info(
+                ngettext("{count} match", "{count} matches", total).format(count=total))
+            return
         current = self._current_match_index + 1
         self.findbar.set_match_info(_("{current} of {total}").format(
             current=current, total=total))
@@ -3367,24 +3819,19 @@ class MainWindow(QMainWindow):
     # FORMAT HANDLERS
     # ----------------------------------------------------------------------
     def _fmt_bold(self):
-        ed = self.current_editor()
-        if ed:
-            ed.toggle_bold()
+        self._toggle_format('bold')
 
     def _fmt_italic(self):
-        ed = self.current_editor()
-        if ed:
-            ed.toggle_italic()
+        self._toggle_format('italic')
 
     def _fmt_underline(self):
-        ed = self.current_editor()
-        if ed:
-            ed.toggle_underline()
+        self._toggle_format('underline')
 
     def _reset_format(self):
         ed = self.current_editor()
         if ed:
             ed.reset_to_default()
+            self._update_format_buttons()
 
     def _undo(self):
         ed = self.current_editor()
@@ -3396,6 +3843,187 @@ class MainWindow(QMainWindow):
         if ed:
             ed.redo()
 
+    def _editor_call(self, name: str) -> None:
+        """Run an editing command on the current tab's editor."""
+        ed = self.current_editor()
+        if ed:
+            getattr(ed, name)()
+            self._update_format_buttons()
+
+    def _open_link(self, href: str) -> None:
+        """Open a link from the document: a web page in the browser, a
+        Nostr link through njump.me, an email in the mail app."""
+        web = link_url.web_address_for(href)
+        if web:
+            self._open_external(web)
+        elif href.lower().startswith("mailto:"):
+            QDesktopServices.openUrl(QUrl(href))
+        else:
+            self.status.showMessage(_("That link cannot be opened."), 5000)
+
+    @staticmethod
+    def _copy_link(href: str) -> None:
+        """The link's address on the clipboard (an email without mailto:)."""
+        QGuiApplication.clipboard().setText(
+            href[len("mailto:"):] if href.lower().startswith("mailto:") else href)
+
+    def _toggle_list(self, kind: str) -> None:
+        ed = self.current_editor()
+        if ed:
+            ed.toggle_list(kind)
+            self._update_format_buttons()
+
+    def _change_indent(self, delta: int) -> None:
+        ed = self.current_editor()
+        if ed:
+            ed.change_indent(delta)
+            self._update_format_buttons()
+
+    def _set_heading(self, level: int) -> None:
+        ed = self.current_editor()
+        if ed:
+            ed.set_heading(level)
+            self._update_format_buttons()
+
+    def _set_toolbar_shown(self, shown: bool) -> None:
+        """View > Show Toolbar, remembered."""
+        self.show_toolbar = bool(shown)
+        save_setting("show_toolbar", self.show_toolbar)
+        self._update_editor_commands()
+
+    def _toggle_style(self, style: str) -> None:
+        ed = self.current_editor()
+        if ed:
+            ed.toggle_style(style)
+            self._update_format_buttons()
+
+    def _apply_color(self, color) -> None:
+        ed = self.current_editor()
+        if ed:
+            ed.apply_color(color)
+
+    def _edit_focused(self, name: str) -> None:
+        """Cut, Copy, Paste, Delete or Select All, for whatever has the
+        keyboard focus, the way a Mac app sends them to its first
+        responder: a text field (the find field), the PDF reader, or the
+        document."""
+        focus = QApplication.focusWidget()
+        if isinstance(focus, (QLineEdit, QTextEdit, QPlainTextEdit)) and not isinstance(
+                focus, HtmlEditor):
+            if name == "delete":
+                if isinstance(focus, QLineEdit):
+                    focus.del_()
+                elif not focus.isReadOnly():
+                    focus.textCursor().removeSelectedText()
+                return
+            {"cut": focus.cut, "copy": focus.copy, "paste": focus.paste,
+             "select_all": focus.selectAll}[name]()
+            return
+        viewer = self.current_pdf_viewer()
+        if viewer is not None:
+            if name == "copy":
+                viewer.view.copy_selection()
+            return
+        ed = self.current_editor()
+        if ed is None:
+            return
+        if name == "cut":
+            ed.cut()
+        elif name == "copy":
+            ed.copy()
+        elif name == "paste":
+            ed.paste_from_clipboard()
+        elif name == "select_all":
+            ed.selectAll()
+        elif name == "delete":
+            cursor = ed.textCursor()
+            if cursor.hasSelection():
+                cursor.beginEditBlock()
+                cursor.removeSelectedText()
+                cursor.endEditBlock()
+                ed.setTextCursor(cursor)
+        ed.setFocus()
+
+    def _paste_plain(self) -> None:
+        focus = QApplication.focusWidget()
+        if isinstance(focus, QLineEdit):
+            focus.paste()
+            return
+        ed = self.current_editor()
+        if ed:
+            ed.paste_normalized()
+
+    def _use_selection_for_find(self) -> None:
+        """The selected words become what Find looks for (Command-E): Find
+        Next then goes to their next occurrence, with the find bar open or
+        not."""
+        ed = self.current_editor()
+        if ed is None:
+            return
+        text = ed.textCursor().selectedText().replace("\u2029", " ").replace("\u2028", " ")
+        if text.strip():
+            self.findbar.edit.setText(text)
+
+    def _editor_kind(self, ed) -> str:
+        """What a tab's editor holds: "rich" (Markdown and HTML documents,
+        and untitled ones: headings, lists and links go to Markdown), or
+        "source" (text written as it is: .txt, R Markdown, code, and
+        Markdown opened as its text). "" for no editor."""
+        if ed is None:
+            return ""
+        if getattr(ed, "_markdown_source", False) or getattr(ed, "_loaded_as_rmd_source", False):
+            return "source"
+        path = getattr(ed, "_file_path", None)
+        if path:
+            return "rich" if path.lower().endswith(_RICH_DOC_EXTS) else "source"
+        language = getattr(ed, "_language", None)
+        return "rich" if language in (None, "markdown", "html") else "source"
+
+    def _update_editor_commands(self) -> None:
+        """Editing commands follow the current tab: none on a PDF tab, and
+        no Markdown structure in a plain-text one."""
+        if not hasattr(self, "_editor_actions"):
+            return
+        kind = self._editor_kind(self.current_editor())
+        if getattr(self, "format_toolbar", None) is not None:
+            # A PDF has nothing to format; plain text has no paragraph styles.
+            self.format_toolbar.setVisible(self.show_toolbar and bool(kind))
+            self.format_toolbar.style_button.setEnabled(kind == "rich")
+        for action in self._editor_actions:
+            action.setEnabled(bool(kind))
+        for action in self._rich_actions:
+            action.setEnabled(kind == "rich")
+        if kind:
+            self._update_undo_redo_buttons()
+
+    def _fill_editor_context_menu(self, menu, editor, pos) -> None:
+        """The editor's context menu: the window's own commands, so it
+        offers what the menus offer, under the same names. On a link, the
+        link's own commands come first."""
+        if editor.anchorAt(pos) and not editor.textCursor().hasSelection():
+            editor.setTextCursor(editor.cursorForPosition(pos))
+            self._update_format_buttons()
+        link = editor.link_at_caret() if self._editor_kind(editor) == "rich" else None
+        if link is not None:
+            # A link's own commands, here only: they mean something only
+            # where a link is.
+            href = link[2]
+            menu.addAction(_("Open Link"), lambda: self._open_link(href))
+            menu.addAction(self.act_link)
+            menu.addAction(_("Copy Link"), lambda: self._copy_link(href))
+            menu.addAction(_("Remove Link"), editor.remove_link)
+            menu.addSeparator()
+        for action in (self.act_cut, self.act_copy, self.act_paste, self.act_paste_plain):
+            menu.addAction(action)
+        menu.addSeparator()
+        for action in (self.act_bold, self.act_italic, self.act_underline, self.act_strike,
+                       self.act_code):
+            menu.addAction(action)
+        menu.addMenu(self.m_color)
+        menu.addSeparator()
+        menu.addMenu(self.m_style)
+        menu.addAction(self.act_reset_format)
+
 
     # ----------------------------------------------------------------------
     # THEME TOGGLE
@@ -3403,21 +4031,18 @@ class MainWindow(QMainWindow):
     def _set_theme(self, is_dark: bool, announce: bool = True):
         """Apply is_dark to every theme-aware widget in the window.
 
-        Shared by the manual toggle (checkbox / Ctrl+Shift+T) and the
+        Shared by the manual toggle (View > Toggle Dark/Light Theme) and the
         OS color-scheme-follow path, so the fan-out logic lives in one
         place instead of being duplicated.
         """
         self.is_dark_theme = is_dark
-        if hasattr(self, 'header_widget'):
-            self.header_widget.theme_checkbox.blockSignals(True)
-            self.header_widget.theme_checkbox.setChecked(self.is_dark_theme)
-            self.header_widget.theme_checkbox.blockSignals(False)
         self._apply_theme()
         if hasattr(self, 'findbar'):
             self.findbar.is_dark = self.is_dark_theme
             self.findbar._update_theme()
-        if hasattr(self, 'header_widget'):
-            self.header_widget.update_theme(self.is_dark_theme)
+        self.profile_chip.set_dark_theme(self.is_dark_theme)
+        if getattr(self, 'format_toolbar', None) is not None:
+            self.format_toolbar.set_dark(self.is_dark_theme)
         if hasattr(self, 'update_bar'):
             self.update_bar.update_theme(self.is_dark_theme)
         for i in range(self.tabs.count()):
@@ -3444,10 +4069,7 @@ class MainWindow(QMainWindow):
             self.status.showMessage(message, 2000)
 
     def _toggle_theme(self):
-        if hasattr(self, 'header_widget') and self.header_widget.theme_checkbox.isChecked() != self.is_dark_theme:
-            target = self.header_widget.theme_checkbox.isChecked()
-        else:
-            target = not self.is_dark_theme
+        target = not self.is_dark_theme
         self._set_theme(target)
         # The user made an explicit choice - stop following the OS scheme
         # and remember this choice across restarts.
@@ -3470,14 +4092,7 @@ class MainWindow(QMainWindow):
     # LINE NUMBERS
     # ----------------------------------------------------------------------
     def _toggle_line_numbers(self):
-        if hasattr(self, 'header_widget') and self.header_widget.line_numbers_checkbox.isChecked() != self.show_line_numbers:
-            self.show_line_numbers = self.header_widget.line_numbers_checkbox.isChecked()
-        else:
-            self.show_line_numbers = not self.show_line_numbers
-        if hasattr(self, 'header_widget'):
-            self.header_widget.line_numbers_checkbox.blockSignals(True)
-            self.header_widget.line_numbers_checkbox.setChecked(self.show_line_numbers)
-            self.header_widget.line_numbers_checkbox.blockSignals(False)
+        self.show_line_numbers = not self.show_line_numbers
         self.act_toggle_line_numbers.setChecked(self.show_line_numbers)
 
         for i in range(self.tabs.count()):
@@ -3502,27 +4117,15 @@ class MainWindow(QMainWindow):
     # SYNTAX HIGHLIGHTING
     # ----------------------------------------------------------------------
     def _toggle_syntax_highlighting(self):
-        if hasattr(self, 'header_widget') and self.header_widget.syntax_highlight_checkbox.isChecked() != self.syntax_highlighting:
-            self.syntax_highlighting = self.header_widget.syntax_highlight_checkbox.isChecked()
-        else:
-            self.syntax_highlighting = not self.syntax_highlighting
-
+        self.syntax_highlighting = not self.syntax_highlighting
         self.act_toggle_syntax_hl.setChecked(self.syntax_highlighting)
-        self.header_widget.syntax_highlight_checkbox.blockSignals(True)
-        self.header_widget.syntax_highlight_checkbox.setChecked(self.syntax_highlighting)
-        self.header_widget.syntax_highlight_checkbox.blockSignals(False)
 
         for i in range(self.tabs.count()):
             container = self.tabs.widget(i)
             if isinstance(container, QWidget):
                 editor = self._editor_from_widget(container)
                 if editor:
-                    if self.syntax_highlighting:
-                        path = getattr(editor, '_file_path', None)
-                        self._attach_highlighter(editor, path)
-                    elif hasattr(editor, '_highlighter'):
-                        editor._highlighter.setDocument(None)
-                        del editor._highlighter
+                    self._attach_highlighter(editor, getattr(editor, '_file_path', None))
 
         self.status.showMessage(_("Syntax highlighting enabled") if self.syntax_highlighting
                                 else _("Syntax highlighting disabled"), 2000)
@@ -3585,27 +4188,27 @@ class MainWindow(QMainWindow):
         if not paths:
             return
         data = {"paths": paths, "active": self.tabs.currentIndex()}
-        os.makedirs(os.path.dirname(self._SESSION_FILE), exist_ok=True)
-        with open(self._SESSION_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f)
+        write_json(self._SESSION_FILE, data)
 
     def _restore_session(self) -> bool:
         if not os.path.isfile(self._SESSION_FILE):
             return False
+        data = read_json(self._SESSION_FILE, dict)
+        # Restored at most once, and a damaged record never restores.
         try:
-            with open(self._SESSION_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception:
-            return False
-        os.remove(self._SESSION_FILE)
-        paths = [p for p in data.get("paths", []) if os.path.isfile(p)]
+            os.remove(self._SESSION_FILE)
+        except OSError:
+            pass
+        listed = data.get("paths")
+        listed = listed if isinstance(listed, list) else []
+        paths = [p for p in listed if isinstance(p, str) and os.path.isfile(p)]
         if not paths:
             return False
-        missing = len(data.get("paths", [])) - len(paths)
+        missing = len(listed) - len(paths)
         for path in paths:
             self.open_path(path)
         active = data.get("active", 0)
-        if 0 <= active < self.tabs.count():
+        if isinstance(active, int) and 0 <= active < self.tabs.count():
             self.tabs.setCurrentIndex(active)
         if missing:
             self.status.showMessage(
@@ -3721,7 +4324,7 @@ class MainWindow(QMainWindow):
         passed in; otherwise the chip falls back to initials on a
         deterministic color disc.
         """
-        chip = self.header_widget.profile_chip
+        chip = self.profile_chip
         default = self._profile_store.default()
         if default is None:
             chip.set_disconnected()
@@ -3734,7 +4337,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_profile_chip_menu(self):
         """Rebuild the chip's dropdown - fast and idempotent."""
-        menu = self.header_widget.profile_chip.menu()
+        menu = self.profile_chip.menu()
         menu.clear()
         self._update_account_actions()
 
@@ -3762,17 +4365,23 @@ class MainWindow(QMainWindow):
         act_membership = menu.addAction(_("EINUNDZWANZIG Membership\u2026"))
         act_membership.triggered.connect(self._open_membership_window)
         menu.addSeparator()
+        if active is not None:
+            act_edit = menu.addAction(_("Edit Profile\u2026"))
+            act_edit.triggered.connect(self._on_edit_profile)
         if active is not None and active.is_local:
             act_backup = menu.addAction(_("Back Up Account\u2026"))
             act_backup.triggered.connect(self._on_backup_account)
+            act_move = menu.addAction(_("Move Key to Signer App\u2026"))
+            act_move.triggered.connect(self._on_move_to_signer)
         act_add = menu.addAction(_("Add Profile\u2026"))
         act_add.triggered.connect(self._on_nostr_connect)
         act_signout = menu.addAction(_("Sign Out"))
         act_signout.triggered.connect(self._on_nostr_sign_out)
 
     def _update_account_actions(self) -> None:
-        """Back Up Account is for an account whose key is kept here. The
-        menu bar is built after the first chip refresh, so both call this.
+        """Back Up Account and Move Key to Signer App are for an account
+        whose key is kept here. The menu bar is built after the first chip
+        refresh, so both call this.
 
         Every change of the active account passes through here (connect,
         switch, sign out, create, restore), so this is also where the one
@@ -3784,10 +4393,11 @@ class MainWindow(QMainWindow):
             if imports is not None:
                 imports.account_changed(self._profile_store.default() if state.active
                                         else None)
-        action = getattr(self, "_act_backup_account", None)
-        if action is not None:
-            current = self._profile_store.default()
-            action.setEnabled(current is not None and current.is_local)
+        current = self._profile_store.default()
+        for name in ("_act_backup_account", "act_move_to_signer"):
+            action = getattr(self, name, None)
+            if action is not None:
+                action.setEnabled(current is not None and current.is_local)
 
     # -- creating, restoring and backing up accounts ---------------------------
     # The windows and the network work behind them are the account
@@ -3802,6 +4412,38 @@ class MainWindow(QMainWindow):
 
     def _on_backup_account(self) -> None:
         self._accounts.backup_account()
+
+    def _on_move_to_signer(self) -> None:
+        self._accounts.move_to_signer()
+
+    def _on_edit_profile(self) -> None:
+        """Edit Profile for the active account. The window reads the
+        profile fresh before anything can be changed (nostr/ui/profile_window.py)."""
+        active = self._profile_store.default()
+        if active is None:
+            inform(self, title=_("Connect a signer first"),
+                   message=_("Connect a Nostr signer (Nostr > Connect Signer\u2026) "
+                             "before editing your profile."),
+                   is_dark=self.is_dark_theme)
+            return
+        editing = ProfileEditing(profile=active, pool=self._relay_pool,
+                                 session_pool=self._session_pool,
+                                 directory=self._relay_directory, parent=self)
+        window = ProfileWindow(read=editing.read, save=editing.save,
+                               signs_locally=active.is_local, is_dark=self.is_dark_theme,
+                               parent=self)
+        # Closing the window ends what is still running for it.
+        editing.setParent(window)
+        window.setWindowFlag(Qt.Window, True)
+        window.setAttribute(Qt.WA_DeleteOnClose, True)
+
+        def saved() -> None:
+            self.status.showMessage(_("Profile saved."), 5000)
+            # Read back what was published, so the chip and menus show it.
+            self._metadata_fetcher.fetch(active)
+
+        window.saved.connect(saved)
+        window.show()
 
     def _on_nostr_connect(self):
         dialog = ConnectDialog(
@@ -3870,6 +4512,49 @@ class MainWindow(QMainWindow):
         dialog = self._visible_media_library()
         if dialog is not None:
             dialog.set_server_suggestions(self._media_server_suggestions())
+
+    def _share_media_server_list(self) -> None:
+        """Publish the servers uploads go to as the account's media server
+        list (kind 10063), after asking: it replaces the list other apps
+        read now, if the account published one."""
+        active = self._profile_store.default()
+        if active is None:
+            return
+        servers = [url_safety.origin_of(s) or s for s in self._media_store.target_servers()]
+        hosts = ", ".join(url_safety.host_of(s) or s for s in servers)
+        parent = self._visible_media_library() or self
+        choice = ask(parent, title=_("Tell Other Apps Where Your Media Is?"),
+                     message=_("Other Nostr apps then look on {hosts} for your pictures, "
+                               "in this order. This replaces the list they use now, if "
+                               "you shared one before.").format(hosts=hosts),
+                     buttons=(Button(_("Cancel"), False, CANCEL),
+                              Button(_("Share List"), True, DEFAULT)),
+                     is_dark=self.is_dark_theme)
+        if choice is not True:
+            return
+        try:
+            writer = publish_server_list(
+                servers=servers, pool=self._relay_pool, directory=self._relay_directory,
+                session_pool=self._session_pool, profile=active, parent=self)
+        except ValueError:
+            self.status.showMessage(_("There is no media server to share."), 5000)
+            return
+        messages = {
+            outbox_writer.WRITTEN: _("Your media server list is shared."),
+            outbox_writer.UNCHANGED: _("Other apps already have this list."),
+            outbox_writer.UNKNOWN_BASE: _("Your current list couldn’t be read, so nothing "
+                                          "was changed. Try again later."),
+        }
+
+        def finished(outcome) -> None:
+            self.status.showMessage(messages.get(outcome.status, _(
+                "The list wasn’t shared. Try again in a moment.")), 6000)
+            if outcome.status == outbox_writer.WRITTEN:
+                self._server_list.refresh(active, force=True)
+            writer.deleteLater()
+
+        writer.finished.connect(finished)
+        writer.start()
 
     def _entitled_quota(self, origin: str):
         """The space a membership gives on its media server, in bytes."""
@@ -4147,9 +4832,15 @@ class MainWindow(QMainWindow):
         binding = getattr(ed, "_draft_binding", None) if ed else None
         default_title = ""
         default_slug = ""
+        first_published = None
         if binding is not None and binding.inner_kind == INNER_KIND_LONG_FORM:
             default_title = binding.title
             default_slug = binding.identifier
+            # A draft of a published article (an import, an edit) carries
+            # when it first went out; a new version keeps that date.
+            record = self._draft_store.get(binding.identifier)
+            if record is not None:
+                first_published = published_at_of({"tags": record.inner_tags})
         if not default_title:
             first_line = next((ln for ln in body.splitlines() if ln.strip()), "")
             default_title = first_line.lstrip("# ").strip()
@@ -4176,6 +4867,7 @@ class MainWindow(QMainWindow):
             private_library=self._private_library,
             default_title=default_title,
             default_slug=default_slug,
+            first_published=first_published,
             parent=self,
             is_dark=self.is_dark_theme,
         )
@@ -4217,6 +4909,7 @@ class MainWindow(QMainWindow):
         )
         dialog.bind_private_library(self._private_library)
         dialog.server_suggestions_accepted.connect(self._use_suggested_media_servers)
+        dialog.share_server_list_requested.connect(self._share_media_server_list)
         dialog.set_server_suggestions(self._media_server_suggestions())
         # The dialog deletes itself on close; forget it then, so nothing
         # later asks a deleted object whether it is visible.
@@ -4251,6 +4944,7 @@ class MainWindow(QMainWindow):
         )
         dialog.bind_private_library(self._private_library)
         dialog.server_suggestions_accepted.connect(self._use_suggested_media_servers)
+        dialog.share_server_list_requested.connect(self._share_media_server_list)
         dialog.set_server_suggestions(self._media_server_suggestions())
         # Pre-select images in the picker - videos / audio can't be
         # inserted as inline document objects.
@@ -5118,6 +5812,7 @@ class MainWindow(QMainWindow):
         )
         # A successful stash clears the modified flag - the tab's
         # contents now match the latest draft snapshot on the network.
+        ed._recovered_title = ""
         ed.document().setModified(False)
         self._update_tab_title()
 
@@ -5308,6 +6003,7 @@ class MainWindow(QMainWindow):
         published exactly as written."""
         if holds_faithfully(content):
             ed.document().setMarkdown(content, READ_FEATURES)
+            normalize_after_markdown_load(ed.document())
             ed._loaded_as_markdown = True
             ed._markdown_source = False
         else:

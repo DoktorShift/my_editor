@@ -63,11 +63,16 @@ def classify(event: Optional[dict], answered: Sequence[str]) -> LookupState:
 
 def fetch_replaceable(pool, relays: Sequence[str], *, kind: int, author: str,
                       on_done: Callable[[Lookup], None], timeout_ms: int = 6_000,
-                      parent: Optional[QObject] = None) -> "_ReplaceableQuery":
-    """Ask ``relays`` for ``author``'s newest ``kind``; ``on_done`` once."""
+                      parent: Optional[QObject] = None,
+                      d_tag: Optional[str] = None) -> "_ReplaceableQuery":
+    """Ask ``relays`` for ``author``'s newest ``kind``; ``on_done`` once.
+
+    ``d_tag`` names one event of an addressable kind (an article, kind
+    30023, by its identifier): only that one competes."""
     key = (author or "").lower()
     return _ReplaceableQuery(pool, dedupe_relays(relays), kind, [key],
-                             lambda results: on_done(results[key]), timeout_ms, parent)
+                             lambda results: on_done(results[key]), timeout_ms, parent,
+                             d_tag=d_tag)
 
 
 def fetch_replaceable_many(pool, relays: Sequence[str], *, kind: int,
@@ -88,10 +93,11 @@ class _ReplaceableQuery(QObject):
     """One REQ for the newest ``kind`` of one or more authors."""
 
     def __init__(self, pool, relays: List[str], kind: int, authors: List[str], on_done,
-                 timeout_ms: int, parent) -> None:
+                 timeout_ms: int, parent, *, d_tag: Optional[str] = None) -> None:
         super().__init__(parent)
         self._relays = relays
         self._kind = kind
+        self._d_tag = d_tag
         self._authors = authors
         self._on_done = on_done
         self._best: Dict[str, Optional[dict]] = {a: None for a in authors}
@@ -106,8 +112,10 @@ class _ReplaceableQuery(QObject):
         if not relays or not authors:
             QTimer.singleShot(0, self._finish)
             return
-        self._sub = pool.subscribe(relays, [{"kinds": [kind], "authors": list(authors),
-                                             "limit": 2 * len(authors)}])
+        query = {"kinds": [kind], "authors": list(authors), "limit": 2 * len(authors)}
+        if d_tag is not None:
+            query["#d"] = [d_tag]
+        self._sub = pool.subscribe(relays, [query])
         self._sub.event.connect(self._on_event)
         self._sub.relay_eose.connect(self._on_relay_eose)
         self._sub.relay_closed.connect(self._on_relay_refused)
@@ -125,6 +133,8 @@ class _ReplaceableQuery(QObject):
         author = str(event.get("pubkey", "")).lower()
         if author not in self._best:
             return
+        if self._d_tag is not None and _d_of(event) != self._d_tag:
+            return          # another article of the same author
         if not is_newer(event, self._best[author]):
             return          # older, or the same event again from another relay
         fingerprint = _fingerprint(event)
@@ -181,6 +191,14 @@ class _ReplaceableQuery(QObject):
             # it a second time.
             self.setParent(None)
             self.deleteLater()
+
+
+def _d_of(event: dict) -> Optional[str]:
+    """An addressable event's identifier (its first ``d`` tag)."""
+    for tag in event.get("tags", []) or []:
+        if isinstance(tag, list) and len(tag) >= 2 and tag[0] == "d":
+            return str(tag[1])
+    return None
 
 
 def _fingerprint(event: dict) -> str:
