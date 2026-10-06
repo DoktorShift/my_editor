@@ -4408,6 +4408,10 @@ class MainWindow(QMainWindow):
         if imports is not None:
             imports.flush()
             if imports.subscriptions.is_busy:
+                # The documents are settled and their backups gone: nothing
+                # typed now could be kept, so the window takes no more
+                # input while it says what it finishes (engine review M2).
+                self.setEnabled(False)
                 self.status.showMessage(_("Saving your list of sources…"))
                 imports.subscriptions.wait_until_settled(QUIT_SYNC_WAIT_MS)
         # Close any warm relay sockets and bunker channels so the WebSocket

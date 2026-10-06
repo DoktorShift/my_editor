@@ -67,3 +67,37 @@ def test_quitting_waits_before_closing_the_signer():
     source = inspect.getsource(MainWindow.closeEvent)
     assert source.index("imports.flush()") < source.index("wait_until_settled")
     assert source.index("wait_until_settled") < source.index("_session_pool.close_all()")
+
+
+def test_nothing_can_be_typed_while_quitting_waits(monkeypatch):
+    """Engine review M2: while quitting waited for the list of sources,
+    the window stayed editable and what was typed then was lost without
+    a word. It takes no more input while it waits."""
+    import types
+    from PySide6.QtGui import QCloseEvent
+    from PySide6.QtWidgets import QMainWindow, QStatusBar, QTabWidget
+    import main_window
+    from main_window import MainWindow
+    monkeypatch.setattr(main_window.workspace, "discard_workspace", lambda: None)
+    host = QMainWindow()
+    seen = {}
+
+    class Subscriptions:
+        is_busy = True
+
+        def wait_until_settled(self, ms):
+            seen["enabled while waiting"] = host.isEnabled()
+            seen["status"] = host.status.currentMessage()
+            return True
+
+    host._imports = types.SimpleNamespace(flush=lambda: None, subscriptions=Subscriptions())
+    host._resolve_unsaved_before_closing = lambda: True
+    host._asset_manager = types.SimpleNamespace(flush=lambda: None)
+    host._save_session = lambda: None
+    host.tabs = QTabWidget()
+    host.status = QStatusBar()
+    host._session_pool = types.SimpleNamespace(close_all=lambda: None)
+    host._relay_pool = types.SimpleNamespace(close_all=lambda: None)
+    MainWindow.closeEvent(host, QCloseEvent())
+    assert seen == {"enabled while waiting": False,
+                    "status": "Saving your list of sources\u2026"}
