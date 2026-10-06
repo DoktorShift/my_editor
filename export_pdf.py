@@ -32,7 +32,6 @@ from PySide6.QtCore import QMarginsF, QRectF, QSizeF, Qt, QLocale, QUrl
 from PySide6.QtGui import (
     QAbstractTextDocumentLayout,
     QColor,
-    QFont,
     QImage,
     QPageLayout,
     QPageSize,
@@ -45,7 +44,7 @@ from PySide6.QtGui import (
 )
 
 from atomic_file import read_json, write_json
-from constants import MONO_FONT
+from fonts import monospace_font
 from i18n import _
 from image_safety import ImageRootPolicy, data_uri_bytes, decode_image_bytes
 
@@ -234,7 +233,7 @@ def paginate(doc, device, resolution: int, *, image_roots=(), asset_resolver=Non
     # Print in points, not the editor's 14 screen pixels, and force a white
     # page regardless of the active theme. Palette colors (Material 600)
     # are chosen to stay readable on white.
-    clone.setDefaultFont(QFont(MONO_FONT, BODY_POINT_SIZE))
+    clone.setDefaultFont(monospace_font(BODY_POINT_SIZE))
     frame_fmt = clone.rootFrame().frameFormat()
     frame_fmt.setBackground(QColor("white"))
     clone.rootFrame().setFrameFormat(frame_fmt)
@@ -254,7 +253,7 @@ def paint_pages(painter: QPainter, device, paged: PagedDocument, page_numbers) -
     printed range still says "Page 3 of 7".
     """
     layout = paged.clone.documentLayout()
-    footer_font = QFont(MONO_FONT, FOOTER_POINT_SIZE)
+    footer_font = monospace_font(FOOTER_POINT_SIZE)
     content_h = paged.content_height
     for n, number in enumerate(page_numbers):
         page = number - 1

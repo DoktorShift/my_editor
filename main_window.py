@@ -35,13 +35,14 @@ from PySide6.QtWidgets import (
 from constants import (
     DARK_BG, DARK_FG, LIGHT_BG, LIGHT_FG, DARK_SELECTION, LIGHT_SELECTION,
     DARK_MENU_BG, DARK_MENU_FG, LIGHT_MENU_BG, LIGHT_MENU_FG,
-    DARK_BORDER, LIGHT_BORDER, MONO_FONT, APP_DISPLAY_NAME, APP_VERSION, APP_URL
+    DARK_BORDER, LIGHT_BORDER, APP_DISPLAY_NAME, APP_VERSION, APP_URL
 )
 from widgets import FindBar, HeaderWidget, LineNumberGutter, FileChangedBar, UpdateBar
 from atomic_file import (
     read_json, read_text_document, save_document, save_text_document, write_json,
 )
 import diagnostics
+from fonts import monospace_family
 import i18n
 from i18n import _, ngettext, pgettext
 from commands import FILE, FORMAT, HELP, NOSTR, SEARCH, VIEW, Command, CommandRegistry
@@ -737,7 +738,7 @@ class MainWindow(QMainWindow):
                 border: none;
                 selection-background-color: {selection};
                 selection-color: {fg};
-                font-family: {MONO_FONT};
+                font-family: "{monospace_family()}";
                 font-size: 14px;
                 line-height: 1.5;
                 padding: 8px;

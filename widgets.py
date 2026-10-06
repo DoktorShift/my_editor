@@ -4,11 +4,12 @@
 
 
 from PySide6.QtCore import Qt, QRect, QSize, Signal
-from PySide6.QtGui import QPainter, QFont, QColor
+from PySide6.QtGui import QPainter, QColor
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLineEdit, QLabel, QPushButton, QFrame, QMenu, QCheckBox
 )
-from constants import DARK_BG, LIGHT_BG, MONO_FONT
+from constants import DARK_BG, LIGHT_BG
+from fonts import monospace_font
 from i18n import _, pgettext
 from nostr.ui.profile_chip import ProfileChip
 
@@ -59,7 +60,7 @@ class LineNumberGutter(QWidget):
         doc = self.editor.document()
         layout = doc.documentLayout()
 
-        font = QFont(MONO_FONT, 14)
+        font = monospace_font(14)
         painter.setFont(font)
         painter.setPen(text_color)
 
