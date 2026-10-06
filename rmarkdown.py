@@ -28,7 +28,7 @@ import json
 import os
 import re
 
-from PySide6.QtCore import QObject, QProcess, Signal
+from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, Signal
 from PySide6.QtGui import QTextBlockFormat, QTextCharFormat, QTextListFormat
 
 from doc_walk import (
@@ -346,8 +346,11 @@ class KnitRunner(QObject):
         proc.setWorkingDirectory(os.path.dirname(os.path.abspath(rmd_path)))
         proc.setProcessChannelMode(QProcess.MergedChannels)
 
-        env = proc.processEnvironment()
-        env = rmd_toolchain.knit_environment(env)
+        # The system's environment with pandoc and the private R library
+        # added. A new QProcess's own environment is empty: what is added
+        # to it is all Rscript would get, without PATH, HOME or, on
+        # Windows, SystemRoot.
+        env = rmd_toolchain.knit_environment(QProcessEnvironment.systemEnvironment())
         proc.setProcessEnvironment(env)
 
         proc.readyReadStandardOutput.connect(self._on_output)
