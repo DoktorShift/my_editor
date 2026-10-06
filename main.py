@@ -14,6 +14,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtNetwork import QLocalSocket
 import constants
 import diagnostics
+import file_paths
 import i18n
 
 # The language is chosen before any module that holds texts is imported:
@@ -118,7 +119,9 @@ def main():
         import self_test
         sys.exit(self_test.run())
 
-    initial_path = sys.argv[1] if len(sys.argv) > 1 else None
+    # Absolute before it is handed on: the running window started in
+    # another folder, so a relative path would mean another file there.
+    initial_path = file_paths.normalize(sys.argv[1]) if len(sys.argv) > 1 else None
 
     if initial_path and _forward_to_running_instance(initial_path):
         sys.exit(0)

@@ -247,8 +247,9 @@ def test_settings_that_cannot_be_saved_keep_the_old_ones(tmp_path, monkeypatch):
 def test_recent_files_ignore_entries_that_are_not_paths(tmp_path, monkeypatch):
     import recent_files
     monkeypatch.setattr(recent_files, "_RECENT_FILE", str(tmp_path / "recent.json"))
-    (tmp_path / "recent.json").write_text('["/a.md", 5, null, "/b.md"]', encoding="utf-8")
-    assert recent_files.load_recent() == ["/a.md", "/b.md"]
+    a, b = str(tmp_path / "a.md"), str(tmp_path / "b.md")
+    (tmp_path / "recent.json").write_text(json.dumps([a, 5, None, b]), encoding="utf-8")
+    assert recent_files.load_recent() == [a, b]
 
 
 # -- the person's own files ------------------------------------------------------
