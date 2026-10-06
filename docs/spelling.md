@@ -31,7 +31,7 @@ spelling.set_visible_blocks(first, last)                  # on scroll and resize
 - Draw underlines as extra selections with `QTextCharFormat.UnderlineStyle.SpellCheckUnderline`, which Qt draws as each platform does (dotted on macOS, wavy elsewhere).
 - For the context menu, `spelling.misspelling_at(position)` checks the block right away if needed. Then `checker.suggestions(m.word, m.language)` (best first; show a few), `checker.learn(m.word, m.language)` and `checker.ignore(m.word, m.language)`. macOS calls them Ignore Spelling and Learn Spelling; Word and LibreOffice call them Ignore All and Add to Dictionary.
 - Dim Edit > Spelling > Check Spelling While Typing when `checker.is_available()` is False. `checker.availabilityChanged` says when a system checker stops working; its underlines are already gone then.
-- `spelling.close()` when spell checking is turned off. A `DocumentSpelling` is a child of its document and goes with it.
+- `spelling.close()` when spell checking is turned off. A `DocumentSpelling` is a child of its document and goes with it; a reference the editor keeps afterwards is harmless, its methods then do nothing.
 - `checker.find_misspellings(text)` checks a short plain text at once (a title, a summary), with offsets from the start of the text.
 - `spelling.set_language(tag)` checks a document in another language; `checker.languages()` lists those the system has. There is no language menu yet: macOS tells languages apart by itself, Windows and Linux use the system language.
 
@@ -39,9 +39,9 @@ Only prose documents should get a `DocumentSpelling`, not source code.
 
 ## What is checked
 
-A word is letters of any script with their combining marks ("Grüße", "naïve" typed decomposed, Hindi), joined by apostrophes ("don't", "geht’s"), hyphens ("E-Mail-Adresse") and soft hyphens. Left alone: single letters, abbreviations in capitals ("NASA", as macOS does), anything with a digit, an underscore or a dot inside ("mp3", "snake_case", "example.com", "z.B."), web, e-mail and Nostr addresses, `nostr:` references and bare `npub1…` keys, mentions, hashtags, inline code and code blocks (fenced or indented), front matter at the top, HTML tags and comments, link and image addresses (their text is checked), character references, paths and emoji shortcodes. Code and mentions that are formatted as such in the editor (a fixed-pitch font, a link to a `nostr:` address) are left alone too.
+A word is letters of any script with their combining marks ("Grüße", "naïve" typed decomposed, Hindi), joined by apostrophes ("don't", "geht’s"), hyphens ("E-Mail-Adresse") and soft hyphens; the underscores of `_emphasis_` are markup, not part of it. Left alone: single letters, abbreviations in capitals ("NASA", as macOS does), anything with a digit, an underscore or a dot inside ("mp3", "snake_case", "example.com", "z.B."), web, e-mail and Nostr addresses (also without a scheme, like "github.com/rinbal"), `nostr:` references and bare `npub1…` keys, mentions, hashtags, inline code and code blocks (fenced, or indented by four columns after a blank line, eight inside a list, whose own paragraphs are indented), front matter at the top, HTML tags and comments, link and image addresses (their text is checked), link reference definitions (a footnote's text is checked), character references, paths and emoji shortcodes. Code and mentions that are formatted as such in the editor (a fixed-pitch font, a link to a `nostr:` address) are left alone too. A paragraph over 20,000 characters is a pasted dump, not prose, and is not checked at all.
 
-Word-by-word checkers (Enchant) also accept an abbreviation listed with its dot ("bzw.") and a compound whose parts are words; only the parts that are not are underlined.
+Word-by-word checkers (Enchant) also accept an abbreviation listed with its dot ("bzw."), a contraction of a known word and a clitic ("geht's", "she'll"), and a compound whose parts are words; only the parts that are not are underlined.
 
 ## How it keeps up with typing
 
@@ -74,7 +74,8 @@ Both check again only the blocks where the word was, in every open document.
 
 ## Tests
 
-- `tests/test_spelling_words.py`, `test_spelling_service.py`, `test_spelling_backends.py`: the scanner, the service and the interface, with stand-in checkers (`tests/spelling_fakes.py`). They run everywhere.
+- `tests/test_spelling_words.py`, `test_spelling_service.py`, `test_spelling_backends.py`: the scanner, the service and the interface, with stand-in checkers (`tests/spelling_fakes.py`). They run everywhere. `spelling_fakes.Editor` is a QTextEdit wired as this note says, keeping its underlines as text cursors; the typing tests drive it key by key.
+- No test writes into a person's dictionary: Learn is tested with the stand-ins, and the Enchant tests learn into a word list in a temporary folder.
 - `tests/test_spelling_macos.py`: the real NSSpellChecker, on macOS.
 - `tests/test_spelling_enchant.py`: the real Enchant where libenchant-2 is installed. The Linux test job installs it with English and German dictionaries. To run it from a Mac: `docker run` with `python:3.12-slim`, `apt-get install libenchant-2-2 hunspell-en-us hunspell-de-de` and Qt's runtime libraries, then the spelling tests.
 - `tests/test_spelling_windows.py`: the Windows backend's COM calls against stand-in COM objects with real function tables (`tests/spelling_com_fakes.py`), on every platform; the real Windows checker only in the Windows test job.
