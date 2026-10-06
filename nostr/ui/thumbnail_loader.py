@@ -30,6 +30,7 @@ from PySide6.QtGui import QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
 import url_safety
+from i18n import _
 from image_safety import decode_image_bytes
 
 
@@ -48,7 +49,9 @@ _HTTP_TIMEOUT_MS = 30_000
 # that policy still allows https to https into a loopback address.
 _MAX_REDIRECTS = 4
 
-_UNSAFE_URL_REASON = "blob URL was not allowed"
+# Shown to a person, as the reason a preview is missing. "not an image"
+# below is not translated: callers compare against it.
+_UNSAFE_URL_REASON = _("blob URL was not allowed")
 
 
 class ThumbnailLoader(QObject):
@@ -264,9 +267,9 @@ class ThumbnailLoader(QObject):
         other.
         """
         if oversize["hit"]:
-            return b"", "blob exceeds cache limit"
+            return b"", _("blob exceeds cache limit")
         if reply.error() != QNetworkReply.NoError:
-            return b"", reply.errorString() or "network error"
+            return b"", reply.errorString() or _("network error")
         # Redirects were followed, so the bytes may come from an origin
         # the caller never named; validate where they came from before
         # reading them.
@@ -274,9 +277,9 @@ class ThumbnailLoader(QObject):
             return b"", _UNSAFE_URL_REASON
         data = bytes(reply.readAll())
         if not data:
-            return b"", "empty response"
+            return b"", _("empty response")
         if len(data) > _MAX_DOWNLOAD_BYTES:
-            return b"", "blob exceeds cache limit"
+            return b"", _("blob exceeds cache limit")
         return data, ""
 
     def _on_reply(
@@ -296,7 +299,7 @@ class ThumbnailLoader(QObject):
             # Validate the bytes match the hash before trusting them.
             actual = hashlib.sha256(data).hexdigest()
             if actual != sha:
-                self.failed.emit(sha, "downloaded bytes do not match sha256")
+                self.failed.emit(sha, _("downloaded bytes do not match sha256"))
                 return
             image = decode_image_bytes(data)
             if image is None:

@@ -35,6 +35,8 @@ from __future__ import annotations
 
 from typing import Final, Iterable, List, Optional, Protocol, Sequence
 
+from i18n import _
+
 from .private_preview import PreviewOutcome, preview_from_envelope
 from .visibility import PrivateBlob, PublicBlob
 
@@ -206,7 +208,7 @@ class MediaVisibility:
         """
         blob = self._private(sha256)
         if blob is None:
-            return PreviewOutcome(reason="this file is not in your private library")
+            return PreviewOutcome(reason=_("this file is not in your private library"))
         return preview_from_envelope(envelope, blob.key_hex)
 
     # -- internals ---------------------------------------------------------

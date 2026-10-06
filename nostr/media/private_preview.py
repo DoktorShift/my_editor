@@ -34,6 +34,7 @@ from typing import Callable, Final, Optional
 from PySide6.QtGui import QImage
 
 import image_safety
+from i18n import _
 
 from .filecrypto import FileCryptoError, decrypt_file, looks_encrypted
 
@@ -47,10 +48,10 @@ MAX_PREVIEW_BYTES: Final[int] = 25 * 1024 * 1024
 
 # The vocabulary of "why there is no picture", in the same voice as the
 # library's existing preview reasons. These are shown to a person.
-REASON_NOT_ENCRYPTED: Final[str] = "these bytes are not an encrypted file"
-REASON_TOO_LARGE: Final[str] = "this file is too large to preview"
-REASON_WRONG_KEY: Final[str] = "the key in your library does not open this file"
-REASON_NOT_AN_IMAGE: Final[str] = "the file inside is not an image this app can show"
+REASON_NOT_ENCRYPTED: Final[str] = _("these bytes are not an encrypted file")
+REASON_TOO_LARGE: Final[str] = _("this file is too large to preview")
+REASON_WRONG_KEY: Final[str] = _("the key in your library does not open this file")
+REASON_NOT_AN_IMAGE: Final[str] = _("the file inside is not an image this app can show")
 
 
 @dataclass(frozen=True)

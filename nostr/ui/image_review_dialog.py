@@ -23,6 +23,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from i18n import _
+
 from ..imports.images import image_label
 
 
@@ -36,23 +38,23 @@ class ImageReviewDialog(QDialog):
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Review images")
+        self.setWindowTitle(_("Review images"))
         self.setModal(True)
         self.resize(520, 380)
 
         skip = set(skip_urls or ())
         layout = QVBoxLayout(self)
 
-        hint = QLabel(
+        hint = QLabel(_(
             "Checked images are copied to your Blossom server so the "
             "draft doesn't depend on the source site. Untick any you "
             "want to keep at their original URL."
-        )
+        ))
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
         self._list = QListWidget()
-        self._list.setAccessibleName("Images to mirror")
+        self._list.setAccessibleName(_("Images to mirror"))
         self._list.setSelectionMode(QListWidget.NoSelection)
         for url in images:
             row = QListWidgetItem(f"{image_label(url)}    {url}")
