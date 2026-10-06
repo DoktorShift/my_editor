@@ -46,6 +46,7 @@ from PySide6.QtGui import (
 )
 
 from constants import MONO_FONT
+from i18n import _
 from image_safety import ImageRootPolicy, data_uri_bytes, decode_image_bytes
 
 CREATOR = "minimal texteditor"
@@ -281,7 +282,8 @@ def paint_pages(painter: QPainter, device, paged: PagedDocument, page_numbers) -
             painter.setFont(footer_font)
             painter.drawText(QRectF(0, content_h, paged.page_width, paged.footer_height),
                              Qt.AlignHCenter | Qt.AlignVCenter,
-                             f"Page {number} of {paged.page_count}")
+                             _("Page {number} of {count}").format(
+                                 number=number, count=paged.page_count))
             painter.restore()
 
 

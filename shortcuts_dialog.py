@@ -37,6 +37,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from i18n import _, pgettext
+
 
 # --------------------------------------------------------------------------- #
 # Shortcut catalogue - single source of truth for the help dialog             #
@@ -57,42 +59,81 @@ class ShortcutGroup:
 # Keys that are not commands of the window: the editor, the find bar
 # and the PDF reader handle them themselves. Everything that IS a command
 # (a menu item with a shortcut) comes from the command list in
-# commands.py, so the two can never disagree.
+# commands.py, so the two can never disagree. Group names and keys are
+# written the command list's way (English); the window translates them
+# where it shows them.
 OTHER_KEYS: Tuple[Tuple[str, Tuple[Tuple[str, str], ...]], ...] = (
     ("Editing", (
-        ("Ctrl+Z", "Undo"),
-        ("Ctrl+Y", "Redo"),
-        ("Ctrl+Shift+Z", "Redo"),
-        ("Tab", "Indent"),
-        ("Shift+Tab", "Outdent"),
-        ("Enter", "New line"),
+        ("Ctrl+Z", _("Undo")),
+        ("Ctrl+Y", _("Redo")),
+        ("Ctrl+Shift+Z", _("Redo")),
+        ("Tab", _("Indent")),
+        ("Shift+Tab", _("Outdent")),
+        ("Enter", _("New line")),
     )),
     ("Search", (
-        ("Enter", "Next match"),
-        ("Shift+Enter", "Previous match"),
-        ("Esc", "Close find bar"),
+        ("Enter", _("Next match")),
+        ("Shift+Enter", _("Previous match")),
+        ("Esc", _("Close find bar")),
     )),
     ("PDF Reading", (
-        ("Ctrl+F", "Find in PDF"),
-        ("Ctrl+C", "Copy selected text"),
-        ("Esc", "Clear selection"),
-        ("Space", "Next screenful"),
-        ("Shift+Space", "Previous screenful"),
-        ("J", "Scroll down"),
-        ("K", "Scroll up"),
-        ("N", "Next page"),
-        ("P", "Previous page"),
-        ("G", "Go to page"),
-        ("Home", "First page"),
-        ("End", "Last page"),
-        ("Ctrl+=", "Zoom in (also Ctrl+wheel)"),
-        ("Ctrl+-", "Zoom out (also Ctrl+wheel)"),
-        ("Ctrl+0", "Fit page width"),
-        ("Ctrl+1", "Actual size"),
-        ("Ctrl+2", "Fit whole page"),
-        ("F12", "Toggle table of contents"),
+        ("Ctrl+F", _("Find in PDF")),
+        ("Ctrl+C", _("Copy selected text")),
+        ("Esc", _("Clear selection")),
+        ("Space", _("Next screenful")),
+        ("Shift+Space", _("Previous screenful")),
+        ("J", _("Scroll down")),
+        ("K", _("Scroll up")),
+        ("N", _("Next page")),
+        ("P", _("Previous page")),
+        ("G", _("Go to page")),
+        ("Home", _("First page")),
+        ("End", _("Last page")),
+        ("Ctrl+=", _("Zoom in (also Ctrl+wheel)")),
+        ("Ctrl+-", _("Zoom out (also Ctrl+wheel)")),
+        ("Ctrl+0", _("Fit page width")),
+        ("Ctrl+1", _("Actual size")),
+        ("Ctrl+2", _("Fit whole page")),
+        ("F12", _("Toggle table of contents")),
     )),
 )
+
+# A group's name on its card. Nostr is a name, the same in every language.
+_GROUP_TITLES = {
+    "File": pgettext("shortcut group", "File"),
+    "Editing": pgettext("shortcut group", "Editing"),
+    "Formatting": pgettext("shortcut group", "Formatting"),
+    "Search": pgettext("shortcut group", "Search"),
+    "View": pgettext("shortcut group", "View"),
+    "Help": pgettext("shortcut group", "Help"),
+    "PDF Reading": pgettext("shortcut group", "PDF Reading"),
+}
+
+# Keys as the reader's keyboard labels them (Strg and Umschalt on a
+# German one). Letters, digits and F-keys read the same everywhere.
+_KEY_NAMES = {
+    "Ctrl": pgettext("key", "Ctrl"),
+    "Shift": pgettext("key", "Shift"),
+    "Alt": pgettext("key", "Alt"),
+    "Enter": pgettext("key", "Enter"),
+    "Return": pgettext("key", "Return"),
+    "Space": pgettext("key", "Space"),
+    "Tab": pgettext("key", "Tab"),
+    "Esc": pgettext("key", "Esc"),
+    "Home": pgettext("key", "Home"),
+    "End": pgettext("key", "End"),
+    "PgUp": pgettext("key", "PgUp"),
+    "PgDown": pgettext("key", "PgDown"),
+    "Del": pgettext("key", "Del"),
+    "Backspace": pgettext("key", "Backspace"),
+}
+
+
+def _key_names(keys: str) -> List[str]:
+    """The keys of "Ctrl+Shift+D", each named the way the reader's
+    keyboard labels it."""
+    parts = [p.strip() for p in keys.split("+") if p.strip()]
+    return [_KEY_NAMES.get(part, part) for part in parts]
 
 
 def groups_from(rows) -> Tuple[ShortcutGroup, ...]:
@@ -253,8 +294,7 @@ def _make_keycap_row(keys: str) -> QWidget:
     layout = QHBoxLayout(container)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(3)
-    parts = [p.strip() for p in keys.split("+") if p.strip()]
-    for i, part in enumerate(parts):
+    for i, part in enumerate(_key_names(keys)):
         if i:
             plus = QLabel("+")
             plus.setObjectName("shortcut_action")
@@ -287,7 +327,7 @@ class _ShortcutCard(QFrame):
         outer.setContentsMargins(14, 12, 14, 14)
         outer.setSpacing(10)
 
-        header = QLabel(group.title)
+        header = QLabel(_GROUP_TITLES.get(group.title, group.title))
         header.setObjectName("shortcut_card_title")
         outer.addWidget(header)
 
@@ -327,7 +367,9 @@ class _ShortcutCard(QFrame):
         needle = needle.strip().lower()
         visible = 0
         for keycap, action, shortcut in self._rows:
-            text = f"{shortcut.keys} {shortcut.action}".lower()
+            # The keys as written (Ctrl+S) and as shown (Strg+S) both match.
+            shown = "+".join(_key_names(shortcut.keys))
+            text = f"{shortcut.keys} {shown} {shortcut.action}".lower()
             match = (not needle) or (needle in text)
             keycap.setVisible(match)
             action.setVisible(match)
@@ -358,13 +400,12 @@ class ShortcutsDialog(QDialog):
         super().__init__(parent)
         self._groups = tuple(groups)
         self.setObjectName("shortcuts_dialog")
-        self.setWindowTitle("Keyboard Shortcuts")
+        self.setWindowTitle(_("Keyboard Shortcuts"))
         self.setModal(True)
         # Wide-and-tall by default so all six categories fit without
         # scrolling on the common laptop resolutions. The dialog is
         # resizable so users on small screens can still see everything.
         self.resize(760, 620)
-        self.setMinimumSize(560, 420)
         self._is_dark = is_dark
         self._cards: List[_ShortcutCard] = []
         self._build_ui()
@@ -377,21 +418,21 @@ class ShortcutsDialog(QDialog):
         root.setContentsMargins(24, 22, 24, 18)
         root.setSpacing(12)
 
-        title = QLabel("Keyboard Shortcuts")
+        title = QLabel(_("Keyboard Shortcuts"))
         title.setObjectName("shortcuts_title")
         root.addWidget(title)
 
-        subtitle = QLabel(
+        subtitle = QLabel(_(
             "Every binding the editor responds to. Type to filter; "
             "Ctrl maps to Command on macOS automatically."
-        )
+        ))
         subtitle.setObjectName("shortcuts_subtitle")
         subtitle.setWordWrap(True)
         root.addWidget(subtitle)
 
         self._search = QLineEdit()
         self._search.setObjectName("shortcuts_search")
-        self._search.setPlaceholderText("Filter shortcuts… (e.g. 'draft', 'save', 'Ctrl+S')")
+        self._search.setPlaceholderText(_("Filter shortcuts… (e.g. 'draft', 'save', 'Ctrl+S')"))
         self._search.setClearButtonEnabled(True)
         self._search.textChanged.connect(self._on_filter_changed)
         root.addWidget(self._search)
@@ -422,8 +463,9 @@ class ShortcutsDialog(QDialog):
 
         scroll.setWidget(inner)
         root.addWidget(scroll, 1)
+        self._scroll = scroll
 
-        self._no_results = QLabel("No shortcuts match your filter.")
+        self._no_results = QLabel(_("No shortcuts match your filter."))
         self._no_results.setObjectName("shortcuts_no_results")
         self._no_results.setAlignment(Qt.AlignCenter)
         self._no_results.setVisible(False)
@@ -438,6 +480,18 @@ class ShortcutsDialog(QDialog):
         close_btn.setDefault(True)
         close_btn.clicked.connect(self.accept)
         root.addWidget(buttons)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._keep_cards_whole()
+
+    def _keep_cards_whole(self) -> None:
+        """Never narrower than the cards need. They do not scroll sideways,
+        so a longer translation widens the window instead of being cut off.
+        Measured when shown, once the cards have their style and fonts."""
+        cards = self._scroll.widget().minimumSizeHint().width()
+        self._scroll.setMinimumWidth(cards + self._scroll.verticalScrollBar().sizeHint().width())
+        self.setMinimumSize(max(560, self.minimumSizeHint().width()), 420)
 
     # -- behaviour ---------------------------------------------------------
 

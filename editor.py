@@ -17,6 +17,7 @@ from constants import (
     DARK_BG, DARK_FG, LIGHT_BG, LIGHT_FG, DARK_SELECTION, LIGHT_SELECTION, MONO_FONT, TEXT_COLORS,
     DARK_GUIDE, LIGHT_GUIDE, DARK_CURRENT_LINE, LIGHT_CURRENT_LINE, DARK_PAPER, LIGHT_PAPER,
 )
+from i18n import _
 
 
 # Stand-in painted for an image whose bytes have not arrived yet. Its
@@ -506,23 +507,23 @@ class HtmlEditor(QTextEdit):
                 QMenu::separator { height: 1px; background: #E1E1E1; margin: 4px 0px; }
             """)
 
-        act_copy = menu.addAction("Copy")
-        act_cut = menu.addAction("Cut")
-        act_paste = menu.addAction("Paste")
+        act_copy = menu.addAction(_("Copy"))
+        act_cut = menu.addAction(_("Cut"))
+        act_paste = menu.addAction(_("Paste"))
         menu.addSeparator()
-        fmt_menu = menu.addMenu("Color")
+        fmt_menu = menu.addMenu(_("Color"))
         for name, col in TEXT_COLORS.items():
-            a = fmt_menu.addAction(name)
+            a = fmt_menu.addAction(_(name))
             a.setData(("color", col))
         fmt_menu.addSeparator()
-        a_clear = fmt_menu.addAction("Remove Color")
+        a_clear = fmt_menu.addAction(_("Remove Color"))
         a_clear.setData(("color", None))
         menu.addSeparator()
-        act_b = menu.addAction("Bold (Ctrl+B)")
-        act_i = menu.addAction("Italic (Ctrl+I)")
-        act_u = menu.addAction("Underline (Ctrl+U)")
+        act_b = menu.addAction(_("Bold (Ctrl+B)"))
+        act_i = menu.addAction(_("Italic (Ctrl+I)"))
+        act_u = menu.addAction(_("Underline (Ctrl+U)"))
         menu.addSeparator()
-        act_reset = menu.addAction("Reset Format (Ctrl+D)")
+        act_reset = menu.addAction(_("Reset Format (Ctrl+D)"))
 
         chosen = menu.exec(event.globalPos())
         if not chosen:

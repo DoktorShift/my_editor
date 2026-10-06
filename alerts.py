@@ -45,6 +45,7 @@ from PySide6.QtWidgets import (
 
 import theme
 from constants import MONO_FONT
+from i18n import _
 
 DEFAULT = "default"
 CANCEL = "cancel"
@@ -78,7 +79,7 @@ class Button:
     tooltip: str = ""
 
 
-OK = Button("OK", "ok", DEFAULT)
+OK = Button(_("OK"), "ok", DEFAULT)
 
 
 class Alert(QDialog):
@@ -166,14 +167,14 @@ class Alert(QDialog):
         self.details_view.setFont(QFont(MONO_FONT, 10))
         self.details_view.setMaximumHeight(140)
         self.details_view.hide()
-        toggle = QPushButton("Show Details")
+        toggle = QPushButton(_("Show Details"))
         toggle.setObjectName("alert_details")
         toggle.setAutoDefault(False)
 
         def flip():
             shown = not self.details_view.isVisible()
             self.details_view.setVisible(shown)
-            toggle.setText("Hide Details" if shown else "Show Details")
+            toggle.setText(_("Hide Details") if shown else _("Show Details"))
             self.adjustSize()
 
         toggle.clicked.connect(flip)
@@ -271,4 +272,4 @@ def confirm_destructive(parent, *, title: str, message: str = "", action: str,
     return ask(parent, title=title, message=message, caution=caution, details=details,
                is_dark=is_dark,
                buttons=(Button(action, True, DESTRUCTIVE),
-                        Button("Cancel", False, DEFAULT))) is True
+                        Button(_("Cancel"), False, DEFAULT))) is True

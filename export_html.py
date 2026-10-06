@@ -36,6 +36,7 @@ from PySide6.QtGui import (
 )
 
 from constants import DARK_BG, DARK_FG, LIGHT_BG, LIGHT_FG, MONO_FONT
+from i18n import _
 from doc_walk import (
     INDENT_STEP,
     bullet_depth,
@@ -152,7 +153,7 @@ def _render_image(img_fmt, source_url_for, policy, asset_resolver) -> str:
         # Bytes are gone from the cache; the original URL is better than
         # nothing even though it breaks strict self-containment.
         return f'<img src="{html.escape(source_url, quote=True)}"{attrs}>'
-    return "<em>[image unavailable]</em>"
+    return f"<em>{html.escape(_('[image unavailable]'))}</em>"
 
 
 def _render_text_run(text: str, fmt: QTextCharFormat) -> str:
@@ -267,7 +268,7 @@ def document_to_html(doc, title: str = "", source_url_for=None, *,
 
     close_to(0)
 
-    page_title = html.escape(title) if title else "Untitled"
+    page_title = html.escape(title or _("Untitled"))
     body_html = "\n".join(body)
     return f"""<!doctype html>
 <html>
