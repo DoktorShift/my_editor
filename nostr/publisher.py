@@ -48,6 +48,7 @@ from .blossom.hashes import blob_url
 from .bunker import BunkerClient, BunkerSessionPool
 from .drafts import (
     DEFAULT_EXPIRATION_SECONDS,
+    DRAFT_WRAP_KIND,
     MAX_INNER_PAYLOAD_BYTES,
     SUPPORTED_INNER_KINDS,
     build_draft_wrap,
@@ -55,7 +56,7 @@ from .drafts import (
     serialize_inner_event,
 )
 from .draft_deletions import build_deletion_request
-from .events import build_event
+from .events import build_event, verify_event
 from .outbox import RelayDirectory, ask_private_relays, normalize_relay_url
 from .profiles import Profile
 from .relay import RelayPool
@@ -645,12 +646,20 @@ class DraftPublishJob(QObject):
 
     Signals (in firing order on the happy path):
       status_changed(str)        progress text
+      signed(dict)               the signed wrap, before it is sent: an
+                                 import keeps it, so a retry sends this
+                                 very event again (:meth:`send_signed`)
+                                 instead of signing a new one
       stashed(str, str, int)     (identifier, event_id, created_at) on
                                  successful sign. Fires before relay
                                  results are in so the panel can update
                                  optimistically.
       completed(list)            list of PublishResult tuples
       failed(str)                terminal. No further signals after this
+
+    A wrap sent again keeps its time, so if the person edited the draft
+    meanwhile, the relays keep the edit: an older replaceable event
+    loses (NIP-01). A retry can never overwrite an edit.
 
     Cancellation: ``cancel()`` flips a flag that suppresses all future
     signal emissions. The in-flight NIP-46 RPC can't actually be
@@ -660,6 +669,7 @@ class DraftPublishJob(QObject):
     """
 
     status_changed = Signal(str)
+    signed = Signal(dict)
     stashed = Signal(str, str, int)
     completed = Signal(list)
     failed = Signal(str)
@@ -671,7 +681,7 @@ class DraftPublishJob(QObject):
         relay_directory: RelayDirectory,
         session_pool: BunkerSessionPool,
         profile: Profile,
-        inner_event: dict,
+        inner_event: Optional[dict],
         identifier: str,
         expiration_seconds: int = DEFAULT_EXPIRATION_SECONDS,
         extra_wrap_tags: Optional[List[List[str]]] = None,
@@ -679,7 +689,10 @@ class DraftPublishJob(QObject):
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
-        if inner_event.get("pubkey", "").lower() != profile.user_pubkey.lower():
+        # ``inner_event`` may be None for a job that only sends a wrap
+        # signed earlier (send_signed).
+        if inner_event is not None and (
+                inner_event.get("pubkey", "").lower() != profile.user_pubkey.lower()):
             raise ValueError(
                 "inner event pubkey does not match the stashing profile"
             )
@@ -702,9 +715,31 @@ class DraftPublishJob(QObject):
 
     def start(self) -> None:
         """Kick off the stash. Safe to call once per instance."""
+        if self._inner_event is None:
+            raise ValueError("no inner event to stash")
         self._emit_status(_("Looking up your relay list…"))
         ask_private_relays(self._relay_directory, self._profile,
                            self._on_relays_ready, entitled=self._entitled_relays)
+
+    def send_signed(self, signed_event: dict) -> None:
+        """Send a wrap signed earlier (by :attr:`signed`) as it is: no
+        encryption and no signature, so no signer prompt. Raises
+        ValueError for a wrap that is not this account's draft
+        ``identifier``."""
+        tags = signed_event.get("tags") or []
+        d_tag = next((t[1] for t in tags if isinstance(t, list) and len(t) >= 2
+                      and t[0] == "d"), None)
+        if (signed_event.get("kind") != DRAFT_WRAP_KIND
+                or str(signed_event.get("pubkey", "")).lower()
+                != self._profile.user_pubkey.lower()
+                or d_tag != self._identifier
+                or not verify_event(signed_event)):
+            raise ValueError("not a signed draft of this account and identifier")
+        self._emit_status(_("Looking up your relay list…"))
+        ask_private_relays(
+            self._relay_directory, self._profile,
+            lambda relays: self._on_signed(signed_event, relays, checkpoint=False),
+            entitled=self._entitled_relays)
 
     def cancel(self) -> None:
         """Suppress further signal emissions; the in-flight RPC runs out."""
@@ -795,9 +830,12 @@ class DraftPublishJob(QObject):
             on_failure=self._emit_failed,
         )
 
-    def _on_signed(self, signed_event: dict, publish_relays: List[str]) -> None:
+    def _on_signed(self, signed_event: dict, publish_relays: List[str], *,
+                   checkpoint: bool = True) -> None:
         if self._cancelled:
             return
+        if checkpoint:
+            self.signed.emit(dict(signed_event))
         self.stashed.emit(
             self._identifier,
             signed_event["id"],
