@@ -165,6 +165,7 @@ class FeedSubscriptionStore(QObject):
         self._profile = profile
         self._local, self._base = FeedList(), None
         self._dirty = self._send_read_times = self._legacy_merged = False
+        self._known = False
         self._publish_after_run = False
         if profile is None:
             self.feeds_changed.emit()
@@ -185,6 +186,18 @@ class FeedSubscriptionStore(QObject):
         self._profile = profile
 
     # -- read API ----------------------------------------------------------
+
+    @property
+    def known(self) -> bool:
+        """Whether the list is known: read from this computer's copy, or
+        from the relays. Until then a source missing from it may only not
+        be loaded yet, so nothing may be removed because of it."""
+        return self._known
+
+    def _mark_known(self) -> None:
+        if not self._known:
+            self._known = True
+            self.feeds_changed.emit()
 
     @property
     def feeds(self) -> List[FeedSubscription]:
@@ -305,6 +318,7 @@ class FeedSubscriptionStore(QObject):
             if self._legacy_merged:
                 if result != _UNREADABLE:
                     self.sync_status.emit("")
+                    self._mark_known()
                 return
             self._read_list(profile, relays, LEGACY_FEED_LIST_DTAG,
                             lambda legacy, _event: _on_legacy(legacy, result))
@@ -320,6 +334,7 @@ class FeedSubscriptionStore(QObject):
             self._save_cache()
             if shared_result != _UNREADABLE:
                 self.sync_status.emit("")
+                self._mark_known()
 
         self._with_relays(profile, _on_relays, reading=True)
 
@@ -404,6 +419,7 @@ class FeedSubscriptionStore(QObject):
             return
         if not isinstance(cached, dict):
             return
+        self._known = True
         if cached.get("version") != _CACHE_VERSION:
             # This app's older cache: the list it synced on its own. It is
             # merged with the shared list as soon as that is read.

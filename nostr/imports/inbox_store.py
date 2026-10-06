@@ -256,16 +256,18 @@ class InboxStore:
     # Sources                                                              #
     # ------------------------------------------------------------------ #
 
-    def sync_sources(self, entries: Iterable[Tuple[str, str, str, bool]]) -> None:
+    def sync_sources(self, entries: Iterable[Tuple[str, str, str, bool]], *,
+                     remove_missing: bool = True) -> None:
         """Make the sources match the followed list: ``(key, url, title,
         automatic)`` each. A new source starts now, so its first check is
         a baseline; a source no longer followed goes with its posts (the
-        ledger and the drafts stay)."""
+        ledger and the drafts stay), but only with ``remove_missing``: a
+        list not known yet says nothing about what is missing from it."""
         now = self._now()
         wanted = {key: (url, title, automatic) for key, url, title, automatic in entries}
         with self._db:
             known = {row["key"] for row in self._db.execute("SELECT key FROM sources")}
-            for key in known - set(wanted):
+            for key in (known - set(wanted)) if remove_missing else ():
                 self._db.execute("DELETE FROM items WHERE source_key = ?", (key,))
                 self._db.execute("DELETE FROM sources WHERE key = ?", (key,))
             for key, (url, title, automatic) in wanted.items():

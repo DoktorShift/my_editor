@@ -347,9 +347,13 @@ class ImportsController(QObject):
             # The process that checks keeps the inbox in step.
             self._announce()
             return
+        # Until the list is known (this computer's copy read, or the
+        # relays answered), a source missing from it is not removed: a
+        # lost copy must never empty the inbox and its skips.
         self.inbox.sync_sources(
-            (source_key(feed.url), feed.url, feed.title, checks_automatically(feed.url))
-            for feed in self.subscriptions.feeds)
+            ((source_key(feed.url), feed.url, feed.title, checks_automatically(feed.url))
+             for feed in self.subscriptions.feeds),
+            remove_missing=self.subscriptions.known)
         for collection_id in [cid for cid, c in self._collections.items()
                               if c.kind == "manual"
                               and not self.subscriptions.has_feed(c.source_url)]:
