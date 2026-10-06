@@ -57,7 +57,9 @@ from .drafts import (
 from .draft_deletions import build_deletion_request
 from .events import build_event, verify_event
 from .outbox import RelayDirectory, ask_draft_relays, normalize_relay_url
+from .outbox import defaults as outbox_defaults
 from .outbox.lookup import fetch_replaceable
+from .outbox.policy import dedupe_relays
 from .profiles import Profile
 from .relay import RelayPool
 
@@ -466,21 +468,52 @@ def published_at_of(event: Optional[dict]) -> Optional[int]:
     return None
 
 
+# What the relays say about an article's first publication.
+FOUND = "found"          # a version is there: it says when
+NEVER = "never"          # every relay the author publishes to answered, none has it
+UNKNOWN = "unknown"      # a relay could not answer: nobody can tell
+
+
+@dataclass(frozen=True)
+class FirstPublication:
+    """When an article was first published, and how sure that is."""
+
+    state: str
+    published_at: Optional[int] = None
+
+
+def first_publication_of(lookup, outbox: Sequence[str]) -> FirstPublication:
+    """FOUND with its date when a version came back; NEVER only when every
+    relay of the author's own list answered (a refusal, a timeout or an
+    unchecked candidate is no evidence that there is none); else UNKNOWN."""
+    if lookup.event is not None:
+        when = published_at_of(lookup.event)
+        return FirstPublication(FOUND, when) if when else FirstPublication(UNKNOWN)
+    if outbox and not lookup.unchecked and set(outbox) <= set(lookup.answered):
+        return FirstPublication(NEVER)
+    return FirstPublication(UNKNOWN)
+
+
 def find_first_publication(relay_pool: RelayPool, relay_directory: RelayDirectory,
                            author: str, slug: str,
-                           on_done: Callable[[Optional[int]], None], *,
+                           on_done: Callable[[FirstPublication], None], *,
                            parent: QObject, timeout_ms: int = 4_000) -> None:
-    """When the author's article ``slug`` was first published, or None
-    when it was never published (or no relay could say). The question
-    lives as long as ``parent`` (the dialog asking it).
+    """Whether and when the author's article ``slug`` was first published
+    (FirstPublication). The question lives as long as ``parent`` (the
+    dialog asking it).
 
     NIP-23 makes ``published_at`` the time of the first publication, so a
     new version of an article carries the old value: readers date it by
     that, and an edit must not move it. Asked of the relays the author
-    publishes to, where the current version is."""
+    publishes to, where the current version is, and also of the relays
+    they read from and the indexers, so a relay list that moved since
+    does not hide the first version."""
     def got_relays(relays: List[str]) -> None:
-        fetch_replaceable(relay_pool, relays, kind=30023, author=author, d_tag=slug,
-                          on_done=lambda found: on_done(published_at_of(found.event)),
+        outbox = dedupe_relays(relays)
+        asked = dedupe_relays([*outbox, *relay_directory.cached(author).read,
+                               *outbox_defaults.INDEXER_RELAYS])
+        fetch_replaceable(relay_pool, asked, kind=30023, author=author, d_tag=slug,
+                          on_done=lambda found: on_done(first_publication_of(found, outbox)),
                           timeout_ms=timeout_ms, parent=parent)
     relay_directory.outbox_of(author, got_relays)
 

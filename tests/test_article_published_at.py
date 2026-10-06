@@ -6,9 +6,12 @@ What must hold:
 
   ``published_at`` is the time of the first publication. Publishing a
   new version of an article (the same identifier) keeps it: from the
-  draft the tab came from when that draft carries it, otherwise from the
-  version already on the relays. Only an article never published before
-  gets "now".
+  draft the tab came from when that draft carries it, from what this
+  computer remembers of its own publications, otherwise from the version
+  already on the relays (those the author publishes to, reads from, and
+  the indexers). Only an article every relay of the author's list says
+  it does not hold gets "now"; when a relay cannot answer, nobody can
+  tell, and the person decides (review F3: an edit got today's date).
 """
 
 import os
@@ -23,7 +26,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QObject, Signal  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from nostr.publisher import published_at_of  # noqa: E402
+from nostr.publisher import (  # noqa: E402
+    FOUND, NEVER, UNKNOWN, FirstPublication, published_at_of,
+)
 from tests.outbox_fakes import PK, FakeClient, FakePool, FakeSessionPool  # noqa: E402
 
 FIRST = 1_700_000_000
@@ -51,22 +56,61 @@ def test_no_usable_time_is_none(event):
     assert published_at_of(event) is None
 
 
-def test_the_version_on_the_authors_relays_is_asked_for_by_its_identifier():
+def _asking(write=("wss://nos.lol",), read=("wss://read.example",)):
+    from nostr.outbox.policy import LookupState, RelayList
     from nostr.publisher import find_first_publication
-    from tests.outbox_fakes import FakeRelayDirectory, HandPool, settle, signed
+    from tests.outbox_fakes import FakeRelayDirectory, HandPool, settle
     directory = FakeRelayDirectory()
-    directory.set(PK, ["wss://nos.lol"])
+    directory.set(PK, RelayList(write=list(write), read=list(read), state=LookupState.FOUND))
     pool = HandPool()
     found = []
     owner = QObject()
-    find_first_publication(pool, directory, PK, "my-post", found.append, parent=owner)
+    find_first_publication(pool, directory, PK, "my-post", found.append, parent=owner,
+                           timeout_ms=50)
     settle()
-    sub = pool.subs[0]
+    return pool.subs[0], found, owner
+
+
+def test_the_version_on_the_relays_is_asked_for_by_its_identifier_everywhere_it_may_be():
+    from nostr.outbox.defaults import INDEXER_RELAYS
+    from tests.outbox_fakes import settle, signed
+    sub, found, _owner = _asking()
     assert sub.filters[0]["kinds"] == [30023] and sub.filters[0]["#d"] == ["my-post"]
+    # The author's relays, the ones they read from, and the indexers.
+    assert {"wss://nos.lol", "wss://read.example", *INDEXER_RELAYS} <= set(sub.urls)
     for url in sub.urls:
         sub.answer(url, signed(30023, [["d", "my-post"], ["published_at", str(FIRST)]]))
     settle()
-    assert found == [FIRST]
+    assert found == [FirstPublication(FOUND, FIRST)]
+
+
+def test_never_published_needs_every_relay_of_the_authors_list_to_answer():
+    from tests.outbox_fakes import settle
+    sub, found, _owner = _asking()
+    for url in sub.urls:
+        if url == "wss://nos.lol" or "kindpag" in url:
+            sub.answer(url)                    # nothing stored
+        else:
+            sub.fail(url)                      # the others do not matter for "never"
+    settle()
+    assert found == [FirstPublication(NEVER)]
+
+
+@pytest.mark.parametrize("how", ["refuses", "times out"])
+def test_a_relay_of_the_authors_list_that_cannot_answer_means_nobody_can_tell(how):
+    import time as clock
+    from tests.outbox_fakes import settle
+    sub, found, _owner = _asking(write=("wss://nos.lol", "wss://down.example"))
+    for url in sub.urls:
+        if url == "wss://down.example":
+            if how == "refuses":
+                sub.refuse(url, "blocked: maintenance")
+            continue
+        sub.answer(url)
+    deadline = clock.monotonic() + 2
+    while not found and clock.monotonic() < deadline:
+        settle()
+    assert found == [FirstPublication(UNKNOWN)]
 
 
 # -- the publish dialog ---------------------------------------------------------------
@@ -100,7 +144,8 @@ def captured(monkeypatch):
     return CapturedJob.made
 
 
-def _dialog(tmp_path, *, slug="my-post", first_published=None, lookup=None):
+def _dialog(tmp_path, *, slug="my-post", first_published=None, lookup=None,
+            first_publications=None):
     from nostr.avatar_store import AvatarStore
     from nostr.known_people import KnownPeople
     from nostr.profiles import Profile as StoredProfile
@@ -120,7 +165,7 @@ def _dialog(tmp_path, *, slug="my-post", first_published=None, lookup=None):
         session_pool=FakeSessionPool(FakeClient()), known_people=people,
         search_client=Nip50SearchClient(HandPool(), people), avatars=AvatarStore(),
         default_title="Hello", default_slug=slug, first_published=first_published,
-        published_at_lookup=lookup)
+        first_publications=first_publications, published_at_lookup=lookup)
 
 
 def _published_at(job) -> int:
@@ -144,12 +189,13 @@ def test_an_edit_keeps_the_date_of_the_version_on_the_relays(tmp_path, captured)
     assert captured == [] and not dialog._publish_btn.isEnabled()   # asking first
     author, slug, done = asked[0]
     assert (author, slug) == (PK, "my-post")
-    done(FIRST)
+    done(FirstPublication(FOUND, FIRST))
     assert _published_at(captured[0]) == FIRST
 
 
 def test_a_first_publication_is_dated_now(tmp_path, captured):
-    dialog = _dialog(tmp_path, lookup=lambda author, slug, done: done(None))
+    dialog = _dialog(tmp_path, lookup=lambda author, slug, done: done(
+        FirstPublication(NEVER)))
     before = int(time.time())
     dialog._on_publish()
     assert before <= _published_at(captured[0]) <= int(time.time())
@@ -158,7 +204,8 @@ def test_a_first_publication_is_dated_now(tmp_path, captured):
 def test_another_identifier_does_not_take_the_drafts_date(tmp_path, captured):
     asked = []
     dialog = _dialog(tmp_path, first_published=FIRST,
-                     lookup=lambda author, slug, done: (asked.append(slug), done(None)))
+                     lookup=lambda author, slug, done: (asked.append(slug),
+                                                        done(FirstPublication(NEVER))))
     dialog._slug_edit.setText("a-new-post")
     dialog._on_publish()
     assert asked == ["a-new-post"]
@@ -170,5 +217,55 @@ def test_an_answer_after_closing_publishes_nothing(tmp_path, captured):
     dialog = _dialog(tmp_path, lookup=lambda author, slug, done: asked.append(done))
     dialog._on_publish()
     dialog.reject()
-    asked[0](FIRST)
+    asked[0](FirstPublication(FOUND, FIRST))
     assert captured == []
+
+
+@pytest.mark.parametrize("answer", ["cancel", "new", "again"])
+def test_when_nobody_can_tell_the_person_decides(tmp_path, captured, monkeypatch, answer):
+    import nostr.ui.publish_article_dialog as module
+    alerts = []
+    monkeypatch.setattr(module, "ask", lambda *a, **k: alerts.append(k["title"]) or answer)
+    asked = []
+
+    def lookup(author, slug, done):
+        asked.append(slug)
+        done(FirstPublication(UNKNOWN) if len(asked) == 1 else FirstPublication(FOUND, FIRST))
+
+    dialog = _dialog(tmp_path, lookup=lookup)
+    before = int(time.time())
+    dialog._on_publish()
+    assert alerts == ["Couldn't check whether this article was published before"]
+    if answer == "cancel":
+        assert captured == [] and dialog._publish_btn.isEnabled()      # nothing signed
+    elif answer == "new":
+        assert before <= _published_at(captured[0]) <= int(time.time())
+    else:
+        assert asked == ["my-post", "my-post"] and _published_at(captured[0]) == FIRST
+
+
+def test_this_computer_remembers_its_own_first_publications(tmp_path, captured):
+    from nostr.first_publications import FirstPublications
+    record = FirstPublications(tmp_path / "first.json")
+    dialog = _dialog(tmp_path, lookup=lambda author, slug, done: done(
+        FirstPublication(NEVER)), first_publications=record)
+    dialog._on_publish()
+    when = _published_at(captured[0])
+    dialog._on_completed([("wss://nos.lol", True, "")])
+    assert FirstPublications(tmp_path / "first.json").get(PK, "my-post") == when
+    # The next edit, with the relays unable to tell, keeps that date unasked.
+    asked = []
+    again = _dialog(tmp_path, lookup=lambda *args: asked.append(args),
+                    first_publications=FirstPublications(tmp_path / "first.json"))
+    again._on_publish()
+    assert asked == [] and _published_at(captured[1]) == when
+
+
+def test_the_record_keeps_the_earliest_date(tmp_path):
+    from nostr.first_publications import FirstPublications
+    record = FirstPublications(tmp_path / "first.json")
+    record.remember(PK, "post", FIRST + 10)
+    record.remember(PK, "post", FIRST)
+    record.remember(PK, "post", FIRST + 20)
+    assert FirstPublications(tmp_path / "first.json").get(PK.upper(), "post") == FIRST
+    assert record.get(PK, "other") is None

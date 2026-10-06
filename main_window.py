@@ -150,6 +150,7 @@ from nostr.ui.imports_window import ImportsWindow
 from nostr.imports.constants import IDENTIFIER_PREFIX as IMPORT_IDENTIFIER_PREFIX
 from nostr.imports.constants import SOURCE_TAG as IMPORT_SOURCE_TAG
 from nostr.article_details import ArticleDetails
+from nostr.first_publications import FirstPublications
 from nostr.drafts import (
     INNER_KIND_LONG_FORM,
     INNER_KIND_SHORT_NOTE,
@@ -405,6 +406,9 @@ class MainWindow(QMainWindow):
         # user-facing surface. All three stay alive for the session.
         self._draft_store = DraftStore(parent=self)
         self._draft_store.record_changed.connect(self._on_draft_record_changed)
+        # When the articles published from here first went out, for when
+        # the relays cannot tell (an edit keeps that date).
+        self._first_publications = FirstPublications()
         self._draft_sync = DraftSync(
             relay_pool=self._relay_pool,
             relay_directory=self._relay_directory,
@@ -4904,6 +4908,7 @@ class MainWindow(QMainWindow):
             default_slug=default_slug,
             first_published=first_published,
             details=details,
+            first_publications=self._first_publications,
             parent=self,
             is_dark=self.is_dark_theme,
         )
