@@ -155,13 +155,29 @@ class TestWords:
         assert model.word_for(model.post(0)) == "Importing"
         assert model.word_for(model.post(1)) == "Failed"
 
-    def test_a_screen_reader_hears_the_row(self):
+    def test_a_screen_reader_hears_the_row_and_its_check(self):
+        """Review M11: a checked post was only "selected" in its name, the
+        word the open row has too; the check is now the item's state."""
         model = PostListModel()
         model.show(lambda after: [] if after else [post(1)], paged=False)
+        index = model.index(0)
+        assert model.flags(index) & Qt.ItemFlag.ItemIsUserCheckable
+        assert model.data(index, Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Unchecked
         model.toggle(0)
-        text = model.data(model.index(0), Qt.ItemDataRole.AccessibleTextRole)
+        text = model.data(index, Qt.ItemDataRole.AccessibleTextRole)
         assert text.startswith("Post 1, Field notes")
-        assert text.endswith("selected")
+        assert "selected" not in text
+        assert model.data(index, Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Checked
+        # Assistive technology checks it the same way.
+        assert model.setData(index, Qt.CheckState.Unchecked.value,
+                             Qt.ItemDataRole.CheckStateRole)
+        assert model.checked() == []
+
+    def test_a_post_that_cannot_be_chosen_is_not_checkable(self):
+        model = PostListModel()
+        model.show(lambda after: [] if after else [post(1)], paged=False)
+        model.set_progress(busy=[model.post(0).d_tag], failed=[])
+        assert not model.flags(model.index(0)) & Qt.ItemFlag.ItemIsUserCheckable
 
 
 class TestKeys:

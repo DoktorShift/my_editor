@@ -5519,22 +5519,18 @@ msgstr "Öffnet den Beitrag auf seiner Website in deinem Browser."
 msgid "Select a post to read it here."
 msgstr "Wähle einen Beitrag aus, um ihn hier zu lesen."
 
-#: nostr/ui/imports_post_list.py:519
+#: nostr/ui/imports_post_list.py:535
 msgid "Posts"
 msgstr "Beiträge"
 
-#: nostr/ui/imports_post_list.py:202
-msgid "selected"
-msgstr "ausgewählt"
-
-#: nostr/ui/imports_post_list.py:398
+#: nostr/ui/imports_post_list.py:414
 #, python-brace-format
 msgid "{n} min"
 msgid_plural "{n} min"
 msgstr[0] "{n} Min."
 msgstr[1] "{n} Min."
 
-#: nostr/ui/imports_post_list.py:401
+#: nostr/ui/imports_post_list.py:417
 #, python-brace-format
 msgid "{n} image"
 msgid_plural "{n} images"

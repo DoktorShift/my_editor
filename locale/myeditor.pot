@@ -5504,22 +5504,18 @@ msgstr ""
 msgid "Select a post to read it here."
 msgstr ""
 
-#: nostr/ui/imports_post_list.py:519
+#: nostr/ui/imports_post_list.py:535
 msgid "Posts"
 msgstr ""
 
-#: nostr/ui/imports_post_list.py:202
-msgid "selected"
-msgstr ""
-
-#: nostr/ui/imports_post_list.py:398
+#: nostr/ui/imports_post_list.py:414
 #, python-brace-format
 msgid "{n} min"
 msgid_plural "{n} min"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/imports_post_list.py:401
+#: nostr/ui/imports_post_list.py:417
 #, python-brace-format
 msgid "{n} image"
 msgid_plural "{n} images"

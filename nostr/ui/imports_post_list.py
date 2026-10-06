@@ -192,19 +192,35 @@ class PostListModel(QAbstractListModel):
             return post
         if role == CheckedRole:
             return post.key in self._checked
+        if role == Qt.ItemDataRole.CheckStateRole:
+            # The check, for assistive technology too (review M11): a
+            # screen reader says "checked" for it and "selected" for the
+            # open row, which are two different things.
+            return (Qt.CheckState.Checked if post.key in self._checked
+                    else Qt.CheckState.Unchecked)
         if role == Qt.ItemDataRole.AccessibleTextRole:
             parts = [post.title or _("Untitled"), post.source_title,
                      date_text(post.published_at or post.found_at)]
             word = self.word_for(post)
             if word:
                 parts.append(word)
-            if post.key in self._checked:
-                parts.append(_("selected"))
             return ", ".join(p for p in parts if p)
         return None
 
+    def setData(self, index, value, role=Qt.ItemDataRole.EditRole) -> bool:
+        if role != Qt.ItemDataRole.CheckStateRole or self.post(index.row()) is None:
+            return False
+        checked = Qt.CheckState(value) == Qt.CheckState.Checked if not isinstance(
+            value, bool) else value
+        self.set_checked(index.row(), checked)
+        return True
+
     def flags(self, index):
-        return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+        flags = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+        post = self.post(index.row())
+        if post is not None and selectable(post, self._busy):
+            flags |= Qt.ItemFlag.ItemIsUserCheckable
+        return flags
 
     # -- paging ----------------------------------------------------------------
 
