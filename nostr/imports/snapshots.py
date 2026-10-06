@@ -22,11 +22,13 @@ from __future__ import annotations
 import dataclasses
 import html
 import re
-from typing import Any, Dict
+from typing import Any, Dict, Iterable, List
 
 from ..rss.dtag import derive_identifier
+from ..rss.normalize import html_to_markdown
 from ..rss.parser import FeedItem
 from .constants import IDENTIFIER_PREFIX
+from .images import scan_markdown_images
 from .sources.podcast import PodcastEpisode, ValueRecipient
 
 EXCERPT_CHARS = 200
@@ -100,6 +102,28 @@ def excerpt(item: FeedItem) -> str:
         return summary[:EXCERPT_CHARS * 2]
     text = plain_text(item.content_html) or (item.content_markdown or "").strip()
     return text[:EXCERPT_CHARS]
+
+
+def images_to_copy(items: Iterable[FeedItem]) -> List[str]:
+    """Every image an import of ``items`` would copy, in order, once: each
+    post's cover, then the images of the Markdown the import makes of it
+    (its own Markdown, or the one made from its HTML). Built the way the
+    pipeline works, so an address left unchecked in the review is the
+    very address the import leaves alone. Converts HTML: run it off the
+    UI thread for many posts."""
+    found: List[str] = []
+    for item in items:
+        markdown = item.content_markdown or html_to_markdown(item.content_html or "")
+        for url in [item.image or "", *scan_markdown_images(markdown)]:
+            if url and url not in found and url.lower().startswith(("http://", "https://")):
+                found.append(url)
+    return found
+
+
+def has_images(item: FeedItem) -> bool:
+    """Whether an import of ``item`` may copy an image (cheap)."""
+    return bool(item.image) or "<img" in (item.content_html or "").lower() or "![" in (
+        item.content_markdown or "")
 
 
 def cover(item: FeedItem) -> str:

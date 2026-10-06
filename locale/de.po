@@ -2777,7 +2777,7 @@ msgstr "Zitierte Notiz"
 
 #: nostr/preview.py:325
 #: nostr/ui/drafts_preview.py:522
-#: nostr/ui/feeds_panel.py:1133
+#: nostr/ui/feeds_panel.py:1132
 #, python-brace-format
 msgid "{n} min read"
 msgid_plural "{n} min read"
@@ -3377,7 +3377,7 @@ msgid "No relay accepted the draft yet. Try again to send it."
 msgstr "Noch kein Relay hat den Entwurf angenommen. Versuche es noch einmal, um ihn zu senden."
 
 #: nostr/imports/pipeline.py:298
-#: nostr/ui/feeds_panel.py:144
+#: nostr/ui/feeds_panel.py:143
 msgid "(untitled)"
 msgstr "(ohne Titel)"
 
@@ -4744,345 +4744,350 @@ msgstr "Schlagwörter: {tags}"
 msgid "Published {date}"
 msgstr "Veröffentlicht am {date}"
 
-#: nostr/ui/feeds_panel.py:124
+#: nostr/ui/feeds_panel.py:123
 msgid "That doesn't look like a fetchable URL. Paste a site or feed address."
 msgstr "Das sieht nicht nach einer abrufbaren Adresse aus. Füge die Adresse einer Website oder eines Feeds ein."
 
-#: nostr/ui/feeds_panel.py:130
+#: nostr/ui/feeds_panel.py:129
 msgid "Paste a link above, or import an export file, to pull posts in as private drafts."
 msgstr "Füge oben einen Link ein oder importiere eine Exportdatei, um Beiträge als private Entwürfe zu übernehmen."
 
-#: nostr/ui/feeds_panel.py:139
+#: nostr/ui/feeds_panel.py:138
 msgid "Content exports (*.xml *.json *.opml *.zip);;All files (*)"
 msgstr "Inhaltsexporte (*.xml *.json *.opml *.zip);;Alle Dateien (*)"
 
-#: nostr/ui/feeds_panel.py:106
+#: nostr/ui/feeds_panel.py:105
 msgid "pending"
 msgstr "wartet"
 
-#: nostr/ui/feeds_panel.py:107
+#: nostr/ui/feeds_panel.py:106
 msgid "resolving from Nostr…"
 msgstr "wird aus Nostr geladen …"
 
-#: nostr/ui/feeds_panel.py:109
+#: nostr/ui/feeds_panel.py:108
 msgid "fetching content…"
 msgstr "Inhalt wird geladen …"
 
-#: nostr/ui/feeds_panel.py:110
+#: nostr/ui/feeds_panel.py:109
 msgid "mirroring images…"
 msgstr "Bilder werden kopiert …"
 
-#: nostr/ui/feeds_panel.py:111
+#: nostr/ui/feeds_panel.py:110
 msgid "signing"
 msgstr "wird signiert"
 
-#: nostr/ui/feeds_panel.py:115
+#: nostr/ui/feeds_panel.py:114
 msgid "saved"
 msgstr "gespeichert"
 
-#: nostr/ui/feeds_panel.py:116
+#: nostr/ui/feeds_panel.py:115
 msgid "published"
 msgstr "veröffentlicht"
 
-#: nostr/ui/feeds_panel.py:117
+#: nostr/ui/feeds_panel.py:116
 msgid "failed"
 msgstr "fehlgeschlagen"
 
-#: nostr/ui/feeds_panel.py:120
+#: nostr/ui/feeds_panel.py:119
 msgid "already imported"
 msgstr "bereits importiert"
 
-#: nostr/ui/feeds_panel.py:968
+#: nostr/ui/feeds_panel.py:967
 #, python-brace-format
 msgid "{source}: {count} item(s) found. Untick anything you don't want, then import."
 msgid_plural "{source}: {count} item(s) found. Untick anything you don't want, then import."
 msgstr[0] "{source}: {count} Beitrag gefunden. Entferne die Häkchen bei allem, was du nicht möchtest, und importiere dann."
 msgstr[1] "{source}: {count} Beiträge gefunden. Entferne die Häkchen bei allem, was du nicht möchtest, und importiere dann."
 
-#: nostr/ui/feeds_panel.py:1152
+#: nostr/ui/feeds_panel.py:1151
 #, python-brace-format
 msgid "Import {n} selected"
 msgid_plural "Import {n} selected"
 msgstr[0] "{n} Beitrag importieren"
 msgstr[1] "{n} Beiträge importieren"
 
-#: nostr/ui/feeds_panel.py:356
+#: nostr/ui/feeds_panel.py:355
 msgid "Source URL"
 msgstr "Quelladresse"
 
-#: nostr/ui/feeds_panel.py:360
+#: nostr/ui/feeds_panel.py:359
 msgid "Import source URL"
 msgstr "Adresse der Importquelle"
 
-#: nostr/ui/feeds_panel.py:362
+#: nostr/ui/feeds_panel.py:361
 msgid "A blog, feed, npub, Bluesky thread, or Markdown URL"
 msgstr "Blog, Feed, npub, Bluesky oder Markdown"
 
-#: nostr/ui/feeds_panel.py:370
+#: nostr/ui/feeds_panel.py:369
 msgid "Accepts feeds (RSS / Atom / JSON), Nostr profiles and events, Bluesky threads, Markdown files, GitHub folders, and sitemaps."
 msgstr "Unterstützt Feeds (RSS / Atom / JSON), Nostr-Profile und -Events, Bluesky-Threads, Markdown-Dateien, GitHub-Ordner und Sitemaps."
 
-#: nostr/ui/feeds_panel.py:382
+#: nostr/ui/feeds_panel.py:381
 msgid "Load preview"
 msgstr "Vorschau laden"
 
-#: nostr/ui/feeds_panel.py:386
+#: nostr/ui/feeds_panel.py:385
 msgid "Fetch the source and preview its items before importing"
 msgstr "Quelle abrufen und ihre Beiträge vor dem Import ansehen"
 
-#: nostr/ui/feeds_panel.py:391
+#: nostr/ui/feeds_panel.py:390
 msgid "Import a file…"
 msgstr "Datei importieren …"
 
-#: nostr/ui/feeds_panel.py:395
+#: nostr/ui/feeds_panel.py:394
 msgid "A WordPress (WXR) or Ghost export, an OPML subscription list, or a Medium / Substack ZIP"
 msgstr "Ein WordPress-Export (WXR) oder Ghost-Export, eine OPML-Abonnementliste oder ein ZIP von Medium oder Substack"
 
-#: nostr/ui/feeds_panel.py:403
+#: nostr/ui/feeds_panel.py:402
 msgid "Stop the current operation (Esc)"
 msgstr "Laufenden Vorgang abbrechen (Esc)"
 
-#: nostr/ui/feeds_panel.py:423
-#: nostr/ui/feeds_panel.py:444
+#: nostr/ui/feeds_panel.py:422
+#: nostr/ui/feeds_panel.py:443
 msgid "Subscribed sources"
 msgstr "Abonnierte Quellen"
 
-#: nostr/ui/feeds_panel.py:435
+#: nostr/ui/feeds_panel.py:434
 msgid "Unsubscribe from the selected source"
 msgstr "Abonnement der ausgewählten Quelle beenden"
 
-#: nostr/ui/feeds_panel.py:436
-#: nostr/ui/feeds_panel.py:1024
+#: nostr/ui/feeds_panel.py:435
+#: nostr/ui/feeds_panel.py:1023
 msgid "Unsubscribe"
 msgstr "Abonnement beenden"
 
-#: nostr/ui/feeds_panel.py:448
+#: nostr/ui/feeds_panel.py:447
 msgid "Double-click a source to load its latest items"
 msgstr "Doppelklicke auf eine Quelle, um ihre neuesten Beiträge zu laden"
 
-#: nostr/ui/feeds_panel.py:504
+#: nostr/ui/feeds_panel.py:503
 msgid "Fetch full text for teaser-only items"
 msgstr "Volltext für gekürzte Beiträge laden"
 
-#: nostr/ui/feeds_panel.py:507
+#: nostr/ui/feeds_panel.py:506
 msgid "Some feeds only ship a summary. When on, the article page is fetched and its main text becomes the draft body."
 msgstr "Manche Feeds liefern nur eine Zusammenfassung. Ist dies aktiv, wird die Artikelseite abgerufen und ihr Haupttext wird zum Inhalt des Entwurfs."
 
-#: nostr/ui/feeds_panel.py:512
+#: nostr/ui/feeds_panel.py:511
 msgid "Mirror images to Blossom"
 msgstr "Bilder zu Blossom kopieren"
 
-#: nostr/ui/feeds_panel.py:515
+#: nostr/ui/feeds_panel.py:514
 msgid "Copies every image to your Blossom server so imported drafts don't depend on the source site staying up."
 msgstr "Kopiert jedes Bild auf deinen Blossom-Server, damit importierte Entwürfe nicht davon abhängen, dass die Quellseite erreichbar bleibt."
 
-#: nostr/ui/feeds_panel.py:520
-#: nostr/ui/image_review_dialog.py:41
-msgid "Review images"
-msgstr "Bilder prüfen"
+#: nostr/ui/feeds_panel.py:519
+msgid "Review Images…"
+msgstr "Bilder prüfen …"
 
-#: nostr/ui/feeds_panel.py:530
+#: nostr/ui/feeds_panel.py:529
 msgid "Subscribe"
 msgstr "Abonnieren"
 
-#: nostr/ui/feeds_panel.py:534
+#: nostr/ui/feeds_panel.py:533
 msgid "Remember this source (synced privately via your relays) so you can re-import new items later."
 msgstr "Diese Quelle merken (privat über deine Relays abgeglichen), damit du neue Beiträge später importieren kannst."
 
-#: nostr/ui/feeds_panel.py:554
+#: nostr/ui/feeds_panel.py:553
 msgid "Import progress"
 msgstr "Importfortschritt"
 
-#: nostr/ui/feeds_panel.py:570
+#: nostr/ui/feeds_panel.py:569
 msgid "Items to import"
 msgstr "Zu importierende Beiträge"
 
-#: nostr/ui/feeds_panel.py:582
+#: nostr/ui/feeds_panel.py:581
 msgid "Import"
 msgstr "Importieren"
 
-#: nostr/ui/feeds_panel.py:586
+#: nostr/ui/feeds_panel.py:585
 msgid "Import the checked items as private drafts"
 msgstr "Markierte Beiträge als private Entwürfe importieren"
 
-#: nostr/ui/feeds_panel.py:781
+#: nostr/ui/feeds_panel.py:780
 msgid "Loading preview…"
 msgstr "Vorschau wird geladen …"
 
-#: nostr/ui/feeds_panel.py:793
+#: nostr/ui/feeds_panel.py:792
 msgid "Import a content export"
 msgstr "Inhaltsexport importieren"
 
-#: nostr/ui/feeds_panel.py:907
+#: nostr/ui/feeds_panel.py:906
 #, python-brace-format
 msgid "Subscribed to {added} feed(s) from {file}."
 msgid_plural "Subscribed to {added} feed(s) from {file}."
 msgstr[0] "{added} Feed aus {file} abonniert."
 msgstr[1] "{added} Feeds aus {file} abonniert."
 
-#: nostr/ui/feeds_panel.py:1244
+#: nostr/ui/feeds_panel.py:1233
 msgid "Checking your existing drafts…"
 msgstr "Deine vorhandenen Entwürfe werden geprüft …"
 
-#: nostr/ui/feeds_panel.py:1319
+#: nostr/ui/feeds_panel.py:1308
 msgid "Starting import…"
 msgstr "Import wird gestartet …"
 
-#: nostr/ui/feeds_panel.py:1367
+#: nostr/ui/feeds_panel.py:1356
 #, python-brace-format
 msgid "{done}/{total} images, {failed} kept original"
 msgid_plural "{done}/{total} images, {failed} kept original"
 msgstr[0] "{done}/{total} Bild, {failed} beim Original belassen"
 msgstr[1] "{done}/{total} Bilder, {failed} beim Original belassen"
 
-#: nostr/ui/feeds_panel.py:1373
+#: nostr/ui/feeds_panel.py:1362
 #, python-brace-format
 msgid "{done}/{total} images"
 msgid_plural "{done}/{total} images"
 msgstr[0] "{done}/{total} Bild"
 msgstr[1] "{done}/{total} Bilder"
 
-#: nostr/ui/feeds_panel.py:1385
+#: nostr/ui/feeds_panel.py:1374
 #, python-brace-format
 msgid "{accepted}/{total} relays"
 msgid_plural "{accepted}/{total} relays"
 msgstr[0] "{accepted}/{total} Relay"
 msgstr[1] "{accepted}/{total} Relays"
 
-#: nostr/ui/feeds_panel.py:724
+#: nostr/ui/feeds_panel.py:723
 msgid "Connect a Nostr profile to import feeds."
 msgstr "Verbinde ein Nostr-Profil, um Feeds zu importieren."
 
-#: nostr/ui/feeds_panel.py:887
+#: nostr/ui/feeds_panel.py:886
 msgid "Feed subscriptions aren't available until the importer is fully wired up."
 msgstr "Feed-Abonnements sind erst verfügbar, wenn der Import vollständig eingerichtet ist."
 
-#: nostr/ui/feeds_panel.py:914
+#: nostr/ui/feeds_panel.py:913
 #, python-brace-format
 msgid "Subscribed to {added} feed(s) from {file}; {skipped} skipped (already subscribed or invalid)."
 msgid_plural "Subscribed to {added} feed(s) from {file}; {skipped} skipped (already subscribed or invalid)."
 msgstr[0] "{added} Feed aus {file} abonniert, {skipped} übersprungen (schon abonniert oder ungültig)."
 msgstr[1] "{added} Feeds aus {file} abonniert, {skipped} übersprungen (schon abonniert oder ungültig)."
 
-#: nostr/ui/feeds_panel.py:1336
+#: nostr/ui/feeds_panel.py:1325
 msgid "Load cancelled."
 msgstr "Laden abgebrochen."
 
-#: nostr/ui/feeds_panel.py:1343
+#: nostr/ui/feeds_panel.py:1332
 msgid "Import cancelled."
 msgstr "Import abgebrochen."
 
-#: nostr/ui/feeds_panel.py:1393
+#: nostr/ui/feeds_panel.py:1382
 msgid "no relay accepted it yet"
 msgstr "noch von keinem Relay angenommen"
 
-#: nostr/ui/feeds_panel.py:485
+#: nostr/ui/feeds_panel.py:484
 msgid "Recommended"
 msgstr "Empfohlen"
 
-#: nostr/ui/feeds_panel.py:726
+#: nostr/ui/feeds_panel.py:725
 msgid "Importer is not wired up yet."
 msgstr "Der Import ist noch nicht eingerichtet."
 
-#: nostr/ui/feeds_panel.py:858
+#: nostr/ui/feeds_panel.py:857
 msgid "That ZIP doesn't look like a Medium or Substack export, or it has no published posts."
 msgstr "Dieses ZIP sieht nicht nach einem Medium- oder Substack-Export aus oder enthält keine veröffentlichten Beiträge."
 
-#: nostr/ui/feeds_panel.py:1411
+#: nostr/ui/feeds_panel.py:1400
 msgid "Done. Nothing to import."
 msgstr "Fertig. Nichts zu importieren."
 
-#: nostr/ui/feeds_panel.py:483
+#: nostr/ui/feeds_panel.py:482
 #, python-brace-format
 msgid "Scope: {name}"
 msgstr "Umfang: {name}"
 
-#: nostr/ui/feeds_panel.py:814
+#: nostr/ui/feeds_panel.py:813
 #, python-brace-format
 msgid "That file is too large to import (over {size} MB)."
 msgstr "Diese Datei ist zu groß für den Import (über {size} MB)."
 
-#: nostr/ui/feeds_panel.py:894
+#: nostr/ui/feeds_panel.py:893
 #, python-brace-format
 msgid "No feeds were found in {file}."
 msgstr "In {file} wurden keine Feeds gefunden."
 
-#: nostr/ui/feeds_panel.py:934
+#: nostr/ui/feeds_panel.py:933
 #, python-brace-format
 msgid "Fetching {url}"
 msgstr "Wird abgerufen: {url}"
 
-#: nostr/ui/feeds_panel.py:938
+#: nostr/ui/feeds_panel.py:937
 msgid "Reading the feed…"
 msgstr "Feed wird gelesen …"
 
-#: nostr/ui/feeds_panel.py:957
+#: nostr/ui/feeds_panel.py:956
 #, python-brace-format
 msgid "{source}: no items to import."
 msgstr "{source}: keine Beiträge zum Importieren."
 
-#: nostr/ui/feeds_panel.py:1047
+#: nostr/ui/feeds_panel.py:1046
 #, python-brace-format
 msgid "Subscribed to {source}."
 msgstr "{source} abonniert."
 
-#: nostr/ui/feeds_panel.py:1176
-#, python-brace-format
-msgid "Review images ({kept}/{total})…"
-msgstr "Bilder prüfen ({kept}/{total}) …"
-
-#: nostr/ui/feeds_panel.py:1406
+#: nostr/ui/feeds_panel.py:1395
 msgid "Done. The item was already imported; nothing was changed."
 msgid_plural "Done. All {count} items were already imported; nothing was changed."
 msgstr[0] "Fertig. Der Eintrag war bereits importiert; nichts wurde geändert."
 msgstr[1] "Fertig. Alle {count} Einträge waren bereits importiert; nichts wurde geändert."
 
-#: nostr/ui/feeds_panel.py:1413
+#: nostr/ui/feeds_panel.py:1402
 #, python-brace-format
 msgid "Done. {succeeded}/{attempted} item(s) imported as drafts."
 msgid_plural "Done. {succeeded}/{attempted} item(s) imported as drafts."
 msgstr[0] "Fertig. {succeeded}/{attempted} Beitrag als Entwurf importiert."
 msgstr[1] "Fertig. {succeeded}/{attempted} Beiträge als Entwürfe importiert."
 
-#: nostr/ui/feeds_panel.py:810
+#: nostr/ui/feeds_panel.py:809
 #, python-brace-format
 msgid "Couldn't read that file: {error}"
 msgstr "Diese Datei konnte nicht gelesen werden: {error}"
 
-#: nostr/ui/feeds_panel.py:878
+#: nostr/ui/feeds_panel.py:877
 #, python-brace-format
 msgid "Couldn't read that archive: {error}"
 msgstr "Dieses Archiv konnte nicht gelesen werden: {error}"
 
-#: nostr/ui/feeds_panel.py:924
+#: nostr/ui/feeds_panel.py:923
 #, python-brace-format
 msgid "Nothing new in {file}: every feed was already subscribed or invalid."
 msgstr "Nichts Neues in {file}: Jeder Feed war schon abonniert oder ungültig."
 
-#: nostr/ui/feeds_panel.py:936
+#: nostr/ui/feeds_panel.py:935
 #, python-brace-format
 msgid "Looking for a feed link at {url}"
 msgstr "Suche nach einem Feed-Link: {url}"
 
-#: nostr/ui/feeds_panel.py:990
+#: nostr/ui/feeds_panel.py:989
 #, python-brace-format
 msgid "last imported {date}"
 msgstr "zuletzt importiert am {date}"
 
-#: nostr/ui/feeds_panel.py:1419
+#: nostr/ui/feeds_panel.py:1408
 #, python-brace-format
 msgid "{count} was already imported and left as it is."
 msgid_plural "{count} were already imported and left as they are."
 msgstr[0] "{count} war bereits importiert und bleibt, wie er ist."
 msgstr[1] "{count} waren bereits importiert und bleiben, wie sie sind."
 
-#: nostr/ui/image_review_dialog.py:48
-msgid "Checked images are copied to your Blossom server so the draft doesn't depend on the source site. Untick any you want to keep at their original URL."
-msgstr "Markierte Bilder werden auf deinen Medienserver kopiert, damit der Entwurf nicht von der Quellseite abhängt. Entferne das Häkchen bei Bildern, die unter ihrer ursprünglichen URL bleiben sollen."
+#: nostr/ui/image_review_dialog.py:58
+msgid "Review Images"
+msgstr "Bilder prüfen"
 
-#: nostr/ui/image_review_dialog.py:57
-msgid "Images to mirror"
+#: nostr/ui/image_review_dialog.py:74
+msgid "Checked images are copied to your media server, so the draft keeps working if the website removes them. Uncheck any you'd rather leave where they are."
+msgstr "Markierte Bilder werden auf deinen Medienserver kopiert, damit der Entwurf vollständig bleibt, auch wenn die Website sie entfernt. Entferne das Häkchen bei Bildern, die bleiben sollen, wo sie sind."
+
+#: nostr/ui/image_review_dialog.py:87
+msgid "Images to copy"
 msgstr "Zu kopierende Bilder"
+
+#: nostr/ui/image_review_dialog.py:141
+#, python-brace-format
+msgid "{kept} of {total} image will be copied."
+msgid_plural "{kept} of {total} images will be copied."
+msgstr[0] "{kept} von {total} Bild wird kopiert."
+msgstr[1] "{kept} von {total} Bildern werden kopiert."
 
 #: nostr/ui/imports_article.py:90
 #: nostr/ui/imports_article.py:93

@@ -78,7 +78,6 @@ from ..imports import workers
 from ..imports.catalogue import ExistingCatalogue
 from ..imports.errors import SourceError, friendly_message
 from ..imports.fetch import SourceFetcher
-from ..imports.images import scan_html_images
 from ..imports.pipeline import ImportItemsJob
 from ..imports.preview import (
     SCOPE_PRESETS,
@@ -86,7 +85,7 @@ from ..imports.preview import (
     filter_items,
     read_minutes,
 )
-from ..imports.snapshots import identifier_of
+from ..imports.snapshots import has_images, identifier_of, images_to_copy
 from ..imports.registry import (
     ResolveInput,
     ResolveResult,
@@ -517,7 +516,7 @@ class FeedsPanel(QFrame):
         )
         self._rehost_check.toggled.connect(
             lambda _checked: self._update_import_button())
-        self._review_images_btn = QPushButton(_("Review images"))
+        self._review_images_btn = QPushButton(_("Review Images\u2026"))
         self._review_images_btn.setObjectName("feeds_panel_chip")
         self._review_images_btn.setCursor(Qt.PointingHandCursor)
         self._review_images_btn.clicked.connect(self._on_review_images)
@@ -1154,38 +1153,28 @@ class FeedsPanel(QFrame):
         self._import_btn.setEnabled(len(selected) > 0)
         self._update_image_review_button(selected)
 
-    def _selected_image_urls(self, selected: List[FeedItem]) -> List[str]:
-        """Every image an import of ``selected`` would copy: the covers
-        and the images in the bodies."""
-        seen: List[str] = []
-        for item in selected:
-            for url in [item.image or "", *scan_html_images(item.content_html)]:
-                if not url or not url.lower().startswith(("http://", "https://")):
-                    continue
-                if url not in seen:
-                    seen.append(url)
-        return seen
-
     def _update_image_review_button(self, selected: List[FeedItem]) -> None:
-        images = self._selected_image_urls(selected)
-        show = bool(images) and self._rehost_check.isChecked()
+        show = self._rehost_check.isChecked() and any(has_images(i) for i in selected)
         self._review_images_btn.setVisible(show)
-        if show:
-            kept = sum(1 for u in images if u not in self._skip_image_urls)
-            self._review_images_btn.setText(
-                _("Review images ({kept}/{total})…").format(
-                    kept=kept, total=len(images)))
 
     def _on_review_images(self) -> None:
         if self._state != "preview":
             return
-        from .image_review_dialog import ImageReviewDialog
+        selected = self._checked_items()
+        generation = self._load_generation
+        # The list is made the way the import works (from the Markdown),
+        # off the UI thread: converting many bodies takes a moment.
+        self._run_blocking(
+            lambda: images_to_copy(selected),
+            lambda images, g=generation: self._show_image_review(g, images),
+            lambda _exc: None)
 
-        images = self._selected_image_urls(self._checked_items())
-        if not images:
+    def _show_image_review(self, generation: int, images: List[str]) -> None:
+        if generation != self._load_generation or self._state != "preview" or not images:
             return
+        from .image_review_dialog import ImageReviewDialog
         dialog = ImageReviewDialog(images, self._skip_image_urls, parent=self)
-        if dialog.exec() == ImageReviewDialog.Accepted:
+        if dialog.exec() == ImageReviewDialog.DialogCode.Accepted:
             self._skip_image_urls = dialog.skip_urls()
             self._update_import_button()
 
