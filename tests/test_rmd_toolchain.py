@@ -230,22 +230,26 @@ def test_discover_pandoc_version_parses_and_falls_back(monkeypatch):
 # --------------------------------------------------------------------------- #
 
 def test_extract_pandoc_zip_and_tar(sandbox, tmp_path):
+    # The program as this system names it (pandoc.exe on Windows), in the
+    # layout of pandoc's release archives.
+    binary = "pandoc.exe" if sys.platform == "win32" else "pandoc"
     zpath = str(tmp_path / "pandoc.zip")
     with zipfile.ZipFile(zpath, "w") as z:
-        z.writestr("pandoc-3.5/bin/pandoc", "#!/bin/sh\n")
+        z.writestr(f"pandoc-3.5/bin/{binary}", "#!/bin/sh\n")
     out = extract_pandoc_archive(zpath, str(tmp_path / "zt"))
-    assert out.endswith("bin/pandoc") and os.path.isfile(out)
+    assert out == os.path.join(str(tmp_path / "zt"), "pandoc-3.5", "bin", binary)
+    assert os.path.isfile(out)
     if sys.platform != "win32":
         assert os.access(out, os.X_OK)
 
     tpath = str(tmp_path / "pandoc.tar.gz")
     with tarfile.open(tpath, "w:gz") as t:
         data = b"#!/bin/sh\n"
-        info = tarfile.TarInfo("pandoc-3.5/bin/pandoc")
+        info = tarfile.TarInfo(f"pandoc-3.5/bin/{binary}")
         info.size = len(data)
         t.addfile(info, io.BytesIO(data))
     out = extract_pandoc_archive(tpath, str(tmp_path / "tt"))
-    assert out.endswith("bin/pandoc")
+    assert out == os.path.join(str(tmp_path / "tt"), "pandoc-3.5", "bin", binary)
 
     empty = str(tmp_path / "empty.zip")
     with zipfile.ZipFile(empty, "w") as z:

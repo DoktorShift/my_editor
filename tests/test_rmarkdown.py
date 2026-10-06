@@ -168,7 +168,8 @@ def test_image_copied_to_sidecar(tmp_path):
 
 
 def test_media_dir_for():
-    assert media_dir_for("/x/y/notes.Rmd") == "/x/y/notes_media"
+    folder = os.path.join("x", "y")
+    assert media_dir_for(os.path.join(folder, "notes.Rmd")) == os.path.join(folder, "notes_media")
 
 
 # --------------------------------------------------------------------------- #
