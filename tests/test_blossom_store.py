@@ -259,6 +259,22 @@ def test_a_failing_mirror_is_reported_and_the_upload_still_commits(tmp_path):
     assert [u["server"] for u in media.urls] == [SERVER]
 
 
+def test_a_server_that_cannot_mirror_gets_the_bytes_uploaded(tmp_path):
+    ctx = make_store(
+        tmp_path, servers=(SERVER, MIRROR),
+        replies=[json_reply(descriptor(), status=201),
+                 error_reply(405, reason="mirror not supported"),
+                 json_reply(descriptor(server=MIRROR), status=201)],
+    )
+    ctx.store.upload_bytes(BODY, name="a.png")
+    ctx.settle()
+    assert ctx.mirror_failures == []
+    _name, media = ctx.finished[0]
+    assert [u["server"] for u in media.urls] == [SERVER, MIRROR]
+    _verb, request, _body = ctx.nam.calls[-1]
+    assert request.url().path() == "/upload"        # the direct upload went out
+
+
 def test_a_mirror_descriptor_for_another_blob_is_refused(tmp_path):
     ctx = make_store(
         tmp_path, servers=(SERVER, MIRROR),
@@ -772,3 +788,14 @@ def test_entitlement_is_resolved_per_call_not_cached(tmp_path):
     assert ctx.store._target_servers() == [SERVER]
     state["servers"] = [E21]
     assert ctx.store._target_servers() == [SERVER, E21]
+
+
+@pytest.mark.parametrize("odd", ["many", [1], {"a": 1}, "1e400", None, -5, True])
+def test_an_odd_number_in_a_listing_never_stops_the_library(tmp_path, odd):
+    blob = descriptor(f"{1:064x}")
+    blob["size"] = odd
+    blob["uploaded"] = odd
+    ctx = make_store(tmp_path, replies=[json_reply([blob])])
+    ctx.store.fetch()
+    ctx.settle()
+    assert list(ctx.store.files) == [blob["sha256"]]

@@ -172,3 +172,26 @@ def test_would_scrub_separates_nothing_to_strip_from_cannot_publish():
     # report as "nothing will be stripped".
     assert would_scrub(b"not an image") is None
     assert would_scrub(b"") is None
+
+
+def _with_text(fmt: str) -> bytes:
+    from PySide6.QtCore import QBuffer, QIODevice
+    from PySide6.QtGui import QColor, QImage
+    image = QImage(8, 8, QImage.Format.Format_RGB32)
+    image.fill(QColor("orange"))
+    image.setText("Location", "GPS 47.3769 8.5417 secret")
+    image.setText("Description", "home address secret")
+    buffer = QBuffer()
+    buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+    assert image.save(buffer, fmt)
+    return bytes(buffer.data())
+
+
+@pytest.mark.parametrize("fmt", ["PNG", "JPEG"])
+def test_text_hidden_in_the_file_does_not_survive(fmt):
+    original = _with_text(fmt)
+    assert b"secret" in original                      # the test file carries it
+    result = scrub_for_publication(original)
+    assert result.scrubbed
+    assert b"secret" not in result.data
+    assert b"GPS" not in result.data

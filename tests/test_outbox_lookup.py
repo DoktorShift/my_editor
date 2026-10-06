@@ -180,6 +180,12 @@ class StubRelay(QObject):
     def open(self):
         pass
 
+    def hold(self):
+        self.holds = getattr(self, "holds", 0) + 1
+
+    def release(self):
+        self.holds -= 1
+
     def send(self, message):
         self.sent.append(message)
         return self.is_connected
@@ -216,3 +222,24 @@ def test_the_subscription_reports_how_each_relay_ended():
     assert ended == [("failed", "wss://a.com"), ("eose", "wss://b.com"),
                      ("closed", "wss://c.com")]
     sub.close()
+
+
+def test_a_subscription_asks_again_when_its_relay_comes_back():
+    pool = StubPool()
+    sub = Subscription(pool, ["wss://a.com"], [{"kinds": [24133]}])
+    events = []
+    sub.event.connect(events.append)
+    a = pool.relays["wss://a.com"]
+    assert a.holds == 1                      # the relay knows it is needed
+    a.is_connected = True
+    a.connected.emit()
+    a.message.emit(["EOSE", sub.sub_id])
+    a.is_connected = False
+    a.disconnected.emit()                    # the socket drops ...
+    a.is_connected = True
+    a.connected.emit()                       # ... and comes back
+    assert a.sent == [["REQ", sub.sub_id, {"kinds": [24133]}]] * 2
+    a.message.emit(["EVENT", sub.sub_id, {"id": "x"}])
+    assert events == [{"id": "x"}]           # still delivered after the drop
+    sub.close()
+    assert a.holds == 0
