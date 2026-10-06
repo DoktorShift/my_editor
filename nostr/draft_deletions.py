@@ -11,12 +11,13 @@ STANDUP stayed in this app's drafts list, and could be published from
 here as if it had never been deleted.
 
 :class:`DraftDeletions` keeps a subscription open for the account's own
-deletion requests, on the relays its drafts are read from, remembers
-the newest request per draft and takes out of the DraftStore any draft
-that is not newer than it, also when a later refresh brings the old
-wrap back. A draft saved after the request is a new draft and stays.
-Only requests signed by the account count: a relay cannot delete
-anyone's draft by inventing one.
+deletion requests, on the relays its drafts are read from, and hands
+each to the DraftStore the way a blanked wrap is handed to it
+(:meth:`DraftStore.apply_deletion`): a deletion removes only what it is
+newer than, and is remembered, so a later refresh that brings the old
+wrap back does not bring the draft back. A draft saved after the
+request is a new draft and stays. Only requests signed by the account
+count: a relay cannot delete anyone's draft by inventing one.
 
 :func:`build_deletion_request` makes the request this app sends with
 its own blanked wrap when it deletes an imported draft, so STANDUP
@@ -105,10 +106,6 @@ class DraftDeletions(QObject):
         self._profile: Optional[Profile] = None
         self._subscription = None
         self._generation = 0
-        # d -> created_at of the newest deletion request naming it.
-        self._deleted: Dict[str, int] = {}
-        store.record_added.connect(self._apply_to)
-        store.record_changed.connect(self._apply_to)
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -129,25 +126,13 @@ class DraftDeletions(QObject):
             self._subscription.close()
             self._subscription = None
         self._profile = None
-        self._deleted = {}
 
     def refresh(self) -> None:
         """Ask again (the drafts list was refreshed, or the relays moved)."""
         profile = self._profile
         if profile is not None:
             self._profile = None
-            deleted = self._deleted
             self.start_for(profile)
-            self._deleted = deleted
-
-    # -- reading -------------------------------------------------------------
-
-    def deleted_at(self, identifier: str) -> int:
-        """When the newest request deleted ``identifier`` (0 if never)."""
-        return self._deleted.get(identifier, 0)
-
-    def identifiers(self) -> List[str]:
-        return list(self._deleted)
 
     # -- internals -----------------------------------------------------------
 
@@ -167,17 +152,7 @@ class DraftDeletions(QObject):
     def handle_event(self, event: dict) -> None:
         if self._profile is None:
             return
+        event_id = str(event.get("id", ""))
         for identifier, when in deleted_identifiers(event, self._profile.user_pubkey).items():
-            if when > self._deleted.get(identifier, 0):
-                self._deleted[identifier] = when
-            self._apply_to(identifier)
-
-    def _apply_to(self, identifier: str) -> None:
-        when = self._deleted.get(identifier)
-        if when is None:
-            return
-        record = self._store.get(identifier)
-        # A draft saved after the request is a new draft.
-        if record is not None and record.created_at <= when:
-            self._store.remove(identifier)
-            self.removed.emit(identifier)
+            if self._store.apply_deletion(identifier, when, event_id):
+                self.removed.emit(identifier)

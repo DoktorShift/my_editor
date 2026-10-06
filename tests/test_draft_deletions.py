@@ -105,7 +105,7 @@ def test_a_request_removes_an_older_draft():
     pool.subscription.event.emit(request(created_at=200))
     assert store.get(D) is None
     assert removed == [D]
-    assert deletions.deleted_at(D) == 200
+    assert D in store.deleted_identifiers()
 
 
 def test_a_draft_saved_after_the_request_stays():
