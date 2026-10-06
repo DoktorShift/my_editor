@@ -26,7 +26,15 @@ older posts. A file or a link opened to import once is listed under
 Files and Links with all its posts checked; a file dropped anywhere on
 the window opens the same way. Under the list, the action bar
 (imports_actions.py) makes drafts of the checked posts, or of the open
-one when none is checked.
+one when none is checked, or skips them (Delete or Backspace, with Undo
+in a message and in Edit > Undo). How an import is going shows in one
+place, the toolbar's activity button (imports_activity.py), and in the
+words of the posts it holds.
+
+The window has no menu bar of its own: the app's menu bar stays, and
+its Edit commands act on this window while it is in front (see
+``undo``, ``can_undo`` and ``edit``), as a Mac app's menu bar acts on
+its key window.
 
 Following Apple's guidelines for split views and sidebars: the selection
 stays visible in every pane, the panes keep a minimum width so no divider
@@ -49,7 +57,7 @@ import sys
 import time
 from typing import Callable, Dict, List, Optional
 
-from PySide6.QtCore import QByteArray, QPoint, QRectF, QSize, Qt, QTimer, QUrl
+from PySide6.QtCore import QByteArray, QPoint, QRectF, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import (
     QAction,
     QColor,
@@ -69,6 +77,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QPlainTextEdit,
+    QTextEdit,
     QMenu,
     QPushButton,
     QSizePolicy,
@@ -80,6 +90,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import alerts
 import url_safety
 from i18n import _, ngettext
 
@@ -98,6 +109,7 @@ from ..imports_controller import ELSEWHERE
 from ..imports.workspace import Post, Scope, checked_text, date_text, matches, targets
 from .image_review_dialog import ImageReviewDialog
 from .imports_actions import ActionBar, OptionsPopover
+from .imports_activity import ActivityButton, JobCard, finished_text
 from .imports_article import ArticlePane
 from .imports_glyphs import glyph_icon
 from .imports_post_list import PostList
@@ -207,12 +219,20 @@ class _SearchField(QLineEdit):
 
 
 class ImportsWindow(QMainWindow):
-    """The Imports window for one account (see the module docstring)."""
+    """The Imports window for one account (see the module docstring).
+
+    Signals:
+      undo_changed()   what Edit > Undo would undo here changed
+    """
+
+    undo_changed = Signal()
 
     def __init__(self, controller, *, dark: bool = False,
                  load_settings: Callable[[], dict] = dict,
                  save_settings: Callable[[dict], None] = lambda _value: None,
                  open_url: Callable[[QUrl], bool] = QDesktopServices.openUrl,
+                 show_drafts: Optional[Callable[[], None]] = None,
+                 confirm_stop: Optional[Callable[[QWidget], bool]] = None,
                  parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("imports_window")
@@ -226,6 +246,9 @@ class ImportsWindow(QMainWindow):
         self._source_state = NEW
         self._auto_hidden = False
         self._sheet = None
+        self._show_drafts = show_drafts
+        # The last skip, for Undo: (source, post, revision) each.
+        self._last_skip: List[tuple] = []
         # What the person chose for the next drafts (this run only), and
         # the images they chose to leave where they are.
         self._choices: Dict[str, bool] = {}
@@ -248,9 +271,17 @@ class ImportsWindow(QMainWindow):
         self._drop_overlay = _DropOverlay(self)
         self._drop_overlay.hide()
 
+        self.job_card = JobCard(self, confirm_stop=confirm_stop or _confirm_stop)
+        self.job_card.pause.connect(controller.pause_import)
+        self.job_card.resume.connect(controller.resume_import)
+        self.job_card.stop.connect(controller.stop_import)
+
         controller.sources_changed.connect(self._refresh_sidebar)
         controller.posts_changed.connect(self._on_posts_changed)
+        controller.activity_changed.connect(self._update_activity)
+        controller.import_finished.connect(self._import_finished)
         self._refresh_sidebar()
+        self._update_activity()
         self._restore(load_settings() or {})
         self._show_list()
         if not self._restored_geometry:
@@ -305,6 +336,11 @@ class ImportsWindow(QMainWindow):
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         bar.addWidget(spacer)
+
+        self.activity_button = ActivityButton()
+        self.activity_button.clicked.connect(self._show_job_card)
+        self._activity_action = bar.addWidget(self.activity_button)
+        self._activity_action.setVisible(False)
 
         self.search = _SearchField(self._focus_list)
         self.search.setObjectName("imports_search")
@@ -365,8 +401,8 @@ class ImportsWindow(QMainWindow):
         self.action_bar = ActionBar()
         self.action_bar.create_clicked.connect(self.create_drafts)
         self.action_bar.options_clicked.connect(self._show_options)
-        # Skipping arrives with Undo.
-        self.action_bar.skip.hide()
+        self.action_bar.skip_clicked.connect(self.skip_or_restore)
+        self.posts.skip_requested.connect(self.skip_or_restore)
         column.addWidget(self.action_bar)
         self.options_popover = OptionsPopover(self)
         self.options_popover.changed.connect(self._choose)
@@ -498,6 +534,13 @@ class ImportsWindow(QMainWindow):
         close.setShortcut(QKeySequence.StandardKey.Close)
         close.triggered.connect(self.close)
         self.addAction(close)
+        # Edit > Undo while this window is in front (the app's menu bar
+        # sends it here too).
+        undo = QAction(self)
+        undo.setShortcut(QKeySequence.StandardKey.Undo)
+        undo.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
+        undo.triggered.connect(self.undo)
+        self.addAction(undo)
         # Command-Return or Ctrl+Return, as Send in Mail.
         create = QAction(self)
         create.setShortcut(QKeySequence(Qt.Modifier.CTRL | Qt.Key.Key_Return))
@@ -763,10 +806,16 @@ class ImportsWindow(QMainWindow):
         chosen = self.targets()
         controller = self._controller
         copy, _full = self._copy_and_full(chosen)
+        restoring = self._restoring()
+        movable = [p for p in chosen if (p.skipped if restoring else p.skippable)]
         self.action_bar.show_targets(
             len(chosen), can_create=not controller.read_only,
-            busy=not controller.can_create(), skip_text=_("Skip"), can_skip=False,
+            busy=not controller.can_create(),
+            skip_text=_("Restore") if restoring else _("Skip"),
+            can_skip=bool(movable) and not controller.read_only,
             prompts=controller.signer_prompts(chosen, copy_images=copy is not False))
+        # Files and links are imported once: nothing there is skipped.
+        self.action_bar.skip.setVisible(not self._scope.is_collection)
         self.action_bar.setVisible(model.selectable_count() > 0)
 
     def _copy_and_full(self, posts: List[Post]):
@@ -826,6 +875,105 @@ class ImportsWindow(QMainWindow):
             self.posts.model_.clear_checks()
             self._reset_choices()
             self._update_selection_band()
+
+    # ------------------------------------------------------------------ #
+    # Skipping, and Undo                                                   #
+    # ------------------------------------------------------------------ #
+
+    def _restoring(self) -> bool:
+        """In the Skipped list the action brings posts back."""
+        view = self._scope.view
+        return view is not None and view.scope == SKIPPED_POSTS
+
+    def skip_or_restore(self) -> None:
+        """Skip (Delete or Backspace), or Restore in the Skipped list."""
+        chosen = self.targets()
+        if self._restoring():
+            restored = self._controller.restore(chosen)
+            if restored:
+                self.banner.say(ngettext("Restored {count} post.", "Restored {count} posts.",
+                                         len(restored)).format(count=len(restored)))
+            return
+        moved = self._controller.skip(chosen)
+        if not moved:
+            return
+        self.posts.model_.clear_checks()
+        self._last_skip = moved
+        self.banner.say(ngettext("Skipped {count} post.", "Skipped {count} posts.",
+                                 len(moved)).format(count=len(moved)),
+                        _("Undo"), self.undo_skip)
+        self.undo_changed.emit()
+
+    def undo_skip(self) -> None:
+        moved, self._last_skip = self._last_skip, []
+        if moved and self._controller.undo_skip(moved):
+            self.banner.hide()
+        self.undo_changed.emit()
+
+    def can_undo(self) -> bool:
+        """Whether Edit > Undo has something to undo here."""
+        focus = self.focusWidget()
+        if _is_text_field(focus):
+            return _text_can_undo(focus)
+        return bool(self._last_skip)
+
+    def undo_text(self) -> str:
+        """Edit > Undo's words while this window is in front."""
+        if self._last_skip and not _is_text_field(self.focusWidget()):
+            return _("Undo Skip")
+        return _("Undo")
+
+    def undo(self) -> None:
+        """Edit > Undo: the text being typed, or else the last skip."""
+        focus = self.focusWidget()
+        if _is_text_field(focus):
+            focus.undo()
+            return
+        self.undo_skip()
+
+    def edit(self, name: str) -> None:
+        """The app's Edit commands for this window (copy, select_all,
+        delete) when the focus is not in a text field."""
+        if name == "select_all":
+            self.posts.model_.check_all()
+            self._update_selection_band()
+        elif name == "delete":
+            self.skip_or_restore()
+        elif name == "copy":
+            post = self.posts.current_post()
+            if post is not None and post.link:
+                QApplication.clipboard().setText(post.link)
+
+    # ------------------------------------------------------------------ #
+    # How an import is going                                               #
+    # ------------------------------------------------------------------ #
+
+    def _update_activity(self) -> None:
+        controller = self._controller
+        job = controller.activity()
+        self.activity_button.show_job(job)
+        self._activity_action.setVisible(job is not None)
+        if self.job_card.isVisible():
+            self.job_card.show_job(job)
+        busy, failed = controller.posts_in_progress()
+        self.posts.model_.set_progress(busy, failed)
+        self._update_actions()
+
+    def _show_job_card(self) -> None:
+        job = self._controller.activity()
+        if job is None:
+            return
+        self.job_card.show_job(job)
+        self.job_card.open_below(self.activity_button)
+
+    def _import_finished(self, job_id: str) -> None:
+        job = self._controller.job(job_id)
+        if job is None:
+            return
+        if self._show_drafts is not None:
+            self.banner.say(finished_text(job), _("Show Drafts"), self._show_drafts)
+        else:
+            self.banner.say(finished_text(job))
 
     def _fill_placeholder(self) -> None:
         title, text, button = self._placeholder()
@@ -1174,6 +1322,24 @@ class _DropOverlay(QWidget):
         painter.setFont(font)
         painter.setPen(self.palette().color(QPalette.ColorRole.WindowText))
         painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, _("Drop to Import"))
+
+
+def _confirm_stop(parent: QWidget) -> bool:
+    return alerts.confirm_destructive(
+        parent, title=_("Stop this import?"),
+        message=_("Drafts already created stay. The other posts are not imported."),
+        action=_("Stop Import"))
+
+
+def _is_text_field(widget) -> bool:
+    return isinstance(widget, (QLineEdit, QTextEdit, QPlainTextEdit)) and not (
+        isinstance(widget, (QTextEdit, QPlainTextEdit)) and widget.isReadOnly())
+
+
+def _text_can_undo(widget) -> bool:
+    if isinstance(widget, QLineEdit):
+        return widget.isUndoAvailable()
+    return widget.document().isUndoAvailable()
 
 
 def _bytes(value) -> Optional[QByteArray]:

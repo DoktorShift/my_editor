@@ -171,6 +171,13 @@ class TestCreating:
         window.create_drafts()
         settle()
         assert jobs.held
+        # The post being imported says so and cannot be chosen again.
+        model = window.posts.model_
+        assert model.word_for(model.post(0)) == "Importing"
+        assert bar(window).create.text() == "Create Draft"
+        assert not bar(window).create.isEnabled()
+        # Another post waits until this import is done.
+        window.posts.setCurrentIndex(model.index(1))
         assert not bar(window).create.isEnabled()
         assert bar(window).create.toolTip() == "Pause the current import before starting another."
         jobs.held[0].play("ok")

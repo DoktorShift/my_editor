@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 import shiboken6
 from PySide6.QtCore import QLockFile, QObject, QTimer, Signal
@@ -54,15 +54,19 @@ from .imports.inbox_store import (
     DRAFTED,
     NEW,
     OLDER,
+    ROW_FAILED,
+    ROW_PENDING,
     SKIPPED,
+    Conflict,
     Counts,
     InboxStore,
+    Job,
     SourceRow,
     View,
     database_path,
 )
 from .imports.intake import read_export
-from .imports.jobs import ImportRunner
+from .imports.jobs import ImportRunner, unfinished
 from .imports.pipeline import ImportItemsJob
 from .imports.registry import ResolveInput, resolve_source
 from .imports.remote_images import RemoteImages
@@ -98,6 +102,8 @@ class ImportsController(QObject):
       inbox_count_changed(int)   posts waiting in the Inbox
       activity_changed()         an import job started, moved or ended
       new_posts(str, int)        a check put posts in the Inbox (source, count)
+      import_finished(str)       an import went through all its posts (its id;
+                                 some may have failed)
     """
 
     bound_changed = Signal(bool)
@@ -106,6 +112,7 @@ class ImportsController(QObject):
     inbox_count_changed = Signal(int)
     activity_changed = Signal()
     new_posts = Signal(str, int)
+    import_finished = Signal(str)
 
     def __init__(self, *, relay_pool, relay_directory, session_pool, draft_store=None,
                  entitled_relays: Optional[Callable[[], Sequence[str]]] = None,
@@ -728,8 +735,115 @@ class ImportsController(QObject):
     # Imports                                                              #
     # ------------------------------------------------------------------ #
 
-    def _on_job_finished(self, _job_id: str) -> None:
+    def _on_job_finished(self, job_id: str) -> None:
         self._announce()
+        job = self.inbox.job(job_id) if self.inbox is not None else None
+        if job is not None and job.status in ("completed", "partial"):
+            self.import_finished.emit(job_id)
+
+    # ------------------------------------------------------------------ #
+    # Progress                                                             #
+    # ------------------------------------------------------------------ #
+
+    def activity(self) -> Optional[Job]:
+        """The import to show: the one running, else the newest one that
+        still has posts to do (paused, or some failed)."""
+        if self.runner is None:
+            return None
+        if self.runner.running is not None:
+            return self.runner.running
+        waiting = unfinished(self.inbox.jobs())
+        return waiting[0] if waiting else None
+
+    def job(self, job_id: str) -> Optional[Job]:
+        if self.runner is not None and self.runner.running is not None \
+                and self.runner.running.id == job_id:
+            return self.runner.running
+        return self.inbox.job(job_id) if self.inbox is not None else None
+
+    def posts_in_progress(self) -> Tuple[Set[str], Set[str]]:
+        """The posts an unfinished import still holds (they cannot be
+        chosen again), and those that failed in one (they can)."""
+        busy: Set[str] = set()
+        failed: Set[str] = set()
+        if self.inbox is None:
+            return busy, failed
+        jobs = unfinished(self.inbox.jobs())
+        running = self.runner.running if self.runner is not None else None
+        if running is not None:
+            jobs = [running] + [job for job in jobs if job.id != running.id]
+        for job in jobs:
+            for row in job.rows:
+                if row.status == ROW_PENDING:
+                    busy.add(row.d_tag)
+                elif row.status == ROW_FAILED:
+                    failed.add(row.d_tag)
+        return busy, failed - busy
+
+    def pause_import(self) -> None:
+        """Pause after the post being made."""
+        if self.runner is not None:
+            self.runner.pause()
+
+    def resume_import(self, job_id: str) -> bool:
+        """Go on with an import, or try its failed posts again."""
+        if self.runner is None or self.read_only:
+            return False
+        started = self.runner.run(job_id)
+        self._announce()
+        return started
+
+    def stop_import(self, job_id: str) -> None:
+        """Stop an import for good; the drafts made stay."""
+        if self.runner is not None:
+            self.runner.stop_paused(job_id)
+            self._announce()
+
+    # ------------------------------------------------------------------ #
+    # Skipping                                                             #
+    # ------------------------------------------------------------------ #
+
+    def skip(self, posts: Sequence[Post]) -> List[Tuple[str, str, int]]:
+        """Set posts aside on this computer. Returns what moved, for Undo:
+        (source, post, its new revision) each."""
+        moved = []
+        if self.inbox is None or self.read_only:
+            return moved
+        for post in posts:
+            if not post.skippable:
+                continue
+            try:
+                revision = self.inbox.skip(post.source_key, post.d_tag, post.revision)
+            except Conflict:
+                continue        # imported or changed meanwhile: leave it
+            moved.append((post.source_key, post.d_tag, revision))
+        if moved:
+            self._announce()
+        return moved
+
+    def restore(self, posts: Sequence[Post]) -> List[Tuple[str, str, int]]:
+        """Bring skipped posts back where they were."""
+        return self._restore([(post.source_key, post.d_tag, post.revision)
+                              for post in posts if post.skipped])
+
+    def undo_skip(self, moved: Sequence[Tuple[str, str, int]]) -> int:
+        """Undo a skip: what :meth:`skip` returned goes back. Returns how
+        many posts did (one changed since stays as it is)."""
+        return len(self._restore(moved))
+
+    def _restore(self, moves) -> List[Tuple[str, str, int]]:
+        restored = []
+        if self.inbox is None or self.read_only:
+            return restored
+        for source_key_, d_tag, revision in moves:
+            try:
+                restored.append((source_key_, d_tag,
+                                 self.inbox.restore(source_key_, d_tag, revision)))
+            except Conflict:
+                continue
+        if restored:
+            self._announce()
+        return restored
 
     def _on_draft_created(self, d_tag: str) -> None:
         """A post became a draft: it is Imported everywhere it is shown."""

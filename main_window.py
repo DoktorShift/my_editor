@@ -599,6 +599,9 @@ class MainWindow(QMainWindow):
 
         self.tabs.currentChanged.connect(self._on_tab_changed)
         self._update_undo_redo_buttons()
+        # Edit > Undo follows the window in front (the Imports window has
+        # its own Undo Skip).
+        QApplication.instance().focusChanged.connect(self._update_undo_redo_buttons)
         self._update_status_bar()
         self._start_ipc_server()
         QTimer.singleShot(0, lambda ws=resumed: self._announce_version_change(ws))
@@ -1070,13 +1073,21 @@ class MainWindow(QMainWindow):
             + " · " + ngettext("{minutes} min read", "{minutes} min read", minutes).format(
                 minutes=_number(minutes)))
 
-    def _update_undo_redo_buttons(self):
+    def _update_undo_redo_buttons(self, *_args):
+        if not hasattr(self, "act_undo"):
+            return
+        imports = self._imports_in_front()
+        if imports is not None:
+            # What Undo undoes in the window in front (Undo Skip there).
+            self.act_undo.setText(imports.undo_text())
+            self.act_undo.setEnabled(imports.can_undo())
+            focus = imports.focusWidget()
+            self.act_redo.setEnabled(isinstance(focus, QLineEdit) and focus.isRedoAvailable())
+            return
         ed = self.current_editor()
-        can_undo = ed.document().isUndoAvailable() if ed else False
-        can_redo = ed.document().isRedoAvailable() if ed else False
-        if hasattr(self, "act_undo"):
-            self.act_undo.setEnabled(can_undo)
-            self.act_redo.setEnabled(can_redo)
+        self.act_undo.setText(_("Undo"))
+        self.act_undo.setEnabled(ed.document().isUndoAvailable() if ed else False)
+        self.act_redo.setEnabled(ed.document().isRedoAvailable() if ed else False)
 
     def _toggle_format(self, fmt: str):
         ed = self.current_editor()
@@ -2104,6 +2115,11 @@ class MainWindow(QMainWindow):
         self.tabs.removeTab(index)
 
     def _close_current_tab(self):
+        # Command-W closes the window in front, also from the menu.
+        imports = self._imports_in_front()
+        if imports is not None:
+            imports.close()
+            return
         idx = self.tabs.currentIndex()
         if idx >= 0:
             self.close_tab(idx)
@@ -3345,7 +3361,12 @@ class MainWindow(QMainWindow):
     def _show_find(self, replace: bool = False):
         """Find… or Find and Replace…: the find bar, its field focused
         (Find and Replace adds the Replace row). In a PDF tab, the PDF
-        reader's own find bar."""
+        reader's own find bar. With the Imports window in front, its
+        search field."""
+        imports = self._imports_in_front()
+        if imports is not None:
+            imports.focus_search()
+            return
         viewer = self.current_pdf_viewer()
         if viewer is not None:
             if viewer.findbar.isVisible():
@@ -3833,12 +3854,30 @@ class MainWindow(QMainWindow):
             ed.reset_to_default()
             self._update_format_buttons()
 
+    def _imports_in_front(self):
+        """The Imports window while it is the window in front. It has no
+        menu bar of its own: the app's Edit commands act on it then, as a
+        Mac app's menu bar acts on its key window."""
+        imports = getattr(self, "_imports", None)
+        window = imports.window() if imports is not None else None
+        return window if window is not None and window.isActiveWindow() else None
+
     def _undo(self):
+        imports = self._imports_in_front()
+        if imports is not None:
+            imports.undo()
+            return
         ed = self.current_editor()
         if ed:
             ed.undo()
 
     def _redo(self):
+        imports = self._imports_in_front()
+        if imports is not None:
+            focus = imports.focusWidget()
+            if isinstance(focus, (QLineEdit, QTextEdit, QPlainTextEdit)):
+                focus.redo()
+            return
         ed = self.current_editor()
         if ed:
             ed.redo()
@@ -3918,6 +3957,10 @@ class MainWindow(QMainWindow):
                 return
             {"cut": focus.cut, "copy": focus.copy, "paste": focus.paste,
              "select_all": focus.selectAll}[name]()
+            return
+        imports = self._imports_in_front()
+        if imports is not None:
+            imports.edit(name)
             return
         viewer = self.current_pdf_viewer()
         if viewer is not None:
@@ -4599,11 +4642,21 @@ class MainWindow(QMainWindow):
 
     def _make_imports_window(self, controller):
         """The Imports window, remembered in settings.json between runs."""
-        return ImportsWindow(
+        window = ImportsWindow(
             controller, dark=self.is_dark_theme,
             load_settings=lambda: load_settings().get(IMPORTS_SETTINGS_KEY) or {},
             save_settings=lambda value: save_setting(IMPORTS_SETTINGS_KEY, value),
-            open_url=lambda url: self._open_external(url.toString()))
+            open_url=lambda url: self._open_external(url.toString()),
+            show_drafts=self._show_drafts_from_imports)
+        # Edit > Undo says what it undoes there (Undo Skip).
+        window.undo_changed.connect(self._update_undo_redo_buttons)
+        return window
+
+    def _show_drafts_from_imports(self) -> None:
+        """Show Drafts, after an import: this window and its Drafts panel."""
+        self._show_drafts_panel()
+        self.raise_()
+        self.activateWindow()
 
     def _on_nostr_profile_connected(self, profile: Profile):
         # New (or re-connected) profile becomes the active one.
