@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import word_count
 from i18n import _, language, ngettext
 
 from ..avatar_store import AvatarStore
@@ -59,9 +60,6 @@ from .mention_chips import MentionChipRow
 from .thumbnail_loader import ThumbnailLoader
 
 
-# Rough words-per-minute used for the read-time hint. Public-facing prose
-# tends to be ~200 wpm; long enough that the badge feels truthful.
-_WPM_READ_SPEED: int = 200
 
 
 # --------------------------------------------------------------------------- #
@@ -747,11 +745,11 @@ class PublishArticleDialog(QDialog):
     # -- meta strip --------------------------------------------------------
 
     def _refresh_meta(self) -> None:
-        words = len(self._body_edit.toPlainText().split())
+        words = word_count.count_words(self._body_edit.toPlainText())
         if words == 0:
             self._meta_label.setText("")
             return
-        minutes = max(1, round(words / _WPM_READ_SPEED))
+        minutes = word_count.reading_minutes(words)
         self._meta_label.setText(ngettext(
             "{words} word · ~{minutes} min read", "{words} words · ~{minutes} min read", words,
         ).format(words=QLocale(language()).toString(words), minutes=minutes))

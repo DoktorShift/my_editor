@@ -36,7 +36,8 @@ from PySide6.QtWidgets import (
 from constants import (
     DARK_BG, DARK_FG, LIGHT_BG, LIGHT_FG, DARK_SELECTION, LIGHT_SELECTION,
     DARK_MENU_BG, DARK_MENU_FG, LIGHT_MENU_BG, LIGHT_MENU_FG,
-    DARK_BORDER, LIGHT_BORDER, MONO_FONT, APP_DISPLAY_NAME, APP_VERSION, APP_URL, TEXT_COLORS
+    DARK_BORDER, LIGHT_BORDER, MONO_FONT, APP_DISPLAY_NAME, APP_VERSION, APP_URL, TEXT_COLORS,
+    DARK_MUTED_FG, LIGHT_MUTED_FG,
 )
 from widgets import FindBar, HeaderWidget, LineNumberGutter, FileChangedBar, UpdateBar
 from format_toolbar import FormatToolbar
@@ -77,6 +78,7 @@ from update_flow import AUTOMATIC, guide_url, plan_for
 import theme
 from export_html import document_to_html, normalize_after_set_html, sniff_image_ext
 from find_replace import find_all, replace_all, replace_match
+from word_count import count_words, reading_minutes
 from export_pdf import export_pdf, load_page_setup
 from page_setup_dialog import PageSetupDialog
 import printing
@@ -288,6 +290,17 @@ class MainWindow(QMainWindow):
 
         self.status = QStatusBar()
         self.setStatusBar(self.status)
+        # How long the document is, quietly: words and reading time, or
+        # the words of the selection while there is one.
+        self._words_label = QLabel()
+        self._words_label.setObjectName("WordCount")
+        self._words_label.setContentsMargins(0, 0, 12, 0)
+        self.status.addPermanentWidget(self._words_label)
+        self._word_count_timer = QTimer(self)
+        self._word_count_timer.setSingleShot(True)
+        self._word_count_timer.setInterval(300)
+        self._word_count_timer.timeout.connect(self._update_word_count)
+        self._document_words = 0
         self._line_label = QLabel()
         self._line_label.setContentsMargins(0, 0, 8, 0)
         self.status.addPermanentWidget(self._line_label)
@@ -696,6 +709,8 @@ class MainWindow(QMainWindow):
 
         label_color = DARK_MENU_FG if self.is_dark_theme else LIGHT_FG
         self._line_label.setStyleSheet(f"color: {label_color}; font-size: 12px;")
+        muted = DARK_MUTED_FG if self.is_dark_theme else LIGHT_MUTED_FG
+        self._words_label.setStyleSheet(f"color: {muted}; font-size: 12px;")
 
         for i in range(self.tabs.count()):
             ed = self._editor_from_widget(self.tabs.widget(i))
@@ -817,6 +832,9 @@ class MainWindow(QMainWindow):
         ed.cursorPositionChanged.connect(self._update_status_bar)
         ed.document().contentsChanged.connect(
             lambda e=ed: self._on_document_changed_for_find(e))
+        ed.document().contentsChanged.connect(
+            lambda e=ed: self._on_document_changed_for_words(e))
+        ed.selectionChanged.connect(lambda e=ed: self._on_selection_changed_for_words(e))
         ed.currentCharFormatChanged.connect(self._update_format_buttons)
         ed.selectionChanged.connect(self._update_format_buttons)
         self._update_editor_theme(ed)
@@ -912,11 +930,13 @@ class MainWindow(QMainWindow):
         if viewer is not None:
             self.status.showMessage(viewer._file_path)
             self._line_label.setText(viewer.page_display())
+            self._words_label.setText("")
             self._update_format_buttons()
             return
         ed = self.current_editor()
         if not ed:
             self._line_label.setText("")
+            self._words_label.setText("")
             return
         path = getattr(ed, "_file_path", None)
         file_info = path if path else _("(Untitled)")
@@ -940,6 +960,7 @@ class MainWindow(QMainWindow):
 
     def _on_tab_changed(self, index=None):
         self._update_window_title()
+        self._update_word_count()
         self._update_undo_redo_buttons()
         self._update_status_bar()  # also calls _update_format_buttons
         self._update_knit_actions()
@@ -961,6 +982,42 @@ class MainWindow(QMainWindow):
             self._current_match_index = -1
             self._last_search_text = ""
             self._on_search_text_changed()
+
+    # -- words --------------------------------------------------------------
+
+    def _on_document_changed_for_words(self, ed) -> None:
+        if ed is self.current_editor():
+            self._word_count_timer.start()
+
+    def _on_selection_changed_for_words(self, ed) -> None:
+        if ed is self.current_editor():
+            self._show_word_count(ed)
+
+    def _update_word_count(self) -> None:
+        """Count the current document's words again (after it changed, or
+        another tab came to the front)."""
+        ed = self.current_editor()
+        self._document_words = count_words(ed.toPlainText()) if ed is not None else 0
+        self._show_word_count(ed)
+
+    def _show_word_count(self, ed) -> None:
+        """"1,234 words · 6 min read", or "12 of 1,234 words" while words
+        are selected; nothing for an empty document or a PDF."""
+        total = self._document_words
+        if ed is None or total == 0:
+            self._words_label.setText("")
+            return
+        selected = ed.textCursor().selectedText() if ed.textCursor().hasSelection() else ""
+        if selected:
+            self._words_label.setText(ngettext(
+                "{selected} of {count} word", "{selected} of {count} words", total).format(
+                selected=_number(count_words(selected)), count=_number(total)))
+            return
+        minutes = reading_minutes(total)
+        self._words_label.setText(ngettext(
+            "{count} word", "{count} words", total).format(count=_number(total))
+            + " · " + ngettext("{minutes} min read", "{minutes} min read", minutes).format(
+                minutes=_number(minutes)))
 
     def _update_undo_redo_buttons(self):
         ed = self.current_editor()
