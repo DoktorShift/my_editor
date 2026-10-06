@@ -80,7 +80,6 @@ class FormatToolbar(QToolBar):
             action = actions[name]
             self.addAction(action)
             button = self.widgetForAction(action)
-            button.setAccessibleName(action.text().replace("&", "").rstrip("…"))
             self.buttons[name] = button
             action.changed.connect(lambda a=action, b=button: self._describe(a, b))
             self._describe(action, button)
@@ -166,4 +165,7 @@ class FormatToolbar(QToolBar):
 
     @staticmethod
     def _describe(action: QAction, button: QToolButton) -> None:
+        """The button says what its command is called now (Add Link turns
+        into Edit Link), to the eye and to a screen reader alike."""
         button.setToolTip(tooltip_for(action))
+        button.setAccessibleName(action.text().replace("&", "").rstrip("…").rstrip())

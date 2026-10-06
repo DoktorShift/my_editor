@@ -742,10 +742,11 @@ class HtmlEditor(QTextEdit):
             self._link_opener(href)
             return
         web = link_url.web_address_for(href)
+        mail = link_url.mail_address_for(href)
         if web and url_safety.is_safe_external_url(web):
             QDesktopServices.openUrl(QUrl(web))
-        elif href.lower().startswith("mailto:"):
-            QDesktopServices.openUrl(QUrl(href))
+        elif mail:
+            QDesktopServices.openUrl(QUrl(mail))
 
     def _leave_link_at_end(self) -> None:
         """Typing right before or right after a link is not part of it

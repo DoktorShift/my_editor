@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import re
 from typing import Optional, Tuple
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit
 
 import url_safety
 from i18n import _
@@ -128,6 +128,28 @@ def display_href(href: str, limit: int = 60) -> str:
         return shown
     keep = (limit - 1) // 2
     return shown[:keep] + "\u2026" + shown[-keep:]
+
+
+# What a mail app is given from an email link: the address and the fields
+# it fills in. Others are left out; some mail apps have attached a file
+# from the reader's own disk for "?attach=/path".
+_MAIL_FIELDS = ("subject", "body", "cc", "bcc")
+
+
+def mail_address_for(href: str) -> Optional[str]:
+    """The ``mailto:`` link the mail app is given for ``href``: its address
+    with only a subject, body, cc and bcc; None when it is no email link."""
+    if not href.lower().startswith("mailto:"):
+        return None
+    address, _sep, query = href[len("mailto:"):].partition("?")
+    kept = [(key, value) for key, value in parse_qsl(query, keep_blank_values=True)
+            if key.lower() in _MAIL_FIELDS]
+    if not address.strip() and not kept:
+        return None
+    url = "mailto:" + address.strip()
+    if kept:
+        url += "?" + urlencode(kept, quote_via=quote)
+    return url
 
 
 def web_address_for(href: str) -> Optional[str]:

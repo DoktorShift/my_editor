@@ -299,3 +299,50 @@ def test_the_context_menu_elsewhere_has_no_link_commands():
     menu = QMenu()
     MainWindow._fill_editor_context_menu(win, menu, ed, ed.cursorRect().center())
     assert "Open Link" not in [a.text() for a in menu.actions()]
+
+
+
+# -- the window's gate for links from files (review M5) --------------------------------
+
+NPUB = "npub1" + "q" * 58
+
+
+@pytest.mark.parametrize("href, opened", [
+    ("https://example.com/page", "https://example.com/page"),
+    ("nostr:" + NPUB, "https://njump.me/" + NPUB),
+    ("mailto:ada@example.com?subject=Hi&attach=/etc/passwd&body=Text",
+     "mailto:ada@example.com?subject=Hi&body=Text"),
+    ("file:///etc/passwd", None),
+    ("smb://server/share", None),
+    ("javascript:alert(1)", None),
+    ("https://good.example@evil.example/", None),
+    ("nostr:nsec1" + "q" * 58, None),
+    ("#fn-1", None),
+])
+def test_links_from_files_open_only_where_they_safely_can(monkeypatch, href, opened):
+    # Links reach the document from .md, .html and drafts without passing
+    # the popover: the window's opener is the only guard.
+    import types
+    import main_window
+    from main_window import MainWindow
+    calls, messages = [], []
+    monkeypatch.setattr(main_window.QDesktopServices, "openUrl",
+                        lambda url: calls.append(url.toString()))
+    window = types.SimpleNamespace(status=types.SimpleNamespace(
+        showMessage=lambda text, *_a: messages.append(text)))
+    window._open_external = lambda url: MainWindow._open_external(window, url)
+    MainWindow._open_link(window, href)
+    assert calls == ([opened] if opened else [])
+    if opened is None and not href.startswith("#"):
+        assert messages == ["That link cannot be opened."]
+
+
+def test_the_link_button_says_edit_link_to_a_screen_reader_too():
+    from PySide6.QtGui import QAction
+    from PySide6.QtWidgets import QMainWindow, QMenu
+    from format_toolbar import LAYOUT, FormatToolbar
+    window = QMainWindow()
+    actions = {name: QAction(name.capitalize(), window) for name in LAYOUT if name}
+    bar = FormatToolbar(actions, QMenu(), dark=False, parent=window)
+    actions["link"].setText("Edit Link…")
+    assert bar.buttons["link"].accessibleName() == "Edit Link"

@@ -3878,12 +3878,19 @@ class MainWindow(QMainWindow):
 
     def _open_link(self, href: str) -> None:
         """Open a link from the document: a web page in the browser, a
-        Nostr link through njump.me, an email in the mail app."""
+        Nostr link through njump.me, an email in the mail app (with only
+        its address, subject, body, cc and bcc). Links reach the document
+        from files and drafts without passing the Add Link checks, so
+        everything else is refused here. A place in the document itself
+        (#name) has nothing to open yet."""
+        if href.startswith("#"):
+            return
         web = link_url.web_address_for(href)
+        mail = link_url.mail_address_for(href)
         if web:
             self._open_external(web)
-        elif href.lower().startswith("mailto:"):
-            QDesktopServices.openUrl(QUrl(href))
+        elif mail:
+            QDesktopServices.openUrl(QUrl(mail))
         else:
             self.status.showMessage(_("That link cannot be opened."), 5000)
 
@@ -4052,7 +4059,9 @@ class MainWindow(QMainWindow):
             # A link's own commands, here only: they mean something only
             # where a link is.
             href = link[2]
-            menu.addAction(_("Open Link"), lambda: self._open_link(href))
+            if not href.startswith("#"):
+                # A place in the document itself opens nothing yet.
+                menu.addAction(_("Open Link"), lambda: self._open_link(href))
             menu.addAction(self.act_link)
             menu.addAction(_("Copy Link"), lambda: self._copy_link(href))
             menu.addAction(_("Remove Link"), editor.remove_link)
