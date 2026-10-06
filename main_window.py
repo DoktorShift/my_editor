@@ -1163,6 +1163,10 @@ class MainWindow(QMainWindow):
             Command("nostr.backup_account", _("Back Up Account\u2026"), NOSTR, nostr=True,
                     keywords=("export", "key")),
             triggered=self._on_backup_account)
+        self.act_move_to_signer = add(
+            Command("nostr.move_to_signer", _("Move Key to Signer App\u2026"), NOSTR,
+                    nostr=True, keywords=("amber", "phone", "key")),
+            triggered=self._on_move_to_signer)
         self.act_edit_profile = add(
             Command("nostr.edit_profile", _("Edit Profile\u2026"), NOSTR, nostr=True,
                     keywords=("name", "picture", "about", "lightning address")),
@@ -1258,6 +1262,7 @@ class MainWindow(QMainWindow):
         m_nostr.addAction(self.act_restore_account)
         m_nostr.addAction(self.act_edit_profile)
         m_nostr.addAction(self._act_backup_account)
+        m_nostr.addAction(self.act_move_to_signer)
         self._update_account_actions()
         m_nostr.addAction(self.act_nostr_sign_out)
 
@@ -3723,14 +3728,17 @@ class MainWindow(QMainWindow):
         if active is not None and active.is_local:
             act_backup = menu.addAction(_("Back Up Account\u2026"))
             act_backup.triggered.connect(self._on_backup_account)
+            act_move = menu.addAction(_("Move Key to Signer App\u2026"))
+            act_move.triggered.connect(self._on_move_to_signer)
         act_add = menu.addAction(_("Add Profile\u2026"))
         act_add.triggered.connect(self._on_nostr_connect)
         act_signout = menu.addAction(_("Sign Out"))
         act_signout.triggered.connect(self._on_nostr_sign_out)
 
     def _update_account_actions(self) -> None:
-        """Back Up Account is for an account whose key is kept here. The
-        menu bar is built after the first chip refresh, so both call this.
+        """Back Up Account and Move Key to Signer App are for an account
+        whose key is kept here. The menu bar is built after the first chip
+        refresh, so both call this.
 
         Every change of the active account passes through here (connect,
         switch, sign out, create, restore), so this is also where the one
@@ -3738,10 +3746,11 @@ class MainWindow(QMainWindow):
         state = getattr(self, "nostr_state", None)
         if state is not None:
             state.refresh()
-        action = getattr(self, "_act_backup_account", None)
-        if action is not None:
-            current = self._profile_store.default()
-            action.setEnabled(current is not None and current.is_local)
+        current = self._profile_store.default()
+        for name in ("_act_backup_account", "act_move_to_signer"):
+            action = getattr(self, name, None)
+            if action is not None:
+                action.setEnabled(current is not None and current.is_local)
 
     # -- creating, restoring and backing up accounts ---------------------------
     # The windows and the network work behind them are the account
@@ -3756,6 +3765,9 @@ class MainWindow(QMainWindow):
 
     def _on_backup_account(self) -> None:
         self._accounts.backup_account()
+
+    def _on_move_to_signer(self) -> None:
+        self._accounts.move_to_signer()
 
     def _on_edit_profile(self) -> None:
         """Edit Profile for the active account. The window reads the
