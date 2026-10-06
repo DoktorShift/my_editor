@@ -1,0 +1,1616 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: MyEditor\n"
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: nostr/ui/account_windows.py:91
+msgid "Your key couldn’t be saved on this computer. Make sure the disk has free space, then try again."
+msgstr "Dein Schlüssel konnte nicht auf diesem Computer gespeichert werden. Sorge für freien Speicherplatz und versuche es dann erneut."
+
+#: nostr/ui/account_windows.py:93
+msgid "You can close this window. MyEditor keeps going in the background."
+msgstr "Du kannst dieses Fenster schließen. MyEditor macht im Hintergrund weiter."
+
+#: nostr/ui/account_windows.py:94
+msgid "If you finish later, MyEditor tries again the next time you open it."
+msgstr "Wenn du es später abschließt, versucht MyEditor es beim nächsten Start erneut."
+
+#: nostr/ui/account_windows.py:167
+msgid "Save Backup File"
+msgstr "Sicherungsdatei speichern"
+
+#: nostr/ui/account_windows.py:168
+msgid "Text files (*.txt)"
+msgstr "Textdateien (*.txt)"
+
+#: nostr/ui/account_windows.py:226
+#: nostr/ui/account_windows.py:912
+msgid "Password:"
+msgstr "Passwort:"
+
+#: nostr/ui/account_windows.py:226
+msgid "At least 8 characters"
+msgstr "Mindestens 8 Zeichen"
+
+#: nostr/ui/account_windows.py:227
+msgid "Confirm:"
+msgstr "Bestätigen:"
+
+#: nostr/ui/account_windows.py:243
+msgid "Save Backup File…"
+msgstr "Sicherungsdatei speichern …"
+
+#: nostr/ui/account_windows.py:251
+#: nostr/ui/account_windows.py:611
+msgid "Copy Private Key"
+msgstr "Privaten Schlüssel kopieren"
+
+#: nostr/ui/account_windows.py:254
+msgid "Save Without a Password…"
+msgstr "Ohne Passwort speichern …"
+
+#: nostr/ui/account_windows.py:357
+msgid "✓ Private key copied. Paste it somewhere only you can reach. MyEditor clears it from the clipboard in a minute."
+msgstr "✓ Privater Schlüssel kopiert. Füge ihn dort ein, wo nur du hinkommst. MyEditor löscht ihn in einer Minute aus der Zwischenablage."
+
+#: nostr/ui/account_windows.py:372
+msgid "Back Up Account"
+msgstr "Konto sichern"
+
+#: nostr/ui/account_windows.py:409
+msgid "Create Nostr Account"
+msgstr "Nostr-Konto erstellen"
+
+#: nostr/ui/account_windows.py:442
+msgid "Your name"
+msgstr "Dein Name"
+
+#: nostr/ui/account_windows.py:444
+msgid "Name:"
+msgstr "Name:"
+
+#: nostr/ui/account_windows.py:522
+msgid "Keep the key on this computer"
+msgstr "Schlüssel auf diesem Computer aufbewahren"
+
+#: nostr/ui/account_windows.py:528
+msgid "Use a signer app on your phone"
+msgstr "Signer-App auf deinem Smartphone verwenden"
+
+#: nostr/ui/account_windows.py:604
+msgid "Private key code for Amber"
+msgstr "Code mit deinem privaten Schlüssel für Amber"
+
+#: nostr/ui/account_windows.py:608
+#: nostr/ui/account_windows.py:623
+#: nostr/ui/account_windows.py:632
+msgid "Show Code for Amber"
+msgstr "Code für Amber zeigen"
+
+#: nostr/ui/account_windows.py:615
+msgid "This code is your private key. Scan it only with your own Amber, on its Add account screen."
+msgstr "Dieser Code ist dein privater Schlüssel. Scanne ihn nur mit deinem eigenen Amber, unter „Neues Konto hinzufügen“."
+
+#: nostr/ui/account_windows.py:638
+msgid "Hide Code"
+msgstr "Code ausblenden"
+
+#: nostr/ui/account_windows.py:642
+msgid "Private key copied. Paste it in Amber’s Add account screen. MyEditor clears it from the clipboard in a minute."
+msgstr "Privater Schlüssel kopiert. Füge ihn in Amber unter „Neues Konto hinzufügen“ ein. MyEditor löscht ihn in einer Minute aus der Zwischenablage."
+
+#: nostr/ui/account_windows.py:739
+msgid "Your account is saved, but it isn’t published yet."
+msgstr "Dein Konto ist gespeichert, aber noch nicht veröffentlicht."
+
+#: nostr/ui/account_windows.py:785
+msgid "Restore Nostr Account"
+msgstr "Nostr-Konto wiederherstellen"
+
+#: nostr/ui/account_windows.py:811
+msgid "Paste a Private Key Instead"
+msgstr "Stattdessen privaten Schlüssel einfügen"
+
+#: nostr/ui/account_windows.py:819
+msgid "nsec1… or ncryptsec1…"
+msgstr "nsec1… oder ncryptsec1…"
+
+#: nostr/ui/account_windows.py:820
+#: nostr/ui/account_windows.py:816
+msgid "Private key"
+msgstr "Privater Schlüssel"
+
+#: nostr/ui/account_windows.py:855
+msgid "Open Backup File"
+msgstr "Sicherungsdatei öffnen"
+
+#: nostr/ui/account_windows.py:856
+msgid "Backup files (*.txt);;All files (*)"
+msgstr "Sicherungsdateien (*.txt);;Alle Dateien (*)"
+
+#: nostr/ui/account_windows.py:214
+msgid "Your public key"
+msgstr "Dein öffentlicher Schlüssel"
+
+#: nostr/ui/account_windows.py:217
+msgid "Copy"
+msgstr "Kopieren"
+
+#: nostr/ui/account_windows.py:220
+msgid "Share it so people can find you."
+msgstr "Teile ihn, damit andere dich finden."
+
+#: nostr/ui/account_windows.py:223
+msgid "Backup file"
+msgstr "Sicherungsdatei"
+
+#: nostr/ui/account_windows.py:233
+msgid "The password protects the file. You need both to restore the account."
+msgstr "Das Passwort schützt die Datei. Zum Wiederherstellen des Kontos brauchst du beides."
+
+#: nostr/ui/account_windows.py:305
+msgid "Save your private key without a password?"
+msgstr "Privaten Schlüssel ohne Passwort speichern?"
+
+#: nostr/ui/account_windows.py:306
+msgid "Anyone who opens the file can use your account. A password-protected file is safer."
+msgstr "Wer die Datei öffnet, kann dein Konto nutzen. Eine Datei mit Passwort ist sicherer."
+
+#: nostr/ui/account_windows.py:319
+msgid "Saving the backup…"
+msgstr "Sicherung wird gespeichert …"
+
+#: nostr/ui/account_windows.py:375
+msgid "Back Up Your Account"
+msgstr "Dein Konto sichern"
+
+#: nostr/ui/account_windows.py:377
+msgid "Nostr has no password reset. A backup lets you restore this account on another computer, or here if this one is reset."
+msgstr "Bei Nostr lässt sich kein Passwort zurücksetzen. Mit einer Sicherung kannst du dieses Konto auf einem anderen Computer wiederherstellen, oder hier, falls dieser zurückgesetzt wird."
+
+#: nostr/ui/account_windows.py:435
+msgid "Create Your Nostr Account"
+msgstr "Dein Nostr-Konto erstellen"
+
+#: nostr/ui/account_windows.py:437
+msgid "A Nostr account works in every Nostr app, and it belongs to you, not to MyEditor."
+msgstr "Ein Nostr-Konto funktioniert in jeder Nostr-App, und es gehört dir, nicht MyEditor."
+
+#: nostr/ui/account_windows.py:448
+msgid "Optional. People see this name. You can change it later."
+msgstr "Optional. Andere sehen diesen Namen. Du kannst ihn später ändern."
+
+#: nostr/ui/account_windows.py:475
+msgid "Save a Way Back In"
+msgstr "Deinen Zugang sichern"
+
+#: nostr/ui/account_windows.py:477
+msgid "Nostr has no password reset. Your private key works like a password that can never be changed, and it is the only way back into this account. Save a backup now."
+msgstr "Bei Nostr lässt sich kein Passwort zurücksetzen. Dein privater Schlüssel ist wie ein Passwort, das sich nie ändern lässt, und er ist der einzige Weg zurück in dieses Konto. Speichere jetzt eine Sicherung."
+
+#: nostr/ui/account_windows.py:507
+msgid "Continue without a backup?"
+msgstr "Ohne Sicherung fortfahren?"
+
+#: nostr/ui/account_windows.py:508
+msgid "If this computer is lost or reset, nobody can get this account back for you."
+msgstr "Geht dieser Computer verloren oder wird er zurückgesetzt, kann dir niemand dieses Konto zurückholen."
+
+#: nostr/ui/account_windows.py:520
+msgid "Choose How to Sign In"
+msgstr "Art der Anmeldung wählen"
+
+#: nostr/ui/account_windows.py:521
+msgid "You can change this later."
+msgstr "Du kannst das später ändern."
+
+#: nostr/ui/account_windows.py:568
+msgid "Your key is kept on this computer."
+msgstr "Dein Schlüssel wird auf diesem Computer aufbewahrt."
+
+#: nostr/ui/account_windows.py:574
+msgid "Get Amber"
+msgstr "Amber installieren"
+
+#: nostr/ui/account_windows.py:576
+msgid "Amber is a free signer app for Android. It keeps your private key on your phone and asks you before anything is signed."
+msgstr "Amber ist eine kostenlose Signer-App für Android. Sie bewahrt deinen privaten Schlüssel auf deinem Smartphone auf und fragt dich, bevor etwas signiert wird."
+
+#: nostr/ui/account_windows.py:578
+msgid "Get Amber from Zapstore"
+msgstr "Amber aus dem Zapstore laden"
+
+#: nostr/ui/account_windows.py:583
+msgid "Amber runs on Android only. On an iPhone, go back and keep the key on this computer for now."
+msgstr "Amber gibt es nur für Android. Mit einem iPhone gehst du zurück und bewahrst den Schlüssel vorerst auf diesem Computer auf."
+
+#: nostr/ui/account_windows.py:595
+msgid "Add Your Key to Amber"
+msgstr "Deinen Schlüssel zu Amber hinzufügen"
+
+#: nostr/ui/account_windows.py:648
+msgid "Connect Amber to MyEditor"
+msgstr "Amber mit MyEditor verbinden"
+
+#: nostr/ui/account_windows.py:654
+msgid "MyEditor then checks that Amber signs as your new account."
+msgstr "MyEditor prüft dann, ob Amber als dein neues Konto signiert."
+
+#: nostr/ui/account_windows.py:678
+msgid "Amber is signing as a different account. In Amber, select the account you just added, then try again."
+msgstr "Amber signiert als ein anderes Konto. Wähle in Amber das Konto, das du gerade hinzugefügt hast, und versuche es dann erneut."
+
+#: nostr/ui/account_windows.py:692
+msgid "Amber holds your key."
+msgstr "Amber bewahrt deinen Schlüssel auf."
+
+#: nostr/ui/account_windows.py:698
+msgid "Setting Up Your Account"
+msgstr "Dein Konto wird eingerichtet"
+
+#: nostr/ui/account_windows.py:719
+msgid "Approve the requests in Amber when it asks."
+msgstr "Bestätige die Anfragen, wenn Amber danach fragt."
+
+#: nostr/ui/account_windows.py:720
+msgid "MyEditor tells the Nostr network about your new account."
+msgstr "MyEditor macht dein neues Konto im Nostr-Netzwerk bekannt."
+
+#: nostr/ui/account_windows.py:741
+msgid "Finish Later"
+msgstr "Später abschließen"
+
+#: nostr/ui/account_windows.py:756
+msgid "You’re All Set"
+msgstr "Alles bereit"
+
+#: nostr/ui/account_windows.py:803
+msgid "Restore Your Account"
+msgstr "Dein Konto wiederherstellen"
+
+#: nostr/ui/account_windows.py:805
+msgid "Open the backup file you saved when you created the account."
+msgstr "Öffne die Sicherungsdatei, die du beim Erstellen des Kontos gespeichert hast."
+
+#: nostr/ui/account_windows.py:823
+msgid "Only paste your private key into apps you trust. Anyone who has it can use your account."
+msgstr "Füge deinen privaten Schlüssel nur in Apps ein, denen du vertraust. Wer ihn hat, kann dein Konto nutzen."
+
+#: nostr/ui/account_windows.py:825
+msgid "Use a Backup File Instead"
+msgstr "Stattdessen Sicherungsdatei verwenden"
+
+#: nostr/ui/account_windows.py:860
+msgid "That file is too large to be a backup."
+msgstr "Diese Datei ist zu groß für eine Sicherung."
+
+#: nostr/ui/account_windows.py:906
+msgid "Enter the Backup Password"
+msgstr "Passwort der Sicherung eingeben"
+
+#: nostr/ui/account_windows.py:908
+msgid "The private key in this backup is protected with the password you chose when you saved it."
+msgstr "Der private Schlüssel in dieser Sicherung ist mit dem Passwort geschützt, das du beim Speichern gewählt hast."
+
+#: nostr/ui/account_windows.py:966
+msgid "Restoring Your Account"
+msgstr "Dein Konto wird wiederhergestellt"
+
+#: nostr/ui/account_windows.py:344
+msgid "The backup couldn’t be saved there. Choose another folder and try again."
+msgstr "Die Sicherung konnte dort nicht gespeichert werden. Wähle einen anderen Ordner und versuche es erneut."
+
+#: nostr/ui/account_windows.py:384
+#: nostr/ui/account_windows.py:767
+#: nostr/ui/account_windows.py:1016
+#: nostr/ui/membership_window.py:971
+msgid "Done"
+msgstr "Fertig"
+
+#: nostr/ui/account_windows.py:453
+#: nostr/ui/account_windows.py:834
+#: nostr/ui/account_windows.py:837
+#: nostr/ui/account_windows.py:310
+#: nostr/ui/membership_window.py:385
+msgid "Cancel"
+msgstr "Abbrechen"
+
+#: nostr/ui/account_windows.py:454
+#: nostr/ui/account_windows.py:492
+#: nostr/ui/account_windows.py:550
+#: nostr/ui/account_windows.py:590
+#: nostr/ui/account_windows.py:835
+#: nostr/ui/membership_window.py:297
+msgid "Continue"
+msgstr "Weiter"
+
+#: nostr/ui/account_windows.py:490
+#: nostr/ui/account_windows.py:549
+#: nostr/ui/account_windows.py:589
+#: nostr/ui/account_windows.py:624
+#: nostr/ui/account_windows.py:665
+#: nostr/ui/account_windows.py:926
+#: nostr/ui/membership_window.py:532
+msgid "Go Back"
+msgstr "Zurück"
+
+#: nostr/ui/account_windows.py:491
+msgid "Skip for Now"
+msgstr "Vorerst überspringen"
+
+#: nostr/ui/account_windows.py:526
+msgid "MyEditor keeps your private key in a file only your user account can read, and signs for you. The quickest way to start."
+msgstr "MyEditor bewahrt deinen privaten Schlüssel in einer Datei auf, die nur dein Benutzerkonto lesen kann, und signiert für dich. Der schnellste Weg zum Start."
+
+#: nostr/ui/account_windows.py:531
+msgid "Your private key lives in Amber on your Android phone, and you approve what MyEditor signs there. Safer, and a few more steps."
+msgstr "Dein privater Schlüssel liegt in Amber auf deinem Android-Smartphone, und dort bestätigst du, was MyEditor signiert. Sicherer, mit ein paar Schritten mehr."
+
+#: nostr/ui/account_windows.py:625
+msgid "I’ve Added It"
+msgstr "Ist hinzugefügt"
+
+#: nostr/ui/account_windows.py:666
+msgid "Show Connection Code…"
+msgstr "Verbindungscode zeigen …"
+
+#: nostr/ui/account_windows.py:687
+msgid "This account couldn’t be saved on this computer. Make sure the disk has free space, then try again."
+msgstr "Dieses Konto konnte nicht auf diesem Computer gespeichert werden. Sorge für freien Speicherplatz und versuche es dann erneut."
+
+#: nostr/ui/account_windows.py:702
+msgid "Account saved"
+msgstr "Konto gespeichert"
+
+#: nostr/ui/account_windows.py:703
+msgid "Publishing your relay list"
+msgstr "Relay-Liste wird veröffentlicht"
+
+#: nostr/ui/account_windows.py:704
+msgid "Publishing your profile"
+msgstr "Profil wird veröffentlicht"
+
+#: nostr/ui/account_windows.py:733
+#: nostr/ui/account_windows.py:1007
+#: nostr/ui/membership_window.py:752
+#: nostr/ui/membership_window.py:834
+#: nostr/ui/connect_dialog.py:250
+msgid "Close"
+msgstr "Schließen"
+
+#: nostr/ui/account_windows.py:743
+#: nostr/ui/connect_dialog.py:358
+msgid "Try Again"
+msgstr "Erneut versuchen"
+
+#: nostr/ui/account_windows.py:765
+#, python-brace-format
+msgid "{name} is ready. You can publish notes and articles, and keep private drafts that follow you to every device."
+msgstr "{name} ist bereit. Du kannst Notizen und Artikel veröffentlichen und private Entwürfe anlegen, die dir auf jedes Gerät folgen."
+
+#: nostr/ui/account_windows.py:838
+msgid "Choose Backup File…"
+msgstr "Sicherungsdatei wählen …"
+
+#: nostr/ui/account_windows.py:871
+msgid "That file couldn’t be opened. Choose the backup file again, or paste the key instead."
+msgstr "Diese Datei konnte nicht geöffnet werden. Wähle die Sicherungsdatei erneut oder füge stattdessen den Schlüssel ein."
+
+#: nostr/ui/account_windows.py:927
+msgid "Restore"
+msgstr "Wiederherstellen"
+
+#: nostr/ui/account_windows.py:953
+msgid "This backup couldn’t be opened."
+msgstr "Diese Sicherung konnte nicht geöffnet werden."
+
+#: nostr/ui/account_windows.py:970
+msgid "Account saved on this computer"
+msgstr "Konto auf diesem Computer gespeichert"
+
+#: nostr/ui/account_windows.py:971
+msgid "Finding your relay list"
+msgstr "Relay-Liste wird gesucht"
+
+#: nostr/ui/account_windows.py:972
+msgid "Finding your profile"
+msgstr "Profil wird gesucht"
+
+#: nostr/ui/account_windows.py:309
+msgid "Save Without Password"
+msgstr "Ohne Passwort speichern"
+
+#: nostr/ui/account_windows.py:348
+#, python-brace-format
+msgid "✓ Backup saved to {path}"
+msgstr "✓ Sicherung gespeichert unter {path}"
+
+#: nostr/ui/account_windows.py:511
+msgid "Continue Without Backup"
+msgstr "Ohne Sicherung fortfahren"
+
+#: nostr/ui/account_windows.py:512
+msgid "Save a Backup"
+msgstr "Sicherung speichern"
+
+#: nostr/ui/account_windows.py:597
+msgid "In Amber, choose Add account. Not Connect app."
+msgstr "Wähle in Amber „Neues Konto hinzufügen“, nicht „App verbinden“."
+
+#: nostr/ui/account_windows.py:598
+msgid "Choose to use a private key, then scan the code below or paste the key you copy here."
+msgstr "Wähle die Anmeldung mit privatem Schlüssel. Scanne dann den Code unten oder füge den Schlüssel ein, den du hier kopierst."
+
+#: nostr/ui/account_windows.py:650
+msgid "In Amber, open Connect app (the scan icon)."
+msgstr "Öffne in Amber „App verbinden“ (das Scan-Symbol)."
+
+#: nostr/ui/account_windows.py:651
+msgid "Scan the code MyEditor shows, and approve the request."
+msgstr "Scanne den Code, den MyEditor zeigt, und bestätige die Anfrage."
+
+#: nostr/ui/account_windows.py:950
+msgid "The password is wrong. Try again."
+msgstr "Das Passwort ist falsch. Versuche es erneut."
+
+#: nostr/account_controller.py:314
+msgid "Publish a relay list for this account?"
+msgstr "Relay-Liste für dieses Konto veröffentlichen?"
+
+#: nostr/account_controller.py:357
+msgid "Delete the private key kept on this computer?"
+msgstr "Privaten Schlüssel auf diesem Computer löschen?"
+
+#: nostr/account_controller.py:383
+#, python-brace-format
+msgid "Sign out of {name}?"
+msgstr "{name} abmelden?"
+
+#: nostr/account_controller.py:328
+msgid "Your relay list is published."
+msgstr "Deine Relay-Liste ist veröffentlicht."
+
+#: nostr/account_controller.py:388
+msgid "MyEditor deletes the private key it keeps for this account. Without a backup, nobody can get this account back."
+msgstr "MyEditor löscht den privaten Schlüssel, den es für dieses Konto aufbewahrt. Ohne Sicherung kann niemand dieses Konto zurückholen."
+
+#: nostr/account_controller.py:390
+#: nostr/account_controller.py:396
+msgid "Sign Out and Delete Key"
+msgstr "Abmelden und Schlüssel löschen"
+
+#: nostr/account_controller.py:145
+msgid "This account’s key isn’t on this computer"
+msgstr "Der Schlüssel dieses Kontos ist nicht auf diesem Computer"
+
+#: nostr/account_controller.py:146
+msgid "MyEditor can’t find the private key it kept for this account. If you saved a backup, restore the account from it."
+msgstr "MyEditor findet den privaten Schlüssel nicht, den es für dieses Konto aufbewahrt hat. Wenn du eine Sicherung gespeichert hast, stelle das Konto daraus wieder her."
+
+#: nostr/account_controller.py:151
+msgid "This account’s key is in your signer app"
+msgstr "Der Schlüssel dieses Kontos liegt in deiner Signer-App"
+
+#: nostr/account_controller.py:152
+msgid "Back it up there."
+msgstr "Sichere ihn dort."
+
+#: nostr/account_controller.py:220
+msgid "Your new account is set up on the Nostr network."
+msgstr "Dein neues Konto ist im Nostr-Netzwerk eingerichtet."
+
+#: nostr/account_controller.py:271
+msgid "This account has no relay list yet."
+msgstr "Dieses Konto hat noch keine Relay-Liste."
+
+#: nostr/account_controller.py:273
+#: nostr/account_controller.py:289
+msgid "Couldn’t check right now."
+msgstr "Konnte gerade nicht geprüft werden."
+
+#: nostr/account_controller.py:291
+msgid "No public profile found."
+msgstr "Kein öffentliches Profil gefunden."
+
+#: nostr/account_controller.py:315
+#, python-brace-format
+msgid "Other Nostr apps use a relay list to find your notes and articles, and this account doesn’t have one yet. MyEditor can publish its recommended relays: {hosts}."
+msgstr "Andere Nostr-Apps finden deine Notizen und Artikel über eine Relay-Liste, und dieses Konto hat noch keine. MyEditor kann seine empfohlenen Relays veröffentlichen: {hosts}."
+
+#: nostr/account_controller.py:318
+#: nostr/ui/membership_window.py:290
+#: nostr/ui/membership_window.py:293
+#: nostr/ui/membership_window.py:296
+#: nostr/ui/membership_window.py:1007
+msgid "Not Now"
+msgstr "Nicht jetzt"
+
+#: nostr/account_controller.py:319
+msgid "Publish Relay List"
+msgstr "Relay-Liste veröffentlichen"
+
+#: nostr/account_controller.py:330
+msgid "This account already has a relay list."
+msgstr "Dieses Konto hat bereits eine Relay-Liste."
+
+#: nostr/account_controller.py:332
+msgid "The relay list wasn’t published. Try again later."
+msgstr "Die Relay-Liste wurde nicht veröffentlicht. Versuche es später erneut."
+
+#: nostr/account_controller.py:358
+#, python-brace-format
+msgid "{name} now signs with your signer app, which holds the same key. MyEditor still keeps a copy of it on this computer. Deleting it leaves the key only where you approve what is signed."
+msgstr "{name} signiert jetzt mit deiner Signer-App, die denselben Schlüssel hat. MyEditor bewahrt noch eine Kopie davon auf diesem Computer auf. Löschst du sie, liegt der Schlüssel nur noch dort, wo du bestätigst, was signiert wird."
+
+#: nostr/account_controller.py:362
+msgid "Keep Key"
+msgstr "Schlüssel behalten"
+
+#: nostr/account_controller.py:363
+msgid "Delete Key"
+msgstr "Schlüssel löschen"
+
+#: nostr/account_controller.py:372
+msgid "The private key couldn’t be deleted"
+msgstr "Der private Schlüssel konnte nicht gelöscht werden"
+
+#: nostr/account_controller.py:373
+msgid "MyEditor couldn’t change the file it keeps keys in. Make sure the disk isn’t full or read-only, then try again."
+msgstr "MyEditor konnte die Datei mit den Schlüsseln nicht ändern. Stelle sicher, dass das Laufwerk nicht voll oder schreibgeschützt ist, und versuche es dann erneut."
+
+#: nostr/account_controller.py:394
+msgid "Your key stays in your signer. MyEditor forgets this connection and deletes the copy of the key it keeps on this computer."
+msgstr "Dein Schlüssel bleibt in deinem Signer. MyEditor vergisst diese Verbindung und löscht die Kopie des Schlüssels auf diesem Computer."
+
+#: nostr/account_controller.py:267
+#, python-brace-format
+msgid "Found, with {count} relay to write to."
+msgid_plural "Found, with {count} relays to write to."
+msgstr[0] "Gefunden: {count} Relay zum Veröffentlichen."
+msgstr[1] "Gefunden: {count} Relays zum Veröffentlichen."
+
+#: nostr/account_controller.py:287
+#, python-brace-format
+msgid "Welcome back, {name}."
+msgstr "Willkommen zurück, {name}."
+
+#: nostr/account_controller.py:400
+msgid "This account’s private key isn’t on this computer. MyEditor forgets the account."
+msgstr "Der private Schlüssel dieses Kontos ist nicht auf diesem Computer. MyEditor vergisst das Konto."
+
+#: nostr/account_controller.py:402
+#: nostr/account_controller.py:408
+msgid "Sign Out"
+msgstr "Abmelden"
+
+#: nostr/account_controller.py:406
+msgid "Your key stays in your signer. MyEditor only forgets this connection."
+msgstr "Dein Schlüssel bleibt in deinem Signer. MyEditor vergisst nur diese Verbindung."
+
+#: nostr/ui/membership_window.py:78
+msgid "Approve the request in your signer app."
+msgstr "Bestätige die Anfrage in deiner Signer-App."
+
+#: nostr/ui/membership_window.py:79
+msgid "One moment."
+msgstr "Einen Moment."
+
+#: nostr/ui/membership_window.py:80
+msgid "Your signer app may ask you to approve."
+msgstr "Deine Signer-App fragt dich eventuell nach einer Bestätigung."
+
+#: nostr/ui/membership_window.py:81
+msgid "Membership belongs to your Nostr identity and runs for a calendar year. You renew it yourself; nothing is charged automatically."
+msgstr "Die Mitgliedschaft gehört zu deiner Nostr-Identität und gilt für ein Kalenderjahr. Du verlängerst sie selbst; nichts wird automatisch abgebucht."
+
+#: nostr/ui/membership_window.py:93
+#, python-brace-format
+msgid "{day} {month} {year}"
+msgstr "{day}. {month} {year}"
+
+#: nostr/ui/membership_window.py:145
+msgid "EINUNDZWANZIG Membership"
+msgstr "EINUNDZWANZIG-Mitgliedschaft"
+
+#: nostr/ui/membership_window.py:205
+#: nostr/ui/membership_window.py:871
+#: nostr/ui/membership_window.py:1051
+msgid "Add to My Relay List"
+msgstr "Zu meiner Relay-Liste hinzufügen"
+
+#: nostr/ui/membership_window.py:273
+msgid "Included"
+msgstr "Enthalten"
+
+#: nostr/ui/membership_window.py:400
+msgid "MyEditor is asking EINUNDZWANZIG where your membership stands."
+msgstr "MyEditor fragt bei EINUNDZWANZIG nach dem Stand deiner Mitgliedschaft."
+
+#: nostr/ui/membership_window.py:421
+#: nostr/ui/membership_window.py:513
+msgid "Your Application"
+msgstr "Dein Antrag"
+
+#: nostr/ui/membership_window.py:433
+msgid "Open Statutes"
+msgstr "Satzung öffnen"
+
+#: nostr/ui/membership_window.py:439
+msgid "I have read the statutes and agree to them."
+msgstr "Ich habe die Satzung gelesen und stimme ihr zu."
+
+#: nostr/ui/membership_window.py:459
+#: nostr/ui/membership_window.py:524
+msgid "Optional. Lowercase letters, digits, - and _."
+msgstr "Optional. Kleinbuchstaben, Ziffern, - und _."
+
+#: nostr/ui/membership_window.py:462
+msgid "Nostr address:"
+msgstr "Nostr-Adresse:"
+
+#: nostr/ui/membership_window.py:466
+msgid "name@example.com"
+msgstr "name@beispiel.de"
+
+#: nostr/ui/membership_window.py:468
+msgid "Optional. Only for membership notices, like renewal reminders."
+msgstr "Optional. Nur für Hinweise zur Mitgliedschaft, etwa Erinnerungen an die Verlängerung."
+
+#: nostr/ui/membership_window.py:472
+msgid "Email:"
+msgstr "E-Mail:"
+
+#: nostr/ui/membership_window.py:478
+msgid "Optional. Anything you’d like the association to know."
+msgstr "Optional. Alles, was der Verein wissen soll."
+
+#: nostr/ui/membership_window.py:483
+msgid "Message:"
+msgstr "Nachricht:"
+
+#: nostr/ui/membership_window.py:531
+msgid "Save Address"
+msgstr "Adresse speichern"
+
+#: nostr/ui/membership_window.py:531
+msgid "Send Application"
+msgstr "Antrag senden"
+
+#: nostr/ui/membership_window.py:596
+msgid "MyEditor is saving your Nostr address."
+msgstr "MyEditor speichert deine Nostr-Adresse."
+
+#: nostr/ui/membership_window.py:597
+msgid "MyEditor is sending your application to EINUNDZWANZIG."
+msgstr "MyEditor sendet deinen Antrag an EINUNDZWANZIG."
+
+#: nostr/ui/membership_window.py:646
+#: nostr/ui/membership_window.py:724
+msgid "Pay with any Lightning wallet. When you’ve paid, click I’ve Paid and MyEditor confirms it with EINUNDZWANZIG."
+msgstr "Bezahle mit einer beliebigen Lightning-Wallet. Wenn du bezahlt hast, klicke auf „Ich habe bezahlt“, und MyEditor bestätigt es bei EINUNDZWANZIG."
+
+#: nostr/ui/membership_window.py:660
+msgid "Lightning invoice code to scan with a wallet"
+msgstr "Code der Lightning-Rechnung zum Scannen mit einer Wallet"
+
+#: nostr/ui/membership_window.py:665
+#: nostr/ui/membership_window.py:769
+msgid "Copy Invoice"
+msgstr "Rechnung kopieren"
+
+#: nostr/ui/membership_window.py:668
+msgid "Open in Wallet"
+msgstr "In Wallet öffnen"
+
+#: nostr/ui/membership_window.py:675
+#: nostr/ui/membership_window.py:721
+msgid "Pay in Browser Instead"
+msgstr "Stattdessen im Browser bezahlen"
+
+#: nostr/ui/membership_window.py:695
+msgid "MyEditor is asking EINUNDZWANZIG for your invoice."
+msgstr "MyEditor fragt bei EINUNDZWANZIG deine Rechnung an."
+
+#: nostr/ui/membership_window.py:707
+#, python-brace-format
+msgid "Renew Your Membership for {year}"
+msgstr "Mitgliedschaft für {year} verlängern"
+
+#: nostr/ui/membership_window.py:708
+#, python-brace-format
+msgid "Pay Your {year} Membership Fee"
+msgstr "Mitgliedsbeitrag {year} bezahlen"
+
+#: nostr/ui/membership_window.py:730
+#: nostr/ui/membership_window.py:818
+msgid "I’ve Paid"
+msgstr "Ich habe bezahlt"
+
+#: nostr/ui/membership_window.py:765
+msgid "Copied"
+msgstr "Kopiert"
+
+#: nostr/ui/membership_window.py:794
+msgid "Checking…"
+msgstr "Wird geprüft …"
+
+#: nostr/ui/membership_window.py:806
+msgid "This invoice has expired. Create a new one to pay."
+msgstr "Diese Rechnung ist abgelaufen. Erstelle eine neue, um zu bezahlen."
+
+#: nostr/ui/membership_window.py:807
+msgid "Create New Invoice"
+msgstr "Neue Rechnung erstellen"
+
+#: nostr/ui/membership_window.py:811
+msgid "Your payment isn’t confirmed yet. If you paid, wait a moment, then click Check Again."
+msgstr "Deine Zahlung ist noch nicht bestätigt. Wenn du bezahlt hast, warte einen Moment und klicke dann auf „Erneut prüfen“."
+
+#: nostr/ui/membership_window.py:813
+#: nostr/ui/membership_window.py:835
+msgid "Check Again"
+msgstr "Erneut prüfen"
+
+#: nostr/ui/membership_window.py:839
+msgid "Your payment arrived. MyEditor is confirming your membership."
+msgstr "Deine Zahlung ist angekommen. MyEditor bestätigt deine Mitgliedschaft."
+
+#: nostr/ui/membership_window.py:895
+#: nostr/ui/membership_window.py:960
+msgid "Choose an Address…"
+msgstr "Adresse wählen …"
+
+#: nostr/ui/membership_window.py:900
+msgid "Show on My Profile"
+msgstr "In meinem Profil zeigen"
+
+#: nostr/ui/membership_window.py:909
+#: nostr/einundzwanzig.py:130
+msgid "Nostr address"
+msgstr "Nostr-Adresse"
+
+#: nostr/ui/membership_window.py:914
+msgid "Set Up on the EINUNDZWANZIG Website"
+msgstr "Auf der EINUNDZWANZIG-Website einrichten"
+
+#: nostr/ui/membership_window.py:928
+msgid "Receipt"
+msgstr "Quittung"
+
+#: nostr/ui/membership_window.py:930
+msgid "Show Membership Details"
+msgstr "Details zur Mitgliedschaft zeigen"
+
+#: nostr/ui/membership_window.py:931
+msgid "Export My Data…"
+msgstr "Meine Daten exportieren …"
+
+#: nostr/ui/membership_window.py:932
+msgid "Delete My Data…"
+msgstr "Meine Daten löschen …"
+
+#: nostr/ui/membership_window.py:949
+msgid "Your membership is active."
+msgstr "Deine Mitgliedschaft ist aktiv."
+
+#: nostr/ui/membership_window.py:1004
+msgid "You can also do this later, here in EINUNDZWANZIG Membership."
+msgstr "Du kannst das auch später hier in „EINUNDZWANZIG-Mitgliedschaft“ tun."
+
+#: nostr/ui/membership_window.py:1060
+msgid "MyEditor is asking EINUNDZWANZIG for the data it keeps about you."
+msgstr "MyEditor fragt bei EINUNDZWANZIG die Daten an, die der Verein über dich speichert."
+
+#: nostr/ui/membership_window.py:1068
+msgid "Export Membership Data"
+msgstr "Mitgliedsdaten exportieren"
+
+#: nostr/ui/membership_window.py:1089
+msgid "MyEditor is asking EINUNDZWANZIG to delete your data."
+msgstr "MyEditor bittet EINUNDZWANZIG, deine Daten zu löschen."
+
+#: nostr/ui/membership_window.py:102
+#, python-brace-format
+msgid "{service} (experimental)"
+msgstr "{service} (experimentell)"
+
+#: nostr/ui/membership_window.py:247
+msgid "Become an EINUNDZWANZIG Member"
+msgstr "EINUNDZWANZIG-Mitglied werden"
+
+#: nostr/ui/membership_window.py:249
+msgid "EINUNDZWANZIG brings Bitcoiners together across the German-speaking world, with local meetups, education and exchange. Membership supports the community and adds services to your Nostr identity."
+msgstr "EINUNDZWANZIG bringt Bitcoiner im ganzen deutschsprachigen Raum zusammen, mit lokalen Treffen, Bildung und Austausch. Die Mitgliedschaft unterstützt die Community und erweitert deine Nostr-Identität um weitere Dienste."
+
+#: nostr/ui/membership_window.py:256
+msgid "Details on the EINUNDZWANZIG Website"
+msgstr "Details auf der EINUNDZWANZIG-Website"
+
+#: nostr/ui/membership_window.py:304
+msgid "Membership belongs to a Nostr identity. Connect your signer to join."
+msgstr "Die Mitgliedschaft gehört zu einer Nostr-Identität. Verbinde deinen Signer, um beizutreten."
+
+#: nostr/ui/membership_window.py:429
+msgid "Joining means agreeing to the association’s statutes. Please read them first."
+msgstr "Mit dem Beitritt stimmst du der Satzung des Vereins zu. Bitte lies sie zuerst."
+
+#: nostr/ui/membership_window.py:507
+msgid "Loading the statutes…"
+msgstr "Satzung wird geladen …"
+
+#: nostr/ui/membership_window.py:512
+msgid "Choose a Nostr Address"
+msgstr "Nostr-Adresse wählen"
+
+#: nostr/ui/membership_window.py:522
+msgid "Lowercase letters, digits, - and _. It can take a few minutes to appear everywhere."
+msgstr "Kleinbuchstaben, Ziffern, - und _. Es kann ein paar Minuten dauern, bis sie überall erscheint."
+
+#: nostr/ui/membership_window.py:722
+msgid "Pay in Browser"
+msgstr "Im Browser bezahlen"
+
+#: nostr/ui/membership_window.py:726
+msgid "Pay on the EINUNDZWANZIG payment page. When you’ve paid, click I’ve Paid and MyEditor confirms it."
+msgstr "Bezahle auf der Zahlungsseite von EINUNDZWANZIG. Wenn du bezahlt hast, klicke auf „Ich habe bezahlt“, und MyEditor bestätigt es."
+
+#: nostr/ui/membership_window.py:775
+msgid "No app on this computer opens Lightning invoices. Scan the code with your phone, or copy the invoice."
+msgstr "Keine App auf diesem Computer öffnet Lightning-Rechnungen. Scanne den Code mit deinem Smartphone oder kopiere die Rechnung."
+
+#: nostr/ui/membership_window.py:792
+msgid "Checking for your payment…"
+msgstr "Deine Zahlung wird geprüft …"
+
+#: nostr/ui/membership_window.py:831
+msgid "Payment Received"
+msgstr "Zahlung erhalten"
+
+#: nostr/ui/membership_window.py:837
+msgid "Your payment arrived. Click Check Again to finish."
+msgstr "Deine Zahlung ist angekommen. Klicke auf „Erneut prüfen“, um abzuschließen."
+
+#: nostr/ui/membership_window.py:943
+msgid "You’re a Member"
+msgstr "Du bist Mitglied"
+
+#: nostr/ui/membership_window.py:944
+msgid "You’re an EINUNDZWANZIG Member"
+msgstr "Du bist EINUNDZWANZIG-Mitglied"
+
+#: nostr/ui/membership_window.py:951
+msgid "Thank you for supporting the community."
+msgstr "Danke, dass du die Community unterstützt."
+
+#: nostr/ui/membership_window.py:957
+msgid "Change Address…"
+msgstr "Adresse ändern …"
+
+#: nostr/ui/membership_window.py:959
+msgid "Not chosen yet."
+msgstr "Noch nicht gewählt."
+
+#: nostr/ui/membership_window.py:988
+msgid "Your profile shows this address."
+msgstr "Dein Profil zeigt diese Adresse."
+
+#: nostr/ui/membership_window.py:999
+#, python-brace-format
+msgid "People who look at your profile then see {address} instead of a long key. It shows as confirmed once EINUNDZWANZIG has approved the name."
+msgstr "Wer dein Profil ansieht, sieht dann {address} statt eines langen Schlüssels. Sie wird als bestätigt angezeigt, sobald EINUNDZWANZIG den Namen freigegeben hat."
+
+#: nostr/ui/membership_window.py:1005
+msgid "Show Your Nostr Address on Your Profile?"
+msgstr "Nostr-Adresse in deinem Profil zeigen?"
+
+#: nostr/ui/membership_window.py:1018
+msgid "Updating your profile…"
+msgstr "Dein Profil wird aktualisiert …"
+
+#: nostr/ui/membership_window.py:1049
+msgid "Publish Recommended Relay List"
+msgstr "Empfohlene Relay-Liste veröffentlichen"
+
+#: nostr/ui/membership_window.py:1079
+msgid "Your membership data is saved."
+msgstr "Deine Mitgliedsdaten sind gespeichert."
+
+#: nostr/ui/membership_window.py:291
+msgid "Connect Signer…"
+msgstr "Signer verbinden …"
+
+#: nostr/ui/membership_window.py:307
+msgid "Joining in the app isn’t available right now. You can join on the EINUNDZWANZIG website."
+msgstr "Der Beitritt in der App ist gerade nicht möglich. Du kannst auf der EINUNDZWANZIG-Website beitreten."
+
+#: nostr/ui/membership_window.py:324
+#, python-brace-format
+msgid "Annual fee for {year}: {fee}"
+msgstr "Mitgliedsbeitrag {year}: {fee}"
+
+#: nostr/ui/membership_window.py:613
+msgid "Your Nostr address is saved. It can take a few minutes to appear everywhere."
+msgstr "Deine Nostr-Adresse ist gespeichert. Es kann ein paar Minuten dauern, bis sie überall erscheint."
+
+#: nostr/ui/membership_window.py:787
+msgid "Not confirmed yet. Checking again…"
+msgstr "Noch nicht bestätigt. Wird erneut geprüft …"
+
+#: nostr/ui/membership_window.py:850
+msgid "Your payment arrived. EINUNDZWANZIG is still confirming it. Check again in a moment."
+msgstr "Deine Zahlung ist angekommen. EINUNDZWANZIG bestätigt sie noch. Prüfe es gleich noch einmal."
+
+#: nostr/ui/membership_window.py:878
+#: nostr/einundzwanzig.py:126
+msgid "Members’ relay"
+msgstr "Mitglieder-Relay"
+
+#: nostr/ui/membership_window.py:884
+#: nostr/einundzwanzig.py:137
+msgid "Media storage"
+msgstr "Medienspeicher"
+
+#: nostr/ui/membership_window.py:917
+msgid "More for members"
+msgstr "Mehr für Mitglieder"
+
+#: nostr/ui/membership_window.py:946
+#, python-brace-format
+msgid "Your membership is paid for {year}."
+msgstr "Deine Mitgliedschaft ist für {year} bezahlt."
+
+#: nostr/ui/membership_window.py:1035
+msgid "Publishing…"
+msgstr "Wird veröffentlicht …"
+
+#: nostr/ui/membership_window.py:1038
+msgid "Adding…"
+msgstr "Wird hinzugefügt …"
+
+#: nostr/ui/membership_window.py:1083
+msgid "Delete your membership data?"
+msgstr "Deine Mitgliedsdaten löschen?"
+
+#: nostr/ui/membership_window.py:1084
+msgid "EINUNDZWANZIG deletes the personal details of your membership. Fees you paid stay on record for bookkeeping. This can’t be undone."
+msgstr "EINUNDZWANZIG löscht die persönlichen Angaben deiner Mitgliedschaft. Bezahlte Beiträge bleiben für die Buchhaltung erfasst. Das lässt sich nicht widerrufen."
+
+#: nostr/ui/membership_window.py:1087
+msgid "Delete Data"
+msgstr "Daten löschen"
+
+#: nostr/ui/membership_window.py:1099
+msgid "Your membership data was deleted."
+msgstr "Deine Mitgliedsdaten wurden gelöscht."
+
+#: nostr/ui/membership_window.py:294
+msgid "Join on the Website"
+msgstr "Auf der Website beitreten"
+
+#: nostr/ui/membership_window.py:310
+msgid "Checking whether you can join from here…"
+msgstr "Es wird geprüft, ob du von hier aus beitreten kannst …"
+
+#: nostr/ui/membership_window.py:528
+#, python-brace-format
+msgid "Version {version}, adopted {date}."
+msgstr "Fassung {version}, beschlossen am {date}."
+
+#: nostr/ui/membership_window.py:1003
+#, python-brace-format
+msgid "It replaces {address}."
+msgstr "Sie ersetzt {address}."
+
+#: nostr/ui/membership_window.py:1008
+msgid "Show on Profile"
+msgstr "Im Profil zeigen"
+
+#: nostr/ui/membership_window.py:1076
+msgid "Couldn’t save your data"
+msgstr "Deine Daten konnten nicht gespeichert werden"
+
+#: nostr/ui/membership_window.py:879
+#, python-brace-format
+msgid "Your notes and articles also go to {relay}. Add it to your relay list so readers find you there too."
+msgstr "Deine Notizen und Artikel gehen auch an {relay}. Füge es deiner Relay-Liste hinzu, damit Leser dich auch dort finden."
+
+#: nostr/ui/membership_window.py:885
+#, python-brace-format
+msgid "Your uploads also go to {server}: {total} in total, up to {per_file} per file."
+msgstr "Was du hochlädst, geht auch an {server}: {total} insgesamt, bis zu {per_file} pro Datei."
+
+#: nostr/ui/membership_window.py:918
+#, python-brace-format
+msgid "Also yours: {services}."
+msgstr "Ebenfalls für dich: {services}."
+
+#: nostr/membership_controller.py:56
+msgid "EINUNDZWANZIG membership recognized. Your members’ relay and media server are available."
+msgstr "EINUNDZWANZIG-Mitgliedschaft erkannt. Dein Mitglieder-Relay und dein Medienserver sind verfügbar."
+
+#: nostr/einundzwanzig.py:127
+msgid "Publish to EINUNDZWANZIG’s own relay, which carries your notes and articles to readers."
+msgstr "Veröffentliche auf dem Premium-Relay von EINUNDZWANZIG, das deine Notizen und Artikel zu deinen Lesern bringt."
+
+#: nostr/einundzwanzig.py:134
+msgid "Lightning watchtower"
+msgstr "Lightning-Watchtower"
+
+#: nostr/einundzwanzig.py:135
+msgid "Protects your Lightning channels, even while your node is offline."
+msgstr "Schutz für deine Lightning-Channels, auch wenn dein Node offline ist."
+
+#: nostr/einundzwanzig.py:138
+msgid "Your own storage for images and videos on Nostr."
+msgstr "Eigener Speicher für Bilder und Videos auf Nostr."
+
+#: nostr/einundzwanzig.py:142
+msgid "Community group"
+msgstr "Community-Gruppe"
+
+#: nostr/einundzwanzig.py:143
+msgid "Write in the EINUNDZWANZIG group on the association’s community relay."
+msgstr "Schreibe in der EINUNDZWANZIG-Gruppe auf dem Community-Relay des Vereins."
+
+#: nostr/einundzwanzig.py:146
+msgid "A workspace for people and AI agents: channels, threads, files and code, all on Nostr."
+msgstr "Arbeitsraum für Menschen und KI-Agenten: Kanäle, Threads, Dateien und Code, komplett auf Nostr."
+
+#: nostr/einundzwanzig.py:148
+msgid "In testing; it needs the Buzz desktop app."
+msgstr "Im Testbetrieb; dafür brauchst du die Desktop-App von Buzz."
+
+#: nostr/einundzwanzig.py:131
+#, python-brace-format
+msgid "A verified name like you@{domain} that people can recognize and share, instead of a long key."
+msgstr "Ein lesbarer, verifizierter Nostr-Name wie du@{domain}, den andere erkennen und teilen können, statt eines langen Schlüssels."
+
+#: nostr/einundzwanzig.py:139
+#, python-brace-format
+msgid "{total} in total, up to {per_file} per file."
+msgstr "{total} Speicher, höchstens {per_file} pro Datei."
+
+#: nostr/einundzwanzig_api/messages.py:43
+msgid "Use only lowercase letters, numbers, hyphens (-) and underscores (_)."
+msgstr "Verwende nur Kleinbuchstaben, Ziffern, Bindestriche (-) und Unterstriche (_)."
+
+#: nostr/einundzwanzig_api/messages.py:115
+msgid "Try again tomorrow."
+msgstr "Versuche es morgen erneut."
+
+#: nostr/einundzwanzig_api/messages.py:208
+msgid "This name cannot be used. Try another one."
+msgstr "Dieser Name kann nicht verwendet werden. Versuche einen anderen."
+
+#: nostr/einundzwanzig_api/messages.py:224
+msgid "This entry was not accepted."
+msgstr "Diese Angabe wurde nicht angenommen."
+
+#: nostr/einundzwanzig_api/messages.py:59
+msgid "Enter a name."
+msgstr "Gib einen Namen ein."
+
+#: nostr/einundzwanzig_api/messages.py:65
+msgid "Enter only the part before the @ sign."
+msgstr "Gib nur den Teil vor dem @-Zeichen ein."
+
+#: nostr/einundzwanzig_api/messages.py:69
+msgid "Use lowercase letters only."
+msgstr "Verwende nur Kleinbuchstaben."
+
+#: nostr/einundzwanzig_api/messages.py:80
+#: nostr/einundzwanzig_api/messages.py:219
+msgid "Enter a valid email address."
+msgstr "Gib eine gültige E-Mail-Adresse ein."
+
+#: nostr/einundzwanzig_api/messages.py:102
+msgid "Wait a few minutes, then try again."
+msgstr "Warte ein paar Minuten und versuche es dann erneut."
+
+#: nostr/einundzwanzig_api/messages.py:120
+msgid "Joining in the app isn't available right now"
+msgstr "Der Beitritt in der App ist gerade nicht möglich"
+
+#: nostr/einundzwanzig_api/messages.py:121
+msgid "You can join on the EINUNDZWANZIG website instead."
+msgstr "Du kannst stattdessen auf der EINUNDZWANZIG-Website beitreten."
+
+#: nostr/einundzwanzig_api/messages.py:124
+msgid "Cannot reach EINUNDZWANZIG"
+msgstr "EINUNDZWANZIG ist nicht erreichbar"
+
+#: nostr/einundzwanzig_api/messages.py:125
+msgid "Check your internet connection and try again."
+msgstr "Prüfe deine Internetverbindung und versuche es erneut."
+
+#: nostr/einundzwanzig_api/messages.py:128
+msgid "EINUNDZWANZIG is taking too long to respond"
+msgstr "EINUNDZWANZIG antwortet nicht rechtzeitig"
+
+#: nostr/einundzwanzig_api/messages.py:129
+msgid "Check your internet connection and try again in a moment."
+msgstr "Prüfe deine Internetverbindung und versuche es gleich noch einmal."
+
+#: nostr/einundzwanzig_api/messages.py:132
+msgid "EINUNDZWANZIG could not confirm it is you"
+msgstr "EINUNDZWANZIG konnte nicht bestätigen, dass du es bist"
+
+#: nostr/einundzwanzig_api/messages.py:133
+msgid "Make sure the date and time on this computer are set automatically, then try again. If it keeps happening, check for a MyEditor update."
+msgstr "Stelle sicher, dass Datum und Uhrzeit auf diesem Computer automatisch eingestellt werden, und versuche es dann erneut. Wenn es immer wieder passiert, suche nach einem Update für MyEditor."
+
+#: nostr/einundzwanzig_api/messages.py:138
+msgid "Some details need another look"
+msgstr "Einige Angaben brauchen einen zweiten Blick"
+
+#: nostr/einundzwanzig_api/messages.py:139
+msgid "Check the highlighted fields and try again."
+msgstr "Prüfe die markierten Felder und versuche es erneut."
+
+#: nostr/einundzwanzig_api/messages.py:142
+msgid "No application on file yet"
+msgstr "Noch kein Antrag vorhanden"
+
+#: nostr/einundzwanzig_api/messages.py:143
+msgid "EINUNDZWANZIG has nothing on file for this account yet. Send your membership application first. If you already did, reload and try again."
+msgstr "EINUNDZWANZIG hat für dieses Konto noch nichts gespeichert. Sende zuerst deinen Mitgliedsantrag. Wenn du das schon getan hast, lade neu und versuche es erneut."
+
+#: nostr/einundzwanzig_api/messages.py:148
+msgid "Your membership changed in the meantime"
+msgstr "Deine Mitgliedschaft hat sich inzwischen geändert"
+
+#: nostr/einundzwanzig_api/messages.py:149
+msgid "Reload to see where things stand, then try again."
+msgstr "Lade neu, um den aktuellen Stand zu sehen, und versuche es dann erneut."
+
+#: nostr/einundzwanzig_api/messages.py:152
+msgid "EINUNDZWANZIG is having trouble right now"
+msgstr "EINUNDZWANZIG hat gerade Probleme"
+
+#: nostr/einundzwanzig_api/messages.py:153
+msgid "Try again in a few minutes."
+msgstr "Versuche es in ein paar Minuten erneut."
+
+#: nostr/einundzwanzig_api/messages.py:156
+msgid "The request was not approved"
+msgstr "Die Anfrage wurde nicht bestätigt"
+
+#: nostr/einundzwanzig_api/messages.py:157
+msgid "Your signer app did not approve it. Try again, and approve the request when your signer app asks."
+msgstr "Deine Signer-App hat sie nicht bestätigt. Versuche es erneut und bestätige die Anfrage, wenn deine Signer-App fragt."
+
+#: nostr/einundzwanzig_api/messages.py:161
+msgid "Your signer did not answer"
+msgstr "Dein Signer hat nicht geantwortet"
+
+#: nostr/einundzwanzig_api/messages.py:162
+msgid "Open your signer app, make sure it is running, and try again."
+msgstr "Öffne deine Signer-App, stelle sicher, dass sie läuft, und versuche es erneut."
+
+#: nostr/einundzwanzig_api/messages.py:165
+msgid "Something went wrong"
+msgstr "Etwas ist schiefgelaufen"
+
+#: nostr/einundzwanzig_api/messages.py:166
+msgid "MyEditor could not understand the answer from EINUNDZWANZIG. Try again later. If it keeps happening, check for a MyEditor update."
+msgstr "MyEditor konnte die Antwort von EINUNDZWANZIG nicht verstehen. Versuche es später erneut. Wenn es immer wieder passiert, suche nach einem Update für MyEditor."
+
+#: nostr/einundzwanzig_api/messages.py:203
+msgid "That name is taken. Try another one."
+msgstr "Dieser Name ist vergeben. Versuche einen anderen."
+
+#: nostr/einundzwanzig_api/messages.py:223
+msgid "Agree to the statutes to continue."
+msgstr "Stimme der Satzung zu, um fortzufahren."
+
+#: nostr/einundzwanzig_api/messages.py:85
+#, python-brace-format
+msgid "Keep your message to {count} characters or fewer."
+msgstr "Deine Nachricht darf höchstens {count} Zeichen lang sein."
+
+#: nostr/einundzwanzig_api/messages.py:181
+msgid "Too many attempts"
+msgstr "Zu viele Versuche"
+
+#: nostr/einundzwanzig_api/messages.py:183
+msgid "Check your details and try again."
+msgstr "Prüfe deine Angaben und versuche es erneut."
+
+#: nostr/einundzwanzig_api/messages.py:61
+#: nostr/einundzwanzig_api/messages.py:205
+#, python-brace-format
+msgid "Use {count} characters or fewer."
+msgstr "Verwende höchstens {count} Zeichen."
+
+#: nostr/einundzwanzig_api/messages.py:67
+msgid "Spaces are not allowed."
+msgstr "Leerzeichen sind nicht erlaubt."
+
+#: nostr/einundzwanzig_api/messages.py:77
+#, python-brace-format
+msgid "Use an address of {count} characters or fewer."
+msgstr "Verwende eine Adresse mit höchstens {count} Zeichen."
+
+#: nostr/einundzwanzig_api/messages.py:104
+#, python-brace-format
+msgid "Wait {count} second, then try again."
+msgid_plural "Wait {count} seconds, then try again."
+msgstr[0] "Warte {count} Sekunde und versuche es dann erneut."
+msgstr[1] "Warte {count} Sekunden und versuche es dann erneut."
+
+#: nostr/einundzwanzig_api/messages.py:108
+#, python-brace-format
+msgid "Wait about {count} minute, then try again."
+msgid_plural "Wait about {count} minutes, then try again."
+msgstr[0] "Warte etwa {count} Minute und versuche es dann erneut."
+msgstr[1] "Warte etwa {count} Minuten und versuche es dann erneut."
+
+#: nostr/einundzwanzig_api/messages.py:113
+#, python-brace-format
+msgid "Try again in about {count} hour."
+msgid_plural "Try again in about {count} hours."
+msgstr[0] "Versuche es in etwa {count} Stunde erneut."
+msgstr[1] "Versuche es in etwa {count} Stunden erneut."
+
+#: nostr/einundzwanzig_api/prices.py:134
+#, python-brace-format
+msgid "{amount} sats"
+msgstr "{amount} Sats"
+
+#: nostr/einundzwanzig_api/prices.py:141
+#, python-brace-format
+msgid "about {amount}"
+msgstr "etwa {amount}"
+
+#: nostr/ui/connect_dialog.py:188
+msgid "Connect Nostr Signer"
+msgstr "Nostr-Signer verbinden"
+
+#: nostr/ui/connect_dialog.py:223
+msgid "Paste URI"
+msgstr "Link einfügen"
+
+#: nostr/ui/connect_dialog.py:224
+msgid "Scan QR"
+msgstr "QR-Code scannen"
+
+#: nostr/ui/connect_dialog.py:225
+msgid "Manual"
+msgstr "Manuell"
+
+#: nostr/ui/connect_dialog.py:263
+msgid "Paste a <b>bunker://</b> URI from your signer."
+msgstr "Füge einen <b>bunker://</b>-Link aus deinem Signer ein."
+
+#: nostr/ui/connect_dialog.py:267
+msgid "Your signer (Amber, nsec.app, nsec.bunker, …) has an option to generate a bunker URL. Copy it and paste it below. You'll be asked to approve the connection on the signer side."
+msgstr "Dein Signer (Amber, nsec.app, nsec.bunker …) kann einen bunker-Link erzeugen. Kopiere ihn und füge ihn unten ein. Danach bittet dich dein Signer, die Verbindung zu bestätigen."
+
+#: nostr/ui/connect_dialog.py:287
+#: nostr/ui/connect_dialog.py:471
+msgid "Connect"
+msgstr "Verbinden"
+
+#: nostr/ui/connect_dialog.py:318
+msgid "Scan this QR with your signer."
+msgstr "Scanne diesen QR-Code mit deinem Signer."
+
+#: nostr/ui/connect_dialog.py:322
+msgid "Open Amber (or any NIP-46 compatible signer), choose <b>Add account</b> → <b>Scan QR</b>, and approve the connection."
+msgstr "Öffne Amber (oder einen anderen kompatiblen Signer), wähle <b>Neues Konto hinzufügen</b> → <b>QR-Code scannen</b> und bestätige die Verbindung."
+
+#: nostr/ui/connect_dialog.py:355
+msgid "Copy URI"
+msgstr "Link kopieren"
+
+#: nostr/ui/connect_dialog.py:391
+msgid "Waiting for your signer to scan…"
+msgstr "Warten, bis dein Signer scannt …"
+
+#: nostr/ui/connect_dialog.py:434
+msgid "Enter the signer's pubkey and its relays."
+msgstr "Gib den öffentlichen Schlüssel des Signers und seine Relays ein."
+
+#: nostr/ui/connect_dialog.py:438
+msgid "Useful when you have a long-lived bunker setup whose pieces you keep separately rather than as one URL."
+msgstr "Praktisch, wenn du einen dauerhaften Bunker eingerichtet hast und seine Teile einzeln statt als einen Link aufbewahrst."
+
+#: nostr/ui/connect_dialog.py:448
+msgid "64 hex chars"
+msgstr "64 Hex-Zeichen"
+
+#: nostr/ui/connect_dialog.py:464
+msgid "Pairing token if your signer gave you one"
+msgstr "Kopplungscode, falls dein Signer dir einen gegeben hat"
+
+#: nostr/ui/connect_dialog.py:511
+msgid "Contacting signer. Approve the request on your phone…"
+msgstr "Signer wird kontaktiert. Bestätige die Anfrage auf deinem Smartphone …"
+
+#: nostr/ui/connect_dialog.py:546
+msgid "A signer replied but the message could not be read. It may be using an older encryption format than this app supports."
+msgstr "Ein Signer hat geantwortet, aber die Nachricht ließ sich nicht lesen. Vielleicht nutzt er eine ältere Verschlüsselung, als diese App unterstützt."
+
+#: nostr/ui/connect_dialog.py:415
+msgid "Code expired, press Try Again"
+msgstr "Code abgelaufen, klicke auf „Erneut versuchen“"
+
+#: nostr/ui/connect_dialog.py:446
+msgid "Bunker pubkey (hex):"
+msgstr "Öffentlicher Schlüssel des Bunkers (hex):"
+
+#: nostr/ui/connect_dialog.py:452
+msgid "Relays (one per line):"
+msgstr "Relays (eines pro Zeile):"
+
+#: nostr/ui/connect_dialog.py:462
+msgid "Secret (optional):"
+msgstr "Geheimcode (optional):"
+
+#: nostr/ui/connect_dialog.py:528
+msgid "Your signer needs you to approve this in the browser window that just opened. Waiting…"
+msgstr "Bestätige das bitte im gerade geöffneten Browserfenster, dein Signer wartet darauf. Warten …"
+
+#: nostr/ui/connect_dialog.py:534
+msgid "Your signer asked for approval at an address that cannot be opened safely, so the connection was not continued."
+msgstr "Dein Signer hat um Bestätigung unter einer Adresse gebeten, die sich nicht sicher öffnen lässt. Die Verbindung wurde deshalb nicht fortgesetzt."
+
+#: nostr/ui/connect_dialog.py:237
+msgid "Create an Account"
+msgstr "Konto erstellen"
+
+#: nostr/ui/connect_dialog.py:238
+msgid "Restore from Backup"
+msgstr "Aus Sicherung wiederherstellen"
+
+#: nostr/ui/connect_dialog.py:563
+#, python-brace-format
+msgid "Connected as {name}."
+msgstr "Verbunden als {name}."
+
+#: nostr/ui/connect_dialog.py:569
+#, python-brace-format
+msgid "Connect failed: {reason}"
+msgstr "Verbinden fehlgeschlagen: {reason}"
+
+#: nostr/ui/connect_dialog.py:412
+#, python-brace-format
+msgid "Code expires in {seconds}s"
+msgstr "Code läuft in {seconds} s ab"
+
+#: nostr/ui/connect_dialog.py:306
+#, python-brace-format
+msgid "Invalid URI: {error}"
+msgstr "Ungültiger Link: {error}"
+
+#: nostr/ui/connect_dialog.py:501
+#, python-brace-format
+msgid "Invalid input: {error}"
+msgstr "Ungültige Eingabe: {error}"
+
+#: nostr/ui/assistant.py:139
+msgid "Working"
+msgstr "In Arbeit"
+
+#: nostr/ui/assistant.py:354
+#, python-brace-format
+msgid "Step {number}, not started"
+msgstr "Schritt {number}, nicht begonnen"
+
+#: nostr/ui/assistant.py:355
+#, python-brace-format
+msgid "Step {number}, in progress"
+msgstr "Schritt {number}, läuft"
+
+#: nostr/ui/assistant.py:356
+#, python-brace-format
+msgid "Step {number}, done"
+msgstr "Schritt {number}, erledigt"
+
+#: nostr/ui/assistant.py:357
+#, python-brace-format
+msgid "Step {number}, failed"
+msgstr "Schritt {number}, fehlgeschlagen"
+
+#: nostr/account_backup.py:110
+msgid "That is a public key. It shows who you are but can’t sign in. Use the private key from your backup."
+msgstr "Das ist ein öffentlicher Schlüssel. Er zeigt, wer du bist, meldet dich aber nicht an. Verwende den privaten Schlüssel aus deiner Sicherung."
+
+#: nostr/account_backup.py:82
+msgid "Protected private key (opens with your backup password):"
+msgstr "Geschützter privater Schlüssel (öffnet sich mit deinem Sicherungspasswort):"
+
+#: nostr/account_backup.py:84
+msgid "Keep this file and its password apart. Anyone who has both can use your account."
+msgstr "Bewahre diese Datei und ihr Passwort getrennt auf. Wer beides hat, kann dein Konto nutzen."
+
+#: nostr/account_backup.py:87
+msgid "Private key (this opens your account, keep it secret):"
+msgstr "Privater Schlüssel (er öffnet dein Konto, halte ihn geheim):"
+
+#: nostr/account_backup.py:89
+msgid "This file is not protected by a password. Anyone who reads it can use your account. Keep it somewhere only you can reach."
+msgstr "Diese Datei ist nicht mit einem Passwort geschützt. Wer sie liest, kann dein Konto nutzen. Bewahre sie dort auf, wo nur du hinkommst."
+
+#: nostr/account_backup.py:142
+msgid "No private key was found. Choose the backup file you saved when you created the account, or paste the whole key."
+msgstr "Es wurde kein privater Schlüssel gefunden. Wähle die Sicherungsdatei, die du beim Erstellen des Kontos gespeichert hast, oder füge den ganzen Schlüssel ein."
+
+#: nostr/account_backup.py:162
+msgid "Use at least 8 characters."
+msgstr "Verwende mindestens 8 Zeichen."
+
+#: nostr/account_backup.py:164
+msgid "The passwords don’t match."
+msgstr "Die Passwörter stimmen nicht überein."
+
+#: nostr/account_backup.py:92
+msgid "MyEditor Nostr account backup"
+msgstr "Sicherung eines Nostr-Kontos aus MyEditor"
+
+#: nostr/account_backup.py:95
+msgid "Public key (share it freely):"
+msgstr "Öffentlicher Schlüssel (darfst du frei teilen):"
+
+#: nostr/account_backup.py:103
+msgid "To restore: in MyEditor, choose Nostr > Restore Account and open this file."
+msgstr "Zum Wiederherstellen wähle in MyEditor Nostr > Konto wiederherstellen und öffne diese Datei."
+
+#: nostr/account_backup.py:104
+msgid "Other Nostr apps can import this key too."
+msgstr "Auch andere Nostr-Apps können diesen Schlüssel importieren."
+
+#: nostr/account_backup.py:105
+msgid "Nobody can reset this key for you. Without it, the account can't be recovered."
+msgstr "Niemand kann diesen Schlüssel für dich zurücksetzen. Ohne ihn lässt sich das Konto nicht wiederherstellen."
+
+#: nostr/account_backup.py:151
+msgid "That key can’t be used as a private key."
+msgstr "Dieser Schlüssel kann nicht als privater Schlüssel verwendet werden."
+
+#: nostr/account_backup.py:93
+#, python-brace-format
+msgid "Saved {date}"
+msgstr "Gespeichert am {date}"
+
+#: nostr/account_backup.py:130
+msgid "That private key is incomplete or mistyped. Copy the whole key from your backup and try again."
+msgstr "Dieser private Schlüssel ist unvollständig oder falsch geschrieben. Kopiere den ganzen Schlüssel aus deiner Sicherung und versuche es erneut."
+
+#: nostr/nip49.py:94
+msgid "This isn’t a protected key."
+msgstr "Das ist kein geschützter Schlüssel."
+
+#: nostr/nip49.py:100
+msgid "This protected key uses a format MyEditor doesn’t know."
+msgstr "Dieser geschützte Schlüssel hat ein Format, das MyEditor nicht kennt."
+
+#: nostr/nip49.py:103
+#: nostr/nip49.py:119
+msgid "This protected key is damaged."
+msgstr "Dieser geschützte Schlüssel ist beschädigt."
+
+#: nostr/nip49.py:105
+msgid "This protected key was saved with settings that need more memory to open than MyEditor can use."
+msgstr "Dieser geschützte Schlüssel wurde mit Einstellungen gespeichert, die zum Öffnen mehr Arbeitsspeicher brauchen, als MyEditor nutzen kann."
+
+#: nostr/nip49.py:92
+#: nostr/nip49.py:98
+msgid "This isn’t a complete protected key."
+msgstr "Das ist kein vollständiger geschützter Schlüssel."
+
+#: nostr/nip49.py:112
+msgid "This computer couldn’t open this protected key. It may need more memory than is free right now."
+msgstr "Dieser Computer konnte den geschützten Schlüssel nicht öffnen. Vielleicht braucht er mehr Arbeitsspeicher, als gerade frei ist."
+
+#: nostr/nip49.py:117
+msgid "The password is wrong."
+msgstr "Das Passwort ist falsch."
+
+#: nostr/bunker.py:98
+msgid "Your signer did not answer. Open your signer app, make sure it is running, and try again."
+msgstr "Dein Signer hat nicht geantwortet. Öffne deine Signer-App, stelle sicher, dass sie läuft, und versuche es erneut."
+
+#: nostr/bunker.py:165
+msgid "expected a bunker:// URI"
+msgstr "Erwartet wird ein bunker://-Link"
+
+#: nostr/bunker.py:170
+msgid "bunker URI must contain a 32-byte hex pubkey"
+msgstr "Der bunker-Link muss einen öffentlichen Schlüssel aus 64 Hex-Zeichen enthalten"
+
+#: nostr/bunker.py:175
+msgid "bunker URI must specify at least one relay"
+msgstr "Der bunker-Link muss mindestens ein Relay nennen"
+
+#: nostr/bunker.py:178
+#, python-brace-format
+msgid "relay must be ws:// or wss://, got {relay}"
+msgstr "Ein Relay muss mit ws:// oder wss:// beginnen (erhalten: {relay})"
+
+#: nostr/relay_list_addition.py:51
+msgid "Added to your relay list."
+msgstr "Zu deiner Relay-Liste hinzugefügt."
+
+#: nostr/relay_list_addition.py:52
+msgid "It’s already on your relay list."
+msgstr "Es steht bereits auf deiner Relay-Liste."
+
+#: nostr/relay_list_addition.py:53
+msgid "You don’t have a relay list yet, so nothing was changed. MyEditor can publish a recommended one with the members’ relay on it."
+msgstr "Du hast noch keine Relay-Liste, deshalb wurde nichts geändert. MyEditor kann eine empfohlene mit dem Mitglieder-Relay veröffentlichen."
+
+#: nostr/relay_list_addition.py:55
+msgid "MyEditor couldn’t read your relay list right now, so nothing was changed. Try again later."
+msgstr "MyEditor konnte deine Relay-Liste gerade nicht lesen, deshalb wurde nichts geändert. Versuche es später erneut."
+
+#: nostr/relay_list_addition.py:57
+msgid "Your relay list wasn’t changed. Try again in a moment."
+msgstr "Deine Relay-Liste wurde nicht geändert. Versuche es gleich noch einmal."
+
+#: nostr/relay_list_addition.py:58
+msgid "Your relay list is published, with the members’ relay on it."
+msgstr "Deine Relay-Liste ist veröffentlicht, mit dem Mitglieder-Relay darauf."
+
+#: nostr/relay_list_addition.py:59
+msgid "Your account has a relay list after all, so nothing was published. Add the members’ relay to it instead."
+msgstr "Dein Konto hat doch eine Relay-Liste, deshalb wurde nichts veröffentlicht. Füge stattdessen das Mitglieder-Relay hinzu."
+
+#: nostr/profile_address.py:47
+msgid "Your profile shows it now."
+msgstr "Dein Profil zeigt sie jetzt."
+
+#: nostr/profile_address.py:48
+msgid "Your profile already shows it."
+msgstr "Dein Profil zeigt sie bereits."
+
+#: nostr/profile_address.py:49
+msgid "MyEditor couldn’t find your profile, so nothing was changed. Try again later."
+msgstr "MyEditor konnte dein Profil nicht finden, deshalb wurde nichts geändert. Versuche es später erneut."
+
+#: nostr/profile_address.py:51
+msgid "MyEditor couldn’t read your profile right now, so nothing was changed. Try again later."
+msgstr "MyEditor konnte dein Profil gerade nicht lesen, deshalb wurde nichts geändert. Versuche es später erneut."
+
+#: nostr/profile_address.py:53
+msgid "Your profile wasn’t changed. Try again in a moment."
+msgstr "Dein Profil wurde nicht geändert. Versuche es gleich noch einmal."
+
+#: nostr/ui/profile_chip.py:101
+msgid "Nostr profile"
+msgstr "Nostr-Profil"
+
+#: nostr/ui/profile_chip.py:117
+msgid "Connect Nostr"
+msgstr "Nostr verbinden"
+
+#: nostr/outbox/writer.py:315
+msgid "The relays didn’t take it yet."
+msgstr "Die Relays haben sie noch nicht angenommen."
+
+#: nostr/outbox/writer.py:316
+msgid "Your account is saved, but the network doesn’t know it yet. Check your internet connection and try again."
+msgstr "Dein Konto ist gespeichert, aber das Netzwerk kennt es noch nicht. Prüfe deine Internetverbindung und versuche es erneut."
+
+#: nostr/outbox/writer.py:321
+#, python-brace-format
+msgid "Saved on {count} relay."
+msgid_plural "Saved on {count} relays."
+msgstr[0] "Auf {count} Relay gespeichert."
+msgstr[1] "Auf {count} Relays gespeichert."
+
+#: nostr/outbox/writer.py:325
+msgid "No name to publish."
+msgstr "Kein Name zum Veröffentlichen."
+
+#: nostr/outbox/writer.py:344
+msgid "Your name isn’t published yet."
+msgstr "Dein Name ist noch nicht veröffentlicht."
+
+#: nostr/outbox/writer.py:345
+msgid "Your account is ready, but your profile isn’t published yet. Try again in a moment."
+msgstr "Dein Konto ist bereit, aber dein Profil ist noch nicht veröffentlicht. Versuche es gleich noch einmal."
