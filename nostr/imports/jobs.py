@@ -97,6 +97,11 @@ class ImportRunner(QObject):
         self._row_outcome: Dict[str, object] = {}
         self._generation = 0
 
+    def set_profile(self, profile) -> None:
+        """The same account signs another way now: the next posts are
+        asked about and signed through ``profile``."""
+        self._profile = profile
+
     # -- reading -------------------------------------------------------------
 
     @property

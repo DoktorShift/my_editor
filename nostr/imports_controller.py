@@ -210,7 +210,14 @@ class ImportsController(QObject):
         """The account in use changed; None when Nostr is not in use."""
         if (profile is not None and self._profile is not None
                 and profile.user_pubkey.lower() == self._profile.user_pubkey.lower()):
+            # The same account, signing another way now (a signer app
+            # paired, or its key restored here): everything that signs or
+            # decrypts for it follows, or the list of sources would keep
+            # asking the signer it no longer has.
             self._profile = profile
+            self.subscriptions.update_profile(profile)
+            if self.runner is not None:
+                self.runner.set_profile(profile)
             return
         self._unbind(ACCOUNT_CHANGED)
         self._generation += 1

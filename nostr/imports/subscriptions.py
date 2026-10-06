@@ -173,6 +173,17 @@ class FeedSubscriptionStore(QObject):
         self.feeds_changed.emit()
         self.refresh()
 
+    def update_profile(self, profile: Profile) -> None:
+        """The same account signs another way now (a signer app paired,
+        or its key restored here): what comes next is signed and read
+        through the new profile. Nothing is reloaded and nothing waiting
+        is lost; another account is a switch (``bind_profile``)."""
+        if (self._profile is None or profile is None
+                or profile.user_pubkey.lower() != self._profile.user_pubkey.lower()):
+            self.bind_profile(profile)
+            return
+        self._profile = profile
+
     # -- read API ----------------------------------------------------------
 
     @property
@@ -623,12 +634,28 @@ class FeedSubscriptionStore(QObject):
         self._with_relays(profile, _on_read_relays, reading=True)
 
     def _default_publisher(self, relays, signed, *, on_done) -> None:
+        """Publish ``signed`` and answer once: as soon as one relay accepted
+        it (the list is safe then; a relay that never answers must not hold
+        up quitting for the publish timeout), or when all have answered
+        and none did."""
+        relays = list(relays)
         try:
-            job = self._relay_pool.publish(list(relays), signed)
+            job = self._relay_pool.publish(relays, signed)
         except Exception as exc:  # noqa: BLE001, publish must never raise into UI
             _log.warning("subscription publish failed: %s", exc)
-            on_done(0, len(list(relays)))
+            on_done(0, len(relays))
             return
-        job.all_done.connect(
-            lambda results: on_done(
-                sum(1 for _, ok, _ in results if ok), len(results)))
+        answered = []
+
+        def accepted(_url: str) -> None:
+            if not answered:
+                answered.append(True)
+                on_done(1, len(relays))
+
+        def all_done(results) -> None:
+            if not answered:
+                answered.append(True)
+                on_done(sum(1 for _, ok, _ in results if ok), len(results))
+
+        job.first_accept.connect(accepted)
+        job.all_done.connect(all_done)
