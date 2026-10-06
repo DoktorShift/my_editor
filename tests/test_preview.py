@@ -112,6 +112,13 @@ def test_reading_time_follows_the_words():
     assert pv.reading_minutes("word " * 226) == 2
 
 
+def test_underscores_are_italic_as_in_every_reader():
+    doc = pv.article_document("an _emphasized_ word\n", pv.Article(title="T"))
+    word = [f for b in blocks(doc) for f in _fragments(b) if f.text() == "emphasized"]
+    assert word and word[0].charFormat().fontItalic()
+    assert not word[0].charFormat().fontUnderline()
+
+
 def test_raw_html_shows_as_text_in_an_article():
     doc = pv.article_document("<b>not bold</b> text\n", pv.Article(title="T"))
     assert "<b>not bold</b>" in doc.toPlainText()

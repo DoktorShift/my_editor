@@ -55,6 +55,7 @@ from PySide6.QtWidgets import QTextBrowser
 
 import i18n
 from i18n import _, ngettext
+from markdown_writer import READ_FEATURES
 from nostr import bech32
 
 # person's pubkey (hex) -> the name to show, or None
@@ -279,11 +280,11 @@ def _merge_fragments(block, char: QTextCharFormat, colors: Palette) -> None:
         it += 1
 
 
-# GitHub's Markdown, with raw HTML shown as text: NIP-23 rules HTML out,
-# and the apps that clean it up show it as text or drop it.
+# Read the way the editor reads it (``_word_`` is italic, as in every
+# reader), with raw HTML shown as text: NIP-23 rules HTML out, and the
+# apps that clean it up show it as text or drop it.
 MARKDOWN_FEATURES = QTextDocument.MarkdownFeature(
-    QTextDocument.MarkdownFeature.MarkdownDialectGitHub.value
-    | QTextDocument.MarkdownFeature.MarkdownNoHTML.value)
+    READ_FEATURES.value | QTextDocument.MarkdownFeature.MarkdownNoHTML.value)
 
 
 def article_document(markdown: str, article: Article, *, names: Optional[NameLookup] = None,
