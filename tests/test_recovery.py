@@ -10,7 +10,9 @@ The defect classes this file guards against:
 - a record written by a newer build being guessed at or overwritten,
 - a stale backup restoring with its original path, so one Ctrl+S
   overwrites hours of newer work,
-- Save As over the same path removing the live backup.
+- Save As over the same path removing the live backup,
+- a quote, a code block or inline code coming back from a crash as
+  plain paragraphs (HTML cannot hold them; the Markdown kept beside it can).
 """
 
 import json
@@ -491,3 +493,67 @@ def test_a_stale_restore_cannot_overwrite_the_newer_file(tmp_path):
 
     assert win.editors[-1]._file_path is None, "Ctrl+S has to go through Save As"
     assert win.tabs.titles == ["note.html (recovered copy)*"]
+
+
+# --------------------------------------------------------------------------- #
+# Markdown structure survives a crash too
+# --------------------------------------------------------------------------- #
+
+def _markdown_editor(markdown: str) -> HtmlEditor:
+    from markdown_writer import READ_FEATURES
+    ed = HtmlEditor()
+    ed.document().setMarkdown(markdown, READ_FEATURES)
+    return ed
+
+
+STRUCTURED = "Intro with `code`.\n\n> A quote\n\n```python\nprint(1)\n```\n"
+
+
+def test_quotes_and_code_survive_backup_and_restore(tmp_path):
+    from markdown_writer import document_to_markdown
+    backup = recovery.EditorBackup(_markdown_editor(STRUCTURED), None)
+    assert backup.write_now()
+    record = _record_of(backup)
+    assert record["markdown"] == STRUCTURED
+    assert record["format"] == "html" and record["content"]   # older builds read this
+
+    restored = HtmlEditor()
+    recovery.load_backup_content(restored, record)
+    assert document_to_markdown(restored.document()) == STRUCTURED
+
+
+def test_a_document_html_keeps_whole_has_no_markdown_copy(tmp_path):
+    backup = recovery.EditorBackup(_markdown_editor("# Title\n\n- one\n- two\n"), None)
+    assert backup.write_now()
+    assert "markdown" not in _record_of(backup)
+
+
+def test_colors_keep_the_html_snapshot(tmp_path):
+    from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
+    ed = _markdown_editor(STRUCTURED)
+    cursor = QTextCursor(ed.document())
+    cursor.movePosition(QTextCursor.MoveOperation.NextWord, QTextCursor.MoveMode.KeepAnchor)
+    red = QTextCharFormat()
+    red.setForeground(QColor("red"))
+    cursor.mergeCharFormat(red)
+    backup = recovery.EditorBackup(ed, None)
+    assert backup.write_now()
+    assert "markdown" not in _record_of(backup)
+
+
+def test_a_document_opened_as_markdown_text_stays_that_way(tmp_path):
+    ed = HtmlEditor()
+    ed.setPlainText("A claim[^1].\n\n[^1]: The source.")
+    ed._markdown_source = True
+    backup = recovery.EditorBackup(ed, None)
+    assert backup.write_now()
+
+    restored = HtmlEditor()
+    recovery.load_backup_content(restored, _record_of(backup))
+    assert restored._markdown_source is True
+    assert restored.toPlainText() == "A claim[^1].\n\n[^1]: The source."
+
+
+def test_backups_follow_the_typing_closely():
+    assert recovery._DEBOUNCE_MS == 2_000
+    assert recovery._MAX_INTERVAL_MS == 15_000
