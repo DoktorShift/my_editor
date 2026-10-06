@@ -157,15 +157,8 @@ print("RESULT " + json.dumps(r))
 
 
 def test_find_and_replace_in_the_window(tmp_path):
-    import json
-    import subprocess
-    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    env = dict(os.environ, HOME=str(tmp_path), QT_QPA_PLATFORM="offscreen")
-    proc = subprocess.run([sys.executable, "-c", WINDOW_SCRIPT, repo], env=env,
-                          capture_output=True, text=True, timeout=120)
-    line = next((l for l in proc.stdout.splitlines() if l.startswith("RESULT ")), None)
-    assert line, f"child failed:\n{proc.stdout}\n{proc.stderr}"
-    r = json.loads(line[len("RESULT "):])
+    from tests.app_process import run_window_script
+    r = run_window_script(WINDOW_SCRIPT, tmp_path)
     assert r["replace_row"]
     assert r["count"] == "3 matches"
     assert r["first"] == [4, 8]

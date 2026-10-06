@@ -27,17 +27,13 @@ second window starts the way the relaunched app does. What must hold:
 
   Quitting normally afterwards leaves no record and no backups behind.
 
-Each run happens in a child process with its own HOME, because the app
-keeps its settings, session and backups under the home folder, and a test
-must never read or touch the real ones.
+Each run happens in a child process with a home folder of its own
+(tests/app_process.py), because the app keeps its settings, session and
+backups under the home folder, and a test must never read or touch the
+real ones.
 """
 
-import json
-import os
-import subprocess
-import sys
-
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from tests.app_process import run_window_script
 
 SCRIPT = r"""
 import json, os, sys
@@ -115,19 +111,8 @@ print("RESULT " + json.dumps(result))
 """
 
 
-def run(tmp_path, script: str, *args: str) -> dict:
-    env = dict(os.environ, HOME=str(tmp_path), QT_QPA_PLATFORM="offscreen")
-    proc = subprocess.run(
-        [sys.executable, "-c", script, REPO, *args],
-        env=env, capture_output=True, text=True, timeout=120,
-    )
-    line = next((l for l in proc.stdout.splitlines() if l.startswith("RESULT ")), None)
-    assert line, f"child failed:\n{proc.stdout}\n{proc.stderr}"
-    return json.loads(line[len("RESULT "):])
-
-
 def restart(tmp_path, target: str) -> dict:
-    return run(tmp_path, SCRIPT, target)
+    return run_window_script(SCRIPT, tmp_path, target)
 
 
 # Shared by the scenarios below: a QApplication, alerts and questions that
@@ -203,7 +188,7 @@ def finish():
 
 
 def scenario(tmp_path, body: str) -> dict:
-    return run(tmp_path, PRELUDE + body + "\nfinish()\n")
+    return run_window_script(PRELUDE + body + "\nfinish()\n", tmp_path)
 
 
 def titles(r) -> list:

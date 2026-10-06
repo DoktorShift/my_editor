@@ -18,9 +18,7 @@ What must hold:
   toolbar's extension menu instead of being cut off.
 """
 
-import json
 import os
-import subprocess
 import sys
 
 import pytest
@@ -34,8 +32,7 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QMenu, QToolButton  # n
 import commands  # noqa: E402
 from commands import Command, CommandRegistry  # noqa: E402
 from format_toolbar import LAYOUT, FormatToolbar, tooltip_for  # noqa: E402
-
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from tests.app_process import run_window_script  # noqa: E402
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -170,12 +167,7 @@ print("RESULT " + json.dumps(r))
 
 
 def test_the_toolbar_in_the_window(tmp_path):
-    env = dict(os.environ, HOME=str(tmp_path), QT_QPA_PLATFORM="offscreen")
-    proc = subprocess.run([sys.executable, "-c", WINDOW_SCRIPT, REPO], env=env,
-                          capture_output=True, text=True, timeout=120)
-    line = next((l for l in proc.stdout.splitlines() if l.startswith("RESULT ")), None)
-    assert line, f"child failed:\n{proc.stdout}\n{proc.stderr}"
-    r = json.loads(line[len("RESULT "):])
+    r = run_window_script(WINDOW_SCRIPT, tmp_path)
     assert r["shown"]
     assert r["bold_checked"]
     assert r["style_body"] == "Body" and r["style_heading"] == "Heading 1"

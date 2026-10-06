@@ -13,17 +13,13 @@ ambiguous to Qt, and then neither fires. What must hold:
 
   In a text tab, the same keys reach the editing commands.
 
-Run in a child process with its own HOME, as every test that builds the
-whole window is, so the real settings are never touched; the window's
-keys are those of Windows and Linux there, where the keys collide.
+Run in a child process with a home folder of its own, as every test
+that builds the whole window is (tests/app_process.py), so the real
+settings are never touched; the window's keys are those of Windows and
+Linux there, where the keys collide.
 """
 
-import json
-import os
-import subprocess
-import sys
-
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from tests.app_process import run_window_script
 
 SCRIPT = r"""
 import json, os, sys, types
@@ -95,12 +91,7 @@ print("RESULT " + json.dumps(result))
 
 
 def test_pdf_keys_reach_the_reader_and_text_keys_the_editor(tmp_path):
-    env = dict(os.environ, HOME=str(tmp_path), QT_QPA_PLATFORM="offscreen")
-    proc = subprocess.run([sys.executable, "-c", SCRIPT, REPO], env=env,
-                          capture_output=True, text=True, timeout=120)
-    line = next((l for l in proc.stdout.splitlines() if l.startswith("RESULT ")), None)
-    assert line, f"child failed:\n{proc.stdout}\n{proc.stderr}"
-    r = json.loads(line[len("RESULT "):])
+    r = run_window_script(SCRIPT, tmp_path)
     assert r["pdf_focus"]
     assert r["ctrl2_fit_page"] and r["ctrl1_actual_size"]
     assert r["ctrl_c_pdf"] == "needle"
