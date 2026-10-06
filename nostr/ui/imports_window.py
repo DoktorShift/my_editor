@@ -391,7 +391,8 @@ class ImportsWindow(QMainWindow):
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(0)
         column.addWidget(self._build_list_header())
-        self.notice = QLabel(ELSEWHERE if self._controller.read_only else "")
+        self.notice = QLabel(ELSEWHERE if self._controller.read_only
+                             else self._controller.notice)
         self.notice.setObjectName("imports_notice")
         self.notice.setWordWrap(True)
         self.notice.setContentsMargins(16, 6, 16, 6)

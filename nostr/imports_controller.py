@@ -29,11 +29,18 @@ closes the window; answers that arrive for the account left are dropped.
 A second MyEditor process on the same account finds the inbox locked (a
 lock file next to it). It shows the inbox but checks nothing and starts
 no import, so two processes never sign the same import twice.
+
+The inbox is a convenience kept on this computer, so it never stops the
+app: a damaged file is set aside (renamed, never deleted) and a new one
+started, and an inbox that cannot be opened at all (a folder that cannot
+be written to) leaves imports unbound with ``problem`` saying why.
 """
 
 from __future__ import annotations
 
 import logging
+import sqlite3
+import time
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
 
@@ -88,6 +95,12 @@ ACCOUNT_CHANGED = _("The account changed. Resume when you're signed in to that a
 QUIT_PAUSED = _("MyEditor was closed during the import. Resume it to go on.")
 ELSEWHERE = _("Imports are checked in another MyEditor window. This one only shows them.")
 ARTICLE_FAILED = _("Couldn't show this post.")
+CANNOT_KEEP = _("MyEditor can't keep imports on this computer: {reason}. Your sources are safe "
+                "on your relays; check that your user folder can be written to, then sign in "
+                "again.")
+SET_ASIDE = _("The file that keeps imports on this computer was damaged, so MyEditor set it "
+              "aside and started a new one. Your sources are kept; posts you had skipped show "
+              "again.")
 NO_SOURCES_IN_LIST = _("No sources were found in that list. Is it a subscription export "
                        "from a feed reader?")
 
@@ -162,6 +175,10 @@ class ImportsController(QObject):
         self.checker = None
         self._lock: Optional[QLockFile] = None
         self.read_only = False
+        # Why imports could not be bound (a folder that cannot be written
+        # to), and a one-time word for the window (a damaged file set aside).
+        self.problem = ""
+        self.notice = ""
         self._collections: Dict[str, Collection] = {}
         self._opened = 0                    # files and links opened, for their ids
         self._window = None
@@ -214,15 +231,25 @@ class ImportsController(QObject):
         self.close_window()
 
     def _bind(self) -> None:
+        self.problem = self.notice = ""
         path = database_path(self._config_dir, self._profile.user_pubkey)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            self._cannot_bind(exc)
+            return
         self._lock = QLockFile(str(path.with_suffix(".lock")))
         # Held for the whole session: stale only when its process is gone.
         self._lock.setStaleLockTime(0)
         self.read_only = not self._lock.tryLock(0)
         if self.read_only:
             _log.info("imports inbox in use by another process; showing it read-only")
-        self.inbox = InboxStore(path)
+        try:
+            self.inbox = self._open_inbox(path)
+        except (sqlite3.Error, OSError) as exc:
+            self._release_lock()
+            self._cannot_bind(exc)
+            return
         if not self.read_only:
             self.inbox.recover_jobs()
             self.inbox.prune_jobs()
@@ -244,7 +271,41 @@ class ImportsController(QObject):
         self.bound_changed.emit(True)
         self._announce()
 
+    def _open_inbox(self, path: Path) -> InboxStore:
+        """The account's inbox. A file that is not a database (damaged) is
+        set aside and a new inbox started; one that cannot be opened at
+        all raises."""
+        try:
+            return InboxStore(path)
+        except sqlite3.OperationalError:
+            raise
+        except sqlite3.DatabaseError as exc:
+            if self.read_only:
+                raise       # the other process holds it: leave it alone
+            aside = path.with_name(f"{path.name}.damaged-{int(time.time())}")
+            _log.warning("imports inbox %s is damaged (%s); set aside as %s",
+                         path, exc, aside.name)
+            for suffix in ("", "-wal", "-shm"):
+                part = Path(f"{path}{suffix}")
+                if part.exists():
+                    part.replace(Path(f"{aside}{suffix}"))
+            self.notice = SET_ASIDE
+            return InboxStore(path)
+
+    def _cannot_bind(self, exc: BaseException) -> None:
+        _log.warning("imports cannot be kept on this computer: %s", exc)
+        self.inbox = None
+        self.read_only = False
+        self.problem = CANNOT_KEEP.format(reason=getattr(exc, "strerror", None) or str(exc))
+        self.bound_changed.emit(False)
+
+    def _release_lock(self) -> None:
+        if self._lock is not None and not self.read_only:
+            self._lock.unlock()
+        self._lock = None
+
     def _unbind(self, reason: str) -> None:
+        self.problem = self.notice = ""
         if self.inbox is None:
             return
         self.close_window()
@@ -256,9 +317,7 @@ class ImportsController(QObject):
                 owned.deleteLater()
         self.inbox.close()
         self.inbox = self.catalogue = self.runner = self.checker = None
-        if self._lock is not None and not self.read_only:
-            self._lock.unlock()
-        self._lock = None
+        self._release_lock()
         self.read_only = False
         self._collections.clear()
         self.bound_changed.emit(False)

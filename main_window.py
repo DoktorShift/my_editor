@@ -4636,8 +4636,19 @@ class MainWindow(QMainWindow):
         self._membership.open_window()
 
     def _open_imports_window(self) -> None:
-        """Nostr > Imports: sources, their posts, and the open one."""
-        self._imports.open_window()
+        """Nostr > Imports: sources, their posts, and the open one. Without
+        an account, or when imports cannot be kept here, it says so."""
+        imports = self._imports
+        if imports.bound:
+            imports.open_window()
+        elif imports.problem:
+            inform(self, title=_("Imports aren't available"), message=imports.problem,
+                   is_dark=self.is_dark_theme)
+        else:
+            inform(self, title=_("Connect a signer first"),
+                   message=_("Connect a Nostr signer (Nostr > Connect Signer\u2026) to "
+                             "follow websites and import posts as drafts."),
+                   is_dark=self.is_dark_theme)
 
     def _update_imports_row(self, *_args) -> None:
         """What the Drafts panel's Imports row says."""
