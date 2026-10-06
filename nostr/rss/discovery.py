@@ -155,23 +155,33 @@ def is_likely_feed_url(value: str) -> bool:
 # HTML detection                                                              #
 # --------------------------------------------------------------------------- #
 
+# A document that opens as a feed (after an XML declaration, comments or
+# processing instructions such as a stylesheet) is one, whatever HTML its
+# items carry.
+_FEED_START = re.compile(
+    r"^(?:<\?[^>]*\?>\s*|<!--.*?-->\s*)*<(?:rss|feed|rdf:rdf|opml)\b", re.S)
+# Item bodies quoted inside a feed; an unfinished one runs to the end of
+# the 2 KiB looked at.
+_CDATA = re.compile(r"<!\[cdata\[.*?(?:\]\]>|$)", re.S)
+# Whole tag names only: ``<header>`` is not ``<head>``.
+_HTML_MARKER = re.compile(r"<!doctype\s+html|<(?:html|head|body)[\s>/]")
+
+
 def looks_like_html(body: str) -> bool:
     """Cheap heuristic for "I got a webpage, not a feed".
 
     Only inspects the first 2 KiB. Returns ``True`` on the obvious HTML
     markers; deliberately lenient so the importer can decide to *try*
     discovery and falls back to the friendly error if discovery turns
-    up nothing.
+    up nothing. A body that opens as a feed, or HTML quoted in a feed's
+    CDATA, never counts.
     """
     if not body:
         return False
     head = body.lstrip()[:2048].lower()
-    return (
-        "<!doctype html" in head
-        or "<html" in head
-        or "<head" in head
-        or "<body" in head
-    )
+    if head.startswith("{") or _FEED_START.match(head):
+        return False
+    return bool(_HTML_MARKER.search(_CDATA.sub("", head)))
 
 
 # --------------------------------------------------------------------------- #
