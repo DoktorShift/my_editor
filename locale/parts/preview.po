@@ -1,0 +1,26 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: MyEditor\n"
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Untitled"
+msgstr "Ohne Titel"
+
+msgid "Preview"
+msgstr "Vorschau"
+
+msgid "Article"
+msgstr "Artikel"
+
+msgid "Quoted note"
+msgstr "Zitierte Notiz"
+
+#, python-brace-format
+msgid "{n} min read"
+msgid_plural "{n} min read"
+msgstr[0] "{n} Min. Lesezeit"
+msgstr[1] "{n} Min. Lesezeit"
