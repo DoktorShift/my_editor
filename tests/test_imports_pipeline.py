@@ -773,16 +773,28 @@ class TestImageRehosting:
         tags = created[0].inner_event["tags"]
         assert ["image", "https://blossom.example/1"] in tags
 
-    def test_a_cover_outside_the_body_is_neither_uploaded_nor_rewritten(self):
-        # The review dialog lists body images only, so a cover the user
-        # never saw there must keep the URL the feed gave it. Rehosting
-        # it would put a third party's file on the user's server outside
-        # what was approved.
+    def test_a_cover_outside_the_body_is_rehosted_too(self):
+        # A feed's enclosure cover is not in the body. Left alone it stays
+        # a link to the original blog, and the draft loses its cover when
+        # that site goes. It is in the review dialog's list as well.
         factory, created = make_factory()
         mirror, calls = fake_image_mirror()
         item = make_item("Pictures", guid="p1", content_html=IMAGE_HTML,
                          image="https://a.example/cover-only.png")
         job = make_job([item], factory=factory, image_mirror=mirror)
+        job.start()
+        settle()
+        assert calls[-1] == "https://a.example/cover-only.png"
+        tags = created[0].inner_event["tags"]
+        assert ["image", f"https://blossom.example/{len(calls)}"] in tags
+
+    def test_a_cover_the_user_kept_at_its_address_is_not_rehosted(self):
+        factory, created = make_factory()
+        mirror, calls = fake_image_mirror()
+        item = make_item("Pictures", guid="p1", content_html=IMAGE_HTML,
+                         image="https://a.example/cover-only.png")
+        job = make_job([item], factory=factory, image_mirror=mirror,
+                       skip_image_urls={"https://a.example/cover-only.png"})
         job.start()
         settle()
         assert "https://a.example/cover-only.png" not in calls
@@ -935,9 +947,10 @@ class TestRehostedImageMetadata:
         settle()
 
         inner = created[0].inner_event
-        assert ["image", "https://a.example/cover-only.png"] in inner["tags"]
+        cover = next(t[1] for t in inner["tags"] if t[0] == "image")
+        assert cover.startswith("https://blossom.example/")
         entries = [e for tag in imeta_tags(inner) for e in tag]
-        assert not any("cover-only" in e for e in entries)
+        assert not any(cover in e for e in entries)
 
 
 # --------------------------------------------------------------------------- #

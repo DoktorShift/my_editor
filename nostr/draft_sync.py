@@ -31,6 +31,7 @@ silent count mismatch.
 
 from __future__ import annotations
 
+import time
 from collections import deque
 from typing import Callable, Deque, Dict, List, Optional, Sequence, Tuple
 
@@ -108,9 +109,12 @@ class DraftSync(QObject):
         session_pool: BunkerSessionPool,
         store: DraftStore,
         entitled_relays: Optional[Callable[[], Sequence[str]]] = None,
+        clock: Callable[[], float] = time.time,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
+        # For NIP-40: expired wraps are ignored, whichever relay sends them.
+        self._clock = clock
         self._relay_pool = relay_pool
         self._relay_directory = relay_directory
         self._session_pool = session_pool
@@ -410,6 +414,11 @@ class DraftSync(QObject):
             return
         if meta.pubkey != self._profile.user_pubkey.lower():
             return  # relay returned an unrelated event; ignore defensively
+        # A relay that ignores NIP-40 can still hand out a wrap past its
+        # expiration (imported drafts carry one of 90 days): it is gone,
+        # and must neither show nor replace what the store holds.
+        if meta.is_expired(self._clock()):
+            return
         # Only the account's own signature counts: a relay must not be able
         # to hide a draft behind a forged deletion, or change its text.
         if not verify_event(event):

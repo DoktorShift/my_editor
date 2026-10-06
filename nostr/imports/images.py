@@ -188,6 +188,7 @@ def rehost_images(
     *,
     mirror: Callable[[str, Callable[..., None], Callable[[str], None]], None],
     skip_urls: Iterable[str] = (),
+    also: Iterable[str] = (),
     on_progress: Optional[Callable[[MirrorProgress], None]] = None,
     on_done: Callable[[MirrorOutcome], None],
     is_cancelled: Callable[[], bool] = lambda: False,
@@ -202,12 +203,18 @@ def rehost_images(
     each one is a signer round-trip and parallel approval popups flood
     the user.
 
+    ``also`` names images outside the markdown to rehost with it (an
+    article's cover); they end up in the outcome's ``mapping`` only.
+
     URLs in ``skip_urls`` stay untouched: the user explicitly opted them
     out of mirroring. Cancellation stops issuing mirrors; ``on_done``
     still fires with whatever was rewritten so the draft ships.
     """
     skip = set(skip_urls or ())
-    urls = [u for u in scan_markdown_images(markdown) if u not in skip]
+    urls = scan_markdown_images(markdown)
+    urls += [u for u in dict.fromkeys(u.strip() for u in also if u)
+             if u not in urls and _is_web_url(u)]
+    urls = [u for u in urls if u not in skip]
     outcome = MirrorOutcome(markdown=markdown or "")
     if not urls:
         on_done(outcome)

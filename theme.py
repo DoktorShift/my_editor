@@ -134,6 +134,12 @@ def dialog_link_color(is_dark: bool) -> str:
     return _DIALOG_LINK[is_dark]
 
 
+def attention_color(is_dark: bool) -> str:
+    """The red that marks a problem (a destructive button, a failed check),
+    readable on its theme's background."""
+    return _DIALOG_DESTRUCTIVE[is_dark]
+
+
 def apply_app_theme(is_dark: bool) -> None:
     """Push the light/dark palette onto the running QApplication.
 

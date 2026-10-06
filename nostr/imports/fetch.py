@@ -12,8 +12,9 @@ Bounds:
 - body size capped at 16 MiB, enforced mid-transfer (the reply is
   aborted the moment the cap is crossed, not after buffering),
 - 30 s transfer timeout,
-- redirect chain capped explicitly (Qt 6 follows redirects with its
-  no-less-safe policy by default; the hop cap stops loops).
+- nothing on the person's own network: every address, and every
+  redirect before it is followed (five at most), passes the network
+  guard (netguard.py) first.
 
 Decoding is intentionally permissive: feeds in the wild lie about
 encoding, so we fall back through ``Content-Type charset`` to the XML
@@ -30,6 +31,7 @@ from __future__ import annotations
 import re
 from typing import Callable, Optional
 
+import shiboken6
 from PySide6.QtCore import QObject, QUrl
 from PySide6.QtNetwork import (
     QNetworkAccessManager,
@@ -42,12 +44,12 @@ from i18n import _
 from image_safety import sniff_image_mime
 
 from .errors import ERROR_CODES, SourceError
+from .netguard import NetGuard
 
 
 _USER_AGENT = b"my-editor-rss/1"
 _TRANSFER_TIMEOUT_MS = 30 * 1000          # 30s of idle time
 _MAX_BODY_BYTES = 16 * 1024 * 1024        # 16 MiB hard cap on a single body
-_MAX_REDIRECTS = 8                        # slash-fix / https-upgrade / www hops
 # Shown as it is: the importer has no friendlier copy for TOO_LARGE.
 _OVERSIZE_MESSAGE = _("Feed exceeds the {size} MiB size limit").format(
     size=_MAX_BODY_BYTES // (1024 * 1024))
@@ -75,12 +77,16 @@ class SourceFetcher(QObject):
     """Reusable one-shot HTTP(S) body fetcher.
 
     Call :meth:`fetch` per request. The object owns one
-    ``QNetworkAccessManager`` for the life of the instance.
+    ``QNetworkAccessManager`` for the life of the instance. ``guard`` and
+    ``nam`` are seams for tests (a resolver that never asks the network,
+    a transport that never connects).
     """
 
-    def __init__(self, parent: Optional[QObject] = None) -> None:
+    def __init__(self, parent: Optional[QObject] = None, *,
+                 guard: Optional[NetGuard] = None, nam=None) -> None:
         super().__init__(parent)
-        self._nam = QNetworkAccessManager(self)
+        self._nam = nam or QNetworkAccessManager(self)
+        self._guard = guard or NetGuard()
 
     def fetch(
         self,
@@ -99,10 +105,54 @@ class SourceFetcher(QObject):
             on_failure(SourceError(
                 _("Feed URL must be http(s)"), ERROR_CODES.FETCH_ERROR))
             return
+        self._guard.check(
+            url,
+            on_allowed=lambda: self._start(qurl, on_success, on_failure),
+            on_refused=lambda reason: on_failure(
+                SourceError(reason, ERROR_CODES.LOCAL_NETWORK)))
 
+    def fetch_feed(
+        self,
+        url: str,
+        *,
+        etag: str = "",
+        last_modified: str = "",
+        on_body: Callable[[str, dict], None],
+        on_not_modified: Callable[[], None],
+        on_failure: Callable[[SourceError], None],
+    ) -> None:
+        """A conditional GET for a feed check: with the validators of the
+        last answer, a feed that did not change answers 304 and costs no
+        download (``on_not_modified``). ``on_body`` gets the text and the
+        new validators: ``{"etag", "last_modified", "final_url"}``."""
+        qurl = QUrl(url)
+        if not qurl.isValid() or qurl.scheme() not in ("http", "https"):
+            on_failure(SourceError(
+                _("Feed URL must be http(s)"), ERROR_CODES.FETCH_ERROR))
+            return
+        headers = []
+        if etag:
+            headers.append((b"If-None-Match", etag.encode("latin-1", "ignore")))
+        if last_modified:
+            headers.append((b"If-Modified-Since", last_modified.encode("latin-1", "ignore")))
+        meta: dict = {}
+        self._guard.check(
+            url,
+            on_allowed=lambda: self._start(
+                qurl, lambda text: on_body(text, meta), on_failure, headers=headers,
+                meta=meta, on_not_modified=on_not_modified),
+            on_refused=lambda reason: on_failure(
+                SourceError(reason, ERROR_CODES.LOCAL_NETWORK)))
+
+    def _start(self, qurl: QUrl, on_success, on_failure, *, headers=(), meta=None,
+               on_not_modified=None) -> None:
+        if not shiboken6.isValid(self):
+            return  # torn down while the name was being resolved
         request = QNetworkRequest(qurl)
         request.setTransferTimeout(_TRANSFER_TIMEOUT_MS)
-        request.setMaximumRedirectsAllowed(_MAX_REDIRECTS)
+        NetGuard.prepare(request)
+        for name, value in headers:
+            request.setRawHeader(name, value)
         request.setRawHeader(b"User-Agent", _USER_AGENT)
         request.setRawHeader(
             b"Accept",
@@ -116,7 +166,8 @@ class SourceFetcher(QObject):
         # surfaces in ``finished`` as OperationCanceledError; the flag
         # lets the handler report a size rejection rather than a
         # generic network failure.
-        oversize = {"hit": False}
+        oversize = {"hit": False, "refused": "", "meta": meta,
+                    "not_modified": on_not_modified}
 
         def _size_guard(received: int, _total: int, r=reply) -> None:
             if received > _MAX_BODY_BYTES and not oversize["hit"]:
@@ -124,6 +175,7 @@ class SourceFetcher(QObject):
                 r.abort()
 
         reply.downloadProgress.connect(_size_guard)
+        self._guard.follow(reply, lambda reason: oversize.update(refused=reason))
         reply.finished.connect(
             lambda r=reply: self._on_finished(r, on_success, on_failure, oversize)
         )
@@ -138,6 +190,9 @@ class SourceFetcher(QObject):
         oversize: dict,
     ) -> None:
         try:
+            if oversize["refused"]:
+                on_failure(SourceError(oversize["refused"], ERROR_CODES.LOCAL_NETWORK))
+                return
             if oversize["hit"]:
                 on_failure(SourceError(_OVERSIZE_MESSAGE, ERROR_CODES.TOO_LARGE))
                 return
@@ -147,6 +202,17 @@ class SourceFetcher(QObject):
                     ERROR_CODES.FETCH_ERROR,
                 ))
                 return
+            status = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
+            if oversize.get("not_modified") is not None and status == 304:
+                oversize["not_modified"]()
+                return
+            meta = oversize.get("meta")
+            if meta is not None:
+                meta.update(
+                    etag=bytes(reply.rawHeader("ETag")).decode("latin-1").strip(),
+                    last_modified=bytes(reply.rawHeader("Last-Modified")).decode(
+                        "latin-1").strip(),
+                    final_url=reply.url().toString())
 
             data = bytes(reply.readAll())
             if not data:
@@ -179,10 +245,11 @@ class BlobFetcher(QObject):
     is being downloaded rather than after a server refuses it. This
     module's own ceiling is the upper bound either way.
 
-    The address is checked against the mirror policy before the request
-    and again on the reply, because redirects are followed and the
-    bytes may end up coming from somewhere the caller never named. This
-    request carries no credentials, so a redirect cannot leak one.
+    The address passes the network guard before the request, every
+    redirect before it is followed, and the final address is checked
+    once more on the reply, because the bytes may end up coming from
+    somewhere the caller never named. This request carries no
+    credentials, so a redirect cannot leak one.
     """
 
     def __init__(
@@ -191,11 +258,14 @@ class BlobFetcher(QObject):
         *,
         max_bytes: int = _MAX_BLOB_BYTES,
         nam=None,
+        guard: Optional[NetGuard] = None,
     ) -> None:
         super().__init__(parent)
-        # ``nam`` is a seam for tests: a fake transport keeps the size
-        # cap and the redirect recheck assertable without a network.
+        # ``nam`` and ``guard`` are seams for tests: a fake transport and
+        # resolver keep the size cap and the redirect recheck assertable
+        # without a network.
         self._nam = nam or QNetworkAccessManager(self)
+        self._guard = guard or NetGuard()
         self._max_bytes = max(1, min(int(max_bytes), _MAX_BLOB_BYTES))
 
     def fetch(
@@ -214,10 +284,15 @@ class BlobFetcher(QObject):
         if not url_safety.is_safe_mirror_source(url):
             on_failure(_BLOB_UNSAFE_URL)
             return
+        self._guard.check(url, on_allowed=lambda: self._start(url, on_success, on_failure),
+                          on_refused=lambda _reason: on_failure(_BLOB_UNSAFE_URL))
 
+    def _start(self, url: str, on_success, on_failure) -> None:
+        if not shiboken6.isValid(self):
+            return  # torn down while the name was being resolved
         request = QNetworkRequest(QUrl(url))
         request.setTransferTimeout(_TRANSFER_TIMEOUT_MS)
-        request.setMaximumRedirectsAllowed(_MAX_REDIRECTS)
+        NetGuard.prepare(request)
         request.setRawHeader(b"User-Agent", _BLOB_USER_AGENT)
         request.setRawHeader(b"Accept", b"image/*;q=0.9, */*;q=0.1")
 
@@ -226,7 +301,7 @@ class BlobFetcher(QObject):
         # is crossed instead of buffering an arbitrarily large body and
         # measuring it afterwards. A declared ``Content-Length`` over
         # the cap is refused without transferring anything at all.
-        oversize = {"hit": False}
+        oversize = {"hit": False, "refused": False}
 
         def _size_guard(received: int, total: int, r=reply) -> None:
             if oversize["hit"]:
@@ -236,6 +311,7 @@ class BlobFetcher(QObject):
                 r.abort()
 
         reply.downloadProgress.connect(_size_guard)
+        self._guard.follow(reply, lambda _reason: oversize.update(refused=True))
         reply.finished.connect(
             lambda r=reply: self._on_finished(
                 r, oversize, on_success, on_failure)
@@ -251,6 +327,9 @@ class BlobFetcher(QObject):
         on_failure: Callable[[str], None],
     ) -> None:
         try:
+            if oversize["refused"]:
+                on_failure(_BLOB_UNSAFE_URL)
+                return
             if oversize["hit"]:
                 on_failure(_BLOB_OVERSIZE)
                 return

@@ -114,8 +114,11 @@ def test_a_deleted_draft_is_not_brought_back_by_an_older_copy():
 # -- what is accepted from relays -----------------------------------------------------------
 
 def make_sync():
+    # The wraps below are dated in 1970, so the clock is too: they expire
+    # 90 days after it (NIP-40), as every draft wrap does.
     sync = DraftSync(relay_pool=MagicMock(), relay_directory=MagicMock(),
-                     session_pool=MagicMock(), store=DraftStore())
+                     session_pool=MagicMock(), store=DraftStore(clock=lambda: 1_000),
+                     clock=lambda: 1_000)
     profile = MagicMock()
     profile.user_pubkey = PK
     sync._profile = profile

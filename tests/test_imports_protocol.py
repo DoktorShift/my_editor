@@ -43,6 +43,7 @@ from nostr.crypto import (
     get_public_key,
 )
 from nostr.drafts import (
+    DEFAULT_EXPIRATION_SECONDS,
     DRAFT_WRAP_KIND,
     build_draft_wrap,
     parse_inner_event,
@@ -146,6 +147,7 @@ class TestWrapNip37:
             encrypted_content=ciphertext,
             pubkey_hex=pubkey,
             client_name=CLIENT_NAME,
+            expiration_seconds=DEFAULT_EXPIRATION_SECONDS,
         )
         return wrap, conv, identifier
 
@@ -156,8 +158,9 @@ class TestWrapNip37:
         assert tag_values(wrap, "d") == [identifier]
         assert tag_values(wrap, "k") == [str(inner["kind"])]
         assert tag_values(wrap, "client") == [CLIENT_NAME]
+        # An imported draft nobody changes goes after 90 days (D-3).
         (expiration,) = tag_values(wrap, "expiration")
-        assert int(expiration) > wrap["created_at"]
+        assert int(expiration) == wrap["created_at"] + DEFAULT_EXPIRATION_SECONDS
         # parse_wrap_event accepts what we built.
         meta = parse_wrap_event({**wrap, "id": "e" * 64})
         assert meta is not None
@@ -202,18 +205,18 @@ class TestEncryptionFloor:
         import pathlib
         import tempfile
 
-        from tests.imports_fakes import PROFILE
         from tests.test_imports_subscriptions import (
-            FakeScheduler, make_store,
+            PROFILE, FakeScheduler, make_store,
         )
         scheduler = FakeScheduler()
-        store, publisher, _ = make_store(
+        store, relay, _ = make_store(
             pathlib.Path(tempfile.mkdtemp()), scheduler=scheduler)
         store.bind_profile(PROFILE)
-        store.add_feed("https://secret-reading-list.example/feed")
-        scheduler.fire_last()
         settle()
-        _relays, signed = publisher.calls[0]
+        store.add_feed("https://secret-reading-list.example/feed")
+        scheduler.fire()
+        settle()
+        _relays, signed = relay.published[0]
         outer = json.dumps(
             {k: v for k, v in signed.items() if k != "content"})
         assert "secret-reading-list" not in outer
