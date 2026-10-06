@@ -586,15 +586,19 @@ def test_retry_after_parsing(value, expected):
     assert parse_retry_after(value, now=1_785_062_400) == expected
 
 
+# Named: pytest puts a test's name in an environment variable, and the body
+# itself as a name would pass Windows' limit of 32767 characters.
 @pytest.mark.parametrize("body", [
-    b"not json",
-    b"\xff\xfe",
-    b"[]",
-    b'{"no_data": true}',
-    b'{"data": {"membership_status": "member"}}',
-    json.dumps({"data": membership_data(status="maybe")}).encode(),
-    json.dumps({"data": membership_data(pubkey=PUBKEY.upper())}).encode(),
-    b"[" * 100_000,
+    pytest.param(b"not json", id="not-json"),
+    pytest.param(b"\xff\xfe", id="not-text"),
+    pytest.param(b"[]", id="a-list"),
+    pytest.param(b'{"no_data": true}', id="no-data"),
+    pytest.param(b'{"data": {"membership_status": "member"}}', id="no-key"),
+    pytest.param(json.dumps({"data": membership_data(status="maybe")}).encode(),
+                 id="unknown-status"),
+    pytest.param(json.dumps({"data": membership_data(pubkey=PUBKEY.upper())}).encode(),
+                 id="key-in-capitals"),
+    pytest.param(b"[" * 100_000, id="nested-too-deep"),
 ])
 def test_a_malformed_answer_is_bad_response_not_an_exception(body):
     env = make(script=[FakeReply(status=200, body=body)])
