@@ -17,7 +17,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QCoreApplication
+from PySide6.QtWidgets import QApplication
 
 from nostr.imports.constants import (
     FEED_LIST_DTAG,
@@ -32,7 +32,7 @@ from tests.outbox_fakes import FakeRelayDirectory, settle
 
 @pytest.fixture(scope="module", autouse=True)
 def qt_app():
-    app = QCoreApplication.instance() or QCoreApplication(sys.argv)
+    app = QApplication.instance() or QApplication(sys.argv)
     yield app
 
 
