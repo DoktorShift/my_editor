@@ -153,6 +153,8 @@ _NOT_PROSE = re.compile("|".join(f"(?:{pattern})" for pattern in (
     r"(?i:\b(?:mailto|nostr|lightning|bitcoin|magnet|tel|sms|geo|urn|cashu|lnurl[a-z]*)"
     r":[^\s<>\"]+)",
     r"(?i:\bwww\.[^\s<>\"]+)",
+    # Addresses written without a scheme, with a path: github.com/rinbal.
+    r"(?<![\w.\-/@])[\w-]+(?:\.[\w-]+)*\.[A-Za-z]{2,}/[^\s<>\"]*",
     # E-mail and Nostr addresses (alice@example.com, _@example.com).
     r"(?<![\w.+\-])[\w.+\-]+@[\w\-]+(?:\.[\w\-]+)+",
     # Mentions (@alice, @npub1...) and hashtags (#bitcoin).

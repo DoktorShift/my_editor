@@ -93,13 +93,20 @@ def test_addresses_are_skipped():
     assert words("write a.b+c@d.de (or x-y@exmple.org)") == ["write", "or"]
 
 
+def test_addresses_without_a_scheme_skip_their_path_too():
+    assert words("Code auf github.com/rinbal/my_editor und example.com/pfad hier") == [
+        "Code", "auf", "und", "hier"]
+    # Not addresses: no dot before the slash, or no name after the dot.
+    assert words("docs/usage.md and/or km/h") == ["docs", "and", "or", "km"]
+
+
 def test_a_long_pasted_token_takes_no_longer_than_its_length():
     # A Cashu token, a hex dump, a long invoice: one unbroken run just under
     # the paragraph limit. A pattern tried from every position of such a run
     # took time in the square of its length (a second and more per
     # keystroke); now it takes a few milliseconds.
     size = MAX_BLOCK_LENGTH - 10
-    for run in ("cashuAeyJ0b2tlbiI6W3s-_", "0123456789abcdef", "a", "ab.", "ab-", "ab+"):
+    for run in ("cashuAeyJ0b2tlbiI6W3s-_", "0123456789abcdef", "a", "ab.", "ab-", "ab+", "a.b/"):
         text = (run * (size // len(run) + 1))[:size]
         started = time.perf_counter()
         scan(text)
