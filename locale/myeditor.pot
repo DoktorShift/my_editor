@@ -3204,6 +3204,10 @@ msgstr ""
 msgid "about {amount}"
 msgstr ""
 
+#: nostr/imports/catalogue.py:48
+msgid "Couldn't check your existing drafts. Try again when you're online."
+msgstr ""
+
 #: nostr/imports/errors.py:74
 msgid "This address points to your local network, which MyEditor doesn't read from for safety."
 msgstr ""

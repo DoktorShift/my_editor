@@ -3218,6 +3218,10 @@ msgstr "{amount} Sats"
 msgid "about {amount}"
 msgstr "etwa {amount}"
 
+#: nostr/imports/catalogue.py:48
+msgid "Couldn't check your existing drafts. Try again when you're online."
+msgstr "Deine vorhandenen Entwürfe konnten nicht geprüft werden. Versuche es noch einmal, wenn du online bist."
+
 #: nostr/imports/errors.py:74
 msgid "This address points to your local network, which MyEditor doesn't read from for safety."
 msgstr "Diese Adresse zeigt in dein lokales Netzwerk. Von dort liest MyEditor zu deiner Sicherheit nichts."
