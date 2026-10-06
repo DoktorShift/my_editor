@@ -20,6 +20,7 @@ Enchant checks word by word, so the caller asks for each word.
 from __future__ import annotations
 
 import ctypes
+import re
 from ctypes import CFUNCTYPE, POINTER, byref, c_char_p, c_int, c_size_t, c_ssize_t, c_void_p
 from typing import Dict, List, Optional, Sequence
 
@@ -136,14 +137,35 @@ class EnchantBackend(SpellBackend):
 
 
 def _load(names: Sequence[str]):
+    problem: Optional[str] = None
     for name in names:
         try:
             lib = ctypes.CDLL(name)
-        except OSError:
+        except OSError as error:
+            # Not there is what it says where Enchant is not installed. Any
+            # other answer (something it needs is missing, an incompatible
+            # GLib) is what whoever reads the log needs to see.
+            if problem is None and not _absent(name, error):
+                problem = str(error)
             continue
         _declare(lib)
         return lib
+    if problem is not None:
+        raise Unavailable(f"libenchant-2 could not be loaded: {problem}")
     raise Unavailable("libenchant-2 is not installed")
+
+
+def _absent(name: str, error: OSError) -> bool:
+    """Whether the loader says the library itself is not there (and not
+    that it is broken, or that something it needs is missing)."""
+    if isinstance(error, FileNotFoundError):            # Windows
+        return True
+    message = str(error)
+    if message.startswith(name + ":"):                  # Linux: "<name>: cannot open ..."
+        return "no such file" in message.lower()
+    # macOS names every place it tried, and why it failed there.
+    reasons = re.findall(r"'[^']*' \(([^)]*)\)", message)
+    return bool(reasons) and all(reason.startswith("no such file") for reason in reasons)
 
 
 def _declare(lib) -> None:

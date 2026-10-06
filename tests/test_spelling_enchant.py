@@ -22,6 +22,15 @@ def test_without_the_library_spelling_is_unavailable_and_says_why():
     assert backend.check("helo", "en-US") is True
 
 
+def test_a_library_that_does_not_load_says_what_the_loader_said(tmp_path):
+    broken = tmp_path / "libenchant-2.so.2"
+    broken.write_bytes(b"not a library")
+    backend = EnchantBackend(library_names=(str(broken), "libenchant-missing.so.9"))
+    assert backend.is_available() is False
+    assert backend.problem.startswith("libenchant-2 could not be loaded: ")
+    assert len(backend.problem) > len("libenchant-2 could not be loaded: ") + 10
+
+
 # -- the real library ----------------------------------------------------------
 
 @pytest.fixture
