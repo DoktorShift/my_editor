@@ -6,12 +6,15 @@ HTML Editor widget with bullet and format logic.
 """
 
 import os
+import re
 import sys
 
-from PySide6.QtCore import Qt, QTimer, QRect, QPoint, QMetaMethod, QEvent, QUrl, Signal
+from PySide6.QtCore import (
+    Qt, QTimer, QRect, QPoint, QMetaMethod, QEvent, QMimeData, QUrl, Signal,
+)
 from PySide6.QtGui import (
     QPainter, QTextBlockFormat, QTextCursor, QTextCharFormat, QColor, QClipboard, QPen,
-    QTextOption, QImage, QTextDocument, QTextFormat, QDesktopServices,
+    QTextOption, QImage, QPixmap, QTextDocument, QTextFormat, QDesktopServices,
 )
 from PySide6.QtWidgets import QTextEdit, QMenu, QApplication, QToolTip
 from constants import (
@@ -19,8 +22,10 @@ from constants import (
     DARK_GUIDE, LIGHT_GUIDE, DARK_CURRENT_LINE, LIGHT_CURRENT_LINE, DARK_PAPER, LIGHT_PAPER,
 )
 from fonts import code_font, writing_font
-from i18n import _
+from i18n import _, ngettext
+import image_safety
 import link_url
+import paste
 import rich_text
 import url_safety
 from link_popover import LinkPopover, clipboard_address
@@ -35,6 +40,13 @@ WRITING_MEASURE = 72
 # image resolves, and a large box would reflow the whole document twice.
 _PLACEHOLDER_SIZE = (160, 100)
 _PLACEHOLDER_COLOR = "#c8c8c8"
+
+
+def _n_pictures_left_out(count: int) -> str:
+    return ngettext("A picture could not be pasted with the text. Copy it on its own "
+                    "and paste it.",
+                    "{count} pictures could not be pasted with the text. Copy each on its "
+                    "own and paste it.", count).format(count=count)
 
 
 def _is_document_relative(url) -> bool:
@@ -59,7 +71,10 @@ class HtmlEditor(QTextEdit):
     # connected decide. Nothing is emitted when nobody is listening, so
     # the widget stays usable on its own (tests, previews).
     image_pasted = Signal(object)    # QImage from the clipboard
-    urls_dropped = Signal(list)      # list[QUrl] dropped on the editor
+    urls_dropped = Signal(list)      # list[QUrl] dropped on the editor (or image files pasted)
+    # A short message for the status bar about what the editor just did
+    # (a paste that had to leave pictures out).
+    notice = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -842,10 +857,6 @@ class HtmlEditor(QTextEdit):
             self.redo()
             return
 
-        if e.key() == Qt.Key_V and e.modifiers() == Qt.ControlModifier:
-            self.paste_from_clipboard()
-            return
-
         if e.text() and e.text().isprintable():
             # The caret may have arrived at a link's edge without moving
             # (a document loaded around it): what is typed is not the link.
@@ -1105,59 +1116,116 @@ class HtmlEditor(QTextEdit):
                 and self.isSignalConnected(QMetaMethod.fromSignal(self.urls_dropped))):
             self.urls_dropped.emit(list(event.mimeData().urls()))
             event.acceptProposedAction()
-        elif event.mimeData().hasText():
-            cursor = self.cursorForPosition(event.position().toPoint())
-            self.setTextCursor(cursor)
-            fmt = QTextCharFormat()
-            fmt.setFontWeight(400)
-            fmt.setFontItalic(False)
-            fmt.setFontUnderline(False)
-            fmt.clearForeground()
-            cursor.insertText(event.mimeData().text(), fmt)
-            self.setTextCursor(cursor)
-            event.acceptProposedAction()
         else:
+            # Text goes where it was dropped, the way a paste would put it
+            # there (insertFromMimeData), as one step on the undo stack.
             super().dropEvent(event)
 
+    # -------- Paste --------
     def paste_from_clipboard(self):
-        """Paste (Ctrl+V, Edit > Paste). A clipboard image is reported to
-        whoever owns media handling; with nobody listening it falls
-        through to the plain-text path that strips foreign formatting."""
-        clip = QApplication.clipboard()
+        """Paste (Edit > Paste, the context menu): the same as the
+        keyboard's paste, which Qt sends to insertFromMimeData."""
+        self.insertFromMimeData(QApplication.clipboard().mimeData())
+
+    def paste_normalized(self):
+        """Paste and Match Style: the clipboard's text, in the style of the
+        text where it goes."""
+        self._insert_plain(paste.plain_text(QApplication.clipboard().mimeData()))
+
+    def canInsertFromMimeData(self, source):
+        return source.hasFormat(paste.MARKDOWN_MIME) or super().canInsertFromMimeData(source)
+
+    def createMimeDataFromSelection(self):
+        """Copy: the text and HTML other apps read, and, where the document
+        holds Markdown structure, the selection as this editor writes
+        Markdown, so a paste here keeps every structure exactly. (Qt's own
+        copy would offer Qt's Markdown, which reads a heading's weight as
+        bold, and builds an OpenDocument copy of every selection.)"""
+        if not self._holds_structure():
+            return super().createMimeDataFromSelection()
         cursor = self.textCursor()
-        text = (clip.text() or "").strip()
-        if (cursor.hasSelection() and link_url.is_bare_http_url(text) and self._holds_structure()
-                and "\u2029" not in cursor.selectedText()):
-            # A web address pasted over words makes them a link to it.
-            rich_text.set_link(cursor, "", text)
+        fragment = cursor.selection()
+        mime = QMimeData()
+        mime.setText(fragment.toPlainText())
+        mime.setHtml(fragment.toHtml())
+        mime.setData(paste.MARKDOWN_MIME, paste.selection_markdown(cursor).encode("utf-8"))
+        return mime
+
+    def insertFromMimeData(self, source):
+        """Every paste and every drop of text arrives here.
+
+        - A web address pasted over words makes them a link to it.
+        - Pictures (image files copied in a file manager, a picture copied
+          on its own) go to whoever handles media, when someone does.
+        - In a document that holds Markdown structure, outside a code
+          block, the paste comes with what Markdown can say of it
+          (paste.py); elsewhere, and for text that is not Markdown, it is
+          plain text in the style of the text where it goes."""
+        if source is None:
+            return
+        cursor = self.textCursor()
+        text = source.text() if source.hasText() else ""
+        address = text.strip()
+        if (cursor.hasSelection() and link_url.is_bare_http_url(address)
+                and self._holds_structure() and "\u2029" not in cursor.selectedText()):
+            rich_text.set_link(cursor, "", address)
             cursor.setPosition(cursor.selectionEnd())
             self.setTextCursor(cursor)
             self._leave_link_at_end()
             return
-        if clip.mimeData().hasImage():
-            image = clip.image()
-            if not image.isNull() and self.isSignalConnected(
-                    QMetaMethod.fromSignal(self.image_pasted)):
-                self.image_pasted.emit(image)
-                return
-        self.paste_normalized()
-
-    def paste_normalized(self):
-        """Paste plain text with default formatting (no external styles, no baked colors)."""
-        plain_text = QApplication.clipboard().text()
-        if not plain_text:
+        if self._pasted_media(source, text):
             return
+        if self._holds_structure() and not rich_text.is_code_block(cursor.block()):
+            pasted = paste.from_mime(source)
+            if pasted is not None:
+                if pasted.left_out:
+                    self.notice.emit(_n_pictures_left_out(pasted.left_out))
+                if not pasted.document.isEmpty():
+                    rich_text.insert_document(cursor, pasted.document)
+                    self.setTextCursor(cursor)
+                    self.ensureCursorVisible()
+                    return
+        if getattr(self, "_markdown_source", False) and source.hasFormat(paste.MARKDOWN_MIME):
+            # Markdown opened as its text: what was copied, as Markdown.
+            text = bytes(source.data(paste.MARKDOWN_MIME)).decode("utf-8", "replace")
+        self._insert_plain(text or paste.plain_text(source))
 
+    def _pasted_media(self, source, text: str) -> bool:
+        """Report pasted pictures to whoever handles media. True when
+        someone took them."""
+        if source.hasUrls() and self.isSignalConnected(
+                QMetaMethod.fromSignal(self.urls_dropped)):
+            urls = list(source.urls())
+            if urls and all(u.isLocalFile() and image_safety.is_image_file(u.toLocalFile())
+                            for u in urls):
+                # Image files copied in the Finder or Explorer.
+                self.urls_dropped.emit(urls)
+                return True
+        if source.hasImage() and not text.strip() and self.isSignalConnected(
+                QMetaMethod.fromSignal(self.image_pasted)):
+            image = source.imageData()
+            if isinstance(image, QPixmap):
+                image = image.toImage()
+            if isinstance(image, QImage) and not image.isNull():
+                self.image_pasted.emit(image)
+                return True
+        return False
+
+    def _insert_plain(self, text: str) -> None:
+        """Insert plain text in the style of the text where it goes (the
+        way typing would: not into a link it only touches). A table cell
+        holds one line, so line breaks become spaces there."""
+        if not text:
+            return
         cursor = self.textCursor()
+        cursor.beginEditBlock()
         if cursor.hasSelection():
             cursor.removeSelectedText()
-
-        fmt = QTextCharFormat()
-        fmt.setFontWeight(400)
-        fmt.setFontItalic(False)
-        fmt.setFontUnderline(False)
-        fmt.clearForeground()
-
-        cursor.insertText(plain_text, fmt)
+            self.setTextCursor(cursor)
+        if cursor.currentTable() is not None and self._holds_structure():
+            text = re.sub(r"[ \t]*[\r\n]+[ \t]*", " ", text.strip())
+        self._leave_link_at_end()
+        cursor.insertText(text, self.currentCharFormat())
+        cursor.endEditBlock()
         self.setTextCursor(cursor)
         self.ensureCursorVisible()

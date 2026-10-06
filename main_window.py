@@ -102,7 +102,7 @@ _SUPPORTED_EXTS = {'.md', '.html', '.htm', '.txt', '.rmd', '.pdf'}
 # _SUPPORTED_EXTS so the dispatcher stays simple. SVG is absent: it is
 # not decoded anywhere in this process, so a dropped .svg gets the
 # ordinary "unsupported" bar message instead of a silent nothing.
-_IMAGE_EXTS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'}
+_IMAGE_EXTS = image_safety.IMAGE_FILE_SUFFIXES
 
 # Persisted answer to the paste-upload prompt: "ask" | "always" | "never".
 _PASTE_UPLOAD_SETTING = "upload_pasted_images"
@@ -899,6 +899,7 @@ class MainWindow(QMainWindow):
         ed.set_resource_resolver(self._asset_manager.resolve_image, ASSET_SCHEME)
         ed.set_local_image_resolver(lambda name, e=ed: self._resolve_local_image(e, name))
         ed.image_pasted.connect(lambda img, e=ed: self._handle_pasted_image(e, img))
+        ed.notice.connect(lambda text: self.status.showMessage(text, 8000))
         ed.urls_dropped.connect(self._handle_dropped_urls)
         ed.set_context_menu_filler(self._fill_editor_context_menu)
         ed.set_structure_check(lambda e=ed: self._editor_kind(e) == "rich")

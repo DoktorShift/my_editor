@@ -62,6 +62,12 @@ The `Edit` menu has what every Mac app has there, in the same order:
 
 Cut, Copy, Paste and Select All act on whatever has the focus: the document, the find field, or the PDF reader.
 
+**What a paste brings in.** In a document that can hold Markdown structure, a paste keeps what Markdown can say and nothing else: headings, bold, italic, strikethrough, code, links, lists and checklists, quotes, code blocks (with their language, from Stack Overflow, GitHub or VS Code), tables, dividers and pictures that are on the web. Fonts, sizes and colors stay behind, so text from Google Docs, Word, Pages or a web page looks like the rest of your document. A link that would not work for your readers (a path on the website it came from, a script) keeps its words without the link. A picture that is not on the web (inside the clipboard or on a disk) cannot come along with the text; the status bar says so, and you can copy the picture on its own and paste it. Plain text is read as Markdown when it clearly is Markdown (a heading and a list, a table); other text arrives as it is. Text copied in MyEditor pastes back exactly as it was.
+
+A paste goes in the way typing it would: inside a sentence the pasted words become part of it, into an empty line the first pasted paragraph keeps its style (a heading stays a heading), code and dividers get lines of their own, pasted list items join the list they land next to, and a table cell gets one line. One `Undo` takes the whole paste back. Inside a code block, and in plain-text and code files, a paste is always plain text. Image files copied in the Finder or Explorer are added like dropped ones. Dropping text on the document works the same way as pasting it.
+
+**Paste and Match Style** pastes the clipboard's plain text in the style of the text where it goes: inside a heading it is heading text, inside bold words it is bold.
+
 ### Find
 
 `Edit > Find`:

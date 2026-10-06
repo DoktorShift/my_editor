@@ -22,7 +22,8 @@ from dataclasses import dataclass
 from typing import Iterator, List, Tuple
 
 from PySide6.QtGui import (
-    QFont, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextFormat, QTextListFormat,
+    QFont, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextDocument, QTextDocumentFragment,
+    QTextFormat, QTextListFormat,
 )
 
 from doc_walk import iter_blocks
@@ -790,3 +791,151 @@ def without_link(fmt: QTextCharFormat) -> QTextCharFormat:
                  QTextFormat.Property.FontUnderline, QTextFormat.Property.TextUnderlineStyle):
         plain.clearProperty(prop)
     return plain
+
+
+# --------------------------------------------------------------------------- #
+# Code blocks and pasted documents                                             #
+# --------------------------------------------------------------------------- #
+
+def is_code_block(block) -> bool:
+    """Whether the paragraph is a line of a code block (fenced or indented,
+    as Qt's Markdown reader marks them)."""
+    fmt = block.blockFormat()
+    return bool(fmt.property(QTextFormat.Property.BlockCodeFence)) or fmt.hasProperty(
+        QTextFormat.Property.BlockCodeLanguage)
+
+
+def _has_own_style(block) -> bool:
+    """Whether a paragraph is more than Body text: a heading, a list item,
+    a quote, a code line or a divider."""
+    return bool(block.blockFormat().headingLevel() or block.textList() is not None
+                or quote_depth(block) or is_code_block(block) or is_divider(block))
+
+
+def _stands_alone(block) -> bool:
+    """Whether a paragraph cannot share its line with other words: a line
+    of code, a divider."""
+    return is_code_block(block) or is_divider(block)
+
+
+def _restyle(doc, start: int, end: int, level: int) -> None:
+    """The text from ``start`` to ``end`` in the paragraph style ``level``."""
+    if end <= start:
+        return
+    span = QTextCursor(doc)
+    span.setPosition(start)
+    span.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+    for first, last, fmt in _text_runs(span):
+        piece = QTextCursor(doc)
+        piece.setPosition(first)
+        piece.setPosition(last, QTextCursor.MoveMode.KeepAnchor)
+        piece.setCharFormat(restyled(fmt, level))
+
+
+def _take_style(target, first) -> None:
+    """The empty paragraph ``target`` became ``first``, the first pasted
+    paragraph: it takes its style, list included."""
+    fmt = QTextBlockFormat(first.blockFormat())
+    fmt.clearProperty(QTextFormat.Property.ObjectIndex)    # the list is set below
+    QTextCursor(target).setBlockFormat(fmt)
+    pasted_list = first.textList()
+    if pasted_list is None:
+        return
+    following = first.next()
+    joined = None
+    if (following.isValid() and following.textList() is not None
+            and following.textList().objectIndex() == pasted_list.objectIndex()):
+        # The next pasted item came from the same list: join its copy.
+        joined = target.next().textList()
+    if joined is not None:
+        joined.add(target)
+    else:
+        QTextCursor(target).createList(pasted_list.format())
+
+
+def _one_line(source):
+    """``source`` as one line of text, its paragraphs joined by spaces:
+    what a table cell can hold."""
+    line = QTextDocument()
+    out = QTextCursor(line)
+    for block in iter_blocks(source):
+        if not block.text().strip():
+            continue
+        if not out.atStart():
+            out.insertText(" ", QTextCharFormat())
+        level = block.blockFormat().headingLevel()
+        it = block.begin()
+        while not it.atEnd():
+            fragment = it.fragment()
+            it += 1
+            if fragment.isValid():
+                fmt = fragment.charFormat()
+                out.insertText(fragment.text(), restyled(fmt, 0) if level else fmt)
+    return line
+
+
+def insert_document(cursor: QTextCursor, source) -> None:
+    """Insert the document ``source`` at the cursor in place of the
+    selection, as one step on the undo stack, the way typing it would:
+
+    - its first paragraph goes on from the words before the caret and its
+      last runs into the words after it, each in the style of the
+      paragraph it joins (a heading pasted into a sentence becomes words
+      of that sentence);
+    - into an empty paragraph, the first pasted paragraph comes with its
+      own style, so a heading stays a heading and an item an item;
+    - code and dividers never run into words: pasted inside a paragraph,
+      they split it and stand on lines of their own;
+    - pasted list items join a list of the same kind they land next to;
+    - into a table cell it comes as one line, which is what a cell holds;
+    - pasted on a divider, it goes below it.
+
+    The cursor ends after what was pasted."""
+    doc = cursor.document()
+    cursor.beginEditBlock()
+    if cursor.hasSelection():
+        cursor.removeSelectedText()
+    if is_divider(cursor.block()):
+        cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+        cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
+    if cursor.currentTable() is not None:
+        source = _one_line(source)
+    first = source.begin()
+    if cursor.block().text():
+        # A code line or a divider at either end of what is pasted gets a
+        # line of its own: split the paragraph there.
+        if _stands_alone(source.lastBlock()) and not cursor.atBlockEnd():
+            cursor.insertBlock()
+            cursor.movePosition(QTextCursor.MoveOperation.PreviousBlock)
+            cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+        if _stands_alone(first) and not cursor.atBlockStart():
+            cursor.insertBlock()
+    target = cursor.block()
+    empty = not target.text()
+    level = target.blockFormat().headingLevel()
+    start = cursor.position()
+    cursor.insertFragment(QTextDocumentFragment(source))
+    end = cursor.position()
+    landed = doc.findBlock(start)
+    last = doc.findBlock(end)
+    if empty and _has_own_style(first):
+        _take_style(landed, first)
+    elif first.blockFormat().headingLevel() != level:
+        # The first pasted words joined a paragraph of another style.
+        _restyle(doc, start, min(end, landed.position() + landed.length() - 1), level)
+    if last != landed:
+        # The words after the caret went on in the last pasted paragraph.
+        tail_level = last.blockFormat().headingLevel()
+        if tail_level != level:
+            _restyle(doc, end, last.position() + last.length() - 1, tail_level)
+    around = [landed.previous()]
+    block = landed
+    while block.isValid():
+        around.append(block)
+        if block == last:
+            break
+        block = block.next()
+    around.append(last.next())
+    _tidy_lists(doc, around)
+    cursor.setPosition(end)
+    cursor.endEditBlock()

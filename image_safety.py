@@ -37,6 +37,16 @@ from PySide6.QtCore import QBuffer, QByteArray, QIODevice
 from PySide6.QtGui import QImage, QImageReader
 
 
+# The picture files a document takes in when they are dropped or pasted
+# (copied in the Finder or Explorer). SVG is absent: it is not decoded
+# anywhere in this process.
+IMAGE_FILE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"})
+
+
+def is_image_file(path: str) -> bool:
+    return os.path.splitext(path)[1].lower() in IMAGE_FILE_SUFFIXES
+
+
 _MAGIC_MIMES = (
     (b"\x89PNG\r\n\x1a\n", "image/png"),
     (b"\xff\xd8\xff", "image/jpeg"),
