@@ -315,3 +315,42 @@ def test_every_library_window_is_offered_the_published_servers():
     ]
     # Each library window when it opens, plus the open one when the list changes.
     assert len(offered) >= len(libraries) + 1
+
+
+def test_sharing_the_server_list_asks_first_then_publishes_what_uploads_use(monkeypatch):
+    from types import SimpleNamespace
+    from PySide6.QtCore import QObject, Signal
+    import main_window as mw_module
+    from nostr.outbox import writer as outbox_writer
+
+    published, refreshed, shown = [], [], []
+
+    class FakeWriter(QObject):
+        finished = Signal(object)
+
+        def start(self):
+            self.finished.emit(outbox_writer.WriteOutcome(outbox_writer.WRITTEN))
+
+    def fake_publish(*, servers, **_deps):
+        published.append(servers)
+        return FakeWriter()
+
+    answers = iter([False, True])
+    monkeypatch.setattr(mw_module, "ask", lambda *a, **kw: next(answers))
+    monkeypatch.setattr(mw_module, "publish_server_list", fake_publish)
+    active = SimpleNamespace(user_pubkey="ab" * 32)
+    host = SimpleNamespace(
+        _profile_store=SimpleNamespace(default=lambda: active),
+        _media_store=SimpleNamespace(target_servers=lambda: ["https://a.example",
+                                                              "https://b.example/"]),
+        _visible_media_library=lambda: None,
+        _relay_pool=None, _relay_directory=None, _session_pool=None,
+        _server_list=SimpleNamespace(refresh=lambda p, force=False: refreshed.append(force)),
+        status=SimpleNamespace(showMessage=lambda text, ms=0: shown.append(text)),
+        is_dark_theme=False,
+    )
+    MainWindow._share_media_server_list(host)          # Cancel: nothing happens
+    assert published == []
+    MainWindow._share_media_server_list(host)          # Share List
+    assert published == [["https://a.example", "https://b.example"]]
+    assert refreshed == [True] and shown == ["Your media server list is shared."]

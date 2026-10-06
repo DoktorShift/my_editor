@@ -268,3 +268,11 @@ def test_nothing_to_offer_shows_nothing(tmp_path, monkeypatch):
     dialog = build(tmp_path, monkeypatch, ServerStore())
     dialog.set_server_suggestions([])
     assert dialog._suggestion_box.isHidden()
+
+
+def test_sharing_the_server_list_is_asked_for_from_the_library(tmp_path, monkeypatch):
+    dialog = build(tmp_path, monkeypatch, ServerStore())
+    asked = []
+    dialog.share_server_list_requested.connect(lambda: asked.append(True))
+    dialog._share_servers.click()
+    assert asked == [True]

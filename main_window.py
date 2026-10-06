@@ -116,6 +116,8 @@ from recent_files import load_recent, add_recent, clear_recent
 from nostr.avatar_store import AvatarBatchLoader, AvatarStore
 from nostr.bech32 import encode_note
 from nostr.blossom.errors import friendly_message
+from nostr.media_server_list import publish_server_list
+from nostr.outbox import writer as outbox_writer
 from nostr.profile_editing import ProfileEditing
 from nostr.state import NostrState
 from nostr.ui.profile_window import ProfileWindow
@@ -3866,6 +3868,49 @@ class MainWindow(QMainWindow):
         if dialog is not None:
             dialog.set_server_suggestions(self._media_server_suggestions())
 
+    def _share_media_server_list(self) -> None:
+        """Publish the servers uploads go to as the account's media server
+        list (kind 10063), after asking: it replaces the list other apps
+        read now, if the account published one."""
+        active = self._profile_store.default()
+        if active is None:
+            return
+        servers = [url_safety.origin_of(s) or s for s in self._media_store.target_servers()]
+        hosts = ", ".join(url_safety.host_of(s) or s for s in servers)
+        parent = self._visible_media_library() or self
+        choice = ask(parent, title=_("Tell Other Apps Where Your Media Is?"),
+                     message=_("Other Nostr apps then look on {hosts} for your pictures, "
+                               "in this order. This replaces the list they use now, if "
+                               "you shared one before.").format(hosts=hosts),
+                     buttons=(Button(_("Cancel"), False, CANCEL),
+                              Button(_("Share List"), True, DEFAULT)),
+                     is_dark=self.is_dark_theme)
+        if choice is not True:
+            return
+        try:
+            writer = publish_server_list(
+                servers=servers, pool=self._relay_pool, directory=self._relay_directory,
+                session_pool=self._session_pool, profile=active, parent=self)
+        except ValueError:
+            self.status.showMessage(_("There is no media server to share."), 5000)
+            return
+        messages = {
+            outbox_writer.WRITTEN: _("Your media server list is shared."),
+            outbox_writer.UNCHANGED: _("Other apps already have this list."),
+            outbox_writer.UNKNOWN_BASE: _("Your current list couldn’t be read, so nothing "
+                                          "was changed. Try again later."),
+        }
+
+        def finished(outcome) -> None:
+            self.status.showMessage(messages.get(outcome.status, _(
+                "The list wasn’t shared. Try again in a moment.")), 6000)
+            if outcome.status == outbox_writer.WRITTEN:
+                self._server_list.refresh(active, force=True)
+            writer.deleteLater()
+
+        writer.finished.connect(finished)
+        writer.start()
+
     def _entitled_quota(self, origin: str):
         """The space a membership gives on its media server, in bytes."""
         return self._membership.quota(origin)
@@ -4196,6 +4241,7 @@ class MainWindow(QMainWindow):
         )
         dialog.bind_private_library(self._private_library)
         dialog.server_suggestions_accepted.connect(self._use_suggested_media_servers)
+        dialog.share_server_list_requested.connect(self._share_media_server_list)
         dialog.set_server_suggestions(self._media_server_suggestions())
         # The dialog deletes itself on close; forget it then, so nothing
         # later asks a deleted object whether it is visible.
@@ -4230,6 +4276,7 @@ class MainWindow(QMainWindow):
         )
         dialog.bind_private_library(self._private_library)
         dialog.server_suggestions_accepted.connect(self._use_suggested_media_servers)
+        dialog.share_server_list_requested.connect(self._share_media_server_list)
         dialog.set_server_suggestions(self._media_server_suggestions())
         # Pre-select images in the picker - videos / audio can't be
         # inserted as inline document objects.
