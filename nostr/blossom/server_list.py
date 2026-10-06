@@ -305,6 +305,7 @@ class UserServerList(QObject):
         self._relay_directory = relay_directory
         self._servers: List[str] = list(self._settings.discovered_servers)
         self._pubkey: str = self._settings.discovered_pubkey
+        self._asked: str = ""
 
     # -- read --------------------------------------------------------------
 
@@ -362,6 +363,9 @@ class UserServerList(QObject):
         two REQs.
         """
         pubkey = str(getattr(profile, "user_pubkey", "") or "")
+        # Only the account asked for last is answered: a slow answer for
+        # an account switched away from must not become this one's list.
+        self._asked = pubkey.lower()
         if not pubkey:
             return
         if force:
@@ -377,7 +381,14 @@ class UserServerList(QObject):
             timeout_ms=timeout_ms,
         )
 
+    def forget_account(self) -> None:
+        """No account is active any more (signed out): answers still on
+        their way are dropped."""
+        self._asked = ""
+
     def _apply(self, pubkey: str, servers: List[str]) -> None:
+        if pubkey.lower() != self._asked:
+            return      # an answer for an account no longer active
         self.discovered.emit(list(servers))
         if not servers:
             # An empty answer is far more often "no relay replied in

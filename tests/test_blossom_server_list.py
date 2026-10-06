@@ -641,3 +641,23 @@ def test_no_discovery_path_publishes_an_event(tmp_path):
     ctx.refresh_with(PUBLISHED)
     assert ctx.pool.published == []
     assert all(sub.closed for sub in ctx.pool.subs)
+
+
+def test_a_late_answer_for_an_account_switched_away_from_is_dropped(tmp_path):
+    # The first account's lookup is still out when the person switches to a
+    # second one; its answer must not become the second account's list, nor
+    # be adopted as everyone's upload servers.
+    ctx = Ctx(tmp_path)
+    ctx.policy.refresh(ctx.profile)                 # first account, in flight
+    ctx.policy.refresh(_profile("cd" * 32))         # switched
+    ctx.pool.deliver(_signed(*PUBLISHED), index=0)  # the first account's answer
+    assert ctx.adopted == [] and ctx.discovered == []
+    assert not ctx.settings.has_explicit_config
+
+
+def test_answers_after_signing_out_are_dropped(tmp_path):
+    ctx = Ctx(tmp_path)
+    ctx.policy.refresh(ctx.profile)
+    ctx.policy.forget_account()
+    ctx.pool.deliver(_signed(*PUBLISHED))
+    assert ctx.adopted == [] and ctx.discovered == []
