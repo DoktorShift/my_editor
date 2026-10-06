@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from typing import Callable, List, Optional
 
-from PySide6.QtCore import QUrl, Qt, Signal
+from PySide6.QtCore import QSize, QUrl, Qt, Signal
 from PySide6.QtGui import QDesktopServices, QTextDocument
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -41,7 +41,7 @@ from i18n import _
 
 from ..imports.images import scan_markdown_images
 from ..imports.workspace import Post, date_text
-from ..preview import Article, NostrPreview
+from ..preview import COLUMN_WIDTH, Article, NostrPreview
 from .imports_glyphs import is_dark, letter_avatar
 
 _EMPTY, _ARTICLE, _MESSAGE = 0, 1, 2
@@ -152,8 +152,11 @@ class ArticlePane(QWidget):
             return
         self._image_urls = [u for u in [article.image, *scan_markdown_images(markdown)] if u]
         if self._images is not None:
+            # The article being read goes ahead of every cover waiting,
+            # decoded as wide as its column.
+            width = QSize(int(COLUMN_WIDTH * self.devicePixelRatioF()), 0)
             for url in self._image_urls:
-                self._images.request(url)
+                self._images.request(url, width, urgent=True)
         self._preview.show_article(markdown, article)
         self._preview.verticalScrollBar().setValue(0)
         self._stack.setCurrentIndex(_ARTICLE)

@@ -31,7 +31,7 @@ class Images(QObject):
     def image(self, url):
         return self.kept.get(url)
 
-    def request(self, url):
+    def request(self, url, size=None, *, urgent=False):
         self.requested.append(url)
 
     def arrive(self, url):

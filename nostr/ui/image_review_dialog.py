@@ -111,8 +111,10 @@ class ImageReviewDialog(QDialog):
             self._items[url] = row
             if self._images.image(url) is not None:
                 self._set_thumbnail(url)
-            else:
-                self._images.request(url)
+            # Decoded no larger than a tile needs (a sharper one when the
+            # cache only has a smaller one).
+            side = int(TILE * self.devicePixelRatioF())
+            self._images.request(url, QSize(side, side))
         self._list.itemChanged.connect(lambda _item: self._update_count())
         if self._list.count():
             self._list.setCurrentRow(0)

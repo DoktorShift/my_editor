@@ -434,14 +434,22 @@ class PostDelegate(QStyledItemDelegate):
                        else palette.color(QPalette.ColorRole.Text))
         painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, word)
 
+    def _cover_size(self, rect: QRect) -> QSize:
+        """The cover's square in device pixels: what its decode must cover."""
+        dpr = self._view.devicePixelRatioF() if self._view is not None else 1.0
+        return QSize(int(rect.width() * dpr), int(rect.height() * dpr))
+
     def _paint_cover(self, painter: QPainter, post: Post, rect: QRect,
                      palette: QPalette) -> None:
         image = self._images.image(post.image) if self._images is not None else None
         painter.save()
         frame = QRectF(rect)
+        if image is not None and self._images is not None:
+            # A sharper one when only a smaller decode is here.
+            self._images.request(post.image, self._cover_size(rect))
         if image is None or image.isNull():
             if self._images is not None:
-                self._images.request(post.image)
+                self._images.request(post.image, self._cover_size(rect))
             fill = QColor(palette.color(QPalette.ColorRole.Mid))
             fill.setAlpha(60)
             painter.setPen(Qt.PenStyle.NoPen)

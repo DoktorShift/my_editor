@@ -60,7 +60,7 @@ class Images(QObject):
     def image(self, url):
         return None
 
-    def request(self, url):
+    def request(self, url, size=None, *, urgent=False):
         pass
 
 
