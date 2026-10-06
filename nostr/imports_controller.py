@@ -35,11 +35,12 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import shiboken6
 from PySide6.QtCore import QLockFile, QObject, QTimer, Signal
 
+import url_safety
 from i18n import _
 
 from .imports import snapshots, workers
@@ -52,6 +53,7 @@ from .imports.fetch import SourceFetcher
 from .imports.inbox_store import (
     DRAFTED,
     NEW,
+    OLDER,
     SKIPPED,
     Counts,
     InboxStore,
@@ -59,11 +61,13 @@ from .imports.inbox_store import (
     View,
     database_path,
 )
+from .imports.intake import read_export
 from .imports.jobs import ImportRunner
 from .imports.pipeline import ImportItemsJob
 from .imports.registry import ResolveInput, resolve_source
 from .imports.remote_images import RemoteImages
 from .imports.sources.nostr import RelayQueryAdapter
+from .imports.sources.opml import is_opml, parse_opml
 from .imports.subscriptions import FeedSubscriptionStore
 from .imports.workspace import Collection, Post, post_from_row
 from .outbox import relays_from
@@ -80,6 +84,8 @@ ACCOUNT_CHANGED = _("The account changed. Resume when you're signed in to that a
 QUIT_PAUSED = _("MyEditor was closed during the import. Resume it to go on.")
 ELSEWHERE = _("Imports are checked in another MyEditor window. This one only shows them.")
 ARTICLE_FAILED = _("Couldn't show this post.")
+NO_SOURCES_IN_LIST = _("No sources were found in that list. Is it a subscription export "
+                       "from a feed reader?")
 
 
 class ImportsController(QObject):
@@ -150,6 +156,7 @@ class ImportsController(QObject):
         self._lock: Optional[QLockFile] = None
         self.read_only = False
         self._collections: Dict[str, Collection] = {}
+        self._opened = 0                    # files and links opened, for their ids
         self._window = None
         self._reconcile_pending = False
         # Bumped whenever the account changes: an answer for the account
@@ -407,6 +414,151 @@ class ImportsController(QObject):
                                on_unavailable=lambda _reason: None)
 
     # ------------------------------------------------------------------ #
+    # Following, files and links                                           #
+    # ------------------------------------------------------------------ #
+
+    def look_up(self, address: str, *,
+                on_done: Callable[[Optional[object], str], None]) -> None:
+        """Read what an address holds, for a sheet: ``on_done(result, "")``
+        or ``on_done(None, words for the person)``."""
+        self._resolve(ResolveInput(url=address), on_done)
+
+    def look_up_paste(self, text: str, address: str, *,
+                      on_done: Callable[[Optional[object], str], None]) -> None:
+        """Read pasted feed text; ``address`` makes its relative links whole."""
+        self._resolve(ResolveInput(url=address.strip() or None, pasted_body=text), on_done)
+
+    def _resolve(self, request: ResolveInput, on_done) -> None:
+        generation = self._generation
+
+        def answer(result, error: str) -> None:
+            if generation == self._generation:
+                on_done(result, error)
+
+        resolve_source(
+            request, fetcher=self._fetcher,
+            on_success=lambda result: answer(result, ""),
+            on_failure=lambda error: answer(None, friendly_message(error)
+                                            if isinstance(error, SourceError) else str(error)),
+            run_blocking=self._run_blocking, nostr_query=self._nostr_query,
+            relay_directory=self._relay_directory)
+
+    def read_list(self, url: str, *,
+                  on_done: Callable[[Optional[object], str], None]) -> None:
+        """Read a list of sources (OPML) at ``url``: ``on_done(document,
+        "")`` or ``on_done(None, words for the person)``."""
+        generation = self._generation
+
+        def read(text: str) -> None:
+            if generation != self._generation:
+                return
+            document = parse_opml(text) if is_opml(text) else None
+            if document is None or not document.feeds:
+                on_done(None, NO_SOURCES_IN_LIST)
+            else:
+                on_done(document, "")
+
+        def failed(error) -> None:
+            if generation == self._generation:
+                on_done(None, friendly_message(error) if isinstance(error, SourceError)
+                        else str(error))
+
+        self._fetcher.fetch(url, on_success=read, on_failure=failed)
+
+    def is_followed(self, url: str) -> bool:
+        return self.subscriptions.has_feed(url)
+
+    def follow(self, url: str, title: str = "", *, result=None) -> str:
+        """Follow ``url``. With the ``result`` its lookup gave, its posts are
+        there at once: a feed's as a baseline (Older Posts, as the first
+        check would make them), another source's as read now. Returns the
+        source's key, or "" when it could not be followed."""
+        if not _public(url):
+            return ""
+        added = self.subscriptions.add_feed(url, title)
+        key = source_key(url)
+        if not added.get("added") and not added.get("duplicate"):
+            return ""
+        if added.get("added") and result is not None and self.inbox is not None:
+            source = self.inbox.source(key)
+            if source is not None and source.automatic and not self.read_only:
+                self.inbox.ingest(
+                    key, list(result.feed.items), final_url=result.url,
+                    feed_title=result.feed.title or "", site_url=result.feed.link or "")
+                self._reconcile_new_posts(key, state=OLDER)
+            elif source is not None and not source.automatic:
+                collection = Collection(id=_manual_id(key), kind="manual",
+                                        label=source.display_title or result.feed.title or url,
+                                        source_url=url, source_key=key,
+                                        items=list(result.feed.items))
+                self._collections[collection.id] = collection
+                self._look_up_states(collection)
+            self._announce()
+        return key
+
+    def follow_all(self, document) -> Tuple[int, int, int]:
+        """Follow every source of a list (OPML): how many were followed
+        now, were followed already, and could not be followed (not a
+        source, or an address on this computer or its network)."""
+        followed = known = refused = 0
+        for feed in document.feeds:
+            added = (self.subscriptions.add_feed(feed.xml_url, feed.title)
+                     if _public(feed.xml_url) else {})
+            if added.get("added"):
+                followed += 1
+            elif added.get("duplicate"):
+                known += 1
+            else:
+                refused += 1
+        return followed, known, refused
+
+    def open_posts(self, *, kind: str, label: str, items, source_url: str = "") -> Collection:
+        """Posts of a file or a link, held while shown, to import once."""
+        self._opened += 1
+        collection = Collection(id=f"{kind}-{self._opened}", kind=kind, label=label,
+                                source_url=source_url, items=list(items))
+        self._collections[collection.id] = collection
+        self._look_up_states(collection)
+        self.sources_changed.emit()
+        return collection
+
+    def read_file(self, path: str, *,
+                  on_done: Callable[[Optional[Collection], Optional[object], str], None]
+                  ) -> None:
+        """Read an export file: ``on_done(collection, None, "")`` with its
+        posts, ``on_done(None, opml_document, "")`` for a list of sources,
+        or ``on_done(None, None, words for the person)``."""
+        generation = self._generation
+
+        def read(export) -> None:
+            if generation != self._generation:
+                return
+            if export.sources is not None:
+                on_done(None, export.sources, "")
+            elif export.items:
+                on_done(self.open_posts(kind="file", label=export.label, items=export.items,
+                                        source_url=export.label), None, "")
+            else:
+                self.look_up_paste(export.text, "", on_done=lambda result, error: (
+                    on_done(self.open_posts(kind="file", label=export.label,
+                                            items=result.feed.items, source_url=export.label),
+                            None, "") if result is not None else on_done(None, None, error)))
+
+        def failed(exc) -> None:
+            if generation == self._generation:
+                on_done(None, None, str(exc))
+
+        self._run_blocking(lambda: read_export(path), read, failed)
+
+    def close_collection(self, collection_id: str) -> None:
+        """Take a file or a link off the list (its drafts stay)."""
+        if self._collections.pop(collection_id, None) is not None:
+            self.sources_changed.emit()
+
+    def collections(self, *kinds: str) -> List[Collection]:
+        return [c for c in self._collections.values() if not kinds or c.kind in kinds]
+
+    # ------------------------------------------------------------------ #
     # What is imported                                                     #
     # ------------------------------------------------------------------ #
 
@@ -437,8 +589,8 @@ class ImportsController(QObject):
         if self.inbox is not None:
             self._reconcile_tags(self.inbox.d_tags((NEW, SKIPPED))[:500])
 
-    def _reconcile_new_posts(self, key: str) -> None:
-        tags = [p.d_tag for p in self.inbox.page(View("source", key, NEW), limit=200)]
+    def _reconcile_new_posts(self, key: str, state: str = NEW) -> None:
+        tags = [p.d_tag for p in self.inbox.page(View("source", key, state), limit=500)]
         self._reconcile_tags(tags)
 
     def _reconcile_tags(self, tags: List[str]) -> None:
@@ -545,6 +697,15 @@ class ImportsController(QObject):
         if window is not None:
             window.close()
             window.deleteLater()
+
+
+def _public(url: str) -> bool:
+    """Whether a web address may be followed: never one on this computer or
+    its network (the owner's decision Q-6). A Nostr address is judged by
+    the readers."""
+    if not url.strip().lower().startswith(("http://", "https://")):
+        return True
+    return url_safety.is_safe_mirror_source(url.strip())
 
 
 def _manual_id(key: str) -> str:

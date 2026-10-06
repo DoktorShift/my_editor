@@ -335,7 +335,7 @@ msgid "(unknown profile)"
 msgstr "(unbekanntes Profil)"
 
 #: main_window.py:1011
-#: nostr/imports/workspace.py:47
+#: nostr/imports/workspace.py:48
 #: nostr/ui/imports_window.py:334
 #: nostr/ui/imports_window.py:515
 #: nostr/ui/imports_window.py:529
@@ -2712,21 +2712,25 @@ msgstr "Ein lesbarer, verifizierter Nostr-Name wie du@{domain}, den andere erken
 msgid "{total} in total, up to {per_file} per file."
 msgstr "{total} Speicher, höchstens {per_file} pro Datei."
 
-#: nostr/imports_controller.py:78
+#: nostr/imports_controller.py:82
 msgid "The account changed. Resume when you're signed in to that account again."
 msgstr "Das Konto wurde gewechselt. Setze den Import fort, wenn du wieder mit diesem Konto angemeldet bist."
 
-#: nostr/imports_controller.py:80
+#: nostr/imports_controller.py:84
 msgid "MyEditor was closed during the import. Resume it to go on."
 msgstr "MyEditor wurde während des Imports geschlossen. Setze ihn fort, um weiterzumachen."
 
-#: nostr/imports_controller.py:81
+#: nostr/imports_controller.py:85
 msgid "Imports are checked in another MyEditor window. This one only shows them."
 msgstr "Importe werden in einem anderen MyEditor-Fenster geprüft. Dieses zeigt sie nur an."
 
-#: nostr/imports_controller.py:82
+#: nostr/imports_controller.py:86
 msgid "Couldn't show this post."
 msgstr "Dieser Beitrag konnte nicht angezeigt werden."
+
+#: nostr/imports_controller.py:87
+msgid "No sources were found in that list. Is it a subscription export from a feed reader?"
+msgstr "In dieser Liste wurden keine Quellen gefunden. Ist es ein Abo-Export aus einem Feedreader?"
 
 #: nostr/membership_controller.py:56
 msgid "EINUNDZWANZIG membership recognized. Your members’ relay and media server are available."
@@ -3373,6 +3377,39 @@ msgstr "Leere Antwort beim Kopieren"
 msgid "This source has reached its inbox limit. Unsubscribe and follow it again to start a fresh inbox; your drafts are kept."
 msgstr "Diese Quelle hat die Grenze ihres Eingangs erreicht. Beende das Abonnement und folge ihr erneut, um mit einem neuen Eingang zu beginnen; deine Entwürfe bleiben erhalten."
 
+#: nostr/imports/intake.py:53
+#: nostr/ui/feeds_panel.py:813
+#, python-brace-format
+msgid "That file is too large to import (over {size} MB)."
+msgstr "Diese Datei ist zu groß für den Import (über {size} MB)."
+
+#: nostr/imports/intake.py:54
+#: nostr/ui/feeds_panel.py:857
+msgid "That ZIP doesn't look like a Medium or Substack export, or it has no published posts."
+msgstr "Dieses ZIP sieht nicht nach einem Medium- oder Substack-Export aus oder enthält keine veröffentlichten Beiträge."
+
+#: nostr/imports/intake.py:48
+msgid "Feed"
+msgstr "Feed"
+
+#: nostr/imports/intake.py:48
+msgid "Nostr author"
+msgstr "Nostr-Autor"
+
+#: nostr/imports/intake.py:48
+msgid "Collection"
+msgstr "Sammlung"
+
+#: nostr/imports/intake.py:49
+msgid "Single post"
+msgstr "Einzelner Beitrag"
+
+#: nostr/imports/intake.py:121
+#: nostr/ui/feeds_panel.py:809
+#, python-brace-format
+msgid "Couldn't read that file: {error}"
+msgstr "Diese Datei konnte nicht gelesen werden: {error}"
+
 #: nostr/imports/jobs.py:65
 msgid "No relay accepted the draft yet. Try again to send it."
 msgstr "Noch kein Relay hat den Entwurf angenommen. Versuche es noch einmal, um ihn zu senden."
@@ -3477,58 +3514,66 @@ msgstr "sie ist keine Liste von Quellen"
 msgid "Couldn't reach the signer to sync feeds: {reason}"
 msgstr "Der Signer ist für den Abgleich der Feeds nicht erreichbar: {reason}"
 
-#: nostr/imports/workspace.py:48
+#: nostr/imports/workspace.py:49
 msgid "Importing"
 msgstr "Wird importiert"
 
-#: nostr/imports/workspace.py:49
+#: nostr/imports/workspace.py:50
 #: nostr/ui/imports_window.py:129
 #: nostr/ui/imports_window.py:515
 msgid "Imported"
 msgstr "Importiert"
 
-#: nostr/imports/workspace.py:50
+#: nostr/imports/workspace.py:51
 #: nostr/ui/imports_window.py:130
 #: nostr/ui/imports_window.py:515
 msgid "Skipped"
 msgstr "Übersprungen"
 
-#: nostr/imports/workspace.py:51
+#: nostr/imports/workspace.py:52
 #: nostr/ui/media_library_dialog.py:1934
 #: nostr/ui/publish_copy_dialog.py:91
 msgid "Failed"
 msgstr "Fehlgeschlagen"
 
-#: nostr/imports/workspace.py:219
-msgid "Just now"
-msgstr "Gerade eben"
-
-#: nostr/imports/workspace.py:228
-msgid "Yesterday"
-msgstr "Gestern"
-
-#: nostr/imports/workspace.py:241
+#: nostr/imports/workspace.py:247
 #, python-brace-format
 msgid "{count} of {total} selected"
 msgid_plural "{count} of {total} selected"
 msgstr[0] "{count} von {total} ausgewählt"
 msgstr[1] "{count} von {total} ausgewählt"
 
-#: nostr/imports/workspace.py:229
+#: nostr/imports/workspace.py:225
+msgid "just now"
+msgstr "gerade eben"
+
+#: nostr/imports/workspace.py:225
+msgid "Just now"
+msgstr "Gerade eben"
+
+#: nostr/imports/workspace.py:234
+msgid "yesterday"
+msgstr "gestern"
+
+#: nostr/imports/workspace.py:234
+msgid "Yesterday"
+msgstr "Gestern"
+
+#: nostr/imports/workspace.py:235
 #, python-brace-format
 msgid "{n} day ago"
 msgid_plural "{n} days ago"
 msgstr[0] "vor {n} Tag"
 msgstr[1] "vor {n} Tagen"
 
-#: nostr/imports/workspace.py:222
+#: nostr/imports/workspace.py:228
 #, python-brace-format
 msgid "{n} min ago"
 msgid_plural "{n} min ago"
 msgstr[0] "vor {n} Min."
 msgstr[1] "vor {n} Min."
 
-#: nostr/imports/workspace.py:225
+#: nostr/imports/workspace.py:231
 #, python-brace-format
 msgid "{n} h ago"
 msgid_plural "{n} h ago"
@@ -4984,10 +5029,6 @@ msgstr "Empfohlen"
 msgid "Importer is not wired up yet."
 msgstr "Der Import ist noch nicht eingerichtet."
 
-#: nostr/ui/feeds_panel.py:857
-msgid "That ZIP doesn't look like a Medium or Substack export, or it has no published posts."
-msgstr "Dieses ZIP sieht nicht nach einem Medium- oder Substack-Export aus oder enthält keine veröffentlichten Beiträge."
-
 #: nostr/ui/feeds_panel.py:1400
 msgid "Done. Nothing to import."
 msgstr "Fertig. Nichts zu importieren."
@@ -4996,11 +5037,6 @@ msgstr "Fertig. Nichts zu importieren."
 #, python-brace-format
 msgid "Scope: {name}"
 msgstr "Umfang: {name}"
-
-#: nostr/ui/feeds_panel.py:813
-#, python-brace-format
-msgid "That file is too large to import (over {size} MB)."
-msgstr "Diese Datei ist zu groß für den Import (über {size} MB)."
 
 #: nostr/ui/feeds_panel.py:893
 #, python-brace-format
@@ -5038,11 +5074,6 @@ msgid "Done. {succeeded}/{attempted} item(s) imported as drafts."
 msgid_plural "Done. {succeeded}/{attempted} item(s) imported as drafts."
 msgstr[0] "Fertig. {succeeded}/{attempted} Beitrag als Entwurf importiert."
 msgstr[1] "Fertig. {succeeded}/{attempted} Beiträge als Entwürfe importiert."
-
-#: nostr/ui/feeds_panel.py:809
-#, python-brace-format
-msgid "Couldn't read that file: {error}"
-msgstr "Diese Datei konnte nicht gelesen werden: {error}"
 
 #: nostr/ui/feeds_panel.py:877
 #, python-brace-format

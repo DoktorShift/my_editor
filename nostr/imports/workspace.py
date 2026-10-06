@@ -10,7 +10,8 @@ does the same):
   (inbox_store.py): the Inbox, Older Posts, Imported, Skipped, and a
   source's own new and older posts;
 - posts held only while they are shown (a :class:`Collection`): a source
-  that is read when it is opened, such as a Nostr author or a sitemap.
+  that is read when it is opened, such as a Nostr author or a sitemap,
+  or a file or a link opened to import once.
 
 It also holds the rules the window's parts share: which list is shown
 (:class:`Scope`), which posts an action applies to (Mail's rule: the
@@ -116,10 +117,12 @@ def post_from_item(item: FeedItem, *, collection: str, source_key: str = "",
 
 @dataclass
 class Collection:
-    """Posts held while they are shown: a source read when it is opened."""
+    """Posts held while they are shown: a source read when it is opened
+    ("manual"), or a file or a link opened to import once ("file",
+    "link")."""
 
     id: str
-    kind: str                   # "manual"
+    kind: str                   # "manual" | "file" | "link"
     label: str
     source_url: str = ""
     source_key: str = ""
@@ -207,16 +210,19 @@ def state_word(post: Post, *, importing: bool = False, failed: bool = False) -> 
     return ""
 
 
-def date_text(timestamp: int, *, now: Optional[float] = None) -> str:
+def date_text(timestamp: int, *, now: Optional[float] = None,
+              in_sentence: bool = False) -> str:
     """"2 h ago", "Yesterday", "Oct 3" or "Oct 3, 2025": relative under six
-    days (STANDUP's rule), the year only when it is not this one."""
+    days (STANDUP's rule), the year only when it is not this one.
+    ``in_sentence`` gives the words that go inside a sentence ("newest
+    yesterday")."""
     if not timestamp:
         return ""
     now = time.time() if now is None else now
     age = int(now) - int(timestamp)
     if 0 <= age < RELATIVE_SECONDS:
         if age < 60:
-            return _("Just now")
+            return _("just now") if in_sentence else _("Just now")
         if age < 3600:
             minutes = age // 60
             return ngettext("{n} min ago", "{n} min ago", minutes).format(n=minutes)
@@ -225,7 +231,7 @@ def date_text(timestamp: int, *, now: Optional[float] = None) -> str:
             return ngettext("{n} h ago", "{n} h ago", hours).format(n=hours)
         days = age // (24 * 3600)
         if days == 1:
-            return _("Yesterday")
+            return _("yesterday") if in_sentence else _("Yesterday")
         return ngettext("{n} day ago", "{n} days ago", days).format(n=days)
     day = datetime.fromtimestamp(int(timestamp))
     locale = QLocale(i18n.language())
