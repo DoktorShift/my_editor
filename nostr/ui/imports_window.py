@@ -245,6 +245,7 @@ class ImportsWindow(QMainWindow):
         self._scope = Scope(view=View(INBOX))
         self._source_state = NEW
         self._auto_hidden = False
+        self._shown_by_person = False
         self._sheet = None
         self._show_drafts = show_drafts
         # The last skip, for Undo: (source, post, revision) each.
@@ -1169,7 +1170,11 @@ class ImportsWindow(QMainWindow):
     # ------------------------------------------------------------------ #
 
     def _on_sidebar_toggled(self, shown: bool) -> None:
+        # The person's choice: the window never folds the sidebar against
+        # a Show, and showing it in a narrow window makes the window wide
+        # enough for it (the panes' minimum widths ask for that).
         self._auto_hidden = False
+        self._shown_by_person = shown
         self.sidebar.setVisible(shown)
         self._update_sidebar_action()
         self._save()
@@ -1184,12 +1189,18 @@ class ImportsWindow(QMainWindow):
         self.add_button.setIcon(glyph_icon("plus", 18, color))
 
     def resizeEvent(self, event) -> None:
+        """The sidebar folds away when the window is made narrower than
+        NARROW, and comes back when it is made wide again: only when the
+        width crosses NARROW, and never against the person's own Show."""
         super().resizeEvent(event)
-        narrow = self.width() < NARROW
-        if narrow and self.sidebar.isVisible():
+        width, before = self.width(), event.oldSize().width()
+        if before < 0:
+            return
+        if (width < NARROW <= before and self.sidebar.isVisible()
+                and not self._shown_by_person):
             self._auto_hidden = True
             self._set_sidebar(False)
-        elif not narrow and self._auto_hidden:
+        elif width >= NARROW > before and self._auto_hidden:
             self._auto_hidden = False
             self._set_sidebar(True)
 

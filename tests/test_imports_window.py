@@ -249,6 +249,26 @@ class TestLayout:
         settle()
         assert window.sidebar.isVisible()
 
+    def test_show_sidebar_works_in_a_narrow_window(self, window):
+        """Review H3: below 852 px the window grew for the sidebar and
+        folded it away again at once, so Show Sidebar never worked."""
+        window.resize(1200, 700)
+        settle()
+        window.resize(700, 700)
+        settle()
+        assert not window.sidebar.isVisible()
+        window.act_sidebar.trigger()
+        settle()
+        window.resize(window.width(), 700)
+        settle()
+        assert window.sidebar.isVisible()
+        assert window.act_sidebar.isChecked()
+        assert window.act_sidebar.text() == "Hide Sidebar"
+        # Making the window narrower does not take it away either.
+        window.resize(860, 700)
+        settle()
+        assert window.sidebar.isVisible()
+
     def test_hiding_the_sidebar_is_remembered(self, window):
         window.act_sidebar.trigger()
         assert not window.sidebar.isVisible()
