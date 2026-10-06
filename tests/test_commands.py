@@ -122,6 +122,25 @@ def test_the_shortcut_list_comes_from_the_commands(window):
     assert ("Nostr", [("Ctrl+Shift+D", "Drafts")]) not in registry.shortcut_groups(nostr=False)
 
 
+def test_a_standard_key_answers_to_every_combination_of_the_platform(window):
+    registry = CommandRegistry(window)
+    action = registry.add(Command("search.next", "Find Next", commands.SEARCH,
+                                  QKeySequence.StandardKey.FindNext))
+    bound = {s.toString(QKeySequence.SequenceFormat.PortableText) for s in action.shortcuts()}
+    expected = set(commands.all_key_texts(QKeySequence.StandardKey.FindNext))
+    assert expected and bound == expected
+    # Every one of them is taken, not only the first.
+    for keys in expected:
+        with pytest.raises(ValueError):
+            registry.add(Command(f"other.{keys}", "Other", commands.FILE, keys))
+
+
+def test_platform_keys_follow_each_platform_convention():
+    assert commands.platform_keys("Ctrl+Alt+1", "Ctrl+1", platform="darwin") == "Ctrl+Alt+1"
+    assert commands.platform_keys("Ctrl+Alt+1", "Ctrl+1", platform="win32") == "Ctrl+1"
+    assert commands.platform_keys("Ctrl+Alt+1", "Ctrl+1", platform="linux") == "Ctrl+1"
+
+
 def test_standard_keys_are_written_out():
     assert key_text(QKeySequence.StandardKey.Save) == "Ctrl+S"
     assert key_text(None) == ""

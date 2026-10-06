@@ -22,6 +22,7 @@ that should only show them once Nostr is in use asks
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
@@ -57,6 +58,30 @@ class Command:
     # The words the Keyboard Shortcuts window uses, when they differ from
     # the menu title ("Toggle theme" for "Toggle Dark/Light Theme").
     listed_as: str = ""
+
+
+def platform_keys(mac: ShortcutSpec, other: ShortcutSpec, *,
+                  platform: Optional[str] = None) -> ShortcutSpec:
+    """The shortcut for this computer: ``mac`` on a Mac, ``other`` elsewhere.
+
+    For the few commands whose keys differ between the platforms' own
+    conventions (Apple's Human Interface Guidelines on a Mac; on Windows
+    and Linux, Ctrl+Alt is AltGr, which types characters on many
+    keyboards). Qt writes Command as Ctrl and Option as Alt on a Mac, so
+    ``mac`` is "Ctrl+Alt+1" for Option-Command-1.
+    """
+    return mac if (platform or sys.platform) == "darwin" else other
+
+
+def all_key_texts(shortcut: ShortcutSpec) -> List[str]:
+    """Every key combination a shortcut answers to: a standard key (Copy,
+    Find Next) has the platform's whole set, anything else one."""
+    if isinstance(shortcut, QKeySequence.StandardKey):
+        texts = [s.toString(QKeySequence.SequenceFormat.PortableText)
+                 for s in QKeySequence.keyBindings(shortcut)]
+        return [t for t in texts if t]
+    keys = key_text(shortcut)
+    return [keys] if keys else []
 
 
 def key_text(shortcut: ShortcutSpec) -> str:
@@ -103,13 +128,18 @@ class CommandRegistry(QObject):
             raise ValueError(f"command {command.id!r} is already registered")
         if command.group not in GROUP_ORDER:
             raise ValueError(f"command {command.id!r} has an unknown group {command.group!r}")
-        keys = key_text(command.shortcut)
-        if keys and keys in self._by_keys:
-            raise ValueError(f"{keys} is taken by {self._by_keys[keys]!r}; "
-                             f"{command.id!r} cannot have it too")
+        all_keys = all_key_texts(command.shortcut)
+        for keys in all_keys:
+            if keys in self._by_keys:
+                raise ValueError(f"{keys} is taken by {self._by_keys[keys]!r}; "
+                                 f"{command.id!r} cannot have it too")
         action = QAction(command.title, self._window)
         action.setObjectName(command.id)
-        if command.shortcut is not None:
+        if isinstance(command.shortcut, QKeySequence.StandardKey):
+            # Every combination the platform uses for it (F3 and Command-G
+            # for Find Next on a Mac), not only the first.
+            action.setShortcuts(command.shortcut)
+        elif command.shortcut is not None:
             action.setShortcut(command.shortcut if isinstance(command.shortcut, QKeySequence)
                                else QKeySequence(command.shortcut))
         if command.checkable:
@@ -125,7 +155,7 @@ class CommandRegistry(QObject):
         # Window-wide, so the shortcut works without the menu bar.
         self._window.addAction(action)
         self._entries[command.id] = _Entry(command, action, hidden_from_list=not listed)
-        if keys:
+        for keys in all_keys:
             self._by_keys[keys] = command.id
         return action
 
