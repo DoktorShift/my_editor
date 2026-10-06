@@ -196,41 +196,49 @@ msgstr "Link entfernen"
 msgid "Update Link"
 msgstr "Link aktualisieren"
 
-#: link_url.py:39
+#: link_url.py:44
 msgid "Enter a web address or an email address."
 msgstr "Gib eine Webadresse oder eine E-Mail-Adresse ein."
 
-#: link_url.py:38
+#: link_url.py:43
 msgid "Enter a web address, an email address or a Nostr link."
 msgstr "Gib eine Webadresse, eine E-Mail-Adresse oder einen Nostr-Link ein."
 
-#: link_url.py:53
+#: link_url.py:52
+msgid "An address with a name or password in it cannot be a link."
+msgstr "Eine Adresse mit Name oder Passwort darin kann kein Link sein."
+
+#: link_url.py:58
+msgid "That address is missing the name of the website."
+msgstr "Dieser Adresse fehlt der Name der Website."
+
+#: link_url.py:56
+msgid "That address has a port number that cannot be."
+msgstr "Diese Adresse hat eine Portnummer, die es nicht geben kann."
+
+#: link_url.py:73
 msgid "An address has no spaces."
 msgstr "Eine Adresse enthält keine Leerzeichen."
 
-#: link_url.py:57
+#: link_url.py:77
 msgid "Name the place in this document after the #."
 msgstr "Gib nach dem # die Stelle in diesem Dokument an."
 
-#: link_url.py:78
+#: link_url.py:96
 msgid "Only web addresses and email addresses can be links."
 msgstr "Nur Webadressen und E-Mail-Adressen können Links sein."
 
-#: link_url.py:73
+#: link_url.py:91
 msgid "That is not a Nostr link."
 msgstr "Das ist kein Nostr-Link."
 
-#: link_url.py:75
+#: link_url.py:93
 msgid "Links that run code or open files on a computer are not allowed."
 msgstr "Links, die Code ausführen oder Dateien auf einem Computer öffnen, sind nicht erlaubt."
 
-#: link_url.py:77
+#: link_url.py:95
 msgid "Only web addresses, email addresses and Nostr links can be links."
 msgstr "Nur Webadressen, E-Mail-Adressen und Nostr-Links können Links sein."
-
-#: link_url.py:70
-msgid "That address is missing the name of the website."
-msgstr "Dieser Adresse fehlt der Name der Website."
 
 #: main_window.py:203
 msgid "Your document is still open. Use Save As to choose another place."

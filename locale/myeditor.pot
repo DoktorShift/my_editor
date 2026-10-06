@@ -196,40 +196,48 @@ msgstr ""
 msgid "Update Link"
 msgstr ""
 
-#: link_url.py:39
+#: link_url.py:44
 msgid "Enter a web address or an email address."
 msgstr ""
 
-#: link_url.py:38
+#: link_url.py:43
 msgid "Enter a web address, an email address or a Nostr link."
 msgstr ""
 
-#: link_url.py:53
-msgid "An address has no spaces."
+#: link_url.py:52
+msgid "An address with a name or password in it cannot be a link."
 msgstr ""
 
-#: link_url.py:57
-msgid "Name the place in this document after the #."
+#: link_url.py:58
+msgid "That address is missing the name of the website."
 msgstr ""
 
-#: link_url.py:78
-msgid "Only web addresses and email addresses can be links."
+#: link_url.py:56
+msgid "That address has a port number that cannot be."
 msgstr ""
 
 #: link_url.py:73
-msgid "That is not a Nostr link."
-msgstr ""
-
-#: link_url.py:75
-msgid "Links that run code or open files on a computer are not allowed."
+msgid "An address has no spaces."
 msgstr ""
 
 #: link_url.py:77
-msgid "Only web addresses, email addresses and Nostr links can be links."
+msgid "Name the place in this document after the #."
 msgstr ""
 
-#: link_url.py:70
-msgid "That address is missing the name of the website."
+#: link_url.py:96
+msgid "Only web addresses and email addresses can be links."
+msgstr ""
+
+#: link_url.py:91
+msgid "That is not a Nostr link."
+msgstr ""
+
+#: link_url.py:93
+msgid "Links that run code or open files on a computer are not allowed."
+msgstr ""
+
+#: link_url.py:95
+msgid "Only web addresses, email addresses and Nostr links can be links."
 msgstr ""
 
 #: main_window.py:203
