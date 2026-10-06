@@ -651,7 +651,7 @@ def test_menu_commands_use_title_style_capitalisation():
         "Retry Decryption", "Open in New Tab", "Publish…",
         "Copy Event ID", "Delete Draft",
     ):
-        assert f'QAction("{command}"' in source
+        assert f'QAction(_("{command}")' in source
 
 
 def test_every_chrome_control_is_reachable_by_keyboard():

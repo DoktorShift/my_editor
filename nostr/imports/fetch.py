@@ -38,6 +38,7 @@ from PySide6.QtNetwork import (
 )
 
 import url_safety
+from i18n import _
 from image_safety import sniff_image_mime
 
 from .errors import ERROR_CODES, SourceError
@@ -47,9 +48,9 @@ _USER_AGENT = b"my-editor-rss/1"
 _TRANSFER_TIMEOUT_MS = 30 * 1000          # 30s of idle time
 _MAX_BODY_BYTES = 16 * 1024 * 1024        # 16 MiB hard cap on a single body
 _MAX_REDIRECTS = 8                        # slash-fix / https-upgrade / www hops
-_OVERSIZE_MESSAGE = (
-    f"Feed exceeds the {_MAX_BODY_BYTES // (1024 * 1024)} MiB size limit"
-)
+# Shown as it is: the importer has no friendlier copy for TOO_LARGE.
+_OVERSIZE_MESSAGE = _("Feed exceeds the {size} MiB size limit").format(
+    size=_MAX_BODY_BYTES // (1024 * 1024))
 
 # Ceiling for a rehosted image, before the destination server's own cap
 # narrows it further. A feed body should never carry anything near this.
@@ -58,9 +59,9 @@ _MAX_BLOB_BYTES = 25 * 1024 * 1024
 _BLOB_USER_AGENT = b"my-editor-rehost/1"
 # Short copy: these land in the per-image row of the image review
 # dialog, next to the filename.
-_BLOB_UNSAFE_URL = "URL was not allowed"
-_BLOB_OVERSIZE = "Image is too large to rehost"
-_BLOB_EMPTY = "Image was empty"
+_BLOB_UNSAFE_URL = _("URL was not allowed")
+_BLOB_OVERSIZE = _("Image is too large to rehost")
+_BLOB_EMPTY = _("Image was empty")
 
 _CHARSET_FROM_CONTENT_TYPE = re.compile(
     r"charset\s*=\s*([A-Za-z0-9_\-.:]+)", re.IGNORECASE
@@ -96,7 +97,7 @@ class SourceFetcher(QObject):
         qurl = QUrl(url)
         if not qurl.isValid() or qurl.scheme() not in ("http", "https"):
             on_failure(SourceError(
-                "Feed URL must be http(s)", ERROR_CODES.FETCH_ERROR))
+                _("Feed URL must be http(s)"), ERROR_CODES.FETCH_ERROR))
             return
 
         request = QNetworkRequest(qurl)
@@ -142,7 +143,7 @@ class SourceFetcher(QObject):
                 return
             if reply.error() != QNetworkReply.NoError:
                 on_failure(SourceError(
-                    reply.errorString() or "network error",
+                    reply.errorString() or _("network error"),
                     ERROR_CODES.FETCH_ERROR,
                 ))
                 return
@@ -254,7 +255,7 @@ class BlobFetcher(QObject):
                 on_failure(_BLOB_OVERSIZE)
                 return
             if reply.error() != QNetworkReply.NoError:
-                on_failure("Could not download the image")
+                on_failure(_("Could not download the image"))
                 return
             final = reply.url().toString()
             if final and not url_safety.is_safe_mirror_source(final):

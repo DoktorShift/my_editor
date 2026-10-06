@@ -66,6 +66,8 @@ from typing import Callable, Iterable, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
+from i18n import _, ngettext
+
 from ..blossom import hashes
 from ..outbox import RelayDirectory
 from ..outbox.policy import retry_relays
@@ -277,11 +279,10 @@ class ImportItemsJob(QObject):
             return
         item = self._items[self._index]
         self._attempted += 1
-        title_for_ui = item.title or item.link or "(untitled)"
+        title_for_ui = item.title or item.link or _("(untitled)")
         self.item_started.emit(self._index, title_for_ui)
-        self._emit_status(
-            f"Item {self._index + 1}/{len(self._items)}: {title_for_ui}"
-        )
+        self._emit_status(_("Item {n}/{total}: {title}").format(
+            n=self._index + 1, total=len(self._items), title=title_for_ui))
         # HTML-to-Markdown conversion is the CPU-heavy step; keep it off
         # the UI thread.
         self._run_blocking(
@@ -300,7 +301,7 @@ class ImportItemsJob(QObject):
     def _on_template_failed(self, exc: BaseException) -> None:
         if self._cancelled:
             return
-        self._record_failure(f"Could not normalise item: {exc}")
+        self._record_failure(_("Could not normalise item: {error}").format(error=exc))
 
     def _on_template_ready(
         self,
@@ -385,7 +386,7 @@ class ImportItemsJob(QObject):
     ) -> None:
         """Fetch chapters (best-effort) and render the episode body."""
         self.item_extracting.emit(self._index, title_for_ui)
-        self._emit_status(f"Fetching chapters for '{title_for_ui}'…")
+        self._emit_status(_("Fetching chapters for '{title}'…").format(title=title_for_ui))
 
         def _with_chapters(chapters) -> None:
             if self._cancelled:
@@ -422,7 +423,7 @@ class ImportItemsJob(QObject):
         the draft always ships."""
         if not self._cancelled:
             self.item_resolving_from_nostr.emit(self._index, title_for_ui)
-        self._emit_status(f"Resolving '{title_for_ui}' from Nostr…")
+        self._emit_status(_("Resolving '{title}' from Nostr…").format(title=title_for_ui))
 
         def _fetch_from(relays) -> None:
             if self._cancelled:
@@ -505,7 +506,7 @@ class ImportItemsJob(QObject):
             self._publish_template_as_draft(template)
             return
         self.item_extracting.emit(self._index, title_for_ui)
-        self._emit_status(f"Fetching full text for '{title_for_ui}'…")
+        self._emit_status(_("Fetching full text for '{title}'…").format(title=title_for_ui))
         self._fetcher.fetch(
             item.link,
             on_success=lambda body, i=item, t=template: (
@@ -579,20 +580,24 @@ class ImportItemsJob(QObject):
                 progress.total,
             )
             done = counts["mirrored"] + counts["failed"]
-            self._emit_status(
-                f"Mirroring images {min(done + 1, progress.total)}/"
-                f"{progress.total}…"
-            )
+            self._emit_status(_("Mirroring images {n}/{total}…").format(
+                n=min(done + 1, progress.total), total=progress.total))
 
         def _on_done(outcome) -> None:
             if self._cancelled:
                 return
             if outcome.failed:
                 total = outcome.mirrored + len(outcome.failed)
-                self._emit_status(
-                    f"{len(outcome.failed)} of {total} image(s) couldn't be "
-                    "mirrored; originals kept."
+                # "image(s)" in English for any count; other languages
+                # get the form their grammar needs.
+                text = ngettext(
+                    "{failed} of {total} image(s) couldn't be mirrored; "
+                    "originals kept.",
+                    "{failed} of {total} image(s) couldn't be mirrored; "
+                    "originals kept.",
+                    total,
                 )
+                self._emit_status(text.format(failed=len(outcome.failed), total=total))
             # The cover follows the body only when it IS an image from
             # the body, because that rewrite is the one the user already
             # approved in the review dialog. A cover the user never saw
@@ -650,7 +655,7 @@ class ImportItemsJob(QObject):
                 media=media,
             )
         except ValueError as exc:
-            self._record_failure(f"Could not build article: {exc}")
+            self._record_failure(_("Could not build article: {error}").format(error=exc))
             return
 
         try:
@@ -665,7 +670,7 @@ class ImportItemsJob(QObject):
                 parent=self,
             )
         except ValueError as exc:
-            self._record_failure(f"Could not start draft job: {exc}")
+            self._record_failure(_("Could not start draft job: {error}").format(error=exc))
             return
 
         self._current_job = job

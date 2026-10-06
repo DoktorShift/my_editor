@@ -35,6 +35,8 @@ from __future__ import annotations
 
 from typing import List, Optional
 
+from i18n import _
+
 from ...rss.discovery import (
     candidate_feed_urls,
     extract_feeds_from_html,
@@ -80,7 +82,8 @@ def _resolve(input_: ResolveInput, ctx: ResolveContext) -> None:
                 ctx.on_failure(SourceError(str(exc), ERROR_CODES.NOT_A_FEED))
             else:
                 ctx.on_failure(SourceError(
-                    f"Unexpected parse error: {exc}", ERROR_CODES.UNKNOWN))
+                    _("Unexpected parse error: {error}").format(error=exc),
+                    ERROR_CODES.UNKNOWN))
 
         ctx.blocking(lambda: _parse_feed_enriched(body), _parsed, _parse_failed)
         return
@@ -158,7 +161,8 @@ class _Discovery:
             self._try_next()
             return
         self._ctx.on_failure(SourceError(
-            f"Unexpected parse error: {exc}", ERROR_CODES.UNKNOWN))
+            _("Unexpected parse error: {error}").format(error=exc),
+            ERROR_CODES.UNKNOWN))
 
     def _on_body(self, url: str, body: str) -> None:
         if self._ctx.is_cancelled():
@@ -208,7 +212,7 @@ class _Discovery:
         # Nothing was ever fetched: surface the transport reason.
         self._ctx.on_failure(
             self._first_fetch_error
-            or SourceError("No URL could be fetched", ERROR_CODES.FETCH_ERROR)
+            or SourceError(_("No URL could be fetched"), ERROR_CODES.FETCH_ERROR)
         )
 
     def _try_sitemap_fallback(self) -> None:

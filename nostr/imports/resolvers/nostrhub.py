@@ -20,6 +20,8 @@ from __future__ import annotations
 import re
 from typing import List
 
+from i18n import _
+
 from ..constants import NOSTR_MAX_ARTICLES, NOSTRHUB_NIP_KIND, NOSTRHUB_RELAYS
 from ..errors import ERROR_CODES, SourceError
 from ..registry import ResolveContext, ResolveInput, ResolveResult, SourceResolver
@@ -103,7 +105,10 @@ def _build_feed(events: list, *, author_name: str, source_url: str) -> Feed:
         key=lambda it: it.published_at or 0,
         reverse=True,
     )
-    title = f"{author_name} · NostrHub NIPs" if author_name else "NostrHub NIPs"
+    title = (
+        _("{name} · NostrHub NIPs").format(name=author_name) if author_name
+        else _("NostrHub NIPs")
+    )
     return Feed(format="nostr", title=title, link=source_url,
                 description=None, items=tuple(items))
 

@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from typing import Optional
 
+from i18n import _
+
 
 class ERROR_CODES:
     """Namespace of stable error-code strings. Not an enum on purpose:
@@ -68,53 +70,53 @@ class SourceError(Exception):
 # always a next step where one exists. Codes absent here fall back to
 # the error's own message.
 _FRIENDLY = {
-    ERROR_CODES.NO_FEED_FOUND: (
+    ERROR_CODES.NO_FEED_FOUND: _(
         "No feed found at this site. "
         "Try pasting the feed URL directly, "
         "or look for an RSS / Atom link in the page footer."
     ),
-    ERROR_CODES.NOT_A_FEED: (
+    ERROR_CODES.NOT_A_FEED: _(
         "That response isn't a feed. Expected RSS, Atom, or JSON Feed."
     ),
-    ERROR_CODES.UNSUPPORTED_SOURCE: (
+    ERROR_CODES.UNSUPPORTED_SOURCE: _(
         "This kind of source can't be imported yet."
     ),
-    ERROR_CODES.EMPTY_RESPONSE: (
+    ERROR_CODES.EMPTY_RESPONSE: _(
         "The server returned an empty response."
     ),
-    ERROR_CODES.NOSTR_INVALID: (
+    ERROR_CODES.NOSTR_INVALID: _(
         "That isn't a recognisable Nostr address."
     ),
-    ERROR_CODES.NOSTR_NOT_FOUND: (
+    ERROR_CODES.NOSTR_NOT_FOUND: _(
         "That Nostr event was not found on the relays."
     ),
-    ERROR_CODES.NIP05_NOT_FOUND: (
+    ERROR_CODES.NIP05_NOT_FOUND: _(
         "No Nostr profile is published at that address."
     ),
-    ERROR_CODES.NO_RELAY_ACCESS: (
+    ERROR_CODES.NO_RELAY_ACCESS: _(
         "Importing from Nostr needs a relay connection, which isn't "
         "available right now."
     ),
-    ERROR_CODES.WXR_EMPTY: (
+    ERROR_CODES.WXR_EMPTY: _(
         "No published posts or pages were found in that WordPress export."
     ),
-    ERROR_CODES.GHOST_EMPTY: (
+    ERROR_CODES.GHOST_EMPTY: _(
         "No published posts were found in that Ghost export."
     ),
-    ERROR_CODES.ARCHIVE_UNREADABLE: (
+    ERROR_CODES.ARCHIVE_UNREADABLE: _(
         "Couldn't read that archive. Export it again from the "
         "platform and retry."
     ),
-    ERROR_CODES.SITEMAP_EMPTY: (
+    ERROR_CODES.SITEMAP_EMPTY: _(
         "That sitemap had no importable article URLs."
     ),
-    ERROR_CODES.BLUESKY_INVALID: (
+    ERROR_CODES.BLUESKY_INVALID: _(
         "That is not a Bluesky post link."
     ),
-    ERROR_CODES.BLUESKY_NOT_FOUND: (
+    ERROR_CODES.BLUESKY_NOT_FOUND: _(
         "That Bluesky post could not be found."
     ),
-    ERROR_CODES.BLUESKY_NOT_THREAD: (
+    ERROR_CODES.BLUESKY_NOT_THREAD: _(
         "That is a single Bluesky post, not a thread. Only multi-post "
         "threads stitch into an article."
     ),
@@ -129,9 +131,9 @@ def friendly_message(error: SourceError, *, detail: Optional[str] = None) -> str
     else falls back to the error's own message so nothing is swallowed.
     """
     if error.code == ERROR_CODES.FETCH_ERROR:
-        reason = (detail or error.message or "network error").rstrip(".")
-        return f"Couldn't reach that URL: {reason}."
+        reason = (detail or error.message or _("network error")).rstrip(".")
+        return _("Couldn't reach that URL: {reason}.").format(reason=reason)
     mapped = _FRIENDLY.get(error.code)
     if mapped:
         return mapped
-    return error.message or "Something went wrong while importing."
+    return error.message or _("Something went wrong while importing.")

@@ -1,0 +1,1134 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: MyEditor\n"
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: nostr/imports/errors.py:73
+msgid "No feed found at this site. Try pasting the feed URL directly, or look for an RSS / Atom link in the page footer."
+msgstr "Auf dieser Website wurde kein Feed gefunden. Füge die Feed-Adresse direkt ein oder suche im Seitenfuß nach einem RSS- oder Atom-Link."
+
+#: nostr/imports/errors.py:78
+msgid "That response isn't a feed. Expected RSS, Atom, or JSON Feed."
+msgstr "Diese Antwort ist kein Feed. Erwartet wurde RSS, Atom oder JSON Feed."
+
+#: nostr/imports/errors.py:81
+msgid "This kind of source can't be imported yet."
+msgstr "Diese Art von Quelle kann noch nicht importiert werden."
+
+#: nostr/imports/errors.py:84
+msgid "The server returned an empty response."
+msgstr "Der Server hat eine leere Antwort geschickt."
+
+#: nostr/imports/errors.py:87
+msgid "That isn't a recognisable Nostr address."
+msgstr "Diese Nostr-Adresse wurde nicht erkannt."
+
+#: nostr/imports/errors.py:90
+msgid "That Nostr event was not found on the relays."
+msgstr "Dieses Nostr-Event wurde auf den Relays nicht gefunden."
+
+#: nostr/imports/errors.py:93
+msgid "No Nostr profile is published at that address."
+msgstr "Unter dieser Adresse ist kein Nostr-Profil veröffentlicht."
+
+#: nostr/imports/errors.py:96
+msgid "Importing from Nostr needs a relay connection, which isn't available right now."
+msgstr "Für den Import aus Nostr ist eine Verbindung zu einem Relay nötig, die gerade nicht besteht."
+
+#: nostr/imports/errors.py:100
+msgid "No published posts or pages were found in that WordPress export."
+msgstr "In diesem WordPress-Export wurden keine veröffentlichten Beiträge oder Seiten gefunden."
+
+#: nostr/imports/errors.py:103
+msgid "No published posts were found in that Ghost export."
+msgstr "In diesem Ghost-Export wurden keine veröffentlichten Beiträge gefunden."
+
+#: nostr/imports/errors.py:106
+msgid "Couldn't read that archive. Export it again from the platform and retry."
+msgstr "Dieses Archiv konnte nicht gelesen werden. Exportiere es erneut von der Plattform und versuche es noch einmal."
+
+#: nostr/imports/errors.py:110
+msgid "That sitemap had no importable article URLs."
+msgstr "Diese Sitemap enthält keine Artikeladressen, die sich importieren lassen."
+
+#: nostr/imports/errors.py:113
+msgid "That is not a Bluesky post link."
+msgstr "Das ist kein Link zu einem Bluesky-Beitrag."
+
+#: nostr/imports/errors.py:116
+msgid "That Bluesky post could not be found."
+msgstr "Dieser Bluesky-Beitrag wurde nicht gefunden."
+
+#: nostr/imports/errors.py:119
+msgid "That is a single Bluesky post, not a thread. Only multi-post threads stitch into an article."
+msgstr "Das ist ein einzelner Bluesky-Beitrag, kein Thread. Nur Threads aus mehreren Beiträgen werden zu einem Artikel zusammengefügt."
+
+#: nostr/imports/errors.py:139
+msgid "Something went wrong while importing."
+msgstr "Beim Importieren ist etwas schiefgegangen."
+
+#: nostr/imports/errors.py:135
+#, python-brace-format
+msgid "Couldn't reach that URL: {reason}."
+msgstr "Diese Adresse ist nicht erreichbar: {reason}."
+
+#: nostr/imports/errors.py:134
+#: nostr/imports/fetch.py:146
+msgid "network error"
+msgstr "Netzwerkfehler"
+
+#: nostr/imports/fetch.py:62
+#: nostr/imports/images.py:67
+msgid "URL was not allowed"
+msgstr "Adresse nicht erlaubt"
+
+#: nostr/imports/fetch.py:63
+msgid "Image is too large to rehost"
+msgstr "Bild ist zu groß zum Kopieren"
+
+#: nostr/imports/fetch.py:64
+msgid "Image was empty"
+msgstr "Bild war leer"
+
+#: nostr/imports/fetch.py:52
+#, python-brace-format
+msgid "Feed exceeds the {size} MiB size limit"
+msgstr "Der Feed überschreitet die Größengrenze von {size} MiB"
+
+#: nostr/imports/fetch.py:100
+msgid "Feed URL must be http(s)"
+msgstr "Die Feed-Adresse muss mit http oder https beginnen"
+
+#: nostr/imports/fetch.py:258
+msgid "Could not download the image"
+msgstr "Bild konnte nicht heruntergeladen werden"
+
+#: nostr/imports/images.py:266
+msgid "Empty mirror response"
+msgstr "Leere Antwort beim Kopieren"
+
+#: nostr/imports/pipeline.py:282
+#: nostr/ui/feeds_panel.py:139
+msgid "(untitled)"
+msgstr "(ohne Titel)"
+
+#: nostr/imports/pipeline.py:593
+#, python-brace-format
+msgid "{failed} of {total} image(s) couldn't be mirrored; originals kept."
+msgid_plural "{failed} of {total} image(s) couldn't be mirrored; originals kept."
+msgstr[0] "{failed} von {total} Bild nicht kopiert, das Original bleibt verlinkt."
+msgstr[1] "{failed} von {total} Bildern nicht kopiert, die Originale bleiben verlinkt."
+
+#: nostr/imports/pipeline.py:284
+#, python-brace-format
+msgid "Item {n}/{total}: {title}"
+msgstr "Beitrag {n}/{total}: {title}"
+
+#: nostr/imports/pipeline.py:304
+#, python-brace-format
+msgid "Could not normalise item: {error}"
+msgstr "Beitrag konnte nicht aufbereitet werden: {error}"
+
+#: nostr/imports/pipeline.py:389
+#, python-brace-format
+msgid "Fetching chapters for '{title}'…"
+msgstr "Kapitel für „{title}“ werden geladen …"
+
+#: nostr/imports/pipeline.py:426
+#, python-brace-format
+msgid "Resolving '{title}' from Nostr…"
+msgstr "„{title}“ wird aus Nostr geladen …"
+
+#: nostr/imports/pipeline.py:509
+#, python-brace-format
+msgid "Fetching full text for '{title}'…"
+msgstr "Volltext für „{title}“ wird geladen …"
+
+#: nostr/imports/pipeline.py:583
+#, python-brace-format
+msgid "Mirroring images {n}/{total}…"
+msgstr "Bild {n} von {total} wird kopiert …"
+
+#: nostr/imports/pipeline.py:658
+#, python-brace-format
+msgid "Could not build article: {error}"
+msgstr "Artikel konnte nicht erstellt werden: {error}"
+
+#: nostr/imports/pipeline.py:673
+#, python-brace-format
+msgid "Could not start draft job: {error}"
+msgstr "Entwurf konnte nicht gespeichert werden: {error}"
+
+#: nostr/imports/preview.py:46
+msgid "New since last import"
+msgstr "Neu seit dem letzten Import"
+
+#: nostr/imports/preview.py:40
+#: nostr/imports/preview.py:41
+#: nostr/imports/preview.py:42
+#, python-brace-format
+msgid "Newest {n}"
+msgstr "Neueste {n}"
+
+#: nostr/imports/preview.py:43
+#, python-brace-format
+msgid "All (up to {n})"
+msgstr "Alle (bis {n})"
+
+#: nostr/imports/resolvers/bluesky.py:50
+#, python-brace-format
+msgid "Bluesky thread by {name} ({n} post)"
+msgid_plural "Bluesky thread by {name} ({n} posts)"
+msgstr[0] "Bluesky-Thread von {name} ({n} Beitrag)"
+msgstr[1] "Bluesky-Thread von {name} ({n} Beiträge)"
+
+#: nostr/imports/resolvers/ghost.py:41
+#: nostr/imports/sources/ghost.py:110
+msgid "Ghost export"
+msgstr "Ghost-Export"
+
+#: nostr/imports/resolvers/ghost.py:53
+#, python-brace-format
+msgid "Could not read that Ghost export: {error}"
+msgstr "Dieser Ghost-Export konnte nicht gelesen werden: {error}"
+
+#: nostr/imports/resolvers/mdx.py:244
+msgid "That GitHub path is not a folder"
+msgstr "Dieser GitHub-Pfad ist kein Ordner"
+
+#: nostr/imports/resolvers/mdx.py:257
+msgid "No .md or .mdx files in that folder"
+msgstr "In diesem Ordner gibt es keine .md- oder .mdx-Dateien"
+
+#: nostr/imports/resolvers/mdx.py:236
+msgid "GitHub returned an unexpected folder listing"
+msgstr "GitHub hat eine unerwartete Ordnerliste geliefert"
+
+#: nostr/imports/resolvers/mdx.py:242
+#, python-brace-format
+msgid "GitHub: {message}"
+msgstr "GitHub: {message}"
+
+#: nostr/imports/resolvers/mdx.py:313
+#, python-brace-format
+msgid "Showing the first {shown} of {total} files"
+msgstr "Die ersten {shown} von {total} Dateien werden angezeigt"
+
+#: nostr/imports/resolvers/mdx.py:204
+#, python-brace-format
+msgid "Could not read that document: {error}"
+msgstr "Dieses Dokument konnte nicht gelesen werden: {error}"
+
+#: nostr/imports/resolvers/mdx.py:299
+#, python-brace-format
+msgid "Could not convert that folder: {error}"
+msgstr "Dieser Ordner konnte nicht umgewandelt werden: {error}"
+
+#: nostr/imports/resolvers/nostr.py:218
+msgid "Nostr articles"
+msgstr "Nostr-Artikel"
+
+#: nostr/imports/resolvers/nostr.py:217
+#, python-brace-format
+msgid "{name} · Articles"
+msgstr "{name} · Artikel"
+
+#: nostr/imports/resolvers/nostrhub.py:110
+msgid "NostrHub NIPs"
+msgstr "NostrHub-NIPs"
+
+#: nostr/imports/resolvers/nostrhub.py:109
+#, python-brace-format
+msgid "{name} · NostrHub NIPs"
+msgstr "{name} · NostrHub-NIPs"
+
+#: nostr/imports/resolvers/rss.py:215
+msgid "No URL could be fetched"
+msgstr "Keine Adresse konnte geladen werden"
+
+#: nostr/imports/resolvers/rss.py:164
+#: nostr/imports/resolvers/rss.py:85
+#, python-brace-format
+msgid "Unexpected parse error: {error}"
+msgstr "Unerwarteter Fehler beim Lesen: {error}"
+
+#: nostr/imports/resolvers/sitemap.py:52
+msgid "Sitemap"
+msgstr "Sitemap"
+
+#: nostr/imports/resolvers/sitemap.py:52
+#, python-brace-format
+msgid "{host} · sitemap"
+msgstr "{host} · Sitemap"
+
+#: nostr/imports/resolvers/wxr.py:43
+msgid "WordPress export"
+msgstr "WordPress-Export"
+
+#: nostr/imports/resolvers/wxr.py:56
+#, python-brace-format
+msgid "Could not read that WordPress export: {error}"
+msgstr "Dieser WordPress-Export konnte nicht gelesen werden: {error}"
+
+#: nostr/imports/sources/archive.py:242
+msgid "Substack export"
+msgstr "Substack-Export"
+
+#: nostr/imports/sources/archive.py:242
+msgid "Medium export"
+msgstr "Medium-Export"
+
+#: nostr/imports/subscriptions.py:304
+msgid "Syncing feed subscriptions…"
+msgstr "Feed-Abonnements werden abgeglichen …"
+
+#: nostr/imports/subscriptions.py:420
+msgid "Feed subscriptions saved locally; no relay accepted the sync yet."
+msgstr "Feed-Abonnements lokal gespeichert, aber noch kein Relay hat den Abgleich angenommen."
+
+#: nostr/imports/subscriptions.py:383
+#, python-brace-format
+msgid "Couldn't sync feed subscriptions: {reason}"
+msgstr "Feed-Abonnements konnten nicht abgeglichen werden: {reason}"
+
+#: nostr/imports/subscriptions.py:362
+#, python-brace-format
+msgid "Couldn't reach the signer to sync feeds: {reason}"
+msgstr "Der Signer ist für den Abgleich der Feeds nicht erreichbar: {reason}"
+
+#: nostr/imports/subscriptions.py:336
+#, python-brace-format
+msgid "Couldn't decrypt the synced feed list: {reason}"
+msgstr "Die abgeglichene Feed-Liste konnte nicht entschlüsselt werden: {reason}"
+
+#: nostr/rss/dtag.py:43
+msgid "Cannot derive identifier: item has no guid, link, or title"
+msgstr "Keine Kennung möglich: Der Beitrag hat weder GUID noch Link noch Titel"
+
+#: nostr/ui/drafts_panel.py:360
+msgid "Drafts"
+msgstr "Entwürfe"
+
+#: nostr/ui/drafts_panel.py:360
+msgid "Feeds"
+msgstr "Feeds"
+
+#: nostr/ui/drafts_panel.py:424
+msgid "now"
+msgstr "jetzt"
+
+#: nostr/ui/drafts_panel.py:460
+msgid "Decrypting…"
+msgstr "Wird entschlüsselt …"
+
+#: nostr/ui/drafts_panel.py:461
+#: nostr/ui/drafts_preview.py:229
+msgid "(no title)"
+msgstr "(ohne Titel)"
+
+#: nostr/ui/drafts_panel.py:471
+#: nostr/ui/drafts_panel.py:507
+msgid "Decrypting"
+msgstr "Wird entschlüsselt"
+
+#: nostr/ui/drafts_panel.py:438
+#, python-brace-format
+msgid "{n}y"
+msgid_plural "{n}y"
+msgstr[0] "{n} J."
+msgstr[1] "{n} J."
+
+#: nostr/ui/drafts_panel.py:473
+#: nostr/ui/drafts_panel.py:509
+msgid "Could not decrypt"
+msgstr "Nicht entschlüsselt"
+
+#: nostr/ui/drafts_panel.py:1039
+msgid "Your saved private drafts"
+msgstr "Deine gespeicherten privaten Entwürfe"
+
+#: nostr/ui/drafts_panel.py:1046
+msgid "Import RSS, Atom, or JSON feeds as private drafts"
+msgstr "RSS-, Atom- oder JSON-Feeds als private Entwürfe importieren"
+
+#: nostr/ui/drafts_panel.py:1077
+msgid "Refresh drafts"
+msgstr "Entwürfe aktualisieren"
+
+#: nostr/ui/drafts_panel.py:1081
+msgid "Close drafts panel"
+msgstr "Seitenleiste „Entwürfe“ schließen"
+
+#: nostr/ui/drafts_panel.py:1132
+msgid "Search drafts…"
+msgstr "Entwürfe durchsuchen"
+
+#: nostr/ui/drafts_panel.py:1133
+msgid "Search drafts"
+msgstr "Entwürfe durchsuchen"
+
+#: nostr/ui/drafts_panel.py:1467
+#, python-brace-format
+msgid "{n} draft could not be decrypted"
+msgid_plural "{n} drafts could not be decrypted"
+msgstr[0] "{n} Entwurf nicht entschlüsselt"
+msgstr[1] "{n} Entwürfe nicht entschlüsselt"
+
+#: nostr/ui/drafts_panel.py:1476
+#, python-brace-format
+msgid "Decrypting {ready} of {total}"
+msgstr "Entschlüsselt: {ready} von {total}"
+
+#: nostr/ui/drafts_panel.py:1547
+#, python-brace-format
+msgid "Press {shortcut} in any tab to save its contents as an encrypted draft on Nostr. Drafts sync to your other devices signed in with the same profile."
+msgstr "Drücke {shortcut} in einem beliebigen Tab, um seinen Inhalt als verschlüsselten Entwurf auf Nostr zu speichern. Entwürfe werden mit deinen anderen Geräten abgeglichen, die mit demselben Profil angemeldet sind."
+
+#: nostr/ui/drafts_panel.py:1914
+msgid "Show Preview"
+msgstr "Vorschau anzeigen"
+
+#: nostr/ui/drafts_panel.py:1935
+msgid "Open in New Tab"
+msgstr "In neuem Tab öffnen"
+
+#: nostr/ui/drafts_panel.py:1940
+msgid "Publish…"
+msgstr "Veröffentlichen …"
+
+#: nostr/ui/drafts_panel.py:1946
+msgid "Copy Event ID"
+msgstr "Event-ID kopieren"
+
+#: nostr/ui/drafts_panel.py:1962
+#, python-brace-format
+msgid "Delete {n} Draft"
+msgid_plural "Delete {n} Drafts"
+msgstr[0] "{n} Entwurf löschen"
+msgstr[1] "{n} Entwürfe löschen"
+
+#: nostr/ui/drafts_panel.py:427
+#, python-brace-format
+msgid "{n}m"
+msgid_plural "{n}m"
+msgstr[0] "{n} Min."
+msgstr[1] "{n} Min."
+
+#: nostr/ui/drafts_panel.py:430
+#, python-brace-format
+msgid "{n}h"
+msgid_plural "{n}h"
+msgstr[0] "{n} Std."
+msgstr[1] "{n} Std."
+
+#: nostr/ui/drafts_panel.py:433
+#, python-brace-format
+msgid "{n}d"
+msgid_plural "{n}d"
+msgstr[0] "{n} T."
+msgstr[1] "{n} T."
+
+#: nostr/ui/drafts_panel.py:436
+#, python-brace-format
+msgid "{n}mo"
+msgid_plural "{n}mo"
+msgstr[0] "{n} Mon."
+msgstr[1] "{n} Mon."
+
+#: nostr/ui/drafts_panel.py:1450
+msgid "Signer cannot decrypt drafts (no NIP-44)"
+msgstr "Dein Signer kann Entwürfe nicht entschlüsseln"
+
+#: nostr/ui/drafts_panel.py:1456
+#: nostr/ui/drafts_panel.py:1530
+msgid "Your signer is not responding"
+msgstr "Dein Signer antwortet nicht"
+
+#: nostr/ui/drafts_panel.py:1510
+msgid "Connect a Nostr profile"
+msgstr "Nostr-Profil verbinden"
+
+#: nostr/ui/drafts_panel.py:1511
+msgid "Drafts are end-to-end encrypted to your Nostr key. Connect a signer from Nostr → Connect Signer… to view, search, and create drafts."
+msgstr "Entwürfe sind Ende-zu-Ende mit deinem Nostr-Schlüssel verschlüsselt. Verbinde über „Nostr → Signer verbinden …“ einen Signer, um Entwürfe anzuzeigen, zu durchsuchen und zu erstellen."
+
+#: nostr/ui/drafts_panel.py:1518
+msgid "Signer does not support NIP-44"
+msgstr "Signer unterstützt keine Entwürfe"
+
+#: nostr/ui/drafts_panel.py:1519
+msgid "This profile's signer cannot decrypt drafts. Connect a NIP-44-capable signer (Amber, nsec.app) to use drafts."
+msgstr "Der Signer dieses Profils kann Entwürfe nicht entschlüsseln. Verbinde einen Signer, der das kann (etwa Amber oder nsec.app), um Entwürfe zu nutzen."
+
+#: nostr/ui/drafts_panel.py:1531
+msgid "Drafts stay encrypted until your signer unlocks them. Open your signer app, make sure it is running, then try again."
+msgstr "Entwürfe bleiben verschlüsselt, bis dein Signer sie entsperrt. Öffne deine Signer-App, stelle sicher, dass sie läuft, und versuche es dann noch einmal."
+
+#: nostr/ui/drafts_panel.py:1551
+msgid "No private drafts yet"
+msgstr "Noch keine privaten Entwürfe"
+
+#: nostr/ui/drafts_panel.py:1557
+msgid "No matching drafts"
+msgstr "Keine passenden Entwürfe"
+
+#: nostr/ui/drafts_panel.py:1927
+msgid "Retry Decryption"
+msgstr "Erneut entschlüsseln"
+
+#: nostr/ui/drafts_panel.py:1968
+msgid "Delete Draft"
+msgstr "Entwurf löschen"
+
+#: nostr/ui/drafts_panel.py:477
+#, python-brace-format
+msgid "{reason}. Double-click to retry."
+msgstr "{reason}. Erneut per Doppelklick."
+
+#: nostr/ui/drafts_panel.py:511
+msgid "Press Return to retry"
+msgstr "Drücke Eingabe, um es noch einmal zu versuchen"
+
+#: nostr/ui/drafts_panel.py:518
+#: nostr/ui/drafts_panel.py:535
+#: nostr/ui/drafts_preview.py:476
+#, python-brace-format
+msgid "Saved {time}"
+msgstr "Gespeichert am {time}"
+
+#: nostr/ui/drafts_panel.py:1474
+msgid "Refreshing drafts"
+msgstr "Entwürfe werden aktualisiert"
+
+#: nostr/ui/drafts_panel.py:1482
+#, python-brace-format
+msgid "Drafts for {name}"
+msgstr "Entwürfe von {name}"
+
+#: nostr/ui/drafts_panel.py:1533
+msgid "Try again"
+msgstr "Erneut versuchen"
+
+#: nostr/ui/drafts_panel.py:1559
+msgid "Clear search"
+msgstr "Suche löschen"
+
+#: nostr/ui/drafts_panel.py:1558
+#, python-brace-format
+msgid "No draft matches \"{query}\"."
+msgstr "Kein Entwurf passt zu „{query}“."
+
+#: nostr/ui/drafts_panel.py:515
+#, python-brace-format
+msgid "Imported from {host}"
+msgstr "Importiert von {host}"
+
+#: nostr/ui/drafts_preview.py:232
+msgid "Loading image…"
+msgstr "Bild wird geladen …"
+
+#: nostr/ui/drafts_preview.py:233
+msgid "Image unavailable"
+msgstr "Bild nicht verfügbar"
+
+#: nostr/ui/drafts_preview.py:440
+msgid "Expired"
+msgstr "Abgelaufen"
+
+#: nostr/ui/drafts_preview.py:443
+msgid "Expires today"
+msgstr "Läuft heute ab"
+
+#: nostr/ui/drafts_preview.py:522
+#: nostr/ui/feeds_panel.py:1117
+#, python-brace-format
+msgid "{n} min read"
+msgid_plural "{n} min read"
+msgstr[0] "{n} Min. Lesezeit"
+msgstr[1] "{n} Min. Lesezeit"
+
+#: nostr/ui/drafts_preview.py:523
+#: nostr/ui/drafts_preview.py:610
+#, python-brace-format
+msgid "{n} word"
+msgid_plural "{n} words"
+msgstr[0] "{n} Wort"
+msgstr[1] "{n} Wörter"
+
+#: nostr/ui/drafts_preview.py:609
+#, python-brace-format
+msgid "{n} minute read"
+msgid_plural "{n} minutes read"
+msgstr[0] "{n} Minute Lesezeit"
+msgstr[1] "{n} Minuten Lesezeit"
+
+#: nostr/ui/drafts_preview.py:444
+#, python-brace-format
+msgid "Expires in {n} day"
+msgid_plural "Expires in {n} days"
+msgstr[0] "Läuft in {n} Tag ab"
+msgstr[1] "Läuft in {n} Tagen ab"
+
+#: nostr/ui/drafts_preview.py:925
+msgid "Article image"
+msgstr "Artikelbild"
+
+#: nostr/ui/drafts_preview.py:1191
+msgid "Draft preview"
+msgstr "Entwurfsvorschau"
+
+#: nostr/ui/drafts_preview.py:1200
+msgid "Preview of one draft. Press Escape to close."
+msgstr "Vorschau eines Entwurfs. Drücke Esc, um sie zu schließen."
+
+#: nostr/ui/drafts_preview.py:486
+#, python-brace-format
+msgid "+{n} more"
+msgid_plural "+{n} more"
+msgstr[0] "+{n} weiteres"
+msgstr[1] "+{n} weitere"
+
+#: nostr/ui/drafts_preview.py:611
+#, python-brace-format
+msgid "{reading_time}, {word_count}"
+msgstr "{reading_time}, {word_count}"
+
+#: nostr/ui/drafts_preview.py:617
+#, python-brace-format
+msgid "Tagged {tags}"
+msgstr "Schlagwörter: {tags}"
+
+#: nostr/ui/drafts_preview.py:473
+#, python-brace-format
+msgid "Published {date}"
+msgstr "Veröffentlicht am {date}"
+
+#: nostr/ui/drafts_common.py:277
+msgid "dd MMMM yyyy 'at' HH:mm"
+msgstr "d. MMMM yyyy 'um' HH:mm"
+
+#: nostr/ui/drafts_common.py:287
+msgid "dd MMMM yyyy"
+msgstr "d. MMMM yyyy"
+
+#: nostr/ui/drafts_common.py:292
+msgid "yyyy-MM-dd"
+msgstr "dd.MM.yyyy"
+
+#: nostr/ui/draft_conflict_banner.py:184
+msgid "A newer version of this draft was published from another device."
+msgstr "Eine neuere Version dieses Entwurfs wurde von einem anderen Gerät gespeichert."
+
+#: nostr/ui/draft_conflict_banner.py:190
+msgid "View"
+msgstr "Ansehen"
+
+#: nostr/ui/draft_conflict_banner.py:192
+msgid "Open the newer version in a new tab"
+msgstr "Neuere Version in neuem Tab öffnen"
+
+#: nostr/ui/draft_conflict_banner.py:196
+msgid "Reload"
+msgstr "Neu laden"
+
+#: nostr/ui/draft_conflict_banner.py:200
+msgid "Replace this tab's contents with the newer version. Unsaved local edits will be lost."
+msgstr "Ersetzt den Inhalt dieses Tabs durch die neuere Version. Nicht gespeicherte Änderungen gehen verloren."
+
+#: nostr/ui/draft_conflict_banner.py:206
+msgid "Keep mine"
+msgstr "Meine behalten"
+
+#: nostr/ui/draft_conflict_banner.py:209
+msgid "Dismiss and let the next save from this tab win."
+msgstr "Schließen. Beim nächsten Speichern aus diesem Tab gilt deine Version."
+
+#: nostr/ui/draft_conflict_banner.py:217
+#: nostr/ui/draft_conflict_banner.py:219
+msgid "Dismiss"
+msgstr "Schließen"
+
+#: nostr/ui/save_destination_dialog.py:225
+#: nostr/ui/save_destination_dialog.py:306
+msgid "Save"
+msgstr "Speichern"
+
+#: nostr/ui/save_destination_dialog.py:252
+msgid "Where do you want to save?"
+msgstr "Wo möchtest du speichern?"
+
+#: nostr/ui/save_destination_dialog.py:257
+msgid "Local files live only on this device. Nostr drafts are encrypted to your key and synced across your other devices."
+msgstr "Lokale Dateien bleiben nur auf diesem Gerät. Nostr-Entwürfe sind mit deinem Schlüssel verschlüsselt und werden mit deinen anderen Geräten abgeglichen."
+
+#: nostr/ui/save_destination_dialog.py:295
+msgid "Remember this choice for this tab"
+msgstr "Auswahl für diesen Tab merken"
+
+#: nostr/ui/save_destination_dialog.py:298
+msgid "Skip this dialog on the next Ctrl+Shift+S for the current document. You can change it again by closing and reopening the tab."
+msgstr "Beim nächsten Strg+Umschalt+S für dieses Dokument nicht mehr fragen. Du kannst das ändern, indem du den Tab schließt und wieder öffnest."
+
+#: nostr/ui/save_destination_dialog.py:269
+msgid "Save to disk"
+msgstr "Als Datei speichern"
+
+#: nostr/ui/save_destination_dialog.py:270
+msgid "A regular local file. Same as your usual Save As."
+msgstr "Eine normale lokale Datei, wie bei „Speichern unter“."
+
+#: nostr/ui/save_destination_dialog.py:273
+msgid "Save as private Nostr draft"
+msgstr "Als privaten Nostr-Entwurf speichern"
+
+#: nostr/ui/save_destination_dialog.py:274
+msgid "End-to-end encrypted to your Nostr key. Only you can decrypt it. Will appear on other devices signed in with the same profile."
+msgstr "Ende-zu-Ende mit deinem Nostr-Schlüssel verschlüsselt. Nur du kannst ihn entschlüsseln. Erscheint auf deinen anderen Geräten, die mit demselben Profil angemeldet sind."
+
+#: nostr/ui/stash_kind_dialog.py:299
+#: nostr/ui/stash_kind_dialog.py:340
+msgid "Save as Nostr draft"
+msgstr "Als Nostr-Entwurf speichern"
+
+#: nostr/ui/stash_kind_dialog.py:345
+msgid "Drafts are end-to-end encrypted to your key. Pick the kind so the draft can be promoted to a publish later."
+msgstr "Entwürfe sind Ende-zu-Ende mit deinem Schlüssel verschlüsselt. Wähle die Art, damit du den Entwurf später veröffentlichen kannst."
+
+#: nostr/ui/stash_kind_dialog.py:396
+msgid "Article title (used to derive the slug)"
+msgstr "Artikeltitel (daraus entsteht der Slug)"
+
+#: nostr/ui/stash_kind_dialog.py:402
+msgid "article-slug"
+msgstr "artikel-slug"
+
+#: nostr/ui/stash_kind_dialog.py:409
+msgid "Optional one-sentence summary"
+msgstr "Optionale Zusammenfassung in einem Satz"
+
+#: nostr/ui/stash_kind_dialog.py:418
+msgid "Save draft"
+msgstr "Entwurf speichern"
+
+#: nostr/ui/stash_kind_dialog.py:357
+msgid "Short note"
+msgstr "Kurze Notiz"
+
+#: nostr/ui/stash_kind_dialog.py:358
+msgid "Quick thought, plain text. Kind 1 when published. No slug: the draft is identified by a private UUID."
+msgstr "Ein kurzer Gedanke als reiner Text. Wird als Notiz veröffentlicht. Ohne Slug: Der Entwurf erhält eine private Kennung."
+
+#: nostr/ui/stash_kind_dialog.py:364
+msgid "Long-form article"
+msgstr "Langer Artikel"
+
+#: nostr/ui/stash_kind_dialog.py:365
+msgid "Markdown post with a stable slug. Kind 30023 when published; the slug ties the draft to the eventual article so re-stashing replaces in place."
+msgstr "Ein Markdown-Beitrag mit festem Slug. Wird als Artikel veröffentlicht. Der Slug verbindet den Entwurf mit dem späteren Artikel, sodass erneutes Speichern ihn ersetzt."
+
+#: nostr/ui/stash_kind_dialog.py:399
+msgid "Title"
+msgstr "Titel"
+
+#: nostr/ui/stash_kind_dialog.py:406
+msgid "Slug (the draft's d-tag)"
+msgstr "Slug (Kennung des Entwurfs)"
+
+#: nostr/ui/stash_kind_dialog.py:411
+msgid "Summary (optional)"
+msgstr "Zusammenfassung (optional)"
+
+#: nostr/ui/feeds_panel.py:119
+msgid "That doesn't look like a fetchable URL. Paste a site or feed address."
+msgstr "Das sieht nicht nach einer abrufbaren Adresse aus. Füge die Adresse einer Website oder eines Feeds ein."
+
+#: nostr/ui/feeds_panel.py:125
+msgid "Paste a link above, or import an export file, to pull posts in as private drafts."
+msgstr "Füge oben einen Link ein oder importiere eine Exportdatei, um Beiträge als private Entwürfe zu übernehmen."
+
+#: nostr/ui/feeds_panel.py:134
+msgid "Content exports (*.xml *.json *.opml *.zip);;All files (*)"
+msgstr "Inhaltsexporte (*.xml *.json *.opml *.zip);;Alle Dateien (*)"
+
+#: nostr/ui/feeds_panel.py:104
+msgid "pending"
+msgstr "wartet"
+
+#: nostr/ui/feeds_panel.py:105
+msgid "resolving from Nostr…"
+msgstr "wird aus Nostr geladen …"
+
+#: nostr/ui/feeds_panel.py:107
+msgid "fetching content…"
+msgstr "Inhalt wird geladen …"
+
+#: nostr/ui/feeds_panel.py:108
+msgid "mirroring images…"
+msgstr "Bilder werden kopiert …"
+
+#: nostr/ui/feeds_panel.py:109
+msgid "signing"
+msgstr "wird signiert"
+
+#: nostr/ui/feeds_panel.py:113
+msgid "saved"
+msgstr "gespeichert"
+
+#: nostr/ui/feeds_panel.py:114
+msgid "published"
+msgstr "veröffentlicht"
+
+#: nostr/ui/feeds_panel.py:115
+msgid "failed"
+msgstr "fehlgeschlagen"
+
+#: nostr/ui/feeds_panel.py:952
+#, python-brace-format
+msgid "{source}: {count} item(s) found. Untick anything you don't want, then import."
+msgid_plural "{source}: {count} item(s) found. Untick anything you don't want, then import."
+msgstr[0] "{source}: {count} Beitrag gefunden. Entferne die Häkchen bei allem, was du nicht möchtest, und importiere dann."
+msgstr[1] "{source}: {count} Beiträge gefunden. Entferne die Häkchen bei allem, was du nicht möchtest, und importiere dann."
+
+#: nostr/ui/feeds_panel.py:1136
+#, python-brace-format
+msgid "Import {n} selected"
+msgid_plural "Import {n} selected"
+msgstr[0] "{n} Beitrag importieren"
+msgstr[1] "{n} Beiträge importieren"
+
+#: nostr/ui/feeds_panel.py:346
+msgid "Source URL"
+msgstr "Quelladresse"
+
+#: nostr/ui/feeds_panel.py:350
+msgid "Import source URL"
+msgstr "Adresse der Importquelle"
+
+#: nostr/ui/feeds_panel.py:352
+msgid "A blog, feed, npub, Bluesky thread, or Markdown URL"
+msgstr "Blog, Feed, npub, Bluesky oder Markdown"
+
+#: nostr/ui/feeds_panel.py:360
+msgid "Accepts feeds (RSS / Atom / JSON), Nostr profiles and events, Bluesky threads, Markdown files, GitHub folders, and sitemaps."
+msgstr "Unterstützt Feeds (RSS / Atom / JSON), Nostr-Profile und -Events, Bluesky-Threads, Markdown-Dateien, GitHub-Ordner und Sitemaps."
+
+#: nostr/ui/feeds_panel.py:372
+msgid "Load preview"
+msgstr "Vorschau laden"
+
+#: nostr/ui/feeds_panel.py:376
+msgid "Fetch the source and preview its items before importing"
+msgstr "Quelle abrufen und ihre Beiträge vor dem Import ansehen"
+
+#: nostr/ui/feeds_panel.py:381
+msgid "Import a file…"
+msgstr "Datei importieren …"
+
+#: nostr/ui/feeds_panel.py:385
+msgid "A WordPress (WXR) or Ghost export, an OPML subscription list, or a Medium / Substack ZIP"
+msgstr "Ein WordPress-Export (WXR) oder Ghost-Export, eine OPML-Abonnementliste oder ein ZIP von Medium oder Substack"
+
+#: nostr/ui/feeds_panel.py:390
+msgid "Cancel"
+msgstr "Abbrechen"
+
+#: nostr/ui/feeds_panel.py:393
+msgid "Stop the current operation (Esc)"
+msgstr "Laufenden Vorgang abbrechen (Esc)"
+
+#: nostr/ui/feeds_panel.py:413
+#: nostr/ui/feeds_panel.py:434
+msgid "Subscribed sources"
+msgstr "Abonnierte Quellen"
+
+#: nostr/ui/feeds_panel.py:425
+msgid "Unsubscribe from the selected source"
+msgstr "Abonnement der ausgewählten Quelle beenden"
+
+#: nostr/ui/feeds_panel.py:426
+#: nostr/ui/feeds_panel.py:1008
+msgid "Unsubscribe"
+msgstr "Abonnement beenden"
+
+#: nostr/ui/feeds_panel.py:438
+msgid "Double-click a source to load its latest items"
+msgstr "Doppelklicke auf eine Quelle, um ihre neuesten Beiträge zu laden"
+
+#: nostr/ui/feeds_panel.py:494
+msgid "Fetch full text for teaser-only items"
+msgstr "Volltext für gekürzte Beiträge laden"
+
+#: nostr/ui/feeds_panel.py:497
+msgid "Some feeds only ship a summary. When on, the article page is fetched and its main text becomes the draft body."
+msgstr "Manche Feeds liefern nur eine Zusammenfassung. Ist dies aktiv, wird die Artikelseite abgerufen und ihr Haupttext wird zum Inhalt des Entwurfs."
+
+#: nostr/ui/feeds_panel.py:502
+msgid "Mirror images to Blossom"
+msgstr "Bilder zu Blossom kopieren"
+
+#: nostr/ui/feeds_panel.py:505
+msgid "Copies every image to your Blossom server so imported drafts don't depend on the source site staying up."
+msgstr "Kopiert jedes Bild auf deinen Blossom-Server, damit importierte Entwürfe nicht davon abhängen, dass die Quellseite erreichbar bleibt."
+
+#: nostr/ui/feeds_panel.py:510
+msgid "Review images"
+msgstr "Bilder prüfen"
+
+#: nostr/ui/feeds_panel.py:520
+msgid "Subscribe"
+msgstr "Abonnieren"
+
+#: nostr/ui/feeds_panel.py:524
+msgid "Remember this source (synced privately via your relays) so you can re-import new items later."
+msgstr "Diese Quelle merken (privat über deine Relays abgeglichen), damit du neue Beiträge später importieren kannst."
+
+#: nostr/ui/feeds_panel.py:544
+msgid "Import progress"
+msgstr "Importfortschritt"
+
+#: nostr/ui/feeds_panel.py:560
+msgid "Items to import"
+msgstr "Zu importierende Beiträge"
+
+#: nostr/ui/feeds_panel.py:572
+msgid "Import"
+msgstr "Importieren"
+
+#: nostr/ui/feeds_panel.py:576
+msgid "Import the checked items as private drafts"
+msgstr "Markierte Beiträge als private Entwürfe importieren"
+
+#: nostr/ui/feeds_panel.py:765
+msgid "Loading preview…"
+msgstr "Vorschau wird geladen …"
+
+#: nostr/ui/feeds_panel.py:777
+msgid "Import a content export"
+msgstr "Inhaltsexport importieren"
+
+#: nostr/ui/feeds_panel.py:891
+#, python-brace-format
+msgid "Subscribed to {added} feed(s) from {file}."
+msgid_plural "Subscribed to {added} feed(s) from {file}."
+msgstr[0] "{added} Feed aus {file} abonniert."
+msgstr[1] "{added} Feeds aus {file} abonniert."
+
+#: nostr/ui/feeds_panel.py:1256
+msgid "Starting import…"
+msgstr "Import wird gestartet …"
+
+#: nostr/ui/feeds_panel.py:1302
+#, python-brace-format
+msgid "{done}/{total} images, {failed} kept original"
+msgid_plural "{done}/{total} images, {failed} kept original"
+msgstr[0] "{done}/{total} Bild, {failed} beim Original belassen"
+msgstr[1] "{done}/{total} Bilder, {failed} beim Original belassen"
+
+#: nostr/ui/feeds_panel.py:1308
+#, python-brace-format
+msgid "{done}/{total} images"
+msgid_plural "{done}/{total} images"
+msgstr[0] "{done}/{total} Bild"
+msgstr[1] "{done}/{total} Bilder"
+
+#: nostr/ui/feeds_panel.py:1320
+#, python-brace-format
+msgid "{accepted}/{total} relays"
+msgid_plural "{accepted}/{total} relays"
+msgstr[0] "{accepted}/{total} Relay"
+msgstr[1] "{accepted}/{total} Relays"
+
+#: nostr/ui/feeds_panel.py:1338
+#, python-brace-format
+msgid "Done. {succeeded}/{attempted} item(s) imported as drafts."
+msgid_plural "Done. {succeeded}/{attempted} item(s) imported as drafts."
+msgstr[0] "Fertig. {succeeded}/{attempted} Beitrag als Entwurf importiert."
+msgstr[1] "Fertig. {succeeded}/{attempted} Beiträge als Entwürfe importiert."
+
+#: nostr/ui/feeds_panel.py:708
+msgid "Connect a Nostr profile to import feeds."
+msgstr "Verbinde ein Nostr-Profil, um Feeds zu importieren."
+
+#: nostr/ui/feeds_panel.py:871
+msgid "Feed subscriptions aren't available until the importer is fully wired up."
+msgstr "Feed-Abonnements sind erst verfügbar, wenn der Import vollständig eingerichtet ist."
+
+#: nostr/ui/feeds_panel.py:898
+#, python-brace-format
+msgid "Subscribed to {added} feed(s) from {file}; {skipped} skipped (already subscribed or invalid)."
+msgid_plural "Subscribed to {added} feed(s) from {file}; {skipped} skipped (already subscribed or invalid)."
+msgstr[0] "{added} Feed aus {file} abonniert, {skipped} übersprungen (schon abonniert oder ungültig)."
+msgstr[1] "{added} Feeds aus {file} abonniert, {skipped} übersprungen (schon abonniert oder ungültig)."
+
+#: nostr/ui/feeds_panel.py:1273
+msgid "Load cancelled."
+msgstr "Laden abgebrochen."
+
+#: nostr/ui/feeds_panel.py:1278
+msgid "Import cancelled."
+msgstr "Import abgebrochen."
+
+#: nostr/ui/feeds_panel.py:1328
+msgid "no relay accepted it yet"
+msgstr "noch von keinem Relay angenommen"
+
+#: nostr/ui/feeds_panel.py:1336
+msgid "Done. Nothing to import."
+msgstr "Fertig. Nichts zu importieren."
+
+#: nostr/ui/feeds_panel.py:475
+msgid "Recommended"
+msgstr "Empfohlen"
+
+#: nostr/ui/feeds_panel.py:710
+msgid "Importer is not wired up yet."
+msgstr "Der Import ist noch nicht eingerichtet."
+
+#: nostr/ui/feeds_panel.py:842
+msgid "That ZIP doesn't look like a Medium or Substack export, or it has no published posts."
+msgstr "Dieses ZIP sieht nicht nach einem Medium- oder Substack-Export aus oder enthält keine veröffentlichten Beiträge."
+
+#: nostr/ui/feeds_panel.py:473
+#, python-brace-format
+msgid "Scope: {name}"
+msgstr "Umfang: {name}"
+
+#: nostr/ui/feeds_panel.py:798
+#, python-brace-format
+msgid "That file is too large to import (over {size} MB)."
+msgstr "Diese Datei ist zu groß für den Import (über {size} MB)."
+
+#: nostr/ui/feeds_panel.py:878
+#, python-brace-format
+msgid "No feeds were found in {file}."
+msgstr "In {file} wurden keine Feeds gefunden."
+
+#: nostr/ui/feeds_panel.py:918
+#, python-brace-format
+msgid "Fetching {url}"
+msgstr "Wird abgerufen: {url}"
+
+#: nostr/ui/feeds_panel.py:922
+msgid "Reading the feed…"
+msgstr "Feed wird gelesen …"
+
+#: nostr/ui/feeds_panel.py:941
+#, python-brace-format
+msgid "{source}: no items to import."
+msgstr "{source}: keine Beiträge zum Importieren."
+
+#: nostr/ui/feeds_panel.py:1031
+#, python-brace-format
+msgid "Subscribed to {source}."
+msgstr "{source} abonniert."
+
+#: nostr/ui/feeds_panel.py:1156
+#, python-brace-format
+msgid "Review images ({kept}/{total})…"
+msgstr "Bilder prüfen ({kept}/{total}) …"
+
+#: nostr/ui/feeds_panel.py:794
+#, python-brace-format
+msgid "Couldn't read that file: {error}"
+msgstr "Diese Datei konnte nicht gelesen werden: {error}"
+
+#: nostr/ui/feeds_panel.py:862
+#, python-brace-format
+msgid "Couldn't read that archive: {error}"
+msgstr "Dieses Archiv konnte nicht gelesen werden: {error}"
+
+#: nostr/ui/feeds_panel.py:908
+#, python-brace-format
+msgid "Nothing new in {file}: every feed was already subscribed or invalid."
+msgstr "Nichts Neues in {file}: Jeder Feed war schon abonniert oder ungültig."
+
+#: nostr/ui/feeds_panel.py:920
+#, python-brace-format
+msgid "Looking for a feed link at {url}"
+msgstr "Suche nach einem Feed-Link: {url}"
+
+#: nostr/ui/feeds_panel.py:974
+#, python-brace-format
+msgid "last imported {date}"
+msgstr "zuletzt importiert am {date}"
+
+#: nostr/draft_sync.py:73
+msgid "your signer did not answer"
+msgstr "Signer antwortet nicht"
+
+#: nostr/draft_sync.py:177
+msgid "Looking up your relay list…"
+msgstr "Deine Relay-Liste wird gesucht …"
+
+#: nostr/draft_sync.py:217
+msgid "Refreshing drafts…"
+msgstr "Entwürfe werden aktualisiert …"
+
+#: nostr/draft_sync.py:324
+#: nostr/draft_sync.py:284
+msgid "Connecting to your signer…"
+msgstr "Verbindung mit deinem Signer wird hergestellt …"
+
+#: nostr/draft_sync.py:592
+msgid "This signer doesn't support NIP-44 encryption, so private drafts are unavailable for this profile."
+msgstr "Dieser Signer unterstützt die nötige Verschlüsselung nicht, daher sind private Entwürfe für dieses Profil nicht verfügbar."
+
+#: nostr/draft_sync.py:378
+msgid "No relays available to fetch drafts."
+msgstr "Keine Relays verfügbar, um Entwürfe zu laden."
+
+#: nostr/draft_sync.py:520
+msgid "inner draft is signed by a different identity"
+msgstr "Entwurf stammt von einer anderen Identität"
+
+#: nostr/draft_sync.py:558
+#: nostr/draft_store.py:284
+msgid "decryption failed"
+msgstr "Nicht entschlüsselt"
+
+#: nostr/draft_sync.py:362
+#, python-brace-format
+msgid "Signer unavailable: {reason}"
+msgstr "Signer nicht erreichbar: {reason}"
+
+#: nostr/draft_sync.py:416
+#, python-brace-format
+msgid "Loaded {n} draft."
+msgid_plural "Loaded {n} drafts."
+msgstr[0] "{n} Entwurf geladen."
+msgstr[1] "{n} Entwürfe geladen."
+
+#: nostr/draft_sync.py:601
+msgid "signer lacks NIP-44 support"
+msgstr "Signer kann keine Entwürfe entschlüsseln"
+
+#: nostr/draft_sync.py:504
+#, python-brace-format
+msgid "malformed draft payload: {error}"
+msgstr "Entwurf ist beschädigt: {error}"
+
+#: nostr/drafts.py:157
+msgid "draft payload must be a JSON object"
+msgstr "Inhalt ist kein JSON-Objekt"
+
+#: nostr/drafts.py:172
+msgid "draft payload tags must be list[list[str]]"
+msgstr "Tags haben ein ungültiges Format"
+
+#: nostr/drafts.py:155
+#, python-brace-format
+msgid "draft payload is not valid JSON: {error}"
+msgstr "Inhalt ist kein gültiges JSON: {error}"
+
+#: nostr/drafts.py:166
+#, python-brace-format
+msgid "draft payload missing required fields: {error}"
+msgstr "Pflichtfelder fehlen: {error}"
+
+#: nostr/draft_store.py:347
+msgid "Untitled note"
+msgstr "Notiz ohne Titel"

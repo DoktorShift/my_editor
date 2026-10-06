@@ -17,6 +17,8 @@ from __future__ import annotations
 from hashlib import sha256
 from typing import Optional
 
+from i18n import _
+
 
 class NoIdentifierError(ValueError):
     """Raised when a feed item has no guid, link, or title to hash."""
@@ -36,8 +38,9 @@ def derive_identifier(
     """
     seed = (guid or "") or (link or "") or (title or "")
     if not seed:
+        # Shown on the item's row in the import list, so translated.
         raise NoIdentifierError(
-            "Cannot derive identifier: item has no guid, link, or title"
+            _("Cannot derive identifier: item has no guid, link, or title")
         )
     digest = sha256(seed.encode("utf-8")).hexdigest()[:16]
     return f"{prefix}{digest}" if prefix else digest

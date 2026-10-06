@@ -52,6 +52,7 @@ from typing import Callable, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import unquote, urlparse
 
 import url_safety
+from i18n import _
 
 from ..blossom import replicate
 from ..blossom.client import BlossomClient, server_origin
@@ -63,7 +64,7 @@ from .fetch import BlobFetcher
 
 # Copy shown for a URL the mirror policy refuses. Short because it lands
 # in the per-image row of the review dialog next to the filename.
-_UNSAFE_URL_ERROR = "URL was not allowed"
+_UNSAFE_URL_ERROR = _("URL was not allowed")
 
 
 # Matches ``![alt](url)``. Mirrors the reference importer's scan; titles
@@ -262,7 +263,7 @@ def rehost_images(
                 _report(i, u, "mirrored", mirrored_url=mirrored_url)
             else:
                 outcome.failed.append(u)
-                _report(i, u, "failed", error="Empty mirror response")
+                _report(i, u, "failed", error=_("Empty mirror response"))
             _next(i + 1)
 
         def _err(reason: str, i=index, u=url) -> None:

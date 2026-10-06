@@ -36,6 +36,8 @@ from typing import Callable, Deque, Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
+from i18n import _, ngettext
+
 from .bunker import BunkerClient, BunkerSessionPool, is_signer_silent
 from .draft_store import DraftState, DraftStore
 from .drafts import (
@@ -68,7 +70,7 @@ _BUNKER_UNSUPPORTED_NEEDLES: Tuple[str, ...] = (
 # separately from an incapable one and can be cleared.
 #
 # What a row says once we have stopped asking on its behalf.
-_SIGNER_SILENT_REASON = "your signer did not answer"
+_SIGNER_SILENT_REASON = _("your signer did not answer")
 
 # How many drafts in a row may time out before we stop asking. The queue
 # is serialized, so one timeout can be a single dropped reply but two in
@@ -172,7 +174,7 @@ class DraftSync(QObject):
         gen = self._generation  # captured for callbacks below
         self._store.bind_profile(profile.user_pubkey)
         self._store.set_loading(True)
-        self.status_changed.emit("Looking up your relay list…")
+        self.status_changed.emit(_("Looking up your relay list…"))
         self._ask_relays(lambda relays, g=gen: self._on_relays_ready(g, relays))
 
     def stop(self) -> None:
@@ -212,7 +214,7 @@ class DraftSync(QObject):
             self._subscription.close()
             self._subscription = None
         self._store.set_loading(True)
-        self.status_changed.emit("Refreshing drafts…")
+        self.status_changed.emit(_("Refreshing drafts…"))
         self._open_subscription()
 
     def reroute(self) -> None:
@@ -279,7 +281,7 @@ class DraftSync(QObject):
         self._clear_signer_unreachable()
         if self._bunker is None:
             gen = self._generation
-            self.status_changed.emit("Connecting to your signer…")
+            self.status_changed.emit(_("Connecting to your signer…"))
             self._session_pool.get(
                 self._profile,
                 on_ready=lambda client, g=gen: self._on_bunker_ready(g, client),
@@ -319,7 +321,7 @@ class DraftSync(QObject):
 
         self._read_relays = list(relays)
 
-        self.status_changed.emit("Connecting to your signer…")
+        self.status_changed.emit(_("Connecting to your signer…"))
         self._session_pool.get(
             self._profile,
             on_ready=lambda client, g=gen: self._on_bunker_ready(g, client),
@@ -357,7 +359,7 @@ class DraftSync(QObject):
         # Without a signer we can't decrypt anything, so surface the
         # failure but keep the wraps as skeleton rows: the user should
         # see there *are* drafts, just locked.
-        self.status_changed.emit(f"Signer unavailable: {reason}")
+        self.status_changed.emit(_("Signer unavailable: {reason}").format(reason=reason))
         self._open_subscription()
         # A handshake that went unanswered is the strongest evidence we
         # ever get that nothing is listening, so there is no reason to
@@ -373,7 +375,7 @@ class DraftSync(QObject):
             self._subscription = None
         if self._profile is None or not self._read_relays:
             self._store.set_loading(False)
-            self.status_changed.emit("No relays available to fetch drafts.")
+            self.status_changed.emit(_("No relays available to fetch drafts."))
             return
         filters = [{
             "kinds": [DRAFT_WRAP_KIND],
@@ -411,7 +413,7 @@ class DraftSync(QObject):
         self._store.set_loading(False)
         count = len(self._store)
         self.status_changed.emit(
-            f"Loaded {count} draft{'' if count == 1 else 's'}."
+            ngettext("Loaded {n} draft.", "Loaded {n} drafts.", count).format(n=count)
         )
 
     # -- internal: bunker decryption queue --------------------------------
@@ -498,7 +500,8 @@ class DraftSync(QObject):
         try:
             inner = parse_inner_event(plaintext)
         except ValueError as exc:
-            self._store.set_failed(identifier, f"malformed draft payload: {exc}")
+            self._store.set_failed(
+                identifier, _("malformed draft payload: {error}").format(error=exc))
             self._after_decrypt(identifier)
             return
 
@@ -514,7 +517,7 @@ class DraftSync(QObject):
         if declared and declared != expected:
             self._store.set_failed(
                 identifier,
-                "inner draft is signed by a different identity",
+                _("inner draft is signed by a different identity"),
             )
             self._after_decrypt(identifier)
             return
@@ -552,7 +555,7 @@ class DraftSync(QObject):
         # A reasoned refusal proves the signer is there, so it clears the
         # silence tally even though this particular draft failed.
         self._consecutive_silences = 0
-        self._store.set_failed(identifier, reason or "decryption failed")
+        self._store.set_failed(identifier, reason or _("decryption failed"))
         self._after_decrypt(identifier)
 
     def _latch_signer_unreachable(self) -> None:
@@ -586,8 +589,8 @@ class DraftSync(QObject):
         """Stop hammering a signer that has no NIP-44 support."""
         self._bunker_unsupported = True
         self.bunker_error.emit(
-            "This signer doesn't support NIP-44 encryption, so "
-            "private drafts are unavailable for this profile."
+            _("This signer doesn't support NIP-44 encryption, so "
+              "private drafts are unavailable for this profile.")
         )
         # Mark every loading record so the panel can render the
         # locked / unavailable state per row.
@@ -595,7 +598,7 @@ class DraftSync(QObject):
             if record.state is DraftState.LOADING:
                 self._store.set_failed(
                     record.identifier,
-                    "signer lacks NIP-44 support",
+                    _("signer lacks NIP-44 support"),
                 )
         self._decrypt_queue.clear()
         self._pending.clear()

@@ -18,12 +18,14 @@ of the app scaled around it.
 
 from __future__ import annotations
 
-import time
 from urllib.parse import urlparse
 
+from PySide6.QtCore import QDateTime, QLocale
 from PySide6.QtGui import QFont, QFontInfo
 from PySide6.QtWidgets import QApplication
 
+import i18n
+from i18n import _
 from constants import (
     DARK_BG,
     DARK_BORDER,
@@ -237,29 +239,54 @@ def source_host(record: DraftRecord) -> str:
     return f"{host[:head]}…{host[head - keep:]}"
 
 
-def format_absolute_time(ts: int) -> str:
-    """The exact save time, in words, for tooltips and screen readers.
+def display_locale() -> QLocale:
+    """The locale dates and numbers are written in.
 
-    It was previously unavailable to every user by any means.
+    The language MyEditor speaks rather than the system's, so a German
+    window never shows an English month name, and an English one never
+    a German one.
     """
+    return QLocale(i18n.language())
+
+
+def format_count(n: int) -> str:
+    """A number with the language's thousands separator: 1,240 or 1.240."""
+    return display_locale().toString(int(n))
+
+
+def _format_moment(ts: int, pattern: str) -> str:
+    """``ts`` in local time, written with the Qt date ``pattern``."""
     if ts <= 0:
         return ""
     try:
-        return time.strftime("%d %B %Y at %H:%M", time.localtime(int(ts)))
-    except (ValueError, OverflowError, OSError):
+        moment = QDateTime.fromSecsSinceEpoch(int(ts))
+    except (ValueError, OverflowError):
         return ""
+    if not moment.isValid():
+        return ""
+    return display_locale().toString(moment, pattern)
+
+
+def format_absolute_time(ts: int) -> str:
+    """The exact save time, in words, for tooltips and screen readers.
+
+    It was previously unavailable to every user by any means. The
+    pattern is a Qt date format and translated, so each language orders
+    day, month and time its own way.
+    """
+    return _format_moment(ts, _("dd MMMM yyyy 'at' HH:mm"))
 
 
 def format_absolute_date(ts: int) -> str:
     """The day only, for a publication date that has no useful clock time.
 
-    Same ``strftime`` family as :func:`format_absolute_time` so the two
-    dates on the preview's origin line cannot be formatted differently
-    from one another.
+    Same formatter as :func:`format_absolute_time` so the two dates on
+    the preview's origin line cannot be formatted differently from one
+    another.
     """
-    if ts <= 0:
-        return ""
-    try:
-        return time.strftime("%d %B %Y", time.localtime(int(ts)))
-    except (ValueError, OverflowError, OSError):
-        return ""
+    return _format_moment(ts, _("dd MMMM yyyy"))
+
+
+def format_short_date(ts: int) -> str:
+    """The day as digits, for a list row with no room for a month name."""
+    return _format_moment(ts, _("yyyy-MM-dd"))
