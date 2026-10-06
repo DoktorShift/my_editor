@@ -154,6 +154,7 @@ class StandIn(QMainWindow):
     paper_mode = False
     editor_background = "none"
     highlight_current_line = False
+    format_toolbar = None          # built with the rest of the window, not here
 
     def __getattr__(self, name):
         if name.startswith("__"):

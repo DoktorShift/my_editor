@@ -346,26 +346,11 @@ class HeaderWidget(QWidget):
         # editor is not in.
         self.syntax_highlight_checkbox.setChecked(False)
 
-        # Format buttons, created here, placed inside the left widget below.
-        # Their letters follow the language (F, K, U in German).
-        self.bold_btn = self._make_format_btn(pgettext("format button", "B"),
-                                              _("Bold (Ctrl+B)"), bold=True)
-        self.italic_btn = self._make_format_btn(pgettext("format button", "I"),
-                                                _("Italic (Ctrl+I)"), italic=True)
-        self.underline_btn = self._make_format_btn(pgettext("format button", "U"),
-                                                   _("Underline (Ctrl+U)"), underline=True)
-
-        # Left half: checkboxes at far left, B/I/U centred between them and the window centre.
-        # Two equal stretches around B/I/U place it at the midpoint of the left half.
+        # Left half: the view checkboxes. Formatting has its own toolbar
+        # (format_toolbar.py), right above the document.
         left_layout.addWidget(self.theme_checkbox)
         left_layout.addWidget(self.line_numbers_checkbox)
         left_layout.addWidget(self.syntax_highlight_checkbox)
-        left_layout.addStretch(1)
-        left_layout.addWidget(self.bold_btn)
-        left_layout.addSpacing(3)
-        left_layout.addWidget(self.italic_btn)
-        left_layout.addSpacing(3)
-        left_layout.addWidget(self.underline_btn)
         left_layout.addStretch(1)
 
         # Center: undo / redo, exactly centred by the equal left(1) / right(1) halves
@@ -403,22 +388,6 @@ class HeaderWidget(QWidget):
         # Apply initial dark theme
         self.update_theme(True)
 
-    @staticmethod
-    def _make_format_btn(label: str, tooltip: str, bold=False, italic=False, underline=False) -> QPushButton:
-        """Create a checkable format toggle button (B / I / U) with styled label font."""
-        btn = QPushButton(label)
-        btn.setToolTip(tooltip)
-        btn.setFixedSize(26, 26)
-        btn.setCheckable(True)
-        btn.setObjectName("FormatBtn")
-        font = btn.font()
-        font.setBold(bold)
-        font.setItalic(italic)
-        font.setUnderline(underline)
-        font.setPointSize(10)
-        btn.setFont(font)
-        return btn
-
     def update_theme(self, is_dark):
         if is_dark:
             self.setStyleSheet("""
@@ -451,17 +420,6 @@ class HeaderWidget(QWidget):
                 QPushButton:hover { background: #3C3C3C; }
                 QPushButton:pressed { background: #1E1E1E; }
                 QPushButton:disabled { background: #252526; color: #3C3C3C; border-color: #2D2D2D; }
-                #FormatBtn {
-                    background: #2D2D30;
-                    color: #D4D4D4;
-                    border: 1px solid #3C3C3C;
-                    border-radius: 4px;
-                    font-size: 13px;
-                }
-                #FormatBtn:hover { background: #3C3C3C; }
-                #FormatBtn:pressed { background: #1E1E1E; }
-                #FormatBtn:checked { background: #3C2800; color: #FFB347; border-color: #FF8C00; }
-                #FormatBtn:checked:hover { background: #4A3200; }
             """)
             self.theme_checkbox.setChecked(True)
             self.credit_label.setStyleSheet("QLabel { font-size: 12px; font-style: italic; color: #858585; }")
@@ -496,17 +454,6 @@ class HeaderWidget(QWidget):
                 QPushButton:hover { background: #E1E1E1; }
                 QPushButton:pressed { background: #D0D0D0; }
                 QPushButton:disabled { background: #F8F8F8; color: #CCCCCC; border-color: #EBEBEB; }
-                #FormatBtn {
-                    background: #ECECEC;
-                    color: #333333;
-                    border: 1px solid #CCCCCC;
-                    border-radius: 4px;
-                    font-size: 13px;
-                }
-                #FormatBtn:hover { background: #E1E1E1; }
-                #FormatBtn:pressed { background: #D0D0D0; }
-                #FormatBtn:checked { background: #FFF0D0; color: #A05000; border-color: #E88000; }
-                #FormatBtn:checked:hover { background: #FFE4B0; }
             """)
             self.theme_checkbox.setChecked(False)
             self.credit_label.setStyleSheet("QLabel { font-size: 12px; font-style: italic; color: #555555; }")

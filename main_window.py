@@ -39,6 +39,7 @@ from constants import (
     DARK_BORDER, LIGHT_BORDER, MONO_FONT, APP_DISPLAY_NAME, APP_VERSION, APP_URL, TEXT_COLORS
 )
 from widgets import FindBar, HeaderWidget, LineNumberGutter, FileChangedBar, UpdateBar
+from format_toolbar import FormatToolbar
 import i18n
 from i18n import _, ngettext, pgettext
 from commands import (
@@ -299,9 +300,6 @@ class MainWindow(QMainWindow):
         self.header_widget.syntax_highlight_checkbox.toggled.connect(self._toggle_syntax_highlighting)
         self.header_widget.undo_btn.clicked.connect(self._undo)
         self.header_widget.redo_btn.clicked.connect(self._redo)
-        self.header_widget.bold_btn.clicked.connect(lambda: self._toggle_format('bold'))
-        self.header_widget.italic_btn.clicked.connect(lambda: self._toggle_format('italic'))
-        self.header_widget.underline_btn.clicked.connect(lambda: self._toggle_format('underline'))
 
         # Nostr publishing infrastructure. All pieces are process-wide
         # singletons living on the window; they are cheap to create and stay
@@ -981,26 +979,23 @@ class MainWindow(QMainWindow):
             self._update_format_buttons()
 
     def _update_format_buttons(self):
-        ed = self.current_editor()
-        if not ed:
-            self.header_widget.bold_btn.setChecked(False)
-            self.header_widget.italic_btn.setChecked(False)
-            self.header_widget.underline_btn.setChecked(False)
-            self._update_style_checks(None)
+        """The format commands show the style at the caret (or of the whole
+        selection): in the Format menu and on the format toolbar alike."""
+        if not hasattr(self, "act_bold"):
             return
-        cursor = ed.textCursor()
-        if cursor.hasSelection():
-            bold = ed._all_in_selection(cursor, lambda f: f.fontWeight() > 400)
-            italic = ed._all_in_selection(cursor, lambda f: f.fontItalic())
-            underline = ed._all_in_selection(cursor, lambda f: f.fontUnderline())
-        else:
-            fmt = ed.currentCharFormat()
-            bold = fmt.fontWeight() > 400
-            italic = fmt.fontItalic()
-            underline = fmt.fontUnderline()
-        self.header_widget.bold_btn.setChecked(bold)
-        self.header_widget.italic_btn.setChecked(italic)
-        self.header_widget.underline_btn.setChecked(underline)
+        ed = self.current_editor()
+        styles = {self.act_bold: rich_text.BOLD, self.act_italic: rich_text.ITALIC,
+                  self.act_underline: rich_text.UNDERLINE, self.act_strike: rich_text.STRIKE,
+                  self.act_code: rich_text.CODE}
+        cursor = ed.textCursor() if ed else None
+        for action, style in styles.items():
+            if cursor is None or cursor.isNull():
+                on = False
+            elif cursor.hasSelection():
+                on = rich_text.selection_has(cursor, style)
+            else:
+                on = rich_text.has_style(ed.currentCharFormat(), style)
+            action.setChecked(on)
         self._update_style_checks(ed)
 
     def _update_style_checks(self, ed) -> None:
@@ -1013,6 +1008,14 @@ class MainWindow(QMainWindow):
         level = rich_text.heading_level(cursor) if cursor is not None else -1
         for index, action in enumerate(self.act_styles):
             action.setChecked(index == level)
+        if getattr(self, "format_toolbar", None) is not None:
+            if 0 <= level < len(self.act_styles):
+                name = self.act_styles[level].text()
+            elif level > 0:
+                name = _("Heading {level}").format(level=level)
+            else:
+                name = pgettext("paragraph style", "Mixed")
+            self.format_toolbar.set_style_name(name)
         kind = rich_text.list_kind(cursor) if cursor is not None else ""
         self.act_bullets.setChecked(kind == rich_text.BULLET)
         self.act_numbers.setChecked(kind == rich_text.NUMBER)
@@ -1097,11 +1100,14 @@ class MainWindow(QMainWindow):
                                   triggered=lambda: self._edit_focused("select_all"))
 
         # Formatting
-        self.act_bold = add(Command("format.bold", _("Bold"), FORMAT, "Ctrl+B"),
+        self.act_bold = add(Command("format.bold", _("Bold"), FORMAT, "Ctrl+B",
+                                    checkable=True),
                             triggered=self._fmt_bold)
-        self.act_italic = add(Command("format.italic", _("Italic"), FORMAT, "Ctrl+I"),
+        self.act_italic = add(Command("format.italic", _("Italic"), FORMAT, "Ctrl+I",
+                                    checkable=True),
                               triggered=self._fmt_italic)
-        self.act_underline = add(Command("format.underline", _("Underline"), FORMAT, "Ctrl+U"),
+        self.act_underline = add(Command("format.underline", _("Underline"), FORMAT, "Ctrl+U",
+                                    checkable=True),
                                  triggered=self._fmt_underline)
         # Underline has no Markdown: it stays in the document and in local
         # files, and is left out of what is published.
@@ -1111,10 +1117,10 @@ class MainWindow(QMainWindow):
         # (Word and LibreOffice have none).
         self.act_strike = add(Command("format.strike", _("Strikethrough"), FORMAT,
                                       platform_keys("Ctrl+Shift+X", "Alt+Shift+5"),
-                                      keywords=(_("cross out"),)),
+                                      checkable=True, keywords=(_("cross out"),)),
                               triggered=lambda: self._toggle_style(rich_text.STRIKE))
         self.act_code = add(Command("format.code", _("Inline Code"), FORMAT,
-                                    keywords=(_("monospace"),)),
+                                    checkable=True, keywords=(_("monospace"),)),
                             triggered=lambda: self._toggle_style(rich_text.CODE))
         # Command-\ and Ctrl+\, Google Docs' keys for it.
         self.act_reset_format = add(Command("format.reset", _("Clear Formatting"), FORMAT,
@@ -1287,6 +1293,13 @@ class MainWindow(QMainWindow):
             self._language_group.addAction(action)
             self.act_languages.append(action)
 
+        # Option-Command-T on a Mac, as every Mac app's Show Toolbar; no key
+        # elsewhere, where none is common (Ctrl+Alt+T opens a terminal).
+        self.show_toolbar = bool(load_settings().get("show_toolbar", True))
+        self.act_show_toolbar = add(Command("view.toolbar", _("Show Toolbar"), VIEW,
+                                            platform_keys("Ctrl+Alt+T", None),
+                                            checkable=True),
+                                    toggled=self._set_toolbar_shown, checked=self.show_toolbar)
         self.act_highlight_line = add(Command("view.highlight_line",
                                               _("Highlight Current Line"), VIEW,
                                               checkable=True),
@@ -1450,6 +1463,8 @@ class MainWindow(QMainWindow):
         self.m_format = m_format
 
         m_view = self.menuBar().addMenu(_("&View"))
+        m_view.addAction(self.act_show_toolbar)
+        m_view.addSeparator()
         m_view.addAction(self.act_toggle_theme)
         m_view.addAction(self.act_toggle_line_numbers)
         m_view.addAction(self.act_toggle_syntax_hl)
@@ -1581,6 +1596,12 @@ class MainWindow(QMainWindow):
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
         v.addWidget(self.header_widget, 0)
+        self.format_toolbar = FormatToolbar(
+            {"bold": self.act_bold, "italic": self.act_italic, "strike": self.act_strike,
+             "link": self.act_link, "bullets": self.act_bullets, "numbers": self.act_numbers,
+             "quote": self.act_quote},
+            self.m_style, dark=self.is_dark_theme)
+        v.addWidget(self.format_toolbar, 0)
         v.addWidget(self.findbar, 0)
         v.addWidget(self.update_bar, 0)
         v.addWidget(self.tabs, 1)
@@ -3654,24 +3675,19 @@ class MainWindow(QMainWindow):
     # FORMAT HANDLERS
     # ----------------------------------------------------------------------
     def _fmt_bold(self):
-        ed = self.current_editor()
-        if ed:
-            ed.toggle_bold()
+        self._toggle_format('bold')
 
     def _fmt_italic(self):
-        ed = self.current_editor()
-        if ed:
-            ed.toggle_italic()
+        self._toggle_format('italic')
 
     def _fmt_underline(self):
-        ed = self.current_editor()
-        if ed:
-            ed.toggle_underline()
+        self._toggle_format('underline')
 
     def _reset_format(self):
         ed = self.current_editor()
         if ed:
             ed.reset_to_default()
+            self._update_format_buttons()
 
     def _undo(self):
         ed = self.current_editor()
@@ -3724,6 +3740,12 @@ class MainWindow(QMainWindow):
         if ed:
             ed.set_heading(level)
             self._update_format_buttons()
+
+    def _set_toolbar_shown(self, shown: bool) -> None:
+        """View > Show Toolbar, remembered."""
+        self.show_toolbar = bool(shown)
+        save_setting("show_toolbar", self.show_toolbar)
+        self._update_editor_commands()
 
     def _toggle_style(self, style: str) -> None:
         ed = self.current_editor()
@@ -3819,6 +3841,9 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "_editor_actions"):
             return
         kind = self._editor_kind(self.current_editor())
+        if getattr(self, "format_toolbar", None) is not None:
+            # A PDF has nothing to format.
+            self.format_toolbar.setVisible(self.show_toolbar and bool(kind))
         for action in self._editor_actions:
             action.setEnabled(bool(kind))
         for action in self._rich_actions:
@@ -3876,6 +3901,8 @@ class MainWindow(QMainWindow):
             self.findbar._update_theme()
         if hasattr(self, 'header_widget'):
             self.header_widget.update_theme(self.is_dark_theme)
+        if getattr(self, 'format_toolbar', None) is not None:
+            self.format_toolbar.set_dark(self.is_dark_theme)
         if hasattr(self, 'update_bar'):
             self.update_bar.update_theme(self.is_dark_theme)
         for i in range(self.tabs.count()):
