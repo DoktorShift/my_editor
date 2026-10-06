@@ -937,6 +937,8 @@ class ImportsController(QObject):
             items=items, feed_url=feed_url, profile=self._profile,
             relay_pool=self._relay_pool, relay_directory=self._relay_directory,
             session_pool=self._session_pool,
+            # One fetcher for every post, not a network manager each.
+            fetcher=self._fetcher,
             identifier_exists=(lambda d: d in store) if store is not None else None,
             is_imported=is_imported, fetch_full_text=fetch_full_text,
             rehost_images=rehost_images,

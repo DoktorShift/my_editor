@@ -87,7 +87,8 @@ class Harness:
     def make_runner(self):
         def item_job(**kwargs):
             self.kwargs.append(kwargs)
-            return FakeItemJob(self, kwargs["items"], kwargs["is_imported"], kwargs)
+            return FakeItemJob(self, kwargs["items"], kwargs["is_imported"], kwargs,
+                               parent=kwargs.get("parent"))
 
         return ImportRunner(store=self.store, catalogue=self.catalogue, profile=PROFILE,
                             item_job_factory=item_job,
@@ -254,3 +255,15 @@ def test_a_choice_for_the_run_wins_over_a_sources_default():
     h.runner.run(job.id)
     kwargs = h.kwargs[0]
     assert (kwargs["rehost_images"], kwargs["fetch_full_text"]) == (True, False)
+
+
+def test_finished_row_jobs_are_let_go():
+    """Engine review M5: every post's job stayed a child of the runner
+    for the whole session."""
+    from PySide6.QtCore import QCoreApplication, QEvent
+    h = Harness()
+    job = h.job("a", "b", "c")
+    h.runner.run(job.id)
+    assert h.status(job)[0] == "completed"
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert not h.runner.findChildren(FakeItemJob)

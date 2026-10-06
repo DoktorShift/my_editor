@@ -191,6 +191,7 @@ class ImportRunner(QObject):
             cancel = getattr(self._current, "cancel", None)
             if cancel is not None:
                 cancel()
+            _release(self._current)
             self._current = None
         job.status, job.error = "paused", reason
         self._store.save_job(job)
@@ -344,6 +345,9 @@ class ImportRunner(QObject):
         job.item_started.connect(
             lambda *_a: live() and self._set_stage(row, STAGE_PREPARING))
         job.completed.connect(lambda *_a: live() and self._settle_made(row, outcome))
+        # Let go of it once it is done (deferred: it is still in its own
+        # signal then). A 2000-post import used to keep 2000 of them.
+        job.completed.connect(lambda *_a: _release(job))
         job.start()
 
     def _settle_made(self, row: JobRow, outcome: dict) -> None:
@@ -379,6 +383,8 @@ class ImportRunner(QObject):
 
         job.completed.connect(completed)
         job.failed.connect(lambda reason: live() and self._end_row(row, ROW_FAILED, reason))
+        job.completed.connect(lambda *_a: _release(job))
+        job.failed.connect(lambda *_a: _release(job))
         try:
             job.send_signed(row.signed_event)
         except ValueError:
@@ -409,6 +415,13 @@ class ImportRunner(QObject):
         self._job = None
         self.job_changed.emit(job.id)
         self.job_finished.emit(job.id)
+
+
+def _release(job) -> None:
+    """Delete a row's finished job on the next turn of the event loop."""
+    delete = getattr(job, "deleteLater", None)
+    if delete is not None:
+        delete()
 
 
 def unfinished(jobs: List[Job]) -> List[Job]:
