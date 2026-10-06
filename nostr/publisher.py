@@ -54,6 +54,7 @@ from .drafts import (
     build_tombstone_wrap,
     serialize_inner_event,
 )
+from .draft_deletions import build_deletion_request
 from .events import build_event
 from .outbox import RelayDirectory, ask_private_relays, normalize_relay_url
 from .profiles import Profile
@@ -834,6 +835,12 @@ class DraftDeleteJob(QObject):
     wherever the draft may be, including where it went while the
     account's own list was unknown.
 
+    ``announce`` also sends a NIP-09 deletion request for the draft, signed
+    right after the tombstone and sent to the same relays. Apps that
+    delete that way (EINUNDZWANZIG STANDUP) read only those, and an
+    imported post deleted without one could be imported there again.
+    ``replaced_wrap_id`` names the wrap being deleted in that request.
+
     Signals:
       status_changed(str)
       tombstoned(str, str)       (identifier, event_id) right after the
@@ -859,6 +866,8 @@ class DraftDeleteJob(QObject):
         identifier: str,
         inner_kind: int,
         entitled_relays: Sequence[str] = (),
+        announce: bool = False,
+        replaced_wrap_id: str = "",
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -869,6 +878,8 @@ class DraftDeleteJob(QObject):
                 f"unsupported inner kind {inner_kind!r}; "
                 f"expected one of {SUPPORTED_INNER_KINDS}"
             )
+        self._announce = announce
+        self._replaced_wrap_id = replaced_wrap_id
         self._relay_pool = relay_pool
         self._relay_directory = relay_directory
         self._session_pool = session_pool
@@ -927,13 +938,35 @@ class DraftDeleteJob(QObject):
         )
         client.sign_event(
             unsigned,
-            on_success=lambda signed: self._on_signed(signed, publish_relays),
+            on_success=lambda signed: self._on_signed(signed, publish_relays, client),
             on_failure=self._emit_failed,
         )
 
-    def _on_signed(self, signed_event: dict, publish_relays: List[str]) -> None:
+    def _on_signed(self, signed_event: dict, publish_relays: List[str],
+                   client: Optional[BunkerClient] = None) -> None:
         if self._cancelled:
             return
+        if self._announce and client is not None:
+            # Signed before anything is sent, so the signer is asked one
+            # thing at a time. The draft is deleted by the tombstone
+            # alone; a refused request only means STANDUP does not hear.
+            request = build_deletion_request(
+                pubkey_hex=self._profile.user_pubkey, identifier=self._identifier,
+                wrap_id=self._replaced_wrap_id)
+            client.sign_event(
+                request,
+                on_success=lambda signed_request: self._send(
+                    signed_event, publish_relays, signed_request),
+                on_failure=lambda _reason: self._send(signed_event, publish_relays))
+            return
+        self._send(signed_event, publish_relays)
+
+    def _send(self, signed_event: dict, publish_relays: List[str],
+              deletion_request: Optional[dict] = None) -> None:
+        if self._cancelled:
+            return
+        if deletion_request is not None:
+            self._relay_pool.publish(publish_relays, deletion_request)
         self.tombstoned.emit(self._identifier, signed_event["id"])
         self._emit_status(ngettext(
             "Removing draft from {n} relay…", "Removing draft from {n} relays…",
@@ -995,9 +1028,13 @@ class DraftBulkDeleteJob(QObject):
         profile: Profile,
         targets: Sequence[Tuple[str, int]],
         entitled_relays: Sequence[str] = (),
+        announce: Optional[dict] = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
+        # Identifier -> id of its current wrap, for the drafts whose
+        # deletion is also announced (DraftDeleteJob ``announce``).
+        self._announce = dict(announce or {})
         # Validated here, before a single signature is asked for. A run
         # that would die on its ninth draft because of something knowable
         # at the start has already cost the user eight approvals.
@@ -1087,6 +1124,8 @@ class DraftBulkDeleteJob(QObject):
                 identifier=identifier,
                 inner_kind=inner_kind,
                 entitled_relays=self._entitled_relays,
+                announce=identifier in self._announce,
+                replaced_wrap_id=self._announce.get(identifier, ""),
                 parent=self,
             )
         except ValueError as exc:

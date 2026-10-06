@@ -122,7 +122,10 @@ from nostr.blossom.store import MediaFile, MediaStore
 from nostr.bunker import BunkerSessionPool
 from nostr.contacts import ContactListFetcher
 from nostr.draft_store import DraftState, DraftStore
+from nostr.draft_deletions import DraftDeletions
 from nostr.draft_sync import DraftSync
+from nostr.imports.constants import IDENTIFIER_PREFIX as IMPORT_IDENTIFIER_PREFIX
+from nostr.imports.constants import SOURCE_TAG as IMPORT_SOURCE_TAG
 from nostr.drafts import (
     INNER_KIND_LONG_FORM,
     INNER_KIND_SHORT_NOTE,
@@ -367,6 +370,15 @@ class MainWindow(QMainWindow):
         self._draft_sync.signer_unreachable.connect(
             self._on_draft_sync_signer_unreachable
         )
+        # Deletions other apps announce as NIP-09 requests (STANDUP does),
+        # which the wraps alone would not show (nostr/draft_deletions.py).
+        self._draft_deletions = DraftDeletions(
+            relay_pool=self._relay_pool,
+            relay_directory=self._relay_directory,
+            store=self._draft_store,
+            entitled_relays=self._entitled_relays,
+            parent=self,
+        )
         # Created lazily inside ``_build_findbar`` so its parent is the
         # central widget rather than ``self`` - keeps Qt's geometry
         # reasoning straightforward.
@@ -485,6 +497,7 @@ class MainWindow(QMainWindow):
             # if the panel is never opened, this still keeps the store
             # warm so opening the panel later is instant.
             self._draft_sync.start_for(active)
+            self._draft_deletions.start_for(active)
             # An account created here whose setup was left for later is
             # finished now, once the window is up.
             QTimer.singleShot(0, lambda: self._accounts.profile_activated(
@@ -3885,6 +3898,7 @@ class MainWindow(QMainWindow):
         # Bind the draft pipeline to the new profile so the panel
         # (visible or not) starts collecting wraps from the relays.
         self._draft_sync.start_for(profile)
+        self._draft_deletions.start_for(profile)
         if self._drafts_panel is not None:
             self._drafts_panel.set_active_profile(profile)
             self._drafts_panel.set_signer_unsupported(False)
@@ -3906,6 +3920,7 @@ class MainWindow(QMainWindow):
         memory is a privacy problem and not merely untidy.
         """
         self._draft_sync.stop()
+        self._draft_deletions.stop()
         self._private_library.stop()
         self._server_list.forget_account()
         # The library lists one account's files; the next account must
@@ -3934,6 +3949,7 @@ class MainWindow(QMainWindow):
         # ``DraftSync.start_for`` is idempotent if the same profile is
         # already active.
         self._draft_sync.start_for(profile)
+        self._draft_deletions.start_for(profile)
         if self._drafts_panel is not None:
             self._drafts_panel.set_active_profile(profile)
             self._drafts_panel.set_signer_unsupported(False)
@@ -3962,6 +3978,7 @@ class MainWindow(QMainWindow):
             self._drafts_panel.set_signer_unreachable(False)
         if remaining is not None:
             self._draft_sync.start_for(remaining)
+            self._draft_deletions.start_for(remaining)
 
     # -- metadata / avatar updates ----------------------------------------
 
@@ -4397,6 +4414,7 @@ class MainWindow(QMainWindow):
             self._central_splitter.setSizes([total - panel_w, panel_w])
         self.act_nostr_drafts.setChecked(True)
         self._draft_sync.refresh()
+        self._draft_deletions.refresh()
 
     def _hide_drafts_panel(self) -> None:
         if self._drafts_panel is None:
@@ -4491,12 +4509,12 @@ class MainWindow(QMainWindow):
         """Delete one draft or twenty, through one question and one run.
 
         Drafts written by other Nostr clients can use inner kinds this
-        editor does not speak (kind 30024, used by Habla and Yakihonne
-        for long-form drafts, is the common one). Tombstoning one of
-        those from here could leave it visible in the client that made
-        it, so they are separated out before anything is confirmed and
-        named in the confirmation rather than failing partway through a
-        run the user already approved.
+        editor does not speak (an article draft, kind 30024, is read as
+        an article: nostr/drafts.py). Tombstoning one of those from here
+        could leave it visible in the client that made it, so they are
+        separated out before anything is confirmed and named in the
+        confirmation rather than failing partway through a run the user
+        already approved.
         """
         profile = self._profile_store.default()
         if profile is None or not identifiers:
@@ -4592,6 +4610,7 @@ class MainWindow(QMainWindow):
                 entitled_relays=self._entitled_relays(),
                 profile=profile,
                 targets=deletable,
+                announce=self._imported_draft_wraps(deletable),
                 parent=self,
             )
         except ValueError as exc:
@@ -4630,6 +4649,22 @@ class MainWindow(QMainWindow):
             )
         )
         job.start()
+
+    def _imported_draft_wraps(self, deletable: List[Tuple[str, int]]) -> dict:
+        """``{d: wrap id}`` for the imported drafts among ``deletable``.
+
+        Their deletion is announced to apps that read only NIP-09
+        requests too (EINUNDZWANZIG STANDUP), so a post deleted here is
+        never imported there again."""
+        found = {}
+        for identifier, _kind in deletable:
+            record = self._draft_store.get(identifier)
+            if record is None:
+                continue
+            if identifier.startswith(IMPORT_IDENTIFIER_PREFIX) or any(
+                    tag and tag[0] == IMPORT_SOURCE_TAG for tag in record.inner_tags):
+                found[identifier] = record.event_id
+        return found
 
     def _on_draft_deletion_finished(
         self, deleted: int, failures: list, total: int, progress,
