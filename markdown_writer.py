@@ -19,9 +19,10 @@ What is written follows what the editor shows ("Markdown first"):
 - Lists: Qt's own lists (from a .md file) and the editor's typed bullets
   ("    • item", see doc_walk) both become "- item", nested by depth.
 - Lines: a paragraph that came from Markdown (it carries paragraph
-  spacing) ends with a blank line. Lines typed one under the other keep
-  being separate lines (a hard line break), and an empty line between
-  them starts a new paragraph. Shift+Enter is a hard line break too.
+  spacing) ends with a blank line, and so does every line typed one
+  under the other: a blank line is the break every Nostr reader shows
+  alike (NIP-23 asks for no hard line breaks inside a paragraph). Only
+  Shift+Enter, an explicit line break, is written as one.
   Leading spaces that indent a typed line become non-breaking spaces,
   so the indent shows instead of turning the line into a code block.
 - Characters Markdown would read as markup in typed text (``*``, ``_``
@@ -476,13 +477,10 @@ def _separator(previous: _Block, block: _Block) -> str:
     if previous.kind == "quote" and block.kind == "quote":
         # Two paragraphs of one quote, or two quoted lines typed one under
         # the other: either way they stay in the quote.
-        if previous.spaced:
-            return "\n" + ("> " * min(previous.level, block.level)).rstrip() + "\n"
-        return "  \n"
-    if (previous.kind == "paragraph" and block.kind == "paragraph"
-            and not previous.spaced and not block.spaced):
-        # Typed one under the other: separate lines, one paragraph.
-        return "  \n"
+        return "\n" + ("> " * min(previous.level, block.level)).rstrip() + "\n"
+    # Lines typed one under the other become paragraphs of their own: a
+    # blank line is the one break every Nostr reader shows the same way
+    # (NIP-23 asks for no hard line breaks inside a paragraph).
     return "\n\n"
 
 
