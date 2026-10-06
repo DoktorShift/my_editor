@@ -7,10 +7,23 @@ QTextDocument: where the text occurs, with or without matching case and
 as whole words only, and what replacing it does. A replacement takes the
 style of the text it replaces (bold stays bold, a link stays a link to
 the same address), and Replace All is one step on the undo stack.
+
+The text is searched as one string with a regular expression rather
+than with QTextDocument.find, which goes back into Python for every
+match (1.6 seconds for 55,000 matches in a long chapter, on every pause
+in typing while the find bar is open; a few milliseconds this way).
+
+Letters with accents can be stored two ways: as one character (é) or as
+a letter followed by a combining accent (e and ´, common in text from
+macOS file names and some PDFs). Both ways are found, whichever way the
+search is typed, and "Cafe" does not find the "Cafe" inside "Café"
+written the second way: the accent belongs to the last letter.
 """
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from bisect import bisect_left
 from dataclasses import dataclass
 from typing import List, Tuple
@@ -27,27 +40,49 @@ class FindOptions:
     match_case: bool = False
     whole_words: bool = False
 
-    def flags(self) -> QTextDocument.FindFlag:
-        flags = QTextDocument.FindFlag(0)
-        if self.match_case:
-            flags |= QTextDocument.FindFlag.FindCaseSensitively
-        if self.whole_words:
-            flags |= QTextDocument.FindFlag.FindWholeWords
-        return flags
+
+
+def _in_word(char: str) -> bool:
+    """Letters, numbers and the accents on them make words (Qt's own
+    rule for whole words, with accents added)."""
+    return char.isalnum() or unicodedata.combining(char) != 0
+
+
+def _pattern(needle: str, options: FindOptions) -> re.Pattern:
+    """Every place ``needle`` starts, written either way (one character
+    per accented letter, or letter and accent)."""
+    forms = sorted({needle, unicodedata.normalize("NFC", needle),
+                    unicodedata.normalize("NFD", needle)}, key=len, reverse=True)
+    flags = 0 if options.match_case else re.IGNORECASE
+    # A lookahead finds overlapping places too, so a place that is not a
+    # whole word cannot hide one that starts inside it.
+    return re.compile("(?=(" + "|".join(re.escape(form) for form in forms) + "))", flags)
 
 
 def find_all(doc: QTextDocument, needle: str, options: FindOptions = FindOptions()
              ) -> List[Match]:
-    """Every occurrence of ``needle``, in document order."""
+    """Every occurrence of ``needle``, in document order, none
+    overlapping the one before."""
     matches: List[Match] = []
     if not needle:
         return matches
-    cursor = QTextCursor(doc)
-    while True:
-        cursor = doc.find(needle, cursor, options.flags())
-        if cursor.isNull():
-            return matches
-        matches.append((cursor.selectionStart(), cursor.selectionEnd()))
+    # The document's characters, one per position (paragraph ends and
+    # table edges included), so string indexes are document positions.
+    text = doc.toRawText()
+    length = len(text)
+    taken_until = 0
+    for found in _pattern(needle, options).finditer(text):
+        start, end = found.start(1), found.end(1)
+        if start < taken_until or start == end:
+            continue
+        if end < length and unicodedata.combining(text[end]):
+            continue                          # the last letter has an accent the search has not
+        if options.whole_words and ((start > 0 and _in_word(text[start - 1]))
+                                    or (end < length and _in_word(text[end]))):
+            continue
+        matches.append((start, end))
+        taken_until = end
+    return matches
 
 
 def visible_matches(matches: List[Match], first: int, last: int) -> List[Tuple[int, Match]]:

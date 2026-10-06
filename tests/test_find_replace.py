@@ -55,6 +55,61 @@ def test_whole_words_skip_parts_of_words():
     assert find_all(doc, "cat", FindOptions(whole_words=True)) == [(0, 3), (13, 16)]
 
 
+def qt_find_all(doc, needle, options):
+    """What QTextDocument.find finds, one call per match: the reference."""
+    from PySide6.QtGui import QTextCursor
+    flags = QTextDocument.FindFlag(0)
+    if options.match_case:
+        flags |= QTextDocument.FindFlag.FindCaseSensitively
+    if options.whole_words:
+        flags |= QTextDocument.FindFlag.FindWholeWords
+    found, cursor = [], QTextCursor(doc)
+    while True:
+        cursor = doc.find(needle, cursor, flags)
+        if cursor.isNull():
+            return found
+        found.append((cursor.selectionStart(), cursor.selectionEnd()))
+
+
+STRUCTURED = ("# The Cat\n\nA cat, a CAT and a category.\n\n- cat one\n    - cat two\n\n"
+              "| cat | dog |\n| --- | --- |\n| a cat | cats |\n\n> cat\n\n```\ncat = 1\n```\n\n"
+              "Last cat\u00a0here, my_cat and cat.\n")
+
+
+@pytest.mark.parametrize("needle", ["cat", "Cat", "a c", "t", "cat one"])
+@pytest.mark.parametrize("options", [FindOptions(), FindOptions(match_case=True),
+                                     FindOptions(whole_words=True),
+                                     FindOptions(match_case=True, whole_words=True)])
+def test_find_agrees_with_qt_in_every_structure(needle, options):
+    doc = doc_of(STRUCTURED)
+    assert find_all(doc, needle, options) == qt_find_all(doc, needle, options)
+
+
+def test_accented_letters_are_found_whichever_way_they_are_stored():
+    # Review L2: "e" with a combining accent, as macOS file names store it.
+    doc = QTextDocument()
+    doc.setPlainText("Cafe\u0301 au lait, Cafe noir, Mu\u0308nchen, Ko\u0308ln")
+    assert find_all(doc, "Cafe", FindOptions(whole_words=True)) == [(15, 19)]
+    assert find_all(doc, "Cafe") == [(15, 19)]                 # the accent is the last letter's
+    assert find_all(doc, "München") == [(26, 34)]               # typed as one character each
+    assert find_all(doc, "Ko\u0308ln") == [(36, 41)]
+    assert replace_all(doc, "Cafe", "Bar", FindOptions(whole_words=True)) == 1
+    assert doc.toPlainText().startswith("Cafe\u0301 au lait, Bar noir")
+    precomposed = QTextDocument()
+    precomposed.setPlainText("Köln")
+    assert find_all(precomposed, "Ko\u0308ln") == [(0, 4)]      # typed with a combining accent
+
+
+def test_find_is_quick_in_a_long_chapter():
+    import time
+    doc = QTextDocument()
+    doc.setPlainText("Der schnelle braune Fuchs springt über den faulen Hund. " * 9000)
+    started = time.perf_counter()
+    found = find_all(doc, "e")
+    assert len(found) == 63000
+    assert time.perf_counter() - started < 0.5
+
+
 def test_nothing_to_find_finds_nothing():
     assert find_all(doc_of("text\n"), "") == []
 
