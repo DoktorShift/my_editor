@@ -1,0 +1,116 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: MyEditor\n"
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Name"
+msgstr "Name"
+
+msgid "The name people see"
+msgstr "Der Name, den andere sehen"
+
+msgid "Username"
+msgstr "Benutzername"
+
+msgid "A short name, without spaces"
+msgstr "Ein kurzer Name ohne Leerzeichen"
+
+msgid "About"
+msgstr "Über mich"
+
+msgid "Picture"
+msgstr "Profilbild"
+
+msgid "Address of an image, https://…"
+msgstr "Adresse eines Bildes, https://…"
+
+msgid "Banner"
+msgstr "Titelbild"
+
+msgid "Address of a wide image, https://…"
+msgstr "Adresse eines breiten Bildes, https://…"
+
+msgid "Website"
+msgstr "Website"
+
+msgid "Lightning Address"
+msgstr "Lightning-Adresse"
+
+msgid "you@wallet.example"
+msgstr "du@wallet.example"
+
+msgid "Nostr Address"
+msgstr "Nostr-Adresse"
+
+msgid "you@example.com"
+msgstr "du@example.com"
+
+msgid "Enter an image address beginning with https, like https://example.com/picture.jpg."
+msgstr "Gib eine Bildadresse ein, die mit https beginnt, etwa https://example.com/bild.jpg."
+
+msgid "Enter a web address beginning with http or https, like https://example.com."
+msgstr "Gib eine Webadresse ein, die mit http oder https beginnt, etwa https://example.com."
+
+msgid "Enter a Lightning address like you@wallet.example."
+msgstr "Gib eine Lightning-Adresse ein, etwa du@wallet.example."
+
+msgid "Enter a Nostr address like you@example.com."
+msgstr "Gib eine Nostr-Adresse ein, etwa du@example.com."
+
+msgid "A username can’t contain spaces."
+msgstr "Ein Benutzername darf keine Leerzeichen enthalten."
+
+msgid "Saving your profile…"
+msgstr "Dein Profil wird gespeichert …"
+
+msgid "Edit Profile"
+msgstr "Profil bearbeiten"
+
+msgid "Reading your profile…"
+msgstr "Dein Profil wird gelesen …"
+
+msgid "Your profile wasn’t saved: it couldn’t be read again just before saving, so nothing was changed. Try again in a moment."
+msgstr "Dein Profil wurde nicht gespeichert: Es ließ sich kurz vor dem Speichern nicht noch einmal lesen, daher wurde nichts geändert. Versuch es gleich noch einmal."
+
+msgid "Your profile wasn’t saved: the signer didn’t sign it, or too few servers took it. Nothing was changed. Try again in a moment."
+msgstr "Dein Profil wurde nicht gespeichert: Der Signer hat es nicht signiert, oder zu wenige Server haben es angenommen. Es wurde nichts geändert. Versuch es gleich noch einmal."
+
+msgid "MyEditor Couldn’t Read Your Profile"
+msgstr "MyEditor konnte dein Profil nicht lesen"
+
+msgid "Your profile couldn’t be read from the network just now. Editing it without reading it first could replace it, so try again in a moment."
+msgstr "Dein Profil ließ sich gerade nicht aus dem Netzwerk lesen. Es ohne vorheriges Lesen zu bearbeiten, könnte es ersetzen. Versuch es deshalb gleich noch einmal."
+
+msgid "Your Profile"
+msgstr "Dein Profil"
+
+msgid "You don’t have a profile yet. What you enter here becomes your profile."
+msgstr "Du hast noch kein Profil. Was du hier eingibst, wird dein Profil."
+
+msgid "This is what people see in every Nostr app. An empty field is removed from your profile."
+msgstr "Das sehen andere in jeder Nostr-App. Ein leeres Feld wird aus deinem Profil entfernt."
+
+msgid "Your signer app may ask you to approve."
+msgstr "Deine Signer-App fragt dich eventuell nach einer Bestätigung."
+
+msgid "Cancel"
+msgstr "Abbrechen"
+
+msgid "This Profile Can’t Be Edited Here"
+msgstr "Dieses Profil lässt sich hier nicht bearbeiten"
+
+msgid "Your profile is stored in a form MyEditor doesn’t understand, so it is left as it is. Edit it in the app that created it."
+msgstr "Dein Profil ist in einer Form gespeichert, die MyEditor nicht versteht. Es bleibt daher unverändert. Bearbeite es in der App, mit der es erstellt wurde."
+
+msgid "Save"
+msgstr "Speichern"
+
+msgid "Close"
+msgstr "Schließen"
+
+msgid "Try Again"
+msgstr "Erneut versuchen"
