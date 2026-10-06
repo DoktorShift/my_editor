@@ -39,6 +39,7 @@ from constants import (
     DARK_BORDER, LIGHT_BORDER, MONO_FONT, APP_DISPLAY_NAME, APP_VERSION, APP_URL
 )
 from widgets import FindBar, HeaderWidget, LineNumberGutter, FileChangedBar, UpdateBar
+import diagnostics
 import i18n
 from i18n import _, ngettext, pgettext
 from commands import FILE, FORMAT, HELP, NOSTR, SEARCH, VIEW, Command, CommandRegistry
@@ -1189,6 +1190,9 @@ class MainWindow(QMainWindow):
         self.act_check_updates = add(Command("help.check_updates", _("Check for Updates\u2026"),
                                              HELP, keywords=("upgrade", "version")),
                                      triggered=self._check_for_updates_manual)
+        self.act_show_logs = add(Command("help.show_logs", _("Show Log Files"), HELP,
+                                         keywords=("diagnostics", "bug report", "crash")),
+                                 triggered=self._show_log_files)
         self.act_about = add(Command("help.about", pgettext("help menu", "About"), HELP),
                              triggered=self._show_about)
 
@@ -1274,6 +1278,7 @@ class MainWindow(QMainWindow):
         help_menu.addSeparator()
         help_menu.addAction(self.act_install_help)
         help_menu.addAction(self.act_check_updates)
+        help_menu.addAction(self.act_show_logs)
         help_menu.addSeparator()
         help_menu.addAction(self.act_about)
 
@@ -3064,6 +3069,14 @@ class MainWindow(QMainWindow):
         # it can replace our files.
         self._closing_for_update = True
         self.close()
+
+    def _show_log_files(self):
+        """Help > Show Log Files: the folder with the log, for a bug report."""
+        folder = diagnostics.log_folder()
+        os.makedirs(folder, exist_ok=True)
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(folder)):
+            self.statusBar().showMessage(
+                _("The log files are in {folder}").format(folder=folder), 8000)
 
     def _open_install_guide(self):
         """Help > Installation Help: the web guide, opened on this system."""
