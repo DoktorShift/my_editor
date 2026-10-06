@@ -80,7 +80,7 @@ from update_dialog import UpdateDialog, WhatsNewDialog
 from update_flow import AUTOMATIC, guide_url, plan_for
 import theme
 from export_html import document_to_html, normalize_after_set_html, sniff_image_ext
-from find_replace import find_all, replace_all, replace_match
+from find_replace import find_all, replace_all, replace_match, visible_matches
 from word_count import count_words, reading_minutes
 from export_pdf import export_pdf, load_page_setup
 from page_setup_dialog import PageSetupDialog
@@ -900,6 +900,7 @@ class MainWindow(QMainWindow):
         ed.set_local_image_resolver(lambda name, e=ed: self._resolve_local_image(e, name))
         ed.image_pasted.connect(lambda img, e=ed: self._handle_pasted_image(e, img))
         ed.notice.connect(lambda text: self.status.showMessage(text, 8000))
+        ed.visible_area_changed.connect(lambda e=ed: self._on_visible_area_changed(e))
         ed.urls_dropped.connect(self._handle_dropped_urls)
         ed.set_context_menu_filler(self._fill_editor_context_menu)
         ed.set_structure_check(lambda e=ed: self._editor_kind(e) == "rich")
@@ -1044,7 +1045,7 @@ class MainWindow(QMainWindow):
                 if i != index:
                     ed = self._editor_from_widget(self.tabs.widget(i))
                     if ed:
-                        ed.setExtraSelections([])
+                        ed.set_highlights("find", [])
             self._search_matches = []
             self._current_match_index = -1
             self._last_search_text = ""
@@ -1370,7 +1371,6 @@ class MainWindow(QMainWindow):
         self._search_matches = []
         self._current_match_index = -1
         self._last_search_text = ""
-        self._search_extra_selections = []
 
         # Theme, line numbers and syntax highlighting: menu items without
         # keys, since no platform convention gives them one (their old keys
@@ -3433,6 +3433,8 @@ class MainWindow(QMainWindow):
         cursor = ed.textCursor()
         selected = (cursor.selectionStart(), cursor.selectionEnd())
         if selected in self._search_matches:
+            # No highlight cursors for the document to move while it changes.
+            ed.set_highlights("find", [])
             _start, end = replace_match(ed.document(), selected, self.findbar.replacement())
             cursor.setPosition(end)
             ed.setTextCursor(cursor)
@@ -3453,6 +3455,10 @@ class MainWindow(QMainWindow):
         needle = self.findbar.text()
         if ed is None or not needle:
             return
+        # Every highlight holds a cursor the document would move on each of
+        # the replacements: take them away first (thousands of matches made
+        # Replace All take minutes).
+        ed.set_highlights("find", [])
         count = replace_all(ed.document(), needle, self.findbar.replacement(),
                             self.findbar.options())
         self._find_refresh.stop()              # found again right here
@@ -3722,55 +3728,42 @@ class MainWindow(QMainWindow):
                                      if selected in self._search_matches else -1)
 
     def _highlight_all_matches(self):
+        """Paint the matches on screen (all of them are counted, but only
+        those are painted: each painted one holds a cursor the document
+        moves on every edit), the current one in the selection color."""
         ed = self.current_editor()
         if not ed:
             return
         if not self._search_matches:
-            ed.setExtraSelections([])
+            ed.set_highlights("find", [])
             return
-
-        highlight_fmt = QTextCharFormat()
-        highlight_fmt.setBackground(QColor("#FFD700"))
-        highlight_fmt.setForeground(QColor("#000000"))
-
+        match_fmt = QTextCharFormat()
+        match_fmt.setBackground(QColor("#FFD700"))
+        match_fmt.setForeground(QColor("#000000"))
+        current_fmt = QTextCharFormat()
+        current_fmt.setBackground(QColor("#264F78" if self.is_dark_theme else "#0078D4"))
+        current_fmt.setForeground(QColor("#FFFFFF"))
+        first, last = ed.visible_range()
         selections = []
-        for start_pos, end_pos in self._search_matches:
+        for index, (start, end) in visible_matches(self._search_matches, first, last):
             cursor = QTextCursor(ed.document())
-            cursor.setPosition(start_pos)
-            cursor.setPosition(end_pos, QTextCursor.KeepAnchor)
-            sel = QTextEdit.ExtraSelection()
-            sel.cursor = cursor
-            sel.format = highlight_fmt
-            selections.append(sel)
+            cursor.setPosition(start)
+            cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+            selection = QTextEdit.ExtraSelection()
+            selection.cursor = cursor
+            selection.format = current_fmt if index == self._current_match_index else match_fmt
+            selections.append(selection)
+        ed.set_highlights("find", selections)
 
-        if 0 <= self._current_match_index < len(self._search_matches):
-            start_pos, end_pos = self._search_matches[self._current_match_index]
-            cursor = QTextCursor(ed.document())
-            cursor.setPosition(start_pos)
-            cursor.setPosition(end_pos, QTextCursor.KeepAnchor)
-            cur_sel = QTextEdit.ExtraSelection()
-            cur_sel.cursor = cursor
-            cur_fmt = QTextCharFormat()
-            if self.is_dark_theme:
-                cur_fmt.setBackground(QColor("#264F78"))
-                cur_fmt.setForeground(QColor("#FFFFFF"))
-            else:
-                cur_fmt.setBackground(QColor("#0078D4"))
-                cur_fmt.setForeground(QColor("#FFFFFF"))
-            cur_sel.format = cur_fmt
-            for i, sel in enumerate(selections):
-                if sel.cursor.selectionStart() == start_pos:
-                    selections[i] = cur_sel
-                    break
-
-        ed.setExtraSelections(selections)
-        self._search_extra_selections = selections
+    def _on_visible_area_changed(self, ed) -> None:
+        """Scrolled or resized: the matches now on screen get painted."""
+        if ed is self.current_editor() and self.findbar.isVisible() and self._search_matches:
+            self._highlight_all_matches()
 
     def _clear_search_highlights(self):
         ed = self.current_editor()
         if ed:
-            ed.setExtraSelections([])
-            self._search_extra_selections = []
+            ed.set_highlights("find", [])
 
     def _find_once(self, forward=True):
         ed = self.current_editor()

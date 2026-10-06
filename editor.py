@@ -75,6 +75,14 @@ class HtmlEditor(QTextEdit):
     # A short message for the status bar about what the editor just did
     # (a paste that had to leave pictures out).
     notice = Signal(str)
+    # The part of the document on screen changed (scrolled, resized):
+    # whoever paints only what is visible (find highlights, spelling)
+    # paints again.
+    visible_area_changed = Signal()
+
+    # Kinds of highlights shown over the text, bottom to top: each kind
+    # keeps its own (set_highlights), the editor shows them together.
+    HIGHLIGHT_LAYERS = ("spelling", "find")
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -127,6 +135,8 @@ class HtmlEditor(QTextEdit):
         self.setFont(code_font())
         # Characters per line when writing; None for code (full width).
         self._writing_measure_chars = None
+        self._highlights = {layer: [] for layer in self.HIGHLIGHT_LAYERS}
+        self.verticalScrollBar().valueChanged.connect(self.visible_area_changed)
 
         # Track active formatting state for persistent formatting
         self.active_format = {
@@ -427,6 +437,30 @@ class HtmlEditor(QTextEdit):
         super().resizeEvent(event)
         if self._paper_mode or self._writing_measure_chars:
             self._update_paper_margins()
+        self.visible_area_changed.emit()
+
+    # -------- Highlights over the text --------
+    def set_highlights(self, layer: str, selections) -> None:
+        """Show ``selections`` (QTextEdit.ExtraSelection) as the highlights
+        of one kind (HIGHLIGHT_LAYERS), in place of that kind's earlier
+        ones; the other kinds stay. Each highlight holds a cursor the
+        document moves on every edit, so callers keep them to what is on
+        screen (visible_range)."""
+        self._highlights[layer] = list(selections)
+        self.setExtraSelections([s for name in self.HIGHLIGHT_LAYERS
+                                 for s in self._highlights[name]])
+
+    def highlights(self, layer: str) -> list:
+        return list(self._highlights[layer])
+
+    def visible_range(self):
+        """``(first, last)``: the document positions from the start of the
+        first paragraph on screen to the end of the last."""
+        viewport = self.viewport()
+        top = self.cursorForPosition(QPoint(0, 0)).block()
+        bottom = self.cursorForPosition(
+            QPoint(viewport.width() - 1, viewport.height() - 1)).block()
+        return top.position(), bottom.position() + bottom.length()
 
     def _is_dark(self) -> bool:
         return hasattr(self, "_theme_colors") and self._theme_colors["bg"] == DARK_BG

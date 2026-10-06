@@ -11,6 +11,7 @@ the same address), and Replace All is one step on the undo stack.
 
 from __future__ import annotations
 
+from bisect import bisect_left
 from dataclasses import dataclass
 from typing import List, Tuple
 
@@ -47,6 +48,19 @@ def find_all(doc: QTextDocument, needle: str, options: FindOptions = FindOptions
         if cursor.isNull():
             return matches
         matches.append((cursor.selectionStart(), cursor.selectionEnd()))
+
+
+def visible_matches(matches: List[Match], first: int, last: int) -> List[Tuple[int, Match]]:
+    """The matches that touch ``first`` to ``last`` (what is on screen),
+    each with its index: only those are painted, however many there are."""
+    index = bisect_left(matches, first, key=lambda match: match[0])
+    if index > 0 and matches[index - 1][1] > first:
+        index -= 1
+    shown = []
+    while index < len(matches) and matches[index][0] <= last:
+        shown.append((index, matches[index]))
+        index += 1
+    return shown
 
 
 def _style_of(doc: QTextDocument, position: int) -> QTextCharFormat:

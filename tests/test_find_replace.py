@@ -179,3 +179,64 @@ def test_find_and_replace_in_the_window(tmp_path):
     assert r["refreshed"] in ("3 matches", "1 of 3")
     assert r["replace_row_kept"]          # Find while the row is open keeps it
     assert r["closed"]
+
+
+MANY_SCRIPT = r"""
+import json, os, sys, time
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+
+w = main_window.MainWindow()
+w.resize(1000, 700)
+w.show()
+ed = w.new_tab()
+ed.setPlainText("One fish, two fish, and some words around them.\n" * 10000)
+app.processEvents()
+w._show_find(replace=True)
+w.findbar.edit.setText("fish")
+app.processEvents()
+r = {"matches": len(w._search_matches), "painted": len(ed.highlights("find"))}
+w.findbar.replace_edit.setText("cat")
+started = time.perf_counter()
+w._replace_all()
+r["replace_all"] = time.perf_counter() - started
+r["left"] = ed.toPlainText().count("fish")
+started = time.perf_counter()
+ed.document().undo()
+r["undo"] = time.perf_counter() - started
+r["back"] = ed.toPlainText().count("fish")
+from PySide6.QtTest import QTest
+QTest.qWait(400)                      # the matches are found again after an edit
+ed.verticalScrollBar().setValue(ed.verticalScrollBar().maximum())
+app.processEvents()
+first, last = ed.visible_range()
+r["painted_after_scroll"] = [c.cursor.selectionStart() >= first - 60
+                             for c in ed.highlights("find")]
+ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_replace_all_stays_quick_with_thousands_of_matches(tmp_path):
+    # Review H2: one highlight cursor per match made Replace All of
+    # 54,000 matches take 84 seconds. Only what is on screen is painted.
+    import json
+    import subprocess
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env = dict(os.environ, HOME=str(tmp_path), QT_QPA_PLATFORM="offscreen")
+    proc = subprocess.run([sys.executable, "-c", MANY_SCRIPT, repo], env=env,
+                          capture_output=True, text=True, timeout=120)
+    line = next((l for l in proc.stdout.splitlines() if l.startswith("RESULT ")), None)
+    assert line, f"child failed:\n{proc.stdout}\n{proc.stderr}"
+    r = json.loads(line[len("RESULT "):])
+    assert r["matches"] == 20000
+    assert 0 < r["painted"] < 400                      # what is on screen, not 20,000
+    assert r["left"] == 0 and r["back"] == 20000
+    assert r["replace_all"] < 1.0, r
+    assert r["undo"] < 1.0, r
+    assert 0 < len(r["painted_after_scroll"]) < 400       # scrolled: what is on screen now
+    assert all(r["painted_after_scroll"])
