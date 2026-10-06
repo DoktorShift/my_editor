@@ -24,7 +24,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import tempfile
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -32,6 +31,8 @@ from typing import Dict, List, Optional
 from urllib.parse import urlsplit
 
 from PySide6.QtCore import QObject, QTimer
+
+from atomic_file import write_text
 
 
 # ---------------------------------------------------------------------------
@@ -433,24 +434,8 @@ class AssetIndex(QObject):
             pass
 
         try:
-            fd, tmp_path = tempfile.mkstemp(
-                prefix=".media_assets_", suffix=".json.tmp", dir=str(directory)
-            )
+            write_text(self._path, json.dumps(payload, indent=2, ensure_ascii=False))
         except OSError:
-            self._degraded = True
-            return False
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(payload, f, indent=2, ensure_ascii=False)
-                f.flush()
-                os.fsync(f.fileno())
-            os.chmod(tmp_path, 0o600)
-            os.replace(tmp_path, self._path)
-        except OSError:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
             self._degraded = True
             return False
 

@@ -24,6 +24,7 @@ from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtPrintSupport import QPrinter
 
 from export_pdf import make_page_layout, paginate, paint_pages
+from i18n import _
 
 # PDF pages are rendered to images for printing. Past this resolution the
 # images only grow, the output doesn't get any sharper on paper.
@@ -45,7 +46,7 @@ def make_printer() -> QPrinter:
 
 def prepare(printer: QPrinter, title: str, page_setup: dict) -> None:
     """Name the job and start from the saved page setup."""
-    printer.setDocName(title or "Untitled")
+    printer.setDocName(title or _("Untitled"))
     printer.setCreator("MyEditor")
     printer.setPageLayout(make_page_layout(page_setup))
 
@@ -138,8 +139,10 @@ def _paint_pdf_page(painter: QPainter, document, index: int, area: QRectF, dpi: 
 def _begin(printer: QPrinter) -> QPainter:
     painter = QPainter()
     if not painter.begin(printer):
-        name = printer.outputFileName() or printer.printerName() or "the printer"
-        raise PrintError(f"Couldn't start printing to {name}.")
+        name = printer.outputFileName() or printer.printerName()
+        if name:
+            raise PrintError(_("Couldn't start printing to {name}.").format(name=name))
+        raise PrintError(_("Couldn't start printing to the printer."))
     painter.setRenderHint(QPainter.Antialiasing)
     painter.setRenderHint(QPainter.TextAntialiasing)
     return painter

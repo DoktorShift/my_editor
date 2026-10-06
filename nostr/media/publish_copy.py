@@ -72,6 +72,7 @@ from typing import (
 from PySide6.QtCore import QObject, Signal
 
 import url_safety
+from i18n import _
 
 from ..blossom.hashes import blob_url, url_agrees_with_hash
 from .filecrypto import FileCryptoError, decrypt_file
@@ -355,7 +356,7 @@ class PublicCopyMaker(QObject):
             # Two copies at once would race for the ledger and the
             # signer. Refusing is honest; queueing behind an operation
             # the caller cannot see is not.
-            self._refuse(blob, on_done, "Another copy is already being made.")
+            self._refuse(blob, on_done, _("Another copy is already being made."))
             return
 
         existing = self.existing_copy(blob)
@@ -375,8 +376,8 @@ class PublicCopyMaker(QObject):
             self._refuse(
                 blob,
                 on_done,
-                "This file does not say where it is stored, so no public "
-                "copy could be made.",
+                _("This file does not say where it is stored, so no public "
+                  "copy could be made."),
             )
             return
 
@@ -417,7 +418,7 @@ class PublicCopyMaker(QObject):
             self._settle(active, CopyResult(
                 source_hash=active.blob.sha256,
                 cancelled=True,
-                reason="This copy was cancelled before anything was uploaded.",
+                reason=_("This copy was cancelled before anything was uploaded."),
             ))
             return
         if run is not None:
@@ -455,7 +456,7 @@ class PublicCopyMaker(QObject):
                 blobs=None,
                 failures=[CopyResult(
                     source_hash="",
-                    reason="Public copies are already being made.",
+                    reason=_("Public copies are already being made."),
                 )],
             ))
             return
@@ -593,8 +594,8 @@ class PublicCopyMaker(QObject):
                     minted=list(minted),
                     failures=[CopyResult(
                         source_hash=blob.sha256,
-                        reason="This file's public copy is not listed, so it "
-                               "was not published.",
+                        reason=_("This file's public copy is not listed, so it "
+                                 "was not published."),
                     )],
                 )
             rewritten.append(copy)
@@ -613,11 +614,12 @@ class PublicCopyMaker(QObject):
             return
         if not copy.urls:
             detail = _short(earlier)
-            self._fail(
-                copy,
-                "This file could not be downloaded from any of your servers"
-                + (f" ({detail})." if detail else "."),
-            )
+            if detail:
+                reason = _("This file could not be downloaded from any of your "
+                           "servers ({reason}).").format(reason=detail)
+            else:
+                reason = _("This file could not be downloaded from any of your servers.")
+            self._fail(copy, reason)
             return
         url = copy.urls.pop(0)
         self.copy_progress.emit(copy.blob.sha256, CopyStage.FETCHING)
@@ -634,7 +636,7 @@ class PublicCopyMaker(QObject):
             # Content addressing is the only reason it is safe to ask a
             # server the user did not choose. Bytes that are not the
             # ones asked for are that server failing, not this file.
-            self._fetch_next(copy, "a server returned the wrong file")
+            self._fetch_next(copy, _("a server returned the wrong file"))
             return
 
         self.copy_progress.emit(copy.blob.sha256, CopyStage.DECRYPTING)
@@ -646,8 +648,8 @@ class PublicCopyMaker(QObject):
             # that would be silent and unrecoverable.
             self._fail(
                 copy,
-                "This file could not be opened with the key in your library, "
-                "so no public copy was made.",
+                _("This file could not be opened with the key in your library, "
+                  "so no public copy was made."),
             )
             return
 
@@ -657,7 +659,7 @@ class PublicCopyMaker(QObject):
         except ScrubError as exc:
             # Step 4 refusing is the feature. There is no branch from
             # here that uploads the bytes anyway.
-            self._fail(copy, f"This file was not published: {exc}.")
+            self._fail(copy, _("This file was not published: {reason}.").format(reason=exc))
             return
         finally:
             # The plaintext of a private file has no business outliving
@@ -689,8 +691,8 @@ class PublicCopyMaker(QObject):
             # that a revoke cannot reach, which is worse than saying so.
             self._fail(
                 copy,
-                "The server did not give this copy an address this app can "
-                "record, so it was not published.",
+                _("The server did not give this copy an address this app can "
+                  "record, so it was not published."),
             )
             return
 
@@ -703,8 +705,8 @@ class PublicCopyMaker(QObject):
             # rather than adding a second one.
             self._fail(
                 copy,
-                "Your record of what is public could not be saved, so this "
-                "copy was not published. It may already be on your server.",
+                _("Your record of what is public could not be saved, so this "
+                  "copy was not published. It may already be on your server."),
             )
             return
 
@@ -715,11 +717,12 @@ class PublicCopyMaker(QObject):
         if copy is None or name != copy.job:
             return
         detail = _short(reason)
-        self._fail(
-            copy,
-            "This file's public copy could not be uploaded"
-            + (f": {detail}" if detail else "."),
-        )
+        if detail:
+            text = _("This file's public copy could not be uploaded: {reason}").format(
+                reason=detail)
+        else:
+            text = _("This file's public copy could not be uploaded.")
+        self._fail(copy, text)
 
     # -- step 7: the pointer, which is only ever a hint ---------------------
 

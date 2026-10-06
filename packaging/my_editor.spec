@@ -16,7 +16,7 @@ the final installer for each platform. See packaging/<os>/ and the CI workflow.
 import os
 import sys
 
-from PyInstaller.utils.hooks import collect_dynamic_libs, collect_submodules
+from PyInstaller.utils.hooks import collect_dynamic_libs, collect_submodules, copy_metadata
 
 # SPECPATH is the directory containing this spec (packaging/); the repo root is
 # its parent. Resolve everything relative to the root so builds are CWD-safe.
@@ -39,6 +39,10 @@ else:
 # Bundle the window icon, preserving its repo-relative path so resource_path()
 # in main.py finds it identically from source and when frozen.
 datas = [(os.path.join(ICON_DIR, "icon-256.png"), os.path.join("packaging", "icons"))]
+# The translations (i18n.py reads locale/<language>.po at startup).
+datas += [(os.path.join(ROOT, "locale", name), "locale")
+          for name in sorted(os.listdir(os.path.join(ROOT, "locale")))
+          if name.endswith(".po")]
 
 # Static analysis misses these (native ext / lazily-imported Qt submodules).
 hiddenimports = [
@@ -61,6 +65,21 @@ hiddenimports = [
 # Collect every submodule + its dynamic libs so they are importable when frozen.
 hiddenimports += collect_submodules("coincurve")
 coincurve_binaries = collect_dynamic_libs("coincurve")
+
+# Spell checking (spelling/) uses the system's own checker. Its backend
+# module is imported by platform when checking starts, so name it here.
+# macOS reaches NSSpellChecker through rubicon-objc, which reads its own
+# version from its package metadata when imported.
+if sys.platform == "darwin":
+    hiddenimports += ["spelling.macos"] + collect_submodules("rubicon.objc")
+    datas += copy_metadata("rubicon-objc")
+elif sys.platform == "win32":
+    hiddenimports += ["spelling.windows"]   # ctypes and COM only, nothing to collect
+else:
+    # Enchant is the system's library, loaded at run time and deliberately
+    # not bundled: it finds its providers and dictionaries where it was
+    # installed. The .deb recommends it (build_deb.sh).
+    hiddenimports += ["spelling.enchant"]
 
 # QtPdf backs the built-in PDF viewer (pdf_viewer.py) and must ship in
 # every bundle. Trim the rest and make sure the giant, unused Qt
@@ -200,6 +219,10 @@ if sys.platform == "darwin":
             "CFBundleVersion": VERSION,
             "NSHighResolutionCapable": True,
             "LSApplicationCategoryType": "public.app-category.productivity",
+            # The languages the app speaks, so macOS shows its own panels
+            # (Open, Save, the app menu) in the same one.
+            "CFBundleLocalizations": ["en", "de"],
+            "CFBundleDevelopmentRegion": "en",
             "CFBundleDocumentTypes": [
                 {
                     "CFBundleTypeName": "Text Document",

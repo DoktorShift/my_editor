@@ -3,13 +3,15 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 
-from PySide6.QtCore import Qt, QRect, QSize, Signal
-from PySide6.QtGui import QPainter, QFont, QColor
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QPainter, QColor
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QLineEdit, QLabel, QPushButton, QFrame, QMenu, QCheckBox
+    QWidget, QGridLayout, QHBoxLayout, QLineEdit, QLabel, QPushButton, QFrame, QMenu, QToolButton,
 )
-from constants import DARK_BG, LIGHT_BG, MONO_FONT
-from nostr.ui.profile_chip import ProfileChip
+from constants import DARK_BG
+from find_replace import FindOptions
+from fonts import monospace_font
+from i18n import _, pgettext
 
 
 class LineNumberGutter(QWidget):
@@ -58,7 +60,7 @@ class LineNumberGutter(QWidget):
         doc = self.editor.document()
         layout = doc.documentLayout()
 
-        font = QFont(MONO_FONT, 14)
+        font = monospace_font(14)
         painter.setFont(font)
         painter.setPen(text_color)
 
@@ -93,60 +95,158 @@ class LineNumberGutter(QWidget):
 
 
 class FindBar(QFrame):
-    def __init__(self, on_find_next, on_find_prev, on_close, parent=None):
+    """Find (and, in the editor, Replace) above the document.
+
+    The field to find in, previous and next match, how many there are,
+    and Done, the way Safari and TextEdit lay out their find bar. With
+    ``replace=True`` a second row can be shown (Find and Replace…):
+    the replacement, Replace and Replace All. With ``options=True`` a
+    menu offers Match Case and Whole Words. The bar only asks: the window
+    connects ``options_changed``, ``replace_requested`` and
+    ``replace_all_requested`` and does the finding (find_replace.py).
+
+    Keys: Return finds the next match, Shift+Return the previous one,
+    Escape closes the bar; Return in the replacement field replaces.
+    """
+
+    options_changed = Signal()
+    replace_requested = Signal()
+    replace_all_requested = Signal()
+
+    def __init__(self, on_find_next, on_find_prev, on_close, parent=None, *,
+                 replace: bool = False, options: bool = False):
         super().__init__(parent)
         self.setFrameShape(QFrame.StyledPanel)
         self.setObjectName("FindBar")
         self.is_dark = True
-        self._update_theme()
 
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(8, 8, 8, 6)
-        outer.setSpacing(4)
+        grid = QGridLayout(self)
+        grid.setContentsMargins(8, 6, 8, 6)
+        grid.setHorizontalSpacing(6)
+        grid.setVerticalSpacing(6)
 
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        self.label = QLabel("Search:")
         self.edit = QLineEdit()
-        self.edit.setPlaceholderText("Search…")
-        self.btn_prev = QPushButton("←")
-        self.btn_next = QPushButton("→")
-        self.btn_close = QPushButton("×")
+        self.edit.setPlaceholderText(pgettext("find field", "Find"))
+        self.edit.setAccessibleName(pgettext("find field", "Find"))
+        self.edit.setClearButtonEnabled(True)
+        self.btn_prev = QPushButton("\u276e")
+        self.btn_prev.setToolTip(_("Previous Match"))
+        self.btn_prev.setAccessibleName(_("Previous Match"))
+        self.btn_next = QPushButton("\u276f")
+        self.btn_next.setToolTip(_("Next Match"))
+        self.btn_next.setAccessibleName(_("Next Match"))
+        for button in (self.btn_prev, self.btn_next):
+            button.setObjectName("FindArrow")
+            button.setAutoDefault(False)
         self.match_info = QLabel("")
-        self.match_info.setMinimumWidth(120)
+        self.match_info.setMinimumWidth(90)
+        self.btn_close = QPushButton(_("Done"))
+        self.btn_close.setAutoDefault(False)
+        self.btn_close.setToolTip(_("Close the find bar (Esc)"))
 
         self.btn_prev.clicked.connect(on_find_prev)
         self.btn_next.clicked.connect(on_find_next)
         self.btn_close.clicked.connect(on_close)
-        self.edit.returnPressed.connect(on_find_next)
-
         self.edit.installEventFilter(self)
 
-        row.addWidget(self.label)
-        row.addWidget(self.edit, 1)
-        row.addWidget(self.btn_prev)
-        row.addWidget(self.btn_next)
-        row.addWidget(self.match_info)
-        row.addWidget(self.btn_close)
+        arrows = QHBoxLayout()
+        arrows.setSpacing(2)
+        arrows.addWidget(self.btn_prev)
+        arrows.addWidget(self.btn_next)
+        grid.addWidget(self.edit, 0, 0)
+        grid.addLayout(arrows, 0, 1)
+        grid.addWidget(self.match_info, 0, 2)
 
-        self.hint_label = QLabel("Enter: next  |  Shift+Enter: prev  |  Esc: close & edit here")
-        hint_font = self.hint_label.font()
-        hint_font.setPointSize(hint_font.pointSize() - 1)
-        hint_font.setItalic(True)
-        self.hint_label.setFont(hint_font)
+        self.match_case = None
+        self.whole_words = None
+        self.options_button = None
+        if options:
+            self.options_button = QToolButton()
+            self.options_button.setText(_("Options"))
+            self.options_button.setAccessibleName(_("Find Options"))
+            self.options_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+            menu = QMenu(self.options_button)
+            self.match_case = menu.addAction(_("Match Case"))
+            self.whole_words = menu.addAction(_("Whole Words"))
+            for action in (self.match_case, self.whole_words):
+                action.setCheckable(True)
+                action.toggled.connect(lambda _on=False: self._options_toggled())
+            self.options_button.setMenu(menu)
+            grid.addWidget(self.options_button, 0, 3)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(4, 0)
+        grid.addWidget(self.btn_close, 0, 5)
 
-        outer.addLayout(row)
-        outer.addWidget(self.hint_label)
+        self.replace_edit = None
+        self.replace_btn = None
+        self.replace_all_btn = None
+        if replace:
+            self.replace_edit = QLineEdit()
+            self.replace_edit.setPlaceholderText(_("Replace With"))
+            self.replace_edit.setAccessibleName(_("Replace With"))
+            self.replace_edit.installEventFilter(self)
+            self.replace_btn = QPushButton(_("Replace"))
+            self.replace_all_btn = QPushButton(_("Replace All"))
+            for button in (self.replace_btn, self.replace_all_btn):
+                button.setAutoDefault(False)
+            self.replace_btn.clicked.connect(self.replace_requested)
+            self.replace_all_btn.clicked.connect(self.replace_all_requested)
+            buttons = QHBoxLayout()
+            buttons.setSpacing(6)
+            buttons.addWidget(self.replace_btn)
+            buttons.addWidget(self.replace_all_btn)
+            buttons.addStretch(1)
+            grid.addWidget(self.replace_edit, 1, 0)
+            grid.addLayout(buttons, 1, 1, 1, 5)
+            self.show_replace(False)
+            # Tab goes from what to find to what to put instead, as in
+            # every find and replace panel.
+            QWidget.setTabOrder(self.edit, self.replace_edit)
+            QWidget.setTabOrder(self.replace_edit, self.replace_btn)
+            QWidget.setTabOrder(self.replace_btn, self.replace_all_btn)
+
+        self._update_theme()
+
+    # -- what the window asks ---------------------------------------------------
+
+    def options(self) -> FindOptions:
+        """Match Case and Whole Words, as chosen."""
+        return FindOptions(
+            match_case=bool(self.match_case and self.match_case.isChecked()),
+            whole_words=bool(self.whole_words and self.whole_words.isChecked()))
+
+    def _options_toggled(self) -> None:
+        if self.options_button is not None:
+            chosen = [a.text() for a in (self.match_case, self.whole_words) if a.isChecked()]
+            # The button says which options are on, so a search that finds
+            # nothing is not a mystery.
+            self.options_button.setText(", ".join(chosen) if chosen else _("Options"))
+        self.options_changed.emit()
+
+    def show_replace(self, shown: bool) -> None:
+        """Show or hide the Replace row (Find and Replace…, or Find…)."""
+        if self.replace_edit is None:
+            return
+        for widget in (self.replace_edit, self.replace_btn, self.replace_all_btn):
+            widget.setVisible(shown)
+
+    def replace_shown(self) -> bool:
+        return self.replace_edit is not None and not self.replace_edit.isHidden()
+
+    def replacement(self) -> str:
+        return self.replace_edit.text() if self.replace_edit is not None else ""
 
     def eventFilter(self, obj, event):
-        if obj == self.edit and event.type() == event.Type.KeyPress:
-            if event.key() == Qt.Key_Return:
-                if event.modifiers() == Qt.ShiftModifier:
+        if event.type() == event.Type.KeyPress and obj in (self.edit, self.replace_edit):
+            if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+                if obj is self.replace_edit:
+                    self.replace_requested.emit()
+                elif event.modifiers() & Qt.ShiftModifier:
                     self.btn_prev.clicked.emit()
                 else:
                     self.btn_next.clicked.emit()
                 return True
-            elif event.key() == Qt.Key_Escape:
+            if event.key() == Qt.Key_Escape:
                 self.btn_close.clicked.emit()
                 return True
         return super().eventFilter(obj, event)
@@ -169,22 +269,23 @@ class FindBar(QFrame):
                 background: #1E1E1E;
                 color: #D4D4D4;
                 border: 1px solid #3C3C3C;
-                padding: 6px 8px;
+                padding: 5px 8px;
                 border-radius: 4px;
                 selection-background-color: #264F78;
             }
-            QPushButton {
+            QPushButton, QToolButton {
                 background: #2D2D30;
                 color: #D4D4D4;
                 border: 1px solid #3C3C3C;
-                padding: 6px 10px;
+                padding: 5px 10px;
                 border-radius: 4px;
             }
-            QPushButton:hover { background: #3C3C3C; }
+            QPushButton:hover, QToolButton:hover { background: #3C3C3C; }
+            QPushButton:disabled { color: #6A6A6A; }
+            #FindArrow { padding: 5px 9px; }
+            QToolButton::menu-indicator { image: none; width: 0; }
             QLabel { color: #CCCCCC; }
             """)
-            if hasattr(self, 'hint_label'):
-                self.hint_label.setStyleSheet("color: #777777;")
         else:
             self.setStyleSheet("""
             #FindBar {
@@ -195,223 +296,28 @@ class FindBar(QFrame):
             QLineEdit {
                 background: #FFFFFF;
                 color: #333333;
-                border: 1px solid #E1E1E1;
-                padding: 6px 8px;
+                border: 1px solid #D0D0D0;
+                padding: 5px 8px;
                 border-radius: 4px;
                 selection-background-color: #0078D4;
             }
-            QPushButton {
+            QPushButton, QToolButton {
                 background: #F3F3F3;
                 color: #333333;
-                border: 1px solid #E1E1E1;
-                padding: 6px 10px;
+                border: 1px solid #D0D0D0;
+                padding: 5px 10px;
                 border-radius: 4px;
             }
-            QPushButton:hover { background: #E1E1E1; }
+            QPushButton:hover, QToolButton:hover { background: #E1E1E1; }
+            QPushButton:disabled { color: #A0A0A0; }
+            #FindArrow { padding: 5px 9px; }
+            QToolButton::menu-indicator { image: none; width: 0; }
             QLabel { color: #666666; }
             """)
-            if hasattr(self, 'hint_label'):
-                self.hint_label.setStyleSheet("color: #999999;")
 
     def focusIn(self):
         self.edit.setFocus()
         self.edit.selectAll()
-
-
-class HeaderWidget(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedHeight(40)
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 5, 10, 5)
-        layout.setSpacing(0)
-
-        # Left: checkboxes in an expanding widget, left-aligned
-        left = QWidget()
-        left.setObjectName("HeaderLeft")
-        left_layout = QHBoxLayout(left)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(8)
-
-        self.theme_checkbox = QCheckBox("Dark Theme")
-        self.theme_checkbox.setToolTip("Toggle Theme (Ctrl+Shift+T)")
-        self.theme_checkbox.setChecked(True)
-
-        self.line_numbers_checkbox = QCheckBox("Line Numbers")
-        self.line_numbers_checkbox.setToolTip("Toggle Line Numbers (Ctrl+Shift+L)")
-
-        self.syntax_highlight_checkbox = QCheckBox("Syntax Highlighting")
-        self.syntax_highlight_checkbox.setToolTip("Toggle Syntax Highlighting (Ctrl+Shift+H)")
-        # Unchecked at startup, matching MainWindow.syntax_highlighting.
-        # These three defaults have to agree or the box shows a state the
-        # editor is not in.
-        self.syntax_highlight_checkbox.setChecked(False)
-
-        # Format buttons, created here, placed inside the left widget below
-        self.bold_btn = self._make_format_btn("B", "Bold (Ctrl+B)", bold=True)
-        self.italic_btn = self._make_format_btn("I", "Italic (Ctrl+I)", italic=True)
-        self.underline_btn = self._make_format_btn("U", "Underline (Ctrl+U)", underline=True)
-
-        # Left half: checkboxes at far left, B/I/U centred between them and the window centre.
-        # Two equal stretches around B/I/U place it at the midpoint of the left half.
-        left_layout.addWidget(self.theme_checkbox)
-        left_layout.addWidget(self.line_numbers_checkbox)
-        left_layout.addWidget(self.syntax_highlight_checkbox)
-        left_layout.addStretch(1)
-        left_layout.addWidget(self.bold_btn)
-        left_layout.addSpacing(3)
-        left_layout.addWidget(self.italic_btn)
-        left_layout.addSpacing(3)
-        left_layout.addWidget(self.underline_btn)
-        left_layout.addStretch(1)
-
-        # Center: undo / redo, exactly centred by the equal left(1) / right(1) halves
-        self.undo_btn = QPushButton("↺")
-        self.undo_btn.setToolTip("Undo (Ctrl+Z)")
-        self.undo_btn.setFixedSize(26, 26)
-        self.undo_btn.setEnabled(False)
-
-        self.redo_btn = QPushButton("↻")
-        self.redo_btn.setToolTip("Redo (Ctrl+Y / Ctrl+Shift+Z)")
-        self.redo_btn.setFixedSize(26, 26)
-        self.redo_btn.setEnabled(False)
-
-        # Right half: credit label right-aligned, with the Nostr profile chip
-        # tucked just after it. The credit stays exactly where it was, the
-        # chip is additive.
-        right = QWidget()
-        right.setObjectName("HeaderRight")
-        right_layout = QHBoxLayout(right)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        self.credit_label = QLabel("built by rinbal")
-        self.profile_chip = ProfileChip()
-        right_layout.addStretch()
-        right_layout.addWidget(self.credit_label)
-        right_layout.addSpacing(10)
-        right_layout.addWidget(self.profile_chip)
-
-        # left(1) and right(1) give equal weight → ↺↻ land exactly in the window centre
-        layout.addWidget(left, 1)
-        layout.addWidget(self.undo_btn)
-        layout.addSpacing(4)
-        layout.addWidget(self.redo_btn)
-        layout.addWidget(right, 1)
-
-        # Apply initial dark theme
-        self.update_theme(True)
-
-    @staticmethod
-    def _make_format_btn(label: str, tooltip: str, bold=False, italic=False, underline=False) -> QPushButton:
-        """Create a checkable format toggle button (B / I / U) with styled label font."""
-        btn = QPushButton(label)
-        btn.setToolTip(tooltip)
-        btn.setFixedSize(26, 26)
-        btn.setCheckable(True)
-        btn.setObjectName("FormatBtn")
-        font = btn.font()
-        font.setBold(bold)
-        font.setItalic(italic)
-        font.setUnderline(underline)
-        font.setPointSize(10)
-        btn.setFont(font)
-        return btn
-
-    def update_theme(self, is_dark):
-        if is_dark:
-            self.setStyleSheet("""
-                QWidget {
-                    background: #252526;
-                    border-bottom: 1px solid #3C3C3C;
-                }
-                QCheckBox {
-                    spacing: 6px; color: #CCCCCC; font-size: 12px;
-                    background: transparent; border-radius: 4px; padding: 2px 6px;
-                }
-                QCheckBox:hover { background: rgba(255, 255, 255, 0.07); color: #FFFFFF; }
-                QCheckBox::indicator {
-                    width: 11px; height: 11px;
-                    border: 1px solid #3C3C3C;
-                    border-radius: 2px;
-                    background: #2D2D30;
-                }
-                QCheckBox::indicator:checked { background: #FF8C00; border: 1px solid #FF8C00; }
-                QCheckBox::indicator:unchecked { background: #2D2D30; border: 1px solid #3C3C3C; }
-                QLabel { color: #CCCCCC; font-size: 12px; background: transparent; }
-                #HeaderLeft, #HeaderRight { background: transparent; }
-                QPushButton {
-                    background: #2D2D30;
-                    color: #D4D4D4;
-                    border: 1px solid #3C3C3C;
-                    border-radius: 13px;
-                    font-size: 15px;
-                }
-                QPushButton:hover { background: #3C3C3C; }
-                QPushButton:pressed { background: #1E1E1E; }
-                QPushButton:disabled { background: #252526; color: #3C3C3C; border-color: #2D2D2D; }
-                #FormatBtn {
-                    background: #2D2D30;
-                    color: #D4D4D4;
-                    border: 1px solid #3C3C3C;
-                    border-radius: 4px;
-                    font-size: 13px;
-                }
-                #FormatBtn:hover { background: #3C3C3C; }
-                #FormatBtn:pressed { background: #1E1E1E; }
-                #FormatBtn:checked { background: #3C2800; color: #FFB347; border-color: #FF8C00; }
-                #FormatBtn:checked:hover { background: #4A3200; }
-            """)
-            self.theme_checkbox.setChecked(True)
-            self.credit_label.setStyleSheet("QLabel { font-size: 12px; font-style: italic; color: #858585; }")
-        else:
-            self.setStyleSheet("""
-                QWidget {
-                    background: #F8F8F8;
-                    border-bottom: 1px solid #E1E1E1;
-                }
-                QCheckBox {
-                    spacing: 6px; color: #333333; font-size: 12px;
-                    background: transparent; border-radius: 4px; padding: 2px 6px;
-                }
-                QCheckBox:hover { background: rgba(0, 0, 0, 0.06); color: #000000; }
-                QCheckBox::indicator {
-                    width: 11px; height: 11px;
-                    border: 1px solid #666666;
-                    border-radius: 2px;
-                    background: #FFFFFF;
-                }
-                QCheckBox::indicator:checked { background: #FF8C00; border: 1px solid #FF8C00; }
-                QCheckBox::indicator:unchecked { background: #FFFFFF; border: 1px solid #666666; }
-                QLabel { color: #333333; font-size: 12px; background: transparent; }
-                #HeaderLeft, #HeaderRight { background: transparent; }
-                QPushButton {
-                    background: #ECECEC;
-                    color: #333333;
-                    border: 1px solid #CCCCCC;
-                    border-radius: 13px;
-                    font-size: 15px;
-                }
-                QPushButton:hover { background: #E1E1E1; }
-                QPushButton:pressed { background: #D0D0D0; }
-                QPushButton:disabled { background: #F8F8F8; color: #CCCCCC; border-color: #EBEBEB; }
-                #FormatBtn {
-                    background: #ECECEC;
-                    color: #333333;
-                    border: 1px solid #CCCCCC;
-                    border-radius: 4px;
-                    font-size: 13px;
-                }
-                #FormatBtn:hover { background: #E1E1E1; }
-                #FormatBtn:pressed { background: #D0D0D0; }
-                #FormatBtn:checked { background: #FFF0D0; color: #A05000; border-color: #E88000; }
-                #FormatBtn:checked:hover { background: #FFE4B0; }
-            """)
-            self.theme_checkbox.setChecked(False)
-            self.credit_label.setStyleSheet("QLabel { font-size: 12px; font-style: italic; color: #555555; }")
-
-        # Let the profile chip re-paint its placeholder/disconnected glyph
-        # in colours that read on the new background.
-        self.profile_chip.set_dark_theme(is_dark)
 
 
 class FileChangedBar(QWidget):
@@ -434,13 +340,13 @@ class FileChangedBar(QWidget):
         layout.addWidget(self._icon)
 
         self._text = QLabel()
-        self._reload_btn = QPushButton("Reload")
+        self._reload_btn = QPushButton(_("Reload"))
         self._reload_btn.setFixedHeight(26)
         self._reload_btn.clicked.connect(self.reload_requested)
 
         self._dismiss_btn = QPushButton("×")
         self._dismiss_btn.setFixedSize(26, 26)
-        self._dismiss_btn.setToolTip("Dismiss")
+        self._dismiss_btn.setToolTip(_("Dismiss"))
         self._dismiss_btn.clicked.connect(self._on_dismiss)
 
         layout.addWidget(self._text, 1)
@@ -451,23 +357,25 @@ class FileChangedBar(QWidget):
         self.hide()
 
     def show_changed(self, has_unsaved: bool):
-        self._text.setText("File was changed externally.")
-        self._reload_btn.setText("Discard my changes and reload" if has_unsaved else "Reload")
+        self._text.setText(_("File was changed externally."))
+        self._reload_btn.setText(_("Discard my changes and reload") if has_unsaved
+                                 else _("Reload"))
         self._reload_btn.show()
         self.show()
 
     def show_deleted(self):
-        self._text.setText("File was deleted - save to recreate it.")
+        self._text.setText(_("File was deleted - save to recreate it."))
         self._reload_btn.hide()
         self.show()
 
     def show_already_open(self):
-        self._text.setText("This file is already open in this tab.")
+        self._text.setText(_("This file is already open in this tab."))
         self._reload_btn.hide()
         self.show()
 
     def show_unsupported(self, filename: str = ""):
-        msg = f"File type not supported: {filename}" if filename else "File type not supported."
+        msg = (_("File type not supported: {names}").format(names=filename) if filename
+               else _("File type not supported."))
         self._text.setText(msg)
         self._reload_btn.hide()
         self.show()
@@ -524,14 +432,19 @@ class FileChangedBar(QWidget):
 
 
 class UpdateBar(QWidget):
-    """Notification bar shown at the top of the window when a newer app version is available.
+    """Notification bar at the top of the window about the app's version.
 
-    It only announces the update. "Update\u2026" opens Software Update, where the
-    person chooses; closing the bar means Later (skipping a version is an
-    explicit button in that dialog, never a side effect of closing this).
+    Two messages, one place:
+
+    - A newer version is available. It only announces the update.
+      "Update\u2026" opens Software Update, where the person chooses; closing
+      the bar means Later (skipping a version is an explicit button in that
+      dialog, never a side effect of closing this).
+    - MyEditor was just updated. "What\u2019s New" shows the release notes.
     """
 
     update_requested = Signal()
+    whats_new_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -547,13 +460,15 @@ class UpdateBar(QWidget):
         layout.addWidget(self._icon)
 
         self._text = QLabel()
-        self._update_btn = QPushButton("Update\u2026")
+        self._update_btn = QPushButton(_("Update\u2026"))
         self._update_btn.setFixedHeight(26)
-        self._update_btn.clicked.connect(self.update_requested)
+        self._update_btn.clicked.connect(self._on_button)
+        self._mode = "available"
 
         self._dismiss_btn = QPushButton("×")
         self._dismiss_btn.setFixedSize(26, 26)
-        self._dismiss_btn.setToolTip("Later")
+        self._dismiss_btn.setToolTip(_("Later"))
+        self._dismiss_btn.setAccessibleName(_("Close"))
         self._dismiss_btn.clicked.connect(self.hide)
 
         layout.addWidget(self._text, 1)
@@ -564,8 +479,26 @@ class UpdateBar(QWidget):
         self.hide()
 
     def show_update(self, version: str):
-        self._text.setText(f"MyEditor {version} is available.")
+        self._mode = "available"
+        self._icon.setText("\u2b06")
+        self._text.setText(_("MyEditor {version} is available.").format(version=version))
+        self._update_btn.setText(_("Update\u2026"))
+        self._dismiss_btn.setToolTip(_("Later"))
         self.show()
+
+    def show_updated(self, version: str):
+        self._mode = "updated"
+        self._icon.setText("\u2713")
+        self._text.setText(_("You\u2019re now using MyEditor {version}.").format(version=version))
+        self._update_btn.setText(_("What\u2019s New"))
+        self._dismiss_btn.setToolTip(_("Close"))
+        self.show()
+
+    def _on_button(self):
+        if self._mode == "updated":
+            self.whats_new_requested.emit()
+        else:
+            self.update_requested.emit()
 
     def update_theme(self, is_dark: bool):
         self.is_dark = is_dark

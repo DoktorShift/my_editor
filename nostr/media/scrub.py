@@ -32,8 +32,10 @@ from dataclasses import dataclass
 from typing import Final, Optional
 
 from PySide6.QtCore import QBuffer, QIODevice
+from PySide6.QtGui import QImage
 
 import image_safety
+from i18n import _
 
 
 # Formats we re-encode, mapped to what we write them back out as. JPEG
@@ -82,11 +84,11 @@ def scrub_for_publication(data: bytes, declared_mime: str = "") -> ScrubResult:
     which is deliberately the same set it will not decode.
     """
     if not isinstance(data, (bytes, bytearray)) or not data:
-        raise ScrubError("there are no bytes to publish")
+        raise ScrubError(_("there are no bytes to publish"))
 
     mime = image_safety.sniff_image_mime(bytes(data))
     if mime is None:
-        raise ScrubError("this file is not an image this app can publish")
+        raise ScrubError(_("this file is not an image this app can publish"))
 
     passthrough_reason = _PASS_THROUGH.get(mime)
     if passthrough_reason:
@@ -98,12 +100,13 @@ def scrub_for_publication(data: bytes, declared_mime: str = "") -> ScrubResult:
     if target is None:
         # Sniffed as an image, but not one we are willing to re-encode.
         # Publishing it unscrubbed would defeat the point of this module.
-        raise ScrubError(f"{mime} cannot be prepared for publication")
+        raise ScrubError(_("{type} cannot be prepared for publication").format(type=mime))
 
     image = image_safety.decode_image_bytes(bytes(data))
     if image is None or image.isNull():
-        raise ScrubError("this image could not be read")
+        raise ScrubError(_("this image could not be read"))
 
+    image = _pixels_only(image)
     fmt, out_mime = target
     buffer = QBuffer()
     buffer.open(QIODevice.WriteOnly)
@@ -114,12 +117,33 @@ def scrub_for_publication(data: bytes, declared_mime: str = "") -> ScrubResult:
     )
     buffer.close()
     if not ok:
-        raise ScrubError("this image could not be re-encoded")
+        raise ScrubError(_("this image could not be re-encoded"))
 
     out = bytes(buffer.data())
     if not out:
-        raise ScrubError("re-encoding produced nothing")
+        raise ScrubError(_("re-encoding produced nothing"))
     return ScrubResult(data=out, mime=out_mime, scrubbed=True)
+
+
+def _pixels_only(image: QImage) -> QImage:
+    """A new image holding the pixels and nothing else.
+
+    QImage keeps the text a decoder found (PNG text chunks, a JPEG
+    comment, XMP) and writes it back out on save, location included; so
+    the pixel rows are copied into a fresh image that never had any. A
+    plain copy of the bytes keeps the result the same on every run."""
+    # Kept opaque when it was, so a photo does not grow an alpha channel.
+    form = (QImage.Format.Format_ARGB32 if image.hasAlphaChannel()
+            else QImage.Format.Format_RGB32)
+    source = image.convertToFormat(form)
+    pixels = bytes(source.constBits())
+    clean = QImage(pixels, source.width(), source.height(), source.bytesPerLine(),
+                   form).copy()
+    # A new image takes its density from the screen; the picture's own
+    # keeps the file the same wherever it is made.
+    clean.setDotsPerMeterX(source.dotsPerMeterX())
+    clean.setDotsPerMeterY(source.dotsPerMeterY())
+    return clean
 
 
 def would_scrub(data: bytes) -> Optional[bool]:

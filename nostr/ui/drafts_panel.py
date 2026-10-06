@@ -101,6 +101,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from i18n import _, ngettext
+
 from ..draft_store import DraftRecord, DraftState, DraftStore
 from ..profiles import Profile
 # Colour, type and record-to-words live in ``drafts_common`` because the
@@ -308,8 +310,11 @@ QMenu::separator {{ height: 1px; background: {t["border"]}; margin: 4px 0px; }}
 # never clips and never changes width from row to row. "just now" is
 # rendered "now" for the same reason: it was the one string wide enough
 # to give a freshly saved draft a different column width from every
-# other row.
-_AGE_SAMPLES: Tuple[str, ...] = ("now", "59m", "23h", "29d", "11mo", "99y")
+# other row. These are the widest age of each unit, in seconds;
+# ``_AGE_SAMPLES``, below the formatter, writes them in the language shown.
+_AGE_SAMPLE_SECONDS: Tuple[int, ...] = (
+    0, 59 * 60, 23 * 3600, 29 * 86_400, 11 * 30 * 86_400, 99 * 365 * 86_400,
+)
 
 
 class _RowMetrics(NamedTuple):
@@ -352,7 +357,7 @@ _MIN_SEGMENT_PADDING_PX = 8
 
 # The two labels the switch has to fit. Kept here rather than read off
 # the widgets because the stylesheet is built before they exist.
-_SEGMENT_LABELS = ("Drafts", "Feeds")
+_SEGMENT_LABELS = (_("Drafts"), _("Feeds"))
 
 
 def _segment_padding_px() -> int:
@@ -414,17 +419,28 @@ def _format_relative_time(ts: int, *, now: Optional[int] = None) -> str:
         return ""
     now = now if now is not None else int(time.time())
     delta = max(0, now - int(ts))
+    # Abbreviated units, the same for one and many in English: "5m", "1h".
     if delta < 60:
-        return "now"
+        return _("now")
     if delta < 3600:
-        return f"{delta // 60}m"
+        n = delta // 60
+        return ngettext("{n}m", "{n}m", n).format(n=n)
     if delta < 86_400:
-        return f"{delta // 3600}h"
+        n = delta // 3600
+        return ngettext("{n}h", "{n}h", n).format(n=n)
     if delta < 86_400 * 30:
-        return f"{delta // 86_400}d"
+        n = delta // 86_400
+        return ngettext("{n}d", "{n}d", n).format(n=n)
     if delta < 86_400 * 365:
-        return f"{delta // (86_400 * 30)}mo"
-    return f"{delta // (86_400 * 365)}y"
+        n = delta // (86_400 * 30)
+        return ngettext("{n}mo", "{n}mo", n).format(n=n)
+    n = delta // (86_400 * 365)
+    return ngettext("{n}y", "{n}y", n).format(n=n)
+
+
+_AGE_SAMPLES: Tuple[str, ...] = tuple(
+    _format_relative_time(1, now=1 + age) for age in _AGE_SAMPLE_SECONDS
+)
 
 
 # Row state as a stylesheet property. Set from one mapping rather than a
@@ -441,8 +457,8 @@ _ROW_STATE = {
 def _display_title(record: DraftRecord) -> str:
     """Line 1 of a row. Shared so the row and its announcement agree."""
     if record.state is DraftState.LOADING:
-        return "Decrypting…"
-    return record.title or "(no title)"
+        return _("Decrypting…")
+    return record.title or _("(no title)")
 
 
 def _display_meta(record: DraftRecord) -> str:
@@ -452,13 +468,13 @@ def _display_meta(record: DraftRecord) -> str:
     the head of the line.
     """
     if record.state is DraftState.LOADING:
-        return "Decrypting"
+        return _("Decrypting")
     if record.state is DraftState.FAILED:
-        reason = record.failure_reason or "Could not decrypt"
+        reason = record.failure_reason or _("Could not decrypt")
         # With the ciphertext still in hand a retry is one double-click
         # away, so the row says so rather than looking permanently broken.
         if record.ciphertext:
-            return f"{reason}. Double-click to retry."
+            return _("{reason}. Double-click to retry.").format(reason=reason)
         return reason
     host = _source_host(record)
     preview = record.snippet or ""
@@ -488,18 +504,18 @@ def _accessible_row_text(record: DraftRecord, *, now: Optional[int] = None) -> s
     """
     sentences = [_display_title(record).rstrip("…")]
     if record.state is DraftState.LOADING:
-        sentences.append("Decrypting")
+        sentences.append(_("Decrypting"))
     elif record.state is DraftState.FAILED:
-        sentences.append(record.failure_reason or "Could not decrypt")
+        sentences.append(record.failure_reason or _("Could not decrypt"))
         if record.ciphertext:
-            sentences.append("Press Return to retry")
+            sentences.append(_("Press Return to retry"))
     else:
         host = _source_host(record)
         if host:
-            sentences.append(f"Imported from {host}")
+            sentences.append(_("Imported from {host}").format(host=host))
     saved = _format_absolute_time(record.created_at)
     if saved:
-        sentences.append(f"Saved {saved}")
+        sentences.append(_("Saved {time}").format(time=saved))
     extra = preview_announcement(
         record, now=now if now is not None else int(time.time()),
     )
@@ -516,7 +532,7 @@ def _row_tooltip(record: DraftRecord) -> str:
         lines.append(meta)
     saved = _format_absolute_time(record.created_at)
     if saved:
-        lines.append(f"Saved {saved}")
+        lines.append(_("Saved {time}").format(time=saved))
     return "\n".join(lines)
 
 
@@ -1019,13 +1035,15 @@ class DraftsPanel(QFrame):
         # and its :focus rule is not shadowed.
         # Both segments elide their own label rather than clipping it,
         # so the band survives its own type scale at any panel width.
-        self._seg_drafts = _SegmentButton("Drafts", "Your saved private drafts")
+        self._seg_drafts = _SegmentButton(
+            _SEGMENT_LABELS[0], _("Your saved private drafts"),
+        )
         self._seg_drafts.setProperty("seg", "first")
         self._seg_drafts.setChecked(True)
         self._seg_drafts.setMinimumHeight(control_h)
 
         self._seg_feeds = _SegmentButton(
-            "Feeds", "Import RSS, Atom, or JSON feeds as private drafts",
+            _SEGMENT_LABELS[1], _("Import RSS, Atom, or JSON feeds as private drafts"),
         )
         self._seg_feeds.setProperty("seg", "last")
         self._seg_feeds.setMinimumHeight(control_h)
@@ -1056,11 +1074,11 @@ class DraftsPanel(QFrame):
         # line, where the holder is only ever as wide as its buttons.
         icons_layout.addStretch(1)
         self._refresh_btn = self._make_icon_button(
-            "⟲", "Refresh drafts", self.refresh_requested.emit, control_h,
+            "⟲", _("Refresh drafts"), self.refresh_requested.emit, control_h,
         )
         icons_layout.addWidget(self._refresh_btn)
         self._close_btn = self._make_icon_button(
-            "×", "Close drafts panel", self.close_requested.emit, control_h,
+            "×", _("Close drafts panel"), self.close_requested.emit, control_h,
         )
         icons_layout.addWidget(self._close_btn)
 
@@ -1111,8 +1129,8 @@ class DraftsPanel(QFrame):
 
         self._search_edit = QLineEdit()
         self._search_edit.setObjectName("drafts_panel_search")
-        self._search_edit.setPlaceholderText("Search drafts…")
-        self._search_edit.setAccessibleName("Search drafts")
+        self._search_edit.setPlaceholderText(_("Search drafts…"))
+        self._search_edit.setAccessibleName(_("Search drafts"))
         self._search_edit.setClearButtonEnabled(True)
         self._search_edit.setMinimumHeight(_control_height())
         self._search_edit.textChanged.connect(self._on_search_changed)
@@ -1429,13 +1447,13 @@ class DraftsPanel(QFrame):
         actually reading the list and so said nothing there.
         """
         if self._signer_unsupported:
-            return "Signer cannot decrypt drafts (no NIP-44)", True
+            return _("Signer cannot decrypt drafts (no NIP-44)"), True
         # Outranks both the failure count and the decrypting count. Those
         # describe drafts; this describes the one thing standing between
         # the user and all of them, and it is the only line here whose
         # remedy is somewhere other than this app.
         if self._signer_unreachable:
-            return "Your signer is not responding", True
+            return _("Your signer is not responding"), True
 
         failed = ready = total = 0
         for record in self._store or []:
@@ -1446,16 +1464,22 @@ class DraftsPanel(QFrame):
                 ready += 1
 
         if failed:
-            noun = "draft" if failed == 1 else "drafts"
-            return f"{failed} {noun} could not be decrypted", True
+            text = ngettext(
+                "{n} draft could not be decrypted",
+                "{n} drafts could not be decrypted",
+                failed,
+            )
+            return text.format(n=failed), True
         if self._loading or self._sync_message:
-            return self._sync_message or "Refreshing drafts", False
+            return self._sync_message or _("Refreshing drafts"), False
         if total and ready < total:
-            return f"Decrypting {ready} of {total}", False
+            text = _("Decrypting {ready} of {total}")
+            return text.format(ready=ready, total=total), False
         profile = self._active_profile
         if profile is None:
             return "", False
-        return f"Drafts for {profile.display_name or profile.npub_short()}", False
+        name = profile.display_name or profile.npub_short()
+        return _("Drafts for {name}").format(name=name), False
 
     def _restart_status_ttl(self) -> None:
         self._status_timer.stop()
@@ -1483,17 +1507,17 @@ class DraftsPanel(QFrame):
         """
         if self._active_profile is None:
             self._show_placeholder(
-                "Connect a Nostr profile",
-                "Drafts are end-to-end encrypted to your Nostr key. Connect a "
-                "signer from Nostr → Connect Signer… to view, search, and "
-                "create drafts.",
+                _("Connect a Nostr profile"),
+                _("Drafts are end-to-end encrypted to your Nostr key. Connect a "
+                  "signer from Nostr → Connect Signer… to view, search, and "
+                  "create drafts."),
             )
             return
         if self._signer_unsupported:
             self._show_placeholder(
-                "Signer does not support NIP-44",
-                "This profile's signer cannot decrypt drafts. Connect a "
-                "NIP-44-capable signer (Amber, nsec.app) to use drafts.",
+                _("Signer does not support NIP-44"),
+                _("This profile's signer cannot decrypt drafts. Connect a "
+                  "NIP-44-capable signer (Amber, nsec.app) to use drafts."),
             )
             return
         # Only when there is nothing readable to show. A signer that went
@@ -1503,10 +1527,10 @@ class DraftsPanel(QFrame):
         # carry the message.
         if self._signer_unreachable and not self._has_readable_draft():
             self._show_placeholder(
-                "Your signer is not responding",
-                "Drafts stay encrypted until your signer unlocks them. Open "
-                "your signer app, make sure it is running, then try again.",
-                action="Try again",
+                _("Your signer is not responding"),
+                _("Drafts stay encrypted until your signer unlocks them. Open "
+                  "your signer app, make sure it is running, then try again."),
+                action=_("Try again"),
                 on_action=self.retry_signer.emit,
             )
             return
@@ -1520,18 +1544,19 @@ class DraftsPanel(QFrame):
                 # the list and the status line narrates the wait.
                 self._body_stack.setCurrentIndex(0)
                 return
+            body = _("Press {shortcut} in any tab to save its contents "
+                     "as an encrypted draft on Nostr. Drafts sync to your other "
+                     "devices signed in with the same profile.")
             self._show_placeholder(
-                "No private drafts yet",
-                f"Press {_save_shortcut_text()} in any tab to save its contents "
-                "as an encrypted draft on Nostr. Drafts sync to your other "
-                "devices signed in with the same profile.",
+                _("No private drafts yet"),
+                body.format(shortcut=_save_shortcut_text()),
             )
             return
         if self._list.count() == 0:
             self._show_placeholder(
-                "No matching drafts",
-                f'No draft matches "{self._search_text}".',
-                action="Clear search",
+                _("No matching drafts"),
+                _('No draft matches "{query}".').format(query=self._search_text),
+                action=_("Clear search"),
                 on_action=self._search_edit.clear,
             )
             return
@@ -1886,7 +1911,7 @@ class DraftsPanel(QFrame):
         # Hover is not allowed to be the only route to the preview:
         # an audit of this panel already flagged hover-only affordances,
         # and the Menu key reaches this menu without a pointer.
-        act_preview = QAction("Show Preview", menu)
+        act_preview = QAction(_("Show Preview"), menu)
         act_preview.setShortcut(QKeySequence(Qt.Key_Space))
         act_preview.triggered.connect(lambda: self._show_preview_for(item))
         act_preview.setEnabled(
@@ -1899,7 +1924,7 @@ class DraftsPanel(QFrame):
             # For a failed row the *only* useful primary action is to
             # retry decryption. Promote it to the top of the menu so
             # right-click → Enter is the recovery path.
-            act_retry = QAction("Retry Decryption", menu)
+            act_retry = QAction(_("Retry Decryption"), menu)
             act_retry.triggered.connect(
                 lambda: self.retry_decrypt.emit(identifier)
             )
@@ -1907,18 +1932,18 @@ class DraftsPanel(QFrame):
             menu.addAction(act_retry)
             menu.addSeparator()
 
-        act_open = QAction("Open in New Tab", menu)
+        act_open = QAction(_("Open in New Tab"), menu)
         act_open.triggered.connect(lambda: self.open_draft.emit(identifier))
         act_open.setEnabled(record.state is DraftState.READY)
         menu.addAction(act_open)
 
-        act_publish = QAction("Publish…", menu)
+        act_publish = QAction(_("Publish…"), menu)
         act_publish.triggered.connect(lambda: self.publish_draft.emit(identifier))
         act_publish.setEnabled(record.state is DraftState.READY)
         menu.addAction(act_publish)
 
         menu.addSeparator()
-        act_copy_id = QAction("Copy Event ID", menu)
+        act_copy_id = QAction(_("Copy Event ID"), menu)
         act_copy_id.triggered.connect(lambda: self._copy_event_id(record))
         act_copy_id.setEnabled(bool(record.event_id))
         menu.addAction(act_copy_id)
@@ -1934,12 +1959,13 @@ class DraftsPanel(QFrame):
             else [identifier]
         )
         if len(targets) > 1:
-            act_delete = QAction(f"Delete {len(targets)} Drafts", menu)
+            label = ngettext("Delete {n} Draft", "Delete {n} Drafts", len(targets))
+            act_delete = QAction(label.format(n=len(targets)), menu)
             act_delete.triggered.connect(
                 lambda checked=False, ids=list(targets): self._request_delete(ids)
             )
         else:
-            act_delete = QAction("Delete Draft", menu)
+            act_delete = QAction(_("Delete Draft"), menu)
             act_delete.triggered.connect(
                 lambda checked=False, ids=[identifier]: self._request_delete(ids)
             )

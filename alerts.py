@@ -31,7 +31,7 @@ confirm_destructive). They all build the dialog through the module-level
 from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -44,7 +44,8 @@ from PySide6.QtWidgets import (
 )
 
 import theme
-from constants import MONO_FONT
+from fonts import monospace_font
+from i18n import _
 
 DEFAULT = "default"
 CANCEL = "cancel"
@@ -78,7 +79,7 @@ class Button:
     tooltip: str = ""
 
 
-OK = Button("OK", "ok", DEFAULT)
+OK = Button(_("OK"), "ok", DEFAULT)
 
 
 class Alert(QDialog):
@@ -163,17 +164,17 @@ class Alert(QDialog):
     def _details(self, details: str) -> QPushButton:
         self.details_view = QPlainTextEdit(details)
         self.details_view.setReadOnly(True)
-        self.details_view.setFont(QFont(MONO_FONT, 10))
+        self.details_view.setFont(monospace_font(10))
         self.details_view.setMaximumHeight(140)
         self.details_view.hide()
-        toggle = QPushButton("Show Details")
+        toggle = QPushButton(_("Show Details"))
         toggle.setObjectName("alert_details")
         toggle.setAutoDefault(False)
 
         def flip():
             shown = not self.details_view.isVisible()
             self.details_view.setVisible(shown)
-            toggle.setText("Hide Details" if shown else "Show Details")
+            toggle.setText(_("Hide Details") if shown else _("Show Details"))
             self.adjustSize()
 
         toggle.clicked.connect(flip)
@@ -271,4 +272,4 @@ def confirm_destructive(parent, *, title: str, message: str = "", action: str,
     return ask(parent, title=title, message=message, caution=caution, details=details,
                is_dark=is_dark,
                buttons=(Button(action, True, DESTRUCTIVE),
-                        Button("Cancel", False, DEFAULT))) is True
+                        Button(_("Cancel"), False, DEFAULT))) is True

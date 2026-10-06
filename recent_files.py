@@ -2,8 +2,9 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-import json
 import os
+
+from atomic_file import read_json, write_json
 
 _RECENT_FILE = os.path.expanduser("~/.cache/my_editor/recent_files.json")
 _MAX_ENTRIES = 10
@@ -11,14 +12,7 @@ _MAX_ENTRIES = 10
 
 def load_recent() -> list[str]:
     """Return the stored list of recent file paths (all entries, including missing files)."""
-    try:
-        with open(_RECENT_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, list):
-            return [p for p in data if isinstance(p, str)]
-    except (FileNotFoundError, json.JSONDecodeError):
-        pass
-    return []
+    return [p for p in read_json(_RECENT_FILE, list) if isinstance(p, str)]
 
 
 def add_recent(path: str) -> None:
@@ -35,6 +29,4 @@ def clear_recent() -> None:
 
 
 def _save(entries: list[str]) -> None:
-    os.makedirs(os.path.dirname(_RECENT_FILE), exist_ok=True)
-    with open(_RECENT_FILE, "w", encoding="utf-8") as f:
-        json.dump(entries, f, indent=2)
+    write_json(_RECENT_FILE, entries, indent=2)

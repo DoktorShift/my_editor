@@ -15,6 +15,12 @@ the one thing a crash-recovery feature must never do. The record carries
 a version so a build that predates this format leaves a newer file
 alone, and a source mtime so a backup older than the file on disk can be
 recognised and restored as a copy instead of overwriting newer work.
+
+HTML does not keep everything, though: a quote, a code block and inline
+code come back from it as plain paragraphs. A document that holds one of
+them (and nothing Markdown cannot carry, such as colors) also keeps its
+Markdown in the record, and is restored from that. The field is an
+addition to the same format, so an older build simply restores the HTML.
 """
 
 import hashlib
@@ -26,16 +32,26 @@ import uuid
 
 from PySide6.QtCore import QTimer
 
-from doc_walk import iter_image_names
+from PySide6.QtGui import QTextFormat, QTextImageFormat
+
+from atomic_file import write_text
+from doc_walk import iter_block_runs, iter_blocks, iter_image_names
+from export_html import normalize_after_set_html
+from markdown_writer import (
+    READ_FEATURES, document_to_markdown, has_local_only_formatting, image_markdown,
+)
 from nostr.media.assets import ASSET_SCHEME
+from rich_text import normalize_after_markdown_load
 
 
 BACKUP_DIR = os.path.join(os.path.expanduser("~"), ".cache", "my_editor", "backups")
-_DEBOUNCE_MS = 3_000
-_MAX_INTERVAL_MS = 10_000
+# A backup is written two seconds after the last change, and at least every
+# fifteen seconds while the typing goes on.
+_DEBOUNCE_MS = 2_000
+_MAX_INTERVAL_MS = 15_000
 
 # Current record format. Readers must skip anything higher (see
-# classify_backup's caller) rather than guess at its meaning.
+# is_restorable) rather than guess at its meaning.
 BACKUP_VERSION = 2
 
 # Truncated HTML is corrupt HTML, so an oversized snapshot is skipped
@@ -75,6 +91,70 @@ def _source_mtime_ns(file_path: str | None) -> int | None:
         return os.stat(file_path).st_mtime_ns
     except OSError:
         return None
+
+
+def document_is_empty(doc) -> bool:
+    """True when a document holds nothing worth keeping: no text, no image.
+
+    The one test for it: an empty document's HTML is still a full skeleton,
+    so the length of its HTML says nothing.
+    """
+    return doc.characterCount() <= 1 and not any(True for _ in iter_image_names(doc))
+
+
+def is_restorable(record: dict) -> bool:
+    """Whether this build can read a backup record.
+
+    A record without a version is the old plain-text format. One written
+    by a newer build, or in a format this build does not know, is left on
+    disk untouched rather than guessed at.
+    """
+    version = record.get("version")
+    if version is None:
+        return True
+    return (isinstance(version, int) and not isinstance(version, bool)
+            and version <= BACKUP_VERSION and record.get("format") == "html")
+
+
+def load_backup_content(editor, record: dict, *, modified: bool = True) -> None:
+    """Put a backup record's content into ``editor``, with no undo history.
+
+    Call is_restorable first. Set the editor's file path before calling:
+    image names beside the original file resolve against it.
+    """
+    content = record.get("content", "")
+    markdown = record.get("markdown")
+    if record.get("version") is None:
+        # Version 1 stored plain text. Restoring it as HTML would render
+        # the user's angle brackets as markup.
+        editor.setPlainText(content)
+    elif isinstance(markdown, str) and markdown:
+        editor.document().setMarkdown(markdown, READ_FEATURES)
+        normalize_after_markdown_load(editor.document())
+    else:
+        editor.setHtml(content)
+        normalize_after_set_html(editor.document())
+    if record.get("markdown_source"):
+        # Opened as its Markdown text: it is still saved as written.
+        editor._markdown_source = True
+    editor.document().clearUndoRedoStacks()
+    editor.document().setModified(modified)
+
+
+def _holds_what_html_loses(doc) -> bool:
+    """Whether the document has a quote, a code block or inline code:
+    what an HTML snapshot gives back as plain paragraphs."""
+    for block in iter_blocks(doc):
+        fmt = block.blockFormat()
+        quote = fmt.property(QTextFormat.Property.BlockQuoteLevel)
+        if (isinstance(quote, int) and quote > 0) or fmt.property(
+                QTextFormat.Property.BlockCodeFence) or fmt.hasProperty(
+                QTextFormat.Property.BlockCodeLanguage):
+            return True
+        if any(f.fontFixedPitch() and not f.isImageFormat()
+               for _text, f in iter_block_runs(block)):
+            return True
+    return False
 
 
 def classify_backup(record: dict) -> str:
@@ -149,14 +229,42 @@ class EditorBackup:
         self._timer.stop()
         return self._write()
 
-    def delete(self) -> None:
-        """Call on normal close: stop the timers and remove the backup file."""
+    def take_over(self, old_file: str) -> bool:
+        """Protect the editor's restored content under this backup, then
+        remove ``old_file``, the record that content came from.
+
+        The replacement is written first: removing the old file before its
+        successor exists is a window in which a second crash loses
+        everything. A restored document that kept its path derives the
+        same backup ID, so the replacement can be the old file itself, and
+        then it stays. True when the content is safe on disk.
+        """
+        if not self.write_now():
+            return False
+        if os.path.abspath(old_file) != os.path.abspath(self.path):
+            try:
+                os.remove(old_file)
+            except OSError:
+                pass
+        return True
+
+    def release(self) -> None:
+        """Stop writing but keep the file on disk.
+
+        Used when MyEditor closes for an update: the next launch restores
+        the tab from this file (workspace.py), so deleting it here would
+        lose exactly the work the restart promised to keep.
+        """
         self._timer.stop()
         self._max_timer.stop()
         try:
             self._editor.document().contentsChanged.disconnect(self._schedule)
         except RuntimeError:
             pass
+
+    def delete(self) -> None:
+        """Call on normal close: stop the timers and remove the backup file."""
+        self.release()
         if os.path.exists(self.path):
             try:
                 os.remove(self.path)
@@ -194,16 +302,38 @@ class EditorBackup:
 
         return _DATA_URI_SRC_RE.sub(replace, content)
 
+    def _markdown_snapshot(self):
+        """The document as Markdown, when Markdown keeps what HTML loses
+        and loses nothing HTML keeps; else None."""
+        doc = self._editor.document()
+        if (getattr(self._editor, "_markdown_source", False)
+                or not _holds_what_html_loses(doc) or has_local_only_formatting(doc)):
+            return None
+
+        def image(fmt):
+            name = fmt.name()
+            if (self._externalize is not None and name.startswith("data:")
+                    and len(name) > MIN_EXTERNALIZE_BYTES):
+                name = self._externalize(name) or name
+            return image_markdown(str(fmt.property(QTextImageFormat.ImageAltText) or ""), name)
+
+        return document_to_markdown(doc, image)
+
     def _write(self) -> bool:
         """Write the snapshot. False means nothing usable is on disk yet."""
-        doc = self._editor.document()
-        has_image = any(True for _ in iter_image_names(doc))
-        if doc.characterCount() <= 1 and not has_image:
-            return False  # an empty document's HTML is still a full skeleton
+        if document_is_empty(self._editor.document()):
+            return False
 
         content = self._snapshot()
+        markdown = self._markdown_snapshot()
+        if markdown is not None:
+            # The fingerprint covers it too: a change only the Markdown
+            # shows (a paragraph turned into a quote) is still written.
+            content_key = content + "\n" + markdown
+        else:
+            content_key = content
         fingerprint = hashlib.sha256(
-            f"{self._file_path or ''}\n{content}".encode("utf-8")
+            f"{self._file_path or ''}\n{content_key}".encode("utf-8")
         ).hexdigest()
         # The fingerprint says the payload has not changed, not that the
         # file survived: a restore or a cleanup elsewhere can have
@@ -221,19 +351,41 @@ class EditorBackup:
             "saved_at": int(time.time()),
             "source_mtime_ns": _source_mtime_ns(self._file_path),
         }
+        if markdown is not None:
+            record["markdown"] = markdown
+        if getattr(self._editor, "_markdown_source", False):
+            record["markdown_source"] = True
         payload = json.dumps(record, ensure_ascii=False)
         if len(payload.encode("utf-8")) > MAX_BACKUP_BYTES:
             self._oversize_until = time.monotonic() + _OVERSIZE_RETRY_S
             return False
 
+        # In one step: a crash while writing must leave the previous
+        # backup whole, since that is exactly when it is needed.
         try:
             _ensure_backup_dir()
-            with open(self.path, "w", encoding="utf-8") as f:
-                f.write(payload)
+            write_text(self.path, payload)
         except OSError:
             return False  # backup is best-effort; never raise to the user
         self._last_hash = fingerprint
         return True
+
+
+def read_backup(path: str) -> dict | None:
+    """One backup record by file path, or None if it is missing or unreadable.
+
+    The record carries ``_backup_file`` like the ones find_all_backups
+    returns, so either can be handed to the same restore code.
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    data["_backup_file"] = path
+    return data
 
 
 def find_all_backups() -> list[dict]:

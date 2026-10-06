@@ -10,7 +10,9 @@ The defect classes this file guards against:
 - a record written by a newer build being guessed at or overwritten,
 - a stale backup restoring with its original path, so one Ctrl+S
   overwrites hours of newer work,
-- Save As over the same path removing the live backup.
+- Save As over the same path removing the live backup,
+- a quote, a code block or inline code coming back from a crash as
+  plain paragraphs (HTML cannot hold them; the Markdown kept beside it can).
 """
 
 import json
@@ -97,6 +99,7 @@ def _window_stub():
         _new_wired_editor=new_editor,
         _reload_from_disk=lambda *a: None,
         _attach_close_button=lambda *a: None,
+        _attach_highlighter=lambda *a: None,
         _asset_manager=types.SimpleNamespace(adopt_data_uri=lambda uri: None),
         _watcher=types.SimpleNamespace(addPath=lambda p: None),
         is_dark_theme=False,
@@ -369,7 +372,7 @@ def test_a_forward_version_record_is_left_on_disk_and_skipped(tmp_path):
     record = dict(json.loads(payload), _backup_file=str(path))
     win = _window_stub()
 
-    assert MainWindow._restore_one_backup(win, record) is False
+    assert MainWindow._restore_one_backup(win, record) is None
 
     assert path.read_text(encoding="utf-8") == payload
     assert win.tabs.titles == []
@@ -383,9 +386,73 @@ def test_an_unknown_format_is_left_on_disk_and_skipped(tmp_path):
     record = dict(json.loads(payload), _backup_file=str(path))
     win = _window_stub()
 
-    assert MainWindow._restore_one_backup(win, record) is False
+    assert MainWindow._restore_one_backup(win, record) is None
 
     assert path.read_text(encoding="utf-8") == payload
+
+
+# --------------------------------------------------------------------------- #
+# The helpers crash recovery and the update restart share
+# --------------------------------------------------------------------------- #
+
+def test_restoring_returns_the_editor_it_opened(tmp_path):
+    path = tmp_path / "old.autosave"
+    path.write_text("{}", encoding="utf-8")
+    record = {"original_path": None, "content": "x", "_backup_file": str(path)}
+    win = _window_stub()
+    assert MainWindow._restore_one_backup(win, record) is win.editors[-1]
+
+
+def test_only_known_formats_are_restorable():
+    assert recovery.is_restorable({})                                   # version 1, plain text
+    assert recovery.is_restorable({"version": 2, "format": "html"})
+    assert not recovery.is_restorable({"version": 3, "format": "html"})  # a newer build
+    assert not recovery.is_restorable({"version": 2, "format": "rtf"})
+    assert not recovery.is_restorable({"version": True, "format": "html"})
+    assert not recovery.is_restorable({"version": "2", "format": "html"})
+
+
+def test_loading_a_backup_leaves_no_undo_history_and_the_given_modified_flag():
+    ed = HtmlEditor()
+    recovery.load_backup_content(ed, {"version": 2, "format": "html",
+                                      "content": "<p>kept</p>"}, modified=False)
+    assert ed.toPlainText() == "kept"
+    assert not ed.document().isModified()
+    assert not ed.document().isUndoAvailable()
+
+    recovery.load_backup_content(ed, {"content": "a <b> tag"})   # version 1: plain text
+    assert ed.toPlainText() == "a <b> tag"
+    assert ed.document().isModified()
+
+
+def test_taking_over_writes_the_replacement_before_removing_the_old_record(tmp_path):
+    old = tmp_path / "old.autosave"
+    old.write_text("{}", encoding="utf-8")
+    backup = recovery.EditorBackup(_editor("restored"), None)
+    assert backup.take_over(str(old))
+    assert not old.exists()
+    assert _record_of(backup)["content"]
+
+
+def test_taking_over_keeps_the_old_record_when_nothing_could_be_written(tmp_path):
+    old = tmp_path / "old.autosave"
+    old.write_text("{}", encoding="utf-8")
+    backup = recovery.EditorBackup(HtmlEditor(), None)   # empty: nothing to write
+    assert backup.take_over(str(old)) is False
+    assert old.exists()
+
+
+def test_taking_over_its_own_file_keeps_it(tmp_path):
+    backup = recovery.EditorBackup(_editor("restored"), str(tmp_path / "note.html"))
+    assert backup.write_now()
+    assert backup.take_over(backup.path)
+    assert os.path.exists(backup.path)
+
+
+def test_an_empty_document_is_empty_and_an_image_is_not():
+    assert recovery.document_is_empty(HtmlEditor().document())
+    assert not recovery.document_is_empty(_editor("x").document())
+    assert not recovery.document_is_empty(_editor_with_image(text="").document())
 
 
 # --------------------------------------------------------------------------- #
@@ -427,3 +494,85 @@ def test_a_stale_restore_cannot_overwrite_the_newer_file(tmp_path):
 
     assert win.editors[-1]._file_path is None, "Ctrl+S has to go through Save As"
     assert win.tabs.titles == ["note.html (recovered copy)*"]
+
+
+def test_a_backup_that_cannot_be_finished_leaves_the_previous_one_whole(tmp_path, monkeypatch):
+    # The moment a backup matters most is a crash, which is also when its
+    # own write may be cut short. The previous backup must survive that.
+    import atomic_file
+
+    ed = _editor("first version")
+    backup = recovery.EditorBackup(ed, str(tmp_path / "note.html"))
+    assert backup.write_now()
+    before = _record_of(backup)["content"]
+
+    ed.setHtml("<p>second version</p>")
+    monkeypatch.setattr(atomic_file, "_replace",
+                        lambda *_: (_ for _ in ()).throw(OSError(5, "I/O error")))
+    assert backup.write_now() is False
+    assert _record_of(backup)["content"] == before
+    assert not [n for n in os.listdir(os.path.dirname(backup.path)) if n.endswith(".tmp")]
+
+
+# --------------------------------------------------------------------------- #
+# Markdown structure survives a crash too
+# --------------------------------------------------------------------------- #
+
+def _markdown_editor(markdown: str) -> HtmlEditor:
+    from markdown_writer import READ_FEATURES
+    ed = HtmlEditor()
+    ed.document().setMarkdown(markdown, READ_FEATURES)
+    return ed
+
+
+STRUCTURED = "Intro with `code`.\n\n> A quote\n\n```python\nprint(1)\n```\n"
+
+
+def test_quotes_and_code_survive_backup_and_restore(tmp_path):
+    from markdown_writer import document_to_markdown
+    backup = recovery.EditorBackup(_markdown_editor(STRUCTURED), None)
+    assert backup.write_now()
+    record = _record_of(backup)
+    assert record["markdown"] == STRUCTURED
+    assert record["format"] == "html" and record["content"]   # older builds read this
+
+    restored = HtmlEditor()
+    recovery.load_backup_content(restored, record)
+    assert document_to_markdown(restored.document()) == STRUCTURED
+
+
+def test_a_document_html_keeps_whole_has_no_markdown_copy(tmp_path):
+    backup = recovery.EditorBackup(_markdown_editor("# Title\n\n- one\n- two\n"), None)
+    assert backup.write_now()
+    assert "markdown" not in _record_of(backup)
+
+
+def test_colors_keep_the_html_snapshot(tmp_path):
+    from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
+    ed = _markdown_editor(STRUCTURED)
+    cursor = QTextCursor(ed.document())
+    cursor.movePosition(QTextCursor.MoveOperation.NextWord, QTextCursor.MoveMode.KeepAnchor)
+    red = QTextCharFormat()
+    red.setForeground(QColor("red"))
+    cursor.mergeCharFormat(red)
+    backup = recovery.EditorBackup(ed, None)
+    assert backup.write_now()
+    assert "markdown" not in _record_of(backup)
+
+
+def test_a_document_opened_as_markdown_text_stays_that_way(tmp_path):
+    ed = HtmlEditor()
+    ed.setPlainText("A claim[^1].\n\n[^1]: The source.")
+    ed._markdown_source = True
+    backup = recovery.EditorBackup(ed, None)
+    assert backup.write_now()
+
+    restored = HtmlEditor()
+    recovery.load_backup_content(restored, _record_of(backup))
+    assert restored._markdown_source is True
+    assert restored.toPlainText() == "A claim[^1].\n\n[^1]: The source."
+
+
+def test_backups_follow_the_typing_closely():
+    assert recovery._DEBOUNCE_MS == 2_000
+    assert recovery._MAX_INTERVAL_MS == 15_000

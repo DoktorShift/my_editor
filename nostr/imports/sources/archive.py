@@ -36,6 +36,8 @@ from typing import List, Optional, Tuple
 
 import lxml.html
 
+from i18n import _
+
 from ...rss.parser import FeedItem
 
 
@@ -237,6 +239,6 @@ def extract_archive(data: bytes) -> ArchiveResult:
             _extract_substack(zf) if platform == "substack"
             else _extract_medium(zf)
         )
-        title = "Substack export" if platform == "substack" else "Medium export"
+        title = _("Substack export") if platform == "substack" else _("Medium export")
         return ArchiveResult(
             platform=platform, title=title, items=tuple(items))

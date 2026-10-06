@@ -31,10 +31,21 @@ else in the app may implement it:
 5. Publishing our own list happens only on deliberate user action, which
    is why :func:`build_server_list_event` is a pure builder here and no
    publish path in this package calls it.
+
+MainWindow owns the one :class:`UserServerList`, sharing the media
+store's settings: it reads the active account's list when the account
+becomes active, announces an adoption in the status bar, offers the
+suggestions in the Media Library, and hands :meth:`recovery_servers` to
+the AssetManager.
+
+Only a validly signed list by the right author counts: the read goes
+through the outbox lookup (nostr/outbox/lookup.py), so a relay cannot
+hand out a forged list and have its servers tried for recovery.
 """
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 from dataclasses import dataclass
@@ -44,10 +55,13 @@ from PySide6.QtCore import QObject, Signal
 
 import url_safety
 
-from .. import DEFAULT_RELAYS
 from ..events import build_event
-from ..queries import fetch_latest_event
+from ..outbox.directory import RelayDirectory
+from ..outbox.lookup import Lookup, fetch_replaceable
+from ..outbox.policy import lookup_relays
 from .settings import BlossomSettings
+
+logger = logging.getLogger(__name__)
 
 
 BLOSSOM_SERVER_LIST_KIND = 10063
@@ -62,9 +76,10 @@ MAX_SERVER_LIST_ENTRIES = 10
 # to the same outcome: drop it, never repair it.
 _SCHEME_RE = re.compile(r"^https?://", re.IGNORECASE)
 
-# Same values as the NIP-65 cache in ``nostr/outbox.py``: a published
-# list changes rarely, and an empty answer is re-asked sooner so a user
-# who has just published theirs is not stuck with the miss.
+# The relay directory's values (TTL_FOUND_S, TTL_ABSENT_S in
+# nostr/outbox/defaults.py): a published list changes rarely, and an
+# empty answer is re-asked sooner so a user who has just published
+# theirs is not stuck with the miss. Ages are on a monotonic clock.
 _TTL_HIT_S: int = 30 * 60
 _TTL_EMPTY_S: int = 3 * 60
 
@@ -175,9 +190,9 @@ class _CacheEntry:
 class ServerListCache(QObject):
     """Fetches kind 10063 events on demand and caches them per pubkey.
 
-    Shaped like ``nostr.outbox.RelayListCache``, for the same reasons:
-    concurrent asks coalesce into one REQ, and a hit resolves without
-    touching a relay.
+    Concurrent asks coalesce into one REQ, and a hit resolves without
+    touching a relay. Only the author's newest validly signed list
+    counts (``query``, the outbox lookup by default).
 
     In memory only, on purpose. A disk cache of other people's server
     lists is a record of whose media the user looked at, it goes stale
@@ -185,9 +200,11 @@ class ServerListCache(QObject):
     blob URL) can afford one relay round trip.
     """
 
-    def __init__(self, pool, parent: Optional[QObject] = None) -> None:
+    def __init__(self, pool, parent: Optional[QObject] = None, *,
+                 query=fetch_replaceable) -> None:
         super().__init__(parent)
         self._pool = pool
+        self._query = query
         self._cache: Dict[str, _CacheEntry] = {}
         self._inflight: Dict[str, List[Callable[[List[str]], None]]] = {}
 
@@ -204,7 +221,7 @@ class ServerListCache(QObject):
         if entry is None:
             return None
         ttl = _TTL_EMPTY_S if not entry.servers else _TTL_HIT_S
-        if time.time() - entry.fetched_at > ttl:
+        if time.monotonic() - entry.fetched_at > ttl:
             return None
         return list(entry.servers)
 
@@ -234,30 +251,21 @@ class ServerListCache(QObject):
             return
         self._inflight[pubkey_hex] = [on_done]
 
-        def _on_event(event: Optional[dict]) -> None:
-            servers = parse_server_list(event) if event else []
-            self._cache[pubkey_hex] = _CacheEntry(
-                servers=list(servers), fetched_at=time.time()
-            )
+        def _on_lookup(result: Lookup) -> None:
             callbacks = self._inflight.pop(pubkey_hex, [])
+            servers = parse_server_list(result.event) if result.event is not None else []
+            self._cache[pubkey_hex] = _CacheEntry(
+                servers=list(servers), fetched_at=time.monotonic()
+            )
             for callback in callbacks:
                 try:
                     callback(list(servers))
                 except Exception:  # noqa: BLE001 - one bad waiter must not drop the rest
-                    pass
+                    logger.exception("a server list callback failed")
 
-        fetch_latest_event(
-            self._pool,
-            relays,
-            filters=[{
-                "kinds": [BLOSSOM_SERVER_LIST_KIND],
-                "authors": [pubkey_hex],
-                "limit": 1,
-            }],
-            on_done=_on_event,
-            timeout_ms=timeout_ms,
-            parent=self,
-        )
+        self._query(self._pool, relays, kind=BLOSSOM_SERVER_LIST_KIND,
+                    author=pubkey_hex, on_done=_on_lookup, timeout_ms=timeout_ms,
+                    parent=self)
 
 
 # --------------------------------------------------------------------------- #
@@ -283,6 +291,7 @@ class UserServerList(QObject):
         self,
         pool=None,
         *,
+        relay_directory: RelayDirectory,
         settings: Optional[BlossomSettings] = None,
         cache: Optional[ServerListCache] = None,
         parent: Optional[QObject] = None,
@@ -290,8 +299,13 @@ class UserServerList(QObject):
         super().__init__(parent)
         self._settings = settings if settings is not None else BlossomSettings()
         self._cache = cache if cache is not None else ServerListCache(pool, parent=self)
+        # Knows the user's own relay list, which leads the lookup, as it
+        # does for their profile and contact list. Required: without it
+        # the user's own relays would silently go unasked.
+        self._relay_directory = relay_directory
         self._servers: List[str] = list(self._settings.discovered_servers)
         self._pubkey: str = self._settings.discovered_pubkey
+        self._asked: str = ""
 
     # -- read --------------------------------------------------------------
 
@@ -349,12 +363,17 @@ class UserServerList(QObject):
         two REQs.
         """
         pubkey = str(getattr(profile, "user_pubkey", "") or "")
+        # Only the account asked for last is answered: a slow answer for
+        # an account switched away from must not become this one's list.
+        self._asked = pubkey.lower()
         if not pubkey:
             return
         if force:
             self._cache.invalidate(pubkey)
-        extra = list(getattr(profile, "bunker_relays", None) or [])
-        relays = list(dict.fromkeys(list(DEFAULT_RELAYS) + extra))
+        # A server list is one of the user's replaceable events, found
+        # where their profile is found: their write relays, then the
+        # indexers.
+        relays = lookup_relays(known=self._relay_directory.cached(pubkey), own=True)
         self._cache.fetch(
             pubkey,
             relays,
@@ -362,7 +381,14 @@ class UserServerList(QObject):
             timeout_ms=timeout_ms,
         )
 
+    def forget_account(self) -> None:
+        """No account is active any more (signed out): answers still on
+        their way are dropped."""
+        self._asked = ""
+
     def _apply(self, pubkey: str, servers: List[str]) -> None:
+        if pubkey.lower() != self._asked:
+            return      # an answer for an account no longer active
         self.discovered.emit(list(servers))
         if not servers:
             # An empty answer is far more often "no relay replied in

@@ -35,6 +35,8 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+from i18n import _
+
 
 # --------------------------------------------------------------------------- #
 # Protocol constants                                                          #
@@ -53,9 +55,22 @@ SUPPORTED_INNER_KINDS: Tuple[int, ...] = (
     INNER_KIND_LONG_FORM,
 )
 
-# Default expiration window per the NIP-37 recommendation. Relays SHOULD
-# honour NIP-40 and reap drafts after this falls in the past; users
-# expect "stale drafts age out" semantics.
+# NIP-23's kind for an article draft. EINUNDZWANZIG STANDUP keeps its
+# article drafts (imports among them) as this kind inside the wrap; read
+# here, it is an article like 30023, and the drafts this app writes stay
+# 30023, which STANDUP reads as well.
+INNER_KIND_ARTICLE_DRAFT: int = 30024
+
+
+def _as_supported_kind(kind: int) -> int:
+    """The kind this app handles ``kind`` as: an article draft is an article."""
+    return INNER_KIND_LONG_FORM if kind == INNER_KIND_ARTICLE_DRAFT else kind
+
+# How long an imported draft is kept when nobody changes it (NIP-40).
+# Only imports carry it: a draft the person writes, or an imported one
+# the person changed and saved, never expires (the owner's decision D-3,
+# and how EINUNDZWANZIG STANDUP keeps drafts too). A draft that vanished
+# after three months without a word was a loss nobody expected.
 DEFAULT_EXPIRATION_SECONDS: int = 90 * 24 * 60 * 60  # 90 days
 
 # NIP-44 v2 caps the *plaintext* (pre-padding) at 65,535 bytes. The wrap
@@ -143,28 +158,31 @@ def parse_inner_event(plaintext: str) -> Dict[str, Any]:
 
     Returns a dict with the same shape as ``build_inner_event``'s output.
     Raises ``ValueError`` on any malformedness so callers can mark a
-    draft row as failed without taking down the whole list refresh.
+    draft row as failed without taking down the whole list refresh. The
+    row shows the message, so it is translated.
     """
     try:
         data = json.loads(plaintext)
     except json.JSONDecodeError as exc:
-        raise ValueError(f"draft payload is not valid JSON: {exc}") from exc
+        raise ValueError(
+            _("draft payload is not valid JSON: {error}").format(error=exc)) from exc
     if not isinstance(data, dict):
-        raise ValueError("draft payload must be a JSON object")
+        raise ValueError(_("draft payload must be a JSON object"))
     try:
-        kind = int(data["kind"])
+        kind = _as_supported_kind(int(data["kind"]))
         content = str(data.get("content", ""))
         tags = list(data.get("tags", []))
         created_at = int(data.get("created_at", 0))
         pubkey = str(data.get("pubkey", "")).lower()
     except (KeyError, TypeError, ValueError) as exc:
-        raise ValueError(f"draft payload missing required fields: {exc}") from exc
+        raise ValueError(
+            _("draft payload missing required fields: {error}").format(error=exc)) from exc
     # Unknown inner kinds are intentionally tolerated: a future client
     # could stash other kinds and we'd rather display "unknown draft
     # type" than silently drop them. ``DraftStore`` decides how to
     # render, see the kind branch in ``set_decrypted``.
     if not all(isinstance(t, list) and all(isinstance(x, str) for x in t) for t in tags):
-        raise ValueError("draft payload tags must be list[list[str]]")
+        raise ValueError(_("draft payload tags must be list[list[str]]"))
     return {
         "kind": kind,
         "content": content,
@@ -178,6 +196,37 @@ def parse_inner_event(plaintext: str) -> Dict[str, Any]:
 # Outer wrap (kind 31234)                                                     #
 # --------------------------------------------------------------------------- #
 
+# --------------------------------------------------------------------------- #
+# Which version of a draft wins                                               #
+# --------------------------------------------------------------------------- #
+
+# The time of the last wrap this app built for each draft (by author and
+# d tag). Two saves of one draft within a second would otherwise share a
+# timestamp, and relays keep whichever has the lower id (NIP-01), which is
+# as often the earlier text as the later.
+_last_written: Dict[str, int] = {}
+
+
+def wrap_time(pubkey_hex: str, identifier: str, *, after: int = 0) -> int:
+    """When a new version of a draft is dated: now, but always after the
+    last version this app wrote and after ``after`` (the newest version
+    known from the relays), so the newest save is the one relays keep."""
+    key = f"{pubkey_hex.lower()}:{identifier}"
+    created_at = max(int(time.time()), _last_written.get(key, 0) + 1, int(after) + 1
+                     if after else 0)
+    _last_written[key] = created_at
+    return created_at
+
+
+def supersedes(created_at: int, event_id: str, other_created_at: int,
+               other_event_id: str) -> bool:
+    """Whether a version replaces another (NIP-01): the newer one wins,
+    and of two with the same time, the one with the lower id."""
+    if created_at != other_created_at:
+        return created_at > other_created_at
+    return (event_id or "") < (other_event_id or "")
+
+
 def build_draft_wrap(
     *,
     identifier: str,
@@ -185,7 +234,7 @@ def build_draft_wrap(
     encrypted_content: str,
     pubkey_hex: str,
     client_name: str,
-    expiration_seconds: int = DEFAULT_EXPIRATION_SECONDS,
+    expiration_seconds: Optional[int] = None,
     extra_tags: Optional[List[List[str]]] = None,
     created_at: Optional[int] = None,
 ) -> Dict[str, Any]:
@@ -197,7 +246,8 @@ def build_draft_wrap(
                                       filter "drafts of articles" vs.
                                       "drafts of notes" without
                                       decryption.
-      ``["expiration", ...]``      , NIP-40, recommended by NIP-37.
+      ``["expiration", ...]``      , NIP-40, only with
+                                      ``expiration_seconds`` (imports).
       ``["client", client_name]``  , NIP-89 attribution.
       ``*extra_tags``              , opaque pass-through (reserved for
                                       future use, e.g. RSS-source tags).
@@ -214,15 +264,16 @@ def build_draft_wrap(
     if len(pubkey_hex) != 64:
         raise ValueError("pubkey_hex must be 64 hex chars")
     if created_at is None:
-        created_at = int(time.time())
-    expiration_unix = int(created_at) + max(0, int(expiration_seconds))
+        created_at = wrap_time(pubkey_hex, identifier)
 
     tags: List[List[str]] = [
         ["d", identifier],
         ["k", str(int(inner_kind))],
-        ["expiration", str(expiration_unix)],
-        ["client", client_name],
     ]
+    if expiration_seconds is not None:
+        tags.append(["expiration",
+                     str(int(created_at) + max(0, int(expiration_seconds)))])
+    tags.append(["client", client_name])
     if extra_tags:
         tags.extend(list(t) for t in extra_tags)
 
@@ -251,10 +302,9 @@ def build_tombstone_wrap(
     been deleted." Same ``d`` + ``k`` (so the addressable replacement
     targets the right event), empty content, no encryption needed.
 
-    The expiration tag is intentionally short here. A tombstone only
-    needs to live long enough for other clients to observe the empty
-    content; we still set 90 days because some relays drop events with
-    expiration in the near past.
+    A tombstone never expires: a draft without an expiration that a
+    lagging relay still holds must stay deleted for good, and an
+    expired tombstone would let it come back.
     """
     return build_draft_wrap(
         identifier=identifier,
@@ -285,6 +335,12 @@ class DraftWrapMeta:
     @property
     def is_tombstone(self) -> bool:
         return self.ciphertext == ""
+
+    def is_expired(self, now: float) -> bool:
+        """NIP-40: past its ``expiration``, a wrap is gone, whatever a relay
+        that ignores expirations still hands out. A wrap without one, or
+        with one that is not a number, never expires."""
+        return self.expiration is not None and self.expiration <= int(now)
 
 
 def parse_wrap_event(event: Dict[str, Any]) -> Optional[DraftWrapMeta]:
@@ -328,7 +384,7 @@ def parse_wrap_event(event: Dict[str, Any]) -> Optional[DraftWrapMeta]:
         # No d-tag → not addressable → not a NIP-37 draft we can manage.
         return None
     try:
-        inner_kind = int(inner_kind_str) if inner_kind_str else 0
+        inner_kind = _as_supported_kind(int(inner_kind_str)) if inner_kind_str else 0
     except ValueError:
         inner_kind = 0
 

@@ -12,7 +12,8 @@ Layout, top to bottom (visibility varies by state):
   |  SUBSCRIBED SOURCES                  [ − ] |   idle/done only
   |    My Blog · last imported 2026-01-02      |
   +--------------------------------------------+
-  |  (Newest 10)(Newest 25)(Newest 50)(All)    |   scope chips (preview)
+  |  (Newest 10)(Newest 25)                    |   scope chips (preview),
+  |  (Newest 50)(All)                          |   two to a line
   |  [x] Fetch full text …  [x] Mirror images  |   options (preview)
   |  (Subscribe)                               |
   +--------------------------------------------+
@@ -37,7 +38,7 @@ lists select on single click and activate on double-click/Return, with
 a remove control beside the list; blank idle states carry next-step
 guidance; tooltips on every action.
 
-Dependencies (relay pool, relay-list cache, bunker session pool, and
+Dependencies (relay pool, relay directory, bunker session pool, and
 optionally the draft store for identifier migration) are injected via
 :meth:`bind_runtime`. The ``fetcher`` and ``import_job_factory``
 constructor seams exist so tests can drive the whole panel with fakes.
@@ -46,8 +47,7 @@ constructor seams exist so tests can drive the whole panel with fakes.
 from __future__ import annotations
 
 import os
-import time
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Sequence
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QKeySequence, QShortcut
@@ -71,12 +71,13 @@ from constants import (
     DARK_BG, DARK_BORDER, DARK_FG, DARK_MENU_BG, DARK_MUTED_FG,
     LIGHT_BG, LIGHT_BORDER, LIGHT_FG, LIGHT_MUTED_FG,
 )
+from i18n import _, ngettext
 
 from ..bunker import BunkerSessionPool
 from ..imports import workers
+from ..imports.catalogue import ExistingCatalogue
 from ..imports.errors import SourceError, friendly_message
 from ..imports.fetch import SourceFetcher
-from ..imports.images import scan_html_images
 from ..imports.pipeline import ImportItemsJob
 from ..imports.preview import (
     SCOPE_PRESETS,
@@ -84,6 +85,7 @@ from ..imports.preview import (
     filter_items,
     read_minutes,
 )
+from ..imports.snapshots import has_images, identifier_of, images_to_copy
 from ..imports.registry import (
     ResolveInput,
     ResolveResult,
@@ -91,35 +93,40 @@ from ..imports.registry import (
     resolve_source,
 )
 from ..imports.subscriptions import FeedSubscriptionStore
-from ..outbox import RelayListCache
+from ..outbox import RelayDirectory, relays_from
 from ..profiles import Profile
 from ..relay import RelayPool
 from ..rss.parser import FeedItem
+from .drafts_common import format_short_date
 
 
+# Keys are the row states the code compares; values are what a row says.
 _STATUS_LABEL = {
-    "pending": "pending",
-    "resolving": "resolving from Nostr…",
+    "pending": _("pending"),
+    "resolving": _("resolving from Nostr…"),
     # Covers both full-text recovery and podcast-chapter fetching.
-    "extracting": "fetching content…",
-    "mirroring": "mirroring images…",
-    "signing": "signing",
+    "extracting": _("fetching content…"),
+    "mirroring": _("mirroring images…"),
+    "signing": _("signing"),
     # "saved" fires at stash time: the draft is signed and exists, but
     # the relay publish is still in flight. "published" only once at
     # least one relay accepted the event (with the count as detail).
-    "saved": "saved",
-    "published": "published",
-    "failed": "failed",
+    "saved": _("saved"),
+    "published": _("published"),
+    "failed": _("failed"),
+    # A draft, an article or a deletion exists for it (in this app or
+    # another): never imported again, so an edited draft stays as it is.
+    "existing": _("already imported"),
 }
 
 
-_URL_HINT_INVALID = (
+_URL_HINT_INVALID = _(
     "That doesn't look like a fetchable URL. Paste a site or feed address."
 )
 
 # Guidance for the blank idle state: an empty screen must point at the
 # next step rather than sit silent.
-_IDLE_GUIDANCE = (
+_IDLE_GUIDANCE = _(
     "Paste a link above, or import an export file, to pull posts in "
     "as private drafts."
 )
@@ -128,9 +135,15 @@ _IDLE_GUIDANCE = (
 # few tens of MB; anything bigger is almost certainly the wrong file).
 _MAX_IMPORT_FILE_BYTES = 64 * 1024 * 1024
 
-_FILE_DIALOG_FILTER = (
+_FILE_DIALOG_FILTER = _(
     "Content exports (*.xml *.json *.opml *.zip);;All files (*)"
 )
+
+# A title for an item that has none, shown in the list only.
+_UNTITLED = _("(untitled)")
+
+# Scope chips per line, so the page fits the drafts panel's width.
+_SCOPE_CHIPS_PER_LINE = 2
 
 
 # Panel accent. No app-wide token exists for it yet; defined once here
@@ -227,19 +240,14 @@ QProgressBar#feeds_panel_progress::chunk {{
 
 
 def _fmt_date(ts: Optional[int]) -> str:
-    if not ts:
-        return ""
-    try:
-        return time.strftime("%Y-%m-%d", time.localtime(int(ts)))
-    except (ValueError, OverflowError, OSError):
-        return ""
+    return format_short_date(ts) if ts else ""
 
 
 class FeedsPanel(QFrame):
     """Preview-first feed importer.
 
     Public surface:
-      bind_runtime(...)          inject relay pool, relay-list cache,
+      bind_runtime(...)          inject relay pool, relay directory,
                                  session pool, and (optionally) the
                                  draft store used for identifier
                                  migration. Must be called before the
@@ -264,6 +272,7 @@ class FeedsPanel(QFrame):
         run_blocking: Optional[Callable[..., None]] = None,
         subscription_store_factory: Optional[
             Callable[..., FeedSubscriptionStore]] = None,
+        catalogue_factory: Optional[Callable[..., ExistingCatalogue]] = None,
     ) -> None:
         super().__init__(parent)
         self.setObjectName("feeds_panel")
@@ -271,8 +280,9 @@ class FeedsPanel(QFrame):
 
         self._is_dark = is_dark
         self._relay_pool: Optional[RelayPool] = None
-        self._relay_list_cache: Optional[RelayListCache] = None
+        self._relay_directory: Optional[RelayDirectory] = None
         self._session_pool: Optional[BunkerSessionPool] = None
+        self._entitled_relays: Optional[Callable[[], Sequence[str]]] = None
         self._draft_store = None
         self._active_profile: Optional[Profile] = None
 
@@ -305,7 +315,11 @@ class FeedsPanel(QFrame):
         self._subscription_store_factory = (
             subscription_store_factory or FeedSubscriptionStore)
         self._subscriptions: Optional[FeedSubscriptionStore] = None
+        self._owns_subscriptions = True
         self._feed_title = ""
+        self._catalogue_factory = catalogue_factory or ExistingCatalogue
+        self._catalogue: Optional[ExistingCatalogue] = None
+        self._existing_count = 0
 
         self._build_ui()
         # Escape cancels whatever is in flight, matching platform
@@ -338,13 +352,13 @@ class FeedsPanel(QFrame):
         layout.setContentsMargins(10, 10, 10, 6)
         layout.setSpacing(6)
 
-        url_label = QLabel("Source URL")
+        url_label = QLabel(_("Source URL"))
         url_label.setObjectName("feeds_panel_field")
         self._url_edit = QLineEdit()
         self._url_edit.setObjectName("feeds_panel_url")
-        self._url_edit.setAccessibleName("Import source URL")
+        self._url_edit.setAccessibleName(_("Import source URL"))
         self._url_edit.setPlaceholderText(
-            "A blog, feed, npub, Bluesky thread, or Markdown URL")
+            _("A blog, feed, npub, Bluesky thread, or Markdown URL"))
         self._url_edit.setClearButtonEnabled(True)
         self._url_edit.textChanged.connect(self._refresh_controls)
         self._url_edit.returnPressed.connect(self._on_load_clicked)
@@ -352,9 +366,9 @@ class FeedsPanel(QFrame):
         layout.addWidget(self._url_edit)
 
         url_hint = QLabel(
-            "Accepts feeds (RSS / Atom / JSON), Nostr profiles and "
-            "events, Bluesky threads, Markdown files, GitHub folders, "
-            "and sitemaps."
+            _("Accepts feeds (RSS / Atom / JSON), Nostr profiles and "
+              "events, Bluesky threads, Markdown files, GitHub folders, "
+              "and sitemaps.")
         )
         url_hint.setObjectName("feeds_panel_hint")
         url_hint.setWordWrap(True)
@@ -364,28 +378,28 @@ class FeedsPanel(QFrame):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(8)
 
-        self._load_btn = QPushButton("Load preview")
+        self._load_btn = QPushButton(_("Load preview"))
         self._load_btn.setObjectName("feeds_panel_primary")
         self._load_btn.setCursor(Qt.PointingHandCursor)
         self._load_btn.setToolTip(
-            "Fetch the source and preview its items before importing")
+            _("Fetch the source and preview its items before importing"))
         self._load_btn.clicked.connect(self._on_load_clicked)
 
         # Trailing ellipsis: the button opens a file dialog for
         # further input, per platform convention.
-        self._file_btn = QPushButton("Import a file…")
+        self._file_btn = QPushButton(_("Import a file…"))
         self._file_btn.setObjectName("feeds_panel_secondary")
         self._file_btn.setCursor(Qt.PointingHandCursor)
         self._file_btn.setToolTip(
-            "A WordPress (WXR) or Ghost export, an OPML subscription "
-            "list, or a Medium / Substack ZIP"
+            _("A WordPress (WXR) or Ghost export, an OPML subscription "
+              "list, or a Medium / Substack ZIP")
         )
         self._file_btn.clicked.connect(self._on_import_file_clicked)
 
-        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn = QPushButton(_("Cancel"))
         self._cancel_btn.setObjectName("feeds_panel_secondary")
         self._cancel_btn.setCursor(Qt.PointingHandCursor)
-        self._cancel_btn.setToolTip("Stop the current operation (Esc)")
+        self._cancel_btn.setToolTip(_("Stop the current operation (Esc)"))
         self._cancel_btn.clicked.connect(self._on_cancel_clicked)
         self._cancel_btn.setVisible(False)
 
@@ -405,7 +419,7 @@ class FeedsPanel(QFrame):
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(6)
-        label = QLabel("Subscribed sources")
+        label = QLabel(_("Subscribed sources"))
         label.setObjectName("feeds_panel_field")
         header.addWidget(label)
         header.addStretch(1)
@@ -417,8 +431,8 @@ class FeedsPanel(QFrame):
         self._remove_source_btn.setFixedWidth(26)
         self._remove_source_btn.setCursor(Qt.PointingHandCursor)
         self._remove_source_btn.setToolTip(
-            "Unsubscribe from the selected source")
-        self._remove_source_btn.setAccessibleName("Unsubscribe")
+            _("Unsubscribe from the selected source"))
+        self._remove_source_btn.setAccessibleName(_("Unsubscribe"))
         self._remove_source_btn.setEnabled(False)
         self._remove_source_btn.clicked.connect(self._on_remove_source)
         header.addWidget(self._remove_source_btn)
@@ -426,11 +440,11 @@ class FeedsPanel(QFrame):
 
         self._sources_list = QListWidget()
         self._sources_list.setObjectName("feeds_panel_list")
-        self._sources_list.setAccessibleName("Subscribed sources")
+        self._sources_list.setAccessibleName(_("Subscribed sources"))
         self._sources_list.setMaximumHeight(140)
         self._sources_list.setSelectionMode(QListWidget.SingleSelection)
         self._sources_list.setToolTip(
-            "Double-click a source to load its latest items"
+            _("Double-click a source to load its latest items")
         )
         # Single click selects (so the remove control has a target);
         # double-click or Return loads, per platform list convention.
@@ -446,28 +460,36 @@ class FeedsPanel(QFrame):
 
     def _build_scope_row(self) -> QWidget:
         self._scope_frame = QFrame()
-        layout = QHBoxLayout(self._scope_frame)
+        layout = QVBoxLayout(self._scope_frame)
         layout.setContentsMargins(10, 0, 10, 6)
         layout.setSpacing(6)
 
         self._scope_group = QButtonGroup(self)
         self._scope_group.setExclusive(True)
         self._scope_buttons = {}
-        for preset in SCOPE_PRESETS:
+        lines: List[QHBoxLayout] = []
+        for index, preset in enumerate(SCOPE_PRESETS):
+            # Two chips to a line: all of them on one line made the page
+            # wider than the panel, and pushed the panel wider with it.
+            if index % _SCOPE_CHIPS_PER_LINE == 0:
+                lines.append(QHBoxLayout())
+                lines[-1].setSpacing(6)
+                layout.addLayout(lines[-1])
             btn = QPushButton(preset.label)
             btn.setObjectName("feeds_panel_chip")
             btn.setCheckable(True)
             btn.setCursor(Qt.PointingHandCursor)
-            btn.setAccessibleName(f"Scope: {preset.label}")
+            btn.setAccessibleName(_("Scope: {name}").format(name=preset.label))
             if preset.recommended:
-                btn.setToolTip("Recommended")
+                btn.setToolTip(_("Recommended"))
             btn.clicked.connect(
                 lambda _checked=False, key=preset.key: self._on_scope_selected(key)
             )
             self._scope_group.addButton(btn)
             self._scope_buttons[preset.key] = btn
-            layout.addWidget(btn)
-        layout.addStretch(1)
+            lines[-1].addWidget(btn)
+        for line in lines:
+            line.addStretch(1)
         self._scope_frame.setVisible(False)
         return self._scope_frame
 
@@ -478,41 +500,38 @@ class FeedsPanel(QFrame):
         layout.setSpacing(4)
 
         self._fulltext_check = QCheckBox(
-            "Fetch full text for teaser-only items")
+            _("Fetch full text for teaser-only items"))
         self._fulltext_check.setChecked(True)
         self._fulltext_check.setToolTip(
-            "Some feeds only ship a summary. When on, the article page "
-            "is fetched and its main text becomes the draft body."
+            _("Some feeds only ship a summary. When on, the article page "
+              "is fetched and its main text becomes the draft body.")
         )
         layout.addWidget(self._fulltext_check)
 
-        rehost_row = QHBoxLayout()
-        rehost_row.setContentsMargins(0, 0, 0, 0)
-        rehost_row.setSpacing(8)
-        self._rehost_check = QCheckBox("Mirror images to Blossom")
+        self._rehost_check = QCheckBox(_("Mirror images to Blossom"))
         self._rehost_check.setChecked(True)
         self._rehost_check.setToolTip(
-            "Copies every image to your Blossom server so imported "
-            "drafts don't depend on the source site staying up."
+            _("Copies every image to your Blossom server so imported "
+              "drafts don't depend on the source site staying up.")
         )
         self._rehost_check.toggled.connect(
             lambda _checked: self._update_import_button())
-        self._review_images_btn = QPushButton("Review images")
+        self._review_images_btn = QPushButton(_("Review Images\u2026"))
         self._review_images_btn.setObjectName("feeds_panel_chip")
         self._review_images_btn.setCursor(Qt.PointingHandCursor)
         self._review_images_btn.clicked.connect(self._on_review_images)
         self._review_images_btn.setVisible(False)
-        rehost_row.addWidget(self._rehost_check)
-        rehost_row.addWidget(self._review_images_btn)
-        rehost_row.addStretch(1)
-        layout.addLayout(rehost_row)
+        layout.addWidget(self._rehost_check)
+        # Under the option it belongs to rather than beside it: the two
+        # side by side were wider than the panel.
+        layout.addWidget(self._review_images_btn, 0, Qt.AlignLeft)
 
-        self._subscribe_btn = QPushButton("Subscribe")
+        self._subscribe_btn = QPushButton(_("Subscribe"))
         self._subscribe_btn.setObjectName("feeds_panel_chip")
         self._subscribe_btn.setCursor(Qt.PointingHandCursor)
         self._subscribe_btn.setToolTip(
-            "Remember this source (synced privately via your relays) so "
-            "you can re-import new items later."
+            _("Remember this source (synced privately via your relays) so "
+              "you can re-import new items later.")
         )
         self._subscribe_btn.clicked.connect(self._on_subscribe_clicked)
         self._subscribe_btn.setVisible(False)
@@ -531,7 +550,7 @@ class FeedsPanel(QFrame):
         layout.setSpacing(0)
         self._progress_bar = QProgressBar()
         self._progress_bar.setObjectName("feeds_panel_progress")
-        self._progress_bar.setAccessibleName("Import progress")
+        self._progress_bar.setAccessibleName(_("Import progress"))
         self._progress_bar.setTextVisible(False)
         self._progress_bar.setVisible(False)
         layout.addWidget(self._progress_bar)
@@ -547,7 +566,7 @@ class FeedsPanel(QFrame):
     def _build_list(self) -> QWidget:
         self._list = QListWidget()
         self._list.setObjectName("feeds_panel_list")
-        self._list.setAccessibleName("Items to import")
+        self._list.setAccessibleName(_("Items to import"))
         self._list.setUniformItemSizes(True)
         self._list.setSelectionMode(QListWidget.NoSelection)
         self._list.itemChanged.connect(self._on_item_check_changed)
@@ -559,11 +578,11 @@ class FeedsPanel(QFrame):
         layout.setContentsMargins(10, 6, 10, 10)
         layout.setSpacing(8)
 
-        self._import_btn = QPushButton("Import")
+        self._import_btn = QPushButton(_("Import"))
         self._import_btn.setObjectName("feeds_panel_primary")
         self._import_btn.setCursor(Qt.PointingHandCursor)
         self._import_btn.setToolTip(
-            "Import the checked items as private drafts")
+            _("Import the checked items as private drafts"))
         self._import_btn.clicked.connect(self._on_import_clicked)
         self._import_btn.setVisible(False)
 
@@ -577,10 +596,12 @@ class FeedsPanel(QFrame):
         self,
         *,
         relay_pool: RelayPool,
-        relay_list_cache: RelayListCache,
+        relay_directory: RelayDirectory,
         session_pool: BunkerSessionPool,
         draft_store=None,
         blossom_settings=None,
+        entitled_relays: Optional[Callable[[], Sequence[str]]] = None,
+        subscriptions: Optional[FeedSubscriptionStore] = None,
     ) -> None:
         """Inject the runtime dependencies needed to publish drafts.
 
@@ -590,10 +611,17 @@ class FeedsPanel(QFrame):
         the new prefixed d-tag. ``blossom_settings`` (anything with a
         ``primary`` attribute) overrides where mirrored images land;
         the user's configured Blossom settings are read by default.
+        ``entitled_relays`` answers which relays the account has standing
+        on beyond its own list (a membership's); imported drafts and the
+        synced feed list go there as well. ``subscriptions`` is the list
+        of sources the app already keeps (the imports controller's); the
+        panel then shows and edits that one, and leaves binding it to an
+        account to its owner. Without it the panel keeps its own.
         """
         self._relay_pool = relay_pool
-        self._relay_list_cache = relay_list_cache
+        self._relay_directory = relay_directory
         self._session_pool = session_pool
+        self._entitled_relays = entitled_relays
         self._draft_store = draft_store
         self._blossom_settings = blossom_settings
         # The relay-query surface Nostr-facing resolvers use (author
@@ -603,26 +631,29 @@ class FeedsPanel(QFrame):
             self._nostr_query = RelayQueryAdapter(relay_pool, parent=self)
         else:
             self._nostr_query = None
+        # What already exists for the account, so an import never
+        # overwrites a draft (also one made or edited in another app).
+        self._catalogue = self._catalogue_factory(
+            relay_pool=relay_pool, relay_directory=relay_directory,
+            draft_store=draft_store, entitled_relays=entitled_relays, parent=self)
         # Subscriptions: the user's remembered sources, synced privately
         # as an encrypted kind 30078 event.
         if self._subscriptions is None:
-            self._subscriptions = self._subscription_store_factory(
+            self._owns_subscriptions = subscriptions is None
+            self._subscriptions = subscriptions or self._subscription_store_factory(
                 session_pool=session_pool,
                 relay_pool=relay_pool,
-                relay_list_cache=relay_list_cache,
+                relay_directory=relay_directory,
+                entitled_relays=entitled_relays,
                 parent=self,
             )
             self._subscriptions.feeds_changed.connect(
                 self._refresh_sources_list)
             self._subscriptions.sync_status.connect(self._on_sync_status)
-            if self._active_profile is not None:
+            if self._owns_subscriptions and self._active_profile is not None:
                 self._subscriptions.bind_profile(self._active_profile)
+            self._refresh_sources_list()
         self._refresh_controls()
-
-    def flush_subscriptions(self) -> None:
-        """Publish pending subscription changes now (app quit / logout)."""
-        if self._subscriptions is not None:
-            self._subscriptions.flush()
 
     def set_active_profile(self, profile: Optional[Profile]) -> None:
         """Track the active Nostr profile. Without one, imports are disabled."""
@@ -632,7 +663,7 @@ class FeedsPanel(QFrame):
         # a preview or a job signed by the old key.
         self._abort_activity()
         self._active_profile = profile
-        if self._subscriptions is not None:
+        if self._subscriptions is not None and self._owns_subscriptions:
             self._subscriptions.bind_profile(profile)
         self._reset_to_idle()
 
@@ -661,7 +692,7 @@ class FeedsPanel(QFrame):
     def _refresh_controls(self) -> None:
         runtime_ready = (
             self._relay_pool is not None
-            and self._relay_list_cache is not None
+            and self._relay_directory is not None
             and self._session_pool is not None
         )
         # The registry is the single validation authority: registering a
@@ -689,9 +720,9 @@ class FeedsPanel(QFrame):
         self._refresh_subscribe_button()
 
         if self._active_profile is None:
-            self._set_status("Connect a Nostr profile to import feeds.")
+            self._set_status(_("Connect a Nostr profile to import feeds."))
         elif not runtime_ready:
-            self._set_status("Importer is not wired up yet.")
+            self._set_status(_("Importer is not wired up yet."))
         elif text and not url_ready and self._state == "idle":
             # Something was typed but it can't be a URL (an XML paste,
             # a bare word, an over-long blob). Say so instead of leaving
@@ -726,6 +757,7 @@ class FeedsPanel(QFrame):
             is_cancelled=lambda g=generation: g != self._load_generation,
             run_blocking=self._run_blocking,
             nostr_query=self._nostr_query,
+            relay_directory=self._relay_directory,
         )
 
     def _enter_loading_state(self, *, source_label: str) -> int:
@@ -745,7 +777,7 @@ class FeedsPanel(QFrame):
         self._list.clear()
         # Preview loading has no known duration: indeterminate bar.
         self._progress_bar.setRange(0, 0)
-        self._set_status("Loading preview…")
+        self._set_status(_("Loading preview…"))
         self._refresh_controls()
         return self._load_generation
 
@@ -757,7 +789,7 @@ class FeedsPanel(QFrame):
         if not self._file_btn.isEnabled():
             return
         path, _selected_filter = QFileDialog.getOpenFileName(
-            self, "Import a content export", "", _FILE_DIALOG_FILTER)
+            self, _("Import a content export"), "", _FILE_DIALOG_FILTER)
         if path:
             self._import_file(path)
 
@@ -773,12 +805,13 @@ class FeedsPanel(QFrame):
             with open(path, "rb") as handle:
                 data = handle.read(_MAX_IMPORT_FILE_BYTES + 1)
         except OSError as exc:
-            self._set_status(f"Couldn't read that file: {exc}", error=True)
+            self._set_status(
+                _("Couldn't read that file: {error}").format(error=exc), error=True)
             return
         if len(data) > _MAX_IMPORT_FILE_BYTES:
             self._set_status(
-                "That file is too large to import "
-                f"(over {_MAX_IMPORT_FILE_BYTES // (1024 * 1024)} MB).",
+                _("That file is too large to import (over {size} MB).").format(
+                    size=_MAX_IMPORT_FILE_BYTES // (1024 * 1024)),
                 error=True,
             )
             return
@@ -804,6 +837,7 @@ class FeedsPanel(QFrame):
             is_cancelled=lambda g=generation: g != self._load_generation,
             run_blocking=self._run_blocking,
             nostr_query=self._nostr_query,
+            relay_directory=self._relay_directory,
         )
 
     def _import_archive(self, data: bytes, label: str) -> None:
@@ -820,8 +854,8 @@ class FeedsPanel(QFrame):
                 self._state = "idle"
                 self._refresh_controls()
                 self._set_status(
-                    "That ZIP doesn't look like a Medium or Substack "
-                    "export, or it has no published posts.",
+                    _("That ZIP doesn't look like a Medium or Substack "
+                      "export, or it has no published posts."),
                     error=True,
                 )
                 return
@@ -839,8 +873,9 @@ class FeedsPanel(QFrame):
                 self._set_status(friendly_message(SourceError(
                     str(exc), _EC.ARCHIVE_UNREADABLE)), error=True)
             else:
-                self._set_status(f"Couldn't read that archive: {exc}",
-                                 error=True)
+                self._set_status(
+                    _("Couldn't read that archive: {error}").format(error=exc),
+                    error=True)
 
         self._run_blocking(lambda: extract_archive(data), _done, _failed)
 
@@ -848,14 +883,14 @@ class FeedsPanel(QFrame):
         """Bulk-subscribe every feed in an OPML list, with one summary."""
         if self._subscriptions is None:
             self._set_status(
-                "Feed subscriptions aren't available until the importer "
-                "is fully wired up."
+                _("Feed subscriptions aren't available until the importer "
+                  "is fully wired up.")
             )
             return
         from ..imports.sources.opml import parse_opml
         document = parse_opml(text)
         if not document.feeds:
-            self._set_status(f"No feeds were found in {label}.")
+            self._set_status(_("No feeds were found in {file}.").format(file=label))
             return
         added = 0
         skipped = 0
@@ -865,17 +900,28 @@ class FeedsPanel(QFrame):
                 added += 1
             else:
                 skipped += 1
+        # The English reads "feed(s)" for any count; ngettext still
+        # gives each language the form its own grammar needs.
         if added and not skipped:
-            self._set_status(f"Subscribed to {added} feed(s) from {label}.")
-        elif added:
-            self._set_status(
-                f"Subscribed to {added} feed(s) from {label}; "
-                f"{skipped} skipped (already subscribed or invalid)."
+            text = ngettext(
+                "Subscribed to {added} feed(s) from {file}.",
+                "Subscribed to {added} feed(s) from {file}.",
+                added,
             )
+            self._set_status(text.format(added=added, file=label))
+        elif added:
+            text = ngettext(
+                "Subscribed to {added} feed(s) from {file}; "
+                "{skipped} skipped (already subscribed or invalid).",
+                "Subscribed to {added} feed(s) from {file}; "
+                "{skipped} skipped (already subscribed or invalid).",
+                added,
+            )
+            self._set_status(text.format(added=added, file=label, skipped=skipped))
         else:
             self._set_status(
-                f"Nothing new in {label}: every feed was already "
-                "subscribed or invalid."
+                _("Nothing new in {file}: every feed was already "
+                  "subscribed or invalid.").format(file=label)
             )
 
     def _on_preview_stage(self, generation: int, stage: dict) -> None:
@@ -884,11 +930,11 @@ class FeedsPanel(QFrame):
         name = stage.get("name", "")
         url = stage.get("url", "")
         if name == "connecting":
-            self._set_status(f"Fetching {url}")
+            self._set_status(_("Fetching {url}").format(url=url))
         elif name == "discovering":
-            self._set_status(f"Looking for a feed link at {url}")
+            self._set_status(_("Looking for a feed link at {url}").format(url=url))
         elif name == "parsing":
-            self._set_status("Reading the feed…")
+            self._set_status(_("Reading the feed…"))
 
     def _on_preview_failed(self, generation: int, error: SourceError) -> None:
         if generation != self._load_generation:
@@ -907,8 +953,8 @@ class FeedsPanel(QFrame):
         if not self._all_items:
             self._state = "idle"
             self._refresh_controls()
-            self._set_status(
-                f"{result.feed.title or result.url}: no items to import.")
+            self._set_status(_("{source}: no items to import.").format(
+                source=result.feed.title or result.url))
             return
 
         self._state = "preview"
@@ -917,10 +963,15 @@ class FeedsPanel(QFrame):
         self._select_scope(default_scope_key(len(self._all_items)))
         self._apply_scope()
         title = result.feed.title or result.url
-        self._set_status(
-            f"{title}: {len(self._all_items)} item(s) found. "
-            "Untick anything you don't want, then import."
+        count = len(self._all_items)
+        text = ngettext(
+            "{source}: {count} item(s) found. "
+            "Untick anything you don't want, then import.",
+            "{source}: {count} item(s) found. "
+            "Untick anything you don't want, then import.",
+            count,
         )
+        self._set_status(text.format(source=title, count=count))
         self._refresh_controls()
 
     # -- subscriptions -----------------------------------------------------
@@ -935,7 +986,7 @@ class FeedsPanel(QFrame):
             if feed.last_fetched_at:
                 date = _fmt_date(feed.last_fetched_at)
                 if date:
-                    parts.append(f"last imported {date}")
+                    parts.append(_("last imported {date}").format(date=date))
             row = QListWidgetItem("  " + "   ·   ".join(parts))
             row.setData(Qt.UserRole, feed.url)
             row.setToolTip(feed.url)
@@ -969,7 +1020,7 @@ class FeedsPanel(QFrame):
         from PySide6.QtWidgets import QMenu
         url = row.data(Qt.UserRole)
         menu = QMenu(self._sources_list)
-        unsubscribe = menu.addAction("Unsubscribe")
+        unsubscribe = menu.addAction(_("Unsubscribe"))
         chosen = menu.exec(self._sources_list.mapToGlobal(pos))
         if chosen is unsubscribe and isinstance(url, str):
             self._subscriptions.remove_feed(url)
@@ -992,8 +1043,8 @@ class FeedsPanel(QFrame):
         result = self._subscriptions.add_feed(
             self._source_label, title=self._feed_title)
         if result.get("added"):
-            self._set_status(
-                f"Subscribed to {self._feed_title or self._source_label}.")
+            self._set_status(_("Subscribed to {source}.").format(
+                source=self._feed_title or self._source_label))
         self._refresh_subscribe_button()
 
     def _on_sync_status(self, text: str) -> None:
@@ -1072,13 +1123,13 @@ class FeedsPanel(QFrame):
 
     @staticmethod
     def _preview_row_text(item: FeedItem) -> str:
-        parts = [item.title or item.link or "(untitled)"]
+        parts = [item.title or item.link or _UNTITLED]
         date = _fmt_date(item.published_at)
         if date:
             parts.append(date)
         minutes = read_minutes(item.content_html)
         if minutes:
-            parts.append(f"{minutes} min read")
+            parts.append(ngettext("{n} min read", "{n} min read", minutes).format(n=minutes))
         return "  " + "   ·   ".join(parts)
 
     def _on_item_check_changed(self, _row: QListWidgetItem) -> None:
@@ -1097,37 +1148,33 @@ class FeedsPanel(QFrame):
 
     def _update_import_button(self) -> None:
         selected = self._checked_items()
-        self._import_btn.setText(f"Import {len(selected)} selected")
+        label = ngettext("Import {n} selected", "Import {n} selected", len(selected))
+        self._import_btn.setText(label.format(n=len(selected)))
         self._import_btn.setEnabled(len(selected) > 0)
         self._update_image_review_button(selected)
 
-    def _selected_image_urls(self, selected: List[FeedItem]) -> List[str]:
-        seen: List[str] = []
-        for item in selected:
-            for url in scan_html_images(item.content_html):
-                if url not in seen:
-                    seen.append(url)
-        return seen
-
     def _update_image_review_button(self, selected: List[FeedItem]) -> None:
-        images = self._selected_image_urls(selected)
-        show = bool(images) and self._rehost_check.isChecked()
+        show = self._rehost_check.isChecked() and any(has_images(i) for i in selected)
         self._review_images_btn.setVisible(show)
-        if show:
-            kept = sum(1 for u in images if u not in self._skip_image_urls)
-            self._review_images_btn.setText(
-                f"Review images ({kept}/{len(images)})…")
 
     def _on_review_images(self) -> None:
         if self._state != "preview":
             return
-        from .image_review_dialog import ImageReviewDialog
+        selected = self._checked_items()
+        generation = self._load_generation
+        # The list is made the way the import works (from the Markdown),
+        # off the UI thread: converting many bodies takes a moment.
+        self._run_blocking(
+            lambda: images_to_copy(selected),
+            lambda images, g=generation: self._show_image_review(g, images),
+            lambda _exc: None)
 
-        images = self._selected_image_urls(self._checked_items())
-        if not images:
+    def _show_image_review(self, generation: int, images: List[str]) -> None:
+        if generation != self._load_generation or self._state != "preview" or not images:
             return
+        from .image_review_dialog import ImageReviewDialog
         dialog = ImageReviewDialog(images, self._skip_image_urls, parent=self)
-        if dialog.exec() == ImageReviewDialog.Accepted:
+        if dialog.exec() == ImageReviewDialog.DialogCode.Accepted:
             self._skip_image_urls = dialog.skip_urls()
             self._update_import_button()
 
@@ -1152,7 +1199,7 @@ class FeedsPanel(QFrame):
             return
         if (
             self._relay_pool is None
-            or self._relay_list_cache is None
+            or self._relay_directory is None
             or self._session_pool is None
             or self._active_profile is None
         ):
@@ -1172,11 +1219,53 @@ class FeedsPanel(QFrame):
                 self._rows.append(row)
                 self._set_row(
                     len(self._rows) - 1,
-                    item.title or item.link or "(untitled)",
+                    item.title or item.link or _UNTITLED,
                     "pending",
                 )
         finally:
             self._populating = False
+
+        # Ask what already exists before anything is fetched or signed.
+        # No answer from any relay means no import, never a guess.
+        self._state = "importing"
+        self._existing_count = 0
+        self._progress_bar.setRange(0, 0)
+        self._set_status(_("Checking your existing drafts…"))
+        self._refresh_controls()
+        generation = self._load_generation
+        identifiers = []
+        for item in selected:
+            try:
+                identifiers.append(identifier_of(item))
+            except ValueError:
+                continue
+        self._catalogue.look_up(
+            self._active_profile, identifiers,
+            on_ready=lambda found, g=generation: self._start_import(g, selected, found),
+            on_unavailable=lambda reason, g=generation: self._import_unavailable(
+                g, reason, selected))
+
+    def _import_unavailable(self, generation: int, reason: str,
+                            selected: List[FeedItem]) -> None:
+        if generation != self._load_generation or self._state != "importing":
+            return
+        self._state = "preview"
+        self._populate_preview_list()
+        # The person's choice stays as it was.
+        for row, item in zip(self._rows, self._preview_items):
+            if item not in selected:
+                row.setCheckState(Qt.Unchecked)
+        self._update_import_button()
+        self._refresh_controls()
+        self._set_status(reason, error=True)
+
+    def _start_import(self, generation: int, selected: List[FeedItem], found) -> None:
+        if generation != self._load_generation or self._state != "importing":
+            return
+        catalogue = self._catalogue
+
+        def is_imported(identifier: str) -> bool:
+            return identifier in found or catalogue.known_locally(identifier) is not None
 
         store = self._draft_store
         identifier_exists = (
@@ -1187,9 +1276,10 @@ class FeedsPanel(QFrame):
             feed_url=self._resolved_url or self._url_edit.text().strip(),
             profile=self._active_profile,
             relay_pool=self._relay_pool,
-            relay_list_cache=self._relay_list_cache,
+            relay_directory=self._relay_directory,
             session_pool=self._session_pool,
             identifier_exists=identifier_exists,
+            is_imported=is_imported,
             fetch_full_text=self._fulltext_check.isChecked(),
             rehost_images=self._rehost_check.isChecked(),
             blossom_server=(
@@ -1197,6 +1287,7 @@ class FeedsPanel(QFrame):
                 if self._rehost_check.isChecked() else ""
             ),
             skip_image_urls=set(self._skip_image_urls),
+            entitled_relays=relays_from(self._entitled_relays),
             parent=self,
         )
         self._job.status_changed.connect(self._set_status)
@@ -1207,14 +1298,14 @@ class FeedsPanel(QFrame):
         self._job.item_succeeded.connect(self._on_item_succeeded)
         self._job.item_published.connect(self._on_item_published)
         self._job.item_failed.connect(self._on_item_failed)
+        self._job.item_existing.connect(self._on_item_existing)
         self._job.progress.connect(self._on_job_progress)
         self._job.completed.connect(self._on_completed)
 
-        self._state = "importing"
         # The import has a known length: determinate bar, item by item.
         self._progress_bar.setRange(0, len(selected))
         self._progress_bar.setValue(0)
-        self._set_status("Starting import…")
+        self._set_status(_("Starting import…"))
         self._refresh_controls()
         self._job.start()
 
@@ -1231,12 +1322,14 @@ class FeedsPanel(QFrame):
             # Refresh first so the idle-state defaults can't overwrite
             # the cancellation notice below.
             self._refresh_controls()
-            self._set_status("Load cancelled.")
+            self._set_status(_("Load cancelled."))
             return
-        if self._state == "importing" and self._job is not None:
-            self._job.cancel()
+        if self._state == "importing":
+            if self._job is not None:
+                self._job.cancel()
+            self._load_generation += 1
             self._finish_import()
-            self._set_status("Import cancelled.")
+            self._set_status(_("Import cancelled."))
 
     def _on_escape(self) -> None:
         if self._state in ("loading", "importing"):
@@ -1259,9 +1352,15 @@ class FeedsPanel(QFrame):
     ) -> None:
         title = self._row_title(index)
         done = mirrored + failed
-        detail = f"{done}/{total} images"
         if failed:
-            detail += f", {failed} kept original"
+            detail = ngettext(
+                "{done}/{total} images, {failed} kept original",
+                "{done}/{total} images, {failed} kept original",
+                total,
+            )
+        else:
+            detail = ngettext("{done}/{total} images", "{done}/{total} images", total)
+        detail = detail.format(done=done, total=total, failed=failed)
         self._set_row(index, title, "mirroring", detail)
 
     def _on_item_succeeded(self, index: int, _identifier: str) -> None:
@@ -1272,23 +1371,45 @@ class FeedsPanel(QFrame):
     def _on_item_published(self, index: int, accepted: int, total: int) -> None:
         title = self._row_title(index)
         if accepted > 0:
-            self._set_row(index, title, "published", f"{accepted}/{total} relays")
+            detail = ngettext(
+                "{accepted}/{total} relays", "{accepted}/{total} relays", total,
+            )
+            self._set_row(index, title, "published",
+                          detail.format(accepted=accepted, total=total))
         else:
             # Signed and saved on the signer, but no relay took it. Not
             # a lie ("published") and not a failure (the draft exists).
-            self._set_row(index, title, "saved", "no relay accepted it yet")
+            self._set_row(index, title, "saved", _("no relay accepted it yet"))
 
     def _on_item_failed(self, index: int, reason: str) -> None:
         title = self._row_title(index)
         self._set_row(index, title, "failed", reason)
 
+    def _on_item_existing(self, index: int, _identifier: str) -> None:
+        self._existing_count += 1
+        self._set_row(index, self._row_title(index), "existing")
+
     def _on_completed(self, succeeded: int, attempted: int) -> None:
-        if attempted == 0:
-            self._set_status("Done. Nothing to import.")
+        existing = self._existing_count
+        if attempted == 0 and existing:
+            self._set_status(ngettext(
+                "Done. The item was already imported; nothing was changed.",
+                "Done. All {count} items were already imported; nothing was changed.",
+                existing).format(count=existing))
+        elif attempted == 0:
+            self._set_status(_("Done. Nothing to import."))
         else:
-            self._set_status(
-                f"Done. {succeeded}/{attempted} item(s) imported as drafts."
-            )
+            text = ngettext(
+                "Done. {succeeded}/{attempted} item(s) imported as drafts.",
+                "Done. {succeeded}/{attempted} item(s) imported as drafts.",
+                attempted,
+            ).format(succeeded=succeeded, attempted=attempted)
+            if existing:
+                text += " " + ngettext(
+                    "{count} was already imported and left as it is.",
+                    "{count} were already imported and left as they are.",
+                    existing).format(count=existing)
+            self._set_status(text)
         # Stamp the subscription so "New since last import" has a floor.
         if (
             succeeded > 0
@@ -1332,7 +1453,7 @@ class FeedsPanel(QFrame):
         item = self._rows[index]
         item.setData(Qt.UserRole, title)
         status_text = _STATUS_LABEL.get(status_key, status_key)
-        display_title = title or "(untitled)"
+        display_title = title or _UNTITLED
         if detail:
             item.setText(f"  {display_title}    {status_text}: {detail}")
         else:

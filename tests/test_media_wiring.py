@@ -271,3 +271,86 @@ def test_the_article_dialog_can_open_the_library_for_its_cover_picker():
     assert len(calls_found) == 1
     assert attribute_argument(
         calls_found[0], "private_library") == "_private_library"
+
+
+# --------------------------------------------------------------------- #
+# The media servers the account publishes (kind 10063)                   #
+# --------------------------------------------------------------------- #
+
+def test_the_published_server_list_shares_the_stores_settings(init_body):
+    """What the list adopts must be what the store uploads to. A second
+    settings object would adopt into a file the store never reads again
+    in this session."""
+    call = constructor(init_body, "UserServerList")
+    settings = [k.value for k in call.keywords if k.arg == "settings"]
+    assert len(settings) == 1
+    value = settings[0]
+    assert isinstance(value, ast.Attribute) and value.attr == "settings"
+    assert isinstance(value.value, ast.Attribute) and value.value.attr == "_media_store"
+
+
+def test_dead_image_addresses_are_recovered_from_the_published_servers(init_body):
+    assets = constructor(init_body, "AssetManager")
+    providers = [k.value for k in assets.keywords if k.arg == "recovery_provider"]
+    assert len(providers) == 1
+    assert isinstance(providers[0], ast.Attribute)
+    assert providers[0].attr == "recovery_servers"
+    list_at = statement_index(init_body, assigns("_server_list"))
+    assets_at = statement_index(init_body, calls("AssetManager"))
+    assert 0 <= list_at < assets_at
+
+
+def test_every_library_window_is_offered_the_published_servers():
+    source = textwrap.dedent(inspect.getsource(MainWindow))
+    tree = ast.parse(source)
+    offered = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "attr", "") == "set_server_suggestions"
+    ]
+    libraries = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "id", "") == "MediaLibraryDialog"
+    ]
+    # Each library window when it opens, plus the open one when the list changes.
+    assert len(offered) >= len(libraries) + 1
+
+
+def test_sharing_the_server_list_asks_first_then_publishes_what_uploads_use(monkeypatch):
+    from types import SimpleNamespace
+    from PySide6.QtCore import QObject, Signal
+    import main_window as mw_module
+    from nostr.outbox import writer as outbox_writer
+
+    published, refreshed, shown = [], [], []
+
+    class FakeWriter(QObject):
+        finished = Signal(object)
+
+        def start(self):
+            self.finished.emit(outbox_writer.WriteOutcome(outbox_writer.WRITTEN))
+
+    def fake_publish(*, servers, **_deps):
+        published.append(servers)
+        return FakeWriter()
+
+    answers = iter([False, True])
+    monkeypatch.setattr(mw_module, "ask", lambda *a, **kw: next(answers))
+    monkeypatch.setattr(mw_module, "publish_server_list", fake_publish)
+    active = SimpleNamespace(user_pubkey="ab" * 32)
+    host = SimpleNamespace(
+        _profile_store=SimpleNamespace(default=lambda: active),
+        _media_store=SimpleNamespace(target_servers=lambda: ["https://a.example",
+                                                              "https://b.example/"]),
+        _visible_media_library=lambda: None,
+        _relay_pool=None, _relay_directory=None, _session_pool=None,
+        _server_list=SimpleNamespace(refresh=lambda p, force=False: refreshed.append(force)),
+        status=SimpleNamespace(showMessage=lambda text, ms=0: shown.append(text)),
+        is_dark_theme=False,
+    )
+    MainWindow._share_media_server_list(host)          # Cancel: nothing happens
+    assert published == []
+    MainWindow._share_media_server_list(host)          # Share List
+    assert published == [["https://a.example", "https://b.example"]]
+    assert refreshed == [True] and shown == ["Your media server list is shared."]

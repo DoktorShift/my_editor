@@ -10,11 +10,13 @@ describe one flow, and the copy can be tested without a window.
 
 Three modes:
 
-    AUTOMATIC    MyEditor downloads the update, closes, and reopens on it
-                 (Windows installer, writable AppImage).
+    AUTOMATIC    MyEditor downloads the update, checks it, closes, and
+                 reopens on it with every tab as it was (Windows installer,
+                 a writable AppImage, a Mac app in a writable folder, the
+                 .deb when the system can ask for a password).
     GUIDED       Updating repeats the install steps, so the dialog lists them
-                 and hands off to the install guide in update mode (macOS, the
-                 .deb, and any install that cannot replace itself).
+                 and hands off to the install guide in update mode (any
+                 install that cannot replace itself).
     FROM_SOURCE  A git checkout: the steps are commands.
 """
 
@@ -23,6 +25,7 @@ from dataclasses import dataclass
 from urllib.parse import urlencode
 
 from constants import APP_INSTALL_GUIDE_URL
+from i18n import _
 from release_assets import normalize_machine
 from updater import APPIMAGE, DEB, MACOS_APP, SOURCE, WINDOWS_INSTALLER
 
@@ -31,11 +34,19 @@ GUIDED = "guided"
 FROM_SOURCE = "source"
 
 
+# What a step of an AUTOMATIC plan does, so the dialog can find the row
+# to update without counting on how many steps a plan has.
+DOWNLOAD = "download"
+PREPARE = "prepare"
+RESTART = "restart"
+
+
 @dataclass(frozen=True)
 class Step:
     title: str
     detail: str
     command: str = ""   # a shell line shown with a Copy button
+    role: str = ""      # DOWNLOAD, PREPARE or RESTART in an AUTOMATIC plan
 
 
 @dataclass(frozen=True)
@@ -84,89 +95,103 @@ def plan_for(kind: str, version: str, *, release_url: str, asset=None,
 
 def _automatic_plan(kind, version, asset, guide) -> UpdatePlan:
     size = _megabytes(getattr(asset, "size", 0))
-    download = "MyEditor downloads the update from GitHub"
-    download += f" ({size} MB)." if size else "."
-    if kind == APPIMAGE:
-        restart = "MyEditor swaps in the new AppImage and opens again."
+    if size:
+        download = _("MyEditor downloads the update from GitHub ({size} MB) and checks "
+                     "that it arrived intact.").format(size=size)
     else:
-        restart = "The installer replaces the old version and opens MyEditor again."
+        download = _("MyEditor downloads the update from GitHub and checks that it "
+                     "arrived intact.")
+    steps = [Step(_("Download"), download, role=DOWNLOAD)]
+    if kind == MACOS_APP:
+        steps.append(Step(_("Install"), _("MyEditor puts the new version next to this one "
+                                          "and checks its signature."), role=PREPARE))
+    elif kind == DEB:
+        steps.append(Step(_("Install"), _("Your system asks for your password, "
+                                          "then installs the update."), role=PREPARE))
+    if kind == WINDOWS_INSTALLER:
+        restart = _("The installer replaces this version and opens MyEditor again, "
+                    "with your tabs just as you left them.")
+    elif kind == APPIMAGE:
+        restart = _("MyEditor swaps in the new AppImage and opens again, "
+                    "with your tabs just as you left them.")
+    else:
+        restart = _("MyEditor closes and opens again on the new version, "
+                    "with your tabs just as you left them.")
+    steps.append(Step(_("Restart"), restart, role=RESTART))
     return UpdatePlan(
         mode=AUTOMATIC,
-        intro=(f"MyEditor downloads version {version}, closes, and opens again "
-               "on the new version. Your settings and documents stay where they are."),
-        steps=(
-            Step("Download", download),
-            Step("Save your work",
-                 "If a document has unsaved changes, MyEditor asks whether to save it first."),
-            Step("Restart", restart),
-        ),
-        primary_label="Update Now",
+        intro=_("MyEditor installs version {version} and opens again. Every open "
+                "document comes back, including changes you haven't saved.").format(
+                    version=version),
+        steps=tuple(steps),
+        primary_label=_("Install Update"),
         guide_url=guide,
     )
 
 
 def _guided_plan(kind, version, asset, guide) -> UpdatePlan:
     if kind == MACOS_APP:
-        intro = ("On a Mac, updating takes the same steps as installing. "
-                 "The update guide shows each one with pictures.")
+        intro = _("On a Mac, updating takes the same steps as installing. "
+                  "The update guide shows each one with pictures.")
         steps = (
-            Step("Download", "Download the new disk image from the update guide."),
-            Step("Replace", "Quit MyEditor. Open the disk image, drag MyEditor "
-                            "onto Applications, and click Replace."),
-            Step("Open", "Open MyEditor. If macOS says it can't verify it, click "
-                         "Done, then click Open Anyway in System Settings > "
-                         "Privacy & Security."),
+            Step(_("Download"), _("Download the new disk image from the update guide.")),
+            Step(_("Replace"), _("Quit MyEditor. Open the disk image, drag MyEditor "
+                                 "onto Applications, and click Replace.")),
+            Step(_("Open"), _("Open MyEditor. If macOS says it can't verify it, click "
+                              "Done, then click Open Anyway in System Settings > "
+                              "Privacy & Security.")),
         )
     elif kind == DEB:
         name = getattr(asset, "name", "") or f"my-editor_{version}_amd64.deb"
-        intro = "The .deb package updates the same way it installs."
+        intro = _("The .deb package updates the same way it installs.")
         steps = (
-            Step("Download", "Download the new .deb package from the update guide."),
-            Step("Install", "Quit MyEditor, open the package, and click Install. "
-                            "Or run this in a terminal, in your Downloads folder:",
+            Step(_("Download"), _("Download the new .deb package from the update guide.")),
+            Step(_("Install"), _("Quit MyEditor, open the package, and click Install. "
+                                 "Or run this in a terminal, in your Downloads folder:"),
                  command=f"sudo apt install ./{name}"),
-            Step("Open", "Open MyEditor again from your applications menu."),
+            Step(_("Open"), _("Open MyEditor again from your applications menu.")),
         )
     elif kind == WINDOWS_INSTALLER:
-        intro = ("Updating takes the same steps as installing. "
-                 "The update guide shows each one with pictures.")
+        intro = _("Updating takes the same steps as installing. "
+                  "The update guide shows each one with pictures.")
         steps = (
-            Step("Download", "Download the new installer from the update guide."),
-            Step("Run", "Open it. If “Windows protected your PC” appears, "
-                        "click More info, then Run anyway."),
-            Step("Install", "Click through the installer. It replaces the old "
-                            "version and keeps your settings."),
+            Step(_("Download"), _("Download the new installer from the update guide.")),
+            Step(_("Run"), _("Open it. If “Windows protected your PC” appears, "
+                             "click More info, then Run anyway.")),
+            Step(_("Install"), _("Click through the installer. It replaces the old "
+                                 "version and keeps your settings.")),
         )
     elif kind == APPIMAGE:
-        intro = ("MyEditor can't replace its AppImage because the folder it's in "
-                 "is read-only, so this update is a quick manual swap.")
+        intro = _("MyEditor can't replace its AppImage because the folder it's in "
+                  "is read-only, so this update is a quick manual swap.")
         steps = (
-            Step("Download", "Download the new AppImage from the update guide."),
-            Step("Replace", "Quit MyEditor and put the new file where the old one "
-                            "was. Turn on Executable as Program in its Properties."),
-            Step("Open", "Double-click the new AppImage."),
+            Step(_("Download"), _("Download the new AppImage from the update guide.")),
+            Step(_("Replace"), _("Quit MyEditor and put the new file where the old one "
+                                 "was. Turn on Executable as Program in its Properties.")),
+            Step(_("Open"), _("Double-click the new AppImage.")),
         )
     else:
-        intro = "Updating takes the same steps as installing."
+        intro = _("Updating takes the same steps as installing.")
         steps = (
-            Step("Download", "Download the new version from the update guide."),
-            Step("Install", "Install it the same way you installed this copy."),
-            Step("Open", "Open MyEditor again."),
+            Step(_("Download"), _("Download the new version from the update guide.")),
+            Step(_("Install"), _("Install it the same way you installed this copy.")),
+            Step(_("Open"), _("Open MyEditor again.")),
         )
-    return UpdatePlan(GUIDED, intro, steps, "Open Update Guide", guide)
+    return UpdatePlan(GUIDED, intro, steps, _("Open Update Guide"), guide)
 
 
 def _source_plan(release_url) -> UpdatePlan:
     return UpdatePlan(
         mode=FROM_SOURCE,
-        intro="This copy runs from source code, so git updates it.",
+        intro=_("This copy runs from source code, so git updates it."),
         steps=(
-            Step("Get the new code", "In the MyEditor folder, run:", command="git pull"),
-            Step("Update dependencies", "Then run:",
+            Step(_("Get the new code"), _("In the MyEditor folder, run:"),
+                 command="git pull"),
+            Step(_("Update dependencies"), _("Then run:"),
                  command="pip install -r requirements.txt"),
-            Step("Restart", "Quit MyEditor and start it again."),
+            Step(_("Restart"), _("Quit MyEditor and start it again.")),
         ),
-        primary_label="Release Notes",
+        primary_label=_("Release Notes"),
         guide_url=release_url,
     )
 

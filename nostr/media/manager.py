@@ -32,6 +32,8 @@ import url_safety
 
 from export_html import sniff_image_mime
 
+from ..blossom.errors import is_signer_failure
+
 # The one BUD-03 hash-from-URL rule, imported rather than repeated: a
 # third copy of it is how the copies drift apart. ``blob_url`` builds the
 # canonical address BUD-01 guarantees, which is what makes a recovery
@@ -79,13 +81,6 @@ class AssetErrorCodes:
 
     SIGNER_REJECTED = "SIGNER_REJECTED"
     UPLOAD_FAILED = "UPLOAD_FAILED"
-
-
-# Prefixes MediaStore produces today when the signer is the reason an
-# upload never started. Temporary until the store reports structured
-# codes; pinned by a test so a copy change fails loudly instead of
-# silently reclassifying every signer failure.
-_SIGNER_REASON_PREFIXES = ("signer rejected", "Connect a Nostr signer")
 
 
 class BlobStore(Protocol):
@@ -576,7 +571,7 @@ class AssetManager(QObject):
         text = str(reason or "")
         code = (
             AssetErrorCodes.SIGNER_REJECTED
-            if text.startswith(_SIGNER_REASON_PREFIXES)
+            if is_signer_failure(text)
             else AssetErrorCodes.UPLOAD_FAILED
         )
         self._fail(asset, code, text)

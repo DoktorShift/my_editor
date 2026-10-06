@@ -8,12 +8,20 @@ live alongside it as pure functions so callers stay declarative.
 
 Shape of the flow:
 
-  1. Look up the author's NIP-65 write relays (cached after first hit).
-  2. Open or reuse the bunker session for the active profile.
-  3. Hand the unsigned event to the signer. The user typically has to
-     approve on their phone here.
-  4. Publish the signed event with eager-first-accept semantics.
-  5. Emit ``completed(results)`` with per-relay outcomes.
+  1. Two things start together: the relay directory works out where the
+     event goes (the author's write relays, then the read relays of
+     everyone it mentions, NIP-65), and the signer is asked to sign it.
+     The user typically has to approve on their phone, which is plenty
+     of time for the lookups to land.
+  2. Once both are in, publish the signed event with eager-first-accept
+     semantics.
+  3. Hand the author's relay list to the mentioned people's relays that
+     took the event, so readers there can find the author's other notes.
+  4. Emit ``completed(results)`` with per-relay outcomes.
+
+Drafts are private and go where every device of the author reads them
+back (RelayDirectory.private_relays): reading asks every relay writing
+goes to.
 
 The builders also attach NIP-92 ``imeta`` tags for media, from records
 the caller hands them. One rule governs every field: describe only media
@@ -27,26 +35,29 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Callable, Iterable, List, Optional, Sequence, Tuple
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QLocale, QObject, Signal
 
 import url_safety
+from i18n import _, language, ngettext
 
 from . import CLIENT_NAME
 from .bech32 import decode_npub, decode_nprofile, encode_nprofile
 from .blossom.hashes import blob_url
 from .bunker import BunkerClient, BunkerSessionPool
 from .drafts import (
-    DEFAULT_EXPIRATION_SECONDS,
+    DRAFT_WRAP_KIND,
     MAX_INNER_PAYLOAD_BYTES,
     SUPPORTED_INNER_KINDS,
     build_draft_wrap,
     build_tombstone_wrap,
     serialize_inner_event,
 )
-from .events import build_event
-from .outbox import RelayListCache, select_draft_publish_relays, select_publish_relays
+from .draft_deletions import build_deletion_request
+from .events import build_event, verify_event
+from .outbox import RelayDirectory, ask_draft_relays, normalize_relay_url
+from .outbox.lookup import fetch_replaceable
 from .profiles import Profile
 from .relay import RelayPool
 
@@ -64,7 +75,7 @@ def _safe_reason(reason: str) -> str:
     signer echoing the request payload into the error text.
     """
     if not reason:
-        return "unknown error"
+        return _("unknown error")
     if len(reason) <= _MAX_REASON_CHARS:
         return reason
     return reason[:_MAX_REASON_CHARS - 1].rstrip() + "…"
@@ -430,6 +441,51 @@ def build_article(
 
 
 # --------------------------------------------------------------------------- #
+# When an article was first published                                         #
+# --------------------------------------------------------------------------- #
+
+def published_at_of(event: Optional[dict]) -> Optional[int]:
+    """When an article was first published, read from a version of it: its
+    ``published_at`` (NIP-23), or, for a version without one, the time
+    that version was made, which is no later than the first publication
+    of what it replaced. None for no event or no usable time."""
+    if not isinstance(event, dict):
+        return None
+    for tag in event.get("tags", []) or []:
+        if isinstance(tag, list) and len(tag) >= 2 and tag[0] == "published_at":
+            try:
+                value = int(str(tag[1]).strip())
+            except ValueError:
+                break
+            if value > 0:
+                return value
+            break
+    created = event.get("created_at")
+    if isinstance(created, int) and not isinstance(created, bool) and created > 0:
+        return created
+    return None
+
+
+def find_first_publication(relay_pool: RelayPool, relay_directory: RelayDirectory,
+                           author: str, slug: str,
+                           on_done: Callable[[Optional[int]], None], *,
+                           parent: QObject, timeout_ms: int = 4_000) -> None:
+    """When the author's article ``slug`` was first published, or None
+    when it was never published (or no relay could say). The question
+    lives as long as ``parent`` (the dialog asking it).
+
+    NIP-23 makes ``published_at`` the time of the first publication, so a
+    new version of an article carries the old value: readers date it by
+    that, and an edit must not move it. Asked of the relays the author
+    publishes to, where the current version is."""
+    def got_relays(relays: List[str]) -> None:
+        fetch_replaceable(relay_pool, relays, kind=30023, author=author, d_tag=slug,
+                          on_done=lambda found: on_done(published_at_of(found.event)),
+                          timeout_ms=timeout_ms, parent=parent)
+    relay_directory.outbox_of(author, got_relays)
+
+
+# --------------------------------------------------------------------------- #
 # Slug helper                                                                  #
 # --------------------------------------------------------------------------- #
 
@@ -453,6 +509,10 @@ def slugify(text: str, *, fallback: str = "untitled") -> str:
 class PublishJob(QObject):
     """One end-to-end publish of any unsigned event.
 
+    The relay plan and the signature are fetched at the same time, and
+    the event goes out once both are in. Where it goes is the relay
+    directory's decision (RelayDirectory.publish_plan), never this job's.
+
     Signals (fired in this order on the happy path):
       status_changed(str)     human-readable progress text
       signed(str)             event id (hex) of the signed event
@@ -461,6 +521,11 @@ class PublishJob(QObject):
                               zero relays accepted
       failed(str)             short reason; terminal. No further signals
                               after this
+
+    Cancellation: ``cancel()`` stops the job where it is. Nothing is
+    published after it and no further signal fires; a signer request
+    already sent cannot be recalled, so its answer is ignored. Once the
+    event has gone to the relays, cancelling only silences the job.
     """
 
     status_changed = Signal(str)
@@ -472,7 +537,7 @@ class PublishJob(QObject):
         self,
         *,
         relay_pool: RelayPool,
-        relay_list_cache: RelayListCache,
+        relay_directory: RelayDirectory,
         session_pool: BunkerSessionPool,
         profile: Profile,
         unsigned_event: dict,
@@ -485,68 +550,126 @@ class PublishJob(QObject):
                 "unsigned event pubkey does not match the publishing profile"
             )
         self._relay_pool = relay_pool
-        self._relay_list_cache = relay_list_cache
+        self._relay_directory = relay_directory
         self._session_pool = session_pool
         # Relays this account has standing on beyond its own list.
         self._entitled_relays = list(entitled_relays)
         self._profile = profile
         self._unsigned = unsigned_event
+        self._plan = None
+        self._signed_event: Optional[dict] = None
+        self._sent = False
+        self._failed = False
+        self._cancelled = False
 
     def start(self) -> None:
         """Kick off the publish. Safe to call once per instance."""
-        self.status_changed.emit("Looking up your relay list…")
-        # Always include the profile's bunker relays when querying, even
-        # if the user has no NIP-65 published, we still want a fast result.
-        relays_to_query = list(dict.fromkeys(list(self._profile.bunker_relays)))
-        self._relay_list_cache.fetch(
+        self.status_changed.emit(_("Connecting to your signer…"))
+        self._relay_directory.publish_plan(
             self._profile.user_pubkey,
-            relays=relays_to_query,
-            on_done=self._on_relay_list_resolved,
+            self._on_plan_ready,
+            mentioned=mentioned_pubkeys(self._unsigned),
+            entitled=self._entitled_relays,
         )
+        self._session_pool.get(
+            self._profile,
+            on_ready=self._on_bunker_ready,
+            on_error=self._fail,
+        )
+
+    def cancel(self) -> None:
+        """Stop: publish nothing more and emit nothing more."""
+        self._cancelled = True
 
     # -- pipeline ----------------------------------------------------------
 
-    def _on_relay_list_resolved(self, relay_list) -> None:
-        publish_relays = select_publish_relays(
-            relay_list.write, entitled=self._entitled_relays,
-        )
-        self.status_changed.emit("Connecting to your signer…")
-        self._session_pool.get(
-            self._profile,
-            on_ready=lambda client: self._on_bunker_ready(client, publish_relays),
-            on_error=self.failed.emit,
-        )
+    def _on_plan_ready(self, plan) -> None:
+        self._plan = plan
+        self._publish_when_ready()
 
-    def _on_bunker_ready(self, client, publish_relays: List[str]) -> None:
+    def _on_bunker_ready(self, client) -> None:
+        if self._failed or self._cancelled:
+            return
         self.status_changed.emit(
-            "Waiting for signature. Approve the request on your signer…"
+            _("Waiting for signature. Approve the request on your signer…")
         )
         client.sign_event(
             self._unsigned,
-            on_success=lambda signed: self._on_signed(signed, publish_relays),
-            on_failure=self.failed.emit,
+            on_success=self._on_signed,
+            on_failure=self._fail,
         )
 
-    def _on_signed(self, signed_event: dict, publish_relays: List[str]) -> None:
+    def _on_signed(self, signed_event: dict) -> None:
+        if self._failed or self._cancelled:
+            return
+        self._signed_event = signed_event
         self.signed.emit(signed_event["id"])
-        self.status_changed.emit(
-            f"Publishing to {len(publish_relays)} relays…"
-        )
-        job = self._relay_pool.publish(publish_relays, signed_event)
+        if self._plan is None:
+            self.status_changed.emit(_("Finding your relays…"))
+        self._publish_when_ready()
+
+    def _publish_when_ready(self) -> None:
+        if (self._sent or self._failed or self._cancelled or self._plan is None
+                or self._signed_event is None):
+            return
+        self._sent = True
+        relays = self._plan.targets
+        self.status_changed.emit(ngettext(
+            "Publishing to {n} relay…", "Publishing to {n} relays…", len(relays),
+        ).format(n=len(relays)))
+        job = self._relay_pool.publish(relays, self._signed_event)
         job.first_accept.connect(self._on_first_accept)
         job.all_done.connect(self._on_publish_done)
 
+    def _fail(self, reason: str) -> None:
+        if self._failed or self._sent or self._cancelled:
+            return
+        self._failed = True
+        self.failed.emit(reason)
+
     def _on_first_accept(self, url: str) -> None:
+        if self._cancelled:
+            return
         # Surface the win immediately so the dialog can flip to a success
         # state even before the slower relays finish reporting.
-        self.status_changed.emit(f"Accepted by {url}. Waiting for the rest…")
+        self.status_changed.emit(_("Accepted by {url}. Waiting for the rest…").format(url=url))
 
     def _on_publish_done(self, results: List[PublishResult]) -> None:
-        accepted = sum(1 for _, ok, _ in results if ok)
-        self.status_changed.emit(
-            f"Published. {accepted}/{len(results)} relays accepted."
-        )
+        accepted = sum(1 for _url, ok, _message in results if ok)
+        # NIP-65: the mentioned people's relays that now hold this event
+        # also get the author's relay list, so whoever reads it there can
+        # find the rest of what the author writes.
+        took_it = {normalize_relay_url(url) for url, ok, _message in results if ok}
+        reached = [url for url in self._plan.inbox if url in took_it]
+        if reached:
+            self._relay_directory.share_relay_list(self._profile.user_pubkey, reached)
+        if self._cancelled:
+            return
+        self.status_changed.emit(ngettext(
+            "Published. {accepted}/{total} relay accepted.",
+            "Published. {accepted}/{total} relays accepted.", len(results),
+        ).format(accepted=accepted, total=len(results)))
         self.completed.emit(results)
+
+
+_PUBKEY_HEX = re.compile(r"[0-9a-f]{64}")
+
+
+def mentioned_pubkeys(event: dict) -> List[Tuple[str, str]]:
+    """``(pubkey, relay hint)`` for everyone an event mentions (its ``p``
+    tags), in tag order, once each; the hint is "" when the tag has none."""
+    out: List[Tuple[str, str]] = []
+    seen: set = set()
+    for tag in event.get("tags", []):
+        if not isinstance(tag, list) or len(tag) < 2 or tag[0] != "p":
+            continue
+        pubkey = str(tag[1]).lower()
+        if pubkey in seen or not _PUBKEY_HEX.fullmatch(pubkey):
+            continue
+        seen.add(pubkey)
+        hint = tag[2] if len(tag) >= 3 and isinstance(tag[2], str) else ""
+        out.append((pubkey, hint))
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -557,23 +680,36 @@ class DraftPublishJob(QObject):
     """End-to-end stash of one inner event as a NIP-37 draft wrap.
 
     Pipeline:
-      1. Resolve NIP-65 relay list.
+      1. Ask the relay directory where the account's private records live.
       2. Acquire bunker session.
       3. Bunker NIP-44 encrypts ``serialize_inner_event(inner)``.
       4. Wrap the ciphertext in a kind-31234 event.
       5. Bunker signs the wrap.
-      6. Publish to ``select_draft_publish_relays`` (write ∪ read ∪
-         bunker ∪ base) so other devices reading from any of those
-         sets can decrypt the same draft.
+      6. Publish to the account's private relays
+         (RelayDirectory.private_relays), all of which DraftSync reads
+         drafts from, so every device of the author finds this one.
 
     Signals (in firing order on the happy path):
       status_changed(str)        progress text
+      signed(dict)               the signed wrap, before it is sent: an
+                                 import keeps it, so a retry sends this
+                                 very event again (:meth:`send_signed`)
+                                 instead of signing a new one
       stashed(str, str, int)     (identifier, event_id, created_at) on
                                  successful sign. Fires before relay
                                  results are in so the panel can update
                                  optimistically.
       completed(list)            list of PublishResult tuples
       failed(str)                terminal. No further signals after this
+
+    A wrap sent again keeps its time, so if the person edited the draft
+    meanwhile, the relays keep the edit: an older replaceable event
+    loses (NIP-01). A retry can never overwrite an edit.
+
+    ``expiration_seconds`` dates the draft's end (NIP-40); only imports
+    pass it (drafts.DEFAULT_EXPIRATION_SECONDS). Without it the draft
+    never expires, which is what a save from the editor makes, also of
+    an imported draft: once the person saved it, it is theirs.
 
     Cancellation: ``cancel()`` flips a flag that suppresses all future
     signal emissions. The in-flight NIP-46 RPC can't actually be
@@ -583,6 +719,7 @@ class DraftPublishJob(QObject):
     """
 
     status_changed = Signal(str)
+    signed = Signal(dict)
     stashed = Signal(str, str, int)
     completed = Signal(list)
     failed = Signal(str)
@@ -591,25 +728,28 @@ class DraftPublishJob(QObject):
         self,
         *,
         relay_pool: RelayPool,
-        relay_list_cache: RelayListCache,
+        relay_directory: RelayDirectory,
         session_pool: BunkerSessionPool,
         profile: Profile,
-        inner_event: dict,
+        inner_event: Optional[dict],
         identifier: str,
-        expiration_seconds: int = DEFAULT_EXPIRATION_SECONDS,
+        expiration_seconds: Optional[int] = None,
         extra_wrap_tags: Optional[List[List[str]]] = None,
         entitled_relays: Sequence[str] = (),
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
-        if inner_event.get("pubkey", "").lower() != profile.user_pubkey.lower():
+        # ``inner_event`` may be None for a job that only sends a wrap
+        # signed earlier (send_signed).
+        if inner_event is not None and (
+                inner_event.get("pubkey", "").lower() != profile.user_pubkey.lower()):
             raise ValueError(
                 "inner event pubkey does not match the stashing profile"
             )
         if not identifier:
             raise ValueError("draft identifier (d-tag) must not be empty")
         self._relay_pool = relay_pool
-        self._relay_list_cache = relay_list_cache
+        self._relay_directory = relay_directory
         self._session_pool = session_pool
         # Relays this account has standing on beyond its own list.
         self._entitled_relays = list(entitled_relays)
@@ -625,13 +765,31 @@ class DraftPublishJob(QObject):
 
     def start(self) -> None:
         """Kick off the stash. Safe to call once per instance."""
-        self._emit_status("Looking up your relay list…")
-        relays_to_query = list(dict.fromkeys(list(self._profile.bunker_relays)))
-        self._relay_list_cache.fetch(
-            self._profile.user_pubkey,
-            relays=relays_to_query,
-            on_done=self._on_relay_list_resolved,
-        )
+        if self._inner_event is None:
+            raise ValueError("no inner event to stash")
+        self._emit_status(_("Looking up your relay list…"))
+        ask_draft_relays(self._relay_directory, self._profile,
+                         self._on_relays_ready, entitled=self._entitled_relays)
+
+    def send_signed(self, signed_event: dict) -> None:
+        """Send a wrap signed earlier (by :attr:`signed`) as it is: no
+        encryption and no signature, so no signer prompt. Raises
+        ValueError for a wrap that is not this account's draft
+        ``identifier``."""
+        tags = signed_event.get("tags") or []
+        d_tag = next((t[1] for t in tags if isinstance(t, list) and len(t) >= 2
+                      and t[0] == "d"), None)
+        if (signed_event.get("kind") != DRAFT_WRAP_KIND
+                or str(signed_event.get("pubkey", "")).lower()
+                != self._profile.user_pubkey.lower()
+                or d_tag != self._identifier
+                or not verify_event(signed_event)):
+            raise ValueError("not a signed draft of this account and identifier")
+        self._emit_status(_("Looking up your relay list…"))
+        ask_draft_relays(
+            self._relay_directory, self._profile,
+            lambda relays: self._on_signed(signed_event, relays, checkpoint=False),
+            entitled=self._entitled_relays)
 
     def cancel(self) -> None:
         """Suppress further signal emissions; the in-flight RPC runs out."""
@@ -649,15 +807,10 @@ class DraftPublishJob(QObject):
 
     # -- pipeline ----------------------------------------------------------
 
-    def _on_relay_list_resolved(self, relay_list) -> None:
+    def _on_relays_ready(self, publish_relays: List[str]) -> None:
         if self._cancelled:
             return
-        publish_relays = select_draft_publish_relays(
-            relay_list,
-            bunker_relays=self._profile.bunker_relays,
-            entitled=self._entitled_relays,
-        )
-        self._emit_status("Connecting to your signer…")
+        self._emit_status(_("Connecting to your signer…"))
         self._session_pool.get(
             self._profile,
             on_ready=lambda client: self._on_bunker_ready(client, publish_relays),
@@ -670,7 +823,7 @@ class DraftPublishJob(QObject):
         try:
             plaintext = serialize_inner_event(self._inner_event)
         except (KeyError, TypeError, ValueError) as exc:
-            self._emit_failed(f"Could not serialize draft: {exc}")
+            self._emit_failed(_("Could not serialize draft: {reason}").format(reason=exc))
             return
         # Pre-flight against the NIP-44 v2 plaintext cap (65535 bytes
         # post-encode). The bunker would reject larger payloads anyway,
@@ -678,20 +831,21 @@ class DraftPublishJob(QObject):
         # round-trip + approval prompt for an inevitable failure.
         payload_bytes = len(plaintext.encode("utf-8"))
         if payload_bytes > MAX_INNER_PAYLOAD_BYTES:
-            self._emit_failed(
-                f"Draft is too large to encrypt "
-                f"({payload_bytes:,} of {MAX_INNER_PAYLOAD_BYTES:,} bytes). "
+            numbers = QLocale(language())
+            self._emit_failed(_(
+                "Draft is too large to encrypt ({size} of {limit} bytes). "
                 "Split it across smaller drafts or publish directly."
-            )
+            ).format(size=numbers.toString(payload_bytes),
+                     limit=numbers.toString(MAX_INNER_PAYLOAD_BYTES)))
             return
         self._emit_status(
-            "Encrypting draft. Approve on your signer if prompted…"
+            _("Encrypting draft. Approve on your signer if prompted…")
         )
         client.nip44_encrypt_self(
             plaintext,
             on_success=lambda ct: self._on_encrypted(ct, client, publish_relays),
             on_failure=lambda reason: self._emit_failed(
-                f"Could not encrypt draft: {_safe_reason(reason)}"
+                _("Could not encrypt draft: {reason}").format(reason=_safe_reason(reason))
             ),
         )
 
@@ -714,11 +868,11 @@ class DraftPublishJob(QObject):
                 extra_tags=self._extra_wrap_tags,
             )
         except ValueError as exc:
-            self._emit_failed(f"Could not build draft wrap: {exc}")
+            self._emit_failed(_("Could not build draft wrap: {reason}").format(reason=exc))
             return
 
         self._emit_status(
-            "Waiting for signature. Approve the request on your signer…"
+            _("Waiting for signature. Approve the request on your signer…")
         )
         client.sign_event(
             self._wrap_unsigned,
@@ -726,27 +880,32 @@ class DraftPublishJob(QObject):
             on_failure=self._emit_failed,
         )
 
-    def _on_signed(self, signed_event: dict, publish_relays: List[str]) -> None:
+    def _on_signed(self, signed_event: dict, publish_relays: List[str], *,
+                   checkpoint: bool = True) -> None:
         if self._cancelled:
             return
+        if checkpoint:
+            self.signed.emit(dict(signed_event))
         self.stashed.emit(
             self._identifier,
             signed_event["id"],
             int(signed_event["created_at"]),
         )
-        self._emit_status(
-            f"Publishing draft to {len(publish_relays)} relays…"
-        )
+        self._emit_status(ngettext(
+            "Publishing draft to {n} relay…", "Publishing draft to {n} relays…",
+            len(publish_relays),
+        ).format(n=len(publish_relays)))
         job = self._relay_pool.publish(publish_relays, signed_event)
         job.all_done.connect(self._on_publish_done)
 
     def _on_publish_done(self, results: List[PublishResult]) -> None:
         if self._cancelled:
             return
-        accepted = sum(1 for _, ok, _ in results if ok)
-        self._emit_status(
-            f"Draft saved to {accepted}/{len(results)} relays."
-        )
+        accepted = sum(1 for _url, ok, _message in results if ok)
+        self._emit_status(ngettext(
+            "Draft saved to {accepted}/{total} relay.",
+            "Draft saved to {accepted}/{total} relays.", len(results),
+        ).format(accepted=accepted, total=len(results)))
         self.completed.emit(results)
 
 
@@ -759,7 +918,16 @@ class DraftDeleteJob(QObject):
 
     Per NIP-37 the deletion mechanism is *not* NIP-09; the addressable
     event is replaced with one whose ``content`` is empty. Same shape
-    as ``DraftPublishJob`` minus the encryption step (no plaintext).
+    as ``DraftPublishJob`` minus the encryption step (no plaintext). It
+    goes to every relay drafts are read from, so the replacement lands
+    wherever the draft may be, including where it went while the
+    account's own list was unknown.
+
+    ``announce`` also sends a NIP-09 deletion request for the draft, signed
+    right after the tombstone and sent to the same relays. Apps that
+    delete that way (EINUNDZWANZIG STANDUP) read only those, and an
+    imported post deleted without one could be imported there again.
+    ``replaced_wrap_id`` names the wrap being deleted in that request.
 
     Signals:
       status_changed(str)
@@ -780,12 +948,14 @@ class DraftDeleteJob(QObject):
         self,
         *,
         relay_pool: RelayPool,
-        relay_list_cache: RelayListCache,
+        relay_directory: RelayDirectory,
         session_pool: BunkerSessionPool,
         profile: Profile,
         identifier: str,
         inner_kind: int,
         entitled_relays: Sequence[str] = (),
+        announce: bool = False,
+        replaced_wrap_id: str = "",
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -796,8 +966,10 @@ class DraftDeleteJob(QObject):
                 f"unsupported inner kind {inner_kind!r}; "
                 f"expected one of {SUPPORTED_INNER_KINDS}"
             )
+        self._announce = announce
+        self._replaced_wrap_id = replaced_wrap_id
         self._relay_pool = relay_pool
-        self._relay_list_cache = relay_list_cache
+        self._relay_directory = relay_directory
         self._session_pool = session_pool
         # Relays this account has standing on beyond its own list.
         self._entitled_relays = list(entitled_relays)
@@ -809,12 +981,12 @@ class DraftDeleteJob(QObject):
     # -- public API --------------------------------------------------------
 
     def start(self) -> None:
-        self._emit_status("Looking up your relay list…")
-        self._relay_list_cache.fetch(
-            self._profile.user_pubkey,
-            relays=list(dict.fromkeys(self._profile.bunker_relays)),
-            on_done=self._on_relay_list_resolved,
-        )
+        self._emit_status(_("Looking up your relay list…"))
+        # Wherever the draft may be, including the relays it went to while
+        # the account's own list was unknown: the tombstone replaces it there.
+        ask_draft_relays(self._relay_directory, self._profile,
+                         self._on_relays_ready, entitled=self._entitled_relays,
+                         reading=True)
 
     def cancel(self) -> None:
         self._cancelled = True
@@ -831,14 +1003,9 @@ class DraftDeleteJob(QObject):
 
     # -- pipeline ----------------------------------------------------------
 
-    def _on_relay_list_resolved(self, relay_list) -> None:
+    def _on_relays_ready(self, publish_relays: List[str]) -> None:
         if self._cancelled:
             return
-        publish_relays = select_draft_publish_relays(
-            relay_list,
-            bunker_relays=self._profile.bunker_relays,
-            entitled=self._entitled_relays,
-        )
         self._session_pool.get(
             self._profile,
             on_ready=lambda client: self._on_bunker_ready(client, publish_relays),
@@ -855,29 +1022,55 @@ class DraftDeleteJob(QObject):
             client_name=CLIENT_NAME,
         )
         self._emit_status(
-            "Waiting for signature. Approve the deletion on your signer…"
+            _("Waiting for signature. Approve the deletion on your signer…")
         )
         client.sign_event(
             unsigned,
-            on_success=lambda signed: self._on_signed(signed, publish_relays),
+            on_success=lambda signed: self._on_signed(signed, publish_relays, client),
             on_failure=self._emit_failed,
         )
 
-    def _on_signed(self, signed_event: dict, publish_relays: List[str]) -> None:
+    def _on_signed(self, signed_event: dict, publish_relays: List[str],
+                   client: Optional[BunkerClient] = None) -> None:
         if self._cancelled:
             return
+        if self._announce and client is not None:
+            # Signed before anything is sent, so the signer is asked one
+            # thing at a time. The draft is deleted by the tombstone
+            # alone; a refused request only means STANDUP does not hear.
+            request = build_deletion_request(
+                pubkey_hex=self._profile.user_pubkey, identifier=self._identifier,
+                wrap_id=self._replaced_wrap_id)
+            client.sign_event(
+                request,
+                on_success=lambda signed_request: self._send(
+                    signed_event, publish_relays, signed_request),
+                on_failure=lambda _reason: self._send(signed_event, publish_relays))
+            return
+        self._send(signed_event, publish_relays)
+
+    def _send(self, signed_event: dict, publish_relays: List[str],
+              deletion_request: Optional[dict] = None) -> None:
+        if self._cancelled:
+            return
+        if deletion_request is not None:
+            self._relay_pool.publish(publish_relays, deletion_request)
         self.tombstoned.emit(self._identifier, signed_event["id"])
-        self._emit_status(f"Removing draft from {len(publish_relays)} relays…")
+        self._emit_status(ngettext(
+            "Removing draft from {n} relay…", "Removing draft from {n} relays…",
+            len(publish_relays),
+        ).format(n=len(publish_relays)))
         job = self._relay_pool.publish(publish_relays, signed_event)
         job.all_done.connect(self._on_publish_done)
 
     def _on_publish_done(self, results: List[PublishResult]) -> None:
         if self._cancelled:
             return
-        accepted = sum(1 for _, ok, _ in results if ok)
-        self._emit_status(
-            f"Draft removed on {accepted}/{len(results)} relays."
-        )
+        accepted = sum(1 for _url, ok, _message in results if ok)
+        self._emit_status(ngettext(
+            "Draft removed on {accepted}/{total} relay.",
+            "Draft removed on {accepted}/{total} relays.", len(results),
+        ).format(accepted=accepted, total=len(results)))
         self.completed.emit(results)
 
 
@@ -918,14 +1111,18 @@ class DraftBulkDeleteJob(QObject):
         self,
         *,
         relay_pool: RelayPool,
-        relay_list_cache: RelayListCache,
+        relay_directory: RelayDirectory,
         session_pool: BunkerSessionPool,
         profile: Profile,
         targets: Sequence[Tuple[str, int]],
         entitled_relays: Sequence[str] = (),
+        announce: Optional[dict] = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
+        # Identifier -> id of its current wrap, for the drafts whose
+        # deletion is also announced (DraftDeleteJob ``announce``).
+        self._announce = dict(announce or {})
         # Validated here, before a single signature is asked for. A run
         # that would die on its ninth draft because of something knowable
         # at the start has already cost the user eight approvals.
@@ -941,7 +1138,7 @@ class DraftBulkDeleteJob(QObject):
             self._targets.append((identifier, int(inner_kind)))
 
         self._relay_pool = relay_pool
-        self._relay_list_cache = relay_list_cache
+        self._relay_directory = relay_directory
         self._session_pool = session_pool
         self._entitled_relays = list(entitled_relays)
         self._profile = profile
@@ -1009,12 +1206,14 @@ class DraftBulkDeleteJob(QObject):
         try:
             job = DraftDeleteJob(
                 relay_pool=self._relay_pool,
-                relay_list_cache=self._relay_list_cache,
+                relay_directory=self._relay_directory,
                 session_pool=self._session_pool,
                 profile=self._profile,
                 identifier=identifier,
                 inner_kind=inner_kind,
                 entitled_relays=self._entitled_relays,
+                announce=identifier in self._announce,
+                replaced_wrap_id=self._announce.get(identifier, ""),
                 parent=self,
             )
         except ValueError as exc:
@@ -1038,14 +1237,15 @@ class DraftBulkDeleteJob(QObject):
         # results decide whether this counts as deleted. Reporting a
         # deletion no relay accepted would tell the user a draft is gone
         # from a place it is still on.
-        if any(ok for _, ok, _ in results):
+        if any(ok for _url, ok, _message in results):
             self._settle(identifier)
             return
         reasons = "; ".join(msg for _url, ok, msg in results if not ok and msg)
-        self._settle(
-            identifier,
-            reason=f"no relay accepted the deletion{f' ({reasons})' if reasons else ''}",
-        )
+        if reasons:
+            reason = _("no relay accepted the deletion ({reasons})").format(reasons=reasons)
+        else:
+            reason = _("no relay accepted the deletion")
+        self._settle(identifier, reason=reason)
 
     def _settle(self, identifier: str, *, reason: str = "") -> None:
         if self._done:

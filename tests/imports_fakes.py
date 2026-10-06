@@ -134,16 +134,6 @@ class ManualFetcher:
         self.pending.append((url, on_success, on_failure))
 
 
-class FakeRelayListCache:
-    def __init__(self, read=("wss://read.example",)):
-        self._relay_list = SimpleNamespace(read=list(read), write=[])
-        self.calls = []
-
-    def fetch(self, pubkey, relays=None, on_done=None):
-        self.calls.append((pubkey, tuple(relays or ())))
-        on_done(self._relay_list)
-
-
 class FakeLongFormFetcher:
     """event=None means not-found; otherwise every fetch resolves it."""
 
@@ -163,21 +153,24 @@ class FakePublishJob(QObject):
     """Mimics DraftPublishJob's signal surface, settling synchronously."""
 
     status_changed = Signal(str)
+    signed = Signal(dict)
     stashed = Signal(str, str, int)
     completed = Signal(list)
     failed = Signal(str)
 
     def __init__(self, *, outcome, inner_event=None, identifier=None,
-                 parent=None, **_ignored):
+                 parent=None, **kwargs):
         super().__init__(parent)
         self.inner_event = inner_event
         self.identifier = identifier
+        self.kwargs = kwargs
         self.cancelled = False
         self._outcome = outcome
 
     def start(self):
         kind, payload = self._outcome
         if kind == "ok":
+            self.signed.emit({"id": "ev-" + self.identifier, "kind": 31234})
             self.stashed.emit(self.identifier, "ev-" + self.identifier, 1234)
             self.completed.emit(payload)
         elif kind == "fail":
@@ -230,3 +223,26 @@ class RecordingPacer:
             fn()
         else:
             self.pending.append(fn)
+
+
+class FakeCatalogue:
+    """Stands in for ExistingCatalogue: ``existing`` maps identifiers to
+    their state; ``unavailable`` is the reason given when no relay
+    answers (empty: they do)."""
+
+    def __init__(self, existing=None, unavailable="", **_kwargs):
+        self.existing = dict(existing or {})
+        self.unavailable = unavailable
+        self.local = {}
+        self.asked = []
+
+    def look_up(self, profile, tags, *, on_ready, on_unavailable):
+        from nostr.imports.catalogue import Existing
+        self.asked.append(list(tags))
+        if self.unavailable:
+            on_unavailable(self.unavailable)
+            return
+        on_ready(Existing({d: s for d, s in self.existing.items() if d in tags}))
+
+    def known_locally(self, d_tag):
+        return self.local.get(d_tag)

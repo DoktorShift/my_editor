@@ -7,6 +7,8 @@ import sys
 
 from PySide6.QtGui import QColor
 
+from i18n import N_
+
 # Product identity. These drive the packaging pipeline (PyInstaller spec,
 # Windows installer, macOS Info.plist, Linux AppImage) and the in-app title.
 # Bump APP_VERSION and tag the release "v<APP_VERSION>" to ship a new build.
@@ -20,6 +22,15 @@ APP_RELEASES_URL = f"{APP_URL}/releases/latest"
 # The step-by-step install guide (site/install/), served by GitHub Pages.
 _REPO_OWNER, _REPO_NAME = APP_REPO_SLUG.split("/")
 APP_INSTALL_GUIDE_URL = f"https://{_REPO_OWNER}.github.io/{_REPO_NAME}/install/"
+
+# The membership service (sidecar/) that holds the EINUNDZWANZIG association's
+# API key and forwards sign-up requests. Official builds point at the
+# maintainers' sidecar; a self-hosted build points at its own, or leaves this
+# empty, which means joining in the app is not offered (the association's
+# website is). The app also offers the website whenever the sidecar cannot be
+# reached or reports that it has no key.
+# MYEDITOR_MEMBERSHIP_SERVICE in the environment overrides it.
+MEMBERSHIP_SERVICE_URL = "https://e21.rinbal.de"
 
 # UI theme colors
 DARK_BG = "#1E1E1E"
@@ -66,13 +77,14 @@ else:
 # Single universal color palette: mid-range saturation (Material Design 600).
 # These colors are clearly visible on both dark (#1E1E1E) and light (#FFFFFF) backgrounds,
 # so no remapping is needed when switching themes or exporting to PDF/HTML.
+# The names are keys; the menus show them through _().
 TEXT_COLORS = {
-    "Red":    QColor(229, 57,  53 ),   # #E53935
-    "Green":  QColor(67,  160, 71 ),   # #43A047
-    "Orange": QColor(251, 140, 0  ),   # #FB8C00
-    "Yellow": QColor(249, 168, 37 ),   # #F9A825  (golden yellow)
-    "Blue":   QColor(30,  136, 229),   # #1E88E5
-    "Purple": QColor(142, 36,  170),   # #8E24AA
+    N_("Red"):    QColor(229, 57,  53 ),   # #E53935
+    N_("Green"):  QColor(67,  160, 71 ),   # #43A047
+    N_("Orange"): QColor(251, 140, 0  ),   # #FB8C00
+    N_("Yellow"): QColor(249, 168, 37 ),   # #F9A825  (golden yellow)
+    N_("Blue"):   QColor(30,  136, 229),   # #1E88E5
+    N_("Purple"): QColor(142, 36,  170),   # #8E24AA
 }
 
 COLOR_MAP = TEXT_COLORS

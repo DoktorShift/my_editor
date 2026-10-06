@@ -113,7 +113,16 @@ def dialog_stylesheet(is_dark: bool) -> str:
     QPushButton:default:hover {{ background: {accent_hover}; border-color: {accent_hover}; }}
     QPushButton#destructive {{ color: {destructive}; }}
     QPushButton#destructive:hover {{ border-color: {destructive}; }}
+    QPushButton:disabled, QPushButton:default:disabled {{
+        background: {field}; color: {muted}; border-color: {border};
+    }}
     """
+
+
+def error_text_color(is_dark: bool) -> str:
+    """Color of a short error said next to a field (why an address cannot
+    be a link), the destructive red of the theme."""
+    return _DIALOG_DESTRUCTIVE[is_dark]
 
 
 def dialog_link_color(is_dark: bool) -> str:
@@ -123,6 +132,12 @@ def dialog_link_color(is_dark: bool) -> str:
     dark to read as a link on the dark theme's background.
     """
     return _DIALOG_LINK[is_dark]
+
+
+def attention_color(is_dark: bool) -> str:
+    """The red that marks a problem (a destructive button, a failed check),
+    readable on its theme's background."""
+    return _DIALOG_DESTRUCTIVE[is_dark]
 
 
 def apply_app_theme(is_dark: bool) -> None:

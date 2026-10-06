@@ -12,14 +12,21 @@ Style brief:
   - Theme-aware (dark + light pair) and Unicode-only glyphs so the
     dialog renders identically on macOS, Windows, and Linux.
 
-The dialog is a static, declarative description of the editor's
-shortcut surface. Editing the shortcuts in code does not need to know
-about this file; we only update ``SHORTCUT_GROUPS`` below when a new
-binding lands.
+The window's commands and their shortcuts come from the command list
+(commands.py, see ``CommandRegistry.shortcut_groups``), so a new or
+changed shortcut shows here by itself. Only keys that are not commands
+(Tab, Esc, the PDF reader's keys) are listed in ``OTHER_KEYS`` below.
+
+Keys are shown the way the computer in use writes them: on a Mac in
+Apple's symbols and order (⌃⌥⇧⌘, as in menus), elsewhere as Ctrl+Shift+S
+with the key names of the reader's keyboard (Strg, Umschalt in German).
+The list is the one for this platform, since the commands' keys follow
+each platform's conventions.
 """
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
@@ -36,6 +43,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from i18n import _, pgettext
 
 
 # --------------------------------------------------------------------------- #
@@ -54,93 +63,123 @@ class ShortcutGroup:
     items: Tuple[Shortcut, ...]
 
 
-SHORTCUT_GROUPS: Tuple[ShortcutGroup, ...] = (
-    ShortcutGroup(
-        title="File",
-        items=(
-            Shortcut("Ctrl+N",          "New tab"),
-            Shortcut("Ctrl+O",          "Open file"),
-            Shortcut("Ctrl+S",          "Save"),
-            Shortcut("Ctrl+Shift+S",    "Save As"),
-            Shortcut("Ctrl+P",          "Print"),
-            Shortcut("Ctrl+Shift+K",    "Knit R Markdown to HTML"),
-            Shortcut("Ctrl+W",          "Close tab"),
-            Shortcut("Ctrl+Q",          "Quit"),
-        ),
-    ),
-    ShortcutGroup(
-        title="Editing",
-        items=(
-            Shortcut("Ctrl+Z",          "Undo"),
-            Shortcut("Ctrl+Y",          "Redo"),
-            Shortcut("Ctrl+Shift+Z",    "Redo"),
-            Shortcut("Tab",             "Indent"),
-            Shortcut("Shift+Tab",       "Outdent"),
-            Shortcut("Enter",           "New line"),
-        ),
-    ),
-    ShortcutGroup(
-        title="Formatting",
-        items=(
-            Shortcut("Ctrl+B",          "Bold"),
-            Shortcut("Ctrl+I",          "Italic"),
-            Shortcut("Ctrl+U",          "Underline"),
-            Shortcut("Ctrl+D",          "Reset to default format"),
-        ),
-    ),
-    ShortcutGroup(
-        title="Search",
-        items=(
-            Shortcut("Ctrl+F",          "Find"),
-            Shortcut("F3",              "Find next"),
-            Shortcut("Shift+F3",        "Find previous"),
-            Shortcut("Enter",           "Next match"),
-            Shortcut("Shift+Enter",     "Previous match"),
-            Shortcut("Esc",             "Close find bar"),
-        ),
-    ),
-    ShortcutGroup(
-        title="View",
-        items=(
-            Shortcut("Ctrl+Shift+T",    "Toggle theme"),
-            Shortcut("Ctrl+Shift+L",    "Toggle line numbers"),
-            Shortcut("Ctrl+Shift+H",    "Toggle syntax highlighting"),
-            Shortcut("F11",             "Full screen (Ctrl+Cmd+F on macOS)"),
-        ),
-    ),
-    ShortcutGroup(
-        title="PDF Reading",
-        items=(
-            Shortcut("Ctrl+F",          "Find in PDF"),
-            Shortcut("Ctrl+C",          "Copy selected text"),
-            Shortcut("Esc",             "Clear selection"),
-            Shortcut("Space",           "Next screenful"),
-            Shortcut("Shift+Space",     "Previous screenful"),
-            Shortcut("J",               "Scroll down"),
-            Shortcut("K",               "Scroll up"),
-            Shortcut("N",               "Next page"),
-            Shortcut("P",               "Previous page"),
-            Shortcut("G",               "Go to page"),
-            Shortcut("Home",            "First page"),
-            Shortcut("End",             "Last page"),
-            Shortcut("Ctrl+=",          "Zoom in (also Ctrl+wheel)"),
-            Shortcut("Ctrl+-",          "Zoom out (also Ctrl+wheel)"),
-            Shortcut("Ctrl+0",          "Fit page width"),
-            Shortcut("Ctrl+1",          "Actual size"),
-            Shortcut("Ctrl+2",          "Fit whole page"),
-            Shortcut("F12",             "Toggle table of contents"),
-        ),
-    ),
-    ShortcutGroup(
-        title="Nostr",
-        items=(
-            Shortcut("Ctrl+Shift+P",    "Publish as note"),
-            Shortcut("Ctrl+Shift+A",    "Publish as article"),
-            Shortcut("Ctrl+Shift+D",    "Toggle Drafts panel"),
-            Shortcut("Ctrl+Shift+S",    "Save As (local or draft)"),
-        ),
-    ),
+# Keys that are not commands of the window: the editor, the find bar
+# and the PDF reader handle them themselves. Everything that IS a command
+# (a menu item with a shortcut) comes from the command list in
+# commands.py, so the two can never disagree. Group names and keys are
+# written the command list's way (English); the window translates them
+# where it shows them.
+OTHER_KEYS: Tuple[Tuple[str, Tuple[Tuple[str, str], ...]], ...] = (
+    ("Editing", (
+        ("Tab", _("Nest a list item, or start a list")),
+        ("Shift+Tab", _("Move a list item out one level")),
+        ("Enter", _("New paragraph (on an empty list item: end the list)")),
+        ("Shift+Enter", _("Line break within the paragraph")),
+        ("Ctrl+Click", _("Open a link")),
+    )),
+    ("Search", (
+        ("Enter", _("Next match")),
+        ("Shift+Enter", _("Previous match")),
+        ("Esc", _("Close find bar")),
+    )),
+    ("PDF Reading", (
+        ("Ctrl+F", _("Find in PDF")),
+        ("Ctrl+C", _("Copy selected text")),
+        ("Esc", _("Clear selection")),
+        ("Space", _("Next screenful")),
+        ("Shift+Space", _("Previous screenful")),
+        ("J", _("Scroll down")),
+        ("K", _("Scroll up")),
+        ("N", _("Next page")),
+        ("P", _("Previous page")),
+        ("G", _("Go to page")),
+        ("Home", _("First page")),
+        ("End", _("Last page")),
+        ("Ctrl+=", _("Zoom in (also Ctrl+wheel)")),
+        ("Ctrl+-", _("Zoom out (also Ctrl+wheel)")),
+        ("Ctrl+0", _("Fit page width")),
+        ("Ctrl+1", _("Actual size")),
+        ("Ctrl+2", _("Fit whole page")),
+        ("F12", _("Toggle table of contents")),
+    )),
 )
+
+# A group's name on its card. Nostr is a name, the same in every language.
+_GROUP_TITLES = {
+    "File": pgettext("shortcut group", "File"),
+    "Editing": pgettext("shortcut group", "Editing"),
+    "Formatting": pgettext("shortcut group", "Formatting"),
+    "Insert": pgettext("shortcut group", "Insert"),
+    "Search": pgettext("shortcut group", "Search"),
+    "View": pgettext("shortcut group", "View"),
+    "Help": pgettext("shortcut group", "Help"),
+    "PDF Reading": pgettext("shortcut group", "PDF Reading"),
+}
+
+# Keys as the reader's keyboard labels them (Strg and Umschalt on a
+# German one). Letters, digits and F-keys read the same everywhere.
+_KEY_NAMES = {
+    "Ctrl": pgettext("key", "Ctrl"),
+    "Shift": pgettext("key", "Shift"),
+    "Alt": pgettext("key", "Alt"),
+    "Enter": pgettext("key", "Enter"),
+    "Return": pgettext("key", "Return"),
+    "Space": pgettext("key", "Space"),
+    "Tab": pgettext("key", "Tab"),
+    "Esc": pgettext("key", "Esc"),
+    "Home": pgettext("key", "Home"),
+    "End": pgettext("key", "End"),
+    "PgUp": pgettext("key", "PgUp"),
+    "PgDown": pgettext("key", "PgDown"),
+    "Del": pgettext("key", "Del"),
+    "Backspace": pgettext("key", "Backspace"),
+    "Click": pgettext("key", "Click"),
+}
+
+IS_MAC = sys.platform == "darwin"
+
+# Apple's modifier symbols, in the order Apple writes them (HIG, Keyboards).
+# Qt names Command "Ctrl" and Control "Meta" on a Mac.
+_MAC_MODIFIERS = (("Meta", "\u2303"), ("Alt", "\u2325"), ("Shift", "\u21e7"),
+                  ("Ctrl", "\u2318"))
+_MAC_KEYS = {
+    "Enter": "\u21a9", "Return": "\u21a9", "Tab": "\u21e5", "Esc": "esc",
+    "Backspace": "\u232b", "Del": "\u2326", "Home": "\u2196", "End": "\u2198",
+    "PgUp": "\u21de", "PgDown": "\u21df", "Up": "\u2191", "Down": "\u2193",
+    "Left": "\u2190", "Right": "\u2192",
+}
+
+
+def _parts(keys: str) -> List[str]:
+    """"Ctrl+Shift+D" as its keys; "Ctrl++" (the plus key) keeps its "+"."""
+    parts = [p.strip() for p in keys.split("+")]
+    keys_found = [p for p in parts if p]
+    if keys.endswith("++"):
+        keys_found.append("+")
+    return keys_found
+
+
+def _key_names(keys: str, *, mac: Optional[bool] = None) -> List[str]:
+    """The keys of "Ctrl+Shift+D", each named the way the computer in use
+    labels it (``mac`` says which, the one in use by default): on a Mac
+    Apple's symbols in Apple's order (⇧⌘D), elsewhere the reader's
+    keyboard's names (Strg, Umschalt)."""
+    parts = _parts(keys)
+    if not (IS_MAC if mac is None else mac):
+        return [_KEY_NAMES.get(part, part) for part in parts]
+    modifiers = dict(_MAC_MODIFIERS)
+    held = [symbol for name, symbol in _MAC_MODIFIERS if name in parts]
+    rest = [_MAC_KEYS.get(part, _KEY_NAMES.get(part, part))
+            for part in parts if part not in modifiers]
+    return held + rest
+
+
+def groups_from(rows) -> Tuple[ShortcutGroup, ...]:
+    """``[(title, [(keys, action), ...]), ...]`` (as
+    CommandRegistry.shortcut_groups returns it) as dialog groups."""
+    return tuple(ShortcutGroup(title=title,
+                               items=tuple(Shortcut(keys, action) for keys, action in items))
+                 for title, items in rows)
 
 
 # --------------------------------------------------------------------------- #
@@ -293,9 +332,9 @@ def _make_keycap_row(keys: str) -> QWidget:
     layout = QHBoxLayout(container)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(3)
-    parts = [p.strip() for p in keys.split("+") if p.strip()]
-    for i, part in enumerate(parts):
-        if i:
+    for i, part in enumerate(_key_names(keys)):
+        # A Mac writes its keys side by side (⇧⌘D), elsewhere with "+".
+        if i and not IS_MAC:
             plus = QLabel("+")
             plus.setObjectName("shortcut_action")
             plus.setAlignment(Qt.AlignCenter)
@@ -327,7 +366,7 @@ class _ShortcutCard(QFrame):
         outer.setContentsMargins(14, 12, 14, 14)
         outer.setSpacing(10)
 
-        header = QLabel(group.title)
+        header = QLabel(_GROUP_TITLES.get(group.title, group.title))
         header.setObjectName("shortcut_card_title")
         outer.addWidget(header)
 
@@ -349,9 +388,13 @@ class _ShortcutCard(QFrame):
             action = QLabel(shortcut.action)
             action.setObjectName("shortcut_action")
             action.setWordWrap(True)
+            action.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             row_idx = self._grid.rowCount()
             self._grid.addWidget(keycap, row_idx, 0, Qt.AlignTop | Qt.AlignLeft)
-            self._grid.addWidget(action, row_idx, 1, Qt.AlignTop | Qt.AlignLeft)
+            # No alignment in the cell: the label then takes the column's
+            # width, and a long (or translated) action wraps onto a
+            # second line instead of being cut off.
+            self._grid.addWidget(action, row_idx, 1)
             self._rows.append((keycap, action, shortcut))
 
     def apply_filter(self, needle: str) -> int:
@@ -363,7 +406,10 @@ class _ShortcutCard(QFrame):
         needle = needle.strip().lower()
         visible = 0
         for keycap, action, shortcut in self._rows:
-            text = f"{shortcut.keys} {shortcut.action}".lower()
+            # The keys as written (Ctrl+S) and as shown (Strg+S, ⌘S) all match.
+            shown = "+".join(_key_names(shortcut.keys)) + " " + "".join(
+                _key_names(shortcut.keys))
+            text = f"{shortcut.keys} {shown} {shortcut.action}".lower()
             match = (not needle) or (needle in text)
             keycap.setVisible(match)
             action.setVisible(match)
@@ -389,16 +435,17 @@ class ShortcutsDialog(QDialog):
     columns, kbd-style key caps, and a live search across all groups.
     """
 
-    def __init__(self, *, is_dark: bool = True, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, groups, *, is_dark: bool = True,
+                 parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        self._groups = tuple(groups)
         self.setObjectName("shortcuts_dialog")
-        self.setWindowTitle("Keyboard Shortcuts")
+        self.setWindowTitle(_("Keyboard Shortcuts"))
         self.setModal(True)
         # Wide-and-tall by default so all six categories fit without
         # scrolling on the common laptop resolutions. The dialog is
         # resizable so users on small screens can still see everything.
         self.resize(760, 620)
-        self.setMinimumSize(560, 420)
         self._is_dark = is_dark
         self._cards: List[_ShortcutCard] = []
         self._build_ui()
@@ -411,21 +458,18 @@ class ShortcutsDialog(QDialog):
         root.setContentsMargins(24, 22, 24, 18)
         root.setSpacing(12)
 
-        title = QLabel("Keyboard Shortcuts")
+        title = QLabel(_("Keyboard Shortcuts"))
         title.setObjectName("shortcuts_title")
         root.addWidget(title)
 
-        subtitle = QLabel(
-            "Every binding the editor responds to. Type to filter; "
-            "Ctrl maps to Command on macOS automatically."
-        )
+        subtitle = QLabel(_("Every key MyEditor answers to on this computer. Type to filter."))
         subtitle.setObjectName("shortcuts_subtitle")
         subtitle.setWordWrap(True)
         root.addWidget(subtitle)
 
         self._search = QLineEdit()
         self._search.setObjectName("shortcuts_search")
-        self._search.setPlaceholderText("Filter shortcuts… (e.g. 'draft', 'save', 'Ctrl+S')")
+        self._search.setPlaceholderText(_("Filter Shortcuts"))
         self._search.setClearButtonEnabled(True)
         self._search.textChanged.connect(self._on_filter_changed)
         root.addWidget(self._search)
@@ -450,14 +494,15 @@ class ShortcutsDialog(QDialog):
         # Build every card up front; ``_reflow_cards`` decides where
         # each one sits in the two-column grid. Reflow runs on every
         # filter change so hidden cards don't leave holes in the layout.
-        for group in SHORTCUT_GROUPS:
+        for group in self._groups:
             self._cards.append(_ShortcutCard(group))
         self._reflow_cards()
 
         scroll.setWidget(inner)
         root.addWidget(scroll, 1)
+        self._scroll = scroll
 
-        self._no_results = QLabel("No shortcuts match your filter.")
+        self._no_results = QLabel(_("No shortcuts match your filter."))
         self._no_results.setObjectName("shortcuts_no_results")
         self._no_results.setAlignment(Qt.AlignCenter)
         self._no_results.setVisible(False)
@@ -472,6 +517,18 @@ class ShortcutsDialog(QDialog):
         close_btn.setDefault(True)
         close_btn.clicked.connect(self.accept)
         root.addWidget(buttons)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._keep_cards_whole()
+
+    def _keep_cards_whole(self) -> None:
+        """Never narrower than the cards need. They do not scroll sideways,
+        so a longer translation widens the window instead of being cut off.
+        Measured when shown, once the cards have their style and fonts."""
+        cards = self._scroll.widget().minimumSizeHint().width()
+        self._scroll.setMinimumWidth(cards + self._scroll.verticalScrollBar().sizeHint().width())
+        self.setMinimumSize(max(560, self.minimumSizeHint().width()), 420)
 
     # -- behaviour ---------------------------------------------------------
 

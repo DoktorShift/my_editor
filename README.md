@@ -1,6 +1,6 @@
 # MyEditor
 
-**A clean, distraction-free desktop text editor. Write locally, publish to Nostr, keep your keys in your own signer.**
+**A clean, distraction-free desktop text editor. Write locally, publish to Nostr, keep your key on this computer or in your own signer app.**
 
 <p align="center">
   <img src="assets/MyEditor_screenshot_v3.png" width="780" alt="MyEditor screenshot"/>
@@ -8,8 +8,9 @@
 
 MyEditor is a fast, local-first note editor for lecture notes, quick drafts, and
 long-form writing. Write in a calm, focused window, then publish straight to Nostr
-as a short note or a full article. Your files stay on your disk and your private
-key stays in your signer.
+as a short note or a full article. Your files stay on your disk, and your private
+key stays where you put it: protected on this computer, or in a signer app on your
+phone, where it can move any time.
 
 <p align="center">
   <a href="https://github.com/rinbal/my_editor/releases/latest"><b>Download for Windows, macOS, or Linux</b></a>
@@ -25,7 +26,9 @@ paper mode for a real sheet-of-paper feel.
 
 **Publish to Nostr.** Send notes or long-form articles signed on your phone via
 NIP-46, keep private encrypted drafts that sync across your devices, and manage
-media on your own Blossom servers.
+media on your own Blossom servers. New to Nostr? Create an account in the app,
+with a password-protected backup. EINUNDZWANZIG membership lives in the Nostr
+menu too, and members get the members' relay and media server.
 [Read the Nostr guide](docs/nostr.md).
 
 **Import from anywhere.** Pull content in as private drafts from RSS / Atom /

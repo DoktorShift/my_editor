@@ -12,8 +12,16 @@ from PySide6.QtCore import QEvent
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
 from PySide6.QtNetwork import QLocalSocket
-from main_window import MainWindow
 import constants
+import diagnostics
+import i18n
+
+# The language is chosen before any module that holds texts is imported:
+# many texts are constants, read once when their module loads. A change
+# of the setting applies on the next start.
+i18n.install(i18n.chosen_language())
+
+from main_window import MainWindow  # noqa: E402
 
 _IPC_SERVER_NAME = "minimal-texteditor-ipc"
 
@@ -77,7 +85,11 @@ def _forward_to_running_instance(path: str) -> bool:
 
 
 def main():
+    # First, so even a failure while starting up is in the log.
+    diagnostics.install(constants.APP_VERSION)
     app = EditorApplication(sys.argv)
+    # Qt's own words (file dialogs, standard buttons) in the same language.
+    i18n.install_qt_translations(app)
     app.setApplicationName(constants.APP_DISPLAY_NAME)
     # Deliberately NOT setting applicationDisplayName: Qt's Linux platform
     # plugins (xcb, wayland) append it to every window title via

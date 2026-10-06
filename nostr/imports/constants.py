@@ -41,23 +41,9 @@ BATCH_PACE_MS: int = 250
 # Nostr source resolvers                                                #
 # --------------------------------------------------------------------- #
 
-# Relays that index profiles + relay lists (kind 0 / kind 10002), used
-# to bootstrap the NIP-65 outbox lookup. purplepag.es specialises in
-# exactly this.
-NOSTR_INDEXER_RELAYS: tuple = (
-    "wss://purplepag.es",
-    "wss://relay.nostr.band",
-)
-
-# Broad set where long-form content tends to live: the fallback when an
-# author advertises no write relays. The app's curated default set
-# already covers the majors (primal, damus, nos.lol, yakihonne).
-NOSTR_LONGFORM_RELAYS: tuple = (
-    "wss://relay.primal.net",
-    "wss://relay.damus.io",
-    "wss://nos.lol",
-    "wss://nostr-01.yakihonne.com",
-)
+# Where an author's articles are read from is the relay directory's
+# answer (their NIP-65 outbox, or nostr/outbox/defaults.py when it is
+# unknown); the importer keeps no relay list of its own for that.
 
 # Cap on articles / NIPs pulled for one author; mirrors MAX_LIMIT scale
 # without letting a prolific author flood the preview query.
@@ -66,7 +52,9 @@ NOSTR_MAX_ARTICLES: int = 100
 # NostrHub "NIP" (Nostr Implementation Possibility) event kind, and the
 # Ditto relays that actually carry those events. They do NOT live on
 # the author's kind-10002 outbox, so the resolver queries these
-# explicitly (hint relays from an nprofile/naddr merge in ahead).
+# explicitly (hint relays from an nprofile/naddr merge in ahead). The
+# one relay list kept outside nostr/outbox/defaults.py on purpose: it
+# names where one app stores its own events, not a general relay.
 NOSTRHUB_NIP_KIND: int = 30817
 NOSTRHUB_RELAYS: tuple = (
     "wss://relay.ditto.pub",
@@ -81,10 +69,12 @@ NOSTR_WIKI_KIND: int = 30818
 # Feed subscriptions                                                    #
 # --------------------------------------------------------------------- #
 
-# Kind 30078 (NIP-78 app data) event carrying the encrypted feed list;
-# the d-tag namespaces it so it never collides with other apps' data.
+# Kind 30078 (NIP-78 app data) event carrying the encrypted feed list.
+# The d-tag is EINUNDZWANZIG STANDUP's, so both apps share one list
+# (feed_list.py); the one this app wrote before is read once, to merge.
 SUBSCRIPTIONS_KIND: int = 30078
-FEED_LIST_DTAG: str = "myeditor:feed-sources"
+FEED_LIST_DTAG: str = "einundzwanzig:feed-sources"
+LEGACY_FEED_LIST_DTAG: str = "myeditor:feed-sources"
 
 # Debounce for publishing subscription changes: rapid add/remove/refresh
 # batches into one signed event per window.
