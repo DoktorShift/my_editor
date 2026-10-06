@@ -13,8 +13,9 @@ What must hold:
   Lines typed one under the other stay separate, as paragraphs: the one
   break every Nostr reader shows alike.
 
-  Typed characters that Markdown would read as markup are escaped, and
-  web addresses and nostr: links are never touched.
+  Typed text is Markdown and is written as typed; only a web address
+  that holds a character a reader would take for emphasis is written as
+  <address>, so it survives being read back.
 
   A short note is plain text: no markup, list markers and link addresses
   kept.
@@ -34,7 +35,7 @@ from PySide6.QtGui import (  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from markdown_writer import (  # noqa: E402
-    NBSP, document_to, document_to_markdown, document_to_note_text,
+    READ_FEATURES, document_to, document_to_markdown, document_to_note_text,
 )
 
 
@@ -45,7 +46,7 @@ def qt_app():
 
 def from_markdown(text: str) -> QTextDocument:
     doc = QTextDocument()
-    doc.setMarkdown(text)
+    doc.setMarkdown(text, READ_FEATURES)
     return doc
 
 
@@ -93,6 +94,10 @@ ROUND_TRIPS = [
     "Before\n\n---\n\nAfter\n",
     "| a | b |\n| --- | --- |\n| 1 | 2 |\n",
     "Para one\n\nPara two\n",
+    "Some *italic* via underscores reads as italic.\n",
+    "> - quoted item\n> - another\n",
+    "See <https://github.com/psf/requests/blob/main/src/requests/__init__.py> now.\n",
+    "A [link](<https://x.example/a (b).png>) with parentheses.\n",
 ]
 
 
@@ -155,38 +160,55 @@ def test_shift_enter_is_a_hard_line_break():
     assert document_to_markdown(doc) == "first  \nsecond\n"
 
 
-def test_a_typed_indent_shows_instead_of_becoming_code():
-    doc = typed("        indented line")
-    assert document_to_markdown(doc) == NBSP * 8 + "indented line\n"
+# -- typed Markdown -------------------------------------------------------------------
 
-
-# -- escaping -----------------------------------------------------------------------
-
-@pytest.mark.parametrize("text, expected", [
-    ("2 * 3 * 4", "2 \\* 3 \\* 4"),
-    ("snake_case stays", "snake_case stays"),
-    ("_not italic_", "\\_not italic\\_"),
-    ("a `tick`", "a \\`tick\\`"),
-    ("[not a link](x)", "\\[not a link\\](x)"),
-    ("<b>html</b>", "\\<b>html\\</b>"),
-    ("# not a heading", "\\# not a heading"),
-    ("> not a quote", "\\> not a quote"),
-    ("- a list it looks like", "- a list it looks like"),
-    ("1. a numbered line", "1. a numbered line"),
-    ("~tilde~", "\\~tilde\\~"),
-    ("back\\slash", "back\\\\slash"),
+@pytest.mark.parametrize("text", [
+    "## A heading typed by hand",
+    "See [the docs](https://example.com) and **this**.",
+    "> quoted by hand",
+    "2 * 3 * 4 and snake_case",
+    "#nostr #bitcoin",
+    "- a list it looks like",
 ])
-def test_typed_markup_characters_show_as_typed(text, expected):
-    assert document_to_markdown(typed(text)) == expected + "\n"
+def test_typed_markdown_is_written_as_typed(text):
+    assert document_to_markdown(typed(text)) == text + "\n"
 
 
 @pytest.mark.parametrize("address", [
-    "https://example.com/a_b*c_d",
-    "nostr:npub1abc_def",
-    "wss://relay.example/x_y",
+    "https://github.com/psf/requests/blob/main/src/requests/__init__.py",
+    "https://example.com/_foo_/bar",
+    "wss://relay.example/x*y",
 ])
-def test_addresses_are_never_escaped(address):
-    assert document_to_markdown(typed(f"see {address} now")) == f"see {address} now\n"
+def test_an_address_with_markup_characters_is_kept_whole(address):
+    written = document_to_markdown(typed(f"see {address} now"))
+    assert written == f"see <{address}> now\n"
+    # Read back and written again, it is the same address.
+    assert document_to_markdown(from_markdown(written)) == written
+
+
+@pytest.mark.parametrize("address", ["https://example.com/plain", "nostr:npub1abcdef"])
+def test_a_plain_address_stays_bare(address):
+    assert document_to_markdown(typed(f"see {address}")) == f"see {address}\n"
+
+
+def test_underscores_read_back_as_italic_not_underline():
+    doc = from_markdown("an _emphasized_ word\n")
+    assert document_to_markdown(doc) == "an *emphasized* word\n"
+
+
+def test_indented_code_stays_code():
+    doc = from_markdown("Intro\n\n    x = a*b*c\n    if x_y_z: pass\n")
+    assert document_to_markdown(doc) == "Intro\n\n```\nx = a*b*c\nif x_y_z: pass\n```\n"
+
+
+def test_a_link_that_shows_its_address_is_an_autolink():
+    doc = typed(("https://x.example/a_b", {"href": "https://x.example/a_b"}))
+    assert document_to_markdown(doc) == "<https://x.example/a_b>\n"
+
+
+def test_a_link_label_with_a_bracket_is_escaped():
+    doc = typed(("see [1]", {"href": "https://x.example"}))
+    assert document_to_markdown(doc) == "[see [1\\]](https://x.example)\n"
 
 
 def test_backticks_inside_code_get_a_longer_fence():
@@ -240,9 +262,9 @@ def test_a_link_that_is_its_own_address_is_written_once():
     assert document_to_note_text(doc) == "https://x.example"
 
 
-def test_a_note_keeps_typed_lines_and_paragraphs():
+def test_a_note_keeps_typed_lines_and_empty_lines_exactly():
     doc = typed("one\ntwo\n\n\nthree")
-    assert document_to_note_text(doc) == "one\ntwo\n\nthree"
+    assert document_to_note_text(doc) == "one\ntwo\n\n\nthree"
 
 
 def test_flavors_by_name():
@@ -279,3 +301,57 @@ def test_a_note_draft_opens_as_typed():
     MainWindow._load_draft_content(ed, draft(INNER_KIND_SHORT_NOTE, "line one\nline *two*"))
     assert ed.toPlainText() == "line one\nline *two*"
     assert document_to_note_text(ed.document()) == "line one\nline *two*"
+
+
+# -- what the editor can hold ------------------------------------------------------------
+
+from markdown_writer import holds_faithfully  # noqa: E402
+
+
+@pytest.mark.parametrize("source", ROUND_TRIPS + [
+    "# Imported\n\nSome **bold** and a [link](https://x.example).\n\n- one\n- two\n",
+    "* star bullets\n* are fine\n",
+    "Setext heading\n==============\n\nText.\n",
+])
+def test_markdown_the_editor_can_hold(source):
+    assert holds_faithfully(source)
+
+
+@pytest.mark.parametrize("source", [
+    "Footnote[^1].\n\n[^1]: The note.\n",
+    "<div>raw</div>\n",
+    "An image ![](https://x.example/a.png) without alt text.\n",
+    'A [link](https://x.example "with a title").\n',
+    "[![badge](https://x.example/b.png)](https://x.example)\n",
+    "> # a heading in a quote\n",
+    "- item\n\n  second paragraph of the item\n- two\n",
+    "Line one\nLine two of the same paragraph\n",
+])
+def test_markdown_the_editor_would_lose(source):
+    assert not holds_faithfully(source)
+
+
+def test_a_draft_the_editor_cannot_hold_opens_as_its_text_and_comes_back_unchanged():
+    from editor import HtmlEditor
+    from main_window import MainWindow
+    from nostr.drafts import INNER_KIND_LONG_FORM
+
+    source = "Footnote[^1] and ![](https://x.example/a.png)\n\n[^1]: The note.\n"
+    ed = HtmlEditor()
+    MainWindow._load_draft_content(ed, draft(INNER_KIND_LONG_FORM, source))
+    assert ed._markdown_source
+    assert ed.toPlainText() == source
+    stub = type("Stub", (), {"_asset_manager": None})()
+    content, _media = MainWindow._publish_payload(stub, ed, "markdown")
+    assert content == source.rstrip("\n")
+
+
+def test_undo_right_after_opening_a_draft_keeps_it():
+    from editor import HtmlEditor
+    from main_window import MainWindow
+    from nostr.drafts import INNER_KIND_LONG_FORM
+
+    ed = HtmlEditor()
+    MainWindow._load_draft_content(ed, draft(INNER_KIND_LONG_FORM, "# Title\n\nBody\n"))
+    ed.document().undo()
+    assert "Body" in ed.toPlainText()

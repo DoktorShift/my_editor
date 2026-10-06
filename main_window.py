@@ -41,7 +41,10 @@ from constants import (
 from widgets import FindBar, HeaderWidget, LineNumberGutter, FileChangedBar, UpdateBar
 from commands import FILE, FORMAT, HELP, NOSTR, SEARCH, VIEW, Command, CommandRegistry
 from doc_walk import iter_blocks, iter_image_names, serialize_plain_with_images
-from markdown_writer import document_to, document_to_markdown, has_local_only_formatting
+from markdown_writer import (
+    READ_FEATURES, document_to, document_to_markdown, has_local_only_formatting,
+    holds_faithfully, image_markdown,
+)
 from editor import HtmlEditor
 import image_safety
 import url_safety
@@ -1819,8 +1822,7 @@ class MainWindow(QMainWindow):
             normalize_lists_after_set_html(ed.document())
             ed.document().clearUndoRedoStacks()
         elif ext.endswith('.md'):
-            ed.document().setMarkdown(content)
-            ed._loaded_as_markdown = True
+            self._load_markdown(ed, content)
         elif ext.endswith('.rmd'):
             # R Markdown is edited as source, the way RStudio does it.
             ed.setPlainText(content)
@@ -2054,8 +2056,7 @@ class MainWindow(QMainWindow):
             url = destination(fmt)
             if not url:
                 return None
-            alt = str(fmt.property(QTextImageFormat.ImageAltText) or "image")
-            return f"![{alt}]({url})"
+            return image_markdown(str(fmt.property(QTextImageFormat.ImageAltText) or ""), url)
 
         def as_note(fmt) -> Optional[str]:
             url = destination(fmt)
@@ -2067,7 +2068,11 @@ class MainWindow(QMainWindow):
         # Markdown a .md file would hold; a note is the same walk as plain
         # text, which is what apps show for a note.
         target = as_markdown if flavor == "markdown" else as_note
-        content = document_to(ed.document(), flavor, target).rstrip("\n")
+        if getattr(ed, "_markdown_source", False):
+            # Opened as its Markdown text: published exactly as written.
+            content = serialize_plain_with_images(ed.document(), target).rstrip("\n")
+        else:
+            content = document_to(ed.document(), flavor, target).rstrip("\n")
         return content, list(records.values())
 
     def _publish_text(self, ed, flavor: str) -> str:
@@ -2244,8 +2249,11 @@ class MainWindow(QMainWindow):
                 # The same Markdown an article publishes, whether the tab
                 # came from a .md file or was typed here.
                 target = self._image_target_for_file_save(ed.document(), path)
-                content = document_to_markdown(
-                    ed.document(), self._markdown_reference_for(target))
+                reference = self._markdown_reference_for(target)
+                if getattr(ed, "_markdown_source", False):
+                    content = serialize_plain_with_images(ed.document(), reference)
+                else:
+                    content = document_to_markdown(ed.document(), reference)
             else:
                 # .txt and anything unknown: images cannot be carried, so
                 # they are omitted rather than left as the raw U+FFFC
@@ -2346,8 +2354,8 @@ class MainWindow(QMainWindow):
             destination = target(fmt)
             if not destination:
                 return None
-            alt = str(fmt.property(QTextImageFormat.ImageAltText) or "image")
-            return f"![{alt}]({destination})"
+            return image_markdown(str(fmt.property(QTextImageFormat.ImageAltText) or ""),
+                                  destination)
 
         return reference
 
@@ -4916,18 +4924,34 @@ class MainWindow(QMainWindow):
             self._show_conflict_banner(container, ed, record)
 
     @staticmethod
-    def _load_draft_content(ed, record) -> None:
-        """Put a draft's text in the editor the way it was written.
+    def _load_markdown(ed, content: str) -> None:
+        """Put Markdown in the editor so that nothing of it is lost.
 
-        An article draft is Markdown (written here by the one Markdown
-        writer, or imported from a feed), so it is read as Markdown and
-        shows its formatting; read as plain text, its markup would show
-        and then be escaped on the next save. A note is plain text."""
-        if record.inner_kind == INNER_KIND_LONG_FORM:
-            ed.document().setMarkdown(record.content)
+        Markdown the editor can hold all of opens with its formatting
+        shown, and is written back the same. Anything else (footnotes, raw
+        HTML, an image without alt text, a draft saved as plain text by an
+        earlier version) opens as its Markdown text, and is saved and
+        published exactly as written."""
+        if holds_faithfully(content):
+            ed.document().setMarkdown(content, READ_FEATURES)
             ed._loaded_as_markdown = True
+            ed._markdown_source = False
+        else:
+            ed.setPlainText(content)
+            ed._markdown_source = True
+        # Undo starts here: undoing the load would empty the tab.
+        ed.document().clearUndoRedoStacks()
+
+    @classmethod
+    def _load_draft_content(cls, ed, record) -> None:
+        """Put a draft's text in the editor the way it was written: an
+        article draft is Markdown, a note is plain text."""
+        if record.inner_kind == INNER_KIND_LONG_FORM:
+            cls._load_markdown(ed, record.content)
         else:
             ed.setPlainText(record.content)
+            ed._markdown_source = False
+            ed.document().clearUndoRedoStacks()
 
     def _show_conflict_banner(self, container, ed, record) -> None:
         """Insert (or update) the per-tab conflict banner."""
