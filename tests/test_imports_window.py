@@ -23,6 +23,7 @@ from nostr.imports.subscriptions import FeedSubscriptionStore
 from nostr.imports_controller import ImportsController
 from nostr.ui.imports_sidebar import FILE, HEADER, LIST, SOURCE
 from nostr.ui.imports_window import ImportsWindow, freshness
+from tests.accessibility import unnamed_controls
 from tests.imports_fakes import FakeCatalogue, FakeFetcher, TWO_ITEM_FEED, inline_run_blocking
 from tests.imports_fakes import make_item
 from tests.outbox_fakes import FakeRelayDirectory, settle
@@ -300,7 +301,7 @@ class TestAdding:
         assert not any(a.isEnabled() for a in win.add_button.menu().actions())
         win.follow_website()
         assert win.sheet() is None
-        assert win.placeholder_button.isHidden()
+        assert win.placeholder_button is None
         controller.account_changed(None)
 
     def test_follow_a_website_shows_the_source_it_followed(self, window):
@@ -378,3 +379,20 @@ class TestAdding:
                                               "2 couldn't be followed.")
         window.banner.close_button.click()
         assert not window.banner.isVisibleTo(window)
+
+
+class TestScreenReaders:
+    def test_every_control_has_a_name(self, window):
+        assert unnamed_controls(window) == []
+
+    def test_also_with_a_message_and_an_empty_list(self, window):
+        window.banner.say("Skipped 2 posts.", "Undo", lambda: None)
+        window.sidebar.select(LIST, SKIPPED_POSTS)
+        assert unnamed_controls(window) == []
+
+    def test_an_empty_inbox_offering_to_follow(self, tmp_path):
+        controller = controller_for(tmp_path)
+        win = ImportsWindow(controller)
+        assert win.placeholder_button is not None
+        assert unnamed_controls(win) == []
+        controller.account_changed(None)

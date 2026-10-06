@@ -18,6 +18,7 @@ from nostr.imports.snapshots import has_images, images_to_copy
 from nostr.ui.image_review_dialog import ImageReviewDialog
 from tests.imports_fakes import TWO_ITEM_FEED, FakeFetcher, make_item
 from tests.test_feeds_panel import make_panel
+from tests.accessibility import unnamed_controls
 
 
 class Images(QObject):
@@ -87,6 +88,10 @@ class TestTheSheet:
         dialog._items["https://x.example/a.png"].setCheckState(Qt.CheckState.Unchecked)
         assert dialog.skip_urls() == {"https://x.example/a.png", "https://x.example/b.png"}
         assert dialog._count.text() == "0 of 2 images will be copied."
+
+    def test_every_control_has_a_name(self):
+        dialog = ImageReviewDialog(["https://x.example/a.png"], image_source=Images())
+        assert unnamed_controls(dialog) == []
 
 
 def test_the_feeds_page_reviews_the_list_the_import_uses(monkeypatch):

@@ -25,6 +25,7 @@ from nostr.imports_controller import ImportsController
 from nostr.ui.flow_layout import FlowLayout
 from nostr.ui.imports_actions import EXPIRY_NOTE, create_label, signer_note
 from nostr.ui.imports_window import ImportsWindow
+from tests.accessibility import unnamed_controls
 from tests.imports_fakes import FakeCatalogue, FakeFetcher, inline_run_blocking
 from tests.outbox_fakes import FakeRelayDirectory, settle
 from tests.test_imports_jobs import FakeItemJob
@@ -208,6 +209,13 @@ class TestController:
         with_images = post.__class__(**{**post.__dict__, "image_count": 3})
         assert controller.signer_prompts([with_images], copy_images=True) == 4
         assert controller.signer_prompts([with_images], copy_images=False) == 1
+
+
+def test_the_bar_and_its_options_have_names(window):
+    window._show_options()
+    assert unnamed_controls(window.action_bar) == []
+    assert unnamed_controls(window.options_popover) == []
+    window.options_popover.hide()
 
 
 def test_words():

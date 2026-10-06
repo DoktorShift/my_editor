@@ -316,6 +316,10 @@ class ImportsWindow(QMainWindow):
         self.search.textChanged.connect(lambda _text: self._search_timer.start())
         bar.addWidget(self.search)
         self._toolbar = bar
+        # Qt's own button for toolbar items that do not fit.
+        more = bar.findChild(QToolButton, "qt_toolbar_ext_button")
+        if more is not None:
+            more.setAccessibleName(_("More Toolbar Items"))
         self._update_sidebar_action()
 
     def _build_panes(self) -> None:
@@ -475,14 +479,14 @@ class ImportsWindow(QMainWindow):
         self.placeholder_text.setObjectName("imports_placeholder")
         self.placeholder_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.placeholder_text.setWordWrap(True)
-        self.placeholder_button = QPushButton()
-        self.placeholder_button.setObjectName("imports_placeholder_button")
-        self.placeholder_button.clicked.connect(self._on_placeholder_button)
+        # Made when an empty list has something to offer (an unnamed
+        # button would wait hidden for screen readers otherwise).
+        self.placeholder_button: Optional[QPushButton] = None
         layout.addStretch(1)
         layout.addWidget(self.placeholder_title)
         layout.addWidget(self.placeholder_text)
-        layout.addWidget(self.placeholder_button, 0, Qt.AlignmentFlag.AlignHCenter)
         layout.addStretch(2)
+        self._placeholder_layout = layout
         return page
 
     def _build_shortcuts(self) -> None:
@@ -828,8 +832,22 @@ class ImportsWindow(QMainWindow):
         self.placeholder_title.setText(title)
         self.placeholder_text.setText(text)
         self.placeholder_text.setVisible(bool(text))
-        self.placeholder_button.setText(button)
-        self.placeholder_button.setVisible(bool(button))
+        old = self.placeholder_button
+        if old is not None and old.text() == button:
+            return
+        if old is not None:
+            self._placeholder_layout.removeWidget(old)
+            old.hide()
+            old.deleteLater()
+            self.placeholder_button = None
+        if button:
+            self.placeholder_button = QPushButton(button)
+            self.placeholder_button.setObjectName("imports_placeholder_button")
+            self.placeholder_button.setAutoDefault(False)
+            self.placeholder_button.clicked.connect(self._on_placeholder_button)
+            # After the title and the sentence, before the space below.
+            self._placeholder_layout.insertWidget(3, self.placeholder_button, 0,
+                                                  Qt.AlignmentFlag.AlignHCenter)
 
     def _placeholder(self):
         """``(title, sentence, button)`` for an empty list."""
@@ -1094,11 +1112,9 @@ class _Banner(QFrame):
         self.label.setTextFormat(Qt.TextFormat.PlainText)
         self.label.setWordWrap(True)
         row.addWidget(self.label, 1)
-        self.action = QPushButton()
-        self.action.setObjectName("imports_banner_action")
-        self.action.setAutoDefault(False)
-        self.action.hide()
-        row.addWidget(self.action)
+        # The action is made for a message that has one.
+        self.action: Optional[QPushButton] = None
+        self._row = row
         self.close_button = QToolButton()
         self.close_button.setObjectName("imports_banner_close")
         self.close_button.setAccessibleName(_("Close Message"))
@@ -1106,14 +1122,22 @@ class _Banner(QFrame):
         self.close_button.clicked.connect(self.hide)
         row.addWidget(self.close_button)
         self._handler: Optional[Callable[[], None]] = None
-        self.action.clicked.connect(self._act)
 
     def say(self, text: str, action: str = "",
             handler: Optional[Callable[[], None]] = None) -> None:
         self.label.setText(text)
         self.label.setAccessibleName(text)
-        self.action.setText(action)
-        self.action.setVisible(bool(action))
+        if self.action is not None:
+            self._row.removeWidget(self.action)
+            self.action.hide()
+            self.action.deleteLater()
+            self.action = None
+        if action:
+            self.action = QPushButton(action)
+            self.action.setObjectName("imports_banner_action")
+            self.action.setAutoDefault(False)
+            self.action.clicked.connect(self._act)
+            self._row.insertWidget(1, self.action)
         self._handler = handler
         color = self.palette().color(QPalette.ColorRole.WindowText)
         self.close_button.setIcon(glyph_icon("close", 14, color))

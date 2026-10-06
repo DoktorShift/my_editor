@@ -29,6 +29,7 @@ from nostr.ui.imports_sheets import (
     LinkSheet,
     dropped_file,
 )
+from tests.accessibility import unnamed_controls
 from tests.imports_fakes import TWO_ITEM_FEED, FakeFetcher
 from tests.outbox_fakes import settle
 from tests.test_imports_controller import Harness, profile
@@ -337,3 +338,16 @@ class TestLink:
         settle()
         assert not sheet.error.isHidden()
         sheet.close()
+
+
+@pytest.mark.parametrize("sheet_class", [FollowSheet, FileSheet, LinkSheet])
+def test_every_control_has_a_name(controller, sheet_class):
+    sheet = sheet_class(controller)
+    assert unnamed_controls(sheet) == []
+
+
+def test_every_state_of_follow_keeps_its_names(follow):
+    type_address(follow, FEED)
+    assert unnamed_controls(follow) == []
+    follow.use_paste()
+    assert unnamed_controls(follow) == []
