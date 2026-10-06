@@ -158,8 +158,11 @@ def test_the_file_is_versioned_and_private_on_disk(tmp_path):
     led.record(public())
     data = json.loads((tmp_path / "media_public.json").read_text())
     assert data["version"] == CURRENT_LEDGER_VERSION
-    mode = os.stat(tmp_path / "media_public.json").st_mode & 0o777
-    assert mode == 0o600
+    # Windows keeps the file private through the user profile's access
+    # list; it has no owner-only mode bits to check.
+    if os.name == "posix":
+        mode = os.stat(tmp_path / "media_public.json").st_mode & 0o777
+        assert mode == 0o600
 
 
 def test_a_missing_file_is_simply_empty(tmp_path):
