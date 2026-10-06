@@ -644,16 +644,41 @@ class HtmlEditor(QTextEdit):
             text = cursor.selectedText()
         else:
             href = clipboard_address()
-            text = cursor.selectedText().replace("\u2029", " ").replace("\u2028", " ")
-        popover = LinkPopover(text=text, href=href, editing=found is not None,
-                              nostr=self._nostr_active(), parent=self)
+            cursor = self._trimmed_selection(cursor)
+            self.setTextCursor(cursor)
+            text = cursor.selectedText()
+        several = "\u2029" in text
+        popover = LinkPopover(text=text.replace("\u2029", " ").replace("\u2028", " "),
+                              href=href, editing=found is not None,
+                              nostr=self._nostr_active(), text_editable=not several,
+                              parent=self)
         popover.applied.connect(self.apply_link)
         popover.removed.connect(self.remove_link)
         # Escape, Cancel or a click elsewhere: the writing goes on here.
-        popover.destroyed.connect(lambda _obj=None: self.setFocus())
+        # (A method, not a lambda: Qt drops the connection if the editor
+        # goes first, a lambda would call into a deleted editor.)
+        popover.destroyed.connect(self._link_popover_closed)
         popover.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         start_rect = self.cursorRect(self._selection_start_cursor())
         popover.show_below(start_rect, self.viewport())
+
+    def _link_popover_closed(self, _popover=None) -> None:
+        self.setFocus()
+
+    @staticmethod
+    def _trimmed_selection(cursor: QTextCursor) -> QTextCursor:
+        """The selection without the spaces (and paragraph ends) at its
+        edges: they stay outside the link, as words processors keep them,
+        instead of being deleted with it."""
+        selected = cursor.selectedText()
+        if not selected.strip():
+            return cursor
+        lead = len(selected) - len(selected.lstrip())
+        trail = len(selected) - len(selected.rstrip())
+        trimmed = QTextCursor(cursor)
+        trimmed.setPosition(cursor.selectionStart() + lead)
+        trimmed.setPosition(cursor.selectionEnd() - trail, QTextCursor.MoveMode.KeepAnchor)
+        return trimmed
 
     def _selection_start_cursor(self) -> QTextCursor:
         cursor = QTextCursor(self.textCursor())
@@ -661,8 +686,9 @@ class HtmlEditor(QTextEdit):
         return cursor
 
     def apply_link(self, text: str, href: str) -> None:
-        """Link the selection (or insert ``text``, or the address itself,
-        when nothing is selected) to ``href``."""
+        """Link the selection to ``href``: its words as they are, or
+        ``text`` in their place when the person retyped them. With nothing
+        selected, ``text`` (or else the address itself) is inserted."""
         cursor = self.textCursor()
         if not cursor.hasSelection() and not text:
             text = link_url.display_href(href, limit=10_000)

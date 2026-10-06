@@ -22,7 +22,7 @@ msgid "Hide Details"
 msgstr "Details ausblenden"
 
 #: alerts.py:275
-#: link_popover.py:90
+#: link_popover.py:99
 #: main_window.py:2650
 #: main_window.py:5980
 #: main_window.py:247
@@ -56,22 +56,22 @@ msgstr "Blau"
 msgid "Purple"
 msgstr "Lila"
 
-#: editor.py:44
+#: editor.py:46
 msgid "A picture could not be pasted with the text. Copy it on its own and paste it."
 msgid_plural "{count} pictures could not be pasted with the text. Copy each on its own and paste it."
 msgstr[0] "Ein Bild konnte nicht mit dem Text eingesetzt werden. Kopiere es einzeln und setze es ein."
 msgstr[1] "{count} Bilder konnten nicht mit dem Text eingesetzt werden. Kopiere sie einzeln und setze sie ein."
 
-#: editor.py:83
+#: editor.py:85
 msgid "Document"
 msgstr "Dokument"
 
-#: editor.py:782
+#: editor.py:810
 #: main_window.py:1222
 msgid "Cut"
 msgstr "Ausschneiden"
 
-#: editor.py:783
+#: editor.py:811
 #: main_window.py:1224
 #: update_dialog.py:188
 #: update_dialog.py:194
@@ -79,16 +79,16 @@ msgstr "Ausschneiden"
 msgid "Copy"
 msgstr "Kopieren"
 
-#: editor.py:784
+#: editor.py:812
 #: main_window.py:1226
 msgid "Paste"
 msgstr "Einsetzen"
 
-#: editor.py:720
+#: editor.py:748
 msgid "Command-click to open"
 msgstr "Zum Öffnen bei gedrückter Befehlstaste klicken"
 
-#: editor.py:721
+#: editor.py:749
 msgid "Ctrl+click to open"
 msgstr "Zum Öffnen bei gedrückter Strg-Taste klicken"
 
@@ -162,33 +162,37 @@ msgctxt "format button"
 msgid "S"
 msgstr "D"
 
-#: link_popover.py:63
+#: link_popover.py:68
 msgid "Same as the address"
 msgstr "Wie die Adresse"
 
-#: link_popover.py:67
+#: link_popover.py:76
 msgid "Text:"
 msgstr "Text:"
 
-#: link_popover.py:68
+#: link_popover.py:77
 msgid "Address:"
 msgstr "Adresse:"
 
-#: link_popover.py:49
+#: link_popover.py:54
 msgid "Edit Link"
 msgstr "Link bearbeiten"
 
-#: link_popover.py:49
-#: link_popover.py:94
+#: link_popover.py:54
+#: link_popover.py:103
 msgid "Add Link"
 msgstr "Link hinzufügen"
 
-#: link_popover.py:84
+#: link_popover.py:71
+msgid "Words from several paragraphs are linked as they are."
+msgstr "Wörter aus mehreren Absätzen werden so verlinkt, wie sie sind."
+
+#: link_popover.py:93
 #: main_window.py:4063
 msgid "Remove Link"
 msgstr "Link entfernen"
 
-#: link_popover.py:94
+#: link_popover.py:103
 msgid "Update Link"
 msgstr "Link aktualisieren"
 

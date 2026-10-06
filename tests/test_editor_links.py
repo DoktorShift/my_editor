@@ -62,6 +62,59 @@ def test_add_link_keeps_the_style_of_the_words():
     assert assert_round_trip(ed.document()) == "Read [**the docs**](https://example.com/docs) today\n"
 
 
+def link_through_the_popover(ed, href, *, retype=None):
+    """Command-K, the address typed, Return: what a person does."""
+    ed.show_link_popover()
+    popover = ed.findChildren(LinkPopover)[-1]
+    if retype is not None:
+        popover.text_edit.setText(retype)
+        popover.text_edit.setModified(True)
+    popover.address_edit.setText(href)
+    popover.add_button.click()
+    return popover
+
+
+def test_spaces_at_the_edges_of_the_selection_stay_outside_the_link():
+    ed = editor("Read the docs today\n")
+    selecting(ed, "the docs ")                  # a word selection with its space
+    link_through_the_popover(ed, "https://example.com/docs")
+    selecting(ed, " today")
+    link_through_the_popover(ed, "https://example.com/today")
+    assert assert_round_trip(ed.document()) == (
+        "Read [the docs](https://example.com/docs) [today](https://example.com/today)\n")
+
+
+def test_a_link_over_a_heading_and_a_paragraph_keeps_both():
+    ed = editor("# Title\n\nSecond **para** here\n")
+    cursor = select(ed.document(), "Title")
+    cursor.setPosition(select(ed.document(), "Second").selectionEnd(),
+                       QTextCursor.MoveMode.KeepAnchor)
+    ed.setTextCursor(cursor)
+    popover = link_through_the_popover(ed, "https://example.com")
+    assert not popover.text_edit.isEnabled()      # several paragraphs: not retyped
+    assert assert_round_trip(ed.document()) == (
+        "# [Title](https://example.com)\n\n[Second](https://example.com) **para** here\n")
+
+
+def test_a_link_over_two_list_items_keeps_both_items():
+    ed = editor("- one\n- two\n")
+    cursor = select(ed.document(), "one")
+    cursor.setPosition(select(ed.document(), "two").selectionEnd(),
+                       QTextCursor.MoveMode.KeepAnchor)
+    ed.setTextCursor(cursor)
+    link_through_the_popover(ed, "https://example.com")
+    assert assert_round_trip(ed.document()) == (
+        "- [one](https://example.com)\n- [two](https://example.com)\n")
+
+
+def test_retyped_words_replace_the_selection():
+    ed = editor("Read the docs today\n")
+    selecting(ed, "the docs")
+    link_through_the_popover(ed, "https://example.com/docs", retype="our guide")
+    assert document_to_markdown(ed.document()) == (
+        "Read [our guide](https://example.com/docs) today\n")
+
+
 def test_add_link_with_nothing_selected_inserts_the_address():
     ed = editor("See\n")
     ed.moveCursor(QTextCursor.MoveOperation.End)
@@ -153,7 +206,7 @@ def test_the_popover_refuses_what_cannot_be_a_link_and_says_why():
     got = []
     popover.applied.connect(lambda text, href: got.append((text, href)))
     popover.add_button.click()
-    assert got == [("x", "https://example.com/page")]
+    assert got == [("", "https://example.com/page")]    # the words were not retyped
 
 
 def test_an_empty_address_is_not_a_complaint_yet():
