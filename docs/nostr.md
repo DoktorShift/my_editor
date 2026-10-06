@@ -101,6 +101,7 @@ In-progress work is saved as a **NIP-37 draft**: a kind 31234 event whose body i
 - **`Ctrl+S`** on a draft-bound tab silently re-saves the draft. Same shortcut, no questions, exactly like saving a local file.
 - Double-click a row to open the draft in a new tab. Right-click for Publish, Copy event id, or Delete.
 - An article draft holds the article's Markdown and opens with its formatting (headings, bold, lists); a note draft opens as typed.
+- An article draft also keeps the article's details: its title, summary, cover image, hashtags, the date it was first published and, for an imported post, where it came from. Saving the draft again keeps all of them, and **Publish Article** offers them, so an imported post goes out with its cover, hashtags and original date.
 
 ### Recovery
 

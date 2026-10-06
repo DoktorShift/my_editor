@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 import word_count
 from i18n import _, language, ngettext
 
+from ..article_details import ArticleDetails
 from ..avatar_store import AvatarStore
 from ..bech32 import encode_naddr
 from ..blossom.store import MediaFile, MediaStore
@@ -338,6 +339,7 @@ class PublishArticleDialog(QDialog):
         default_title: str = "",
         default_slug: str = "",
         first_published: Optional[int] = None,
+        details: Optional[ArticleDetails] = None,
         published_at_lookup: Optional[
             Callable[[str, str, Callable[[Optional[int]], None]], None]] = None,
         parent=None,
@@ -384,9 +386,15 @@ class PublishArticleDialog(QDialog):
             {default_slug: first_published} if default_slug and first_published else {})
         self._published_at_lookup = published_at_lookup or self._look_up_published_at
         self._looking_up = False
+        # What the article's draft holds besides its text (an imported
+        # article's summary, cover, hashtags and source): offered here and
+        # published with it.
+        self._details = details or ArticleDetails()
         # Tracks whether the user has manually edited the slug. As long as
-        # they haven't, slug stays in sync with title.
-        self._slug_is_auto = True
+        # they haven't, slug stays in sync with title. An article that has
+        # an identifier already (its draft's) keeps it: another one would
+        # publish another article.
+        self._slug_is_auto = not self._details.identifier
         self._advanced_open = False
         # Cover-image preview state.
         self._cover_thumb_hash: str = ""
@@ -401,6 +409,9 @@ class PublishArticleDialog(QDialog):
             default_title=default_title,
             default_slug=default_slug,
         )
+        self._summary_edit.setText(self._details.summary)
+        self._image_edit.setText(self._details.image)
+        self._tags_edit.setText(", ".join(self._details.hashtags))
         self._apply_theme()
         self._refresh_profile_chip()
         self._refresh_meta()
@@ -885,6 +896,7 @@ class PublishArticleDialog(QDialog):
                 published_at=published_at,
                 hashtags=self._hashtag_list(),
                 mentions=self._mention_row.mentions(),
+                extra_tags=self._details.carried_tags(body) or None,
             )
         except ValueError as exc:
             # Make sure the Advanced panel is open so the slug field is visible

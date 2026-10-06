@@ -149,6 +149,7 @@ from nostr.ui.imports_window import SETTINGS_KEY as IMPORTS_SETTINGS_KEY
 from nostr.ui.imports_window import ImportsWindow
 from nostr.imports.constants import IDENTIFIER_PREFIX as IMPORT_IDENTIFIER_PREFIX
 from nostr.imports.constants import SOURCE_TAG as IMPORT_SOURCE_TAG
+from nostr.article_details import ArticleDetails
 from nostr.drafts import (
     INNER_KIND_LONG_FORM,
     INNER_KIND_SHORT_NOTE,
@@ -172,7 +173,6 @@ from nostr.publisher import (
     DraftBulkDeleteJob,
     DraftPublishJob,
     PublishedMedia,
-    published_at_of,
 )
 from nostr.relay import RelayPool
 from nostr.search import Nip50SearchClient
@@ -4869,18 +4869,13 @@ class MainWindow(QMainWindow):
         #      coordinate so re-publishing replaces the draft in place).
         #   2. File path basename for disk-backed tabs.
         #   3. First non-blank line as a heuristic title for free-form tabs.
-        binding = getattr(ed, "_draft_binding", None) if ed else None
-        default_title = ""
-        default_slug = ""
-        first_published = None
-        if binding is not None and binding.inner_kind == INNER_KIND_LONG_FORM:
-            default_title = binding.title
-            default_slug = binding.identifier
-            # A draft of a published article (an import, an edit) carries
-            # when it first went out; a new version keeps that date.
-            record = self._draft_store.get(binding.identifier)
-            if record is not None:
-                first_published = published_at_of({"tags": record.inner_tags})
+        # A draft of an article (an import, an edit) brings all its details:
+        # summary, cover, hashtags, source, and when it first went out (a
+        # new version keeps that date).
+        details = self._article_details_of(ed)
+        default_title = details.title
+        default_slug = details.identifier
+        first_published = details.published_at
         if not default_title:
             first_line = next((ln for ln in body.splitlines() if ln.strip()), "")
             default_title = first_line.lstrip("# ").strip()
@@ -4908,6 +4903,7 @@ class MainWindow(QMainWindow):
             default_title=default_title,
             default_slug=default_slug,
             first_published=first_published,
+            details=details,
             parent=self,
             is_dark=self.is_dark_theme,
         )
@@ -5638,7 +5634,8 @@ class MainWindow(QMainWindow):
             return
         flavor = "markdown" if choice.kind is StashKind.ARTICLE else "note"
         inner = self._build_inner_for_choice(
-            profile, choice, self._publish_text(ed, flavor)
+            profile, choice, self._publish_text(ed, flavor),
+            details=self._article_details_of(ed),
         )
         if inner is None:
             return
@@ -5660,15 +5657,10 @@ class MainWindow(QMainWindow):
         if profile is None:
             return
 
-        # Pull summary off the cached record so re-stashes don't drop
-        # metadata that's only stored in the inner event tags. Title is
-        # already on the binding.
-        summary = ""
-        record = self._draft_store.get(binding.identifier)
-        if record is not None:
-            for tag in record.inner_tags:
-                if len(tag) >= 2 and tag[0] == "summary" and not summary:
-                    summary = tag[1]
+        # Every detail the draft holds goes into the new version (review
+        # F4: an imported draft lost its cover, hashtags, first
+        # publication date and source here). The title is the binding's.
+        details = self._article_details_of(ed)
 
         kind = (
             StashKind.ARTICLE
@@ -5679,13 +5671,13 @@ class MainWindow(QMainWindow):
             kind=kind,
             identifier=binding.identifier,
             title=binding.title,
-            summary=summary,
+            summary=details.summary,
         )
         if not self._confirm_images_uploaded(ed):
             return
         flavor = "markdown" if kind is StashKind.ARTICLE else "note"
         inner = self._build_inner_for_choice(
-            profile, choice, self._publish_text(ed, flavor)
+            profile, choice, self._publish_text(ed, flavor), details=details
         )
         if inner is None:
             return
@@ -5758,6 +5750,20 @@ class MainWindow(QMainWindow):
         self._attach_active_stash(ed, job)
         job.start()
 
+    def _article_details_of(self, ed) -> ArticleDetails:
+        """The details of the article in a tab: those its draft holds (an
+        imported article's cover, hashtags, first publication date and
+        source among them), with the tab's own identifier and title.
+        Empty for a tab that is no article draft."""
+        binding = getattr(ed, "_draft_binding", None) if ed is not None else None
+        if binding is None or binding.inner_kind != INNER_KIND_LONG_FORM:
+            return ArticleDetails()
+        record = self._draft_store.get(binding.identifier)
+        details = (ArticleDetails.from_tags(record.inner_tags) if record is not None
+                   else ArticleDetails())
+        return details.with_changes(identifier=binding.identifier,
+                                    title=binding.title or details.title)
+
     def _stash_defaults_for(
         self,
         ed,
@@ -5801,20 +5807,25 @@ class MainWindow(QMainWindow):
         profile: Profile,
         choice: StashChoice,
         content: str,
+        *,
+        details: Optional[ArticleDetails] = None,
     ) -> Optional[dict]:
         """Compose the inner unsigned event from the kind-picker choice.
 
-        For articles we also seed the ``title`` / ``summary`` / ``d``
-        tags so promoting the draft to a real NIP-23 publish later has
-        the metadata it needs.
+        An article draft carries all of the article's details (d, title,
+        summary, cover, hashtags, first publication date, source), so
+        publishing it later has every one of them. The choice's
+        identifier, title and summary win over ``details``; saved under
+        another identifier, it is another article, with a first
+        publication of its own.
         """
         tags: list[list[str]] = []
         if choice.kind is StashKind.ARTICLE:
-            tags.append(["d", choice.identifier])
-            if choice.title:
-                tags.append(["title", choice.title])
-            if choice.summary:
-                tags.append(["summary", choice.summary])
+            base = details or ArticleDetails()
+            if base.identifier and base.identifier != choice.identifier:
+                base = base.with_changes(published_at=None)
+            tags = base.with_changes(identifier=choice.identifier, title=choice.title,
+                                     summary=choice.summary).draft_tags(content)
         try:
             return build_inner_event(
                 kind=choice.kind.value,
