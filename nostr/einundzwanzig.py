@@ -197,21 +197,25 @@ def parse_roster(payload: bytes) -> Set[str]:
     that is malformed is skipped rather than failing the whole roster,
     since one bad row must not cost every member their benefits.
     """
-    return set(parse_roster_records(payload))
+    return set(parse_roster_records(payload) or {})
 
 
-def parse_roster_records(payload: bytes) -> Dict[str, Optional[str]]:
+def parse_roster_records(payload: bytes) -> Optional[Dict[str, Optional[str]]]:
     """Hex pubkey -> verified name handle (or None) from a roster response.
 
     The handle is the part before ``@einundzwanzig.space``. One that does
     not look like a handle is dropped, never the member it came with.
+
+    None when the answer is not a roster at all (not JSON, or not a list):
+    a maintenance page served with status 200 is a failed fetch, not an
+    empty roster, and must not take every member's benefits away.
     """
     try:
         data = json.loads(payload.decode("utf-8"))
     except (ValueError, UnicodeDecodeError):
-        return {}
+        return None
     if not isinstance(data, list):
-        return {}
+        return None
     found: Dict[str, Optional[str]] = {}
     for record in data:
         if not isinstance(record, dict):
@@ -415,7 +419,10 @@ class MembershipDirectory(QObject):
         self._inflight = None
         try:
             ok = reply.error() == QNetworkReply.NoError and not oversize["hit"]
-            records = parse_roster_records(bytes(reply.readAll())) if ok else {}
+            records = parse_roster_records(bytes(reply.readAll())) if ok else None
+            # An answer that is not a roster is a failed fetch.
+            ok = records is not None
+            records = records or {}
             roster = set(records)
         finally:
             reply.deleteLater()
