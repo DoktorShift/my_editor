@@ -27,8 +27,9 @@ each into an encrypted draft:
      (stray nav / footer) is usually *shorter*, not longer. Recovers
      the real title for slug-titled (sitemap) items.
   4. Image rehosting (opt-in, default on when a Blossom server is
-     configured): every unique image in the markdown is downloaded and
-     uploaded to the user's Blossom server, and the markdown rewritten.
+     configured): every unique image in the markdown, and the cover, is
+     downloaded and uploaded to the user's Blossom server, and the
+     markdown and the cover rewritten.
      A user-curated skip set keeps chosen images at their original URLs;
      one failed image never fails the item.
   5. Build the unsigned NIP-23 inner event via ``build_article`` (with
@@ -598,12 +599,10 @@ class ImportItemsJob(QObject):
                     total,
                 )
                 self._emit_status(text.format(failed=len(outcome.failed), total=total))
-            # The cover follows the body only when it IS an image from
-            # the body, because that rewrite is the one the user already
-            # approved in the review dialog. A cover the user never saw
-            # in that list keeps the URL the feed gave it; rehosting it
-            # would upload a third party's file to the user's server
-            # outside what was approved.
+            # The cover is rehosted with the body's images (it is in the
+            # review dialog's list too, so the user can keep it at its
+            # original address); otherwise the draft would still depend
+            # on the source site for its cover.
             self._sign_and_publish(
                 replace(
                     template,
@@ -617,6 +616,7 @@ class ImportItemsJob(QObject):
             template.content,
             mirror=self._image_mirror,
             skip_urls=self._skip_image_urls,
+            also=[template.image] if template.image else [],
             on_progress=_on_progress,
             on_done=_on_done,
             is_cancelled=lambda: self._cancelled,

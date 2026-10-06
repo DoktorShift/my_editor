@@ -1149,9 +1149,13 @@ class FeedsPanel(QFrame):
         self._update_image_review_button(selected)
 
     def _selected_image_urls(self, selected: List[FeedItem]) -> List[str]:
+        """Every image an import of ``selected`` would copy: the covers
+        and the images in the bodies."""
         seen: List[str] = []
         for item in selected:
-            for url in scan_html_images(item.content_html):
+            for url in [item.image or "", *scan_html_images(item.content_html)]:
+                if not url or not url.lower().startswith(("http://", "https://")):
+                    continue
                 if url not in seen:
                     seen.append(url)
         return seen

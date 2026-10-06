@@ -202,6 +202,23 @@ class TestRehostLoop(unittest.TestCase):
         self.assertEqual(calls, ["https://a.example/photo%20one.jpg"])
         self.assertIn("![banner](https://a.example/banner.png)", outcome.markdown)
 
+    def test_an_image_outside_the_markdown_is_rehosted_with_it(self):
+        # The cover: copied like the body's images, but only mapped,
+        # since it is not in the markdown to rewrite.
+        mirror, calls = fake_mirror()
+        outcome, _ = run_rehost("no images here", mirror,
+                                also=["https://a.example/cover.png", "",
+                                      "data:image/png;base64,AAAA"])
+        self.assertEqual(calls, ["https://a.example/cover.png"])
+        self.assertEqual(outcome.mapping, {"https://a.example/cover.png":
+                                           "https://blossom.example/1"})
+        self.assertEqual(outcome.markdown, "no images here")
+
+    def test_an_image_in_both_is_copied_once(self):
+        mirror, calls = fake_mirror()
+        run_rehost(MD, mirror, also=["https://a.example/banner.png"])
+        self.assertEqual(calls.count("https://a.example/banner.png"), 1)
+
     def test_no_images_short_circuits(self):
         mirror, calls = fake_mirror()
         outcome, progress = run_rehost("plain text, no images", mirror)
