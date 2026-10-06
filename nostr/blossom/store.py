@@ -51,6 +51,7 @@ from .client import (
     extract_server_from_blob_url,
     looks_like_sha256,
     server_origin,
+    whole_number,
 )
 from .errors import ERROR_CODES, NO_SIGNER, friendly_message, signer_rejected
 from .hashes import blob_url, url_agrees_with_hash
@@ -83,6 +84,17 @@ _RETRYABLE_STATUSES = frozenset({0, 413, 429, 502, 503})
 # the clock is the problem, so the next server would demand auth too and
 # a failover buys a second prompt and a second failure.
 _RETRYABLE_CODES = frozenset({ERROR_CODES.REDIRECT_REFUSED})
+
+# A server that refuses a copy for one of these reasons would refuse the
+# same bytes uploaded directly: its limits, a payment, the signature, or a
+# copy that came back wrong. Any other refusal (no mirror support, the
+# source out of its reach) gets a direct upload.
+_NO_DIRECT_UPLOAD = frozenset({
+    ERROR_CODES.RATE_LIMITED, ERROR_CODES.PAYMENT_REQUIRED, ERROR_CODES.SERVER_TOO_LARGE,
+    ERROR_CODES.TOO_LARGE, ERROR_CODES.AUTH_REJECTED, ERROR_CODES.SIGNER_REJECTED,
+    ERROR_CODES.SIGNER_IDENTITY_MISMATCH, ERROR_CODES.HASH_MISMATCH,
+    ERROR_CODES.NETWORK_UNAVAILABLE,
+})
 
 
 # ---------------------------------------------------------------------------
@@ -599,7 +611,7 @@ class MediaStore(QObject):
             url = entry.get("url") or f"{origin}/{sha}"
             size = _entry_size(entry)
             mime = str(entry.get("type") or "application/octet-stream")
-            uploaded = int(entry.get("uploaded") or entry.get("created") or 0)
+            uploaded = whole_number(entry.get("uploaded") or entry.get("created"))
             uploaded_ms = uploaded * 1000 if uploaded else int(time.time() * 1000)
 
             if sha in merged:
@@ -967,6 +979,7 @@ class MediaStore(QObject):
                 media=media,
                 source_url=media.url,
                 mirror_servers=missing,
+                body=body,
             )
             return
 
@@ -1149,6 +1162,7 @@ class MediaStore(QObject):
             source_url=primary_url,
             mirror_servers=mirror_servers,
             configured_primary=configured_primary,
+            body=body,
         )
 
     def _replicate(
@@ -1160,6 +1174,7 @@ class MediaStore(QObject):
         source_url: str,
         mirror_servers: List[str],
         configured_primary: str = "",
+        body: Optional[bytes] = None,
     ) -> None:
         """Copy a blob one server already holds onto the rest, in turn.
 
@@ -1168,7 +1183,10 @@ class MediaStore(QObject):
         clear one by one anyway, which is the flood the importer's loop
         was written to avoid.
 
-        A mirror that refuses is reported and the walk carries on. The
+        A server that cannot copy it (no mirror support, or it cannot
+        reach the source) gets the bytes uploaded directly when they are
+        at hand. A server that refuses for its own reasons (a limit, a
+        payment, the signature) is reported and the walk carries on. The
         blob is already on a server, so failing the whole upload over a
         replication problem would take an image out of a document to
         punish a server the user does not control.
@@ -1202,6 +1220,22 @@ class MediaStore(QObject):
                 failures.append((_hostname(o), _error_code(err)))
                 step(i + 1)
 
+            def on_mirror_err(err: BlossomError, o=origin, i=index) -> None:
+                if body is None or _error_code(err) in _NO_DIRECT_UPLOAD:
+                    on_err(err, o, i)
+                    return
+                replicate.upload_to_server(
+                    session_pool=self._session_pool,
+                    profile=profile,
+                    client=self._client,
+                    server=o,
+                    body=body,
+                    mime=media.mime_type,
+                    sha256=media.hash,
+                    on_success=lambda result, o=o, i=i: on_ok(result, o, i),
+                    on_failure=lambda err2, o=o, i=i: on_err(err2, o, i),
+                )
+
             replicate.mirror_to_server(
                 session_pool=self._session_pool,
                 profile=profile,
@@ -1210,7 +1244,7 @@ class MediaStore(QObject):
                 source_url=source_url,
                 sha256=media.hash,
                 on_success=on_ok,
-                on_failure=on_err,
+                on_failure=on_mirror_err,
             )
 
         step(0)
@@ -1426,11 +1460,7 @@ def servers_holding(media, planned: Sequence[str]) -> Set[str]:
 
 def _entry_size(entry: dict) -> int:
     """A /list entry's size in bytes; 0 when it is missing or nonsense."""
-    try:
-        size = int(entry.get("size") or 0)
-    except (TypeError, ValueError):
-        return 0
-    return max(0, size)
+    return whole_number(entry.get("size"))
 
 
 def _origin_or_empty(value: str) -> str:
