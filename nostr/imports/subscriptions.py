@@ -46,6 +46,7 @@ from typing import Callable, Dict, List, Optional, Sequence
 
 from PySide6.QtCore import QEventLoop, QObject, QTimer, Signal
 
+from atomic_file import write_json
 from i18n import _
 
 from .. import CLIENT_NAME
@@ -422,13 +423,9 @@ class FeedSubscriptionStore(QObject):
             "dirty": dirty,
             "legacyMerged": legacy_merged,
         }
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-            tmp.replace(path)
-        except OSError as exc:
-            _log.warning("feed cache write failed: %s", exc)
+        # write_json logs why when it cannot write; the list itself stays
+        # on the relays.
+        write_json(path, data, indent=2)
 
     # -- internals: relays ---------------------------------------------------
 

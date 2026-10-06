@@ -226,7 +226,7 @@ class TestMutations:
     def test_older_cache_is_read(self, tmp_path):
         (tmp_path / f"feed_sources_{PK}.json").write_text(json.dumps({
             "feeds": [{"url": FEED_URL, "title": "Old", "last_fetched_at": 7}],
-            "updated_at": 1}))
+            "updated_at": 1}), encoding="utf-8")
         store, _, _ = make_store(tmp_path, relay=FakeRelay(accepted=False))
         store.bind_profile(PROFILE)
         assert store.get(FEED_URL).last_fetched_at == 7
@@ -421,7 +421,7 @@ class TestPublish:
         settle()
         assert store.feeds == []
         assert [f["url"] for f in relay.payload()["feeds"]] == [FEED_URL]
-        cached = json.loads((tmp_path / f"feed_sources_{PK}.json").read_text())
+        cached = json.loads((tmp_path / f"feed_sources_{PK}.json").read_text(encoding="utf-8"))
         assert cached["dirty"] is False
 
 
@@ -558,7 +558,7 @@ class TestQuitting:
         store.flush()
         assert store.wait_until_settled(50) is False
         # What was not sent is sent on the next launch.
-        cached = json.loads((tmp_path / f"feed_sources_{PK}.json").read_text())
+        cached = json.loads((tmp_path / f"feed_sources_{PK}.json").read_text(encoding="utf-8"))
         assert cached["dirty"] is True
 
     def test_nothing_to_wait_for(self, tmp_path):
