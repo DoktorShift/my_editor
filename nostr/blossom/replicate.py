@@ -50,13 +50,8 @@ from ..bunker import BunkerSessionPool
 from ..profiles import Profile
 from .auth import build_blossom_auth_event
 from .client import BlossomClient, BlossomError, UploadResult, server_origin
-from .errors import ERROR_CODES
+from .errors import ERROR_CODES, signer_rejected
 
-
-# Kept byte-identical to what the store and the importer emitted before
-# the extraction: the asset layer still classifies a signer failure by
-# matching the start of this sentence.
-_SIGNER_PREFIX = "signer rejected the Blossom auth event: "
 
 _UNSAFE_SOURCE = "mirror source URL was not allowed"
 
@@ -191,7 +186,7 @@ def _sign_upload_token(
 
 
 def _signer_error(reason, *, prefixed: bool = False) -> BlossomError:
-    text = f"{_SIGNER_PREFIX}{reason}" if prefixed else str(reason)
+    text = signer_rejected(reason) if prefixed else str(reason)
     return BlossomError(text, code=ERROR_CODES.SIGNER_REJECTED)
 
 

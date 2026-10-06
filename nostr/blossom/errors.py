@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import re
 
+from i18n import N_, _
+
 
 class ERROR_CODES:
     """Namespace of stable error-code strings."""
@@ -53,63 +55,86 @@ class ERROR_CODES:
 # document because of any of these, and the copy says so where it is
 # the user's first question.
 _FRIENDLY = {
-    ERROR_CODES.REDIRECT_REFUSED: (
+    ERROR_CODES.REDIRECT_REFUSED: _(
         "The server redirected this request. For safety it was not sent "
         "again. Try a different server."
     ),
-    ERROR_CODES.UNSAFE_URL: (
+    ERROR_CODES.UNSAFE_URL: _(
         "That address is not allowed. Only regular web links can be used "
         "here."
     ),
-    ERROR_CODES.TOO_LARGE: (
+    ERROR_CODES.TOO_LARGE: _(
         "The transfer was larger than allowed and was stopped."
     ),
-    ERROR_CODES.UNSUPPORTED_FORMAT: (
+    ERROR_CODES.UNSUPPORTED_FORMAT: _(
         "That file format cannot be shown here. The file itself is "
         "unaffected."
     ),
-    ERROR_CODES.HOST_MISMATCH: (
+    ERROR_CODES.HOST_MISMATCH: _(
         "The signed authorization does not match this server. Nothing was "
         "sent."
     ),
-    ERROR_CODES.SIGNER_REJECTED: (
+    ERROR_CODES.SIGNER_REJECTED: _(
         "The signer declined the request. Approve it in the signer app and "
         "try again."
     ),
-    ERROR_CODES.UPLOAD_FAILED: (
+    ERROR_CODES.UPLOAD_FAILED: _(
         "The upload did not finish. The image stays in your document and "
         "can be retried."
     ),
-    ERROR_CODES.NETWORK_UNAVAILABLE: (
+    ERROR_CODES.NETWORK_UNAVAILABLE: _(
         "The server could not be reached. The image stays in your document "
         "and can be uploaded later."
     ),
-    ERROR_CODES.SIGNER_IDENTITY_MISMATCH: (
+    ERROR_CODES.SIGNER_IDENTITY_MISMATCH: _(
         "The signer answered for a different identity. Nothing was sent."
     ),
-    ERROR_CODES.HASH_MISMATCH: (
+    ERROR_CODES.HASH_MISMATCH: _(
         "The server described a different file than the one that was sent. "
         "Nothing was stored and the file stays in your document."
     ),
-    ERROR_CODES.SERVER_TOO_LARGE: (
+    ERROR_CODES.SERVER_TOO_LARGE: _(
         "That server refused the file for being too large. Try another "
         "server, or a smaller file."
     ),
-    ERROR_CODES.PAYMENT_REQUIRED: (
+    ERROR_CODES.PAYMENT_REQUIRED: _(
         "That server asks for payment for uploads. The file stays in your "
         "document. Try another server."
     ),
-    ERROR_CODES.RATE_LIMITED: (
+    ERROR_CODES.RATE_LIMITED: _(
         "That server is asking for a slower pace. Wait a moment and try "
         "again."
     ),
-    ERROR_CODES.AUTH_REJECTED: (
+    ERROR_CODES.AUTH_REJECTED: _(
         "That server did not accept the signed authorization. Check the "
         "signer is connected, then try again."
     ),
 }
 
-_FALLBACK = "Something went wrong with that media request. Nothing was lost."
+_FALLBACK = _("Something went wrong with that media request. Nothing was lost.")
+
+# The two sentences that say the signer, not a server, stopped a request.
+# The asset manager tells the two kinds of failure apart by them
+# (nostr/media/manager.py), so they are written once, here, and compared
+# in the language they are shown in. Temporary until the store reports
+# structured codes for every failure.
+NO_SIGNER = _("Connect a Nostr signer first.")
+_SIGNER_REJECTED = N_("signer rejected the Blossom auth event: {reason}")
+
+
+def signer_rejected(reason) -> str:
+    """The sentence for a signer that refused to sign, with its own words."""
+    return _(_SIGNER_REJECTED).format(reason=reason)
+
+
+def is_signer_failure(text) -> bool:
+    """Whether ``text`` is one of the two sentences above."""
+    text = str(text or "")
+    if text.startswith(NO_SIGNER):
+        return True
+    # The signer's own words come last, so the sentence is known up to them.
+    opening = _(_SIGNER_REJECTED).partition("{reason}")[0]
+    return bool(opening) and text.startswith(opening)
 
 # A raw header can carry anything the operator typed, including CR LF.
 # This string lands in a plain-text label, so newlines and control

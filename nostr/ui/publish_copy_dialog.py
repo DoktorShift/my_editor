@@ -51,6 +51,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from i18n import _, ngettext
+
 from ..media.media_visibility import UNKNOWN, MediaVisibility
 from ..media.publish_copy import CopyStage, PublicCopyMaker, PublishSet
 from ..media.visibility import PrivateBlob, PublicBlob
@@ -77,33 +79,33 @@ CANCELLED = "cancelled"
 # names what it removes rather than calling itself "preparing".
 WAITING = "waiting"
 _STAGE_TEXT: Dict[str, str] = {
-    WAITING: "Waiting",
-    CopyStage.CHECKING: "Checking",
-    CopyStage.FETCHING: "Downloading the original",
-    CopyStage.DECRYPTING: "Decrypting",
-    CopyStage.PREPARING: "Removing camera and location data",
-    CopyStage.UPLOADING: "Uploading the copy",
-    CopyStage.RECORDING: "Recording it as public",
-    CopyStage.REUSED: "Already has a public copy",
-    CopyStage.DONE: "Public copy created",
-    CopyStage.FAILED: "Failed",
-    CopyStage.CANCELLED: "Cancelled, nothing was uploaded",
+    WAITING: _("Waiting"),
+    CopyStage.CHECKING: _("Checking"),
+    CopyStage.FETCHING: _("Downloading the original"),
+    CopyStage.DECRYPTING: _("Decrypting"),
+    CopyStage.PREPARING: _("Removing camera and location data"),
+    CopyStage.UPLOADING: _("Uploading the copy"),
+    CopyStage.RECORDING: _("Recording it as public"),
+    CopyStage.REUSED: _("Already has a public copy"),
+    CopyStage.DONE: _("Public copy created"),
+    CopyStage.FAILED: _("Failed"),
+    CopyStage.CANCELLED: _("Cancelled, nothing was uploaded"),
 }
 
 # The four promises, in the order they answer "what happens to me".
 # ``writing.md``: "Be clear. Choose words that are easily understood and
 # convey the right thing."
 _PROMISES = (
-    "A separate public copy is uploaded. Anyone with its address can open it.",
-    "The private original is not changed, moved or unlocked. It stays private.",
-    "Camera and location details are removed from the copy before it is sent.",
-    "You can revoke the copy later. It is listed with your published media.",
+    _("A separate public copy is uploaded. Anyone with its address can open it."),
+    _("The private original is not changed, moved or unlocked. It stays private."),
+    _("Camera and location details are removed from the copy before it is sent."),
+    _("You can revoke the copy later. It is listed with your published media."),
 )
 
 # What a pick is refused with when nobody has been able to check it. It
 # names the state, the consequence and the way out, because "unknown" on
 # its own reads as a bug rather than as something the user can clear.
-_UNCHECKED_PICK = (
+_UNCHECKED_PICK = _(
     "This picture has not been checked against your private library, so it "
     "was not used. Wait for the library to finish opening, or reconnect your "
     "signer, then try again."
@@ -140,7 +142,7 @@ class PublishCopyDialog(QDialog):
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Create a public copy")
+        self.setWindowTitle(_("Create a public copy"))
         self.setModal(True)
         self.resize(560, 460)
         self.setStyleSheet(_DARK_CSS if is_dark else _LIGHT_CSS)
@@ -246,10 +248,10 @@ class PublishCopyDialog(QDialog):
         buttons = QHBoxLayout()
         buttons.setSpacing(8)
         buttons.addStretch(1)
-        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn = QPushButton(_("Cancel"))
         self._cancel_btn.clicked.connect(self._on_cancel_clicked)
         buttons.addWidget(self._cancel_btn)
-        self._retry_btn = QPushButton("Try again")
+        self._retry_btn = QPushButton(_("Try again"))
         self._retry_btn.clicked.connect(self._on_retry_clicked)
         self._retry_btn.setVisible(False)
         buttons.addWidget(self._retry_btn)
@@ -277,19 +279,19 @@ class PublishCopyDialog(QDialog):
                 # ``resolve_pick`` never opens the dialog for a set that
                 # is already public, because there is nothing to consent
                 # to and a modal asking about nothing is noise.
-                self._heading.setText("These pictures already have public copies.")
+                self._heading.setText(_("These pictures already have public copies."))
             else:
-                self._heading.setText(
-                    "Create a public copy of this picture?"
-                    if count == 1
-                    else f"Create public copies of these {count} pictures?"
-                )
+                self._heading.setText(ngettext(
+                    "Create a public copy of this picture?",
+                    "Create public copies of these {count} pictures?",
+                    count,
+                ).format(count=count))
         elif working:
-            self._heading.setText(
-                "Creating the public copy…"
-                if count == 1
-                else f"Creating {count} public copies…"
-            )
+            self._heading.setText(ngettext(
+                "Creating the public copy…",
+                "Creating {count} public copies…",
+                count,
+            ).format(count=count))
 
         self._promises.setVisible(explaining)
         self._storage.setVisible(explaining)
@@ -300,7 +302,7 @@ class PublishCopyDialog(QDialog):
         # There is nothing to halt before the run starts and nothing to
         # halt after it has stopped, so the one button changes meaning
         # with the state rather than sitting there doing nothing.
-        self._cancel_btn.setText("Cancel" if explaining or working else "Close")
+        self._cancel_btn.setText(_("Cancel") if explaining or working else _("Close"))
 
     # -- the run -----------------------------------------------------------
 
@@ -366,7 +368,7 @@ class PublishCopyDialog(QDialog):
         # feedback.md: "Consider integrating status feedback into your
         # interface... people get important information without having to
         # take action or leave their current context."
-        self._status.setText(f"{done} of {total} settled.")
+        self._status.setText(_("{done} of {total} settled.").format(done=done, total=total))
 
     def _on_run_done(self, outcome: PublishSet) -> None:
         self._publish_set = outcome
@@ -401,7 +403,7 @@ class PublishCopyDialog(QDialog):
         pointing at it. The dialog closes when the run answers.
         """
         if self._state == WORKING:
-            self._status.setText("Stopping. Nothing new will be uploaded.")
+            self._status.setText(_("Stopping. Nothing new will be uploaded."))
             self._maker.cancel()
             return
         super().reject()
@@ -483,9 +485,9 @@ def resolve_pick(
 
     if maker is None:
         return PickResolution(
-            reason="This picture is private, and this app cannot make a "
-                   "public copy of it right now. Connect your signer and "
-                   "try again.",
+            reason=_("This picture is private, and this app cannot make a "
+                     "public copy of it right now. Connect your signer and "
+                     "try again."),
         )
 
     if all(maker.existing_copy(blob) is not None for blob in private):
@@ -523,7 +525,7 @@ def resolution_from(outcome: Optional[PublishSet]) -> PickResolution:
             return PickResolution(cancelled=True)
         reason = outcome.failures[0].reason if outcome.failures else ""
         return PickResolution(
-            reason=reason or "No public copy was created, so nothing was inserted.",
+            reason=reason or _("No public copy was created, so nothing was inserted."),
         )
     public: PublicBlob = outcome.blobs[0]
     return PickResolution(
@@ -541,8 +543,10 @@ def resolution_from(outcome: Optional[PublishSet]) -> PickResolution:
 
 def _create_label(count: int) -> str:
     if not count:
-        return "Use the existing copies"
-    return "Create public copy" if count == 1 else f"Create {count} public copies"
+        return _("Use the existing copies")
+    return ngettext(
+        "Create public copy", "Create {count} public copies", count,
+    ).format(count=count)
 
 
 def _row_text(blob: PrivateBlob, stage: str) -> str:
@@ -564,41 +568,45 @@ def _storage_line(pending: Sequence[PrivateBlob]) -> str:
     """
     total = sum(max(0, blob.size) for blob in pending)
     if not total:
-        return (
+        return _(
             "Each copy is stored beside its original, so it uses that much "
             "space again on your media servers."
         )
     if len(pending) == 1:
-        return (
-            f"The copy uses about {_format_size(total)} more on your media "
-            f"servers. The original keeps its own space."
-        )
-    return (
-        f"The copies use about {_format_size(total)} more on your media "
-        f"servers, on top of the originals, which keep their own space."
-    )
+        return _(
+            "The copy uses about {size} more on your media "
+            "servers. The original keeps its own space."
+        ).format(size=_format_size(total))
+    return _(
+        "The copies use about {size} more on your media "
+        "servers, on top of the originals, which keep their own space."
+    ).format(size=_format_size(total))
 
 
 def _cancelled_line(minted: int) -> str:
     """Cancelling says what did and did not happen, without softening it."""
     if not minted:
-        return "Cancelled. Nothing was uploaded and nothing was published."
-    return (
-        f"Cancelled. Nothing was published, but "
-        f"{minted} public cop{'y' if minted == 1 else 'ies'} had already been "
-        f"created. {'It is' if minted == 1 else 'They are'} listed with your "
-        f"published media and can be revoked there."
-    )
+        return _("Cancelled. Nothing was uploaded and nothing was published.")
+    return ngettext(
+        "Cancelled. Nothing was published, but {count} public copy had already "
+        "been created. It is listed with your published media and can be "
+        "revoked there.",
+        "Cancelled. Nothing was published, but {count} public copies had already "
+        "been created. They are listed with your published media and can be "
+        "revoked there.",
+        minted,
+    ).format(count=minted)
 
 
 def _failed_line(reason: str, minted: int) -> str:
     """A named reason, and never a claim that the set succeeded."""
-    detail = (reason or "").strip() or "A public copy could not be created."
-    line = f"Nothing was published. {detail}"
-    if minted:
-        line += (
-            f" {minted} cop{'y' if minted == 1 else 'ies'} made before this "
-            f"{'is' if minted == 1 else 'are'} listed with your published "
-            f"media and can be revoked."
-        )
-    return line
+    detail = (reason or "").strip() or _("A public copy could not be created.")
+    if not minted:
+        return _("Nothing was published. {reason}").format(reason=detail)
+    return ngettext(
+        "Nothing was published. {reason} {count} copy made before this is "
+        "listed with your published media and can be revoked.",
+        "Nothing was published. {reason} {count} copies made before this are "
+        "listed with your published media and can be revoked.",
+        minted,
+    ).format(reason=detail, count=minted)

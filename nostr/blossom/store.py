@@ -38,6 +38,7 @@ from typing import Callable, Dict, List, Optional, Protocol, Sequence, Set
 from PySide6.QtCore import QObject, Signal
 
 import url_safety
+from i18n import _
 
 from ..bunker import BunkerClient, BunkerSessionPool
 from ..profiles import Profile
@@ -51,7 +52,7 @@ from .client import (
     looks_like_sha256,
     server_origin,
 )
-from .errors import ERROR_CODES, friendly_message
+from .errors import ERROR_CODES, NO_SIGNER, friendly_message, signer_rejected
 from .hashes import blob_url, url_agrees_with_hash
 from .plan import get_effective_max_file, lists_publicly, plan_upload, UploadPlan
 from .settings import BlossomSettings
@@ -429,15 +430,15 @@ class MediaStore(QObject):
                 listing.fetched_at = now
             self._listings = listings
             if remaining["errors"] >= len(servers) and not previous:
-                self.fetch_error.emit(
+                self.fetch_error.emit(_(
                     "Could not reach any Blossom server. Check your network or server list."
-                )
+                ))
             else:
                 if remaining["errors"] >= len(servers):
-                    self.fetch_error.emit(
+                    self.fetch_error.emit(_(
                         "Could not reach any Blossom server. Showing what the "
                         "library had before."
-                    )
+                    ))
                 failed = {o for o, l in listings.items() if not l.ok}
                 carry_over(failed)
                 for sha, media in self._files.items():
@@ -700,18 +701,18 @@ class MediaStore(QObject):
         path = Path(file_path)
         name = path.name or "upload"
         if profile is None:
-            self.upload_failed.emit(name, "Connect a Nostr signer first.")
+            self.upload_failed.emit(name, NO_SIGNER)
             return
         try:
             body = path.read_bytes()
         except OSError as exc:
-            self.upload_failed.emit(name, f"Could not read file: {exc}")
+            self.upload_failed.emit(name, _("Could not read file: {error}").format(error=exc))
             return
         if not body:
-            self.upload_failed.emit(name, "File is empty.")
+            self.upload_failed.emit(name, _("File is empty."))
             return
 
-        mime, _ = mimetypes.guess_type(str(path))
+        mime, _encoding = mimetypes.guess_type(str(path))
         self.upload_bytes(body, name=name, mime_type=mime or "application/octet-stream")
 
     def upload_bytes(
@@ -741,15 +742,15 @@ class MediaStore(QObject):
         """
         profile = self._profile_provider()
         if profile is None:
-            self.upload_failed.emit(name, "Connect a Nostr signer first.")
+            self.upload_failed.emit(name, NO_SIGNER)
             return
         if not body:
-            self.upload_failed.emit(name, "Nothing to upload.")
+            self.upload_failed.emit(name, _("Nothing to upload."))
             return
 
         servers = self._target_servers()
         if not servers:
-            self.upload_failed.emit(name, "No Blossom servers configured.")
+            self.upload_failed.emit(name, _("No Blossom servers configured."))
             return
 
         # The size plan runs before any dedup probe, so an oversized file
@@ -761,8 +762,8 @@ class MediaStore(QObject):
             limit_mb = max(1, max(get_effective_max_file(s) for s in servers) // (1024 * 1024))
             self.upload_failed.emit(
                 name,
-                f"File is too large for any configured server ({limit_mb} MiB). "
-                "Try a smaller file or add a server that accepts it.",
+                _("File is too large for any configured server ({limit} MiB). "
+                  "Try a smaller file or add a server that accepts it.").format(limit=limit_mb),
             )
             return
 
@@ -771,7 +772,8 @@ class MediaStore(QObject):
                     if self._has_room(server, sha, len(body), name)]
         if not eligible:
             self.upload_failed.emit(
-                name, "There isn\u2019t enough space left on your media servers for this file.")
+                name,
+                _("There isn\u2019t enough space left on your media servers for this file."))
             return
         self._seed_cache(body)
         state = UploadJobState(name=name, status="queued", hash=sha)
@@ -1269,7 +1271,7 @@ class MediaStore(QObject):
         """
         profile = self._profile_provider()
         if profile is None:
-            self.delete_failed.emit(file_hash, "Connect a Nostr signer first.")
+            self.delete_failed.emit(file_hash, NO_SIGNER)
             return
         media = self._files.get(file_hash)
         if media is None:
@@ -1309,7 +1311,8 @@ class MediaStore(QObject):
                 summary = "; ".join(f"{_hostname(host)}: {msg}" for host, msg in failures)
                 self.delete_failed.emit(
                     file_hash,
-                    f"No server accepted the delete ({summary}). Removed locally.",
+                    _("No server accepted the delete ({servers}). Removed locally.").format(
+                        servers=summary),
                 )
             self.library_changed.emit()
 
@@ -1386,9 +1389,7 @@ class MediaStore(QObject):
             client.sign_event(
                 unsigned_event,
                 on_success=on_signed,
-                on_failure=lambda reason: on_failure(
-                    f"signer rejected the Blossom auth event: {reason}"
-                ),
+                on_failure=lambda reason: on_failure(signer_rejected(reason)),
             )
 
         self._session_pool.get(profile, on_ready=on_ready, on_error=on_failure)

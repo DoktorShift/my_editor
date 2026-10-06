@@ -34,6 +34,7 @@ from typing import Final, Optional
 from PySide6.QtCore import QBuffer, QIODevice
 
 import image_safety
+from i18n import _
 
 
 # Formats we re-encode, mapped to what we write them back out as. JPEG
@@ -82,11 +83,11 @@ def scrub_for_publication(data: bytes, declared_mime: str = "") -> ScrubResult:
     which is deliberately the same set it will not decode.
     """
     if not isinstance(data, (bytes, bytearray)) or not data:
-        raise ScrubError("there are no bytes to publish")
+        raise ScrubError(_("there are no bytes to publish"))
 
     mime = image_safety.sniff_image_mime(bytes(data))
     if mime is None:
-        raise ScrubError("this file is not an image this app can publish")
+        raise ScrubError(_("this file is not an image this app can publish"))
 
     passthrough_reason = _PASS_THROUGH.get(mime)
     if passthrough_reason:
@@ -98,11 +99,11 @@ def scrub_for_publication(data: bytes, declared_mime: str = "") -> ScrubResult:
     if target is None:
         # Sniffed as an image, but not one we are willing to re-encode.
         # Publishing it unscrubbed would defeat the point of this module.
-        raise ScrubError(f"{mime} cannot be prepared for publication")
+        raise ScrubError(_("{type} cannot be prepared for publication").format(type=mime))
 
     image = image_safety.decode_image_bytes(bytes(data))
     if image is None or image.isNull():
-        raise ScrubError("this image could not be read")
+        raise ScrubError(_("this image could not be read"))
 
     fmt, out_mime = target
     buffer = QBuffer()
@@ -114,11 +115,11 @@ def scrub_for_publication(data: bytes, declared_mime: str = "") -> ScrubResult:
     )
     buffer.close()
     if not ok:
-        raise ScrubError("this image could not be re-encoded")
+        raise ScrubError(_("this image could not be re-encoded"))
 
     out = bytes(buffer.data())
     if not out:
-        raise ScrubError("re-encoding produced nothing")
+        raise ScrubError(_("re-encoding produced nothing"))
     return ScrubResult(data=out, mime=out_mime, scrubbed=True)
 
 
