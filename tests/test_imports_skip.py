@@ -163,3 +163,38 @@ class TestTheMenuBar:
         MainWindow._update_undo_redo_buttons(stand_in)
         assert stand_in.act_undo.text() == "Undo"
         assert not stand_in.act_undo.isEnabled()
+
+
+def test_the_documents_commands_are_dimmed_while_imports_is_in_front(window):
+    """Review M9: the menu bar is the app's while the Imports window is
+    in front; what it cannot do there is dimmed, and View > Show Sidebar
+    works for it."""
+    from PySide6.QtWidgets import QMainWindow, QMenu
+    from commands import EDIT, FILE, FORMAT, VIEW, Command, CommandRegistry
+    host_window = QMainWindow()
+    registry = CommandRegistry(host_window)
+    save = registry.add(Command("file.save", "Save", FILE, "Ctrl+S"))
+    bold = registry.add(Command("format.bold", "Bold", FORMAT, "Ctrl+B"))
+    copy = registry.add(Command("edit.copy", "Copy", EDIT))
+    sidebar = registry.add(Command("view.sidebar", "Show Sidebar", VIEW), enabled=False)
+    front = {"window": window}
+    host = SimpleNamespace(
+        commands=registry, act_window_sidebar=sidebar, _m_background=QMenu(),
+        _imports_in_front=lambda: front["window"], _update_knit_actions=lambda: None,
+        _update_format_buttons=lambda: None,
+        _DOCUMENT_COMMANDS=MainWindow._DOCUMENT_COMMANDS,
+        _DOCUMENT_PREFIXES=MainWindow._DOCUMENT_PREFIXES)
+    host._is_document_command = lambda cid: MainWindow._is_document_command(host, cid)
+    host._update_window_commands = lambda: MainWindow._update_window_commands(host)
+    bold.setEnabled(False)          # as the document left it
+    MainWindow._update_window_commands(host)
+    assert not save.isEnabled() and not bold.isEnabled()
+    assert copy.isEnabled()          # acts on the window in front
+    assert sidebar.isEnabled() and sidebar.text() == "Hide Sidebar"
+    MainWindow._toggle_window_sidebar(host)
+    assert not window.act_sidebar.isChecked()
+    assert sidebar.text() == "Show Sidebar"
+    front["window"] = None           # the editor's window in front again
+    MainWindow._update_window_commands(host)
+    assert save.isEnabled() and not bold.isEnabled()
+    assert not sidebar.isEnabled()

@@ -601,8 +601,10 @@ class MainWindow(QMainWindow):
         self.tabs.currentChanged.connect(self._on_tab_changed)
         self._update_undo_redo_buttons()
         # Edit > Undo follows the window in front (the Imports window has
-        # its own Undo Skip).
+        # its own Undo Skip), and the document's own commands are dimmed
+        # while another window is in front.
         QApplication.instance().focusChanged.connect(self._update_undo_redo_buttons)
+        QApplication.instance().focusChanged.connect(self._update_window_commands)
         self._update_status_bar()
         self._start_ipc_server()
         QTimer.singleShot(0, lambda ws=resumed: self._announce_version_change(ws))
@@ -1448,6 +1450,12 @@ class MainWindow(QMainWindow):
                                           QKeySequence.StandardKey.FullScreen, checkable=True,
                                           listed_as=_("Full screen")),
                                   toggled=self._toggle_fullscreen)
+        # View > Show Sidebar, for the window in front that has one (the
+        # Imports window); dimmed while this window is in front. Its own
+        # key (Control-Command-S) belongs to that window.
+        self.act_window_sidebar = add(Command("view.sidebar", _("Show Sidebar"), VIEW,
+                                              listed_as=_("Show or hide the sidebar")),
+                                      triggered=self._toggle_window_sidebar, enabled=False)
 
         # Nostr. Only the ones that need an account are marked: Create
         # Account, Connect Signer, Restore and the membership window are
@@ -1630,7 +1638,9 @@ class MainWindow(QMainWindow):
         for action in self.act_languages:
             m_language.addAction(action)
         m_view.addSeparator()
+        m_view.addAction(self.act_window_sidebar)
         m_view.addAction(self.act_fullscreen)
+        self._m_background = m_background
 
         m_nostr = self.menuBar().addMenu("&Nostr")
         m_nostr.addAction(self.act_nostr_publish_note)
@@ -3852,6 +3862,59 @@ class MainWindow(QMainWindow):
         if ed:
             ed.reset_to_default()
             self._update_format_buttons()
+
+    # Commands that act on this window's document: dimmed while another
+    # window is in front, as a Mac app dims what the key window cannot do.
+    _DOCUMENT_COMMANDS = frozenset({
+        "file.save", "file.save_as", "file.page_setup", "file.print", "file.print_preview",
+        "file.knit_html", "file.knit_pdf", "search.replace", "search.next",
+        "search.previous", "search.use_selection", "edit.paste_plain",
+        "view.line_numbers", "view.syntax_highlighting", "view.paper_mode", "view.toolbar",
+        "view.highlight_line", "nostr.publish_note", "nostr.publish_article",
+        "nostr.insert_image"})
+    _DOCUMENT_PREFIXES = ("format.", "insert.")
+
+    def _is_document_command(self, command_id: str) -> bool:
+        return (command_id in self._DOCUMENT_COMMANDS
+                or command_id.startswith(self._DOCUMENT_PREFIXES))
+
+    def _update_window_commands(self, *_args) -> None:
+        """Dim the document's commands while the Imports window is in front
+        (and View > Show Sidebar works for it); give them back after."""
+        if not hasattr(self, "commands"):
+            return
+        imports = self._imports_in_front()
+        in_front = imports is not None
+        if in_front != getattr(self, "_document_commands_dimmed", False):
+            self._document_commands_dimmed = in_front
+            kept = self.__dict__.setdefault("_dimmed_were_enabled", {})
+            for command in self.commands.commands():
+                if not self._is_document_command(command.id):
+                    continue
+                action = self.commands.action(command.id)
+                if in_front:
+                    kept[command.id] = action.isEnabled()
+                    action.setEnabled(False)
+                else:
+                    action.setEnabled(kept.pop(command.id, True))
+            if hasattr(self, "_m_background"):
+                self._m_background.setEnabled(not in_front)
+            if not in_front:
+                # What changed meanwhile is asked again.
+                self._update_knit_actions()
+                self._update_format_buttons()
+        self.act_window_sidebar.setEnabled(in_front)
+        if in_front:
+            shown = imports.act_sidebar.isChecked()
+            self.act_window_sidebar.setText(_("Hide Sidebar") if shown else _("Show Sidebar"))
+        else:
+            self.act_window_sidebar.setText(_("Show Sidebar"))
+
+    def _toggle_window_sidebar(self) -> None:
+        imports = self._imports_in_front()
+        if imports is not None:
+            imports.act_sidebar.trigger()
+            self._update_window_commands()
 
     def _imports_in_front(self):
         """The Imports window while it is the window in front. It has no
