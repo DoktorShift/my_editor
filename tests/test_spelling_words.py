@@ -2,9 +2,11 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Finding the words of Markdown text that spell checking reads."""
 
+import time
+
 from spelling.words import (
-    START, State, advance, checkable, clean, from_utf16, hyphen_parts, masked, passed_code,
-    scan, to_utf16, utf16_offsets,
+    MAX_BLOCK_LENGTH, START, State, advance, checkable, clean, from_utf16, hyphen_parts, masked,
+    passed_code, scan, to_utf16, utf16_offsets,
 )
 
 
@@ -82,6 +84,29 @@ def test_addresses_are_skipped():
     text = ("See https://example.com/path?q=wrod, www.exmple.org and "
             "ftp://files.exmple.net/a; mail alice@exmple.com or _@exmple.com.")
     assert words(text) == ["See", "and", "mail", "or"]
+    assert words("write a.b+c@d.de (or x-y@exmple.org)") == ["write", "or"]
+
+
+def test_a_long_pasted_token_takes_no_longer_than_its_length():
+    # A Cashu token, a hex dump, a long invoice: one unbroken run just under
+    # the paragraph limit. A pattern tried from every position of such a run
+    # took time in the square of its length (a second and more per
+    # keystroke); now it takes a few milliseconds.
+    size = MAX_BLOCK_LENGTH - 10
+    for run in ("cashuAeyJ0b2tlbiI6W3s-_", "0123456789abcdef", "a", "ab.", "ab-", "ab+"):
+        text = (run * (size // len(run) + 1))[:size]
+        started = time.perf_counter()
+        scan(text)
+        assert time.perf_counter() - started < 0.25, run
+
+
+def test_a_paragraph_too_long_for_prose_is_not_read():
+    text = "wrod " * (MAX_BLOCK_LENGTH // 5 + 1)
+    started = time.perf_counter()
+    found = scan(text)
+    assert time.perf_counter() - started < 0.25
+    assert found.words == () and found.skipped == ((0, len(text)),)
+    assert found.state == advance(text)
 
 
 def test_nostr_references_mentions_and_hashtags_are_skipped():

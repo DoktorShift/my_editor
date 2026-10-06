@@ -41,6 +41,11 @@ Span = Tuple[int, int]
 SOFT_HYPHEN = "\u00ad"
 _HYPHENS = "-\u2010\u2011"
 
+MAX_BLOCK_LENGTH = 20_000
+"""A paragraph longer than this (some 3,000 words, six pages without a
+break) is a pasted dump, not prose: it is not read for words, so no
+text can make checking it hold up typing."""
+
 
 class State(NamedTuple):
     """What the text so far leaves open for the next line."""
@@ -138,13 +143,16 @@ _NOT_PROSE = re.compile("|".join(f"(?:{pattern})" for pattern in (
     # Reference labels [text][label] and footnotes [^note].
     r"\]\[[^\[\]]*\]",
     r"\[\^[^\[\]\s]+\]",
-    # Addresses: with a scheme, nostr: and other references, www.
-    r"(?i:\b[a-z][a-z0-9+.\-]*://[^\s<>\"]+)",
+    # Addresses: with a scheme, nostr: and other references, www. A
+    # pattern that can start inside a long run of letters, dots and
+    # hyphens starts only where the run starts: tried from every position
+    # of a pasted token, it would take time in the square of its length.
+    r"(?i:(?<![\w+.\-])[a-z][a-z0-9+.\-]*://[^\s<>\"]+)",
     r"(?i:\b(?:mailto|nostr|lightning|bitcoin|magnet|tel|sms|geo|urn|cashu|lnurl[a-z]*)"
     r":[^\s<>\"]+)",
     r"(?i:\bwww\.[^\s<>\"]+)",
     # E-mail and Nostr addresses (alice@example.com, _@example.com).
-    r"[\w.+\-]+@[\w\-]+(?:\.[\w\-]+)+",
+    r"(?<![\w.+\-])[\w.+\-]+@[\w\-]+(?:\.[\w\-]+)+",
     # Mentions (@alice, @npub1...) and hashtags (#bitcoin).
     r"(?<![\w@])@[\w.\-]+",
     r"(?<![\w&#/])#\w[\w\-]*",
@@ -179,6 +187,8 @@ def scan(text: str, state: State = START, skipped: Iterable[Span] = ()) -> Scan:
     """The words to check in ``text`` (one block: a paragraph, or one
     line of a plain text document), starting in ``state``. ``skipped``
     adds spans the caller knows are not prose (formatted code)."""
+    if len(text) > MAX_BLOCK_LENGTH:
+        return Scan((), ((0, len(text)),), advance(text, state))
     spans: List[Span] = list(skipped)
     offset = 0
     for line in text.split(LINE_SEPARATOR):
