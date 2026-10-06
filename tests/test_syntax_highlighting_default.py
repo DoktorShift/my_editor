@@ -74,4 +74,4 @@ def test_it_matches_line_numbers_which_were_already_off():
 def test_the_toggle_still_exists_so_this_is_a_default_not_a_removal():
     source = (ROOT / "main_window.py").read_text(encoding="utf-8")
     assert "_toggle_syntax_highlighting" in source
-    assert "Ctrl+Shift+H" in source
+    assert '"view.syntax_highlighting"' in source

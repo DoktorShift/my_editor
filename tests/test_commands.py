@@ -388,3 +388,13 @@ def test_each_platform_gets_its_own_conventions(qt_app, monkeypatch, platform, k
         shortcut = win.commands.action(command_id).shortcut()
         assert shortcut.toString(QKeySequence.SequenceFormat.PortableText) == expected, \
             command_id
+
+
+
+def test_the_app_invented_view_keys_are_retired(fresh_window):
+    # No platform convention gives these a key; Shift-Command-L is Notes'
+    # Checklist. The menu items stay.
+    for command_id in ("view.theme", "view.line_numbers", "view.syntax_highlighting"):
+        action = fresh_window.commands.action(command_id)
+        assert action.shortcut().isEmpty(), command_id
+        assert action in fresh_window.m_view.actions()

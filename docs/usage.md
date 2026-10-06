@@ -88,9 +88,6 @@ The find bar's Options menu offers Match Case and Whole Words. A replacement tak
 | `Backspace` (just below a divider) | Removes the divider |
 
 Lists are real lists, written to Markdown as `- item` and `1. item`, nested by four spaces. In plain-text files (`.txt`, code, R Markdown), `Tab` types a bullet as text (`    • item`) instead, as before.
-| `Ctrl+Shift+L` | Toggle line numbers |
-| `Ctrl+Shift+T` | Toggle dark / light theme |
-| `Ctrl+Shift+H` | Toggle syntax highlighting |
 
 The **`View`** menu holds the appearance options: theme, line numbers, syntax highlighting, background style (lined, dashed, dotted, grid), paper mode, and highlight current line. Nothing around the document repeats a menu: the window shows the format toolbar, the tabs and the text.
 

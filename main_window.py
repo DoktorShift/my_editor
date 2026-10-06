@@ -258,8 +258,8 @@ class MainWindow(QMainWindow):
         else:
             self.is_dark_theme = self._detect_os_dark_theme()
         # While True, the app follows OS color scheme changes live. Set to
-        # False the moment the user picks a theme explicitly (checkbox or
-        # Ctrl+Shift+T) so their choice sticks.
+        # False the moment the user picks a theme explicitly (with
+        # View > Toggle Dark/Light Theme) so their choice sticks.
         self._follow_os_theme = theme_pref is None
         QGuiApplication.styleHints().colorSchemeChanged.connect(self._on_os_color_scheme_changed)
 
@@ -1300,17 +1300,19 @@ class MainWindow(QMainWindow):
         self._last_search_text = ""
         self._search_extra_selections = []
 
-        # Theme + line numbers
+        # Theme, line numbers and syntax highlighting: menu items without
+        # keys, since no platform convention gives them one (their old keys
+        # were this app's own; Shift-Command-L is Notes' Checklist).
         self.act_toggle_theme = add(Command("view.theme", _("Toggle Dark/Light Theme"), VIEW,
-                                            "Ctrl+Shift+T", listed_as=_("Toggle theme"),
+                                            listed_as=_("Toggle theme"),
                                             keywords=("dark", "light")),
                                     triggered=self._toggle_theme)
         self.act_toggle_line_numbers = add(
-            Command("view.line_numbers", _("Show Line Numbers"), VIEW, "Ctrl+Shift+L",
+            Command("view.line_numbers", _("Show Line Numbers"), VIEW,
                     checkable=True, listed_as=_("Toggle line numbers")),
             triggered=self._toggle_line_numbers)
         self.act_toggle_syntax_hl = add(
-            Command("view.syntax_highlighting", _("Syntax Highlighting"), VIEW, "Ctrl+Shift+H",
+            Command("view.syntax_highlighting", _("Syntax Highlighting"), VIEW,
                     checkable=True, listed_as=_("Toggle syntax highlighting")),
             triggered=self._toggle_syntax_highlighting, checked=False)
 
@@ -3965,7 +3967,7 @@ class MainWindow(QMainWindow):
     def _set_theme(self, is_dark: bool, announce: bool = True):
         """Apply is_dark to every theme-aware widget in the window.
 
-        Shared by the manual toggle (checkbox / Ctrl+Shift+T) and the
+        Shared by the manual toggle (View > Toggle Dark/Light Theme) and the
         OS color-scheme-follow path, so the fan-out logic lives in one
         place instead of being duplicated.
         """

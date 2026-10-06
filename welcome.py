@@ -41,7 +41,7 @@ def welcome_html() -> str:
         _("<b>Ctrl+O</b> - open a file"),
         _("<b>Ctrl+S</b> - save"),
         _("<b>Ctrl+F</b> - find"),
-        _("<b>Ctrl+Shift+T</b> - switch between dark and light theme"),
+        _page_text(_("View > Toggle Dark/Light Theme - switch between dark and light")),
         _page_text(_("Help > Keyboard Shortcuts - for the full list")),
     ]
     items = "\n".join(f"        <li>{line}</li>" for line in lines)
