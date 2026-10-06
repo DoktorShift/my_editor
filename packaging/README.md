@@ -107,6 +107,10 @@ Keep the icon centers in the generator in sync with `icon_locations` in
 - The Linux `.deb` installs the app under `/opt/my-editor`, symlinks
   `/usr/bin/my-editor` onto `PATH`, adds the menu launcher and icon, and declares
   the Qt runtime libraries as dependencies so `apt` pulls them in automatically.
+- Spell checking uses each system's own checker (see [`docs/spelling.md`](../docs/spelling.md)).
+  macOS needs `rubicon-objc` (pure Python, in the bundle); Windows needs nothing;
+  on Linux the system's Enchant is used and never bundled, and the `.deb`
+  recommends `libenchant-2-2`, which brings an English dictionary.
 - QtWebEngine is excluded in the spec (the app does not use it), which keeps
   bundles around 100-200 MB instead of 500 MB+.
 - macOS double-click file association via Finder is handled by the app itself:
