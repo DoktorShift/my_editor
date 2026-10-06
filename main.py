@@ -112,6 +112,12 @@ def main():
     # startup and on every toggle; see theme.apply_app_theme.
     app.setStyle("Fusion")
 
+    # A build proving it is whole (the release workflow runs this on every
+    # bundle): no window, no other instance contacted, just the checks.
+    if "--self-test" in sys.argv[1:]:
+        import self_test
+        sys.exit(self_test.run())
+
     initial_path = sys.argv[1] if len(sys.argv) > 1 else None
 
     if initial_path and _forward_to_running_instance(initial_path):

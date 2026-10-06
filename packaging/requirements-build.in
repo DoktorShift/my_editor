@@ -1,0 +1,5 @@
+# What a release build installs: the app's own requirements and the
+# bundler. Compiled into requirements-build.lock (exact versions with
+# hashes, for every system); see packaging/README.md.
+-r ../requirements.txt
+pyinstaller
