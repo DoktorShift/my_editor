@@ -115,6 +115,15 @@ def test_a_paragraph_checker_reads_only_prose_and_only_words_count():
     assert "exmple" not in sent and "cde" not in sent and len(sent) == 45
 
 
+def test_a_paragraph_checker_finds_mistakes_inside_underscore_emphasis():
+    # Like macOS, the fake reads "_" as part of a word: shown "_Wrot_", it
+    # flags "_Wrot_", which is not inside the word "Wrot", and the mistake
+    # was dropped. The underscores are markup and are blanked now.
+    checker = SpellChecker(FakeTextBackend())
+    found = checker.find_misspellings("das ist ein _Wrot_ und __Fehlr__ hier", "de-DE")
+    assert [m.word for m in found] == ["Wrot", "Fehlr"]
+
+
 def test_a_paragraph_checker_tells_the_language():
     checker = SpellChecker(FakeTextBackend(default=AUTOMATIC))
     assert checker.default_language() == AUTOMATIC

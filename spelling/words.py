@@ -198,10 +198,24 @@ def scan(text: str, state: State = START, skipped: Iterable[Span] = ()) -> Scan:
         spans.extend((offset + start, offset + end) for start, end in partial)
         offset += len(line) + 1
     spans.extend(match.span() for match in _NOT_PROSE.finditer(text))
+    candidates: List[Span] = []
+    for match in _TOKEN.finditer(text):
+        start, end = match.span()
+        word_start, word_end = start, end
+        while word_start < word_end and text[word_start] == "_":
+            word_start += 1
+        while word_end > word_start and text[word_end - 1] == "_":
+            word_end -= 1
+        # Underscores around a word are Markdown emphasis (_word_): markup,
+        # which a system checker must not read as part of the word.
+        if word_start > start:
+            spans.append((start, word_start))
+        if word_end < end:
+            spans.append((word_end, end))
+        if word_start < word_end and checkable(text[word_start:word_end]):
+            candidates.append((word_start, word_end))
     merged = _merged(spans)
-    words = _outside((_trimmed(text, *match.span()) for match in _TOKEN.finditer(text)),
-                     merged)
-    return Scan(tuple(words), tuple(merged), state)
+    return Scan(tuple(_outside(candidates, merged)), tuple(merged), state)
 
 
 def advance(text: str, state: State = START) -> State:
@@ -270,18 +284,6 @@ def _line(line: str, state: State) -> Tuple[State, bool, List[Span]]:
     return State(comment=comment, blank=not line.strip(), first=False), False, partial
 
 
-def _trimmed(text: str, start: int, end: int) -> Optional[Span]:
-    """A token as a word to check, or None. Underscores at its ends are
-    Markdown emphasis (_word_), not part of it."""
-    while start < end and text[start] == "_":
-        start += 1
-    while end > start and text[end - 1] == "_":
-        end -= 1
-    if start < end and checkable(text[start:end]):
-        return start, end
-    return None
-
-
 def checkable(word: str) -> bool:
     """Whether ``word`` is a word to check: not a single letter, an
     abbreviation in capitals, a number or anything with a digit, an
@@ -344,13 +346,11 @@ def _merged(spans: List[Span]) -> List[Span]:
     return out
 
 
-def _outside(words: Iterable[Optional[Span]], skipped: Sequence[Span]) -> List[Span]:
+def _outside(words: Iterable[Span], skipped: Sequence[Span]) -> List[Span]:
     """The words that touch nothing skipped (both in order)."""
     out: List[Span] = []
     index = 0
     for word in words:
-        if word is None:
-            continue
         start, end = word
         while index < len(skipped) and skipped[index][1] <= start:
             index += 1

@@ -65,6 +65,12 @@ def test_markdown_emphasis_keeps_its_words():
         "one", "two", "three", "four", "five", "six"]
 
 
+def test_the_underscores_of_emphasis_are_blanked_for_a_system_checker():
+    text = "ein _Wrot_ und __Fehlr__ in snake_case"
+    out = masked(text, scan(text).skipped)
+    assert out == "ein  Wrot  und   Fehlr   in snake_case"
+
+
 def test_hyphenated_words_split_into_the_parts_that_are_words():
     text = "E-Mail-Adresse"
     assert [text[s:e] for s, e in hyphen_parts(text, 0, len(text))] == ["Mail", "Adresse"]

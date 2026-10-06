@@ -20,6 +20,8 @@ GERMAN = ("das", "Das", "ist", "ein", "eine", "Haus", "schön", "Straße", "Grü
 WORDS = {"en-US": ENGLISH, "de-DE": GERMAN}
 
 _WORD = re.compile(r"[^\W\d_]+(?:['’\-][^\W\d_]+)*")
+# A system checker reads "_" as part of a word, as macOS does: "_Wrot_".
+_SYSTEM_WORD = re.compile(r"[^\W\d]+(?:['’\-][^\W\d]+)*")
 
 
 class FakeBackend(SpellBackend):
@@ -102,7 +104,7 @@ class FakeTextBackend(FakeBackend):
         if language == AUTOMATIC:
             language = self.identify(text)
         languages = list(self.words) if language == AUTOMATIC else [language]
-        misspelled = tuple((m.start(), m.end()) for m in _WORD.finditer(text)
+        misspelled = tuple((m.start(), m.end()) for m in _SYSTEM_WORD.finditer(text)
                            if not any(self.knows(m.group(0), each) for each in languages))
         return TextCheck(misspelled, language)
 

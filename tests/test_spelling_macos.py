@@ -68,6 +68,14 @@ def test_macos_tells_the_language_of_each_paragraph(backend):
     assert len(german.misspelled) == 2 and len(english.misspelled) == 2
 
 
+def test_mistakes_inside_underscore_emphasis_are_found(backend):
+    checker = SpellChecker(backend)
+    for text, wrong in (("Das ist ein _Wrot_ in einem Satz hier.", "Wrot"),
+                        ("Das ist ein __Fehlr__ in einem Satz hier.", "Fehlr"),
+                        ("This is a _mistaek_ in a sentence here.", "mistaek")):
+        assert [m.word for m in checker.find_misspellings(text, AUTOMATIC)] == [wrong], text
+
+
 def test_an_ignored_word_counts_as_right_until_the_app_quits(backend):
     word = "Qwrtzq" + uuid.uuid4().hex[:6]
     assert backend.check(word, "de") is False
