@@ -387,6 +387,9 @@ class AssistantWindow(QDialog):
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._scroll.viewport().setAutoFillBackground(False)
         self._scroll.setWidget(self._stack)
+        # QScrollArea paints its widget's background by default; the page
+        # sits on the window's own background, in light and dark alike.
+        self._stack.setAutoFillBackground(False)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 22, 24, 18)
         layout.setSpacing(18)
@@ -445,6 +448,13 @@ class AssistantWindow(QDialog):
         shown = min(needed, self._tallest_page())
         if shown != self._scroll.minimumHeight():
             self._scroll.setMinimumHeight(shown)
+        # As wide as the page needs, plus the scroll bar when it scrolls,
+        # so nothing is cut off at the right edge.
+        bar = (self._scroll.verticalScrollBar().sizeHint().width() if needed > shown
+               else 0)
+        wide = self._stack.minimumSizeHint().width() + bar
+        if wide != self._scroll.minimumWidth():
+            self._scroll.setMinimumWidth(wide)
 
     def _tallest_page(self) -> int:
         """The most page height the screen has room for, with the window's
