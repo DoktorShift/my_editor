@@ -108,7 +108,8 @@ If your signer (Amber, nsec.app) times out a decrypt approval or you dismiss the
 
 ### Storage notes
 
-- Drafts you write never expire. An imported draft you don't change is removed after 90 days (NIP-40); once you change and save it, it stays like any other draft.
+- Drafts you save with this version never expire. An imported draft you don't change is removed after 90 days (NIP-40); once you change and save it, it stays like any other draft.
+- A draft saved with an earlier version of MyEditor keeps the end date it was saved with (90 days after that save) until you save it again. The Drafts list shows that date in the draft's row ("Removed on ... unless you save it again"); open the draft and save it to keep it.
 - Notes are tagged with a private UUID; articles use a stable slug, so the draft and its eventual published article share the same address.
 - Deleting a draft publishes an empty replacement so your other devices see it removed; it never expires, so a relay that kept an old copy cannot bring the draft back.
 

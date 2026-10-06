@@ -2353,7 +2353,7 @@ msgstr "Update-Anleitung öffnen"
 #: update_dialog.py:279
 #: nostr/ui/account_windows.py:769
 #: nostr/ui/connect_dialog.py:360
-#: nostr/ui/drafts_panel.py:1062
+#: nostr/ui/drafts_panel.py:1076
 #: nostr/ui/imports_activity.py:283
 #: nostr/ui/imports_window.py:1040
 #: nostr/ui/profile_window.py:331
@@ -4935,7 +4935,7 @@ msgid "A newer version of this draft was published from another device."
 msgstr "Eine neuere Version dieses Entwurfs wurde von einem anderen Gerät gespeichert."
 
 #: nostr/ui/draft_conflict_banner.py:190
-#: nostr/ui/drafts_panel.py:712
+#: nostr/ui/drafts_panel.py:726
 msgid "View"
 msgstr "Ansehen"
 
@@ -4967,257 +4967,262 @@ msgstr "d. MMMM yyyy"
 msgid "yyyy-MM-dd"
 msgstr "dd.MM.yyyy"
 
-#: nostr/ui/drafts_panel.py:438
+#: nostr/ui/drafts_panel.py:439
 msgid "now"
 msgstr "jetzt"
 
-#: nostr/ui/drafts_panel.py:474
+#: nostr/ui/drafts_panel.py:475
 msgid "Decrypting…"
 msgstr "Wird entschlüsselt …"
 
-#: nostr/ui/drafts_panel.py:475
+#: nostr/ui/drafts_panel.py:476
 #: nostr/ui/drafts_preview.py:229
 msgid "(no title)"
 msgstr "(ohne Titel)"
 
-#: nostr/ui/drafts_panel.py:485
-#: nostr/ui/drafts_panel.py:521
+#: nostr/ui/drafts_panel.py:486
+#: nostr/ui/drafts_panel.py:533
 #: nostr/ui/publish_copy_dialog.py:85
 msgid "Decrypting"
 msgstr "Wird entschlüsselt"
 
-#: nostr/ui/drafts_panel.py:452
+#: nostr/ui/drafts_panel.py:453
 #, python-brace-format
 msgid "{n}y"
 msgid_plural "{n}y"
 msgstr[0] "{n} J."
 msgstr[1] "{n} J."
 
-#: nostr/ui/drafts_panel.py:487
-#: nostr/ui/drafts_panel.py:523
+#: nostr/ui/drafts_panel.py:488
+#: nostr/ui/drafts_panel.py:535
 msgid "Could not decrypt"
 msgstr "Nicht entschlüsselt"
 
-#: nostr/ui/drafts_panel.py:897
-#: nostr/ui/drafts_panel.py:907
+#: nostr/ui/drafts_panel.py:508
+#, python-brace-format
+msgid "Removed on {date} unless you save it again"
+msgstr "Wird am {date} entfernt, außer du speicherst ihn erneut"
+
+#: nostr/ui/drafts_panel.py:911
+#: nostr/ui/drafts_panel.py:921
 #: nostr/ui/imports_window.py:242
 msgid "Imports"
 msgstr "Importe"
 
-#: nostr/ui/drafts_panel.py:898
+#: nostr/ui/drafts_panel.py:912
 msgid "Open the Imports window"
 msgstr "Das Fenster „Importe“ öffnen"
 
-#: nostr/ui/drafts_panel.py:1041
-#: nostr/ui/drafts_panel.py:1062
-#: nostr/ui/drafts_panel.py:1063
+#: nostr/ui/drafts_panel.py:1055
+#: nostr/ui/drafts_panel.py:1076
+#: nostr/ui/drafts_panel.py:1077
 #: nostr/ui/imports_activity.py:253
 #: nostr/ui/imports_activity.py:280
 msgid "Pause"
 msgstr "Pausieren"
 
-#: nostr/ui/drafts_panel.py:1062
+#: nostr/ui/drafts_panel.py:1076
 #: nostr/ui/imports_activity.py:286
 msgid "Resume"
 msgstr "Fortsetzen"
 
-#: nostr/ui/drafts_panel.py:1383
+#: nostr/ui/drafts_panel.py:1397
 msgid "Refresh drafts"
 msgstr "Entwürfe aktualisieren"
 
-#: nostr/ui/drafts_panel.py:1387
+#: nostr/ui/drafts_panel.py:1401
 msgid "Close drafts panel"
 msgstr "Seitenleiste „Entwürfe“ schließen"
 
-#: nostr/ui/drafts_panel.py:1438
+#: nostr/ui/drafts_panel.py:1452
 msgid "Search drafts…"
 msgstr "Entwürfe durchsuchen"
 
-#: nostr/ui/drafts_panel.py:1439
+#: nostr/ui/drafts_panel.py:1453
 msgid "Search drafts"
 msgstr "Entwürfe durchsuchen"
 
-#: nostr/ui/drafts_panel.py:1465
-#: nostr/ui/drafts_panel.py:1304
+#: nostr/ui/drafts_panel.py:1479
+#: nostr/ui/drafts_panel.py:1318
 msgid "Drafts"
 msgstr "Entwürfe"
 
-#: nostr/ui/drafts_panel.py:1795
+#: nostr/ui/drafts_panel.py:1809
 #, python-brace-format
 msgid "{n} draft could not be decrypted"
 msgid_plural "{n} drafts could not be decrypted"
 msgstr[0] "{n} Entwurf nicht entschlüsselt"
 msgstr[1] "{n} Entwürfe nicht entschlüsselt"
 
-#: nostr/ui/drafts_panel.py:1804
+#: nostr/ui/drafts_panel.py:1818
 #, python-brace-format
 msgid "Decrypting {ready} of {total}"
 msgstr "Entschlüsselt: {ready} von {total}"
 
-#: nostr/ui/drafts_panel.py:1875
+#: nostr/ui/drafts_panel.py:1889
 #, python-brace-format
 msgid "Press {shortcut} in any tab to save its contents as an encrypted draft on Nostr. Drafts sync to your other devices signed in with the same profile."
 msgstr "Drücke {shortcut} in einem beliebigen Tab, um seinen Inhalt als verschlüsselten Entwurf auf Nostr zu speichern. Entwürfe werden mit deinen anderen Geräten abgeglichen, die mit demselben Profil angemeldet sind."
 
-#: nostr/ui/drafts_panel.py:2250
+#: nostr/ui/drafts_panel.py:2264
 msgid "Show Preview"
 msgstr "Vorschau anzeigen"
 
-#: nostr/ui/drafts_panel.py:2271
+#: nostr/ui/drafts_panel.py:2285
 msgid "Open in New Tab"
 msgstr "In neuem Tab öffnen"
 
-#: nostr/ui/drafts_panel.py:2276
+#: nostr/ui/drafts_panel.py:2290
 msgid "Publish…"
 msgstr "Veröffentlichen …"
 
-#: nostr/ui/drafts_panel.py:2282
+#: nostr/ui/drafts_panel.py:2296
 msgid "Copy Event ID"
 msgstr "Event-ID kopieren"
 
-#: nostr/ui/drafts_panel.py:2298
+#: nostr/ui/drafts_panel.py:2312
 #, python-brace-format
 msgid "Delete {n} Draft"
 msgid_plural "Delete {n} Drafts"
 msgstr[0] "{n} Entwurf löschen"
 msgstr[1] "{n} Entwürfe löschen"
 
-#: nostr/ui/drafts_panel.py:441
+#: nostr/ui/drafts_panel.py:442
 #, python-brace-format
 msgid "{n}m"
 msgid_plural "{n}m"
 msgstr[0] "{n} Min."
 msgstr[1] "{n} Min."
 
-#: nostr/ui/drafts_panel.py:444
+#: nostr/ui/drafts_panel.py:445
 #, python-brace-format
 msgid "{n}h"
 msgid_plural "{n}h"
 msgstr[0] "{n} Std."
 msgstr[1] "{n} Std."
 
-#: nostr/ui/drafts_panel.py:447
+#: nostr/ui/drafts_panel.py:448
 #, python-brace-format
 msgid "{n}d"
 msgid_plural "{n}d"
 msgstr[0] "{n} T."
 msgstr[1] "{n} T."
 
-#: nostr/ui/drafts_panel.py:450
+#: nostr/ui/drafts_panel.py:451
 #, python-brace-format
 msgid "{n}mo"
 msgid_plural "{n}mo"
 msgstr[0] "{n} Mon."
 msgstr[1] "{n} Mon."
 
-#: nostr/ui/drafts_panel.py:1304
+#: nostr/ui/drafts_panel.py:1318
 msgid "Your saved private drafts"
 msgstr "Deine gespeicherten privaten Entwürfe"
 
-#: nostr/ui/drafts_panel.py:1778
+#: nostr/ui/drafts_panel.py:1792
 msgid "Signer cannot decrypt drafts (no NIP-44)"
 msgstr "Dein Signer kann Entwürfe nicht entschlüsseln"
 
-#: nostr/ui/drafts_panel.py:1784
-#: nostr/ui/drafts_panel.py:1858
+#: nostr/ui/drafts_panel.py:1798
+#: nostr/ui/drafts_panel.py:1872
 msgid "Your signer is not responding"
 msgstr "Dein Signer antwortet nicht"
 
-#: nostr/ui/drafts_panel.py:1838
+#: nostr/ui/drafts_panel.py:1852
 msgid "Connect a Nostr profile"
 msgstr "Nostr-Profil verbinden"
 
-#: nostr/ui/drafts_panel.py:1839
+#: nostr/ui/drafts_panel.py:1853
 msgid "Drafts are end-to-end encrypted to your Nostr key. Connect a signer from Nostr → Connect Signer… to view, search, and create drafts."
 msgstr "Entwürfe sind Ende-zu-Ende mit deinem Nostr-Schlüssel verschlüsselt. Verbinde über „Nostr → Signer verbinden …“ einen Signer, um Entwürfe anzuzeigen, zu durchsuchen und zu erstellen."
 
-#: nostr/ui/drafts_panel.py:1846
+#: nostr/ui/drafts_panel.py:1860
 msgid "Signer does not support NIP-44"
 msgstr "Signer unterstützt keine Entwürfe"
 
-#: nostr/ui/drafts_panel.py:1847
+#: nostr/ui/drafts_panel.py:1861
 msgid "This profile's signer cannot decrypt drafts. Connect a NIP-44-capable signer (Amber, nsec.app) to use drafts."
 msgstr "Der Signer dieses Profils kann Entwürfe nicht entschlüsseln. Verbinde einen Signer, der das kann (etwa Amber oder nsec.app), um Entwürfe zu nutzen."
 
-#: nostr/ui/drafts_panel.py:1859
+#: nostr/ui/drafts_panel.py:1873
 msgid "Drafts stay encrypted until your signer unlocks them. Open your signer app, make sure it is running, then try again."
 msgstr "Entwürfe bleiben verschlüsselt, bis dein Signer sie entsperrt. Öffne deine Signer-App, stelle sicher, dass sie läuft, und versuche es dann noch einmal."
 
-#: nostr/ui/drafts_panel.py:1879
+#: nostr/ui/drafts_panel.py:1893
 msgid "No private drafts yet"
 msgstr "Noch keine privaten Entwürfe"
 
-#: nostr/ui/drafts_panel.py:1885
+#: nostr/ui/drafts_panel.py:1899
 msgid "No matching drafts"
 msgstr "Keine passenden Entwürfe"
 
-#: nostr/ui/drafts_panel.py:2263
+#: nostr/ui/drafts_panel.py:2277
 msgid "Retry Decryption"
 msgstr "Erneut entschlüsseln"
 
-#: nostr/ui/drafts_panel.py:2304
+#: nostr/ui/drafts_panel.py:2318
 msgid "Delete Draft"
 msgstr "Entwurf löschen"
 
-#: nostr/ui/drafts_panel.py:491
+#: nostr/ui/drafts_panel.py:492
 #, python-brace-format
 msgid "{reason}. Double-click to retry."
 msgstr "{reason}. Erneut per Doppelklick."
 
-#: nostr/ui/drafts_panel.py:525
+#: nostr/ui/drafts_panel.py:537
 msgid "Press Return to retry"
 msgstr "Drücke Eingabe, um es noch einmal zu versuchen"
 
-#: nostr/ui/drafts_panel.py:532
-#: nostr/ui/drafts_panel.py:549
+#: nostr/ui/drafts_panel.py:544
+#: nostr/ui/drafts_panel.py:563
 #: nostr/ui/drafts_preview.py:476
 #, python-brace-format
 msgid "Saved {time}"
 msgstr "Gespeichert am {time}"
 
-#: nostr/ui/drafts_panel.py:903
+#: nostr/ui/drafts_panel.py:917
 #, python-brace-format
 msgid "{count} new"
 msgid_plural "{count} new"
 msgstr[0] "{count} neu"
 msgstr[1] "{count} neu"
 
-#: nostr/ui/drafts_panel.py:1802
+#: nostr/ui/drafts_panel.py:1816
 msgid "Refreshing drafts"
 msgstr "Entwürfe werden aktualisiert"
 
-#: nostr/ui/drafts_panel.py:1810
+#: nostr/ui/drafts_panel.py:1824
 #, python-brace-format
 msgid "Drafts for {name}"
 msgstr "Entwürfe von {name}"
 
-#: nostr/ui/drafts_panel.py:1861
+#: nostr/ui/drafts_panel.py:1875
 #: nostr/ui/publish_copy_dialog.py:254
 msgid "Try again"
 msgstr "Erneut versuchen"
 
-#: nostr/ui/drafts_panel.py:1887
+#: nostr/ui/drafts_panel.py:1901
 msgid "Clear search"
 msgstr "Suche löschen"
 
-#: nostr/ui/drafts_panel.py:906
+#: nostr/ui/drafts_panel.py:920
 #, python-brace-format
 msgid "Imports, {count} new post"
 msgid_plural "Imports, {count} new posts"
 msgstr[0] "Importe, {count} neuer Beitrag"
 msgstr[1] "Importe, {count} neue Beiträge"
 
-#: nostr/ui/drafts_panel.py:1886
+#: nostr/ui/drafts_panel.py:1900
 #, python-brace-format
 msgid "No draft matches \"{query}\"."
 msgstr "Kein Entwurf passt zu „{query}“."
 
-#: nostr/ui/drafts_panel.py:529
+#: nostr/ui/drafts_panel.py:541
 #, python-brace-format
 msgid "Imported from {host}"
 msgstr "Importiert von {host}"
 
-#: nostr/ui/drafts_panel.py:795
+#: nostr/ui/drafts_panel.py:809
 #, python-brace-format
 msgid "View: {title}"
 msgstr "Ansicht: {title}"

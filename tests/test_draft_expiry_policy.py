@@ -81,3 +81,22 @@ def test_the_editor_save_passes_no_expiration():
     assert calls
     for call in calls:
         assert "expiration_seconds" not in {k.arg for k in call.keywords}
+
+
+def test_a_draft_that_still_has_an_end_date_says_so_in_the_list():
+    """Engine review M6: drafts saved before drafts stopped expiring keep
+    their old end date until they are saved again; the list says when,
+    and how to keep them."""
+    from nostr.draft_store import DraftRecord, DraftState
+    from nostr.ui.drafts_panel import _accessible_row_text, _display_meta, expiry_note
+    end = 1_800_000_000
+    record = DraftRecord(identifier="note-1", inner_kind=1, state=DraftState.READY,
+                         title="A note", snippet="first words", expiration=end)
+    note = expiry_note(end)
+    assert note.startswith("Removed on ") and note.endswith("unless you save it again")
+    assert _display_meta(record) == note
+    assert note in _accessible_row_text(record, now=end - 30 * 86400)
+    kept = DraftRecord(identifier="note-2", inner_kind=1, state=DraftState.READY,
+                       title="Kept", snippet="first words")
+    assert _display_meta(kept) == "first words"
+    assert expiry_note(None) == ""

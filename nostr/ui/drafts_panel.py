@@ -124,6 +124,7 @@ from ..profiles import Profile
 from .drafts_common import (
     MIN_CONTROL_PX as _MIN_CONTROL_PX,
     THEME_TOKENS as _THEME_TOKENS,
+    format_absolute_date,
     format_absolute_time as _format_absolute_time,
     secondary_font as _secondary_font,
     source_host as _source_host,
@@ -491,10 +492,21 @@ def _display_meta(record: DraftRecord) -> str:
             return _("{reason}. Double-click to retry.").format(reason=reason)
         return reason
     host = _source_host(record)
-    preview = record.snippet or ""
+    # A draft that still carries an end date (saved before drafts stopped
+    # expiring, or imported and not changed since) says so where it is
+    # seen, with the way to keep it (engine review M6).
+    preview = expiry_note(record.expiration) or record.snippet or ""
     if host and preview:
         return f"{host} · {preview}"
     return host or preview
+
+
+def expiry_note(expiration: Optional[int]) -> str:
+    """"Removed on 04 January 2027 unless you save it again", or ''."""
+    if not expiration:
+        return ""
+    return _("Removed on {date} unless you save it again").format(
+        date=format_absolute_date(int(expiration)))
 
 
 def _accessible_row_text(record: DraftRecord, *, now: Optional[int] = None) -> str:
@@ -530,6 +542,8 @@ def _accessible_row_text(record: DraftRecord, *, now: Optional[int] = None) -> s
     saved = _format_absolute_time(record.created_at)
     if saved:
         sentences.append(_("Saved {time}").format(time=saved))
+    if record.state is DraftState.READY and expiry_note(record.expiration):
+        sentences.append(expiry_note(record.expiration))
     extra = preview_announcement(
         record, now=now if now is not None else int(time.time()),
     )
