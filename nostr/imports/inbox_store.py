@@ -35,6 +35,7 @@ each call is one short transaction. ``clock`` is injectable for tests.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import time
 import uuid
@@ -50,7 +51,12 @@ from . import snapshots
 SCHEMA_VERSION = 1
 CHECK_INTERVAL = 15 * 60
 MAX_BACKOFF = 24 * 60 * 60
+_log = logging.getLogger(__name__)
+
 MAX_STORED_POSTS = 5000
+# The newest posts of one answer that are kept, as STANDUP reads them: a
+# feed longer than this is not refused, its oldest posts are left out.
+MAX_PER_ANSWER = 500
 MAX_BODY_BYTES = 256 * 1024
 FUTURE_GRACE = 5 * 60
 CHECK_LEASE = 120
@@ -143,6 +149,7 @@ class IngestResult:
     new: int = 0
     older: int = 0
     waiting: int = 0
+    too_long: int = 0           # posts too long to keep here (logged)
     error: str = ""
 
 
@@ -426,12 +433,19 @@ class InboxStore:
                 continue
             if d_tag not in known and d_tag not in unseen:
                 unseen[d_tag] = item
-        if len(known) + len(unseen) > MAX_STORED_POSTS:
+        # The newest of the answer, and only as many as the inbox has room
+        # for (engine review L7: a long feed was refused whole).
+        room = min(MAX_PER_ANSWER, MAX_STORED_POSTS - len(known))
+        if unseen and room <= 0:
             self.record_failure(key, INBOX_FULL)
             return IngestResult(error=INBOX_FULL)
+        if len(unseen) > room:
+            newest = sorted(unseen.items(), key=lambda pair: pair[1].published_at or 0,
+                            reverse=True)[:room]
+            unseen = dict(newest)
         ledger = self.ledger_states(unseen)
         remembered = self._skips_remembered(unseen)
-        new = older = waiting = 0
+        new = older = waiting = too_long = 0
         with self._db:
             for d_tag, item in unseen.items():
                 published = item.published_at or 0
@@ -441,7 +455,12 @@ class InboxStore:
                 snapshot = snapshots.to_snapshot(item)
                 text = json.dumps(snapshot, ensure_ascii=False)
                 if len(text.encode("utf-8")) > MAX_BODY_BYTES + 64 * 1024:
-                    continue  # too large to keep; an export file imports it
+                    # Too long to keep here: said in the log and counted,
+                    # never dropped without a word (review L7).
+                    too_long += 1
+                    _log.info("a post of %s is too long to keep in the inbox: %s", key,
+                              (item.title or item.link or d_tag)[:120])
+                    continue
                 if baseline or (published and published < source["created_at"]):
                     fresh = OLDER
                 else:
@@ -466,6 +485,10 @@ class InboxStore:
                      item.title or "", snapshots.excerpt(item), snapshots.cover(item),
                      item.link or "", item.author or "",
                      snapshots.minutes_of(item), snapshots.images_in(item)))
+            if waiting:
+                # A post dated ahead waits for its time; the feed must be
+                # read again then, not answered "unchanged" (review L6).
+                etag, last_modified = source["etag"], source["last_modified"]
             self._db.execute(
                 "UPDATE sources SET last_checked = ?, next_check = ?, checking_until = 0, "
                 "failures = 0, error = '', etag = ?, last_modified = ?, "
@@ -474,7 +497,7 @@ class InboxStore:
                 "site_url = COALESCE(NULLIF(?, ''), site_url) WHERE key = ?",
                 (now, now + interval, etag, last_modified, final_url, feed_title,
                  site_url, key))
-        return IngestResult(new=new, older=older, waiting=waiting)
+        return IngestResult(new=new, older=older, waiting=waiting, too_long=too_long)
 
     def page(self, view: View, *, query: str = "", after: Optional[tuple] = None,
              limit: int = PAGE_SIZE) -> List[PostRow]:
@@ -725,13 +748,16 @@ class InboxStore:
             self._db.execute("UPDATE jobs SET status = 'stopped' WHERE status = 'stopping'")
 
     def prune_jobs(self) -> None:
-        """Finished jobs older than a week go, rows and all."""
+        """Jobs done for good (stopped or completed) older than a week go,
+        rows and all. One with failed posts stays: they can be tried
+        again (review L12)."""
         limit = self._now() - FINISHED_JOB_DAYS * 24 * 3600
-        marks = ", ".join("?" * len(JOB_FINISHED))
+        done = ("stopped", "completed")
+        marks = ", ".join("?" * len(done))
         with self._db:
             old = [row["id"] for row in self._db.execute(
                 f"SELECT id FROM jobs WHERE status IN ({marks}) AND updated_at < ?",
-                (*JOB_FINISHED, limit))]
+                (*done, limit))]
             for job_id in old:
                 self._db.execute("DELETE FROM job_rows WHERE job_id = ?", (job_id,))
                 self._db.execute("DELETE FROM jobs WHERE id = ?", (job_id,))

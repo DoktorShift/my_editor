@@ -98,12 +98,43 @@ class TestIngest:
         store.ingest(KEY, edited)
         assert view_titles(store, View(OLDER_POSTS)) == ["a"]
 
-    def test_the_inbox_limit(self, store, monkeypatch):
+    def test_the_inbox_limit(self, store, monkeypatch, clock):
+        """Engine review L7: a feed longer than the room left was refused
+        whole; now its newest posts that fit are kept, and only a full
+        inbox says so."""
         monkeypatch.setattr("nostr.imports.inbox_store.MAX_STORED_POSTS", 2)
-        result = store.ingest(KEY, items("a", "b", "c"))
-        assert result.error == INBOX_FULL
+        posts = [make_item(t, guid=f"g-{t}", published_at=T0 - n)
+                 for n, t in enumerate(("a", "b", "c"))]
+        result = store.ingest(KEY, posts)
+        assert (result.older, result.error) == (2, "")
+        assert sorted(view_titles(store, View(OLDER_POSTS))) == ["a", "b"]
+        clock.now += 900
+        later = store.ingest(KEY, [make_item("d", guid="g-d", published_at=T0 + 10)])
+        assert later.error == INBOX_FULL
         assert store.source(KEY).error == INBOX_FULL
         assert MAX_STORED_POSTS == 5000
+
+    def test_a_long_answer_keeps_its_newest_five_hundred(self, store):
+        posts = [make_item(f"p{n}", guid=f"g{n}", published_at=T0 - n) for n in range(600)]
+        assert store.ingest(KEY, posts).older == 500
+        kept = set(view_titles(store, View(OLDER_POSTS), limit=600))
+        assert "p0" in kept and "p599" not in kept
+
+    def test_a_post_dated_ahead_is_read_again(self, store, clock):
+        """Review L6: the validators of an answer that left a post
+        waiting made the next check "unchanged", and the post never came."""
+        store.ingest(KEY, items("a", published=T0), etag="old", last_modified="old")
+        clock.now += 900
+        store.ingest(KEY, items("soon", published=T0 + 900 + 3600), etag="new",
+                     last_modified="new")
+        source = store.source(KEY)
+        assert (source.etag, source.last_modified) == ("old", "old")
+
+    def test_a_post_too_long_to_keep_is_counted(self, store, monkeypatch):
+        monkeypatch.setattr("nostr.imports.inbox_store.MAX_BODY_BYTES", 100)
+        long = make_item("long", guid="g-long", content_html="<p>" + "x" * 70_000 + "</p>")
+        result = store.ingest(KEY, [long])
+        assert result.too_long == 1
 
     def test_counts_per_source_and_stats(self, store, clock):
         store.ingest(KEY, items("a"))

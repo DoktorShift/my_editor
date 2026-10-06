@@ -34,6 +34,7 @@ account.
 
 from __future__ import annotations
 
+import time
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QObject, QTimer, Signal
@@ -62,7 +63,10 @@ STAGE_FULL_TEXT = "full_text"
 STAGE_IMAGES = "images"
 STAGE_SAVING = "saving"
 
-NO_RELAY = _("No relay accepted the draft yet. Try again to send it.")
+NO_RELAY = _("The draft couldn't be saved yet. Try again to send it.")
+# A kept draft this close to its end date is made anew instead of sent:
+# relays refuse an expired one, and the post would fail for good (L5).
+CHECKPOINT_MARGIN = 24 * 3600
 
 
 class ImportRunner(QObject):
@@ -83,6 +87,7 @@ class ImportRunner(QObject):
                  item_job_factory: Callable[..., QObject],
                  resend_factory: Callable[..., QObject],
                  pacer: Optional[Callable[[int, Callable[[], None]], None]] = None,
+                 clock: Callable[[], float] = time.time,
                  parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._store = store
@@ -91,6 +96,7 @@ class ImportRunner(QObject):
         self._item_job_factory = item_job_factory
         self._resend_factory = resend_factory
         self._pacer = pacer or (lambda ms, fn: QTimer.singleShot(ms, fn))
+        self._now = clock
         self._job: Optional[Job] = None
         self._existing = Existing()
         self._current = None          # the item job or resend in flight
@@ -251,6 +257,9 @@ class ImportRunner(QObject):
             row.status, row.stage = ROW_EXISTING, ""
             self._store.save_row(job.id, row)
             self.job_changed.emit(job.id)
+        if row.signed_event and _expires_soon(row.signed_event, self._now()):
+            row.signed_event = None
+            self._store.save_row(job.id, row)
         if row.signed_event:
             self._resend(row)
         else:
@@ -415,6 +424,16 @@ class ImportRunner(QObject):
         self._job = None
         self.job_changed.emit(job.id)
         self.job_finished.emit(job.id)
+
+
+def _expires_soon(event: dict, now: float) -> bool:
+    for tag in event.get("tags", []) if isinstance(event, dict) else []:
+        if isinstance(tag, list) and len(tag) >= 2 and tag[0] == "expiration":
+            try:
+                return int(tag[1]) <= now + CHECKPOINT_MARGIN
+            except (TypeError, ValueError):
+                return False
+    return False
 
 
 def _release(job) -> None:

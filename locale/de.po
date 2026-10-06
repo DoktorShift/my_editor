@@ -2998,12 +2998,12 @@ msgstr "Der bunker-Link muss mindestens ein Relay nennen"
 msgid "relay must be ws:// or wss://, got {relay}"
 msgstr "Ein Relay muss mit ws:// oder wss:// beginnen (erhalten: {relay})"
 
-#: nostr/draft_store.py:298
-#: nostr/draft_sync.py:617
+#: nostr/draft_store.py:302
+#: nostr/draft_sync.py:619
 msgid "decryption failed"
 msgstr "Nicht entschlüsselt"
 
-#: nostr/draft_store.py:386
+#: nostr/draft_store.py:407
 msgid "Untitled note"
 msgstr "Notiz ohne Titel"
 
@@ -3029,7 +3029,7 @@ msgstr "Entwürfe werden aktualisiert …"
 msgid "Connecting to your signer…"
 msgstr "Verbindung zu deinem Signer wird hergestellt …"
 
-#: nostr/draft_sync.py:651
+#: nostr/draft_sync.py:653
 msgid "This signer doesn't support NIP-44 encryption, so private drafts are unavailable for this profile."
 msgstr "Dieser Signer unterstützt die nötige Verschlüsselung nicht, daher sind private Entwürfe für dieses Profil nicht verfügbar."
 
@@ -3037,7 +3037,7 @@ msgstr "Dieser Signer unterstützt die nötige Verschlüsselung nicht, daher sin
 msgid "No relays available to fetch drafts."
 msgstr "Keine Relays verfügbar, um Entwürfe zu laden."
 
-#: nostr/draft_sync.py:579
+#: nostr/draft_sync.py:581
 msgid "inner draft is signed by a different identity"
 msgstr "Entwurf stammt von einer anderen Identität"
 
@@ -3046,18 +3046,18 @@ msgstr "Entwurf stammt von einer anderen Identität"
 msgid "Signer unavailable: {reason}"
 msgstr "Signer nicht erreichbar: {reason}"
 
-#: nostr/draft_sync.py:475
+#: nostr/draft_sync.py:477
 #, python-brace-format
 msgid "Loaded {n} draft."
 msgid_plural "Loaded {n} drafts."
 msgstr[0] "{n} Entwurf geladen."
 msgstr[1] "{n} Entwürfe geladen."
 
-#: nostr/draft_sync.py:660
+#: nostr/draft_sync.py:662
 msgid "signer lacks NIP-44 support"
 msgstr "Signer kann keine Entwürfe entschlüsseln"
 
-#: nostr/draft_sync.py:563
+#: nostr/draft_sync.py:565
 #, python-brace-format
 msgid "malformed draft payload: {error}"
 msgstr "Entwurf ist beschädigt: {error}"
@@ -3259,7 +3259,7 @@ msgstr "Der Entwurf wird verschlüsselt. Bestätige in deinem Signer, wenn er fr
 msgid "Waiting for signature. Approve the deletion on your signer…"
 msgstr "Warte auf die Signatur. Bestätige das Löschen in deinem Signer …"
 
-#: nostr/publisher.py:1247
+#: nostr/publisher.py:1254
 msgid "no relay accepted the deletion"
 msgstr "kein Relay hat das Löschen angenommen"
 
@@ -3300,21 +3300,21 @@ msgid_plural "Draft saved to {accepted}/{total} relays."
 msgstr[0] "Entwurf auf {accepted}/{total} Relay gespeichert."
 msgstr[1] "Entwurf auf {accepted}/{total} Relays gespeichert."
 
-#: nostr/publisher.py:1059
+#: nostr/publisher.py:1063
 #, python-brace-format
 msgid "Removing draft from {n} relay…"
 msgid_plural "Removing draft from {n} relays…"
 msgstr[0] "Der Entwurf wird von {n} Relay entfernt …"
 msgstr[1] "Der Entwurf wird von {n} Relays entfernt …"
 
-#: nostr/publisher.py:1070
+#: nostr/publisher.py:1077
 #, python-brace-format
 msgid "Draft removed on {accepted}/{total} relay."
 msgid_plural "Draft removed on {accepted}/{total} relays."
 msgstr[0] "Entwurf auf {accepted}/{total} Relay entfernt."
 msgstr[1] "Entwurf auf {accepted}/{total} Relays entfernt."
 
-#: nostr/publisher.py:1245
+#: nostr/publisher.py:1252
 #, python-brace-format
 msgid "no relay accepted the deletion ({reasons})"
 msgstr "kein Relay hat das Löschen angenommen ({reasons})"
@@ -3806,7 +3806,7 @@ msgstr "Bild konnte nicht heruntergeladen werden"
 msgid "Empty mirror response"
 msgstr "Leere Antwort beim Kopieren"
 
-#: nostr/imports/inbox_store.py:73
+#: nostr/imports/inbox_store.py:79
 msgid "This source has reached its inbox limit. Unsubscribe and follow it again to start a fresh inbox; your drafts are kept."
 msgstr "Diese Quelle hat die Grenze ihres Eingangs erreicht. Beende das Abonnement und folge ihr erneut, um mit einem neuen Eingang zu beginnen; deine Entwürfe bleiben erhalten."
 
@@ -3840,9 +3840,9 @@ msgstr "Einzelner Beitrag"
 msgid "Couldn't read that file: {error}"
 msgstr "Diese Datei konnte nicht gelesen werden: {error}"
 
-#: nostr/imports/jobs.py:65
-msgid "No relay accepted the draft yet. Try again to send it."
-msgstr "Noch kein Relay hat den Entwurf angenommen. Versuche es noch einmal, um ihn zu senden."
+#: nostr/imports/jobs.py:66
+msgid "The draft couldn't be saved yet. Try again to send it."
+msgstr "Der Entwurf konnte noch nicht gespeichert werden. Versuche es erneut, um ihn zu senden."
 
 #: nostr/imports/pipeline.py:299
 msgid "(untitled)"

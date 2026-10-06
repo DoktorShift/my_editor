@@ -217,7 +217,10 @@ class FeedChecker(QObject):
         key = source.key
         self._in_flight[key] = generation
         self.checking.emit(key, True)
-        url = source.final_url or source.url
+        # Where the feed moved to, but the followed address again after a
+        # failure: a temporary redirect must not replace it for good
+        # (review L11).
+        url = source.url if source.failures else (source.final_url or source.url)
 
         def live() -> bool:
             return generation == self._generation and self._in_flight.get(key) == generation

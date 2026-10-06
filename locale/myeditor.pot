@@ -2983,12 +2983,12 @@ msgstr ""
 msgid "relay must be ws:// or wss://, got {relay}"
 msgstr ""
 
-#: nostr/draft_store.py:298
-#: nostr/draft_sync.py:617
+#: nostr/draft_store.py:302
+#: nostr/draft_sync.py:619
 msgid "decryption failed"
 msgstr ""
 
-#: nostr/draft_store.py:386
+#: nostr/draft_store.py:407
 msgid "Untitled note"
 msgstr ""
 
@@ -3014,7 +3014,7 @@ msgstr ""
 msgid "Connecting to your signer…"
 msgstr ""
 
-#: nostr/draft_sync.py:651
+#: nostr/draft_sync.py:653
 msgid "This signer doesn't support NIP-44 encryption, so private drafts are unavailable for this profile."
 msgstr ""
 
@@ -3022,7 +3022,7 @@ msgstr ""
 msgid "No relays available to fetch drafts."
 msgstr ""
 
-#: nostr/draft_sync.py:579
+#: nostr/draft_sync.py:581
 msgid "inner draft is signed by a different identity"
 msgstr ""
 
@@ -3031,18 +3031,18 @@ msgstr ""
 msgid "Signer unavailable: {reason}"
 msgstr ""
 
-#: nostr/draft_sync.py:475
+#: nostr/draft_sync.py:477
 #, python-brace-format
 msgid "Loaded {n} draft."
 msgid_plural "Loaded {n} drafts."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/draft_sync.py:660
+#: nostr/draft_sync.py:662
 msgid "signer lacks NIP-44 support"
 msgstr ""
 
-#: nostr/draft_sync.py:563
+#: nostr/draft_sync.py:565
 #, python-brace-format
 msgid "malformed draft payload: {error}"
 msgstr ""
@@ -3244,7 +3244,7 @@ msgstr ""
 msgid "Waiting for signature. Approve the deletion on your signer…"
 msgstr ""
 
-#: nostr/publisher.py:1247
+#: nostr/publisher.py:1254
 msgid "no relay accepted the deletion"
 msgstr ""
 
@@ -3285,21 +3285,21 @@ msgid_plural "Draft saved to {accepted}/{total} relays."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/publisher.py:1059
+#: nostr/publisher.py:1063
 #, python-brace-format
 msgid "Removing draft from {n} relay…"
 msgid_plural "Removing draft from {n} relays…"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/publisher.py:1070
+#: nostr/publisher.py:1077
 #, python-brace-format
 msgid "Draft removed on {accepted}/{total} relay."
 msgid_plural "Draft removed on {accepted}/{total} relays."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/publisher.py:1245
+#: nostr/publisher.py:1252
 #, python-brace-format
 msgid "no relay accepted the deletion ({reasons})"
 msgstr ""
@@ -3791,7 +3791,7 @@ msgstr ""
 msgid "Empty mirror response"
 msgstr ""
 
-#: nostr/imports/inbox_store.py:73
+#: nostr/imports/inbox_store.py:79
 msgid "This source has reached its inbox limit. Unsubscribe and follow it again to start a fresh inbox; your drafts are kept."
 msgstr ""
 
@@ -3825,8 +3825,8 @@ msgstr ""
 msgid "Couldn't read that file: {error}"
 msgstr ""
 
-#: nostr/imports/jobs.py:65
-msgid "No relay accepted the draft yet. Try again to send it."
+#: nostr/imports/jobs.py:66
+msgid "The draft couldn't be saved yet. Try again to send it."
 msgstr ""
 
 #: nostr/imports/pipeline.py:299

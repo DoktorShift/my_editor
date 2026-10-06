@@ -267,3 +267,36 @@ def test_finished_row_jobs_are_let_go():
     assert h.status(job)[0] == "completed"
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     assert not h.runner.findChildren(FakeItemJob)
+
+
+def test_a_kept_draft_near_its_end_is_made_anew():
+    """Engine review L5: a kept signed draft past its expiration was sent
+    again and refused by every relay, for good."""
+    h = Harness()
+    job = h.job("a")
+    saved = h.store.job(job.id)
+    row = saved.rows[0]
+    row.signed_event = {"id": "old-wrap", "kind": 31234,
+                        "tags": [["d", row.d_tag], ["expiration", "1000"]]}
+    h.store.save_row(job.id, row)
+    h.runner.run(job.id)
+    assert h.resent == []                      # not the expired one
+    assert h.started == [row.d_tag]            # made again
+    assert h.status(job) == ("completed", ["done"])
+
+
+def test_a_job_with_failed_posts_is_not_pruned():
+    """Engine review L12: a job whose failed posts can be tried again was
+    deleted after a week like a finished one."""
+    clock = {"now": 1_800_000_000}
+    store = InboxStore(":memory:", clock=lambda: clock["now"])
+    h = Harness(store=store, script={"b": "fail"})
+    job = h.job("a", "b")
+    h.runner.run(job.id)
+    assert h.status(job)[0] == "partial"
+    done = h.job("c")
+    h.runner.run(done.id)
+    clock["now"] += 8 * 24 * 3600
+    store.prune_jobs()
+    assert store.job(job.id) is not None
+    assert store.job(done.id) is None

@@ -274,3 +274,17 @@ def test_a_local_address_says_so():
     text = error_text(SourceError("", ERROR_CODES.LOCAL_NETWORK))
     assert "on this computer or its local network" in text
     assert "public websites only" in text
+
+
+def test_after_a_failure_the_followed_address_is_asked_again():
+    """Engine review L11: a temporary redirect's address replaced the
+    followed one for good, also after it failed."""
+    h = Harness({FEED: ("304",)})
+    h.store._db.execute("UPDATE sources SET final_url = ? WHERE key = ?",
+                        ("https://moved.example/feed", FEED))
+    h.store._db.commit()
+    h.store.record_failure(FEED, "Couldn't reach that URL")
+    h.later(4 * 3600)
+    h.checker.start()
+    h.checker.tick()
+    assert h.fetcher.requests[-1][0] == FEED
