@@ -1238,10 +1238,10 @@ class MainWindow(QMainWindow):
         self.act_underline = add(Command("format.underline", _("Underline"), FORMAT, "Ctrl+U",
                                     checkable=True),
                                  triggered=self._fmt_underline)
-        # Underline has no Markdown: it stays in the document and in local
-        # files, and is left out of what is published.
-        self.act_underline.setToolTip(_("Underline stays in local files; Markdown and "
-                                        "Nostr have none."))
+        # Underline has no Markdown, so it is offered only where the file
+        # keeps it: HTML documents (owner decision Q-L). Elsewhere it is
+        # dimmed, and it has no toolbar button.
+        self.act_underline.setToolTip(_("Underlining is kept in HTML documents only."))
         # Shift-Command-X on a Mac, Alt+Shift+5 elsewhere, as in Google Docs
         # (Word and LibreOffice have none).
         self.act_strike = add(Command("format.strike", _("Strikethrough"), FORMAT,
@@ -4017,8 +4017,17 @@ class MainWindow(QMainWindow):
             action.setEnabled(bool(kind))
         for action in self._rich_actions:
             action.setEnabled(kind == "rich")
+        self.act_underline.setEnabled(bool(self._keeps_underline(self.current_editor())))
         if kind:
             self._update_undo_redo_buttons()
+
+    @staticmethod
+    def _keeps_underline(ed) -> bool:
+        """Whether the document's file keeps underlining: an HTML document.
+        Markdown (files, new documents, drafts, articles) and plain text
+        have no underline."""
+        path = (getattr(ed, "_file_path", None) or "").lower() if ed is not None else ""
+        return path.endswith((".html", ".htm")) and not getattr(ed, "_markdown_source", False)
 
     def _fill_editor_context_menu(self, menu, editor, pos) -> None:
         """The editor's context menu: the window's own commands, so it

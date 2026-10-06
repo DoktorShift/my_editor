@@ -23,7 +23,7 @@ On macOS, `Ctrl` in these tables is the Command key (`⌘`) and `Alt` is Option 
 |---|---|
 | `Ctrl+B` | Bold |
 | `Ctrl+I` | Italic |
-| `Ctrl+U` | Underline (stays in local files: Markdown and Nostr have no underline) |
+| `Ctrl+U` | Underline, in HTML documents only (Markdown and Nostr have no underline, so it is dimmed elsewhere) |
 | `Ctrl+Shift+X` on macOS, `Alt+Shift+5` on Windows and Linux | Strikethrough |
 | | Inline Code (`Format` menu) |
 | `Ctrl+\` | Clear Formatting (a link stays a link) |

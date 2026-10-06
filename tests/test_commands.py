@@ -405,3 +405,19 @@ def test_imports_is_in_the_nostr_menu_without_a_shortcut(main_window_commands):
     command = main_window_commands.commands.command("nostr.imports")
     assert command.shortcut is None
     assert command.group == "Nostr"
+
+
+
+@pytest.mark.parametrize("path, keeps", [
+    ("/notes/page.html", True), ("/notes/page.HTM", True), ("/notes/a.md", False),
+    ("/notes/a.txt", False), (None, False),
+])
+def test_underline_is_offered_only_where_the_file_keeps_it(fresh_window, path, keeps):
+    from main_window import MainWindow
+    win = fresh_window
+    win._editor_kind = lambda ed: MainWindow._editor_kind(win, ed)
+    win._keeps_underline = MainWindow._keeps_underline
+    win.current_editor = lambda: _Editor(path)
+    MainWindow._update_editor_commands(win)
+    assert win.act_underline.isEnabled() is keeps
+    assert "underline" not in __import__("format_toolbar").LAYOUT
