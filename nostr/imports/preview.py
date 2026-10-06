@@ -12,6 +12,8 @@ import re
 from dataclasses import dataclass
 from typing import List, Optional, Sequence
 
+from i18n import _
+
 from ..rss.parser import FeedItem
 from .constants import DEFAULT_LIMIT, MAX_LIMIT
 
@@ -33,14 +35,15 @@ class ScopePreset:
     since_last_visit: bool = False
 
 
+# ``key`` is what the code compares; ``label`` is only ever shown.
 SCOPE_PRESETS: tuple = (
-    ScopePreset("newest10", "Newest 10", 10),
-    ScopePreset("newest25", "Newest 25", 25, recommended=True),
-    ScopePreset("newest50", "Newest 50", 50),
-    ScopePreset("all", f"All (up to {MAX_LIMIT})", MAX_LIMIT),
+    ScopePreset("newest10", _("Newest {n}").format(n=10), 10),
+    ScopePreset("newest25", _("Newest {n}").format(n=25), 25, recommended=True),
+    ScopePreset("newest50", _("Newest {n}").format(n=50), 50),
+    ScopePreset("all", _("All (up to {n})").format(n=MAX_LIMIT), MAX_LIMIT),
     # Only offered for subscribed sources with a recorded last import;
     # the panel hides the chip otherwise.
-    ScopePreset("sinceVisit", "New since last import", MAX_LIMIT,
+    ScopePreset("sinceVisit", _("New since last import"), MAX_LIMIT,
                 since_last_visit=True),
 )
 

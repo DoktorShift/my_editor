@@ -11,6 +11,8 @@ so this never intercepts them. Runs before the RSS catch-all.
 
 from __future__ import annotations
 
+from i18n import _
+
 from ...rss.parser import Feed
 from ..errors import ERROR_CODES, SourceError
 from ..registry import ResolveContext, ResolveInput, ResolveResult, SourceResolver
@@ -36,7 +38,7 @@ def _resolve(input_: ResolveInput, ctx: ResolveContext) -> None:
             return
         feed = Feed(
             format="ghost",
-            title=export.title or "Ghost export",
+            title=export.title or _("Ghost export"),
             link=None,
             description=None,
             items=export.items,
@@ -48,7 +50,7 @@ def _resolve(input_: ResolveInput, ctx: ResolveContext) -> None:
         lambda: parse_ghost_export(input_.pasted_body or ""),
         _deliver,
         lambda exc: ctx.on_failure(SourceError(
-            f"Could not read that Ghost export: {exc}",
+            _("Could not read that Ghost export: {error}").format(error=exc),
             ERROR_CODES.UNKNOWN,
         )),
     )

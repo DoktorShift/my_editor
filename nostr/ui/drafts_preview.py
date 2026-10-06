@@ -79,6 +79,7 @@ from PySide6.QtWidgets import (
 )
 
 import url_safety
+from i18n import _, ngettext
 
 from ..draft_store import DraftRecord, DraftState
 from ..drafts import flatten_markdown_inline
@@ -89,6 +90,7 @@ from .drafts_common import (
     first_tag,
     format_absolute_date,
     format_absolute_time,
+    format_count,
     scaled,
     secondary_font,
     source_host,
@@ -224,11 +226,11 @@ _MAX_TAGS: int = 6
 # would say nothing on almost every draft.
 _EXPIRY_HORIZON_DAYS: int = 14
 
-_NO_TITLE = "(no title)"
+_NO_TITLE = _("(no title)")
 _SEP = " · "
 
-_IMAGE_WAITING = "Loading image…"
-_IMAGE_UNAVAILABLE = "Image unavailable"
+_IMAGE_WAITING = _("Loading image…")
+_IMAGE_UNAVAILABLE = _("Image unavailable")
 
 
 # --------------------------------------------------------------------------- #
@@ -435,13 +437,11 @@ def expiry_phrase(expiration: Optional[int], *, now: int) -> str:
     if delta > _EXPIRY_HORIZON_DAYS * 86_400:
         return ""
     if delta < 0:
-        return "Expired"
+        return _("Expired")
     days = delta // 86_400
     if days <= 0:
-        return "Expires today"
-    if days == 1:
-        return "Expires in 1 day"
-    return f"Expires in {days} days"
+        return _("Expires today")
+    return ngettext("Expires in {n} day", "Expires in {n} days", days).format(n=days)
 
 
 def _origin_line(record: DraftRecord) -> str:
@@ -470,10 +470,10 @@ def _origin_line(record: DraftRecord) -> str:
     if published > 0 and not same_minute:
         published_text = format_absolute_date(published)
         if published_text:
-            parts.append(f"Published {published_text}")
+            parts.append(_("Published {date}").format(date=published_text))
     saved = format_absolute_time(record.created_at)
     if saved:
-        parts.append(f"Saved {saved}")
+        parts.append(_("Saved {time}").format(time=saved))
     return _SEP.join(parts)
 
 
@@ -483,7 +483,7 @@ def _tags_line(names: List[str]) -> str:
     shown = [f"#{name}" for name in names[:_MAX_TAGS]]
     extra = len(names) - len(shown)
     if extra > 0:
-        shown.append(f"+{extra} more")
+        shown.append(ngettext("+{n} more", "+{n} more", extra).format(n=extra))
     return _SEP.join(shown)
 
 
@@ -517,10 +517,14 @@ def preview_fields(
     if digest is None:
         digest = body_digest(record.content)
     summary = first_tag(record, "summary").strip() or digest.opening
-    stats = (
-        f"{digest.minutes} min read{_SEP}{digest.words:,} words"
-        if digest.words else ""
-    )
+    stats = ""
+    if digest.words:
+        reading = ngettext("{n} min read", "{n} min read", digest.minutes)
+        words = ngettext("{n} word", "{n} words", digest.words)
+        stats = _SEP.join((
+            reading.format(n=digest.minutes),
+            words.format(n=format_count(digest.words)),
+        ))
     return PreviewFields(
         title=record.title or _NO_TITLE,
         summary=summary,
@@ -602,14 +606,15 @@ def preview_announcement(
         digest = body_digest(record.content)
     sentences = []
     if digest.words:
-        minutes = "minute" if digest.minutes == 1 else "minutes"
-        words = "word" if digest.words == 1 else "words"
-        sentences.append(
-            f"{digest.minutes} {minutes} read, {digest.words} {words}"
-        )
+        reading = ngettext("{n} minute read", "{n} minutes read", digest.minutes)
+        words = ngettext("{n} word", "{n} words", digest.words)
+        sentences.append(_("{reading_time}, {word_count}").format(
+            reading_time=reading.format(n=digest.minutes),
+            word_count=words.format(n=digest.words),
+        ))
     names = article_hashtags(record)
     if names:
-        sentences.append("Tagged " + ", ".join(names[:_MAX_TAGS]))
+        sentences.append(_("Tagged {tags}").format(tags=", ".join(names[:_MAX_TAGS])))
     expiry = expiry_phrase(record.expiration, now=now)
     if expiry:
         sentences.append(expiry)
@@ -917,7 +922,7 @@ class _HeroImage(QWidget):
         self._pixmap: Optional[QPixmap] = None
         # NIP-23 carries no alt text, so the name says what the thing is
         # and no description invents what it depicts.
-        self.setAccessibleName("Article image")
+        self.setAccessibleName(_("Article image"))
         layout = QVBoxLayout(self)
         layout.setContentsMargins(_PAD, _PAD, _PAD, _PAD)
         self._note = QLabel("", self)
@@ -1183,7 +1188,7 @@ class PreviewPopover(QWidget):
         self._images_enabled = False
 
         self.setObjectName("drafts_preview")
-        self.setAccessibleName("Draft preview")
+        self.setAccessibleName(_("Draft preview"))
         # Qt has no per-widget accessible-role setter, so this window
         # cannot advertise itself as a dialog the way an AppKit popover
         # does. Every child below carries its own accessible name
@@ -1192,7 +1197,7 @@ class PreviewPopover(QWidget):
         # and ``preview_announcement`` puts the same facts on the row for
         # a reader that never enters it at all.
         self.setAccessibleDescription(
-            "Preview of one draft. Press Escape to close."
+            _("Preview of one draft. Press Escape to close.")
         )
         self.setFocusPolicy(Qt.NoFocus)
         if not self._child_mode:

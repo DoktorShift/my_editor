@@ -38,6 +38,8 @@ from typing import Callable, List, Optional, Sequence
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
+from i18n import _
+
 from .. import CLIENT_NAME
 from ..events import build_event
 from ..outbox import RelayDirectory, ask_private_relays
@@ -299,7 +301,7 @@ class FeedSubscriptionStore(QObject):
         profile = self._profile
         if profile is None or self._query is None:
             return
-        self.sync_status.emit("Syncing feed subscriptions…")
+        self.sync_status.emit(_("Syncing feed subscriptions…"))
 
         def _on_relays(relays) -> None:
             if self._profile is not profile:
@@ -331,7 +333,8 @@ class FeedSubscriptionStore(QObject):
                 ciphertext,
                 on_success=_adopt,
                 on_failure=lambda reason: self.sync_status.emit(
-                    f"Couldn't decrypt the synced feed list: {reason}"),
+                    _("Couldn't decrypt the synced feed list: {reason}").format(
+                        reason=reason)),
             )
 
         def _adopt(plaintext: str) -> None:
@@ -356,7 +359,8 @@ class FeedSubscriptionStore(QObject):
             profile,
             on_ready=_on_ready,
             on_error=lambda reason: self.sync_status.emit(
-                f"Couldn't reach the signer to sync feeds: {reason}"),
+                _("Couldn't reach the signer to sync feeds: {reason}").format(
+                    reason=reason)),
         )
 
     def _publish_now(self) -> None:
@@ -376,7 +380,7 @@ class FeedSubscriptionStore(QObject):
             self._publish_in_flight = False
             self._dirty = True  # keep the change queued for a retry
             self.sync_status.emit(
-                f"Couldn't sync feed subscriptions: {reason}")
+                _("Couldn't sync feed subscriptions: {reason}").format(reason=reason))
 
         def _on_ready(client) -> None:
             client.nip44_encrypt_self(
@@ -413,8 +417,8 @@ class FeedSubscriptionStore(QObject):
             else:
                 self._dirty = True
                 self.sync_status.emit(
-                    "Feed subscriptions saved locally; no relay accepted "
-                    "the sync yet.")
+                    _("Feed subscriptions saved locally; no relay accepted "
+                      "the sync yet."))
 
         self._session_pool.get(profile, on_ready=_on_ready, on_error=_fail)
 

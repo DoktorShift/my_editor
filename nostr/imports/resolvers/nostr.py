@@ -30,6 +30,8 @@ from __future__ import annotations
 
 from typing import List, Optional
 
+from i18n import _
+
 from ...outbox.policy import retry_relays
 from ..constants import NOSTR_MAX_ARTICLES
 from ..errors import ERROR_CODES, SourceError
@@ -212,8 +214,8 @@ def _resolve_author(
         items = tuple(nostr_event_to_item(e) for e in events)
         source_url = _canonical_source_url(url, entity, nip05)
         title = (
-            f"{author_name} · Articles" if author_name
-            else (nip05.address if nip05 else "Nostr articles")
+            _("{name} · Articles").format(name=author_name) if author_name
+            else (nip05.address if nip05 else _("Nostr articles"))
         )
         # An author with no articles yields an empty feed (the UI shows
         # a calm "nothing to import" state), not an error.

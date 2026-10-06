@@ -35,6 +35,8 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+from i18n import _
+
 
 # --------------------------------------------------------------------------- #
 # Protocol constants                                                          #
@@ -143,14 +145,16 @@ def parse_inner_event(plaintext: str) -> Dict[str, Any]:
 
     Returns a dict with the same shape as ``build_inner_event``'s output.
     Raises ``ValueError`` on any malformedness so callers can mark a
-    draft row as failed without taking down the whole list refresh.
+    draft row as failed without taking down the whole list refresh. The
+    row shows the message, so it is translated.
     """
     try:
         data = json.loads(plaintext)
     except json.JSONDecodeError as exc:
-        raise ValueError(f"draft payload is not valid JSON: {exc}") from exc
+        raise ValueError(
+            _("draft payload is not valid JSON: {error}").format(error=exc)) from exc
     if not isinstance(data, dict):
-        raise ValueError("draft payload must be a JSON object")
+        raise ValueError(_("draft payload must be a JSON object"))
     try:
         kind = int(data["kind"])
         content = str(data.get("content", ""))
@@ -158,13 +162,14 @@ def parse_inner_event(plaintext: str) -> Dict[str, Any]:
         created_at = int(data.get("created_at", 0))
         pubkey = str(data.get("pubkey", "")).lower()
     except (KeyError, TypeError, ValueError) as exc:
-        raise ValueError(f"draft payload missing required fields: {exc}") from exc
+        raise ValueError(
+            _("draft payload missing required fields: {error}").format(error=exc)) from exc
     # Unknown inner kinds are intentionally tolerated: a future client
     # could stash other kinds and we'd rather display "unknown draft
     # type" than silently drop them. ``DraftStore`` decides how to
     # render, see the kind branch in ``set_decrypted``.
     if not all(isinstance(t, list) and all(isinstance(x, str) for x in t) for t in tags):
-        raise ValueError("draft payload tags must be list[list[str]]")
+        raise ValueError(_("draft payload tags must be list[list[str]]"))
     return {
         "kind": kind,
         "content": content,

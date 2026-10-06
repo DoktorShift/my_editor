@@ -25,6 +25,8 @@ from typing import Any, Dict, Iterator, List, Optional
 
 from PySide6.QtCore import QObject, Signal
 
+from i18n import _
+
 from .drafts import (
     DraftWrapMeta,
     INNER_KIND_LONG_FORM,
@@ -279,7 +281,7 @@ class DraftStore(QObject):
         if record is None:
             return
         record.state = DraftState.FAILED
-        record.failure_reason = reason or "decryption failed"
+        record.failure_reason = reason or _("decryption failed")
         self.record_changed.emit(identifier)
 
     def remove(self, identifier: str) -> None:
@@ -339,6 +341,7 @@ def _note_title_from_content(content: str) -> str:
     Notes have no title field, so the shared Markdown title rule picks
     the first line that still reads as words. If the body is empty, or
     is nothing but images, we return "Untitled note" so the row is
-    still recognisable in the list.
+    still recognisable in the list. The row is the only place this title
+    is shown, and nothing publishes it, so the fallback is translated.
     """
-    return derive_title_from_markdown(content, max_len=60, fallback="Untitled note")
+    return derive_title_from_markdown(content, max_len=60, fallback=_("Untitled note"))

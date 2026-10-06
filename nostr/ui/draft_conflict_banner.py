@@ -7,19 +7,19 @@ currently bound to a tab has been updated from another device (same
 ``d``-tag, newer ``created_at`` than the one the tab was opened with).
 The user picks one of three resolutions:
 
-  - **View** — open the remote version in a new tab without touching
+  - **View**: open the remote version in a new tab without touching
     the current one. Lets the user diff visually.
-  - **Reload** — replace the current tab's contents with the remote
+  - **Reload**: replace the current tab's contents with the remote
     version. The local unsaved edits are lost; we warn if dirty.
-  - **Keep mine** — dismiss the banner. The next stash from this tab
+  - **Keep mine**: dismiss the banner. The next stash from this tab
     will become the newest ``created_at`` and win.
 
 Cross-platform notes:
   - All colours / borders use the existing theme palette.
-  - No platform-specific assets — the icon is a Unicode glyph so the
+  - No platform-specific assets: the icon is a Unicode glyph so the
     banner renders identically on macOS, Windows, and Linux.
-  - The Close button uses a Unicode × (U+00D7) for the same reason —
-    Qt's standard icons differ subtly across themes.
+  - The Close button uses a Unicode × (U+00D7) for the same reason,
+    because Qt's standard icons differ subtly across themes.
 """
 
 from __future__ import annotations
@@ -36,6 +36,8 @@ from PySide6.QtWidgets import (
     QToolButton,
     QWidget,
 )
+
+from i18n import _
 
 
 # --------------------------------------------------------------------------- #
@@ -137,10 +139,10 @@ class DraftConflictBanner(QFrame):
     """Slim banner with View / Reload / Keep mine actions.
 
     Signals:
-      view_remote()   — open the newer draft in a *new* tab.
-      reload()        — replace this tab's contents with the newer draft.
-      keep_mine()     — dismiss; the next stash supersedes the remote.
-      dismissed()     — banner is closing (fired whenever the user
+      view_remote()   , open the newer draft in a *new* tab.
+      reload()        , replace this tab's contents with the newer draft.
+      keep_mine()     , dismiss; the next stash supersedes the remote.
+      dismissed()     , banner is closing (fired whenever the user
                         clicks any action or the close button), so the
                         caller can detach it from the tab.
     """
@@ -159,7 +161,9 @@ class DraftConflictBanner(QFrame):
         super().__init__(parent)
         self.setObjectName("draft_conflict_banner")
         self.setFrameShape(QFrame.NoFrame)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        # Never shorter than its text: a narrow window wraps the message
+        # onto more lines, and a fixed height would cut them off.
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         self._is_dark = is_dark
         self._build_ui()
         self.apply_theme(is_dark)
@@ -177,32 +181,32 @@ class DraftConflictBanner(QFrame):
         layout.addWidget(icon)
 
         self._text = QLabel(
-            "A newer version of this draft was published from another device."
+            _("A newer version of this draft was published from another device.")
         )
         self._text.setObjectName("draft_conflict_text")
         self._text.setWordWrap(True)
         layout.addWidget(self._text, 1)
 
-        self._view_btn = QPushButton("View")
+        self._view_btn = QPushButton(_("View"))
         self._view_btn.setObjectName("draft_conflict_action")
-        self._view_btn.setToolTip("Open the newer version in a new tab")
+        self._view_btn.setToolTip(_("Open the newer version in a new tab"))
         self._view_btn.clicked.connect(self._on_view)
         layout.addWidget(self._view_btn)
 
-        self._reload_btn = QPushButton("Reload")
+        self._reload_btn = QPushButton(_("Reload"))
         self._reload_btn.setObjectName("draft_conflict_action")
         self._reload_btn.setProperty("primary", "true")
         self._reload_btn.setToolTip(
-            "Replace this tab's contents with the newer version. "
-            "Unsaved local edits will be lost."
+            _("Replace this tab's contents with the newer version. "
+              "Unsaved local edits will be lost.")
         )
         self._reload_btn.clicked.connect(self._on_reload)
         layout.addWidget(self._reload_btn)
 
-        self._keep_btn = QPushButton("Keep mine")
+        self._keep_btn = QPushButton(_("Keep mine"))
         self._keep_btn.setObjectName("draft_conflict_action")
         self._keep_btn.setToolTip(
-            "Dismiss and let the next save from this tab win."
+            _("Dismiss and let the next save from this tab win.")
         )
         self._keep_btn.clicked.connect(self._on_keep)
         layout.addWidget(self._keep_btn)
@@ -210,7 +214,9 @@ class DraftConflictBanner(QFrame):
         self._close_btn = QToolButton()
         self._close_btn.setObjectName("draft_conflict_close")
         self._close_btn.setText("×")
-        self._close_btn.setToolTip("Dismiss")
+        self._close_btn.setToolTip(_("Dismiss"))
+        # Icon only, so the name is what a screen reader announces.
+        self._close_btn.setAccessibleName(_("Dismiss"))
         self._close_btn.setCursor(Qt.PointingHandCursor)
         self._close_btn.clicked.connect(self._on_close)
         layout.addWidget(self._close_btn)
@@ -227,7 +233,7 @@ class DraftConflictBanner(QFrame):
             btn.style().polish(btn)
 
     def set_message(self, text: str) -> None:
-        """Override the banner copy — e.g. include the timestamp of the
+        """Override the banner copy, e.g. include the timestamp of the
         remote version once we know it."""
         self._text.setText(text)
 

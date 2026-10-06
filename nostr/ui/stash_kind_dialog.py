@@ -4,7 +4,7 @@
 
 This is the second-stage dialog in the stash flow. The first stage
 (``SaveDestinationDialog``) routes the user here when they choose
-"Save as private Nostr draft" — or it's skipped via the per-tab
+"Save as private Nostr draft", or it's skipped via the per-tab
 "remember" toggle, in which case the previous binding's identifier
 and kind are reused without prompting.
 
@@ -14,7 +14,7 @@ UX:
     inline metadata block (slug, title, summary). The slug auto-fills
     from the title via ``publisher.slugify`` until the user types
     something themselves.
-  - The dialog never asks for cover image or hashtags — those are
+  - The dialog never asks for cover image or hashtags: those are
     publish-time concerns; the draft only needs a stable d-tag so a
     later promote-to-publish can carry forward.
   - The default selection follows the caller's preference (typically
@@ -42,6 +42,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from i18n import _
+
 from ..drafts import (
     INNER_KIND_LONG_FORM,
     INNER_KIND_SHORT_NOTE,
@@ -63,7 +65,7 @@ class StashChoice:
 
     For a note draft, ``slug`` is auto-generated as a UUID identifier and
     ``title`` / ``summary`` are empty. For an article, ``slug`` becomes
-    the addressable ``d``-tag — the same slug the article will use if
+    the addressable ``d``-tag, the same slug the article will use if
     later promoted to a real publish.
     """
 
@@ -74,7 +76,7 @@ class StashChoice:
 
 
 # --------------------------------------------------------------------------- #
-# Stylesheets — matched to SaveDestinationDialog's vocabulary                 #
+# Stylesheets, matched to SaveDestinationDialog's vocabulary                  #
 # --------------------------------------------------------------------------- #
 
 _DARK_CSS = """
@@ -266,7 +268,7 @@ class _KindCard(QFrame):
         self.style().polish(self)
         self.radio.setChecked(selected)
 
-    def mousePressEvent(self, event):  # noqa: D401 — Qt override
+    def mousePressEvent(self, event):  # noqa: D401 (Qt override)
         if event.button() == Qt.LeftButton:
             self.clicked.emit()
         super().mousePressEvent(event)
@@ -294,7 +296,7 @@ class StashKindDialog(QDialog):
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Save as Nostr draft")
+        self.setWindowTitle(_("Save as Nostr draft"))
         self.setModal(True)
         self.setMinimumWidth(500)
         self._is_dark = is_dark
@@ -335,13 +337,13 @@ class StashKindDialog(QDialog):
         root.setContentsMargins(24, 22, 24, 18)
         root.setSpacing(14)
 
-        title = QLabel("Save as Nostr draft")
+        title = QLabel(_("Save as Nostr draft"))
         title.setObjectName("stash_kind_title")
         root.addWidget(title)
 
         subtitle = QLabel(
-            "Drafts are end-to-end encrypted to your key. Pick the kind "
-            "so the draft can be promoted to a publish later."
+            _("Drafts are end-to-end encrypted to your key. Pick the kind "
+              "so the draft can be promoted to a publish later.")
         )
         subtitle.setObjectName("stash_kind_subtitle")
         subtitle.setWordWrap(True)
@@ -352,15 +354,15 @@ class StashKindDialog(QDialog):
         self._group.setExclusive(True)
 
         self._note_card = _KindCard(
-            title="Short note",
-            hint=(
+            title=_("Short note"),
+            hint=_(
                 "Quick thought, plain text. Kind 1 when published. "
-                "No slug — the draft is identified by a private UUID."
+                "No slug: the draft is identified by a private UUID."
             ),
         )
         self._article_card = _KindCard(
-            title="Long-form article",
-            hint=(
+            title=_("Long-form article"),
+            hint=_(
                 "Markdown post with a stable slug. Kind 30023 when "
                 "published; the slug ties the draft to the eventual "
                 "article so re-stashing replaces in place."
@@ -391,29 +393,29 @@ class StashKindDialog(QDialog):
         article_layout.addWidget(_divider())
 
         self._title_edit = QLineEdit()
-        self._title_edit.setPlaceholderText("Article title (used to derive the slug)")
+        self._title_edit.setPlaceholderText(_("Article title (used to derive the slug)"))
         self._title_edit.setText(suggested_title)
         self._title_edit.textChanged.connect(self._on_title_changed)
-        article_layout.addWidget(_field("Title", self._title_edit))
+        article_layout.addWidget(_field(_("Title"), self._title_edit))
 
         self._slug_edit = QLineEdit()
-        self._slug_edit.setPlaceholderText("article-slug")
+        self._slug_edit.setPlaceholderText(_("article-slug"))
         seed_slug = suggested_slug or (slugify(suggested_title) if suggested_title else "")
         self._slug_edit.setText(seed_slug)
         self._slug_edit.textEdited.connect(self._on_slug_edited)
-        article_layout.addWidget(_field("Slug (the draft's d-tag)", self._slug_edit))
+        article_layout.addWidget(_field(_("Slug (the draft's d-tag)"), self._slug_edit))
 
         self._summary_edit = QLineEdit()
-        self._summary_edit.setPlaceholderText("Optional one-sentence summary")
+        self._summary_edit.setPlaceholderText(_("Optional one-sentence summary"))
         self._summary_edit.setText(suggested_summary)
-        article_layout.addWidget(_field("Summary (optional)", self._summary_edit))
+        article_layout.addWidget(_field(_("Summary (optional)"), self._summary_edit))
 
         root.addWidget(self._article_panel)
 
         # Buttons
         buttons = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
         self._save_btn = buttons.button(QDialogButtonBox.Ok)
-        self._save_btn.setText("Save draft")
+        self._save_btn.setText(_("Save draft"))
         self._save_btn.setDefault(True)
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
@@ -433,7 +435,7 @@ class StashKindDialog(QDialog):
         self._article_card.set_selected(not is_note)
         self._article_panel.setVisible(not is_note)
         # Resize the dialog to its sizeHint when the panel collapses or
-        # expands — Qt won't shrink the dialog otherwise on macOS.
+        # expands: Qt won't shrink the dialog otherwise on macOS.
         self.adjustSize()
         self._refresh_save_enabled()
 
@@ -445,7 +447,7 @@ class StashKindDialog(QDialog):
         self._refresh_save_enabled()
 
     def _on_slug_edited(self, _text: str) -> None:
-        # The user took manual control — stop auto-syncing.
+        # The user took manual control, so stop auto-syncing.
         self._slug_is_auto = False
         self._refresh_save_enabled()
 
@@ -472,7 +474,7 @@ class StashKindDialog(QDialog):
         else:
             slug = self._slug_edit.text().strip()
             if not slug:
-                # Defensive — the OK button shouldn't have been enabled.
+                # Defensive: the OK button shouldn't have been enabled.
                 return
             self._choice = StashChoice(
                 kind=StashKind.ARTICLE,
