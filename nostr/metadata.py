@@ -31,7 +31,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -40,6 +39,7 @@ from PySide6.QtGui import QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
 import url_safety
+from atomic_file import write_bytes
 from image_safety import decode_image_bytes
 
 from .outbox.directory import RelayDirectory
@@ -306,18 +306,6 @@ def _write_private_file(path: Path, data: bytes) -> None:
     the caller already has the pixmap.
     """
     try:
-        fd, tmp_path = tempfile.mkstemp(
-            prefix=".avatar_", suffix=".tmp", dir=str(path.parent)
-        )
+        write_bytes(path, data)
     except OSError:
-        return
-    try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
-        _chmod(tmp_path, 0o600)
-        os.replace(tmp_path, path)
-    except OSError:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
+        pass

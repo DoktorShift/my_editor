@@ -25,7 +25,6 @@ Geometry notes, established empirically against QPdfDocument:
   outside the trusted-root policy.
 """
 
-import json
 import os
 from dataclasses import dataclass
 
@@ -33,7 +32,6 @@ from PySide6.QtCore import QMarginsF, QRectF, QSizeF, Qt, QLocale, QUrl
 from PySide6.QtGui import (
     QAbstractTextDocumentLayout,
     QColor,
-    QFont,
     QImage,
     QPageLayout,
     QPageSize,
@@ -45,7 +43,8 @@ from PySide6.QtGui import (
     QTextImageFormat,
 )
 
-from constants import MONO_FONT
+from atomic_file import read_json, write_json
+from fonts import monospace_font
 from i18n import _
 from image_safety import ImageRootPolicy, data_uri_bytes, decode_image_bytes
 
@@ -86,12 +85,8 @@ def default_page_setup() -> dict:
 
 def load_page_setup() -> dict:
     setup = default_page_setup()
-    try:
-        with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return setup
-    if isinstance(data, dict):
+    data = read_json(_CONFIG_PATH, dict)
+    if data:
         if data.get("page_size") in PAGE_SIZES:
             setup["page_size"] = data["page_size"]
         if data.get("orientation") in ("portrait", "landscape"):
@@ -103,9 +98,7 @@ def load_page_setup() -> dict:
 
 
 def save_page_setup(setup: dict) -> None:
-    os.makedirs(os.path.dirname(_CONFIG_PATH), exist_ok=True)
-    with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(setup, f, indent=2)
+    write_json(_CONFIG_PATH, setup, indent=2)
 
 
 def make_page_layout(setup: dict) -> QPageLayout:
@@ -240,7 +233,7 @@ def paginate(doc, device, resolution: int, *, image_roots=(), asset_resolver=Non
     # Print in points, not the editor's 14 screen pixels, and force a white
     # page regardless of the active theme. Palette colors (Material 600)
     # are chosen to stay readable on white.
-    clone.setDefaultFont(QFont(MONO_FONT, BODY_POINT_SIZE))
+    clone.setDefaultFont(monospace_font(BODY_POINT_SIZE))
     frame_fmt = clone.rootFrame().frameFormat()
     frame_fmt.setBackground(QColor("white"))
     clone.rootFrame().setFrameFormat(frame_fmt)
@@ -260,7 +253,7 @@ def paint_pages(painter: QPainter, device, paged: PagedDocument, page_numbers) -
     printed range still says "Page 3 of 7".
     """
     layout = paged.clone.documentLayout()
-    footer_font = QFont(MONO_FONT, FOOTER_POINT_SIZE)
+    footer_font = monospace_font(FOOTER_POINT_SIZE)
     content_h = paged.content_height
     for n, number in enumerate(page_numbers):
         page = number - 1

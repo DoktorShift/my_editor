@@ -32,11 +32,11 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 import time
 from pathlib import Path
 from typing import Dict, Optional
 
+from atomic_file import write_text
 from nostr import crypto
 
 KEYS_DIR = Path.home() / ".config" / "my_editor"
@@ -147,17 +147,6 @@ class KeyVault:
             os.chmod(folder, 0o700)
         except OSError:
             pass
-        fd, tmp = tempfile.mkstemp(prefix=".nostr_keys_", suffix=".tmp", dir=str(folder))
-        try:
-            os.chmod(tmp, 0o600)   # before a single key byte is written
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump({"version": 1, "keys": keys}, f)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp, self._path)
-        except OSError:
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-            raise
+        # The new file is readable by this account only from its first
+        # byte on (atomic_file creates it that way).
+        write_text(self._path, json.dumps({"version": 1, "keys": keys}))

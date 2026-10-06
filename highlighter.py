@@ -9,7 +9,7 @@ import re
 import os
 from PySide6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor, QFont
 
-from constants import MONO_FONT
+from fonts import monospace_family
 
 
 _EXT_TO_LANG: dict[str, str] = {
@@ -532,9 +532,6 @@ class RichTextLook(QSyntaxHighlighter):
 
     _CODE_BACKGROUND = {True: "#33363B", False: "#EEF0F2"}
     _LINK = {True: "#4AA3FF", False: "#0A66C2"}
-    # A font that is monospaced on every system: "monospace", which
-    # Markdown gives inline code, is not a font on macOS or Windows.
-    _CODE_FAMILIES = [MONO_FONT, "Menlo", "Consolas", "DejaVu Sans Mono", "monospace"]
 
     def __init__(self, document, is_dark: bool = True):
         super().__init__(document)
@@ -550,7 +547,9 @@ class RichTextLook(QSyntaxHighlighter):
     def _build_formats(self):
         self._code = QTextCharFormat()
         self._code.setBackground(QColor(self._CODE_BACKGROUND[self._is_dark]))
-        self._code.setFontFamilies(self._CODE_FAMILIES)
+        # A font that is monospaced on this system: "monospace", which
+        # Markdown gives inline code, is not a font on macOS or Windows.
+        self._code.setFontFamilies([monospace_family(), "monospace"])
         # A link reads as one in either theme, whatever color the file
         # it came from gave it.
         self._link = QTextCharFormat()

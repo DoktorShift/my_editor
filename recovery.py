@@ -34,6 +34,7 @@ from PySide6.QtCore import QTimer
 
 from PySide6.QtGui import QTextFormat, QTextImageFormat
 
+from atomic_file import write_text
 from doc_walk import iter_block_runs, iter_blocks, iter_image_names
 from export_html import normalize_after_set_html
 from markdown_writer import (
@@ -359,10 +360,11 @@ class EditorBackup:
             self._oversize_until = time.monotonic() + _OVERSIZE_RETRY_S
             return False
 
+        # In one step: a crash while writing must leave the previous
+        # backup whole, since that is exactly when it is needed.
         try:
             _ensure_backup_dir()
-            with open(self.path, "w", encoding="utf-8") as f:
-                f.write(payload)
+            write_text(self.path, payload)
         except OSError:
             return False  # backup is best-effort; never raise to the user
         self._last_hash = fingerprint

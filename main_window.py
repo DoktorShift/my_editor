@@ -5,7 +5,6 @@
 
 import hashlib
 import itertools
-import json
 import os
 import platform
 import re
@@ -36,11 +35,16 @@ from PySide6.QtWidgets import (
 from constants import (
     DARK_BG, DARK_FG, LIGHT_BG, LIGHT_FG, DARK_SELECTION, LIGHT_SELECTION,
     DARK_MENU_BG, DARK_MENU_FG, LIGHT_MENU_BG, LIGHT_MENU_FG,
-    DARK_BORDER, LIGHT_BORDER, MONO_FONT, APP_DISPLAY_NAME, APP_VERSION, APP_URL, TEXT_COLORS,
+    DARK_BORDER, LIGHT_BORDER, APP_DISPLAY_NAME, APP_VERSION, APP_URL, TEXT_COLORS,
     DARK_MUTED_FG, LIGHT_MUTED_FG,
 )
 from widgets import FindBar, HeaderWidget, LineNumberGutter, FileChangedBar, UpdateBar
 from format_toolbar import FormatToolbar
+from atomic_file import (
+    read_json, read_text_document, save_document, save_text_document, write_json,
+)
+import diagnostics
+from fonts import monospace_family
 import i18n
 from i18n import _, ngettext, pgettext
 from commands import (
@@ -767,7 +771,7 @@ class MainWindow(QMainWindow):
                 border: none;
                 selection-background-color: {selection};
                 selection-color: {fg};
-                font-family: {MONO_FONT};
+                font-family: "{monospace_family()}";
                 font-size: 14px;
                 line-height: 1.5;
                 padding: 8px;
@@ -1127,7 +1131,8 @@ class MainWindow(QMainWindow):
         self.act_close_tab = add(Command("file.close_tab", _("Close Tab"), FILE, "Ctrl+W",
                                          listed_as=_("Close tab")),
                                  triggered=self._close_current_tab)
-        self.act_quit = add(Command("file.quit", _("Quit"), FILE, "Ctrl+Q"),
+        self.act_quit = add(Command("file.quit", _("Quit"), FILE, "Ctrl+Q",
+                                    role=QAction.MenuRole.QuitRole),
                             triggered=self._quit_application)
 
         # Edit, as in every Mac app. Cut, Copy, Paste and Select All act on
@@ -1441,7 +1446,11 @@ class MainWindow(QMainWindow):
         self.act_check_updates = add(Command("help.check_updates", _("Check for Updates\u2026"),
                                              HELP, keywords=("upgrade", "version")),
                                      triggered=self._check_for_updates_manual)
-        self.act_about = add(Command("help.about", pgettext("help menu", "About"), HELP),
+        self.act_show_logs = add(Command("help.show_logs", _("Show Log Files"), HELP,
+                                         keywords=("diagnostics", "bug report", "crash")),
+                                 triggered=self._show_log_files)
+        self.act_about = add(Command("help.about", pgettext("help menu", "About"), HELP,
+                                     role=QAction.MenuRole.AboutRole),
                              triggered=self._show_about)
 
     def _build_menu(self):
@@ -1568,6 +1577,7 @@ class MainWindow(QMainWindow):
         help_menu.addSeparator()
         help_menu.addAction(self.act_install_help)
         help_menu.addAction(self.act_check_updates)
+        help_menu.addAction(self.act_show_logs)
         help_menu.addSeparator()
         help_menu.addAction(self.act_about)
 
@@ -2250,9 +2260,8 @@ class MainWindow(QMainWindow):
             return self._open_pdf_tab(path)
 
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                content = f.read()
-        except Exception as e:
+            content, newline = read_text_document(path)
+        except (OSError, ValueError) as e:
             inform(self, title=_("Couldn't open \u201c{name}\u201d").format(
                        name=os.path.basename(path)),
                    message=str(e))
@@ -2263,6 +2272,8 @@ class MainWindow(QMainWindow):
         # document's own directory, and Qt caches whatever the first
         # lookup answered.
         ed._file_path = path
+        # Saved back with the line endings it came with.
+        ed._newline = newline
         self._set_editor_content(ed, path, content)
 
         ed.document().setModified(False)
@@ -2677,8 +2688,7 @@ class MainWindow(QMainWindow):
                 # placeholder the old toPlainText call wrote out.
                 content = serialize_plain_with_images(ed.document(), lambda fmt: None)
 
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(content)
+            save_text_document(path, content, newline=getattr(ed, "_newline", None))
             ed._recovered_title = ""
             ed.document().setModified(False)
             self._update_tab_title()
@@ -2724,13 +2734,13 @@ class MainWindow(QMainWindow):
         if not path or not os.path.exists(path):
             return
         try:
-            with open(path, 'r', encoding='utf-8') as f:
-                content = f.read()
-        except Exception as e:
+            content, newline = read_text_document(path)
+        except (OSError, ValueError) as e:
             inform(self, title=_("Couldn't reload \u201c{name}\u201d").format(
                        name=os.path.basename(path)),
                    message=str(e))
             return
+        ed._newline = newline
 
         self._set_editor_content(ed, path, content)
         self._attach_highlighter(ed, path)
@@ -2801,8 +2811,7 @@ class MainWindow(QMainWindow):
                 return written[name]
             try:
                 os.makedirs(media_dir, exist_ok=True)
-                with open(os.path.join(media_dir, name), "wb") as f:
-                    f.write(data)
+                save_document(os.path.join(media_dir, name), data)
             except OSError:
                 return None
             written[name] = f"{os.path.basename(media_dir)}/{name}"
@@ -2949,8 +2958,7 @@ class MainWindow(QMainWindow):
             os.makedirs(media_dir, exist_ok=True)
             target = os.path.join(media_dir, filename)
             try:
-                with open(target, "wb") as f:
-                    f.write(data)
+                save_document(target, data)
             except OSError:
                 return None
             return f"{os.path.basename(media_dir)}/{filename}"
@@ -2960,8 +2968,8 @@ class MainWindow(QMainWindow):
     def _save_as_rtf(self, editor, path: str) -> bool:
         try:
             content = self._to_rtf(editor)
-            with open(path, "w", encoding="ascii") as f:
-                f.write(content)
+            save_text_document(path, content, encoding="ascii",
+                               newline=getattr(editor, "_newline", None))
             editor._recovered_title = ""
             editor.document().setModified(False)
             self._update_tab_title()
@@ -3459,6 +3467,14 @@ class MainWindow(QMainWindow):
         # it can replace our files.
         self._closing_for_update = True
         self.close()
+
+    def _show_log_files(self):
+        """Help > Show Log Files: the folder with the log, for a bug report."""
+        folder = diagnostics.log_folder()
+        os.makedirs(folder, exist_ok=True)
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(folder)):
+            self.statusBar().showMessage(
+                _("The log files are in {folder}").format(folder=folder), 8000)
 
     def _open_install_guide(self):
         """Help > Installation Help: the web guide, opened on this system."""
@@ -4120,27 +4136,27 @@ class MainWindow(QMainWindow):
         if not paths:
             return
         data = {"paths": paths, "active": self.tabs.currentIndex()}
-        os.makedirs(os.path.dirname(self._SESSION_FILE), exist_ok=True)
-        with open(self._SESSION_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f)
+        write_json(self._SESSION_FILE, data)
 
     def _restore_session(self) -> bool:
         if not os.path.isfile(self._SESSION_FILE):
             return False
+        data = read_json(self._SESSION_FILE, dict)
+        # Restored at most once, and a damaged record never restores.
         try:
-            with open(self._SESSION_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception:
-            return False
-        os.remove(self._SESSION_FILE)
-        paths = [p for p in data.get("paths", []) if os.path.isfile(p)]
+            os.remove(self._SESSION_FILE)
+        except OSError:
+            pass
+        listed = data.get("paths")
+        listed = listed if isinstance(listed, list) else []
+        paths = [p for p in listed if isinstance(p, str) and os.path.isfile(p)]
         if not paths:
             return False
-        missing = len(data.get("paths", [])) - len(paths)
+        missing = len(listed) - len(paths)
         for path in paths:
             self.open_path(path)
         active = data.get("active", 0)
-        if 0 <= active < self.tabs.count():
+        if isinstance(active, int) and 0 <= active < self.tabs.count():
             self.tabs.setCurrentIndex(active)
         if missing:
             self.status.showMessage(

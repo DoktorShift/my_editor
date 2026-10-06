@@ -172,10 +172,10 @@ def test_the_suggested_file_name_says_whose_account_it_is():
 @pytest.mark.skipif(os.name != "posix", reason="POSIX permissions")
 def test_the_backup_file_is_private_from_the_first_byte(tmp_path):
     path = tmp_path / "backup.txt"
-    path.write_text("an older file anyone could read")
+    path.write_text("an older file anyone could read", encoding="utf-8")
     os.chmod(path, 0o644)
     aw.write_backup_file(str(path), "the backup")
-    assert path.read_text() == "the backup"
+    assert path.read_text(encoding="utf-8") == "the backup"
     assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
     fresh = tmp_path / "fresh.txt"
     aw.write_backup_file(str(fresh), "x")

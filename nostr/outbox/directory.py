@@ -39,8 +39,6 @@ from __future__ import annotations
 import copy
 import json
 import logging
-import os
-import tempfile
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -48,6 +46,8 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QObject, QTimer, Signal
+
+from atomic_file import write_text
 
 from .. import events
 from . import defaults, policy
@@ -425,28 +425,12 @@ class RelayDirectory(QObject):
         own = self._own_keys()
         lists = {k: e.event for k, e in self._entries.items()
                  if k in own and e.found and e.event is not None}
-        folder = self._store_path.parent
-        tmp: Optional[str] = None
         try:
-            folder.mkdir(parents=True, exist_ok=True)
-            fd, tmp = tempfile.mkstemp(prefix=".relay_lists_", dir=str(folder))
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump({"version": 1, "lists": lists}, f)
-                f.flush()
-                os.fsync(f.fileno())
-            os.chmod(tmp, 0o600)
-            os.replace(tmp, self._store_path)
-            tmp = None
+            write_text(self._store_path, json.dumps({"version": 1, "lists": lists}))
         except (OSError, TypeError, ValueError) as exc:
             # The lists are still known for this session; only the head
             # start on the next launch is lost.
             logger.warning("could not save the relay lists: %s", exc)
-        finally:
-            if tmp is not None:
-                try:
-                    os.unlink(tmp)
-                except OSError:
-                    pass
 
 
 def _copy(relay_list: RelayList) -> RelayList:

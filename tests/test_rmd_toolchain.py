@@ -71,7 +71,7 @@ def test_find_pandoc_managed_beats_system(sandbox, monkeypatch):
     managed = sandbox / "pandoc" / "3.5" / "bin"
     managed.mkdir(parents=True)
     binary = managed / "pandoc"
-    binary.write_text("")
+    binary.write_text("", encoding="utf-8")
     rmd_toolchain._save_state({"pandoc": {"version": "3.5",
                                           "bin": str(binary)}})
     monkeypatch.setattr(rmd_toolchain.shutil, "which",
@@ -258,7 +258,7 @@ def test_knit_environment_composition(sandbox):
     bin_dir = sandbox / "pandoc" / "3.5" / "bin"
     bin_dir.mkdir(parents=True)
     binary = bin_dir / "pandoc"
-    binary.write_text("")
+    binary.write_text("", encoding="utf-8")
     rmd_toolchain._save_state({"pandoc": {"version": "3.5",
                                           "bin": str(binary)}})
     env = QProcessEnvironment()
@@ -275,6 +275,6 @@ def test_state_roundtrip(sandbox):
     assert rmd_toolchain._load_state() == {"pandoc": {"version": "3.5",
                                                      "bin": "/x"}}
     # Corrupt state degrades to empty, not an exception.
-    with open(rmd_toolchain._STATE_PATH, "w") as f:
+    with open(rmd_toolchain._STATE_PATH, "w", encoding="utf-8") as f:
         f.write("{broken")
     assert rmd_toolchain._load_state() == {}

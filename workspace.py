@@ -29,6 +29,8 @@ import time
 from dataclasses import asdict, dataclass, field
 from typing import Optional
 
+from atomic_file import write_json
+
 WORKSPACE_FILE = os.path.join(os.path.expanduser("~"), ".cache", "my_editor", "workspace.json")
 
 # Readers skip a record with a higher version instead of guessing at it.
@@ -81,18 +83,7 @@ def write_workspace(workspace: Workspace, path: str = WORKSPACE_FILE) -> bool:
     record = asdict(workspace)
     record["version"] = WORKSPACE_VERSION
     record["tabs"] = [asdict(t) for t in workspace.tabs]
-    tmp = path + ".tmp"
-    try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(record, f, ensure_ascii=False)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)
-    except (OSError, TypeError, ValueError):
-        _remove(tmp)
-        return False
-    return True
+    return write_json(path, record, ensure_ascii=False)
 
 
 def take_workspace(path: str = WORKSPACE_FILE) -> Optional[Workspace]:

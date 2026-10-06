@@ -59,6 +59,10 @@ class Command:
     # The words the Keyboard Shortcuts window uses, when they differ from
     # the menu title ("Toggle theme" for "Toggle Dark/Light Theme").
     listed_as: str = ""
+    # Where macOS puts it. Only About and Quit move to the application
+    # menu; every other command stays where it was put, whatever its title
+    # says in any language (Qt would otherwise guess from the words).
+    role: QAction.MenuRole = QAction.MenuRole.NoRole
 
 
 def platform_keys(mac: ShortcutSpec, other: ShortcutSpec, *,
@@ -136,6 +140,7 @@ class CommandRegistry(QObject):
                                  f"{command.id!r} cannot have it too")
         action = QAction(command.title, self._window)
         action.setObjectName(command.id)
+        action.setMenuRole(command.role)
         if isinstance(command.shortcut, QKeySequence.StandardKey):
             # Every combination the platform uses for it (F3 and Command-G
             # for Find Next on a Mac), not only the first.

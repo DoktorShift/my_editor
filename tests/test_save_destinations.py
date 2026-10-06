@@ -171,3 +171,23 @@ def test_a_document_without_images_is_unchanged_by_the_guard(win):
     ed = _editor_with(text="just words")
     for name in ("notes.org", "README", "paper.Rmd", "plain.txt"):
         assert win._loses_content_on_save(ed, name) is False
+
+
+def test_a_saved_file_keeps_the_line_endings_it_was_read_with(win, tmp_path, monkeypatch):
+    # On Windows a Markdown file from a Git repository must not turn
+    # every line into CRLF the first time it is saved.
+    import atomic_file
+    from PySide6.QtWidgets import QTextEdit
+
+    monkeypatch.setattr(atomic_file.os, "linesep", "\r\n")
+    ed = QTextEdit()
+    ed.setPlainText("Line one\nLine two")
+    ed._newline = "\n"
+    win._ed = ed
+    path = str(tmp_path / "notes.txt")
+    assert win._save_to(path) is True
+    assert b"\r\n" not in open(path, "rb").read()
+
+    ed._newline = None          # a new document: this system's ending
+    assert win._save_to(path) is True
+    assert b"\r\n" in open(path, "rb").read()

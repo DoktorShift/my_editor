@@ -15,9 +15,10 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QTextEdit, QMenu, QApplication, QToolTip
 from constants import (
-    DARK_BG, DARK_FG, LIGHT_BG, LIGHT_FG, DARK_SELECTION, LIGHT_SELECTION, MONO_FONT,
+    DARK_BG, DARK_FG, LIGHT_BG, LIGHT_FG, DARK_SELECTION, LIGHT_SELECTION,
     DARK_GUIDE, LIGHT_GUIDE, DARK_CURRENT_LINE, LIGHT_CURRENT_LINE, DARK_PAPER, LIGHT_PAPER,
 )
+from fonts import monospace_family
 from i18n import _
 import link_url
 import rich_text
@@ -95,7 +96,7 @@ class HtmlEditor(QTextEdit):
                 color: {DARK_FG};
                 border: none;
                 selection-background-color: {DARK_SELECTION};
-                font-family: {MONO_FONT};
+                font-family: "{monospace_family()}";
                 font-size: 14px;
                 line-height: 1.5;
                 padding: 8px;
