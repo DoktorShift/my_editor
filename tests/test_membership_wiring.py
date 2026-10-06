@@ -516,6 +516,10 @@ def test_a_profile_address_for_an_account_no_longer_active_is_not_written():
     h.profile = Profile(OTHER_KEY)              # switched, window not told yet
     window._profile_button.click()
     assert h.jobs == []
+    # The window is not left waiting: it says nothing was changed, and the
+    # button can be used again.
+    assert window._profile_result.text() == pa.outcome_message(pa.FAILED)
+    assert window._profile_button.isEnabled()
     window.close()
 
 

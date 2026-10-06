@@ -3657,6 +3657,7 @@ class MainWindow(QMainWindow):
         """
         self._draft_sync.stop()
         self._private_library.stop()
+        self._server_list.forget_account()
         # The library lists one account's files; the next account must
         # never see them, not even until its own fetch lands.
         self._media_store.clear()

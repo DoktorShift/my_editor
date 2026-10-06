@@ -9,9 +9,11 @@ first, then CHF, then EUR. The association's own amount is always shown
 exactly; every other amount is converted with today's Bitcoin price and
 marked as approximate.
 
-The price comes from mempool.space's public price endpoint, asked only
-while the membership window is open, with no identity attached. When it
-cannot be reached, the window shows the association's amount alone.
+The price comes from mempool.space's public price endpoint, asked once
+while the membership window is open, with no account and a plain app
+name attached (mempool.space sees the computer's address, as any web
+request does). When it cannot be reached, the window shows the
+association's amount alone.
 
 :func:`parse_prices`, :func:`fee_amounts` and :func:`format_fee` are pure;
 :class:`PriceLookup` is the one network call.
@@ -30,7 +32,9 @@ from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequ
 PRICES_URL: str = "https://mempool.space/api/v1/prices"
 PRICES_TIMEOUT_MS: int = 8_000
 _MAX_PRICES_BYTES: int = 16 * 1024
-_USER_AGENT = b"my-editor-membership/1"
+# A plain name: the price is the same for everyone, and the request says
+# nothing about why it was asked.
+_USER_AGENT = b"MyEditor"
 
 SATS = "SATS"
 CHF = "CHF"

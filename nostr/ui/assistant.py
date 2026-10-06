@@ -40,10 +40,12 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -377,10 +379,18 @@ class AssistantWindow(QDialog):
         self._button_widgets: List[QPushButton] = []
 
         self._stack = QStackedWidget()
+        # A page taller than the screen scrolls, so the buttons stay in
+        # reach; otherwise the window simply grows to fit it.
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._scroll.viewport().setAutoFillBackground(False)
+        self._scroll.setWidget(self._stack)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 22, 24, 18)
         layout.setSpacing(18)
-        layout.addWidget(self._stack, 1)
+        layout.addWidget(self._scroll, 1)
         self._button_row = QHBoxLayout()
         self._button_row.setSpacing(8)
         layout.addLayout(self._button_row)
@@ -413,7 +423,8 @@ class AssistantWindow(QDialog):
 
         Wrapped text needs more height the narrower the window is, and a
         stack of pages does not pass that on, so the page's own height at
-        the current width becomes the window's minimum. Longer words (a
+        the current width becomes the window's minimum, up to what the
+        screen can show; beyond that the page scrolls. Longer words (a
         translation, a larger font) then grow the window instead of
         clipping the text. It runs again whenever the page's layout
         changes, so text that arrives later fits too."""
@@ -421,7 +432,7 @@ class AssistantWindow(QDialog):
         layout = page.layout() if page is not None else None
         if layout is None:
             return
-        width = self._stack.width()
+        width = self._scroll.viewport().width()
         if not self.isVisible() or width <= 0:
             margins = self.layout().contentsMargins()
             width = max(self.width(), self.minimumWidth()) - margins.left() - margins.right()
@@ -431,6 +442,20 @@ class AssistantWindow(QDialog):
             needed = layout.totalSizeHint().height()
         if needed != self._stack.minimumHeight():
             self._stack.setMinimumHeight(needed)
+        shown = min(needed, self._tallest_page())
+        if shown != self._scroll.minimumHeight():
+            self._scroll.setMinimumHeight(shown)
+
+    def _tallest_page(self) -> int:
+        """The most page height the screen has room for, with the window's
+        title bar, margins and buttons around it."""
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if screen is None:
+            return 10_000
+        margins = self.layout().contentsMargins()
+        around = (margins.top() + margins.bottom() + self.layout().spacing()
+                  + self._button_row.sizeHint().height() + 60)
+        return max(200, screen.availableGeometry().height() - around)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

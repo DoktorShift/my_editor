@@ -898,3 +898,17 @@ def test_no_text_in_the_window_uses_an_em_dash():
     texts = [w.text() for w in win.findChildren(QPushButton)]
     texts += [w.text() for w in win.findChildren(mw.QLabel)]
     assert all("\u2014" not in t for t in texts)
+
+
+# -- a page taller than the screen ----------------------------------------------------------
+
+def test_a_very_long_page_scrolls_instead_of_leaving_the_screen():
+    win = window()
+    win._overview_note.setText("A very long note that wraps over many lines. " * 400)
+    win.show()
+    QApplication.processEvents()
+    available = win.screen().availableGeometry().height()
+    assert win.height() <= available
+    assert win._scroll.verticalScrollBar().maximum() > 0
+    assert default_button(win).isVisible()
+    win.close()
