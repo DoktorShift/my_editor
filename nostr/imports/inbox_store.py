@@ -40,7 +40,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from i18n import _
 
@@ -251,6 +251,12 @@ class InboxStore:
         version = self._db.execute("PRAGMA user_version").fetchone()[0]
         if version < 1:
             self._db.executescript("BEGIN;" + _SCHEMA + "PRAGMA user_version = 1; COMMIT;")
+        if version < 2:
+            # Skips outlive their source (Q-3 keeps them on this computer):
+            # a source that leaves the list and comes back keeps them.
+            self._db.executescript(
+                "BEGIN; CREATE TABLE IF NOT EXISTS skip_memory (d_tag TEXT PRIMARY KEY, "
+                "at INTEGER NOT NULL); PRAGMA user_version = 2; COMMIT;")
 
     # ------------------------------------------------------------------ #
     # Sources                                                              #
@@ -268,6 +274,11 @@ class InboxStore:
         with self._db:
             known = {row["key"] for row in self._db.execute("SELECT key FROM sources")}
             for key in (known - set(wanted)) if remove_missing else ():
+                # Its skips are remembered: followed again, the posts come
+                # back skipped, as the person left them.
+                self._db.execute(
+                    "INSERT OR IGNORE INTO skip_memory (d_tag, at) SELECT d_tag, ? FROM items "
+                    "WHERE source_key = ? AND state = ?", (now, key, SKIPPED))
                 self._db.execute("DELETE FROM items WHERE source_key = ?", (key,))
                 self._db.execute("DELETE FROM sources WHERE key = ?", (key,))
             for key, (url, title, automatic) in wanted.items():
@@ -413,6 +424,7 @@ class InboxStore:
             self.record_failure(key, INBOX_FULL)
             return IngestResult(error=INBOX_FULL)
         ledger = self.ledger_states(unseen)
+        remembered = self._skips_remembered(unseen)
         new = older = waiting = 0
         with self._db:
             for d_tag, item in unseen.items():
@@ -424,12 +436,16 @@ class InboxStore:
                 text = json.dumps(snapshot, ensure_ascii=False)
                 if len(text.encode("utf-8")) > MAX_BODY_BYTES + 64 * 1024:
                     continue  # too large to keep; an export file imports it
+                if baseline or (published and published < source["created_at"]):
+                    fresh = OLDER
+                else:
+                    fresh = NEW
                 if d_tag in ledger:
                     state = ledger[d_tag]
-                elif baseline or (published and published < source["created_at"]):
-                    state = OLDER
+                elif d_tag in remembered:
+                    state = SKIPPED
                 else:
-                    state = NEW
+                    state = fresh
                 if state == NEW:
                     new += 1
                 elif state == OLDER:
@@ -440,7 +456,7 @@ class InboxStore:
                     "author, read_minutes, image_count) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)",
                     (key, d_tag, text, now, published, _position(now, published), state,
-                     state if state in (NEW, OLDER) else NEW,
+                     state if state in (NEW, OLDER) else fresh,
                      item.title or "", snapshots.excerpt(item), snapshots.cover(item),
                      item.link or "", item.author or "",
                      snapshots.reading_minutes(item.content_html),
@@ -538,7 +554,19 @@ class InboxStore:
 
     def restore(self, source_key: str, d_tag: str, revision: int) -> int:
         """Bring a skipped post back where it was."""
-        return self._move(source_key, d_tag, revision, skip=False)
+        revision = self._move(source_key, d_tag, revision, skip=False)
+        with self._db:
+            self._db.execute("DELETE FROM skip_memory WHERE d_tag = ?", (d_tag,))
+        return revision
+
+    def _skips_remembered(self, d_tags: Iterable[str]) -> Set[str]:
+        tags = list(d_tags)
+        found: Set[str] = set()
+        for chunk in _chunks(tags, 400):
+            marks = ", ".join("?" * len(chunk))
+            found.update(row["d_tag"] for row in self._db.execute(
+                f"SELECT d_tag FROM skip_memory WHERE d_tag IN ({marks})", tuple(chunk)))
+        return found
 
     def _move(self, source_key: str, d_tag: str, revision: int, *, skip: bool) -> int:
         with self._db:

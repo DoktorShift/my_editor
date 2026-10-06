@@ -337,3 +337,45 @@ class TestSnapshots:
         assert snapshots.cover(item) == "https://x/a.png"
         assert snapshots.reading_minutes("") == 0
         assert snapshots.reading_minutes("<p>one</p>") == 1
+
+
+def test_skips_outlive_a_source_that_leaves_and_comes_back():
+    """Engine review M3: a source missing from the list took its skips
+    with it, and followed again its posts came back unskipped."""
+    store = InboxStore(":memory:", clock=lambda: 1_800_000_000)
+    store.sync_sources([("k", "https://blog.example/feed", "Blog", True)])
+    items = [make_item("One", guid="g1"), make_item("Two", guid="g2")]
+    store.ingest("k", items)
+    post = store.page(View(OLDER_POSTS))[0]
+    store.skip("k", post.d_tag, post.revision)
+    store.sync_sources([])                               # unsubscribed (here or elsewhere)
+    assert store.counts().skipped == 0
+    store.sync_sources([("k", "https://blog.example/feed", "Blog", True)])
+    store.ingest("k", items)
+    assert store.counts().skipped == 1
+    skipped = store.page(View(SKIPPED_POSTS))[0]
+    assert skipped.d_tag == post.d_tag
+    # Restored, it is forgotten: the next time it is a post like any other.
+    store.restore("k", skipped.d_tag, skipped.revision)
+    store.sync_sources([])
+    store.sync_sources([("k", "https://blog.example/feed", "Blog", True)])
+    store.ingest("k", items)
+    assert store.counts().skipped == 0
+
+
+def test_an_inbox_from_before_skips_were_remembered_is_upgraded(tmp_path):
+    import sqlite3
+    path = tmp_path / "old.sqlite3"
+    InboxStore(path).close()
+    db = sqlite3.connect(str(path))
+    db.execute("DROP TABLE skip_memory")
+    db.execute("PRAGMA user_version = 1")
+    db.commit()
+    db.close()
+    store = InboxStore(path)
+    store.sync_sources([("k", "https://blog.example/feed", "Blog", True)])
+    store.ingest("k", [make_item("One", guid="g1")])
+    post = store.page(View(OLDER_POSTS))[0]
+    store.skip("k", post.d_tag, post.revision)
+    store.sync_sources([])
+    store.close()
