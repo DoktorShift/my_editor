@@ -709,8 +709,8 @@ msgid "Sign Out Active Profile"
 msgstr ""
 
 #: main_window.py:1436
-#: shortcuts_dialog.py:401
-#: shortcuts_dialog.py:419
+#: shortcuts_dialog.py:443
+#: shortcuts_dialog.py:461
 msgid "Keyboard Shortcuts"
 msgstr ""
 
@@ -1673,7 +1673,7 @@ msgid "Fit Page"
 msgstr ""
 
 #: pdf_viewer.py:643
-#: shortcuts_dialog.py:93
+#: shortcuts_dialog.py:102
 msgid "Fit whole page"
 msgstr ""
 
@@ -1982,217 +1982,230 @@ msgstr ""
 msgid "Run the downloaded installer manually:"
 msgstr ""
 
-#: shortcuts_dialog.py:100
+#: shortcuts_dialog.py:109
 msgctxt "shortcut group"
 msgid "File"
 msgstr ""
 
-#: shortcuts_dialog.py:101
+#: shortcuts_dialog.py:110
 msgctxt "shortcut group"
 msgid "Editing"
 msgstr ""
 
-#: shortcuts_dialog.py:102
+#: shortcuts_dialog.py:111
 msgctxt "shortcut group"
 msgid "Formatting"
 msgstr ""
 
-#: shortcuts_dialog.py:103
+#: shortcuts_dialog.py:112
 msgctxt "shortcut group"
 msgid "Insert"
 msgstr ""
 
-#: shortcuts_dialog.py:104
+#: shortcuts_dialog.py:113
 msgctxt "shortcut group"
 msgid "Search"
 msgstr ""
 
-#: shortcuts_dialog.py:105
+#: shortcuts_dialog.py:114
 msgctxt "shortcut group"
 msgid "View"
 msgstr ""
 
-#: shortcuts_dialog.py:106
+#: shortcuts_dialog.py:115
 msgctxt "shortcut group"
 msgid "Help"
 msgstr ""
 
-#: shortcuts_dialog.py:107
+#: shortcuts_dialog.py:116
 msgctxt "shortcut group"
 msgid "PDF Reading"
 msgstr ""
 
-#: shortcuts_dialog.py:113
+#: shortcuts_dialog.py:122
 msgctxt "key"
 msgid "Ctrl"
 msgstr ""
 
-#: shortcuts_dialog.py:114
+#: shortcuts_dialog.py:123
 msgctxt "key"
 msgid "Shift"
 msgstr ""
 
-#: shortcuts_dialog.py:115
+#: shortcuts_dialog.py:124
 msgctxt "key"
 msgid "Alt"
 msgstr ""
 
-#: shortcuts_dialog.py:116
+#: shortcuts_dialog.py:125
 msgctxt "key"
 msgid "Enter"
 msgstr ""
 
-#: shortcuts_dialog.py:117
+#: shortcuts_dialog.py:126
 msgctxt "key"
 msgid "Return"
 msgstr ""
 
-#: shortcuts_dialog.py:118
+#: shortcuts_dialog.py:127
 msgctxt "key"
 msgid "Space"
 msgstr ""
 
-#: shortcuts_dialog.py:119
+#: shortcuts_dialog.py:128
 msgctxt "key"
 msgid "Tab"
 msgstr ""
 
-#: shortcuts_dialog.py:120
+#: shortcuts_dialog.py:129
 msgctxt "key"
 msgid "Esc"
 msgstr ""
 
-#: shortcuts_dialog.py:121
+#: shortcuts_dialog.py:130
 msgctxt "key"
 msgid "Home"
 msgstr ""
 
-#: shortcuts_dialog.py:122
+#: shortcuts_dialog.py:131
 msgctxt "key"
 msgid "End"
 msgstr ""
 
-#: shortcuts_dialog.py:123
+#: shortcuts_dialog.py:132
 msgctxt "key"
 msgid "PgUp"
 msgstr ""
 
-#: shortcuts_dialog.py:124
+#: shortcuts_dialog.py:133
 msgctxt "key"
 msgid "PgDown"
 msgstr ""
 
-#: shortcuts_dialog.py:125
+#: shortcuts_dialog.py:134
 msgctxt "key"
 msgid "Del"
 msgstr ""
 
-#: shortcuts_dialog.py:126
+#: shortcuts_dialog.py:135
 msgctxt "key"
 msgid "Backspace"
 msgstr ""
 
-#: shortcuts_dialog.py:423
-msgid "Every binding the editor responds to. Type to filter; Ctrl maps to Command on macOS automatically."
+#: shortcuts_dialog.py:136
+msgctxt "key"
+msgid "Click"
 msgstr ""
 
-#: shortcuts_dialog.py:433
-msgid "Filter shortcuts… (e.g. 'draft', 'save', 'Ctrl+S')"
+#: shortcuts_dialog.py:465
+msgid "Every key MyEditor answers to on this computer. Type to filter."
 msgstr ""
 
-#: shortcuts_dialog.py:466
+#: shortcuts_dialog.py:472
+msgid "Filter Shortcuts"
+msgstr ""
+
+#: shortcuts_dialog.py:505
 msgid "No shortcuts match your filter."
 msgstr ""
 
-#: shortcuts_dialog.py:67
-msgid "Indent"
-msgstr ""
-
-#: shortcuts_dialog.py:68
-msgid "Outdent"
-msgstr ""
-
-#: shortcuts_dialog.py:69
-msgid "New line"
-msgstr ""
-
-#: shortcuts_dialog.py:72
-msgid "Next match"
-msgstr ""
-
-#: shortcuts_dialog.py:73
-msgid "Previous match"
-msgstr ""
-
 #: shortcuts_dialog.py:74
-msgid "Close find bar"
+msgid "Nest a list item, or start a list"
+msgstr ""
+
+#: shortcuts_dialog.py:75
+msgid "Move a list item out one level"
+msgstr ""
+
+#: shortcuts_dialog.py:76
+msgid "New paragraph (on an empty list item: end the list)"
 msgstr ""
 
 #: shortcuts_dialog.py:77
-msgid "Find in PDF"
+msgid "Line break within the paragraph"
 msgstr ""
 
 #: shortcuts_dialog.py:78
-msgid "Copy selected text"
-msgstr ""
-
-#: shortcuts_dialog.py:79
-msgid "Clear selection"
-msgstr ""
-
-#: shortcuts_dialog.py:80
-msgid "Next screenful"
+msgid "Open a link"
 msgstr ""
 
 #: shortcuts_dialog.py:81
-msgid "Previous screenful"
+msgid "Next match"
 msgstr ""
 
 #: shortcuts_dialog.py:82
-msgid "Scroll down"
+msgid "Previous match"
 msgstr ""
 
 #: shortcuts_dialog.py:83
-msgid "Scroll up"
-msgstr ""
-
-#: shortcuts_dialog.py:84
-msgid "Next page"
-msgstr ""
-
-#: shortcuts_dialog.py:85
-msgid "Previous page"
+msgid "Close find bar"
 msgstr ""
 
 #: shortcuts_dialog.py:86
-msgid "Go to page"
+msgid "Find in PDF"
 msgstr ""
 
 #: shortcuts_dialog.py:87
-msgid "First page"
+msgid "Copy selected text"
 msgstr ""
 
 #: shortcuts_dialog.py:88
-msgid "Last page"
+msgid "Clear selection"
 msgstr ""
 
 #: shortcuts_dialog.py:89
-msgid "Zoom in (also Ctrl+wheel)"
+msgid "Next screenful"
 msgstr ""
 
 #: shortcuts_dialog.py:90
-msgid "Zoom out (also Ctrl+wheel)"
+msgid "Previous screenful"
 msgstr ""
 
 #: shortcuts_dialog.py:91
-msgid "Fit page width"
+msgid "Scroll down"
 msgstr ""
 
 #: shortcuts_dialog.py:92
-msgid "Actual size"
+msgid "Scroll up"
+msgstr ""
+
+#: shortcuts_dialog.py:93
+msgid "Next page"
 msgstr ""
 
 #: shortcuts_dialog.py:94
+msgid "Previous page"
+msgstr ""
+
+#: shortcuts_dialog.py:95
+msgid "Go to page"
+msgstr ""
+
+#: shortcuts_dialog.py:96
+msgid "First page"
+msgstr ""
+
+#: shortcuts_dialog.py:97
+msgid "Last page"
+msgstr ""
+
+#: shortcuts_dialog.py:98
+msgid "Zoom in (also Ctrl+wheel)"
+msgstr ""
+
+#: shortcuts_dialog.py:99
+msgid "Zoom out (also Ctrl+wheel)"
+msgstr ""
+
+#: shortcuts_dialog.py:100
+msgid "Fit page width"
+msgstr ""
+
+#: shortcuts_dialog.py:101
+msgid "Actual size"
+msgstr ""
+
+#: shortcuts_dialog.py:103
 msgid "Toggle table of contents"
 msgstr ""
 

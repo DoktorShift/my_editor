@@ -16,10 +16,17 @@ The window's commands and their shortcuts come from the command list
 (commands.py, see ``CommandRegistry.shortcut_groups``), so a new or
 changed shortcut shows here by itself. Only keys that are not commands
 (Tab, Esc, the PDF reader's keys) are listed in ``OTHER_KEYS`` below.
+
+Keys are shown the way the computer in use writes them: on a Mac in
+Apple's symbols and order (⌃⌥⇧⌘, as in menus), elsewhere as Ctrl+Shift+S
+with the key names of the reader's keyboard (Strg, Umschalt in German).
+The list is the one for this platform, since the commands' keys follow
+each platform's conventions.
 """
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
@@ -64,9 +71,11 @@ class ShortcutGroup:
 # where it shows them.
 OTHER_KEYS: Tuple[Tuple[str, Tuple[Tuple[str, str], ...]], ...] = (
     ("Editing", (
-        ("Tab", _("Indent")),
-        ("Shift+Tab", _("Outdent")),
-        ("Enter", _("New line")),
+        ("Tab", _("Nest a list item, or start a list")),
+        ("Shift+Tab", _("Move a list item out one level")),
+        ("Enter", _("New paragraph (on an empty list item: end the list)")),
+        ("Shift+Enter", _("Line break within the paragraph")),
+        ("Ctrl+Click", _("Open a link")),
     )),
     ("Search", (
         ("Enter", _("Next match")),
@@ -124,14 +133,45 @@ _KEY_NAMES = {
     "PgDown": pgettext("key", "PgDown"),
     "Del": pgettext("key", "Del"),
     "Backspace": pgettext("key", "Backspace"),
+    "Click": pgettext("key", "Click"),
+}
+
+IS_MAC = sys.platform == "darwin"
+
+# Apple's modifier symbols, in the order Apple writes them (HIG, Keyboards).
+# Qt names Command "Ctrl" and Control "Meta" on a Mac.
+_MAC_MODIFIERS = (("Meta", "\u2303"), ("Alt", "\u2325"), ("Shift", "\u21e7"),
+                  ("Ctrl", "\u2318"))
+_MAC_KEYS = {
+    "Enter": "\u21a9", "Return": "\u21a9", "Tab": "\u21e5", "Esc": "esc",
+    "Backspace": "\u232b", "Del": "\u2326", "Home": "\u2196", "End": "\u2198",
+    "PgUp": "\u21de", "PgDown": "\u21df", "Up": "\u2191", "Down": "\u2193",
+    "Left": "\u2190", "Right": "\u2192",
 }
 
 
-def _key_names(keys: str) -> List[str]:
-    """The keys of "Ctrl+Shift+D", each named the way the reader's
-    keyboard labels it."""
-    parts = [p.strip() for p in keys.split("+") if p.strip()]
-    return [_KEY_NAMES.get(part, part) for part in parts]
+def _parts(keys: str) -> List[str]:
+    """"Ctrl+Shift+D" as its keys; "Ctrl++" (the plus key) keeps its "+"."""
+    parts = [p.strip() for p in keys.split("+")]
+    keys_found = [p for p in parts if p]
+    if keys.endswith("++"):
+        keys_found.append("+")
+    return keys_found
+
+
+def _key_names(keys: str, *, mac: Optional[bool] = None) -> List[str]:
+    """The keys of "Ctrl+Shift+D", each named the way the computer in use
+    labels it (``mac`` says which, the one in use by default): on a Mac
+    Apple's symbols in Apple's order (⇧⌘D), elsewhere the reader's
+    keyboard's names (Strg, Umschalt)."""
+    parts = _parts(keys)
+    if not (IS_MAC if mac is None else mac):
+        return [_KEY_NAMES.get(part, part) for part in parts]
+    modifiers = dict(_MAC_MODIFIERS)
+    held = [symbol for name, symbol in _MAC_MODIFIERS if name in parts]
+    rest = [_MAC_KEYS.get(part, _KEY_NAMES.get(part, part))
+            for part in parts if part not in modifiers]
+    return held + rest
 
 
 def groups_from(rows) -> Tuple[ShortcutGroup, ...]:
@@ -293,7 +333,8 @@ def _make_keycap_row(keys: str) -> QWidget:
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(3)
     for i, part in enumerate(_key_names(keys)):
-        if i:
+        # A Mac writes its keys side by side (⇧⌘D), elsewhere with "+".
+        if i and not IS_MAC:
             plus = QLabel("+")
             plus.setObjectName("shortcut_action")
             plus.setAlignment(Qt.AlignCenter)
@@ -365,8 +406,9 @@ class _ShortcutCard(QFrame):
         needle = needle.strip().lower()
         visible = 0
         for keycap, action, shortcut in self._rows:
-            # The keys as written (Ctrl+S) and as shown (Strg+S) both match.
-            shown = "+".join(_key_names(shortcut.keys))
+            # The keys as written (Ctrl+S) and as shown (Strg+S, ⌘S) all match.
+            shown = "+".join(_key_names(shortcut.keys)) + " " + "".join(
+                _key_names(shortcut.keys))
             text = f"{shortcut.keys} {shown} {shortcut.action}".lower()
             match = (not needle) or (needle in text)
             keycap.setVisible(match)
@@ -420,17 +462,14 @@ class ShortcutsDialog(QDialog):
         title.setObjectName("shortcuts_title")
         root.addWidget(title)
 
-        subtitle = QLabel(_(
-            "Every binding the editor responds to. Type to filter; "
-            "Ctrl maps to Command on macOS automatically."
-        ))
+        subtitle = QLabel(_("Every key MyEditor answers to on this computer. Type to filter."))
         subtitle.setObjectName("shortcuts_subtitle")
         subtitle.setWordWrap(True)
         root.addWidget(subtitle)
 
         self._search = QLineEdit()
         self._search.setObjectName("shortcuts_search")
-        self._search.setPlaceholderText(_("Filter shortcuts… (e.g. 'draft', 'save', 'Ctrl+S')"))
+        self._search.setPlaceholderText(_("Filter Shortcuts"))
         self._search.setClearButtonEnabled(True)
         self._search.textChanged.connect(self._on_filter_changed)
         root.addWidget(self._search)
