@@ -196,3 +196,75 @@ class _AddressableEventsQuery(QObject):
             self._on_done(ordered)
         finally:
             self.deleteLater()
+
+
+# --------------------------------------------------------------------------- #
+# Every event, and who answered                                               #
+# --------------------------------------------------------------------------- #
+
+def fetch_events_answered(
+    pool: RelayPool,
+    relays: List[str],
+    filters: List[Dict[str, Any]],
+    on_done: Callable[[List[dict], "set"], None],
+    *,
+    timeout_ms: int = 8_000,
+    parent: Optional[QObject] = None,
+) -> "_AnsweredQuery":
+    """Every event matching ``filters``, and which relays answered.
+
+    ``on_done(events, answered)`` is called once, when every relay ended
+    (stored events sent, refused, failed) or at the timeout. ``answered``
+    holds the (normalized) addresses of the relays that sent all their
+    stored events (EOSE): a relay that refused the request (CLOSED, for
+    example more filters than it allows), failed or said nothing is not
+    among them. So a caller can tell "no relay answered" from "there is
+    nothing", which a lost answer must never be taken for.
+    """
+    return _AnsweredQuery(pool, relays, filters, on_done, timeout_ms, parent)
+
+
+class _AnsweredQuery(QObject):
+    """Internal helper, see ``fetch_events_answered``."""
+
+    def __init__(self, pool, relays, filters, on_done, timeout_ms: int,
+                 parent: Optional[QObject]) -> None:
+        super().__init__(parent)
+        from .outbox.policy import normalize_relay_url
+        self._normalize = lambda url: normalize_relay_url(url) or url
+        self._on_done = on_done
+        self._events: List[dict] = []
+        self._answered: set = set()
+        self._open = {self._normalize(u) for u in relays}
+        self._finished = False
+        self._subscription = pool.subscribe(list(relays), list(filters))
+        self._subscription.event.connect(self._events.append)
+        self._subscription.relay_eose.connect(self._on_eose)
+        self._subscription.relay_closed.connect(self._on_ended)
+        self._subscription.relay_failed.connect(self._on_ended)
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self._finish)
+        self._timer.start(timeout_ms)
+        if not self._open:
+            QTimer.singleShot(0, self._finish)
+
+    def _on_eose(self, url: str) -> None:
+        self._answered.add(self._normalize(url))
+        self._on_ended(url)
+
+    def _on_ended(self, url: str, *_reason) -> None:
+        self._open.discard(self._normalize(url))
+        if not self._open:
+            self._finish()
+
+    def _finish(self) -> None:
+        if self._finished:
+            return
+        self._finished = True
+        self._timer.stop()
+        self._subscription.close()
+        try:
+            self._on_done(list(self._events), set(self._answered))
+        finally:
+            self.deleteLater()

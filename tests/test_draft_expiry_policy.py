@@ -64,7 +64,8 @@ def test_the_import_pipeline_asks_for_the_ninety_days():
     importer = ImportItemsJob(
         items=[make_item("Post", guid="g")], feed_url="https://blog.example/feed",
         profile=PROFILE, relay_pool=None, relay_directory=FakeRelayDirectory(),
-        session_pool=None, fetcher=FakeFetcher(), long_form_fetcher=FakeLongFormFetcher(None),
+        session_pool=None, is_imported=lambda _d: False, fetcher=FakeFetcher(),
+        long_form_fetcher=FakeLongFormFetcher(None),
         publish_job_factory=factory, run_blocking=inline_run_blocking, pacer=RecordingPacer())
     importer.start()
     settle()

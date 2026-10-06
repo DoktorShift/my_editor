@@ -27,7 +27,9 @@ def signed(kind, d_tag, content="x", sk=SK):
 
 
 class FakeQuery:
-    """Answers each query with the events whose kind a filter asks for."""
+    """Answers each query with the events whose kind a filter asks for.
+    ``answered``: how many of the relays asked answered (the first ones),
+    or a function of (relays, filters) giving the set that did."""
 
     def __init__(self, stored, *, answered=1):
         self.stored = stored
@@ -37,11 +39,15 @@ class FakeQuery:
     def __call__(self, relays, filters, on_done):
         self.calls.append((list(relays), filters))
         kinds = {k for f in filters for k in f["kinds"]}
-        on_done([e for e in self.stored if e["kind"] in kinds], self.answered)
+        if callable(self.answered):
+            answered = set(self.answered(list(relays), filters))
+        else:
+            answered = set(relays[:self.answered])
+        on_done([e for e in self.stored if e["kind"] in kinds], answered)
 
 
-def catalogue(query, store=None, ledger=None):
-    return ExistingCatalogue(relay_pool=None, relay_directory=FakeRelayDirectory(),
+def catalogue(query, store=None, ledger=None, directory=None):
+    return ExistingCatalogue(relay_pool=None, relay_directory=directory or FakeRelayDirectory(),
                              draft_store=store, ledger=ledger, query=query)
 
 
@@ -64,19 +70,68 @@ def test_drafts_articles_and_deletions_count():
                             D4: "removed", "rss-5": "drafted"}
 
 
+def private_calls(query):
+    return [c for c in query.calls if [5] in [f["kinds"] for f in c[1]]]
+
+
+def outbox_calls(query):
+    return [c for c in query.calls if [f["kinds"] for f in c[1]] == [[30023]]]
+
+
 def test_what_is_asked_and_where():
     query = FakeQuery([])
     look_up(catalogue(query), [f"rss-{i}" for i in range(25)])
-    private, outbox = query.calls
-    kinds = [f["kinds"] for f in private[1]]
-    assert kinds == [[31234, 30024], [5], [31234, 30024], [5]]
-    assert len(private[1][0]["#d"]) == 20 and len(private[1][2]["#d"]) == 5
+    (private,) = private_calls(query)
+    (outbox,) = outbox_calls(query)
+    assert [f["kinds"] for f in private[1]] == [[31234, 30024], [5]]
+    assert private[1][0]["#d"] == [f"rss-{i}" for i in range(25)]
     assert f"31234:{PK}:rss-0" in private[1][1]["#a"]
     assert f"30023:{PK}:rss-0" in private[1][1]["#a"]
-    assert outbox[1] == [{"kinds": [30023], "authors": [PK], "#d": [f"rss-{i}" for i in
-                                                                    range(20)]},
-                         {"kinds": [30023], "authors": [PK],
-                          "#d": [f"rss-{i}" for i in range(20, 25)]}]
+    assert outbox[1] == [{"kinds": [30023], "authors": [PK],
+                          "#d": [f"rss-{i}" for i in range(25)]}]
+
+
+def test_many_posts_are_asked_in_requests_relays_accept():
+    """Review H3: 120 posts in one request made twelve filters, a relay
+    allowing ten refused it, and the answer was taken for "nothing"."""
+    query = FakeQuery([])
+    out = look_up(catalogue(query), [f"rss-{i}" for i in range(250)])
+    assert out["found"] == {}
+    private, outbox = private_calls(query), outbox_calls(query)
+    assert [len(c[1][0]["#d"]) for c in private] == [100, 100, 50]
+    assert [len(c[1][0]["#d"]) for c in outbox] == [100, 100, 50]
+    assert all(len(c[1]) <= 2 for c in query.calls)
+
+
+def test_one_unanswered_request_makes_it_unavailable():
+    asked = []
+
+    def answered(relays, filters):
+        asked.append(1)
+        return [] if len(asked) == 2 else relays
+    out = look_up(catalogue(FakeQuery([], answered=answered)),
+                  [f"rss-{i}" for i in range(250)])
+    assert out == {"unavailable": UNAVAILABLE}
+
+
+def test_only_the_relays_drafts_go_to_count_for_drafts():
+    """The fallback relays answering with nothing prove nothing about
+    drafts kept on the account's own relays: unavailable, not "none"."""
+    own = "wss://own.example"
+    directory = FakeRelayDirectory({PK: [own]})
+
+    def answered(relays, filters):
+        kinds = [f["kinds"] for f in filters]
+        if [5] in kinds:            # the drafts' request: the own relay refused it
+            return [u for u in relays if "own.example" not in u]
+        return relays
+    out = look_up(catalogue(FakeQuery([], answered=answered), directory=directory), [D1])
+    assert out == {"unavailable": UNAVAILABLE}
+    # The own relay answering is enough.
+    out = look_up(catalogue(FakeQuery([signed(31234, D1)],
+                                      answered=lambda relays, filters: [own]),
+                            directory=directory), [D1])
+    assert out["found"] == {D1: "drafted"}
 
 
 def test_no_relay_answering_is_unavailable_never_nothing():
@@ -130,16 +185,18 @@ class FakePool:
         return subscription
 
 
-def test_the_relay_query_counts_answering_relays():
-    from nostr.imports.catalogue import _RelayQuery
+def test_the_relay_query_says_which_relays_answered():
+    from nostr.queries import fetch_events_answered
     pool = FakePool()
     out = []
-    query = _RelayQuery(pool, ["wss://a.example", "wss://b.example"], [{}],
-                        lambda events_, answered: out.append((events_, answered)))
+    query = fetch_events_answered(pool, ["wss://a.example", "wss://b.example",
+                                         "wss://c.example"], [{}],
+                                  lambda events_, answered: out.append((events_, answered)))
     _relays, sub = pool.subscriptions[0]
     sub.event.emit({"id": "x"})
     sub.relay_failed.emit("wss://a.example", "down")
+    sub.relay_closed.emit("wss://c.example", "too many filters")
     assert out == []
     sub.relay_eose.emit("wss://b.example")
-    assert out == [([{"id": "x"}], 1)]
+    assert out == [([{"id": "x"}], {"wss://b.example"})]
     assert query is not None

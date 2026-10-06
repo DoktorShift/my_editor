@@ -15,21 +15,28 @@ when, for the account and the post's identifier, any of these exists:
 
 EINUNDZWANZIG STANDUP answers the same question from its server. This
 app has no server, so :class:`ExistingCatalogue` asks the relays: the
-account's private relays for drafts and deletions, its outbox for
-articles, in batches of 20 identifiers, plus the DraftStore (drafts
+relays the account's drafts are written to (and read from) for drafts
+and deletions, its outbox for articles, plus the DraftStore (drafts
 already loaded, and deletions it saw) and the ledger.
 
-It fails closed: when no relay of a set answers, the answer is
-"unavailable", never "nothing found", and an import does not start. An
-event counts only when the account signed it.
+It asks in requests every relay accepts: ``CHUNK`` identifiers a
+request, at most two filters (NIP-11 lets a relay cap the filters of a
+request; rnostr allows ten, and a request past that is refused), one
+request after the other.
+
+It fails closed: an answer counts for the drafts only when one of the
+relays drafts are written to answered it (a fallback relay that has
+nothing proves nothing), and when any request goes unanswered the
+answer is "unavailable", never "nothing found", and an import does not
+start. An event counts only when the account signed it.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Iterable, List, Optional, Sequence
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set
 
-from PySide6.QtCore import QObject, QTimer
+from PySide6.QtCore import QObject
 
 from i18n import _
 
@@ -38,9 +45,12 @@ from ..drafts import DRAFT_WRAP_KIND
 from ..events import verify_event
 from ..outbox import ask_draft_relays
 from ..outbox.policy import normalize_relay_url
+from ..queries import fetch_events_answered
 from .inbox_store import DRAFTED, PUBLISHED, REMOVED
 
-BATCH = 20
+# Identifiers a request: two filters of them stay far below what relays
+# accept for a message (strfry: 128 KiB).
+CHUNK = 100
 ARTICLE_KIND = 30023
 ARTICLE_DRAFT_KIND = 30024
 QUERY_TIMEOUT_MS = 8_000
@@ -64,9 +74,10 @@ class Existing:
         return d_tag in self.states
 
 
-# query(relays, filters, on_done(events, answered)): ``answered`` is how
-# many relays ended their stored events (EOSE) before the timeout.
-Query = Callable[[List[str], List[dict], Callable[[List[dict], int], None]], None]
+# query(relays, filters, on_done(events, answered)): ``answered`` is the
+# set of relays (normalized addresses) that ended their stored events
+# (EOSE) before the timeout; one that refused the request is not in it.
+Query = Callable[[List[str], List[dict], Callable[[List[dict], Set[str]], None]], None]
 
 
 class ExistingCatalogue(QObject):
@@ -115,26 +126,31 @@ class ExistingCatalogue(QObject):
             if pending["sets"] == 0:
                 on_ready(found)
 
-        batches = [tags[i:i + BATCH] for i in range(0, len(tags), BATCH)]
+        chunks = [tags[i:i + CHUNK] for i in range(0, len(tags), CHUNK)]
 
-        def _private(relays: List[str]) -> None:
-            filters = []
-            for batch in batches:
-                filters.append({"kinds": [DRAFT_WRAP_KIND, ARTICLE_DRAFT_KIND],
-                                "authors": [pubkey], "#d": batch})
-                addresses = [f"{kind}:{pubkey}:{d}" for d in batch
-                             for kind in (DRAFT_WRAP_KIND, ARTICLE_KIND)]
-                filters.append({"kinds": [DELETION_KIND], "authors": [pubkey],
-                                "#a": addresses})
-            self._ask(relays, filters, pubkey, found, set(tags), _set_done)
+        def _private_filters(chunk: List[str]) -> List[dict]:
+            addresses = [f"{kind}:{pubkey}:{d}" for d in chunk
+                         for kind in (DRAFT_WRAP_KIND, ARTICLE_KIND)]
+            return [{"kinds": [DRAFT_WRAP_KIND, ARTICLE_DRAFT_KIND], "authors": [pubkey],
+                     "#d": chunk},
+                    {"kinds": [DELETION_KIND], "authors": [pubkey], "#a": addresses}]
+
+        def _private(own: List[str]) -> None:
+            # Asked of the read set (the drafts' own relays and the
+            # fallback ones); an answer counts only from the own ones.
+            ask_draft_relays(self._relay_directory, profile,
+                             lambda read: self._ask_chunks(
+                                 read, [_private_filters(c) for c in chunks], pubkey, found,
+                                 set(tags), _set_done, counted=own),
+                             entitled=self._entitled_relays, reading=True)
 
         def _outbox(relays: List[str]) -> None:
-            filters = [{"kinds": [ARTICLE_KIND], "authors": [pubkey], "#d": batch}
-                       for batch in batches]
-            self._ask(relays, filters, pubkey, found, set(tags), _set_done)
+            self._ask_chunks(relays, [[{"kinds": [ARTICLE_KIND], "authors": [pubkey],
+                                        "#d": chunk}] for chunk in chunks],
+                             pubkey, found, set(tags), _set_done)
 
         ask_draft_relays(self._relay_directory, profile, _private,
-                         entitled=self._entitled_relays, reading=True)
+                         entitled=self._entitled_relays, reading=False)
         self._relay_directory.outbox_of(pubkey, _outbox)
 
     # -- internals -------------------------------------------------------------
@@ -153,25 +169,40 @@ class ExistingCatalogue(QObject):
             for d_tag, state in self._ledger(tags).items():
                 found.add(d_tag, state)
 
-    def _ask(self, relays, filters, pubkey: str, found: Existing, wanted: set,
-             done: Callable[[bool], None]) -> None:
+    def _ask_chunks(self, relays, requests: List[List[dict]], pubkey: str,
+                    found: Existing, wanted: set, done: Callable[[bool], None], *,
+                    counted: Optional[Iterable[str]] = None) -> None:
+        """Ask ``requests`` one after the other; ``done(True)`` when every
+        one was answered (by one of ``counted``, when given), else
+        ``done(False)`` at the first that was not."""
         relays = list(relays)
-        if not relays:
-            done(False)
+        counts = {normalize_relay_url(u) or u for u in (counted or ())}
+        if not relays or not requests:
+            done(bool(relays))
             return
+        queue = list(requests)
 
-        def _answer(events: List[dict], answered: int) -> None:
-            if answered == 0:
+        def _next() -> None:
+            filters = queue.pop(0)
+            self._query(relays, filters, _answer)
+
+        def _answer(events: List[dict], answered: Set[str]) -> None:
+            answered = {normalize_relay_url(u) or u for u in answered}
+            if not answered or (counts and not (answered & counts)):
                 done(False)
                 return
             for event in events:
                 _record(event, pubkey, found, wanted)
-            done(True)
+            if queue:
+                _next()
+            else:
+                done(True)
 
-        self._query(relays, filters, _answer)
+        _next()
 
     def _relay_query(self, relays, filters, on_done) -> None:
-        _RelayQuery(self._relay_pool, relays, filters, on_done, parent=self)
+        fetch_events_answered(self._relay_pool, relays, filters, on_done,
+                              timeout_ms=QUERY_TIMEOUT_MS, parent=self)
 
 
 def _record(event: dict, pubkey: str, found: Existing, wanted: set) -> None:
@@ -204,43 +235,3 @@ def _record(event: dict, pubkey: str, found: Existing, wanted: set) -> None:
         found.add(d_tag, DRAFTED if str(event.get("content") or "") else REMOVED)
     elif kind == ARTICLE_DRAFT_KIND:
         found.add(d_tag, DRAFTED)
-
-
-class _RelayQuery(QObject):
-    """One subscription that ends when every relay ended (EOSE, closed,
-    failed) or at the timeout, and says how many relays answered."""
-
-    def __init__(self, pool, relays, filters, on_done, *, parent=None,
-                 timeout_ms: int = QUERY_TIMEOUT_MS) -> None:
-        super().__init__(parent)
-        self._on_done = on_done
-        self._events: List[dict] = []
-        self._answered = 0
-        self._open = {normalize_relay_url(u) or u for u in relays}
-        self._finished = False
-        self._subscription = pool.subscribe(list(relays), list(filters))
-        self._subscription.event.connect(self._events.append)
-        self._subscription.relay_eose.connect(self._on_eose)
-        self._subscription.relay_closed.connect(self._on_ended)
-        self._subscription.relay_failed.connect(self._on_ended)
-        self._timer = QTimer(self)
-        self._timer.setSingleShot(True)
-        self._timer.timeout.connect(self._finish)
-        self._timer.start(timeout_ms)
-
-    def _on_eose(self, url: str) -> None:
-        self._answered += 1
-        self._on_ended(url)
-
-    def _on_ended(self, url: str, *_reason) -> None:
-        self._open.discard(normalize_relay_url(url) or url)
-        if not self._open:
-            self._finish()
-
-    def _finish(self) -> None:
-        if self._finished:
-            return
-        self._finished = True
-        self._subscription.close()
-        self._on_done(list(self._events), self._answered)
-        self.deleteLater()
