@@ -635,10 +635,20 @@ class FeedsPanel(QFrame):
                 self._subscriptions.bind_profile(self._active_profile)
         self._refresh_controls()
 
-    def flush_subscriptions(self) -> None:
-        """Publish pending subscription changes now (app quit / logout)."""
-        if self._subscriptions is not None:
-            self._subscriptions.flush()
+    def flush_subscriptions(self) -> bool:
+        """Publish pending subscription changes now (app quit / logout).
+        True when nothing is left on its way."""
+        if self._subscriptions is None:
+            return True
+        self._subscriptions.flush()
+        return not self._subscriptions.is_busy
+
+    def wait_for_subscriptions(self, wait_ms: int) -> bool:
+        """Wait ``wait_ms`` at most for flushed changes to arrive (quitting:
+        the signer and the relays go away right after)."""
+        if self._subscriptions is None:
+            return True
+        return self._subscriptions.wait_until_settled(wait_ms)
 
     def set_active_profile(self, profile: Optional[Profile]) -> None:
         """Track the active Nostr profile. Without one, imports are disabled."""

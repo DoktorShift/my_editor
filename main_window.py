@@ -224,6 +224,10 @@ def _ask_save_changes(parent, title: str, *, save_label: str = "",
     ))
 
 
+# How long quitting waits for unsent changes to the list of sources.
+QUIT_SYNC_WAIT_MS = 5_000
+
+
 class MainWindow(QMainWindow):
     def __init__(self, initial_path: str | None = None):
         super().__init__()
@@ -3659,10 +3663,14 @@ class MainWindow(QMainWindow):
             viewer = self._pdf_viewer_from_widget(self.tabs.widget(i))
             if viewer is not None:
                 viewer.save_view_state()
-        # Publish any pending feed-subscription changes before the relay
-        # sockets go away (best effort; the local cache survives anyway).
-        if hasattr(self, "_drafts_panel"):
-            self._drafts_panel.feeds.flush_subscriptions()
+        # Publish any pending changes to the list of sources before the
+        # signer and the relay sockets go away, waiting a few seconds at
+        # most: a key kept here signs on a later turn of the event loop,
+        # and what does not arrive in time is sent on the next launch.
+        feeds = getattr(getattr(self, "_drafts_panel", None), "feeds", None)
+        if feeds is not None and not feeds.flush_subscriptions():
+            self.status.showMessage(_("Saving your list of sources…"))
+            feeds.wait_for_subscriptions(QUIT_SYNC_WAIT_MS)
         # Close any warm relay sockets and bunker channels so the WebSocket
         # layer can flush close frames before the QApplication tears down.
         if hasattr(self, "_session_pool"):

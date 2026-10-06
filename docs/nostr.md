@@ -181,7 +181,7 @@ The sources you subscribe to are one private list on your relays, the same list 
 - Whatever MyEditor does not understand (sources only STANDUP reads, keys it does not know) is written back unchanged.
 - A list MyEditor cannot read (one saved with an older kind of encryption, or while the signer is unreachable) is never written over; your changes stay on this computer until it can be read.
 - The list MyEditor kept before (`d` = `myeditor:feed-sources`) is merged in once and not written again.
-- Changes that could not be sent yet are kept with the list on this computer and sent at the next start.
+- Quitting waits a few seconds for changes that are still on their way. Changes that could not be sent yet are kept with the list on this computer and sent at the next start.
 
 ### Idempotent re-runs
 
