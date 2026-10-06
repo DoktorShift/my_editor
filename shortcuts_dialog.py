@@ -64,9 +64,6 @@ class ShortcutGroup:
 # where it shows them.
 OTHER_KEYS: Tuple[Tuple[str, Tuple[Tuple[str, str], ...]], ...] = (
     ("Editing", (
-        ("Ctrl+Z", _("Undo")),
-        ("Ctrl+Y", _("Redo")),
-        ("Ctrl+Shift+Z", _("Redo")),
         ("Tab", _("Indent")),
         ("Shift+Tab", _("Outdent")),
         ("Enter", _("New line")),

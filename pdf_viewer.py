@@ -255,6 +255,25 @@ class _ReaderView(QPdfView):
         # without a button held.
         self.viewport().setMouseTracking(True)
 
+    # -- copying -----------------------------------------------------------
+
+    def event(self, e):
+        # The copy key is the reader's own while it has the focus, the way
+        # a text field claims it: the window's Edit > Copy has the same key,
+        # and two shortcuts on one key would cancel each other out.
+        if (e.type() == QEvent.Type.ShortcutOverride
+                and e.matches(QKeySequence.StandardKey.Copy)):
+            e.accept()
+            return True
+        return super().event(e)
+
+    def keyPressEvent(self, e):
+        if e.matches(QKeySequence.StandardKey.Copy):
+            self.copy_selection()
+            e.accept()
+            return
+        super().keyPressEvent(e)
+
     # -- geometry (mirror of QPdfView's private layout) --------------------
 
     @staticmethod
@@ -658,7 +677,6 @@ class PdfViewerTab(QWidget):
             (QKeySequence(Qt.Key_Plus), self.zoom_in),
             (QKeySequence(Qt.Key_Minus), self.zoom_out),
             (QKeySequence(Qt.Key_G), self._focus_page_box),
-            (QKeySequence.Copy, self.view.copy_selection),
             (QKeySequence(Qt.Key_Escape), self.view.clear_selection),
         ):
             sc = QShortcut(keys, self.view)

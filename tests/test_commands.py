@@ -232,3 +232,104 @@ def test_menu_titles_follow_title_case_and_no_em_dashes(main_window_commands):
             if word.lower() in small and index:
                 continue
             assert word[0].isupper() or not word[0].isalpha(), command.title
+
+
+# -- the Edit menu, and commands that follow the tab ---------------------------------------
+
+@pytest.fixture
+def fresh_window(qt_app):
+    """A stand-in built for one test. (QAction.menu() hands its menu to
+    Python in PySide6, and walking the menus with it can delete them, so
+    tests that read the menus' own objects get a window of their own.)"""
+    from main_window import MainWindow
+    stand_in = StandIn()
+    MainWindow._build_actions(stand_in)
+    MainWindow._build_menu(stand_in)
+    return stand_in
+
+
+def test_the_edit_menu_follows_apple_order(fresh_window):
+    win = fresh_window
+    titles = [a.text() for a in win.m_edit.actions() if not a.isSeparator()]
+    assert titles[:8] == ["Undo", "Redo", "Cut", "Copy", "Paste", "Paste and Match Style",
+                          "Delete", "Select All"]
+    find = [a.objectName() for a in win.m_find.actions()]
+    assert find[:4] == ["search.find", "search.next", "search.previous",
+                        "search.use_selection"]
+    # Find lives in Edit now; there is no Search menu of its own.
+    tops = [a.text().replace("&", "") for a in win.menuBar().actions()]
+    assert tops[:3] == ["File", "Edit", "Format"] and "Search" not in tops
+
+
+def test_find_next_answers_to_every_key_of_the_platform(fresh_window):
+    action = fresh_window.commands.action("search.next")
+    bound = {s.toString(QKeySequence.SequenceFormat.PortableText) for s in action.shortcuts()}
+    assert bound == set(commands.all_key_texts(QKeySequence.StandardKey.FindNext))
+
+
+def test_the_colors_are_in_the_format_menu(fresh_window):
+    win = fresh_window
+    ids = [a.objectName() for a in win.m_color.actions() if not a.isSeparator()]
+    assert ids[0] == "format.color.red" and ids[-1] == "format.color.none"
+    assert win.m_color.menuAction() in win.m_format.actions()
+
+
+class _Editor:
+    def __init__(self, path=None, **flags):
+        self._file_path = path
+        for name, value in flags.items():
+            setattr(self, name, value)
+
+
+@pytest.mark.parametrize("editor, kind", [
+    (None, ""),
+    (_Editor(), "rich"),
+    (_Editor("/notes/a.md"), "rich"),
+    (_Editor("/notes/a.html"), "rich"),
+    (_Editor("/notes/a.txt"), "source"),
+    (_Editor("/notes/a.py"), "source"),
+    (_Editor("/notes/a.md", _markdown_source=True), "source"),
+    (_Editor("/notes/a.Rmd", _loaded_as_rmd_source=True), "source"),
+    (_Editor(_language="python"), "source"),
+])
+def test_what_a_tab_can_hold(editor, kind):
+    from main_window import MainWindow
+    assert MainWindow._editor_kind(None, editor) == kind
+
+
+def test_editing_commands_follow_the_tab(fresh_window):
+    from main_window import MainWindow
+    win = fresh_window
+    win._editor_kind = lambda ed: MainWindow._editor_kind(win, ed)
+    rich_only = win.commands.action("format.bold")   # stands in for a structure command
+    win._rich_actions.append(rich_only)
+
+    win.current_editor = lambda: None                  # a PDF tab
+    MainWindow._update_editor_commands(win)
+    assert not win.act_paste.isEnabled() and not win.act_bold.isEnabled()
+    assert win.act_copy.isEnabled()                    # copies from the PDF
+    assert win.act_find.isEnabled()                    # finds in the PDF
+
+    win.current_editor = lambda: _Editor("/notes/a.txt")
+    MainWindow._update_editor_commands(win)
+    assert win.act_paste.isEnabled() and not rich_only.isEnabled()
+
+    win.current_editor = lambda: _Editor("/notes/a.md")
+    MainWindow._update_editor_commands(win)
+    assert rich_only.isEnabled()
+
+
+def test_the_pdf_reader_keeps_its_copy_key(qt_app):
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent
+    from pdf_viewer import _ReaderView
+    view = _ReaderView()
+    copy = QKeySequence(QKeySequence.StandardKey.Copy)[0]
+    event = QKeyEvent(QEvent.Type.ShortcutOverride, copy.key(), copy.keyboardModifiers())
+    event.ignore()
+    view.event(event)
+    assert event.isAccepted()
+    other = QKeyEvent(QEvent.Type.ShortcutOverride, Qt.Key.Key_B, Qt.KeyboardModifier.ControlModifier)
+    other.ignore()
+    view.event(other)
+    assert not other.isAccepted()

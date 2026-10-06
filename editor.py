@@ -14,7 +14,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QTextEdit, QMenu, QApplication
 from constants import (
-    DARK_BG, DARK_FG, LIGHT_BG, LIGHT_FG, DARK_SELECTION, LIGHT_SELECTION, MONO_FONT, TEXT_COLORS,
+    DARK_BG, DARK_FG, LIGHT_BG, LIGHT_FG, DARK_SELECTION, LIGHT_SELECTION, MONO_FONT,
     DARK_GUIDE, LIGHT_GUIDE, DARK_CURRENT_LINE, LIGHT_CURRENT_LINE, DARK_PAPER, LIGHT_PAPER,
 )
 from i18n import _
@@ -55,6 +55,11 @@ class HtmlEditor(QTextEdit):
         super().__init__(parent)
         self.setAcceptRichText(True)
         self.setUndoRedoEnabled(True)
+
+        # Who fills the context menu: the window puts its own commands
+        # there (the same ones as in its menus). Without one, the menu has
+        # Cut, Copy and Paste.
+        self._context_menu_filler = None
 
         # Resource seam: a resolver plus the URL scheme it answers for.
         # Injected by the window so the editor carries no knowledge of
@@ -476,11 +481,15 @@ class HtmlEditor(QTextEdit):
         self._blink_timer.stop()
         self.viewport().update(self._block_cursor_rect())
 
-    # -------- Context menu with colors --------
+    # -------- Context menu --------
+    def set_context_menu_filler(self, filler) -> None:
+        """Install ``filler(menu, editor)``, which puts the commands in the
+        context menu. Injected, so the editor holds no command list."""
+        self._context_menu_filler = filler
+
     def contextMenuEvent(self, event):
         menu = QMenu(self)
-        is_dark = hasattr(self, '_theme_colors') and self._theme_colors['bg'] == DARK_BG
-        if is_dark:
+        if self._is_dark():
             menu.setStyleSheet("""
                 QMenu {
                     background: #252526;
@@ -506,46 +515,13 @@ class HtmlEditor(QTextEdit):
                 QMenu::item:disabled { color: #999999; }
                 QMenu::separator { height: 1px; background: #E1E1E1; margin: 4px 0px; }
             """)
-
-        act_copy = menu.addAction(_("Copy"))
-        act_cut = menu.addAction(_("Cut"))
-        act_paste = menu.addAction(_("Paste"))
-        menu.addSeparator()
-        fmt_menu = menu.addMenu(_("Color"))
-        for name, col in TEXT_COLORS.items():
-            a = fmt_menu.addAction(_(name))
-            a.setData(("color", col))
-        fmt_menu.addSeparator()
-        a_clear = fmt_menu.addAction(_("Remove Color"))
-        a_clear.setData(("color", None))
-        menu.addSeparator()
-        act_b = menu.addAction(_("Bold (Ctrl+B)"))
-        act_i = menu.addAction(_("Italic (Ctrl+I)"))
-        act_u = menu.addAction(_("Underline (Ctrl+U)"))
-        menu.addSeparator()
-        act_reset = menu.addAction(_("Reset Format (Ctrl+D)"))
-
-        chosen = menu.exec(event.globalPos())
-        if not chosen:
-            return
-        if chosen == act_copy:
-            self.copy()
-        elif chosen == act_cut:
-            self.cut()
-        elif chosen == act_paste:
-            self.paste_normalized()
-        elif chosen == act_b:
-            self.toggle_bold()
-        elif chosen == act_i:
-            self.toggle_italic()
-        elif chosen == act_u:
-            self.toggle_underline()
-        elif chosen == act_reset:
-            self.reset_to_default()
+        if self._context_menu_filler is not None:
+            self._context_menu_filler(menu, self)
         else:
-            data = chosen.data()
-            if isinstance(data, tuple) and data and data[0] == "color":
-                self.apply_color(data[1])
+            menu.addAction(_("Cut"), self.cut)
+            menu.addAction(_("Copy"), self.copy)
+            menu.addAction(_("Paste"), self.paste_from_clipboard)
+        menu.exec(event.globalPos())
 
     # -------- Bullet Logic (•) --------
     @staticmethod
@@ -599,18 +575,8 @@ class HtmlEditor(QTextEdit):
             self.redo()
             return
 
-        # Ctrl+V, image-aware paste. A clipboard image is reported to
-        # whoever owns media handling; with nobody listening it falls
-        # through to the plain-text path that strips foreign formatting.
         if e.key() == Qt.Key_V and e.modifiers() == Qt.ControlModifier:
-            clip = QApplication.clipboard()
-            if clip.mimeData().hasImage():
-                image = clip.image()
-                if not image.isNull() and self.isSignalConnected(
-                        QMetaMethod.fromSignal(self.image_pasted)):
-                    self.image_pasted.emit(image)
-                    return
-            self.paste_normalized()
+            self.paste_from_clipboard()
             return
 
         c = self.textCursor()
@@ -792,6 +758,19 @@ class HtmlEditor(QTextEdit):
             event.acceptProposedAction()
         else:
             super().dropEvent(event)
+
+    def paste_from_clipboard(self):
+        """Paste (Ctrl+V, Edit > Paste). A clipboard image is reported to
+        whoever owns media handling; with nobody listening it falls
+        through to the plain-text path that strips foreign formatting."""
+        clip = QApplication.clipboard()
+        if clip.mimeData().hasImage():
+            image = clip.image()
+            if not image.isNull() and self.isSignalConnected(
+                    QMetaMethod.fromSignal(self.image_pasted)):
+                self.image_pasted.emit(image)
+                return
+        self.paste_normalized()
 
     def paste_normalized(self):
         """Paste plain text with default formatting (no external styles, no baked colors)."""

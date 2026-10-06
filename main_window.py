@@ -27,8 +27,8 @@ from PySide6.QtGui import (
 )
 from PySide6.QtPrintSupport import QPrintDialog, QPrintPreviewDialog
 from PySide6.QtWidgets import (
-    QMainWindow, QFileDialog, QInputDialog, QMenu, QWidget,
-    QVBoxLayout, QTextEdit, QTabWidget, QToolButton, QHBoxLayout, QStatusBar,
+    QApplication, QMainWindow, QFileDialog, QInputDialog, QLineEdit, QMenu, QWidget,
+    QVBoxLayout, QPlainTextEdit, QTextEdit, QTabWidget, QToolButton, QHBoxLayout, QStatusBar,
     QPushButton, QTabBar, QWidgetAction, QLabel, QDialog, QSplitter,
     QProgressDialog
 )
@@ -36,12 +36,14 @@ from PySide6.QtWidgets import (
 from constants import (
     DARK_BG, DARK_FG, LIGHT_BG, LIGHT_FG, DARK_SELECTION, LIGHT_SELECTION,
     DARK_MENU_BG, DARK_MENU_FG, LIGHT_MENU_BG, LIGHT_MENU_FG,
-    DARK_BORDER, LIGHT_BORDER, MONO_FONT, APP_DISPLAY_NAME, APP_VERSION, APP_URL
+    DARK_BORDER, LIGHT_BORDER, MONO_FONT, APP_DISPLAY_NAME, APP_VERSION, APP_URL, TEXT_COLORS
 )
 from widgets import FindBar, HeaderWidget, LineNumberGutter, FileChangedBar, UpdateBar
 import i18n
 from i18n import _, ngettext, pgettext
-from commands import FILE, FORMAT, HELP, NOSTR, SEARCH, VIEW, Command, CommandRegistry
+from commands import (
+    EDIT, FILE, FORMAT, HELP, NOSTR, SEARCH, VIEW, Command, CommandRegistry, platform_keys,
+)
 from doc_walk import iter_blocks, iter_image_names, serialize_plain_with_images
 from markdown_writer import (
     READ_FEATURES, document_to, document_to_markdown, has_local_only_formatting,
@@ -802,6 +804,7 @@ class MainWindow(QMainWindow):
         ed.set_local_image_resolver(lambda name, e=ed: self._resolve_local_image(e, name))
         ed.image_pasted.connect(lambda img, e=ed: self._handle_pasted_image(e, img))
         ed.urls_dropped.connect(self._handle_dropped_urls)
+        ed.set_context_menu_filler(self._fill_editor_context_menu)
         return ed
 
     def _resolve_local_image(self, editor, name: str):
@@ -877,6 +880,7 @@ class MainWindow(QMainWindow):
         return f"{prefix}{base}{dirty}"
 
     def _update_status_bar(self):
+        self._update_editor_commands()
         viewer = self.current_pdf_viewer()
         if viewer is not None:
             self.status.showMessage(viewer._file_path)
@@ -937,6 +941,9 @@ class MainWindow(QMainWindow):
         can_redo = ed.document().isRedoAvailable() if ed else False
         self.header_widget.undo_btn.setEnabled(can_undo)
         self.header_widget.redo_btn.setEnabled(can_redo)
+        if hasattr(self, "act_undo"):
+            self.act_undo.setEnabled(can_undo)
+            self.act_redo.setEnabled(can_redo)
 
     def _toggle_format(self, fmt: str):
         ed = self.current_editor()
@@ -1015,6 +1022,32 @@ class MainWindow(QMainWindow):
         self.act_quit = add(Command("file.quit", _("Quit"), FILE, "Ctrl+Q"),
                             triggered=self._quit_application)
 
+        # Edit, as in every Mac app. Cut, Copy, Paste and Select All act on
+        # whatever has the keyboard focus: the document, the find field,
+        # the PDF reader (see _edit_focused).
+        self.act_undo = add(Command("edit.undo", _("Undo"), EDIT, QKeySequence.StandardKey.Undo),
+                            triggered=self._undo)
+        self.act_redo = add(Command("edit.redo", _("Redo"), EDIT, QKeySequence.StandardKey.Redo),
+                            triggered=self._redo)
+        self.act_cut = add(Command("edit.cut", _("Cut"), EDIT, QKeySequence.StandardKey.Cut),
+                           triggered=lambda: self._edit_focused("cut"))
+        self.act_copy = add(Command("edit.copy", _("Copy"), EDIT, QKeySequence.StandardKey.Copy),
+                            triggered=lambda: self._edit_focused("copy"))
+        self.act_paste = add(Command("edit.paste", _("Paste"), EDIT,
+                                     QKeySequence.StandardKey.Paste),
+                             triggered=lambda: self._edit_focused("paste"))
+        # Paste as plain text, in the style of the text around it.
+        self.act_paste_plain = add(
+            Command("edit.paste_plain", _("Paste and Match Style"), EDIT,
+                    platform_keys("Ctrl+Alt+Shift+V", "Ctrl+Shift+V"),
+                    keywords=(_("plain text"),)),
+            triggered=self._paste_plain)
+        self.act_delete = add(Command("edit.delete", _("Delete"), EDIT),
+                              triggered=lambda: self._edit_focused("delete"))
+        self.act_select_all = add(Command("edit.select_all", _("Select All"), EDIT,
+                                          QKeySequence.StandardKey.SelectAll),
+                                  triggered=lambda: self._edit_focused("select_all"))
+
         # Formatting
         self.act_bold = add(Command("format.bold", _("Bold"), FORMAT, "Ctrl+B"),
                             triggered=self._fmt_bold)
@@ -1026,16 +1059,47 @@ class MainWindow(QMainWindow):
                                             listed_as=_("Reset to default format"),
                                             keywords=("clear", "plain")),
                                     triggered=self._reset_format)
+        # Text colors stay in the document and in local files; Markdown
+        # has none, so they never reach Nostr.
+        self.act_colors = []
+        for name, color in TEXT_COLORS.items():
+            self.act_colors.append(add(
+                Command(f"format.color.{name.lower()}", _(name), FORMAT,
+                        keywords=(_("color"),)),
+                triggered=lambda c=color: self._apply_color(c)))
+        self.act_remove_color = add(Command("format.color.none", _("Remove Color"), FORMAT),
+                                    triggered=lambda: self._apply_color(None))
 
-        # Search
-        self.act_find = add(Command("search.find", _("Find"), SEARCH, "Ctrl+F"),
+        # Find, in the Edit menu. Find Next and Find Previous use each
+        # platform's own keys (Command-G on a Mac, F3 on Windows).
+        self.act_find = add(Command("search.find", _("Find\u2026"), SEARCH, "Ctrl+F",
+                                    listed_as=_("Find")),
                             triggered=self._toggle_findbar)
-        self.act_find_next = add(Command("search.next", _("Find Next"), SEARCH, "F3",
+        self.act_find_next = add(Command("search.next", _("Find Next"), SEARCH,
+                                         QKeySequence.StandardKey.FindNext,
                                          listed_as=_("Find next")),
                                  triggered=self._find_next)
         self.act_find_prev = add(Command("search.previous", _("Find Previous"), SEARCH,
-                                         "Shift+F3", listed_as=_("Find previous")),
+                                         QKeySequence.StandardKey.FindPrevious,
+                                         listed_as=_("Find previous")),
                                  triggered=self._find_prev)
+        # Command-E on a Mac: the selection becomes what Find Next looks for.
+        self.act_use_selection = add(
+            Command("search.use_selection", _("Use Selection for Find"), SEARCH,
+                    platform_keys("Ctrl+E", None)),
+            triggered=self._use_selection_for_find)
+
+        # Disabled where there is no editor (a PDF tab), so the shortcuts
+        # the PDF reader has for itself stay its own.
+        self._editor_actions = [
+            self.act_undo, self.act_redo, self.act_cut, self.act_paste, self.act_paste_plain,
+            self.act_delete, self.act_select_all, self.act_use_selection,
+            self.act_bold, self.act_italic, self.act_underline, self.act_reset_format,
+            *self.act_colors, self.act_remove_color,
+        ]
+        # Structure that only a document holding Markdown can carry
+        # (headings, lists, links): off in plain-text tabs as well.
+        self._rich_actions = []
 
         self._search_matches = []
         self._current_match_index = -1
@@ -1204,17 +1268,37 @@ class MainWindow(QMainWindow):
         m_file.addAction(self.act_close_tab)
         m_file.addAction(self.act_quit)
 
-        m_find = self.menuBar().addMenu(_("&Search"))
-        m_find.addAction(self.act_find)
-        m_find.addAction(self.act_find_next)
-        m_find.addAction(self.act_find_prev)
+        m_edit = self.menuBar().addMenu(_("&Edit"))
+        m_edit.addAction(self.act_undo)
+        m_edit.addAction(self.act_redo)
+        m_edit.addSeparator()
+        m_edit.addAction(self.act_cut)
+        m_edit.addAction(self.act_copy)
+        m_edit.addAction(self.act_paste)
+        m_edit.addAction(self.act_paste_plain)
+        m_edit.addAction(self.act_delete)
+        m_edit.addAction(self.act_select_all)
+        m_edit.addSeparator()
+        self.m_find = m_edit.addMenu(pgettext("menu", "Find"))
+        self.m_find.addAction(self.act_find)
+        self.m_find.addAction(self.act_find_next)
+        self.m_find.addAction(self.act_find_prev)
+        self.m_find.addAction(self.act_use_selection)
+        self.m_edit = m_edit
 
         m_format = self.menuBar().addMenu(_("F&ormat"))
         m_format.addAction(self.act_bold)
         m_format.addAction(self.act_italic)
         m_format.addAction(self.act_underline)
         m_format.addSeparator()
+        self.m_color = m_format.addMenu(_("Color"))
+        for action in self.act_colors:
+            self.m_color.addAction(action)
+        self.m_color.addSeparator()
+        self.m_color.addAction(self.act_remove_color)
+        m_format.addSeparator()
         m_format.addAction(self.act_reset_format)
+        self.m_format = m_format
 
         m_view = self.menuBar().addMenu(_("&View"))
         m_view.addAction(self.act_toggle_theme)
@@ -3353,6 +3437,113 @@ class MainWindow(QMainWindow):
         ed = self.current_editor()
         if ed:
             ed.redo()
+
+    def _apply_color(self, color) -> None:
+        ed = self.current_editor()
+        if ed:
+            ed.apply_color(color)
+
+    def _edit_focused(self, name: str) -> None:
+        """Cut, Copy, Paste, Delete or Select All, for whatever has the
+        keyboard focus, the way a Mac app sends them to its first
+        responder: a text field (the find field), the PDF reader, or the
+        document."""
+        focus = QApplication.focusWidget()
+        if isinstance(focus, (QLineEdit, QTextEdit, QPlainTextEdit)) and not isinstance(
+                focus, HtmlEditor):
+            if name == "delete":
+                if isinstance(focus, QLineEdit):
+                    focus.del_()
+                elif not focus.isReadOnly():
+                    focus.textCursor().removeSelectedText()
+                return
+            {"cut": focus.cut, "copy": focus.copy, "paste": focus.paste,
+             "select_all": focus.selectAll}[name]()
+            return
+        viewer = self.current_pdf_viewer()
+        if viewer is not None:
+            if name == "copy":
+                viewer.view.copy_selection()
+            return
+        ed = self.current_editor()
+        if ed is None:
+            return
+        if name == "cut":
+            ed.cut()
+        elif name == "copy":
+            ed.copy()
+        elif name == "paste":
+            ed.paste_from_clipboard()
+        elif name == "select_all":
+            ed.selectAll()
+        elif name == "delete":
+            cursor = ed.textCursor()
+            if cursor.hasSelection():
+                cursor.beginEditBlock()
+                cursor.removeSelectedText()
+                cursor.endEditBlock()
+                ed.setTextCursor(cursor)
+        ed.setFocus()
+
+    def _paste_plain(self) -> None:
+        focus = QApplication.focusWidget()
+        if isinstance(focus, QLineEdit):
+            focus.paste()
+            return
+        ed = self.current_editor()
+        if ed:
+            ed.paste_normalized()
+
+    def _use_selection_for_find(self) -> None:
+        """The selected words become what Find looks for (Command-E): Find
+        Next then goes to their next occurrence, with the find bar open or
+        not."""
+        ed = self.current_editor()
+        if ed is None:
+            return
+        text = ed.textCursor().selectedText().replace("\u2029", " ").replace("\u2028", " ")
+        if text.strip():
+            self.findbar.edit.setText(text)
+
+    def _editor_kind(self, ed) -> str:
+        """What a tab's editor holds: "rich" (Markdown and HTML documents,
+        and untitled ones: headings, lists and links go to Markdown), or
+        "source" (text written as it is: .txt, R Markdown, code, and
+        Markdown opened as its text). "" for no editor."""
+        if ed is None:
+            return ""
+        if getattr(ed, "_markdown_source", False) or getattr(ed, "_loaded_as_rmd_source", False):
+            return "source"
+        path = getattr(ed, "_file_path", None)
+        if path:
+            return "rich" if path.lower().endswith(_RICH_DOC_EXTS) else "source"
+        language = getattr(ed, "_language", None)
+        return "rich" if language in (None, "markdown", "html") else "source"
+
+    def _update_editor_commands(self) -> None:
+        """Editing commands follow the current tab: none on a PDF tab, and
+        no Markdown structure in a plain-text one."""
+        if not hasattr(self, "_editor_actions"):
+            return
+        kind = self._editor_kind(self.current_editor())
+        for action in self._editor_actions:
+            action.setEnabled(bool(kind))
+        for action in self._rich_actions:
+            action.setEnabled(kind == "rich")
+        if kind:
+            self._update_undo_redo_buttons()
+
+    def _fill_editor_context_menu(self, menu, editor) -> None:
+        """The editor's context menu: the window's own commands, so it
+        offers what the menus offer, under the same names."""
+        for action in (self.act_cut, self.act_copy, self.act_paste, self.act_paste_plain):
+            menu.addAction(action)
+        menu.addSeparator()
+        for action in (self.act_bold, self.act_italic, self.act_underline):
+            menu.addAction(action)
+        menu.addMenu(self.m_color)
+        menu.addSeparator()
+        menu.addAction(self.act_reset_format)
 
 
     # ----------------------------------------------------------------------
