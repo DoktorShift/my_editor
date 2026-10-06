@@ -15,11 +15,11 @@ rewrites so a crash mid-write can't corrupt the cache.
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterable, List, Optional
+
+from atomic_file import write_text
 
 
 KNOWN_PEOPLE_FILE = Path.home() / ".config" / "my_editor" / "known_people.json"
@@ -170,20 +170,5 @@ class KnownPeople:
                 self._people[p.pubkey] = p
 
     def _save(self) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
         payload = {"people": [asdict(p) for p in self._people.values()]}
-        fd, tmp_path = tempfile.mkstemp(
-            prefix=".known_people_", suffix=".json.tmp", dir=str(self._path.parent)
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(payload, f, ensure_ascii=False)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp_path, self._path)
-        except OSError:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
+        write_text(self._path, json.dumps(payload, ensure_ascii=False))

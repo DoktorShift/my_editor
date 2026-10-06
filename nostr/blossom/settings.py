@@ -27,11 +27,11 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 from pathlib import Path
 from typing import List, Optional
 
 import url_safety
+from atomic_file import write_text
 
 from .servers import DEFAULT_BLOSSOM_SERVERS
 
@@ -323,19 +323,4 @@ class BlossomSettings:
             "discovered_pubkey": self._discovered_pubkey,
         }
 
-        fd, tmp_path = tempfile.mkstemp(
-            prefix=".blossom_servers_", suffix=".json.tmp", dir=str(directory)
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(payload, f, indent=2, ensure_ascii=False)
-                f.flush()
-                os.fsync(f.fileno())
-            os.chmod(tmp_path, 0o600)
-            os.replace(tmp_path, self._path)
-        except OSError:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
+        write_text(self._path, json.dumps(payload, indent=2, ensure_ascii=False))

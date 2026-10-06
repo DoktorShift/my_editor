@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import tempfile
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -30,6 +29,7 @@ from PySide6.QtGui import QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
 import url_safety
+from atomic_file import write_bytes
 from i18n import _
 from image_safety import decode_image_bytes
 
@@ -378,19 +378,4 @@ def _write_cache_file(path: Path, data: bytes) -> None:
     private as the config directory it lives in. An aborted write leaves
     no temp file behind.
     """
-    fd, tmp_path = tempfile.mkstemp(
-        prefix=".blob_", suffix=".tmp", dir=str(path.parent)
-    )
-    try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
-            f.flush()
-            os.fsync(f.fileno())
-        _chmod(tmp_path, 0o600)
-        os.replace(tmp_path, path)
-    except OSError:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
+    write_bytes(path, data)

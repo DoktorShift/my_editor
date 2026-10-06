@@ -31,10 +31,11 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterator, List, Optional
+
+from atomic_file import write_text
 
 
 PROFILES_DIR = Path.home() / ".config" / "my_editor"
@@ -172,22 +173,5 @@ class ProfileStore:
             "profiles": [asdict(p) for p in self._profiles.values()],
         }
 
-        # Atomic write: tmp file in the same directory, rename into place.
-        # Same directory is important - rename across filesystems is not atomic.
-        fd, tmp_path = tempfile.mkstemp(
-            prefix=".nostr_profiles_", suffix=".json.tmp", dir=str(folder)
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(payload, f, indent=2, ensure_ascii=False)
-                f.flush()
-                os.fsync(f.fileno())
-            os.chmod(tmp_path, 0o600)
-            os.replace(tmp_path, self._path)
-        except OSError:
-            # Best-effort cleanup; re-raise so the caller knows the write failed.
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
+        # Raises OSError so the caller knows the write failed.
+        write_text(self._path, json.dumps(payload, indent=2, ensure_ascii=False))
