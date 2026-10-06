@@ -10,6 +10,7 @@ from PySide6.QtGui import QTextCharFormat, QTextCursor, QTextDocument
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QTextEdit
 
+from spelling import service
 from spelling.backends import AUTOMATIC
 from spelling.service import DocumentSpelling, Misspelling, SpellChecker
 from tests.spelling_fakes import Editor, FakeBackend, FakeTextBackend, drain
@@ -362,6 +363,32 @@ def test_opening_a_fence_turns_the_lines_below_into_code_and_closing_it_back():
     type_at(doc, doc.findBlockByNumber(3).position(), "```\n")
     spelling.check_all()
     assert wrong(spelling, doc) == [["helo"], [], [], [], ["cde"], []]
+
+
+def test_a_fence_opened_at_the_top_of_a_long_document_costs_the_keystroke_little(
+        monkeypatch):
+    lines = [f"line {i} wrod" for i in range(3000)]
+    doc = document(*lines)
+    spelling, checker, *_ = follow(doc)
+    spelling.STATE_BLOCKS = 50
+    spelling.check_all()
+    walked = []
+    real = service._advanced
+    monkeypatch.setattr(service, "_advanced", lambda block, state: walked.append(1)
+                        or real(block, state))
+    type_at(doc, doc.findBlockByNumber(5).position(), "```\n")
+    assert len(walked) <= 60                       # not the 3,000 lines below
+    # The rest is brought up to date in the slices, where nothing below the
+    # walk is checked before the walk reaches it.
+    assert spelling.misspelling_at(doc.findBlockByNumber(2000).position() + 10) is None
+    spelling.check_all()
+    assert found_now(spelling, doc) == found_fresh(doc, checker)
+    assert not any(found_now(spelling, doc)[6:])
+    type_at(doc, doc.findBlockByNumber(2500).position(), "```\n")
+    type_at(doc, doc.findBlockByNumber(1000).position(), "~~~\n")
+    type_at(doc, doc.findBlockByNumber(5).position(), "x")
+    spelling.check_all()
+    assert found_now(spelling, doc) == found_fresh(doc, checker)
 
 
 def test_formatted_code_and_mentions_are_not_checked():

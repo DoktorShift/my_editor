@@ -259,6 +259,12 @@ class DocumentSpelling(QObject):
     """After this long without typing, the word being typed counts as
     finished (about the pause between two sentences)."""
 
+    STATE_BLOCKS = 2000
+    """How many blocks below an edit the cheap pass that keeps code fences
+    right walks at once (a few milliseconds). When an edit opens or closes
+    a fence, the rest of the document is brought up to date in the
+    slices."""
+
     def __init__(self, checker: SpellChecker, document: QTextDocument, *,
                  language: Optional[str] = None,
                  clock: Callable[[], float] = time.perf_counter) -> None:
@@ -278,6 +284,10 @@ class DocumentSpelling(QObject):
         self._shown: List[Tuple[Misspelling, ...]] = []
         self._texts: List[Optional[str]] = []
         self._dirty = bytearray()
+        # Where the cheap pass stopped: a block whose stored state was
+        # computed from the state kept here. From the first one on, states
+        # are not up to date yet, and no block is checked there.
+        self._breaks: Dict[int, Optional[State]] = {}
         self._visible = (0, -1)
         self._sweep = 0
         # The word being typed: where the last edit ended, while the
@@ -353,6 +363,9 @@ class DocumentSpelling(QObject):
         if not block.isValid():
             return None
         number = block.blockNumber()
+        while self._breaks and min(self._breaks) <= number:
+            start = min(self._breaks)                # its state first
+            self._states_from(start, start - 1, old_start=self._breaks.pop(start))
         if (number < len(self._dirty) and self._stale(number, block)
                 and self._checker.is_available()):
             if self._check(number):
@@ -374,7 +387,7 @@ class DocumentSpelling(QObject):
     def is_checking(self) -> bool:
         """Whether some block still waits to be checked (never while the
         system checker does not work)."""
-        return (self._alive() and self._dirty.find(1) >= 0
+        return (self._alive() and (self._dirty.find(1) >= 0 or bool(self._breaks))
                 and self._checker.is_available())
 
     def close(self) -> None:
@@ -409,6 +422,7 @@ class DocumentSpelling(QObject):
         self._texts = [None] * count
         self._dirty = bytearray(b"\x01") * count
         self._states = []
+        self._breaks = {}
         self._states_from(0, count - 1)
         self._sweep = 0
         self._schedule()
@@ -428,7 +442,21 @@ class DocumentSpelling(QObject):
         # named to the editor).
         new = last - first + 1
         old_text = self._texts[first] if first <= old_last else None
-        old_end = self._states[old_last] if old_last >= 0 else words.START
+        old_end: Optional[State] = self._states[old_last] if old_last >= 0 else words.START
+        if self._breaks:
+            # Stops of the cheap pass move with their blocks; one inside the
+            # replaced blocks is gone, and what follows them may then not
+            # start as it did.
+            delta = count - len(self._found)
+            moved = {}
+            for number, kept in self._breaks.items():
+                if number < first:
+                    moved[number] = kept
+                elif number > old_last:
+                    moved[number + delta] = kept
+                else:
+                    old_end = None
+            self._breaks = moved
         self._found[first:old_last + 1] = [()] * new
         self._shown[first:old_last + 1] = [()] * new
         self._texts[first:old_last + 1] = [None] * new
@@ -467,20 +495,32 @@ class DocumentSpelling(QObject):
         self._schedule()
         return True
 
-    def _states_from(self, first: int, last: int, old_end: Optional[State] = None) -> None:
+    def _states_from(self, first: int, last: int, old_end: Optional[State] = None, *,
+                     old_start: Optional[State] = None) -> None:
         """Bring the states up to date from block ``first``: every block
         up to ``last`` (the ones that changed, whose old blocks ended in
         ``old_end``), then on while a block starts in another state than
-        it did before. Such a block is checked again: a fence opened or
-        closed above it turns it into code or back into prose."""
+        it did before (``old_start`` for ``first`` when the walk goes on
+        from a stop). Such a block is checked again: a fence opened or
+        closed above it turns it into code or back into prose. Past
+        ``last`` it walks at most STATE_BLOCKS blocks, and notes where it
+        stopped."""
         block = self._document.findBlockByNumber(first)
         state = words.START if first == 0 else self._states[first - 1]
         number = first
-        old_start: Optional[State] = None
+        walked = 0
         while block.isValid():
+            if number in self._breaks:
+                # An earlier walk stopped here: this block's stored state
+                # was computed from the state it kept.
+                old_start = self._breaks.pop(number)
             if number > last:
                 if state == old_start:
                     break
+                if walked >= self.STATE_BLOCKS:
+                    self._breaks[number] = old_start
+                    break
+                walked += 1
                 self._dirty[number] = 1
             after = _advanced(block, state)
             if number < len(self._states):
@@ -560,7 +600,8 @@ class DocumentSpelling(QObject):
     # -- checking -----------------------------------------------------------
 
     def _schedule(self) -> None:
-        if self._alive() and self._dirty.find(1) >= 0 and not self._timer.isActive():
+        if (self._alive() and (self._dirty.find(1) >= 0 or self._breaks)
+                and not self._timer.isActive()):
             self._timer.start()
 
     def _run(self, deadline: Optional[float] = -1.0) -> bool:
@@ -570,6 +611,10 @@ class DocumentSpelling(QObject):
             return False
         if deadline is not None and deadline < 0:
             deadline = self._clock() + self.SLICE_SECONDS
+        # First bring the states up to date where the cheap pass stopped.
+        while self._breaks and (deadline is None or self._clock() < deadline):
+            start = min(self._breaks)
+            self._states_from(start, start - 1, old_start=self._breaks.pop(start))
         changed: List[int] = []
         while True:
             number = self._next()
@@ -586,21 +631,23 @@ class DocumentSpelling(QObject):
         # not the editor's business.
         for first, last in _runs(changed):
             self.misspellingsChanged.emit(first, last)
-        left = self._dirty.find(1) >= 0
+        left = self._dirty.find(1) >= 0 or bool(self._breaks)
         if left and deadline is not None:
             self._timer.start()
         return left
 
     def _next(self) -> Optional[int]:
         """The next block to check: a visible one, or the next one after
-        the last checked, around the document."""
+        the last checked, around the document; none where the states are
+        not up to date yet."""
+        end = min(self._breaks) if self._breaks else len(self._dirty)
         first, last = self._visible
-        for number in range(max(first, 0), min(last, len(self._dirty) - 1) + 1):
+        for number in range(max(first, 0), min(last + 1, end)):
             if self._dirty[number]:
                 return number
-        number = self._dirty.find(1, self._sweep)
+        number = self._dirty.find(1, min(self._sweep, end), end)
         if number < 0:
-            number = self._dirty.find(1)
+            number = self._dirty.find(1, 0, end)
         if number < 0:
             return None
         self._sweep = number
