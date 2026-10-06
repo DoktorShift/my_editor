@@ -44,7 +44,6 @@ from atomic_file import (
     read_json, read_text_document, save_document, save_text_document, write_json,
 )
 import diagnostics
-from fonts import monospace_family
 import i18n
 from i18n import _, ngettext, pgettext
 from commands import (
@@ -745,6 +744,7 @@ class MainWindow(QMainWindow):
             editor._highlighter = SyntaxHighlighter(
                 editor.document(), lang, self.is_dark_theme
             )
+            self._update_editor_font(editor)     # code: the monospace font
             self._update_status_bar()
 
     @staticmethod
@@ -768,6 +768,16 @@ class MainWindow(QMainWindow):
             )
         elif self._editor_kind(editor) == "rich":
             editor._highlighter = RichTextLook(editor.document(), self.is_dark_theme)
+        self._update_editor_font(editor)
+
+    def _update_editor_font(self, editor) -> None:
+        """Writing in the system's text font, code and plain text in the
+        monospace font (View > Use Monospace Font for Writing sets all
+        writing in monospace too)."""
+        writing = (not self.monospace_writing
+                   and (self._editor_kind(editor) == "rich"
+                        or getattr(editor, "_markdown_source", False)))
+        editor.set_writing_font(writing)
 
     def _update_editor_theme(self, editor):
         bg = DARK_BG if self.is_dark_theme else LIGHT_BG
@@ -783,9 +793,6 @@ class MainWindow(QMainWindow):
                 border: none;
                 selection-background-color: {selection};
                 selection-color: {fg};
-                font-family: "{monospace_family()}";
-                font-size: 14px;
-                line-height: 1.5;
                 padding: 8px;
             }}
             QScrollBar:vertical {{
@@ -1386,6 +1393,12 @@ class MainWindow(QMainWindow):
         # Option-Command-T on a Mac, as every Mac app's Show Toolbar; no key
         # elsewhere, where none is common (Ctrl+Alt+T opens a terminal).
         self.show_toolbar = bool(load_settings().get("show_toolbar", True))
+        # Writing in the monospace font, for those who prefer it (Q-K).
+        self.monospace_writing = bool(load_settings().get("monospace_writing", False))
+        self.act_monospace_writing = add(
+            Command("view.monospace_writing", _("Use Monospace Font for Writing"), VIEW,
+                    checkable=True, keywords=(_("font"), _("typewriter"))),
+            toggled=self._set_monospace_writing, checked=self.monospace_writing)
         self.act_show_toolbar = add(Command("view.toolbar", _("Show Toolbar"), VIEW,
                                             platform_keys("Ctrl+Alt+T", None),
                                             checkable=True),
@@ -1559,6 +1572,8 @@ class MainWindow(QMainWindow):
         m_view = self.menuBar().addMenu(_("&View"))
         self.m_view = m_view
         m_view.addAction(self.act_show_toolbar)
+        m_view.addSeparator()
+        m_view.addAction(self.act_monospace_writing)
         m_view.addSeparator()
         m_view.addAction(self.act_toggle_theme)
         m_view.addAction(self.act_toggle_line_numbers)
@@ -3841,6 +3856,15 @@ class MainWindow(QMainWindow):
         if ed:
             ed.set_heading(level)
             self._update_format_buttons()
+
+    def _set_monospace_writing(self, on: bool) -> None:
+        """View > Use Monospace Font for Writing, remembered."""
+        self.monospace_writing = bool(on)
+        save_setting("monospace_writing", self.monospace_writing)
+        for i in range(self.tabs.count()):
+            ed = self._editor_from_widget(self.tabs.widget(i))
+            if ed is not None:
+                self._update_editor_font(ed)
 
     def _set_toolbar_shown(self, shown: bool) -> None:
         """View > Show Toolbar, remembered."""

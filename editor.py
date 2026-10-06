@@ -18,13 +18,17 @@ from constants import (
     DARK_BG, DARK_FG, LIGHT_BG, LIGHT_FG, DARK_SELECTION, LIGHT_SELECTION,
     DARK_GUIDE, LIGHT_GUIDE, DARK_CURRENT_LINE, LIGHT_CURRENT_LINE, DARK_PAPER, LIGHT_PAPER,
 )
-from fonts import monospace_family
+from fonts import code_font, writing_font
 from i18n import _
 import link_url
 import rich_text
 import url_safety
 from link_popover import LinkPopover, clipboard_address
 
+
+# Characters per line when writing: within the 50 to 75 that typography
+# (and nostrdesign.org's UI tips) give for comfortable reading.
+WRITING_MEASURE = 72
 
 # Stand-in painted for an image whose bytes have not arrived yet. Its
 # size is deliberately modest: it is replaced in place once the real
@@ -96,12 +100,15 @@ class HtmlEditor(QTextEdit):
                 color: {DARK_FG};
                 border: none;
                 selection-background-color: {DARK_SELECTION};
-                font-family: "{monospace_family()}";
-                font-size: 14px;
-                line-height: 1.5;
                 padding: 8px;
             }}
         """)
+        # Code and plain text are set in the monospace font; writing gets
+        # the system's text font (set_writing_font). The font is set here,
+        # not in the style sheet, which could only name a family.
+        self.setFont(code_font())
+        # Characters per line when writing; None for code (full width).
+        self._writing_measure_chars = None
 
         # Track active formatting state for persistent formatting
         self.active_format = {
@@ -375,18 +382,32 @@ class HtmlEditor(QTextEdit):
         self._update_paper_margins()
         self.viewport().update()
 
+    def set_writing_font(self, writing: bool) -> None:
+        """Writing (Markdown, drafts): the system's text font at a reading
+        size, in a column of a comfortable line length. Otherwise (code,
+        plain text): the monospace font across the whole width."""
+        self.setFont(writing_font() if writing else code_font())
+        self._writing_measure_chars = WRITING_MEASURE if writing else None
+        self._update_paper_margins()
+        self.viewport().update()
+
     def _update_paper_margins(self):
-        if not self._paper_mode:
+        """The text column: Paper Mode's page, or the writing measure, or
+        the whole width."""
+        chars = self._paper_measure_chars if self._paper_mode else self._writing_measure_chars
+        if not chars:
             self.setViewportMargins(0, 0, 0, 0)
             return
-        char_w = self.fontMetrics().horizontalAdvance("0") or 8
-        measure = char_w * self._paper_measure_chars
+        metrics = self.fontMetrics()
+        char_w = (metrics.averageCharWidth() if self._writing_measure_chars
+                  else metrics.horizontalAdvance("0")) or 8
+        measure = char_w * chars
         side = int(max(0, (self.width() - measure) / 2))
         self.setViewportMargins(side, 0, side, 0)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if self._paper_mode:
+        if self._paper_mode or self._writing_measure_chars:
             self._update_paper_margins()
 
     def _is_dark(self) -> bool:

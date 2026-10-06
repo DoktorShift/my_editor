@@ -36,6 +36,8 @@ On macOS, `Ctrl` in these tables is the Command key (`⌘`) and `Alt` is Option 
 | `Ctrl+K` | Add Link (Edit Link when the caret is in a link) |
 | | `Insert > Divider`: a horizontal rule (`---`) after the paragraph |
 
+Writing (Markdown files, new documents and drafts) is set in your system's own text font at a reading size, in a column of a comfortable line length; plain text and code files keep the monospace font across the whole window. `View > Use Monospace Font for Writing` sets all writing in monospace.
+
 The status bar says, quietly, how long the document is: its words and how long it takes to read (225 words a minute, as the long-form Nostr readers count), or how many words are selected.
 
 The **format toolbar** above the document holds the controls used most: the paragraph style (Body, Heading 1 to 3), Bold, Italic, Strikethrough, Add Link, Bulleted List, Numbered List and Quote. Everything else is in the `Format` and `Insert` menus. `View > Show Toolbar` (`Ctrl+Alt+T` on macOS) hides it; a PDF tab has none.

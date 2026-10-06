@@ -32,6 +32,18 @@ def test_style_sheets_get_a_family_this_system_really_has():
     assert family and QFontDatabase.hasFamily(family)
 
 
-def test_the_editor_style_sheet_uses_it():
+def test_the_editor_uses_it_for_code_and_the_system_font_for_writing():
     from editor import HtmlEditor
-    assert f'font-family: "{fonts.monospace_family()}"' in HtmlEditor().styleSheet()
+    ed = HtmlEditor()
+    assert QFontInfo(ed.font()).fixedPitch()
+    assert ed.font().pixelSize() == fonts.CODE_PIXEL_SIZE
+    ed.set_writing_font(True)
+    assert not QFontInfo(ed.font()).fixedPitch()
+    assert ed.font().pixelSize() == fonts.WRITING_PIXEL_SIZE
+    ed.set_writing_font(False)
+    assert QFontInfo(ed.font()).fixedPitch()
+
+
+def test_the_writing_font_is_one_the_system_has():
+    family = QFontInfo(fonts.writing_font()).family()
+    assert family and not QFontInfo(fonts.writing_font()).fixedPitch()
