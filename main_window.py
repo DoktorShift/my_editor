@@ -2485,8 +2485,7 @@ class MainWindow(QMainWindow):
                 return written[name]
             try:
                 os.makedirs(media_dir, exist_ok=True)
-                with open(os.path.join(media_dir, name), "wb") as f:
-                    f.write(data)
+                save_document(os.path.join(media_dir, name), data)
             except OSError:
                 return None
             written[name] = f"{os.path.basename(media_dir)}/{name}"
