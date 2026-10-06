@@ -42,6 +42,7 @@ from i18n import _
 from ..imports.images import scan_markdown_images
 from ..imports.workspace import Post, date_text
 from ..preview import COLUMN_WIDTH, Article, NostrPreview
+from .eliding_label import ElidingLabel
 from .imports_glyphs import is_dark, letter_avatar
 
 _EMPTY, _ARTICLE, _MESSAGE = 0, 1, 2
@@ -84,9 +85,12 @@ class ArticlePane(QWidget):
         row.setSpacing(8)
         self._avatar = QLabel()
         self._avatar.setFixedSize(18, 18)
-        self._origin = QLabel()
-        self._origin.setTextFormat(Qt.TextFormat.PlainText)
+        # The source's name elides; the date beside it stays whole.
+        self._origin = ElidingLabel()
         self._origin.setObjectName("imports_article_origin")
+        self._date = QLabel()
+        self._date.setObjectName("imports_article_origin")
+        self._date.setTextFormat(Qt.TextFormat.PlainText)
         self._open = QPushButton(_("Open Original"))
         self._open.setObjectName("imports_open_original")
         self._open.setToolTip(_("Read this post on its website"))
@@ -96,6 +100,7 @@ class ArticlePane(QWidget):
         self._open.clicked.connect(self.open_original)
         row.addWidget(self._avatar)
         row.addWidget(self._origin, 1)
+        row.addWidget(self._date)
         row.addWidget(self._open)
         layout.addWidget(self._header)
 
@@ -135,8 +140,9 @@ class ArticlePane(QWidget):
         if post is None:
             self._stack.setCurrentIndex(_EMPTY)
             return
-        parts = [post.source_title, date_text(post.published_at or post.found_at)]
-        self._origin.setText("  ·  ".join(p for p in parts if p))
+        when = date_text(post.published_at or post.found_at)
+        self._origin.setText(post.source_title)
+        self._date.setText(f"\u00b7  {when}" if when and post.source_title else when)
         self._avatar.setPixmap(letter_avatar(post.source_title, post.source_url or
                                              post.source_key, 18, dark=is_dark(self.palette()),
                                              dpr=self.devicePixelRatioF()))

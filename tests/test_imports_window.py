@@ -292,9 +292,9 @@ class TestLayout:
 
 def test_freshness_words():
     source = SimpleNamespace(automatic=True, error="", last_checked=NOW - 120, next_check=0)
-    assert freshness(source, now=NOW) == "Checked 2 min ago."
+    assert freshness(source, now=NOW) == "Checked 2 min ago"
     source.last_checked = NOW - 10
-    assert freshness(source, now=NOW) == "Checked just now."
+    assert freshness(source, now=NOW) == "Checked just now"
     source.last_checked = 0
     assert freshness(source, now=NOW) == "Not checked yet."
     failed = SimpleNamespace(automatic=True, error="Boom.", last_checked=0,
@@ -472,3 +472,23 @@ class TestWhatThePersonIsDoingStays:
         settle()
         assert window.segment_older.isChecked()
         assert titles(window) == ["Archive"]
+
+
+def test_a_long_source_title_elides_and_keeps_the_segments(tmp_path):
+    """Review M2: a long title was cut without an ellipsis and the New
+    and Older control showed no labels at all."""
+    controller = controller_for(tmp_path)
+    long = "Verbraucherzentrale Nordrhein-Westfalen Pressemitteilungen Aktuell"
+    controller.subscriptions.add_feed(JOURNAL, long)
+    win = ImportsWindow(controller)
+    win.resize(1180, 760)
+    win.show()
+    settle()
+    win.sidebar.select(SOURCE, source_key(JOURNAL))
+    settle()
+    assert win.list_title.text() == long
+    assert win.list_title.painted_text().endswith("\u2026")
+    for segment in (win.segment_new, win.segment_older):
+        assert segment.width() >= segment.sizeHint().width()
+    win.close()
+    controller.account_changed(None)

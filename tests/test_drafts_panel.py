@@ -322,7 +322,8 @@ def test_a_long_title_elides_inside_the_label():
     # The label never mutates the string it was handed. It holds no
     # QLabel text of its own at all, which is what stops elision from
     # feeding back into the layout.
-    assert label.text() == ""
+    from PySide6.QtWidgets import QLabel
+    assert QLabel.text(label) == ""
     assert label.full_text() == long_title
     # The whole row is readable from any point on it, so the full title
     # survives at every width.

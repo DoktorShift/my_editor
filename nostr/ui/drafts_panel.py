@@ -134,6 +134,7 @@ from .drafts_preview import (
     preview_announcement,
     preview_is_eligible,
 )
+from .eliding_label import ElidingLabel
 from .imports_glyphs import glyph
 
 
@@ -553,74 +554,27 @@ def _row_tooltip(record: DraftRecord) -> str:
 # Row widget                                                                  #
 # --------------------------------------------------------------------------- #
 
-class _ElidingLabel(QLabel):
-    """Single-line label that elides at paint time, from its own width.
+class _ElidingLabel(ElidingLabel):
+    """Single-line label that elides at paint time, from its own width
+    (eliding_label.py, shared with the Imports window).
 
-    Elision must not run through ``setText``: setText changes the
+    Elision must not run through ``QLabel.setText``: that changes the
     label's sizeHint, which re-runs the layout and moves the width the
     elision was computed against, so the string overflows the final
-    label and QLabel hard-clips the ellipsis that was added. That is
-    why a row read ``![One Class, One`` with no trailing dots at every
-    panel width. Painting from ``contentsRect()`` has no such feedback
-    loop, and re-elides on splitter drags and font changes for free.
-
-    ``QSizePolicy.Ignored`` plus a zero minimum width is what keeps a
-    very long title from forcing the panel wider than the user dragged
+    label and QLabel hard-clips the ellipsis that was added. That is why
+    a row once read ``![One Class, One`` with no trailing dots at every
+    panel width. ``QSizePolicy.Ignored`` plus a zero minimum width keeps
+    a very long title from forcing the panel wider than the user dragged
     it, which matters most at ``MIN_PANEL_WIDTH``.
 
-    It paints text and nothing else. The stylesheet gives these labels
-    colour and weight only; anyone adding a background or a border to
-    them has to draw the style primitive here first, or set
-    ``Qt.WA_StyledBackground``. The tooltip is owned by the row, so the
-    whole row is readable from any point on it rather than one line at
-    a time.
+    The stylesheet gives these labels colour and weight only. The
+    tooltip is owned by the row, so the whole row is readable from any
+    point on it rather than one line at a time.
     """
 
-    def __init__(
-        self,
-        parent: Optional[QWidget] = None,
-        mode: Qt.TextElideMode = Qt.ElideRight,
-    ) -> None:
-        super().__init__(parent)
-        self._full = ""
-        self._mode = mode
-        self.setTextInteractionFlags(Qt.NoTextInteraction)
-        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-
-    def full_text(self) -> str:
-        """The unelided string. The label never mutates it."""
-        return self._full
-
-    def set_full_text(self, text: str) -> None:
-        self._full = text or ""
-        # The painted string is elided and ``text()`` is empty, so the
-        # accessible name is where the whole string stays reachable.
-        # Going through ``setText`` instead is what caused the feedback
-        # loop described above.
-        self.setAccessibleName(self._full)
-        self.update()
-
-    def minimumSizeHint(self) -> QSize:
-        hint = super().minimumSizeHint()
-        hint.setWidth(0)
-        return hint
-
-    def paintEvent(self, event) -> None:
-        painter = QPainter(self)
-        rect = self.contentsRect()
-        elided = self.fontMetrics().elidedText(self._full, self._mode, rect.width())
-        # drawItemText paints through the palette, which is where the
-        # stylesheet's ``color`` (including the [state] and [sel]
-        # variants) lands after a polish.
-        self.style().drawItemText(
-            painter,
-            rect,
-            int(self.alignment()),
-            self.palette(),
-            self.isEnabled(),
-            elided,
-            self.foregroundRole(),
-        )
+    def __init__(self, parent: Optional[QWidget] = None,
+                 mode: Qt.TextElideMode = Qt.ElideRight) -> None:
+        super().__init__("", parent, mode=mode, tooltip=False)
 
 
 class _SegmentButton(QPushButton):

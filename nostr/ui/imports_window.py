@@ -110,6 +110,7 @@ from ..imports.workspace import Post, Scope, checked_text, date_text, matches, t
 from .image_review_dialog import ImageReviewDialog
 from .imports_actions import ActionBar, OptionsPopover
 from .imports_activity import ActivityButton, JobCard, finished_text
+from .eliding_label import ElidingLabel
 from .imports_article import ArticlePane
 from .imports_glyphs import glyph_icon
 from .imports_post_list import PostList
@@ -194,9 +195,11 @@ def freshness(source: SourceRow, *, now: Optional[float] = None) -> str:
         return f"{source.error} {when}"
     if not source.last_checked:
         return _("Not checked yet.")
+    # No period after the time: in German it ends in one already
+    # ("vor 2 Min."), and a doubled one reads as a mistake (review L2).
     if now - source.last_checked < 60:
-        return _("Checked just now.")
-    return _("Checked {when}.").format(when=date_text(source.last_checked, now=now))
+        return _("Checked just now")
+    return _("Checked {when}").format(when=date_text(source.last_checked, now=now))
 
 
 class _SearchField(QLineEdit):
@@ -440,9 +443,10 @@ class ImportsWindow(QMainWindow):
 
         top = QHBoxLayout()
         top.setSpacing(8)
-        self.list_title = QLabel()
+        # A long source title elides (whole in its tooltip) and never
+        # squeezes the New and Older segments beside it.
+        self.list_title = ElidingLabel()
         self.list_title.setObjectName("imports_list_title")
-        self.list_title.setTextFormat(Qt.TextFormat.PlainText)
         title_font = QFont(self.list_title.font())
         title_font.setPointSizeF(title_font.pointSizeF() + 5)
         title_font.setWeight(QFont.Weight.DemiBold)
@@ -501,6 +505,7 @@ class ImportsWindow(QMainWindow):
         button.setObjectName("imports_segment")
         button.setProperty("edge", edge)
         button.setAccessibleName(name)
+        button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         button.clicked.connect(lambda _checked=False, s=state: self._on_segment(s))
         self._segment_group.addButton(button)
         row.addWidget(button)

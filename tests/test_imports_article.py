@@ -153,4 +153,21 @@ def test_no_post_shows_the_hint():
 def test_the_header_names_the_source_and_the_date():
     widget, _images, _opened = pane("x")
     widget.show_post(POST)
-    assert widget._origin.text().startswith("Field notes  ·  ")
+    assert widget._origin.text() == "Field notes"
+    assert widget._date.text().startswith("\u00b7  ")
+
+
+def test_a_long_source_name_elides_and_the_date_stays_whole():
+    """Review M2: the header was cut to "...Pressemitteilungen \u00b7 vo"."""
+    from dataclasses import replace
+    widget, _images, _opened = pane("x")
+    long = "Verbraucherzentrale Nordrhein-Westfalen Pressemitteilungen " * 2
+    widget.resize(420, 400)
+    widget.show()
+    widget.show_post(replace(POST, source_title=long))
+    widget.layout().activate()
+    widget._header.layout().activate()
+    assert widget._origin.painted_text().endswith("\u2026")
+    assert widget._origin.toolTip() == long
+    assert widget._date.width() >= widget._date.sizeHint().width()
+    widget.hide()
