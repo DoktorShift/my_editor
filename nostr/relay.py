@@ -26,8 +26,12 @@ Design notes:
     state. Eager semantics: ``first_accept`` fires the instant one relay
     OKs; ``all_done`` fires after every relay has reported (success,
     rejection, error, or per-relay timeout).
-  - No reconnection logic in this chunk. If a relay drops, the next
-    publish opens a fresh socket.
+  - A relay that carries open subscriptions reconnects by itself when
+    its socket drops (after 1 s, then twice as long each time, at most a
+    minute), and every open subscription sends its REQ again once it is
+    back. That is what keeps a signer app's channel (NIP-46) and live
+    draft sync working through a dropped connection. A relay nobody
+    subscribes to is not reopened: the next publish opens a fresh socket.
 """
 
 from __future__ import annotations
@@ -51,6 +55,11 @@ DEFAULT_PUBLISH_TIMEOUT_MS: int = 8000
 # before we declare it dead. Folded into the publish timeout - this is
 # just the wait for ``connected`` to fire.
 DEFAULT_CONNECT_TIMEOUT_MS: int = 5000
+
+# Reconnecting a relay that still carries subscriptions: the first wait,
+# doubled after every failed attempt, up to the last.
+RECONNECT_FIRST_MS: int = 1000
+RECONNECT_LONGEST_MS: int = 60_000
 
 
 PublishResult = Tuple[str, bool, str]  # (url, ok, message)
@@ -85,6 +94,14 @@ class Relay(QObject):
         self._ws.errorOccurred.connect(self._on_error)
         self._connected = False
         self._opening = False
+        self._stopped = False
+        # Open subscriptions on this relay; while there are any, a dropped
+        # socket is reopened.
+        self._holds = 0
+        self._retry_ms = RECONNECT_FIRST_MS
+        self._retry = QTimer(self)
+        self._retry.setSingleShot(True)
+        self._retry.timeout.connect(self.open)
 
     @property
     def url(self) -> str:
@@ -100,13 +117,33 @@ class Relay(QObject):
 
     def open(self) -> None:
         """Begin the TLS handshake. No-op if already open or opening."""
+        self._stopped = False
         if self._connected or self._opening:
             return
         self._opening = True
         self._ws.open(QUrl(self._url))
 
     def close(self) -> None:
+        """Close the socket for good: it is not reopened by itself."""
+        self._stopped = True
+        self._retry.stop()
         self._ws.close()
+
+    def hold(self) -> None:
+        """A subscription needs this relay: reopen it when it drops."""
+        self._holds += 1
+
+    def release(self) -> None:
+        """A subscription is done with this relay."""
+        self._holds = max(0, self._holds - 1)
+        if not self._holds:
+            self._retry.stop()
+
+    def _reconnect_later(self) -> None:
+        if self._stopped or not self._holds or self._retry.isActive():
+            return
+        self._retry.start(self._retry_ms)
+        self._retry_ms = min(self._retry_ms * 2, RECONNECT_LONGEST_MS)
 
     def send(self, message: list) -> bool:
         """Serialize and send a JSON message. Returns False if not connected."""
@@ -122,12 +159,14 @@ class Relay(QObject):
     def _on_connected(self) -> None:
         self._opening = False
         self._connected = True
+        self._retry_ms = RECONNECT_FIRST_MS
         self.connected.emit()
 
     def _on_disconnected(self) -> None:
         self._opening = False
         self._connected = False
         self.disconnected.emit()
+        self._reconnect_later()
 
     def _on_text_message(self, text: str) -> None:
         try:
@@ -141,6 +180,8 @@ class Relay(QObject):
     def _on_error(self, _code) -> None:
         self._opening = False
         self.error.emit(self._ws.errorString())
+        if not self._connected:
+            self._reconnect_later()     # an attempt that never connected
 
 
 # --------------------------------------------------------------------------- #
@@ -355,7 +396,10 @@ class Subscription(QObject):
     ends in at most one of relay_eose, relay_closed and relay_failed.
 
     The subscription stays open until ``close()`` is called; new events
-    matching the filter continue to fire ``event`` after EOSE.
+    matching the filter continue to fire ``event`` after EOSE. When a
+    relay's socket drops and comes back, the REQ is sent again, so the
+    subscription keeps receiving from it (a relay's end is still reported
+    once, the first time).
     """
 
     event = Signal(dict)
@@ -407,14 +451,15 @@ class Subscription(QObject):
         self._connections.append((relay, "error", err_slot))
         self._connections.append((relay, "disconnected", disc_slot))
 
-        if relay.is_connected:
-            self._send_req(url)
-            return
-
+        # Every (re)connection gets the REQ, not only the first.
         conn_slot = lambda u=url: self._send_req(u)
         relay.connected.connect(conn_slot)
         self._connections.append((relay, "connected", conn_slot))
-        relay.open()
+        relay.hold()
+        if relay.is_connected:
+            self._send_req(url)
+        else:
+            relay.open()
 
     def _send_req(self, url: str) -> None:
         if self._closed:
@@ -465,6 +510,7 @@ class Subscription(QObject):
             relay = self._pool.get_or_create(url)
             if relay.is_connected:
                 relay.send(["CLOSE", self._sub_id])
+            relay.release()
         for relay, sig_name, slot in self._connections:
             try:
                 getattr(relay, sig_name).disconnect(slot)
