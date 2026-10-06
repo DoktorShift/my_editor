@@ -49,10 +49,17 @@ Accounting invariant (verified against ``publisher.py``): a
 signed, the only remaining outcome is ``completed`` with per-relay
 results. Counting success at stash time is therefore sound.
 
+Never overwrite: ``is_imported`` answers whether a draft, an article
+or a deletion already exists for an identifier (catalogue.py). It is
+asked as soon as an item's identifier is known, before anything is
+fetched, copied or signed, and again right before signing (the other
+app may have made the draft in the meantime). Such an item is reported
+as ``item_existing`` and nothing of it is signed or sent.
+
 Identifier migration: new imports carry the ``rss-`` d-tag prefix. When
 ``identifier_exists`` reports that a draft with the *bare* (pre-prefix)
-identifier already exists, that identifier is reused so the import
-replaces the existing draft instead of silently duplicating it.
+identifier already exists, that identifier is used instead, so the
+item counts as already imported rather than becoming a second draft.
 
 Every external boundary is injectable (``long_form_fetcher``,
 ``publish_job_factory``, ``run_blocking`` executor, ``pacer``), so the
@@ -125,6 +132,10 @@ class ImportItemsJob(QObject):
                                        once the relay publish settles;
                                        ``accepted`` may be 0.
       item_failed(int, str)            (index, short reason)
+      item_existing(int, str)          (index, identifier) the item is
+                                       already imported; nothing signed
+      item_signed(int, dict)           (index, signed wrap) before it is
+                                       sent, for a checkpoint
       progress(int, int)               (done, total)
     And once per run:
       completed(int, int)              (succeeded, attempted)
@@ -142,6 +153,8 @@ class ImportItemsJob(QObject):
     item_succeeded = Signal(int, str)
     item_published = Signal(int, int, int)
     item_failed = Signal(int, str)
+    item_existing = Signal(int, str)
+    item_signed = Signal(int, dict)
     progress = Signal(int, int)
     completed = Signal(int, int)
 
@@ -162,6 +175,7 @@ class ImportItemsJob(QObject):
         extra_hashtags: Optional[List[str]] = None,
         identifier_prefix: Optional[str] = IDENTIFIER_PREFIX,
         identifier_exists: Optional[Callable[[str], bool]] = None,
+        is_imported: Optional[Callable[[str], bool]] = None,
         fetcher: Optional[SourceFetcher] = None,
         long_form_fetcher: Optional[LongFormFetcher] = None,
         image_mirror: Optional[Callable[..., None]] = None,
@@ -188,6 +202,7 @@ class ImportItemsJob(QObject):
         self._extra_hashtags: Tuple[str, ...] = tuple(extra_hashtags or ())
         self._identifier_prefix = identifier_prefix
         self._identifier_exists = identifier_exists
+        self._is_imported = is_imported
 
         # Injectable seams; defaults wire to the real stack.
         self._fetcher = fetcher if fetcher is not None else SourceFetcher(self)
@@ -313,6 +328,8 @@ class ImportItemsJob(QObject):
         if self._cancelled:
             return
         template = self._apply_identifier_migration(template)
+        if self._already_imported(template.slug):
+            return
         # Sources that already deliver Markdown (Nostr long-form,
         # NostrHub NIPs, MDX) are authoritative: the body IS the
         # canonical prose, so no recovery pass could improve on it.
@@ -638,6 +655,9 @@ class ImportItemsJob(QObject):
         """
         if self._cancelled:
             return
+        # Asked again: the other app may have made this draft meanwhile.
+        if self._already_imported(template.slug):
+            return
         extra_tags = (
             [[SOURCE_TAG, self._feed_url]] if self._feed_url else None
         )
@@ -676,6 +696,10 @@ class ImportItemsJob(QObject):
         self._current_job = job
         slug_for_signals = template.slug
         job.status_changed.connect(self._on_draft_status)
+        signed = getattr(job, "signed", None)
+        if signed is not None:
+            signed.connect(lambda event, i=self._index: (
+                None if self._cancelled else self.item_signed.emit(i, event)))
         job.stashed.connect(
             lambda identifier, _event_id, _ts, _slug=slug_for_signals: (
                 self._on_draft_stashed(_slug)
@@ -721,6 +745,25 @@ class ImportItemsJob(QObject):
             return
         self._record_failure(reason)
 
+    def _already_imported(self, identifier: str) -> bool:
+        """Report an item that already exists, and move on. Defensive: a
+        failing probe counts as "exists", so nothing is overwritten."""
+        if self._is_imported is None:
+            return False
+        try:
+            exists = bool(self._is_imported(identifier))
+        except Exception:  # noqa: BLE001
+            exists = True
+        if not exists:
+            return False
+        # Not attempted: nothing was made of it.
+        self._attempted = max(0, self._attempted - 1)
+        self.item_existing.emit(self._index, identifier)
+        self.progress.emit(self._index + 1, len(self._items))
+        self._index += 1
+        self._start_next_item()
+        return True
+
     def _record_failure(self, reason: str) -> None:
         """Per-item failure path. Increments index and moves on."""
         self._release_current_job()
@@ -746,7 +789,7 @@ class ImportItemsJob(QObject):
         if job is None:
             return
         self._current_job = None
-        for signal_name in ("status_changed", "stashed", "completed", "failed"):
+        for signal_name in ("status_changed", "signed", "stashed", "completed", "failed"):
             signal = getattr(job, signal_name, None)
             if signal is None:
                 continue

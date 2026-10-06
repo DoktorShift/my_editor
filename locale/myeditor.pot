@@ -2562,8 +2562,9 @@ msgid "your signer did not answer"
 msgstr ""
 
 #: nostr/draft_sync.py:182
-#: nostr/publisher.py:705
-#: nostr/publisher.py:896
+#: nostr/publisher.py:720
+#: nostr/publisher.py:738
+#: nostr/publisher.py:934
 msgid "Looking up your relay list…"
 msgstr ""
 
@@ -2573,8 +2574,8 @@ msgstr ""
 
 #: nostr/draft_sync.py:329
 #: nostr/draft_sync.py:289
-#: nostr/publisher.py:521
-#: nostr/publisher.py:728
+#: nostr/publisher.py:522
+#: nostr/publisher.py:763
 msgid "Connecting to your signer…"
 msgstr ""
 
@@ -2762,99 +2763,99 @@ msgstr ""
 msgid "Your profile wasn’t changed. Try again in a moment."
 msgstr ""
 
-#: nostr/publisher.py:77
+#: nostr/publisher.py:78
 msgid "unknown error"
 msgstr ""
 
-#: nostr/publisher.py:548
-#: nostr/publisher.py:790
+#: nostr/publisher.py:549
+#: nostr/publisher.py:825
 msgid "Waiting for signature. Approve the request on your signer…"
 msgstr ""
 
-#: nostr/publisher.py:757
+#: nostr/publisher.py:792
 msgid "Encrypting draft. Approve on your signer if prompted…"
 msgstr ""
 
-#: nostr/publisher.py:937
+#: nostr/publisher.py:975
 msgid "Waiting for signature. Approve the deletion on your signer…"
 msgstr ""
 
-#: nostr/publisher.py:1159
+#: nostr/publisher.py:1197
 msgid "no relay accepted the deletion"
 msgstr ""
 
-#: nostr/publisher.py:562
+#: nostr/publisher.py:563
 msgid "Finding your relays…"
 msgstr ""
 
-#: nostr/publisher.py:571
+#: nostr/publisher.py:572
 #, python-brace-format
 msgid "Publishing to {n} relay…"
 msgid_plural "Publishing to {n} relays…"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/publisher.py:589
+#: nostr/publisher.py:590
 #, python-brace-format
 msgid "Accepted by {url}. Waiting for the rest…"
 msgstr ""
 
-#: nostr/publisher.py:602
+#: nostr/publisher.py:603
 #, python-brace-format
 msgid "Published. {accepted}/{total} relay accepted."
 msgid_plural "Published. {accepted}/{total} relays accepted."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/publisher.py:806
+#: nostr/publisher.py:844
 #, python-brace-format
 msgid "Publishing draft to {n} relay…"
 msgid_plural "Publishing draft to {n} relays…"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/publisher.py:817
+#: nostr/publisher.py:855
 #, python-brace-format
 msgid "Draft saved to {accepted}/{total} relay."
 msgid_plural "Draft saved to {accepted}/{total} relays."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/publisher.py:971
+#: nostr/publisher.py:1009
 #, python-brace-format
 msgid "Removing draft from {n} relay…"
 msgid_plural "Removing draft from {n} relays…"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/publisher.py:982
+#: nostr/publisher.py:1020
 #, python-brace-format
 msgid "Draft removed on {accepted}/{total} relay."
 msgid_plural "Draft removed on {accepted}/{total} relays."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/publisher.py:1157
+#: nostr/publisher.py:1195
 #, python-brace-format
 msgid "no relay accepted the deletion ({reasons})"
 msgstr ""
 
-#: nostr/publisher.py:750
+#: nostr/publisher.py:785
 #, python-brace-format
 msgid "Draft is too large to encrypt ({size} of {limit} bytes). Split it across smaller drafts or publish directly."
 msgstr ""
 
-#: nostr/publisher.py:741
+#: nostr/publisher.py:776
 #, python-brace-format
 msgid "Could not serialize draft: {reason}"
 msgstr ""
 
-#: nostr/publisher.py:786
+#: nostr/publisher.py:821
 #, python-brace-format
 msgid "Could not build draft wrap: {reason}"
 msgstr ""
 
-#: nostr/publisher.py:763
+#: nostr/publisher.py:798
 #, python-brace-format
 msgid "Could not encrypt draft: {reason}"
 msgstr ""
@@ -3321,54 +3322,58 @@ msgstr ""
 msgid "This source has reached its inbox limit. Unsubscribe and follow it again to start a fresh inbox; your drafts are kept."
 msgstr ""
 
-#: nostr/imports/pipeline.py:283
+#: nostr/imports/jobs.py:65
+msgid "No relay accepted the draft yet. Try again to send it."
+msgstr ""
+
+#: nostr/imports/pipeline.py:298
 #: nostr/ui/feeds_panel.py:139
 msgid "(untitled)"
 msgstr ""
 
-#: nostr/imports/pipeline.py:594
+#: nostr/imports/pipeline.py:611
 #, python-brace-format
 msgid "{failed} of {total} image(s) couldn't be mirrored; originals kept."
 msgid_plural "{failed} of {total} image(s) couldn't be mirrored; originals kept."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/imports/pipeline.py:285
+#: nostr/imports/pipeline.py:300
 #, python-brace-format
 msgid "Item {n}/{total}: {title}"
 msgstr ""
 
-#: nostr/imports/pipeline.py:305
+#: nostr/imports/pipeline.py:320
 #, python-brace-format
 msgid "Could not normalise item: {error}"
 msgstr ""
 
-#: nostr/imports/pipeline.py:390
+#: nostr/imports/pipeline.py:407
 #, python-brace-format
 msgid "Fetching chapters for '{title}'…"
 msgstr ""
 
-#: nostr/imports/pipeline.py:427
+#: nostr/imports/pipeline.py:444
 #, python-brace-format
 msgid "Resolving '{title}' from Nostr…"
 msgstr ""
 
-#: nostr/imports/pipeline.py:510
+#: nostr/imports/pipeline.py:527
 #, python-brace-format
 msgid "Fetching full text for '{title}'…"
 msgstr ""
 
-#: nostr/imports/pipeline.py:584
+#: nostr/imports/pipeline.py:601
 #, python-brace-format
 msgid "Mirroring images {n}/{total}…"
 msgstr ""
 
-#: nostr/imports/pipeline.py:658
+#: nostr/imports/pipeline.py:678
 #, python-brace-format
 msgid "Could not build article: {error}"
 msgstr ""
 
-#: nostr/imports/pipeline.py:673
+#: nostr/imports/pipeline.py:693
 #, python-brace-format
 msgid "Could not start draft job: {error}"
 msgstr ""

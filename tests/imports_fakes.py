@@ -153,6 +153,7 @@ class FakePublishJob(QObject):
     """Mimics DraftPublishJob's signal surface, settling synchronously."""
 
     status_changed = Signal(str)
+    signed = Signal(dict)
     stashed = Signal(str, str, int)
     completed = Signal(list)
     failed = Signal(str)
@@ -169,6 +170,7 @@ class FakePublishJob(QObject):
     def start(self):
         kind, payload = self._outcome
         if kind == "ok":
+            self.signed.emit({"id": "ev-" + self.identifier, "kind": 31234})
             self.stashed.emit(self.identifier, "ev-" + self.identifier, 1234)
             self.completed.emit(payload)
         elif kind == "fail":
