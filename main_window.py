@@ -1018,7 +1018,8 @@ class MainWindow(QMainWindow):
         self.act_close_tab = add(Command("file.close_tab", _("Close Tab"), FILE, "Ctrl+W",
                                          listed_as=_("Close tab")),
                                  triggered=self._close_current_tab)
-        self.act_quit = add(Command("file.quit", _("Quit"), FILE, "Ctrl+Q"),
+        self.act_quit = add(Command("file.quit", _("Quit"), FILE, "Ctrl+Q",
+                                    role=QAction.MenuRole.QuitRole),
                             triggered=self._quit_application)
 
         # Formatting
@@ -1195,7 +1196,8 @@ class MainWindow(QMainWindow):
         self.act_show_logs = add(Command("help.show_logs", _("Show Log Files"), HELP,
                                          keywords=("diagnostics", "bug report", "crash")),
                                  triggered=self._show_log_files)
-        self.act_about = add(Command("help.about", pgettext("help menu", "About"), HELP),
+        self.act_about = add(Command("help.about", pgettext("help menu", "About"), HELP,
+                                     role=QAction.MenuRole.AboutRole),
                              triggered=self._show_about)
 
     def _build_menu(self):
