@@ -169,7 +169,7 @@ def markdown_for_preview(markdown: str, names: Optional[NameLookup] = None) -> s
 def reading_minutes(markdown: str) -> int:
     """Minutes to read the article, by the one rule (word_count.py); at
     least one, since a byline never says "0 min read"."""
-    return max(1, word_count.reading_minutes(word_count.count_words(markdown)))
+    return max(1, word_count.reading_minutes(word_count.count_markdown_words(markdown)))
 
 
 def _date_text(published_at: int) -> str:

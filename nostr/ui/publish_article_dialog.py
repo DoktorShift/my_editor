@@ -764,7 +764,7 @@ class PublishArticleDialog(QDialog):
     # -- meta strip --------------------------------------------------------
 
     def _refresh_meta(self) -> None:
-        words = word_count.count_words(self._body_edit.toPlainText())
+        words = word_count.count_markdown_words(self._body_edit.toPlainText())
         if words == 0:
             self._meta_label.setText("")
             return
