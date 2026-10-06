@@ -492,3 +492,37 @@ def test_a_long_source_title_elides_and_keeps_the_segments(tmp_path):
         assert segment.width() >= segment.sizeHint().width()
     win.close()
     controller.account_changed(None)
+
+
+class TestReviewLows:
+    """The CP1 review's small findings (L1, L3, L4, L6, L9, L11)."""
+
+    def test_the_posts_have_the_keyboard_from_the_start(self, window):
+        assert window.focusWidget() is window.posts
+
+    def test_open_website_opens_the_site_not_the_feed(self, window):
+        from PySide6.QtWidgets import QMenu
+        opened = []
+        window._open_url = lambda url: opened.append(url.toString())
+        entry = next(e for e in entries(window) if e.kind == SOURCE and e.url == JOURNAL)
+        menu = QMenu()
+        window._source_actions(menu, entry)
+        next(a for a in menu.actions() if a.text() == "Open Website").trigger()
+        assert opened == ["https://journal.example"]
+        window._controller.inbox.set_site(source_key(JOURNAL),
+                                          site_url="https://journal.example/blog/")
+        menu = QMenu()
+        window._source_actions(menu, entry)
+        next(a for a in menu.actions() if a.text() == "Open Website").trigger()
+        assert opened[-1] == "https://journal.example/blog/"
+
+    def test_a_check_under_way_says_so(self, window):
+        entry = next(e for e in entries(window) if e.kind == SOURCE and e.automatic)
+        window._controller.is_checking = lambda key: True
+        window._controller.check_now = lambda key: False
+        window.check_now(entry)
+        assert window.list_subtitle.text() == "Checking for new posts…"
+
+    def test_a_link_that_cannot_be_opened_says_so(self, window):
+        window.article.link_refused.emit("mailto:someone@example.com")
+        assert window.banner.label.text() == "That link can't be opened from here."

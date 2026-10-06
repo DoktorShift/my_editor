@@ -147,6 +147,10 @@ class ArticlePane(QWidget):
                                              post.source_key, 18, dark=is_dark(self.palette()),
                                              dpr=self.devicePixelRatioF()))
         self._open.setEnabled(url_safety.is_safe_external_url(post.link))
+        # Never the previous post's body under this post's header while
+        # this one is prepared (review L1).
+        self._message.findChild(QLabel).setText("")
+        self._stack.setCurrentIndex(_MESSAGE)
         generation = self._generation
         self._prepare(post,
                       on_ready=lambda markdown, article: self._show_article(

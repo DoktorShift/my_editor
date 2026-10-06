@@ -296,6 +296,9 @@ class ImportsWindow(QMainWindow):
         self._show_list()
         if not self._restored_geometry:
             self.resize(1180, 760)
+        # Space and Command-A act on the posts from the start, as in Mail
+        # (review L3), not on the search field.
+        self.posts.setFocus(Qt.FocusReason.OtherFocusReason)
         self._ready = True
 
     # ------------------------------------------------------------------ #
@@ -385,6 +388,9 @@ class ImportsWindow(QMainWindow):
         self.article = ArticlePane(prepare=self._controller.prepare_article,
                                    images=self._controller.images, dark=self._dark,
                                    open_url=self._open_url)
+        # A link the article cannot open says so (review L9).
+        self.article.link_refused.connect(lambda _link: self.banner.say(
+            _("That link can't be opened from here.")))
         self.article.setMinimumWidth(ARTICLE_MIN)
 
         list_pane = QWidget()
@@ -654,9 +660,12 @@ class ImportsWindow(QMainWindow):
         check = menu.addAction(_("Check Now") if entry.automatic else _("Read Now"))
         check.setEnabled(not self._controller.read_only)
         check.triggered.connect(lambda: self.check_now(entry))
+        # The website, not the feed's address (review L4): what the feed
+        # names as its site, else the address's own start page.
+        site = self._website_of(entry)
         website = menu.addAction(_("Open Website"))
-        website.setEnabled(url_safety.is_safe_external_url(entry.url))
-        website.triggered.connect(lambda: self._open_url(QUrl(entry.url)))
+        website.setEnabled(url_safety.is_safe_external_url(site))
+        website.triggered.connect(lambda: self._open_url(QUrl(site)))
         copy = menu.addAction(_("Copy Address"))
         copy.triggered.connect(lambda: QApplication.clipboard().setText(entry.url))
         menu.addSeparator()
@@ -673,12 +682,20 @@ class ImportsWindow(QMainWindow):
                 action=_("Unsubscribe")):
             self._controller.unfollow(entry.key)
 
+    def _website_of(self, entry: Entry) -> str:
+        source = self._controller.source(entry.key)
+        if source is not None and source.site_url:
+            return source.site_url
+        return url_safety.origin_of(entry.url) or entry.url
+
     def check_now(self, entry: Entry) -> None:
+        under_way = self._controller.is_checking(entry.key)
         started = self._controller.check_now(entry.key)
         if not started and entry.automatic:
-            self.list_subtitle.setText(_("You can check again in a minute."))
+            self.list_subtitle.setText(_("Checking for new posts\u2026") if under_way
+                                       else _("You can check again in a minute."))
         elif not entry.automatic:
-            collection = self._controller.collection("m-" + entry.key)
+            collection = self._controller.collection_of(entry.key)
             if collection is not None and self.sidebar.chosen() == entry:
                 self._scope = Scope(collection=collection.id)
                 self._show_list()

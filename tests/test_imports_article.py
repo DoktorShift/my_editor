@@ -10,6 +10,8 @@ policy for outside links, and drops an answer for a post no longer open.
 
 from __future__ import annotations
 
+from PySide6.QtWidgets import QLabel
+
 from dataclasses import replace
 
 from PySide6.QtCore import QObject, QUrl, Signal
@@ -171,3 +173,16 @@ def test_a_long_source_name_elides_and_the_date_stays_whole():
     assert widget._origin.toolTip() == long
     assert widget._date.width() >= widget._date.sizeHint().width()
     widget.hide()
+
+
+def test_another_post_never_shows_the_previous_body():
+    """Review L1: the header and Open Original switched at once while the
+    body still showed the previous post until the new one was ready."""
+    from dataclasses import replace
+    widget, _images, _opened = pane("Body of post A.", hold=True)
+    widget.show_post(POST)
+    widget._prepare.pending.pop()()
+    assert "Body of post A." in text_of(widget)
+    widget.show_post(replace(POST, key="other", title="Post B"))
+    assert widget._stack.currentWidget() is widget._message
+    assert widget._message.findChild(QLabel).text() == ""

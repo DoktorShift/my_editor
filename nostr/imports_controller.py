@@ -420,6 +420,10 @@ class ImportsController(QObject):
     def collection(self, collection_id: str) -> Optional[Collection]:
         return self._collections.get(collection_id)
 
+    def collection_of(self, key: str) -> Optional[Collection]:
+        """The posts read of a source that is read when it is opened."""
+        return self._collections.get(_manual_id(key))
+
     def read_source(self, url: str) -> Optional[Collection]:
         """Read a source that is not checked on its own (a Nostr author, a
         sitemap, a GitHub folder): now, while it is shown."""
@@ -450,8 +454,9 @@ class ImportsController(QObject):
             self.subscriptions.mark_fetched(url)
             if not _title_known(source) and result.feed.title:
                 collection.label = result.feed.title
-                self.inbox.set_site(key, feed_title=result.feed.title,
-                                    site_url=result.feed.link or "")
+                if not self.read_only:      # the other process keeps the inbox
+                    self.inbox.set_site(key, feed_title=result.feed.title,
+                                        site_url=result.feed.link or "")
             self._look_up_states(collection)
             self.sources_changed.emit()
 
@@ -693,8 +698,10 @@ class ImportsController(QObject):
             if by_state and inbox.reconcile(**by_state):
                 self._announce()
 
-        self.catalogue.look_up(self._profile, tags, on_ready=found,
-                               on_unavailable=lambda _reason: None)
+        self.catalogue.look_up(
+            self._profile, tags, on_ready=found,
+            on_unavailable=lambda reason: _log.info(
+                "could not ask which posts exist already: %s", reason))
 
     # ------------------------------------------------------------------ #
     # One post, as it will be published                                    #

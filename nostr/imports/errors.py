@@ -97,14 +97,15 @@ _FRIENDLY = {
         "That isn't a recognisable Nostr address."
     ),
     ERROR_CODES.NOSTR_NOT_FOUND: _(
-        "That Nostr event was not found on the relays."
+        "That post wasn't found. It may have been deleted, or the places it is "
+        "kept are not answering right now."
     ),
     ERROR_CODES.NIP05_NOT_FOUND: _(
         "No Nostr profile is published at that address."
     ),
     ERROR_CODES.NO_RELAY_ACCESS: _(
-        "Importing from Nostr needs a relay connection, which isn't "
-        "available right now."
+        "Importing from Nostr needs a connection, which isn't available "
+        "right now."
     ),
     ERROR_CODES.WXR_EMPTY: _(
         "No published posts or pages were found in that WordPress export."
