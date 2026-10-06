@@ -107,6 +107,8 @@ def test_the_find_bar_offers_replace_and_options():
     bar.replace_all_btn.click()
     assert asked == ["one", "all"]
     assert bar.edit.nextInFocusChain() is bar.replace_edit     # Tab: find, then replace
+    from tests.accessibility import unnamed_controls
+    assert unnamed_controls(bar) == []                          # a placeholder is not a name
 
 
 WINDOW_SCRIPT = r"""

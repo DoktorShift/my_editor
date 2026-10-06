@@ -945,6 +945,8 @@ class MainWindow(QMainWindow):
         if not ed:
             return
         self.tabs.setTabText(self.tabs.currentIndex(), self._compose_tab_title(ed))
+        # A screen reader announces the text area by its document's name.
+        ed.setAccessibleName(self._document_name(ed))
         self._update_status_bar()
 
     def _compose_tab_title(self, ed) -> str:
@@ -964,22 +966,29 @@ class MainWindow(QMainWindow):
         """
         if is_pristine_welcome(ed):
             return _("Welcome")
-        path = getattr(ed, "_file_path", None)
         binding = getattr(ed, "_draft_binding", None)
         dirty = "*" if ed.document().isModified() else ""
+        prefix = "⚿ " if binding is not None else ""
+        return f"{prefix}{self._document_name(ed)}{dirty}"
+
+    @staticmethod
+    def _document_name(ed) -> str:
+        """The document's own name: the file's, the draft's title, or
+        Untitled."""
+        if is_pristine_welcome(ed):
+            return _("Welcome")
+        path = getattr(ed, "_file_path", None)
+        binding = getattr(ed, "_draft_binding", None)
         recovered = getattr(ed, "_recovered_title", "")
         if recovered:
-            base = recovered
-        elif path:
-            base = os.path.basename(path)
-        elif binding and binding.title:
-            base = binding.title
-        elif binding:
-            base = _("Untitled draft")
-        else:
-            base = _("Untitled")
-        prefix = "⚿ " if binding is not None else ""
-        return f"{prefix}{base}{dirty}"
+            return recovered
+        if path:
+            return os.path.basename(path)
+        if binding and binding.title:
+            return binding.title
+        if binding:
+            return _("Untitled draft")
+        return _("Untitled")
 
     def _update_status_bar(self):
         self._update_editor_commands()
@@ -1535,6 +1544,11 @@ class MainWindow(QMainWindow):
                              triggered=self._show_about)
 
     def _build_menu(self):
+        # The chevron a narrow window shows for the menus it has no room
+        # for: Qt gives it no name, so a screen reader would say "button".
+        more = self.menuBar().findChild(QToolButton, "qt_menubar_ext_button")
+        if more is not None:
+            more.setAccessibleName(_("More Menus"))
         m_file = self.menuBar().addMenu(_("&File"))
         m_file.addAction(self.act_new)
         m_file.addAction(self.act_open)
@@ -2046,6 +2060,7 @@ class MainWindow(QMainWindow):
         if hasattr(ed, '_backup'):
             ed._backup.update_file_path(new_path)
         self.tabs.setTabText(idx, new_name)
+        ed.setAccessibleName(self._document_name(ed))
         self._update_window_title()
 
     def _attach_close_button(self, idx: int, container: QWidget):

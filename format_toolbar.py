@@ -84,6 +84,12 @@ class FormatToolbar(QToolBar):
             self.buttons[name] = button
             action.changed.connect(lambda a=action, b=button: self._describe(a, b))
             self._describe(action, button)
+        # The chevron that holds the buttons a narrow window has no room
+        # for: Qt gives it no name, so a screen reader would say "button".
+        more = self.findChild(QToolButton, "qt_toolbar_ext_button")
+        if more is not None:
+            more.setAccessibleName(_("More Formatting"))
+            more.setToolTip(_("More Formatting"))
         self.set_style_name(_("Body"))
         self.set_dark(dark)
 

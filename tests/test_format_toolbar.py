@@ -33,6 +33,7 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QMenu, QToolButton  # n
 
 import commands  # noqa: E402
 from commands import Command, CommandRegistry  # noqa: E402
+from tests.accessibility import unnamed_controls  # noqa: E402
 from format_toolbar import LAYOUT, FormatToolbar, tooltip_for  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -68,6 +69,11 @@ def test_the_buttons_are_the_window_commands(toolbar):
     assert toolbar.buttons["bold"].isChecked()
     toolbar.actions_["quote"].setEnabled(False)
     assert not toolbar.buttons["quote"].isEnabled()
+
+
+def test_a_screen_reader_can_name_every_button(toolbar):
+    # The buttons show icons only: each is announced by its command's name.
+    assert unnamed_controls(toolbar) == []
 
 
 def test_each_button_says_its_key_the_platform_way(toolbar):

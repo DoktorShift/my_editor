@@ -161,6 +161,12 @@ def test_an_empty_address_is_not_a_complaint_yet():
     assert not popover.add_button.isEnabled() and popover.problem.isHidden()
 
 
+def test_a_screen_reader_can_name_every_field_and_button():
+    from tests.accessibility import unnamed_controls
+    assert unnamed_controls(LinkPopover(text="site", href="https://x.example",
+                                        editing=True)) == []
+
+
 def test_editing_offers_remove_link():
     popover = LinkPopover(text="site", href="https://x.example", editing=True)
     assert popover.remove_button is not None

@@ -65,6 +65,9 @@ class HtmlEditor(QTextEdit):
         super().__init__(parent)
         self.setAcceptRichText(True)
         self.setUndoRedoEnabled(True)
+        # What a screen reader calls the text area until the window names
+        # it after its document.
+        self.setAccessibleName(_("Document"))
 
         # Who fills the context menu: the window puts its own commands
         # there (the same ones as in its menus). Without one, the menu has
