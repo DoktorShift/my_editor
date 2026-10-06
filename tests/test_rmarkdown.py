@@ -144,6 +144,12 @@ def test_headings_strike_code_and_links_are_pandoc_markdown():
     assert "[a site](https://x.example)" in body
 
 
+def test_quotes_and_dividers_are_pandoc_markdown():
+    # Review F6 (early range): they vanished when saved as R Markdown.
+    body = _body_of("Intro\n\n> A quote\n>\n> More\n>\n> > deeper\n\n---\n\nAfter\n")
+    assert body == "Intro\n\n> A quote\n>\n> More\n>\n> > deeper\n\n***\n\nAfter\n"
+
+
 def test_line_structure_uses_hard_breaks():
     out = document_to_rmd(_doc(["line one", "line two", "", "para two"]), "T")
     assert "line one\\\nline two\n\npara two" in out

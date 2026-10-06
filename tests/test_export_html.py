@@ -467,6 +467,10 @@ def test_headings_inline_styles_and_links_export():
     "- [x] done\n- [ ] open\n",
     "# Big\n\n## Smaller\n\nbody\n",
     "A ~~gone~~ [site](https://x.example) end\n",
+    "Intro\n\n> A quote\n>\n> > deeper\n\nAfter\n",
+    "Above\n\n---\n\nBelow\n",
+    "> - quoted item\n\nend\n",
 ])
 def test_markdown_structure_survives_an_html_round_trip(md):
+    # Review F6 (early range): quotes and dividers were lost on save.
     assert document_to_markdown(_roundtrip(_from_markdown(md))) == md

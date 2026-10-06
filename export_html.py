@@ -39,6 +39,7 @@ from PySide6.QtGui import (
     QTextListFormat,
 )
 
+import rich_text
 from constants import DARK_BG, DARK_FG, LIGHT_BG, LIGHT_FG, MONO_FONT
 from i18n import _
 from doc_walk import (
@@ -90,9 +91,10 @@ def _font_stack() -> str:
 
 
 def _head_css() -> str:
-    # The page CSS is for browsers only; Qt ignores <style> blocks when the
-    # file is reopened, which is fine because everything that must round-trip
-    # (colors, pre-wrap paragraphs) is also emitted inline.
+    # The page CSS is for browsers. Everything that must round-trip (colors,
+    # pre-wrap paragraphs) is also emitted inline. Qt does apply some of it
+    # when the file is reopened: the body margin moves every paragraph in,
+    # and normalize_after_set_html takes it off again.
     return f"""    :root {{ color-scheme: light dark; }}
     body {{
       margin: 2rem auto;
@@ -305,14 +307,34 @@ def document_to_html(doc, title: str = "", source_url_for=None, *,
             body.append("".join(list_buf))
             list_buf.clear()
 
+    quotes = 0            # how many <blockquote> levels are open
+
+    def quote_to(level: int):
+        nonlocal quotes
+        if level == quotes:
+            return
+        close_to(0)
+        close_real(0)
+        while quotes > level:
+            body.append("</blockquote>")
+            quotes -= 1
+        while quotes < level:
+            body.append("<blockquote>")
+            quotes += 1
+
     for block in iter_blocks(doc):
         text = block.text()
         text_list = block.textList()
+        quote_to(rich_text.quote_depth(block))
         if text_list is not None:
             close_to(0)
             real_item(block, text_list)
             continue
         close_real(0)
+        if rich_text.is_divider(block):
+            close_to(0)
+            body.append("<hr>")
+            continue
         spaces, has_bullet = parse_bullet_line(text)
 
         if has_bullet:
@@ -355,6 +377,7 @@ def document_to_html(doc, title: str = "", source_url_for=None, *,
 
     close_to(0)
     close_real(0)
+    quote_to(0)
 
     page_title = html.escape(title or _("Untitled"))
     body_html = "\n".join(body)
@@ -375,6 +398,37 @@ def document_to_html(doc, title: str = "", source_url_for=None, *,
 """
 
 
+def _quote_depths(doc) -> None:
+    """Qt's reader marks every <blockquote> as the first quote level and
+    only moves an inner one further in; a page's style sheet can move
+    every paragraph in as well (the body margin of the pages this module
+    writes). The depth is read back from how far each quoted paragraph
+    sits in from the others, and the page's own margin is taken off."""
+    blocks = list(iter_blocks(doc))
+    quoted = [b for b in blocks if rich_text.quote_depth(b)]
+    plain = [b.blockFormat().leftMargin() for b in blocks
+             if not rich_text.quote_depth(b) and b.textList() is None]
+    if plain:
+        base = min(plain)
+    elif quoted:
+        base = min(b.blockFormat().leftMargin() for b in quoted) - rich_text.QUOTE_INDENT
+    else:
+        return
+    base = max(0.0, base)
+    cursor = QTextCursor(doc)
+    cursor.beginEditBlock()
+    if base:
+        for block in blocks:
+            fmt = block.blockFormat()
+            if fmt.leftMargin() >= base:
+                fmt.setLeftMargin(fmt.leftMargin() - base)
+                QTextCursor(block).setBlockFormat(fmt)
+    for block in quoted:
+        depth = max(1, round(block.blockFormat().leftMargin() / rich_text.QUOTE_INDENT))
+        rich_text.set_quote_depth(block, depth)
+    cursor.endEditBlock()
+
+
 def normalize_after_set_html(doc) -> None:
     """Tidy a document Qt's HTML reader just read (a file being opened, a
     crash backup restored).
@@ -382,8 +436,10 @@ def normalize_after_set_html(doc) -> None:
     Empty paragraphs come back empty: this exporter writes them as
     <p>&nbsp;</p>, because Qt drops <p></p> and doubles <p><br></p>.
     Whitespace that pretty-printed HTML leaves at the end of a list item,
-    or after </html>, is trimmed. Lists stay real lists.
+    or after </html>, is trimmed. Lists stay real lists. Quotes get their
+    depth back (see _quote_depths).
     """
+    _quote_depths(doc)
     NBSP = "\u00a0"
     nbsp_targets = []
     items = []
