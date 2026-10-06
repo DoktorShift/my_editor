@@ -100,6 +100,7 @@ _GROUP_TITLES = {
     "File": pgettext("shortcut group", "File"),
     "Editing": pgettext("shortcut group", "Editing"),
     "Formatting": pgettext("shortcut group", "Formatting"),
+    "Insert": pgettext("shortcut group", "Insert"),
     "Search": pgettext("shortcut group", "Search"),
     "View": pgettext("shortcut group", "View"),
     "Help": pgettext("shortcut group", "Help"),

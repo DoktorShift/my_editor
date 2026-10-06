@@ -42,7 +42,8 @@ from widgets import FindBar, HeaderWidget, LineNumberGutter, FileChangedBar, Upd
 import i18n
 from i18n import _, ngettext, pgettext
 from commands import (
-    EDIT, FILE, FORMAT, HELP, NOSTR, SEARCH, VIEW, Command, CommandRegistry, platform_keys,
+    EDIT, FILE, FORMAT, HELP, INSERT, NOSTR, SEARCH, VIEW, Command, CommandRegistry,
+    platform_keys,
 )
 from doc_walk import iter_blocks, iter_image_names, serialize_plain_with_images
 from markdown_writer import (
@@ -1009,6 +1010,7 @@ class MainWindow(QMainWindow):
         kind = rich_text.list_kind(cursor) if cursor is not None else ""
         self.act_bullets.setChecked(kind == rich_text.BULLET)
         self.act_numbers.setChecked(kind == rich_text.NUMBER)
+        self.act_quote.setChecked(cursor is not None and rich_text.in_quote(cursor))
 
     # ----------------------------------------------------------------------
     # ACTIONS / MENU
@@ -1137,6 +1139,15 @@ class MainWindow(QMainWindow):
         self.act_outdent = add(Command("format.outdent", _("Decrease Indent"), FORMAT,
                                        "Ctrl+["),
                                triggered=lambda: self._change_indent(-1))
+        # Apple Notes' Block Quote key.
+        self.act_quote = add(Command("format.quote", _("Quote"), FORMAT, "Ctrl+'",
+                                     checkable=True, keywords=(_("citation"),)),
+                             triggered=lambda: self._editor_call("toggle_quote"))
+
+        # Insert
+        self.act_divider = add(Command("insert.divider", _("Divider"), INSERT,
+                                       keywords=(_("horizontal rule"), _("line"))),
+                               triggered=lambda: self._editor_call("insert_divider"))
         # Text colors stay in the document and in local files; Markdown
         # has none, so they never reach Nostr.
         self.act_colors = []
@@ -1179,7 +1190,8 @@ class MainWindow(QMainWindow):
         # Structure that only a document holding Markdown can carry
         # (headings, lists, links): off in plain-text tabs as well.
         self._rich_actions = [self.act_strike, self.act_code, *self.act_styles,
-                              self.act_bullets, self.act_numbers]
+                              self.act_bullets, self.act_numbers, self.act_quote,
+                              self.act_divider]
 
         self._search_matches = []
         self._current_match_index = -1
@@ -1374,6 +1386,10 @@ class MainWindow(QMainWindow):
         self.m_find.addAction(self.act_use_selection)
         self.m_edit = m_edit
 
+        # Insert, between Edit and Format, as in Pages.
+        self.m_insert = self.menuBar().addMenu(_("&Insert"))
+        self.m_insert.addAction(self.act_divider)
+
         m_format = self.menuBar().addMenu(_("F&ormat"))
         self.m_style = m_format.addMenu(_("Style"))
         for action in self.act_styles:
@@ -1387,6 +1403,7 @@ class MainWindow(QMainWindow):
         m_format.addSeparator()
         m_format.addAction(self.act_bullets)
         m_format.addAction(self.act_numbers)
+        m_format.addAction(self.act_quote)
         m_format.addSeparator()
         m_format.addAction(self.act_indent)
         m_format.addAction(self.act_outdent)
@@ -2202,7 +2219,8 @@ class MainWindow(QMainWindow):
         formatting, or structure plain text cannot keep (lists, headings)."""
         block = ed.document().begin()
         while block.isValid():
-            if block.textList() is not None or block.blockFormat().headingLevel():
+            if (block.textList() is not None or block.blockFormat().headingLevel()
+                    or rich_text.quote_depth(block) or rich_text.is_divider(block)):
                 return True
             it = block.begin()
             while not it.atEnd():
@@ -3550,6 +3568,13 @@ class MainWindow(QMainWindow):
         ed = self.current_editor()
         if ed:
             ed.redo()
+
+    def _editor_call(self, name: str) -> None:
+        """Run an editing command on the current tab's editor."""
+        ed = self.current_editor()
+        if ed:
+            getattr(ed, name)()
+            self._update_format_buttons()
 
     def _toggle_list(self, kind: str) -> None:
         ed = self.current_editor()

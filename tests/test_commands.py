@@ -258,7 +258,7 @@ def test_the_edit_menu_follows_apple_order(fresh_window):
                         "search.use_selection"]
     # Find lives in Edit now; there is no Search menu of its own.
     tops = [a.text().replace("&", "") for a in win.menuBar().actions()]
-    assert tops[:3] == ["File", "Edit", "Format"] and "Search" not in tops
+    assert tops[:4] == ["File", "Edit", "Insert", "Format"] and "Search" not in tops
 
 
 def test_find_next_answers_to_every_key_of_the_platform(fresh_window):

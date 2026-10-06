@@ -32,6 +32,8 @@ On macOS, `Ctrl` in these tables is the Command key (`⌘`) and `Alt` is Option 
 | `Ctrl+Shift+7` | Bulleted List (again: no list) |
 | `Ctrl+Shift+9` | Numbered List (again: no list) |
 | `Ctrl+]` / `Ctrl+[` | Increase / Decrease Indent of list items |
+| `Ctrl+'` | Quote (again: no quote) |
+| | `Insert > Divider`: a horizontal rule (`---`) after the paragraph |
 
 Return at the end of a heading starts a Body paragraph; Backspace at the start of a heading makes it Body. Strikethrough, inline code and the paragraph styles are Markdown, so they are offered in documents that can hold Markdown structure (Markdown, HTML and new documents), not in plain-text and code files. Text colors are in `Format > Color`.
 
@@ -70,6 +72,8 @@ Cut, Copy, Paste and Select All act on whatever has the focus: the document, the
 | `Enter` | New paragraph (a new item in a list) |
 | `Enter` (on an empty item) | One level up, and out of the list from the top level |
 | `Backspace` (at an item's start) | The same as `Shift+Tab` |
+| `Enter` (on an empty quoted line), `Backspace` (at a quote's start) | One level of quote less |
+| `Backspace` (just below a divider) | Removes the divider |
 
 Lists are real lists, written to Markdown as `- item` and `1. item`, nested by four spaces. In plain-text files (`.txt`, code, R Markdown), `Tab` types a bullet as text (`    • item`) instead, as before.
 | `Ctrl+Shift+L` | Toggle line numbers |

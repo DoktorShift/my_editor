@@ -9,8 +9,8 @@ import os
 
 from PySide6.QtCore import Qt, QTimer, QRect, QPoint, QMetaMethod, Signal
 from PySide6.QtGui import (
-    QPainter, QTextCursor, QTextCharFormat, QColor, QClipboard, QPen, QTextOption,
-    QImage, QTextDocument, QTextFormat,
+    QPainter, QTextBlockFormat, QTextCursor, QTextCharFormat, QColor, QClipboard, QPen,
+    QTextOption, QImage, QTextDocument, QTextFormat,
 )
 from PySide6.QtWidgets import QTextEdit, QMenu, QApplication
 from constants import (
@@ -403,6 +403,7 @@ class HtmlEditor(QTextEdit):
         if self._bg_pattern != "none" or self._paper_mode:
             self._paint_guides(painter)
 
+        self._paint_quote_bars(painter)
         painter.end()
 
         super().paintEvent(event)
@@ -416,6 +417,29 @@ class HtmlEditor(QTextEdit):
         p2 = QPainter(vp)
         p2.fillRect(rect, color)
         p2.end()
+
+    def _paint_quote_bars(self, painter):
+        """A bar beside each level of a quote, as every reader draws one.
+        Only painted: nothing of it is in the document."""
+        vp = self.viewport()
+        block = self.cursorForPosition(QPoint(0, 0)).block()
+        layout = self.document().documentLayout()
+        dx = self.horizontalScrollBar().value()
+        dy = self.verticalScrollBar().value()
+        color = QColor("#5A5D63") if self._is_dark() else QColor("#C9CDD2")
+        while block.isValid():
+            rect = layout.blockBoundingRect(block)
+            top = int(rect.top()) - dy
+            if top > vp.height():
+                break
+            depth = rich_text.quote_depth(block)
+            if depth:
+                fmt = block.blockFormat()
+                height = int(rect.height() - fmt.topMargin() - fmt.bottomMargin())
+                for level in range(depth):
+                    x = int(rect.left()) - dx + level * rich_text.QUOTE_INDENT + 12
+                    painter.fillRect(QRect(x, top + int(fmt.topMargin()), 3, height), color)
+            block = block.next()
 
     def _paint_guides(self, painter):
         vp = self.viewport()
@@ -542,6 +566,21 @@ class HtmlEditor(QTextEdit):
         spaces, has_bullet = self._indent_level_and_has_bullet(line)
         if has_bullet:
             self._indent_typed_bullet(line, start, spaces, has_bullet, delta)
+
+    # -------- Quotes and dividers --------
+    def toggle_quote(self) -> None:
+        """Quote the paragraphs under the cursor, or take the quote away."""
+        cursor = self.textCursor()
+        rich_text.toggle_quote(cursor)
+        self.setTextCursor(cursor)
+        self.viewport().update()
+
+    def insert_divider(self) -> None:
+        """A divider after the paragraph at the cursor; typing goes on below it."""
+        cursor = self.textCursor()
+        rich_text.insert_divider(cursor)
+        self.setTextCursor(cursor)
+        self.ensureCursorVisible()
 
     # -------- Context menu --------
     def set_context_menu_filler(self, filler) -> None:
@@ -815,6 +854,24 @@ class HtmlEditor(QTextEdit):
             return False
         if cursor.hasSelection():
             return False
+        if rich_text.is_divider(block):
+            return self._divider_key(e, cursor, block)
+        previous = block.previous()
+        if (key == Qt.Key_Backspace and plain and cursor.atBlockStart()
+                and previous.isValid() and rich_text.is_divider(previous)):
+            # Backspace just below a divider takes the divider away.
+            rich_text.remove_divider(previous)
+            return True
+        if (rich_text.quote_depth(block) and block.textList() is None and plain and (
+                (key in (Qt.Key_Return, Qt.Key_Enter) and not block.text())
+                or (key == Qt.Key_Backspace and cursor.atBlockStart()))):
+            # Return on an empty quoted line, or Backspace at the start of
+            # a quoted paragraph: one level of quote less.
+            cursor.beginEditBlock()
+            rich_text.set_quote_depth(block, rich_text.quote_depth(block) - 1)
+            cursor.endEditBlock()
+            self.viewport().update()
+            return True
         if block.textList() is not None and plain and (
                 (key in (Qt.Key_Return, Qt.Key_Enter) and not block.text())
                 or (key == Qt.Key_Backspace and cursor.atBlockStart())):
@@ -831,7 +888,7 @@ class HtmlEditor(QTextEdit):
             cursor.beginEditBlock()
             fmt = block.blockFormat()
             if cursor.atBlockEnd():
-                fmt.setHeadingLevel(0)
+                fmt = rich_text.heading_block_format(fmt, 0)
                 char = rich_text.body_char_format(cursor.charFormat())
             else:
                 char = cursor.charFormat()
@@ -845,6 +902,31 @@ class HtmlEditor(QTextEdit):
             # Backspace at the start of a heading makes it Body first.
             self.set_heading(0)
             return True
+        return False
+
+    def _divider_key(self, e, cursor, block) -> bool:
+        """A divider holds no text: typing on it goes into the paragraph
+        below (made when there is none), Backspace and Delete take it
+        away."""
+        key = e.key()
+        if key in (Qt.Key_Backspace, Qt.Key_Delete):
+            rich_text.remove_divider(block)
+            return True
+        if key in (Qt.Key_Return, Qt.Key_Enter) or (
+                e.text() and e.text().isprintable()
+                and not e.modifiers() & (Qt.ControlModifier | Qt.MetaModifier)):
+            below = block.next()
+            if not below.isValid() or rich_text.is_divider(below) or \
+                    key in (Qt.Key_Return, Qt.Key_Enter):
+                cursor.beginEditBlock()
+                cursor.movePosition(QTextCursor.EndOfBlock)
+                cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
+                cursor.endEditBlock()
+            else:
+                cursor.setPosition(below.position())
+            self.setTextCursor(cursor)
+            # Return is done; a character is typed where the caret is now.
+            return key in (Qt.Key_Return, Qt.Key_Enter)
         return False
 
     def _apply_active_format_to_cursor(self):

@@ -37,11 +37,12 @@ ShortcutSpec = Union[None, str, QKeySequence, QKeySequence.StandardKey]
 FILE = "File"
 EDIT = "Editing"
 FORMAT = "Formatting"
+INSERT = "Insert"
 SEARCH = "Search"
 VIEW = "View"
 NOSTR = "Nostr"
 HELP = "Help"
-GROUP_ORDER: Tuple[str, ...] = (FILE, EDIT, FORMAT, SEARCH, VIEW, NOSTR, HELP)
+GROUP_ORDER: Tuple[str, ...] = (FILE, EDIT, FORMAT, INSERT, SEARCH, VIEW, NOSTR, HELP)
 
 
 @dataclass(frozen=True)

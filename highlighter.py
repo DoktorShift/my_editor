@@ -9,6 +9,8 @@ import re
 import os
 from PySide6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor, QFont
 
+from constants import MONO_FONT
+
 
 _EXT_TO_LANG: dict[str, str] = {
     '.py': 'python', '.pyw': 'python',
@@ -519,15 +521,20 @@ class RichTextLook(QSyntaxHighlighter):
 
     Some of what a Markdown document holds has no look of its own in a
     monospaced editor: inline code is set in the same font as the text
-    around it. This adds the look (a tinted chip behind inline code)
-    without putting anything into the document, so nothing of it is
-    saved, published, or counted as formatting.
+    around it, and a link keeps whatever color the file it came from gave
+    it. This adds the look (a tinted chip behind inline code, links in
+    the theme's link color) without putting anything into the document,
+    so nothing of it is saved, published, or counted as formatting.
 
     One highlighter per document: a code file gets SyntaxHighlighter, a
     document with Markdown structure this one.
     """
 
     _CODE_BACKGROUND = {True: "#33363B", False: "#EEF0F2"}
+    _LINK = {True: "#4AA3FF", False: "#0A66C2"}
+    # A font that is monospaced on every system: "monospace", which
+    # Markdown gives inline code, is not a font on macOS or Windows.
+    _CODE_FAMILIES = [MONO_FONT, "Menlo", "Consolas", "DejaVu Sans Mono", "monospace"]
 
     def __init__(self, document, is_dark: bool = True):
         super().__init__(document)
@@ -543,6 +550,12 @@ class RichTextLook(QSyntaxHighlighter):
     def _build_formats(self):
         self._code = QTextCharFormat()
         self._code.setBackground(QColor(self._CODE_BACKGROUND[self._is_dark]))
+        self._code.setFontFamilies(self._CODE_FAMILIES)
+        # A link reads as one in either theme, whatever color the file
+        # it came from gave it.
+        self._link = QTextCharFormat()
+        self._link.setForeground(QColor(self._LINK[self._is_dark]))
+        self._link.setFontUnderline(True)
 
     def highlightBlock(self, text: str):
         block = self.currentBlock()
@@ -552,6 +565,13 @@ class RichTextLook(QSyntaxHighlighter):
             fragment = it.fragment()
             if fragment.isValid():
                 fmt = fragment.charFormat()
-                if fmt.fontFixedPitch() and not fmt.isImageFormat():
+                if fmt.isImageFormat():
+                    pass
+                elif fmt.isAnchor():
+                    look = QTextCharFormat(self._link)
+                    if fmt.fontFixedPitch():
+                        look.merge(self._code)
+                    self.setFormat(fragment.position() - start, fragment.length(), look)
+                elif fmt.fontFixedPitch():
                     self.setFormat(fragment.position() - start, fragment.length(), self._code)
             it += 1

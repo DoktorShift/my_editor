@@ -20,7 +20,9 @@ from __future__ import annotations
 
 from typing import List, Tuple
 
-from PySide6.QtGui import QFont, QTextCharFormat, QTextCursor, QTextFormat, QTextListFormat
+from PySide6.QtGui import (
+    QFont, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextFormat, QTextListFormat,
+)
 
 from doc_walk import iter_blocks
 
@@ -46,12 +48,16 @@ def normalize_after_markdown_load(doc) -> None:
     on such a paragraph would make a checked item out of nothing. Every
     block outside a list loses it; list items keep theirs.
 
+    Headings get the room above and below them that the editor gives
+    the ones typed here.
+
     Call after every ``setMarkdown`` whose result the person edits.
     """
     marker = QTextFormat.Property.BlockMarker
     stray = [block for block in iter_blocks(doc)
              if block.textList() is None and block.blockFormat().hasProperty(marker)]
-    if not stray:
+    headings = [block for block in iter_blocks(doc) if block.blockFormat().headingLevel()]
+    if not stray and not headings:
         return
     cursor = QTextCursor(doc)
     cursor.beginEditBlock()
@@ -59,6 +65,10 @@ def normalize_after_markdown_load(doc) -> None:
         fmt = block.blockFormat()
         fmt.clearProperty(marker)
         QTextCursor(block).setBlockFormat(fmt)
+    # Headings get the room the editor gives the ones typed here.
+    for block in headings:
+        fmt = block.blockFormat()
+        QTextCursor(block).setBlockFormat(heading_block_format(fmt, fmt.headingLevel()))
     cursor.endEditBlock()
 
 
@@ -268,6 +278,19 @@ def body_char_format(fmt: QTextCharFormat) -> QTextCharFormat:
     return body
 
 
+# Room above and below a heading. Margins are how the editor shows it;
+# they are not Markdown, so nothing of them is written.
+HEADING_MARGINS = (12, 4)
+
+
+def heading_block_format(fmt, level: int):
+    fmt.setHeadingLevel(level)
+    top, bottom = HEADING_MARGINS if level else (0, 0)
+    fmt.setTopMargin(top)
+    fmt.setBottomMargin(bottom)
+    return fmt
+
+
 def set_heading(cursor: QTextCursor, level: int) -> None:
     """Make the paragraphs under the cursor Body (0) or a heading of
     ``level``, as one step on the undo stack. Choosing the style a
@@ -279,8 +302,7 @@ def set_heading(cursor: QTextCursor, level: int) -> None:
     edit = QTextCursor(doc)
     edit.beginEditBlock()
     for block in _blocks_of(cursor):
-        fmt = block.blockFormat()
-        fmt.setHeadingLevel(level)
+        fmt = heading_block_format(block.blockFormat(), level)
         whole = QTextCursor(block)
         whole.setBlockFormat(fmt)
         whole.movePosition(QTextCursor.MoveOperation.EndOfBlock,
@@ -494,3 +516,90 @@ def change_indent(cursor: QTextCursor, delta: int) -> bool:
     _tidy_lists(doc, [items[0].previous(), *items, items[-1].next()])
     edit.endEditBlock()
     return True
+
+
+# --------------------------------------------------------------------------- #
+# Quotes and dividers                                                          #
+# --------------------------------------------------------------------------- #
+
+# How far one level of quote moves a paragraph in, as Qt's Markdown reader
+# places it: a quote typed here and one read from a .md file look alike.
+QUOTE_INDENT = 40
+
+
+def quote_depth(block) -> int:
+    level = block.blockFormat().property(QTextFormat.Property.BlockQuoteLevel)
+    return level if isinstance(level, int) and level > 0 else 0
+
+
+def set_quote_depth(block, depth: int) -> None:
+    fmt = block.blockFormat()
+    if depth > 0:
+        fmt.setProperty(QTextFormat.Property.BlockQuoteLevel, depth)
+        fmt.setLeftMargin(QUOTE_INDENT * depth)
+    else:
+        fmt.clearProperty(QTextFormat.Property.BlockQuoteLevel)
+        fmt.setLeftMargin(0)
+    QTextCursor(block).setBlockFormat(fmt)
+
+
+def in_quote(cursor: QTextCursor) -> bool:
+    """Whether every paragraph under the cursor is quoted."""
+    blocks = _blocks_of(cursor)
+    return bool(blocks) and all(quote_depth(b) for b in blocks)
+
+
+def toggle_quote(cursor: QTextCursor) -> None:
+    """Quote the paragraphs under the cursor, or, when all of them are
+    quoted already, take the quote away. One step on the undo stack."""
+    blocks = _blocks_of(cursor)
+    if not blocks:
+        return
+    unquote = in_quote(cursor)
+    edit = QTextCursor(cursor.document())
+    edit.beginEditBlock()
+    for block in blocks:
+        if unquote:
+            set_quote_depth(block, 0)
+        elif not quote_depth(block) and not is_divider(block):
+            set_quote_depth(block, 1)
+    edit.endEditBlock()
+
+
+def is_divider(block) -> bool:
+    return block.blockFormat().hasProperty(
+        QTextFormat.Property.BlockTrailingHorizontalRulerWidth)
+
+
+def _divider_format() -> QTextBlockFormat:
+    fmt = QTextBlockFormat()
+    # What Qt's Markdown reader gives "---": a rule across the page.
+    fmt.setProperty(QTextFormat.Property.BlockTrailingHorizontalRulerWidth, 1)
+    return fmt
+
+
+def insert_divider(cursor: QTextCursor) -> None:
+    """A divider (a horizontal rule, ``---``) after the paragraph at the
+    cursor, or in its place when it is empty, and an empty paragraph after
+    it where the cursor goes. One step on the undo stack."""
+    cursor.beginEditBlock()
+    block = cursor.block()
+    if block.text() or is_divider(block):
+        cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+        cursor.insertBlock(_divider_format(), QTextCharFormat())
+    else:
+        cursor.setBlockFormat(_divider_format())
+        cursor.setBlockCharFormat(QTextCharFormat())
+    after = cursor.block().next()
+    if after.isValid() and not after.text() and not is_divider(after) \
+            and after.textList() is None:
+        cursor.setPosition(after.position())
+    else:
+        cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+        cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
+    cursor.endEditBlock()
+
+
+def remove_divider(block) -> None:
+    """The divider becomes an empty paragraph again."""
+    QTextCursor(block).setBlockFormat(QTextBlockFormat())
