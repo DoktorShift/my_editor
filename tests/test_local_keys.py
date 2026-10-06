@@ -373,3 +373,22 @@ def test_a_dropped_signer_is_closed_and_deleted(tmp_path):
     pool.get(local_profile(pubkey), got.append, print)
     pool.close_all()
     assert deleted(got[1])
+
+
+class BrokenRemote(FakeRemote):
+    """A saved pairing that cannot even start."""
+
+    def reattach(self, **_kw):
+        raise ValueError("bad key")
+
+
+def test_a_pairing_that_cannot_start_fails_every_waiter_and_can_be_retried(monkeypatch,
+                                                                          tmp_path):
+    monkeypatch.setattr(bunker, "BunkerClient", BrokenRemote)
+    pool = BunkerSessionPool(pool=None, vault=KeyVault(tmp_path / "nostr_keys.json"))
+    errors = []
+    pool.get(remote_profile("a" * 64), print, errors.append)
+    assert len(errors) == 1 and "could not be opened" in errors[0]
+    # Nothing is left waiting: the next request tries again, and fails again.
+    pool.get(remote_profile("a" * 64), print, errors.append)
+    assert len(errors) == 2

@@ -159,6 +159,19 @@ class BlossomError(Exception):
 _HEX_SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 
 
+
+def whole_number(value) -> int:
+    """A count a server sent (a size, a time), as a non-negative integer:
+    0 for anything missing or nonsense, so one odd field never stops an
+    upload or a listing."""
+    if isinstance(value, bool):
+        return 0
+    try:
+        number = int(value or 0)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+    return max(0, number)
+
 def server_origin(server_url: str) -> str:
     """Return ``scheme://host[:port]`` for ``server_url`` (no path, no
     trailing slash). Used to scope the ``server`` tag on auth events to
@@ -334,7 +347,7 @@ class UploadResult(dict):
         result = cls(
             hash=sha,
             url=safe_blob_url(data.get("url"), server, sha),
-            size=int(data.get("size") or 0),
+            size=whole_number(data.get("size")),
             mime_type=str(data.get("type") or "application/octet-stream"),
             server=server,
             existed=False,

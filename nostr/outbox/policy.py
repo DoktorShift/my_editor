@@ -25,6 +25,8 @@ from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 from typing import Dict, Iterable, List, Mapping, Optional
 
+import url_safety
+
 from .. import events
 from . import defaults
 
@@ -99,10 +101,6 @@ def normalize_relay_url(url) -> Optional[str]:
     return f"{scheme}://{netloc}" + (f"/{path}" if path else "")
 
 
-# Names that only mean something on the user's own network (or need Tor).
-_PRIVATE_NAMES = ("localhost",)
-_PRIVATE_SUFFIXES = (".localhost", ".local", ".onion", ".internal", ".lan", ".home",
-                     ".home.arpa", ".localdomain", ".intranet", ".corp")
 
 
 def is_public_relay(url) -> bool:
@@ -127,14 +125,7 @@ def is_public_relay(url) -> bool:
         address = None
     if address is not None:
         return address.is_global and not address.is_multicast
-    labels = host.rstrip(".").split(".")
-    if len(labels) < 2 or host in _PRIVATE_NAMES or host.endswith(_PRIVATE_SUFFIXES):
-        return False
-    last = labels[-1]
-    # A numeric last label is an address in disguise (127.1, 0x7f.1).
-    if last.isdigit() or (last.startswith("0x") and all(c in "0123456789abcdef" for c in last[2:])):
-        return False
-    return True
+    return not url_safety.is_local_name(host)
 
 
 def public_relays(urls: Iterable[str]) -> List[str]:

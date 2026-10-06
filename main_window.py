@@ -5304,9 +5304,19 @@ class MainWindow(QMainWindow):
         banner.deleteLater()
 
     def _on_conflict_view(self, identifier: str) -> None:
-        # View = open the remote version in a brand-new tab without
-        # touching the conflicted one.
-        self._on_panel_open_draft(identifier)
+        """View: the other device's version in a new tab of its own, not
+        bound to the draft, so comparing it changes nothing. (Opening the
+        draft would only bring the conflicted tab to the front.)"""
+        record = self._draft_store.get(identifier)
+        if record is None or record.state is not DraftState.READY:
+            return
+        self.new_tab()
+        ed = self.current_editor()
+        if ed is None:
+            return
+        self._load_draft_content(ed, record)
+        ed.document().setModified(False)
+        self._update_tab_title()
 
     def _on_conflict_reload(self, ed, identifier: str) -> None:
         record = self._draft_store.get(identifier)

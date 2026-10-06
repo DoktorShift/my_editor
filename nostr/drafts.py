@@ -194,6 +194,37 @@ def parse_inner_event(plaintext: str) -> Dict[str, Any]:
 # Outer wrap (kind 31234)                                                     #
 # --------------------------------------------------------------------------- #
 
+# --------------------------------------------------------------------------- #
+# Which version of a draft wins                                               #
+# --------------------------------------------------------------------------- #
+
+# The time of the last wrap this app built for each draft (by author and
+# d tag). Two saves of one draft within a second would otherwise share a
+# timestamp, and relays keep whichever has the lower id (NIP-01), which is
+# as often the earlier text as the later.
+_last_written: Dict[str, int] = {}
+
+
+def wrap_time(pubkey_hex: str, identifier: str, *, after: int = 0) -> int:
+    """When a new version of a draft is dated: now, but always after the
+    last version this app wrote and after ``after`` (the newest version
+    known from the relays), so the newest save is the one relays keep."""
+    key = f"{pubkey_hex.lower()}:{identifier}"
+    created_at = max(int(time.time()), _last_written.get(key, 0) + 1, int(after) + 1
+                     if after else 0)
+    _last_written[key] = created_at
+    return created_at
+
+
+def supersedes(created_at: int, event_id: str, other_created_at: int,
+               other_event_id: str) -> bool:
+    """Whether a version replaces another (NIP-01): the newer one wins,
+    and of two with the same time, the one with the lower id."""
+    if created_at != other_created_at:
+        return created_at > other_created_at
+    return (event_id or "") < (other_event_id or "")
+
+
 def build_draft_wrap(
     *,
     identifier: str,
@@ -230,7 +261,7 @@ def build_draft_wrap(
     if len(pubkey_hex) != 64:
         raise ValueError("pubkey_hex must be 64 hex chars")
     if created_at is None:
-        created_at = int(time.time())
+        created_at = wrap_time(pubkey_hex, identifier)
     expiration_unix = int(created_at) + max(0, int(expiration_seconds))
 
     tags: List[List[str]] = [

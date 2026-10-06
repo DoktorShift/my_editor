@@ -34,6 +34,7 @@ from .drafts import (
     derive_preview_snippet,
     derive_title_from_markdown,
     extract_article_metadata,
+    supersedes,
 )
 
 
@@ -116,6 +117,8 @@ class DraftStore(QObject):
         super().__init__(parent)
         self._profile_pubkey: Optional[str] = None
         self._records: Dict[str, DraftRecord] = {}
+        # Drafts deleted, by d tag: the deletion's (created_at, event id).
+        self._deleted: Dict[str, tuple] = {}
         self._is_loading: bool = False
 
     # -- read --------------------------------------------------------------
@@ -165,6 +168,7 @@ class DraftStore(QObject):
 
     def reset(self) -> None:
         """Clear all records and emit ``cleared``."""
+        self._deleted.clear()
         if not self._records and not self._is_loading:
             # Still emit cleared so panels in an inconsistent state can
             # reconcile cheaply.
@@ -194,11 +198,22 @@ class DraftStore(QObject):
         Tombstones (empty ciphertext) are handled here too, they remove
         any existing record for that ``d`` and emit ``record_removed``.
         """
-        if meta.is_tombstone:
-            self.remove(meta.identifier)
-            return
-
         existing = self._records.get(meta.identifier)
+        if meta.is_tombstone:
+            # A deletion removes only what it is newer than: a relay that
+            # lags behind can hand out a deletion older than a draft
+            # written since. Its time is remembered, so a copy the
+            # deletion replaced, still held by another relay, does not
+            # bring the draft back.
+            if existing is None or supersedes(meta.created_at, meta.event_id,
+                                              existing.created_at, existing.event_id):
+                self._deleted[meta.identifier] = (meta.created_at, meta.event_id)
+                if existing is not None:
+                    self.remove(meta.identifier)
+            return
+        deleted = self._deleted.get(meta.identifier)
+        if deleted is not None and not supersedes(meta.created_at, meta.event_id, *deleted):
+            return
         if existing is None:
             record = DraftRecord(
                 identifier=meta.identifier,
@@ -213,10 +228,11 @@ class DraftStore(QObject):
             self.record_added.emit(meta.identifier)
             return
 
-        # Already known. If the wrap is newer than the cached row's
-        # backing event, transition back to LOADING so the row picks up
-        # the new payload after decryption; otherwise leave it alone.
-        if meta.created_at <= existing.created_at:
+        # Already known. If the wrap replaces the cached row's backing
+        # event, transition back to LOADING so the row picks up the new
+        # payload after decryption; otherwise leave it alone.
+        if not supersedes(meta.created_at, meta.event_id,
+                          existing.created_at, existing.event_id):
             return
         existing.event_id = meta.event_id
         existing.created_at = meta.created_at

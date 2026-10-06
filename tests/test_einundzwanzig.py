@@ -586,3 +586,20 @@ def test_the_roster_and_the_api_agree_on_what_a_name_is():
     ]).encode())
     assert records[MEMBER] == "fine_name-1"
     assert records[OTHER] is None
+
+
+def test_a_maintenance_page_is_a_failed_refresh_not_an_empty_roster():
+    # Served with status 200, an HTML page is not a roster: every member
+    # keeps their relay and media server, and no year-before retry runs.
+    nam = FakeNam({2026: roster_bytes(MEMBER)})
+    directory, clock = _directory(nam)
+    _resolve(directory, MEMBER)
+    clock["t"] += 16 * 60
+    nam.by_year[2026] = b"<html><body>Down for maintenance</body></html>"
+    seen = []
+    directory.resolved.connect(lambda pk, ok: seen.append((pk, ok)))
+    directory.resolve(MEMBER)
+    nam.replies[-1].finished.emit()
+    assert seen == [(MEMBER, True)]
+    assert directory.last_known_membership(MEMBER) is True
+    assert nam.requested == [2026, 2026]

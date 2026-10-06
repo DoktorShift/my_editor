@@ -134,6 +134,11 @@ DEFAULT_PERMS = (
     "sign_event:27235,sign_event:10002,"
     # Publishing the profile of an account created or edited in MyEditor.
     "sign_event:0,"
+    # Media servers: proving who uploads, lists or deletes a file
+    # (BUD-11), and the list of servers the account uses (BUD-03).
+    "sign_event:24242,sign_event:10063,"
+    # The synced feed list (NIP-78) and where drafts are kept (NIP-37).
+    "sign_event:30078,sign_event:10013,"
     "nip44_encrypt,nip44_decrypt,"
     "ping"
 )
@@ -1086,14 +1091,19 @@ class BunkerSessionPool(QObject):
                 except Exception:  # noqa: BLE001
                     pass
 
-        new_client.reattach(
-            bunker_pubkey=profile.bunker_pubkey,
-            relays=list(profile.bunker_relays),
-            local_sk=local_sk,
-            user_pubkey=profile.user_pubkey,
-            on_success=_ok,
-            on_failure=_err,
-        )
+        try:
+            new_client.reattach(
+                bunker_pubkey=profile.bunker_pubkey,
+                relays=list(profile.bunker_relays),
+                local_sk=local_sk,
+                user_pubkey=profile.user_pubkey,
+                on_success=_ok,
+                on_failure=_err,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # A saved pairing that cannot even start (a malformed key) must
+            # fail every waiter now, not leave them waiting for good.
+            _err(f"the saved signer pairing could not be opened: {exc}")
 
     def _get_local(self, pubkey: str, on_ready, on_error) -> None:
         """A key kept on this computer: no channel to open, no phone to
