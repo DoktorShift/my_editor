@@ -229,6 +229,9 @@ def create_backend() -> SpellBackend:
     if sys.platform == "darwin":
         from .macos import MacBackend
         return MacBackend()
+    if sys.platform == "win32":
+        from .windows import WindowsBackend
+        return WindowsBackend()
     return NullBackend()
 
 

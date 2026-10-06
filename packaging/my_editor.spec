@@ -73,6 +73,8 @@ coincurve_binaries = collect_dynamic_libs("coincurve")
 if sys.platform == "darwin":
     hiddenimports += ["spelling.macos"] + collect_submodules("rubicon.objc")
     datas += copy_metadata("rubicon-objc")
+elif sys.platform == "win32":
+    hiddenimports += ["spelling.windows"]   # ctypes and COM only, nothing to collect
 
 # QtPdf backs the built-in PDF viewer (pdf_viewer.py) and must ship in
 # every bundle. Trim the rest and make sure the giant, unused Qt
