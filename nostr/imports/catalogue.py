@@ -33,7 +33,7 @@ from PySide6.QtCore import QObject
 
 from i18n import _
 
-from ..draft_deletions import DELETION_KIND, deleted_identifiers
+from ..deletion import DELETION_KIND, read_deletion
 from ..drafts import DRAFT_WRAP_KIND
 from ..events import verify_event
 from ..outbox import ask_draft_relays
@@ -181,18 +181,13 @@ def _record(event: dict, pubkey: str, found: Existing, wanted: set) -> None:
         return
     kind = event.get("kind")
     if kind == DELETION_KIND:
-        for d_tag in deleted_identifiers(event, pubkey):
-            if d_tag in wanted:
-                found.add(d_tag, REMOVED)
-        # Deleted articles are named 30023:<pk>:<d>.
-        prefix = f"{ARTICLE_KIND}:{pubkey}:"
-        if verify_event(event):
-            for tag in event.get("tags", []):
-                if (isinstance(tag, list) and len(tag) >= 2 and tag[0] == "a"
-                        and str(tag[1]).lower().startswith(prefix)):
-                    d_tag = str(tag[1])[len(prefix):]
-                    if d_tag in wanted:
-                        found.add(d_tag, REMOVED)
+        # A deleted draft or article is named by its address.
+        request = read_deletion(event, pubkey)
+        if request is not None:
+            for d_tag in (request.identifiers(DRAFT_WRAP_KIND)
+                          + request.identifiers(ARTICLE_KIND)):
+                if d_tag in wanted:
+                    found.add(d_tag, REMOVED)
         return
     if not verify_event(event):
         return
