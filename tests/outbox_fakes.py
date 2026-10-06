@@ -71,8 +71,21 @@ class FakeSessionPool:
 
 
 class FakeJob(QObject):
+    """A publish, reported the way nostr/relay.py's PublishJob reports one:
+    each relay's answer, the first one that took it, then all of them."""
+
     first_accept = Signal(str)
+    relay_result = Signal(str, bool, str)
     all_done = Signal(list)
+
+    def report(self, results) -> None:
+        accepted = False
+        for url, ok, message in results:
+            self.relay_result.emit(url, ok, message)
+            if ok and not accepted:
+                accepted = True
+                self.first_accept.emit(url)
+        self.all_done.emit(list(results))
 
 
 class FakeSubscription(QObject):
@@ -141,7 +154,7 @@ class FakePool:
         if self.keep and any(ok for _u, ok, _m in results):
             self.stored[event["id"]] = event
         job = FakeJob()
-        QTimer.singleShot(0, lambda: job.all_done.emit(results))
+        QTimer.singleShot(0, lambda: job.report(results))
         return job
 
     def subscribe(self, urls, filters):

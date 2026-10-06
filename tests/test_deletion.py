@@ -21,9 +21,12 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from nostr import events  # noqa: E402
 from nostr.deletion import (  # noqa: E402
-    DELETION_KIND, address, address_of, build_deletion, read_deletion,
+    DELETION_KIND, DeletionJob, address, address_of, build_deletion, read_deletion,
 )
-from tests.outbox_fakes import NOW, OTHER_PK, OTHER_SK, PK, SK, signed  # noqa: E402
+from tests.outbox_fakes import (  # noqa: E402
+    NOW, OTHER_PK, OTHER_SK, PK, SK, FakeClient, FakeJob, FakePool, FakeRelayDirectory,
+    FakeSessionPool, Profile, settle, signed,
+)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -103,3 +106,146 @@ def test_addresses_of_events():
     assert address_of(article("post")) == f"30023:{PK}:post"
     assert address_of(signed(10002, [["r", "wss://a.example"]])) == f"10002:{PK}:"
     assert address_of(signed(1, [], "a note")) is None
+
+
+# -- the job ------------------------------------------------------------------------------
+
+WRITE = ["wss://w1.example", "wss://w2.example"]
+FOUND = "wss://found.example"
+BOB = "b" * 64
+BOB_INBOX = "wss://bob-inbox.example"
+
+
+def deletion_job(target, *, pool=None, client=None, found_on=(FOUND,), mentioned=(),
+                 entitled=(), lists=None):
+    directory = FakeRelayDirectory(lists if lists is not None else {PK: WRITE})
+    job = DeletionJob(relay_pool=pool or FakePool(), relay_directory=directory,
+                      session_pool=FakeSessionPool(client or FakeClient()), profile=Profile(),
+                      event=target, found_on=found_on, mentioned=mentioned,
+                      entitled_relays=entitled, clock=lambda: NOW)
+    seen = {"signed": [], "results": [], "first": [], "completed": [], "failed": []}
+    job.signed.connect(seen["signed"].append)
+    job.relay_result.connect(lambda *result: seen["results"].append(result))
+    job.first_accept.connect(seen["first"].append)
+    job.completed.connect(seen["completed"].append)
+    job.failed.connect(seen["failed"].append)
+    return job, seen
+
+
+def test_an_article_is_asked_back_by_id_and_by_address_with_its_kind():
+    target = article("my-post")
+    pool = FakePool()
+    job, seen = deletion_job(target, pool=pool)
+    job.start()
+    settle()
+    (relays, sent), = pool.published
+    assert sent["kind"] == DELETION_KIND and sent["pubkey"] == PK and sent["content"] == ""
+    assert sent["tags"] == [["a", f"30023:{PK}:my-post"], ["e", target["id"]], ["k", "30023"]]
+    assert sent["created_at"] == NOW and events.verify_event(sent)
+    assert seen["signed"] == [sent] and job.request == sent
+    assert relays == [FOUND] + WRITE              # where it was found, then where it goes
+    assert seen["first"] == [FOUND]
+    assert [r[0] for r in seen["results"]] == relays
+    assert seen["completed"] == [[(url, True, "") for url in relays]]
+
+
+def test_a_note_is_asked_back_by_id_only():
+    note = signed(1, [["client", "MyEditor"]], "a note")
+    pool = FakePool()
+    job, _seen = deletion_job(note, pool=pool)
+    job.start()
+    settle()
+    sent = pool.published[0][1]
+    assert sent["tags"] == [["e", note["id"]], ["k", "1"]]
+
+
+def test_it_also_goes_where_the_publish_went():
+    note = signed(1, [["p", BOB]], "hi Bob")
+    lists = {PK: WRITE, BOB: [BOB_INBOX]}
+    pool = FakePool()
+    job, _seen = deletion_job(note, pool=pool, lists=lists, mentioned=[(BOB, "")],
+                              entitled=lambda: ["wss://members.example"])
+    job.start()
+    settle()
+    assert pool.published[0][0] == [FOUND] + WRITE + ["wss://members.example", BOB_INBOX]
+
+
+def test_no_relay_taking_it_still_completes_and_try_again_sends_the_same_request():
+    target = article()
+    pool = FakePool(refuse=set([FOUND] + WRITE))
+    client = FakeClient()
+    job, seen = deletion_job(target, pool=pool, client=client)
+    job.start()
+    settle()
+    assert seen["first"] == [] and len(seen["completed"]) == 1
+    assert not any(ok for _url, ok, _message in seen["completed"][0])
+    pool.refuse = set()
+    assert job.send_again() is True
+    settle()
+    assert len(client.requests) == 1               # signed once
+    assert pool.published[1] == pool.published[0]  # the same request, to the same relays
+    assert seen["first"] == [FOUND]
+
+
+def test_try_again_waits_until_the_relays_answered_the_last_sending():
+    class SilentPool(FakePool):
+        def publish(self, urls, event):
+            self.published.append((list(urls), event))
+            return FakeJob()                       # no relay has answered yet
+
+    pool = SilentPool()
+    job, seen = deletion_job(article(), pool=pool)
+    job.start()
+    settle()
+    assert len(pool.published) == 1 and seen["completed"] == []
+    assert job.send_again() is False and len(pool.published) == 1
+
+
+def test_a_signer_that_does_not_sign_fails_the_job_and_nothing_is_sent():
+    pool = FakePool()
+    job, seen = deletion_job(article(), pool=pool, client=FakeClient(fail="user rejected"))
+    job.start()
+    settle()
+    assert seen["failed"] == ["user rejected"] and pool.published == []
+    assert job.send_again() is False
+
+
+def test_a_signer_that_returns_something_else_is_not_trusted():
+    def other_tags(event):
+        return events.sign_event(dict(event, tags=[["e", "f" * 64]]), SK)
+    pool = FakePool()
+    job, seen = deletion_job(article(), pool=pool, client=FakeClient(tamper=other_tags))
+    job.start()
+    settle()
+    assert len(seen["failed"]) == 1 and pool.published == []
+
+
+def test_only_the_accounts_own_events_can_be_asked_back():
+    with pytest.raises(ValueError):
+        deletion_job(article(sk=OTHER_SK))
+    with pytest.raises(ValueError):
+        deletion_job({"kind": 1, "pubkey": PK, "id": "not an id"})
+
+
+class ParkedClient(FakeClient):
+    """Signs only when the test says so: the approval is still on the phone."""
+
+    def __init__(self):
+        super().__init__()
+        self.parked = []
+
+    def sign_event(self, unsigned, on_success, on_failure, **_kw):
+        self.parked.append(lambda: FakeClient.sign_event(self, unsigned, on_success,
+                                                          on_failure))
+
+
+def test_a_cancelled_job_sends_nothing_and_says_nothing_more():
+    pool = FakePool()
+    client = ParkedClient()
+    job, seen = deletion_job(article(), pool=pool, client=client)
+    job.start()
+    job.cancel()
+    client.parked.pop()()                          # approved after all
+    settle()
+    assert pool.published == []
+    assert seen == {"signed": [], "results": [], "first": [], "completed": [], "failed": []}

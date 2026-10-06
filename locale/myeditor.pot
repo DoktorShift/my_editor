@@ -2946,6 +2946,34 @@ msgstr ""
 msgid "relay must be ws:// or wss://, got {relay}"
 msgstr ""
 
+#: nostr/deletion.py:263
+#: nostr/draft_sync.py:358
+#: nostr/draft_sync.py:318
+#: nostr/publisher.py:567
+#: nostr/publisher.py:813
+msgid "Connecting to your signer…"
+msgstr ""
+
+#: nostr/deletion.py:299
+#: nostr/publisher.py:1025
+msgid "Waiting for signature. Approve the deletion on your signer…"
+msgstr ""
+
+#: nostr/deletion.py:350
+msgid "The signer didn’t sign the request."
+msgstr ""
+
+#: nostr/deletion.py:303
+msgid "The signer returned a different event."
+msgstr ""
+
+#: nostr/deletion.py:326
+#, python-brace-format
+msgid "Asking {n} relay to delete it…"
+msgid_plural "Asking {n} relays to delete it…"
+msgstr[0] ""
+msgstr[1] ""
+
 #: nostr/draft_store.py:298
 #: nostr/draft_sync.py:617
 msgid "decryption failed"
@@ -2968,13 +2996,6 @@ msgstr ""
 
 #: nostr/draft_sync.py:251
 msgid "Refreshing drafts…"
-msgstr ""
-
-#: nostr/draft_sync.py:358
-#: nostr/draft_sync.py:318
-#: nostr/publisher.py:567
-#: nostr/publisher.py:813
-msgid "Connecting to your signer…"
 msgstr ""
 
 #: nostr/draft_sync.py:651
@@ -3189,10 +3210,6 @@ msgstr ""
 
 #: nostr/publisher.py:842
 msgid "Encrypting draft. Approve on your signer if prompted…"
-msgstr ""
-
-#: nostr/publisher.py:1025
-msgid "Waiting for signature. Approve the deletion on your signer…"
 msgstr ""
 
 #: nostr/publisher.py:1247

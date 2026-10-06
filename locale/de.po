@@ -2961,6 +2961,34 @@ msgstr "Der bunker-Link muss mindestens ein Relay nennen"
 msgid "relay must be ws:// or wss://, got {relay}"
 msgstr "Ein Relay muss mit ws:// oder wss:// beginnen (erhalten: {relay})"
 
+#: nostr/deletion.py:263
+#: nostr/draft_sync.py:358
+#: nostr/draft_sync.py:318
+#: nostr/publisher.py:567
+#: nostr/publisher.py:813
+msgid "Connecting to your signer…"
+msgstr "Verbindung zu deinem Signer wird hergestellt …"
+
+#: nostr/deletion.py:299
+#: nostr/publisher.py:1025
+msgid "Waiting for signature. Approve the deletion on your signer…"
+msgstr "Warte auf die Signatur. Bestätige das Löschen in deinem Signer …"
+
+#: nostr/deletion.py:350
+msgid "The signer didn’t sign the request."
+msgstr "Der Signer hat die Anfrage nicht signiert."
+
+#: nostr/deletion.py:303
+msgid "The signer returned a different event."
+msgstr "Der Signer hat etwas anderes zurückgegeben als angefragt."
+
+#: nostr/deletion.py:326
+#, python-brace-format
+msgid "Asking {n} relay to delete it…"
+msgid_plural "Asking {n} relays to delete it…"
+msgstr[0] "{n} Relay wird gebeten, es zu löschen …"
+msgstr[1] "{n} Relays werden gebeten, es zu löschen …"
+
 #: nostr/draft_store.py:298
 #: nostr/draft_sync.py:617
 msgid "decryption failed"
@@ -2984,13 +3012,6 @@ msgstr "Deine Relay-Liste wird abgerufen …"
 #: nostr/draft_sync.py:251
 msgid "Refreshing drafts…"
 msgstr "Entwürfe werden aktualisiert …"
-
-#: nostr/draft_sync.py:358
-#: nostr/draft_sync.py:318
-#: nostr/publisher.py:567
-#: nostr/publisher.py:813
-msgid "Connecting to your signer…"
-msgstr "Verbindung zu deinem Signer wird hergestellt …"
 
 #: nostr/draft_sync.py:651
 msgid "This signer doesn't support NIP-44 encryption, so private drafts are unavailable for this profile."
@@ -3205,10 +3226,6 @@ msgstr "Warte auf die Signatur. Bestätige die Anfrage in deinem Signer …"
 #: nostr/publisher.py:842
 msgid "Encrypting draft. Approve on your signer if prompted…"
 msgstr "Der Entwurf wird verschlüsselt. Bestätige in deinem Signer, wenn er fragt …"
-
-#: nostr/publisher.py:1025
-msgid "Waiting for signature. Approve the deletion on your signer…"
-msgstr "Warte auf die Signatur. Bestätige das Löschen in deinem Signer …"
 
 #: nostr/publisher.py:1247
 msgid "no relay accepted the deletion"
