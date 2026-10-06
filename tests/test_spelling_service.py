@@ -2,13 +2,14 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Spell checking a document as it changes, without blocking typing."""
 
-from PySide6.QtCore import QCoreApplication, QEvent
+from PySide6.QtCore import QCoreApplication, QEvent, Qt
 from PySide6.QtGui import QTextCharFormat, QTextCursor, QTextDocument
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QTextEdit
 
 from spelling.backends import AUTOMATIC
 from spelling.service import DocumentSpelling, Misspelling, SpellChecker
-from tests.spelling_fakes import FakeBackend, FakeTextBackend
+from tests.spelling_fakes import Editor, FakeBackend, FakeTextBackend, drain
 
 
 class Clock:
@@ -47,14 +48,6 @@ def wrong(spelling, doc):
         out.append([text[m.start:m.end] for m in spelling.misspellings(block)])
         block = block.next()
     return out
-
-
-def drain(spelling):
-    for _ in range(1000):
-        QCoreApplication.processEvents()
-        if not spelling.is_checking():
-            return
-    raise AssertionError("spell checking never finished")
 
 
 def type_at(doc, position, text):
@@ -200,7 +193,9 @@ def test_an_edit_checks_only_the_block_it_touched():
     spelling.check_all()
     assert sorted(set(backend.checked_words())) == ["here"]   # "a" and "wrld" were known
     assert wrong(spelling, doc) == [["helo"], ["wrld"], []]
-    assert changes == []                             # the misspellings stayed the same
+    # Named although its misspellings stayed the same: underlines kept as
+    # text cursors grow with text typed right after them.
+    assert changes == [(1, 1)]
 
 
 def test_typing_before_a_misspelling_moves_it_and_says_so():
@@ -338,14 +333,85 @@ def test_formatted_code_and_mentions_are_not_checked():
     assert found == ["lnk", "txt", "wrod"]
 
 
-def test_the_word_being_typed_can_be_left_out():
-    doc = document("the helo")
-    spelling, *_ = follow(doc)
-    spelling.check_all()
-    block = doc.begin()
-    end = block.position() + len("the helo")
-    assert spelling.misspellings(block, typing_position=end) == ()
-    assert len(spelling.misspellings(block, typing_position=0)) == 1
+def test_the_word_being_typed_is_not_underlined_until_it_is_finished():
+    editor = Editor()
+    editor.type("the hel")
+    assert editor.underlined() == [[]]
+    editor.type("lo here ")
+    assert editor.underlined() == [[]]
+
+
+def test_a_word_finished_with_a_period_gets_its_underline():
+    editor = Editor()
+    editor.type("the helo")
+    assert editor.underlined() == [[]]
+    editor.type(".")
+    assert editor.underlined() == [["helo"]]
+
+
+def test_a_word_finished_with_return_gets_its_underline():
+    editor = Editor()
+    editor.type("the helo\nthe end")
+    assert editor.underlined() == [["helo"], []]
+
+
+def test_a_word_finished_with_return_in_a_paragraph_checker_gets_its_underline():
+    editor = Editor(FakeTextBackend())
+    editor.type("the end helo\nthe end")
+    assert editor.underlined() == [["helo"], []]
+
+
+def test_typing_right_after_an_underlined_word_redraws_its_underline():
+    editor = Editor()
+    editor.type("a wrld ")
+    assert editor.underlined() == [["wrld"]]
+    QTest.keyClick(editor.edit, Qt.Key.Key_Left)
+    editor.type("!")                                 # the underline must not grow onto "!"
+    assert editor.underlined() == [["wrld"]]
+    QTest.keyClick(editor.edit, Qt.Key.Key_Left)
+    editor.type("\n")                               # nor onto the line break
+    assert editor.underlined() == [["wrld"], []]
+
+
+def test_a_pause_in_typing_finishes_the_word():
+    editor = Editor()
+    editor.spelling.TYPING_PAUSE_SECONDS = 0.01
+    editor.type("the helo")
+    for _ in range(100):
+        QTest.qWait(5)
+        if editor.underlined() == [["helo"]]:
+            break
+    assert editor.underlined() == [["helo"]]
+
+
+def test_moving_the_cursor_away_finishes_the_word_and_back_keeps_it():
+    editor = Editor()
+    editor.type("the helo")
+    QTest.keyClick(editor.edit, Qt.Key.Key_Home)
+    assert editor.underlined() == [["helo"]]
+    QTest.keyClick(editor.edit, Qt.Key.Key_End)      # back to the end, not typing
+    assert editor.underlined() == [["helo"]]
+
+
+def test_formatting_a_word_is_not_typing_it():
+    editor = Editor()
+    editor.type("the helo.")
+    cursor = editor.edit.textCursor()
+    cursor.setPosition(4)
+    cursor.setPosition(8, QTextCursor.MoveMode.KeepAnchor)
+    editor.edit.setTextCursor(cursor)
+    bold = QTextCharFormat()
+    bold.setFontWeight(700)
+    editor.edit.mergeCurrentCharFormat(bold)
+    drain(editor.spelling)
+    assert editor.underlined() == [["helo"]]
+
+
+def test_the_context_menu_finds_the_word_being_typed():
+    editor = Editor()
+    editor.type("the helo")
+    editor.spelling.check_all()
+    assert editor.spelling.misspelling_at(6).word == "helo"
 
 
 def test_the_misspelling_under_a_click_is_found_at_once():

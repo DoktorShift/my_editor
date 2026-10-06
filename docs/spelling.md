@@ -21,10 +21,13 @@ from spelling import DocumentSpelling, SpellChecker
 checker = SpellChecker()                                  # once, at start
 spelling = DocumentSpelling(checker, editor.document())   # per document
 spelling.misspellingsChanged.connect(underline_blocks)    # (first, last) block numbers
+editor.cursorPositionChanged.connect(
+    lambda: spelling.set_cursor_position(editor.textCursor().position()))
 spelling.set_visible_blocks(first, last)                  # on scroll and resize
 ```
 
-- `spelling.misspellings(block, typing_position=...)` gives the misspelled words of a block, empty until it is checked. Each `Misspelling` has `start` and `length` in UTF-16 units from the start of the block (what `QTextCursor` counts), so the underline runs from `block.position() + m.start` to `block.position() + m.end`. Pass the cursor's position as `typing_position` while the person types there: the word under it is not finished, and macOS and Word do not underline it either.
+- `spelling.misspellings(block)` gives the misspelled words of a block, empty until it is checked. Each `Misspelling` has `start` and `length` in UTF-16 units from the start of the block (what `QTextCursor` counts), so the underline runs from `block.position() + m.start` to `block.position() + m.end`.
+- Redraw a block's underlines when `misspellingsChanged` names it, and the visible blocks after scrolling; nothing else is needed. The word being typed at the cursor is left out until it is finished (a space, punctuation or Return after it, the cursor moving away, or a pause of a second and a half), as macOS and Word do; `misspellingsChanged` names its block when it is, so the last word of a sentence gets its underline without the editor watching for it. This is why the service needs `set_cursor_position` on every cursor move.
 - Draw underlines as extra selections with `QTextCharFormat.UnderlineStyle.SpellCheckUnderline`, which Qt draws as each platform does (dotted on macOS, wavy elsewhere).
 - For the context menu, `spelling.misspelling_at(position)` checks the block right away if needed. Then `checker.suggestions(m.word, m.language)` (best first; show a few), `checker.learn(m.word, m.language)` and `checker.ignore(m.word, m.language)`. macOS calls them Ignore Spelling and Learn Spelling; Word and LibreOffice call them Ignore All and Add to Dictionary.
 - Dim Edit > Spelling > Check Spelling While Typing when `checker.is_available()` is False. `checker.availabilityChanged` says when a system checker stops working; its underlines are already gone then.
@@ -42,7 +45,7 @@ Word-by-word checkers (Enchant) also accept an abbreviation listed with its dot 
 
 ## How it keeps up with typing
 
-Blocks are checked in slices of about 8 milliseconds from the event loop, the visible blocks first, then the rest of the document. An edit marks only the blocks it touched; inserting or removing lines keeps every other block's result. What a line leaves open (a code fence, front matter, an HTML comment) is tracked for the whole document by a cheap pass, so opening a fence turns the lines below into code at once and closing it brings them back. `misspellingsChanged` is not emitted when a check finds the same words again. Measured with the macOS checker: 2,200 paragraphs checked in 1.2 seconds of slices (median slice 8.3 ms), and a keystroke costs under a millisecond to track and to check again.
+Blocks are checked in slices of about 8 milliseconds from the event loop, the visible blocks first, then the rest of the document. An edit marks only the blocks it touched; inserting or removing lines keeps every other block's result. What a line leaves open (a code fence, front matter, an HTML comment) is tracked for the whole document by a cheap pass, so opening a fence turns the lines below into code at once and closing it brings them back. `misspellingsChanged` names a block when what the editor shows for it changes, and every block that was edited (underlines kept as text cursors grow with text typed right after them, so they are redrawn). Measured with the macOS checker: 2,200 paragraphs checked in 1.2 seconds of slices (median slice 8.3 ms), and a keystroke costs under a millisecond to track and to check again.
 
 Everything runs on the thread that made it, without worker threads: the system checkers expect that, Windows COM objects above all. A backend asked from another thread answers neutrally and logs a warning.
 

@@ -1,13 +1,20 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""A spell checker that knows a handful of words, for the spelling tests."""
+"""A spell checker that knows a handful of words, and an editor wired to
+spelling the way docs/spelling.md says, for the spelling tests."""
 
 from __future__ import annotations
 
 import re
 from typing import Dict, Iterable, List, Optional, Sequence
 
+from PySide6.QtCore import QCoreApplication, Qt
+from PySide6.QtTest import QTest
+from PySide6.QtGui import QTextCursor
+from PySide6.QtWidgets import QTextEdit
+
 from spelling.backends import AUTOMATIC, SpellBackend, TextCheck
+from spelling.service import DocumentSpelling, SpellChecker
 
 ENGLISH = ("the", "a", "is", "this", "text", "word", "words", "with", "one", "mistake",
            "and", "here", "see", "it", "spelled", "right", "code", "link", "line",
@@ -122,3 +129,60 @@ class FakeTextBackend(FakeBackend):
 
     def checked_texts(self) -> List[str]:
         return [call[1] for call in self.calls if call[0] == "check_text"]
+
+
+def drain(spelling):
+    for _ in range(1000):
+        QCoreApplication.processEvents()
+        if not spelling.is_checking():
+            return
+    raise AssertionError("spell checking never finished")
+
+
+class Editor:
+    """A QTextEdit wired the way docs/spelling.md says: it tells the
+    service where its cursor is, keeps its underlines as text cursors
+    (which is what extra selections are, and they move and grow with
+    edits), and redraws only the blocks ``misspellingsChanged`` names.
+    ``underlined`` is what it shows."""
+
+    def __init__(self, backend=None):
+        self.edit = QTextEdit()
+        self.edit.show()
+        self.checker = SpellChecker(backend or FakeBackend())
+        self.spelling = DocumentSpelling(self.checker, self.edit.document())
+        self.marks: List[QTextCursor] = []
+        self.spelling.misspellingsChanged.connect(self.redraw)
+        self.edit.cursorPositionChanged.connect(
+            lambda: self.spelling.set_cursor_position(self.edit.textCursor().position()))
+
+    def redraw(self, first, last):
+        doc = self.edit.document()
+        self.marks = [mark for mark in self.marks
+                      if not first <= doc.findBlock(mark.selectionStart()).blockNumber() <= last]
+        for number in range(first, last + 1):
+            block = doc.findBlockByNumber(number)
+            for misspelling in self.spelling.misspellings(block):
+                mark = QTextCursor(doc)
+                mark.setPosition(block.position() + misspelling.start)
+                mark.setPosition(block.position() + misspelling.end,
+                                 QTextCursor.MoveMode.KeepAnchor)
+                self.marks.append(mark)
+
+    def type(self, keys):
+        for key in keys:
+            if key == "\n":
+                QTest.keyClick(self.edit, Qt.Key.Key_Return)
+            else:
+                QTest.keyClicks(self.edit, key)
+            drain(self.spelling)
+
+    def underlined(self):
+        """The underlined text of each block."""
+        doc = self.edit.document()
+        out = [[] for _ in range(doc.blockCount())]
+        for mark in sorted(self.marks, key=lambda mark: mark.selectionStart()):
+            if mark.hasSelection():
+                out[doc.findBlock(mark.selectionStart()).blockNumber()].append(
+                    mark.selectedText())
+        return out

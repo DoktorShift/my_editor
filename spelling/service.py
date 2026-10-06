@@ -234,6 +234,10 @@ class DocumentSpelling(QObject):
     SLICE_SECONDS = 0.008
     """How long one slice of checking may take before typing gets its turn."""
 
+    TYPING_PAUSE_SECONDS = 1.5
+    """After this long without typing, the word being typed counts as
+    finished (about the pause between two sentences)."""
+
     def __init__(self, checker: SpellChecker, document: QTextDocument, *,
                  language: Optional[str] = None,
                  clock: Callable[[], float] = time.perf_counter) -> None:
@@ -245,18 +249,28 @@ class DocumentSpelling(QObject):
         self._clock = clock
         self._closed = False
         # Per block, in block order: the state at its end (always current),
-        # its misspellings as last reported, the text they were found in,
-        # and whether it must be checked again.
+        # its misspellings as found, those the editor was last given (all
+        # but the word being typed), the text they were found in, and
+        # whether it must be checked again.
         self._states: List[State] = []
         self._found: List[Tuple[Misspelling, ...]] = []
+        self._shown: List[Tuple[Misspelling, ...]] = []
         self._texts: List[Optional[str]] = []
         self._dirty = bytearray()
         self._visible = (0, -1)
         self._sweep = 0
+        # The word being typed: where the last edit ended, while the
+        # editor's cursor is there and typing has not paused.
+        self._cursor: Optional[int] = None
+        self._edit_end: Optional[int] = None
+        self._typing: Optional[int] = None
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(0)
         self._timer.timeout.connect(self._run)
+        self._pause = QTimer(self)
+        self._pause.setSingleShot(True)
+        self._pause.timeout.connect(self._typing_paused)
         # A document only reports its changes once it has a layout; every
         # editor's document has one, a document made on its own gets it now.
         document.documentLayout()
@@ -285,19 +299,27 @@ class DocumentSpelling(QObject):
         self._visible = (first, last)
         self._schedule()
 
-    def misspellings(self, block: QTextBlock, *,
-                     typing_position: Optional[int] = None) -> Tuple[Misspelling, ...]:
-        """The misspelled words of ``block``, empty until it is checked.
-        ``typing_position`` (a document position) leaves out the word
-        being typed there, which is not finished yet."""
+    def set_cursor_position(self, position: int) -> None:
+        """Where the editor's cursor is: call it whenever the cursor moves.
+        The word being typed there is not finished, so it is left out of
+        ``misspellings`` until it is: a space, punctuation or Return
+        after it, the cursor moving away, or a pause in typing. Then
+        ``misspellingsChanged`` names its block."""
+        if self._closed:
+            return
+        self._cursor = position
+        if position != self._edit_end:
+            self._edit_end = None
+            self._pause.stop()
+        self._update_typing()
+
+    def misspellings(self, block: QTextBlock) -> Tuple[Misspelling, ...]:
+        """The misspelled words of ``block``, empty until it is checked,
+        without the word being typed at the cursor."""
         number = block.blockNumber()
         if self._closed or not 0 <= number < len(self._found) or self._stale(number, block):
             return ()
-        found = self._found[number]
-        if typing_position is None:
-            return found
-        offset = typing_position - block.position()
-        return tuple(m for m in found if not m.touches(offset))
+        return self._without_typing(block, self._found[number])
 
     def misspelling_at(self, position: int) -> Optional[Misspelling]:
         """The misspelled word at a document position (for the context
@@ -313,8 +335,11 @@ class DocumentSpelling(QObject):
                 and self._checker.is_available()):
             if self._check(number):
                 self.misspellingsChanged.emit(number, number)
+        if self._closed or self._stale(number, block):
+            return None
         offset = position - block.position()
-        for misspelling in self.misspellings(block):
+        # The word asked about, also while it is being typed.
+        for misspelling in self._found[number]:
             if misspelling.touches(offset):
                 return misspelling
         return None
@@ -336,6 +361,7 @@ class DocumentSpelling(QObject):
             return
         self._closed = True
         self._timer.stop()
+        self._pause.stop()
         for signal, slot in ((self._document.contentsChange, self._changed),
                              (self._checker.availabilityChanged, self._availability_changed),
                              (self._checker.wordAccepted, self._word_accepted)):
@@ -349,6 +375,7 @@ class DocumentSpelling(QObject):
     def _restart(self) -> None:
         count = self._document.blockCount()
         self._found = [()] * count
+        self._shown = [()] * count
         self._texts = [None] * count
         self._dirty = bytearray(b"\x01") * count
         self._states = []
@@ -356,7 +383,7 @@ class DocumentSpelling(QObject):
         self._sweep = 0
         self._schedule()
 
-    def _changed(self, position: int, _removed: int, added: int) -> None:
+    def _changed(self, position: int, removed: int, added: int) -> None:
         if self._closed:
             return
         document = self._document
@@ -367,12 +394,13 @@ class DocumentSpelling(QObject):
         if not (first - 1 <= old_last < len(self._found)) or first > last:
             self._restart()
             return
-        # The blocks the change replaced: the first keeps its misspellings
-        # as last reported, so a check that finds the same says nothing.
+        # The blocks the change replaced are checked again (and then always
+        # named to the editor).
         new = last - first + 1
-        carried = self._found[first] if first <= old_last else ()
+        old_text = self._texts[first] if first <= old_last else None
         old_end = self._states[old_last] if old_last >= 0 else words.START
-        self._found[first:old_last + 1] = [carried] + [()] * (new - 1)
+        self._found[first:old_last + 1] = [()] * new
+        self._shown[first:old_last + 1] = [()] * new
         self._texts[first:old_last + 1] = [None] * new
         self._dirty[first:old_last + 1] = b"\x01" * new
         self._states[first:old_last + 1] = [words.START] * new
@@ -390,6 +418,11 @@ class DocumentSpelling(QObject):
             end += 1
             self._dirty[end] = 1
         self._states_from(first, end, old_end if end == last else None)
+        # Typing, unless only the formatting changed (Bold over a selection).
+        if not (removed == added and old_text == document.findBlockByNumber(first).text()):
+            self._edit_end = position + added
+            self._pause.start(int(self.TYPING_PAUSE_SECONDS * 1000))
+        self._update_typing()
         self._schedule()
 
     def _stale(self, number: int, block: QTextBlock) -> bool:
@@ -431,6 +464,47 @@ class DocumentSpelling(QObject):
             block = block.next()
             number += 1
 
+    def _update_typing(self) -> None:
+        """Note where the word being typed is; when that changed, tell the
+        editor about each block whose shown misspellings changed with it
+        (the word just finished now has its underline)."""
+        typing = (self._edit_end
+                  if self._edit_end is not None and self._edit_end == self._cursor else None)
+        if typing == self._typing:
+            return
+        before, self._typing = self._typing, typing
+        for number in sorted({n for n in (self._block_at(before), self._block_at(typing))
+                              if n is not None}):
+            block = self._document.findBlockByNumber(number)
+            if self._dirty[number] or self._texts[number] != block.text():
+                continue                    # it is checked again, and told then
+            shown = self._without_typing(block, self._found[number])
+            if shown != self._shown[number]:
+                self._shown[number] = shown
+                self.misspellingsChanged.emit(number, number)
+
+    def _typing_paused(self) -> None:
+        self._edit_end = None
+        self._update_typing()
+
+    def _block_at(self, position: Optional[int]) -> Optional[int]:
+        if position is None:
+            return None
+        block = self._document.findBlock(position)
+        if not block.isValid() or block.blockNumber() >= len(self._found):
+            return None
+        return block.blockNumber()
+
+    def _without_typing(self, block: QTextBlock,
+                        found: Tuple[Misspelling, ...]) -> Tuple[Misspelling, ...]:
+        """``found`` without the word being typed, if it is in ``block``."""
+        if self._typing is None or not found:
+            return found
+        offset = self._typing - block.position()
+        if not 0 <= offset < block.length():
+            return found
+        return tuple(m for m in found if not m.touches(offset))
+
     def _mark_all(self) -> None:
         self._dirty = bytearray(b"\x01") * len(self._found)
         self._schedule()
@@ -440,8 +514,9 @@ class DocumentSpelling(QObject):
             self._mark_all()
             return
         self._timer.stop()
-        if any(self._found):
-            self._found = [()] * len(self._found)
+        self._found = [()] * len(self._found)
+        if any(self._shown):
+            self._shown = [()] * len(self._found)
             self.misspellingsChanged.emit(0, len(self._found) - 1)
         self._dirty = bytearray(b"\x01") * len(self._found)
 
@@ -499,7 +574,8 @@ class DocumentSpelling(QObject):
         return number
 
     def _check(self, number: int) -> bool:
-        """Check one block. Returns whether its misspellings changed."""
+        """Check one block. Returns whether the editor must redraw it: the
+        misspellings it is shown changed, or its text did."""
         block = self._document.findBlockByNumber(number)
         text = block.text()
         found: Tuple[Misspelling, ...] = ()
@@ -513,11 +589,17 @@ class DocumentSpelling(QObject):
                             word, language)
                 for start, end, word, language
                 in self._checker._misspelled(text, scanned, self.language()))
+        # A block whose text changed is always named: underlines kept as
+        # text cursors (extra selections) grow with text typed right after
+        # them, and need redrawing even when the misspellings are the same.
+        edited = self._texts[number] != text
         self._dirty[number] = 0
         self._texts[number] = text
-        if found == self._found[number]:
-            return False
         self._found[number] = found
+        shown = self._without_typing(block, found)
+        if shown == self._shown[number] and not edited:
+            return False
+        self._shown[number] = shown
         return True
 
 

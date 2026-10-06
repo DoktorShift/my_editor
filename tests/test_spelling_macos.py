@@ -11,6 +11,7 @@ from PySide6.QtGui import QTextDocument
 
 from spelling.backends import AUTOMATIC, create_backend
 from spelling.service import DocumentSpelling, SpellChecker
+from tests.spelling_fakes import Editor
 
 if sys.platform != "darwin":
     pytest.skip("NSSpellChecker exists only on macOS", allow_module_level=True)
@@ -92,6 +93,13 @@ def test_a_learned_word_goes_into_the_persons_dictionary(backend):
     finally:
         backend._checker.unlearnWord(word)
     assert not backend._checker.hasLearnedWord(word)
+
+
+def test_the_last_word_of_a_paragraph_gets_its_underline_once_typed():
+    editor = Editor(MacBackend())
+    editor.type("Das ist ein Fehlr.\nNeuer Absatz")
+    assert editor.underlined()[0] == ["Fehlr"]
+    editor.checker.backend.close()
 
 
 def test_a_document_is_checked_paragraph_by_paragraph():
