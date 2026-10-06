@@ -21,7 +21,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, Iterator, List, Optional
+import time
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
 from PySide6.QtCore import QObject, Signal
 
@@ -113,8 +114,11 @@ class DraftStore(QObject):
     cleared = Signal()
     loading_state_changed = Signal(bool)
 
-    def __init__(self, parent: Optional[QObject] = None) -> None:
+    def __init__(self, parent: Optional[QObject] = None, *,
+                 clock: Callable[[], float] = time.time) -> None:
         super().__init__(parent)
+        # For NIP-40: an expired wrap never enters the store.
+        self._clock = clock
         self._profile_pubkey: Optional[str] = None
         self._records: Dict[str, DraftRecord] = {}
         # Drafts deleted, by d tag: the deletion's (created_at, event id).
@@ -198,6 +202,9 @@ class DraftStore(QObject):
         Tombstones (empty ciphertext) are handled here too, they remove
         any existing record for that ``d`` and emit ``record_removed``.
         """
+        if meta.is_expired(self._clock()):
+            # Gone (NIP-40): neither a row nor a version that replaces one.
+            return
         existing = self._records.get(meta.identifier)
         if meta.is_tombstone:
             self.apply_deletion(meta.identifier, meta.created_at, meta.event_id)

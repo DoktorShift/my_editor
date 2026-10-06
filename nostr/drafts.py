@@ -333,6 +333,12 @@ class DraftWrapMeta:
     def is_tombstone(self) -> bool:
         return self.ciphertext == ""
 
+    def is_expired(self, now: float) -> bool:
+        """NIP-40: past its ``expiration``, a wrap is gone, whatever a relay
+        that ignores expirations still hands out. A wrap without one, or
+        with one that is not a number, never expires."""
+        return self.expiration is not None and self.expiration <= int(now)
+
 
 def parse_wrap_event(event: Dict[str, Any]) -> Optional[DraftWrapMeta]:
     """Extract metadata from a relay-delivered 31234 event.
