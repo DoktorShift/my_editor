@@ -3327,6 +3327,10 @@ msgstr "Bild konnte nicht heruntergeladen werden"
 msgid "Empty mirror response"
 msgstr "Leere Antwort beim Kopieren"
 
+#: nostr/imports/inbox_store.py:73
+msgid "This source has reached its inbox limit. Unsubscribe and follow it again to start a fresh inbox; your drafts are kept."
+msgstr "Diese Quelle hat die Grenze ihres Eingangs erreicht. Beende das Abonnement und folge ihr erneut, um mit einem neuen Eingang zu beginnen; deine Entwürfe bleiben erhalten."
+
 #: nostr/imports/pipeline.py:283
 #: nostr/ui/feeds_panel.py:139
 msgid "(untitled)"

@@ -3313,6 +3313,10 @@ msgstr ""
 msgid "Empty mirror response"
 msgstr ""
 
+#: nostr/imports/inbox_store.py:73
+msgid "This source has reached its inbox limit. Unsubscribe and follow it again to start a fresh inbox; your drafts are kept."
+msgstr ""
+
 #: nostr/imports/pipeline.py:283
 #: nostr/ui/feeds_panel.py:139
 msgid "(untitled)"
