@@ -30,7 +30,9 @@ from PySide6.QtGui import QAction, QKeySequence
 
 ShortcutSpec = Union[None, str, QKeySequence, QKeySequence.StandardKey]
 
-# The groups, in the order the Keyboard Shortcuts window lists them.
+# The groups, in the order the Keyboard Shortcuts window lists them. They
+# are keys, so they stay English; the window translates them where it
+# shows them (shortcuts_dialog.py).
 FILE = "File"
 EDIT = "Editing"
 FORMAT = "Formatting"
@@ -173,7 +175,7 @@ class CommandRegistry(QObject):
             keys = key_text(command.shortcut)
             if not keys or entry.hidden_from_list or (command.nostr and not nostr):
                 continue
-            words = command.listed_as or command.title.rstrip("…").rstrip(".")
+            words = command.listed_as or command.title.rstrip("…").rstrip(".").rstrip()
             rows.setdefault(command.group, []).append((keys, words))
         for group, items in extra:
             rows.setdefault(group, []).extend(items)

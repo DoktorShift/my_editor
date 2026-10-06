@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLineEdit, QLabel, QPushButton, QFrame, QMenu, QCheckBox
 )
 from constants import DARK_BG, LIGHT_BG, MONO_FONT
+from i18n import _, pgettext
 from nostr.ui.profile_chip import ProfileChip
 
 
@@ -106,9 +107,9 @@ class FindBar(QFrame):
 
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
-        self.label = QLabel("Search:")
+        self.label = QLabel(_("Search:"))
         self.edit = QLineEdit()
-        self.edit.setPlaceholderText("Search…")
+        self.edit.setPlaceholderText(_("Search…"))
         self.btn_prev = QPushButton("←")
         self.btn_next = QPushButton("→")
         self.btn_close = QPushButton("×")
@@ -129,7 +130,7 @@ class FindBar(QFrame):
         row.addWidget(self.match_info)
         row.addWidget(self.btn_close)
 
-        self.hint_label = QLabel("Enter: next  |  Shift+Enter: prev  |  Esc: close & edit here")
+        self.hint_label = QLabel(_("Enter: next  |  Shift+Enter: prev  |  Esc: close & edit here"))
         hint_font = self.hint_label.font()
         hint_font.setPointSize(hint_font.pointSize() - 1)
         hint_font.setItalic(True)
@@ -234,24 +235,28 @@ class HeaderWidget(QWidget):
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(8)
 
-        self.theme_checkbox = QCheckBox("Dark Theme")
-        self.theme_checkbox.setToolTip("Toggle Theme (Ctrl+Shift+T)")
+        self.theme_checkbox = QCheckBox(_("Dark Theme"))
+        self.theme_checkbox.setToolTip(_("Toggle Theme (Ctrl+Shift+T)"))
         self.theme_checkbox.setChecked(True)
 
-        self.line_numbers_checkbox = QCheckBox("Line Numbers")
-        self.line_numbers_checkbox.setToolTip("Toggle Line Numbers (Ctrl+Shift+L)")
+        self.line_numbers_checkbox = QCheckBox(_("Line Numbers"))
+        self.line_numbers_checkbox.setToolTip(_("Toggle Line Numbers (Ctrl+Shift+L)"))
 
-        self.syntax_highlight_checkbox = QCheckBox("Syntax Highlighting")
-        self.syntax_highlight_checkbox.setToolTip("Toggle Syntax Highlighting (Ctrl+Shift+H)")
+        self.syntax_highlight_checkbox = QCheckBox(_("Syntax Highlighting"))
+        self.syntax_highlight_checkbox.setToolTip(_("Toggle Syntax Highlighting (Ctrl+Shift+H)"))
         # Unchecked at startup, matching MainWindow.syntax_highlighting.
         # These three defaults have to agree or the box shows a state the
         # editor is not in.
         self.syntax_highlight_checkbox.setChecked(False)
 
-        # Format buttons, created here, placed inside the left widget below
-        self.bold_btn = self._make_format_btn("B", "Bold (Ctrl+B)", bold=True)
-        self.italic_btn = self._make_format_btn("I", "Italic (Ctrl+I)", italic=True)
-        self.underline_btn = self._make_format_btn("U", "Underline (Ctrl+U)", underline=True)
+        # Format buttons, created here, placed inside the left widget below.
+        # Their letters follow the language (F, K, U in German).
+        self.bold_btn = self._make_format_btn(pgettext("format button", "B"),
+                                              _("Bold (Ctrl+B)"), bold=True)
+        self.italic_btn = self._make_format_btn(pgettext("format button", "I"),
+                                                _("Italic (Ctrl+I)"), italic=True)
+        self.underline_btn = self._make_format_btn(pgettext("format button", "U"),
+                                                   _("Underline (Ctrl+U)"), underline=True)
 
         # Left half: checkboxes at far left, B/I/U centred between them and the window centre.
         # Two equal stretches around B/I/U place it at the midpoint of the left half.
@@ -268,12 +273,12 @@ class HeaderWidget(QWidget):
 
         # Center: undo / redo, exactly centred by the equal left(1) / right(1) halves
         self.undo_btn = QPushButton("↺")
-        self.undo_btn.setToolTip("Undo (Ctrl+Z)")
+        self.undo_btn.setToolTip(_("Undo (Ctrl+Z)"))
         self.undo_btn.setFixedSize(26, 26)
         self.undo_btn.setEnabled(False)
 
         self.redo_btn = QPushButton("↻")
-        self.redo_btn.setToolTip("Redo (Ctrl+Y / Ctrl+Shift+Z)")
+        self.redo_btn.setToolTip(_("Redo (Ctrl+Y / Ctrl+Shift+Z)"))
         self.redo_btn.setFixedSize(26, 26)
         self.redo_btn.setEnabled(False)
 
@@ -284,7 +289,7 @@ class HeaderWidget(QWidget):
         right.setObjectName("HeaderRight")
         right_layout = QHBoxLayout(right)
         right_layout.setContentsMargins(0, 0, 0, 0)
-        self.credit_label = QLabel("built by rinbal")
+        self.credit_label = QLabel(_("built by rinbal"))
         self.profile_chip = ProfileChip()
         right_layout.addStretch()
         right_layout.addWidget(self.credit_label)
@@ -434,13 +439,13 @@ class FileChangedBar(QWidget):
         layout.addWidget(self._icon)
 
         self._text = QLabel()
-        self._reload_btn = QPushButton("Reload")
+        self._reload_btn = QPushButton(_("Reload"))
         self._reload_btn.setFixedHeight(26)
         self._reload_btn.clicked.connect(self.reload_requested)
 
         self._dismiss_btn = QPushButton("×")
         self._dismiss_btn.setFixedSize(26, 26)
-        self._dismiss_btn.setToolTip("Dismiss")
+        self._dismiss_btn.setToolTip(_("Dismiss"))
         self._dismiss_btn.clicked.connect(self._on_dismiss)
 
         layout.addWidget(self._text, 1)
@@ -451,23 +456,25 @@ class FileChangedBar(QWidget):
         self.hide()
 
     def show_changed(self, has_unsaved: bool):
-        self._text.setText("File was changed externally.")
-        self._reload_btn.setText("Discard my changes and reload" if has_unsaved else "Reload")
+        self._text.setText(_("File was changed externally."))
+        self._reload_btn.setText(_("Discard my changes and reload") if has_unsaved
+                                 else _("Reload"))
         self._reload_btn.show()
         self.show()
 
     def show_deleted(self):
-        self._text.setText("File was deleted - save to recreate it.")
+        self._text.setText(_("File was deleted - save to recreate it."))
         self._reload_btn.hide()
         self.show()
 
     def show_already_open(self):
-        self._text.setText("This file is already open in this tab.")
+        self._text.setText(_("This file is already open in this tab."))
         self._reload_btn.hide()
         self.show()
 
     def show_unsupported(self, filename: str = ""):
-        msg = f"File type not supported: {filename}" if filename else "File type not supported."
+        msg = (_("File type not supported: {names}").format(names=filename) if filename
+               else _("File type not supported."))
         self._text.setText(msg)
         self._reload_btn.hide()
         self.show()
@@ -552,15 +559,15 @@ class UpdateBar(QWidget):
         layout.addWidget(self._icon)
 
         self._text = QLabel()
-        self._update_btn = QPushButton("Update\u2026")
+        self._update_btn = QPushButton(_("Update\u2026"))
         self._update_btn.setFixedHeight(26)
         self._update_btn.clicked.connect(self._on_button)
         self._mode = "available"
 
         self._dismiss_btn = QPushButton("×")
         self._dismiss_btn.setFixedSize(26, 26)
-        self._dismiss_btn.setToolTip("Later")
-        self._dismiss_btn.setAccessibleName("Close")
+        self._dismiss_btn.setToolTip(_("Later"))
+        self._dismiss_btn.setAccessibleName(_("Close"))
         self._dismiss_btn.clicked.connect(self.hide)
 
         layout.addWidget(self._text, 1)
@@ -573,17 +580,17 @@ class UpdateBar(QWidget):
     def show_update(self, version: str):
         self._mode = "available"
         self._icon.setText("\u2b06")
-        self._text.setText(f"MyEditor {version} is available.")
-        self._update_btn.setText("Update\u2026")
-        self._dismiss_btn.setToolTip("Later")
+        self._text.setText(_("MyEditor {version} is available.").format(version=version))
+        self._update_btn.setText(_("Update\u2026"))
+        self._dismiss_btn.setToolTip(_("Later"))
         self.show()
 
     def show_updated(self, version: str):
         self._mode = "updated"
         self._icon.setText("\u2713")
-        self._text.setText(f"You\u2019re now using MyEditor {version}.")
-        self._update_btn.setText("What\u2019s New")
-        self._dismiss_btn.setToolTip("Close")
+        self._text.setText(_("You\u2019re now using MyEditor {version}.").format(version=version))
+        self._update_btn.setText(_("What\u2019s New"))
+        self._dismiss_btn.setToolTip(_("Close"))
         self.show()
 
     def _on_button(self):
