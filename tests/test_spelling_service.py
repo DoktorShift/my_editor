@@ -282,6 +282,17 @@ def test_learning_a_word_checks_again_only_where_it_was():
     assert changes == [(0, 2)]
 
 
+def test_a_word_with_a_typographic_apostrophe_is_learned_as_typed():
+    doc = document("the Ku\u2019damm", "Ku'damm")
+    spelling, checker, backend, _changes = follow(doc)
+    spelling.check_all()
+    assert wrong(spelling, doc) == [["Ku\u2019damm"], ["Ku'damm"]]
+    checker.learn("Ku\u2019damm", "en-US")
+    assert backend.learned == ["Ku'damm"]        # one form for every dictionary
+    spelling.check_all()
+    assert wrong(spelling, doc) == [[], []]
+
+
 def test_ignoring_a_word_reaches_every_document():
     first, second = document("helo here"), document("see helo")
     checker = SpellChecker(FakeBackend())

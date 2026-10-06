@@ -113,11 +113,11 @@ class SpellChecker(QObject):
     def learn(self, word: str, language: Optional[str] = None) -> bool:
         """Add ``word`` to the person's dictionary for good (the system's,
         shared with other apps where the system has one)."""
-        return self._accept(word, self._backend.learn(words.clean(word), self._language(language)))
+        return self._accept(word, self._backend.learn(_for_checker(word), self._language(language)))
 
     def ignore(self, word: str, language: Optional[str] = None) -> bool:
         """Accept ``word`` everywhere until the app quits."""
-        return self._accept(word, self._backend.ignore(words.clean(word), self._language(language)))
+        return self._accept(word, self._backend.ignore(_for_checker(word), self._language(language)))
 
     def find_misspellings(self, text: str, language: Optional[str] = None) -> List[Misspelling]:
         """The misspelled words of a short plain text (a title, a
@@ -217,8 +217,8 @@ class SpellChecker(QObject):
     def _accept(self, word: str, taken: bool) -> bool:
         self._notice()
         if taken:
-            accepted = _for_checker(word)
-            for key in [key for key in self._known if key[1].casefold() == accepted.casefold()]:
+            accepted = _for_checker(word).casefold()
+            for key in [key for key in self._known if key[1].casefold() == accepted]:
                 del self._known[key]
             self.wordAccepted.emit(words.clean(word))
         return taken
@@ -424,9 +424,9 @@ class DocumentSpelling(QObject):
         self._dirty = bytearray(b"\x01") * len(self._found)
 
     def _word_accepted(self, word: str) -> None:
-        folded = word.casefold()
+        accepted = _for_checker(word).casefold()
         for number, found in enumerate(self._found):
-            if any(m.word.casefold() == folded for m in found):
+            if any(_for_checker(m.word).casefold() == accepted for m in found):
                 self._dirty[number] = 1
         self._schedule()
 
