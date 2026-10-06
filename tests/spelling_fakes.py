@@ -101,8 +101,9 @@ class FakeTextBackend(FakeBackend):
         self._boom("check_text")
         if language == AUTOMATIC:
             language = self.identify(text)
+        languages = list(self.words) if language == AUTOMATIC else [language]
         misspelled = tuple((m.start(), m.end()) for m in _WORD.finditer(text)
-                           if not self.knows(m.group(0), language))
+                           if not any(self.knows(m.group(0), each) for each in languages))
         return TextCheck(misspelled, language)
 
     def _resolve(self, language: str) -> str:
