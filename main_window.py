@@ -38,7 +38,7 @@ from constants import (
     DARK_BORDER, LIGHT_BORDER, MONO_FONT, APP_DISPLAY_NAME, APP_VERSION, APP_URL
 )
 from widgets import FindBar, HeaderWidget, LineNumberGutter, FileChangedBar, UpdateBar
-from atomic_file import read_json, write_json
+from atomic_file import read_json, save_document, save_text_document, write_json
 import diagnostics
 import i18n
 from i18n import _, ngettext, pgettext
@@ -2365,8 +2365,7 @@ class MainWindow(QMainWindow):
                 # placeholder the old toPlainText call wrote out.
                 content = serialize_plain_with_images(ed.document(), lambda fmt: None)
 
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(content)
+            save_text_document(path, content)
             ed.document().setModified(False)
             self._update_tab_title()
             self.status.showMessage(_("Saved: {path}").format(path=path))
@@ -2634,8 +2633,7 @@ class MainWindow(QMainWindow):
             os.makedirs(media_dir, exist_ok=True)
             target = os.path.join(media_dir, filename)
             try:
-                with open(target, "wb") as f:
-                    f.write(data)
+                save_document(target, data)
             except OSError:
                 return None
             return f"{os.path.basename(media_dir)}/{filename}"
@@ -2645,8 +2643,7 @@ class MainWindow(QMainWindow):
     def _save_as_rtf(self, editor, path: str) -> bool:
         try:
             content = self._to_rtf(editor)
-            with open(path, "w", encoding="ascii") as f:
-                f.write(content)
+            save_text_document(path, content, encoding="ascii")
             editor.document().setModified(False)
             self._update_tab_title()
             self.status.showMessage(_("Saved: {path}").format(path=path))

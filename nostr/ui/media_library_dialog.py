@@ -70,6 +70,7 @@ from PySide6.QtWidgets import (
 )
 
 from alerts import confirm_destructive
+from atomic_file import save_document
 
 import i18n
 import url_safety
@@ -1725,9 +1726,8 @@ class MediaLibraryDialog(QDialog):
         """Copy a cached file to the user-chosen destination. ``src`` is
         a ``Path``-compatible source already in the Blossom cache."""
         try:
-            data = src.read_bytes() if hasattr(src, "read_bytes") else open(src, "rb").read()
-            with open(dest, "wb") as f:
-                f.write(data)
+            data = Path(src).read_bytes()
+            save_document(dest, data)
         except OSError as exc:
             self._set_status(_("Could not save: {error}").format(error=exc), error=True)
             return

@@ -54,6 +54,7 @@ from PySide6.QtWidgets import (
 )
 
 from alerts import CANCEL, Button, ask, confirm_destructive, inform
+from atomic_file import save_text_document
 from alerts import DEFAULT as ALERT_DEFAULT
 from i18n import _
 from nostr import einundzwanzig_api as e21
@@ -1043,8 +1044,8 @@ class MembershipWindow(AssistantWindow):
         if not path:
             return
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(export.document, f, ensure_ascii=False, indent=2)
+            save_text_document(path, json.dumps(export.document, ensure_ascii=False,
+                                                indent=2))
         except OSError as exc:
             inform(self, title=_("Couldn’t save your data"), message=str(exc),
                    is_dark=self._is_dark)
