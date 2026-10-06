@@ -282,15 +282,24 @@ class Sidebar(QListView):
         self.model_.set_entries(entries)
         self._restore_selection()
 
-    def select(self, kind: str, key: str) -> bool:
-        """Choose the row ``(kind, key)``; False when there is none."""
+    def select(self, kind: str, key: str, *, announce: bool = True) -> bool:
+        """Choose the row ``(kind, key)``; False when there is none.
+        ``entry_selected`` is said only when the choice changed (and
+        ``announce`` is on): the same choice found again after the rows
+        changed is not a new one."""
         row = self.model_.row_of(kind, key)
         if row < 0:
             return False
+        changed = (kind, key) != self._chosen
         self._chosen = (kind, key)
         index = self.model_.index(row)
         if self.currentIndex() != index:
+            blocked = self.selectionModel().blockSignals(True)
             self.setCurrentIndex(index)
+            self.selectionModel().blockSignals(blocked)
+            self.viewport().update()
+        if changed and announce:
+            self.entry_selected.emit(self.model_.entry(row))
         return True
 
     def chosen(self) -> Optional[Entry]:
@@ -298,14 +307,16 @@ class Sidebar(QListView):
         return self.model_.entry(row)
 
     def _restore_selection(self) -> None:
-        if self.select(*self._chosen):
+        """After the rows changed: the same choice, quietly (the window keeps
+        its search, its checks and the open post), or the Inbox when what
+        was chosen is gone."""
+        if self.select(*self._chosen, announce=False):
             return
-        # What was chosen is gone (a source was removed): back to the Inbox.
         self.select(LIST, "inbox")
 
     def _on_current(self, current: QModelIndex, _previous: QModelIndex) -> None:
         entry = self.model_.entry(current.row())
-        if entry is None or not entry.selectable:
+        if entry is None or not entry.selectable or (entry.kind, entry.key) == self._chosen:
             return
         self._chosen = (entry.kind, entry.key)
         self.entry_selected.emit(entry)

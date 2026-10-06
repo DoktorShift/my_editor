@@ -442,3 +442,33 @@ class TestUnsubscribe:
         menu = QMenu()
         window._source_actions(menu, entry)
         assert [a.text() for a in menu.actions() if a.text()][-1] == "Unsubscribe\u2026"
+
+
+class TestWhatThePersonIsDoingStays:
+    """Review M1: any change to the list of sources (a source followed on
+    another device, a first check renaming one) used to clear the search,
+    the checks and the open post."""
+
+    def test_a_new_source_elsewhere_changes_nothing_here(self, window):
+        window.search.setText("s")
+        window._show_list()
+        model = window.posts.model_
+        assert model.rowCount() >= 2
+        model.set_checked(0, True)
+        window.posts.setCurrentIndex(model.index(1))
+        opened = window.posts.current_post().key
+        checked = [p.key for p in model.checked()]
+        window._controller.subscriptions.add_feed("https://elsewhere.example/feed", "Zzz")
+        settle()
+        assert window.search.text() == "s"
+        assert [p.key for p in model.checked()] == checked
+        assert window.posts.current_post().key == opened
+        assert any(e.title == "Zzz" for e in entries(window))
+
+    def test_a_source_shown_keeps_its_segment(self, window):
+        window.sidebar.select(SOURCE, source_key(JOURNAL))
+        window.segment_older.click()
+        window._controller.subscriptions.add_feed("https://elsewhere.example/feed", "Aaa")
+        settle()
+        assert window.segment_older.isChecked()
+        assert titles(window) == ["Archive"]
