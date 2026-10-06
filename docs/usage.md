@@ -63,10 +63,13 @@ Cut, Copy, Paste and Select All act on whatever has the focus: the document, the
 | Shortcut | Action |
 |---|---|
 | `Ctrl+F` | Find (opens the find bar) |
-| `Enter` / `Shift+Enter` | Next / previous match, while the find bar is open |
+| `Ctrl+Alt+F` on macOS, `Ctrl+H` on Windows and Linux | Find and Replace: the find bar with a Replace row (Replace, Replace All) |
+| `Enter` / `Shift+Enter` | Next / previous match, while the find bar is open (`Enter` in the Replace field replaces) |
 | `Ctrl+G` / `Ctrl+Shift+G` on macOS, `F3` / `Shift+F3` elsewhere | Find Next / Find Previous |
 | `Ctrl+E` (macOS) | Use Selection for Find: the selected words become what Find Next looks for |
 | `Escape` | Close find bar and return to editor |
+
+The find bar's Options menu offers Match Case and Whole Words. A replacement takes the style of the text it replaces (a bold word stays bold, a link stays the same link), and Replace All is one step to undo.
 
 ### Editor
 

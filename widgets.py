@@ -6,9 +6,11 @@
 from PySide6.QtCore import Qt, QRect, QSize, Signal
 from PySide6.QtGui import QPainter, QFont, QColor
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QLineEdit, QLabel, QPushButton, QFrame, QMenu, QCheckBox
+    QWidget, QGridLayout, QHBoxLayout, QVBoxLayout, QLineEdit, QLabel, QPushButton, QFrame, QMenu,
+    QCheckBox, QToolButton,
 )
 from constants import DARK_BG, LIGHT_BG, MONO_FONT
+from find_replace import FindOptions
 from i18n import _, pgettext
 from nostr.ui.profile_chip import ProfileChip
 
@@ -94,60 +96,153 @@ class LineNumberGutter(QWidget):
 
 
 class FindBar(QFrame):
-    def __init__(self, on_find_next, on_find_prev, on_close, parent=None):
+    """Find (and, in the editor, Replace) above the document.
+
+    The field to find in, previous and next match, how many there are,
+    and Done, the way Safari and TextEdit lay out their find bar. With
+    ``replace=True`` a second row can be shown (Find and Replace…):
+    the replacement, Replace and Replace All. With ``options=True`` a
+    menu offers Match Case and Whole Words. The bar only asks: the window
+    connects ``options_changed``, ``replace_requested`` and
+    ``replace_all_requested`` and does the finding (find_replace.py).
+
+    Keys: Return finds the next match, Shift+Return the previous one,
+    Escape closes the bar; Return in the replacement field replaces.
+    """
+
+    options_changed = Signal()
+    replace_requested = Signal()
+    replace_all_requested = Signal()
+
+    def __init__(self, on_find_next, on_find_prev, on_close, parent=None, *,
+                 replace: bool = False, options: bool = False):
         super().__init__(parent)
         self.setFrameShape(QFrame.StyledPanel)
         self.setObjectName("FindBar")
         self.is_dark = True
-        self._update_theme()
 
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(8, 8, 8, 6)
-        outer.setSpacing(4)
+        grid = QGridLayout(self)
+        grid.setContentsMargins(8, 6, 8, 6)
+        grid.setHorizontalSpacing(6)
+        grid.setVerticalSpacing(6)
 
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        self.label = QLabel(_("Search:"))
         self.edit = QLineEdit()
-        self.edit.setPlaceholderText(_("Search…"))
-        self.btn_prev = QPushButton("←")
-        self.btn_next = QPushButton("→")
-        self.btn_close = QPushButton("×")
+        self.edit.setPlaceholderText(pgettext("find field", "Find"))
+        self.edit.setAccessibleName(pgettext("find field", "Find"))
+        self.edit.setClearButtonEnabled(True)
+        self.btn_prev = QPushButton("\u276e")
+        self.btn_prev.setToolTip(_("Previous Match"))
+        self.btn_prev.setAccessibleName(_("Previous Match"))
+        self.btn_next = QPushButton("\u276f")
+        self.btn_next.setToolTip(_("Next Match"))
+        self.btn_next.setAccessibleName(_("Next Match"))
+        for button in (self.btn_prev, self.btn_next):
+            button.setObjectName("FindArrow")
+            button.setAutoDefault(False)
         self.match_info = QLabel("")
-        self.match_info.setMinimumWidth(120)
+        self.match_info.setMinimumWidth(90)
+        self.btn_close = QPushButton(_("Done"))
+        self.btn_close.setAutoDefault(False)
+        self.btn_close.setToolTip(_("Close the find bar (Esc)"))
 
         self.btn_prev.clicked.connect(on_find_prev)
         self.btn_next.clicked.connect(on_find_next)
         self.btn_close.clicked.connect(on_close)
-        self.edit.returnPressed.connect(on_find_next)
-
         self.edit.installEventFilter(self)
 
-        row.addWidget(self.label)
-        row.addWidget(self.edit, 1)
-        row.addWidget(self.btn_prev)
-        row.addWidget(self.btn_next)
-        row.addWidget(self.match_info)
-        row.addWidget(self.btn_close)
+        arrows = QHBoxLayout()
+        arrows.setSpacing(2)
+        arrows.addWidget(self.btn_prev)
+        arrows.addWidget(self.btn_next)
+        grid.addWidget(self.edit, 0, 0)
+        grid.addLayout(arrows, 0, 1)
+        grid.addWidget(self.match_info, 0, 2)
 
-        self.hint_label = QLabel(_("Enter: next  |  Shift+Enter: prev  |  Esc: close & edit here"))
-        hint_font = self.hint_label.font()
-        hint_font.setPointSize(hint_font.pointSize() - 1)
-        hint_font.setItalic(True)
-        self.hint_label.setFont(hint_font)
+        self.match_case = None
+        self.whole_words = None
+        self.options_button = None
+        if options:
+            self.options_button = QToolButton()
+            self.options_button.setText(_("Options"))
+            self.options_button.setAccessibleName(_("Find Options"))
+            self.options_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+            menu = QMenu(self.options_button)
+            self.match_case = menu.addAction(_("Match Case"))
+            self.whole_words = menu.addAction(_("Whole Words"))
+            for action in (self.match_case, self.whole_words):
+                action.setCheckable(True)
+                action.toggled.connect(lambda _on=False: self._options_toggled())
+            self.options_button.setMenu(menu)
+            grid.addWidget(self.options_button, 0, 3)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(4, 0)
+        grid.addWidget(self.btn_close, 0, 5)
 
-        outer.addLayout(row)
-        outer.addWidget(self.hint_label)
+        self.replace_edit = None
+        self.replace_btn = None
+        self.replace_all_btn = None
+        if replace:
+            self.replace_edit = QLineEdit()
+            self.replace_edit.setPlaceholderText(_("Replace With"))
+            self.replace_edit.setAccessibleName(_("Replace With"))
+            self.replace_edit.installEventFilter(self)
+            self.replace_btn = QPushButton(_("Replace"))
+            self.replace_all_btn = QPushButton(_("Replace All"))
+            for button in (self.replace_btn, self.replace_all_btn):
+                button.setAutoDefault(False)
+            self.replace_btn.clicked.connect(self.replace_requested)
+            self.replace_all_btn.clicked.connect(self.replace_all_requested)
+            buttons = QHBoxLayout()
+            buttons.setSpacing(6)
+            buttons.addWidget(self.replace_btn)
+            buttons.addWidget(self.replace_all_btn)
+            buttons.addStretch(1)
+            grid.addWidget(self.replace_edit, 1, 0)
+            grid.addLayout(buttons, 1, 1, 1, 5)
+            self.show_replace(False)
+
+        self._update_theme()
+
+    # -- what the window asks ---------------------------------------------------
+
+    def options(self) -> FindOptions:
+        """Match Case and Whole Words, as chosen."""
+        return FindOptions(
+            match_case=bool(self.match_case and self.match_case.isChecked()),
+            whole_words=bool(self.whole_words and self.whole_words.isChecked()))
+
+    def _options_toggled(self) -> None:
+        if self.options_button is not None:
+            chosen = [a.text() for a in (self.match_case, self.whole_words) if a.isChecked()]
+            # The button says which options are on, so a search that finds
+            # nothing is not a mystery.
+            self.options_button.setText(", ".join(chosen) if chosen else _("Options"))
+        self.options_changed.emit()
+
+    def show_replace(self, shown: bool) -> None:
+        """Show or hide the Replace row (Find and Replace…, or Find…)."""
+        if self.replace_edit is None:
+            return
+        for widget in (self.replace_edit, self.replace_btn, self.replace_all_btn):
+            widget.setVisible(shown)
+
+    def replace_shown(self) -> bool:
+        return self.replace_edit is not None and not self.replace_edit.isHidden()
+
+    def replacement(self) -> str:
+        return self.replace_edit.text() if self.replace_edit is not None else ""
 
     def eventFilter(self, obj, event):
-        if obj == self.edit and event.type() == event.Type.KeyPress:
-            if event.key() == Qt.Key_Return:
-                if event.modifiers() == Qt.ShiftModifier:
+        if event.type() == event.Type.KeyPress and obj in (self.edit, self.replace_edit):
+            if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+                if obj is self.replace_edit:
+                    self.replace_requested.emit()
+                elif event.modifiers() & Qt.ShiftModifier:
                     self.btn_prev.clicked.emit()
                 else:
                     self.btn_next.clicked.emit()
                 return True
-            elif event.key() == Qt.Key_Escape:
+            if event.key() == Qt.Key_Escape:
                 self.btn_close.clicked.emit()
                 return True
         return super().eventFilter(obj, event)
@@ -170,22 +265,23 @@ class FindBar(QFrame):
                 background: #1E1E1E;
                 color: #D4D4D4;
                 border: 1px solid #3C3C3C;
-                padding: 6px 8px;
+                padding: 5px 8px;
                 border-radius: 4px;
                 selection-background-color: #264F78;
             }
-            QPushButton {
+            QPushButton, QToolButton {
                 background: #2D2D30;
                 color: #D4D4D4;
                 border: 1px solid #3C3C3C;
-                padding: 6px 10px;
+                padding: 5px 10px;
                 border-radius: 4px;
             }
-            QPushButton:hover { background: #3C3C3C; }
+            QPushButton:hover, QToolButton:hover { background: #3C3C3C; }
+            QPushButton:disabled { color: #6A6A6A; }
+            #FindArrow { padding: 5px 9px; }
+            QToolButton::menu-indicator { image: none; width: 0; }
             QLabel { color: #CCCCCC; }
             """)
-            if hasattr(self, 'hint_label'):
-                self.hint_label.setStyleSheet("color: #777777;")
         else:
             self.setStyleSheet("""
             #FindBar {
@@ -196,23 +292,24 @@ class FindBar(QFrame):
             QLineEdit {
                 background: #FFFFFF;
                 color: #333333;
-                border: 1px solid #E1E1E1;
-                padding: 6px 8px;
+                border: 1px solid #D0D0D0;
+                padding: 5px 8px;
                 border-radius: 4px;
                 selection-background-color: #0078D4;
             }
-            QPushButton {
+            QPushButton, QToolButton {
                 background: #F3F3F3;
                 color: #333333;
-                border: 1px solid #E1E1E1;
-                padding: 6px 10px;
+                border: 1px solid #D0D0D0;
+                padding: 5px 10px;
                 border-radius: 4px;
             }
-            QPushButton:hover { background: #E1E1E1; }
+            QPushButton:hover, QToolButton:hover { background: #E1E1E1; }
+            QPushButton:disabled { color: #A0A0A0; }
+            #FindArrow { padding: 5px 9px; }
+            QToolButton::menu-indicator { image: none; width: 0; }
             QLabel { color: #666666; }
             """)
-            if hasattr(self, 'hint_label'):
-                self.hint_label.setStyleSheet("color: #999999;")
 
     def focusIn(self):
         self.edit.setFocus()

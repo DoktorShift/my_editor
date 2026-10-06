@@ -75,6 +75,7 @@ from update_dialog import UpdateDialog, WhatsNewDialog
 from update_flow import AUTOMATIC, guide_url, plan_for
 import theme
 from export_html import document_to_html, normalize_after_set_html, sniff_image_ext
+from find_replace import find_all, replace_all, replace_match
 from export_pdf import export_pdf, load_page_setup
 from page_setup_dialog import PageSetupDialog
 import printing
@@ -816,6 +817,8 @@ class MainWindow(QMainWindow):
         ed.document().undoAvailable.connect(self._update_undo_redo_buttons)
         ed.document().redoAvailable.connect(self._update_undo_redo_buttons)
         ed.cursorPositionChanged.connect(self._update_status_bar)
+        ed.document().contentsChanged.connect(
+            lambda e=ed: self._on_document_changed_for_find(e))
         ed.currentCharFormatChanged.connect(self._update_format_buttons)
         ed.selectionChanged.connect(self._update_format_buttons)
         self._update_editor_theme(ed)
@@ -1182,7 +1185,14 @@ class MainWindow(QMainWindow):
         # platform's own keys (Command-G on a Mac, F3 on Windows).
         self.act_find = add(Command("search.find", _("Find\u2026"), SEARCH, "Ctrl+F",
                                     listed_as=_("Find")),
-                            triggered=self._toggle_findbar)
+                            triggered=lambda: self._show_find(replace=False))
+        # Option-Command-F on a Mac (TextEdit, Pages); Ctrl+H elsewhere
+        # (Word, Google Docs, LibreOffice). Never QKeySequence.Replace,
+        # which is Command-H, Hide, on a Mac.
+        self.act_replace = add(Command("search.replace", _("Find and Replace\u2026"), SEARCH,
+                                       platform_keys("Ctrl+Alt+F", "Ctrl+H"),
+                                       listed_as=_("Find and replace")),
+                               triggered=lambda: self._show_find(replace=True))
         self.act_find_next = add(Command("search.next", _("Find Next"), SEARCH,
                                          QKeySequence.StandardKey.FindNext,
                                          listed_as=_("Find next")),
@@ -1201,7 +1211,7 @@ class MainWindow(QMainWindow):
         # the PDF reader has for itself stay its own.
         self._editor_actions = [
             self.act_undo, self.act_redo, self.act_cut, self.act_paste, self.act_paste_plain,
-            self.act_delete, self.act_select_all, self.act_use_selection,
+            self.act_delete, self.act_select_all, self.act_use_selection, self.act_replace,
             self.act_indent, self.act_outdent,
             self.act_bold, self.act_italic, self.act_underline, self.act_reset_format,
             *self.act_colors, self.act_remove_color,
@@ -1400,6 +1410,7 @@ class MainWindow(QMainWindow):
         m_edit.addSeparator()
         self.m_find = m_edit.addMenu(pgettext("menu", "Find"))
         self.m_find.addAction(self.act_find)
+        self.m_find.addAction(self.act_replace)
         self.m_find.addAction(self.act_find_next)
         self.m_find.addAction(self.act_find_prev)
         self.m_find.addAction(self.act_use_selection)
@@ -1539,9 +1550,19 @@ class MainWindow(QMainWindow):
         self._populate_recent_menu()
 
     def _build_findbar(self):
-        self.findbar = FindBar(self._find_next, self._find_prev, self._toggle_findbar, self)
+        self.findbar = FindBar(self._find_next, self._find_prev, self._close_findbar, self,
+                               replace=True, options=True)
         self.findbar.setVisible(False)
         self.findbar.edit.textChanged.connect(self._on_search_text_changed)
+        self.findbar.options_changed.connect(self._on_find_options_changed)
+        self.findbar.replace_requested.connect(self._replace_current)
+        self.findbar.replace_all_requested.connect(self._replace_all)
+        # Matches are found again shortly after the document changes, so
+        # the count and the highlights never describe text that is gone.
+        self._find_refresh = QTimer(self)
+        self._find_refresh.setSingleShot(True)
+        self._find_refresh.setInterval(250)
+        self._find_refresh.timeout.connect(self._refresh_matches)
 
         self.update_bar = UpdateBar()
         self.update_bar.update_theme(self.is_dark_theme)
@@ -3164,25 +3185,98 @@ class MainWindow(QMainWindow):
     # ----------------------------------------------------------------------
     # SEARCH
     # ----------------------------------------------------------------------
-    def _toggle_findbar(self):
+    def _show_find(self, replace: bool = False):
+        """Find… or Find and Replace…: the find bar, its field focused
+        (Find and Replace adds the Replace row). In a PDF tab, the PDF
+        reader's own find bar."""
         viewer = self.current_pdf_viewer()
         if viewer is not None:
-            viewer.toggle_findbar()
+            if viewer.findbar.isVisible():
+                viewer.findbar.focusIn()
+            else:
+                viewer.toggle_findbar()
             return
-        vis = not self.findbar.isVisible()
-        self.findbar.setVisible(vis)
-        if vis:
-            self.findbar.focusIn()
-            self._on_search_text_changed()
+        if self.current_editor() is None:
+            return
+        self.findbar.show_replace(replace or (self.findbar.isVisible()
+                                              and self.findbar.replace_shown()))
+        self.findbar.setVisible(True)
+        self.findbar.focusIn()
+        self._last_search_text = None
+        self._on_search_text_changed()
+
+    def _close_findbar(self):
+        """Done or Escape: the bar goes, the highlights with it, and the
+        writing goes on where the match was."""
+        self.findbar.setVisible(False)
+        self.findbar.set_match_info("")
+        self._clear_search_highlights()
+        ed = self.current_editor()
+        if ed:
+            cursor = ed.textCursor()
+            cursor.setPosition(cursor.selectionStart())
+            ed.setTextCursor(cursor)
+            ed.setFocus()
+
+    def _on_find_options_changed(self):
+        self._last_search_text = None
+        self._on_search_text_changed()
+
+    def _on_document_changed_for_find(self, ed):
+        if ed is self.current_editor() and self.findbar.isVisible():
+            self._find_refresh.start()
+
+    def _refresh_matches(self):
+        if not self.findbar.isVisible():
+            return
+        self._last_search_text = None
+        self._on_search_text_changed()
+
+    def _replace_current(self):
+        """Replace: the match that is selected becomes the replacement (in
+        its style), and the next match is selected. With no match
+        selected, the next one is found first."""
+        ed = self.current_editor()
+        needle = self.findbar.text()
+        if ed is None or not needle:
+            return
+        self._update_search_matches(needle)
+        self._last_search_text = needle
+        cursor = ed.textCursor()
+        selected = (cursor.selectionStart(), cursor.selectionEnd())
+        if selected in self._search_matches:
+            _start, end = replace_match(ed.document(), selected, self.findbar.replacement())
+            cursor.setPosition(end)
+            ed.setTextCursor(cursor)
+            self._find_refresh.stop()          # found again right here
+            self._update_search_matches(needle)
+            self._last_search_text = needle
+            following = [i for i, (start, _e) in enumerate(self._search_matches) if start >= end]
+            self._current_match_index = (following[0] if following else 0) - 1
+            if not self._search_matches:
+                self._highlight_all_matches()
+                self._update_match_display()
+                return
+        self._find_once(True)
+
+    def _replace_all(self):
+        """Replace All: every match, as one step to undo."""
+        ed = self.current_editor()
+        needle = self.findbar.text()
+        if ed is None or not needle:
+            return
+        count = replace_all(ed.document(), needle, self.findbar.replacement(),
+                            self.findbar.options())
+        self._find_refresh.stop()              # found again right here
+        self._update_search_matches(needle)
+        self._last_search_text = needle
+        self._highlight_all_matches()
+        if count:
+            self.findbar.set_match_info(
+                ngettext("{count} replaced", "{count} replaced", count).format(
+                    count=_number(count)))
         else:
-            self.findbar.set_match_info("")
-            self._clear_search_highlights()
-            ed = self.current_editor()
-            if ed:
-                cursor = ed.textCursor()
-                cursor.setPosition(cursor.selectionStart())
-                ed.setTextCursor(cursor)
-                ed.setFocus()
+            self.findbar.set_match_info(_("No matches"))
 
     def _choose_language(self, code: str) -> None:
         """Remember the language; it is used from the next start on."""
@@ -3423,18 +3517,13 @@ class MainWindow(QMainWindow):
         ed = self.current_editor()
         if not ed:
             return
-        self._search_matches = []
-        if not needle:
-            self._current_match_index = -1
-            return
-        cursor = QTextCursor(ed.document())
-        cursor.movePosition(QTextCursor.Start)
-        while True:
-            cursor = ed.document().find(needle, cursor, QTextDocument.FindFlags())
-            if cursor.isNull():
-                break
-            self._search_matches.append((cursor.selectionStart(), cursor.selectionEnd()))
-        self._current_match_index = -1
+        self._search_matches = find_all(ed.document(), needle, self.findbar.options())
+        # The match that is selected stays the current one when the matches
+        # are found again (after typing, after a replacement).
+        cursor = ed.textCursor()
+        selected = (cursor.selectionStart(), cursor.selectionEnd())
+        self._current_match_index = (self._search_matches.index(selected)
+                                     if selected in self._search_matches else -1)
 
     def _highlight_all_matches(self):
         ed = self.current_editor()
@@ -3538,6 +3627,10 @@ class MainWindow(QMainWindow):
             self.findbar.set_match_info(_("No matches"))
             return
         total = len(self._search_matches)
+        if self._current_match_index < 0:
+            self.findbar.set_match_info(
+                ngettext("{count} match", "{count} matches", total).format(count=total))
+            return
         current = self._current_match_index + 1
         self.findbar.set_match_info(_("{current} of {total}").format(
             current=current, total=total))

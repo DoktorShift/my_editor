@@ -254,7 +254,7 @@ def test_the_edit_menu_follows_apple_order(fresh_window):
     assert titles[:8] == ["Undo", "Redo", "Cut", "Copy", "Paste", "Paste and Match Style",
                           "Delete", "Select All"]
     find = [a.objectName() for a in win.m_find.actions()]
-    assert find[:4] == ["search.find", "search.next", "search.previous",
+    assert find[:5] == ["search.find", "search.replace", "search.next", "search.previous",
                         "search.use_selection"]
     # Find lives in Edit now; there is no Search menu of its own.
     tops = [a.text().replace("&", "") for a in win.menuBar().actions()]
@@ -352,11 +352,13 @@ def test_paragraph_styles_use_each_platform_keys(fresh_window):
                 "format.list.number": "Ctrl+Shift+9", "format.quote": "Ctrl+'",
                 "format.style.h2": "Ctrl+Alt+2", "edit.paste_plain": "Ctrl+Alt+Shift+V",
                 "search.use_selection": "Ctrl+E", "format.reset": "Ctrl+\\",
+                "search.replace": "Ctrl+Alt+F",
                 "insert.link": "Ctrl+K"}),
     ("win32", {"format.strike": "Alt+Shift+5", "format.list.bullet": "Ctrl+Shift+8",
                "format.list.number": "Ctrl+Shift+7", "format.quote": "",
                "format.style.h2": "Ctrl+2", "edit.paste_plain": "Ctrl+Shift+V",
                "search.use_selection": "", "format.reset": "Ctrl+\\",
+               "search.replace": "Ctrl+H",
                "insert.link": "Ctrl+K"}),
     ("linux", {"format.list.bullet": "Ctrl+Shift+8", "format.quote": "",
                "format.style.body": "Ctrl+0"}),

@@ -543,7 +543,6 @@ class PdfViewerTab(QWidget):
         self._build_toolbar()
 
         self.findbar = FindBar(self.find_next, self.find_prev, self._close_findbar, self)
-        self.findbar.hint_label.setText(_("Enter: next  |  Shift+Enter: prev  |  Esc: close"))
         self.findbar.edit.textChanged.connect(self._on_search_text_changed)
         self.findbar.setVisible(False)
 
