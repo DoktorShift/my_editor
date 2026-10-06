@@ -333,3 +333,14 @@ def test_the_pdf_reader_keeps_its_copy_key(qt_app):
     other.ignore()
     view.event(other)
     assert not other.isAccepted()
+
+
+
+def test_paragraph_styles_use_each_platform_keys(fresh_window):
+    expected = "Ctrl+Alt+1" if sys.platform == "darwin" else "Ctrl+1"
+    action = fresh_window.commands.action("format.style.h1")
+    assert action.shortcut().toString(QKeySequence.SequenceFormat.PortableText) == expected
+    assert [a.objectName() for a in fresh_window.m_style.actions()] == [
+        "format.style.body", "format.style.h1", "format.style.h2", "format.style.h3"]
+    # Structure commands are off where there is no Markdown to hold them.
+    assert action in fresh_window._rich_actions

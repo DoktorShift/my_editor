@@ -294,6 +294,16 @@ class HtmlEditor(QTextEdit):
             self.setCurrentCharFormat(fmt)
         return on
 
+    def set_heading(self, level: int) -> None:
+        """Body (0) or Heading 1 to 3 for the paragraphs under the cursor;
+        the style they already have turns them back into Body."""
+        cursor = self.textCursor()
+        rich_text.set_heading(cursor, level)
+        self.setTextCursor(cursor)
+        now = cursor.block().blockFormat().headingLevel()
+        self.setCurrentCharFormat(rich_text.restyled(self.currentCharFormat(), now))
+        self._update_active_format()
+
     def toggle_strike(self):
         return self.toggle_style(rich_text.STRIKE)
 
@@ -602,6 +612,10 @@ class HtmlEditor(QTextEdit):
             self.paste_from_clipboard()
             return
 
+        if self._structure_key(e):
+            self.ensureCursorVisible()
+            return
+
         c = self.textCursor()
         line, start = self._line_info(c)
         spaces, has_bullet = self._indent_level_and_has_bullet(line)
@@ -743,6 +757,39 @@ class HtmlEditor(QTextEdit):
 
         super().keyPressEvent(e)
         self.ensureCursorVisible()
+
+    # -------- Keys inside Markdown structure --------
+    def _structure_key(self, e) -> bool:
+        """Enter, Backspace and Tab where the paragraph has a structure of
+        its own (a heading). True when the key was handled here."""
+        cursor = self.textCursor()
+        if cursor.hasSelection():
+            return False
+        block = cursor.block()
+        heading = block.blockFormat().headingLevel()
+        plain = e.modifiers() in (Qt.NoModifier, Qt.KeypadModifier)
+        if heading and e.key() in (Qt.Key_Return, Qt.Key_Enter) and plain:
+            # Return at the end of a heading starts a Body paragraph, the
+            # way Pages and every Markdown editor continue after a title;
+            # anywhere else in it, both halves stay headings.
+            cursor.beginEditBlock()
+            fmt = block.blockFormat()
+            if cursor.atBlockEnd():
+                fmt.setHeadingLevel(0)
+                char = rich_text.body_char_format(cursor.charFormat())
+            else:
+                char = cursor.charFormat()
+            cursor.insertBlock(fmt, char)
+            cursor.endEditBlock()
+            self.setTextCursor(cursor)
+            self.setCurrentCharFormat(char)
+            self._update_active_format()
+            return True
+        if heading and e.key() == Qt.Key_Backspace and plain and cursor.atBlockStart():
+            # Backspace at the start of a heading makes it Body first.
+            self.set_heading(0)
+            return True
+        return False
 
     def _apply_active_format_to_cursor(self):
         """Apply the active formatting state to the current cursor position."""

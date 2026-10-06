@@ -50,3 +50,22 @@ def select(doc: QTextDocument, text: str, occurrence: int = 0):
     cursor.setPosition(start)
     cursor.setPosition(start + len(text), QTextCursor.MoveMode.KeepAnchor)
     return cursor
+
+
+def press(editor, key, modifiers=None, text: str = ""):
+    """One key press in ``editor``, as the keyboard sends it."""
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent
+    if modifiers is None:
+        modifiers = Qt.KeyboardModifier.NoModifier
+    editor.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, key, modifiers, text))
+
+
+def type_text(editor, text: str):
+    """Type ``text`` key by key; a newline is Return."""
+    from PySide6.QtCore import Qt
+    for ch in text:
+        if ch == "\n":
+            press(editor, Qt.Key.Key_Return)
+        else:
+            press(editor, 0, text=ch)

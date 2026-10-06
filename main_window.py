@@ -974,6 +974,7 @@ class MainWindow(QMainWindow):
             self.header_widget.bold_btn.setChecked(False)
             self.header_widget.italic_btn.setChecked(False)
             self.header_widget.underline_btn.setChecked(False)
+            self._update_style_checks(None)
             return
         cursor = ed.textCursor()
         if cursor.hasSelection():
@@ -988,7 +989,17 @@ class MainWindow(QMainWindow):
         self.header_widget.bold_btn.setChecked(bold)
         self.header_widget.italic_btn.setChecked(italic)
         self.header_widget.underline_btn.setChecked(underline)
+        self._update_style_checks(ed)
 
+    def _update_style_checks(self, ed) -> None:
+        """The Style menu checks the style of the paragraph at the caret
+        (none for a selection of mixed styles, or Heading 4 and lower,
+        which come from Markdown files)."""
+        if not hasattr(self, "act_styles"):
+            return
+        level = rich_text.heading_level(ed.textCursor()) if ed else -1
+        for index, action in enumerate(self.act_styles):
+            action.setChecked(index == level)
 
     # ----------------------------------------------------------------------
     # ACTIONS / MENU
@@ -1085,6 +1096,23 @@ class MainWindow(QMainWindow):
         self.act_reset_format = add(Command("format.reset", _("Clear Formatting"), FORMAT,
                                             "Ctrl+D", keywords=(_("plain"),)),
                                     triggered=self._reset_format)
+        # Paragraph styles. Option-Command-0 to 3 on a Mac, as in Pages and
+        # standup; Ctrl+0 to 3 elsewhere, because Ctrl+Alt is AltGr there
+        # and types characters (² and ³ on a German keyboard).
+        self._style_group = QActionGroup(self)
+        self._style_group.setExclusionPolicy(QActionGroup.ExclusionPolicy.ExclusiveOptional)
+        self.act_styles = []
+        for level, title, words in (
+                (0, _("Body"), (_("paragraph"), _("text"))),
+                (1, _("Heading 1"), (_("title"), "h1")),
+                (2, _("Heading 2"), (_("subtitle"), "h2")),
+                (3, _("Heading 3"), ("h3",))):
+            action = add(Command(f"format.style.{'body' if not level else f'h{level}'}", title,
+                                 FORMAT, platform_keys(f"Ctrl+Alt+{level}", f"Ctrl+{level}"),
+                                 checkable=True, keywords=words),
+                         triggered=lambda n=level: self._set_heading(n))
+            self._style_group.addAction(action)
+            self.act_styles.append(action)
         # Text colors stay in the document and in local files; Markdown
         # has none, so they never reach Nostr.
         self.act_colors = []
@@ -1125,7 +1153,7 @@ class MainWindow(QMainWindow):
         ]
         # Structure that only a document holding Markdown can carry
         # (headings, lists, links): off in plain-text tabs as well.
-        self._rich_actions = [self.act_strike, self.act_code]
+        self._rich_actions = [self.act_strike, self.act_code, *self.act_styles]
 
         self._search_matches = []
         self._current_match_index = -1
@@ -1313,6 +1341,10 @@ class MainWindow(QMainWindow):
         self.m_edit = m_edit
 
         m_format = self.menuBar().addMenu(_("F&ormat"))
+        self.m_style = m_format.addMenu(_("Style"))
+        for action in self.act_styles:
+            self.m_style.addAction(action)
+        m_format.addSeparator()
         m_format.addAction(self.act_bold)
         m_format.addAction(self.act_italic)
         m_format.addAction(self.act_underline)
@@ -3475,6 +3507,12 @@ class MainWindow(QMainWindow):
         if ed:
             ed.redo()
 
+    def _set_heading(self, level: int) -> None:
+        ed = self.current_editor()
+        if ed:
+            ed.set_heading(level)
+            self._update_format_buttons()
+
     def _toggle_style(self, style: str) -> None:
         ed = self.current_editor()
         if ed:
@@ -3587,6 +3625,7 @@ class MainWindow(QMainWindow):
             menu.addAction(action)
         menu.addMenu(self.m_color)
         menu.addSeparator()
+        menu.addMenu(self.m_style)
         menu.addAction(self.act_reset_format)
 
 

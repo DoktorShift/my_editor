@@ -214,3 +214,90 @@ def typing_format_without(fmt: QTextCharFormat) -> QTextCharFormat:
         if not (fmt.isAnchor() and prop in _LINK_LOOK):
             clean.clearProperty(prop)
     return clean
+
+
+# --------------------------------------------------------------------------- #
+# Paragraph styles: Body and Heading 1 to 3                                    #
+# --------------------------------------------------------------------------- #
+
+BODY = 0
+# How much larger a heading's text is, the way Qt's Markdown reader sizes
+# it (QTextCharFormat.FontSizeAdjustment): a document typed here and one
+# opened from a .md file look the same.
+HEADING_SIZE = {1: 3, 2: 2, 3: 1, 4: 0, 5: -1, 6: -1}
+
+
+def _blocks_of(cursor: QTextCursor):
+    """The blocks the cursor's selection touches (the caret's block
+    without one), in order. None for a null cursor (an editor's cursor is
+    one while its whole document is being replaced)."""
+    if cursor.isNull():
+        return []
+    doc = cursor.document()
+    block = doc.findBlock(cursor.selectionStart())
+    last = doc.findBlock(cursor.selectionEnd())
+    blocks = []
+    while block.isValid():
+        blocks.append(block)
+        if block == last:
+            break
+        block = block.next()
+    return blocks
+
+
+def heading_level(cursor: QTextCursor) -> int:
+    """The paragraph style under the cursor: 0 for Body, 1 to 6 for a
+    heading, -1 when the selection spans different ones."""
+    levels = {block.blockFormat().headingLevel() for block in _blocks_of(cursor)}
+    return levels.pop() if len(levels) == 1 else -1
+
+
+def heading_char_format(level: int) -> QTextCharFormat:
+    """The text format of a heading of ``level`` (merged into its text)."""
+    fmt = QTextCharFormat()
+    fmt.setProperty(QTextFormat.Property.FontSizeAdjustment, HEADING_SIZE.get(level, 0))
+    fmt.setFontWeight(QFont.Weight.Bold)
+    return fmt
+
+
+def body_char_format(fmt: QTextCharFormat) -> QTextCharFormat:
+    """``fmt`` as Body text: no heading size, no heading weight."""
+    body = QTextCharFormat(fmt)
+    body.clearProperty(QTextFormat.Property.FontSizeAdjustment)
+    body.clearProperty(QTextFormat.Property.FontWeight)
+    return body
+
+
+def set_heading(cursor: QTextCursor, level: int) -> None:
+    """Make the paragraphs under the cursor Body (0) or a heading of
+    ``level``, as one step on the undo stack. Choosing the style a
+    paragraph already has turns it back into Body, the way the toolbar's
+    heading buttons work in standup and Google Docs."""
+    if level and heading_level(cursor) == level:
+        level = BODY
+    doc = cursor.document()
+    edit = QTextCursor(doc)
+    edit.beginEditBlock()
+    for block in _blocks_of(cursor):
+        fmt = block.blockFormat()
+        fmt.setHeadingLevel(level)
+        whole = QTextCursor(block)
+        whole.setBlockFormat(fmt)
+        whole.movePosition(QTextCursor.MoveOperation.EndOfBlock,
+                           QTextCursor.MoveMode.KeepAnchor)
+        for start, end, char in (_text_runs(whole) if whole.hasSelection() else []):
+            piece = QTextCursor(doc)
+            piece.setPosition(start)
+            piece.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+            piece.setCharFormat(restyled(char, level))
+        # What is typed into the paragraph next (an empty one, or at its end).
+        whole.setBlockCharFormat(restyled(block.charFormat(), level))
+    edit.endEditBlock()
+
+
+def restyled(fmt: QTextCharFormat, level: int) -> QTextCharFormat:
+    """``fmt`` in the paragraph style ``level`` (0 for Body)."""
+    body = body_char_format(fmt)
+    if level:
+        body.merge(heading_char_format(level))
+    return body

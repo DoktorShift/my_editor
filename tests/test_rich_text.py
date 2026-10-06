@@ -29,7 +29,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 import rich_text  # noqa: E402
 from markdown_writer import READ_FEATURES, document_to_markdown  # noqa: E402
 from tests.rich_text_helpers import (  # noqa: E402
-    assert_round_trip, block_named, from_markdown, select,
+    assert_round_trip, block_named, from_markdown, press, select, type_text,
 )
 
 
@@ -142,3 +142,91 @@ def test_inline_code_shows_as_a_chip_that_is_not_in_the_document():
     # Only the screen shows it: nothing is saved or counted as formatting.
     assert not has_local_only_formatting(doc)
     assert document_to_markdown(doc) == "call `print` now\n"
+
+
+
+# -- paragraph styles -----------------------------------------------------------------
+
+@pytest.mark.parametrize("level, marks", [(1, "#"), (2, "##"), (3, "###")])
+def test_a_paragraph_becomes_a_heading_and_back(level, marks):
+    doc = from_markdown("Intro\n\nA title\n")
+    rich_text.set_heading(QTextCursor(block_named(doc, "A title")), level)
+    assert assert_round_trip(doc) == f"Intro\n\n{marks} A title\n"
+    block = block_named(doc, "A title")
+    fmt = block.begin().fragment().charFormat()
+    assert fmt.property(QTextFormat.Property.FontSizeAdjustment) == rich_text.HEADING_SIZE[level]
+    # The same style again is Body again.
+    rich_text.set_heading(QTextCursor(block), level)
+    assert document_to_markdown(doc) == "Intro\n\nA title\n"
+    assert not block.begin().fragment().charFormat().hasProperty(
+        QTextFormat.Property.FontSizeAdjustment)
+
+
+def test_a_typed_heading_looks_like_one_read_from_markdown():
+    typed = from_markdown("Title\n")
+    rich_text.set_heading(QTextCursor(typed), 2)
+    read = from_markdown("## Title\n")
+    one = typed.begin().begin().fragment().charFormat()
+    other = read.begin().begin().fragment().charFormat()
+    for prop in (QTextFormat.Property.FontSizeAdjustment, QTextFormat.Property.FontWeight):
+        assert one.property(prop) == other.property(prop)
+
+
+def test_mixed_paragraphs_have_no_single_style():
+    doc = from_markdown("# One\n\nTwo\n")
+    cursor = QTextCursor(doc)
+    cursor.select(QTextCursor.SelectionType.Document)
+    assert rich_text.heading_level(cursor) == -1
+    rich_text.set_heading(cursor, 2)
+    assert document_to_markdown(doc) == "## One\n\n## Two\n"
+
+
+def _editor_with(markdown: str):
+    from editor import HtmlEditor
+    ed = HtmlEditor()
+    ed.document().setMarkdown(markdown, READ_FEATURES)
+    return ed
+
+
+def test_return_after_a_heading_types_body_text():
+    ed = _editor_with("## Title\n")
+    ed.moveCursor(QTextCursor.MoveOperation.End)
+    type_text(ed, "\nPlain words")
+    assert document_to_markdown(ed.document()) == "## Title\n\nPlain words\n"
+    fmt = block_named(ed.document(), "Plain words").begin().fragment().charFormat()
+    assert fmt.fontWeight() == 400
+    assert not fmt.hasProperty(QTextFormat.Property.FontSizeAdjustment)
+
+
+def test_return_inside_a_heading_splits_it_into_two():
+    ed = _editor_with("## Title words\n")
+    cursor = ed.textCursor()
+    cursor.setPosition(6)
+    ed.setTextCursor(cursor)
+    type_text(ed, "\n")
+    assert document_to_markdown(ed.document()) == "## Title\n\n## words\n"
+
+
+def test_backspace_at_the_start_of_a_heading_makes_it_body():
+    from PySide6.QtCore import Qt
+    ed = _editor_with("Intro\n\n## Title\n")
+    ed.setTextCursor(QTextCursor(block_named(ed.document(), "Title")))
+    press(ed, Qt.Key.Key_Backspace)
+    assert document_to_markdown(ed.document()) == "Intro\n\nTitle\n"
+    press(ed, Qt.Key.Key_Backspace)                  # now an ordinary Backspace
+    assert document_to_markdown(ed.document()) == "IntroTitle\n"
+
+
+def test_setting_a_heading_with_the_caret_styles_what_is_typed():
+    from editor import HtmlEditor
+    ed = HtmlEditor()
+    ed.set_heading(1)
+    type_text(ed, "Big\nsmall")
+    assert document_to_markdown(ed.document()) == "# Big\n\nsmall\n"
+
+
+
+def test_a_null_cursor_has_no_style():
+    # An editor's cursor is null while setHtml replaces its document, and
+    # the window asks for the style at the caret right then.
+    assert rich_text.heading_level(QTextCursor()) == -1

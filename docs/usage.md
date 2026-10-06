@@ -27,8 +27,10 @@ On macOS, `Ctrl` in these tables is the Command key (`⌘`) and `Alt` is Option 
 | `Ctrl+Shift+X` | Strikethrough |
 | | Inline Code (`Format` menu) |
 | `Ctrl+D` | Clear Formatting (a link stays a link) |
+| `Ctrl+Alt+0` (`Ctrl+0` on Windows and Linux) | Style: Body |
+| `Ctrl+Alt+1` to `Ctrl+Alt+3` (`Ctrl+1` to `Ctrl+3`) | Style: Heading 1 to 3 (the same heading again makes it Body) |
 
-Strikethrough and inline code are Markdown, so they are offered in documents that can hold Markdown structure (Markdown, HTML and new documents), not in plain-text and code files. Text colors are in `Format > Color`.
+Return at the end of a heading starts a Body paragraph; Backspace at the start of a heading makes it Body. Strikethrough, inline code and the paragraph styles are Markdown, so they are offered in documents that can hold Markdown structure (Markdown, HTML and new documents), not in plain-text and code files. Text colors are in `Format > Color`.
 
 ### Edit
 
