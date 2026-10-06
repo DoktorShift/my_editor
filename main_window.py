@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 
+import bisect
 import hashlib
 import itertools
 import os
@@ -3441,12 +3442,11 @@ class MainWindow(QMainWindow):
             self._find_refresh.stop()          # found again right here
             self._update_search_matches(needle)
             self._last_search_text = needle
-            following = [i for i, (start, _e) in enumerate(self._search_matches) if start >= end]
-            self._current_match_index = (following[0] if following else 0) - 1
             if not self._search_matches:
                 self._highlight_all_matches()
                 self._update_match_display()
                 return
+        # The next match after the caret (after the replacement).
         self._find_once(True)
 
     def _replace_all(self):
@@ -3779,22 +3779,21 @@ class MainWindow(QMainWindow):
             self.findbar.set_match_info(_("No matches"))
             return
 
-        wrapped = False
-        total = len(self._search_matches)
-        if forward:
-            if self._current_match_index == -1:
-                self._current_match_index = 0
-            else:
-                next_idx = (self._current_match_index + 1) % total
-                wrapped = (next_idx == 0)
-                self._current_match_index = next_idx
+        matches = self._search_matches
+        total = len(matches)
+        cursor = ed.textCursor()
+        selected = (cursor.selectionStart(), cursor.selectionEnd())
+        index = self._current_match_index
+        if 0 <= index < total and matches[index] == selected:
+            # On a match: the one after it (before it, going back).
+            index = index + 1 if forward else index - 1
+        elif forward:
+            # Anywhere else: from the caret, the way every editor searches.
+            index = bisect.bisect_left(matches, selected[1], key=lambda match: match[0])
         else:
-            if self._current_match_index == -1:
-                self._current_match_index = total - 1
-            else:
-                prev_idx = (self._current_match_index - 1) % total
-                wrapped = (prev_idx == total - 1)
-                self._current_match_index = prev_idx
+            index = bisect.bisect_right(matches, selected[0], key=lambda match: match[1]) - 1
+        wrapped = not 0 <= index < total
+        self._current_match_index = index % total
 
         if 0 <= self._current_match_index < len(self._search_matches):
             start_pos, end_pos = self._search_matches[self._current_match_index]

@@ -231,7 +231,7 @@ def test_find_and_replace_in_the_window(tmp_path):
     assert r["after_all"] == "one cat, two cat, red cat"
     assert r["replaced"] == "2 replaced"
     assert r["undone"] == "one cat, two fish, red fish"
-    assert r["refreshed"] in ("3 matches", "1 of 3")
+    assert r["refreshed"] == "3 matches"           # found again; no match selected
     assert r["replace_row_kept"]          # Find while the row is open keeps it
     assert r["closed"]
 
@@ -295,3 +295,77 @@ def test_replace_all_stays_quick_with_thousands_of_matches(tmp_path):
     assert r["undo"] < 1.0, r
     assert 0 < len(r["painted_after_scroll"]) < 400       # scrolled: what is on screen now
     assert all(r["painted_after_scroll"])
+
+
+
+CARET_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtGui import QTextCursor
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+
+w = main_window.MainWindow()
+w.show()
+ed = w.new_tab()
+ed.insertPlainText("fish A, fish B, fish C, fish D")
+w._show_find(replace=True)
+w.findbar.edit.setText("fish")
+
+
+def caret_after(text):
+    cursor = ed.textCursor()
+    cursor.setPosition(ed.toPlainText().index(text) + len(text))
+    ed.setTextCursor(cursor)
+
+
+def selected():
+    return ed.textCursor().selectedText() + "|" + ed.toPlainText()[
+        ed.textCursor().selectionEnd():ed.textCursor().selectionEnd() + 2]
+
+
+r = {}
+caret_after("fish B")
+w._find_next()
+r["next"] = selected()
+caret_after("fish B")
+ed.insertPlainText("!")
+QTest.qWait(400)                         # the matches are found again
+w._find_next()
+r["after_edit"] = selected()
+caret_after("fish C")
+w._find_prev()
+r["previous"] = selected()
+caret_after("fish C")
+w.findbar.replace_edit.setText("cat")
+w._replace_current()
+r["replace_selects"] = selected()
+r["unchanged"] = ed.toPlainText()
+w._replace_current()
+r["replaced"] = ed.toPlainText()
+ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_find_next_and_replace_go_on_from_the_caret(tmp_path):
+    # Review M1: they went back to the first match after any edit.
+    import json
+    import subprocess
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env = dict(os.environ, HOME=str(tmp_path), QT_QPA_PLATFORM="offscreen")
+    proc = subprocess.run([sys.executable, "-c", CARET_SCRIPT, repo], env=env,
+                          capture_output=True, text=True, timeout=120)
+    line = next((l for l in proc.stdout.splitlines() if l.startswith("RESULT ")), None)
+    assert line, f"child failed:\n{proc.stdout}\n{proc.stderr}"
+    r = json.loads(line[len("RESULT "):])
+    assert r["next"] == "fish| C"                       # the one after "fish B": fish C
+    assert r["after_edit"] == "fish| C"
+    assert r["previous"] == "fish| C"                   # back from after "fish C": fish C
+    assert r["replace_selects"] == "fish| D"            # Replace first finds the next one
+    assert r["unchanged"] == "fish A, fish B!, fish C, fish D"
+    assert r["replaced"] == "fish A, fish B!, fish C, cat D"
