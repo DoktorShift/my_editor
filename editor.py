@@ -1112,7 +1112,7 @@ class HtmlEditor(QTextEdit):
             fmt = block.blockFormat()
             if cursor.atBlockEnd():
                 fmt = rich_text.heading_block_format(fmt, 0)
-                char = rich_text.body_char_format(cursor.charFormat())
+                char = rich_text.body_char_format(cursor.charFormat(), own_weight=False)
             else:
                 char = cursor.charFormat()
             cursor.insertBlock(fmt, char)

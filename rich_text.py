@@ -316,11 +316,24 @@ def heading_char_format(level: int) -> QTextCharFormat:
     return fmt
 
 
-def body_char_format(fmt: QTextCharFormat) -> QTextCharFormat:
-    """``fmt`` as Body text: no heading size, no heading weight."""
+# The weight words had of their own before their paragraph became a
+# heading, which sets every word in its bold: given back when the
+# paragraph is Body again, so bold words stay bold (0: none of their own).
+OWN_WEIGHT = QTextFormat.Property.UserProperty + 0x3D1
+
+
+def body_char_format(fmt: QTextCharFormat, *, own_weight: bool = True) -> QTextCharFormat:
+    """``fmt`` as Body text: no heading size, no heading weight, and the
+    weight the words had of their own (unless ``own_weight`` is False:
+    what is typed next starts in the plain weight)."""
     body = QTextCharFormat(fmt)
     body.clearProperty(QTextFormat.Property.FontSizeAdjustment)
-    body.clearProperty(QTextFormat.Property.FontWeight)
+    own = body.property(OWN_WEIGHT) if own_weight else None
+    if isinstance(own, int) and not isinstance(own, bool) and own > 0:
+        body.setFontWeight(own)
+    else:
+        body.clearProperty(QTextFormat.Property.FontWeight)
+    body.clearProperty(OWN_WEIGHT)
     return body
 
 
@@ -341,13 +354,23 @@ def set_heading(cursor: QTextCursor, level: int) -> None:
     """Make the paragraphs under the cursor Body (0) or a heading of
     ``level``, as one step on the undo stack. Choosing the style a
     paragraph already has turns it back into Body, the way the toolbar's
-    heading buttons work in standup and Google Docs."""
+    heading buttons work in standup and Google Docs.
+
+    A heading is a paragraph of its own: a list item or a quoted line
+    made a heading leaves its list or quote (Markdown readers drop the
+    quote of a quoted heading, and a heading inside a list is no heading
+    to them)."""
     if level and heading_level(cursor) == level:
         level = BODY
     doc = cursor.document()
     edit = QTextCursor(doc)
     edit.beginEditBlock()
     for block in _blocks_of(cursor):
+        if level:
+            if block.textList() is not None:
+                leave_list(block)
+            if quote_depth(block):
+                set_quote_depth(block, 0)
         fmt = heading_block_format(block.blockFormat(), level)
         whole = QTextCursor(block)
         whole.setBlockFormat(fmt)
@@ -364,11 +387,18 @@ def set_heading(cursor: QTextCursor, level: int) -> None:
 
 
 def restyled(fmt: QTextCharFormat, level: int) -> QTextCharFormat:
-    """``fmt`` in the paragraph style ``level`` (0 for Body)."""
-    body = body_char_format(fmt)
-    if level:
-        body.merge(heading_char_format(level))
-    return body
+    """``fmt`` in the paragraph style ``level`` (0 for Body). Words that
+    become heading words keep note of their own weight (OWN_WEIGHT)."""
+    if not level:
+        return body_char_format(fmt)
+    heading = QTextCharFormat(fmt)
+    if not heading.hasProperty(OWN_WEIGHT):
+        own = fmt.fontWeight() if fmt.hasProperty(QTextFormat.Property.FontWeight) else 0
+        heading.setProperty(OWN_WEIGHT, int(own))
+    heading.clearProperty(QTextFormat.Property.FontSizeAdjustment)
+    heading.clearProperty(QTextFormat.Property.FontWeight)
+    heading.merge(heading_char_format(level))
+    return heading
 
 
 # --------------------------------------------------------------------------- #
@@ -636,7 +666,9 @@ def paragraph_state(cursor: QTextCursor, *, budget: int = STATE_BUDGET) -> Parag
 
 def toggle_quote(cursor: QTextCursor) -> None:
     """Quote the paragraphs under the cursor, or, when all of them are
-    quoted already, take the quote away. One step on the undo stack."""
+    quoted already, take the quote away. One step on the undo stack. A
+    heading quoted becomes Body first: Markdown readers drop the quote of
+    a quoted heading."""
     blocks = _blocks_of(cursor)
     if not blocks:
         return
@@ -647,6 +679,8 @@ def toggle_quote(cursor: QTextCursor) -> None:
         if unquote:
             set_quote_depth(block, 0)
         elif not quote_depth(block) and not is_divider(block):
+            if block.blockFormat().headingLevel():
+                set_heading(QTextCursor(block), BODY)
             set_quote_depth(block, 1)
     edit.endEditBlock()
 

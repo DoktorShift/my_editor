@@ -162,6 +162,51 @@ def test_a_paragraph_becomes_a_heading_and_back(level, marks):
         QTextFormat.Property.FontSizeAdjustment)
 
 
+def test_bold_words_stay_bold_through_a_heading_and_back():
+    # Review F8 (early range): Body, Heading, Body wiped the bold.
+    doc = from_markdown("This is **important** text\n")
+    cursor = QTextCursor(doc.begin())
+    rich_text.set_heading(cursor, 1)
+    assert document_to_markdown(doc) == "# This is important text\n"
+    rich_text.set_heading(cursor, 2)                      # another heading on the way
+    rich_text.set_heading(cursor, 0)
+    assert assert_round_trip(doc) == "This is **important** text\n"
+
+
+def test_return_after_a_heading_that_was_bold_types_plain_words():
+    ed = _editor_with("This is **important**\n")
+    ed.set_heading(1)
+    ed.moveCursor(QTextCursor.MoveOperation.End)
+    type_text(ed, "\nnext")
+    assert document_to_markdown(ed.document()) == "# This is important\n\nnext\n"
+
+
+@pytest.mark.parametrize("first", ["heading", "quote"])
+def test_a_heading_is_never_quoted(first):
+    # Review F5 (early range): "> # Title" is a quote readers drop, and the
+    # file opened as source.
+    from markdown_writer import holds_faithfully
+    doc = from_markdown("Title\n\nBody\n")
+    cursor = QTextCursor(doc.begin())
+    if first == "heading":
+        rich_text.set_heading(cursor, 1)
+        rich_text.toggle_quote(cursor)
+        expected = "> Title\n\nBody\n"
+    else:
+        rich_text.toggle_quote(cursor)
+        rich_text.set_heading(cursor, 1)
+        expected = "# Title\n\nBody\n"
+    markdown = assert_round_trip(doc)
+    assert markdown == expected and holds_faithfully(markdown)
+
+
+def test_a_list_item_made_a_heading_leaves_the_list():
+    # Review F7 (early range): it showed as a heading and was saved bold.
+    doc = from_markdown("- Item one\n- Item two\n")
+    rich_text.set_heading(QTextCursor(block_named(doc, "Item one")), 2)
+    assert assert_round_trip(doc) == "## Item one\n\n- Item two\n"
+
+
 def test_a_typed_heading_looks_like_one_read_from_markdown():
     typed = from_markdown("Title\n")
     rich_text.set_heading(QTextCursor(typed), 2)
