@@ -137,7 +137,7 @@ def _published_to(job_class, **kwargs):
 
 def _read_from():
     relay_pool = MagicMock()
-    sync = DraftSync(relay_pool=relay_pool, relay_directory=_directory(),
+    sync = DraftSync(read_draft_list=lambda _profile, done: done([]), relay_pool=relay_pool, relay_directory=_directory(),
                      session_pool=_signer(), store=DraftStore(),
                      entitled_relays=lambda: [MEMBER_RELAY])
     sync.start_for(_profile())

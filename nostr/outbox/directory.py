@@ -100,6 +100,17 @@ class RelayDirectory(QObject):
         # author -> {relay: id of the relay list sent there}, so a list is
         # shared with a relay once, not with every note that reaches it.
         self._shared: Dict[str, Dict[str, str]] = {}
+        # author -> the relays the account keeps its drafts on (NIP-37 kind
+        # 10013, decrypted; empty: it has no such list). Absent: not known.
+        self._draft_lists: Dict[str, List[str]] = {}
+        # author -> what waits for the draft list being read right now, and
+        # until when it waits. One timer serves every wait: a timer per wait,
+        # connected to a closure over this object, could outlive or destroy it.
+        self._draft_waiting: Dict[str, List[Callable[[], None]]] = {}
+        self._draft_deadlines: Dict[str, float] = {}
+        self._draft_timer = QTimer(self)
+        self._draft_timer.setSingleShot(True)
+        self._draft_timer.timeout.connect(self._draft_waits_ran_out)
         self._load()
 
     # ------------------------------------------------------------------ #
@@ -234,6 +245,74 @@ class RelayDirectory(QObject):
         ``reading`` read from (policy.private_relays)."""
         self.lookup(author, lambda relay_list: on_done(policy.private_relays(
             relay_list, entitled=entitled, legacy=legacy, reading=reading)))
+
+    # -- drafts ------------------------------------------------------------
+
+    def expect_draft_relays(self, author: str, *, timeout_ms: int = 15_000) -> None:
+        """The account's draft list is being read: ``draft_relays`` waits
+        for it (at most ``timeout_ms``), so no draft is saved where the
+        person did not want it in the moments after starting up."""
+        key = (author or "").lower()
+        if key in self._draft_waiting:
+            return
+        self._draft_waiting[key] = []
+        self._draft_deadlines[key] = self._clock() + timeout_ms / 1000
+        self._arm_draft_timer()
+
+    def set_draft_relays(self, author: str, relays: Optional[Sequence[str]]) -> None:
+        """What reading the account's draft list found: its relays, an
+        empty list for none, or None when it could not be read. None keeps
+        what was known before, so an unreachable signer never moves drafts
+        to relays the person did not choose."""
+        key = (author or "").lower()
+        if relays is not None:
+            chosen = policy.dedupe_relays(relays, cap=defaults.PRIVATE_CAP)
+            if self._draft_lists.get(key) != chosen:
+                self._draft_lists[key] = chosen
+                if self._is_own(key):
+                    self._save()
+                self.changed.emit(key)
+        self._settle_drafts(key)
+
+    def draft_relays_of(self, author: str) -> Optional[List[str]]:
+        """The account's draft relays as known now, [] for none, None when
+        not known."""
+        known = self._draft_lists.get((author or "").lower())
+        return list(known) if known is not None else None
+
+    def draft_relays(self, author: str, on_done: Callable[[List[str]], None], *,
+                     entitled: Sequence[str] = (), legacy: Sequence[str] = (),
+                     reading: bool = False) -> None:
+        """Where the author's drafts are written, or with ``reading`` read
+        from (policy.draft_relays)."""
+        key = (author or "").lower()
+        if key in self._draft_waiting:
+            self._draft_waiting[key].append(lambda: self.draft_relays(
+                key, on_done, entitled=entitled, legacy=legacy, reading=reading))
+            return
+        self.lookup(key, lambda relay_list: on_done(policy.draft_relays(
+            relay_list, self._draft_lists.get(key, ()), entitled=entitled,
+            legacy=legacy, reading=reading)))
+
+    def _settle_drafts(self, key: str) -> None:
+        self._draft_deadlines.pop(key, None)
+        waiting = self._draft_waiting.pop(key, [])
+        self._arm_draft_timer()
+        for resume in waiting:
+            resume()
+
+    def _draft_waits_ran_out(self) -> None:
+        now = self._clock()
+        for key in [k for k, until in self._draft_deadlines.items() if until <= now]:
+            self._settle_drafts(key)
+        self._arm_draft_timer()
+
+    def _arm_draft_timer(self) -> None:
+        if not self._draft_deadlines:
+            self._draft_timer.stop()
+            return
+        wait = max(0.0, min(self._draft_deadlines.values()) - self._clock())
+        self._draft_timer.start(int(wait * 1000))
 
     def outbox_of(self, author: str, on_done: Callable[[List[str]], None], *,
                   hints: Sequence[str] = ()) -> None:
@@ -418,6 +497,11 @@ class RelayDirectory(QObject):
                 relay_list = policy.parse_relay_list(event)
                 relay_list.fetched_at = float("-inf")   # known, but due for a refresh
                 self._entries[str(event["pubkey"]).lower()] = relay_list
+        drafts = data.get("drafts") if isinstance(data, dict) else None
+        for author, relays in (drafts.items() if isinstance(drafts, dict) else ()):
+            if isinstance(author, str) and isinstance(relays, list):
+                self._draft_lists[author.lower()] = policy.dedupe_relays(
+                    [r for r in relays if isinstance(r, str)], cap=defaults.PRIVATE_CAP)
 
     def _save(self) -> None:
         if self._store_path is None:
@@ -425,8 +509,10 @@ class RelayDirectory(QObject):
         own = self._own_keys()
         lists = {k: e.event for k, e in self._entries.items()
                  if k in own and e.found and e.event is not None}
+        drafts = {k: v for k, v in self._draft_lists.items() if k in own}
         try:
-            write_text(self._store_path, json.dumps({"version": 1, "lists": lists}))
+            write_text(self._store_path,
+                       json.dumps({"version": 1, "lists": lists, "drafts": drafts}))
         except (OSError, TypeError, ValueError) as exc:
             # The lists are still known for this session; only the head
             # start on the next launch is lost.
@@ -436,6 +522,17 @@ class RelayDirectory(QObject):
 def _copy(relay_list: RelayList) -> RelayList:
     """A RelayList nobody else holds, event and all."""
     return copy.deepcopy(relay_list)
+
+
+def ask_draft_relays(directory, profile, on_done: Callable[[List[str]], None], *,
+                     entitled=(), reading: bool = False) -> None:
+    """Where ``profile``'s drafts are written, or with ``reading`` read
+    from: the account's own draft relays when it has chosen some (NIP-37),
+    otherwise wherever its private records live (``ask_private_relays``)."""
+    directory.draft_relays(profile.user_pubkey, on_done,
+                           entitled=policy.relays_from(entitled),
+                           legacy=list(getattr(profile, "bunker_relays", None) or ()),
+                           reading=reading)
 
 
 def ask_private_relays(directory, profile, on_done: Callable[[List[str]], None], *,

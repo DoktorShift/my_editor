@@ -56,7 +56,7 @@ from .drafts import (
 )
 from .draft_deletions import build_deletion_request
 from .events import build_event, verify_event
-from .outbox import RelayDirectory, ask_private_relays, normalize_relay_url
+from .outbox import RelayDirectory, ask_draft_relays, normalize_relay_url
 from .outbox.lookup import fetch_replaceable
 from .profiles import Profile
 from .relay import RelayPool
@@ -768,8 +768,8 @@ class DraftPublishJob(QObject):
         if self._inner_event is None:
             raise ValueError("no inner event to stash")
         self._emit_status(_("Looking up your relay list…"))
-        ask_private_relays(self._relay_directory, self._profile,
-                           self._on_relays_ready, entitled=self._entitled_relays)
+        ask_draft_relays(self._relay_directory, self._profile,
+                         self._on_relays_ready, entitled=self._entitled_relays)
 
     def send_signed(self, signed_event: dict) -> None:
         """Send a wrap signed earlier (by :attr:`signed`) as it is: no
@@ -786,7 +786,7 @@ class DraftPublishJob(QObject):
                 or not verify_event(signed_event)):
             raise ValueError("not a signed draft of this account and identifier")
         self._emit_status(_("Looking up your relay list…"))
-        ask_private_relays(
+        ask_draft_relays(
             self._relay_directory, self._profile,
             lambda relays: self._on_signed(signed_event, relays, checkpoint=False),
             entitled=self._entitled_relays)
@@ -984,9 +984,9 @@ class DraftDeleteJob(QObject):
         self._emit_status(_("Looking up your relay list…"))
         # Wherever the draft may be, including the relays it went to while
         # the account's own list was unknown: the tombstone replaces it there.
-        ask_private_relays(self._relay_directory, self._profile,
-                           self._on_relays_ready, entitled=self._entitled_relays,
-                           reading=True)
+        ask_draft_relays(self._relay_directory, self._profile,
+                         self._on_relays_ready, entitled=self._entitled_relays,
+                         reading=True)
 
     def cancel(self) -> None:
         self._cancelled = True

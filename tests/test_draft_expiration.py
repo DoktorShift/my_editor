@@ -33,7 +33,7 @@ def wrap(identifier="d1", *, created_at=NOW - 100, expiration=None, content="ct"
 def sync_with_store():
     store = DraftStore(clock=lambda: NOW)
     store.bind_profile(PK)
-    sync = DraftSync(relay_pool=MagicMock(), relay_directory=MagicMock(),
+    sync = DraftSync(read_draft_list=lambda _profile, done: done([]), relay_pool=MagicMock(), relay_directory=MagicMock(),
                      session_pool=MagicMock(), store=store, clock=lambda: NOW)
     profile = MagicMock()
     profile.user_pubkey = PK
