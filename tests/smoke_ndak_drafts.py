@@ -17,6 +17,7 @@ draft into a tab, Ctrl+S, the conflict banner) are in smoke_ndak_app.py.
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import sys
@@ -34,6 +35,13 @@ from nostr.drafts import (DEFAULT_EXPIRATION_SECONDS, build_draft_wrap,  # noqa:
                           build_inner_event, build_tombstone_wrap, new_note_identifier,
                           serialize_inner_event)
 from nostr.publisher import DraftBulkDeleteJob, DraftDeleteJob, DraftPublishJob  # noqa: E402
+
+# Since the owner's decision D-3 only imported drafts expire: a draft written
+# in the editor, and a deletion, carry no expiration. Older builds gave every
+# draft and deletion 90 days. The harness checks what the build under test
+# promises, read from build_draft_wrap's default.
+EDITOR_DRAFTS_EXPIRE = inspect.signature(build_draft_wrap).parameters[
+    "expiration_seconds"].default is not None
 from nostr.ui.account_windows import local_profile  # noqa: E402
 
 RNOSTR, NRS, STRFRY, OBELISK, KHATRU = nd.RNOSTR, nd.NRS, nd.STRFRY, nd.OBELISK, nd.KHATRU
@@ -95,11 +103,16 @@ def nak_open(wrap):
 def review_wrap(label, wrap, inner_kind, inner):
     nd.review_event(rep, label, wrap, kind=31234)
     t = [x[0] for x in wrap["tags"]]
-    rep.check(f"{label}: NIP-37 tags d and k, NIP-40 expiration 90 days, client",
-              t == ["d", "k", "expiration", "client"]
-              and nd.tag_values(wrap, "k") == [str(inner_kind)]
-              and int(nd.tag_values(wrap, "expiration")[0]) - wrap["created_at"]
-              == DEFAULT_EXPIRATION_SECONDS == 90 * 86400, json.dumps(wrap["tags"]))
+    if EDITOR_DRAFTS_EXPIRE:
+        rep.check(f"{label}: NIP-37 tags d and k, NIP-40 expiration 90 days, client",
+                  t == ["d", "k", "expiration", "client"]
+                  and nd.tag_values(wrap, "k") == [str(inner_kind)]
+                  and int(nd.tag_values(wrap, "expiration")[0]) - wrap["created_at"]
+                  == DEFAULT_EXPIRATION_SECONDS == 90 * 86400, json.dumps(wrap["tags"]))
+    else:
+        rep.check(f"{label}: NIP-37 tags d and k, client, and no expiration (written here: D-3)",
+                  t == ["d", "k", "client"] and nd.tag_values(wrap, "k") == [str(inner_kind)],
+                  json.dumps(wrap["tags"]))
     opened = nak_open(wrap)
     rep.check(f"{label}: nak decrypts the content (NIP-44 to self) to the unsigned draft event",
               opened is not None and opened.get("kind") == inner_kind
@@ -164,8 +177,13 @@ if rn and ra:
     rep.check("the article's body, title and summary are right",
               ra.content == art_inner["content"] and ra.title == "A Draft Article"
               and ["summary", "drafted live"] in ra.inner_tags, repr(ra.title))
-    rep.check("the expiration is known on the record",
-              ra.expiration == int(nd.tag_values(art_wrap, "expiration")[0]), str(ra.expiration))
+    if EDITOR_DRAFTS_EXPIRE:
+        rep.check("the expiration is known on the record",
+                  ra.expiration == int(nd.tag_values(art_wrap, "expiration")[0]),
+                  str(ra.expiration))
+    else:
+        rep.check("the record knows the draft never expires", ra.expiration is None,
+                  str(ra.expiration))
 nd.wait_until(lambda: not B.store.is_loading, 10_000)
 rep.check("device B finished loading (all read relays answered)", not B.store.is_loading,
           B.status.last[0] if B.status.fired else "")
@@ -282,7 +300,8 @@ nd.wait_until(lambda: box)
 # Saved 100 days ago, so its 90-day expiration passed 10 days ago.
 expired = build_draft_wrap(identifier=exp_id, inner_kind=1, encrypted_content=box["c"],
                            pubkey_hex=pk, client_name="MyEditor",
-                           created_at=int(time.time()) - 100 * 86400)
+                           created_at=int(time.time()) - 100 * 86400,
+                           expiration_seconds=90 * 86400)
 expired_signed = a.sign(alice, expired)
 accepted = a.publish_raw([RNOSTR, NRS, STRFRY], expired_signed)
 served = {r for r in (RNOSTR, NRS, STRFRY) if nd.nak_req([r], ids=[expired_signed["id"]])}
@@ -316,9 +335,17 @@ tomb = wrap_on_relays(note_id)
 if rep.check("the deletion is an empty replacement on the relays (NIP-37, not NIP-09)",
              tomb is not None and tomb["id"] == res.get("eid") and tomb["content"] == ""):
     nd.review_event(rep, "draft deletion", tomb, kind=31234)
-    rep.check("the deletion keeps d and k, with a fresh 90-day expiration",
-              [x[0] for x in tomb["tags"]] == ["d", "k", "expiration", "client"]
-              and nd.tag_values(tomb, "d") == [note_id] and nd.tag_values(tomb, "k") == ["1"])
+    if EDITOR_DRAFTS_EXPIRE:
+        rep.check("the deletion keeps d and k, with a fresh 90-day expiration",
+                  [x[0] for x in tomb["tags"]] == ["d", "k", "expiration", "client"]
+                  and nd.tag_values(tomb, "d") == [note_id] and nd.tag_values(tomb, "k") == ["1"])
+    else:
+        # An expiring deletion would let a lagging relay's copy of the draft
+        # come back once it lapsed.
+        rep.check("the deletion keeps d and k and never expires",
+                  [x[0] for x in tomb["tags"]] == ["d", "k", "client"]
+                  and nd.tag_values(tomb, "d") == [note_id] and nd.tag_values(tomb, "k") == ["1"],
+                  json.dumps(tomb["tags"]))
     where = {r for r, ok in nd.presence(tomb["id"]).items() if ok}
     rep.check("the deletion goes wherever drafts are read (own relays plus the fallback set)",
               where == {RNOSTR, NRS, STRFRY}, ", ".join(sorted(nd.RELAY_NAMES[r] for r in where)))
