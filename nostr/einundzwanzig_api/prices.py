@@ -15,6 +15,9 @@ name attached (mempool.space sees the computer's address, as any web
 request does). When it cannot be reached, the window shows the
 association's amount alone.
 
+Amounts are written the way the app's language writes numbers:
+``21,000 sats`` in English, ``21.000 Sats`` in German.
+
 :func:`parse_prices`, :func:`fee_amounts` and :func:`format_fee` are pure;
 :class:`PriceLookup` is the one network call.
 """
@@ -26,8 +29,11 @@ import math
 from dataclasses import dataclass
 from typing import Any, Callable, List, Optional, Tuple
 
-from PySide6.QtCore import QObject, QTimer, QUrl
+from PySide6.QtCore import QLocale, QObject, QTimer, QUrl
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
+
+import i18n
+from i18n import _
 
 PRICES_URL: str = "https://mempool.space/api/v1/prices"
 PRICES_TIMEOUT_MS: int = 8_000
@@ -113,18 +119,30 @@ def _round_sats(value: float, exact: bool) -> int:
     return int(round(value / 100.0)) * 100 if value >= 1000 else int(round(value))
 
 
+def display_locale() -> QLocale:
+    """The language's way of writing numbers and dates. The pseudo
+    language writes them as English does."""
+    language = i18n.language()
+    return QLocale(i18n.ENGLISH if language == i18n.PSEUDO else language)
+
+
+def format_number(value: float, decimals: int = 0) -> str:
+    """``21,000`` in English, ``21.000`` in German."""
+    return display_locale().toString(float(value), "f", decimals)
+
+
 def format_one(currency: str, amount: float, exact: bool = True) -> str:
     """``21,000 sats``, ``21 CHF`` or ``about 22 EUR``."""
     unit = _currency(currency)
     if unit == SATS:
-        text = f"{_round_sats(amount, exact):,} sats"
+        text = _("{amount} sats").format(amount=format_number(_round_sats(amount, exact)))
     elif exact and float(amount).is_integer():
-        text = f"{int(amount):,} {unit}".strip()
+        text = f"{format_number(amount)} {unit}".strip()
     elif not exact and amount >= 1:
-        text = f"{int(round(amount)):,} {unit}".strip()
+        text = f"{format_number(round(amount))} {unit}".strip()
     else:
-        text = f"{amount:,.2f} {unit}".strip()
-    return text if exact else f"about {text}"
+        text = f"{format_number(amount, 2)} {unit}".strip()
+    return text if exact else _("about {amount}").format(amount=text)
 
 
 def format_fee(amount: float, currency: str, prices: Optional[Prices]) -> Tuple[str, str]:

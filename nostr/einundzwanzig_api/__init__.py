@@ -54,7 +54,8 @@ public name, so ``nostr.einundzwanzig_api`` is imported as before:
 - ``client``: :class:`MembershipApi`, the service and upstream addresses,
   and the signer adapter;
 - ``watcher``: :class:`PaymentWatcher`;
-- ``prices``: the fee in sats, CHF and EUR, and :class:`PriceLookup`.
+- ``prices``: the fee in sats, CHF and EUR, numbers written the way the
+  app's language writes them, and :class:`PriceLookup`.
 """
 
 from .bolt11 import bolt11_amount_sats
@@ -118,8 +119,10 @@ from .prices import (
     SATS,
     PriceLookup,
     Prices,
+    display_locale,
     fee_amounts,
     format_fee,
+    format_number,
     format_one,
     parse_prices,
 )
@@ -136,8 +139,9 @@ __all__ = [
     "ApiError", "CurrentYear", "Erasure", "ErrorCode", "FeeEntry", "Invoice",
     "MembershipApi", "MembershipConfig", "MembershipExport", "MembershipStatus",
     "PaymentWatcher", "PriceLookup", "Prices", "SignFn",
-    "application_text_problem", "bolt11_amount_sats", "email_problem", "fee_amounts",
-    "field_message", "format_fee", "format_one", "handle_field_message", "humanize",
+    "application_text_problem", "bolt11_amount_sats", "display_locale", "email_problem",
+    "fee_amounts", "field_message", "format_fee", "format_number", "format_one",
+    "handle_field_message", "humanize",
     "nip05_handle_problem", "parse_config",
     "parse_erasure", "parse_export", "parse_fee_entry", "parse_invoice",
     "parse_membership", "parse_payments", "parse_prices", "parse_retry_after", "service_url",

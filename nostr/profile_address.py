@@ -30,6 +30,7 @@ from typing import Callable, Optional
 
 from PySide6.QtCore import QObject, Signal
 
+from i18n import _
 from nostr.outbox import writer as outbox_writer
 from nostr.outbox.lookup import fetch_replaceable
 
@@ -43,13 +44,13 @@ FAILED = "failed"
 DONE = frozenset({SHOWN, ALREADY})
 
 _MESSAGES = {
-    SHOWN: "Your profile shows it now.",
-    ALREADY: "Your profile already shows it.",
-    NO_PROFILE: ("MyEditor couldn’t find your profile, so nothing was changed. "
-                 "Try again later."),
-    UNREADABLE: ("MyEditor couldn’t read your profile right now, so nothing was "
-                 "changed. Try again later."),
-    FAILED: "Your profile wasn’t changed. Try again in a moment.",
+    SHOWN: _("Your profile shows it now."),
+    ALREADY: _("Your profile already shows it."),
+    NO_PROFILE: _("MyEditor couldn’t find your profile, so nothing was changed. "
+                  "Try again later."),
+    UNREADABLE: _("MyEditor couldn’t read your profile right now, so nothing was "
+                  "changed. Try again later."),
+    FAILED: _("Your profile wasn’t changed. Try again in a moment."),
 }
 
 _FROM_WRITER = {

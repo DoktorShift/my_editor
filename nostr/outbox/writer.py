@@ -43,6 +43,8 @@ from typing import Callable, Mapping, Optional, Tuple
 
 from PySide6.QtCore import QObject, Signal
 
+from i18n import _, ngettext
+
 from .. import events
 from . import defaults, policy
 from .lookup import Lookup, fetch_replaceable
@@ -310,15 +312,17 @@ class AccountSetup(QObject):
         if outcome.ok:
             self._done["relays"] = outcome
         if not outcome.ok:
-            self.step.emit("relays", "error", "The relays didn’t take it yet.")
-            self.finished.emit(False, "Your account is saved, but the network doesn’t "
-                                      "know it yet. Check your internet connection and "
-                                      "try again.")
+            self.step.emit("relays", "error", _("The relays didn’t take it yet."))
+            self.finished.emit(False, _("Your account is saved, but the network doesn’t "
+                                        "know it yet. Check your internet connection and "
+                                        "try again."))
             return
         count = len(outcome.accepted)
-        self.step.emit("relays", "done", f"Saved on {count} relays." if count else "")
+        saved = ngettext("Saved on {count} relay.", "Saved on {count} relays.",
+                         count).format(count=count)
+        self.step.emit("relays", "done", saved if count else "")
         if not self._name:
-            self.step.emit("profile", "done", "No name to publish.")
+            self.step.emit("profile", "done", _("No name to publish."))
             self.finished.emit(True, "")
             return
         if "profile" in self._done:
@@ -337,9 +341,9 @@ class AccountSetup(QObject):
         if outcome.ok:
             self._done["profile"] = outcome
         if not outcome.ok:
-            self.step.emit("profile", "error", "Your name isn’t published yet.")
-            self.finished.emit(False, "Your account is ready, but your profile isn’t "
-                                      "published yet. Try again in a moment.")
+            self.step.emit("profile", "error", _("Your name isn’t published yet."))
+            self.finished.emit(False, _("Your account is ready, but your profile isn’t "
+                                        "published yet. Try again in a moment."))
             return
         self.step.emit("profile", "done", "")
         self.finished.emit(True, "")

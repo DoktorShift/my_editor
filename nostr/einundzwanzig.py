@@ -34,6 +34,8 @@ from typing import Callable, Dict, Optional, Set, Tuple
 from PySide6.QtCore import QObject, QUrl, Signal
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
+from i18n import _
+
 from .einundzwanzig_api import nip05_handle_problem
 
 
@@ -110,7 +112,8 @@ class MemberService:
 # resources/views/livewire/association/profile.blade.php, lines 558-639, in
 # github.com/HolgerHatGarKeineNode/einundzwanzig-verein at 31ee878765cb
 # (2026-09-25). The association writes in German only; the English words
-# are MyEditor's. Compare with that file when the portal changes.
+# are MyEditor's, and the German translation keeps the association's own
+# words where they fit. Compare with that file when the portal changes.
 #
 # Which host does what (checked against each host's own description):
 # nostr.einundzwanzig.space is the members' relay for ordinary notes and
@@ -120,28 +123,29 @@ class MemberService:
 # and never belong in a relay list.
 MEMBER_SERVICES: Tuple[MemberService, ...] = (
     MemberService(
-        "relay", "Members’ relay",
-        "Publish to EINUNDZWANZIG’s own relay, which carries your notes and "
-        "articles to readers.", in_app=True),
+        "relay", _("Members’ relay"),
+        _("Publish to EINUNDZWANZIG’s own relay, which carries your notes and "
+          "articles to readers."), in_app=True),
     MemberService(
-        "address", "Nostr address",
-        f"A verified name like you@{NIP05_DOMAIN} that people can recognize and "
-        "share, instead of a long key.", in_app=True),
+        "address", _("Nostr address"),
+        _("A verified name like you@{domain} that people can recognize and "
+          "share, instead of a long key.").format(domain=NIP05_DOMAIN), in_app=True),
     MemberService(
-        "watchtower", "Lightning watchtower",
-        "Protects your Lightning channels, even while your node is offline."),
+        "watchtower", _("Lightning watchtower"),
+        _("Protects your Lightning channels, even while your node is offline.")),
     MemberService(
-        "media", "Media storage",
-        "Your own storage for images and videos on Nostr.",
-        note=f"{PER_USER_LABEL} in total, up to {MAX_FILE_LABEL} per file.", in_app=True),
+        "media", _("Media storage"),
+        _("Your own storage for images and videos on Nostr."),
+        note=_("{total} in total, up to {per_file} per file.").format(
+            total=PER_USER_LABEL, per_file=MAX_FILE_LABEL), in_app=True),
     MemberService(
-        "group", "Community group",
-        "Write in the EINUNDZWANZIG group on the association’s community relay."),
+        "group", _("Community group"),
+        _("Write in the EINUNDZWANZIG group on the association’s community relay.")),
     MemberService(
         "buzz", "Buzz",
-        "A workspace for people and AI agents: channels, threads, files and code, "
-        "all on Nostr.",
-        note="In testing; it needs the Buzz desktop app.", experimental=True),
+        _("A workspace for people and AI agents: channels, threads, files and code, "
+          "all on Nostr."),
+        note=_("In testing; it needs the Buzz desktop app."), experimental=True),
 )
 
 

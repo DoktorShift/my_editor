@@ -35,6 +35,7 @@ import shiboken6
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 
 import url_safety
+from i18n import _
 from nostr.einundzwanzig import (
     MEMBER_BENEFITS, MEMBER_RELAY, NO_BENEFITS, Benefits, MembershipDirectory,
 )
@@ -52,8 +53,8 @@ from nostr.ui.membership_window import MembershipWindow
 REFRESH_INTERVAL_MS = 10 * 60 * 1000
 
 # Shown once per member per session, when the membership is first known.
-RECOGNIZED_MESSAGE = ("EINUNDZWANZIG membership recognized. Your members’ relay and "
-                      "media server are available.")
+RECOGNIZED_MESSAGE = _("EINUNDZWANZIG membership recognized. Your members’ relay and "
+                       "media server are available.")
 
 # The Media Library's name for the members' server.
 SERVER_LABEL = "EINUNDZWANZIG"

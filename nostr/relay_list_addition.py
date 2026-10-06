@@ -32,6 +32,7 @@ from typing import Callable, Optional
 
 from PySide6.QtCore import QObject, Signal
 
+from i18n import _
 from nostr.outbox import writer as outbox_writer
 from nostr.outbox.lookup import fetch_replaceable
 
@@ -47,16 +48,16 @@ LIST_EXISTS = "list_exists"
 DONE = frozenset({ADDED, ALREADY, PUBLISHED})
 
 _MESSAGES = {
-    ADDED: "Added to your relay list.",
-    ALREADY: "It’s already on your relay list.",
-    NO_LIST: ("You don’t have a relay list yet, so nothing was changed. MyEditor "
-              "can publish a recommended one with the members’ relay on it."),
-    UNREADABLE: ("MyEditor couldn’t read your relay list right now, so nothing was "
-                 "changed. Try again later."),
-    FAILED: "Your relay list wasn’t changed. Try again in a moment.",
-    PUBLISHED: "Your relay list is published, with the members’ relay on it.",
-    LIST_EXISTS: ("Your account has a relay list after all, so nothing was "
-                  "published. Add the members’ relay to it instead."),
+    ADDED: _("Added to your relay list."),
+    ALREADY: _("It’s already on your relay list."),
+    NO_LIST: _("You don’t have a relay list yet, so nothing was changed. MyEditor "
+               "can publish a recommended one with the members’ relay on it."),
+    UNREADABLE: _("MyEditor couldn’t read your relay list right now, so nothing was "
+                  "changed. Try again later."),
+    FAILED: _("Your relay list wasn’t changed. Try again in a moment."),
+    PUBLISHED: _("Your relay list is published, with the members’ relay on it."),
+    LIST_EXISTS: _("Your account has a relay list after all, so nothing was "
+                   "published. Add the members’ relay to it instead."),
 }
 
 _FROM_ADDING = {
