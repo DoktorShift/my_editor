@@ -23,6 +23,7 @@ which only macOS can do.
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Sequence, Tuple, TypeVar
@@ -225,6 +226,9 @@ class NullBackend(SpellBackend):
 
 def create_backend() -> SpellBackend:
     """The spell checker of the system the app runs on."""
+    if sys.platform == "darwin":
+        from .macos import MacBackend
+        return MacBackend()
     return NullBackend()
 
 
