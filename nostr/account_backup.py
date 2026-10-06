@@ -4,7 +4,8 @@
 
 A Nostr account has no password reset. The private key is the only way
 back in, so Create Account offers a backup file, and Restore Account
-reads one. The file is plain text a person can read and print:
+reads one. The file is plain text a person can read and print, in the
+app's language:
 
     MyEditor Nostr account backup
     ...
@@ -32,6 +33,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Iterable, Optional
 
+from i18n import _
 from nostr import bech32, crypto, nip49
 
 FILE_SUFFIX = ".txt"
@@ -77,20 +79,20 @@ def backup_text(secret_key: bytes, *, password: Optional[str],
     npub = bech32.encode_npub(pubkey)
     day = (today or datetime.date.today()).isoformat()
     if password is not None:
-        key_heading = "Protected private key (opens with your backup password):"
+        key_heading = _("Protected private key (opens with your backup password):")
         key = nip49.encrypt(secret_key, password)
-        warning = ("Keep this file and its password apart. Anyone who has both "
-                   "can use your account.")
+        warning = _("Keep this file and its password apart. Anyone who has both "
+                    "can use your account.")
     else:
-        key_heading = "Private key (this opens your account, keep it secret):"
+        key_heading = _("Private key (this opens your account, keep it secret):")
         key = bech32.encode_nsec(secret_key.hex())
-        warning = ("This file is not protected by a password. Anyone who reads "
-                   "it can use your account. Keep it somewhere only you can reach.")
+        warning = _("This file is not protected by a password. Anyone who reads "
+                    "it can use your account. Keep it somewhere only you can reach.")
     return "\n".join([
-        "MyEditor Nostr account backup",
-        f"Saved {day}",
+        _("MyEditor Nostr account backup"),
+        _("Saved {date}").format(date=day),
         "",
-        "Public key (share it freely):",
+        _("Public key (share it freely):"),
         npub,
         "",
         key_heading,
@@ -98,15 +100,15 @@ def backup_text(secret_key: bytes, *, password: Optional[str],
         "",
         warning,
         "",
-        "To restore: in MyEditor, choose Nostr > Restore Account and open this file.",
-        "Other Nostr apps can import this key too.",
-        "Nobody can reset this key for you. Without it, the account can't be recovered.",
+        _("To restore: in MyEditor, choose Nostr > Restore Account and open this file."),
+        _("Other Nostr apps can import this key too."),
+        _("Nobody can reset this key for you. Without it, the account can't be recovered."),
         "",
     ])
 
 
-_PUBLIC_KEY = ("That is a public key. It shows who you are but can’t sign in. "
-               "Use the private key from your backup.")
+_PUBLIC_KEY = _("That is a public key. It shows who you are but can’t sign in. "
+                "Use the private key from your backup.")
 
 
 def find_key(text: str, *, allow_hex: bool = False,
@@ -125,8 +127,8 @@ def find_key(text: str, *, allow_hex: bool = False,
         try:
             secret = bytes.fromhex(bech32.decode_nsec(match.group(0).lower()))
         except Exception as exc:  # noqa: BLE001, any decoding failure is a typo
-            raise BackupError("That private key is incomplete or mistyped. Copy the "
-                              "whole key from your backup and try again.") from exc
+            raise BackupError(_("That private key is incomplete or mistyped. Copy the "
+                                "whole key from your backup and try again.")) from exc
         return FoundKey(text=match.group(0).lower(), protected=False,
                         secret=_checked(secret))
     candidate = text.strip()
@@ -137,8 +139,8 @@ def find_key(text: str, *, allow_hex: bool = False,
                         secret=_checked(bytes.fromhex(candidate)))
     if candidate.lower().startswith("npub1"):
         raise BackupError(_PUBLIC_KEY)
-    raise BackupError("No private key was found. Choose the backup file you saved "
-                      "when you created the account, or paste the whole key.")
+    raise BackupError(_("No private key was found. Choose the backup file you saved "
+                        "when you created the account, or paste the whole key."))
 
 
 def _checked(secret: bytes) -> bytes:
@@ -146,7 +148,7 @@ def _checked(secret: bytes) -> bytes:
     try:
         crypto.get_public_key(secret)
     except Exception as exc:  # noqa: BLE001
-        raise BackupError("That key can’t be used as a private key.") from exc
+        raise BackupError(_("That key can’t be used as a private key.")) from exc
     return secret
 
 
@@ -157,7 +159,7 @@ def password_problem(password: str, confirmation: str) -> Optional[str]:
     safe if it leaks, and anything stricter only gets written on a note.
     """
     if len(password) < 8:
-        return "Use at least 8 characters."
+        return _("Use at least 8 characters.")
     if password != confirmation:
-        return "The passwords don’t match."
+        return _("The passwords don’t match.")
     return None

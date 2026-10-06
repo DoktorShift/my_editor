@@ -35,6 +35,7 @@ import shiboken6
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from alerts import CANCEL, DEFAULT, Button, ask, confirm_destructive, inform
+from i18n import _, ngettext
 from nostr.outbox import writer as outbox_writer
 from nostr.outbox.defaults import STARTER_LIST
 from nostr.outbox.lookup import fetch_replaceable
@@ -141,13 +142,14 @@ class AccountController(QObject):
         secret = self._vault.load(active.user_pubkey)
         if secret is None:
             if active.is_local:
-                inform(self._window, title="This account’s key isn’t on this computer",
-                       message="MyEditor can’t find the private key it kept for this "
-                               "account. If you saved a backup, restore the account from it.",
+                inform(self._window, title=_("This account’s key isn’t on this computer"),
+                       message=_("MyEditor can’t find the private key it kept for this "
+                                 "account. If you saved a backup, restore the account "
+                                 "from it."),
                        is_dark=self._is_dark())
             else:
-                inform(self._window, title="This account’s key is in your signer app",
-                       message="Back it up there.", is_dark=self._is_dark())
+                inform(self._window, title=_("This account’s key is in your signer app"),
+                       message=_("Back it up there."), is_dark=self._is_dark())
             return None
         window = BackupAccountWindow(secret=secret, is_dark=self._is_dark(),
                                      parent=self._window)
@@ -215,7 +217,8 @@ class AccountController(QObject):
             if ok:
                 self._set_pending(pubkey, False)
                 if not window.watching:
-                    self.status.emit("Your new account is set up on the Nostr network.", 6000)
+                    self.status.emit(_("Your new account is set up on the Nostr network."),
+                                     6000)
             window.finished(ok, message)
             if not window.watching:
                 self._forget_setup(pubkey, setup)
@@ -259,12 +262,15 @@ class AccountController(QObject):
         def relays_known(relay_list) -> None:
             state["relays"] = relay_list
             if relay_list.found:
+                count = len(relay_list.write)
                 window.step(STEP_RELAYS, "done",
-                            f"Found, with {len(relay_list.write)} relays to write to.")
+                            ngettext("Found, with {count} relay to write to.",
+                                     "Found, with {count} relays to write to.",
+                                     count).format(count=count))
             elif relay_list.state is LookupState.ABSENT:
-                window.step(STEP_RELAYS, "done", "This account has no relay list yet.")
+                window.step(STEP_RELAYS, "done", _("This account has no relay list yet."))
             else:
-                window.step(STEP_RELAYS, "error", "Couldn’t check right now.")
+                window.step(STEP_RELAYS, "error", _("Couldn’t check right now."))
             window.step(STEP_PROFILE, "active")
             self._fetch(self._relay_pool, lookup_relays(known=relay_list, own=True),
                         kind=KIND_PROFILE,
@@ -278,11 +284,11 @@ class AccountController(QObject):
                     stored.display_name = name
                     self._save(stored)
                     self.profile_changed.emit(stored)
-                window.step(STEP_PROFILE, "done", f"Welcome back, {name}.")
+                window.step(STEP_PROFILE, "done", _("Welcome back, {name}.").format(name=name))
             elif result.state is LookupState.UNKNOWN:
-                window.step(STEP_PROFILE, "error", "Couldn’t check right now.")
+                window.step(STEP_PROFILE, "error", _("Couldn’t check right now."))
             else:
-                window.step(STEP_PROFILE, "done", "No public profile found.")
+                window.step(STEP_PROFILE, "done", _("No public profile found."))
             window.finished(True, "")
             if state["relays"] is not None and state["relays"].state is LookupState.ABSENT:
                 QTimer.singleShot(0, lambda: self.offer_relay_list(profile))
@@ -305,12 +311,12 @@ class AccountController(QObject):
             return
         hosts = ", ".join(url.split("://", 1)[1] for url, _marker in STARTER_LIST)
         choice = ask(
-            self._window, title="Publish a relay list for this account?",
-            message=("Other Nostr apps use a relay list to find your notes and "
-                     "articles, and this account doesn’t have one yet. MyEditor "
-                     f"can publish its recommended relays: {hosts}."),
-            buttons=(Button("Not Now", False, CANCEL),
-                     Button("Publish Relay List", True, DEFAULT)),
+            self._window, title=_("Publish a relay list for this account?"),
+            message=_("Other Nostr apps use a relay list to find your notes and "
+                      "articles, and this account doesn’t have one yet. MyEditor "
+                      "can publish its recommended relays: {hosts}.").format(hosts=hosts),
+            buttons=(Button(_("Not Now"), False, CANCEL),
+                     Button(_("Publish Relay List"), True, DEFAULT)),
             is_dark=self._is_dark())
         if choice is not True:
             self._relay_list_declined.add(profile.user_pubkey)
@@ -319,11 +325,11 @@ class AccountController(QObject):
 
         def done(outcome) -> None:
             if outcome.status == outbox_writer.WRITTEN:
-                self.status.emit("Your relay list is published.", 5000)
+                self.status.emit(_("Your relay list is published."), 5000)
             elif outcome.status == outbox_writer.EXISTS:
-                self.status.emit("This account already has a relay list.", 5000)
+                self.status.emit(_("This account already has a relay list."), 5000)
             else:
-                self.status.emit("The relay list wasn’t published. Try again later.",
+                self.status.emit(_("The relay list wasn’t published. Try again later."),
                                  6000)
             writer.deleteLater()
 
@@ -348,12 +354,13 @@ class AccountController(QObject):
     def _offer_to_delete_key(self, profile) -> None:
         name = profile.display_name or profile.npub_short()
         choice = ask(
-            self._window, title="Delete the private key kept on this computer?",
-            message=(f"{name} now signs with your signer app, which holds the same key. "
-                     "MyEditor still keeps a copy of it on this computer. Deleting it "
-                     "leaves the key only where you approve what is signed."),
-            buttons=(Button("Keep Key", False, CANCEL),
-                     Button("Delete Key", True, DEFAULT)),
+            self._window, title=_("Delete the private key kept on this computer?"),
+            message=_("{name} now signs with your signer app, which holds the same key. "
+                      "MyEditor still keeps a copy of it on this computer. Deleting it "
+                      "leaves the key only where you approve what is signed."
+                      ).format(name=name),
+            buttons=(Button(_("Keep Key"), False, CANCEL),
+                     Button(_("Delete Key"), True, DEFAULT)),
             is_dark=self._is_dark())
         if choice is True:
             self._forget_key(profile.user_pubkey)
@@ -362,9 +369,9 @@ class AccountController(QObject):
         try:
             self._vault.forget(pubkey)
         except OSError:
-            inform(self._window, title="The private key couldn’t be deleted",
-                   message="MyEditor couldn’t change the file it keeps keys in. Make "
-                           "sure the disk isn’t full or read-only, then try again.",
+            inform(self._window, title=_("The private key couldn’t be deleted"),
+                   message=_("MyEditor couldn’t change the file it keeps keys in. Make "
+                             "sure the disk isn’t full or read-only, then try again."),
                    caution=True, is_dark=self._is_dark())
             return False
         return True
@@ -373,31 +380,32 @@ class AccountController(QObject):
         """Ask, then forget the account: every key kept for it here, its
         signer, and its profile. True when it was signed out."""
         name = profile.display_name or profile.npub_short()
+        title = _("Sign out of {name}?").format(name=name)
         has_key = self._vault.has(profile.user_pubkey)
         if profile.is_local and has_key:
             confirmed = confirm_destructive(
-                self._window, title=f"Sign out of {name}?",
-                message=("MyEditor deletes the private key it keeps for this account. "
-                         "Without a backup, nobody can get this account back."),
-                action="Sign Out and Delete Key", caution=True, is_dark=self._is_dark())
+                self._window, title=title,
+                message=_("MyEditor deletes the private key it keeps for this account. "
+                          "Without a backup, nobody can get this account back."),
+                action=_("Sign Out and Delete Key"), caution=True, is_dark=self._is_dark())
         elif has_key:
             confirmed = confirm_destructive(
-                self._window, title=f"Sign out of {name}?",
-                message=("Your key stays in your signer. MyEditor forgets this connection "
-                         "and deletes the copy of the key it keeps on this computer."),
-                action="Sign Out and Delete Key", is_dark=self._is_dark())
+                self._window, title=title,
+                message=_("Your key stays in your signer. MyEditor forgets this connection "
+                          "and deletes the copy of the key it keeps on this computer."),
+                action=_("Sign Out and Delete Key"), is_dark=self._is_dark())
         elif profile.is_local:
             confirmed = confirm_destructive(
-                self._window, title=f"Sign out of {name}?",
-                message=("This account’s private key isn’t on this computer. "
-                         "MyEditor forgets the account."),
-                action="Sign Out", is_dark=self._is_dark())
+                self._window, title=title,
+                message=_("This account’s private key isn’t on this computer. "
+                          "MyEditor forgets the account."),
+                action=_("Sign Out"), is_dark=self._is_dark())
         else:
             confirmed = confirm_destructive(
-                self._window, title=f"Sign out of {name}?",
-                message=("Your key stays in your signer. MyEditor only forgets "
-                         "this connection."),
-                action="Sign Out", is_dark=self._is_dark())
+                self._window, title=title,
+                message=_("Your key stays in your signer. MyEditor only forgets "
+                          "this connection."),
+                action=_("Sign Out"), is_dark=self._is_dark())
         if not confirmed:
             return False
         if has_key and not self._forget_key(profile.user_pubkey):

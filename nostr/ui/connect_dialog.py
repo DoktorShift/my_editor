@@ -51,6 +51,7 @@ from ..profiles import Profile, ProfileStore
 from ..qr import make_qr_pixmap
 from ..relay import RelayPool
 
+from i18n import _
 from url_safety import is_safe_external_url
 
 
@@ -184,9 +185,8 @@ class ConnectDialog(QDialog):
         False leaves out the links to Create Account and Restore Account,
         for when the dialog is part of one of those."""
         super().__init__(parent)
-        self.setWindowTitle("Connect Nostr Signer")
+        self.setWindowTitle(_("Connect Nostr Signer"))
         self.setModal(True)
-        self.setMinimumSize(560, 480)
 
         self._pool = pool
         self._store = store
@@ -215,10 +215,14 @@ class ConnectDialog(QDialog):
         layout.setContentsMargins(20, 18, 20, 16)
         layout.setSpacing(10)
 
+        # At least 560 wide with the margins. The window's minimum comes from
+        # its content, so it grows to fit the tallest tab (the code to scan)
+        # and longer words instead of drawing one thing over another.
+        layout.addStrut(520)
         self._tabs = QTabWidget()
-        self._tabs.addTab(self._build_paste_tab(), "Paste URI")
-        self._tabs.addTab(self._build_qr_tab(), "Scan QR")
-        self._tabs.addTab(self._build_manual_tab(), "Manual")
+        self._tabs.addTab(self._build_paste_tab(), _("Paste URI"))
+        self._tabs.addTab(self._build_qr_tab(), _("Scan QR"))
+        self._tabs.addTab(self._build_manual_tab(), _("Manual"))
         layout.addWidget(self._tabs, 1)
 
         # Shared status line + close-only footer. Each tab has its own
@@ -230,8 +234,8 @@ class ConnectDialog(QDialog):
         layout.addWidget(self._status)
 
         footer = QHBoxLayout()
-        alternatives = ((("Create an Account", self.create_requested),
-                         ("Restore from Backup", self.restore_requested))
+        alternatives = (((_("Create an Account"), self.create_requested),
+                         (_("Restore from Backup"), self.restore_requested))
                         if self._offer_alternatives else ())
         for label, signal in alternatives:
             link = QPushButton(label)
@@ -239,10 +243,11 @@ class ConnectDialog(QDialog):
             link.setFlat(True)
             link.setAutoDefault(False)
             link.setCursor(Qt.PointingHandCursor)
-            link.clicked.connect(lambda _=False, sig=signal: (self._on_cancel(), sig.emit()))
+            link.clicked.connect(
+                lambda _checked=False, sig=signal: (self._on_cancel(), sig.emit()))
             footer.addWidget(link)
         footer.addStretch(1)
-        self._cancel_btn = QPushButton("Close")
+        self._cancel_btn = QPushButton(_("Close"))
         self._cancel_btn.clicked.connect(self._on_cancel)
         footer.addWidget(self._cancel_btn)
         layout.addLayout(footer)
@@ -255,15 +260,15 @@ class ConnectDialog(QDialog):
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(10)
 
-        header = QLabel("Paste a <b>bunker://</b> URI from your signer.")
+        header = QLabel(_("Paste a <b>bunker://</b> URI from your signer."))
         header.setWordWrap(True)
         layout.addWidget(header)
 
-        hint = QLabel(
+        hint = QLabel(_(
             "Your signer (Amber, nsec.app, nsec.bunker, …) has an option "
             "to generate a bunker URL. Copy it and paste it below. You'll "
             "be asked to approve the connection on the signer side."
-        )
+        ))
         hint.setObjectName("connect_hint")
         hint.setWordWrap(True)
         layout.addWidget(hint)
@@ -279,7 +284,7 @@ class ConnectDialog(QDialog):
 
         button_row = QHBoxLayout()
         button_row.addStretch(1)
-        self._paste_btn = QPushButton("Connect")
+        self._paste_btn = QPushButton(_("Connect"))
         self._paste_btn.clicked.connect(self._on_paste_connect)
         button_row.addWidget(self._paste_btn)
         layout.addLayout(button_row)
@@ -298,7 +303,7 @@ class ConnectDialog(QDialog):
         try:
             parse_bunker_uri(uri)
         except ValueError as exc:
-            self._set_status(f"Invalid URI: {exc}", error=True)
+            self._set_status(_("Invalid URI: {error}").format(error=exc), error=True)
             return
         self._begin_bunker_connect(uri)
 
@@ -310,14 +315,14 @@ class ConnectDialog(QDialog):
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(8)
 
-        header = QLabel("Scan this QR with your signer.")
+        header = QLabel(_("Scan this QR with your signer."))
         header.setWordWrap(True)
         layout.addWidget(header)
 
-        hint = QLabel(
+        hint = QLabel(_(
             "Open Amber (or any NIP-46 compatible signer), choose "
             "<b>Add account</b> → <b>Scan QR</b>, and approve the connection."
-        )
+        ))
         hint.setObjectName("connect_hint")
         hint.setWordWrap(True)
         layout.addWidget(hint)
@@ -328,7 +333,8 @@ class ConnectDialog(QDialog):
         self._qr_label = QLabel()
         self._qr_label.setObjectName("qr_label")
         self._qr_label.setAlignment(Qt.AlignCenter)
-        self._qr_label.setMinimumSize(280, 280)
+        # The code and the 8px padding around it, so nothing below covers it.
+        self._qr_label.setMinimumSize(280 + 16, 280 + 16)
         qr_row.addWidget(self._qr_label)
         qr_row.addStretch(1)
         layout.addLayout(qr_row)
@@ -346,10 +352,10 @@ class ConnectDialog(QDialog):
 
         button_row = QHBoxLayout()
         button_row.addStretch(1)
-        self._copy_btn = QPushButton("Copy URI")
+        self._copy_btn = QPushButton(_("Copy URI"))
         self._copy_btn.clicked.connect(self._copy_qr_uri)
         button_row.addWidget(self._copy_btn)
-        self._regen_btn = QPushButton("Try Again")
+        self._regen_btn = QPushButton(_("Try Again"))
         self._regen_btn.clicked.connect(self._start_qr_listener)
         button_row.addWidget(self._regen_btn)
         layout.addLayout(button_row)
@@ -382,7 +388,7 @@ class ConnectDialog(QDialog):
         light = "#1E1E1E" if self._is_dark else "#FFFFFF"
         self._qr_label.setPixmap(make_qr_pixmap(uri, size=280, dark=dark, light=light))
 
-        self._set_status("Waiting for your signer to scan…")
+        self._set_status(_("Waiting for your signer to scan…"))
         self._start_qr_countdown()
 
     def _start_qr_countdown(self) -> None:
@@ -403,9 +409,10 @@ class ConnectDialog(QDialog):
 
     def _update_countdown_label(self) -> None:
         if self._qr_seconds_left > 0:
-            self._countdown_label.setText(f"Code expires in {self._qr_seconds_left}s")
+            self._countdown_label.setText(_("Code expires in {seconds}s").format(
+                seconds=self._qr_seconds_left))
         else:
-            self._countdown_label.setText("Code expired, press Try Again")
+            self._countdown_label.setText(_("Code expired, press Try Again"))
 
     def _copy_qr_uri(self) -> None:
         from PySide6.QtWidgets import QApplication
@@ -424,25 +431,25 @@ class ConnectDialog(QDialog):
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(8)
 
-        header = QLabel("Enter the signer's pubkey and its relays.")
+        header = QLabel(_("Enter the signer's pubkey and its relays."))
         header.setWordWrap(True)
         layout.addWidget(header)
 
-        hint = QLabel(
+        hint = QLabel(_(
             "Useful when you have a long-lived bunker setup whose pieces "
             "you keep separately rather than as one URL."
-        )
+        ))
         hint.setObjectName("connect_hint")
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
-        layout.addWidget(QLabel("Bunker pubkey (hex):"))
+        layout.addWidget(QLabel(_("Bunker pubkey (hex):")))
         self._manual_pk = QLineEdit()
-        self._manual_pk.setPlaceholderText("64 hex chars")
+        self._manual_pk.setPlaceholderText(_("64 hex chars"))
         self._manual_pk.textChanged.connect(self._update_manual_button)
         layout.addWidget(self._manual_pk)
 
-        layout.addWidget(QLabel("Relays (one per line):"))
+        layout.addWidget(QLabel(_("Relays (one per line):")))
         self._manual_relays = QTextEdit()
         self._manual_relays.setPlaceholderText(
             "wss://relay.example\nwss://another.example"
@@ -452,16 +459,16 @@ class ConnectDialog(QDialog):
         self._manual_relays.textChanged.connect(self._update_manual_button)
         layout.addWidget(self._manual_relays)
 
-        layout.addWidget(QLabel("Secret (optional):"))
+        layout.addWidget(QLabel(_("Secret (optional):")))
         self._manual_secret = QLineEdit()
-        self._manual_secret.setPlaceholderText("Pairing token if your signer gave you one")
+        self._manual_secret.setPlaceholderText(_("Pairing token if your signer gave you one"))
         layout.addWidget(self._manual_secret)
 
         layout.addStretch(1)
 
         button_row = QHBoxLayout()
         button_row.addStretch(1)
-        self._manual_btn = QPushButton("Connect")
+        self._manual_btn = QPushButton(_("Connect"))
         self._manual_btn.clicked.connect(self._on_manual_connect)
         button_row.addWidget(self._manual_btn)
         layout.addLayout(button_row)
@@ -491,7 +498,7 @@ class ConnectDialog(QDialog):
         try:
             parse_bunker_uri(uri)
         except ValueError as exc:
-            self._set_status(f"Invalid input: {exc}", error=True)
+            self._set_status(_("Invalid input: {error}").format(error=exc), error=True)
             return
         self._begin_bunker_connect(uri)
 
@@ -501,7 +508,7 @@ class ConnectDialog(QDialog):
         self._teardown_client(reason="starting new attempt")
         self._client = BunkerClient(self._pool, parent=self)
         self._watch_client_diagnostics(self._client)
-        self._set_status("Contacting signer. Approve the request on your phone…")
+        self._set_status(_("Contacting signer. Approve the request on your phone…"))
         self._refresh_action_buttons()
         self._client.connect_to_bunker(
             uri,
@@ -518,14 +525,14 @@ class ConnectDialog(QDialog):
         """The signer wants the user to authenticate before it will answer."""
         if is_safe_external_url(url):
             QDesktopServices.openUrl(QUrl(url))
-            self._set_status(
+            self._set_status(_(
                 "Your signer needs you to approve this in the browser window "
                 "that just opened. Waiting…"
-            )
+            ))
         else:
             self._set_status(
-                "Your signer asked for approval at an address that cannot be "
-                "opened safely, so the connection was not continued.",
+                _("Your signer asked for approval at an address that cannot be "
+                  "opened safely, so the connection was not continued."),
                 error=True,
             )
 
@@ -536,8 +543,8 @@ class ConnectDialog(QDialog):
         looks the same as the signer never having replied.
         """
         self._set_status(
-            "A signer replied but the message could not be read. It may be "
-            "using an older encryption format than this app supports.",
+            _("A signer replied but the message could not be read. It may be "
+              "using an older encryption format than this app supports."),
             error=True,
         )
 
@@ -553,13 +560,13 @@ class ConnectDialog(QDialog):
         )
         if self._persist:
             self._store.upsert(profile)
-        self._set_status(f"Connected as {profile.npub_short()}.")
+        self._set_status(_("Connected as {name}.").format(name=profile.npub_short()))
         self._stop_qr_listener()
         self.profile_connected.emit(profile)
         self.accept()
 
     def _on_pair_failure(self, reason: str) -> None:
-        self._set_status(f"Connect failed: {reason}", error=True)
+        self._set_status(_("Connect failed: {reason}").format(reason=reason), error=True)
         self._teardown_client(reason=reason)
         self._refresh_action_buttons()
 

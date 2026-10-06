@@ -54,6 +54,7 @@ from constants import (
     DARK_BORDER, DARK_MENU_BG, DARK_MUTED_FG,
     LIGHT_BORDER, LIGHT_MENU_BG, LIGHT_MUTED_FG, LIGHT_SELECTION,
 )
+from i18n import _
 
 # Button placement.
 LEADING = "leading"     # Go Back: the leading edge
@@ -135,7 +136,7 @@ def busy_bar(width: int = 220) -> QProgressBar:
     bar.setRange(0, 0)      # indeterminate: the wait has no known length
     bar.setTextVisible(False)
     bar.setMaximumWidth(width)
-    bar.setAccessibleName("Working")
+    bar.setAccessibleName(_("Working"))
     return bar
 
 
@@ -350,9 +351,11 @@ class StepList(QWidget):
         badge = row["badge"]
         badge.setProperty("state", state)
         badge.setText(self._MARKS.get(state, str(row["number"])))
-        spoken = {"pending": "not started", "active": "in progress", "done": "done",
-                  "error": "failed"}[state]
-        badge.setAccessibleName(f"Step {row['number']}, {spoken}")
+        spoken = {"pending": _("Step {number}, not started"),
+                  "active": _("Step {number}, in progress"),
+                  "done": _("Step {number}, done"),
+                  "error": _("Step {number}, failed")}[state]
+        badge.setAccessibleName(spoken.format(number=row["number"]))
         _repolish(badge)
         row["detail"].setText(detail)
         row["detail"].setVisible(bool(detail))
@@ -416,15 +419,23 @@ class AssistantWindow(QDialog):
         the current width becomes the window's minimum. Longer words (a
         translation, a larger font) then grow the window instead of
         clipping the text. It runs again whenever the page's layout
-        changes, so text that arrives later fits too."""
+        changes, so text that arrives later fits too.
+
+        A page that cannot get narrower than the window (a row of longer
+        words) widens the window the same way."""
         page = self._stack.currentWidget()
         layout = page.layout() if page is not None else None
         if layout is None:
             return
+        margins = self.layout().contentsMargins()
+        sides = margins.left() + margins.right()
+        narrowest = layout.totalMinimumSize().width()
+        if narrowest + sides > self.minimumWidth():
+            self.setMinimumWidth(narrowest + sides)
         width = self._stack.width()
         if not self.isVisible() or width <= 0:
-            margins = self.layout().contentsMargins()
-            width = max(self.width(), self.minimumWidth()) - margins.left() - margins.right()
+            width = max(self.width(), self.minimumWidth()) - sides
+        width = max(width, narrowest)
         if layout.hasHeightForWidth():
             needed = layout.totalHeightForWidth(width)
         else:

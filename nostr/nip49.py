@@ -41,6 +41,7 @@ import unicodedata
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 
+from i18n import _
 from nostr import bech32
 
 HRP = "ncryptsec"
@@ -88,34 +89,34 @@ def decrypt(ncryptsec: str, password: str) -> bytes:
     try:
         hrp, data = bech32.bech32_decode(ncryptsec.strip().lower())
     except Exception as exc:  # noqa: BLE001, any decoding failure is a damaged key
-        raise Nip49Error("This isn’t a complete protected key.") from exc
+        raise Nip49Error(_("This isn’t a complete protected key.")) from exc
     if hrp != HRP:
-        raise Nip49Error("This isn’t a protected key.")
+        raise Nip49Error(_("This isn’t a protected key."))
     try:
         payload = bytes(bech32.convertbits(data, 5, 8, False))
     except ValueError as exc:
-        raise Nip49Error("This isn’t a complete protected key.") from exc
+        raise Nip49Error(_("This isn’t a complete protected key.")) from exc
     if len(payload) != 1 + 1 + 16 + 24 + 1 + 48 or payload[0] != VERSION:
-        raise Nip49Error("This protected key uses a format MyEditor doesn’t know.")
+        raise Nip49Error(_("This protected key uses a format MyEditor doesn’t know."))
     log_n = payload[1]
     if log_n == 0:
-        raise Nip49Error("This protected key is damaged.")
+        raise Nip49Error(_("This protected key is damaged."))
     if log_n > _MAX_LOG_N:
-        raise Nip49Error("This protected key was saved with settings that need more "
-                         "memory to open than MyEditor can use.")
+        raise Nip49Error(_("This protected key was saved with settings that need more "
+                           "memory to open than MyEditor can use."))
     salt, nonce = payload[2:18], payload[18:42]
     aad, sealed = payload[42:43], payload[43:]
     try:
         key = _derive(password, salt, log_n)
     except (ValueError, MemoryError, OverflowError) as exc:
-        raise Nip49Error("This computer couldn’t open this protected key. It may "
-                         "need more memory than is free right now.") from exc
+        raise Nip49Error(_("This computer couldn’t open this protected key. It may "
+                           "need more memory than is free right now.")) from exc
     try:
         secret = _xchacha_open(key, nonce, sealed, aad)
     except InvalidTag as exc:
-        raise Nip49Error("The password is wrong.", wrong_password=True) from exc
+        raise Nip49Error(_("The password is wrong."), wrong_password=True) from exc
     if len(secret) != 32:
-        raise Nip49Error("This protected key is damaged.")
+        raise Nip49Error(_("This protected key is damaged."))
     return secret
 
 

@@ -37,6 +37,8 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
+from i18n import _
+
 from . import CLIENT_NAME, crypto, events
 from .relay import RelayPool, Subscription
 
@@ -93,7 +95,7 @@ def humanize_failure(reason: str) -> str:
     through unchanged rather than blurred into a generic apology.
     """
     if is_signer_silent(reason):
-        return (
+        return _(
             "Your signer did not answer. Open your signer app, make sure "
             "it is running, and try again."
         )
@@ -160,20 +162,21 @@ def parse_bunker_uri(uri: str) -> BunkerURI:
         raise ValueError("bunker URI must be a string")
     uri = uri.strip()
     if not uri.startswith("bunker://"):
-        raise ValueError("expected a bunker:// URI")
+        raise ValueError(_("expected a bunker:// URI"))
 
     parts = urlsplit(uri)
     pubkey = (parts.netloc or parts.path.lstrip("/")).strip().lower()
     if len(pubkey) != 64 or not all(c in "0123456789abcdef" for c in pubkey):
-        raise ValueError("bunker URI must contain a 32-byte hex pubkey")
+        raise ValueError(_("bunker URI must contain a 32-byte hex pubkey"))
 
     qs = parse_qs(parts.query, keep_blank_values=False)
     relays = [r.strip() for r in qs.get("relay", []) if r.strip()]
     if not relays:
-        raise ValueError("bunker URI must specify at least one relay")
+        raise ValueError(_("bunker URI must specify at least one relay"))
     for relay in relays:
         if not (relay.startswith("wss://") or relay.startswith("ws://")):
-            raise ValueError(f"relay must be ws:// or wss://, got {relay!r}")
+            raise ValueError(_("relay must be ws:// or wss://, got {relay}").format(
+                relay=repr(relay)))
 
     secret_values = qs.get("secret", [])
     secret = secret_values[0] if secret_values else None
