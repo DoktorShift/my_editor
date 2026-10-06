@@ -33,7 +33,7 @@ import stat
 import sys
 import tempfile
 import time
-from typing import Any, Optional, Type, TypeVar, Union
+from typing import Any, Optional, Tuple, Type, TypeVar, Union
 
 PathLike = Union[str, "os.PathLike[str]"]
 T = TypeVar("T", dict, list)
@@ -148,10 +148,35 @@ def save_document(path: PathLike, data: bytes) -> None:
     _sync_folder(folder)
 
 
-def save_text_document(path: PathLike, text: str, *, encoding: str = "utf-8") -> None:
-    """``save_document`` for text, with this system's line endings, as
-    text files have always been saved by the app."""
-    save_document(path, text.replace("\n", os.linesep).encode(encoding))
+def read_text_document(path: PathLike, *, encoding: str = "utf-8") -> Tuple[str, str]:
+    """A text file's content with every line ending as ``"\n"``, and the
+    line ending the file uses (``"\r\n"`` or ``"\n"``; this system's
+    when the file has no line break), so that saving writes the file
+    back the way it was. Raises OSError, and ValueError for text that is
+    not in ``encoding``."""
+    with open(path, "rb") as f:
+        text = f.read().decode(encoding)
+    return text.replace("\r\n", "\n").replace("\r", "\n"), newline_of(text)
+
+
+def newline_of(text: str) -> str:
+    """The line ending most lines of ``text`` use; this system's when
+    there is none. A Markdown file from a Git repository keeps its "\n"
+    on Windows, a file written on Windows keeps its "\r\n" elsewhere."""
+    windows = text.count("\r\n")
+    unix = text.count("\n") - windows
+    if windows == unix == 0:
+        return os.linesep
+    return "\r\n" if windows > unix else "\n"
+
+
+def save_text_document(path: PathLike, text: str, *, encoding: str = "utf-8",
+                       newline: Optional[str] = None) -> None:
+    """``save_document`` for text. Lines end in ``newline``, the ending the
+    file had when it was read (see ``read_text_document``); a new file gets
+    this system's."""
+    text = text.replace("\r\n", "\n")
+    save_document(path, text.replace("\n", newline or os.linesep).encode(encoding))
 
 
 def read_json(path: PathLike, kind: Type[T]) -> T:

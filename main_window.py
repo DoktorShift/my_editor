@@ -38,7 +38,9 @@ from constants import (
     DARK_BORDER, LIGHT_BORDER, MONO_FONT, APP_DISPLAY_NAME, APP_VERSION, APP_URL
 )
 from widgets import FindBar, HeaderWidget, LineNumberGutter, FileChangedBar, UpdateBar
-from atomic_file import read_json, save_document, save_text_document, write_json
+from atomic_file import (
+    read_json, read_text_document, save_document, save_text_document, write_json,
+)
 import diagnostics
 import i18n
 from i18n import _, ngettext, pgettext
@@ -1942,9 +1944,8 @@ class MainWindow(QMainWindow):
             return self._open_pdf_tab(path)
 
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                content = f.read()
-        except Exception as e:
+            content, newline = read_text_document(path)
+        except (OSError, ValueError) as e:
             inform(self, title=_("Couldn't open \u201c{name}\u201d").format(
                        name=os.path.basename(path)),
                    message=str(e))
@@ -1955,6 +1956,8 @@ class MainWindow(QMainWindow):
         # document's own directory, and Qt caches whatever the first
         # lookup answered.
         ed._file_path = path
+        # Saved back with the line endings it came with.
+        ed._newline = newline
         self._set_editor_content(ed, path, content)
 
         ed.document().setModified(False)
@@ -2365,7 +2368,7 @@ class MainWindow(QMainWindow):
                 # placeholder the old toPlainText call wrote out.
                 content = serialize_plain_with_images(ed.document(), lambda fmt: None)
 
-            save_text_document(path, content)
+            save_text_document(path, content, newline=getattr(ed, "_newline", None))
             ed.document().setModified(False)
             self._update_tab_title()
             self.status.showMessage(_("Saved: {path}").format(path=path))
@@ -2410,13 +2413,13 @@ class MainWindow(QMainWindow):
         if not path or not os.path.exists(path):
             return
         try:
-            with open(path, 'r', encoding='utf-8') as f:
-                content = f.read()
-        except Exception as e:
+            content, newline = read_text_document(path)
+        except (OSError, ValueError) as e:
             inform(self, title=_("Couldn't reload \u201c{name}\u201d").format(
                        name=os.path.basename(path)),
                    message=str(e))
             return
+        ed._newline = newline
 
         self._set_editor_content(ed, path, content)
 
@@ -2642,7 +2645,8 @@ class MainWindow(QMainWindow):
     def _save_as_rtf(self, editor, path: str) -> bool:
         try:
             content = self._to_rtf(editor)
-            save_text_document(path, content, encoding="ascii")
+            save_text_document(path, content, encoding="ascii",
+                               newline=getattr(editor, "_newline", None))
             editor.document().setModified(False)
             self._update_tab_title()
             self.status.showMessage(_("Saved: {path}").format(path=path))

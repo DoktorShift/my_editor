@@ -374,3 +374,58 @@ def test_text_documents_can_use_another_encoding(tmp_path):
     with pytest.raises(UnicodeEncodeError):
         save_text_document(path, "café", encoding="ascii")
     assert path.read_bytes() == b"{\\rtf1 hi}"
+
+
+# -- line endings ----------------------------------------------------------------
+
+from atomic_file import newline_of, read_text_document  # noqa: E402
+
+
+def test_a_documents_line_endings_are_read_and_written_back(tmp_path):
+    for ending in ("\n", "\r\n"):
+        path = tmp_path / "notes.md"
+        path.write_bytes(ending.join(["# Title", "", "Text."]).encode() + ending.encode())
+        text, newline = read_text_document(path)
+        assert text == "# Title\n\nText.\n"
+        assert newline == ending
+        save_text_document(path, text + "More.\n", newline=newline)
+        assert path.read_bytes() == ending.join(
+            ["# Title", "", "Text.", "More.", ""]).encode()
+
+
+def test_an_lf_file_stays_lf_on_windows(tmp_path, monkeypatch):
+    monkeypatch.setattr(atomic_file.os, "linesep", "\r\n")
+    path = tmp_path / "README.md"
+    path.write_bytes(b"one\ntwo\n")
+    text, newline = read_text_document(path)
+    save_text_document(path, text, newline=newline)
+    assert path.read_bytes() == b"one\ntwo\n"
+
+
+def test_most_lines_decide_a_mixed_file(tmp_path):
+    assert newline_of("a\r\nb\r\nc\n") == "\r\n"
+    assert newline_of("a\nb\nc\r\n") == "\n"
+
+
+def test_a_file_without_line_breaks_gets_this_systems(monkeypatch):
+    monkeypatch.setattr(atomic_file.os, "linesep", "\r\n")
+    assert newline_of("one line") == "\r\n"
+
+
+def test_old_mac_line_endings_read_as_lines(tmp_path):
+    path = tmp_path / "old.txt"
+    path.write_bytes(b"one\rtwo\r")
+    assert read_text_document(path)[0] == "one\ntwo\n"
+
+
+def test_text_that_is_not_utf8_is_refused(tmp_path):
+    path = tmp_path / "latin1.txt"
+    path.write_bytes("café".encode("latin-1"))
+    with pytest.raises(ValueError):
+        read_text_document(path)
+
+
+def test_a_stray_windows_ending_in_the_text_is_not_doubled(tmp_path):
+    path = tmp_path / "pasted.md"
+    save_text_document(path, "a\r\nb\n", newline="\r\n")
+    assert path.read_bytes() == b"a\r\nb\r\n"
