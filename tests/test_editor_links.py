@@ -187,6 +187,17 @@ def test_a_web_address_pasted_over_words_links_them():
     assert document_to_markdown(ed.document()) == "read [this page](https://example.com/page)\n"
 
 
+@pytest.mark.parametrize("old", ["https://old.example.com/v1", "ada@example.com"])
+def test_a_web_address_pasted_over_an_address_replaces_it(old):
+    # Review M2: the words kept saying the old address while the link went
+    # to the new one.
+    ed = editor(f"Download at {old} now\n")
+    selecting(ed, old)
+    QApplication.clipboard().setText("https://new.example.com/v2")
+    ed.paste_from_clipboard()
+    assert document_to_markdown(ed.document()) == "Download at https://new.example.com/v2 now\n"
+
+
 def test_plain_text_pasted_over_words_replaces_them():
     ed = editor("read this page\n")
     selecting(ed, "this page")

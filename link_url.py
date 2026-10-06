@@ -109,6 +109,17 @@ def is_bare_http_url(text: str) -> bool:
     return url_safety.is_safe_external_url(text)
 
 
+def is_an_address(text: str) -> bool:
+    """Whether ``text`` is itself one web or email address (words a
+    pasted address replaces instead of linking)."""
+    text = (text or "").strip()
+    if not text or any(ch.isspace() for ch in text):
+        return False
+    lowered = text.lower()
+    return (lowered.startswith(("http://", "https://", "www.", "mailto:"))
+            or bool(_EMAIL.fullmatch(text)))
+
+
 def display_href(href: str, limit: int = 60) -> str:
     """A link's address short enough for a tooltip or a menu: without
     ``mailto:``, and cut in the middle when it is long."""

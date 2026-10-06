@@ -1214,7 +1214,9 @@ class HtmlEditor(QTextEdit):
     def insertFromMimeData(self, source):
         """Every paste and every drop of text arrives here.
 
-        - A web address pasted over words makes them a link to it.
+        - A web address pasted over words makes them a link to it (over
+          an address, it replaces it: the words would say one address
+          and the link go to another).
         - Pictures (image files copied in a file manager, a picture copied
           on its own) go to whoever handles media, when someone does.
         - In a document that holds Markdown structure, outside a code
@@ -1227,7 +1229,8 @@ class HtmlEditor(QTextEdit):
         text = source.text() if source.hasText() else ""
         address = text.strip()
         if (cursor.hasSelection() and link_url.is_bare_http_url(address)
-                and self._holds_structure() and "\u2029" not in cursor.selectedText()):
+                and self._holds_structure() and "\u2029" not in cursor.selectedText()
+                and not link_url.is_an_address(cursor.selectedText())):
             rich_text.set_link(cursor, "", address)
             cursor.setPosition(cursor.selectionEnd())
             self.setTextCursor(cursor)
