@@ -529,8 +529,12 @@ def nak(*args: str, stdin: Optional[str] = None, timeout: float = 30,
     env = dict(os.environ)
     if env_home is not None:
         env["HOME"] = str(env_home)
-    return subprocess.run(["nak", *args], input=stdin, capture_output=True, text=True,
-                          timeout=timeout, env=env)
+    # nak reads events and filters from a piped stdin, so without input it
+    # must get none: an inherited open pipe (an agent's shell, a CI step)
+    # made every call wait until it timed out.
+    feed = {"input": stdin} if stdin is not None else {"stdin": subprocess.DEVNULL}
+    return subprocess.run(["nak", *args], capture_output=True, text=True,
+                          timeout=timeout, env=env, **feed)
 
 
 def nak_req(relays: Sequence[str], *, kinds: Iterable[int] = (), authors: Iterable[str] = (),
