@@ -364,14 +364,15 @@ class SilentRelay(FakeRelay):
         super().__init__()
         self.waiting = []
 
-    def latest(self, relays, filters, on_done):
+    def events(self, relays, filters, on_done):
         self.queries.append((list(relays), filters))
-        self.waiting.append((filters, on_done))
+        self.waiting.append((list(relays), filters, on_done))
 
     def answer(self):
         while self.waiting:
-            filters, on_done = self.waiting.pop(0)
-            on_done(self.stored.get(filters[0]["#d"][0]))
+            relays, filters, on_done = self.waiting.pop(0)
+            stored = self.stored.get(filters[0]["#d"][0])
+            on_done([stored] if stored else [], set(relays))
 
 
 def test_a_lost_copy_of_the_list_never_empties_the_inbox(tmp_path):
