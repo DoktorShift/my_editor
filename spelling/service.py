@@ -33,6 +33,12 @@ from .words import Scan, Span, State
 
 _KNOWN_LIMIT = 50_000       # words remembered per session before starting over
 
+# Clitics written onto a word after an apostrophe, by language, which
+# word-by-word dictionaries (Hunspell) do not all list: German "es"
+# ("geht's", "Hab's"), English "is", "has", "will", "are", "have",
+# "would", "am" and "not" ("Nostr's" stays wrong: "Nostr" is unknown).
+_CLITICS = {"de": ("s",), "en": ("s", "t", "ll", "re", "ve", "d", "m")}
+
 
 @dataclass(frozen=True)
 class Misspelling:
@@ -208,6 +214,8 @@ class SpellChecker(QObject):
             # Abbreviations are listed with their dot ("bzw.", "etc.").
             if text[end:end + 1] == "." and self._right(word + ".", language):
                 continue
+            if self._contraction(word, language):
+                continue
             if words.is_hyphenated(word):
                 # A compound the dictionary does not list is fine when its
                 # parts are words: only the parts that are not are wrong.
@@ -218,6 +226,14 @@ class SpellChecker(QObject):
                 continue
             out.append((start, end, words.clean(word), language))
         return out if self._available_now() else []
+
+    def _contraction(self, word: str, language: str) -> bool:
+        """A word the dictionary does not list whole, written as a known
+        word and a clitic of its language: "geht's" is "geht" and "es"."""
+        head, apostrophe, tail = _for_checker(word).rpartition("'")
+        clitics = _CLITICS.get(language.split("-")[0].lower(), ())
+        return bool(apostrophe and head and tail.lower() in clitics
+                    and self._right(head, language))
 
     def _accept(self, word: str, taken: bool) -> bool:
         self._notice()

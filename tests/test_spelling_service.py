@@ -81,6 +81,16 @@ def test_word_by_word_knows_abbreviations_compounds_and_apostrophes():
     assert checker.find_misspellings("don’t it's", "en-US") == []
 
 
+def test_word_by_word_knows_contractions_with_an_apostrophe():
+    checker = SpellChecker(FakeBackend())
+    text = "Wie geht\u2019s? Geht's gut? Hab\u2019s gesehen."
+    assert checker.find_misspellings(text, "de-DE") == []
+    # A clitic of the language after a known word, nothing else.
+    found = checker.find_misspellings("Gibt's geht'n Hab's", "de-DE")
+    assert [m.word for m in found] == ["Gibt's", "geht'n"]
+    assert [m.word for m in checker.find_misspellings("Nostr's here", "en-US")] == ["Nostr's"]
+
+
 def test_each_word_is_asked_once_until_it_is_learned():
     backend = FakeBackend()
     checker = SpellChecker(backend)

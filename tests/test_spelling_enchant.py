@@ -70,6 +70,16 @@ def test_german_with_umlauts_and_sharp_s(backend):
     assert "Straße" in backend.suggestions("Strase", "de-DE")
 
 
+def test_german_contractions_with_an_apostrophe_are_words(backend):
+    if "de-DE" not in backend.languages():
+        pytest.skip("no German dictionary installed")
+    checker = SpellChecker(backend)
+    assert checker.find_misspellings("Wie geht’s? Geht's gut? Hab’s gesehen.",
+                                     "de-DE") == []
+    assert [m.word for m in checker.find_misspellings("Wie gehtt's dir?", "de-DE")] == [
+        "gehtt's"]
+
+
 def test_a_learned_word_goes_into_the_persons_word_list(backend, tmp_path):
     word = "Zxqvlearn" + uuid.uuid4().hex[:6]
     assert backend.check(word, "en-US") is False

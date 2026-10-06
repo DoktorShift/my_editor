@@ -22,8 +22,8 @@ ENGLISH = ("the", "a", "is", "this", "text", "word", "words", "with", "one", "mi
            "second", "third", "Alice", "read", "more", "at", "or", "on", "in", "of",
            "title", "write", "every", "block", "check", "after", "before", "end")
 GERMAN = ("das", "Das", "ist", "ein", "eine", "Haus", "schön", "Straße", "Grüße", "und",
-          "mit", "Wörter", "Wort", "geht's", "Adresse", "Mail", "Fehler", "hier", "der",
-          "die", "bzw.", "Text", "Zeile")
+          "mit", "Wörter", "Wort", "geht", "Adresse", "Mail", "Fehler", "hier", "der",
+          "die", "bzw.", "Text", "Zeile", "wie", "gut", "Hab", "gesehen")
 WORDS = {"en-US": ENGLISH, "de-DE": GERMAN}
 
 _WORD = re.compile(r"[^\W\d_]+(?:['’\-][^\W\d_]+)*")
@@ -71,8 +71,10 @@ class FakeBackend(SpellBackend):
         return self.default
 
     def knows(self, word: str, language: str) -> bool:
-        return (word in self.words.get(language, ()) or word in self.learned
-                or word in self.ignored)
+        known = self.words.get(language, ())
+        # Like a real dictionary, a word may start a sentence: "Geht".
+        return (word in known or word[:1].lower() + word[1:] in known
+                or word in self.learned or word in self.ignored)
 
     def _check(self, word: str, language: str) -> bool:
         self.calls.append(("check", word, language))
