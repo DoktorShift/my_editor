@@ -207,6 +207,18 @@ def test_visible_blocks_are_checked_first():
     assert backend.checked_words() == ["golf", "hotel", "alpha", "bravo"]
 
 
+def test_a_slice_names_only_the_blocks_it_changed():
+    # The visible blocks far below the sweep through the rest: the editor
+    # is told about each run of changed blocks, not about all in between.
+    doc = document(*[f"line wrod{chr(97 + i % 26)}" for i in range(100)])
+    spelling, _checker, _backend, changes = follow(doc, clock=Clock(step=0.001))
+    spelling.set_visible_blocks(50, 52)
+    spelling._run()                                  # about seven blocks in 8 ms
+    assert changes[0] == (50, 52)
+    assert all(last < 50 or first > 52 or (first, last) == (50, 52) for first, last in changes)
+    assert sum(last - first + 1 for first, last in changes) < 10
+
+
 def test_a_slice_stops_when_its_time_is_up():
     doc = document(*[f"word{i} wrod" for i in range(20)])
     spelling, _checker, backend, _changes = follow(doc, clock=Clock(step=0.003))
@@ -469,7 +481,7 @@ def test_learning_a_word_checks_again_only_where_it_was():
     spelling.check_all()
     assert wrong(spelling, doc) == [[], ["wrld"], ["nostr"]]
     assert "wrld" not in backend.checked_words()          # the middle line was not asked
-    assert changes == [(0, 2)]
+    assert sorted(changes) == [(0, 0), (2, 2)]      # and not named either
 
 
 def test_a_word_with_a_typographic_apostrophe_is_learned_as_typed():

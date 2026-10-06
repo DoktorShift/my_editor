@@ -581,8 +581,11 @@ class DocumentSpelling(QObject):
                 return False
             if deadline is not None and self._clock() >= deadline:
                 break
-        if changed:
-            self.misspellingsChanged.emit(min(changed), max(changed))
+        # One signal per run of neighbouring blocks, visible ones first: the
+        # sweep may be far from the screen, and the blocks between are
+        # not the editor's business.
+        for first, last in _runs(changed):
+            self.misspellingsChanged.emit(first, last)
         left = self._dirty.find(1) >= 0
         if left and deadline is not None:
             self._timer.start()
@@ -657,6 +660,17 @@ def _within_words(text: str, spans: Sequence[Span],
             if words.checkable(piece):
                 out.append((start, end, words.clean(piece), result.language))
     return out
+
+
+def _runs(numbers: Sequence[int]) -> List[Tuple[int, int]]:
+    """Block numbers, in the order given, as runs of neighbours."""
+    runs: List[Tuple[int, int]] = []
+    for number in numbers:
+        if runs and number == runs[-1][1] + 1:
+            runs[-1] = (runs[-1][0], number)
+        else:
+            runs.append((number, number))
+    return runs
 
 
 def _block_number(document: QTextDocument, position: int) -> int:
