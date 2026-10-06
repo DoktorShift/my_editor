@@ -21,7 +21,7 @@ from nostr.imports.feed_list import source_key
 from nostr.imports.inbox_store import INBOX, OLDER_POSTS, SKIPPED_POSTS
 from nostr.imports.subscriptions import FeedSubscriptionStore
 from nostr.imports_controller import ImportsController
-from nostr.ui.imports_sidebar import HEADER, LIST, SOURCE
+from nostr.ui.imports_sidebar import FILE, HEADER, LIST, SOURCE
 from nostr.ui.imports_window import ImportsWindow, freshness
 from tests.imports_fakes import FakeCatalogue, FakeFetcher, TWO_ITEM_FEED, inline_run_blocking
 from tests.imports_fakes import make_item
@@ -281,3 +281,100 @@ def test_freshness_words():
     assert freshness(failed, now=NOW) == "Boom. Next try in 2 hours."
     manual = SimpleNamespace(automatic=False, error="", last_checked=0, next_check=0)
     assert freshness(manual, now=NOW) == "MyEditor reads this source when you open it."
+
+
+class TestAdding:
+    """Add: Follow a Website, Import a File, Import a Link."""
+
+    def test_the_add_menu(self, window):
+        actions = window.add_button.menu().actions()
+        assert [a.text() for a in actions] == ["Follow a Website…", "Import a File…",
+                                               "Import a Link…"]
+        assert all(a.isEnabled() for a in actions)
+        assert window.add_button.accessibleName() == "Add"
+
+    def test_a_window_that_only_shows_cannot_add(self, tmp_path):
+        controller = controller_for(tmp_path)
+        controller.read_only = True
+        win = ImportsWindow(controller)
+        assert not any(a.isEnabled() for a in win.add_button.menu().actions())
+        win.follow_website()
+        assert win.sheet() is None
+        assert win.placeholder_button.isHidden()
+        controller.account_changed(None)
+
+    def test_follow_a_website_shows_the_source_it_followed(self, window):
+        window.follow_website()
+        sheet = window.sheet()
+        assert type(sheet).__name__ == "FollowSheet"
+        assert sheet.windowModality() == Qt.WindowModality.WindowModal
+        sheet.address.setText(AUTHOR)
+        sheet.look_up()
+        settle()
+        sheet.buttons["follow"].click()
+        settle()
+        assert window.sidebar.chosen() == next(e for e in entries(window)
+                                               if e.key == source_key(AUTHOR))
+        assert window.sheet() is None
+
+    def test_an_empty_inbox_offers_to_follow(self, tmp_path):
+        controller = controller_for(tmp_path)
+        win = ImportsWindow(controller)
+        win.show()
+        assert win.placeholder_button.text() == "Follow a Website…"
+        win.placeholder_button.click()
+        assert type(win.sheet()).__name__ == "FollowSheet"
+        win.sheet().reject()
+        win.close()
+        controller.account_changed(None)
+
+    def test_a_file_opens_with_all_its_posts_checked(self, window, tmp_path):
+        from tests.test_imports_files import WXR
+        path = tmp_path / "blog.xml"
+        path.write_text(WXR, encoding="utf-8")
+        window.import_file(str(path))
+        settle()
+        rows = [(e.kind, e.title) for e in entries(window)]
+        assert rows[-2:] == [(HEADER, "Files and Links"), (FILE, "blog.xml")]
+        assert window.sidebar.chosen().kind == FILE
+        model = window.posts.model_
+        assert model.rowCount() == 2
+        assert len(model.checked()) == 2
+        assert window.list_subtitle.text() == "Imported once, not kept as a source."
+        # Removing it from the list goes back to the Inbox.
+        window._controller.close_collection(window.sidebar.chosen().key)
+        settle()
+        assert window.sidebar.chosen().key == INBOX
+        assert all(e.kind != FILE for e in entries(window))
+
+    def test_a_file_dropped_on_the_window(self, window, tmp_path):
+        from PySide6.QtCore import QMimeData, QPointF, QUrl
+        from PySide6.QtGui import QDropEvent
+        from tests.test_imports_files import WXR
+        path = tmp_path / "dropped.xml"
+        path.write_text(WXR, encoding="utf-8")
+        mime = QMimeData()
+        mime.setUrls([QUrl.fromLocalFile(str(path))])
+        event = QDropEvent(QPointF(20, 20), Qt.DropAction.CopyAction, mime,
+                           Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+        window.dropEvent(event)
+        settle()
+        assert window.sidebar.chosen().title == "dropped.xml"
+
+    def test_a_single_post_found_while_following_opens_once(self, window):
+        from tests.imports_fakes import TWO_ITEM_FEED
+        from nostr.rss.parser import parse_feed
+        result = SimpleNamespace(url="https://example.com/a", feed=parse_feed(TWO_ITEM_FEED))
+        window._open_once(result)
+        settle()
+        chosen = window.sidebar.chosen()
+        assert chosen.kind == FILE and chosen.glyph == "link"
+
+    def test_following_a_list_says_how_many(self, window):
+        window._followed_list(3, 1, 2)
+        assert window.banner.isVisibleTo(window)
+        assert window.banner.label.text() == ("Following 3 new sources. "
+                                              "1 was followed already. "
+                                              "2 couldn't be followed.")
+        window.banner.close_button.click()
+        assert not window.banner.isVisibleTo(window)

@@ -15,12 +15,16 @@ reads by itself: **sources -> their posts -> the post you are reading**.
     |  A Journal 6|                              |  Every cycle ...     |
     +-------------+------------------------------+----------------------+
 
-The toolbar holds Show Sidebar and the search field. The sidebar
-(imports_sidebar.py) chooses the list, the list (imports_post_list.py)
-chooses the post, the article pane (imports_article.py) shows it the way
-an import will publish it. A source that is read when it is opened (a
-Nostr author, a sitemap) is read when it is chosen; one that is checked
-on its own shows its new or older posts.
+The toolbar holds Show Sidebar, Add (Follow a Website, Import a File,
+Import a Link: the sheets of imports_sheets.py) and the search field. The
+sidebar (imports_sidebar.py) chooses the list, the list
+(imports_post_list.py) chooses the post, the article pane
+(imports_article.py) shows it the way an import will publish it. A
+source that is read when it is opened (a Nostr author, a sitemap) is
+read when it is chosen; one that is checked on its own shows its new or
+older posts. A file or a link opened to import once is listed under
+Files and Links with all its posts checked; a file dropped anywhere on
+the window opens the same way.
 
 Following Apple's guidelines for split views and sidebars: the selection
 stays visible in every pane, the panes keep a minimum width so no divider
@@ -43,12 +47,22 @@ import sys
 import time
 from typing import Callable, Dict, List, Optional
 
-from PySide6.QtCore import QByteArray, QPoint, QSize, Qt, QTimer, QUrl
-from PySide6.QtGui import QAction, QDesktopServices, QFont, QKeySequence, QPalette
+from PySide6.QtCore import QByteArray, QPoint, QRectF, QSize, Qt, QTimer, QUrl
+from PySide6.QtGui import (
+    QAction,
+    QColor,
+    QDesktopServices,
+    QFont,
+    QKeySequence,
+    QPainter,
+    QPalette,
+    QPen,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
     QCheckBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -83,7 +97,8 @@ from ..imports.workspace import Post, Scope, checked_text, date_text, matches
 from .imports_article import ArticlePane
 from .imports_glyphs import glyph_icon
 from .imports_post_list import PostList
-from .imports_sidebar import HEADER, LIST, SOURCE, Entry, Sidebar
+from .imports_sheets import FileSheet, FollowSheet, LinkSheet, dropped_file
+from .imports_sidebar import FILE, HEADER, LIST, SOURCE, Entry, Sidebar
 
 SETTINGS_KEY = "imports_window"
 NARROW = 900
@@ -101,6 +116,9 @@ QWidget#imports_rule { background: palette(mid); }
 QLabel#imports_list_subtitle, QLabel#imports_placeholder,
 QLabel#imports_article_origin { color: palette(placeholder-text); }
 QLabel#imports_notice { background: palette(alternate-base); }
+QFrame#imports_banner { background: palette(alternate-base); border: none;
+    border-bottom: 1px solid palette(mid); }
+QToolButton#imports_banner_close { border: none; padding: 2px; }
 QPushButton#imports_segment {
     border: 1px solid palette(mid); padding: 3px 12px; min-width: 0;
     background: palette(base); color: palette(text);
@@ -194,6 +212,9 @@ class ImportsWindow(QMainWindow):
         self._scope = Scope(view=View(INBOX))
         self._source_state = NEW
         self._auto_hidden = False
+        self._sheet = None
+        # Files and links get all their posts checked when first shown.
+        self._checked_once: set = set()
         # Nothing is saved until the window has been restored.
         self._ready = False
         self._restored_geometry = False
@@ -206,6 +227,9 @@ class ImportsWindow(QMainWindow):
         self._build_panes()
         self._build_shortcuts()
         self.setStyleSheet(STYLE)
+        self.setAcceptDrops(True)
+        self._drop_overlay = _DropOverlay(self)
+        self._drop_overlay.hide()
 
         controller.sources_changed.connect(self._refresh_sidebar)
         controller.posts_changed.connect(self._on_posts_changed)
@@ -239,6 +263,27 @@ class ImportsWindow(QMainWindow):
             self.act_sidebar.setShortcut(QKeySequence("Ctrl+Meta+S"))
         self.act_sidebar.toggled.connect(self._on_sidebar_toggled)
         bar.addAction(self.act_sidebar)
+
+        self.act_follow = QAction(_("Follow a Website…"), self)
+        self.act_follow.setObjectName("imports_follow")
+        self.act_follow.triggered.connect(lambda: self.follow_website())
+        self.act_import_file = QAction(_("Import a File…"), self)
+        self.act_import_file.setObjectName("imports_import_file")
+        self.act_import_file.triggered.connect(lambda: self.import_file())
+        self.act_import_link = QAction(_("Import a Link…"), self)
+        self.act_import_link.setObjectName("imports_import_link")
+        self.act_import_link.triggered.connect(self.import_link)
+        add_menu = QMenu(self)
+        for action in (self.act_follow, self.act_import_file, self.act_import_link):
+            action.setEnabled(not self._controller.read_only)
+            add_menu.addAction(action)
+        self.add_button = QToolButton()
+        self.add_button.setObjectName("imports_add")
+        self.add_button.setAccessibleName(_("Add"))
+        self.add_button.setToolTip(_("Follow a website, or import a file or a link"))
+        self.add_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.add_button.setMenu(add_menu)
+        bar.addWidget(self.add_button)
 
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -288,6 +333,9 @@ class ImportsWindow(QMainWindow):
         self.notice.setContentsMargins(16, 6, 16, 6)
         self.notice.setVisible(bool(self.notice.text()))
         column.addWidget(self.notice)
+        self.banner = _Banner()
+        self.banner.hide()
+        column.addWidget(self.banner)
         self.list_stack = QStackedWidget()
         self.list_stack.addWidget(self.posts)
         self.list_stack.addWidget(self._build_placeholder())
@@ -443,6 +491,16 @@ class ImportsWindow(QMainWindow):
             entries.append(Entry(SOURCE, source.key, source.display_title,
                                  count=source.new_count, failed=failed, tooltip=tooltip,
                                  url=source.url, automatic=source.automatic))
+        opened = controller.collections("file", "link")
+        if opened:
+            entries.append(Entry(HEADER, "files", _("Files and Links")))
+        for collection in reversed(opened):
+            entries.append(Entry(FILE, collection.id, collection.label,
+                                 glyph="link" if collection.kind == "link" else "file",
+                                 count=len(collection.posts()),
+                                 tooltip="\n".join(p for p in (collection.label,
+                                                               collection.source_url) if p),
+                                 url=collection.source_url))
         self.sidebar.set_entries(entries)
         self._update_header()
 
@@ -460,8 +518,17 @@ class ImportsWindow(QMainWindow):
             else:
                 collection = self._controller.read_source(entry.url)
                 self._scope = Scope(collection=collection.id if collection else "")
+        elif entry.kind == FILE:
+            self._scope = Scope(collection=entry.key)
         self._show_list()
-        self._save()
+        if entry.kind == FILE and entry.key not in self._checked_once:
+            # A file's or a link's posts are there to be imported: all of
+            # them are checked to begin with.
+            self._checked_once.add(entry.key)
+            self.posts.model_.check_all()
+            self._update_selection_band()
+        if entry.kind != FILE:
+            self._save()
 
     def _on_segment(self, state: str) -> None:
         entry = self.sidebar.chosen()
@@ -473,7 +540,11 @@ class ImportsWindow(QMainWindow):
 
     def _show_source_menu(self, entry: Entry, position: QPoint) -> None:
         menu = QMenu(self)
-        self._source_actions(menu, entry)
+        if entry.kind == FILE:
+            remove = menu.addAction(_("Remove from List"))
+            remove.triggered.connect(lambda: self._controller.close_collection(entry.key))
+        else:
+            self._source_actions(menu, entry)
         menu.exec(position)
 
     def _fill_source_menu(self) -> None:
@@ -482,6 +553,9 @@ class ImportsWindow(QMainWindow):
         entry = self.sidebar.chosen()
         if entry is not None and entry.kind == SOURCE:
             self._source_actions(menu, entry)
+        elif entry is not None and entry.kind == FILE:
+            remove = menu.addAction(_("Remove from List"))
+            remove.triggered.connect(lambda: self._controller.close_collection(entry.key))
 
     def _source_actions(self, menu: QMenu, entry: Entry) -> None:
         check = menu.addAction(_("Check Now") if entry.automatic else _("Read Now"))
@@ -556,7 +630,8 @@ class ImportsWindow(QMainWindow):
         entry = self.sidebar.chosen()
         is_source = entry is not None and entry.kind == SOURCE
         self.segments.setVisible(is_source and entry.automatic)
-        self.source_menu_button.setVisible(is_source)
+        self.source_menu_button.setVisible(is_source or (entry is not None
+                                                         and entry.kind == FILE))
         if entry is None:
             return
         if entry.kind == LIST:
@@ -576,6 +651,11 @@ class ImportsWindow(QMainWindow):
                 return ngettext("{n} new post", "{n} new posts", entry.count).format(
                     n=entry.count)
             return ngettext("{n} post", "{n} posts", entry.count).format(n=entry.count)
+        if entry.kind == FILE:
+            collection = self._controller.collection(entry.key)
+            if collection is None:
+                return ""
+            return _("Imported once, not kept as a source.")
         if entry.kind == SOURCE:
             source = self._controller.source(entry.key)
             if source is None:
@@ -656,7 +736,8 @@ class ImportsWindow(QMainWindow):
         if view.scope == INBOX:
             if not self._controller.sources():
                 return (_("No sources yet"),
-                        _("Follow a website to see its new posts here."), "")
+                        _("Follow a website to see its new posts here."),
+                        "" if self._controller.read_only else _("Follow a Website…"))
             return (_("You're up to date"),
                     _("New posts appear here when MyEditor checks your sources."), "")
         if view.scope == OLDER_POSTS:
@@ -680,6 +761,107 @@ class ImportsWindow(QMainWindow):
         entry = self.sidebar.chosen()
         if entry is not None and entry.kind == SOURCE:
             self.check_now(entry)
+        elif entry is not None and entry.kind == LIST and entry.key == INBOX:
+            self.follow_website()
+
+    # ------------------------------------------------------------------ #
+    # Following, files and links                                           #
+    # ------------------------------------------------------------------ #
+
+    def _open_sheet(self, sheet) -> None:
+        if self._sheet is not None:
+            self._sheet.close()
+        self._sheet = sheet
+
+        def finished(_result: int) -> None:
+            if self._sheet is sheet:
+                self._sheet = None
+            sheet.deleteLater()
+
+        sheet.finished.connect(finished)
+        sheet.open()
+
+    def sheet(self):
+        """The sheet open now, if any."""
+        return self._sheet
+
+    def follow_website(self, address: str = "") -> None:
+        """Add > Follow a Website..."""
+        if self._controller.read_only:
+            return
+        sheet = FollowSheet(self._controller, dark=self._dark, address=address, parent=self)
+        sheet.followed.connect(lambda key: self.show_view(SOURCE, key))
+        sheet.show_source.connect(lambda key: self.show_view(SOURCE, key))
+        sheet.import_once.connect(self._open_once)
+        sheet.followed_list.connect(self._followed_list)
+        self._open_sheet(sheet)
+        if address:
+            sheet.look_up()
+
+    def import_file(self, path: str = "") -> None:
+        """Add > Import a File... (and a file dropped on the window)."""
+        if self._controller.read_only:
+            return
+        sheet = FileSheet(self._controller, dark=self._dark, parent=self)
+        sheet.opened.connect(lambda collection_id: self.show_view(FILE, collection_id))
+        sheet.followed_list.connect(self._followed_list)
+        self._open_sheet(sheet)
+        if path:
+            sheet.read(path)
+
+    def import_link(self) -> None:
+        """Add > Import a Link..."""
+        if self._controller.read_only:
+            return
+        sheet = LinkSheet(self._controller, dark=self._dark, parent=self)
+        sheet.opened.connect(lambda collection_id: self.show_view(FILE, collection_id))
+        sheet.follow.connect(lambda address: QTimer.singleShot(
+            0, self, lambda: self.follow_website(address)))
+        self._open_sheet(sheet)
+
+    def _open_once(self, result) -> None:
+        """A single post from Follow a Website: open it like a link."""
+        if result is None:
+            return
+        collection = self._controller.open_posts(
+            kind="link", label=result.feed.title or result.url, items=result.feed.items,
+            source_url=result.url)
+        self.show_view(FILE, collection.id)
+
+    def _followed_list(self, followed: int, known: int, refused: int = 0) -> None:
+        parts = [ngettext("Following {count} new source.", "Following {count} new sources.",
+                          followed).format(count=followed)]
+        if known:
+            parts.append(ngettext("{count} was followed already.",
+                                  "{count} were followed already.", known).format(count=known))
+        if refused:
+            parts.append(ngettext("{count} couldn't be followed.",
+                                  "{count} couldn't be followed.", refused).format(
+                count=refused))
+        self.banner.say(" ".join(parts))
+
+    # -- dropping a file on the window -------------------------------------------
+
+    def dragEnterEvent(self, event) -> None:
+        if not self._controller.read_only and dropped_file(event.mimeData()):
+            event.acceptProposedAction()
+            self._drop_overlay.setGeometry(self.centralWidget().geometry())
+            self._drop_overlay.raise_()
+            self._drop_overlay.show()
+
+    def dragMoveEvent(self, event) -> None:
+        if not self._drop_overlay.isHidden():
+            event.acceptProposedAction()
+
+    def dragLeaveEvent(self, event) -> None:
+        self._drop_overlay.hide()
+
+    def dropEvent(self, event) -> None:
+        self._drop_overlay.hide()
+        path = dropped_file(event.mimeData())
+        if path and not self._controller.read_only:
+            event.acceptProposedAction()
+            self.import_file(path)
 
     # ------------------------------------------------------------------ #
     # Sidebar visibility, focus, theme                                     #
@@ -698,6 +880,7 @@ class ImportsWindow(QMainWindow):
         self.act_sidebar.setToolTip(text)
         color = self.palette().color(QPalette.ColorRole.WindowText)
         self.act_sidebar.setIcon(glyph_icon("sidebar", 18, color))
+        self.add_button.setIcon(glyph_icon("plus", 18, color))
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -735,8 +918,12 @@ class ImportsWindow(QMainWindow):
         self.posts.viewport().update()
 
     def show_view(self, kind: str, key: str) -> None:
-        """Show a list or a source (the Drafts panel opens the Inbox)."""
+        """Show a list, a source or a file (the Drafts panel opens the
+        Inbox)."""
+        if self.sidebar.model_.row_of(kind, key) < 0:
+            self._refresh_sidebar()
         self.sidebar.select(kind, key)
+        self.posts.setFocus(Qt.FocusReason.OtherFocusReason)
 
     # ------------------------------------------------------------------ #
     # Remembering the window                                               #
@@ -773,6 +960,81 @@ class ImportsWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         self._save()
         super().closeEvent(event)
+
+
+class _Banner(QFrame):
+    """A one-line message above the list, with an optional action and a
+    close button: what just happened, and the way back where there is
+    one."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setObjectName("imports_banner")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(16, 6, 8, 6)
+        row.setSpacing(8)
+        self.label = QLabel()
+        self.label.setObjectName("imports_banner_text")
+        self.label.setTextFormat(Qt.TextFormat.PlainText)
+        self.label.setWordWrap(True)
+        row.addWidget(self.label, 1)
+        self.action = QPushButton()
+        self.action.setObjectName("imports_banner_action")
+        self.action.setAutoDefault(False)
+        self.action.hide()
+        row.addWidget(self.action)
+        self.close_button = QToolButton()
+        self.close_button.setObjectName("imports_banner_close")
+        self.close_button.setAccessibleName(_("Close Message"))
+        self.close_button.setToolTip(_("Close Message"))
+        self.close_button.clicked.connect(self.hide)
+        row.addWidget(self.close_button)
+        self._handler: Optional[Callable[[], None]] = None
+        self.action.clicked.connect(self._act)
+
+    def say(self, text: str, action: str = "",
+            handler: Optional[Callable[[], None]] = None) -> None:
+        self.label.setText(text)
+        self.label.setAccessibleName(text)
+        self.action.setText(action)
+        self.action.setVisible(bool(action))
+        self._handler = handler
+        color = self.palette().color(QPalette.ColorRole.WindowText)
+        self.close_button.setIcon(glyph_icon("close", 14, color))
+        self.show()
+
+    def _act(self) -> None:
+        handler = self._handler
+        self.hide()
+        if handler is not None:
+            handler()
+
+
+class _DropOverlay(QWidget):
+    """Shown over the window while a file is dragged onto it."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setAccessibleName(_("Drop to Import"))
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        highlight = QColor(self.palette().color(QPalette.ColorRole.Highlight))
+        fill = QColor(self.palette().color(QPalette.ColorRole.Window))
+        fill.setAlpha(225)
+        rect = QRectF(self.rect()).adjusted(10, 10, -10, -10)
+        painter.setBrush(fill)
+        painter.setPen(QPen(highlight, 3))
+        painter.drawRoundedRect(rect, 12, 12)
+        font = QFont(self.font())
+        font.setPointSizeF(font.pointSizeF() + 6)
+        font.setWeight(QFont.Weight.DemiBold)
+        painter.setFont(font)
+        painter.setPen(self.palette().color(QPalette.ColorRole.WindowText))
+        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, _("Drop to Import"))
 
 
 def _bytes(value) -> Optional[QByteArray]:
