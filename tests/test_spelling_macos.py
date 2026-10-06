@@ -1,6 +1,10 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The macOS spell checker itself (NSSpellChecker), where it exists."""
+"""The macOS spell checker itself (NSSpellChecker), where it exists.
+
+Nothing here learns a word: that would write into the person's own
+dictionary, which every app on the Mac shares. Learn Spelling is tested
+with the stand-in checker; Ignore lasts only for this process."""
 
 import sys
 import uuid
@@ -82,17 +86,6 @@ def test_an_ignored_word_counts_as_right_until_the_app_quits(backend):
     assert backend.check(word, "de") is False
     assert backend.ignore(word, "de") is True
     assert backend.check(word, "de") is True
-
-
-def test_a_learned_word_goes_into_the_persons_dictionary(backend):
-    word = "Zxqvlearn" + uuid.uuid4().hex[:6]
-    try:
-        assert backend.learn(word, "en") is True
-        assert backend.check(word, "en") is True
-        assert backend._checker.hasLearnedWord(word)
-    finally:
-        backend._checker.unlearnWord(word)
-    assert not backend._checker.hasLearnedWord(word)
 
 
 def test_the_last_word_of_a_paragraph_gets_its_underline_once_typed():
