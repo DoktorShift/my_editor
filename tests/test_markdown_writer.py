@@ -306,6 +306,25 @@ def test_an_own_address_after_a_word_is_kept_whole():
     assert document_to_markdown(typed("see:", (url, {"href": url}))) == f"see:<{url}>\n"
 
 
+NPUB = "npub1" + "q" * 58
+NEVENT = "nevent1" + "q" * 60
+
+
+def test_a_nostr_link_is_written_bare_whatever_its_words():
+    # Review M4 (W2): "[Alice](nostr:npub1...)" is dropped by njump and
+    # read differently elsewhere; the bare reference is shown the same
+    # everywhere (as the person's name, or a card).
+    doc = typed(("Thanks to ", {}), ("Alice", {"href": "nostr:" + NPUB}),
+                (" for ", {}), ("this note", {"href": "nostr:" + NEVENT}), (".", {}))
+    assert document_to_markdown(doc) == f"Thanks to nostr:{NPUB} for nostr:{NEVENT}.\n"
+    assert document_to_note_text(doc) == f"Thanks to nostr:{NPUB} for nostr:{NEVENT}."
+
+
+def test_a_bare_nostr_reference_keeps_a_space_from_the_words_around_it():
+    doc = typed(("see", {}), ("Alice", {"href": "nostr:" + NPUB}), ("today", {}))
+    assert document_to_markdown(doc) == f"see nostr:{NPUB} today\n"
+
+
 def test_a_link_label_with_a_bracket_is_escaped():
     doc = typed(("see [1]", {"href": "https://x.example"}))
     assert document_to_markdown(doc) == "[see [1\\]](https://x.example)\n"

@@ -91,6 +91,28 @@ _ORDERED_STYLES = {
     QTextListFormat.Style.ListUpperRoman,
 }
 
+# A Nostr reference: a person, a note or an article. Written bare, whatever
+# words its link shows (W2): that is the form every Nostr reader turns into
+# a name or a card the same way; njump and others drop a labelled link to
+# it ([label](nostr:...)) or show its address.
+_NOSTR_REFERENCE = re.compile(r"nostr:(?:npub|nprofile|note|nevent|naddr)1[02-9ac-hj-np-z]+",
+                              re.IGNORECASE)
+
+
+def _is_nostr_reference(href: str) -> bool:
+    return bool(_NOSTR_REFERENCE.fullmatch(href or ""))
+
+
+def _apart(reference: str, before: str, following: Optional["_Span"]) -> str:
+    """``reference`` with a space where a word would otherwise touch it,
+    so readers find where it starts and ends."""
+    if before and before[-1].isalnum():
+        reference = " " + reference
+    if following is not None and following.text[:1].isalnum():
+        reference += " "
+    return reference
+
+
 # A bare web address, and the characters that make a Markdown reader see
 # emphasis or code inside one.
 _WEB_ADDRESS = re.compile(r"(?<![<(\w])(?:https?|wss?)://[^\s<>]+", re.IGNORECASE)
@@ -435,10 +457,13 @@ def _inline_markdown(spans: List[_Span], hard_break: str = "  \n") -> str:
             while i < len(spans) and spans[i].href == span.href and not spans[i].raw:
                 group.append(spans[i])
                 i += 1
+            following = spans[i] if i < len(spans) else None
+            if _is_nostr_reference(span.href):
+                out.append(_apart(span.href, "".join(out), following))
+                continue
             words = "".join(s.text for s in group).replace(LINE_SEPARATOR, " ")
             address = _own_address(words.strip(), span.href)
             if address and not any(s.bold or s.italic or s.strike for s in group):
-                following = spans[i] if i < len(spans) else None
                 out.append(_autolink(address, span.href, "".join(out), following))
                 continue
             inner = "".join(_styled(s) for s in group)
@@ -585,7 +610,10 @@ def _inline_note(spans: List[_Span]) -> str:
                 i += 1
             label = "".join(group).replace(LINE_SEPARATOR, " ").strip()
             href = span.href
-            if not label or label == href or label.rstrip("/") == href.rstrip("/"):
+            if _is_nostr_reference(href):
+                following = spans[i] if i < len(spans) else None
+                out.append(_apart(href, "".join(out), following))
+            elif not label or label == href or label.rstrip("/") == href.rstrip("/"):
                 out.append(href)
             else:
                 out.append(f"{label} ({href})")
