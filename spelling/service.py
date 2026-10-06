@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 import shiboken6
 from PySide6.QtCore import QObject, QTimer, Signal
@@ -61,6 +61,17 @@ class Misspelling:
 
     def touches(self, offset: int) -> bool:
         return self.start <= offset <= self.end
+
+
+class Found(NamedTuple):
+    """A misspelled word in a text a SpellChecker read, by Python index."""
+
+    start: int
+    end: int
+    word: str
+    """The word, as Suggestions, Learn Spelling and Ignore Spelling take it."""
+    language: str
+    """The language it was checked in."""
 
 
 class SpellChecker(QObject):
@@ -138,20 +149,19 @@ class SpellChecker(QObject):
         for line in text.split("\n"):
             found = words.scan(line, state)
             state = found.state
-            for start, end, word, checked_in in self._misspelled(line, found, language):
-                first = words.to_utf16(offsets, position + start)
-                out.append(Misspelling(first, words.to_utf16(offsets, position + end) - first,
-                                       word, checked_in))
+            for wrong in self.misspelled(line, found, language):
+                first = words.to_utf16(offsets, position + wrong.start)
+                out.append(Misspelling(first, words.to_utf16(offsets, position + wrong.end) - first,
+                                       wrong.word, wrong.language))
             position += len(line) + 1
         return out
 
-    # -- inside ---------------------------------------------------------------
-
-    def _misspelled(self, text: str, found: Scan,
-                    language: str) -> List[Tuple[int, int, str, str]]:
-        """``(start, end, word, language)`` of each misspelled word of
-        ``text`` that :func:`words.scan` found, as Python indices (for
-        DocumentSpelling and find_misspellings)."""
+    def misspelled(self, text: str, found: Scan, language: str) -> List[Found]:
+        """The misspelled words among those :func:`words.scan` found in
+        ``text`` (one block), in ``language``: the step that
+        find_misspellings and DocumentSpelling share. A paragraph checker
+        reads the text with everything that is not prose blanked out, a
+        word-by-word one is asked about each word."""
         if not found.words or not self._available_now():
             return []
         result = self._backend.check_text(words.masked(text, found.skipped), language)
@@ -160,6 +170,8 @@ class SpellChecker(QObject):
         if result is not None:
             return _within_words(text, found.words, result)
         return self._word_by_word(text, found.words, self._concrete(language))
+
+    # -- inside ---------------------------------------------------------------
 
     def _language(self, language: Optional[str]) -> str:
         return language if language else self.default_language()
@@ -202,9 +214,8 @@ class SpellChecker(QObject):
             self._known[key] = known
         return known
 
-    def _word_by_word(self, text: str, spans: Sequence[Span],
-                      language: str) -> List[Tuple[int, int, str, str]]:
-        out: List[Tuple[int, int, str, str]] = []
+    def _word_by_word(self, text: str, spans: Sequence[Span], language: str) -> List[Found]:
+        out: List[Found] = []
         for start, end in spans:
             if not self._available_now():
                 return []
@@ -222,9 +233,9 @@ class SpellChecker(QObject):
                 for part_start, part_end in words.hyphen_parts(text, start, end):
                     part = text[part_start:part_end]
                     if not self._right(part, language):
-                        out.append((part_start, part_end, words.clean(part), language))
+                        out.append(Found(part_start, part_end, words.clean(part), language))
                 continue
-            out.append((start, end, words.clean(word), language))
+            out.append(Found(start, end, words.clean(word), language))
         return out if self._available_now() else []
 
     def _contraction(self, word: str, language: str) -> bool:
@@ -664,11 +675,10 @@ class DocumentSpelling(QObject):
             scanned = words.scan(text, state, _code_spans(block, text))
             offsets = words.utf16_offsets(text)
             found = tuple(
-                Misspelling(words.to_utf16(offsets, start),
-                            words.to_utf16(offsets, end) - words.to_utf16(offsets, start),
-                            word, language)
-                for start, end, word, language
-                in self._checker._misspelled(text, scanned, self.language()))
+                Misspelling(words.to_utf16(offsets, wrong.start),
+                            words.to_utf16(offsets, wrong.end) - words.to_utf16(offsets, wrong.start),
+                            wrong.word, wrong.language)
+                for wrong in self._checker.misspelled(text, scanned, self.language()))
         # A block whose text changed is always named: underlines kept as
         # text cursors (extra selections) grow with text typed right after
         # them, and need redrawing even when the misspellings are the same.
@@ -691,11 +701,10 @@ def _for_checker(word: str) -> str:
     return words.clean(word).replace("’", "'")
 
 
-def _within_words(text: str, spans: Sequence[Span],
-                  result: TextCheck) -> List[Tuple[int, int, str, str]]:
+def _within_words(text: str, spans: Sequence[Span], result: TextCheck) -> List[Found]:
     """What a system checker flagged in a whole paragraph, kept only
     where it lies inside a word the scanner would check, and is one."""
-    out: List[Tuple[int, int, str, str]] = []
+    out: List[Found] = []
     index = 0
     for start, end in sorted(result.misspelled):
         while index < len(spans) and spans[index][1] <= start:
@@ -705,7 +714,7 @@ def _within_words(text: str, spans: Sequence[Span],
         if spans[index][0] <= start and end <= spans[index][1]:
             piece = text[start:end]
             if words.checkable(piece):
-                out.append((start, end, words.clean(piece), result.language))
+                out.append(Found(start, end, words.clean(piece), result.language))
     return out
 
 

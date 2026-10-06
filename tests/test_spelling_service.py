@@ -12,7 +12,8 @@ from PySide6.QtWidgets import QTextEdit
 
 from spelling import service
 from spelling.backends import AUTOMATIC
-from spelling.service import DocumentSpelling, Misspelling, SpellChecker
+from spelling.service import DocumentSpelling, Found, Misspelling, SpellChecker
+from spelling.words import scan
 from tests.spelling_fakes import Editor, FakeBackend, FakeTextBackend, drain
 
 
@@ -158,6 +159,24 @@ def test_text_cut_inside_an_emoji_does_not_turn_spelling_off():
         assert checker.check("wrld\ud83d", "en-US") is True
         assert checker.suggestions("wrld\ud83d", "en-US") == []
         assert checker.is_available() is True
+
+
+def test_a_document_is_checked_through_the_checkers_public_step():
+    class Watching(SpellChecker):
+        def __init__(self, backend):
+            super().__init__(backend)
+            self.texts = []
+
+        def misspelled(self, text, found, language):
+            self.texts.append(text)
+            return super().misspelled(text, found, language)
+
+    checker = Watching(FakeBackend())
+    spelling = DocumentSpelling(checker, document("the helo"))
+    spelling.check_all()
+    assert checker.texts == ["the helo"]
+    assert checker.misspelled("a wrld", scan("a wrld"), "en-US") == [
+        Found(2, 6, "wrld", "en-US")]
 
 
 def test_an_unavailable_checker_finds_nothing_and_says_so_once():

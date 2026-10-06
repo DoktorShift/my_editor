@@ -22,11 +22,12 @@ from .backends import (
     create_backend,
     normalize_language,
 )
-from .service import DocumentSpelling, Misspelling, SpellChecker
+from .service import DocumentSpelling, Found, Misspelling, SpellChecker
 
 __all__ = [
     "AUTOMATIC",
     "DocumentSpelling",
+    "Found",
     "Misspelling",
     "NullBackend",
     "SpellBackend",
