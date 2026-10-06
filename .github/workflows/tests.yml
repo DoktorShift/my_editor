@@ -1,6 +1,6 @@
 name: Tests
 
-# Runs the test suite for every pull request
+# Runs the test suite and the translation check for every pull request
 # and every push to main and dev, on the three platforms the installers
 # are built for, so a change that breaks one of them is seen before it
 # is merged.
@@ -49,6 +49,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r sidecar/requirements.txt "pytest~=9.0"
+
+      # A missing translation, or a placeholder that would crash a
+      # window, fails here.
+      - name: Check the translations
+        run: python scripts/i18n.py check
 
       - name: Run the tests
         run: python -m pytest -q
