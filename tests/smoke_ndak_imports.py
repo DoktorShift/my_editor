@@ -348,7 +348,9 @@ if rep.check("the feed list is published as kind 30078", list_event is not None)
     nd.review_event(rep, "feed list", list_event, kind=30078)
     rep.check("its d tag namespaces it, and it says it is NIP-44 encrypted",
               nd.tag_values(list_event, "d") == [FEED_LIST_DTAG]
-              and nd.tag_values(list_event, "encrypted") == ["nip44_v2"], json.dumps(list_event["tags"]))
+              # "nip44" since the list is shared with STANDUP; older builds wrote "nip44_v2".
+              and nd.tag_values(list_event, "encrypted") in (["nip44"], ["nip44_v2"]),
+              json.dumps(list_event["tags"]))
     opened = nd.nak("decrypt", "--sec", sk_hex, "-p", pk, list_event["content"]).stdout
     try:
         payload = json.loads(opened)

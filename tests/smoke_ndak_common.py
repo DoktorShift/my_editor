@@ -158,10 +158,35 @@ def _allow_the_test_bed_host(module) -> None:
     module.is_local_name = is_local_name
 
 
+def _allow_the_test_bed_addresses(module) -> None:
+    """HARNESS-ONLY: let the importer's network guard fetch from this
+    computer, where the test bed's web server (feeds, pages, nostr.json)
+    runs.
+
+    nostr/imports/netguard.py refuses every address that is not on the
+    public internet, by design, and localhost resolves to a loopback
+    address. Only loopback is let through; private network addresses stay
+    refused, so the guard's rule is still exercised."""
+    real = getattr(module, "is_public_address", None)
+    if real is None:
+        return      # an app from before the guard
+
+    def is_public_address(address: str) -> bool:
+        try:
+            if ipaddress.ip_address((address or "").split("%", 1)[0]).is_loopback:
+                return True
+        except ValueError:
+            pass
+        return real(address)
+
+    module.is_public_address = is_public_address
+
+
 # Callables run right after a module is imported: module name -> [fn(module)].
 POST_IMPORT_HOOKS: Dict[str, List[Callable[[Any], None]]] = {
     "nostr.einundzwanzig": [_rebuild_member_benefits],
     "url_safety": [_allow_the_test_bed_host],
+    "nostr.imports.netguard": [_allow_the_test_bed_addresses],
 }
 
 HOME: Optional[Path] = None
