@@ -110,8 +110,8 @@ def post_from_item(item: FeedItem, *, collection: str, source_key: str = "",
                 title=item.title or "", excerpt=snapshots.excerpt(item),
                 image=snapshots.cover(item), link=item.link or "", author=item.author or "",
                 published_at=item.published_at or 0, found_at=0,
-                read_minutes=snapshots.reading_minutes(item.content_html),
-                image_count=snapshots.image_count(item.content_html), state=state,
+                read_minutes=snapshots.minutes_of(item),
+                image_count=snapshots.images_in(item), state=state,
                 collection=collection)
 
 

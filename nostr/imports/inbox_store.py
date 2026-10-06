@@ -465,8 +465,7 @@ class InboxStore:
                      state if state in (NEW, OLDER) else fresh,
                      item.title or "", snapshots.excerpt(item), snapshots.cover(item),
                      item.link or "", item.author or "",
-                     snapshots.reading_minutes(item.content_html),
-                     snapshots.image_count(item.content_html)))
+                     snapshots.minutes_of(item), snapshots.images_in(item)))
             self._db.execute(
                 "UPDATE sources SET last_checked = ?, next_check = ?, checking_until = 0, "
                 "failures = 0, error = '', etag = ?, last_modified = ?, "
