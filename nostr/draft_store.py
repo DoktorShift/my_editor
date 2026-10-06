@@ -121,7 +121,10 @@ class DraftStore(QObject):
         self._clock = clock
         self._profile_pubkey: Optional[str] = None
         self._records: Dict[str, DraftRecord] = {}
-        # Drafts deleted, by d tag: the deletion's (created_at, event id).
+        # Drafts deleted, by d tag: the deletion's (created_at, event id,
+        # whether it was a request). A request (NIP-09) deletes every
+        # version up to its time, the same second included; a blanked wrap
+        # (NIP-37) replaces only what it supersedes (NIP-01).
         self._deleted: Dict[str, tuple] = {}
         self._is_loading: bool = False
 
@@ -202,15 +205,16 @@ class DraftStore(QObject):
         Tombstones (empty ciphertext) are handled here too, they remove
         any existing record for that ``d`` and emit ``record_removed``.
         """
+        if meta.is_tombstone:
+            # Also past its own expiration: the deletion it says still
+            # keeps an older copy out (engine review L4).
+            self.apply_deletion(meta.identifier, meta.created_at, meta.event_id)
+            return
         if meta.is_expired(self._clock()):
             # Gone (NIP-40): neither a row nor a version that replaces one.
             return
         existing = self._records.get(meta.identifier)
-        if meta.is_tombstone:
-            self.apply_deletion(meta.identifier, meta.created_at, meta.event_id)
-            return
-        deleted = self._deleted.get(meta.identifier)
-        if deleted is not None and not supersedes(meta.created_at, meta.event_id, *deleted):
+        if self._deleted_after(meta.identifier, meta.created_at, meta.event_id):
             return
         if existing is None:
             record = DraftRecord(
@@ -298,25 +302,42 @@ class DraftStore(QObject):
         record.failure_reason = reason or _("decryption failed")
         self.record_changed.emit(identifier)
 
-    def apply_deletion(self, identifier: str, created_at: int, event_id: str) -> bool:
+    def apply_deletion(self, identifier: str, created_at: int, event_id: str, *,
+                       request: bool = False) -> bool:
         """A deletion of ``identifier`` made at ``created_at``: a blanked
-        wrap (NIP-37), or a deletion request naming the draft (NIP-09,
-        how EINUNDZWANZIG STANDUP deletes). Returns whether a draft left.
+        wrap (NIP-37), or with ``request`` a deletion request naming the
+        draft (NIP-09, how EINUNDZWANZIG STANDUP deletes). Returns whether
+        a draft left.
 
         A deletion removes only what it is newer than: a relay that lags
         behind can hand out a deletion older than a draft written since.
-        Its time is remembered, so a copy the deletion replaced, still
-        held by another relay, does not bring the draft back.
+        A request deletes every version up to its time, the same second
+        included (NIP-09: engine review L1); a blanked wrap replaces only
+        what it supersedes (NIP-01). Its time is remembered, so a copy the
+        deletion replaced, still held by another relay, does not bring the
+        draft back.
         """
         remembered = self._deleted.get(identifier)
-        if remembered is None or supersedes(created_at, event_id, *remembered):
-            self._deleted[identifier] = (int(created_at), event_id or "")
+        if remembered is None or supersedes(created_at, event_id, remembered[0],
+                                            remembered[1]):
+            self._deleted[identifier] = (int(created_at), event_id or "", request)
         existing = self._records.get(identifier)
-        if existing is not None and supersedes(created_at, event_id,
-                                               existing.created_at, existing.event_id):
+        if existing is not None and self._deleted_after(
+                identifier, existing.created_at, existing.event_id):
             self.remove(identifier)
             return True
         return False
+
+    def _deleted_after(self, identifier: str, created_at: int, event_id: str) -> bool:
+        """Whether the deletion remembered for ``identifier`` deletes the
+        version made at ``created_at``."""
+        deleted = self._deleted.get(identifier)
+        if deleted is None:
+            return False
+        when, deleted_id, request = deleted
+        if request:
+            return int(created_at) <= when
+        return supersedes(when, deleted_id, int(created_at), event_id)
 
     def deleted_identifiers(self) -> List[str]:
         """The drafts known to be deleted (this session), newest version

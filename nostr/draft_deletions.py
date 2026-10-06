@@ -154,5 +154,5 @@ class DraftDeletions(QObject):
             return
         event_id = str(event.get("id", ""))
         for identifier, when in deleted_identifiers(event, self._profile.user_pubkey).items():
-            if self._store.apply_deletion(identifier, when, event_id):
+            if self._store.apply_deletion(identifier, when, event_id, request=True):
                 self.removed.emit(identifier)
