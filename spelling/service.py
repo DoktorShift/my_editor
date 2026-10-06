@@ -291,8 +291,7 @@ class DocumentSpelling(QObject):
         ``typing_position`` (a document position) leaves out the word
         being typed there, which is not finished yet."""
         number = block.blockNumber()
-        if (self._closed or not 0 <= number < len(self._found) or self._dirty[number]
-                or self._texts[number] != block.text()):
+        if self._closed or not 0 <= number < len(self._found) or self._stale(number, block):
             return ()
         found = self._found[number]
         if typing_position is None:
@@ -310,7 +309,8 @@ class DocumentSpelling(QObject):
         if not block.isValid():
             return None
         number = block.blockNumber()
-        if number < len(self._dirty) and self._dirty[number] and self._checker.is_available():
+        if (number < len(self._dirty) and self._stale(number, block)
+                and self._checker.is_available()):
             if self._check(number):
                 self.misspellingsChanged.emit(number, number)
         offset = position - block.position()
@@ -379,8 +379,30 @@ class DocumentSpelling(QObject):
         if len(self._found) != count:
             self._restart()
             return
-        self._states_from(first, last, old_end)
+        # Qt reports some undos short (seen after rich text pasted over a
+        # selection): a block after the range whose text is not the one it
+        # was checked in changed too.
+        end = last
+        while end + 1 < count:
+            remembered = self._texts[end + 1]
+            if remembered is None or remembered == document.findBlockByNumber(end + 1).text():
+                break
+            end += 1
+            self._dirty[end] = 1
+        self._states_from(first, end, old_end if end == last else None)
         self._schedule()
+
+    def _stale(self, number: int, block: QTextBlock) -> bool:
+        """Whether a block must be checked before its misspellings count.
+        One whose text changed without the document saying so is marked
+        to be checked again here, so it heals as soon as it is read."""
+        if self._dirty[number]:
+            return True
+        if self._texts[number] == block.text():
+            return False
+        self._dirty[number] = 1
+        self._schedule()
+        return True
 
     def _states_from(self, first: int, last: int, old_end: Optional[State] = None) -> None:
         """Bring the states up to date from block ``first``: every block

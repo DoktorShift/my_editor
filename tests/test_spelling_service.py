@@ -4,6 +4,7 @@
 
 from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtGui import QTextCharFormat, QTextCursor, QTextDocument
+from PySide6.QtWidgets import QTextEdit
 
 from spelling.backends import AUTOMATIC
 from spelling.service import DocumentSpelling, Misspelling, SpellChecker
@@ -218,6 +219,85 @@ def test_new_and_removed_lines_keep_the_others_checked():
     cursor.removeSelectedText()
     spelling.check_all()
     assert wrong(spelling, doc) == [["helo"], ["wrld"], []]
+
+
+def found_now(spelling, doc):
+    """Every block's misspellings as the service has them."""
+    out, block = [], doc.begin()
+    while block.isValid():
+        out.append([(m.start, m.length, m.word) for m in spelling.misspellings(block)])
+        block = block.next()
+    return out
+
+
+def found_fresh(doc, checker):
+    """What checking a copy of the document from scratch finds."""
+    copy = doc.clone()
+    spelling = DocumentSpelling(checker, copy)
+    spelling.check_all()
+    return found_now(spelling, copy)
+
+
+def test_an_undo_qt_reports_short_still_gets_its_paragraphs_checked():
+    # Recorded: formatted text pasted over selections, then Undo. Qt's
+    # report of the undo leaves out the start of the next paragraph, which
+    # the undo changed too ("a wrldtexthelo th" became "texthelo th").
+    editor = QTextEdit()
+    editor.setMarkdown("the end\n\nhelo there\n\n- one wrld\n- two\n")
+    doc = editor.document()
+    spelling, checker, *_ = follow(doc)
+    spelling.check_all()
+
+    def select(start, end):
+        cursor = QTextCursor(doc)
+        cursor.setPosition(start)
+        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+        return cursor
+
+    def copy(start, end, to):
+        fragment = select(start, end).selection()
+        cursor = QTextCursor(doc)
+        cursor.setPosition(to)
+        cursor.insertFragment(fragment)
+
+    def markdown(at, text):
+        cursor = QTextCursor(doc)
+        cursor.setPosition(at)
+        cursor.insertMarkdown(text)
+
+    markdown(8, "> quoet\n\ntext")
+    copy(4, 35, 39)
+    markdown(15, "- a wrld\n- b mroe")
+    copy(44, 84, 74)
+    select(29, 59).insertHtml("<pre>cde\nfnction</pre>")
+    markdown(31, "- a wrld\n- b mroe")
+    copy(102, 114, 35)
+    select(38, 45).insertHtml("<ul><li>item wrld</li><li>mroe</li></ul>")
+    select(46, 76).insertHtml("<p>the helo</p><p>a wrld</p>")
+    spelling.check_all()
+    doc.undo()
+    spelling.check_all()
+    assert found_now(spelling, doc) == found_fresh(doc, checker)
+    assert any("texthelo" in [m[2] for m in block] for block in found_now(spelling, doc))
+
+
+def test_a_block_changed_without_a_report_is_checked_again_when_read():
+    doc = document("the end", "a wrld")
+    spelling, *_ = follow(doc)
+    spelling.check_all()
+    doc.blockSignals(True)                         # the service hears nothing
+    type_at(doc, doc.findBlockByNumber(1).position(), "mroe ")
+    doc.blockSignals(False)
+    block = doc.findBlockByNumber(1)
+    assert spelling.misspellings(block) == ()       # stale: not shown
+    assert spelling.is_checking()                   # and checked again
+    spelling.check_all()
+    assert wrong(spelling, doc) == [[], ["mroe", "wrld"]]
+    # The context menu checks a stale block on the spot.
+    doc.blockSignals(True)
+    type_at(doc, block.position(), "zzq ")
+    doc.blockSignals(False)
+    assert spelling.misspelling_at(block.position() + 1).word == "zzq"
 
 
 def test_opening_a_fence_turns_the_lines_below_into_code_and_closing_it_back():
