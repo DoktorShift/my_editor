@@ -18,9 +18,23 @@ test can call it without a window.
 
 from __future__ import annotations
 
-from PySide6.QtGui import QTextCursor, QTextFormat
+from typing import List, Tuple
+
+from PySide6.QtGui import QFont, QTextCharFormat, QTextCursor, QTextFormat
 
 from doc_walk import iter_blocks
+
+# Inline styles, by name. Underline has no Markdown; it stays in local
+# files only (markdown_writer.has_local_only_formatting).
+BOLD = "bold"
+ITALIC = "italic"
+UNDERLINE = "underline"
+STRIKE = "strike"
+CODE = "code"
+INLINE = (BOLD, ITALIC, UNDERLINE, STRIKE, CODE)
+
+# The font inline code is shown in, as Qt's Markdown reader writes it.
+CODE_FAMILIES = ["monospace"]
 
 
 def normalize_after_markdown_load(doc) -> None:
@@ -46,3 +60,157 @@ def normalize_after_markdown_load(doc) -> None:
         fmt.clearProperty(marker)
         QTextCursor(block).setBlockFormat(fmt)
     cursor.endEditBlock()
+
+
+# --------------------------------------------------------------------------- #
+# Inline styles                                                                #
+# --------------------------------------------------------------------------- #
+
+def has_style(fmt: QTextCharFormat, style: str) -> bool:
+    """Whether a piece of text carries ``style``."""
+    if style == BOLD:
+        return fmt.fontWeight() >= QFont.Weight.DemiBold
+    if style == ITALIC:
+        return fmt.fontItalic()
+    if style == UNDERLINE:
+        return fmt.fontUnderline()
+    if style == STRIKE:
+        return fmt.fontStrikeOut()
+    if style == CODE:
+        return fmt.fontFixedPitch()
+    raise ValueError(f"unknown style {style!r}")
+
+
+def style_format(style: str, on: bool) -> QTextCharFormat:
+    """The change that turns ``style`` on or off, to merge into text."""
+    fmt = QTextCharFormat()
+    if style == BOLD:
+        fmt.setFontWeight(QFont.Weight.Bold if on else QFont.Weight.Normal)
+    elif style == ITALIC:
+        fmt.setFontItalic(on)
+    elif style == UNDERLINE:
+        fmt.setFontUnderline(on)
+    elif style == STRIKE:
+        fmt.setFontStrikeOut(on)
+    elif style == CODE:
+        fmt.setFontFixedPitch(on)
+        # Off, the families are cleared by clear_style below: merging can
+        # set a property but never take one away.
+        if on:
+            fmt.setFontFamilies(CODE_FAMILIES)
+    else:
+        raise ValueError(f"unknown style {style!r}")
+    return fmt
+
+
+def _text_runs(cursor: QTextCursor) -> List[Tuple[int, int, QTextCharFormat]]:
+    """``(start, end, format)`` of every piece of text in the selection
+    (images left out), cut to the selection."""
+    doc = cursor.document()
+    start, end = cursor.selectionStart(), cursor.selectionEnd()
+    runs = []
+    block = doc.findBlock(start)
+    while block.isValid() and block.position() < end:
+        it = block.begin()
+        while not it.atEnd():
+            fragment = it.fragment()
+            if fragment.isValid():
+                first = fragment.position()
+                last = first + fragment.length()
+                fmt = fragment.charFormat()
+                if last > start and first < end and not fmt.isImageFormat():
+                    runs.append((max(first, start), min(last, end), fmt))
+            it += 1
+        block = block.next()
+    return runs
+
+
+def selection_has(cursor: QTextCursor, style: str) -> bool:
+    """Whether all of the selected text carries ``style``: a selection that
+    is only partly bold counts as not bold, so the command makes it all
+    bold (the way Pages and Google Docs do it)."""
+    runs = _text_runs(cursor)
+    return bool(runs) and all(has_style(fmt, style) for _s, _e, fmt in runs)
+
+
+def toggle_style(cursor: QTextCursor, style: str) -> bool:
+    """Turn ``style`` on over the whole selection, or off when all of it
+    has it already. Returns the new state. One step on the undo stack."""
+    on = not selection_has(cursor, style)
+    cursor.beginEditBlock()
+    cursor.mergeCharFormat(style_format(style, on))
+    if not on and style == CODE:
+        _clear_properties(cursor, (QTextFormat.Property.FontFamilies,
+                                   QTextFormat.Property.FontFamily))
+    cursor.endEditBlock()
+    return on
+
+
+def _clear_properties(cursor: QTextCursor, properties, *, keep=None) -> None:
+    """Take ``properties`` off every piece of the selection; ``keep(fmt,
+    property)`` may spare one."""
+    doc = cursor.document()
+    for start, end, fmt in _text_runs(cursor):
+        changed = QTextCharFormat(fmt)
+        for prop in properties:
+            if keep is None or not keep(fmt, prop):
+                changed.clearProperty(prop)
+        if changed != fmt:
+            piece = QTextCursor(doc)
+            piece.setPosition(start)
+            piece.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+            piece.setCharFormat(changed)
+
+
+# What Clear Formatting takes away: every inline style and color. A link
+# stays a link and keeps its own look; a heading keeps its weight.
+_FORMATTING = (
+    QTextFormat.Property.FontWeight, QTextFormat.Property.FontItalic,
+    QTextFormat.Property.FontUnderline, QTextFormat.Property.TextUnderlineStyle,
+    QTextFormat.Property.FontStrikeOut, QTextFormat.Property.FontFixedPitch,
+    QTextFormat.Property.FontFamilies, QTextFormat.Property.FontFamily,
+    QTextFormat.Property.ForegroundBrush, QTextFormat.Property.BackgroundBrush,
+)
+_LINK_LOOK = (QTextFormat.Property.ForegroundBrush, QTextFormat.Property.FontUnderline,
+              QTextFormat.Property.TextUnderlineStyle)
+
+
+def clear_formatting(cursor: QTextCursor) -> None:
+    """Clear Formatting over the selection, as one step on the undo stack."""
+    doc = cursor.document()
+    headings = set()
+    block = doc.findBlock(cursor.selectionStart())
+    while block.isValid() and block.position() <= cursor.selectionEnd():
+        if block.blockFormat().headingLevel():
+            headings.add(block.position())
+        block = block.next()
+
+    def keep(fmt, prop):
+        if fmt.isAnchor() and prop in _LINK_LOOK:
+            return True
+        return False
+
+    cursor.beginEditBlock()
+    _clear_properties(cursor, _FORMATTING, keep=keep)
+    # A heading is bold by its own format: that is not emphasis to clear.
+    for position in headings:
+        heading = QTextCursor(doc.findBlock(position))
+        heading.movePosition(QTextCursor.MoveOperation.EndOfBlock,
+                             QTextCursor.MoveMode.KeepAnchor)
+        within = QTextCursor(doc)
+        within.setPosition(max(heading.selectionStart(), cursor.selectionStart()))
+        within.setPosition(min(heading.selectionEnd(), cursor.selectionEnd()),
+                           QTextCursor.MoveMode.KeepAnchor)
+        within.mergeCharFormat(style_format(BOLD, True))
+    cursor.endEditBlock()
+
+
+def typing_format_without(fmt: QTextCharFormat) -> QTextCharFormat:
+    """The format to type on with after Clear Formatting with nothing
+    selected: the one at the caret, with every style and color taken off
+    (a link stays a link)."""
+    clean = QTextCharFormat(fmt)
+    for prop in _FORMATTING:
+        if not (fmt.isAnchor() and prop in _LINK_LOOK):
+            clean.clearProperty(prop)
+    return clean

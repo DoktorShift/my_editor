@@ -99,6 +99,7 @@ def _window_stub():
         _new_wired_editor=new_editor,
         _reload_from_disk=lambda *a: None,
         _attach_close_button=lambda *a: None,
+        _attach_highlighter=lambda *a: None,
         _asset_manager=types.SimpleNamespace(adopt_data_uri=lambda uri: None),
         _watcher=types.SimpleNamespace(addPath=lambda p: None),
         is_dark_theme=False,

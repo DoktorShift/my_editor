@@ -2,6 +2,8 @@
 
 ## Keyboard shortcuts
 
+On macOS, `Ctrl` in these tables is the Command key (`⌘`) and `Alt` is Option (`⌥`). Where a Mac app uses a different key than Windows and Linux, both are given.
+
 ### File
 
 | Shortcut | Action |
@@ -21,27 +23,37 @@
 |---|---|
 | `Ctrl+B` | Bold |
 | `Ctrl+I` | Italic |
-| `Ctrl+U` | Underline |
-| `Ctrl+D` | Reset all formatting |
+| `Ctrl+U` | Underline (stays in local files: Markdown and Nostr have no underline) |
+| `Ctrl+Shift+X` | Strikethrough |
+| | Inline Code (`Format` menu) |
+| `Ctrl+D` | Clear Formatting (a link stays a link) |
 
-The **B**, **I**, and **U** buttons in the header bar and the **Format** menu mirror these shortcuts; the buttons highlight orange when the format is active at the cursor position.
+Strikethrough and inline code are Markdown, so they are offered in documents that can hold Markdown structure (Markdown, HTML and new documents), not in plain-text and code files. Text colors are in `Format > Color`.
 
-### Undo / Redo
+### Edit
+
+The `Edit` menu has what every Mac app has there, in the same order:
 
 | Shortcut | Action |
 |---|---|
 | `Ctrl+Z` | Undo |
-| `Ctrl+Y` / `Ctrl+Shift+Z` | Redo |
+| `Ctrl+Shift+Z` (`Ctrl+Y` on Windows) | Redo |
+| `Ctrl+X` / `Ctrl+C` / `Ctrl+V` | Cut / Copy / Paste |
+| `Ctrl+Alt+Shift+V` (`Ctrl+Shift+V` on Windows and Linux) | Paste and Match Style: paste as plain text in the style around it |
+| `Ctrl+A` | Select All |
 
-### Search
+Cut, Copy, Paste and Select All act on whatever has the focus: the document, the find field, or the PDF reader.
+
+### Find
+
+`Edit > Find`:
 
 | Shortcut | Action |
 |---|---|
-| `Ctrl+F` | Open find bar |
-| `Enter` | Next match (while find bar is open) |
-| `Shift+Enter` | Previous match (while find bar is open) |
-| `F3` | Find next |
-| `Shift+F3` | Find previous |
+| `Ctrl+F` | Find (opens the find bar) |
+| `Enter` / `Shift+Enter` | Next / previous match, while the find bar is open |
+| `Ctrl+G` / `Ctrl+Shift+G` on macOS, `F3` / `Shift+F3` elsewhere | Find Next / Find Previous |
+| `Ctrl+E` (macOS) | Use Selection for Find: the selected words become what Find Next looks for |
 | `Escape` | Close find bar and return to editor |
 
 ### Editor
@@ -121,13 +133,12 @@ or `F12`); the button stays greyed out when the PDF has no outline.
 
 ## Right-click menu
 
-Right-clicking in the editor opens a context menu with:
+Right-clicking in the editor opens a context menu with the same commands as the menus:
 
-- Copy / Cut / Paste
-- **Color**: apply one of six text colors (Red, Green, Orange, Yellow, Blue, Purple)
-- **Remove Color**: restore default text color
-- Bold / Italic / Underline toggles
-- **Reset Format**: clear all formatting at once
+- Cut / Copy / Paste / Paste and Match Style
+- Bold / Italic / Underline / Strikethrough / Inline Code
+- **Color**: one of six text colors (Red, Green, Orange, Yellow, Blue, Purple), or **Remove Color**
+- **Clear Formatting**: every style and color at once; links stay links
 
 Right-clicking a **tab** opens a context menu with:
 

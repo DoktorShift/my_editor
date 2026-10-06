@@ -10,7 +10,7 @@ import os
 from PySide6.QtCore import Qt, QTimer, QRect, QPoint, QMetaMethod, Signal
 from PySide6.QtGui import (
     QPainter, QTextCursor, QTextCharFormat, QColor, QClipboard, QPen, QTextOption,
-    QImage, QTextDocument,
+    QImage, QTextDocument, QTextFormat,
 )
 from PySide6.QtWidgets import QTextEdit, QMenu, QApplication
 from constants import (
@@ -18,6 +18,7 @@ from constants import (
     DARK_GUIDE, LIGHT_GUIDE, DARK_CURRENT_LINE, LIGHT_CURRENT_LINE, DARK_PAPER, LIGHT_PAPER,
 )
 from i18n import _
+import rich_text
 
 
 # Stand-in painted for an image whose bytes have not arrived yet. Its
@@ -274,19 +275,41 @@ class HtmlEditor(QTextEdit):
         self.active_format['color'] = qcolor
         self.ensureCursorVisible()
 
-    def reset_to_default(self):
-        """Reset text formatting to default (no bold, italic, underline, color)."""
+    def toggle_style(self, style: str) -> bool:
+        """Turn an inline style (rich_text.INLINE) on or off: over the
+        whole selection, or for what is typed next. Returns the new state."""
         cursor = self.textCursor()
-        fmt = QTextCharFormat()
-        fmt.setFontWeight(400)
-        fmt.setFontItalic(False)
-        fmt.setFontUnderline(False)
-        fmt.clearForeground()
-
         if cursor.hasSelection():
-            cursor.mergeCharFormat(fmt)
+            on = rich_text.toggle_style(cursor, style)
+            self.setTextCursor(cursor)
+            return on
+        on = not rich_text.has_style(self.currentCharFormat(), style)
+        if on or style != rich_text.CODE:
+            self.mergeCurrentCharFormat(rich_text.style_format(style, on))
         else:
-            self.mergeCurrentCharFormat(fmt)
+            fmt = self.currentCharFormat()
+            fmt.setFontFixedPitch(False)
+            fmt.clearProperty(QTextFormat.Property.FontFamilies)
+            fmt.clearProperty(QTextFormat.Property.FontFamily)
+            self.setCurrentCharFormat(fmt)
+        return on
+
+    def toggle_strike(self):
+        return self.toggle_style(rich_text.STRIKE)
+
+    def toggle_code(self):
+        return self.toggle_style(rich_text.CODE)
+
+    def reset_to_default(self):
+        """Clear Formatting: no bold, italic, underline, strikethrough,
+        inline code or color, over the selection or for what is typed
+        next. A link stays a link."""
+        cursor = self.textCursor()
+        if cursor.hasSelection():
+            rich_text.clear_formatting(cursor)
+            self.setTextCursor(cursor)
+        else:
+            self.setCurrentCharFormat(rich_text.typing_format_without(self.currentCharFormat()))
 
         self.active_format['bold'] = False
         self.active_format['italic'] = False

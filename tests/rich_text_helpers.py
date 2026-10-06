@@ -37,3 +37,16 @@ def block_named(doc: QTextDocument, text: str):
             return block
         block = block.next()
     raise AssertionError(f"no block {text!r}")
+
+
+def select(doc: QTextDocument, text: str, occurrence: int = 0):
+    """A cursor selecting the ``occurrence``-th ``text`` in ``doc``."""
+    from PySide6.QtGui import QTextCursor
+    plain = doc.toPlainText()
+    start = -1
+    for _i in range(occurrence + 1):
+        start = plain.index(text, start + 1)
+    cursor = QTextCursor(doc)
+    cursor.setPosition(start)
+    cursor.setPosition(start + len(text), QTextCursor.MoveMode.KeepAnchor)
+    return cursor

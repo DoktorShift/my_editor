@@ -28,7 +28,9 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import rich_text  # noqa: E402
 from markdown_writer import READ_FEATURES, document_to_markdown  # noqa: E402
-from tests.rich_text_helpers import assert_round_trip, block_named, from_markdown  # noqa: E402
+from tests.rich_text_helpers import (  # noqa: E402
+    assert_round_trip, block_named, from_markdown, select,
+)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -58,3 +60,85 @@ def test_a_list_started_after_a_checklist_is_a_plain_list():
 def test_a_checklist_comes_back_the_same():
     assert_round_trip(from_markdown("- [x] done\n- [ ] open\n\nAfter\n"))
 
+
+
+
+# -- inline styles --------------------------------------------------------------------
+
+def test_a_partly_struck_selection_becomes_all_struck():
+    doc = from_markdown("keep ~~these~~ words\n")
+    cursor = select(doc, "keep these")
+    assert rich_text.toggle_style(cursor, rich_text.STRIKE) is True
+    assert assert_round_trip(doc) == "~~keep these~~ words\n"
+
+
+def test_a_wholly_struck_selection_is_unstruck():
+    doc = from_markdown("~~gone~~ text\n")
+    assert rich_text.toggle_style(select(doc, "gone"), rich_text.STRIKE) is False
+    assert document_to_markdown(doc) == "gone text\n"
+
+
+def test_inline_code_is_a_code_span_and_comes_back_off():
+    doc = from_markdown("call print now\n")
+    rich_text.toggle_style(select(doc, "print"), rich_text.CODE)
+    assert assert_round_trip(doc) == "call `print` now\n"
+    rich_text.toggle_style(select(doc, "print"), rich_text.CODE)
+    assert document_to_markdown(doc) == "call print now\n"
+    fmt = block_named(doc, "call print now").begin().fragment().charFormat()
+    assert not fmt.hasProperty(QTextFormat.Property.FontFamilies)
+
+
+def test_code_with_a_backtick_gets_a_longer_fence():
+    doc = from_markdown("use a`b here\n")
+    rich_text.toggle_style(select(doc, "a`b"), rich_text.CODE)
+    assert assert_round_trip(doc) == "use ``a`b`` here\n"
+
+
+def test_a_style_change_is_one_undo_step():
+    doc = from_markdown("one two three\n")
+    rich_text.toggle_style(select(doc, "one two three"), rich_text.STRIKE)
+    doc.undo()
+    assert document_to_markdown(doc) == "one two three\n"
+
+
+def test_clear_formatting_keeps_links_and_headings():
+    doc = from_markdown("# Title\n\n**bold** ~~s~~ `c` [site](https://x.example)\n")
+    cursor = QTextCursor(doc)
+    cursor.select(QTextCursor.SelectionType.Document)
+    rich_text.clear_formatting(cursor)
+    assert assert_round_trip(doc) == "# Title\n\nbold s c [site](https://x.example)\n"
+    link = select(doc, "site")
+    link.setPosition(link.selectionStart() + 1)
+    assert link.charFormat().isAnchor()
+    assert link.charFormat().hasProperty(QTextFormat.Property.ForegroundBrush)   # still looks like one
+
+
+def test_the_editor_toggles_for_what_is_typed_next():
+    from editor import HtmlEditor
+    ed = HtmlEditor()
+    assert ed.toggle_strike() is True
+    ed.insertPlainText("gone")
+    assert ed.toggle_strike() is False
+    ed.insertPlainText(" kept")
+    assert document_to_markdown(ed.document()) == "~~gone~~ kept\n"
+    ed.insertPlainText(" ")
+    ed.toggle_code()
+    ed.insertPlainText("x")
+    ed.toggle_code()
+    ed.insertPlainText(" y")
+    assert document_to_markdown(ed.document()) == "~~gone~~ kept `x` y\n"
+
+
+
+def test_inline_code_shows_as_a_chip_that_is_not_in_the_document():
+    from highlighter import RichTextLook
+    from markdown_writer import has_local_only_formatting
+    doc = from_markdown("call `print` now\n")
+    look = RichTextLook(doc, is_dark=False)
+    look.rehighlight()
+    chips = [r for r in doc.begin().layout().formats() if r.format.hasProperty(
+        QTextFormat.Property.BackgroundBrush)]
+    assert [(r.start, r.length) for r in chips] == [(5, 5)]
+    # Only the screen shows it: nothing is saved or counted as formatting.
+    assert not has_local_only_formatting(doc)
+    assert document_to_markdown(doc) == "call `print` now\n"

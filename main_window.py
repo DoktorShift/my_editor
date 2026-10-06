@@ -50,10 +50,14 @@ from markdown_writer import (
     holds_faithfully, image_markdown,
 )
 from editor import HtmlEditor
+import rich_text
 from rich_text import normalize_after_markdown_load
 import image_safety
 import url_safety
-from highlighter import SyntaxHighlighter, detect_language, detect_language_from_content, LANGUAGE_DISPLAY_NAMES
+from highlighter import (
+    LANGUAGE_DISPLAY_NAMES, RichTextLook, SyntaxHighlighter, detect_language,
+    detect_language_from_content,
+)
 from settings import load_settings, save_setting
 from welcome import is_pristine_welcome, welcome_html
 from update_check import UpdateChecker
@@ -701,24 +705,33 @@ class MainWindow(QMainWindow):
         lang = detect_language_from_content(editor.toPlainText())
         if lang and self.syntax_highlighting:
             editor._language = lang
+            self._drop_highlighter(editor)
             editor._highlighter = SyntaxHighlighter(
                 editor.document(), lang, self.is_dark_theme
             )
             self._update_status_bar()
 
-    def _attach_highlighter(self, editor, path: str | None):
-        """Detect language from path and attach / replace syntax highlighter."""
-        lang = detect_language(path)
-        editor._language = lang
-        # Remove existing highlighter if any
+    @staticmethod
+    def _drop_highlighter(editor) -> None:
         if hasattr(editor, '_highlighter'):
             editor._highlighter.setDocument(None)
             del editor._highlighter
+
+    def _attach_highlighter(self, editor, path: str | None):
+        """Detect language from path and attach / replace the highlighter:
+        syntax colors for a code file (while Syntax Highlighting is on),
+        the look of inline code and code blocks for a document with
+        Markdown structure. One per document: two would undo each other."""
+        lang = detect_language(path)
+        editor._language = lang
+        self._drop_highlighter(editor)
         # Only highlight plain-text source files, not rendered rich documents
         if lang and path and not path.lower().endswith(_RICH_DOC_EXTS) and self.syntax_highlighting:
             editor._highlighter = SyntaxHighlighter(
                 editor.document(), lang, self.is_dark_theme
             )
+        elif self._editor_kind(editor) == "rich":
+            editor._highlighter = RichTextLook(editor.document(), self.is_dark_theme)
 
     def _update_editor_theme(self, editor):
         bg = DARK_BG if self.is_dark_theme else LIGHT_BG
@@ -869,7 +882,10 @@ class MainWindow(QMainWindow):
         path = getattr(ed, "_file_path", None)
         binding = getattr(ed, "_draft_binding", None)
         dirty = "*" if ed.document().isModified() else ""
-        if path:
+        recovered = getattr(ed, "_recovered_title", "")
+        if recovered:
+            base = recovered
+        elif path:
             base = os.path.basename(path)
         elif binding and binding.title:
             base = binding.title
@@ -1056,9 +1072,18 @@ class MainWindow(QMainWindow):
                               triggered=self._fmt_italic)
         self.act_underline = add(Command("format.underline", _("Underline"), FORMAT, "Ctrl+U"),
                                  triggered=self._fmt_underline)
-        self.act_reset_format = add(Command("format.reset", _("Reset Format"), FORMAT, "Ctrl+D",
-                                            listed_as=_("Reset to default format"),
-                                            keywords=("clear", "plain")),
+        # Underline has no Markdown: it stays in the document and in local
+        # files, and is left out of what is published.
+        self.act_underline.setToolTip(_("Underline stays in local files; Markdown and "
+                                        "Nostr have none."))
+        self.act_strike = add(Command("format.strike", _("Strikethrough"), FORMAT,
+                                      "Ctrl+Shift+X", keywords=(_("cross out"),)),
+                              triggered=lambda: self._toggle_style(rich_text.STRIKE))
+        self.act_code = add(Command("format.code", _("Inline Code"), FORMAT,
+                                    keywords=(_("monospace"),)),
+                            triggered=lambda: self._toggle_style(rich_text.CODE))
+        self.act_reset_format = add(Command("format.reset", _("Clear Formatting"), FORMAT,
+                                            "Ctrl+D", keywords=(_("plain"),)),
                                     triggered=self._reset_format)
         # Text colors stay in the document and in local files; Markdown
         # has none, so they never reach Nostr.
@@ -1100,7 +1125,7 @@ class MainWindow(QMainWindow):
         ]
         # Structure that only a document holding Markdown can carry
         # (headings, lists, links): off in plain-text tabs as well.
-        self._rich_actions = []
+        self._rich_actions = [self.act_strike, self.act_code]
 
         self._search_matches = []
         self._current_match_index = -1
@@ -1291,6 +1316,8 @@ class MainWindow(QMainWindow):
         m_format.addAction(self.act_bold)
         m_format.addAction(self.act_italic)
         m_format.addAction(self.act_underline)
+        m_format.addAction(self.act_strike)
+        m_format.addAction(self.act_code)
         m_format.addSeparator()
         self.m_color = m_format.addMenu(_("Color"))
         for action in self.act_colors:
@@ -1507,6 +1534,7 @@ class MainWindow(QMainWindow):
         # resolve against it.
         ed._file_path = None if freshness == "stale" else original_path
         load_backup_content(ed, backup, modified=True)
+        self._attach_highlighter(ed, ed._file_path)
 
         container = QWidget()
         vbox = QVBoxLayout(container)
@@ -1536,6 +1564,8 @@ class MainWindow(QMainWindow):
             tab_title = _("{name} (recovered copy)").format(name=base_name)
         else:
             tab_title = _("{name} (recovered)").format(name=base_name)
+        # The tab says so until the work is saved (_compose_tab_title).
+        ed._recovered_title = tab_title
         idx = self.tabs.addTab(container, tab_title + "*")
         self._attach_close_button(idx, container)
 
@@ -1600,6 +1630,7 @@ class MainWindow(QMainWindow):
         ed._lang_detect_timer = _timer
 
         ed.setHtml("<div></div>")
+        self._attach_highlighter(ed, None)
         ed._backup = EditorBackup(
             ed, None, externalize=self._asset_manager.adopt_data_uri
         )
@@ -2434,6 +2465,7 @@ class MainWindow(QMainWindow):
 
             with open(path, "w", encoding="utf-8") as f:
                 f.write(content)
+            ed._recovered_title = ""
             ed.document().setModified(False)
             self._update_tab_title()
             self.status.showMessage(_("Saved: {path}").format(path=path))
@@ -2487,6 +2519,8 @@ class MainWindow(QMainWindow):
             return
 
         self._set_editor_content(ed, path, content)
+        self._attach_highlighter(ed, path)
+        ed._recovered_title = ""
 
         ed.document().setModified(False)
         bar.hide()
@@ -2714,6 +2748,7 @@ class MainWindow(QMainWindow):
             content = self._to_rtf(editor)
             with open(path, "w", encoding="ascii") as f:
                 f.write(content)
+            editor._recovered_title = ""
             editor.document().setModified(False)
             self._update_tab_title()
             self.status.showMessage(_("Saved: {path}").format(path=path))
@@ -2826,6 +2861,7 @@ class MainWindow(QMainWindow):
                        title=self._export_title_for(path),
                        image_roots=self._image_roots_for(path),
                        asset_resolver=self._asset_manager.export_view)
+            editor._recovered_title = ""
             editor.document().setModified(False)
             self._update_tab_title()
             self.status.showMessage(_("Saved: {path}").format(path=path))
@@ -3439,6 +3475,12 @@ class MainWindow(QMainWindow):
         if ed:
             ed.redo()
 
+    def _toggle_style(self, style: str) -> None:
+        ed = self.current_editor()
+        if ed:
+            ed.toggle_style(style)
+            self._update_format_buttons()
+
     def _apply_color(self, color) -> None:
         ed = self.current_editor()
         if ed:
@@ -3540,7 +3582,8 @@ class MainWindow(QMainWindow):
         for action in (self.act_cut, self.act_copy, self.act_paste, self.act_paste_plain):
             menu.addAction(action)
         menu.addSeparator()
-        for action in (self.act_bold, self.act_italic, self.act_underline):
+        for action in (self.act_bold, self.act_italic, self.act_underline, self.act_strike,
+                       self.act_code):
             menu.addAction(action)
         menu.addMenu(self.m_color)
         menu.addSeparator()
@@ -3664,12 +3707,7 @@ class MainWindow(QMainWindow):
             if isinstance(container, QWidget):
                 editor = self._editor_from_widget(container)
                 if editor:
-                    if self.syntax_highlighting:
-                        path = getattr(editor, '_file_path', None)
-                        self._attach_highlighter(editor, path)
-                    elif hasattr(editor, '_highlighter'):
-                        editor._highlighter.setDocument(None)
-                        del editor._highlighter
+                    self._attach_highlighter(editor, getattr(editor, '_file_path', None))
 
         self.status.showMessage(_("Syntax highlighting enabled") if self.syntax_highlighting
                                 else _("Syntax highlighting disabled"), 2000)
@@ -5228,6 +5266,7 @@ class MainWindow(QMainWindow):
         )
         # A successful stash clears the modified flag - the tab's
         # contents now match the latest draft snapshot on the network.
+        ed._recovered_title = ""
         ed.document().setModified(False)
         self._update_tab_title()
 
