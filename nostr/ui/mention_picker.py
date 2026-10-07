@@ -10,13 +10,18 @@ Usage from a parent widget (e.g. the publish dialog):
 
 The popup auto-dismisses on click-outside (Qt.Popup window flag).
 Keyboard navigation: ↑/↓ to move, Enter to pick, Esc to cancel.
+
+A person's Nostr address shows under their name only once their domain
+has confirmed it (``address_check``, nostr/nip05_check.py): anyone can
+write any address into a profile. Searching still finds people by what
+their address says.
 """
 
 from __future__ import annotations
 
 from typing import List, Optional
 
-from PySide6.QtCore import QPoint, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -33,6 +38,7 @@ from i18n import _
 
 from ..avatar_store import AvatarStore
 from ..known_people import KnownPeople, Person
+from ..nip05_check import Nip05Check
 from ..search import Nip50SearchClient
 from .avatar import make_avatar_pixmap_from_image, pixmap_for_profile
 
@@ -123,6 +129,7 @@ class _ResultRow(QWidget):
         person: Person,
         *,
         avatar_image: Optional[QPixmap] = None,
+        address: str = "",
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
@@ -147,14 +154,14 @@ class _ResultRow(QWidget):
         name_label = QLabel(name_text)
         name_label.setObjectName("row_name")
         text_col.addWidget(name_label)
-        if person.nip05:
-            nip05_label = QLabel(person.nip05)
+        if address:
+            nip05_label = QLabel(address)
             nip05_label.setObjectName("row_nip05")
             text_col.addWidget(nip05_label)
         layout.addLayout(text_col, 1)
 
         if person.source == "contact":
-            badge = QLabel(_("you follow"))
+            badge = QLabel(_("Following"))
             badge.setObjectName("row_badge")
             layout.addWidget(badge)
 
@@ -204,9 +211,13 @@ class MentionPicker(QWidget):
         parent: Optional[QWidget] = None,
         *,
         is_dark: bool = True,
+        address_check: Optional[Nip05Check] = None,
     ) -> None:
         super().__init__(parent, Qt.Popup)
         self.setObjectName("mention_picker")
+        self.setAccessibleName(_("Mention"))
+        # Confirms the Nostr addresses shown; without one, none is shown.
+        self._address_check = address_check
         self.setMinimumWidth(360)
         self.setMaximumHeight(380)
         self._known_people = known_people
@@ -229,6 +240,8 @@ class MentionPicker(QWidget):
         self._search_client.results.connect(self._on_remote_results)
         if self._avatars is not None:
             self._avatars.avatar_added.connect(self._on_avatar_added)
+        if self._address_check is not None:
+            self._address_check.checked.connect(self._on_address_checked)
 
     # -- UI build ----------------------------------------------------------
 
@@ -239,6 +252,7 @@ class MentionPicker(QWidget):
 
         self._list = QListWidget()
         self._list.setObjectName("mention_results")
+        self._list.setAccessibleName(_("People"))
         self._list.setFocusPolicy(Qt.NoFocus)
         self._list.itemActivated.connect(self._on_activated)
         self._list.itemClicked.connect(self._on_activated)
@@ -246,6 +260,7 @@ class MentionPicker(QWidget):
         self._search_edit = _SearchEdit(self._list, self)
         self._search_edit.setObjectName("mention_search")
         self._search_edit.setPlaceholderText(_("Search people…"))
+        self._search_edit.setAccessibleName(_("Search People"))
         self._search_edit.textChanged.connect(self._on_text_changed)
 
         self._hint = QLabel("")
@@ -301,6 +316,14 @@ class MentionPicker(QWidget):
 
     # -- rendering ---------------------------------------------------------
 
+    def confirmed_address(self, person: Person) -> str:
+        """The person's Nostr address when their domain confirmed it, else
+        "" (asking the domain, the first time)."""
+        if not person.nip05 or self._address_check is None:
+            return ""
+        return person.nip05 if self._address_check.confirmed(
+            person.pubkey, person.nip05) is True else ""
+
     def _render(self, people: List[Person], *, searching: bool) -> None:
         self._list.clear()
         self._last_people = list(people)
@@ -308,13 +331,23 @@ class MentionPicker(QWidget):
         for person in people:
             item = QListWidgetItem()
             avatar_pix = self._avatars.get(person.pubkey) if self._avatars else None
+            address = self.confirmed_address(person)
             row = _ResultRow(
                 person,
                 avatar_image=avatar_pix,
+                address=address,
                 parent=self._list,
             )
             item.setSizeHint(row.sizeHint())
             item.setData(Qt.UserRole, person)
+            # What a screen reader says for the row: the name, the address
+            # when confirmed, and "Following".
+            spoken = [person.display_name or _short_pk(person.pubkey)]
+            if address:
+                spoken.append(address)
+            if person.source == "contact":
+                spoken.append(_("Following"))
+            item.setData(Qt.AccessibleTextRole, ", ".join(spoken))
             self._list.addItem(item)
             self._list.setItemWidget(item, row)
         if self._list.count() > 0:
@@ -338,6 +371,11 @@ class MentionPicker(QWidget):
         if isinstance(person, Person):
             self.picked.emit(person)
             self.hide()
+
+    def _on_address_checked(self, pubkey_hex: str, _address: str) -> None:
+        """A domain answered: show the address now if it was confirmed."""
+        if pubkey_hex in self._visible_pks and self._last_people and self.isVisible():
+            self._render(self._last_people, searching=False)
 
     def _on_avatar_added(self, pubkey_hex: str, _pixmap) -> None:
         """A new avatar landed; if it belongs to one of our currently-rendered

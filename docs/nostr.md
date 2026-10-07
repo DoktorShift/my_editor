@@ -59,7 +59,9 @@ Avatars and display names are pulled from each profile's kind 0 metadata in the 
 
 ### Tagging people (mentions)
 
-Inside both publish dialogs there's a **Mentions** chip row. Clicking **+ add person** opens a picker that searches:
+While a Nostr account is in use, type `@` at the start of a word in a document (or choose `Insert > Mention…`, also in the Nostr menu and the slash menu) to mention someone: a short list opens at the caret with the people you follow first ("Following"), then everyone a search finds. Type a name or a Nostr address to narrow it, and choose one: "@Name" takes the place of the `@`, as a link to the person; `Escape` keeps the `@`. `Backspace` right after a mention takes it away whole. A mention is published as the person's Nostr link (`nostr:npub1…`, or `nostr:nprofile1…` with a relay where they can be found), which every reader shows as their name, and gets a `p` tag so they hear about it (NIP-27); opened again, it shows the name. A person's Nostr address shows in the list only once their domain has confirmed it (`nostr/nip05_check.py`): anyone can write any address into a profile. An `@` inside a word (an email address) or in code stays an `@`.
+
+Inside both publish dialogs there's also a **Mentions** chip row. Clicking **+ add person** opens a picker that searches:
 
 - your **NIP-02 contact list** first (instant, offline after the first fetch), and
 - **NIP-50 search relays** (`relay.ditto.pub`, `search.nos.today`) for anyone you don't already follow.

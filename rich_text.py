@@ -839,6 +839,93 @@ def remove_divider(block) -> None:
 # cells and no alignment.
 
 # --------------------------------------------------------------------------- #
+# Mentions                                                                     #
+# --------------------------------------------------------------------------- #
+# A mention is a link to a person's Nostr address (``nostr:npub1…`` or
+# ``nostr:nprofile1…``) whose words are "@" and their name. Markdown writes
+# it as the bare address, which every Nostr reader turns into the name
+# (NIP-27); read back, link_references gives it its name again.
+
+MENTION_HREF = re.compile(r"nostr:(?:npub|nprofile)1[02-9ac-hj-np-z]+")
+_REFERENCE_TEXT = re.compile(r"nostr:((?:npub|nprofile)1[02-9ac-hj-np-z]+)")
+
+
+def is_mention(href: str) -> bool:
+    return bool(MENTION_HREF.fullmatch(href or ""))
+
+
+def mention_format(href: str) -> QTextCharFormat:
+    fmt = QTextCharFormat()
+    fmt.setAnchor(True)
+    fmt.setAnchorHref(href)
+    return fmt
+
+
+def insert_mention(cursor: QTextCursor, href: str, name: str) -> None:
+    """The mention of ``name`` (its link ``href``) at the cursor, in place
+    of the selection, then a space unless one follows. One undo step; the
+    cursor ends after it, outside the link."""
+    edit = QTextCursor(cursor.document())
+    edit.beginEditBlock()
+    if cursor.hasSelection():
+        cursor.removeSelectedText()
+    plain = without_link(cursor.charFormat())
+    cursor.insertText("@" + name.lstrip("@"), mention_format(href))
+    # (The end of a paragraph reads as a separator, not as a space.)
+    following = cursor.document().characterAt(cursor.position())
+    if following not in (" ", "\t", "\u00a0"):
+        cursor.insertText(" ", plain)
+    else:
+        cursor.movePosition(QTextCursor.MoveOperation.NextCharacter)
+    edit.endEditBlock()
+
+
+def mention_before(cursor: QTextCursor) -> Optional[Tuple[int, int]]:
+    """(start, end) of the mention that ends right at the caret, or None."""
+    if cursor.hasSelection() or cursor.atBlockStart():
+        return None
+    found = link_range(cursor)
+    if found is None:
+        return None
+    start, end, href = found
+    if end != cursor.position() or not is_mention(href):
+        return None
+    return start, end
+
+
+def link_references(doc, label_for) -> int:
+    """Each bare mention in ``doc`` (``nostr:npub1…`` written as text, as
+    Markdown keeps a mention) made a mention again: a link whose words are
+    "@" and ``label_for(entity)``. Not in code, not in a link already.
+    Returns how many."""
+    found = []
+    for block in iter_blocks(doc):
+        if is_code_block(block):
+            continue
+        for match in _REFERENCE_TEXT.finditer(block.text()):
+            probe = QTextCursor(block)
+            probe.setPosition(block.position() + match.start() + 1)
+            fmt = probe.charFormat()
+            if fmt.isAnchor() or has_style(fmt, CODE):
+                continue
+            found.append((block.position() + match.start(), match.end() - match.start(),
+                          match.group(0), match.group(1)))
+    if not found:
+        return 0
+    edit = QTextCursor(doc)
+    edit.beginEditBlock()
+    for position, length, href, entity in reversed(found):
+        cursor = QTextCursor(doc)
+        cursor.setPosition(position)
+        cursor.setPosition(position + length, QTextCursor.MoveMode.KeepAnchor)
+        fmt = QTextCharFormat(cursor.charFormat())
+        fmt.merge(mention_format(href))
+        cursor.insertText("@" + label_for(entity).lstrip("@"), fmt)
+    edit.endEditBlock()
+    return len(found)
+
+
+# --------------------------------------------------------------------------- #
 # Footnotes                                                                    #
 # --------------------------------------------------------------------------- #
 # Footnotes are kept as the text Markdown writes for them: a mark ("[^1]")

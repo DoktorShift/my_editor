@@ -116,6 +116,22 @@ def normalize_reference(raw: str) -> Tuple[Optional[Reference], str]:
     return reference, ""
 
 
+def short_key(npub: str) -> str:
+    """``npub1abcd…wxyz``: a key short enough to read."""
+    return f"{npub[:9]}\u2026{npub[-4:]}" if len(npub) > 16 else npub
+
+
+def person_name(entity: str, names: Optional[Callable[[str], Optional[str]]] = None) -> str:
+    """How a person a reference names is called: their name when ``names``
+    (pubkey -> name or None) knows it, else their short key; the entity
+    itself when it does not decode."""
+    reference = read_entity(entity)
+    if reference is None or reference.kind != PERSON:
+        return entity
+    name = names(reference.pubkey) if names else None
+    return name or short_key(bech32.encode_npub(reference.pubkey))
+
+
 def outside_code(markdown: str, change: Callable[[str], str]) -> str:
     """Apply ``change`` to the Markdown outside fenced code blocks and
     inline code, which show references as they are."""

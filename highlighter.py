@@ -604,8 +604,9 @@ class RichTextLook(QSyntaxHighlighter):
     them, inline code too, a link keeps whatever color the file it came
     from gave it, and a footnote mark is plain text. This adds the look
     (code blocks in the code font, colored by their language; a tinted
-    chip behind inline code; links in the theme's link color; footnote
-    marks raised in the link color, their definitions quieter) without
+    chip behind inline code; links in the theme's link color, mentions of
+    people as names in it; footnote marks raised in the link color, their
+    definitions quieter) without
     putting anything into the document, so nothing of it is saved,
     published, or counted as formatting. (The editor paints the box
     behind a code block.)
@@ -640,6 +641,11 @@ class RichTextLook(QSyntaxHighlighter):
         self._link = QTextCharFormat()
         self._link.setForeground(QColor(self._LINK[self._is_dark]))
         self._link.setFontUnderline(True)
+        # A mention reads as a name, in the link color, without underline.
+        self._mention = QTextCharFormat()
+        self._mention.setForeground(QColor(self._LINK[self._is_dark]))
+        self._mention.setFontUnderline(False)
+        self._mention.setFontWeight(QFont.Weight.Medium)
         # A code block's lines, in the font code is set in; each language's
         # colors over it.
         self._code_line = QTextCharFormat()
@@ -711,7 +717,8 @@ class RichTextLook(QSyntaxHighlighter):
                 if fmt.isImageFormat():
                     pass
                 elif fmt.isAnchor():
-                    look = QTextCharFormat(self._link)
+                    look = QTextCharFormat(self._mention if rich_text.is_mention(
+                        fmt.anchorHref()) else self._link)
                     if fmt.fontFixedPitch():
                         look.merge(self._code)
                     self.setFormat(fragment.position() - start, fragment.length(), look)

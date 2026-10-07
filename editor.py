@@ -87,6 +87,8 @@ class HtmlEditor(QTextEdit):
     # whoever paints only what is visible (find highlights, spelling)
     # paints again.
     visible_area_changed = Signal()
+    # "@" typed at the start of a word, where a mention can go: its position.
+    mention_requested = Signal(int)
 
     # Kinds of highlights shown over the text, bottom to top: each kind
     # keeps its own (set_highlights), the editor shows them together.
@@ -736,10 +738,13 @@ class HtmlEditor(QTextEdit):
 
     def _after_typed(self, text: str) -> None:
         """After ``text`` was typed at the caret: the slash menu for a "/"
-        at the start of a word, and Markdown Shortcuts: the structure or
-        style the text completes, as an undo step of its own."""
+        at the start of a word, a mention for an "@" there while a Nostr
+        account is in use, and Markdown Shortcuts: the structure or style
+        the text completes, as an undo step of its own."""
         if text == "/":
             self._maybe_open_slash()
+        if text == "@":
+            self._maybe_ask_mention()
         if not text or not self._shortcuts_apply():
             return
         cursor = self.textCursor()
@@ -771,6 +776,34 @@ class HtmlEditor(QTextEdit):
         """The slash menu while it is open, else None."""
         menu = self._slash_menu
         return menu if self._slash_at >= 0 and menu is not None and menu.isVisible() else None
+
+    def _maybe_ask_mention(self) -> None:
+        """An "@" was just typed: ask for a person to mention when it starts
+        a word (not in an email address), in a document that holds Markdown
+        structure, outside code, while a Nostr account is in use."""
+        if not self._nostr_active() or not self._holds_structure():
+            return
+        cursor = self.textCursor()
+        block = cursor.block()
+        if rich_text.is_code_block(block) or rich_text.holds_link_or_code(cursor):
+            return
+        before = block.text()[:cursor.positionInBlock() - 1]
+        if before and not (before[-1].isspace() or before[-1] in "([{\"'\u201c\u2018"):
+            return
+        self.mention_requested.emit(cursor.position() - 1)
+
+    def insert_mention(self, at: int, href: str, name: str) -> None:
+        """The mention of ``name`` (``href``, a person's nostr: link) in place
+        of the "@" typed at ``at`` (when it is still there), else at the
+        caret. One undo step."""
+        cursor = self.textCursor()
+        doc = self.document()
+        if 0 <= at < doc.characterCount() and doc.characterAt(at) == "@":
+            cursor.setPosition(at)
+            cursor.setPosition(at + 1, QTextCursor.MoveMode.KeepAnchor)
+        rich_text.insert_mention(cursor, href, name)
+        self.setTextCursor(cursor)
+        self.setCurrentCharFormat(rich_text.without_link(self.currentCharFormat()))
 
     def _maybe_open_slash(self) -> None:
         """A "/" was just typed: the slash menu, at the start of a word in a
@@ -1355,6 +1388,18 @@ class HtmlEditor(QTextEdit):
                 return
 
         elif e.key() == Qt.Key_Backspace:
+            mention = rich_text.mention_before(c) if self._holds_structure() else None
+            if mention is not None and e.modifiers() in (Qt.NoModifier, Qt.KeypadModifier):
+                # A mention goes as a whole: half a name links to nobody.
+                cursor = self.textCursor()
+                cursor.beginEditBlock()
+                cursor.setPosition(mention[0])
+                cursor.setPosition(mention[1], QTextCursor.MoveMode.KeepAnchor)
+                cursor.removeSelectedText()
+                cursor.endEditBlock()
+                self.setTextCursor(cursor)
+                self.ensureCursorVisible()
+                return
             if not c.hasSelection() and c.positionInBlock() <= spaces + (2 if has_bullet else 0) and (spaces > 0 or has_bullet):
                 if has_bullet:
                     if spaces == 0 and c.blockNumber() > 0:

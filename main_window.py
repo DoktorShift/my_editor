@@ -143,7 +143,9 @@ from workspace import Workspace
 from recent_files import load_recent, add_recent, clear_recent
 
 from nostr.avatar_store import AvatarBatchLoader, AvatarStore
-from nostr.bech32 import encode_note
+from nostr.bech32 import encode_note, encode_nprofile, encode_npub
+from nostr.nip05_check import Nip05Check
+from nostr.ui.mention_picker import MentionPicker
 from nostr import refs
 from nostr.blossom.errors import friendly_message
 from nostr.media_server_list import publish_server_list
@@ -448,6 +450,9 @@ class MainWindow(QMainWindow):
         # Mentions infrastructure: cached known people, NIP-50 search,
         # background contact-list fetcher. All process-wide singletons.
         self._known_people = KnownPeople()
+        # A person's Nostr address shows only once their domain confirmed it.
+        self._address_check = Nip05Check(parent=self)
+        self._mention_picker = None
         self._search_client = Nip50SearchClient(
             self._relay_pool, self._known_people, parent=self
         )
@@ -1099,6 +1104,9 @@ class MainWindow(QMainWindow):
         ed.set_structure_check(lambda e=ed: self._editor_kind(e) == "rich")
         ed.set_local_formats_check(lambda e=ed: self._keeps_underline(e))
         ed.set_paste_guard(lambda text, e=ed: self._guard_paste(e, text))
+        ed.mention_requested.connect(lambda at, e=ed: self._ask_mention(e, at))
+        # Mentions read back from Markdown get their names (rich_text.link_references).
+        ed._mention_label = self._mention_label
         ed.set_markdown_shortcuts_check(lambda: self.markdown_shortcuts)
         ed.set_slash_items(self._slash_items)
         ed.set_link_opener(self._open_link)
@@ -1862,6 +1870,12 @@ class MainWindow(QMainWindow):
                     nostr=True, listed_as=_("Insert image"),
                     keywords=(_("picture"), _("photo")), slash_section=slash_menu.INSERT),
             triggered=self._on_nostr_insert_image)
+        # Mention: "@" at the start of a word does the same while typing.
+        self.act_insert_mention = add(
+            Command("nostr.insert_mention", _("Insert Mention…"), NOSTR, nostr=True,
+                    keywords=(_("person"), _("people"), _("tag"), "@"),
+                    slash_section=slash_menu.INSERT),
+            triggered=lambda: self._ask_mention(self.current_editor(), -1))
         # Drafts surface - the side-docked panel. ``Ctrl+Shift+D`` (D
         # for Draft) toggles it, sitting alongside the other Ctrl+Shift
         # Nostr shortcuts.
@@ -1990,6 +2004,11 @@ class MainWindow(QMainWindow):
         self.m_insert.addAction(self.act_divider)
         self.m_insert.addAction(self.act_code_block)
         self.m_insert.addAction(self.act_footnote)
+        # Nostr's own insertions, in the Insert menu only while a Nostr
+        # account is in use (decision D-1); always in the Nostr menu.
+        self._insert_nostr_separator = self.m_insert.addSeparator()
+        self._insert_nostr_actions = [self.act_insert_mention, self.act_nostr_insert_image]
+        self.m_insert.aboutToShow.connect(self._fill_insert_menu)
 
         m_format = self.menuBar().addMenu(_("F&ormat"))
         self.m_style = m_format.addMenu(_("Style"))
@@ -2067,6 +2086,7 @@ class MainWindow(QMainWindow):
         m_nostr.addSeparator()
         m_nostr.addAction(self.act_nostr_media)
         m_nostr.addAction(self.act_nostr_insert_image)
+        m_nostr.addAction(self.act_insert_mention)
         m_nostr.addSeparator()
         m_nostr.addAction(self.act_nostr_drafts)
         m_nostr.addAction(self.act_nostr_imports)
@@ -5802,6 +5822,54 @@ class MainWindow(QMainWindow):
         dialog.published.connect(self._on_nostr_note_published)
         dialog.exec()
 
+    def _fill_insert_menu(self) -> None:
+        """The Insert menu as it opens: Nostr's insertions only while a
+        Nostr account is in use."""
+        active = bool(self.nostr_state.active)
+        for action in self._insert_nostr_actions:
+            self.m_insert.removeAction(action)
+        self._insert_nostr_separator.setVisible(active)
+        if active:
+            self.m_insert.addActions(self._insert_nostr_actions)
+
+    # -- mentions ----------------------------------------------------------------
+
+    def _mention_label(self, entity: str) -> str:
+        """The name a mention shows: the person's, when known."""
+        def name(pubkey: str):
+            person = self._known_people.get(pubkey)
+            return person.display_name if person is not None else None
+        return refs.person_name(entity, name)
+
+    def _ask_mention(self, ed, at: int) -> None:
+        """Who to mention, asked at the caret ("@" typed at ``at``, or -1
+        from Insert > Mention): the people you follow first, then a search;
+        their Nostr address only once confirmed. Escape keeps what was
+        typed."""
+        if ed is None or not self.nostr_state.active or self._editor_kind(ed) != "rich":
+            return
+        if self._mention_picker is None:
+            self._mention_picker = MentionPicker(
+                self._known_people, self._search_client, avatars=self._avatars,
+                parent=self, is_dark=self.is_dark_theme, address_check=self._address_check)
+            self._mention_picker.picked.connect(self._mention_picked)
+        self._mention_target = (ed, at)
+        caret = ed.cursorRect()
+        self._mention_picker.open_at(ed.viewport().mapToGlobal(caret.bottomLeft()))
+
+    def _mention_picked(self, person) -> None:
+        ed, at = getattr(self, "_mention_target", (None, -1))
+        if ed is None or not shiboken6.isValid(ed):
+            return
+        self.activateWindow()
+        ed.setFocus()
+        if person.relay_hint:
+            href = "nostr:" + encode_nprofile(person.pubkey, [person.relay_hint])
+        else:
+            href = "nostr:" + encode_npub(person.pubkey)
+        ed.insert_mention(at, href, person.display_name or refs.short_key(
+            encode_npub(person.pubkey)))
+
     # -- secret keys: never pasted where Nostr is written, never published ---
 
     def _guard_paste(self, ed, text: str):
@@ -7104,6 +7172,9 @@ class MainWindow(QMainWindow):
         written."""
         if holds_faithfully(content):
             read_markdown(ed.document(), content)
+            # Mentions, kept as bare addresses, read back as names.
+            rich_text.link_references(
+                ed.document(), getattr(ed, "_mention_label", None) or refs.person_name)
             ed._loaded_as_markdown = True
             ed._markdown_source = False
         else:

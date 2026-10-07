@@ -64,6 +64,7 @@ from doc_walk import iter_blocks
 from i18n import _, ngettext
 from markdown_writer import READ_FEATURES, read_markdown
 from nostr import bech32
+from nostr import refs
 from nostr.refs import outside_code
 
 # person's pubkey (hex) -> the name to show, or None
@@ -115,9 +116,7 @@ class Article:
 # References                                                                   #
 # --------------------------------------------------------------------------- #
 
-def short_key(npub: str) -> str:
-    """``npub1abcd…wxyz``: a key short enough to read."""
-    return f"{npub[:9]}…{npub[-4:]}" if len(npub) > 16 else npub
+short_key = refs.short_key
 
 
 def reference_label(reference: str, names: Optional[NameLookup]) -> str:
