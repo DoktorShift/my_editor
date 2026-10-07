@@ -75,7 +75,7 @@ def build_event(
     If ``sk`` is given, the event is fully signed (the public key is
     derived from sk and the signature is computed). If ``sk`` is None but
     ``pubkey_hex`` is provided, an *unsigned* event is returned with
-    ``id`` populated but no ``sig`` — useful for handing off to a remote
+    ``id`` populated but no ``sig``, useful for handing off to a remote
     signer (NIP-46) which will fill in the signature.
 
     ``tags`` defaults to an empty list; ``created_at`` defaults to now.
@@ -113,7 +113,7 @@ def build_event(
 def sign_event(unsigned: Event, sk: bytes) -> Event:
     """Sign an existing unsigned event dict in place AND return it.
 
-    The pubkey on the event is overwritten to match ``sk`` (defensive —
+    The pubkey on the event is overwritten to match ``sk`` (defensive:
     a mismatched pubkey would produce a verifiable event with the wrong
     author). The id is recomputed for the same reason.
     """
@@ -133,6 +133,19 @@ def sign_event(unsigned: Event, sk: bytes) -> Event:
 # --------------------------------------------------------------------------- #
 # Verify                                                                      #
 # --------------------------------------------------------------------------- #
+
+def fingerprint(event: Event) -> str:
+    """The whole event as text, to tell copies apart.
+
+    Two copies differing in any field are different copies, even when
+    they claim the same id and signature: a relay can send a forged copy
+    of a real event, and checking a copy is checking exactly that text.
+    """
+    try:
+        return json.dumps(event, sort_keys=True, separators=(",", ":"), default=str)
+    except (TypeError, ValueError):
+        return repr(event)
+
 
 def verify_event(event: Event) -> bool:
     """Validate id, pubkey shape, and signature. Returns False on any failure."""

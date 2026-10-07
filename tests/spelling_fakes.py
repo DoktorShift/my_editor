@@ -1,13 +1,20 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""A spell checker that knows a handful of words, for the spelling tests."""
+"""A spell checker that knows a handful of words, and an editor wired to
+spelling the way docs/spelling.md says, for the spelling tests."""
 
 from __future__ import annotations
 
 import re
 from typing import Dict, Iterable, List, Optional, Sequence
 
+from PySide6.QtCore import QCoreApplication, Qt
+from PySide6.QtTest import QTest
+from PySide6.QtGui import QTextCursor
+from PySide6.QtWidgets import QTextEdit
+
 from spelling.backends import AUTOMATIC, SpellBackend, TextCheck
+from spelling.service import DocumentSpelling, SpellChecker
 
 ENGLISH = ("the", "a", "is", "this", "text", "word", "words", "with", "one", "mistake",
            "and", "here", "see", "it", "spelled", "right", "code", "link", "line",
@@ -15,11 +22,13 @@ ENGLISH = ("the", "a", "is", "this", "text", "word", "words", "with", "one", "mi
            "second", "third", "Alice", "read", "more", "at", "or", "on", "in", "of",
            "title", "write", "every", "block", "check", "after", "before", "end")
 GERMAN = ("das", "Das", "ist", "ein", "eine", "Haus", "schön", "Straße", "Grüße", "und",
-          "mit", "Wörter", "Wort", "geht's", "Adresse", "Mail", "Fehler", "hier", "der",
-          "die", "bzw.", "Text", "Zeile")
+          "mit", "Wörter", "Wort", "geht", "Adresse", "Mail", "Fehler", "hier", "der",
+          "die", "bzw.", "Text", "Zeile", "wie", "gut", "Hab", "gesehen")
 WORDS = {"en-US": ENGLISH, "de-DE": GERMAN}
 
 _WORD = re.compile(r"[^\W\d_]+(?:['’\-][^\W\d_]+)*")
+# A system checker reads "_" as part of a word, as macOS does: "_Wrot_".
+_SYSTEM_WORD = re.compile(r"[^\W\d]+(?:['’\-][^\W\d]+)*")
 
 
 class FakeBackend(SpellBackend):
@@ -62,8 +71,10 @@ class FakeBackend(SpellBackend):
         return self.default
 
     def knows(self, word: str, language: str) -> bool:
-        return (word in self.words.get(language, ()) or word in self.learned
-                or word in self.ignored)
+        known = self.words.get(language, ())
+        # Like a real dictionary, a word may start a sentence: "Geht".
+        return (word in known or word[:1].lower() + word[1:] in known
+                or word in self.learned or word in self.ignored)
 
     def _check(self, word: str, language: str) -> bool:
         self.calls.append(("check", word, language))
@@ -99,10 +110,11 @@ class FakeTextBackend(FakeBackend):
     def _check_text(self, text: str, language: str) -> Optional[TextCheck]:
         self.calls.append(("check_text", text, language))
         self._boom("check_text")
+        text.encode("utf-16-le")        # as strict as macOS: a lone surrogate fails
         if language == AUTOMATIC:
             language = self.identify(text)
         languages = list(self.words) if language == AUTOMATIC else [language]
-        misspelled = tuple((m.start(), m.end()) for m in _WORD.finditer(text)
+        misspelled = tuple((m.start(), m.end()) for m in _SYSTEM_WORD.finditer(text)
                            if not any(self.knows(m.group(0), each) for each in languages))
         return TextCheck(misspelled, language)
 
@@ -120,3 +132,60 @@ class FakeTextBackend(FakeBackend):
 
     def checked_texts(self) -> List[str]:
         return [call[1] for call in self.calls if call[0] == "check_text"]
+
+
+def drain(spelling):
+    for _ in range(1000):
+        QCoreApplication.processEvents()
+        if not spelling.is_checking():
+            return
+    raise AssertionError("spell checking never finished")
+
+
+class Editor:
+    """A QTextEdit wired the way docs/spelling.md says: it tells the
+    service where its cursor is, keeps its underlines as text cursors
+    (which is what extra selections are, and they move and grow with
+    edits), and redraws only the blocks ``misspellingsChanged`` names.
+    ``underlined`` is what it shows."""
+
+    def __init__(self, backend=None):
+        self.edit = QTextEdit()
+        self.edit.show()
+        self.checker = SpellChecker(backend or FakeBackend())
+        self.spelling = DocumentSpelling(self.checker, self.edit.document())
+        self.marks: List[QTextCursor] = []
+        self.spelling.misspellingsChanged.connect(self.redraw)
+        self.edit.cursorPositionChanged.connect(
+            lambda: self.spelling.set_cursor_position(self.edit.textCursor().position()))
+
+    def redraw(self, first, last):
+        doc = self.edit.document()
+        self.marks = [mark for mark in self.marks
+                      if not first <= doc.findBlock(mark.selectionStart()).blockNumber() <= last]
+        for number in range(first, last + 1):
+            block = doc.findBlockByNumber(number)
+            for misspelling in self.spelling.misspellings(block):
+                mark = QTextCursor(doc)
+                mark.setPosition(block.position() + misspelling.start)
+                mark.setPosition(block.position() + misspelling.end,
+                                 QTextCursor.MoveMode.KeepAnchor)
+                self.marks.append(mark)
+
+    def type(self, keys):
+        for key in keys:
+            if key == "\n":
+                QTest.keyClick(self.edit, Qt.Key.Key_Return)
+            else:
+                QTest.keyClicks(self.edit, key)
+            drain(self.spelling)
+
+    def underlined(self):
+        """The underlined text of each block."""
+        doc = self.edit.document()
+        out = [[] for _ in range(doc.blockCount())]
+        for mark in sorted(self.marks, key=lambda mark: mark.selectionStart()):
+            if mark.hasSelection():
+                out[doc.findBlock(mark.selectionStart()).blockNumber()].append(
+                    mark.selectedText())
+        return out

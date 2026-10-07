@@ -29,15 +29,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Iterable, List, Optional, Sequence
 
-from PySide6.QtCore import QObject, QTimer
+from PySide6.QtCore import QObject
 
 from i18n import _
 
-from ..draft_deletions import DELETION_KIND, deleted_identifiers
+from ..deletion import DELETION_KIND, read_deletion
 from ..drafts import DRAFT_WRAP_KIND
 from ..events import verify_event
 from ..outbox import ask_draft_relays
-from ..outbox.policy import normalize_relay_url
+from ..queries import fetch_events
 from .inbox_store import DRAFTED, PUBLISHED, REMOVED
 
 BATCH = 20
@@ -171,7 +171,9 @@ class ExistingCatalogue(QObject):
         self._query(relays, filters, _answer)
 
     def _relay_query(self, relays, filters, on_done) -> None:
-        _RelayQuery(self._relay_pool, relays, filters, on_done, parent=self)
+        fetch_events(self._relay_pool, relays, filters,
+                     lambda fetched: on_done(list(fetched.events), len(fetched.answered)),
+                     timeout_ms=QUERY_TIMEOUT_MS, parent=self)
 
 
 def _record(event: dict, pubkey: str, found: Existing, wanted: set) -> None:
@@ -179,18 +181,13 @@ def _record(event: dict, pubkey: str, found: Existing, wanted: set) -> None:
         return
     kind = event.get("kind")
     if kind == DELETION_KIND:
-        for d_tag in deleted_identifiers(event, pubkey):
-            if d_tag in wanted:
-                found.add(d_tag, REMOVED)
-        # Deleted articles are named 30023:<pk>:<d>.
-        prefix = f"{ARTICLE_KIND}:{pubkey}:"
-        if verify_event(event):
-            for tag in event.get("tags", []):
-                if (isinstance(tag, list) and len(tag) >= 2 and tag[0] == "a"
-                        and str(tag[1]).lower().startswith(prefix)):
-                    d_tag = str(tag[1])[len(prefix):]
-                    if d_tag in wanted:
-                        found.add(d_tag, REMOVED)
+        # A deleted draft or article is named by its address.
+        request = read_deletion(event, pubkey)
+        if request is not None:
+            for d_tag in (request.identifiers(DRAFT_WRAP_KIND)
+                          + request.identifiers(ARTICLE_KIND)):
+                if d_tag in wanted:
+                    found.add(d_tag, REMOVED)
         return
     if not verify_event(event):
         return
@@ -204,43 +201,3 @@ def _record(event: dict, pubkey: str, found: Existing, wanted: set) -> None:
         found.add(d_tag, DRAFTED if str(event.get("content") or "") else REMOVED)
     elif kind == ARTICLE_DRAFT_KIND:
         found.add(d_tag, DRAFTED)
-
-
-class _RelayQuery(QObject):
-    """One subscription that ends when every relay ended (EOSE, closed,
-    failed) or at the timeout, and says how many relays answered."""
-
-    def __init__(self, pool, relays, filters, on_done, *, parent=None,
-                 timeout_ms: int = QUERY_TIMEOUT_MS) -> None:
-        super().__init__(parent)
-        self._on_done = on_done
-        self._events: List[dict] = []
-        self._answered = 0
-        self._open = {normalize_relay_url(u) or u for u in relays}
-        self._finished = False
-        self._subscription = pool.subscribe(list(relays), list(filters))
-        self._subscription.event.connect(self._events.append)
-        self._subscription.relay_eose.connect(self._on_eose)
-        self._subscription.relay_closed.connect(self._on_ended)
-        self._subscription.relay_failed.connect(self._on_ended)
-        self._timer = QTimer(self)
-        self._timer.setSingleShot(True)
-        self._timer.timeout.connect(self._finish)
-        self._timer.start(timeout_ms)
-
-    def _on_eose(self, url: str) -> None:
-        self._answered += 1
-        self._on_ended(url)
-
-    def _on_ended(self, url: str, *_reason) -> None:
-        self._open.discard(normalize_relay_url(url) or url)
-        if not self._open:
-            self._finish()
-
-    def _finish(self) -> None:
-        if self._finished:
-            return
-        self._finished = True
-        self._subscription.close()
-        self._on_done(list(self._events), self._answered)
-        self.deleteLater()

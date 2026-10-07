@@ -2,12 +2,19 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Spell checking a document as it changes, without blocking typing."""
 
-from PySide6.QtCore import QCoreApplication, QEvent
-from PySide6.QtGui import QTextCharFormat, QTextCursor, QTextDocument
+import json
+import threading
 
+from PySide6.QtCore import QCoreApplication, QEvent, Qt
+from PySide6.QtGui import QTextCharFormat, QTextCursor, QTextDocument
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QTextEdit
+
+from spelling import service
 from spelling.backends import AUTOMATIC
-from spelling.service import DocumentSpelling, Misspelling, SpellChecker
-from tests.spelling_fakes import FakeBackend, FakeTextBackend
+from spelling.service import DocumentSpelling, Found, Misspelling, SpellChecker
+from spelling.words import scan
+from tests.spelling_fakes import Editor, FakeBackend, FakeTextBackend, drain
 
 
 class Clock:
@@ -48,14 +55,6 @@ def wrong(spelling, doc):
     return out
 
 
-def drain(spelling):
-    for _ in range(1000):
-        QCoreApplication.processEvents()
-        if not spelling.is_checking():
-            return
-    raise AssertionError("spell checking never finished")
-
-
 def type_at(doc, position, text):
     cursor = QTextCursor(doc)
     cursor.setPosition(position)
@@ -84,6 +83,16 @@ def test_word_by_word_knows_abbreviations_compounds_and_apostrophes():
     assert checker.find_misspellings("don’t it's", "en-US") == []
 
 
+def test_word_by_word_knows_contractions_with_an_apostrophe():
+    checker = SpellChecker(FakeBackend())
+    text = "Wie geht\u2019s? Geht's gut? Hab\u2019s gesehen."
+    assert checker.find_misspellings(text, "de-DE") == []
+    # A clitic of the language after a known word, nothing else.
+    found = checker.find_misspellings("Gibt's geht'n Hab's", "de-DE")
+    assert [m.word for m in found] == ["Gibt's", "geht'n"]
+    assert [m.word for m in checker.find_misspellings("Nostr's here", "en-US")] == ["Nostr's"]
+
+
 def test_each_word_is_asked_once_until_it_is_learned():
     backend = FakeBackend()
     checker = SpellChecker(backend)
@@ -96,6 +105,16 @@ def test_each_word_is_asked_once_until_it_is_learned():
     assert accepted == ["Nostr"]
     assert checker.check("Nostr", "en-US") is True
     assert backend.checked_words().count("Nostr") == 2
+
+
+def test_another_threads_answer_is_not_remembered_for_everyone():
+    checker = SpellChecker(FakeBackend())
+    answers = []
+    worker = threading.Thread(target=lambda: answers.append(checker.check("helo", "en-US")))
+    worker.start()
+    worker.join()
+    assert answers == [True]                        # the neutral answer, with a warning
+    assert checker.check("helo", "en-US") is False  # the backend's own thread asks it
 
 
 def test_suggestions_keep_a_typographic_apostrophe():
@@ -114,11 +133,50 @@ def test_a_paragraph_checker_reads_only_prose_and_only_words_count():
     assert "exmple" not in sent and "cde" not in sent and len(sent) == 45
 
 
+def test_a_paragraph_checker_finds_mistakes_inside_underscore_emphasis():
+    # Like macOS, the fake reads "_" as part of a word: shown "_Wrot_", it
+    # flags "_Wrot_", which is not inside the word "Wrot", and the mistake
+    # was dropped. The underscores are markup and are blanked now.
+    checker = SpellChecker(FakeTextBackend())
+    found = checker.find_misspellings("das ist ein _Wrot_ und __Fehlr__ hier", "de-DE")
+    assert [m.word for m in found] == ["Wrot", "Fehlr"]
+
+
 def test_a_paragraph_checker_tells_the_language():
     checker = SpellChecker(FakeTextBackend(default=AUTOMATIC))
     assert checker.default_language() == AUTOMATIC
     found = checker.find_misspellings("das ist ein Huas\nthis is a wrod")
     assert [(m.word, m.language) for m in found] == [("Huas", "de-DE"), ("wrod", "en-US")]
+
+
+def test_text_cut_inside_an_emoji_does_not_turn_spelling_off():
+    # A title from relay JSON, cut by a client between the two halves of
+    # an emoji: a lone surrogate. Bad input, not a broken checker.
+    title = json.loads('"the helo wrld \\ud83d"')
+    for backend in (FakeTextBackend(), FakeBackend()):
+        checker = SpellChecker(backend)
+        assert [m.word for m in checker.find_misspellings(title, "en-US")] == ["helo", "wrld"]
+        assert checker.check("wrld\ud83d", "en-US") is True
+        assert checker.suggestions("wrld\ud83d", "en-US") == []
+        assert checker.is_available() is True
+
+
+def test_a_document_is_checked_through_the_checkers_public_step():
+    class Watching(SpellChecker):
+        def __init__(self, backend):
+            super().__init__(backend)
+            self.texts = []
+
+        def misspelled(self, text, found, language):
+            self.texts.append(text)
+            return super().misspelled(text, found, language)
+
+    checker = Watching(FakeBackend())
+    spelling = DocumentSpelling(checker, document("the helo"))
+    spelling.check_all()
+    assert checker.texts == ["the helo"]
+    assert checker.misspelled("a wrld", scan("a wrld"), "en-US") == [
+        Found(2, 6, "wrld", "en-US")]
 
 
 def test_an_unavailable_checker_finds_nothing_and_says_so_once():
@@ -169,6 +227,18 @@ def test_visible_blocks_are_checked_first():
     assert backend.checked_words() == ["golf", "hotel", "alpha", "bravo"]
 
 
+def test_a_slice_names_only_the_blocks_it_changed():
+    # The visible blocks far below the sweep through the rest: the editor
+    # is told about each run of changed blocks, not about all in between.
+    doc = document(*[f"line wrod{chr(97 + i % 26)}" for i in range(100)])
+    spelling, _checker, _backend, changes = follow(doc, clock=Clock(step=0.001))
+    spelling.set_visible_blocks(50, 52)
+    spelling._run()                                  # about seven blocks in 8 ms
+    assert changes[0] == (50, 52)
+    assert all(last < 50 or first > 52 or (first, last) == (50, 52) for first, last in changes)
+    assert sum(last - first + 1 for first, last in changes) < 10
+
+
 def test_a_slice_stops_when_its_time_is_up():
     doc = document(*[f"word{i} wrod" for i in range(20)])
     spelling, _checker, backend, _changes = follow(doc, clock=Clock(step=0.003))
@@ -190,7 +260,9 @@ def test_an_edit_checks_only_the_block_it_touched():
     spelling.check_all()
     assert sorted(set(backend.checked_words())) == ["here"]   # "a" and "wrld" were known
     assert wrong(spelling, doc) == [["helo"], ["wrld"], []]
-    assert changes == []                             # the misspellings stayed the same
+    # Named although its misspellings stayed the same: underlines kept as
+    # text cursors grow with text typed right after them.
+    assert changes == [(1, 1)]
 
 
 def test_typing_before_a_misspelling_moves_it_and_says_so():
@@ -220,6 +292,85 @@ def test_new_and_removed_lines_keep_the_others_checked():
     assert wrong(spelling, doc) == [["helo"], ["wrld"], []]
 
 
+def found_now(spelling, doc):
+    """Every block's misspellings as the service has them."""
+    out, block = [], doc.begin()
+    while block.isValid():
+        out.append([(m.start, m.length, m.word) for m in spelling.misspellings(block)])
+        block = block.next()
+    return out
+
+
+def found_fresh(doc, checker):
+    """What checking a copy of the document from scratch finds."""
+    copy = doc.clone()
+    spelling = DocumentSpelling(checker, copy)
+    spelling.check_all()
+    return found_now(spelling, copy)
+
+
+def test_an_undo_qt_reports_short_still_gets_its_paragraphs_checked():
+    # Recorded: formatted text pasted over selections, then Undo. Qt's
+    # report of the undo leaves out the start of the next paragraph, which
+    # the undo changed too ("a wrldtexthelo th" became "texthelo th").
+    editor = QTextEdit()
+    editor.setMarkdown("the end\n\nhelo there\n\n- one wrld\n- two\n")
+    doc = editor.document()
+    spelling, checker, *_ = follow(doc)
+    spelling.check_all()
+
+    def select(start, end):
+        cursor = QTextCursor(doc)
+        cursor.setPosition(start)
+        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+        return cursor
+
+    def copy(start, end, to):
+        fragment = select(start, end).selection()
+        cursor = QTextCursor(doc)
+        cursor.setPosition(to)
+        cursor.insertFragment(fragment)
+
+    def markdown(at, text):
+        cursor = QTextCursor(doc)
+        cursor.setPosition(at)
+        cursor.insertMarkdown(text)
+
+    markdown(8, "> quoet\n\ntext")
+    copy(4, 35, 39)
+    markdown(15, "- a wrld\n- b mroe")
+    copy(44, 84, 74)
+    select(29, 59).insertHtml("<pre>cde\nfnction</pre>")
+    markdown(31, "- a wrld\n- b mroe")
+    copy(102, 114, 35)
+    select(38, 45).insertHtml("<ul><li>item wrld</li><li>mroe</li></ul>")
+    select(46, 76).insertHtml("<p>the helo</p><p>a wrld</p>")
+    spelling.check_all()
+    doc.undo()
+    spelling.check_all()
+    assert found_now(spelling, doc) == found_fresh(doc, checker)
+    assert any("texthelo" in [m[2] for m in block] for block in found_now(spelling, doc))
+
+
+def test_a_block_changed_without_a_report_is_checked_again_when_read():
+    doc = document("the end", "a wrld")
+    spelling, *_ = follow(doc)
+    spelling.check_all()
+    doc.blockSignals(True)                         # the service hears nothing
+    type_at(doc, doc.findBlockByNumber(1).position(), "mroe ")
+    doc.blockSignals(False)
+    block = doc.findBlockByNumber(1)
+    assert spelling.misspellings(block) == ()       # stale: not shown
+    assert spelling.is_checking()                   # and checked again
+    spelling.check_all()
+    assert wrong(spelling, doc) == [[], ["mroe", "wrld"]]
+    # The context menu checks a stale block on the spot.
+    doc.blockSignals(True)
+    type_at(doc, block.position(), "zzq ")
+    doc.blockSignals(False)
+    assert spelling.misspelling_at(block.position() + 1).word == "zzq"
+
+
 def test_opening_a_fence_turns_the_lines_below_into_code_and_closing_it_back():
     doc = document("the helo", "a wrld", "the cde", "end")
     spelling, *_ = follow(doc)
@@ -231,6 +382,32 @@ def test_opening_a_fence_turns_the_lines_below_into_code_and_closing_it_back():
     type_at(doc, doc.findBlockByNumber(3).position(), "```\n")
     spelling.check_all()
     assert wrong(spelling, doc) == [["helo"], [], [], [], ["cde"], []]
+
+
+def test_a_fence_opened_at_the_top_of_a_long_document_costs_the_keystroke_little(
+        monkeypatch):
+    lines = [f"line {i} wrod" for i in range(3000)]
+    doc = document(*lines)
+    spelling, checker, *_ = follow(doc)
+    spelling.STATE_BLOCKS = 50
+    spelling.check_all()
+    walked = []
+    real = service._advanced
+    monkeypatch.setattr(service, "_advanced", lambda block, state: walked.append(1)
+                        or real(block, state))
+    type_at(doc, doc.findBlockByNumber(5).position(), "```\n")
+    assert len(walked) <= 60                       # not the 3,000 lines below
+    # The rest is brought up to date in the slices, where nothing below the
+    # walk is checked before the walk reaches it.
+    assert spelling.misspelling_at(doc.findBlockByNumber(2000).position() + 10) is None
+    spelling.check_all()
+    assert found_now(spelling, doc) == found_fresh(doc, checker)
+    assert not any(found_now(spelling, doc)[6:])
+    type_at(doc, doc.findBlockByNumber(2500).position(), "```\n")
+    type_at(doc, doc.findBlockByNumber(1000).position(), "~~~\n")
+    type_at(doc, doc.findBlockByNumber(5).position(), "x")
+    spelling.check_all()
+    assert found_now(spelling, doc) == found_fresh(doc, checker)
 
 
 def test_formatted_code_and_mentions_are_not_checked():
@@ -249,14 +426,85 @@ def test_formatted_code_and_mentions_are_not_checked():
     assert found == ["lnk", "txt", "wrod"]
 
 
-def test_the_word_being_typed_can_be_left_out():
-    doc = document("the helo")
-    spelling, *_ = follow(doc)
-    spelling.check_all()
-    block = doc.begin()
-    end = block.position() + len("the helo")
-    assert spelling.misspellings(block, typing_position=end) == ()
-    assert len(spelling.misspellings(block, typing_position=0)) == 1
+def test_the_word_being_typed_is_not_underlined_until_it_is_finished():
+    editor = Editor()
+    editor.type("the hel")
+    assert editor.underlined() == [[]]
+    editor.type("lo here ")
+    assert editor.underlined() == [[]]
+
+
+def test_a_word_finished_with_a_period_gets_its_underline():
+    editor = Editor()
+    editor.type("the helo")
+    assert editor.underlined() == [[]]
+    editor.type(".")
+    assert editor.underlined() == [["helo"]]
+
+
+def test_a_word_finished_with_return_gets_its_underline():
+    editor = Editor()
+    editor.type("the helo\nthe end")
+    assert editor.underlined() == [["helo"], []]
+
+
+def test_a_word_finished_with_return_in_a_paragraph_checker_gets_its_underline():
+    editor = Editor(FakeTextBackend())
+    editor.type("the end helo\nthe end")
+    assert editor.underlined() == [["helo"], []]
+
+
+def test_typing_right_after_an_underlined_word_redraws_its_underline():
+    editor = Editor()
+    editor.type("a wrld ")
+    assert editor.underlined() == [["wrld"]]
+    QTest.keyClick(editor.edit, Qt.Key.Key_Left)
+    editor.type("!")                                 # the underline must not grow onto "!"
+    assert editor.underlined() == [["wrld"]]
+    QTest.keyClick(editor.edit, Qt.Key.Key_Left)
+    editor.type("\n")                               # nor onto the line break
+    assert editor.underlined() == [["wrld"], []]
+
+
+def test_a_pause_in_typing_finishes_the_word():
+    editor = Editor()
+    editor.spelling.TYPING_PAUSE_SECONDS = 0.01
+    editor.type("the helo")
+    for _ in range(100):
+        QTest.qWait(5)
+        if editor.underlined() == [["helo"]]:
+            break
+    assert editor.underlined() == [["helo"]]
+
+
+def test_moving_the_cursor_away_finishes_the_word_and_back_keeps_it():
+    editor = Editor()
+    editor.type("the helo")
+    QTest.keyClick(editor.edit, Qt.Key.Key_Home)
+    assert editor.underlined() == [["helo"]]
+    QTest.keyClick(editor.edit, Qt.Key.Key_End)      # back to the end, not typing
+    assert editor.underlined() == [["helo"]]
+
+
+def test_formatting_a_word_is_not_typing_it():
+    editor = Editor()
+    editor.type("the helo.")
+    cursor = editor.edit.textCursor()
+    cursor.setPosition(4)
+    cursor.setPosition(8, QTextCursor.MoveMode.KeepAnchor)
+    editor.edit.setTextCursor(cursor)
+    bold = QTextCharFormat()
+    bold.setFontWeight(700)
+    editor.edit.mergeCurrentCharFormat(bold)
+    drain(editor.spelling)
+    assert editor.underlined() == [["helo"]]
+
+
+def test_the_context_menu_finds_the_word_being_typed():
+    editor = Editor()
+    editor.type("the helo")
+    editor.spelling.check_all()
+    assert editor.spelling.misspelling_at(6).word == "helo"
 
 
 def test_the_misspelling_under_a_click_is_found_at_once():
@@ -279,7 +527,7 @@ def test_learning_a_word_checks_again_only_where_it_was():
     spelling.check_all()
     assert wrong(spelling, doc) == [[], ["wrld"], ["nostr"]]
     assert "wrld" not in backend.checked_words()          # the middle line was not asked
-    assert changes == [(0, 2)]
+    assert sorted(changes) == [(0, 0), (2, 2)]      # and not named either
 
 
 def test_a_word_with_a_typographic_apostrophe_is_learned_as_typed():
@@ -363,6 +611,22 @@ def test_closing_stops_following_the_document():
     assert backend.calls == []
     assert spelling.misspellings(doc.begin()) == ()
     assert spelling.misspelling_at(0) is None
+
+
+def test_a_spelling_whose_document_is_gone_stays_quiet():
+    doc = document("the helo")
+    spelling, *_ = follow(doc)
+    spelling.check_all()
+    doc.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    # The editor may still hold the object, and turn checking off later.
+    spelling.close()
+    spelling.set_visible_blocks(0, 3)
+    spelling.set_language("de-DE")
+    spelling.set_cursor_position(0)
+    spelling.check_all()
+    assert spelling.misspelling_at(0) is None
+    assert spelling.is_checking() is False
 
 
 def test_a_document_that_goes_away_takes_its_spelling_along():
