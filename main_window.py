@@ -54,6 +54,7 @@ from commands import (
 )
 import slash_menu
 from slash_menu import SlashItem
+from table_picker import TablePicker
 import preview_pane
 from preview_pane import (
     ARTICLE, DOCUMENT, NOTE, PREVIEW, SPLIT, SPLIT_MIN_WIDTH, WRITE, PreviewContent, PreviewPane,
@@ -1244,8 +1245,8 @@ class MainWindow(QMainWindow):
         for action, style in styles.items():
             action.setChecked(state.get(style, False))
         self._update_style_checks(ed)
-        if self._editing_code() != getattr(self, "_commands_in_code", False):
-            # The caret went into a code block or out of one.
+        if self._caret_context() != getattr(self, "_caret_context_shown", (False, False)):
+            # The caret went into a code block or a table, or out of one.
             self._update_editor_commands()
 
     def _update_style_checks(self, ed) -> None:
@@ -1475,6 +1476,24 @@ class MainWindow(QMainWindow):
             action.setData(language)
             self._code_language_group.addAction(action)
             self.act_code_languages.append(action)
+        # Table...: its size is chosen on a grid at the caret (table_picker).
+        self.act_table = add(Command("insert.table", _("Table\u2026"), INSERT,
+                                     keywords=(_("grid"), _("rows"), _("columns")),
+                                     slash_section=slash_menu.BLOCKS),
+                             triggered=self._insert_table)
+        # A table's rows and columns: Format > Table, and the context menu in
+        # a table. No keys: Pages' Option-arrow keys for rows and columns
+        # move by word and paragraph in text, and no convention has others.
+        self.act_table_commands = [
+            add(Command(f"format.table.{name}", title, FORMAT,
+                        keywords=(_("table"), _("row") if "row" in name else _("column"))),
+                triggered=lambda n=name: self._editor_table_command(n))
+            for name, title in (
+                ("add_row_above", _("Add Row Above")), ("add_row_below", _("Add Row Below")),
+                ("add_column_before", _("Add Column Before")),
+                ("add_column_after", _("Add Column After")),
+                ("delete_row", _("Delete Row")), ("delete_column", _("Delete Column")),
+                ("delete_table", _("Delete Table")))]
         # Text colors stay in the document and in local files; Markdown
         # has none, so they never reach Nostr.
         self.act_colors = []
@@ -1526,7 +1545,13 @@ class MainWindow(QMainWindow):
         self._rich_actions = [self.act_strike, self.act_code, *self.act_styles,
                               self.act_bullets, self.act_numbers, self.act_checklist,
                               self.act_quote, self.act_divider, self.act_link,
-                              self.act_code_block]
+                              self.act_code_block, self.act_table]
+        # Paragraph structure, which a table cell (one line of words in
+        # Markdown) cannot hold: off in a table.
+        self._block_actions = [*self.act_styles, self.act_bullets, self.act_numbers,
+                               self.act_checklist, self.act_quote, self.act_divider,
+                               self.act_code_block, self.act_table, self.act_indent,
+                               self.act_outdent]
         # Styles of words, which code does not have: off in a code block.
         self._word_actions = [self.act_bold, self.act_italic, self.act_underline,
                               self.act_strike, self.act_code, self.act_link,
@@ -1796,6 +1821,7 @@ class MainWindow(QMainWindow):
         self.m_insert = self.menuBar().addMenu(_("&Insert"))
         self.m_insert.addAction(self.act_link)
         self.m_insert.addSeparator()
+        self.m_insert.addAction(self.act_table)
         self.m_insert.addAction(self.act_divider)
         self.m_insert.addAction(self.act_code_block)
 
@@ -1828,6 +1854,11 @@ class MainWindow(QMainWindow):
             self.m_code_language.addAction(action)
             if not action.data():
                 self.m_code_language.addSeparator()         # after Plain Text
+        self.m_table = m_format.addMenu(_("Table"))
+        for index, action in enumerate(self.act_table_commands):
+            if index in (2, 4, 6):
+                self.m_table.addSeparator()     # rows | columns | delete | the table
+            self.m_table.addAction(action)
         m_format.addSeparator()
         m_format.addAction(self.act_reset_format)
         self.m_format = m_format
@@ -4171,12 +4202,16 @@ class MainWindow(QMainWindow):
             ed.set_heading(level)
             self._update_format_buttons()
 
-    def _editing_code(self) -> bool:
-        """Whether the current tab edits a document with structure and the
-        caret (or the selection) is in a code block."""
+    def _caret_context(self) -> tuple:
+        """(in a code block, in a table): where the caret (or the selection)
+        is, in a document with structure that is being edited."""
         ed = self.current_editor()
-        return bool(self._editor_kind(ed) == "rich" and not self._shows_preview_only(ed)
-                    and self._caret_in_code(ed))
+        editing = (ed is not None and MainWindow._editor_kind(self, ed) == "rich"
+                   and not MainWindow._shows_preview_only(self, ed))
+        if not editing:
+            return False, False
+        return (MainWindow._caret_in_code(ed),
+                ed.textCursor().currentTable() is not None)
 
     @staticmethod
     def _caret_in_code(ed) -> bool:
@@ -4200,6 +4235,33 @@ class MainWindow(QMainWindow):
         if language:
             return _("Code: {language}").format(language=language)
         return _("Code")
+
+    def _insert_table(self) -> None:
+        """Insert > Table...: its size chosen on a grid at the caret, then
+        the table, the caret in its first cell."""
+        ed = self.current_editor()
+        if ed is None:
+            return
+        picker = TablePicker(self, dark=self.is_dark_theme)
+        picker.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        picker.picked.connect(lambda rows, columns, e=ed: self._table_picked(e, rows, columns))
+        self._table_picker = picker
+        picker.open_at(ed.cursorRect(), ed.viewport())
+
+    def _table_picked(self, ed, rows: int, columns: int) -> None:
+        if not shiboken6.isValid(ed):
+            return
+        # Back to the text, in this window, whatever the panel left active.
+        self.activateWindow()
+        ed.setFocus()
+        ed.insert_table(rows, columns)
+        self._update_format_buttons()
+
+    def _editor_table_command(self, name: str) -> None:
+        ed = self.current_editor()
+        if ed is not None:
+            ed.table_command(name)
+            self._update_format_buttons()
 
     def _insert_code_block(self) -> None:
         """Insert > Code Block: the paragraph at the caret (or those
@@ -4345,23 +4407,31 @@ class MainWindow(QMainWindow):
             return
         kind = self._editor_kind(self.current_editor())
         reading = self._shows_preview_only(self.current_editor())
+        in_code, in_table = self._caret_context_shown = self._caret_context() or (False, False)
         if getattr(self, "format_toolbar", None) is not None:
-            # A PDF has nothing to format; plain text has no paragraph styles.
+            # A PDF has nothing to format; plain text has no paragraph
+            # styles, and neither has a table cell.
             self.format_toolbar.setVisible(self.show_toolbar and bool(kind))
-            self.format_toolbar.style_button.setEnabled(kind == "rich" and not reading)
+            self.format_toolbar.style_button.setEnabled(kind == "rich" and not reading
+                                                        and not in_table)
         # Only the preview shows: nothing to edit there (Copy and Select
         # All act on the preview itself, through the focus).
         for action in self._editor_actions:
             action.setEnabled(bool(kind) and not reading)
         for action in self._rich_actions:
             action.setEnabled(kind == "rich" and not reading)
-        in_code = self._commands_in_code = bool(self._editing_code())
         # In a code block, words have no styles: the text is code.
         if in_code:
             for action in self._word_actions:
                 action.setEnabled(False)
         for action in self.act_code_languages:
             action.setEnabled(in_code)
+        # A table cell holds words, no paragraph structure.
+        if in_table:
+            for action in self._block_actions:
+                action.setEnabled(False)
+        for action in self.act_table_commands:
+            action.setEnabled(in_table)
         self.act_select_all.setEnabled(bool(kind))
         for action in (self.act_find, self.act_replace, self.act_find_next, self.act_find_prev):
             action.setEnabled(not reading)
@@ -4401,6 +4471,10 @@ class MainWindow(QMainWindow):
         for action in (self.act_cut, self.act_copy, self.act_paste, self.act_paste_plain):
             menu.addAction(action)
         menu.addSeparator()
+        if self._editor_kind(editor) == "rich" and editor.textCursor().currentTable() is not None:
+            # In a table: its rows and columns.
+            menu.addMenu(self.m_table)
+            menu.addSeparator()
         for action in (self.act_bold, self.act_italic, self.act_underline, self.act_strike,
                        self.act_code):
             menu.addAction(action)

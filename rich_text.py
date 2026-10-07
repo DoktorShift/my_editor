@@ -23,7 +23,8 @@ from typing import Iterator, List, Optional, Tuple
 
 from PySide6.QtGui import (
     QFont, QFontDatabase, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextDocument,
-    QTextDocumentFragment, QTextFormat, QTextListFormat,
+    QTextDocumentFragment, QTextFormat, QTextLength, QTextListFormat, QTextTable,
+    QTextTableFormat,
 )
 
 from doc_walk import iter_blocks
@@ -51,9 +52,9 @@ def normalize_after_markdown_load(doc) -> None:
     block outside a list loses it; list items keep theirs.
 
     Headings get the room above and below them that the editor gives
-    the ones typed here, and bulleted lists the shape of their depth
-    (disc, circle, square), as lists made here have: Qt's reader gives
-    every depth a disc.
+    the ones typed here, bulleted lists the shape of their depth (disc,
+    circle, square), as lists made here have: Qt's reader gives every
+    depth a disc, and tables the grid of the ones inserted here.
 
     Call after every ``setMarkdown`` whose result the person edits.
     """
@@ -69,10 +70,16 @@ def normalize_after_markdown_load(doc) -> None:
     reshaped = [text_list for text_list in bullets.values()
                 if text_list.format().style()
                 != list_format(BULLET, max(1, text_list.format().indent())).style()]
-    if not stray and not headings and not reshaped:
+    tables = [table for table in tables_of(doc)
+              if table.format().cellPadding() != table_format().cellPadding()]
+    if not stray and not headings and not reshaped and not tables:
         return
     cursor = QTextCursor(doc)
     cursor.beginEditBlock()
+    for table in tables:
+        fmt = table.format()
+        fmt.merge(table_format())
+        table.setFormat(fmt)
     for block in stray:
         fmt = block.blockFormat()
         fmt.clearProperty(marker)
@@ -814,6 +821,232 @@ def insert_divider(cursor: QTextCursor) -> None:
 def remove_divider(block) -> None:
     """The divider becomes an empty paragraph again."""
     QTextCursor(block).setBlockFormat(QTextBlockFormat())
+
+
+# --------------------------------------------------------------------------- #
+# Tables                                                                       #
+# --------------------------------------------------------------------------- #
+# A table is Markdown's: one header row (its words bold, by the header's
+# own format, which the writer leaves out), cells of one line each (a
+# Return in a cell is a line separator, written as a space), no merged
+# cells and no alignment.
+
+def table_format() -> QTextTableFormat:
+    """How a table looks in the editor: a thin grid across the column."""
+    fmt = QTextTableFormat()
+    fmt.setBorder(1)
+    fmt.setCellPadding(6)
+    fmt.setCellSpacing(0)
+    fmt.setBorderCollapse(True)
+    fmt.setWidth(QTextLength(QTextLength.Type.PercentageLength, 100))
+    return fmt
+
+
+def _header_format(header: bool) -> QTextCharFormat:
+    fmt = QTextCharFormat()
+    fmt.setFontWeight(QFont.Weight.Bold if header else QFont.Weight.Normal)
+    return fmt
+
+
+def _style_row(table, row: int) -> None:
+    """The cells of ``row`` in the header's style (row 0) or the body's:
+    their words, and what is typed into them."""
+    header = row == 0
+    weight = _header_format(header)
+    for column in range(table.columns()):
+        cell = table.cellAt(row, column)
+        first = cell.firstCursorPosition()
+        first.setBlockCharFormat(weight)
+        words = QTextCursor(first)
+        words.setPosition(cell.lastPosition(), QTextCursor.MoveMode.KeepAnchor)
+        if words.hasSelection():
+            words.mergeCharFormat(weight)
+
+
+def tables_of(doc) -> List[QTextTable]:
+    """Every table in ``doc``, in order."""
+    found: List[QTextTable] = []
+
+    def walk(frame) -> None:
+        for child in frame.childFrames():
+            if isinstance(child, QTextTable):
+                found.append(child)
+            walk(child)
+    walk(doc.rootFrame())
+    return found
+
+
+def insert_table(cursor: QTextCursor, rows: int, columns: int) -> Optional[QTextTable]:
+    """A table of ``rows`` (the header row included) and ``columns``, as a
+    block of its own: in place of an empty paragraph, else after the
+    paragraph at the cursor, never inside code, a divider or another
+    table. The cursor goes into its first cell. One step on the undo
+    stack; None when there is no place for one."""
+    rows, columns = max(1, rows), max(1, columns)
+    block = cursor.block()
+    if cursor.currentTable() is not None or is_code_block(block) or is_divider(block):
+        return None
+    doc = cursor.document()
+    edit = QTextCursor(doc)
+    edit.beginEditBlock()
+    at = QTextCursor(block)
+    at.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+    table = at.insertTable(rows, columns, table_format())
+    previous = block.previous()
+    if not block.text() and previous.isValid() and QTextCursor(previous).currentTable() is None:
+        # In an empty paragraph, Qt keeps the paragraph before the table:
+        # it goes, so the table takes its place.
+        joint = QTextCursor(previous)
+        joint.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+        joint.setPosition(block.position(), QTextCursor.MoveMode.KeepAnchor)
+        joint.removeSelectedText()
+    _style_row(table, 0)
+    after = QTextCursor(doc)
+    after.setPosition(table.lastPosition() + 1)
+    if not after.block().text():
+        # What follows the table is a Body paragraph, whatever the
+        # paragraph it was split from was.
+        after.setBlockFormat(QTextBlockFormat())
+        after.setBlockCharFormat(QTextCharFormat())
+    edit.endEditBlock()
+    cursor.setPosition(table.cellAt(0, 0).firstPosition())
+    return table
+
+
+def _place(cursor: QTextCursor, table, row: int, column: int) -> None:
+    row = max(0, min(row, table.rows() - 1))
+    column = max(0, min(column, table.columns() - 1))
+    cursor.setPosition(table.cellAt(row, column).firstPosition())
+
+
+def add_table_row(cursor: QTextCursor, *, below: bool) -> bool:
+    """A row above or below the one at the cursor, which goes into it. A
+    row added above the header is the new header. One undo step."""
+    table = cursor.currentTable()
+    if table is None:
+        return False
+    cell = table.cellAt(cursor)
+    row = cell.row() + (1 if below else 0)
+    edit = QTextCursor(cursor.document())
+    edit.beginEditBlock()
+    table.insertRows(row, 1)
+    _style_row(table, row)
+    if row == 0:
+        _style_row(table, 1)              # the old header is a row now
+    edit.endEditBlock()
+    _place(cursor, table, row, cell.column())
+    return True
+
+
+def add_table_column(cursor: QTextCursor, *, after: bool) -> bool:
+    """A column before or after the one at the cursor, which goes into
+    it. One undo step."""
+    table = cursor.currentTable()
+    if table is None:
+        return False
+    cell = table.cellAt(cursor)
+    column = cell.column() + (1 if after else 0)
+    edit = QTextCursor(cursor.document())
+    edit.beginEditBlock()
+    table.insertColumns(column, 1)
+    header = table.cellAt(0, column).firstCursorPosition()
+    header.setBlockCharFormat(_header_format(True))
+    for row in range(1, table.rows()):
+        table.cellAt(row, column).firstCursorPosition().setBlockCharFormat(
+            _header_format(False))
+    edit.endEditBlock()
+    _place(cursor, table, cell.row(), column)
+    return True
+
+
+def delete_table(cursor: QTextCursor) -> bool:
+    """The table at the cursor goes; the cursor goes where it stood."""
+    table = cursor.currentTable()
+    if table is None:
+        return False
+    start = table.firstPosition() - 1
+    edit = QTextCursor(cursor.document())
+    edit.beginEditBlock()
+    table.removeRows(0, table.rows())
+    edit.endEditBlock()
+    cursor.setPosition(min(max(0, start), cursor.document().characterCount() - 1))
+    return True
+
+
+def delete_table_row(cursor: QTextCursor) -> bool:
+    """The row at the cursor goes (the last one takes the table with it).
+    The header's row gone, the next row is the header. One undo step."""
+    table = cursor.currentTable()
+    if table is None:
+        return False
+    if table.rows() == 1:
+        return delete_table(cursor)
+    cell = table.cellAt(cursor)
+    edit = QTextCursor(cursor.document())
+    edit.beginEditBlock()
+    table.removeRows(cell.row(), 1)
+    if cell.row() == 0:
+        _style_row(table, 0)
+    edit.endEditBlock()
+    _place(cursor, table, cell.row(), cell.column())
+    return True
+
+
+def delete_table_column(cursor: QTextCursor) -> bool:
+    """The column at the cursor goes (the last one takes the table with
+    it). One undo step."""
+    table = cursor.currentTable()
+    if table is None:
+        return False
+    if table.columns() == 1:
+        return delete_table(cursor)
+    cell = table.cellAt(cursor)
+    edit = QTextCursor(cursor.document())
+    edit.beginEditBlock()
+    table.removeColumns(cell.column(), 1)
+    edit.endEditBlock()
+    _place(cursor, table, cell.row(), cell.column())
+    return True
+
+
+def next_table_cell(cursor: QTextCursor, step: int) -> bool:
+    """Into the next cell (step 1, adding a row after the last cell, one
+    undo step) or the previous one (-1). False outside a table."""
+    table = cursor.currentTable()
+    if table is None:
+        return False
+    cell = table.cellAt(cursor)
+    index = cell.row() * table.columns() + cell.column() + step
+    if index < 0:
+        index = 0
+    elif index >= table.rows() * table.columns():
+        edit = QTextCursor(cursor.document())
+        edit.beginEditBlock()
+        table.appendRows(1)
+        _style_row(table, table.rows() - 1)
+        edit.endEditBlock()
+    _place(cursor, table, index // table.columns(), index % table.columns())
+    return True
+
+
+def leave_table(cursor: QTextCursor) -> bool:
+    """Out of the table, into a new paragraph right below it (or the empty
+    one already there). False outside a table."""
+    table = cursor.currentTable()
+    if table is None:
+        return False
+    doc = cursor.document()
+    after = QTextCursor(doc)
+    after.setPosition(table.lastPosition() + 1)
+    block = after.block()
+    if block.text() or QTextCursor(block).currentTable() is not None \
+            or block.textList() is not None or block.blockFormat().headingLevel():
+        after.beginEditBlock()
+        after.insertBlock(QTextBlockFormat(), QTextCharFormat())
+        after.movePosition(QTextCursor.MoveOperation.PreviousBlock)
+        after.endEditBlock()
+    cursor.setPosition(after.position())
+    return True
 
 
 # --------------------------------------------------------------------------- #

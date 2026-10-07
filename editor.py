@@ -66,6 +66,11 @@ def _is_document_relative(url) -> bool:
     return bool(name) and not name.startswith(("/", "\\")) and not os.path.isabs(name)
 
 
+# A line break inside a paragraph (Shift+Return), and inside a table cell
+# (Return), which Markdown writes in a cell as a space.
+LINE_BREAK = "\u2028"
+
+
 class HtmlEditor(QTextEdit):
     """QTextEdit with bullet and format logic."""
 
@@ -1279,6 +1284,9 @@ class HtmlEditor(QTextEdit):
         key = e.key()
         if rich_text.is_code_block(block) and self._holds_structure():
             return self._code_key(e, cursor, block)
+        if cursor.currentTable() is not None and self._holds_structure() \
+                and self._table_key(e, cursor):
+            return True
         if key in (Qt.Key_Tab, Qt.Key_Backtab) and e.modifiers() in (
                 Qt.NoModifier, Qt.ShiftModifier):
             delta = -1 if key == Qt.Key_Backtab or e.modifiers() == Qt.ShiftModifier else 1
@@ -1353,6 +1361,57 @@ class HtmlEditor(QTextEdit):
             self.set_heading(0)
             return True
         return False
+
+    def _table_key(self, e, cursor) -> bool:
+        """The keys of a table. Tab goes to the next cell (after the last
+        one it adds a row), Shift+Tab to the one before; Command-Return on
+        a Mac and Ctrl+Return elsewhere leave the table, into a paragraph
+        below it; Return is a line break inside the cell, since a
+        Markdown cell holds one line. True when the key was handled."""
+        key = e.key()
+        modifiers = e.modifiers() & ~Qt.KeypadModifier
+        moved = False
+        if key == Qt.Key_Tab and modifiers == Qt.NoModifier:
+            moved = rich_text.next_table_cell(cursor, 1)
+        elif key == Qt.Key_Backtab or (key == Qt.Key_Tab and modifiers == Qt.ShiftModifier):
+            moved = rich_text.next_table_cell(cursor, -1)
+        elif key in (Qt.Key_Return, Qt.Key_Enter) and modifiers == Qt.ControlModifier:
+            moved = rich_text.leave_table(cursor)
+        elif key in (Qt.Key_Return, Qt.Key_Enter) and modifiers in (Qt.NoModifier,
+                                                                    Qt.ShiftModifier):
+            cursor.beginEditBlock()
+            cursor.insertText(LINE_BREAK, self.currentCharFormat())
+            cursor.endEditBlock()
+            moved = True
+        if moved:
+            self.setTextCursor(cursor)
+        return moved
+
+    def insert_table(self, rows: int, columns: int) -> None:
+        """Insert > Table: a table of ``rows`` (the header included) and
+        ``columns``, the caret in its first cell."""
+        cursor = self.textCursor()
+        if rich_text.insert_table(cursor, rows, columns) is not None:
+            self.setTextCursor(cursor)
+            self.setCurrentCharFormat(cursor.block().charFormat())
+
+    TABLE_COMMANDS = {
+        "add_row_above": lambda c: rich_text.add_table_row(c, below=False),
+        "add_row_below": lambda c: rich_text.add_table_row(c, below=True),
+        "add_column_before": lambda c: rich_text.add_table_column(c, after=False),
+        "add_column_after": lambda c: rich_text.add_table_column(c, after=True),
+        "delete_row": rich_text.delete_table_row,
+        "delete_column": rich_text.delete_table_column,
+        "delete_table": rich_text.delete_table,
+    }
+
+    def table_command(self, name: str) -> None:
+        """Format > Table: a row or a column added or deleted, or the
+        table deleted, at the caret."""
+        cursor = self.textCursor()
+        if self.TABLE_COMMANDS[name](cursor):
+            self.setTextCursor(cursor)
+            self.setCurrentCharFormat(cursor.charFormat())
 
     CODE_INDENT = 4
 

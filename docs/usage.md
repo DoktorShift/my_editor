@@ -37,6 +37,7 @@ On macOS, `Ctrl` in these tables is the Command key (`⌘`) and `Alt` is Option 
 | `Ctrl+K` | Add Link (Edit Link when the caret is in a link) |
 | | `Insert > Divider`: a horizontal rule (`---`) after the paragraph |
 | | `Insert > Code Block`: the paragraph becomes a block of code, and a short list at the caret asks for its language (`Escape` keeps it plain text). `Format > Code Language` changes it later |
+| | `Insert > Table…`: a table, its size chosen on a grid at the caret; `Format > Table` adds and deletes its rows and columns |
 
 Writing (Markdown files, new documents and drafts) is set in your system's own text font at a reading size, in a column of a comfortable line length, with the thin insertion point of a word processor; plain text and code files keep the monospace font across the whole window, and its block caret. `View > Use Monospace Font for Writing` sets all writing in monospace.
 
@@ -53,6 +54,14 @@ The keys follow each platform's own conventions: Apple Notes and Pages on macOS,
 - `Return` on an empty last line, `Down` on the last line of the document, or `Backspace` at the start of the block takes you out of it, onto a Body paragraph; choosing Body in the Style pop-up makes a line text again.
 
 Words in code have no styles, so Bold, Italic, Inline Code and links are dimmed there, and a paste is plain text. Markdown writes the block fenced, with its language, as Nostr readers expect it.
+
+**Tables.** `Insert > Table…` (or `/table` in the slash menu) opens a small grid at the caret: move the pointer over it, or use the arrow keys, to choose how many columns and rows (the size shows under the grid, "3 × 2" for three columns and two rows), and click or press `Return` to insert the table; `Escape` changes nothing. The first row is the header, in bold. Inside a table:
+
+- `Tab` goes to the next cell, and after the last cell adds a row; `Shift+Tab` goes back;
+- `Return` starts a new line inside the cell (Markdown keeps a cell on one line, so it is written as a space);
+- `Cmd+Return` on macOS, `Ctrl+Return` on Windows and Linux, leaves the table, into a paragraph below it.
+
+`Format > Table` (also in the context menu inside a table) adds a row above or below, a column before or after, and deletes the row, the column or the whole table. A cell holds words, links and code, but no headings, lists or quotes, so those commands are dimmed in a table. Markdown tables have no merged cells and no column alignment, so MyEditor offers neither.
 
 Links: `Ctrl+K` opens a small panel under the words with the link's text and address. It accepts web addresses (`https://` is added when you leave it out), email addresses and, while a Nostr account is in use, Nostr links; it says right there why anything else cannot be a link. Pasting a web address over selected words links them. `Ctrl`-click (`Cmd`-click on macOS) opens a link: web pages in your browser, Nostr links through njump.me. Typing right after a link is not part of it.
 

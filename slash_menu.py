@@ -73,6 +73,8 @@ ICONS: Dict[str, IconMaker] = {
     "format.list.number": format_icons.numbered_list,
     "format.quote": format_icons.quote,
     "insert.divider": format_icons.divider,
+    "insert.table": format_icons.table,
+    "insert.code_block": format_icons.code_block,
     "insert.link": format_icons.link,
     "format.list.task": format_icons.checklist,
 }

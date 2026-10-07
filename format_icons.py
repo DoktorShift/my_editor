@@ -152,3 +152,41 @@ def checklist(color: QColor) -> QIcon:
             painter.setPen(_pen(ink))
             painter.drawLine(QPointF(10, y), QPointF(16.5, y))
     return _icon(draw, color)
+
+
+def table(color: QColor) -> QIcon:
+    """A grid of three columns and three rows, the header row filled."""
+    def draw(painter: QPainter, ink: QColor) -> None:
+        frame = QRectF(1.5, 2.5, 15, 13)
+        painter.setPen(Qt.PenStyle.NoPen)
+        faint = QColor(ink)
+        faint.setAlphaF(ink.alphaF() * 0.35)
+        painter.setBrush(faint)
+        painter.drawRect(QRectF(frame.left(), frame.top(), frame.width(), 4.3))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(_pen(ink, 1.3))
+        painter.drawRoundedRect(frame, 1.5, 1.5)
+        for x in (6.5, 11.5):
+            painter.drawLine(QPointF(x, frame.top()), QPointF(x, frame.bottom()))
+        for y in (6.8, 11.2):
+            painter.drawLine(QPointF(frame.left(), y), QPointF(frame.right(), y))
+    return _icon(draw, color)
+
+
+def code_block(color: QColor) -> QIcon:
+    """Angle brackets around a slash: code."""
+    def draw(painter: QPainter, ink: QColor) -> None:
+        painter.setPen(_pen(ink, 1.6))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        left = QPainterPath()
+        left.moveTo(QPointF(6, 4.5))
+        left.lineTo(QPointF(1.8, 9))
+        left.lineTo(QPointF(6, 13.5))
+        painter.drawPath(left)
+        right = QPainterPath()
+        right.moveTo(QPointF(12, 4.5))
+        right.lineTo(QPointF(16.2, 9))
+        right.lineTo(QPointF(12, 13.5))
+        painter.drawPath(right)
+        painter.drawLine(QPointF(10.2, 3.5), QPointF(7.8, 14.5))
+    return _icon(draw, color)
