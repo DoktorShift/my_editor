@@ -4,7 +4,7 @@
 
 import html
 
-from constants import APP_DISPLAY_NAME, TEXT_COLORS
+from constants import APP_DISPLAY_NAME
 from i18n import _
 
 
@@ -34,16 +34,17 @@ def _page_text(message: str) -> str:
 
 def welcome_html(keys=None) -> str:
     """Build the HTML shown in the first-run Welcome tab. ``keys`` maps a
-    command to its keys as the platform writes them (DEFAULT_KEYS)."""
+    command to its keys as the platform writes them (DEFAULT_KEYS).
+
+    It says how to write, and where publishing lives when someone wants
+    it: the Nostr menu, which is the one way in to everything Nostr (the
+    page itself shows nothing of it). Colors are not advertised: they
+    stay in local files and never reach a published article."""
     keys = {**DEFAULT_KEYS, **(keys or {})}
 
     def key_line(command: str, words: str) -> str:
         return _page_text(words).format(keys=f"<b>{_page_text(keys[command])}</b>")
 
-    colors = " ".join(
-        f'<span style="color:{color.name()}">{_page_text(_(name))}</span>'
-        for name, color in TEXT_COLORS.items()
-    )
     title = _page_text(_("Welcome to {app}").format(app=APP_DISPLAY_NAME))
     intro = _page_text(_("A minimal, distraction-free text editor - just you and your words."))
     get_started = _page_text(_("Get started"))
@@ -57,8 +58,12 @@ def welcome_html(keys=None) -> str:
         _page_text(_("Help > Keyboard Shortcuts - for the full list")),
     ]
     items = "\n".join(f"        <li>{line}</li>" for line in lines)
-    color_line = _page_text(_("Colors, right where you need them: {colors}")).format(
-        colors=colors)
+    publish = _page_text(_("When you want to publish"))
+    publishing = _page_text(_(
+        "Everything for it is in the Nostr menu, whenever you are ready: create an "
+        "account or connect your signer app, then Publish as Article shows how your "
+        "article will look before it goes out. Drafts keeps unfinished work private to "
+        "your account, and Imports brings in posts from your blog or feed as drafts."))
     closing = _page_text(_("That's it. This tab is just a note like any other - close it, "
                            "edit it, or make it your own."))
     return f"""
@@ -68,6 +73,7 @@ def welcome_html(keys=None) -> str:
     <ul>
 {items}
     </ul>
-    <p>{color_line}</p>
+    <h2>{publish}</h2>
+    <p>{publishing}</p>
     <p>{closing}</p>
     """

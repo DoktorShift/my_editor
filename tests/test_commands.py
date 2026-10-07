@@ -443,3 +443,15 @@ def test_the_welcome_page_names_the_keys_the_platform_way(fresh_window):
     page = welcome_html(keys)
     assert f"<b>{native}</b>" in page
     assert "<b>⌘N</b>" in welcome_html({"file.new": "⌘N"})
+
+
+def test_the_welcome_page_says_where_publishing_lives_and_sells_no_local_colors():
+    """The first page names the writing keys and where publishing starts
+    (the Nostr menu, the one way in), with nothing of Nostr to click on
+    it; colors stay in local files and are not advertised."""
+    from welcome import welcome_html
+    page = welcome_html()
+    assert "View &gt; Appearance" in page or "View > Appearance" in page
+    assert "Nostr menu" in page and "Publish as Article" in page
+    assert "<a " not in page                       # nothing to click: the menu is the door
+    assert "Colors" not in page and "color:" not in page

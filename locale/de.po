@@ -2708,55 +2708,58 @@ msgstr "Das Paket konnte nicht installiert werden. Vielleicht läuft gerade eine
 msgid "This copy of MyEditor can't update itself."
 msgstr "Diese Kopie von MyEditor kann sich nicht selbst aktualisieren."
 
-#: welcome.py:48
+#: welcome.py:49
 msgid "A minimal, distraction-free text editor - just you and your words."
 msgstr "Ein schlichter, ablenkungsfreier Texteditor: nur du und deine Worte."
 
-#: welcome.py:49
+#: welcome.py:50
 msgid "Get started"
 msgstr "Los geht’s"
 
+#: welcome.py:61
+msgid "When you want to publish"
+msgstr "Wenn du veröffentlichen möchtest"
+
 #: welcome.py:62
+msgid "Everything for it is in the Nostr menu, whenever you are ready: create an account or connect your signer app, then Publish as Article shows how your article will look before it goes out. Drafts keeps unfinished work private to your account, and Imports brings in posts from your blog or feed as drafts."
+msgstr "Alles dafür findest du im Nostr-Menü, sobald du so weit bist: Erstelle ein Konto oder verbinde deine Signer-App; „Als Artikel veröffentlichen“ zeigt dir dann, wie dein Artikel aussieht, bevor er erscheint. „Entwürfe“ bewahrt Unfertiges privat in deinem Konto auf, und „Importe“ holt Beiträge aus deinem Blog oder Feed als Entwürfe herein."
+
+#: welcome.py:67
 msgid "That's it. This tab is just a note like any other - close it, edit it, or make it your own."
 msgstr "Das war’s. Dieser Tab ist eine Notiz wie jede andere: Schließe ihn, bearbeite ihn oder mach ihn zu deinem eigenen."
 
-#: welcome.py:52
+#: welcome.py:53
 #, python-brace-format
 msgid "{keys} - new file"
 msgstr "{keys}: neue Datei"
 
-#: welcome.py:53
+#: welcome.py:54
 #, python-brace-format
 msgid "{keys} - open a file"
 msgstr "{keys}: Datei öffnen"
 
-#: welcome.py:54
+#: welcome.py:55
 #, python-brace-format
 msgid "{keys} - save"
 msgstr "{keys}: speichern"
 
-#: welcome.py:55
+#: welcome.py:56
 #, python-brace-format
 msgid "{keys} - find"
 msgstr "{keys}: suchen"
 
-#: welcome.py:56
+#: welcome.py:57
 msgid "View > Appearance - light, dark, or the same as your computer"
 msgstr "Darstellung > Erscheinungsbild: hell, dunkel oder wie auf deinem Computer"
 
-#: welcome.py:57
+#: welcome.py:58
 msgid "Help > Keyboard Shortcuts - for the full list"
 msgstr "Hilfe > Tastaturkurzbefehle: die vollständige Liste"
 
-#: welcome.py:47
+#: welcome.py:48
 #, python-brace-format
 msgid "Welcome to {app}"
 msgstr "Willkommen bei {app}"
-
-#: welcome.py:60
-#, python-brace-format
-msgid "Colors, right where you need them: {colors}"
-msgstr "Farben, genau da, wo du sie brauchst: {colors}"
 
 #: widgets.py:129
 #: widgets.py:130
