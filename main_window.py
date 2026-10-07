@@ -29,7 +29,7 @@ from PySide6.QtPrintSupport import QPrintDialog, QPrintPreviewDialog
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QFileDialog, QInputDialog, QLineEdit, QMenu, QWidget,
     QVBoxLayout, QPlainTextEdit, QTextEdit, QTabWidget, QToolButton, QHBoxLayout, QStatusBar,
-    QPushButton, QTabBar, QWidgetAction, QLabel, QDialog, QSplitter,
+    QPushButton, QTabBar, QLabel, QDialog, QSplitter,
     QProgressDialog
 )
 
@@ -1684,9 +1684,13 @@ class MainWindow(QMainWindow):
             m_file.addAction(self.act_print_preview)
         m_file.addAction(self.act_print)
         m_file.addSeparator()
-        m_file.addAction(self.act_knit_html)
-        m_file.addAction(self.act_knit_pdf)
-        m_file.addAction(self.act_rmd_toolchain)
+        # R Markdown is for the few who write it: one item in the File menu,
+        # its commands (and Knit's key) inside.
+        self.m_rmarkdown = m_file.addMenu(_("R Markdown"))
+        self.m_rmarkdown.addAction(self.act_knit_html)
+        self.m_rmarkdown.addAction(self.act_knit_pdf)
+        self.m_rmarkdown.addSeparator()
+        self.m_rmarkdown.addAction(self.act_rmd_toolchain)
         m_file.addSeparator()
         m_file.addAction(self.act_close_tab)
         m_file.addAction(self.act_quit)
@@ -1812,39 +1816,24 @@ class MainWindow(QMainWindow):
         help_menu.addAction(self.act_about)
 
     def _populate_recent_menu(self):
+        """The files opened last, then Clear Recent Files: an ordinary
+        menu item (reached by the keyboard like any other, in the menu's
+        own color, since clearing the list deletes no file), dimmed while
+        the list is empty, as a Mac's Open Recent menu does."""
         self.m_recent.clear()
         self.m_recent.setToolTipsVisible(True)
         entries = [p for p in load_recent() if os.path.exists(p)]
-
-        if not entries:
-            empty = QAction(_("(empty)"), self)
-            empty.setEnabled(False)
-            self.m_recent.addAction(empty)
-        else:
-            for path in entries:
-                action = QAction(os.path.basename(path), self)
-                action.setToolTip(path)
-                action.triggered.connect(lambda checked, p=path: self.open_path(p))
-                self.m_recent.addAction(action)
-
-        self.m_recent.addSeparator()
-        clear_widget = QLabel("  " + _("Clear Recent Files") + "  ")
-        clear_widget.setContentsMargins(4, 4, 4, 4)
-        clear_widget.setStyleSheet("""
-            QLabel {
-                color: #CC4444;
-                padding: 4px 8px;
-            }
-            QLabel:hover {
-                background: rgba(180, 40, 40, 0.15);
-                color: #FF6666;
-            }
-        """)
-        clear_action = QWidgetAction(self)
-        clear_action.setDefaultWidget(clear_widget)
-        clear_action.triggered.connect(self._clear_recent_files)
-        clear_widget.mousePressEvent = lambda e: (self.m_recent.close(), self._clear_recent_files())
-        self.m_recent.addAction(clear_action)
+        for path in entries:
+            action = QAction(os.path.basename(path), self)
+            action.setToolTip(path)
+            action.triggered.connect(lambda checked, p=path: self.open_path(p))
+            self.m_recent.addAction(action)
+        if entries:
+            self.m_recent.addSeparator()
+        clear = QAction(_("Clear Recent Files"), self)
+        clear.setEnabled(bool(entries))
+        clear.triggered.connect(self._clear_recent_files)
+        self.m_recent.addAction(clear)
 
     def _clear_recent_files(self):
         clear_recent()

@@ -208,7 +208,7 @@ macOS shows a preview inside its print dialog. On Windows and Linux,
 
 ## R Markdown knitting
 
-`.Rmd` tabs get `File > Knit to HTML` (`Ctrl+Shift+K`) and `File > Knit to PDF`.
+`.Rmd` tabs get `File > R Markdown > Knit to HTML` (`Ctrl+Shift+K`) and `File > R Markdown > Knit to PDF`.
 Knitting saves the tab, then renders the file through `rmarkdown::render` and
 opens the result.
 
@@ -218,4 +218,4 @@ private app library. Nothing is downloaded without confirmation, and an existing
 system R is always preferred over downloading one. Knit to PDF additionally
 needs LaTeX, offered as an optional TinyTeX install (about 100 MB).
 
-`File > R Markdown Toolchain…` shows the status of all components at any time.
+`File > R Markdown > R Markdown Toolchain…` shows the status of all components at any time.
