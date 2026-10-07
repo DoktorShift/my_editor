@@ -73,6 +73,8 @@ def normalize_after_markdown_load(doc) -> None:
                 != list_format(BULLET, max(1, text_list.format().indent())).style()]
     tables = [table for table in tables_of(doc)
               if table.format().cellPadding() != table_format().cellPadding()]
+    if tables_of(doc):
+        unescape_cell_code(doc)
     if not stray and not headings and not reshaped and not tables:
         return
     cursor = QTextCursor(doc)
@@ -1256,6 +1258,53 @@ def next_table_cell(cursor: QTextCursor, step: int) -> bool:
         edit.endEditBlock()
     _place(cursor, table, index // table.columns(), index % table.columns())
     return True
+
+
+def next_table_row(cursor: QTextCursor) -> bool:
+    """Into the cell below (a new row after the last one, one undo step).
+    False outside a table."""
+    table = cursor.currentTable()
+    if table is None:
+        return False
+    cell = table.cellAt(cursor)
+    if cell.row() + 1 >= table.rows():
+        edit = QTextCursor(cursor.document())
+        edit.beginEditBlock()
+        table.appendRows(1)
+        _style_row(table, table.rows() - 1)
+        edit.endEditBlock()
+    _place(cursor, table, cell.row() + 1, cell.column())
+    return True
+
+
+def unescape_cell_code(doc) -> None:
+    """A pipe in code in a table cell, as Qt's reader leaves it: with the
+    backslash GFM asks for there (the writer writes `a\\|b`), which GFM
+    readers drop. Dropped here too, so the code reads as written."""
+    edits = []
+    for table in tables_of(doc):
+        for row in range(table.rows()):
+            for column in range(table.columns()):
+                cell = table.cellAt(row, column)
+                it = cell.begin()
+                while not it.atEnd():
+                    block = it.currentBlock()
+                    if block.isValid():
+                        frag = block.begin()
+                        while not frag.atEnd():
+                            fragment = frag.fragment()
+                            if (fragment.isValid() and fragment.charFormat().fontFixedPitch()
+                                    and "\\|" in fragment.text()):
+                                edits.append((fragment.position(), fragment.length(),
+                                              fragment.text().replace("\\|", "|"),
+                                              QTextCharFormat(fragment.charFormat())))
+                            frag += 1
+                    it += 1
+    for position, length, text, fmt in reversed(edits):
+        cursor = QTextCursor(doc)
+        cursor.setPosition(position)
+        cursor.setPosition(position + length, QTextCursor.MoveMode.KeepAnchor)
+        cursor.insertText(text, fmt)
 
 
 def leave_table(cursor: QTextCursor) -> bool:

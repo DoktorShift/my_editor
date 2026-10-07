@@ -473,6 +473,12 @@ def test_markdown_the_editor_can_hold(source):
     "> # a heading in a quote\n",
     "- item\n\n  second paragraph of the item\n- two\n",
     "Line one\nLine two of the same paragraph\n",
+    # Review M6 (CP3): what the editor's own reader changes.
+    "```make\nall:\n\tcc main.c\n```\n",                      # a tab in code
+    "| a | b |\n| :--- | ---: |\n| 1 | 2 |\n",                    # alignment
+    "| **a** | b |\n| --- | --- |\n| 1 | 2 |\n",                 # emphasis in a header
+    "1. Run this:\n\n   ```sh\n   make\n   ```\n",            # code in a list item
+    "Escaped \\[^1\\] stays literal.\n\n[^1]: A note.\n",    # an escaped mark (L3)
 ])
 def test_markdown_the_editor_would_lose(source):
     assert not holds_faithfully(source)

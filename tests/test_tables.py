@@ -131,12 +131,30 @@ def test_tab_after_the_last_cell_adds_a_row_and_shift_tab_goes_back():
         "| a |   |\n| --- | --- |\n| c | d |\n| e |   |\n")
 
 
-def test_return_in_a_cell_is_a_line_break_written_as_a_space():
+def test_return_in_a_cell_goes_to_the_cell_below():
+    # Review M4 (CP3): a line break in a cell was shown but saved as a
+    # space. A Markdown cell holds one line, so Return moves on instead.
     ed = table_editor()
-    type_text(ed, "one\ntwo")
-    cell = rich_text.tables_of(ed.document())[0].cellAt(0, 0)
-    assert cell.firstCursorPosition().block().text() == "one\u2028two"   # one paragraph
-    assert assert_round_trip(ed.document()).startswith("| one two |")
+    type_text(ed, "one\ntwo\nthree")
+    assert assert_round_trip(ed.document()) == (
+        "| one |   |\n| --- | --- |\n| two |   |\n| three |   |\n")
+    assert "\u2028" not in ed.toPlainText()
+
+
+def test_code_with_a_pipe_in_a_cell_keeps_exactly_through_save_and_reopen():
+    # Review M5 (CP3): the escape GFM asks for came back as a backslash,
+    # one more at every save, and the file then opened as its text.
+    from markdown_writer import holds_faithfully
+    from nostr.preview import body_document
+    ed = table_editor()
+    type_text(ed, "`a|b`")
+    first = assert_round_trip(ed.document())
+    assert first.startswith("| `a\\|b` |")
+    reopened = from_markdown(first)
+    assert document_to_markdown(reopened) == first
+    assert holds_faithfully(first)
+    shown = body_document(first).toPlainText()
+    assert "a|b" in shown and "a\\|b" not in shown
 
 
 def test_command_return_leaves_the_table_into_a_paragraph_below():

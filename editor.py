@@ -1526,10 +1526,18 @@ class HtmlEditor(QTextEdit):
             self.setTextCursor(cursor)
             return True
         if rich_text.is_task(block) and plain and key in (Qt.Key_Return, Qt.Key_Enter):
-            # The next item of a checklist starts unticked, as in Notes.
+            # The new item of a checklist starts unticked, as in Notes, and
+            # the item the caret was in keeps its tick: at its start, the
+            # new item is the empty one above it.
+            at_start = cursor.atBlockStart() and bool(block.text())
             cursor.beginEditBlock()
+            tick = block.blockFormat().marker()
             cursor.insertBlock()
-            rich_text.set_tick(cursor.block(), rich_text.UNTICKED)
+            if at_start:
+                rich_text.set_tick(cursor.block().previous(), rich_text.UNTICKED)
+                rich_text.set_tick(cursor.block(), tick)
+            else:
+                rich_text.set_tick(cursor.block(), rich_text.UNTICKED)
             cursor.endEditBlock()
             self.setTextCursor(cursor)
             return True
@@ -1559,10 +1567,11 @@ class HtmlEditor(QTextEdit):
 
     def _table_key(self, e, cursor) -> bool:
         """The keys of a table. Tab goes to the next cell (after the last
-        one it adds a row), Shift+Tab to the one before; Command-Return on
-        a Mac and Ctrl+Return elsewhere leave the table, into a paragraph
-        below it; Return is a line break inside the cell, since a
-        Markdown cell holds one line. True when the key was handled."""
+        one it adds a row), Shift+Tab to the one before; Return goes to the
+        cell below (a new row after the last), since a Markdown cell holds
+        one line; Command-Return on a Mac and Ctrl+Return elsewhere leave
+        the table, into a paragraph below it. True when the key was
+        handled."""
         key = e.key()
         modifiers = e.modifiers() & ~Qt.KeypadModifier
         moved = False
@@ -1574,10 +1583,9 @@ class HtmlEditor(QTextEdit):
             moved = rich_text.leave_table(cursor)
         elif key in (Qt.Key_Return, Qt.Key_Enter) and modifiers in (Qt.NoModifier,
                                                                     Qt.ShiftModifier):
-            cursor.beginEditBlock()
-            cursor.insertText(LINE_BREAK, self.currentCharFormat())
-            cursor.endEditBlock()
-            moved = True
+            # A Markdown cell holds one line: Return goes to the cell below,
+            # as in a spreadsheet (a new row after the last one).
+            moved = rich_text.next_table_row(cursor)
         if moved:
             self.setTextCursor(cursor)
         return moved

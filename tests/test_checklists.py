@@ -36,7 +36,7 @@ import rich_text  # noqa: E402
 from editor import HtmlEditor  # noqa: E402
 from markdown_writer import document_to_markdown, read_markdown  # noqa: E402
 from tests.rich_text_helpers import (  # noqa: E402
-    assert_round_trip, block_named, from_markdown, select, type_text,
+    assert_round_trip, block_named, from_markdown, press, select, type_text,
 )
 
 
@@ -106,6 +106,27 @@ def test_return_in_a_ticked_item_starts_an_unticked_one():
     ed = editor("- [x] done\n")
     type_text(ed, "\nnext\n\nafter")
     assert assert_round_trip(ed.document()) == "- [x] done\n- [ ] next\n\nafter\n"
+
+
+@pytest.mark.parametrize("caret, markdown", [
+    (0, "- [ ] \n- [x] Buy milk\n"),                  # a new item above, the tick kept
+    (4, "- [x] Buy \n- [ ] milk\n"),
+    (8, "- [x] Buy milk\n- [ ] \n"),
+])
+def test_return_in_a_ticked_item_keeps_its_tick(caret, markdown):
+    # Review M1 (CP3): Return at the start moved the tick to the empty line.
+    ed = editor("- [x] Buy milk\n")
+    cursor = ed.textCursor()
+    cursor.setPosition(caret)
+    ed.setTextCursor(cursor)
+    press(ed, Qt.Key.Key_Return)
+    blocks = [ed.document().findBlockByNumber(n) for n in range(2)]
+    ticks = [rich_text.is_task(b) and b.blockFormat().marker() == rich_text.TICKED
+             for b in blocks]
+    texts = [b.text() for b in blocks]
+    expected = {0: ([False, True], ["", "Buy milk"]), 4: ([True, False], ["Buy ", "milk"]),
+                8: ([True, False], ["Buy milk", ""])}[caret]
+    assert (ticks, texts) == expected
 
 
 def test_markdown_shortcuts_make_checklist_items():

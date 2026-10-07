@@ -748,14 +748,20 @@ def has_local_only_formatting(doc) -> bool:
 
 # Markdown the editor's document cannot hold, so reading it in would lose
 # something: a footnote whose note goes on in a second paragraph (the
-# editor keeps footnotes as their text, one paragraph each), raw HTML, an
-# image without alt text (Qt drops it), a link title, a link around an
-# image, a heading inside a quote, a paragraph continued inside a list
-# item, and lines that wrap inside a paragraph (a draft saved as plain
-# text by an earlier version).
+# editor keeps footnotes as their text, one paragraph each), a tab where a
+# line starts (lists and code are indented with spaces), code inside a
+# list item (it moves out of the item), an escaped footnote mark, raw
+# HTML, an image without alt text (Qt drops it), a link title, a link
+# around an image, a heading inside a quote, a paragraph continued inside
+# a list item, and lines that wrap inside a paragraph (a draft saved as
+# plain text by an earlier version). Also (below): a tab inside fenced
+# code, a column's alignment, emphasis in a table's header row.
 _LOSSY = [
     re.compile(r"^ {0,3}\[\^[^\]]+\]:.*\n(?:[ \t]*\n)+(?: {4}|\t)\S",
                re.MULTILINE),                              # a note of two paragraphs
+    re.compile(r"^\t", re.MULTILINE),                     # a tab where a line starts
+    re.compile(r"^ {2,}(?:```|~~~)", re.MULTILINE),        # code inside a list item
+    re.compile(r"\\\[\^"),                                 # an escaped footnote mark
     re.compile(r"<(?:[A-Za-z][\w-]*[\s/>]|/[A-Za-z]|!--)"),  # raw HTML
     re.compile(r"!\[\]\("),                                # image without alt text
     re.compile(r"\]\((?!<)[^)\s]+\s+[\"'(]"),              # link title
@@ -849,16 +855,51 @@ def read_markdown(doc: QTextDocument, markdown: str, features=READ_FEATURES) -> 
     normalize_after_markdown_load(doc)
 
 
+def _tab_in_fence(markdown: str) -> bool:
+    """Whether a fenced code block holds a tab (Qt's reader makes it spaces,
+    and a Makefile stops working)."""
+    fence = ""
+    for line in markdown.split("\n"):
+        found = _FENCE_LINE.match(line)
+        if fence:
+            if found and found.group(1)[0] == fence[0] and len(found.group(1)) >= len(fence) \
+                    and not found.group(2).strip():
+                fence = ""
+            elif "\t" in line:
+                return True
+        elif found:
+            fence = found.group(1)
+    return False
+
+
+_DELIMITER_ROW = re.compile(r"^[ \t]*\|?(?:[ \t]*:?-+:?[ \t]*\|)+[ \t]*(?::?-+:?)?[ \t]*$")
+_HEADER_EMPHASIS = re.compile(r"\*|~~|(?<![\w\\])_|_(?!\w)")
+
+
+def _table_loses(markdown: str) -> bool:
+    """Whether a table says what the editor's tables cannot keep: a
+    column's alignment, or emphasis in its header row (the header is bold
+    by its own format there)."""
+    lines = markdown.split("\n")
+    for index in range(1, len(lines)):
+        if _DELIMITER_ROW.match(lines[index]) and "|" in lines[index - 1]:
+            if ":" in lines[index] or _HEADER_EMPHASIS.search(lines[index - 1]):
+                return True
+    return False
+
+
 def holds_faithfully(markdown: str) -> bool:
     """Whether the editor can hold this Markdown and write it back without
     losing anything. When it cannot, open it as its Markdown text."""
-    if any(pattern.search(markdown) for pattern in _LOSSY) or _soft_wrapped(markdown):
+    if (any(pattern.search(markdown) for pattern in _LOSSY) or _soft_wrapped(markdown)
+            or _tab_in_fence(markdown) or _table_loses(markdown)):
         return False
-    # Read as the editor reads it, footnotes as their text.
+    # Read as the editor reads it (footnotes as their text, code in cells
+    # without the escape of its pipes).
     first = QTextDocument()
-    first.setMarkdown(literal_footnotes(markdown), READ_FEATURES)
+    read_markdown(first, markdown)
     second = QTextDocument()
-    second.setMarkdown(literal_footnotes(document_to_markdown(first)), READ_FEATURES)
+    read_markdown(second, document_to_markdown(first))
     return _fingerprint(first) == _fingerprint(second)
 
 
