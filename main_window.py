@@ -2017,9 +2017,11 @@ class MainWindow(QMainWindow):
         new_name = new_name.strip()
         new_path = file_paths.normalize(os.path.join(directory, new_name))
 
-        # Changing only the case of a name finds the file itself where the
-        # disk ignores case (Windows, a Mac): that is a rename, not a clash.
-        if os.path.exists(new_path) and not file_paths.same_file(new_path, old_path):
+        # Any entry with that name is a clash, a link (even a broken one)
+        # included: renaming onto it would replace it. Only changing the
+        # case of the name, where the disk ignores case (Windows, a Mac),
+        # finds the file itself, and that is a rename.
+        if os.path.lexists(new_path) and not file_paths.is_case_change(old_path, new_path):
             inform(self, title=_("\u201c{name}\u201d already exists").format(name=new_name),
                    message=_("Choose a different name."))
             return
