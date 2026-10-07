@@ -361,14 +361,15 @@ class InboxStore:
     def claim(self, key: str, *, manual: bool = False) -> bool:
         """Take the check of ``key`` (no other check of it runs until it is
         done or its lease runs out). A manual check is allowed once a
-        minute; an automatic one only when due."""
+        minute, also of a source not checked automatically; an automatic
+        one only when due and not turned off."""
         now = self._now()
-        condition = "last_attempt <= ?" if manual else "next_check <= ?"
+        condition = "last_attempt <= ?" if manual else "paused = 0 AND next_check <= ?"
         limit = now - MANUAL_CHECK_GAP if manual else now
         with self._db:
             cursor = self._db.execute(
                 "UPDATE sources SET checking_until = ?, last_attempt = ? WHERE key = ? "
-                f"AND paused = 0 AND checking_until <= ? AND {condition}",
+                f"AND checking_until <= ? AND {condition}",
                 (now + CHECK_LEASE, now, key, now, limit))
         return cursor.rowcount == 1
 

@@ -209,7 +209,8 @@ class FeedChecker(QObject):
     # -- one check ---------------------------------------------------------------
 
     def _interval(self) -> int:
-        automatic = sum(1 for s in self._store.sources() if s.automatic)
+        # Sources whose automatic checks are off add no checks (Q-8).
+        automatic = sum(1 for s in self._store.sources() if s.automatic and not s.paused)
         return interval_for(automatic)
 
     def _check(self, source: SourceRow) -> None:

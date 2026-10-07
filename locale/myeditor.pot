@@ -156,6 +156,7 @@ msgid "Text:"
 msgstr ""
 
 #: link_popover.py:68
+#: nostr/ui/imports_source_settings.py:146
 msgid "Address:"
 msgstr ""
 
@@ -238,8 +239,8 @@ msgstr ""
 
 #: main_window.py:1091
 #: main_window.py:1215
-#: nostr/ui/imports_window.py:1002
-#: nostr/ui/imports_window.py:982
+#: nostr/ui/imports_window.py:981
+#: nostr/ui/imports_window.py:961
 msgid "Undo"
 msgstr ""
 
@@ -484,9 +485,9 @@ msgstr ""
 
 #: main_window.py:1171
 #: nostr/imports/workspace.py:48
-#: nostr/ui/imports_window.py:466
-#: nostr/ui/imports_window.py:736
-#: nostr/ui/imports_window.py:750
+#: nostr/ui/imports_window.py:440
+#: nostr/ui/imports_window.py:715
+#: nostr/ui/imports_window.py:729
 msgid "New"
 msgstr ""
 
@@ -548,7 +549,7 @@ msgid "Paste and Match Style"
 msgstr ""
 
 #: main_window.py:1234
-#: nostr/ui/imports_window.py:839
+#: nostr/ui/imports_window.py:818
 msgid "Select All"
 msgstr ""
 
@@ -671,7 +672,7 @@ msgstr ""
 #: main_window.py:1456
 #: main_window.py:3911
 #: main_window.py:3909
-#: nostr/ui/imports_window.py:1279
+#: nostr/ui/imports_window.py:1258
 msgid "Show Sidebar"
 msgstr ""
 
@@ -832,7 +833,7 @@ msgid "MyEditor closes to install the update. Changes you don't save will be los
 msgstr ""
 
 #: main_window.py:3687
-#: nostr/ui/imports_window.py:1100
+#: nostr/ui/imports_window.py:1079
 msgid "You're up to date"
 msgstr ""
 
@@ -1121,7 +1122,7 @@ msgid "{current} of {total}"
 msgstr ""
 
 #: main_window.py:3909
-#: nostr/ui/imports_window.py:1279
+#: nostr/ui/imports_window.py:1258
 msgid "Hide Sidebar"
 msgstr ""
 
@@ -2320,7 +2321,7 @@ msgstr ""
 #: nostr/ui/account_windows.py:854
 #: nostr/ui/account_windows.py:1104
 #: nostr/ui/image_review_dialog.py:124
-#: nostr/ui/media_library_dialog.py:1947
+#: nostr/ui/imports_source_settings.py:191
 msgid "Done"
 msgstr ""
 
@@ -2350,7 +2351,7 @@ msgstr ""
 #: nostr/ui/draft_relays_sheet.py:294
 #: nostr/ui/drafts_panel.py:1108
 #: nostr/ui/imports_activity.py:288
-#: nostr/ui/imports_window.py:1092
+#: nostr/ui/imports_window.py:1071
 #: nostr/ui/profile_window.py:331
 msgid "Try Again"
 msgstr ""
@@ -3153,32 +3154,32 @@ msgstr ""
 msgid "{total} in total, up to {per_file} per file."
 msgstr ""
 
-#: nostr/imports_controller.py:95
+#: nostr/imports_controller.py:96
 msgid "The account changed. Resume when you're signed in to that account again."
 msgstr ""
 
-#: nostr/imports_controller.py:97
+#: nostr/imports_controller.py:98
 msgid "MyEditor was closed during the import. Resume it to go on."
 msgstr ""
 
-#: nostr/imports_controller.py:98
+#: nostr/imports_controller.py:99
 msgid "Imports are checked in another MyEditor window. This one only shows them."
 msgstr ""
 
-#: nostr/imports_controller.py:99
+#: nostr/imports_controller.py:100
 msgid "Couldn't show this post."
 msgstr ""
 
-#: nostr/imports_controller.py:100
+#: nostr/imports_controller.py:101
 #, python-brace-format
 msgid "MyEditor can't keep imports on this computer: {reason}. Your sources are safe on your relays; check that your user folder can be written to, then sign in again."
 msgstr ""
 
-#: nostr/imports_controller.py:103
+#: nostr/imports_controller.py:104
 msgid "The file that keeps imports on this computer was damaged, so MyEditor set it aside and started a new one. Your sources are kept; posts you had skipped show again."
 msgstr ""
 
-#: nostr/imports_controller.py:106
+#: nostr/imports_controller.py:107
 msgid "No sources were found in that list. Is it a subscription export from a feed reader?"
 msgstr ""
 
@@ -3973,14 +3974,14 @@ msgid "Importing"
 msgstr ""
 
 #: nostr/imports/workspace.py:50
-#: nostr/ui/imports_window.py:174
-#: nostr/ui/imports_window.py:736
+#: nostr/ui/imports_window.py:173
+#: nostr/ui/imports_window.py:715
 msgid "Imported"
 msgstr ""
 
 #: nostr/imports/workspace.py:51
-#: nostr/ui/imports_window.py:175
-#: nostr/ui/imports_window.py:736
+#: nostr/ui/imports_window.py:174
+#: nostr/ui/imports_window.py:715
 msgid "Skipped"
 msgstr ""
 
@@ -3990,7 +3991,30 @@ msgstr ""
 msgid "Failed"
 msgstr ""
 
-#: nostr/imports/workspace.py:256
+#: nostr/imports/workspace.py:259
+#: nostr/ui/imports_sheets.py:508
+msgid "MyEditor reads this source when you open it."
+msgstr ""
+
+#: nostr/imports/workspace.py:278
+msgid "Not checked yet."
+msgstr ""
+
+#: nostr/imports/workspace.py:282
+msgid "Checked just now"
+msgstr ""
+
+#: nostr/imports/workspace.py:263
+#: nostr/ui/imports_sidebar.py:148
+msgid "Not checked automatically"
+msgstr ""
+
+#: nostr/imports/workspace.py:283
+#, python-brace-format
+msgid "Checked {when}"
+msgstr ""
+
+#: nostr/imports/workspace.py:289
 #, python-brace-format
 msgid "{count} of {total} selected"
 msgid_plural "{count} of {total} selected"
@@ -4020,6 +4044,11 @@ msgid_plural "{n} days ago"
 msgstr[0] ""
 msgstr[1] ""
 
+#: nostr/imports/workspace.py:264
+#, python-brace-format
+msgid "Not checked automatically · Checked {when}"
+msgstr ""
+
 #: nostr/imports/workspace.py:237
 #, python-brace-format
 msgid "{n} min ago"
@@ -4031,6 +4060,20 @@ msgstr[1] ""
 #, python-brace-format
 msgid "{n} h ago"
 msgid_plural "{n} h ago"
+msgstr[0] ""
+msgstr[1] ""
+
+#: nostr/imports/workspace.py:270
+#, python-brace-format
+msgid "Next try in {n} hour."
+msgid_plural "Next try in {n} hours."
+msgstr[0] ""
+msgstr[1] ""
+
+#: nostr/imports/workspace.py:274
+#, python-brace-format
+msgid "Next try in {n} minute."
+msgid_plural "Next try in {n} minutes."
 msgstr[0] ""
 msgstr[1] ""
 
@@ -4433,6 +4476,7 @@ msgid "Your name"
 msgstr ""
 
 #: nostr/ui/account_windows.py:576
+#: nostr/ui/imports_source_settings.py:138
 msgid "Name:"
 msgstr ""
 
@@ -4736,7 +4780,7 @@ msgid "That file couldn’t be opened. Choose the backup file again, or paste th
 msgstr ""
 
 #: nostr/ui/account_windows.py:1015
-#: nostr/ui/imports_window.py:883
+#: nostr/ui/imports_window.py:862
 msgid "Restore"
 msgstr ""
 
@@ -4994,7 +5038,7 @@ msgid "Add a relay:"
 msgstr ""
 
 #: nostr/ui/draft_relays_sheet.py:123
-#: nostr/ui/imports_window.py:340
+#: nostr/ui/imports_window.py:314
 msgid "Add"
 msgstr ""
 
@@ -5103,7 +5147,7 @@ msgstr ""
 
 #: nostr/ui/drafts_panel.py:943
 #: nostr/ui/drafts_panel.py:953
-#: nostr/ui/imports_window.py:242
+#: nostr/ui/imports_window.py:216
 msgid "Imports"
 msgstr ""
 
@@ -5442,7 +5486,7 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: nostr/ui/imports_actions.py:96
-#: nostr/ui/imports_window.py:883
+#: nostr/ui/imports_window.py:862
 msgid "Skip"
 msgstr ""
 
@@ -5459,6 +5503,7 @@ msgid "Options for the New Drafts"
 msgstr ""
 
 #: nostr/ui/imports_actions.py:148
+#: nostr/ui/imports_source_settings.py:172
 msgid "Copy images to your media server"
 msgstr ""
 
@@ -5467,6 +5512,7 @@ msgid "Review Images…"
 msgstr ""
 
 #: nostr/ui/imports_actions.py:160
+#: nostr/ui/imports_source_settings.py:178
 msgid "Fetch the full article"
 msgstr ""
 
@@ -5475,10 +5521,12 @@ msgid "These posts come from sources with different settings. What you choose he
 msgstr ""
 
 #: nostr/ui/imports_actions.py:152
+#: nostr/ui/imports_source_settings.py:175
 msgid "Drafts keep working if the original site removes its images."
 msgstr ""
 
 #: nostr/ui/imports_actions.py:164
+#: nostr/ui/imports_source_settings.py:181
 msgid "Uses the whole article when the feed only has a summary."
 msgstr ""
 
@@ -5919,332 +5967,329 @@ msgstr ""
 msgid "MyEditor checks this feed for new posts while it's open."
 msgstr ""
 
-#: nostr/ui/imports_sheets.py:508
-#: nostr/ui/imports_window.py:185
-msgid "MyEditor reads this source when you open it."
-msgstr ""
-
-#: nostr/ui/imports_sidebar.py:265
+#: nostr/ui/imports_sidebar.py:276
 msgid "Lists and sources"
 msgstr ""
 
-#: nostr/ui/imports_sidebar.py:144
+#: nostr/ui/imports_sidebar.py:146
 msgid "Couldn't check this source"
 msgstr ""
 
-#: nostr/ui/imports_window.py:172
-msgid "Inbox"
-msgstr ""
-
-#: nostr/ui/imports_window.py:173
-#: nostr/ui/imports_window.py:467
-msgid "Older Posts"
-msgstr ""
-
-#: nostr/ui/imports_window.py:198
-msgid "Not checked yet."
-msgstr ""
-
-#: nostr/ui/imports_window.py:202
-msgid "Checked just now"
-msgstr ""
-
-#: nostr/ui/imports_window.py:203
-#, python-brace-format
-msgid "Checked {when}"
-msgstr ""
-
-#: nostr/ui/imports_window.py:306
-msgid "Imports Toolbar"
-msgstr ""
-
-#: nostr/ui/imports_window.py:325
-#: nostr/ui/imports_window.py:1099
-msgid "Follow a Website…"
-msgstr ""
-
-#: nostr/ui/imports_window.py:328
-msgid "Import a File…"
-msgstr ""
-
-#: nostr/ui/imports_window.py:331
-msgid "Import a Link…"
-msgstr ""
-
-#: nostr/ui/imports_window.py:341
-msgid "Follow a website, or import a file or a link"
-msgstr ""
-
-#: nostr/ui/imports_window.py:358
-msgid "Search"
-msgstr ""
-
-#: nostr/ui/imports_window.py:359
-msgid "Search Posts"
-msgstr ""
-
-#: nostr/ui/imports_window.py:466
-msgid "New Posts"
-msgstr ""
-
-#: nostr/ui/imports_window.py:467
-msgid "Older"
-msgstr ""
-
-#: nostr/ui/imports_window.py:476
-msgid "Source Actions"
-msgstr ""
-
-#: nostr/ui/imports_window.py:477
-msgid "What you can do with this source"
-msgstr ""
-
-#: nostr/ui/imports_window.py:497
-msgid "Select All Posts"
-msgstr ""
-
-#: nostr/ui/imports_window.py:673
-msgid "Open Website"
-msgstr ""
-
-#: nostr/ui/imports_window.py:676
-msgid "Copy Address"
-msgstr ""
-
-#: nostr/ui/imports_window.py:679
-msgid "Unsubscribe…"
-msgstr ""
-
-#: nostr/ui/imports_window.py:796
-msgid "Posts you skipped on this computer."
-msgstr ""
-
-#: nostr/ui/imports_window.py:808
-msgid "Imported once, not kept as a source."
-msgstr ""
-
-#: nostr/ui/imports_window.py:1001
-msgid "Undo Skip"
-msgstr ""
-
-#: nostr/ui/imports_window.py:1115
-#: nostr/ui/imports_window.py:1103
-msgid "No older posts"
-msgstr ""
-
-#: nostr/ui/imports_window.py:1116
-msgid "Posts that were already on this source when you followed it appear here."
-msgstr ""
-
-#: nostr/ui/imports_window.py:1204
-msgid "That link can't be opened from here."
-msgstr ""
-
-#: nostr/ui/imports_window.py:1394
-#: nostr/ui/imports_window.py:1395
-msgid "Close Message"
-msgstr ""
-
-#: nostr/ui/imports_window.py:1433
-#: nostr/ui/imports_window.py:1450
-msgid "Drop to Import"
-msgstr ""
-
-#: nostr/ui/imports_window.py:369
-msgid "More Toolbar Items"
-msgstr ""
-
-#: nostr/ui/imports_window.py:667
-msgid "Check Now"
-msgstr ""
-
-#: nostr/ui/imports_window.py:667
-msgid "Read Now"
-msgstr ""
-
-#: nostr/ui/imports_window.py:704
+#: nostr/ui/imports_source_settings.py:66
 msgid "Its posts leave Imports. Drafts you already created stay."
 msgstr ""
 
-#: nostr/ui/imports_window.py:705
+#: nostr/ui/imports_source_settings.py:67
 msgid "Unsubscribe"
 msgstr ""
 
-#: nostr/ui/imports_window.py:1052
-msgid "Show Drafts"
+#: nostr/ui/imports_source_settings.py:82
+msgid "Source Settings"
 msgstr ""
 
-#: nostr/ui/imports_window.py:1082
-msgid "No Results"
+#: nostr/ui/imports_source_settings.py:121
+#: nostr/ui/imports_window.py:648
+msgid "Open Website"
 msgstr ""
 
-#: nostr/ui/imports_window.py:1093
-msgid "No posts"
+#: nostr/ui/imports_source_settings.py:156
+#: nostr/ui/imports_window.py:642
+msgid "Check Now"
 msgstr ""
 
-#: nostr/ui/imports_window.py:1093
-msgid "This source has no posts to import."
+#: nostr/ui/imports_source_settings.py:161
+msgid "Check for new posts automatically"
 msgstr ""
 
-#: nostr/ui/imports_window.py:1101
-msgid "New posts appear here when MyEditor checks your sources."
+#: nostr/ui/imports_source_settings.py:166
+msgid "Updates:"
 msgstr ""
 
-#: nostr/ui/imports_window.py:1104
-msgid "Posts that were already on a source when you followed it appear here."
+#: nostr/ui/imports_source_settings.py:185
+msgid "New drafts:"
 msgstr ""
 
-#: nostr/ui/imports_window.py:1107
-msgid "Nothing imported yet"
-msgstr ""
-
-#: nostr/ui/imports_window.py:1108
-msgid "Posts you import as drafts appear here."
-msgstr ""
-
-#: nostr/ui/imports_window.py:1110
-msgid "Nothing skipped"
-msgstr ""
-
-#: nostr/ui/imports_window.py:1111
-msgid "Posts you skip on this computer appear here, so you can bring them back."
-msgstr ""
-
-#: nostr/ui/imports_window.py:1114
-msgid "No new posts"
-msgstr ""
-
-#: nostr/ui/imports_window.py:1114
-msgid "New posts from this source appear here."
-msgstr ""
-
-#: nostr/ui/imports_window.py:1214
-msgid "Stop this import?"
-msgstr ""
-
-#: nostr/ui/imports_window.py:1215
-msgid "Drafts already created stay. The other posts are not imported."
-msgstr ""
-
-#: nostr/ui/imports_window.py:1216
-msgid "Stop Import"
-msgstr ""
-
-#: nostr/ui/imports_window.py:190
-#, python-brace-format
-msgid "Next try in {n} hour."
-msgid_plural "Next try in {n} hours."
-msgstr[0] ""
-msgstr[1] ""
-
-#: nostr/ui/imports_window.py:194
-#, python-brace-format
-msgid "Next try in {n} minute."
-msgid_plural "Next try in {n} minutes."
-msgstr[0] ""
-msgstr[1] ""
-
-#: nostr/ui/imports_window.py:584
-msgid "Sources"
-msgstr ""
-
-#: nostr/ui/imports_window.py:594
-msgid "Files and Links"
-msgstr ""
-
-#: nostr/ui/imports_window.py:660
-msgid "Remove from List"
-msgstr ""
-
-#: nostr/ui/imports_window.py:718
-#: nostr/ui/imports_window.py:814
+#: nostr/ui/imports_source_settings.py:214
+#: nostr/ui/imports_window.py:697
+#: nostr/ui/imports_window.py:793
 msgid "Checking for new posts…"
 msgstr ""
 
-#: nostr/ui/imports_window.py:719
+#: nostr/ui/imports_source_settings.py:184
+msgid "Your other devices use these settings too."
+msgstr ""
+
+#: nostr/ui/imports_source_settings.py:189
+#: nostr/ui/imports_window.py:657
+msgid "Unsubscribe…"
+msgstr ""
+
+#: nostr/ui/imports_source_settings.py:216
+#: nostr/ui/imports_window.py:698
 msgid "You can check again in a minute."
 msgstr ""
 
-#: nostr/ui/imports_window.py:803
+#: nostr/ui/imports_source_settings.py:65
+#, python-brace-format
+msgid "Unsubscribe from “{title}”?"
+msgstr ""
+
+#: nostr/ui/imports_window.py:171
+msgid "Inbox"
+msgstr ""
+
+#: nostr/ui/imports_window.py:172
+#: nostr/ui/imports_window.py:441
+msgid "Older Posts"
+msgstr ""
+
+#: nostr/ui/imports_window.py:280
+msgid "Imports Toolbar"
+msgstr ""
+
+#: nostr/ui/imports_window.py:299
+#: nostr/ui/imports_window.py:1078
+msgid "Follow a Website…"
+msgstr ""
+
+#: nostr/ui/imports_window.py:302
+msgid "Import a File…"
+msgstr ""
+
+#: nostr/ui/imports_window.py:305
+msgid "Import a Link…"
+msgstr ""
+
+#: nostr/ui/imports_window.py:315
+msgid "Follow a website, or import a file or a link"
+msgstr ""
+
+#: nostr/ui/imports_window.py:332
+msgid "Search"
+msgstr ""
+
+#: nostr/ui/imports_window.py:333
+msgid "Search Posts"
+msgstr ""
+
+#: nostr/ui/imports_window.py:440
+msgid "New Posts"
+msgstr ""
+
+#: nostr/ui/imports_window.py:441
+msgid "Older"
+msgstr ""
+
+#: nostr/ui/imports_window.py:450
+msgid "Source Actions"
+msgstr ""
+
+#: nostr/ui/imports_window.py:451
+msgid "What you can do with this source"
+msgstr ""
+
+#: nostr/ui/imports_window.py:471
+msgid "Select All Posts"
+msgstr ""
+
+#: nostr/ui/imports_window.py:651
+msgid "Copy Address"
+msgstr ""
+
+#: nostr/ui/imports_window.py:654
+msgid "Source Settings…"
+msgstr ""
+
+#: nostr/ui/imports_window.py:775
+msgid "Posts you skipped on this computer."
+msgstr ""
+
+#: nostr/ui/imports_window.py:787
+msgid "Imported once, not kept as a source."
+msgstr ""
+
+#: nostr/ui/imports_window.py:980
+msgid "Undo Skip"
+msgstr ""
+
+#: nostr/ui/imports_window.py:1094
+#: nostr/ui/imports_window.py:1082
+msgid "No older posts"
+msgstr ""
+
+#: nostr/ui/imports_window.py:1095
+msgid "Posts that were already on this source when you followed it appear here."
+msgstr ""
+
+#: nostr/ui/imports_window.py:1183
+msgid "That link can't be opened from here."
+msgstr ""
+
+#: nostr/ui/imports_window.py:1373
+#: nostr/ui/imports_window.py:1374
+msgid "Close Message"
+msgstr ""
+
+#: nostr/ui/imports_window.py:1412
+#: nostr/ui/imports_window.py:1429
+msgid "Drop to Import"
+msgstr ""
+
+#: nostr/ui/imports_window.py:343
+msgid "More Toolbar Items"
+msgstr ""
+
+#: nostr/ui/imports_window.py:642
+msgid "Read Now"
+msgstr ""
+
+#: nostr/ui/imports_window.py:1031
+msgid "Show Drafts"
+msgstr ""
+
+#: nostr/ui/imports_window.py:1061
+msgid "No Results"
+msgstr ""
+
+#: nostr/ui/imports_window.py:1072
+msgid "No posts"
+msgstr ""
+
+#: nostr/ui/imports_window.py:1072
+msgid "This source has no posts to import."
+msgstr ""
+
+#: nostr/ui/imports_window.py:1080
+msgid "New posts appear here when MyEditor checks your sources."
+msgstr ""
+
+#: nostr/ui/imports_window.py:1083
+msgid "Posts that were already on a source when you followed it appear here."
+msgstr ""
+
+#: nostr/ui/imports_window.py:1086
+msgid "Nothing imported yet"
+msgstr ""
+
+#: nostr/ui/imports_window.py:1087
+msgid "Posts you import as drafts appear here."
+msgstr ""
+
+#: nostr/ui/imports_window.py:1089
+msgid "Nothing skipped"
+msgstr ""
+
+#: nostr/ui/imports_window.py:1090
+msgid "Posts you skip on this computer appear here, so you can bring them back."
+msgstr ""
+
+#: nostr/ui/imports_window.py:1093
+msgid "No new posts"
+msgstr ""
+
+#: nostr/ui/imports_window.py:1093
+msgid "New posts from this source appear here."
+msgstr ""
+
+#: nostr/ui/imports_window.py:1193
+msgid "Stop this import?"
+msgstr ""
+
+#: nostr/ui/imports_window.py:1194
+msgid "Drafts already created stay. The other posts are not imported."
+msgstr ""
+
+#: nostr/ui/imports_window.py:1195
+msgid "Stop Import"
+msgstr ""
+
+#: nostr/ui/imports_window.py:558
+msgid "Sources"
+msgstr ""
+
+#: nostr/ui/imports_window.py:569
+msgid "Files and Links"
+msgstr ""
+
+#: nostr/ui/imports_window.py:635
+msgid "Remove from List"
+msgstr ""
+
+#: nostr/ui/imports_window.py:782
 #, python-brace-format
 msgid "{n} post"
 msgid_plural "{n} posts"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/imports_window.py:814
+#: nostr/ui/imports_window.py:793
 msgid "Reading…"
 msgstr ""
 
-#: nostr/ui/imports_window.py:925
+#: nostr/ui/imports_window.py:904
 msgid "None of these posts has an image that can be copied."
 msgstr ""
 
-#: nostr/ui/imports_window.py:980
+#: nostr/ui/imports_window.py:959
 #, python-brace-format
 msgid "Skipped {count} post."
 msgid_plural "Skipped {count} posts."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/imports_window.py:1092
+#: nostr/ui/imports_window.py:1071
 msgid "Couldn't read this source"
 msgstr ""
 
-#: nostr/ui/imports_window.py:1097
+#: nostr/ui/imports_window.py:1076
 msgid "No sources yet"
 msgstr ""
 
-#: nostr/ui/imports_window.py:1098
+#: nostr/ui/imports_window.py:1077
 msgid "Follow a website to see its new posts here."
 msgstr ""
 
-#: nostr/ui/imports_window.py:1229
+#: nostr/ui/imports_window.py:1208
 #, python-brace-format
 msgid "Following {count} new source."
 msgid_plural "Following {count} new sources."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/imports_window.py:703
-#, python-brace-format
-msgid "Unsubscribe from “{title}”?"
-msgstr ""
-
-#: nostr/ui/imports_window.py:801
+#: nostr/ui/imports_window.py:780
 #, python-brace-format
 msgid "{n} new post"
 msgid_plural "{n} new posts"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/imports_window.py:1083
+#: nostr/ui/imports_window.py:1062
 #, python-brace-format
 msgid "No posts match “{query}”."
 msgstr ""
 
-#: nostr/ui/imports_window.py:1232
+#: nostr/ui/imports_window.py:1211
 #, python-brace-format
 msgid "{count} was followed already."
 msgid_plural "{count} were followed already."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/imports_window.py:1235
+#: nostr/ui/imports_window.py:1214
 #, python-brace-format
 msgid "{count} couldn't be followed."
 msgid_plural "{count} couldn't be followed."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/imports_window.py:972
+#: nostr/ui/imports_window.py:951
 #, python-brace-format
 msgid "Restored {count} post."
 msgid_plural "Restored {count} posts."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/imports_window.py:1090
+#: nostr/ui/imports_window.py:1069
 #, python-brace-format
 msgid "Reading {source}…"
 msgstr ""

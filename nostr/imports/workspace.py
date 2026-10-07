@@ -35,7 +35,7 @@ from i18n import N_, _, ngettext
 
 from ..rss.parser import FeedItem
 from . import snapshots
-from .inbox_store import IMPORTED_STATES, NEW, OLDER, SKIPPED, PostRow, View
+from .inbox_store import IMPORTED_STATES, NEW, OLDER, SKIPPED, PostRow, SourceRow, View
 
 INBOX_ORIGIN = "inbox"
 MEMORY_ORIGIN = "memory"
@@ -249,6 +249,39 @@ def date_text(timestamp: int, *, now: Optional[float] = None,
     if day.year == datetime.fromtimestamp(int(now)).year:
         return locale.toString(date, "MMM d" if english else "d. MMM")
     return locale.toString(date, "MMM d, yyyy" if english else "d. MMM yyyy")
+
+
+def freshness(source: SourceRow, *, now: Optional[float] = None) -> str:
+    """When a source was last checked, or why that failed and when the
+    next try is: the words its tooltip and its list header use."""
+    now = time.time() if now is None else now
+    if not source.automatic:
+        return _("MyEditor reads this source when you open it.")
+    if source.paused:
+        # Turned off in Source Settings: when it was last read still helps.
+        if not source.last_checked:
+            return _("Not checked automatically")
+        return _("Not checked automatically \u00b7 Checked {when}").format(
+            when=date_text(source.last_checked, now=now, in_sentence=True))
+    if source.error:
+        wait = max(0, source.next_check - int(now))
+        if wait >= 3600:
+            hours = (wait + 1800) // 3600
+            when = ngettext("Next try in {n} hour.", "Next try in {n} hours.", hours).format(
+                n=hours)
+        else:
+            minutes = max(1, (wait + 59) // 60)
+            when = ngettext("Next try in {n} minute.", "Next try in {n} minutes.",
+                            minutes).format(n=minutes)
+        return f"{source.error} {when}"
+    if not source.last_checked:
+        return _("Not checked yet.")
+    # No period after the time: in German it ends in one already
+    # ("vor 2 Min."), and a doubled one reads as a mistake (review L2).
+    if now - source.last_checked < 60:
+        return _("Checked just now")
+    return _("Checked {when}").format(
+        when=date_text(source.last_checked, now=now, in_sentence=True))
 
 
 def checked_text(count: int, total: int) -> str:

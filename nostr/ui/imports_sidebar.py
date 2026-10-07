@@ -18,7 +18,8 @@ Two levels at most, as Apple's guidelines ask of a sidebar:
 
 A count shows only when there is something to count; the Inbox's is
 bold. A source shows its initial in a calm tint (its site icon comes
-later), its new posts, or a dot when its last check failed. Section
+later), its new posts, a dot when its last check failed, or a pause
+glyph when its automatic checks are turned off. Section
 headers cannot be selected, so the arrow keys pass over them.
 
 :class:`SidebarModel` holds the rows; the window fills it from the
@@ -68,6 +69,7 @@ class Entry:
     trailing: str = ""         # instead of the count: "31/48"
     emphasized: bool = False   # the Inbox count
     failed: bool = False       # a source whose last check failed
+    paused: bool = False       # a source whose automatic checks are off
     tooltip: str = ""
     url: str = ""              # a source's address
     automatic: bool = True
@@ -142,6 +144,8 @@ class SidebarModel(QAbstractListModel):
                 parts.append(str(entry.count))
             if entry.failed:
                 parts.append(_("Couldn't check this source"))
+            elif entry.paused:
+                parts.append(_("Not checked automatically"))
             return ", ".join(parts)
         return None
 
@@ -206,7 +210,8 @@ class SidebarDelegate(QStyledItemDelegate):
         trailing = ""
         trailing_width = 0
         font = QFont(option.font)
-        if entry.failed:
+        paused = entry.paused and not entry.failed and not (entry.trailing or entry.count)
+        if entry.failed or paused:
             trailing_width = 14
         elif entry.trailing or entry.count:
             trailing = entry.trailing or str(entry.count)
@@ -230,6 +235,12 @@ class SidebarDelegate(QStyledItemDelegate):
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(_attention(palette))
             painter.drawEllipse(center)
+        elif paused:
+            # Checks turned off: a quiet pause glyph, where a count would be
+            # (the count wins: what waits matters more than how it came).
+            size = 12
+            painter.drawPixmap(QRect(rect.right() - 14 - size, rect.center().y() - size // 2 + 1,
+                                     size, size), glyph("pause", size, muted, dpr))
         elif trailing:
             count_font = QFont(font)
             count_font.setBold(entry.emphasized)

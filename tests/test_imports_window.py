@@ -312,17 +312,28 @@ class TestLayout:
 
 
 def test_freshness_words():
-    source = SimpleNamespace(automatic=True, error="", last_checked=NOW - 120, next_check=0)
+    source = SimpleNamespace(automatic=True, paused=False, error="", last_checked=NOW - 120,
+                             next_check=0)
     assert freshness(source, now=NOW) == "Checked 2 min ago"
     source.last_checked = NOW - 10
     assert freshness(source, now=NOW) == "Checked just now"
+    source.last_checked = NOW - 30 * 3600
+    assert freshness(source, now=NOW) == "Checked yesterday"     # inside a sentence
     source.last_checked = 0
     assert freshness(source, now=NOW) == "Not checked yet."
-    failed = SimpleNamespace(automatic=True, error="Boom.", last_checked=0,
+    failed = SimpleNamespace(automatic=True, paused=False, error="Boom.", last_checked=0,
                              next_check=NOW + 7200)
     assert freshness(failed, now=NOW) == "Boom. Next try in 2 hours."
-    manual = SimpleNamespace(automatic=False, error="", last_checked=0, next_check=0)
+    manual = SimpleNamespace(automatic=False, paused=False, error="", last_checked=0,
+                             next_check=0)
     assert freshness(manual, now=NOW) == "MyEditor reads this source when you open it."
+    # Automatic checks turned off in Source Settings: said so, an old
+    # error no longer is.
+    off = SimpleNamespace(automatic=True, paused=True, error="Boom.", last_checked=NOW - 120,
+                          next_check=0)
+    assert freshness(off, now=NOW) == "Not checked automatically \u00b7 Checked 2 min ago"
+    off.last_checked = 0
+    assert freshness(off, now=NOW) == "Not checked automatically"
 
 
 class TestAdding:

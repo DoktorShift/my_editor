@@ -43,6 +43,7 @@ import logging
 import sqlite3
 import time
 import weakref
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
 
@@ -385,6 +386,45 @@ class ImportsController(QObject):
 
     def source(self, key: str) -> Optional[SourceRow]:
         return self.inbox.source(key) if self.inbox is not None else None
+
+    def website_of(self, key: str) -> str:
+        """A source's website: the one its feed names, else its address's
+        start page (review L4: not the feed's own address)."""
+        source = self.source(key)
+        if source is None:
+            return ""
+        if source.site_url:
+            return source.site_url
+        return url_safety.origin_of(source.url) or source.url
+
+    def settings_of(self, key: str) -> Optional["SourceSettings"]:
+        """What Source Settings shows for ``key``."""
+        source = self.source(key)
+        if source is None:
+            return None
+        followed = self.subscriptions.get(source.url)
+        copy_images, full_text = self._source_defaults(key)
+        return SourceSettings(
+            key=key, url=source.url, name=followed.title if followed else source.title,
+            own_title=source.feed_title, website=self.website_of(key),
+            automatic=source.automatic, checking=not source.paused,
+            copy_images=copy_images, full_text=full_text)
+
+    def save_settings(self, key: str, *, name: str, checking: bool, copy_images: bool,
+                      full_text: bool) -> None:
+        """Keep what Source Settings says. The name and the defaults for new
+        drafts go with the list of sources (the other devices, and
+        EINUNDZWANZIG STANDUP, use them too); whether the source is
+        checked automatically stays on this computer."""
+        source = self.source(key)
+        if source is None or self.read_only:
+            return
+        self.subscriptions.update_title(source.url, name.strip())
+        self.subscriptions.set_source_options(source.url, rehost_images=copy_images,
+                                              fetch_full_text=full_text)
+        if source.automatic and source.paused == checking:
+            self.inbox.set_paused(key, not checking)
+            self._announce()
 
     def check_now(self, key: str) -> bool:
         """The person asked to check a source now (once a minute at most)."""
@@ -1006,6 +1046,21 @@ class ImportsController(QObject):
         if window is not None:
             window.close()
             window.deleteLater()
+
+
+@dataclass(frozen=True)
+class SourceSettings:
+    """One source as Source Settings shows it."""
+
+    key: str
+    url: str
+    name: str               # the name the person gave it ("" = the source's own)
+    own_title: str          # what the source calls itself
+    website: str
+    automatic: bool         # a feed this app checks while it runs
+    checking: bool          # automatic checks are on
+    copy_images: bool       # defaults for new drafts (synced)
+    full_text: bool
 
 
 def _release_at_exit(controller_ref) -> Callable[[], None]:

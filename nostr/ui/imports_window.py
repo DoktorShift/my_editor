@@ -54,7 +54,6 @@ from __future__ import annotations
 
 import base64
 import sys
-import time
 from functools import partial
 from typing import Callable, Dict, List, Optional
 
@@ -103,14 +102,14 @@ from ..imports.inbox_store import (
     OLDER_POSTS,
     PAGE_SIZE,
     SKIPPED_POSTS,
-    SourceRow,
     View,
 )
 from ..imports_controller import ELSEWHERE
-from ..imports.workspace import Post, Scope, checked_text, date_text, matches, targets
+from ..imports.workspace import Post, Scope, checked_text, freshness, matches, targets
 from .image_review_dialog import ImageReviewDialog
 from .imports_actions import ActionBar, OptionsPopover
 from .imports_activity import ActivityButton, JobCard, finished_text
+from .imports_source_settings import SourceSettingsSheet, unsubscribe_question
 from .eliding_label import ElidingLabel
 from .imports_article import ArticlePane
 from .imports_glyphs import glyph_icon
@@ -176,31 +175,6 @@ LISTS = (
 )
 _LIST_TITLES = {key: title for key, title, _glyph in LISTS}
 
-
-def freshness(source: SourceRow, *, now: Optional[float] = None) -> str:
-    """When a source was last checked, or why that failed and when the
-    next try is: the words its tooltip and its list header use."""
-    now = time.time() if now is None else now
-    if not source.automatic:
-        return _("MyEditor reads this source when you open it.")
-    if source.error:
-        wait = max(0, source.next_check - int(now))
-        if wait >= 3600:
-            hours = (wait + 1800) // 3600
-            when = ngettext("Next try in {n} hour.", "Next try in {n} hours.", hours).format(
-                n=hours)
-        else:
-            minutes = max(1, (wait + 59) // 60)
-            when = ngettext("Next try in {n} minute.", "Next try in {n} minutes.",
-                            minutes).format(n=minutes)
-        return f"{source.error} {when}"
-    if not source.last_checked:
-        return _("Not checked yet.")
-    # No period after the time: in German it ends in one already
-    # ("vor 2 Min."), and a doubled one reads as a mistake (review L2).
-    if now - source.last_checked < 60:
-        return _("Checked just now")
-    return _("Checked {when}").format(when=date_text(source.last_checked, now=now))
 
 
 class _SearchField(QLineEdit):
@@ -587,7 +561,8 @@ class ImportsWindow(QMainWindow):
             tooltip = "\n".join(p for p in (source.display_title, source.url,
                                              freshness(source)) if p)
             entries.append(Entry(SOURCE, source.key, source.display_title,
-                                 count=source.new_count, failed=failed, tooltip=tooltip,
+                                 count=source.new_count, failed=failed and not source.paused,
+                                 paused=source.automatic and source.paused, tooltip=tooltip,
                                  url=source.url, automatic=source.automatic))
         opened = controller.collections("file", "link")
         if opened:
@@ -669,13 +644,16 @@ class ImportsWindow(QMainWindow):
         check.setData(("check", entry))
         # The website, not the feed's address (review L4): what the feed
         # names as its site, else the address's own start page.
-        site = self._website_of(entry)
+        site = self._controller.website_of(entry.key) or entry.url
         website = menu.addAction(_("Open Website"))
         website.setEnabled(url_safety.is_safe_external_url(site))
         website.setData(("website", site))
         copy = menu.addAction(_("Copy Address"))
         copy.setData(("copy", entry.url))
         menu.addSeparator()
+        settings = menu.addAction(_("Source Settings\u2026"))
+        settings.setEnabled(not self._controller.read_only)
+        settings.setData(("settings", entry))
         unsubscribe = menu.addAction(_("Unsubscribe\u2026"))
         unsubscribe.setEnabled(not self._controller.read_only)
         unsubscribe.setData(("unsubscribe", entry))
@@ -693,23 +671,24 @@ class ImportsWindow(QMainWindow):
             QApplication.clipboard().setText(target)
         elif name == "unsubscribe":
             self.unsubscribe(target)
+        elif name == "settings":
+            self.source_settings(target.key)
         elif name == "remove":
             self._controller.close_collection(target.key)
 
     def unsubscribe(self, entry: Entry) -> None:
         """Stop following a source, after asking: its posts leave the
         lists, the drafts made from them stay."""
-        if self._confirm(
-                title=_("Unsubscribe from \u201c{title}\u201d?").format(title=entry.title),
-                message=_("Its posts leave Imports. Drafts you already created stay."),
-                action=_("Unsubscribe")):
+        if self._confirm(**unsubscribe_question(entry.title)):
             self._controller.unfollow(entry.key)
 
-    def _website_of(self, entry: Entry) -> str:
-        source = self._controller.source(entry.key)
-        if source is not None and source.site_url:
-            return source.site_url
-        return url_safety.origin_of(entry.url) or entry.url
+    def source_settings(self, key: str) -> None:
+        """Source Settings for ``key``, as a sheet on this window."""
+        if self._controller.read_only or self._controller.source(key) is None:
+            return
+        self._open_sheet(SourceSettingsSheet(
+            self._controller, key, dark=self._dark, open_url=self._open_url,
+            confirm=self._confirm_with, parent=self))
 
     def check_now(self, entry: Entry) -> None:
         under_way = self._controller.is_checking(entry.key)
