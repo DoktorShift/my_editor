@@ -59,6 +59,9 @@ from .imports.checker import FeedChecker, checks_automatically
 from .imports.constants import IDENTIFIER_PREFIX
 from .imports.errors import SourceError, friendly_message
 from .imports.feed_list import source_key
+from .imports.fulltext import extract_readable_content
+from .rss.parser import FeedItem
+from .imports.intake import FEED, is_whole_source, kind_of, post_at, same_page
 from .imports.sources.opml import OpmlFeed, write_opml
 from .imports.subscriptions import SYNCING
 from .imports.fetch import SourceFetcher
@@ -108,6 +111,7 @@ SET_ASIDE = _("The file that keeps imports on this computer was damaged, so MyEd
               "again.")
 NO_SOURCES_IN_LIST = _("No sources were found in that list. Is it a subscription export "
                        "from a feed reader?")
+NOTHING_FOUND = _("Nothing to import was found at that address.")
 
 
 class ImportsController(QObject):
@@ -722,6 +726,66 @@ class ImportsController(QObject):
             else:
                 refused += 1
         return followed, known, refused
+
+    def open_link(self, address: str, *,
+                  on_done: Callable[[Optional[Collection], str], None]) -> None:
+        """Import a Link: the posts at ``address``, held to import once.
+        An article's page is one post (CP2 review N5: the site's whole
+        feed opened, every post checked): the post of the site's feed
+        whose page it is, else the page itself, read as one post. A feed,
+        a site's start page or a thread opens whole."""
+        generation = self._generation
+
+        def found(result, error: str) -> None:
+            if generation != self._generation:
+                return
+            if result is None or not result.feed.items:
+                on_done(None, error or NOTHING_FOUND)
+                return
+            items = list(result.feed.items)
+            article = (kind_of(address) == FEED and not is_whole_source(address)
+                       and not same_page(result.url or "", address))
+            if not article or len(items) == 1:
+                on_done(self.open_posts(kind="link", label=result.feed.title or address,
+                                        items=items, source_url=result.url or address), "")
+                return
+            post = post_at(items, address)
+            if post is not None:
+                on_done(self.open_posts(kind="link", label=post.title or address,
+                                        items=[post], source_url=address), "")
+                return
+            self._read_page(address, generation, on_done)
+
+        self.look_up(address, on_done=found)
+
+    def _read_page(self, address: str, generation: int,
+                   on_done: Callable[[Optional[Collection], str], None]) -> None:
+        """A page that is in no feed, read as one post (its main text, as
+        Fetch the Full Article reads one)."""
+        def read(html: str) -> None:
+            self._run_blocking(
+                lambda: extract_readable_content(html, url=address),
+                lambda content: made(content),
+                lambda exc: failed(str(exc)))
+
+        def made(content) -> None:
+            if generation != self._generation:
+                return
+            if content is None:
+                on_done(None, NOTHING_FOUND)
+                return
+            post = FeedItem(guid=address, title=content.title or address, link=address,
+                            summary=None, content_html=content.html, published_at=None,
+                            categories=(), image=None, author=None)
+            on_done(self.open_posts(kind="link", label=post.title, items=[post],
+                                    source_url=address), "")
+
+        def failed(reason) -> None:
+            if generation == self._generation:
+                on_done(None, friendly_message(reason) if isinstance(reason, SourceError)
+                        else str(reason) or NOTHING_FOUND)
+
+        self._fetcher.fetch(address, on_success=read, on_failure=failed)
 
     def open_posts(self, *, kind: str, label: str, items, source_url: str = "") -> Collection:
         """Posts of a file or a link, held while shown, to import once."""

@@ -360,3 +360,76 @@ def test_every_state_of_follow_keeps_its_names(follow):
     assert unnamed_controls(follow) == []
     follow.use_paste()
     assert unnamed_controls(follow) == []
+
+
+class TestOneArticle:
+    """CP2 review N5: a link to one article opened the site's whole feed,
+    every post checked ("Create 25 Drafts", 50 signer requests)."""
+
+    ARTICLE = "https://example.com/b/"          # the feed names it without "/"
+    ELSEWHERE = "https://example.com/2019/an-old-one"
+    PAGE = ("<!doctype html><html><head><title>An old one</title>"
+            "<link rel=\"alternate\" type=\"application/rss+xml\" href=\"/feed.xml\">"
+            "</head><body><nav>menu</nav><article><h1>An old one</h1>"
+            + "<p>Paragraph of the article that is long enough to read. </p>" * 12
+            + "</article><footer>footer</footer></body></html>")
+
+    @pytest.fixture
+    def links(self, tmp_path):
+        fetcher = FakeFetcher({self.ARTICLE: ("ok", self.PAGE),
+                               self.ELSEWHERE: ("ok", self.PAGE),
+                               "https://example.com/feed.xml": ("ok", TWO_ITEM_FEED),
+                               "https://example.com/": ("ok", self.PAGE)})
+        h = Harness(tmp_path, fetcher=fetcher)
+        h.controller.account_changed(profile())
+        settle()
+        yield h.controller
+        h.controller.account_changed(None)
+        settle()
+
+    def open(self, controller, address):
+        out = {}
+        controller.open_link(address, on_done=lambda collection, error: out.update(
+            collection=collection, error=error))
+        settle()
+        return out
+
+    def test_the_article_is_the_one_post(self, links):
+        out = self.open(links, self.ARTICLE)
+        posts = out["collection"].posts()
+        assert [p.title for p in posts] == ["Second"]
+        assert out["collection"].label == "Second"
+
+    def test_an_article_the_feed_no_longer_holds_is_read_from_its_page(self, links):
+        out = self.open(links, self.ELSEWHERE)
+        (post,) = out["collection"].posts()
+        assert post.title == "An old one"
+        assert "long enough to read" in links.item(post).content_html
+
+    def test_a_feed_or_a_start_page_opens_whole(self, links):
+        assert len(self.open(links, "https://example.com/feed.xml")["collection"].posts()) == 2
+        assert len(self.open(links, "https://example.com/")["collection"].posts()) == 2
+
+    def test_the_sheet_calls_only_whole_sources_whole(self, links):
+        sheet = LinkSheet(links)
+        sheet.show()
+        sheet.address.setText(self.ARTICLE)
+        assert sheet.source_note.isHidden()
+        for whole in ("https://example.com/", "https://example.com/feed.xml",
+                      "https://medium.com/feed/@someone", "https://example.com/rss/"):
+            sheet.address.setText(whole)
+            assert not sheet.source_note.isHidden(), whole
+        sheet.close()
+
+    def test_in_the_window_only_that_post_is_there_to_create(self, links):
+        from nostr.ui.imports_window import ImportsWindow
+        window = ImportsWindow(links)
+        window.show()
+        window.import_link()
+        sheet = window.sheet()
+        sheet.address.setText(self.ARTICLE)
+        sheet.open_link()
+        settle()
+        assert window.posts.model_.rowCount() == 1
+        assert window.action_bar.create.text() == "Create Draft"
+        window.close()

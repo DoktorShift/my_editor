@@ -672,7 +672,7 @@ msgstr "Vollbild"
 #: main_window.py:1457
 #: main_window.py:3912
 #: main_window.py:3910
-#: nostr/ui/imports_window.py:1317
+#: nostr/ui/imports_window.py:1327
 msgid "Show Sidebar"
 msgstr "Seitenleiste einblenden"
 
@@ -1129,7 +1129,7 @@ msgid "{current} of {total}"
 msgstr "{current} von {total}"
 
 #: main_window.py:3910
-#: nostr/ui/imports_window.py:1317
+#: nostr/ui/imports_window.py:1327
 msgid "Hide Sidebar"
 msgstr "Seitenleiste ausblenden"
 
@@ -3170,36 +3170,40 @@ msgstr "Ein lesbarer, verifizierter Nostr-Name wie du@{domain}, den andere erken
 msgid "{total} in total, up to {per_file} per file."
 msgstr "{total} Speicher, höchstens {per_file} pro Datei."
 
-#: nostr/imports_controller.py:98
+#: nostr/imports_controller.py:101
 msgid "The account changed. Resume when you're signed in to that account again."
 msgstr "Das Konto wurde gewechselt. Setze den Import fort, wenn du wieder mit diesem Konto angemeldet bist."
 
-#: nostr/imports_controller.py:100
+#: nostr/imports_controller.py:103
 msgid "MyEditor was closed during the import. Resume it to go on."
 msgstr "MyEditor wurde während des Imports geschlossen. Setze ihn fort, um weiterzumachen."
 
-#: nostr/imports_controller.py:101
+#: nostr/imports_controller.py:104
 msgid "Imports are checked in another MyEditor window. This one only shows them."
 msgstr "Importe werden in einem anderen MyEditor-Fenster geprüft. Dieses zeigt sie nur an."
 
-#: nostr/imports_controller.py:102
+#: nostr/imports_controller.py:105
 msgid "Couldn't show this post."
 msgstr "Dieser Beitrag konnte nicht angezeigt werden."
 
-#: nostr/imports_controller.py:103
+#: nostr/imports_controller.py:106
 #, python-brace-format
 msgid "MyEditor can't keep imports on this computer: {reason}. Your sources are safe on your relays; check that your user folder can be written to, then sign in again."
 msgstr "MyEditor kann Importe auf diesem Computer nicht speichern: {reason}. Deine Quellen sind auf deinen Relays sicher. Prüfe, ob in deinen Benutzerordner geschrieben werden kann, und melde dich dann erneut an."
 
-#: nostr/imports_controller.py:106
+#: nostr/imports_controller.py:109
 msgid "The file that keeps imports on this computer was damaged, so MyEditor set it aside and started a new one. Your sources are kept; posts you had skipped show again."
 msgstr "Die Datei, in der MyEditor Importe auf diesem Computer speichert, war beschädigt. MyEditor hat sie beiseitegelegt und eine neue angelegt. Deine Quellen bleiben erhalten; übersprungene Beiträge erscheinen wieder."
 
-#: nostr/imports_controller.py:109
+#: nostr/imports_controller.py:112
 msgid "No sources were found in that list. Is it a subscription export from a feed reader?"
 msgstr "In dieser Liste wurden keine Quellen gefunden. Ist es ein Abo-Export aus einem Feedreader?"
 
-#: nostr/imports_controller.py:458
+#: nostr/imports_controller.py:114
+msgid "Nothing to import was found at that address."
+msgstr "Unter dieser Adresse wurde nichts zum Importieren gefunden."
+
+#: nostr/imports_controller.py:462
 msgid "MyEditor Sources"
 msgstr "MyEditor-Quellen"
 
@@ -3848,32 +3852,32 @@ msgstr "Leere Antwort beim Kopieren"
 msgid "This source has reached its inbox limit. Unsubscribe and follow it again to start a fresh inbox; your drafts are kept."
 msgstr "Diese Quelle hat die Grenze ihres Eingangs erreicht. Beende das Abonnement und folge ihr erneut, um mit einem neuen Eingang zu beginnen; deine Entwürfe bleiben erhalten."
 
-#: nostr/imports/intake.py:50
+#: nostr/imports/intake.py:51
 #, python-brace-format
 msgid "That file is too large to import (over {size} MB)."
 msgstr "Diese Datei ist zu groß für den Import (über {size} MB)."
 
-#: nostr/imports/intake.py:51
+#: nostr/imports/intake.py:52
 msgid "That ZIP doesn't look like a Medium or Substack export, or it has no published posts."
 msgstr "Dieses ZIP sieht nicht nach einem Medium- oder Substack-Export aus oder enthält keine veröffentlichten Beiträge."
 
-#: nostr/imports/intake.py:87
+#: nostr/imports/intake.py:124
 msgid "Feed"
 msgstr "Feed"
 
-#: nostr/imports/intake.py:87
+#: nostr/imports/intake.py:124
 msgid "Nostr author"
 msgstr "Nostr-Autor"
 
-#: nostr/imports/intake.py:87
+#: nostr/imports/intake.py:124
 msgid "Collection"
 msgstr "Sammlung"
 
-#: nostr/imports/intake.py:88
+#: nostr/imports/intake.py:125
 msgid "Single post"
 msgstr "Einzelner Beitrag"
 
-#: nostr/imports/intake.py:120
+#: nostr/imports/intake.py:157
 #, python-brace-format
 msgid "Couldn't read that file: {error}"
 msgstr "Diese Datei konnte nicht gelesen werden: {error}"
@@ -5733,17 +5737,13 @@ msgid_plural "{n} images"
 msgstr[0] "{n} Bild"
 msgstr[1] "{n} Bilder"
 
-#: nostr/ui/imports_sheets.py:96
+#: nostr/ui/imports_sheets.py:97
 msgid "That doesn't look like the address of a website, a feed or a Nostr author."
 msgstr "Das sieht nicht nach der Adresse einer Website, eines Feeds oder eines Nostr-Autors aus."
 
-#: nostr/ui/imports_sheets.py:98
+#: nostr/ui/imports_sheets.py:99
 msgid "Add the feed's address above as well, so the links in it work."
 msgstr "Gib oben auch die Adresse des Feeds ein, damit die Links darin funktionieren."
-
-#: nostr/ui/imports_sheets.py:99
-msgid "Nothing to import was found at that address."
-msgstr "Unter dieser Adresse wurde nichts zum Importieren gefunden."
 
 #: nostr/ui/imports_sheets.py:100
 msgid "This address can't be followed."
@@ -5977,7 +5977,7 @@ msgstr "Andere Datei auswählen …"
 msgid "Reading “{file}”…"
 msgstr "„{file}“ wird gelesen …"
 
-#: nostr/ui/imports_sheets.py:772
+#: nostr/ui/imports_sheets.py:771
 #, python-brace-format
 msgid "Opening {address}…"
 msgstr "{address} wird geöffnet …"
@@ -6156,17 +6156,17 @@ msgstr "Quellen exportieren"
 msgid "Lists of sources (*.opml)"
 msgstr "Quellenlisten (*.opml)"
 
-#: nostr/ui/imports_window.py:1242
+#: nostr/ui/imports_window.py:1252
 msgid "That link can't be opened from here."
 msgstr "Dieser Link kann hier nicht geöffnet werden."
 
-#: nostr/ui/imports_window.py:1432
-#: nostr/ui/imports_window.py:1433
+#: nostr/ui/imports_window.py:1442
+#: nostr/ui/imports_window.py:1443
 msgid "Close Message"
 msgstr "Hinweis schließen"
 
-#: nostr/ui/imports_window.py:1471
-#: nostr/ui/imports_window.py:1488
+#: nostr/ui/imports_window.py:1481
+#: nostr/ui/imports_window.py:1498
 msgid "Drop to Import"
 msgstr "Zum Importieren ablegen"
 
@@ -6231,15 +6231,15 @@ msgstr "Neue Beiträge dieser Quelle erscheinen hier."
 msgid "Sources"
 msgstr "Quellen"
 
-#: nostr/ui/imports_window.py:1252
+#: nostr/ui/imports_window.py:1262
 msgid "Stop this import?"
 msgstr "Diesen Import stoppen?"
 
-#: nostr/ui/imports_window.py:1253
+#: nostr/ui/imports_window.py:1263
 msgid "Drafts already created stay. The other posts are not imported."
 msgstr "Bereits erstellte Entwürfe bleiben. Die übrigen Beiträge werden nicht importiert."
 
-#: nostr/ui/imports_window.py:1254
+#: nostr/ui/imports_window.py:1264
 msgid "Stop Import"
 msgstr "Import stoppen"
 
@@ -6285,7 +6285,7 @@ msgstr "Noch keine Quellen"
 msgid "Follow a website to see its new posts here."
 msgstr "Folge einer Website, um ihre neuen Beiträge hier zu sehen."
 
-#: nostr/ui/imports_window.py:1267
+#: nostr/ui/imports_window.py:1277
 #, python-brace-format
 msgid "Following {count} new source."
 msgid_plural "Following {count} new sources."
@@ -6304,14 +6304,14 @@ msgstr[1] "{n} neue Beiträge"
 msgid "No posts match “{query}”."
 msgstr "Keine Beiträge passen zu „{query}“."
 
-#: nostr/ui/imports_window.py:1270
+#: nostr/ui/imports_window.py:1280
 #, python-brace-format
 msgid "{count} was followed already."
 msgid_plural "{count} were followed already."
 msgstr[0] "{count} Quelle war schon in deiner Liste."
 msgstr[1] "{count} Quellen waren schon in deiner Liste."
 
-#: nostr/ui/imports_window.py:1273
+#: nostr/ui/imports_window.py:1283
 #, python-brace-format
 msgid "{count} couldn't be followed."
 msgid_plural "{count} couldn't be followed."
