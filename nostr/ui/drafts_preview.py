@@ -44,6 +44,7 @@ Three seams keep this testable and network-free:
 from __future__ import annotations
 
 import math
+import weakref
 from typing import Dict, List, NamedTuple, Optional, Tuple
 from urllib.parse import urlsplit
 
@@ -1561,9 +1562,17 @@ class PreviewController(QObject):
     and ``preview_now``. Everything else is injected or pure.
     """
 
+    @property
+    def _panel(self):
+        return self._panel_ref()
+
     def __init__(self, panel, *, parent: Optional[QObject] = None) -> None:
         super().__init__(parent if parent is not None else panel)
-        self._panel = panel
+        # Weakly: the controller is the panel's Qt child, and the collector
+        # sees a parent's children. A strong reference back put a panel
+        # without a parent in a cycle only the collector frees, and that
+        # tears the panel's widgets down in an order Qt does not survive.
+        self._panel_ref = weakref.ref(panel)
         self._popover: Optional[PreviewPopover] = None
         self._loader = None
         self._is_dark = True

@@ -131,3 +131,24 @@ def test_a_held_post_has_the_stored_figures():
     held = post_from_item(item, collection="c", source_title="Blog")
     assert (held.image, held.image_count, held.read_minutes) == ("https://x/1.png", 1, 1)
     assert held.key == f"m:c:{held.d_tag}"
+
+
+def test_a_held_lists_rows_are_made_once(monkeypatch):
+    """Review M10: a source with a thousand long posts cost a third of a
+    second each time its rows were asked for."""
+    from nostr.imports import workspace
+    made = []
+    original = workspace.post_from_item
+    monkeypatch.setattr(workspace, "post_from_item",
+                        lambda *a, **kw: made.append(1) or original(*a, **kw))
+    collection = workspace.Collection(id="m-x", kind="manual", label="Blog",
+                                      items=[make_item(f"P{i}", guid=f"g{i}")
+                                             for i in range(50)])
+    first = collection.posts()
+    assert len(made) == 50
+    collection.states[first[0].d_tag] = "drafted"
+    again = collection.posts()
+    assert len(made) == 50
+    assert again[0].state == "drafted"
+    collection.items = collection.items + [make_item("New", guid="g-new")]
+    assert len(collection.posts()) == 51

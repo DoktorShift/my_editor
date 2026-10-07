@@ -88,7 +88,8 @@ class Harness:
         self.checker = FeedChecker(
             store=self.store, fetcher=self.fetcher, run_blocking=inline_run_blocking,
             online=lambda: self.is_online,
-            scheduler=lambda ms, fn: self.scheduled.append((ms, fn)))
+            scheduler=lambda ms, fn: self.scheduled.append((ms, fn)),
+            clock=lambda: self.clock.now)
         self.checked = []
         self.checker.source_checked.connect(lambda key, new: self.checked.append((key, new)))
 
@@ -152,8 +153,49 @@ def test_at_most_two_at_a_time():
     assert len(h.fetcher.requests) == 2
     h.checker.tick()
     assert len(h.fetcher.requests) == 2
-    h.fetcher.waiting.pop(0)()                        # one ends: the next starts
+    h.fetcher.waiting.pop(0)()                        # one ends: the next starts,
+    run_scheduled(h)                                  # on the next turn of the loop
     assert len(h.fetcher.requests) == 3
+
+
+def run_scheduled(h, rounds=1000):
+    """Run what the checker scheduled at once (0 ms), as the loop would."""
+    for _ in range(rounds):
+        now = [entry for entry in h.scheduled if entry[0] == 0]
+        if not now:
+            return
+        for entry in now:
+            h.scheduled.remove(entry)
+            entry[1]()
+
+
+def test_a_check_whose_write_fails_gives_its_slot_back(monkeypatch):
+    """Engine review M4: an ingest that raised (a locked database, a full
+    disk) kept its slot for good; two of them stopped every check."""
+    import sqlite3
+    h = Harness({FEED: ("body", feed("a"))})
+    monkeypatch.setattr(h.store, "ingest", lambda *a, **kw: (_ for _ in ()).throw(
+        sqlite3.OperationalError("database is locked")))
+    h.checker.start()
+    h.checker.tick()
+    assert not h.checker.is_checking(FEED)
+    assert h.checked == [(FEED, 0)]
+    assert h.store.source(FEED).failures == 1
+
+
+def test_at_most_two_hundred_checks_an_hour():
+    """Engine review L9 and the owner's decision Q-8: 300 sources due at
+    launch were all checked at once."""
+    urls = [f"https://{n}.example/feed" for n in range(300)]
+    h = Harness({u: ("304",) for u in urls}, sources=[(u, True) for u in urls])
+    h.checker.start()
+    h.checker.tick()
+    run_scheduled(h)
+    assert len(h.fetcher.requests) == 200
+    h.later(3601)
+    h.checker.tick()
+    run_scheduled(h)
+    assert len(h.fetcher.requests) == 300
 
 
 def test_a_failure_keeps_the_posts_and_tries_later():
@@ -228,5 +270,21 @@ def test_error_words(code, expected):
 
 
 def test_a_local_address_says_so():
+    # Q-6: on this computer or its network, and only public websites.
     text = error_text(SourceError("", ERROR_CODES.LOCAL_NETWORK))
-    assert "local network" in text
+    assert "on this computer or its local network" in text
+    assert "public websites only" in text
+
+
+def test_after_a_failure_the_followed_address_is_asked_again():
+    """Engine review L11: a temporary redirect's address replaced the
+    followed one for good, also after it failed."""
+    h = Harness({FEED: ("304",)})
+    h.store._db.execute("UPDATE sources SET final_url = ? WHERE key = ?",
+                        ("https://moved.example/feed", FEED))
+    h.store._db.commit()
+    h.store.record_failure(FEED, "Couldn't reach that URL")
+    h.later(4 * 3600)
+    h.checker.start()
+    h.checker.tick()
+    assert h.fetcher.requests[-1][0] == FEED

@@ -10,6 +10,8 @@ policy for outside links, and drops an answer for a post no longer open.
 
 from __future__ import annotations
 
+from PySide6.QtWidgets import QLabel
+
 from dataclasses import replace
 
 from PySide6.QtCore import QObject, QUrl, Signal
@@ -20,6 +22,16 @@ from nostr.imports.workspace import INBOX_ORIGIN, Post
 from nostr.preview import Article
 from nostr.rss.normalize import html_to_markdown
 from nostr.ui.imports_article import ArticlePane
+import pytest
+from tests.widget_lifetime import delete_new_windows
+
+
+@pytest.fixture(autouse=True)
+def _windows_deleted():
+    """Every window and panel a test makes is deleted after it: left to
+    the cycle collector, one without a parent can crash it."""
+    yield from delete_new_windows()
+
 
 POST = Post(key="c:s:rss-1", origin=INBOX_ORIGIN, source_key="s", source_title="Field notes",
             source_url="https://s.example/feed", d_tag="rss-1", title="Hello", excerpt="",
@@ -38,7 +50,7 @@ class Images(QObject):
     def image(self, url):
         return self.kept.get(url)
 
-    def request(self, url):
+    def request(self, url, size=None, *, urgent=False):
         self.requested.append(url)
 
     def arrive(self, url):
@@ -153,4 +165,46 @@ def test_no_post_shows_the_hint():
 def test_the_header_names_the_source_and_the_date():
     widget, _images, _opened = pane("x")
     widget.show_post(POST)
-    assert widget._origin.text().startswith("Field notes  ·  ")
+    assert widget._origin.text() == "Field notes"
+    assert widget._date.text().startswith("\u00b7  ")
+
+
+def test_a_long_source_name_elides_and_the_date_stays_whole():
+    """Review M2: the header was cut to "...Pressemitteilungen \u00b7 vo"."""
+    from dataclasses import replace
+    widget, _images, _opened = pane("x")
+    long = "Verbraucherzentrale Nordrhein-Westfalen Pressemitteilungen " * 2
+    widget.resize(420, 400)
+    widget.show()
+    widget.show_post(replace(POST, source_title=long))
+    widget.layout().activate()
+    widget._header.layout().activate()
+    assert widget._origin.painted_text().endswith("\u2026")
+    assert widget._origin.toolTip() == long
+    assert widget._date.width() >= widget._date.sizeHint().width()
+    widget.hide()
+
+
+def test_another_post_never_shows_the_previous_body():
+    """Review L1: the header and Open Original switched at once while the
+    body still showed the previous post until the new one was ready."""
+    from dataclasses import replace
+    widget, _images, _opened = pane("Body of post A.", hold=True)
+    widget.show_post(POST)
+    widget._prepare.pending.pop()()
+    assert "Body of post A." in text_of(widget)
+    widget.show_post(replace(POST, key="other", title="Post B"))
+    assert widget._stack.currentWidget() is widget._message
+    assert widget._message.findChild(QLabel).text() == ""
+
+
+@pytest.mark.parametrize("text", ["Lightning Weekly", "A thoughtful journal", "Imports",
+                                  "Field notes", "Verbraucherzentrale Nordrhein-Westfalen"])
+def test_an_eliding_label_given_its_hint_shows_its_whole_text(text):
+    """The hint was the rounded-down width, and eliding compares the
+    fractional one: a label given exactly its hint showed "Lightning
+    Wee…" in the article header."""
+    from nostr.ui.eliding_label import ElidingLabel
+    label = ElidingLabel(text)
+    label.resize(label.sizeHint())
+    assert label.painted_text() == text

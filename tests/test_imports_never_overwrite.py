@@ -89,3 +89,14 @@ def test_the_signed_wrap_is_handed_out_for_the_checkpoint():
     job.start()
     settle()
     assert kept == [(0, "ev-" + identifier_of(item))]
+
+
+def test_the_check_cannot_be_left_out():
+    """Review L14: without the check an import took "nothing exists" and
+    overwrote; it is required now."""
+    import pytest
+    factory, _created = make_factory()
+    with pytest.raises(TypeError):
+        ImportItemsJob(items=[], feed_url="https://blog.example/feed", profile=PROFILE,
+                       relay_pool=None, relay_directory=FakeRelayDirectory(),
+                       session_pool=None, publish_job_factory=factory)

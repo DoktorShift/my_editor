@@ -98,12 +98,43 @@ class TestIngest:
         store.ingest(KEY, edited)
         assert view_titles(store, View(OLDER_POSTS)) == ["a"]
 
-    def test_the_inbox_limit(self, store, monkeypatch):
+    def test_the_inbox_limit(self, store, monkeypatch, clock):
+        """Engine review L7: a feed longer than the room left was refused
+        whole; now its newest posts that fit are kept, and only a full
+        inbox says so."""
         monkeypatch.setattr("nostr.imports.inbox_store.MAX_STORED_POSTS", 2)
-        result = store.ingest(KEY, items("a", "b", "c"))
-        assert result.error == INBOX_FULL
+        posts = [make_item(t, guid=f"g-{t}", published_at=T0 - n)
+                 for n, t in enumerate(("a", "b", "c"))]
+        result = store.ingest(KEY, posts)
+        assert (result.older, result.error) == (2, "")
+        assert sorted(view_titles(store, View(OLDER_POSTS))) == ["a", "b"]
+        clock.now += 900
+        later = store.ingest(KEY, [make_item("d", guid="g-d", published_at=T0 + 10)])
+        assert later.error == INBOX_FULL
         assert store.source(KEY).error == INBOX_FULL
         assert MAX_STORED_POSTS == 5000
+
+    def test_a_long_answer_keeps_its_newest_five_hundred(self, store):
+        posts = [make_item(f"p{n}", guid=f"g{n}", published_at=T0 - n) for n in range(600)]
+        assert store.ingest(KEY, posts).older == 500
+        kept = set(view_titles(store, View(OLDER_POSTS), limit=600))
+        assert "p0" in kept and "p599" not in kept
+
+    def test_a_post_dated_ahead_is_read_again(self, store, clock):
+        """Review L6: the validators of an answer that left a post
+        waiting made the next check "unchanged", and the post never came."""
+        store.ingest(KEY, items("a", published=T0), etag="old", last_modified="old")
+        clock.now += 900
+        store.ingest(KEY, items("soon", published=T0 + 900 + 3600), etag="new",
+                     last_modified="new")
+        source = store.source(KEY)
+        assert (source.etag, source.last_modified) == ("old", "old")
+
+    def test_a_post_too_long_to_keep_is_counted(self, store, monkeypatch):
+        monkeypatch.setattr("nostr.imports.inbox_store.MAX_BODY_BYTES", 100)
+        long = make_item("long", guid="g-long", content_html="<p>" + "x" * 70_000 + "</p>")
+        result = store.ingest(KEY, [long])
+        assert result.too_long == 1
 
     def test_counts_per_source_and_stats(self, store, clock):
         store.ingest(KEY, items("a"))
@@ -337,3 +368,61 @@ class TestSnapshots:
         assert snapshots.cover(item) == "https://x/a.png"
         assert snapshots.reading_minutes("") == 0
         assert snapshots.reading_minutes("<p>one</p>") == 1
+
+
+def test_skips_outlive_a_source_that_leaves_and_comes_back():
+    """Engine review M3: a source missing from the list took its skips
+    with it, and followed again its posts came back unskipped."""
+    store = InboxStore(":memory:", clock=lambda: 1_800_000_000)
+    store.sync_sources([("k", "https://blog.example/feed", "Blog", True)])
+    items = [make_item("One", guid="g1"), make_item("Two", guid="g2")]
+    store.ingest("k", items)
+    post = store.page(View(OLDER_POSTS))[0]
+    store.skip("k", post.d_tag, post.revision)
+    store.sync_sources([])                               # unsubscribed (here or elsewhere)
+    assert store.counts().skipped == 0
+    store.sync_sources([("k", "https://blog.example/feed", "Blog", True)])
+    store.ingest("k", items)
+    assert store.counts().skipped == 1
+    skipped = store.page(View(SKIPPED_POSTS))[0]
+    assert skipped.d_tag == post.d_tag
+    # Restored, it is forgotten: the next time it is a post like any other.
+    store.restore("k", skipped.d_tag, skipped.revision)
+    store.sync_sources([])
+    store.sync_sources([("k", "https://blog.example/feed", "Blog", True)])
+    store.ingest("k", items)
+    assert store.counts().skipped == 0
+
+
+def test_an_inbox_from_before_skips_were_remembered_is_upgraded(tmp_path):
+    import sqlite3
+    path = tmp_path / "old.sqlite3"
+    InboxStore(path).close()
+    db = sqlite3.connect(str(path))
+    db.execute("DROP TABLE skip_memory")
+    db.execute("PRAGMA user_version = 1")
+    db.commit()
+    db.close()
+    store = InboxStore(path)
+    store.sync_sources([("k", "https://blog.example/feed", "Blog", True)])
+    store.ingest("k", [make_item("One", guid="g1")])
+    post = store.page(View(OLDER_POSTS))[0]
+    store.skip("k", post.d_tag, post.revision)
+    store.sync_sources([])
+    store.close()
+
+
+@pytest.mark.parametrize("query, found", [
+    ("über", ["Über Bitcoin"]),
+    ("öl", ["Straße und Öl"]),
+    ("STRASSE", ["Straße und Öl"]),
+    ("ärzteblatt", ["Straße und Öl", "Über Bitcoin"]),     # the source's title
+])
+def test_search_ignores_case_beyond_ascii(query, found):
+    """Both reviews (M3, L8): SQLite's LIKE folds ASCII only."""
+    store = InboxStore(":memory:", clock=lambda: 1_800_000_000)
+    store.sync_sources([("k", "https://blog.example/feed", "Ärzteblatt", True)])
+    store.ingest("k", [make_item("Über Bitcoin", guid="g1"),
+                       make_item("Straße und Öl", guid="g2")])
+    rows = store.page(View(OLDER_POSTS), query=query)
+    assert sorted(row.title for row in rows) == found

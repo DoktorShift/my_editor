@@ -44,7 +44,7 @@ from i18n import _
 from image_safety import sniff_image_mime
 
 from .errors import ERROR_CODES, SourceError
-from .netguard import NetGuard
+from .netguard import UNRESOLVED_REASON, NetGuard
 
 
 _USER_AGENT = b"my-editor-rss/1"
@@ -64,6 +64,7 @@ _BLOB_USER_AGENT = b"my-editor-rehost/1"
 _BLOB_UNSAFE_URL = _("URL was not allowed")
 _BLOB_OVERSIZE = _("Image is too large to rehost")
 _BLOB_EMPTY = _("Image was empty")
+_BLOB_NOT_FOUND = _("Image address could not be found")
 
 _CHARSET_FROM_CONTENT_TYPE = re.compile(
     r"charset\s*=\s*([A-Za-z0-9_\-.:]+)", re.IGNORECASE
@@ -109,7 +110,9 @@ class SourceFetcher(QObject):
             url,
             on_allowed=lambda: self._start(qurl, on_success, on_failure),
             on_refused=lambda reason: on_failure(
-                SourceError(reason, ERROR_CODES.LOCAL_NETWORK)))
+                SourceError(reason, ERROR_CODES.LOCAL_NETWORK)),
+            on_unresolved=lambda: on_failure(
+                SourceError(UNRESOLVED_REASON, ERROR_CODES.FETCH_ERROR)))
 
     def fetch_feed(
         self,
@@ -142,7 +145,9 @@ class SourceFetcher(QObject):
                 qurl, lambda text: on_body(text, meta), on_failure, headers=headers,
                 meta=meta, on_not_modified=on_not_modified),
             on_refused=lambda reason: on_failure(
-                SourceError(reason, ERROR_CODES.LOCAL_NETWORK)))
+                SourceError(reason, ERROR_CODES.LOCAL_NETWORK)),
+            on_unresolved=lambda: on_failure(
+                SourceError(UNRESOLVED_REASON, ERROR_CODES.FETCH_ERROR)))
 
     def _start(self, qurl: QUrl, on_success, on_failure, *, headers=(), meta=None,
                on_not_modified=None) -> None:
@@ -285,7 +290,8 @@ class BlobFetcher(QObject):
             on_failure(_BLOB_UNSAFE_URL)
             return
         self._guard.check(url, on_allowed=lambda: self._start(url, on_success, on_failure),
-                          on_refused=lambda _reason: on_failure(_BLOB_UNSAFE_URL))
+                          on_refused=lambda _reason: on_failure(_BLOB_UNSAFE_URL),
+                          on_unresolved=lambda: on_failure(_BLOB_NOT_FOUND))
 
     def _start(self, url: str, on_success, on_failure) -> None:
         if not shiboken6.isValid(self):

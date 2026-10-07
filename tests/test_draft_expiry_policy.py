@@ -10,9 +10,6 @@ imported draft the person changed, makes a draft that stays.
 
 from __future__ import annotations
 
-import ast
-import inspect
-import textwrap
 from unittest.mock import MagicMock
 
 from main_window import MainWindow
@@ -64,19 +61,63 @@ def test_the_import_pipeline_asks_for_the_ninety_days():
     importer = ImportItemsJob(
         items=[make_item("Post", guid="g")], feed_url="https://blog.example/feed",
         profile=PROFILE, relay_pool=None, relay_directory=FakeRelayDirectory(),
-        session_pool=None, fetcher=FakeFetcher(), long_form_fetcher=FakeLongFormFetcher(None),
+        session_pool=None, is_imported=lambda _d: False, fetcher=FakeFetcher(),
+        long_form_fetcher=FakeLongFormFetcher(None),
         publish_job_factory=factory, run_blocking=inline_run_blocking, pacer=RecordingPacer())
     importer.start()
     settle()
     assert created[0].kwargs["expiration_seconds"] == DEFAULT_EXPIRATION_SECONDS
 
 
-def test_the_editor_save_passes_no_expiration():
-    # Saving from the editor, also an imported draft the person changed,
-    # makes a draft that stays.
-    tree = ast.parse(textwrap.dedent(inspect.getsource(MainWindow)))
-    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
-             and getattr(node.func, "id", "") == "DraftPublishJob"]
-    assert calls
-    for call in calls:
-        assert "expiration_seconds" not in {k.arg for k in call.keywords}
+def test_the_editor_save_passes_no_expiration(monkeypatch):
+    """Saving from the editor, also an imported draft the person changed,
+    makes a draft that stays: the save path asks for no end date (review
+    L16: this used to read MainWindow's source)."""
+    import types
+    from PySide6.QtCore import QObject, Signal
+    import main_window
+    made = []
+
+    class RecordingJob(QObject):
+        status_changed = Signal(str)
+        stashed = Signal(str, str, int)
+        failed = Signal(str)
+
+        def __init__(self, **kwargs):
+            super().__init__()
+            made.append(kwargs)
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(main_window, "DraftPublishJob", RecordingJob)
+    host = types.SimpleNamespace(
+        _is_stash_in_flight_for=lambda _ed: False, _relay_pool=None,
+        _relay_directory=FakeRelayDirectory(), _session_pool=None,
+        _entitled_relays=lambda: (), status=types.SimpleNamespace(showMessage=print),
+        _attach_active_stash=lambda _ed, _job: None)
+    choice = types.SimpleNamespace(identifier="rss-0123456789abcdef")
+    inner = {"kind": 30023, "content": "An edited import", "tags": [["d", "x"]],
+             "created_at": 1_800_000_000, "pubkey": PROFILE.user_pubkey}
+    MainWindow._fire_draft_publish_job(host, object(), PROFILE, choice, inner)
+    assert len(made) == 1
+    assert made[0].get("expiration_seconds") is None
+
+
+def test_a_draft_that_still_has_an_end_date_says_so_in_the_list():
+    """Engine review M6: drafts saved before drafts stopped expiring keep
+    their old end date until they are saved again; the list says when,
+    and how to keep them."""
+    from nostr.draft_store import DraftRecord, DraftState
+    from nostr.ui.drafts_panel import _accessible_row_text, _display_meta, expiry_note
+    end = 1_800_000_000
+    record = DraftRecord(identifier="note-1", inner_kind=1, state=DraftState.READY,
+                         title="A note", snippet="first words", expiration=end)
+    note = expiry_note(end)
+    assert note.startswith("Removed on ") and note.endswith("unless you save it again")
+    assert _display_meta(record) == note
+    assert note in _accessible_row_text(record, now=end - 30 * 86400)
+    kept = DraftRecord(identifier="note-2", inner_kind=1, state=DraftState.READY,
+                       title="Kept", snippet="first words")
+    assert _display_meta(kept) == "first words"
+    assert expiry_note(None) == ""

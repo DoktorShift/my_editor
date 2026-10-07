@@ -12,6 +12,8 @@ too, so STANDUP never imports that post again.
 
 from __future__ import annotations
 
+import pytest
+
 from unittest.mock import MagicMock
 
 from PySide6.QtCore import QObject, Signal
@@ -162,7 +164,30 @@ def test_deleting_an_imported_draft_also_sends_a_request():
     # Tombstone, request (imported draft), then the note's tombstone alone.
     assert signed == [31234, 5, 31234]
     kinds = [event["kind"] for event in published]
-    assert kinds == [5, 31234, 31234]
-    assert ["a", f"31234:{PK}:{D}"] in published[0]["tags"]
-    assert ["e", "e" * 64] in published[0]["tags"]
+    # The tombstone goes out first, then the request (engine review L3).
+    assert kinds == [31234, 5, 31234]
+    tombstone, request = published[0], published[1]
+    assert ["a", f"31234:{PK}:{D}"] in request["tags"]
+    assert ["e", "e" * 64] in request["tags"]
+    # One second before the tombstone: a relay that follows NIP-09 keeps it.
+    assert request["created_at"] == tombstone["created_at"] - 1
     assert finished == [2]
+
+
+@pytest.mark.parametrize("request_id", ["0" * 64, "f" * 64])
+def test_a_request_in_the_same_second_deletes_the_draft(request_id):
+    """Engine review L1: NIP-09 deletes every version up to the request's
+    time; of four same-second requests, only those with the lower id
+    deleted the draft."""
+    from nostr.draft_store import DraftStore
+    from nostr.drafts import DraftWrapMeta
+    store = DraftStore()
+    store.bind_profile(PK)
+    store.upsert_skeleton(DraftWrapMeta("d1", 30023, "8" * 64, PK, 1000, None, "ct"))
+    assert store.apply_deletion("d1", 1000, request_id, request=True)
+    assert store.get("d1") is None
+    # The same second's copy from another relay stays out; a later save is new.
+    store.upsert_skeleton(DraftWrapMeta("d1", 30023, "9" * 64, PK, 1000, None, "ct"))
+    assert store.get("d1") is None
+    store.upsert_skeleton(DraftWrapMeta("d1", 30023, "a" * 64, PK, 1001, None, "ct"))
+    assert store.get("d1") is not None

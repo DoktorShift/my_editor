@@ -35,6 +35,15 @@ from tests.test_imports_subscriptions import (
     FakeSessionPool,
 )
 from nostr.imports.subscriptions import FeedSubscriptionStore
+from tests.widget_lifetime import delete_new_windows
+
+
+@pytest.fixture(autouse=True)
+def _windows_deleted():
+    """Every window and panel a test makes is deleted after it: left to
+    the cycle collector, one without a parent can crash it."""
+    yield from delete_new_windows()
+
 
 PK = "ab" * 32
 OTHER = "cd" * 32
@@ -355,3 +364,67 @@ def test_the_window_is_made_once(harness):
     harness.controller.open_window()
     assert len(harness.windows) == 1
     assert harness.windows[0].shown == 2
+
+
+class SilentRelay(FakeRelay):
+    """Relays that do not answer yet: questions wait until ``answer``."""
+
+    def __init__(self):
+        super().__init__()
+        self.waiting = []
+
+    def events(self, relays, filters, on_done):
+        self.queries.append((list(relays), filters))
+        self.waiting.append((list(relays), filters, on_done))
+
+    def answer(self):
+        while self.waiting:
+            relays, filters, on_done = self.waiting.pop(0)
+            stored = self.stored.get(filters[0]["#d"][0])
+            on_done([stored] if stored else [], set(relays))
+
+
+def test_a_lost_copy_of_the_list_never_empties_the_inbox(tmp_path):
+    """Review M7: binding with the list's copy on this computer gone
+    removed every source with its posts and skips before any relay was
+    asked. Until the list is known, nothing is removed."""
+    from nostr.imports.constants import FEED_LIST_DTAG
+    from tests.outbox_fakes import PK as LIST_PK
+    relay = SilentRelay()
+    relay.put(FEED_LIST_DTAG, {"feeds": [{"url": FEED, "title": "Blog"}]})
+    store = FeedSubscriptionStore(
+        session_pool=FakeSessionPool(), relay_pool=None,
+        relay_directory=FakeRelayDirectory(), cache_dir=tmp_path / "cache",
+        query=relay, publisher=relay, scheduler=FakeScheduler(),
+        clock=lambda: 1_800_000_000)
+    controller = ImportsController(
+        relay_pool=None, relay_directory=FakeRelayDirectory(), session_pool=None,
+        config_dir=tmp_path, subscription_store=store, fetcher=FakeFetcher({}),
+        run_blocking=inline_run_blocking, checker_factory=lambda inbox: FakeChecker(),
+        catalogue_factory=lambda inbox: FakeCatalogue())
+    account = profile(LIST_PK)
+    controller.account_changed(account)
+    settle()
+    relay.answer()
+    settle()
+    assert [s.url for s in controller.sources()] == [FEED]
+    inbox = controller.inbox
+    inbox.ingest(source_key(FEED), [make_item("One", guid="g1"), make_item("Two", guid="g2")])
+    post = controller.page(View(OLDER_POSTS))[0]
+    inbox.skip(post.source_key, post.d_tag, post.revision)
+    controller.account_changed(None)
+    settle()
+    for cached in (tmp_path / "cache").iterdir():
+        cached.unlink()
+    controller.account_changed(account)
+    settle()
+    assert relay.waiting            # the relays have not answered yet
+    assert [s.url for s in controller.sources()] == [FEED]
+    assert controller.counts().skipped == 1
+    assert controller.counts().older == 1
+    # The relays answer with the list: still there, nothing lost.
+    relay.answer()
+    settle()
+    assert [s.url for s in controller.sources()] == [FEED]
+    assert controller.counts().skipped == 1
+    controller.account_changed(None)

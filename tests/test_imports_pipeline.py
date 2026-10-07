@@ -79,6 +79,7 @@ def make_job(items, *, factory=None, long_form=None, pacer=None,
              page_fetcher=None, feed_url=FEED_URL, directory=None, **kwargs):
     if factory is None:
         factory, _ = make_factory()
+    kwargs.setdefault("is_imported", lambda _identifier: False)
     return ImportItemsJob(
         items=items,
         feed_url=feed_url,
@@ -195,7 +196,7 @@ class TestHappyPath:
         directory = make_directory()
         job = ImportItemsJob(
             items=[], feed_url=FEED_URL, profile=PROFILE, relay_pool=None,
-            relay_directory=directory, session_pool=None,
+            relay_directory=directory, session_pool=None, is_imported=lambda _d: False,
             long_form_fetcher=FakeLongFormFetcher(None),
             publish_job_factory=make_factory()[0],
             run_blocking=inline_run_blocking, pacer=RecordingPacer(),

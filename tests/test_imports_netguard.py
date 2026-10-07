@@ -17,6 +17,7 @@ from nostr.imports.errors import ERROR_CODES, friendly_message
 from nostr.imports.fetch import SourceFetcher
 from nostr.imports.netguard import (
     REFUSED_MESSAGE,
+    UNRESOLVED_REASON,
     NetGuard,
     is_allowed_url,
     is_public_address,
@@ -88,9 +89,15 @@ def test_a_public_address_literal_needs_no_lookup():
     assert asked == []
 
 
-def test_a_name_that_does_not_resolve_is_left_to_the_fetch():
+def test_a_name_the_guard_cannot_resolve_is_not_fetched():
+    """Review L10: it was let through, and Qt resolves again to connect,
+    so a name answering 127.0.0.1 the second time was fetched."""
     net_guard = NetGuard(resolver=lambda host, on_done: on_done(None))
-    assert verdict(net_guard, "https://nowhere.example/feed") == "allowed"
+    assert verdict(net_guard, "https://nowhere.example/feed") == UNRESOLVED_REASON
+    told = []
+    net_guard.check("https://nowhere.example/feed", on_allowed=lambda: told.append("allowed"),
+                    on_refused=told.append, on_unresolved=lambda: told.append("unresolved"))
+    assert told == ["unresolved"]
 
 
 class TestSourceFetcher:

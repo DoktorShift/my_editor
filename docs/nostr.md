@@ -133,7 +133,8 @@ If your signer (Amber, nsec.app) times out a decrypt approval or you dismiss the
 
 ### Storage notes
 
-- Drafts you write never expire. An imported draft you don't change is removed after 90 days (NIP-40); once you change and save it, it stays like any other draft.
+- Drafts you save with this version never expire. An imported draft you don't change is removed after 90 days (NIP-40); once you change and save it, it stays like any other draft.
+- A draft saved with an earlier version of MyEditor keeps the end date it was saved with (90 days after that save) until you save it again. The Drafts list shows that date in the draft's row ("Removed on ... unless you save it again"); open the draft and save it to keep it.
 - Notes are tagged with a private UUID; articles use a stable slug, so the draft and its eventual published article share the same address.
 - Deleting a draft publishes an empty replacement so your other devices see it removed; it never expires, so a relay that kept an old copy cannot bring the draft back.
 
@@ -178,11 +179,20 @@ The planner checks each configured server's documented per-file limit before sen
 
 ---
 
-## Import from RSS, Atom, and JSON feeds
+## Imports: follow websites, import files and links
 
-Mirror your own blog into private Nostr drafts. Open the Drafts panel with `Ctrl+Shift+D`, switch to the **Feeds** segment, paste a URL, and import. Each surviving item becomes a NIP-37 draft signed by your active profile with title, summary, cover image, hashtags, and original publish date preserved.
+Mirror your own blog, or a website you follow, into private Nostr drafts. Choose **Nostr > Imports…**, or the Imports row at the top of the Drafts panel, which also says how many new posts wait.
 
-### Paste anything
+- **Add > Follow a Website…**: paste an address. MyEditor shows what it found (its name, whether it is a feed, a Nostr author or a collection, how many posts and how new the newest is) before anything is kept. While MyEditor is open it checks a followed feed for new posts, which appear in the Inbox; the posts that were already there when you followed it wait in Older Posts.
+- **Add > Import a File…**, or drop a file on the window: a WordPress, Ghost, Medium or Substack export, a feed file, a Markdown file, or a list of sources (OPML) to follow.
+- **Add > Import a Link…**: one post, thread, Nostr article or Markdown file, imported once and not kept as a source.
+- Check the posts you want, or just open one, and choose **Create Drafts** (Command-Return or Ctrl+Return). **Options…** chooses whether images are copied to your media server and whether the whole article is fetched when a feed has only a summary. Imported drafts you don't change are removed after 90 days; once you change and save one, it stays like any draft you wrote.
+- **Skip** (or Delete) sets posts aside on this computer; Undo, in the message or in Edit > Undo, brings them back, and so does Restore in the Skipped list.
+- The toolbar shows how an import is going. Its card pauses, resumes, stops, and tries posts that failed again; the Drafts panel's Imports row shows the same line.
+
+Each draft keeps the post's title, summary, cover image, hashtags and original date.
+
+### Addresses that work
 
 You don't need the feed URL. The editor accepts:
 

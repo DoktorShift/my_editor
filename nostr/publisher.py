@@ -1082,9 +1082,15 @@ class DraftDeleteJob(QObject):
             # Signed before anything is sent, so the signer is asked one
             # thing at a time. The draft is deleted by the tombstone
             # alone; a refused request only means STANDUP does not hear.
+            # One second before the tombstone (engine review L3): a relay
+            # that follows NIP-09 deletes every version up to the request,
+            # and one in the same second took the tombstone with it. The
+            # tombstone already came after the draft it replaces, so the
+            # request still names everything before it.
             request = build_deletion_request(
                 pubkey_hex=self._profile.user_pubkey, identifier=self._identifier,
-                wrap_id=self._replaced_wrap_id)
+                wrap_id=self._replaced_wrap_id,
+                created_at=int(signed_event["created_at"]) - 1)
             client.sign_event(
                 request,
                 on_success=lambda signed_request: self._send(
@@ -1097,8 +1103,6 @@ class DraftDeleteJob(QObject):
               deletion_request: Optional[dict] = None) -> None:
         if self._cancelled:
             return
-        if deletion_request is not None:
-            self._relay_pool.publish(publish_relays, deletion_request)
         self.tombstoned.emit(self._identifier, signed_event["id"])
         self._emit_status(ngettext(
             "Removing draft from {n} relay…", "Removing draft from {n} relays…",
@@ -1106,6 +1110,9 @@ class DraftDeleteJob(QObject):
         ).format(n=len(publish_relays)))
         job = self._relay_pool.publish(publish_relays, signed_event)
         job.all_done.connect(self._on_publish_done)
+        # The tombstone first, then the request that names the draft.
+        if deletion_request is not None:
+            self._relay_pool.publish(publish_relays, deletion_request)
 
     def _on_publish_done(self, results: List[PublishResult]) -> None:
         if self._cancelled:

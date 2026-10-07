@@ -18,8 +18,9 @@ constants.py so there is no second list to keep in sync. Call
 apply_app_theme() once at startup and again on every theme change.
 """
 
-from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QColor, QPainter, QPalette, QPen
+from PySide6.QtWidgets import QApplication, QProxyStyle, QStyle
 
 from constants import (
     DARK_BG, DARK_BORDER, DARK_FG, DARK_MENU_BG, DARK_MUTED_FG, DARK_SELECTION,
@@ -138,6 +139,39 @@ def attention_color(is_dark: bool) -> str:
     """The red that marks a problem (a destructive button, a failed check),
     readable on its theme's background."""
     return _DIALOG_DESTRUCTIVE[is_dark]
+
+
+def check_box_border(palette: QPalette) -> QColor:
+    """A check box's frame that people can see on either theme: the text
+    colour over the field, about half and half, which keeps the 3:1 that
+    controls need against the field and the window (Fusion's own frame
+    is the window colour darkened, 1.07:1 on the dark theme)."""
+    text = palette.color(QPalette.ColorRole.Text)
+    base = palette.color(QPalette.ColorRole.Base)
+    share = 0.55
+    return QColor(round(text.red() * share + base.red() * (1 - share)),
+                  round(text.green() * share + base.green() * (1 - share)),
+                  round(text.blue() * share + base.blue() * (1 - share)))
+
+
+class AppStyle(QProxyStyle):
+    """Fusion, with check boxes whose frame can be seen on the dark theme
+    too (review M5). Everything else is Fusion's."""
+
+    _BOXES = (QStyle.PrimitiveElement.PE_IndicatorCheckBox,
+              QStyle.PrimitiveElement.PE_IndicatorItemViewItemCheck)
+
+    def drawPrimitive(self, element, option, painter, widget=None):  # noqa: N802
+        super().drawPrimitive(element, option, painter, widget)
+        if element not in self._BOXES or option is None:
+            return
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(check_box_border(option.palette), 1))
+        frame = QRectF(option.rect).adjusted(0.5, 0.5, -0.5, -0.5)
+        painter.drawRoundedRect(frame, 2, 2)
+        painter.restore()
 
 
 def apply_app_theme(is_dark: bool) -> None:

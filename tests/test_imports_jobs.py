@@ -87,7 +87,8 @@ class Harness:
     def make_runner(self):
         def item_job(**kwargs):
             self.kwargs.append(kwargs)
-            return FakeItemJob(self, kwargs["items"], kwargs["is_imported"], kwargs)
+            return FakeItemJob(self, kwargs["items"], kwargs["is_imported"], kwargs,
+                               parent=kwargs.get("parent"))
 
         return ImportRunner(store=self.store, catalogue=self.catalogue, profile=PROFILE,
                             item_job_factory=item_job,
@@ -231,14 +232,71 @@ def test_an_account_change_pauses_at_once():
     assert h.status(job) == ("paused", ["pending", "pending"])
 
 
-def test_per_source_options_override_the_run():
+def test_a_sources_defaults_apply_where_the_run_chose_nothing():
     h = Harness()
     item = make_item("a", guid="g-a")
     job = h.runner.create(label="x", source_type="inbox", posts=[(item, "src")],
-                          options={"rehost_images": True, "fetch_full_text": True,
-                                   "skip_image_urls": ["https://x/1.png"],
-                                   "by_source": {"src": {"rehost_images": False}}})
+                          options={"skip_image_urls": ["https://x/1.png"],
+                                   "by_source": {"src": {"rehost_images": False,
+                                                         "fetch_full_text": True}}})
     h.runner.run(job.id)
     kwargs = h.kwargs[0]
     assert (kwargs["rehost_images"], kwargs["fetch_full_text"]) == (False, True)
     assert kwargs["skip_image_urls"] == {"https://x/1.png"}
+
+
+def test_a_choice_for_the_run_wins_over_a_sources_default():
+    h = Harness()
+    item = make_item("a", guid="g-a")
+    job = h.runner.create(label="x", source_type="inbox", posts=[(item, "src")],
+                          options={"rehost_images": True,
+                                   "by_source": {"src": {"rehost_images": False,
+                                                         "fetch_full_text": False}}})
+    h.runner.run(job.id)
+    kwargs = h.kwargs[0]
+    assert (kwargs["rehost_images"], kwargs["fetch_full_text"]) == (True, False)
+
+
+def test_finished_row_jobs_are_let_go():
+    """Engine review M5: every post's job stayed a child of the runner
+    for the whole session."""
+    from PySide6.QtCore import QCoreApplication, QEvent
+    h = Harness()
+    job = h.job("a", "b", "c")
+    h.runner.run(job.id)
+    assert h.status(job)[0] == "completed"
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert not h.runner.findChildren(FakeItemJob)
+
+
+def test_a_kept_draft_near_its_end_is_made_anew():
+    """Engine review L5: a kept signed draft past its expiration was sent
+    again and refused by every relay, for good."""
+    h = Harness()
+    job = h.job("a")
+    saved = h.store.job(job.id)
+    row = saved.rows[0]
+    row.signed_event = {"id": "old-wrap", "kind": 31234,
+                        "tags": [["d", row.d_tag], ["expiration", "1000"]]}
+    h.store.save_row(job.id, row)
+    h.runner.run(job.id)
+    assert h.resent == []                      # not the expired one
+    assert h.started == [row.d_tag]            # made again
+    assert h.status(job) == ("completed", ["done"])
+
+
+def test_a_job_with_failed_posts_is_not_pruned():
+    """Engine review L12: a job whose failed posts can be tried again was
+    deleted after a week like a finished one."""
+    clock = {"now": 1_800_000_000}
+    store = InboxStore(":memory:", clock=lambda: clock["now"])
+    h = Harness(store=store, script={"b": "fail"})
+    job = h.job("a", "b")
+    h.runner.run(job.id)
+    assert h.status(job)[0] == "partial"
+    done = h.job("c")
+    h.runner.run(done.id)
+    clock["now"] += 8 * 24 * 3600
+    store.prune_jobs()
+    assert store.job(job.id) is not None
+    assert store.job(done.id) is None

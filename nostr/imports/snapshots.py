@@ -37,6 +37,10 @@ _TAG = re.compile(r"<[^>]+>")
 _IMG = re.compile(r"<img\b", re.IGNORECASE)
 _IMG_SRC = re.compile(r"""<img[^>]+src=["']([^"']+)["']""", re.IGNORECASE)
 _SPACE = re.compile(r"\s+")
+# Markdown, read as words: images out, links as their text, marks out.
+_MD_IMAGE = re.compile(r"!\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)")
+_MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_MD_MARKS = re.compile(r"(?m)^\s{0,3}(?:#{1,6}\s+|>\s?|[-*+]\s+|\d+[.)]\s+)|[*_`~]+")
 _FIELDS = ("guid", "title", "link", "summary", "content_html", "published_at",
            "image", "author", "title_from_url", "content_markdown")
 
@@ -87,6 +91,32 @@ def plain_text(body_html: str) -> str:
     return _SPACE.sub(" ", html.unescape(_TAG.sub(" ", body_html or ""))).strip()
 
 
+def markdown_text(markdown: str) -> str:
+    """The words of Markdown, as a reader sees them (for an excerpt and
+    a read time): images left out, links as their text, marks gone."""
+    text = _MD_IMAGE.sub(" ", markdown or "")
+    text = _MD_LINK.sub(r"\1", text)
+    text = _MD_MARKS.sub(" ", text)
+    return plain_text(text)
+
+
+def minutes_of(item: FeedItem) -> int:
+    """The read time of a post, from its HTML or, for a source that
+    delivers Markdown (a Nostr author, a GitHub folder), its Markdown."""
+    if item.content_html:
+        return reading_minutes(item.content_html)
+    text = markdown_text(item.content_markdown or "")
+    words = len(text.split())
+    return max(1, int(words / 225 + 0.5)) if words else 0
+
+
+def images_in(item: FeedItem) -> int:
+    """How many images a post shows, from its HTML or its Markdown."""
+    if item.content_html:
+        return image_count(item.content_html)
+    return len(_MD_IMAGE.findall(item.content_markdown or ""))
+
+
 def reading_minutes(body_html: str) -> int:
     words = len(_TAG.sub(" ", body_html or "").split())
     return max(1, int(words / 225 + 0.5)) if words else 0
@@ -100,7 +130,7 @@ def excerpt(item: FeedItem) -> str:
     summary = plain_text(item.summary or "")
     if summary:
         return summary[:EXCERPT_CHARS * 2]
-    text = plain_text(item.content_html) or (item.content_markdown or "").strip()
+    text = plain_text(item.content_html) or markdown_text(item.content_markdown or "")
     return text[:EXCERPT_CHARS]
 
 
@@ -127,7 +157,12 @@ def has_images(item: FeedItem) -> bool:
 
 
 def cover(item: FeedItem) -> str:
+    """The post's picture: its own, else the first image of its HTML or
+    its Markdown."""
     if item.image:
         return item.image
     match = _IMG_SRC.search(item.content_html or "")
+    if match:
+        return match.group(1)
+    match = _MD_IMAGE.search(item.content_markdown or "")
     return match.group(1) if match else ""

@@ -16,7 +16,10 @@ text, podcast chapters, images, site icons) passes this guard first:
   and at most 2048 characters.
 - The name is then resolved, and refused when **any** address it
   resolves to is not public (private, loopback, link-local, reserved,
-  multicast), the test url_safety applies to an address literal.
+  multicast), the test url_safety applies to an address literal. A name
+  that does not resolve is refused too: Qt would resolve it again to
+  connect, and that answer is not checked (STANDUP's server refuses such
+  names as well).
 - Every redirect is checked the same way before it is followed (the
   fetchers ask Qt to wait for :meth:`NetGuard.follow`), five at most.
 
@@ -38,10 +41,16 @@ from PySide6.QtNetwork import QHostInfo, QNetworkReply, QNetworkRequest
 
 import url_safety
 
+from i18n import _
+
 from .errors import LOCAL_NETWORK_MESSAGE as REFUSED_MESSAGE
 
 MAX_URL_LENGTH = 2048
 MAX_REDIRECTS = 5
+
+# Why a name that did not resolve is not fetched, as the reason in
+# "Couldn't reach that URL: {reason}." (errors.friendly_message).
+UNRESOLVED_REASON = _("the address could not be found")
 
 # resolve(host, on_done): on_done(addresses) with the addresses as text,
 # or None when the name could not be resolved.
@@ -94,8 +103,10 @@ class NetGuard:
         """Call ``on_allowed`` when ``url`` may be fetched, ``on_refused``
         with the reason when it points into the local network.
 
-        A name that does not resolve goes to ``on_unresolved`` (by default
-        it is allowed, so the fetch fails with the network's own words).
+        A name that does not resolve is not fetched either: it goes to
+        ``on_unresolved``, by default ``on_refused`` with
+        :data:`UNRESOLVED_REASON` (review L10: a name the guard could not
+        resolve was fetched, and Qt's own lookup could answer 127.0.0.1).
         """
         if not is_allowed_url(url):
             on_refused(REFUSED_MESSAGE)
@@ -114,7 +125,10 @@ class NetGuard:
 
         def _resolved(addresses: Optional[List[str]]) -> None:
             if not addresses:
-                (on_unresolved or on_allowed)()
+                if on_unresolved is not None:
+                    on_unresolved()
+                else:
+                    on_refused(UNRESOLVED_REASON)
                 return
             if all(is_public_address(a) for a in addresses):
                 on_allowed()

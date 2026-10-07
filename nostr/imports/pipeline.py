@@ -168,6 +168,7 @@ class ImportItemsJob(QObject):
         relay_pool: RelayPool,
         relay_directory: RelayDirectory,
         session_pool: BunkerSessionPool,
+        is_imported: Callable[[str], bool],
         append_source_link: bool = True,
         fetch_full_text: bool = True,
         rehost_images: bool = True,
@@ -176,7 +177,6 @@ class ImportItemsJob(QObject):
         extra_hashtags: Optional[List[str]] = None,
         identifier_prefix: Optional[str] = IDENTIFIER_PREFIX,
         identifier_exists: Optional[Callable[[str], bool]] = None,
-        is_imported: Optional[Callable[[str], bool]] = None,
         fetcher: Optional[SourceFetcher] = None,
         long_form_fetcher: Optional[LongFormFetcher] = None,
         image_mirror: Optional[Callable[..., None]] = None,
@@ -751,9 +751,8 @@ class ImportItemsJob(QObject):
 
     def _already_imported(self, identifier: str) -> bool:
         """Report an item that already exists, and move on. Defensive: a
-        failing probe counts as "exists", so nothing is overwritten."""
-        if self._is_imported is None:
-            return False
+        failing probe counts as "exists", so nothing is overwritten. The
+        probe is required: a caller cannot leave it out and overwrite."""
         try:
             exists = bool(self._is_imported(identifier))
         except Exception:  # noqa: BLE001

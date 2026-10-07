@@ -71,9 +71,11 @@ class SourceError(Exception):
 # and (per the platform writing guidelines) never "we", never blame,
 # always a next step where one exists. Codes absent here fall back to
 # the error's own message.
+# The owner's decision Q-6: such an address is not followed, and the
+# message says why in plain words.
 LOCAL_NETWORK_MESSAGE = _(
-    "This address points to your local network, which MyEditor doesn't read "
-    "from for safety.")
+    "This address is on this computer or its local network. MyEditor follows "
+    "public websites only.")
 
 _FRIENDLY = {
     ERROR_CODES.LOCAL_NETWORK: LOCAL_NETWORK_MESSAGE,
@@ -95,14 +97,15 @@ _FRIENDLY = {
         "That isn't a recognisable Nostr address."
     ),
     ERROR_CODES.NOSTR_NOT_FOUND: _(
-        "That Nostr event was not found on the relays."
+        "That post wasn't found. It may have been deleted, or the places it is "
+        "kept are not answering right now."
     ),
     ERROR_CODES.NIP05_NOT_FOUND: _(
         "No Nostr profile is published at that address."
     ),
     ERROR_CODES.NO_RELAY_ACCESS: _(
-        "Importing from Nostr needs a relay connection, which isn't "
-        "available right now."
+        "Importing from Nostr needs a connection, which isn't available "
+        "right now."
     ),
     ERROR_CODES.WXR_EMPTY: _(
         "No published posts or pages were found in that WordPress export."

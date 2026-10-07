@@ -442,7 +442,9 @@ class DraftSync(QObject):
         # A relay that ignores NIP-40 can still hand out a wrap past its
         # expiration (imported drafts carry one of 90 days): it is gone,
         # and must neither show nor replace what the store holds.
-        if meta.is_expired(self._clock()):
+        # A blanked wrap past its expiration still says the draft was
+        # deleted, and keeps an older copy out (the store records it).
+        if meta.is_expired(self._clock()) and not meta.is_tombstone:
             return
         # Only the account's own signature counts: a relay must not be able
         # to hide a draft behind a forged deletion, or change its text.

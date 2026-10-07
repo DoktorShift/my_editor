@@ -35,12 +35,13 @@ each call is one short transaction. ``clock`` is injectable for tests.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from i18n import _
 
@@ -50,7 +51,12 @@ from . import snapshots
 SCHEMA_VERSION = 1
 CHECK_INTERVAL = 15 * 60
 MAX_BACKOFF = 24 * 60 * 60
+_log = logging.getLogger(__name__)
+
 MAX_STORED_POSTS = 5000
+# The newest posts of one answer that are kept, as STANDUP reads them: a
+# feed longer than this is not refused, its oldest posts are left out.
+MAX_PER_ANSWER = 500
 MAX_BODY_BYTES = 256 * 1024
 FUTURE_GRACE = 5 * 60
 CHECK_LEASE = 120
@@ -143,6 +149,7 @@ class IngestResult:
     new: int = 0
     older: int = 0
     waiting: int = 0
+    too_long: int = 0           # posts too long to keep here (logged)
     error: str = ""
 
 
@@ -228,6 +235,11 @@ def database_path(config_dir: Path, pubkey: str) -> Path:
     return Path(config_dir) / "imports" / f"{pubkey.lower()}.sqlite3"
 
 
+def _fold(text) -> str:
+    """The search form of a text: case folded (German ß matches SS)."""
+    return str(text or "").casefold()
+
+
 class InboxStore:
     """One account's inbox. ``path`` ``:memory:`` keeps it in memory (tests)."""
 
@@ -237,6 +249,7 @@ class InboxStore:
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(str(path), timeout=5)
         self._db.row_factory = sqlite3.Row
+        self._db.create_function("fold", 1, _fold, deterministic=True)
         if path != ":memory:":
             self._db.execute("PRAGMA journal_mode=WAL")
         self._migrate()
@@ -251,21 +264,34 @@ class InboxStore:
         version = self._db.execute("PRAGMA user_version").fetchone()[0]
         if version < 1:
             self._db.executescript("BEGIN;" + _SCHEMA + "PRAGMA user_version = 1; COMMIT;")
+        if version < 2:
+            # Skips outlive their source (Q-3 keeps them on this computer):
+            # a source that leaves the list and comes back keeps them.
+            self._db.executescript(
+                "BEGIN; CREATE TABLE IF NOT EXISTS skip_memory (d_tag TEXT PRIMARY KEY, "
+                "at INTEGER NOT NULL); PRAGMA user_version = 2; COMMIT;")
 
     # ------------------------------------------------------------------ #
     # Sources                                                              #
     # ------------------------------------------------------------------ #
 
-    def sync_sources(self, entries: Iterable[Tuple[str, str, str, bool]]) -> None:
+    def sync_sources(self, entries: Iterable[Tuple[str, str, str, bool]], *,
+                     remove_missing: bool = True) -> None:
         """Make the sources match the followed list: ``(key, url, title,
         automatic)`` each. A new source starts now, so its first check is
         a baseline; a source no longer followed goes with its posts (the
-        ledger and the drafts stay)."""
+        ledger and the drafts stay), but only with ``remove_missing``: a
+        list not known yet says nothing about what is missing from it."""
         now = self._now()
         wanted = {key: (url, title, automatic) for key, url, title, automatic in entries}
         with self._db:
             known = {row["key"] for row in self._db.execute("SELECT key FROM sources")}
-            for key in known - set(wanted):
+            for key in (known - set(wanted)) if remove_missing else ():
+                # Its skips are remembered: followed again, the posts come
+                # back skipped, as the person left them.
+                self._db.execute(
+                    "INSERT OR IGNORE INTO skip_memory (d_tag, at) SELECT d_tag, ? FROM items "
+                    "WHERE source_key = ? AND state = ?", (now, key, SKIPPED))
                 self._db.execute("DELETE FROM items WHERE source_key = ?", (key,))
                 self._db.execute("DELETE FROM sources WHERE key = ?", (key,))
             for key, (url, title, automatic) in wanted.items():
@@ -407,11 +433,19 @@ class InboxStore:
                 continue
             if d_tag not in known and d_tag not in unseen:
                 unseen[d_tag] = item
-        if len(known) + len(unseen) > MAX_STORED_POSTS:
+        # The newest of the answer, and only as many as the inbox has room
+        # for (engine review L7: a long feed was refused whole).
+        room = min(MAX_PER_ANSWER, MAX_STORED_POSTS - len(known))
+        if unseen and room <= 0:
             self.record_failure(key, INBOX_FULL)
             return IngestResult(error=INBOX_FULL)
+        if len(unseen) > room:
+            newest = sorted(unseen.items(), key=lambda pair: pair[1].published_at or 0,
+                            reverse=True)[:room]
+            unseen = dict(newest)
         ledger = self.ledger_states(unseen)
-        new = older = waiting = 0
+        remembered = self._skips_remembered(unseen)
+        new = older = waiting = too_long = 0
         with self._db:
             for d_tag, item in unseen.items():
                 published = item.published_at or 0
@@ -421,13 +455,22 @@ class InboxStore:
                 snapshot = snapshots.to_snapshot(item)
                 text = json.dumps(snapshot, ensure_ascii=False)
                 if len(text.encode("utf-8")) > MAX_BODY_BYTES + 64 * 1024:
-                    continue  # too large to keep; an export file imports it
+                    # Too long to keep here: said in the log and counted,
+                    # never dropped without a word (review L7).
+                    too_long += 1
+                    _log.info("a post of %s is too long to keep in the inbox: %s", key,
+                              (item.title or item.link or d_tag)[:120])
+                    continue
+                if baseline or (published and published < source["created_at"]):
+                    fresh = OLDER
+                else:
+                    fresh = NEW
                 if d_tag in ledger:
                     state = ledger[d_tag]
-                elif baseline or (published and published < source["created_at"]):
-                    state = OLDER
+                elif d_tag in remembered:
+                    state = SKIPPED
                 else:
-                    state = NEW
+                    state = fresh
                 if state == NEW:
                     new += 1
                 elif state == OLDER:
@@ -438,11 +481,14 @@ class InboxStore:
                     "author, read_minutes, image_count) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)",
                     (key, d_tag, text, now, published, _position(now, published), state,
-                     state if state in (NEW, OLDER) else NEW,
+                     state if state in (NEW, OLDER) else fresh,
                      item.title or "", snapshots.excerpt(item), snapshots.cover(item),
                      item.link or "", item.author or "",
-                     snapshots.reading_minutes(item.content_html),
-                     snapshots.image_count(item.content_html)))
+                     snapshots.minutes_of(item), snapshots.images_in(item)))
+            if waiting:
+                # A post dated ahead waits for its time; the feed must be
+                # read again then, not answered "unchanged" (review L6).
+                etag, last_modified = source["etag"], source["last_modified"]
             self._db.execute(
                 "UPDATE sources SET last_checked = ?, next_check = ?, checking_until = 0, "
                 "failures = 0, error = '', etag = ?, last_modified = ?, "
@@ -451,7 +497,7 @@ class InboxStore:
                 "site_url = COALESCE(NULLIF(?, ''), site_url) WHERE key = ?",
                 (now, now + interval, etag, last_modified, final_url, feed_title,
                  site_url, key))
-        return IngestResult(new=new, older=older, waiting=waiting)
+        return IngestResult(new=new, older=older, waiting=waiting, too_long=too_long)
 
     def page(self, view: View, *, query: str = "", after: Optional[tuple] = None,
              limit: int = PAGE_SIZE) -> List[PostRow]:
@@ -459,9 +505,13 @@ class InboxStore:
         the last row of the previous page."""
         where, args = self._view_filter(view)
         if query.strip():
-            like = f"%{_escape_like(query.strip())}%"
-            where.append("(i.title LIKE ? ESCAPE '\\' OR i.excerpt LIKE ? ESCAPE '\\' "
-                         "OR s.title LIKE ? ESCAPE '\\' OR s.feed_title LIKE ? ESCAPE '\\')")
+            # Case folded beyond ASCII, as held lists search (str.casefold):
+            # SQLite's LIKE folds ASCII only, and "über" must find "Über".
+            like = f"%{_escape_like(query.strip().casefold())}%"
+            where.append("(fold(i.title) LIKE ? ESCAPE '\\' "
+                         "OR fold(i.excerpt) LIKE ? ESCAPE '\\' "
+                         "OR fold(s.title) LIKE ? ESCAPE '\\' "
+                         "OR fold(s.feed_title) LIKE ? ESCAPE '\\')")
             args += [like, like, like, like]
         if after is not None:
             where.append("(i.position, i.source_key, i.d_tag) < (?, ?, ?)")
@@ -536,7 +586,19 @@ class InboxStore:
 
     def restore(self, source_key: str, d_tag: str, revision: int) -> int:
         """Bring a skipped post back where it was."""
-        return self._move(source_key, d_tag, revision, skip=False)
+        revision = self._move(source_key, d_tag, revision, skip=False)
+        with self._db:
+            self._db.execute("DELETE FROM skip_memory WHERE d_tag = ?", (d_tag,))
+        return revision
+
+    def _skips_remembered(self, d_tags: Iterable[str]) -> Set[str]:
+        tags = list(d_tags)
+        found: Set[str] = set()
+        for chunk in _chunks(tags, 400):
+            marks = ", ".join("?" * len(chunk))
+            found.update(row["d_tag"] for row in self._db.execute(
+                f"SELECT d_tag FROM skip_memory WHERE d_tag IN ({marks})", tuple(chunk)))
+        return found
 
     def _move(self, source_key: str, d_tag: str, revision: int, *, skip: bool) -> int:
         with self._db:
@@ -686,13 +748,16 @@ class InboxStore:
             self._db.execute("UPDATE jobs SET status = 'stopped' WHERE status = 'stopping'")
 
     def prune_jobs(self) -> None:
-        """Finished jobs older than a week go, rows and all."""
+        """Jobs done for good (stopped or completed) older than a week go,
+        rows and all. One with failed posts stays: they can be tried
+        again (review L12)."""
         limit = self._now() - FINISHED_JOB_DAYS * 24 * 3600
-        marks = ", ".join("?" * len(JOB_FINISHED))
+        done = ("stopped", "completed")
+        marks = ", ".join("?" * len(done))
         with self._db:
             old = [row["id"] for row in self._db.execute(
                 f"SELECT id FROM jobs WHERE status IN ({marks}) AND updated_at < ?",
-                (*JOB_FINISHED, limit))]
+                (*done, limit))]
             for job_id in old:
                 self._db.execute("DELETE FROM job_rows WHERE job_id = ?", (job_id,))
                 self._db.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
