@@ -1073,9 +1073,12 @@ class ImportsController(QObject):
             if generation != self._generation:
                 return
             content = template.content
-            if item.partial:
-                note = TRIMMED_POST if post.trimmed else PARTIAL_POST
-                content += "\n\n*" + note + "*"
+            if post.trimmed:
+                # Nothing of the body is left: the word first, where the
+                # body would be, then where the post is.
+                content = "*" + TRIMMED_POST + "*\n\n" + content
+            elif item.partial:
+                content += "\n\n*" + PARTIAL_POST + "*"
             on_ready(content, Article(
                 title=template.title, summary=template.summary,
                 image=template.image or snapshots.cover(item), tags=template.hashtags,

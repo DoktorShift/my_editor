@@ -252,8 +252,8 @@ def test_a_post_whose_text_is_gone_says_so(tmp_path):
                                on_failed=lambda reason: out.update(failed=reason))
     settle()
     assert "Text that was here" not in out["md"]
-    assert out["md"].rstrip().endswith("*" + TRIMMED_POST + "*")
-    assert "https://blog.example/old" in out["md"]          # Originally published at
+    assert out["md"].startswith("*" + TRIMMED_POST + "*")    # where the body would be
+    assert out["md"].rstrip().endswith("(https://blog.example/old)*")    # then where it is
     controller.account_changed(None)
 
 
