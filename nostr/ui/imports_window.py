@@ -301,6 +301,12 @@ class ImportsWindow(QMainWindow):
             self.act_sidebar.setShortcut(QKeySequence("Ctrl+Meta+S"))
         self.act_sidebar.toggled.connect(self._on_sidebar_toggled)
         bar.addAction(self.act_sidebar)
+        # Reachable with Tab like the toolbar's other buttons: on Windows
+        # and Linux this window has no menu bar of its own, so Show Sidebar
+        # had no keyboard path, and a narrow window folds the sidebar away
+        # with the lists and sources in it (CP2 review N9).
+        self.sidebar_button = bar.widgetForAction(self.act_sidebar)
+        self.sidebar_button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
 
         self.act_follow = QAction(_("Follow a Website…"), self)
         self.act_follow.setObjectName("imports_follow")

@@ -624,3 +624,20 @@ def test_the_list_of_sources_says_when_a_change_is_not_shared(tmp_path):
     win.close()
     controller.account_changed(None)
     settle()
+
+
+def test_show_sidebar_is_reachable_with_the_keyboard(window):
+    """CP2 review N9: on Windows and Linux this window has no menu bar of
+    its own, and the toolbar's sidebar button took no focus, so a folded
+    sidebar (a narrow window) could not be brought back from the keyboard."""
+    button = window.sidebar_button
+    assert button.focusPolicy() & Qt.FocusPolicy.TabFocus
+    window.act_sidebar.setChecked(False)
+    assert not window.act_sidebar.isChecked()
+    button.setFocus(Qt.FocusReason.TabFocusReason)
+    QTest.keyClick(button, Qt.Key.Key_Space)
+    assert window.act_sidebar.isChecked()
+    # In the Tab chain: Shift+Tab from the Add button reaches it.
+    window.add_button.setFocus(Qt.FocusReason.TabFocusReason)
+    assert window.add_button.previousInFocusChain() is button or \
+        button.nextInFocusChain() is window.add_button
