@@ -931,7 +931,7 @@ class ImportsWindow(QMainWindow):
             dialog.finished.connect(self._on_review_finished)
             dialog.open()
 
-        self._controller.images_of(chosen, on_ready=ready)
+        self._controller.images_of(chosen, on_ready=ready, on_failed=self.banner.say)
 
     def _on_review_finished(self, result: int) -> None:
         # A bound slot: a closure over this window on its dialog would

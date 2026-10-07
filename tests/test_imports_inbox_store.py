@@ -130,11 +130,21 @@ class TestIngest:
         source = store.source(KEY)
         assert (source.etag, source.last_modified) == ("old", "old")
 
-    def test_a_post_too_long_to_keep_is_counted(self, store, monkeypatch):
+    def test_a_post_too_long_to_keep_is_kept_cut_and_marked(self, store, monkeypatch):
+        """Engine review L7, CP2 review: a post past the limit was dropped
+        without a word. It is kept with its text cut, as STANDUP keeps one,
+        and marked, so importing it reads its own page."""
         monkeypatch.setattr("nostr.imports.inbox_store.MAX_BODY_BYTES", 100)
         long = make_item("long", guid="g-long", content_html="<p>" + "x" * 70_000 + "</p>")
-        result = store.ingest(KEY, [long])
-        assert result.too_long == 1
+        short = make_item("short", guid="g-short", content_html="<p>x</p>")
+        result = store.ingest(KEY, [long, short])
+        assert result.too_long == 1 and not result.error
+        assert sorted(view_titles(store, View(OLDER_POSTS))) == ["long", "short"]
+        kept = store.item(KEY, next(p.d_tag for p in store.page(View(OLDER_POSTS))
+                                    if p.title == "long"))
+        assert kept.partial and len(kept.content_html.encode("utf-8")) <= 100
+        assert not store.item(KEY, next(p.d_tag for p in store.page(View(OLDER_POSTS))
+                                        if p.title == "short")).partial
 
     def test_counts_per_source_and_stats(self, store, clock):
         store.ingest(KEY, items("a"))

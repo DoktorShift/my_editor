@@ -112,6 +112,9 @@ SET_ASIDE = _("The file that keeps imports on this computer was damaged, so MyEd
 NO_SOURCES_IN_LIST = _("No sources were found in that list. Is it a subscription export "
                        "from a feed reader?")
 NOTHING_FOUND = _("Nothing to import was found at that address.")
+PARTIAL_POST = _("This post is longer than MyEditor keeps here. Open Original reads all of "
+                 "it, and a draft made of it gets the whole post from its page.")
+IMAGES_UNREADABLE = _("Couldn't read the images of these posts.")
 
 
 class ImportsController(QObject):
@@ -617,8 +620,12 @@ class ImportsController(QObject):
             collection.states.update(existing.states)
             self.posts_changed.emit()
 
+        # Unavailable, the posts simply show no state; Create checks again
+        # and fails closed. Said in the log, never silent (review L8).
         self.catalogue.look_up(self._profile, tags, on_ready=found,
-                               on_unavailable=lambda _reason: None)
+                               on_unavailable=lambda reason: _log.warning(
+                                   "could not ask which posts of %s exist already: %s",
+                                   collection.label[:80], reason))
 
     # ------------------------------------------------------------------ #
     # Following, files and links                                           #
@@ -884,7 +891,7 @@ class ImportsController(QObject):
 
         self.catalogue.look_up(
             self._profile, tags, on_ready=found,
-            on_unavailable=lambda reason: _log.info(
+            on_unavailable=lambda reason: _log.warning(
                 "could not ask which posts exist already: %s", reason))
 
     # ------------------------------------------------------------------ #
@@ -908,7 +915,10 @@ class ImportsController(QObject):
         def made(template) -> None:
             if generation != self._generation:
                 return
-            on_ready(template.content, Article(
+            content = template.content
+            if item.partial:
+                content += "\n\n*" + PARTIAL_POST + "*"
+            on_ready(content, Article(
                 title=template.title, summary=template.summary,
                 image=template.image or snapshots.cover(item), tags=template.hashtags,
                 author=author, published_at=template.published_at or 0))
@@ -1003,9 +1013,11 @@ class ImportsController(QObject):
         return job.id
 
     def images_of(self, posts: Sequence[Post], *,
-                  on_ready: Callable[[List[str]], None]) -> None:
+                  on_ready: Callable[[List[str]], None],
+                  on_failed: Optional[Callable[[str], None]] = None) -> None:
         """Every image an import of ``posts`` would copy, for the review
-        (found off the UI thread: it converts each post)."""
+        (found off the UI thread: it converts each post). A failure says
+        so (review L8: it read as "no image to copy")."""
         items = [item for item in map(self.item, posts) if item is not None]
         generation = self._generation
 
@@ -1013,8 +1025,12 @@ class ImportsController(QObject):
             if generation == self._generation:
                 on_ready(list(images))
 
-        self._run_blocking(lambda: snapshots.images_to_copy(items), found,
-                           lambda _exc: found([]))
+        def failed(exc) -> None:
+            _log.warning("could not find the images of %d posts: %s", len(items), exc)
+            if generation == self._generation and on_failed is not None:
+                on_failed(IMAGES_UNREADABLE)
+
+        self._run_blocking(lambda: snapshots.images_to_copy(items), found, failed)
 
     # ------------------------------------------------------------------ #
     # Imports                                                              #

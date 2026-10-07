@@ -47,6 +47,7 @@ def make_item(
     author=None,
     title_from_url=False,
     content_markdown=None,
+    partial=False,
 ) -> FeedItem:
     return FeedItem(
         guid=guid if guid is not None else title,
@@ -60,6 +61,7 @@ def make_item(
         author=author,
         title_from_url=title_from_url,
         content_markdown=content_markdown,
+        partial=partial,
     )
 
 

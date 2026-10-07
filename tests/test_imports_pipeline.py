@@ -606,6 +606,19 @@ class TestFullTextRecovery:
         settle()
         assert pages.calls == []
 
+    def test_a_post_kept_only_in_part_is_read_from_its_page(self):
+        """A post the inbox kept only in part (too long) is read from its
+        page whatever the option, and any more text is adopted."""
+        factory, created = make_factory()
+        pages = FakeFetcher({ARTICLE_URL: ("ok", ARTICLE_PAGE)})
+        item = make_item("Long", guid="t1", link=ARTICLE_URL, content_html=THIN_HTML,
+                         partial=True)
+        job = make_job([item], factory=factory, page_fetcher=pages, fetch_full_text=False)
+        job.start()
+        settle()
+        assert pages.calls == [ARTICLE_URL]
+        assert "Paragraph 3" in created[0].inner_event["content"]
+
     def test_page_fetch_failure_keeps_feed_body(self):
         factory, created = make_factory()
         pages = FakeFetcher({ARTICLE_URL: ("err", "HTTP 503")})

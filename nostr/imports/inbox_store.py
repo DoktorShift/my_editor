@@ -39,7 +39,7 @@ import logging
 import sqlite3
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
@@ -229,6 +229,20 @@ CREATE TABLE job_rows (job_id TEXT NOT NULL, idx INTEGER NOT NULL, d_tag TEXT NO
   status TEXT NOT NULL, stage TEXT NOT NULL DEFAULT '', error TEXT NOT NULL DEFAULT '',
   signed_event TEXT, snapshot TEXT, PRIMARY KEY (job_id, idx));
 """
+
+
+def _cut(item: FeedItem) -> FeedItem:
+    """``item`` with its text cut to what the inbox keeps, marked partial."""
+    def cut(text: Optional[str]) -> Optional[str]:
+        if not text:
+            return text
+        data = text.encode("utf-8")
+        if len(data) <= MAX_BODY_BYTES:
+            return text
+        return data[:MAX_BODY_BYTES].decode("utf-8", errors="ignore")
+    return replace(item, content_html=cut(item.content_html) or "",
+                   content_markdown=cut(item.content_markdown),
+                   summary=cut(item.summary), partial=True)
 
 
 def database_path(config_dir: Path, pubkey: str) -> Path:
@@ -480,12 +494,14 @@ class InboxStore:
                 snapshot = snapshots.to_snapshot(item)
                 text = json.dumps(snapshot, ensure_ascii=False)
                 if len(text.encode("utf-8")) > MAX_BODY_BYTES + 64 * 1024:
-                    # Too long to keep here: said in the log and counted,
-                    # never dropped without a word (review L7).
+                    # Kept with its text cut at the limit, as STANDUP keeps
+                    # one, and marked: importing it reads its own page for
+                    # the whole text (review L7: it was dropped).
                     too_long += 1
-                    _log.info("a post of %s is too long to keep in the inbox: %s", key,
-                              (item.title or item.link or d_tag)[:120])
-                    continue
+                    _log.warning("a post of %s is longer than the inbox keeps; its text is "
+                                 "cut: %s", key, (item.title or item.link or d_tag)[:120])
+                    item = _cut(item)
+                    text = json.dumps(snapshots.to_snapshot(item), ensure_ascii=False)
                 if baseline or (published and published < source["created_at"]):
                     fresh = OLDER
                 else:

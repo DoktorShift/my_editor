@@ -55,6 +55,10 @@ class FeedItem:
     # carries an audio enclosure. The import pipeline renders it as the
     # episode's Markdown body.
     podcast: Optional[object] = None
+    # True when only part of the text is kept (the Imports inbox keeps at
+    # most 256 KiB of a post, as EINUNDZWANZIG STANDUP does). Importing
+    # such a post reads its own page for the whole text.
+    partial: bool = False
 
 
 @dataclass(frozen=True)

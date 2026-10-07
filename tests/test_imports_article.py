@@ -185,6 +185,24 @@ def test_a_long_source_name_elides_and_the_date_stays_whole():
     widget.hide()
 
 
+def test_a_post_kept_only_in_part_says_so(tmp_path):
+    """The reader learns a long post is cut here, and where all of it is."""
+    from nostr.imports_controller import PARTIAL_POST
+    from tests.imports_fakes import make_item
+    from tests.outbox_fakes import settle
+    from tests.test_imports_window import controller_for
+    controller = controller_for(tmp_path)
+    collection = controller.open_posts(kind="link", label="A link", items=[
+        make_item("Long", guid="g", link="https://blog.example/long",
+                  content_html="<p>The start of a long post.</p>", partial=True)])
+    out = {}
+    controller.prepare_article(collection.posts()[0], on_ready=lambda md, art: out.update(md=md),
+                               on_failed=lambda reason: out.update(failed=reason))
+    settle()
+    assert out["md"].rstrip().endswith("*" + PARTIAL_POST + "*")
+    controller.account_changed(None)
+
+
 def test_another_post_never_shows_the_previous_body():
     """Review L1: the header and Open Original switched at once while the
     body still showed the previous post until the new one was ready."""

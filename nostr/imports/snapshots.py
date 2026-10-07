@@ -42,7 +42,7 @@ _MD_IMAGE = re.compile(r"!\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)")
 _MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 _MD_MARKS = re.compile(r"(?m)^\s{0,3}(?:#{1,6}\s+|>\s?|[-*+]\s+|\d+[.)]\s+)|[*_`~]+")
 _FIELDS = ("guid", "title", "link", "summary", "content_html", "published_at",
-           "image", "author", "title_from_url", "content_markdown")
+           "image", "author", "title_from_url", "content_markdown", "partial")
 
 
 def identifier_of(item: FeedItem) -> str:
@@ -84,6 +84,7 @@ def from_snapshot(data: Dict[str, Any]) -> FeedItem:
         title_from_url=bool(data.get("title_from_url")),
         content_markdown=data.get("content_markdown") or None,
         podcast=podcast,
+        partial=bool(data.get("partial")),
     )
 
 

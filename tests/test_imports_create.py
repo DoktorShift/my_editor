@@ -365,6 +365,19 @@ def test_the_review_shows_what_the_import_copies(window, monkeypatch):
     assert window._skip_images == {"https://x.example/a.png"}
 
 
+def test_images_that_cannot_be_read_say_so(window, monkeypatch):
+    """CP2 review L8: a failed search for the images read as "no image to
+    copy"."""
+    from nostr.imports import snapshots
+    from nostr.imports_controller import IMAGES_UNREADABLE
+
+    def broken(_items):
+        raise ValueError("a body that cannot be converted")
+    monkeypatch.setattr(snapshots, "images_to_copy", broken)
+    window._review_images()
+    assert window.banner.label.text() == IMAGES_UNREADABLE
+
+
 def test_no_image_to_copy_is_said(window, monkeypatch):
     """Review L8: with only inline or relative images, Review Images did
     nothing and said nothing."""

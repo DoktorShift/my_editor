@@ -517,9 +517,10 @@ class ImportItemsJob(QObject):
         """
         if self._cancelled:
             return
+        # A post kept only in part (too long for the inbox) is read from its
+        # page whatever the option: the part alone would be a cut draft.
         if not (
-            self._fetch_full_text
-            and self._body_is_thin(template, item)
+            (item.partial or (self._fetch_full_text and self._body_is_thin(template, item)))
             and _is_http_url(item.link)
         ):
             self._publish_template_as_draft(template)
@@ -560,7 +561,10 @@ class ImportItemsJob(QObject):
                 markdown, page_title = result
                 # Adopt only on a clear win over the summary we already
                 # have; a bad extraction is usually shorter, not longer.
-                if len(markdown) > max(THIN_CONTENT_CHARS, feed_body_len * 2):
+                # For a post kept only in part, any more text is a win.
+                needed = feed_body_len if item.partial else max(THIN_CONTENT_CHARS,
+                                                                 feed_body_len * 2)
+                if len(markdown) > needed:
                     updated = replace(
                         template, content=self._with_footer(markdown, item))
                     if item.title_from_url and page_title:
