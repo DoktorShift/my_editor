@@ -284,7 +284,7 @@ def format_absolute_time(ts: int) -> str:
     pattern is a Qt date format and translated, so each language orders
     day, month and time its own way.
     """
-    return _format_moment(ts, _("dd MMMM yyyy 'at' HH:mm"))
+    return _format_moment(ts, _("d MMMM yyyy 'at' HH:mm"))
 
 
 def format_absolute_date(ts: int) -> str:
@@ -294,7 +294,7 @@ def format_absolute_date(ts: int) -> str:
     the preview's origin line cannot be formatted differently from one
     another.
     """
-    return _format_moment(ts, _("dd MMMM yyyy"))
+    return _format_moment(ts, _("d MMMM yyyy"))
 
 
 def format_short_date(ts: int) -> str:
