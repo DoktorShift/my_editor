@@ -722,9 +722,10 @@ class HtmlEditor(QTextEdit):
         words.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
         words.removeSelectedText()
         self.setTextCursor(words)
+        # The text has the focus all along (the menu never takes it); a
+        # command may give it to a panel of its own (Add Link's).
         action.trigger()
         step.endEditBlock()
-        self.setFocus()
 
     def _slash_key(self, e) -> bool:
         """The keys of the open slash menu. True when one was handled."""

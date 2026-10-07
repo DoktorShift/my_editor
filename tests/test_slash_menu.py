@@ -272,6 +272,16 @@ plain = w.open_path(txt)
 plain.moveCursor(plain.textCursor().MoveOperation.End)
 type_text(plain, "/")
 r["plain_menu"] = plain.slash_menu() is not None
+w.tabs.setCurrentIndex(w._editor_widget_index(ed))
+ed.setFocus()
+type_text(ed, "\n/link")
+press(ed, Qt.Key.Key_Return)
+app.processEvents()
+from link_popover import LinkPopover
+popovers = [p for p in ed.findChildren(LinkPopover) if p.isVisible()]
+r["link_popover"] = bool(popovers) and popovers[0].address_edit.hasFocus()
+for p in popovers:
+    p.close()
 for e in (ed, plain):
     e.document().setModified(False)
 w.close()
@@ -289,3 +299,4 @@ def test_the_window_offers_its_own_commands(tmp_path):
     assert r["groups"] == ["Text", "Lists", "Blocks", "Insert"]
     assert r["markdown"] == "## Title\n"
     assert r["plain_menu"] is False
+    assert r["link_popover"]                    # Add Link's panel keeps the focus it took
