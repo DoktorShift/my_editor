@@ -532,14 +532,20 @@ def test_a_backup_that_cannot_be_finished_leaves_the_previous_one_whole(tmp_path
 
 
 # --------------------------------------------------------------------------- #
-# Markdown structure survives a crash too
+# A crash gives back exactly what was typed, structure included
 # --------------------------------------------------------------------------- #
 
 def _markdown_editor(markdown: str) -> HtmlEditor:
-    from markdown_writer import READ_FEATURES
+    from markdown_writer import read_markdown
     ed = HtmlEditor()
-    ed.document().setMarkdown(markdown, READ_FEATURES)
+    read_markdown(ed.document(), markdown)
     return ed
+
+
+def _restored(backup) -> HtmlEditor:
+    restored = HtmlEditor()
+    recovery.load_backup_content(restored, _record_of(backup))
+    return restored
 
 
 STRUCTURED = "Intro with `code`.\n\n> A quote\n\n```python\nprint(1)\n```\n"
@@ -550,22 +556,20 @@ def test_quotes_and_code_survive_backup_and_restore(tmp_path):
     backup = recovery.EditorBackup(_markdown_editor(STRUCTURED), None)
     assert backup.write_now()
     record = _record_of(backup)
-    assert record["markdown"] == STRUCTURED
+    assert record["structure"]["blocks"] and record["structure"]["code"]
     assert record["format"] == "html" and record["content"]   # older builds read this
-
-    restored = HtmlEditor()
-    recovery.load_backup_content(restored, record)
-    assert document_to_markdown(restored.document()) == STRUCTURED
+    assert document_to_markdown(_restored(backup).document()) == STRUCTURED
 
 
-def test_a_document_html_keeps_whole_has_no_markdown_copy(tmp_path):
+def test_a_document_html_keeps_whole_has_no_structure_list(tmp_path):
     backup = recovery.EditorBackup(_markdown_editor("# Title\n\n- one\n- two\n"), None)
     assert backup.write_now()
-    assert "markdown" not in _record_of(backup)
+    assert "structure" not in _record_of(backup)
 
 
-def test_colors_keep_the_html_snapshot(tmp_path):
+def test_colors_and_code_survive_together(tmp_path):
     from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
+    from markdown_writer import document_to_markdown
     ed = _markdown_editor(STRUCTURED)
     cursor = QTextCursor(ed.document())
     cursor.movePosition(QTextCursor.MoveOperation.NextWord, QTextCursor.MoveMode.KeepAnchor)
@@ -574,7 +578,170 @@ def test_colors_keep_the_html_snapshot(tmp_path):
     cursor.mergeCharFormat(red)
     backup = recovery.EditorBackup(ed, None)
     assert backup.write_now()
-    assert "markdown" not in _record_of(backup)
+    restored = _restored(backup)
+    assert document_to_markdown(restored.document()) == STRUCTURED
+    first = QTextCursor(restored.document())
+    first.setPosition(1)
+    assert first.charFormat().foreground().color() == QColor("red")
+
+
+@pytest.mark.parametrize("typed", [
+    "In HTML, <br> breaks a line.",
+    "Write &amp; for an ampersand.",
+    "A star stays \\* here, and *this* too.",
+    "Hidden <!-- note --> words.",
+    "    four spaces first",
+    "Backticks `around` a word, and <b>tags</b>.",
+])
+def test_typed_markdown_characters_come_back_as_typed(typed):
+    # Review F1: a restore that read the backup as Markdown lost the rest
+    # of the document after a typed <br>, and changed entities and escapes.
+    from PySide6.QtGui import QTextCursor
+    ed = HtmlEditor()
+    cursor = ed.textCursor()
+    cursor.insertText("Code: ")
+    code = rich_text_style_code()
+    cursor.insertText("x = 1", code)
+    cursor.insertText(" end", code.__class__())
+    cursor.insertBlock()
+    cursor.insertText(typed)
+    cursor.insertBlock()
+    cursor.insertText("Second paragraph.")
+    cursor.insertBlock()
+    cursor.insertText("Third paragraph.")
+    backup = recovery.EditorBackup(ed, None)
+    assert backup.write_now()
+    restored = _restored(backup)
+    assert restored.toPlainText() == ed.toPlainText()
+    probe = QTextCursor(restored.document())
+    probe.setPosition(len("Code: ") + 2)
+    assert probe.charFormat().fontFixedPitch()          # the inline code is back too
+
+
+def rich_text_style_code():
+    import rich_text
+    return rich_text.style_format(rich_text.CODE, True)
+
+
+def test_a_note_comes_back_without_new_blank_lines():
+    from markdown_writer import document_to_note_text
+    ed = HtmlEditor()
+    ed.setPlainText("first line\nsecond line\nthird line")
+    cursor = ed.textCursor()
+    cursor.setPosition(0)
+    cursor.setPosition(5, cursor.MoveMode.KeepAnchor)
+    cursor.mergeCharFormat(rich_text_style_code())
+    backup = recovery.EditorBackup(ed, None)
+    assert backup.write_now()
+    assert document_to_note_text(_restored(backup).document()) == document_to_note_text(
+        ed.document())
+
+
+def test_an_html_document_keeps_its_html_formatting():
+    # Alignment, a size, sub- and superscript and a merged cell, next to
+    # inline code: the HTML keeps them, the structure list adds the code.
+    from PySide6.QtGui import QTextCursor
+    ed = HtmlEditor()
+    ed.setHtml('<p align="center"><span style="font-size:20pt">Big</span> H<sub>2</sub>O '
+               'x<sup>2</sup> <code>code</code></p><table border="1"><tr>'
+               '<td colspan="2">merged</td></tr><tr><td>a</td><td>b</td></tr></table>')
+    probe = QTextCursor(ed.document())
+    probe.setPosition(ed.toPlainText().index("code") + 1)
+    whole = QTextCursor(ed.document())
+    whole.setPosition(ed.toPlainText().index("code"))
+    whole.setPosition(ed.toPlainText().index("code") + 4, QTextCursor.MoveMode.KeepAnchor)
+    whole.mergeCharFormat(rich_text_style_code())
+    backup = recovery.EditorBackup(ed, "/tmp/page.html")
+    assert backup.write_now()
+    kept = _restored(backup)                     # the editor owns the document
+    restored = kept.document()
+    first = restored.begin()
+    assert first.blockFormat().alignment() & __import__("PySide6.QtCore").QtCore.Qt.AlignHCenter
+    sizes = [f.charFormat().fontPointSize() for f in _fragments(first)]
+    assert 20 in sizes
+    aligns = [f.charFormat().verticalAlignment() for f in _fragments(first)]
+    from PySide6.QtGui import QTextCharFormat
+    assert QTextCharFormat.VerticalAlignment.AlignSubScript in aligns
+    assert QTextCharFormat.VerticalAlignment.AlignSuperScript in aligns
+    assert any(f.charFormat().fontFixedPitch() for f in _fragments(first))
+    cell = QTextCursor(restored.findBlock(restored.toPlainText().index("merged")))
+    assert cell.currentTable().cellAt(cell).columnSpan() == 2
+
+
+def _fragments(block):
+    it = block.begin()
+    while not it.atEnd():
+        if it.fragment().isValid():
+            yield it.fragment()
+        it += 1
+
+
+def test_a_structure_list_for_other_text_is_not_applied():
+    from markdown_writer import document_to_markdown
+    backup = recovery.EditorBackup(_markdown_editor(STRUCTURED), None)
+    assert backup.write_now()
+    record = _record_of(backup)
+    record["content"] = record["content"].replace("Intro", "Other")
+    restored = HtmlEditor()
+    recovery.load_backup_content(restored, record)
+    assert restored.toPlainText().startswith("Other with code.")
+    assert ">" not in document_to_markdown(restored.document())   # no quote put on wrong text
+
+
+def test_an_older_markdown_record_is_used_only_when_it_gives_back_the_text():
+    from markdown_writer import document_to_markdown
+    ed = _markdown_editor(STRUCTURED)
+    backup = recovery.EditorBackup(ed, None)
+    assert backup.write_now()
+    record = _record_of(backup)
+    del record["structure"]
+    record["markdown"] = STRUCTURED                    # as an earlier build wrote it
+    restored = HtmlEditor()
+    recovery.load_backup_content(restored, record)
+    assert document_to_markdown(restored.document()) == STRUCTURED
+    # Typed text the Markdown would change: the HTML wins.
+    typed = HtmlEditor()
+    typed.setPlainText("In HTML, <br> breaks a line.\nMore text.")
+    backup = recovery.EditorBackup(typed, None)
+    assert backup.write_now()
+    record = _record_of(backup)
+    record["markdown"] = "In HTML, <br> breaks a line.\n\nMore text.\n"
+    restored = HtmlEditor()
+    recovery.load_backup_content(restored, record)
+    assert restored.toPlainText() == "In HTML, <br> breaks a line.\nMore text."
+
+
+def test_an_idle_tab_is_not_written_again(monkeypatch):
+    # Review L1 (early range): every tick rebuilt the snapshot of every
+    # open tab, typing or not.
+    backup = recovery.EditorBackup(_markdown_editor(STRUCTURED), None)
+    assert backup.write_now()
+    built = []
+    original = backup._snapshot
+    monkeypatch.setattr(backup, "_snapshot", lambda: built.append(1) or original())
+    assert backup.write_now()
+    assert built == []
+    backup._editor.textCursor().insertText("more")
+    assert backup.write_now()
+    assert built == [1]
+
+
+def test_typed_footnotes_survive_a_crash():
+    # Review H3: restored from Markdown, "[^2]: Ibid." was read as a link
+    # definition and lost.
+    from markdown_writer import document_to_markdown
+    ed = _markdown_editor("> A quote\n")
+    cursor = ed.textCursor()
+    cursor.movePosition(cursor.MoveOperation.End)
+    for line in ("A claim[^1] and another[^2].", "[^1]: https://example.com/source",
+                 "[^2]: Ibid."):
+        cursor.insertBlock(__import__("PySide6.QtGui").QtGui.QTextBlockFormat())
+        cursor.insertText(line)
+    backup = recovery.EditorBackup(ed, None)
+    assert backup.write_now()
+    restored = _restored(backup)
+    assert restored.toPlainText() == ed.toPlainText()
+    assert document_to_markdown(restored.document()) == document_to_markdown(ed.document())
 
 
 def test_a_document_opened_as_markdown_text_stays_that_way(tmp_path):

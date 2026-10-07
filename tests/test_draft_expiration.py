@@ -63,10 +63,16 @@ def test_an_expired_wrap_never_replaces_the_stored_version():
     assert store.get("d1").event_id == first
 
 
-def test_an_expired_deletion_deletes_nothing():
+def test_an_expired_deletion_still_keeps_an_older_copy_out():
+    """Engine review L4: blanked wraps written before D-3 carry 90 days;
+    once those passed, an older copy still held by a lagging relay came
+    back. The deletion counts whatever its own end date."""
     sync, store = sync_with_store()
-    sync._on_wrap_event(wrap(created_at=NOW - 100, expiration=NOW + 3600))
     sync._on_wrap_event(wrap(created_at=NOW - 50, expiration=NOW - 10, content=""))
+    sync._on_wrap_event(wrap(created_at=NOW - 100))
+    assert store.get("d1") is None
+    # A draft written after the deletion is a new draft.
+    sync._on_wrap_event(wrap(created_at=NOW - 20))
     assert store.get("d1") is not None
 
 

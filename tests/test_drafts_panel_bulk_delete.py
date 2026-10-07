@@ -23,12 +23,21 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtGui import QKeyEvent
-from PySide6.QtWidgets import QApplication, QListWidget
+from PySide6.QtWidgets import QApplication, QLabel, QListWidget
 
 from nostr.draft_store import DraftStore
 from nostr.drafts import DraftWrapMeta
 from nostr.profiles import Profile
 from nostr.ui.drafts_panel import DraftsPanel
+from tests.widget_lifetime import delete_new_windows
+
+
+@pytest.fixture(autouse=True)
+def _windows_deleted():
+    """Every window and panel a test makes is deleted after it: left to
+    the cycle collector, one without a parent can crash it."""
+    yield from delete_new_windows()
+
 
 PK = "a" * 64
 
@@ -48,6 +57,10 @@ def wrap(identifier, created_at=1700000000):
 
 @pytest.fixture
 def panel():
+    return build_panel()
+
+
+def build_panel():
     store = DraftStore()
     store.bind_profile(PK)
     for i in range(5):
@@ -211,3 +224,44 @@ def test_the_menu_asks_the_host_rather_than_deleting_anything(panel):
     assert out and panel._store is not None
     # Still there: removing the row is the host's answer, not the menu's.
     assert len(panel._store) == 5
+
+
+def test_every_row_command_reaches_the_host(panel):
+    """The menu's commands are carried on their actions and run by one
+    slot of the panel (no closure over the panel on its children)."""
+    asked = []
+    panel.open_draft.connect(lambda i: asked.append(("open", i)))
+    panel.publish_draft.connect(lambda i: asked.append(("publish", i)))
+    panel.copy_event_id.connect(lambda i: asked.append(("copy", i)))
+    item = panel._list.item(0)
+    identifier = rows_of(panel)[0]
+    menu = panel._build_context_menu(item)
+    for text in ("Open in New Tab", "Publish…", "Copy Event ID"):
+        next(a for a in menu.actions() if a.text() == text).trigger()
+    assert asked == [("open", identifier), ("publish", identifier),
+                     ("copy", identifier + "e")]
+    assert QApplication.clipboard().text() == identifier + "e"
+
+
+def test_a_panel_without_a_parent_is_freed_without_the_collector():
+    """Left to the cycle collector, a panel without a parent can crash it
+    (Shiboken hands its children back to Python one by one). Nothing the
+    panel's children keep may hold the panel, its menus included."""
+    import gc
+    import weakref
+    panel = build_panel()
+    panel.add_view("published", "Published", "", QLabel("Published"))
+    panel.show_view("published")
+    panel.show_view(DraftsPanel.DRAFTS_VIEW)
+    panel._build_context_menu(panel._list.item(0))
+    ref = weakref.ref(panel)
+    gc.collect()
+    # As it was afterwards: the test run collects on its own (conftest).
+    collecting = gc.isenabled()
+    gc.disable()
+    try:
+        del panel
+        assert ref() is None
+    finally:
+        if collecting:
+            gc.enable()

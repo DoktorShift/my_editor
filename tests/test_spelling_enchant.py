@@ -22,6 +22,15 @@ def test_without_the_library_spelling_is_unavailable_and_says_why():
     assert backend.check("helo", "en-US") is True
 
 
+def test_a_library_that_does_not_load_says_what_the_loader_said(tmp_path):
+    broken = tmp_path / "libenchant-2.so.2"
+    broken.write_bytes(b"not a library")
+    backend = EnchantBackend(library_names=(str(broken), "libenchant-missing.so.9"))
+    assert backend.is_available() is False
+    assert backend.problem.startswith("libenchant-2 could not be loaded: ")
+    assert len(backend.problem) > len("libenchant-2 could not be loaded: ") + 10
+
+
 # -- the real library ----------------------------------------------------------
 
 @pytest.fixture
@@ -59,6 +68,16 @@ def test_german_with_umlauts_and_sharp_s(backend):
     assert backend.check("schön", "de-DE") is True
     assert backend.check("Strase", "de-DE") is False
     assert "Straße" in backend.suggestions("Strase", "de-DE")
+
+
+def test_german_contractions_with_an_apostrophe_are_words(backend):
+    if "de-DE" not in backend.languages():
+        pytest.skip("no German dictionary installed")
+    checker = SpellChecker(backend)
+    assert checker.find_misspellings("Wie geht’s? Geht's gut? Hab’s gesehen.",
+                                     "de-DE") == []
+    assert [m.word for m in checker.find_misspellings("Wie gehtt's dir?", "de-DE")] == [
+        "gehtt's"]
 
 
 def test_a_learned_word_goes_into_the_persons_word_list(backend, tmp_path):

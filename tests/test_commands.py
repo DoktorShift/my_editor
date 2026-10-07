@@ -352,7 +352,7 @@ def test_the_pdf_reader_keeps_its_copy_key(qt_app):
 
 
 def test_paragraph_styles_use_each_platform_keys(fresh_window):
-    expected = "Ctrl+Alt+1" if sys.platform == "darwin" else "Ctrl+1"
+    expected = "Ctrl+Shift+T" if sys.platform == "darwin" else "Ctrl+1"
     action = fresh_window.commands.action("format.style.h1")
     assert action.shortcut().toString(QKeySequence.SequenceFormat.PortableText) == expected
     assert [a.objectName() for a in fresh_window.m_style.actions()] == [
@@ -365,7 +365,9 @@ def test_paragraph_styles_use_each_platform_keys(fresh_window):
 @pytest.mark.parametrize("platform, keys", [
     ("darwin", {"format.strike": "Ctrl+Shift+X", "format.list.bullet": "Ctrl+Shift+7",
                 "format.list.number": "Ctrl+Shift+9", "format.quote": "Ctrl+'",
-                "format.style.h2": "Ctrl+Alt+2", "edit.paste_plain": "Ctrl+Alt+Shift+V",
+                "format.style.h2": "Ctrl+Shift+H", "format.style.body": "Ctrl+Shift+B",
+                "format.style.h1": "Ctrl+Shift+T", "format.style.h3": "Ctrl+Shift+J",
+                "edit.paste_plain": "Ctrl+Alt+Shift+V",
                 "search.use_selection": "Ctrl+E", "format.reset": "Ctrl+\\",
                 "search.replace": "Ctrl+Alt+F",
                 "insert.link": "Ctrl+K"}),
@@ -375,7 +377,8 @@ def test_paragraph_styles_use_each_platform_keys(fresh_window):
                "search.use_selection": "", "format.reset": "Ctrl+\\",
                "search.replace": "Ctrl+H",
                "insert.link": "Ctrl+K"}),
-    ("linux", {"format.list.bullet": "Ctrl+Shift+8", "format.quote": "",
+    ("linux", {"format.list.bullet": "Ctrl+Shift+8", "format.list.number": "Ctrl+Shift+7",
+               "format.quote": "", "format.strike": "Alt+Shift+5", "format.reset": "Ctrl+\\",
                "format.style.body": "Ctrl+0"}),
 ])
 def test_each_platform_gets_its_own_conventions(qt_app, monkeypatch, platform, keys):
@@ -405,3 +408,32 @@ def test_imports_is_in_the_nostr_menu_without_a_shortcut(main_window_commands):
     command = main_window_commands.commands.command("nostr.imports")
     assert command.shortcut is None
     assert command.group == "Nostr"
+
+
+
+@pytest.mark.parametrize("path, keeps", [
+    ("/notes/page.html", True), ("/notes/page.HTM", True), ("/notes/a.md", False),
+    ("/notes/a.txt", False), (None, False),
+])
+def test_underline_is_offered_only_where_the_file_keeps_it(fresh_window, path, keeps):
+    from main_window import MainWindow
+    win = fresh_window
+    win._editor_kind = lambda ed: MainWindow._editor_kind(win, ed)
+    win._keeps_underline = MainWindow._keeps_underline
+    win.current_editor = lambda: _Editor(path)
+    MainWindow._update_editor_commands(win)
+    assert win.act_underline.isEnabled() is keeps
+    assert "underline" not in __import__("format_toolbar").LAYOUT
+
+
+
+def test_the_welcome_page_names_the_keys_the_platform_way(fresh_window):
+    # Review L7: it said "Ctrl+N" on a Mac too.
+    from main_window import MainWindow
+    from welcome import welcome_html
+    keys = MainWindow._welcome_keys(fresh_window)
+    native = fresh_window.act_new.shortcut().toString(QKeySequence.SequenceFormat.NativeText)
+    assert keys["file.new"] == native
+    page = welcome_html(keys)
+    assert f"<b>{native}</b>" in page
+    assert "<b>⌘N</b>" in welcome_html({"file.new": "⌘N"})

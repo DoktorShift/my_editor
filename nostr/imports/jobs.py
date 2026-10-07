@@ -34,6 +34,7 @@ account.
 
 from __future__ import annotations
 
+import time
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QObject, QTimer, Signal
@@ -62,7 +63,10 @@ STAGE_FULL_TEXT = "full_text"
 STAGE_IMAGES = "images"
 STAGE_SAVING = "saving"
 
-NO_RELAY = _("No relay accepted the draft yet. Try again to send it.")
+NO_RELAY = _("The draft couldn't be saved yet. Try again to send it.")
+# A kept draft this close to its end date is made anew instead of sent:
+# relays refuse an expired one, and the post would fail for good (L5).
+CHECKPOINT_MARGIN = 24 * 3600
 
 
 class ImportRunner(QObject):
@@ -83,6 +87,7 @@ class ImportRunner(QObject):
                  item_job_factory: Callable[..., QObject],
                  resend_factory: Callable[..., QObject],
                  pacer: Optional[Callable[[int, Callable[[], None]], None]] = None,
+                 clock: Callable[[], float] = time.time,
                  parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._store = store
@@ -91,11 +96,17 @@ class ImportRunner(QObject):
         self._item_job_factory = item_job_factory
         self._resend_factory = resend_factory
         self._pacer = pacer or (lambda ms, fn: QTimer.singleShot(ms, fn))
+        self._now = clock
         self._job: Optional[Job] = None
         self._existing = Existing()
         self._current = None          # the item job or resend in flight
         self._row_outcome: Dict[str, object] = {}
         self._generation = 0
+
+    def set_profile(self, profile) -> None:
+        """The same account signs another way now: the next posts are
+        asked about and signed through ``profile``."""
+        self._profile = profile
 
     # -- reading -------------------------------------------------------------
 
@@ -186,6 +197,7 @@ class ImportRunner(QObject):
             cancel = getattr(self._current, "cancel", None)
             if cancel is not None:
                 cancel()
+            _release(self._current)
             self._current = None
         job.status, job.error = "paused", reason
         self._store.save_job(job)
@@ -245,6 +257,9 @@ class ImportRunner(QObject):
             row.status, row.stage = ROW_EXISTING, ""
             self._store.save_row(job.id, row)
             self.job_changed.emit(job.id)
+        if row.signed_event and _expires_soon(row.signed_event, self._now()):
+            row.signed_event = None
+            self._store.save_row(job.id, row)
         if row.signed_event:
             self._resend(row)
         else:
@@ -290,9 +305,12 @@ class ImportRunner(QObject):
         return job.source_url if job else ""
 
     def _options(self, row: JobRow) -> dict:
-        options = dict(self._job.options) if self._job else {}
-        by_source = options.pop("by_source", {}) or {}
-        options.update(by_source.get(row.source_key, {}))
+        """A row's options: its source's defaults (``by_source``), and over
+        them what the person chose for this run."""
+        chosen = dict(self._job.options) if self._job else {}
+        by_source = chosen.pop("by_source", {}) or {}
+        options = dict(by_source.get(row.source_key, {}))
+        options.update(chosen)
         return options
 
     def _make(self, row: JobRow) -> None:
@@ -336,6 +354,9 @@ class ImportRunner(QObject):
         job.item_started.connect(
             lambda *_a: live() and self._set_stage(row, STAGE_PREPARING))
         job.completed.connect(lambda *_a: live() and self._settle_made(row, outcome))
+        # Let go of it once it is done (deferred: it is still in its own
+        # signal then). A 2000-post import used to keep 2000 of them.
+        job.completed.connect(lambda *_a: _release(job))
         job.start()
 
     def _settle_made(self, row: JobRow, outcome: dict) -> None:
@@ -371,6 +392,8 @@ class ImportRunner(QObject):
 
         job.completed.connect(completed)
         job.failed.connect(lambda reason: live() and self._end_row(row, ROW_FAILED, reason))
+        job.completed.connect(lambda *_a: _release(job))
+        job.failed.connect(lambda *_a: _release(job))
         try:
             job.send_signed(row.signed_event)
         except ValueError:
@@ -401,6 +424,23 @@ class ImportRunner(QObject):
         self._job = None
         self.job_changed.emit(job.id)
         self.job_finished.emit(job.id)
+
+
+def _expires_soon(event: dict, now: float) -> bool:
+    for tag in event.get("tags", []) if isinstance(event, dict) else []:
+        if isinstance(tag, list) and len(tag) >= 2 and tag[0] == "expiration":
+            try:
+                return int(tag[1]) <= now + CHECKPOINT_MARGIN
+            except (TypeError, ValueError):
+                return False
+    return False
+
+
+def _release(job) -> None:
+    """Delete a row's finished job on the next turn of the event loop."""
+    delete = getattr(job, "deleteLater", None)
+    if delete is not None:
+        delete()
 
 
 def unfinished(jobs: List[Job]) -> List[Job]:

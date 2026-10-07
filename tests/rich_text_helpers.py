@@ -9,15 +9,13 @@ opened, and written again, gives the same Markdown.
 
 from PySide6.QtGui import QTextDocument
 
-import rich_text
-from markdown_writer import READ_FEATURES, document_to_markdown
+from markdown_writer import document_to_markdown, read_markdown
 
 
 def from_markdown(text: str) -> QTextDocument:
     """A document opened from Markdown, the way the editor opens it."""
     doc = QTextDocument()
-    doc.setMarkdown(text, READ_FEATURES)
-    rich_text.normalize_after_markdown_load(doc)
+    read_markdown(doc, text)
     return doc
 
 

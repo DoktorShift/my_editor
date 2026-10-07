@@ -24,6 +24,7 @@ Write in the editor, hit publish, approve on your phone. The document goes out a
 
 - **Short notes** (kind 1, `Ctrl+Shift+P`): the editor's content as plain text, since that is what apps show for a note. Bold and italic are left out; list markers and link addresses stay.
 - **Long-form articles** (NIP-23 kind 30023, `Ctrl+Shift+A`): the body is the same Markdown a `.md` save writes (`markdown_writer.py`): bold, italic, strikethrough, inline code, links, headings, lists, quotes, code blocks, tables and task lists reach Nostr. Underline and colors have no Markdown and stay in local files. Lines typed one under the other become paragraphs of their own (NIP-23 asks for no hard line breaks), and Markdown typed by hand (`## Heading`, `[label](url)`, a code fence) is published as typed. An article draft or `.md` file that holds something the editor cannot show (footnotes, raw HTML, an image without alt text) opens as its Markdown text and is published exactly as written, so nothing is lost. Title, summary, slug (the `d`-tag identifier), cover image, and hashtags come with it. Re-publishing with the same slug replaces the previous version, so an article stays addressable as one `naddr1…` link across edits.
+- **The date an article first went out** stays with it through every edit: readers date the article by it. MyEditor takes it from the article's draft, or from what this computer remembers of its own publications (`~/.config/my_editor/article_first_published.json`), or asks the relays you publish to, the ones you read from and the indexers. An article none of them holds is new and dated today, as long as at least one of the relays you publish to (and an indexer) answered: one relay that is down does not hold up a new article. When none of the relays you publish to answers, nobody can tell whether the article went out before, so MyEditor asks you: **Try Again**, **Publish as New** (today's date) or **Cancel**. A draft saved after publishing keeps the date, so another device that opens the draft keeps it too.
 
 Both flows display a `Published from MyEditor` client tag so readers that honour NIP-89 can show which app produced the note.
 
@@ -71,7 +72,7 @@ Relay choice follows the **NIP-65 outbox model**, decided in one place (`nostr/o
 
 - A note or article goes to **your write relays** from your kind 10002 list first, then a membership relay if you have one, then the **read relays of everyone it mentions** (or the relay hint in the mention when their list is unknown). Your relay list goes along to those people's relays, so readers there can find the rest of what you write. While your list is unknown, or has fewer than two write relays, a small curated set fills in.
 - NIP-65 asks for all of a mentioned person's read relays; MyEditor sends to the first two of each (`INBOX_PER_MENTION`) and to ten for all mentions together (`INBOX_TOTAL_CAP`), so a note naming many people does not fan out to dozens of relays. The slots go round: everyone's first read relay, then everyone's second, so the people named last are reached too. The relay lists of everyone a note mentions are looked up in one request.
-- **Private drafts**, the synced feed list and the private media library are written to your write and read relays, a membership relay, and the signer relays older versions stored drafts on (at most ten; a long relay list never pushes out the last two). While your list is still unknown, the curated set stands in for your own relays. Reading asks every relay writing goes to plus that curated set, so a draft saved before your list was known is still found once it is; deleting a draft reaches all of them too.
+- **Private drafts**, the synced feed list and the private media library are written to your write and read relays, a membership relay, and the signer relays older versions stored drafts on (at most ten; a long relay list never pushes out the last two). While your list is still unknown, the curated set stands in for your own relays. Reading asks every relay writing goes to plus that curated set, so a draft saved before your list was known is still found once it is; deleting a draft reaches all of them too. Drafts can be kept on relays of your own choosing instead (see [Where drafts are kept](#where-drafts-are-kept)).
 - **Someone else's article** (an `naddr`, an `npub`'s articles) is read from **their** write relays, never from yours.
 - Relay lists are looked up on your own relays and on indexers, verified by signature, and cached: for 30 minutes when found, while your own list is also kept on disk so routing is right from the first second after a launch.
 - Relays named by other people (their relay lists, relay hints in mentions and `naddr`/`nevent` links) are used only when they are public `wss://` relays: plain `ws://`, `localhost`, private and link-local addresses, `.local`/`.lan` style names and `.onion` are skipped, so a stranger's event cannot make MyEditor connect into your own network. Your own relay list is used as you wrote it.
@@ -85,6 +86,21 @@ The publisher uses eager-first-accept semantics: as soon as one relay acknowledg
 - **An account kept on this computer** has its key in `~/.config/my_editor/nostr_keys.json` (`chmod 600`, folder `chmod 700`), separate from the profiles. It is never shown on screen, and Sign Out deletes it, after an alert that says what a missing backup costs. A damaged key file is set aside, never overwritten.
 - **Connection spoof protection.** The `nostrconnect://` flow generates a one-time secret that the editor verifies against the signer's response before completing the handshake.
 - **Profile file permissions.** The on-disk profile store is restricted to the owner. The local channel keypair stored there only authorizes the existing bunker session; it cannot sign anything itself.
+
+### What you published, and taking it back
+
+The Drafts panel has a second view, **Published**, beside **Drafts**. It lists the notes and articles the account in use has published, newest first by the day each one first went out. An article shows its title, a note its first line, and each row says Article or Note and the date. Editing an article later keeps its first date. Every article is listed; notes come fifty at a time, and **Load More Notes** at the end of the list brings older ones.
+
+The list is read from the relays you publish to. Anything you asked to delete is left out, also when one relay still has a copy and another one has your request. When no relay answers, the view says so and offers **Try Again**; it never looks empty just because nobody answered.
+
+Right-click a row, or press the Menu key, for:
+
+- **Edit** (articles): opens the article in a tab. Publishing it again replaces it, keeps its address and keeps the date it first went out.
+- **Open in Browser**: shows it on njump.me, a page any browser can open.
+- **Copy Link**: copies that same address, to share.
+- **Delete from Nostr…** (also the Delete key): asks first. Then MyEditor asks the relays to remove it with a deletion request signed by your account (NIP-09). The request goes to every relay the item was found on and to every relay you publish to. The row goes as soon as one relay accepts, and the status line says how many did. If none accepts, an alert says so and offers **Try Again**, which sends the same request again without asking your signer. People and apps that already saved a copy may still have it, and a draft of the item stays.
+
+Return opens a row: an article for editing, a note in the browser.
 
 ---
 
@@ -101,6 +117,15 @@ In-progress work is saved as a **NIP-37 draft**: a kind 31234 event whose body i
 - **`Ctrl+S`** on a draft-bound tab silently re-saves the draft. Same shortcut, no questions, exactly like saving a local file.
 - Double-click a row to open the draft in a new tab. Right-click for Publish, Copy event id, or Delete.
 - An article draft holds the article's Markdown and opens with its formatting (headings, bold, lists); a note draft opens as typed.
+- An article draft also keeps the article's details: its title, summary, cover image, hashtags, the date it was first published and, for an imported post, where it came from. Saving the draft again keeps all of them, and **Publish Article** offers them, so an imported post goes out with its cover, hashtags and original date.
+
+### Where drafts are kept
+
+Drafts are encrypted wherever they are kept. To keep them on relays of your choice only, for example a relay of your own that lets nobody else read your events, choose **Draft Relays…** in the Drafts panel's menu, add the relays and click **Save**. An address starts with `wss://`; a relay running on this computer may also use `ws://`. You can choose up to ten.
+
+From then on new drafts are saved only there. Drafts are still looked for on your usual relays too, so drafts saved earlier, or by an app that doesn't know this setting, are found. The choice itself is kept on your relays, encrypted to your own key (NIP-37), so your other devices and apps that read it (Amethyst does) keep drafts in the same place. Apps that don't read it won't see the drafts saved there.
+
+**Use My Usual Relays** empties the list; after **Save**, drafts go where they went before you chose.
 
 ### Recovery
 
@@ -108,7 +133,8 @@ If your signer (Amber, nsec.app) times out a decrypt approval or you dismiss the
 
 ### Storage notes
 
-- Drafts you write never expire. An imported draft you don't change is removed after 90 days (NIP-40); once you change and save it, it stays like any other draft.
+- Drafts you save with this version never expire. An imported draft you don't change is removed after 90 days (NIP-40); once you change and save it, it stays like any other draft.
+- A draft saved with an earlier version of MyEditor keeps the end date it was saved with (90 days after that save) until you save it again. The Drafts list shows that date in the draft's row ("Removed on ... unless you save it again"); open the draft and save it to keep it.
 - Notes are tagged with a private UUID; articles use a stable slug, so the draft and its eventual published article share the same address.
 - Deleting a draft publishes an empty replacement so your other devices see it removed; it never expires, so a relay that kept an old copy cannot bring the draft back.
 
@@ -153,11 +179,20 @@ The planner checks each configured server's documented per-file limit before sen
 
 ---
 
-## Import from RSS, Atom, and JSON feeds
+## Imports: follow websites, import files and links
 
-Mirror your own blog into private Nostr drafts. Open the Drafts panel with `Ctrl+Shift+D`, switch to the **Feeds** segment, paste a URL, and import. Each surviving item becomes a NIP-37 draft signed by your active profile with title, summary, cover image, hashtags, and original publish date preserved.
+Mirror your own blog, or a website you follow, into private Nostr drafts. Choose **Nostr > Imports…**, or the Imports row at the top of the Drafts panel, which also says how many new posts wait.
 
-### Paste anything
+- **Add > Follow a Website…**: paste an address. MyEditor shows what it found (its name, whether it is a feed, a Nostr author or a collection, how many posts and how new the newest is) before anything is kept. While MyEditor is open it checks a followed feed for new posts, which appear in the Inbox; the posts that were already there when you followed it wait in Older Posts.
+- **Add > Import a File…**, or drop a file on the window: a WordPress, Ghost, Medium or Substack export, a feed file, a Markdown file, or a list of sources (OPML) to follow.
+- **Add > Import a Link…**: one post, thread, Nostr article or Markdown file, imported once and not kept as a source.
+- Check the posts you want, or just open one, and choose **Create Drafts** (Command-Return or Ctrl+Return). **Options…** chooses whether images are copied to your media server and whether the whole article is fetched when a feed has only a summary. Imported drafts you don't change are removed after 90 days; once you change and save one, it stays like any draft you wrote.
+- **Skip** (or Delete) sets posts aside on this computer; Undo, in the message or in Edit > Undo, brings them back, and so does Restore in the Skipped list.
+- The toolbar shows how an import is going. Its card pauses, resumes, stops, and tries posts that failed again; the Drafts panel's Imports row shows the same line.
+
+Each draft keeps the post's title, summary, cover image, hashtags and original date.
+
+### Addresses that work
 
 You don't need the feed URL. The editor accepts:
 

@@ -38,9 +38,6 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication,
     QPushButton,
-    QStyle,
-    QStyleOptionButton,
-    QStylePainter,
     QToolButton,
     QWidget,
 )
@@ -63,6 +60,15 @@ from nostr.ui.drafts_panel import (
     _secondary_font,
 )
 from nostr.ui.profile_chip import ProfileChip
+from tests.accessibility import unnamed_controls
+from tests.widget_lifetime import delete_new_windows
+
+
+@pytest.fixture(autouse=True)
+def _windows_deleted():
+    """Every window and panel a test makes is deleted after it: left to
+    the cycle collector, one without a parent can crash it."""
+    yield from delete_new_windows()
 
 
 PK = "a" * 64
@@ -324,7 +330,8 @@ def test_a_long_title_elides_inside_the_label():
     # The label never mutates the string it was handed. It holds no
     # QLabel text of its own at all, which is what stops elision from
     # feeding back into the layout.
-    assert label.text() == ""
+    from PySide6.QtWidgets import QLabel
+    assert QLabel.text(label) == ""
     assert label.full_text() == long_title
     # The whole row is readable from any point on it, so the full title
     # survives at every width.
@@ -598,7 +605,8 @@ def test_the_selected_row_carries_a_shape_cue_not_only_a_fill():
             panel.hide()
 
 
-@pytest.mark.parametrize("control_name", ["_seg_feeds", "_close_btn", "_refresh_btn", "_search_edit"])
+@pytest.mark.parametrize("control_name", ["_launcher", "_close_btn", "_refresh_btn",
+                                          "_search_edit"])
 def test_focus_is_visible_on_every_keyboard_reachable_control(control_name):
     """Measured before this change: focusing changed zero pixels.
 
@@ -608,13 +616,19 @@ def test_focus_is_visible_on_every_keyboard_reachable_control(control_name):
     invisible to Full Keyboard Access.
     """
     panel = DraftsPanel(is_dark=True)
+    panel.set_imports_state(available=True, new_posts=2)
+    panel._launcher = panel._imports_row.button
     panel.resize(320, 400)
     panel.show()
     panel.layout().activate()
     try:
         control = getattr(panel, control_name)
-        control.clearFocus()
+        # Focus elsewhere first: a shown panel hands its focus to the first
+        # control in the chain, and a cleared focus can come straight back.
+        elsewhere = panel._close_btn if control is panel._search_edit else panel._search_edit
+        elsewhere.setFocus(Qt.OtherFocusReason)
         QApplication.processEvents()
+        assert not control.hasFocus()
         before = control.grab().toImage()
         control.setFocus(Qt.OtherFocusReason)
         QApplication.processEvents()
@@ -656,9 +670,11 @@ def test_menu_commands_use_title_style_capitalisation():
 
 def test_every_chrome_control_is_reachable_by_keyboard():
     panel = DraftsPanel(is_dark=True)
+    panel.add_view("published", "Published", "", QWidget())
     for control in (
-        panel._seg_drafts, panel._seg_feeds, panel._refresh_btn,
-        panel._close_btn, panel._search_edit, panel._list,
+        *panel._view_switch.segments, panel._view_switch.popup, panel._refresh_btn,
+        panel._close_btn, panel._imports_row.button, panel._imports_row.action,
+        panel._search_edit, panel._list,
     ):
         assert control.focusPolicy() != Qt.NoFocus
 
@@ -799,12 +815,16 @@ def test_every_icon_only_control_has_an_accessible_name():
     # Measured before this change: all eleven controls returned "", and
     # the two icon buttons were announced as the glyphs "⟲" and "×".
     panel = DraftsPanel(is_dark=True)
+    panel.add_view("published", "Published", "", QWidget())
+    segments = panel._view_switch.segments
     names = {
         panel._refresh_btn: "Refresh drafts",
         panel._close_btn: "Close drafts panel",
         panel._search_edit: "Search drafts",
-        panel._seg_drafts: "Drafts",
-        panel._seg_feeds: "Feeds",
+        segments[0]: "Drafts",
+        segments[1]: "Published",
+        panel._view_switch.popup: "View: Drafts",
+        panel._imports_row.button: "Imports",
     }
     for widget, expected in names.items():
         assert widget.accessibleName() == expected
@@ -1006,6 +1026,7 @@ def test_switching_theme_repaints_existing_rows():
 def test_the_chrome_fits_at_the_minimum_width():
     store = populated_store()
     panel = bound_panel(store)
+    panel.set_imports_state(available=True, new_posts=14)
     panel.resize(MIN_PANEL_WIDTH, 600)
     panel.show()
     panel.layout().activate()
@@ -1014,65 +1035,14 @@ def test_the_chrome_fits_at_the_minimum_width():
         # nothing before it has overflowed.
         right_edge = panel._close_btn.mapTo(panel, panel._close_btn.rect().topRight()).x()
         assert right_edge <= MIN_PANEL_WIDTH, right_edge
-        assert panel._seg_drafts.x() >= 0
-        # Both segments are still readable, not squeezed to nothing.
-        assert panel._seg_drafts.width() >= 40
-        assert panel._seg_feeds.width() >= 40
+        # One view: a title, not a switch.
+        assert panel._title.isVisibleTo(panel)
+        assert not panel._view_switch.isVisibleTo(panel)
         # accessibility.md: macOS default control size is 28x28 pt.
-        for control in (panel._refresh_btn, panel._close_btn, panel._seg_drafts):
+        for control in (panel._refresh_btn, panel._close_btn):
             assert control.height() >= 28
             assert control.width() >= 28
-    finally:
-        panel.hide()
-
-
-def paint_segment_string(segment, text: str) -> QImage:
-    """The segment's own draw call, with a string of our choosing."""
-    image = QImage(segment.size(), QImage.Format_ARGB32)
-    image.fill(Qt.transparent)
-    option = QStyleOptionButton()
-    segment.initStyleOption(option)
-    option.text = text
-    painter = QStylePainter(image, segment)
-    painter.drawControl(QStyle.CE_PushButton, option)
-    painter.end()
-    return image
-
-
-# 13 pt is the macOS default accessibility.md names, 26 pt is the 200
-# percent enlargement it asks apps to support.
-@pytest.mark.parametrize("point_size", [13, 17, 22, 26])
-@pytest.mark.parametrize("width", [MIN_PANEL_WIDTH, 320])
-def test_the_mode_switch_survives_its_own_type_scale(app_font, point_size, width):
-    """accessibility.md: "give people the option to enlarge text by at
-    least 200 percent".
-
-    QPushButton clips centred text from both ends with no ellipsis, so
-    before the band reflowed and the segments elided, "Drafts" painted
-    as "raf" at 26 pt and there was no way back to the word.
-    """
-    font = QFont(app_font.font())
-    font.setPointSizeF(point_size)
-    app_font.setFont(font)
-
-    panel = DraftsPanel(is_dark=True)
-    panel.resize(width, 600)
-    panel.show()
-    try:
-        panel.layout().activate()
-        for segment in (panel._seg_drafts, panel._seg_feeds):
-            label = segment.text()
-            painted = segment.painted_text()
-            fits = segment.width() >= segment.sizeHint().width()
-            assert fits or painted.endswith("…"), (
-                f"{label} at {point_size}pt/{width}px painted {painted!r}"
-            )
-            if fits:
-                assert painted == label
-            # The recovery, on both segments. text-fields.md: "Consider
-            # using an expansion tooltip to show the full version of
-            # clipped or truncated text."
-            assert label in segment.toolTip()
+        assert panel._imports_row.button.height() >= 28
     finally:
         panel.hide()
 
@@ -1081,97 +1051,192 @@ def corner_in_panel(panel, widget) -> QPoint:
     """A widget's top left in panel coordinates.
 
     ``x()`` and ``y()`` are relative to each widget's own parent, and
-    the segments and the icon buttons sit in different holders.
+    the switch and the icon buttons sit in different holders.
     """
     return widget.mapTo(panel, widget.rect().topLeft())
 
 
-def test_the_band_stays_on_one_line_at_the_default_font():
-    # Elision alone would satisfy the no-clipping rule while quietly
-    # costing every normal user a second row of chrome, so the default
-    # is pinned as firmly as the enlarged case.
+# --------------------------------------------------------------------------- #
+# Views, and the switch between them                                          #
+# --------------------------------------------------------------------------- #
+
+ENGLISH = ("Drafts", "Published")
+# The German words are the longest the switch is known to need:
+# "Entwürfe | Veröffentlicht".
+GERMAN = ("Entwürfe", "Veröffentlicht")
+
+
+def with_views(labels, width: int) -> DraftsPanel:
+    """A panel with a second view, its two views named ``labels``."""
     panel = DraftsPanel(is_dark=True)
-    panel.resize(MIN_PANEL_WIDTH, 600)
+    panel._views[0] = (panel.DRAFTS_VIEW, labels[0], "")
+    panel._title.set_full_text(labels[0])
+    panel.add_view("published", labels[1], "Your published notes and articles", QWidget())
+    panel.resize(width, 600)
     panel.show()
+    panel.layout().activate()
+    return panel
+
+
+def default_size() -> float:
+    """The platform's own text size: what 100 percent means here."""
+    return QApplication.font().pointSizeF()
+
+
+def scaled(app_font, scale: float) -> None:
+    font = QFont(app_font.font())
+    font.setPointSizeF(app_font.base * scale)
+    app_font.setFont(font)
+
+
+@pytest.fixture
+def sized(app_font):
+    app_font.base = default_size()
+    return app_font
+
+
+def test_one_view_shows_its_title():
+    panel = DraftsPanel(is_dark=True)
+    assert panel.views() == ["drafts"]
+    assert panel._title.full_text() == "Drafts"
+    assert not panel._view_switch.has_choice()
+
+
+def test_a_second_view_brings_the_switch():
+    panel = with_views(ENGLISH, 320)
     try:
-        panel.layout().activate()
-        assert not panel._top_band.is_stacked()
-        assert panel._seg_drafts.painted_text() == "Drafts"
-        # One line means the icons sit beside the segments, not under.
-        assert (
-            corner_in_panel(panel, panel._refresh_btn).y()
-            == corner_in_panel(panel, panel._seg_drafts).y()
-        )
+        switch = panel._view_switch
+        assert not panel._title.isVisibleTo(panel)
+        assert switch.isVisibleTo(panel)
+        changed = []
+        panel.view_changed.connect(changed.append)
+        if switch.is_popup():
+            switch.popup.menu().actions()[1].trigger()
+        else:
+            switch.segments[1].click()
+        assert changed == ["published"]
+        assert panel.current_view() == "published"
+        assert switch.popup.text() == "Published"
+        panel.show_view("drafts")
+        assert panel.current_view() == "drafts"
     finally:
         panel.hide()
 
 
-@pytest.mark.parametrize("point_size", [17, 22])
-def test_the_band_stacks_rather_than_starving_the_mode_switch(app_font, point_size):
+def test_a_view_is_added_once():
+    panel = DraftsPanel(is_dark=True)
+    panel.add_view("published", "Published", "", QWidget())
+    with pytest.raises(ValueError):
+        panel.add_view("published", "Published", "", QWidget())
+
+
+def shown_words(panel) -> list:
+    """What the switch paints, as words."""
+    switch = panel._view_switch
+    if switch.is_popup():
+        return [switch.popup.painted_text()]
+    return [segment.painted_text() for segment in switch.segments]
+
+
+def wanted_words(panel, labels) -> list:
+    switch = panel._view_switch
+    return [labels[0]] if switch.is_popup() else list(labels)
+
+
+# 100 to 200 percent of the platform's own text size: accessibility.md
+# asks apps to let text grow to at least 200 percent.
+@pytest.mark.parametrize("scale", [1.0, 1.3, 1.7, 2.0])
+@pytest.mark.parametrize("width", [MIN_PANEL_WIDTH, 320])
+@pytest.mark.parametrize("labels", [ENGLISH, GERMAN])
+def test_the_switch_never_cuts_a_word(sized, scale, width, labels):
+    """Segments where they fit, else a pop-up button naming the current
+    view: either way every word is painted whole, at every size up to
+    200 percent, on the narrowest panel."""
+    scaled(sized, scale)
+    panel = with_views(labels, width)
+    try:
+        assert shown_words(panel) == wanted_words(panel, labels), (
+            f"{labels} at {scale:.0%} on {width}px painted {shown_words(panel)}")
+        switch = panel._view_switch
+        if not switch.is_popup():
+            for segment in switch.segments:
+                assert segment.width() >= segment.sizeHint().width()
+        right = panel._close_btn.mapTo(panel, panel._close_btn.rect().topRight()).x()
+        assert right <= width
+    finally:
+        panel.hide()
+
+
+@pytest.mark.parametrize("labels", [ENGLISH, GERMAN])
+def test_the_band_stays_on_one_line_at_the_default_font(labels):
+    # Changing control costs nothing; a second line of chrome costs every
+    # normal user space, so the default size is pinned as firmly as the
+    # enlarged one.
+    for panel in (DraftsPanel(is_dark=True), with_views(labels, MIN_PANEL_WIDTH)):
+        panel.resize(MIN_PANEL_WIDTH, 600)
+        panel.show()
+        try:
+            panel.layout().activate()
+            assert not panel._top_band.is_stacked()
+            leading = (panel._view_switch if panel._view_switch.has_choice()
+                       else panel._title)
+            assert (corner_in_panel(panel, panel._refresh_btn).y()
+                    == corner_in_panel(panel, leading).y())
+        finally:
+            panel.hide()
+
+
+def test_the_band_stacks_only_when_the_popup_cannot_sit_beside_the_buttons(sized):
     """typography.md: "Consider adjusting your layout at large font
-    sizes... inline items... and container boundaries can crowd text and
-    cause truncation or overlapping."
+    sizes." The pop-up button comes first; the buttons only move down
+    when even it does not fit beside them, and then the word stays
+    whole on its own line."""
+    stacked = None
+    for scale in (1.0, 1.5, 2.0, 2.5, 3.0):
+        scaled(sized, scale)
+        panel = with_views(GERMAN, MIN_PANEL_WIDTH)
+        try:
+            switch = panel._view_switch
+            if panel._top_band.is_stacked():
+                assert switch.is_popup()
+                assert (corner_in_panel(panel, panel._refresh_btn).y()
+                        > corner_in_panel(panel, switch).y())
+                stacked = scale
+                break
+            if switch.is_popup():
+                assert (switch.popup_width() + panel._top_band._icons.sizeHint().width()
+                        + 6 <= MIN_PANEL_WIDTH - dp.GUTTER - 8)
+        finally:
+            panel.hide()
+    # Somewhere up to three times the platform's size, the buttons do move.
+    assert stacked is not None
 
-    Without the reflow the segments keep their share of one line and
-    elide to "Dra…" and "Fe…" at 17 pt. Eliding is the safety net, not
-    the answer: the answer is giving them the line.
-    """
+
+def test_past_every_size_the_popup_elides_and_keeps_its_name(app_font):
+    """Far beyond 200 percent no control fits: the pop-up button then
+    paints an ellipsis, and the whole name stays in its tooltip and its
+    accessible name. Pins the pixels, not just ``painted_text``."""
     font = QFont(app_font.font())
-    font.setPointSizeF(point_size)
+    font.setPointSizeF(64)
     app_font.setFont(font)
-
-    panel = DraftsPanel(is_dark=True)
-    panel.resize(MIN_PANEL_WIDTH, 600)
-    panel.show()
+    panel = with_views(GERMAN, MIN_PANEL_WIDTH)
     try:
-        panel.layout().activate()
-        assert panel._top_band.is_stacked()
-        # The icon pair moved to its own line, below the segments.
-        assert (
-            corner_in_panel(panel, panel._refresh_btn).y()
-            > corner_in_panel(panel, panel._seg_drafts).y()
-        )
-        # And the words survive intact, which is the point of moving it.
-        assert panel._seg_drafts.painted_text() == "Drafts"
-        assert panel._seg_feeds.painted_text() == "Feeds"
-        # The pair stays on the trailing edge once it spans the width.
-        assert (
-            corner_in_panel(panel, panel._close_btn).x()
-            > corner_in_panel(panel, panel._seg_feeds).x()
-        )
+        popup = panel._view_switch.popup
+        assert panel._view_switch.is_popup()
+        painted = popup.painted_text()
+        assert painted != "Entwürfe" and painted.endswith("…")
+        assert popup.toolTip() == "Entwürfe"
+        assert popup.accessibleName() == "View: Entwürfe"
     finally:
         panel.hide()
 
 
-def test_a_squeezed_segment_paints_the_ellipsis_it_claims_to(app_font):
-    """Pins the pixels, not just ``painted_text``.
-
-    The elision is only real if ``paintEvent`` uses it, so the painted
-    output is compared against the same draw call fed the elided string
-    and the full one.
-    """
-    # Past 200 percent. At 200 exactly the segment inset now shrinks
-    # enough for the whole word to fit, which is the better outcome and
-    # is pinned separately; this test is about what happens once no
-    # amount of shrinking helps.
-    font = QFont(app_font.font())
-    font.setPointSizeF(40)
-    app_font.setFont(font)
-
-    panel = DraftsPanel(is_dark=True)
-    panel.resize(MIN_PANEL_WIDTH, 600)
-    panel.show()
+@pytest.mark.parametrize("labels", [ENGLISH, GERMAN])
+def test_long_view_names_never_widen_the_panel(sized, labels):
+    scaled(sized, 2.0)
+    panel = with_views(labels, MIN_PANEL_WIDTH)
     try:
-        panel.layout().activate()
-        segment = panel._seg_drafts
-        painted = segment.painted_text()
-        # The premise: at this size the label really does not fit.
-        assert painted != "Drafts"
-        assert painted.endswith("…")
-
-        image = paint_to_image(segment)
-        assert image == paint_segment_string(segment, painted)
-        assert image != paint_segment_string(segment, "Drafts")
+        assert panel.minimumSizeHint().width() <= MIN_PANEL_WIDTH
     finally:
         panel.hide()
 
@@ -1182,66 +1247,95 @@ def test_the_whole_panel_paints_at_the_minimum_width():
         panel = DraftsPanel(is_dark=is_dark)
         panel.set_active_profile(make_profile())
         panel.bind_store(store)
+        panel.set_imports_state(available=True, new_posts=3, activity="Creating drafts, 1 of 3",
+                                action="pause")
         panel.resize(MIN_PANEL_WIDTH, 600)
         assert not panel.grab().isNull()
 
 
 # --------------------------------------------------------------------------- #
-# The mode switch survives 200 percent type
+# The Imports row (D-2)                                                       #
 # --------------------------------------------------------------------------- #
 
-def _segment_line_fits(point_size: int) -> bool:
-    """Whether both labels fit the narrowest panel whole, at this size."""
-    font = QFont()
-    font.setPointSize(point_size)
-    QApplication.setFont(font)
-    metrics = QFontMetrics(font)
-    inset = dp._segment_padding_px()
-    widest = max(metrics.horizontalAdvance(label) for label in dp._SEGMENT_LABELS)
-    needed = 2 * (widest + 2 * inset + 2)
-    return needed <= MIN_PANEL_WIDTH - 2 * dp.GUTTER
+def test_the_imports_row_waits_for_an_account():
+    panel = DraftsPanel(is_dark=True)
+    assert panel._imports_row.isHidden()
+    panel.set_imports_state(available=True, new_posts=0)
+    assert not panel._imports_row.isHidden()
+    assert panel._imports_row.button.accessibleName() == "Imports"
+    assert panel._imports_row.button.count_text() == ""
 
 
-@pytest.fixture
-def restore_font():
-    previous = QApplication.font()
-    yield
-    QApplication.setFont(previous)
+def test_the_imports_row_says_how_many_and_opens_the_window():
+    panel = DraftsPanel(is_dark=True)
+    opened = []
+    panel.open_imports.connect(lambda: opened.append(True))
+    panel.set_imports_state(available=True, new_posts=14)
+    button = panel._imports_row.button
+    assert button.count_text() == "14 new"
+    assert button.accessibleName() == "Imports, 14 new posts"
+    button.click()
+    assert opened == [True]
 
 
-def test_the_mode_switch_reads_whole_at_two_hundred_percent(restore_font):
-    # accessibility.md asks for text to enlarge by at least 200 percent.
-    # The switch is the panel's primary navigation, so it clipping is
-    # the one truncation that cannot be shrugged off.
-    assert _segment_line_fits(26)
+def test_the_imports_row_pauses_and_resumes():
+    panel = DraftsPanel(is_dark=True)
+    asked = []
+    panel.pause_import.connect(lambda: asked.append("pause"))
+    panel.resume_import.connect(lambda: asked.append("resume"))
+    row = panel._imports_row
+    panel.set_imports_state(available=True, new_posts=2,
+                            activity="Creating drafts, 1 of 3", action="pause")
+    assert row.activity.text() == "Creating drafts, 1 of 3"
+    assert row.action.text() == "Pause"
+    row.action.click()
+    panel.set_imports_state(available=True, activity="Import paused, 1 of 3",
+                            action="resume")
+    assert row.action.text() == "Resume"
+    row.action.click()
+    panel.set_imports_state(available=True, activity="1 post couldn't be imported",
+                            action="retry")
+    assert row.action.text() == "Try Again"
+    row.action.click()
+    assert asked == ["pause", "resume", "resume"]
+    panel.set_imports_state(available=True)
+    assert row._activity_line.isHidden()
 
 
-@pytest.mark.parametrize("point_size", [9, 11, 13, 17, 22, 26])
-def test_the_mode_switch_fits_at_every_ordinary_size(restore_font, point_size):
-    assert _segment_line_fits(point_size)
+@pytest.mark.parametrize("scale", [1.0, 1.5, 2.0])
+def test_the_imports_row_reads_whole(sized, scale):
+    """The row that replaced the Feeds segment fits the narrowest panel
+    at up to 200 percent with its words whole (the Linux fonts made the
+    old switch clip here)."""
+    scaled(sized, scale)
+    panel = DraftsPanel(is_dark=True)
+    panel.set_imports_state(available=True, new_posts=148,
+                            activity="Creating drafts, 31 of 48", action="pause")
+    panel.resize(MIN_PANEL_WIDTH, 600)
+    panel.show()
+    try:
+        panel.layout().activate()
+        row = panel._imports_row
+        assert row.button.painted_title() == "Imports"
+        # The count stays whole too: under the title where it does not fit
+        # beside it, the button a line taller for it.
+        if row.button.is_stacked():
+            assert row.button.height() >= row.button.heightForWidth(row.button.width())
+        right = row.action.mapTo(panel, row.action.rect().topRight()).x()
+        assert right <= MIN_PANEL_WIDTH
+        assert row.action.width() >= row.action.sizeHint().width()
+        assert panel.minimumSizeHint().width() <= MIN_PANEL_WIDTH
+    finally:
+        panel.hide()
 
 
-def test_the_inset_is_untouched_at_ordinary_sizes(restore_font):
-    # Shrinking early would cost the control its shape for no reason.
-    for point_size in (9, 13, 17, 22):
-        font = QFont()
-        font.setPointSize(point_size)
-        QApplication.setFont(font)
-        assert dp._segment_padding_px() == dp._SEGMENT_PADDING_PX
-
-
-def test_the_inset_never_collapses_the_control(restore_font):
-    # Past the point where shrinking can help, the segment elides with an
-    # ellipsis instead, which it already does legibly. The inset must not
-    # keep shrinking until the button reads as bare text.
-    font = QFont()
-    font.setPointSize(64)
-    QApplication.setFont(font)
-    assert dp._segment_padding_px() == dp._MIN_SEGMENT_PADDING_PX
-
-
-def test_the_stylesheet_carries_the_computed_inset(restore_font):
-    font = QFont()
-    font.setPointSize(26)
-    QApplication.setFont(font)
-    assert f"padding: 2px {dp._segment_padding_px()}px" in dp._panel_css(True)
+def test_every_control_has_a_name():
+    panel = DraftsPanel(is_dark=True)
+    panel.set_imports_state(available=True, new_posts=3, activity="Creating drafts, 1 of 3",
+                            action="pause")
+    assert unnamed_controls(panel) == []
+    two = with_views(GERMAN, MIN_PANEL_WIDTH)
+    try:
+        assert unnamed_controls(two) == []
+    finally:
+        two.hide()

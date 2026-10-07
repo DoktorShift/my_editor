@@ -23,7 +23,6 @@ one way or the other, and at the latest when the time is up.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Sequence
 
@@ -137,7 +136,7 @@ class _ReplaceableQuery(QObject):
             return          # another article of the same author
         if not is_newer(event, self._best[author]):
             return          # older, or the same event again from another relay
-        fingerprint = _fingerprint(event)
+        fingerprint = events.fingerprint(event)
         if fingerprint in self._rejected:
             return          # the same forgery again: once is enough
         if self._checked[author] >= VERIFY_CAP:
@@ -199,12 +198,3 @@ def _d_of(event: dict) -> Optional[str]:
         if isinstance(tag, list) and len(tag) >= 2 and tag[0] == "d":
             return str(tag[1])
     return None
-
-
-def _fingerprint(event: dict) -> str:
-    """The whole event, as text: a copy differing in any field, even one
-    sharing the real event's id and signature, is a different copy."""
-    try:
-        return json.dumps(event, sort_keys=True, separators=(",", ":"), default=str)
-    except (TypeError, ValueError):
-        return repr(event)

@@ -112,3 +112,23 @@ def test_the_preview_and_the_publish_dialog_count_the_same_way():
     text = "see https://example.com/a?b=c and [link](https://x.example)\n" * 120
     words = count_words(text)
     assert preview.reading_minutes(text) == reading_minutes(words)
+
+
+
+MIXED = ("# Eine Liste\n\n1. Eins\n2. Zwei\n3. Drei\n\n- [x] Erledigt\n- [ ] Offen\n\n"
+         "> Ein Zitat\n\n```python\nprint(\"hallo welt\")\n```\n\n"
+         "![Ein Bild von einer Katze](https://example.com/cat.png)\n\n"
+         "| A | B |\n| --- | --- |\n| eins | zwei |\n\nSiehe [die Seite](https://example.com).\n")
+
+
+def test_the_status_bar_and_the_publish_dialog_agree():
+    # Review M6: list numbers, checkboxes, the code fence and a picture's
+    # description counted in the dialog and the preview, not on screen.
+    from PySide6.QtGui import QTextDocument
+    from PySide6.QtWidgets import QApplication
+    from markdown_writer import read_markdown
+    from word_count import count_markdown_words
+    QApplication.instance() or QApplication([])
+    doc = QTextDocument()
+    read_markdown(doc, MIXED)
+    assert count_markdown_words(MIXED) == count_words(doc.toPlainText())

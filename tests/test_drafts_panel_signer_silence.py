@@ -28,6 +28,16 @@ from nostr.draft_store import DraftStore
 from nostr.drafts import DraftWrapMeta
 from nostr.profiles import Profile
 from nostr.ui.drafts_panel import DraftsPanel
+from tests.accessibility import unnamed_controls
+from tests.widget_lifetime import delete_new_windows
+
+
+@pytest.fixture(autouse=True)
+def _windows_deleted():
+    """Every window and panel a test makes is deleted after it: left to
+    the cycle collector, one without a parent can crash it."""
+    yield from delete_new_windows()
+
 
 PK = "a" * 64
 
@@ -218,3 +228,28 @@ def test_a_placeholder_with_no_remedy_hides_the_button():
     p.set_active_profile(None)
     assert showing_placeholder(p)
     assert not p._empty_action.isVisibleTo(p)
+
+
+def test_every_control_has_a_name_in_each_empty_state():
+    """A screen reader names the list and the empty state's button in
+    every state: no drafts, signer silent, nothing matching, and back."""
+    empty_store = DraftStore()
+    empty_store.bind_profile(PK)
+    empty = panel(empty_store)
+    assert showing_placeholder(empty)
+    assert not empty._empty_action.isVisibleTo(empty)
+    assert unnamed_controls(empty) == []
+    assert empty._list.accessibleName() == "Drafts"
+
+    quiet = panel(locked_store())
+    quiet.set_signer_unreachable(True)
+    assert unnamed_controls(quiet) == []
+
+    store = locked_store(2)
+    store.set_decrypted("d0", inner={"kind": 1, "content": "Pineapple", "tags": []})
+    searching = panel(store)
+    searching._search_edit.setText("zzzznomatch")
+    assert showing_placeholder(searching)
+    assert unnamed_controls(searching) == []
+    searching._search_edit.setText("")
+    assert unnamed_controls(searching) == []

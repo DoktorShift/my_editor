@@ -62,6 +62,59 @@ def test_add_link_keeps_the_style_of_the_words():
     assert assert_round_trip(ed.document()) == "Read [**the docs**](https://example.com/docs) today\n"
 
 
+def link_through_the_popover(ed, href, *, retype=None):
+    """Command-K, the address typed, Return: what a person does."""
+    ed.show_link_popover()
+    popover = ed.findChildren(LinkPopover)[-1]
+    if retype is not None:
+        popover.text_edit.setText(retype)
+        popover.text_edit.setModified(True)
+    popover.address_edit.setText(href)
+    popover.add_button.click()
+    return popover
+
+
+def test_spaces_at_the_edges_of_the_selection_stay_outside_the_link():
+    ed = editor("Read the docs today\n")
+    selecting(ed, "the docs ")                  # a word selection with its space
+    link_through_the_popover(ed, "https://example.com/docs")
+    selecting(ed, " today")
+    link_through_the_popover(ed, "https://example.com/today")
+    assert assert_round_trip(ed.document()) == (
+        "Read [the docs](https://example.com/docs) [today](https://example.com/today)\n")
+
+
+def test_a_link_over_a_heading_and_a_paragraph_keeps_both():
+    ed = editor("# Title\n\nSecond **para** here\n")
+    cursor = select(ed.document(), "Title")
+    cursor.setPosition(select(ed.document(), "Second").selectionEnd(),
+                       QTextCursor.MoveMode.KeepAnchor)
+    ed.setTextCursor(cursor)
+    popover = link_through_the_popover(ed, "https://example.com")
+    assert not popover.text_edit.isEnabled()      # several paragraphs: not retyped
+    assert assert_round_trip(ed.document()) == (
+        "# [Title](https://example.com)\n\n[Second](https://example.com) **para** here\n")
+
+
+def test_a_link_over_two_list_items_keeps_both_items():
+    ed = editor("- one\n- two\n")
+    cursor = select(ed.document(), "one")
+    cursor.setPosition(select(ed.document(), "two").selectionEnd(),
+                       QTextCursor.MoveMode.KeepAnchor)
+    ed.setTextCursor(cursor)
+    link_through_the_popover(ed, "https://example.com")
+    assert assert_round_trip(ed.document()) == (
+        "- [one](https://example.com)\n- [two](https://example.com)\n")
+
+
+def test_retyped_words_replace_the_selection():
+    ed = editor("Read the docs today\n")
+    selecting(ed, "the docs")
+    link_through_the_popover(ed, "https://example.com/docs", retype="our guide")
+    assert document_to_markdown(ed.document()) == (
+        "Read [our guide](https://example.com/docs) today\n")
+
+
 def test_add_link_with_nothing_selected_inserts_the_address():
     ed = editor("See\n")
     ed.moveCursor(QTextCursor.MoveOperation.End)
@@ -134,6 +187,17 @@ def test_a_web_address_pasted_over_words_links_them():
     assert document_to_markdown(ed.document()) == "read [this page](https://example.com/page)\n"
 
 
+@pytest.mark.parametrize("old", ["https://old.example.com/v1", "ada@example.com"])
+def test_a_web_address_pasted_over_an_address_replaces_it(old):
+    # Review M2: the words kept saying the old address while the link went
+    # to the new one.
+    ed = editor(f"Download at {old} now\n")
+    selecting(ed, old)
+    QApplication.clipboard().setText("https://new.example.com/v2")
+    ed.paste_from_clipboard()
+    assert document_to_markdown(ed.document()) == "Download at https://new.example.com/v2 now\n"
+
+
 def test_plain_text_pasted_over_words_replaces_them():
     ed = editor("read this page\n")
     selecting(ed, "this page")
@@ -153,12 +217,18 @@ def test_the_popover_refuses_what_cannot_be_a_link_and_says_why():
     got = []
     popover.applied.connect(lambda text, href: got.append((text, href)))
     popover.add_button.click()
-    assert got == [("x", "https://example.com/page")]
+    assert got == [("", "https://example.com/page")]    # the words were not retyped
 
 
 def test_an_empty_address_is_not_a_complaint_yet():
     popover = LinkPopover()
     assert not popover.add_button.isEnabled() and popover.problem.isHidden()
+
+
+def test_a_screen_reader_can_name_every_field_and_button():
+    from tests.accessibility import unnamed_controls
+    assert unnamed_controls(LinkPopover(text="site", href="https://x.example",
+                                        editing=True)) == []
 
 
 def test_editing_offers_remove_link():
@@ -229,3 +299,50 @@ def test_the_context_menu_elsewhere_has_no_link_commands():
     menu = QMenu()
     MainWindow._fill_editor_context_menu(win, menu, ed, ed.cursorRect().center())
     assert "Open Link" not in [a.text() for a in menu.actions()]
+
+
+
+# -- the window's gate for links from files (review M5) --------------------------------
+
+NPUB = "npub1" + "q" * 58
+
+
+@pytest.mark.parametrize("href, opened", [
+    ("https://example.com/page", "https://example.com/page"),
+    ("nostr:" + NPUB, "https://njump.me/" + NPUB),
+    ("mailto:ada@example.com?subject=Hi&attach=/etc/passwd&body=Text",
+     "mailto:ada@example.com?subject=Hi&body=Text"),
+    ("file:///etc/passwd", None),
+    ("smb://server/share", None),
+    ("javascript:alert(1)", None),
+    ("https://good.example@evil.example/", None),
+    ("nostr:nsec1" + "q" * 58, None),
+    ("#fn-1", None),
+])
+def test_links_from_files_open_only_where_they_safely_can(monkeypatch, href, opened):
+    # Links reach the document from .md, .html and drafts without passing
+    # the popover: the window's opener is the only guard.
+    import types
+    import main_window
+    from main_window import MainWindow
+    calls, messages = [], []
+    monkeypatch.setattr(main_window.QDesktopServices, "openUrl",
+                        lambda url: calls.append(url.toString()))
+    window = types.SimpleNamespace(status=types.SimpleNamespace(
+        showMessage=lambda text, *_a: messages.append(text)))
+    window._open_external = lambda url: MainWindow._open_external(window, url)
+    MainWindow._open_link(window, href)
+    assert calls == ([opened] if opened else [])
+    if opened is None and not href.startswith("#"):
+        assert messages == ["That link cannot be opened."]
+
+
+def test_the_link_button_says_edit_link_to_a_screen_reader_too():
+    from PySide6.QtGui import QAction
+    from PySide6.QtWidgets import QMainWindow, QMenu
+    from format_toolbar import LAYOUT, FormatToolbar
+    window = QMainWindow()
+    actions = {name: QAction(name.capitalize(), window) for name in LAYOUT if name}
+    bar = FormatToolbar(actions, QMenu(), dark=False, parent=window)
+    actions["link"].setText("Edit Link…")
+    assert bar.buttons["link"].accessibleName() == "Edit Link"

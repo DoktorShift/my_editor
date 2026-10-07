@@ -52,6 +52,19 @@ def test_what_cannot(typed):
     assert address is None and reason
 
 
+@pytest.mark.parametrize("typed, says", [
+    ("https://good.example@evil.example/", "name or password"),
+    ("https://user:secret@example.com/", "name or password"),
+    ("example.com:99999", "port"),
+    ("https://example.com:70000/x", "port"),
+])
+def test_addresses_the_app_would_not_open_are_refused_with_a_reason(typed, says):
+    # Review M3: they became links, and Command-click then refused them.
+    address, reason = normalize_link_input(typed)
+    assert address is None and says in reason
+    assert not is_bare_http_url(typed)
+
+
 def test_only_one_web_address_is_a_bare_url():
     assert is_bare_http_url("https://example.com/x")
     assert not is_bare_http_url("see https://example.com")

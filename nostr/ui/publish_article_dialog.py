@@ -31,8 +31,11 @@ from PySide6.QtWidgets import (
 )
 
 import word_count
+from alerts import CANCEL, DEFAULT, NORMAL, Button, ask
 from i18n import _, language, ngettext
 
+from ..article_details import ArticleDetails
+from ..first_publications import FirstPublications
 from ..avatar_store import AvatarStore
 from ..bech32 import encode_naddr
 from ..blossom.store import MediaFile, MediaStore
@@ -41,7 +44,8 @@ from ..known_people import KnownPeople
 from ..outbox import RelayDirectory, relays_from
 from ..profiles import Profile, ProfileStore
 from ..publisher import (
-    PublishJob, PublishResult, build_article, find_first_publication, slugify,
+    FOUND, NEVER, FirstPublication, PublishJob, PublishResult, build_article,
+    find_first_publication, slugify,
 )
 from ..relay import RelayPool
 from ..search import Nip50SearchClient
@@ -338,8 +342,10 @@ class PublishArticleDialog(QDialog):
         default_title: str = "",
         default_slug: str = "",
         first_published: Optional[int] = None,
+        details: Optional[ArticleDetails] = None,
+        first_publications: Optional[FirstPublications] = None,
         published_at_lookup: Optional[
-            Callable[[str, str, Callable[[Optional[int]], None]], None]] = None,
+            Callable[[str, str, Callable[[FirstPublication], None]], None]] = None,
         parent=None,
         is_dark: bool = True,
     ) -> None:
@@ -377,16 +383,26 @@ class PublishArticleDialog(QDialog):
         self._job: Optional[PublishJob] = None
         self._signed_event_id: Optional[str] = None
         # NIP-23: ``published_at`` is when the article first went out, and
-        # an edit keeps it. Known here when the tab came from a draft that
-        # carries it (for that draft's identifier); otherwise asked of the
-        # relays at publish time, and "now" only for a first publication.
+        # an edit keeps it. Known when the tab came from a draft that
+        # carries it (for that draft's identifier) or when this computer
+        # published the article before; otherwise asked of the relays at
+        # publish time. "Now" only for a first publication; when nobody
+        # can tell, the person decides (never a guess).
         self._first_published = (
             {default_slug: first_published} if default_slug and first_published else {})
+        self._first_publications = first_publications
         self._published_at_lookup = published_at_lookup or self._look_up_published_at
         self._looking_up = False
+        self._published_at_used: Optional[int] = None
+        # What the article's draft holds besides its text (an imported
+        # article's summary, cover, hashtags and source): offered here and
+        # published with it.
+        self._details = details or ArticleDetails()
         # Tracks whether the user has manually edited the slug. As long as
-        # they haven't, slug stays in sync with title.
-        self._slug_is_auto = True
+        # they haven't, slug stays in sync with title. An article that has
+        # an identifier already (its draft's) keeps it: another one would
+        # publish another article.
+        self._slug_is_auto = not self._details.identifier
         self._advanced_open = False
         # Cover-image preview state.
         self._cover_thumb_hash: str = ""
@@ -401,6 +417,9 @@ class PublishArticleDialog(QDialog):
             default_title=default_title,
             default_slug=default_slug,
         )
+        self._summary_edit.setText(self._details.summary)
+        self._image_edit.setText(self._details.image)
+        self._tags_edit.setText(", ".join(self._details.hashtags))
         self._apply_theme()
         self._refresh_profile_chip()
         self._refresh_meta()
@@ -745,7 +764,7 @@ class PublishArticleDialog(QDialog):
     # -- meta strip --------------------------------------------------------
 
     def _refresh_meta(self) -> None:
-        words = word_count.count_words(self._body_edit.toPlainText())
+        words = word_count.count_markdown_words(self._body_edit.toPlainText())
         if words == 0:
             self._meta_label.setText("")
             return
@@ -836,7 +855,7 @@ class PublishArticleDialog(QDialog):
     # -- publish flow ------------------------------------------------------
 
     def _look_up_published_at(self, author: str, slug: str,
-                              on_done: Callable[[Optional[int]], None]) -> None:
+                              on_done: Callable[[FirstPublication], None]) -> None:
         find_first_publication(self._relay_pool, self._relay_directory, author, slug,
                                on_done, parent=self)
 
@@ -845,7 +864,9 @@ class PublishArticleDialog(QDialog):
         body = self._body_edit.toPlainText().strip()
         if not slug or not body or self._job is not None or self._looking_up:
             return
-        known = self._first_published.get(slug)
+        known = self._first_published.get(slug) or (
+            self._first_publications.get(self._current_profile.user_pubkey, slug)
+            if self._first_publications is not None else None)
         if known:
             self._publish(slug, body, known)
             return
@@ -857,7 +878,7 @@ class PublishArticleDialog(QDialog):
         self._published_at_lookup(
             author, slug, lambda when, s=slug, a=author: self._on_published_at(s, a, when))
 
-    def _on_published_at(self, slug: str, author: str, when: Optional[int]) -> None:
+    def _on_published_at(self, slug: str, author: str, found: FirstPublication) -> None:
         if not self._looking_up:
             return                                     # the dialog was closed meanwhile
         self._looking_up = False
@@ -867,11 +888,35 @@ class PublishArticleDialog(QDialog):
             self._set_busy(False)
             self._set_status("")
             return
-        if when:
-            self._first_published[slug] = when
         body = self._body_edit.toPlainText().strip()
         self._set_busy(False)
-        self._publish(slug, body, when or int(time.time()))
+        if found.state == FOUND:
+            self._first_published[slug] = found.published_at
+            self._publish(slug, body, found.published_at)
+        elif found.state == NEVER:
+            self._publish(slug, body, int(time.time()))
+        else:
+            self._set_status("")
+            self._ask_when_nobody_can_tell(slug, body)
+
+    def _ask_when_nobody_can_tell(self, slug: str, body: str) -> None:
+        """None of the relays the author publishes to answered: whether the
+        article went out before cannot be told, and a guess would either
+        re-date an edit or back-date a new article. The person decides."""
+        choice = ask(
+            self,
+            title=_("Couldn't check whether this article was published before"),
+            message=_("None of the relays you publish to answered. If the article went "
+                      "out before, publishing it as new gives it today's date, and "
+                      "readers see it as a new article."),
+            buttons=(Button(_("Publish as New"), "new", NORMAL),
+                     Button(_("Cancel"), "cancel", CANCEL),
+                     Button(_("Try Again"), "again", DEFAULT)),
+            is_dark=self._is_dark)
+        if choice == "again":
+            self._on_publish()
+        elif choice == "new":
+            self._publish(slug, body, int(time.time()))
 
     def _publish(self, slug: str, body: str, published_at: int) -> None:
         try:
@@ -885,6 +930,7 @@ class PublishArticleDialog(QDialog):
                 published_at=published_at,
                 hashtags=self._hashtag_list(),
                 mentions=self._mention_row.mentions(),
+                extra_tags=self._details.carried_tags(body) or None,
             )
         except ValueError as exc:
             # Make sure the Advanced panel is open so the slug field is visible
@@ -896,6 +942,7 @@ class PublishArticleDialog(QDialog):
 
         self._set_busy(True)
         self._set_status("")
+        self._published_at_used = published_at
 
         self._job = PublishJob(
             relay_pool=self._relay_pool,
@@ -925,6 +972,11 @@ class PublishArticleDialog(QDialog):
             self._set_busy(False)
             return
 
+        if self._first_publications is not None and self._published_at_used:
+            # This computer remembers it, for when the relays cannot tell.
+            self._first_publications.remember(self._current_profile.user_pubkey,
+                                              self._slug_edit.text().strip(),
+                                              self._published_at_used)
         hint_relays = [url for url, ok, _message in results if ok][:2]
         naddr = encode_naddr(
             identifier=self._slug_edit.text().strip(),

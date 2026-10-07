@@ -172,6 +172,16 @@ def secondary_font() -> QFont:
     return font
 
 
+# The rows of the panel's lists: two stacked lines from one gutter, with
+# a leading bar on the selected row as well as a fill (``accessibility.md``:
+# "Offer visual indicators, like distinct shapes or icons, in addition to
+# color"). The vertical values add up to the row height.
+LIST_GUTTER: int = 12
+ROW_PAD_V: int = 7
+ROW_LINE_GAP: int = 2
+SELECTION_BAR_W: int = 3
+
+
 def scaled(base: int) -> int:
     """``base`` px at the macOS default point size, scaled to this app's.
 

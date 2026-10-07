@@ -84,7 +84,11 @@ def same_origin(a: str, b: str) -> bool:
     return origin_a is not None and origin_a == origin_b
 
 
-def _is_loopback(host: str) -> bool:
+def is_loopback_host(host: str) -> bool:
+    """Whether a host name is this computer itself (``localhost``, or a
+    loopback address), where nobody on the way can read or change what is
+    sent."""
+    host = (host or "").lower()
     if host == "localhost":
         return True
     try:
@@ -110,7 +114,7 @@ def is_safe_media_url(url: str, *, allowed_origin: Optional[str] = None) -> bool
         return False
     scheme = (parts.scheme or "").lower()
     if scheme == "http":
-        if not _is_loopback(host):
+        if not is_loopback_host(host):
             return False
     elif scheme != "https":
         return False

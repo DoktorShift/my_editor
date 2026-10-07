@@ -13,6 +13,9 @@ Two levels at most, as Apple's guidelines ask of a sidebar:
       A  Field notes   5       new posts waiting from this source
       N  Night Shift   •       its last check failed (the tooltip says why)
 
+    Files
+      wordpress.xml   48       a file or a link opened to import once
+
 A count shows only when there is something to count; the Inbox's is
 bold. A source shows its initial in a calm tint (its site icon comes
 later), its new posts, or a dot when its last check failed. Section
@@ -47,7 +50,7 @@ from i18n import _
 
 from .imports_glyphs import glyph, is_dark, letter_avatar
 
-LIST, HEADER, SOURCE = "list", "header", "source"
+LIST, HEADER, SOURCE, FILE = "list", "header", "source", "file"
 ROW_HEIGHT = 30
 HEADER_HEIGHT = 30
 ICON = 16
@@ -57,11 +60,12 @@ ICON = 16
 class Entry:
     """One row of the sidebar."""
 
-    kind: str                  # LIST | HEADER | SOURCE
-    key: str                   # a list's name, or a source's key
+    kind: str                  # LIST | HEADER | SOURCE | FILE
+    key: str                   # a list's name, a source's key, a file's id
     title: str
-    glyph: str = ""            # for a LIST
+    glyph: str = ""            # for a LIST and a FILE
     count: int = 0
+    trailing: str = ""         # instead of the count: "31/48"
     emphasized: bool = False   # the Inbox count
     failed: bool = False       # a source whose last check failed
     tooltip: str = ""
@@ -132,7 +136,9 @@ class SidebarModel(QAbstractListModel):
             return entry.tooltip or None
         if role == Qt.ItemDataRole.AccessibleTextRole:
             parts = [entry.title]
-            if entry.count:
+            if entry.trailing:
+                parts.append(entry.trailing)
+            elif entry.count:
                 parts.append(str(entry.count))
             if entry.failed:
                 parts.append(_("Couldn't check this source"))
@@ -190,7 +196,7 @@ class SidebarDelegate(QStyledItemDelegate):
 
         dpr = self._view.devicePixelRatioF()
         icon_rect = QRect(rect.left() + 14, rect.center().y() - ICON // 2 + 1, ICON, ICON)
-        if entry.kind == LIST:
+        if entry.kind in (LIST, FILE):
             painter.drawPixmap(icon_rect, glyph(entry.glyph, ICON, muted if not (
                 selected and focused) else text_color, dpr))
         else:
@@ -202,8 +208,8 @@ class SidebarDelegate(QStyledItemDelegate):
         font = QFont(option.font)
         if entry.failed:
             trailing_width = 14
-        elif entry.count:
-            trailing = str(entry.count)
+        elif entry.trailing or entry.count:
+            trailing = entry.trailing or str(entry.count)
             count_font = QFont(font)
             count_font.setBold(entry.emphasized)
             trailing_width = QFontMetrics(count_font).horizontalAdvance(trailing) + 4
@@ -276,15 +282,24 @@ class Sidebar(QListView):
         self.model_.set_entries(entries)
         self._restore_selection()
 
-    def select(self, kind: str, key: str) -> bool:
-        """Choose the row ``(kind, key)``; False when there is none."""
+    def select(self, kind: str, key: str, *, announce: bool = True) -> bool:
+        """Choose the row ``(kind, key)``; False when there is none.
+        ``entry_selected`` is said only when the choice changed (and
+        ``announce`` is on): the same choice found again after the rows
+        changed is not a new one."""
         row = self.model_.row_of(kind, key)
         if row < 0:
             return False
+        changed = (kind, key) != self._chosen
         self._chosen = (kind, key)
         index = self.model_.index(row)
         if self.currentIndex() != index:
+            blocked = self.selectionModel().blockSignals(True)
             self.setCurrentIndex(index)
+            self.selectionModel().blockSignals(blocked)
+            self.viewport().update()
+        if changed and announce:
+            self.entry_selected.emit(self.model_.entry(row))
         return True
 
     def chosen(self) -> Optional[Entry]:
@@ -292,21 +307,23 @@ class Sidebar(QListView):
         return self.model_.entry(row)
 
     def _restore_selection(self) -> None:
-        if self.select(*self._chosen):
+        """After the rows changed: the same choice, quietly (the window keeps
+        its search, its checks and the open post), or the Inbox when what
+        was chosen is gone."""
+        if self.select(*self._chosen, announce=False):
             return
-        # What was chosen is gone (a source was removed): back to the Inbox.
         self.select(LIST, "inbox")
 
     def _on_current(self, current: QModelIndex, _previous: QModelIndex) -> None:
         entry = self.model_.entry(current.row())
-        if entry is None or not entry.selectable:
+        if entry is None or not entry.selectable or (entry.kind, entry.key) == self._chosen:
             return
         self._chosen = (entry.kind, entry.key)
         self.entry_selected.emit(entry)
 
     def _on_context_menu(self, pos: QPoint) -> None:
         entry = self.model_.entry(self.indexAt(pos).row())
-        if entry is not None and entry.kind == SOURCE:
+        if entry is not None and entry.kind in (SOURCE, FILE):
             self.menu_requested.emit(entry, self.viewport().mapToGlobal(pos))
 
     def focusInEvent(self, event) -> None:

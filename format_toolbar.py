@@ -26,8 +26,8 @@ from PySide6.QtWidgets import QMenu, QPushButton, QToolBar, QToolButton, QWidget
 
 import format_icons
 from constants import (
-    DARK_BORDER, DARK_FG, DARK_MENU_BG, DARK_SELECTION, LIGHT_BORDER, LIGHT_FG, LIGHT_MENU_BG,
-    LIGHT_SELECTION,
+    DARK_BORDER, DARK_FG, DARK_MENU_BG, DARK_MUTED_FG, DARK_SELECTION, LIGHT_BORDER, LIGHT_FG,
+    LIGHT_MENU_BG, LIGHT_MUTED_FG, LIGHT_SELECTION,
 )
 from i18n import _, pgettext
 
@@ -80,10 +80,15 @@ class FormatToolbar(QToolBar):
             action = actions[name]
             self.addAction(action)
             button = self.widgetForAction(action)
-            button.setAccessibleName(action.text().replace("&", "").rstrip("…"))
             self.buttons[name] = button
             action.changed.connect(lambda a=action, b=button: self._describe(a, b))
             self._describe(action, button)
+        # The chevron that holds the buttons a narrow window has no room
+        # for: Qt gives it no name, so a screen reader would say "button".
+        more = self.findChild(QToolButton, "qt_toolbar_ext_button")
+        if more is not None:
+            more.setAccessibleName(_("More Formatting"))
+            more.setToolTip(_("More Formatting"))
         self.set_style_name(_("Body"))
         self.set_dark(dark)
 
@@ -99,6 +104,8 @@ class FormatToolbar(QToolBar):
         icons = {
             "bold": format_icons.letter(pgettext("format button", "B"), ink, bold=True),
             "italic": format_icons.letter(pgettext("format button", "I"), ink, italic=True),
+            # A letter whose struck form still reads as a letter crossed out
+            # (a struck D reads as the letter Đ).
             "strike": format_icons.letter(pgettext("format button", "S"), ink, strike=True),
             "link": format_icons.link(ink),
             "bullets": format_icons.bulleted_list(ink),
@@ -114,6 +121,9 @@ class FormatToolbar(QToolBar):
             else (LIGHT_MENU_BG, LIGHT_BORDER, LIGHT_SELECTION))
         hover = "rgba(255, 255, 255, 0.08)" if dark else "rgba(0, 0, 0, 0.06)"
         checked = "rgba(255, 255, 255, 0.16)" if dark else "rgba(0, 0, 0, 0.11)"
+        # A button that is on shows it with an edge of at least 3:1 against
+        # the toolbar (WCAG 1.4.11), not with a faint fill alone.
+        checked_edge = DARK_MUTED_FG if dark else LIGHT_MUTED_FG
         text = DARK_FG if dark else LIGHT_FG
         self.setStyleSheet(f"""
             #FormatToolbar {{
@@ -131,7 +141,10 @@ class FormatToolbar(QToolBar):
                 padding: 3px;
             }}
             #FormatToolbar QToolButton:hover {{ background: {hover}; }}
-            #FormatToolbar QToolButton:checked {{ background: {checked}; }}
+            #FormatToolbar QToolButton:checked {{
+                background: {checked};
+                border-color: {checked_edge};
+            }}
             #FormatToolbar QToolButton:focus {{ border-color: {selection}; }}
             #FormatToolbar::separator {{
                 background: {border};
@@ -142,6 +155,8 @@ class FormatToolbar(QToolBar):
         self._style_style_button(text, border, hover, selection)
 
     def _style_style_button(self, text: str, border: str, hover: str, selection: str) -> None:
+        dim = format_icons.dimmed(QColor(text))
+        dim_text = f"rgba({dim.red()}, {dim.green()}, {dim.blue()}, {dim.alphaF():.2f})"
         # Its own sheet: a pop-up button reads left to right, its name
         # first and the arrow at the end, as in TextEdit and Pages. (A
         # ::menu-indicator rule would make Qt drop the padding.)
@@ -156,8 +171,12 @@ class FormatToolbar(QToolBar):
             }}
             QPushButton:hover {{ background: {hover}; }}
             QPushButton:focus {{ border-color: {selection}; }}
+            QPushButton:disabled {{ color: {dim_text}; background: transparent; }}
         """)
 
     @staticmethod
     def _describe(action: QAction, button: QToolButton) -> None:
+        """The button says what its command is called now (Add Link turns
+        into Edit Link), to the eye and to a screen reader alike."""
         button.setToolTip(tooltip_for(action))
+        button.setAccessibleName(action.text().replace("&", "").rstrip("…").rstrip())

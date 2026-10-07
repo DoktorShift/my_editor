@@ -22,7 +22,8 @@ from dataclasses import dataclass
 from typing import Iterator, List, Tuple
 
 from PySide6.QtGui import (
-    QFont, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextFormat, QTextListFormat,
+    QFont, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextDocument, QTextDocumentFragment,
+    QTextFormat, QTextListFormat,
 )
 
 from doc_walk import iter_blocks
@@ -50,7 +51,9 @@ def normalize_after_markdown_load(doc) -> None:
     block outside a list loses it; list items keep theirs.
 
     Headings get the room above and below them that the editor gives
-    the ones typed here.
+    the ones typed here, and bulleted lists the shape of their depth
+    (disc, circle, square), as lists made here have: Qt's reader gives
+    every depth a disc.
 
     Call after every ``setMarkdown`` whose result the person edits.
     """
@@ -58,7 +61,15 @@ def normalize_after_markdown_load(doc) -> None:
     stray = [block for block in iter_blocks(doc)
              if block.textList() is None and block.blockFormat().hasProperty(marker)]
     headings = [block for block in iter_blocks(doc) if block.blockFormat().headingLevel()]
-    if not stray and not headings:
+    bullets = {}
+    for block in iter_blocks(doc):
+        text_list = block.textList()
+        if text_list is not None and list_kind_of(text_list) == BULLET:
+            bullets.setdefault(text_list.objectIndex(), text_list)
+    reshaped = [text_list for text_list in bullets.values()
+                if text_list.format().style()
+                != list_format(BULLET, max(1, text_list.format().indent())).style()]
+    if not stray and not headings and not reshaped:
         return
     cursor = QTextCursor(doc)
     cursor.beginEditBlock()
@@ -70,6 +81,10 @@ def normalize_after_markdown_load(doc) -> None:
     for block in headings:
         fmt = block.blockFormat()
         QTextCursor(block).setBlockFormat(heading_block_format(fmt, fmt.headingLevel()))
+    for text_list in reshaped:
+        fmt = text_list.format()
+        fmt.setStyle(list_format(BULLET, max(1, fmt.indent())).style())
+        text_list.setFormat(fmt)
     cursor.endEditBlock()
 
 
@@ -156,7 +171,8 @@ def selection_has(cursor: QTextCursor, style: str) -> bool:
 # selection someone reads at once, and a bound on the time one update
 # takes while a long selection is being extended. Past it, a style that
 # could not be checked all the way counts as not applied throughout (its
-# button shows off); the commands themselves always act on all of it.
+# button shows off), and the command decides from the same reading, so a
+# button that shows off always turns its style on (over all of it).
 STATE_BUDGET = 1500
 
 
@@ -180,10 +196,11 @@ def selection_state(cursor: QTextCursor, styles=INLINE, *,
     return {style: seen > 0 and style in still for style in styles}
 
 
-def toggle_style(cursor: QTextCursor, style: str) -> bool:
+def toggle_style(cursor: QTextCursor, style: str, *, budget: int = STATE_BUDGET) -> bool:
     """Turn ``style`` on over the whole selection, or off when all of it
-    has it already. Returns the new state. One step on the undo stack."""
-    on = not selection_has(cursor, style)
+    has it already, read as the toolbar reads it (selection_state). Returns
+    the new state. One step on the undo stack."""
+    on = not selection_state(cursor, (style,), budget=budget)[style]
     cursor.beginEditBlock()
     cursor.mergeCharFormat(style_format(style, on))
     if not on and style == CODE:
@@ -315,11 +332,24 @@ def heading_char_format(level: int) -> QTextCharFormat:
     return fmt
 
 
-def body_char_format(fmt: QTextCharFormat) -> QTextCharFormat:
-    """``fmt`` as Body text: no heading size, no heading weight."""
+# The weight words had of their own before their paragraph became a
+# heading, which sets every word in its bold: given back when the
+# paragraph is Body again, so bold words stay bold (0: none of their own).
+OWN_WEIGHT = QTextFormat.Property.UserProperty + 0x3D1
+
+
+def body_char_format(fmt: QTextCharFormat, *, own_weight: bool = True) -> QTextCharFormat:
+    """``fmt`` as Body text: no heading size, no heading weight, and the
+    weight the words had of their own (unless ``own_weight`` is False:
+    what is typed next starts in the plain weight)."""
     body = QTextCharFormat(fmt)
     body.clearProperty(QTextFormat.Property.FontSizeAdjustment)
-    body.clearProperty(QTextFormat.Property.FontWeight)
+    own = body.property(OWN_WEIGHT) if own_weight else None
+    if isinstance(own, int) and not isinstance(own, bool) and own > 0:
+        body.setFontWeight(own)
+    else:
+        body.clearProperty(QTextFormat.Property.FontWeight)
+    body.clearProperty(OWN_WEIGHT)
     return body
 
 
@@ -340,13 +370,23 @@ def set_heading(cursor: QTextCursor, level: int) -> None:
     """Make the paragraphs under the cursor Body (0) or a heading of
     ``level``, as one step on the undo stack. Choosing the style a
     paragraph already has turns it back into Body, the way the toolbar's
-    heading buttons work in standup and Google Docs."""
+    heading buttons work in standup and Google Docs.
+
+    A heading is a paragraph of its own: a list item or a quoted line
+    made a heading leaves its list or quote (Markdown readers drop the
+    quote of a quoted heading, and a heading inside a list is no heading
+    to them)."""
     if level and heading_level(cursor) == level:
         level = BODY
     doc = cursor.document()
     edit = QTextCursor(doc)
     edit.beginEditBlock()
     for block in _blocks_of(cursor):
+        if level:
+            if block.textList() is not None:
+                leave_list(block)
+            if quote_depth(block):
+                set_quote_depth(block, 0)
         fmt = heading_block_format(block.blockFormat(), level)
         whole = QTextCursor(block)
         whole.setBlockFormat(fmt)
@@ -363,11 +403,18 @@ def set_heading(cursor: QTextCursor, level: int) -> None:
 
 
 def restyled(fmt: QTextCharFormat, level: int) -> QTextCharFormat:
-    """``fmt`` in the paragraph style ``level`` (0 for Body)."""
-    body = body_char_format(fmt)
-    if level:
-        body.merge(heading_char_format(level))
-    return body
+    """``fmt`` in the paragraph style ``level`` (0 for Body). Words that
+    become heading words keep note of their own weight (OWN_WEIGHT)."""
+    if not level:
+        return body_char_format(fmt)
+    heading = QTextCharFormat(fmt)
+    if not heading.hasProperty(OWN_WEIGHT):
+        own = fmt.fontWeight() if fmt.hasProperty(QTextFormat.Property.FontWeight) else 0
+        heading.setProperty(OWN_WEIGHT, int(own))
+    heading.clearProperty(QTextFormat.Property.FontSizeAdjustment)
+    heading.clearProperty(QTextFormat.Property.FontWeight)
+    heading.merge(heading_char_format(level))
+    return heading
 
 
 # --------------------------------------------------------------------------- #
@@ -635,7 +682,9 @@ def paragraph_state(cursor: QTextCursor, *, budget: int = STATE_BUDGET) -> Parag
 
 def toggle_quote(cursor: QTextCursor) -> None:
     """Quote the paragraphs under the cursor, or, when all of them are
-    quoted already, take the quote away. One step on the undo stack."""
+    quoted already, take the quote away. One step on the undo stack. A
+    heading quoted becomes Body first: Markdown readers drop the quote of
+    a quoted heading."""
     blocks = _blocks_of(cursor)
     if not blocks:
         return
@@ -646,6 +695,8 @@ def toggle_quote(cursor: QTextCursor) -> None:
         if unquote:
             set_quote_depth(block, 0)
         elif not quote_depth(block) and not is_divider(block):
+            if block.blockFormat().headingLevel():
+                set_heading(QTextCursor(block), BODY)
             set_quote_depth(block, 1)
     edit.endEditBlock()
 
@@ -790,3 +841,151 @@ def without_link(fmt: QTextCharFormat) -> QTextCharFormat:
                  QTextFormat.Property.FontUnderline, QTextFormat.Property.TextUnderlineStyle):
         plain.clearProperty(prop)
     return plain
+
+
+# --------------------------------------------------------------------------- #
+# Code blocks and pasted documents                                             #
+# --------------------------------------------------------------------------- #
+
+def is_code_block(block) -> bool:
+    """Whether the paragraph is a line of a code block (fenced or indented,
+    as Qt's Markdown reader marks them)."""
+    fmt = block.blockFormat()
+    return bool(fmt.property(QTextFormat.Property.BlockCodeFence)) or fmt.hasProperty(
+        QTextFormat.Property.BlockCodeLanguage)
+
+
+def _has_own_style(block) -> bool:
+    """Whether a paragraph is more than Body text: a heading, a list item,
+    a quote, a code line or a divider."""
+    return bool(block.blockFormat().headingLevel() or block.textList() is not None
+                or quote_depth(block) or is_code_block(block) or is_divider(block))
+
+
+def _stands_alone(block) -> bool:
+    """Whether a paragraph cannot share its line with other words: a line
+    of code, a divider."""
+    return is_code_block(block) or is_divider(block)
+
+
+def _restyle(doc, start: int, end: int, level: int) -> None:
+    """The text from ``start`` to ``end`` in the paragraph style ``level``."""
+    if end <= start:
+        return
+    span = QTextCursor(doc)
+    span.setPosition(start)
+    span.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+    for first, last, fmt in _text_runs(span):
+        piece = QTextCursor(doc)
+        piece.setPosition(first)
+        piece.setPosition(last, QTextCursor.MoveMode.KeepAnchor)
+        piece.setCharFormat(restyled(fmt, level))
+
+
+def _take_style(target, first) -> None:
+    """The empty paragraph ``target`` became ``first``, the first pasted
+    paragraph: it takes its style, list included."""
+    fmt = QTextBlockFormat(first.blockFormat())
+    fmt.clearProperty(QTextFormat.Property.ObjectIndex)    # the list is set below
+    QTextCursor(target).setBlockFormat(fmt)
+    pasted_list = first.textList()
+    if pasted_list is None:
+        return
+    following = first.next()
+    joined = None
+    if (following.isValid() and following.textList() is not None
+            and following.textList().objectIndex() == pasted_list.objectIndex()):
+        # The next pasted item came from the same list: join its copy.
+        joined = target.next().textList()
+    if joined is not None:
+        joined.add(target)
+    else:
+        QTextCursor(target).createList(pasted_list.format())
+
+
+def _one_line(source):
+    """``source`` as one line of text, its paragraphs joined by spaces:
+    what a table cell can hold."""
+    line = QTextDocument()
+    out = QTextCursor(line)
+    for block in iter_blocks(source):
+        if not block.text().strip():
+            continue
+        if not out.atStart():
+            out.insertText(" ", QTextCharFormat())
+        level = block.blockFormat().headingLevel()
+        it = block.begin()
+        while not it.atEnd():
+            fragment = it.fragment()
+            it += 1
+            if fragment.isValid():
+                fmt = fragment.charFormat()
+                out.insertText(fragment.text(), restyled(fmt, 0) if level else fmt)
+    return line
+
+
+def insert_document(cursor: QTextCursor, source) -> None:
+    """Insert the document ``source`` at the cursor in place of the
+    selection, as one step on the undo stack, the way typing it would:
+
+    - its first paragraph goes on from the words before the caret and its
+      last runs into the words after it, each in the style of the
+      paragraph it joins (a heading pasted into a sentence becomes words
+      of that sentence);
+    - into an empty paragraph, the first pasted paragraph comes with its
+      own style, so a heading stays a heading and an item an item;
+    - code and dividers never run into words: pasted inside a paragraph,
+      they split it and stand on lines of their own;
+    - pasted list items join a list of the same kind they land next to;
+    - into a table cell it comes as one line, which is what a cell holds;
+    - pasted on a divider, it goes below it.
+
+    The cursor ends after what was pasted."""
+    doc = cursor.document()
+    cursor.beginEditBlock()
+    if cursor.hasSelection():
+        cursor.removeSelectedText()
+    if is_divider(cursor.block()):
+        cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+        cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
+    if cursor.currentTable() is not None:
+        source = _one_line(source)
+    first = source.begin()
+    if cursor.block().text():
+        # A code line or a divider at either end of what is pasted gets a
+        # line of its own: split the paragraph there.
+        if _stands_alone(source.lastBlock()) and not cursor.atBlockEnd():
+            cursor.insertBlock()
+            cursor.movePosition(QTextCursor.MoveOperation.PreviousBlock)
+            cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+        if _stands_alone(first) and not cursor.atBlockStart():
+            cursor.insertBlock()
+    target = cursor.block()
+    empty = not target.text()
+    level = target.blockFormat().headingLevel()
+    start = cursor.position()
+    cursor.insertFragment(QTextDocumentFragment(source))
+    end = cursor.position()
+    landed = doc.findBlock(start)
+    last = doc.findBlock(end)
+    if empty and _has_own_style(first):
+        _take_style(landed, first)
+    elif first.blockFormat().headingLevel() != level:
+        # The first pasted words joined a paragraph of another style.
+        _restyle(doc, start, min(end, landed.position() + landed.length() - 1), level)
+    if last != landed:
+        # The words after the caret went on in the last pasted paragraph.
+        tail_level = last.blockFormat().headingLevel()
+        if tail_level != level:
+            _restyle(doc, end, last.position() + last.length() - 1, tail_level)
+    around = [landed.previous()]
+    block = landed
+    while block.isValid():
+        around.append(block)
+        if block == last:
+            break
+        block = block.next()
+    around.append(last.next())
+    _tidy_lists(doc, around)
+    cursor.setPosition(end)
+    cursor.endEditBlock()

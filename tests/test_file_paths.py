@@ -303,6 +303,7 @@ class _RenameWindow:
     """The slice of MainWindow that renames a file."""
 
     _rename_tab = MainWindow._rename_tab
+    _document_name = staticmethod(MainWindow._document_name)
 
     def __init__(self):
         self.titles = []
@@ -320,9 +321,10 @@ def _rename(monkeypatch, path, new_name):
                         lambda parent, **kw: told.append(kw.get("title", "")))
     monkeypatch.setattr(main_window_module.QInputDialog, "getText",
                         lambda *a, **k: (new_name, True))
-    moved = []
+    moved, ed_names = [], []
     ed = SimpleNamespace(_file_path=str(path),
-                         _backup=SimpleNamespace(update_file_path=moved.append))
+                         _backup=SimpleNamespace(update_file_path=moved.append),
+                         setAccessibleName=ed_names.append, names=ed_names)
     window = _RenameWindow()
     window._rename_tab(0, ed)
     return ed, window, told, moved
@@ -334,7 +336,7 @@ def test_another_case_of_its_own_name_renames_the_file(note, monkeypatch):
     assert told == []
     assert "Note.md" in os.listdir(note.parent) and "note.md" not in os.listdir(note.parent)
     assert ed._file_path == renamed and moved == [renamed]
-    assert window.titles == ["Note.md"]
+    assert window.titles == ["Note.md"] and ed.names == ["Note.md"]
 
 
 def test_a_name_another_file_has_is_refused(note, monkeypatch):

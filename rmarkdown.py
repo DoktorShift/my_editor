@@ -38,6 +38,7 @@ from doc_walk import (
     parse_bullet_line,
     skip_prefix,
 )
+import rich_text
 import rmd_toolchain
 from i18n import _
 
@@ -189,13 +190,40 @@ def document_to_rmd(doc, title: str, copy_image=None) -> str:
     ])
 
     lines: list[str] = []
-    prev_kind = None  # None | "text" | "bullet" | "blank"
+    prev_kind = None  # None | "text" | "bullet" | "blank" | "quote"
+    prev_quote = 0
     for block in iter_blocks(doc):
         text = block.text()
         spaces, has_bullet = parse_bullet_line(text)
 
+        if rich_text.is_divider(block):
+            if prev_kind not in (None, "blank"):
+                lines.append("")
+            # Not "---": at the top it would read as the YAML header.
+            lines.append("***")
+            lines.append("")
+            prev_kind = "blank"
+            continue
+
+        quote = rich_text.quote_depth(block)
+        if quote and text.strip():
+            prefix = "> " * quote
+            if prev_kind == "quote":
+                # A new paragraph in the quote, at the shallower depth.
+                lines.append(("> " * min(prev_quote, quote)).rstrip())
+            elif prev_kind not in (None, "blank"):
+                lines.append("")
+            if block.textList() is not None:
+                lines.append(prefix + _list_item_md(block, copy_image))
+            else:
+                lines.append(prefix + _guard_line_start(
+                    _render_runs_md(list(iter_block_runs(block)), copy_image)))
+            prev_kind = "quote"
+            prev_quote = quote
+            continue
+
         if block.textList() is not None:
-            if prev_kind == "text":
+            if prev_kind in ("text", "quote"):
                 lines.append("")  # a list needs a blank line before it
             lines.append(_list_item_md(block, copy_image))
             prev_kind = "bullet"
@@ -215,7 +243,7 @@ def document_to_rmd(doc, title: str, copy_image=None) -> str:
             depth = bullet_depth(spaces)
             runs = skip_prefix(list(iter_block_runs(block)), spaces + 2)
             content = _render_runs_md(runs, copy_image)
-            if prev_kind == "text":
+            if prev_kind in ("text", "quote"):
                 lines.append("")  # a list needs a blank line before it
             lines.append("  " * (depth - 1) + "- " + content)
             prev_kind = "bullet"
@@ -233,7 +261,8 @@ def document_to_rmd(doc, title: str, copy_image=None) -> str:
             # Keep the editor's line structure: hard break, not a merged
             # paragraph and not a paragraph gap.
             lines[-1] += "\\"
-        elif prev_kind == "bullet":
+        elif prev_kind in ("bullet", "quote"):
+            # A blank line ends the list or quote (else the line joins it).
             lines.append("")
         lines.append(content)
         prev_kind = "text"

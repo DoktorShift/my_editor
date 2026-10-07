@@ -33,8 +33,11 @@ a source is a baseline. Every fetch passes the network guard
 
 from __future__ import annotations
 
+import logging
 import math
-from typing import Callable, Dict, Optional
+import time
+from collections import deque
+from typing import Callable, Deque, Dict, Optional
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
@@ -48,9 +51,14 @@ from .inbox_store import CHECK_INTERVAL, InboxStore, SourceRow
 from .registry import ResolveInput, detect_resolver, resolve_source
 from .sources.podcast import enrich_feed_with_podcast
 
+_log = logging.getLogger(__name__)
+
 LAUNCH_DELAY_MS = 10_000
 TICK_MS = 60_000
 CONCURRENT = 2
+# The owner's decision Q-8: at most about 200 checks an hour, however many
+# sources are followed and however many are due at launch.
+CHECKS_PER_HOUR = 200
 SOURCES_PER_INTERVAL = 50
 FEED_FORMATS = ("rss", "atom", "jsonfeed")
 
@@ -114,6 +122,7 @@ class FeedChecker(QObject):
                  online: Callable[[], bool] = _default_online,
                  scheduler: Optional[Callable[[int, Callable[[], None]], None]] = None,
                  tick_ms: int = TICK_MS, launch_delay_ms: int = LAUNCH_DELAY_MS,
+                 clock: Callable[[], float] = time.monotonic,
                  parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._store = store
@@ -129,6 +138,9 @@ class FeedChecker(QObject):
         self._running = False
         self._generation = 0
         self._in_flight: Dict[str, int] = {}
+        self._clock = clock
+        # When the checks of the last hour started (for the hourly budget).
+        self._started: Deque[float] = deque()
 
     # -- control ---------------------------------------------------------------
 
@@ -177,13 +189,22 @@ class FeedChecker(QObject):
         """Start the checks that are due, while there is room."""
         if not self._running or not self._online():
             return
-        room = CONCURRENT - len(self._in_flight)
+        room = min(CONCURRENT - len(self._in_flight), self._budget_left())
         if room <= 0:
             return
         for source in self._store.due_sources(room):
             if source.key in self._in_flight or not self._store.claim(source.key):
                 continue
+            self._started.append(self._clock())
             self._check(source)
+
+    def _budget_left(self) -> int:
+        """Checks this hour may still start (Q-8). A person's own Check Now
+        is not counted against it."""
+        hour_ago = self._clock() - 3600
+        while self._started and self._started[0] <= hour_ago:
+            self._started.popleft()
+        return CHECKS_PER_HOUR - len(self._started)
 
     # -- one check ---------------------------------------------------------------
 
@@ -196,7 +217,10 @@ class FeedChecker(QObject):
         key = source.key
         self._in_flight[key] = generation
         self.checking.emit(key, True)
-        url = source.final_url or source.url
+        # Where the feed moved to, but the followed address again after a
+        # failure: a temporary redirect must not replace it for good
+        # (review L11).
+        url = source.url if source.failures else (source.final_url or source.url)
 
         def live() -> bool:
             return generation == self._generation and self._in_flight.get(key) == generation
@@ -217,8 +241,12 @@ class FeedChecker(QObject):
 
         def on_not_modified() -> None:
             if live():
-                self._store.record_unchanged(key, interval=self._interval())
-                self._done(key, 0)
+                try:
+                    self._store.record_unchanged(key, interval=self._interval())
+                except Exception:  # noqa: BLE001, the slot must come back
+                    _log.warning("could not record an unchanged feed", exc_info=True)
+                finally:
+                    self._done(key, 0)
 
         self._fetcher.fetch_feed(
             url, etag=source.etag, last_modified=source.last_modified,
@@ -243,22 +271,41 @@ class FeedChecker(QObject):
 
     def _ingest(self, key: str, feed, *, etag: str = "", last_modified: str = "",
                 final_url: str = "") -> None:
-        result = self._store.ingest(
-            key, list(feed.items), interval=self._interval(), etag=etag,
-            last_modified=last_modified, final_url=final_url,
-            feed_title=feed.title or "", site_url=feed.link or "")
-        self._done(key, result.new)
+        new = 0
+        try:
+            new = self._store.ingest(
+                key, list(feed.items), interval=self._interval(), etag=etag,
+                last_modified=last_modified, final_url=final_url,
+                feed_title=feed.title or "", site_url=feed.link or "").new
+        except Exception:  # noqa: BLE001, a locked or full disk must not hold the slot
+            _log.warning("could not store a checked feed", exc_info=True)
+            self._record_failure(key, SourceError("", ERROR_CODES.UNKNOWN))
+        finally:
+            self._done(key, new)
 
     def _fail(self, key: str, error: SourceError) -> None:
-        self._store.record_failure(key, error_text(error))
-        self._done(key, 0)
+        try:
+            self._record_failure(key, error)
+        finally:
+            self._done(key, 0)
+
+    def _record_failure(self, key: str, error: SourceError) -> None:
+        try:
+            self._store.record_failure(key, error_text(error))
+        except Exception:  # noqa: BLE001
+            _log.warning("could not record a failed check", exc_info=True)
 
     def _done(self, key: str, new: int) -> None:
+        """A check ended, whatever happened: its slot comes back (review M4:
+        a write that raised kept it for good, and two stopped every check)."""
         self._in_flight.pop(key, None)
         self.checking.emit(key, False)
         self.source_checked.emit(key, new)
-        # A free slot: the next due source need not wait for the tick.
-        self.tick()
+        # A free slot: the next due source need not wait for the minute,
+        # but goes on the next turn of the event loop, never inside this
+        # call (a run of failures answered at once nested deeper and deeper).
+        generation = self._generation
+        self._schedule(0, lambda: generation == self._generation and self.tick())
 
 
 def _as_error(exc: BaseException) -> SourceError:

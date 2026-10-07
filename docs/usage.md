@@ -23,12 +23,12 @@ On macOS, `Ctrl` in these tables is the Command key (`⌘`) and `Alt` is Option 
 |---|---|
 | `Ctrl+B` | Bold |
 | `Ctrl+I` | Italic |
-| `Ctrl+U` | Underline (stays in local files: Markdown and Nostr have no underline) |
+| `Ctrl+U` | Underline, in HTML documents only (Markdown and Nostr have no underline, so it is dimmed elsewhere) |
 | `Ctrl+Shift+X` on macOS, `Alt+Shift+5` on Windows and Linux | Strikethrough |
 | | Inline Code (`Format` menu) |
 | `Ctrl+\` | Clear Formatting (a link stays a link) |
-| `Ctrl+Alt+0` on macOS, `Ctrl+0` on Windows and Linux | Style: Body |
-| `Ctrl+Alt+1` to `Ctrl+Alt+3` on macOS, `Ctrl+1` to `Ctrl+3` on Windows and Linux | Style: Heading 1 to 3 (the same heading again makes it Body) |
+| `Ctrl+Shift+B` on macOS, `Ctrl+0` on Windows and Linux | Style: Body |
+| `Ctrl+Shift+T`, `Ctrl+Shift+H`, `Ctrl+Shift+J` on macOS (Notes' Title, Heading and Subheading), `Ctrl+1` to `Ctrl+3` on Windows and Linux | Style: Heading 1 to 3 (the same heading again makes it Body) |
 | `Ctrl+Shift+7` on macOS, `Ctrl+Shift+8` on Windows and Linux | Bulleted List (again: no list) |
 | `Ctrl+Shift+9` on macOS, `Ctrl+Shift+7` on Windows and Linux | Numbered List (again: no list) |
 | `Ctrl+]` / `Ctrl+[` | Increase / Decrease Indent of list items |
@@ -36,11 +36,13 @@ On macOS, `Ctrl` in these tables is the Command key (`⌘`) and `Alt` is Option 
 | `Ctrl+K` | Add Link (Edit Link when the caret is in a link) |
 | | `Insert > Divider`: a horizontal rule (`---`) after the paragraph |
 
+Writing (Markdown files, new documents and drafts) is set in your system's own text font at a reading size, in a column of a comfortable line length; plain text and code files keep the monospace font across the whole window. `View > Use Monospace Font for Writing` sets all writing in monospace.
+
 The status bar says, quietly, how long the document is: its words and how long it takes to read (225 words a minute, as the long-form Nostr readers count), or how many words are selected.
 
 The **format toolbar** above the document holds the controls used most: the paragraph style (Body, Heading 1 to 3), Bold, Italic, Strikethrough, Add Link, Bulleted List, Numbered List and Quote. Everything else is in the `Format` and `Insert` menus. `View > Show Toolbar` (`Ctrl+Alt+T` on macOS) hides it; a PDF tab has none.
 
-The keys follow each platform's own conventions: Apple Notes and Pages on macOS, Google Docs and LibreOffice on Windows and Linux. A command no convention has a key for has none.
+The keys follow each platform's own conventions: Apple Notes and Pages on macOS, Google Docs and LibreOffice on Windows and Linux. A command no convention has a key for has none. One exception on macOS: Strikethrough and Clear Formatting, which Apple's apps give no key, keep the keys writers know from Google Docs (`Ctrl+Shift+X`, `Ctrl+\`).
 
 Links: `Ctrl+K` opens a small panel under the words with the link's text and address. It accepts web addresses (`https://` is added when you leave it out), email addresses and, while a Nostr account is in use, Nostr links; it says right there why anything else cannot be a link. Pasting a web address over selected words links them. `Ctrl`-click (`Cmd`-click on macOS) opens a link: web pages in your browser, Nostr links through njump.me. Typing right after a link is not part of it.
 
@@ -59,6 +61,12 @@ The `Edit` menu has what every Mac app has there, in the same order:
 | `Ctrl+A` | Select All |
 
 Cut, Copy, Paste and Select All act on whatever has the focus: the document, the find field, or the PDF reader.
+
+**What a paste brings in.** In a document that can hold Markdown structure, a paste keeps what Markdown can say and nothing else: headings, bold, italic, strikethrough, code, links, lists and checklists, quotes, code blocks (with their language, from Stack Overflow, GitHub or VS Code), tables, dividers and pictures that are on the web. Fonts, sizes and colors stay behind, so text from Google Docs, Word, Pages or a web page looks like the rest of your document. A link that would not work for your readers (a path on the website it came from, a script) keeps its words without the link. A picture that is not on the web (inside the clipboard or on a disk) cannot come along with the text; the status bar says so, and you can copy the picture on its own and paste it. Plain text is read as Markdown when it clearly is Markdown (a heading and a list, a table); other text arrives as it is. Text copied in MyEditor pastes back exactly as it was.
+
+A paste goes in the way typing it would: inside a sentence the pasted words become part of it, into an empty line the first pasted paragraph keeps its style (a heading stays a heading), code and dividers get lines of their own, pasted list items join the list they land next to, and a table cell gets one line. One `Undo` takes the whole paste back. Inside a code block, and in plain-text and code files, a paste is always plain text. Image files copied in the Finder or Explorer are added like dropped ones. Dropping text on the document works the same way as pasting it.
+
+**Paste and Match Style** pastes the clipboard's plain text in the style of the text where it goes: inside a heading it is heading text, inside bold words it is bold.
 
 ### Find
 

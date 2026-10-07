@@ -55,6 +55,61 @@ def test_whole_words_skip_parts_of_words():
     assert find_all(doc, "cat", FindOptions(whole_words=True)) == [(0, 3), (13, 16)]
 
 
+def qt_find_all(doc, needle, options):
+    """What QTextDocument.find finds, one call per match: the reference."""
+    from PySide6.QtGui import QTextCursor
+    flags = QTextDocument.FindFlag(0)
+    if options.match_case:
+        flags |= QTextDocument.FindFlag.FindCaseSensitively
+    if options.whole_words:
+        flags |= QTextDocument.FindFlag.FindWholeWords
+    found, cursor = [], QTextCursor(doc)
+    while True:
+        cursor = doc.find(needle, cursor, flags)
+        if cursor.isNull():
+            return found
+        found.append((cursor.selectionStart(), cursor.selectionEnd()))
+
+
+STRUCTURED = ("# The Cat\n\nA cat, a CAT and a category.\n\n- cat one\n    - cat two\n\n"
+              "| cat | dog |\n| --- | --- |\n| a cat | cats |\n\n> cat\n\n```\ncat = 1\n```\n\n"
+              "Last cat\u00a0here, my_cat and cat.\n")
+
+
+@pytest.mark.parametrize("needle", ["cat", "Cat", "a c", "t", "cat one"])
+@pytest.mark.parametrize("options", [FindOptions(), FindOptions(match_case=True),
+                                     FindOptions(whole_words=True),
+                                     FindOptions(match_case=True, whole_words=True)])
+def test_find_agrees_with_qt_in_every_structure(needle, options):
+    doc = doc_of(STRUCTURED)
+    assert find_all(doc, needle, options) == qt_find_all(doc, needle, options)
+
+
+def test_accented_letters_are_found_whichever_way_they_are_stored():
+    # Review L2: "e" with a combining accent, as macOS file names store it.
+    doc = QTextDocument()
+    doc.setPlainText("Cafe\u0301 au lait, Cafe noir, Mu\u0308nchen, Ko\u0308ln")
+    assert find_all(doc, "Cafe", FindOptions(whole_words=True)) == [(15, 19)]
+    assert find_all(doc, "Cafe") == [(15, 19)]                 # the accent is the last letter's
+    assert find_all(doc, "München") == [(26, 34)]               # typed as one character each
+    assert find_all(doc, "Ko\u0308ln") == [(36, 41)]
+    assert replace_all(doc, "Cafe", "Bar", FindOptions(whole_words=True)) == 1
+    assert doc.toPlainText().startswith("Cafe\u0301 au lait, Bar noir")
+    precomposed = QTextDocument()
+    precomposed.setPlainText("Köln")
+    assert find_all(precomposed, "Ko\u0308ln") == [(0, 4)]      # typed with a combining accent
+
+
+def test_find_is_quick_in_a_long_chapter():
+    import time
+    doc = QTextDocument()
+    doc.setPlainText("Der schnelle braune Fuchs springt über den faulen Hund. " * 9000)
+    started = time.perf_counter()
+    found = find_all(doc, "e")
+    assert len(found) == 63000
+    assert time.perf_counter() - started < 0.5
+
+
 def test_nothing_to_find_finds_nothing():
     assert find_all(doc_of("text\n"), "") == []
 
@@ -99,7 +154,9 @@ def test_the_find_bar_offers_replace_and_options():
     assert not bar.replace_edit.isHidden() and bar.replace_shown()
     bar.match_case.setChecked(True)
     assert bar.options() == FindOptions(match_case=True)
-    assert bar.options_button.text() == "Match Case"
+    assert bar.options_button.text() == "Options (1)"      # short: the bar keeps its width
+    assert bar.options_button.toolTip() == "Match Case"
+    assert bar.options_button.accessibleDescription() == "Match Case"
     asked = []
     bar.replace_requested.connect(lambda: asked.append("one"))
     bar.replace_all_requested.connect(lambda: asked.append("all"))
@@ -107,6 +164,8 @@ def test_the_find_bar_offers_replace_and_options():
     bar.replace_all_btn.click()
     assert asked == ["one", "all"]
     assert bar.edit.nextInFocusChain() is bar.replace_edit     # Tab: find, then replace
+    from tests.accessibility import unnamed_controls
+    assert unnamed_controls(bar) == []                          # a placeholder is not a name
 
 
 WINDOW_SCRIPT = r"""
@@ -167,6 +226,141 @@ def test_find_and_replace_in_the_window(tmp_path):
     assert r["after_all"] == "one cat, two cat, red cat"
     assert r["replaced"] == "2 replaced"
     assert r["undone"] == "one cat, two fish, red fish"
-    assert r["refreshed"] in ("3 matches", "1 of 3")
+    assert r["refreshed"] == "3 matches"           # found again; no match selected
     assert r["replace_row_kept"]          # Find while the row is open keeps it
     assert r["closed"]
+
+
+MANY_SCRIPT = r"""
+import json, os, sys, time
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+
+w = main_window.MainWindow()
+w.resize(1000, 700)
+w.show()
+ed = w.new_tab()
+ed.setPlainText("One fish, two fish, and some words around them.\n" * 10000)
+app.processEvents()
+w._show_find(replace=True)
+w.findbar.edit.setText("fish")
+app.processEvents()
+r = {"matches": len(w._search_matches), "painted": len(ed.highlights("find"))}
+w.findbar.replace_edit.setText("cat")
+started = time.perf_counter()
+w._replace_all()
+r["replace_all"] = time.perf_counter() - started
+r["left"] = ed.toPlainText().count("fish")
+started = time.perf_counter()
+ed.document().undo()
+r["undo"] = time.perf_counter() - started
+r["back"] = ed.toPlainText().count("fish")
+from PySide6.QtTest import QTest
+QTest.qWait(400)                      # the matches are found again after an edit
+ed.verticalScrollBar().setValue(ed.verticalScrollBar().maximum())
+app.processEvents()
+first, last = ed.visible_range()
+r["painted_after_scroll"] = [c.cursor.selectionStart() >= first - 60
+                             for c in ed.highlights("find")]
+ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_replace_all_stays_quick_with_thousands_of_matches(tmp_path):
+    # Review H2: one highlight cursor per match made Replace All of
+    # 54,000 matches take 84 seconds. Only what is on screen is painted.
+    import json
+    import subprocess
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env = dict(os.environ, HOME=str(tmp_path), QT_QPA_PLATFORM="offscreen")
+    proc = subprocess.run([sys.executable, "-c", MANY_SCRIPT, repo], env=env,
+                          capture_output=True, text=True, timeout=120)
+    line = next((l for l in proc.stdout.splitlines() if l.startswith("RESULT ")), None)
+    assert line, f"child failed:\n{proc.stdout}\n{proc.stderr}"
+    r = json.loads(line[len("RESULT "):])
+    assert r["matches"] == 20000
+    assert 0 < r["painted"] < 400                      # what is on screen, not 20,000
+    assert r["left"] == 0 and r["back"] == 20000
+    assert r["replace_all"] < 1.0, r
+    assert r["undo"] < 1.0, r
+    assert 0 < len(r["painted_after_scroll"]) < 400       # scrolled: what is on screen now
+    assert all(r["painted_after_scroll"])
+
+
+
+CARET_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtGui import QTextCursor
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+
+w = main_window.MainWindow()
+w.show()
+ed = w.new_tab()
+ed.insertPlainText("fish A, fish B, fish C, fish D")
+w._show_find(replace=True)
+w.findbar.edit.setText("fish")
+
+
+def caret_after(text):
+    cursor = ed.textCursor()
+    cursor.setPosition(ed.toPlainText().index(text) + len(text))
+    ed.setTextCursor(cursor)
+
+
+def selected():
+    return ed.textCursor().selectedText() + "|" + ed.toPlainText()[
+        ed.textCursor().selectionEnd():ed.textCursor().selectionEnd() + 2]
+
+
+r = {}
+caret_after("fish B")
+w._find_next()
+r["next"] = selected()
+caret_after("fish B")
+ed.insertPlainText("!")
+QTest.qWait(400)                         # the matches are found again
+w._find_next()
+r["after_edit"] = selected()
+caret_after("fish C")
+w._find_prev()
+r["previous"] = selected()
+caret_after("fish C")
+w.findbar.replace_edit.setText("cat")
+w._replace_current()
+r["replace_selects"] = selected()
+r["unchanged"] = ed.toPlainText()
+w._replace_current()
+r["replaced"] = ed.toPlainText()
+ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_find_next_and_replace_go_on_from_the_caret(tmp_path):
+    # Review M1: they went back to the first match after any edit.
+    import json
+    import subprocess
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env = dict(os.environ, HOME=str(tmp_path), QT_QPA_PLATFORM="offscreen")
+    proc = subprocess.run([sys.executable, "-c", CARET_SCRIPT, repo], env=env,
+                          capture_output=True, text=True, timeout=120)
+    line = next((l for l in proc.stdout.splitlines() if l.startswith("RESULT ")), None)
+    assert line, f"child failed:\n{proc.stdout}\n{proc.stderr}"
+    r = json.loads(line[len("RESULT "):])
+    assert r["next"] == "fish| C"                       # the one after "fish B": fish C
+    assert r["after_edit"] == "fish| C"
+    assert r["previous"] == "fish| C"                   # back from after "fish C": fish C
+    assert r["replace_selects"] == "fish| D"            # Replace first finds the next one
+    assert r["unchanged"] == "fish A, fish B!, fish C, fish D"
+    assert r["replaced"] == "fish A, fish B!, fish C, cat D"

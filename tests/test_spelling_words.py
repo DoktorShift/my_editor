@@ -2,9 +2,11 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Finding the words of Markdown text that spell checking reads."""
 
+import time
+
 from spelling.words import (
-    START, State, advance, checkable, clean, from_utf16, hyphen_parts, masked, passed_code,
-    scan, to_utf16, utf16_offsets,
+    MAX_BLOCK_LENGTH, START, State, advance, checkable, clean, from_utf16, hyphen_parts, masked,
+    passed_code, scan, to_utf16, utf16_offsets,
 )
 
 
@@ -63,6 +65,12 @@ def test_markdown_emphasis_keeps_its_words():
         "one", "two", "three", "four", "five", "six"]
 
 
+def test_the_underscores_of_emphasis_are_blanked_for_a_system_checker():
+    text = "ein _Wrot_ und __Fehlr__ in snake_case"
+    out = masked(text, scan(text).skipped)
+    assert out == "ein  Wrot  und   Fehlr   in snake_case"
+
+
 def test_hyphenated_words_split_into_the_parts_that_are_words():
     text = "E-Mail-Adresse"
     assert [text[s:e] for s, e in hyphen_parts(text, 0, len(text))] == ["Mail", "Adresse"]
@@ -82,6 +90,36 @@ def test_addresses_are_skipped():
     text = ("See https://example.com/path?q=wrod, www.exmple.org and "
             "ftp://files.exmple.net/a; mail alice@exmple.com or _@exmple.com.")
     assert words(text) == ["See", "and", "mail", "or"]
+    assert words("write a.b+c@d.de (or x-y@exmple.org)") == ["write", "or"]
+
+
+def test_addresses_without_a_scheme_skip_their_path_too():
+    assert words("Code auf github.com/rinbal/my_editor und example.com/pfad hier") == [
+        "Code", "auf", "und", "hier"]
+    # Not addresses: no dot before the slash, or no name after the dot.
+    assert words("docs/usage.md and/or km/h") == ["docs", "and", "or", "km"]
+
+
+def test_a_long_pasted_token_takes_no_longer_than_its_length():
+    # A Cashu token, a hex dump, a long invoice: one unbroken run just under
+    # the paragraph limit. A pattern tried from every position of such a run
+    # took time in the square of its length (a second and more per
+    # keystroke); now it takes a few milliseconds.
+    size = MAX_BLOCK_LENGTH - 10
+    for run in ("cashuAeyJ0b2tlbiI6W3s-_", "0123456789abcdef", "a", "ab.", "ab-", "ab+", "a.b/"):
+        text = (run * (size // len(run) + 1))[:size]
+        started = time.perf_counter()
+        scan(text)
+        assert time.perf_counter() - started < 0.25, run
+
+
+def test_a_paragraph_too_long_for_prose_is_not_read():
+    text = "wrod " * (MAX_BLOCK_LENGTH // 5 + 1)
+    started = time.perf_counter()
+    found = scan(text)
+    assert time.perf_counter() - started < 0.25
+    assert found.words == () and found.skipped == ((0, len(text)),)
+    assert found.state == advance(text)
 
 
 def test_nostr_references_mentions_and_hashtags_are_skipped():
@@ -156,6 +194,35 @@ def test_html_comments_can_span_lines():
 
 def test_reference_definitions_are_skipped():
     assert blocks('[label]: https://example.com "Titel"', "Text") == [[], ["Text"]]
+    assert blocks("[label]: <https://example.com/a b>", "[other]: /pfad (Titl)") == [[], []]
+
+
+def test_footnote_definitions_and_lines_that_only_look_like_references_are_prose():
+    assert words("[^1]: Eine Fusnote mit einem Fehlr darin.") == [
+        "Eine", "Fusnote", "mit", "einem", "Fehlr", "darin"]
+    assert words("[Hinweis]: Das ist wichtig mit Fehlr.") == [
+        "Hinweis", "Das", "ist", "wichtig", "mit", "Fehlr"]
+
+
+def test_the_indented_paragraphs_of_a_list_item_are_prose():
+    assert blocks("- Erster Punkt", "", "    Ein zweiter Absatz im Punkt mit Fehlr.")[2] == [
+        "Ein", "zweiter", "Absatz", "im", "Punkt", "mit", "Fehlr"]
+    assert blocks("1. First item", "", "    A second paragraph wrod.")[2] == [
+        "second", "paragraph", "wrod"]
+    assert blocks("- one", "  - nestd", "", "      a paragraph of it")[3] == [
+        "paragraph", "of", "it"]
+    # Code inside an item is indented four more; after the list, four is code.
+    assert blocks("- item", "", "        cde lne") == [["item"], [], []]
+    assert blocks("- item", "", "Back at the margin", "", "    cde lne") == [
+        ["item"], [], ["Back", "at", "the", "margin"], [], []]
+    # A fence inside a list keeps the list going.
+    assert blocks("- item", "", "  ```", "  cde", "  ```", "", "    more of the item")[6] == [
+        "more", "of", "the", "item"]
+
+
+def test_a_rule_then_prose_at_the_top_is_prose():
+    assert blocks("---", "Hinweis: Das ist wichtig mit Fehlr.") == [
+        [], ["Hinweis", "Das", "ist", "wichtig", "mit", "Fehlr"]]
 
 
 def test_line_breaks_inside_a_block_are_lines():

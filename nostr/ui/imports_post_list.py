@@ -132,7 +132,6 @@ class PostListModel(QAbstractListModel):
         if [(p.key, p) for p in posts] == [(p.key, p) for p in self._posts] and \
                 more == self._more:
             return
-        keys = {p.key for p in posts}
         self.layoutAboutToBeChanged.emit()
         old_keys = [p.key for p in self._posts]
         persistent = self.persistentIndexList()
@@ -144,7 +143,9 @@ class PostListModel(QAbstractListModel):
             self.changePersistentIndex(index, self.index(row) if row >= 0 else QModelIndex())
         self.layoutChanged.emit()
         before = set(self._checked)
-        self._checked &= {k for k in keys if selectable(self.post_by_key(k))}
+        # One pass, not a search per check (review M10: quadratic with
+        # thousands of posts checked).
+        self._checked &= {p.key for p in posts if selectable(p, self._busy)}
         if self._checked != before:
             self.checks_changed.emit()
 
@@ -192,19 +193,35 @@ class PostListModel(QAbstractListModel):
             return post
         if role == CheckedRole:
             return post.key in self._checked
+        if role == Qt.ItemDataRole.CheckStateRole:
+            # The check, for assistive technology too (review M11): a
+            # screen reader says "checked" for it and "selected" for the
+            # open row, which are two different things.
+            return (Qt.CheckState.Checked if post.key in self._checked
+                    else Qt.CheckState.Unchecked)
         if role == Qt.ItemDataRole.AccessibleTextRole:
             parts = [post.title or _("Untitled"), post.source_title,
                      date_text(post.published_at or post.found_at)]
             word = self.word_for(post)
             if word:
                 parts.append(word)
-            if post.key in self._checked:
-                parts.append(_("selected"))
             return ", ".join(p for p in parts if p)
         return None
 
+    def setData(self, index, value, role=Qt.ItemDataRole.EditRole) -> bool:
+        if role != Qt.ItemDataRole.CheckStateRole or self.post(index.row()) is None:
+            return False
+        checked = Qt.CheckState(value) == Qt.CheckState.Checked if not isinstance(
+            value, bool) else value
+        self.set_checked(index.row(), checked)
+        return True
+
     def flags(self, index):
-        return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+        flags = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+        post = self.post(index.row())
+        if post is not None and selectable(post, self._busy):
+            flags |= Qt.ItemFlag.ItemIsUserCheckable
+        return flags
 
     # -- paging ----------------------------------------------------------------
 
@@ -434,14 +451,22 @@ class PostDelegate(QStyledItemDelegate):
                        else palette.color(QPalette.ColorRole.Text))
         painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, word)
 
+    def _cover_size(self, rect: QRect) -> QSize:
+        """The cover's square in device pixels: what its decode must cover."""
+        dpr = self._view.devicePixelRatioF() if self._view is not None else 1.0
+        return QSize(int(rect.width() * dpr), int(rect.height() * dpr))
+
     def _paint_cover(self, painter: QPainter, post: Post, rect: QRect,
                      palette: QPalette) -> None:
         image = self._images.image(post.image) if self._images is not None else None
         painter.save()
         frame = QRectF(rect)
+        if image is not None and self._images is not None:
+            # A sharper one when only a smaller decode is here.
+            self._images.request(post.image, self._cover_size(rect))
         if image is None or image.isNull():
             if self._images is not None:
-                self._images.request(post.image)
+                self._images.request(post.image, self._cover_size(rect))
             fill = QColor(palette.color(QPalette.ColorRole.Mid))
             fill.setAlpha(60)
             painter.setPen(Qt.PenStyle.NoPen)

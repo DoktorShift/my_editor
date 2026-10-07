@@ -16,11 +16,16 @@ a version so a build that predates this format leaves a newer file
 alone, and a source mtime so a backup older than the file on disk can be
 recognised and restored as a copy instead of overwriting newer work.
 
-HTML does not keep everything, though: a quote, a code block and inline
-code come back from it as plain paragraphs. A document that holds one of
-them (and nothing Markdown cannot carry, such as colors) also keeps its
-Markdown in the record, and is restored from that. The field is an
-addition to the same format, so an older build simply restores the HTML.
+HTML keeps every typed character, but not everything around it: quote
+levels, code blocks (with their language) and inline code come back as
+plain paragraphs and plain words. The record keeps those few things in a
+small list of its own ("structure": per paragraph, and the stretches of
+inline code), and the restore puts them back over the HTML, once the
+restored text is checked to be the very text they were taken from.
+Restoring from Markdown instead would read typed text as Markdown: a
+typed <br> would cut the document there. An older build ignores the list
+and restores the HTML; a record from a build that kept Markdown instead
+is restored from that only when it gives back exactly the HTML's text.
 """
 
 import hashlib
@@ -32,16 +37,14 @@ import uuid
 
 from PySide6.QtCore import QTimer
 
-from PySide6.QtGui import QTextFormat, QTextImageFormat
+from PySide6.QtGui import QTextCursor, QTextDocument, QTextFormat
 
+import rich_text
 from atomic_file import write_text
-from doc_walk import iter_block_runs, iter_blocks, iter_image_names
+from doc_walk import iter_blocks, iter_image_names
 from export_html import normalize_after_set_html
-from markdown_writer import (
-    READ_FEATURES, document_to_markdown, has_local_only_formatting, image_markdown,
-)
+from markdown_writer import holds_faithfully, read_markdown
 from nostr.media.assets import ASSET_SCHEME
-from rich_text import normalize_after_markdown_load
 
 
 BACKUP_DIR = os.path.join(os.path.expanduser("~"), ".cache", "my_editor", "backups")
@@ -123,17 +126,19 @@ def load_backup_content(editor, record: dict, *, modified: bool = True) -> None:
     image names beside the original file resolve against it.
     """
     content = record.get("content", "")
-    markdown = record.get("markdown")
     if record.get("version") is None:
         # Version 1 stored plain text. Restoring it as HTML would render
         # the user's angle brackets as markup.
         editor.setPlainText(content)
-    elif isinstance(markdown, str) and markdown:
-        editor.document().setMarkdown(markdown, READ_FEATURES)
-        normalize_after_markdown_load(editor.document())
     else:
         editor.setHtml(content)
         normalize_after_set_html(editor.document())
+        structure = record.get("structure")
+        markdown = record.get("markdown")
+        if isinstance(structure, dict):
+            apply_structure(editor.document(), structure)
+        elif isinstance(markdown, str) and markdown:
+            _restore_older_markdown(editor.document(), markdown)
     if record.get("markdown_source"):
         # Opened as its Markdown text: it is still saved as written.
         editor._markdown_source = True
@@ -141,20 +146,97 @@ def load_backup_content(editor, record: dict, *, modified: bool = True) -> None:
     editor.document().setModified(modified)
 
 
-def _holds_what_html_loses(doc) -> bool:
-    """Whether the document has a quote, a code block or inline code:
-    what an HTML snapshot gives back as plain paragraphs."""
-    for block in iter_blocks(doc):
+def _text_print(doc) -> str:
+    """A fingerprint of the document's characters, positions included."""
+    return hashlib.sha256(doc.toRawText().encode("utf-8", "surrogatepass")).hexdigest()
+
+
+def structure_of(doc) -> dict | None:
+    """What an HTML snapshot cannot carry, by position: each paragraph's
+    quote level and code block (fence and language), and the stretches of
+    inline code. None when the document has none of them."""
+    blocks = []
+    code = []
+    for number, block in enumerate(iter_blocks(doc)):
         fmt = block.blockFormat()
-        quote = fmt.property(QTextFormat.Property.BlockQuoteLevel)
-        if (isinstance(quote, int) and quote > 0) or fmt.property(
-                QTextFormat.Property.BlockCodeFence) or fmt.hasProperty(
-                QTextFormat.Property.BlockCodeLanguage):
-            return True
-        if any(f.fontFixedPitch() and not f.isImageFormat()
-               for _text, f in iter_block_runs(block)):
-            return True
-    return False
+        kept = {}
+        quote = rich_text.quote_depth(block)
+        if quote:
+            kept["quote"] = quote
+        if rich_text.is_code_block(block):
+            kept["fence"] = str(fmt.property(QTextFormat.Property.BlockCodeFence) or "")
+            kept["language"] = str(fmt.property(QTextFormat.Property.BlockCodeLanguage) or "")
+        if kept:
+            blocks.append([number, kept])
+        it = block.begin()
+        while not it.atEnd():
+            fragment = it.fragment()
+            it += 1
+            if fragment.isValid() and fragment.charFormat().fontFixedPitch() \
+                    and not fragment.charFormat().isImageFormat():
+                start, end = fragment.position(), fragment.position() + fragment.length()
+                if code and code[-1][1] == start:
+                    code[-1][1] = end
+                else:
+                    code.append([start, end])
+    if not blocks and not code:
+        return None
+    return {"text": _text_print(doc), "blocks": blocks, "code": code}
+
+
+def _whole_number(value, low: int, high: int) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and low <= value < high
+
+
+def apply_structure(doc, structure: dict) -> bool:
+    """Put back what structure_of kept, over a document restored from the
+    HTML of the same moment. Nothing is applied unless the text is the
+    very text the list was taken from. True when it was applied."""
+    blocks = structure.get("blocks")
+    code = structure.get("code")
+    if (structure.get("text") != _text_print(doc) or not isinstance(blocks, list)
+            or not isinstance(code, list)):
+        return False
+    count, length = doc.blockCount(), doc.characterCount()
+    cursor = QTextCursor(doc)
+    cursor.beginEditBlock()
+    for item in blocks:
+        if not (isinstance(item, list) and len(item) == 2 and _whole_number(item[0], 0, count)
+                and isinstance(item[1], dict)):
+            continue
+        block = doc.findBlockByNumber(item[0])
+        kept = item[1]
+        if _whole_number(kept.get("quote"), 1, 32):
+            rich_text.set_quote_depth(block, kept["quote"])
+        if "fence" in kept or "language" in kept:
+            fmt = block.blockFormat()
+            fmt.setProperty(QTextFormat.Property.BlockCodeFence, str(kept.get("fence") or "`"))
+            fmt.setProperty(QTextFormat.Property.BlockCodeLanguage,
+                            str(kept.get("language") or ""))
+            QTextCursor(block).setBlockFormat(fmt)
+    code_style = rich_text.style_format(rich_text.CODE, True)
+    for item in code:
+        if not (isinstance(item, list) and len(item) == 2 and _whole_number(item[0], 0, length)
+                and _whole_number(item[1], item[0] + 1, length + 1)):
+            continue
+        piece = QTextCursor(doc)
+        piece.setPosition(item[0])
+        piece.setPosition(item[1], QTextCursor.MoveMode.KeepAnchor)
+        piece.mergeCharFormat(code_style)
+    cursor.endEditBlock()
+    return True
+
+
+def _restore_older_markdown(doc, markdown: str) -> None:
+    """A record from a build that kept Markdown beside the HTML: its
+    Markdown, but only when it reads back to exactly the HTML's text
+    (typed Markdown characters would have changed it otherwise)."""
+    if not holds_faithfully(markdown):
+        return
+    candidate = QTextDocument()
+    read_markdown(candidate, markdown)
+    if candidate.toPlainText() == doc.toPlainText():
+        read_markdown(doc, markdown)
 
 
 def classify_backup(record: dict) -> str:
@@ -191,6 +273,7 @@ class EditorBackup:
         # module stays testable without the asset layer running.
         self._externalize = externalize
         self._last_hash = ""
+        self._written_revision = None
         self._oversize_until = 0.0
 
         self._timer = QTimer()
@@ -216,6 +299,7 @@ class EditorBackup:
         old_backup = _backup_path_for(self._backup_id)
         self._file_path = new_path
         self._backup_id = _backup_id_for(new_path)
+        self._written_revision = None          # the record names the path: write it again
         # Saving over the same path keeps the same ID, and removing that
         # file would leave the document with no crash protection.
         if old_backup != self.path and os.path.exists(old_backup):
@@ -302,36 +386,22 @@ class EditorBackup:
 
         return _DATA_URI_SRC_RE.sub(replace, content)
 
-    def _markdown_snapshot(self):
-        """The document as Markdown, when Markdown keeps what HTML loses
-        and loses nothing HTML keeps; else None."""
-        doc = self._editor.document()
-        if (getattr(self._editor, "_markdown_source", False)
-                or not _holds_what_html_loses(doc) or has_local_only_formatting(doc)):
-            return None
-
-        def image(fmt):
-            name = fmt.name()
-            if (self._externalize is not None and name.startswith("data:")
-                    and len(name) > MIN_EXTERNALIZE_BYTES):
-                name = self._externalize(name) or name
-            return image_markdown(str(fmt.property(QTextImageFormat.ImageAltText) or ""), name)
-
-        return document_to_markdown(doc, image)
-
     def _write(self) -> bool:
         """Write the snapshot. False means nothing usable is on disk yet."""
-        if document_is_empty(self._editor.document()):
+        doc = self._editor.document()
+        if document_is_empty(doc):
             return False
+        # Nothing changed since the last write that is still on disk: an
+        # idle tab costs nothing on the timer's ticks.
+        revision = doc.revision()
+        if revision == self._written_revision and os.path.exists(self.path):
+            return True
 
         content = self._snapshot()
-        markdown = self._markdown_snapshot()
-        if markdown is not None:
-            # The fingerprint covers it too: a change only the Markdown
-            # shows (a paragraph turned into a quote) is still written.
-            content_key = content + "\n" + markdown
-        else:
-            content_key = content
+        structure = structure_of(doc)
+        # The fingerprint covers the structure too: a change only it shows
+        # (a paragraph turned into a quote) is still written.
+        content_key = content + "\n" + json.dumps(structure, sort_keys=True)
         fingerprint = hashlib.sha256(
             f"{self._file_path or ''}\n{content_key}".encode("utf-8")
         ).hexdigest()
@@ -340,6 +410,7 @@ class EditorBackup:
         # removed it, and skipping the write then would leave the
         # document unprotected until the next keystroke.
         if fingerprint == self._last_hash and os.path.exists(self.path):
+            self._written_revision = revision
             return True  # already on disk, byte for byte
 
         record = {
@@ -351,8 +422,8 @@ class EditorBackup:
             "saved_at": int(time.time()),
             "source_mtime_ns": _source_mtime_ns(self._file_path),
         }
-        if markdown is not None:
-            record["markdown"] = markdown
+        if structure is not None:
+            record["structure"] = structure
         if getattr(self._editor, "_markdown_source", False):
             record["markdown_source"] = True
         payload = json.dumps(record, ensure_ascii=False)
@@ -368,6 +439,7 @@ class EditorBackup:
         except OSError:
             return False  # backup is best-effort; never raise to the user
         self._last_hash = fingerprint
+        self._written_revision = revision
         return True
 
 

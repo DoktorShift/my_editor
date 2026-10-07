@@ -31,6 +31,7 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QMenu, QToolButton  # n
 
 import commands  # noqa: E402
 from commands import Command, CommandRegistry  # noqa: E402
+from tests.accessibility import unnamed_controls  # noqa: E402
 from format_toolbar import LAYOUT, FormatToolbar, tooltip_for  # noqa: E402
 from tests.app_process import run_window_script  # noqa: E402
 
@@ -65,6 +66,11 @@ def test_the_buttons_are_the_window_commands(toolbar):
     assert toolbar.buttons["bold"].isChecked()
     toolbar.actions_["quote"].setEnabled(False)
     assert not toolbar.buttons["quote"].isEnabled()
+
+
+def test_a_screen_reader_can_name_every_button(toolbar):
+    # The buttons show icons only: each is announced by its command's name.
+    assert unnamed_controls(toolbar) == []
 
 
 def test_each_button_says_its_key_the_platform_way(toolbar):
@@ -149,7 +155,7 @@ w.tabs.setCurrentIndex(w.tabs.indexOf(ed.parent().parent()))
 app.processEvents()
 r["text_again"] = tb.isVisible()
 txt = os.path.join(os.environ["HOME"], "plain.txt")
-with open(txt, "w") as f:
+with open(txt, "w", encoding="utf-8") as f:
     f.write("plain text\n")
 w.open_path(txt)
 app.processEvents()
@@ -175,3 +181,53 @@ def test_the_toolbar_in_the_window(tmp_path):
     assert r["pdf_hidden"] and r["text_again"]
     # Plain text keeps bold and italic, but has no paragraph styles or lists.
     assert r["txt_bold"] and not r["txt_style"] and not r["txt_list"]
+
+
+
+def _ink(widget, dark: bool) -> int:
+    """The strongest ink in a rendered control, on the toolbar behind it:
+    the brightest pixel on a dark toolbar, the darkest on a light one (as
+    0 to 255)."""
+    image = widget.parentWidget().grab(widget.geometry()).toImage()
+    values = [sum(image.pixelColor(x, y).getRgb()[:3]) // 3
+              for x in range(image.width()) for y in range(image.height())]
+    return max(values) if dark else min(values)
+
+
+@pytest.mark.parametrize("dark", [True, False])
+def test_a_control_that_cannot_act_looks_it(dark):
+    # Review M7: in a plain-text tab the style pop-up kept its full text
+    # color, and in dark mode the dimmed icons were barely dimmer.
+    window = QMainWindow()
+    registry = CommandRegistry(window)
+    actions = {name: registry.add(Command(f"format.{name}", name.capitalize(),
+                                          commands.FORMAT, checkable=True))
+               for name in LAYOUT if name}
+    menu = QMenu()
+    menu.addAction("Body")
+    bar = FormatToolbar(actions, menu, dark=dark, parent=window)
+    window.addToolBar(bar)
+    window.show()
+    QApplication.processEvents()
+    for widget, disable in ((bar.buttons["quote"], lambda: actions["quote"].setEnabled(False)),
+                            (bar.style_button, lambda: bar.style_button.setEnabled(False))):
+        live = _ink(widget, dark)
+        disable()
+        QApplication.processEvents()
+        dimmed = _ink(widget, dark)
+        assert abs(live - dimmed) >= 60, (widget, live, dimmed)
+    window.close()
+
+
+@pytest.mark.parametrize("dark", [True, False])
+def test_a_button_that_is_on_has_a_visible_edge(dark):
+    # Review L8: the fill alone was 1.3:1 (light) and 1.65:1 (dark).
+    from constants import DARK_MUTED_FG, LIGHT_MUTED_FG
+    window = QMainWindow()
+    registry = CommandRegistry(window)
+    actions = {name: registry.add(Command(f"format.{name}", name.capitalize(),
+                                          commands.FORMAT, checkable=True))
+               for name in LAYOUT if name}
+    bar = FormatToolbar(actions, QMenu(), dark=dark, parent=window)
+    edge = DARK_MUTED_FG if dark else LIGHT_MUTED_FG
+    assert "QToolButton:checked" in bar.styleSheet() and edge in bar.styleSheet()
