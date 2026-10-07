@@ -133,3 +133,22 @@ def divider(color: QColor) -> QIcon:
         painter.drawLine(QPointF(4, 4), QPointF(14, 4))
         painter.drawLine(QPointF(4, 14), QPointF(14, 14))
     return _icon(draw, color)
+
+
+def checklist(color: QColor) -> QIcon:
+    """Boxes, one ticked, each with a line beside it."""
+    def draw(painter: QPainter, ink: QColor) -> None:
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        for y, ticked in ((5.0, True), (13.0, False)):
+            painter.setPen(_pen(ink, 1.3))
+            painter.drawRoundedRect(QRectF(1.5, y - 3, 6, 6), 1.2, 1.2)
+            if ticked:
+                painter.setPen(_pen(ink, 1.4))
+                path = QPainterPath()
+                path.moveTo(QPointF(2.8, y))
+                path.lineTo(QPointF(4.2, y + 1.5))
+                path.lineTo(QPointF(6.4, y - 1.6))
+                painter.drawPath(path)
+            painter.setPen(_pen(ink))
+            painter.drawLine(QPointF(10, y), QPointF(16.5, y))
+    return _icon(draw, color)

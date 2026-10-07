@@ -758,6 +758,13 @@ class HtmlEditor(QTextEdit):
         self._holds_structure = check
 
     # -------- Lists --------
+    def toggle_checklist(self) -> None:
+        """Checklist for the paragraphs under the cursor; again, the boxes
+        go and they are plain list items."""
+        cursor = self.textCursor()
+        rich_text.toggle_checklist(cursor)
+        self.setTextCursor(cursor)
+
     def toggle_list(self, kind: str) -> None:
         """Bulleted (rich_text.BULLET) or Numbered List (rich_text.NUMBER)
         for the paragraphs under the cursor; again, it is taken away."""
@@ -1247,6 +1254,14 @@ class HtmlEditor(QTextEdit):
             # Return on an empty item, or Backspace at an item's start: one
             # level up, and out of the list from the top level.
             rich_text.change_indent(cursor, -1)
+            self.setTextCursor(cursor)
+            return True
+        if rich_text.is_task(block) and plain and key in (Qt.Key_Return, Qt.Key_Enter):
+            # The next item of a checklist starts unticked, as in Notes.
+            cursor.beginEditBlock()
+            cursor.insertBlock()
+            rich_text.set_tick(cursor.block(), rich_text.UNTICKED)
+            cursor.endEditBlock()
             self.setTextCursor(cursor)
             return True
         heading = block.blockFormat().headingLevel()

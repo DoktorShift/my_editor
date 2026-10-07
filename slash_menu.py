@@ -72,6 +72,7 @@ ICONS: Dict[str, IconMaker] = {
     "format.quote": format_icons.quote,
     "insert.divider": format_icons.divider,
     "insert.link": format_icons.link,
+    "format.list.task": format_icons.checklist,
 }
 
 

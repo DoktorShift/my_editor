@@ -595,6 +595,57 @@ def toggle_list(cursor: QTextCursor, kind: str) -> None:
     edit.endEditBlock()
 
 
+# --------------------------------------------------------------------------- #
+# Checklists                                                                   #
+# --------------------------------------------------------------------------- #
+
+UNTICKED = QTextBlockFormat.MarkerType.Unchecked
+TICKED = QTextBlockFormat.MarkerType.Checked
+
+
+def is_task(block) -> bool:
+    """Whether a paragraph is a checklist item: a list item with a box,
+    ticked or not (Markdown's "- [ ]" and "- [x]")."""
+    return block.textList() is not None and block.blockFormat().marker() in (UNTICKED, TICKED)
+
+
+def set_tick(block, marker) -> None:
+    """Give a list item a box (UNTICKED or TICKED), or none
+    (QTextBlockFormat.MarkerType.NoMarker)."""
+    fmt = block.blockFormat()
+    fmt.setMarker(marker)
+    QTextCursor(block).setBlockFormat(fmt)
+
+
+def toggle_checklist(cursor: QTextCursor) -> None:
+    """Checklist over the paragraphs under the cursor, as one step on the
+    undo stack: when all of them are checklist items, they become plain
+    list items again; otherwise each becomes one, unticked unless it was
+    ticked, and a paragraph outside a list joins a bulleted list first (a
+    heading becomes Body: a list item is not a heading). Code, dividers
+    and table cells are left as they are."""
+    blocks = [b for b in _blocks_of(cursor) if not is_code_block(b) and not is_divider(b)
+              and QTextCursor(b).currentTable() is None]
+    if not blocks:
+        return
+    doc = cursor.document()
+    edit = QTextCursor(doc)
+    edit.beginEditBlock()
+    if all(is_task(b) for b in blocks):
+        for block in blocks:
+            set_tick(block, QTextBlockFormat.MarkerType.NoMarker)
+    else:
+        for block in blocks:
+            if block.textList() is None:
+                if block.blockFormat().headingLevel():
+                    set_heading(QTextCursor(block), BODY)
+                _move_to_depth(block, 1, BULLET)
+            if not is_task(block):
+                set_tick(block, UNTICKED)
+        _tidy_lists(doc, [blocks[0].previous(), *blocks, blocks[-1].next()])
+    edit.endEditBlock()
+
+
 def change_indent(cursor: QTextCursor, delta: int) -> bool:
     """Increase (+1) or decrease (-1) the nesting of the list items under
     the cursor, as one step on the undo stack. An item at the top level
@@ -663,6 +714,7 @@ class ParagraphState:
     heading: int = -1
     list_kind: str = ""
     quoted: bool = False
+    tasks: bool = False         # all of them checklist items
 
 
 def paragraph_state(cursor: QTextCursor, *, budget: int = STATE_BUDGET) -> ParagraphState:
@@ -672,21 +724,23 @@ def paragraph_state(cursor: QTextCursor, *, budget: int = STATE_BUDGET) -> Parag
     level = None
     kind = None
     quoted = True
+    tasks = True
     seen = 0
     for block in _iter_blocks_of(cursor):
         seen += 1
         if seen > budget:
-            return ParagraphState(-1, "mixed", False)
+            return ParagraphState(-1, "mixed", False, False)
         this_level = block.blockFormat().headingLevel()
         this_kind = list_kind_of(block.textList()) if block.textList() is not None else ""
         level = this_level if level is None or level == this_level else -1
         kind = this_kind if kind is None or kind == this_kind else "mixed"
         quoted = quoted and bool(quote_depth(block))
-        if level == -1 and kind == "mixed" and not quoted:
+        tasks = tasks and is_task(block)
+        if level == -1 and kind == "mixed" and not quoted and not tasks:
             break
     if not seen:
         return ParagraphState()
-    return ParagraphState(level, kind, quoted)
+    return ParagraphState(level, kind, quoted, tasks)
 
 
 def toggle_quote(cursor: QTextCursor) -> None:

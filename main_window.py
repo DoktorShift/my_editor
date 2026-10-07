@@ -1264,6 +1264,7 @@ class MainWindow(QMainWindow):
             self.format_toolbar.set_style_name(name)
         self.act_bullets.setChecked(paragraphs.list_kind == rich_text.BULLET)
         self.act_numbers.setChecked(paragraphs.list_kind == rich_text.NUMBER)
+        self.act_checklist.setChecked(paragraphs.tasks)
         self.act_quote.setChecked(paragraphs.quoted)
         in_link = (cursor is not None and self._editor_kind(ed) == "rich"
                    and rich_text.link_range(cursor) is not None)
@@ -1410,6 +1411,14 @@ class MainWindow(QMainWindow):
                                        keywords=(_("numbers"), _("list"), _("ordered")),
                                        slash_section=slash_menu.LISTS),
                                triggered=lambda: self._toggle_list(rich_text.NUMBER))
+        # Checklist: Apple Notes' key on a Mac (Shift-Command-L), Google
+        # Docs' elsewhere (Ctrl+Shift+9).
+        self.act_checklist = add(Command("format.list.task", _("Checklist"), FORMAT,
+                                         platform_keys("Ctrl+Shift+L", "Ctrl+Shift+9"),
+                                         checkable=True,
+                                         keywords=(_("todo"), _("checkbox"), _("task")),
+                                         slash_section=slash_menu.LISTS),
+                                 triggered=lambda: self._editor_call("toggle_checklist"))
         self.act_indent = add(Command("format.indent", _("Increase Indent"), FORMAT, "Ctrl+]",
                                       keywords=(_("nest"),)),
                               triggered=lambda: self._change_indent(+1))
@@ -1484,8 +1493,8 @@ class MainWindow(QMainWindow):
         # Structure that only a document holding Markdown can carry
         # (headings, lists, links): off in plain-text tabs as well.
         self._rich_actions = [self.act_strike, self.act_code, *self.act_styles,
-                              self.act_bullets, self.act_numbers, self.act_quote,
-                              self.act_divider, self.act_link]
+                              self.act_bullets, self.act_numbers, self.act_checklist,
+                              self.act_quote, self.act_divider, self.act_link]
 
         self._search_matches = []
         self._current_match_index = -1
@@ -1766,6 +1775,7 @@ class MainWindow(QMainWindow):
         m_format.addSeparator()
         m_format.addAction(self.act_bullets)
         m_format.addAction(self.act_numbers)
+        m_format.addAction(self.act_checklist)
         m_format.addAction(self.act_quote)
         m_format.addSeparator()
         m_format.addAction(self.act_indent)
@@ -1933,7 +1943,7 @@ class MainWindow(QMainWindow):
         self.format_toolbar = FormatToolbar(
             {"bold": self.act_bold, "italic": self.act_italic, "strike": self.act_strike,
              "link": self.act_link, "bullets": self.act_bullets, "numbers": self.act_numbers,
-             "quote": self.act_quote},
+             "checklist": self.act_checklist, "quote": self.act_quote},
             self.m_style, dark=self.is_dark_theme)
         self.view_switch = ViewSwitch(
             (self.act_view_write, self.act_view_preview, self.act_view_split),

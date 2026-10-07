@@ -31,6 +31,7 @@ On macOS, `Ctrl` in these tables is the Command key (`⌘`) and `Alt` is Option 
 | `Ctrl+Shift+T`, `Ctrl+Shift+H`, `Ctrl+Shift+J` on macOS (Notes' Title, Heading and Subheading), `Ctrl+1` to `Ctrl+3` on Windows and Linux | Style: Heading 1 to 3 (the same heading again makes it Body) |
 | `Ctrl+Shift+7` on macOS, `Ctrl+Shift+8` on Windows and Linux | Bulleted List (again: no list) |
 | `Ctrl+Shift+9` on macOS, `Ctrl+Shift+7` on Windows and Linux | Numbered List (again: no list) |
+| `Ctrl+Shift+L` on macOS, `Ctrl+Shift+9` on Windows and Linux | Checklist: boxes to tick (again: plain list items). Click a box to tick it; `Return` starts the next item unticked |
 | `Ctrl+]` / `Ctrl+[` | Increase / Decrease Indent of list items |
 | `Ctrl+'` on macOS (no shortcut on Windows and Linux) | Quote (again: no quote) |
 | `Ctrl+K` | Add Link (Edit Link when the caret is in a link) |
@@ -40,7 +41,7 @@ Writing (Markdown files, new documents and drafts) is set in your system's own t
 
 The status bar says, quietly, how long the document is: its words and how long it takes to read (225 words a minute, as the long-form Nostr readers count), or how many words are selected.
 
-The **format toolbar** above the document holds the controls used most: the paragraph style (Body, Heading 1 to 3), Bold, Italic, Strikethrough, Add Link, Bulleted List, Numbered List and Quote. Everything else is in the `Format` and `Insert` menus. `View > Show Toolbar` (`Ctrl+Alt+T` on macOS) hides it; a PDF tab has none.
+The **format toolbar** above the document holds the controls used most: the paragraph style (Body, Heading 1 to 3), Bold, Italic, Strikethrough, Add Link, Bulleted List, Numbered List, Checklist and Quote. Everything else is in the `Format` and `Insert` menus. `View > Show Toolbar` (`Ctrl+Alt+T` on macOS) hides it; a PDF tab has none.
 
 The keys follow each platform's own conventions: Apple Notes and Pages on macOS, Google Docs and LibreOffice on Windows and Linux. A command no convention has a key for has none. One exception on macOS: Strikethrough and Clear Formatting, which Apple's apps give no key, keep the keys writers know from Google Docs (`Ctrl+Shift+X`, `Ctrl+\`).
 
@@ -76,6 +77,7 @@ A paste goes in the way typing it would: inside a sentence the pasted words beco
 | `-`, `*` or `+` and a space | A bulleted list |
 | `1.` or `1)` and a space | A numbered list, starting at the number you typed (right below a list, it goes on from it) |
 | `>` and a space | A quote |
+| `[ ]` or `[x]` and a space, at the start of a paragraph or a list item | A checklist item, ticked for `[x]` |
 | `---`, `***` or `___`, then Return | A divider |
 | `**words**` | Bold |
 | `*words*` or `_words_` | Italic (an underscore only at the start of a word, so `snake_case` stays as typed) |

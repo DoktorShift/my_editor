@@ -39,6 +39,8 @@ import rich_text
 
 # The start of a paragraph, up to the space just typed.
 _BLOCK_START = re.compile(r"(#{1,3}|[-*+]|(\d{1,9})[.)]|>) ")
+# A checklist box typed at the start of a paragraph or of a list item.
+_TASK_START = re.compile(r"\[([ xX])\] ")
 # A paragraph that is a divider, before Return.
 _DIVIDER = re.compile(r"-{3,}|\*{3,}|_{3,}")
 # Closing marks, checked in this order against the paragraph's text up to
@@ -71,6 +73,10 @@ def after_space(cursor: QTextCursor) -> str:
         return ""
     block = cursor.block()
     typed = block.text()[:cursor.positionInBlock()]
+    task = _TASK_START.fullmatch(typed)
+    if task is not None and (_is_body(block) or block.textList() is not None):
+        # In an item that has a box already, the box typed sets its tick.
+        return _make_task(cursor, block, typed, ticked=task.group(1) != " ")
     found = _BLOCK_START.fullmatch(typed)
     if found is None or not _is_body(block):
         return ""
@@ -98,6 +104,22 @@ def after_space(cursor: QTextCursor) -> str:
     edit.endEditBlock()
     cursor.setPosition(block.position())
     return made
+
+
+def _make_task(cursor: QTextCursor, block, typed: str, *, ticked: bool) -> str:
+    """"[ ] " or "[x] " typed at the start of a paragraph or a list item:
+    a checklist item, ticked for "[x] "."""
+    edit = QTextCursor(cursor.document())
+    edit.beginEditBlock()
+    marks = QTextCursor(block)
+    marks.setPosition(block.position() + len(typed), QTextCursor.MoveMode.KeepAnchor)
+    marks.removeSelectedText()
+    if block.textList() is None:
+        rich_text.toggle_checklist(QTextCursor(block))
+    rich_text.set_tick(block, rich_text.TICKED if ticked else rich_text.UNTICKED)
+    edit.endEditBlock()
+    cursor.setPosition(block.position())
+    return "checklist"
 
 
 def _number_from(block, number: int) -> None:

@@ -32,7 +32,8 @@ from constants import (
 from i18n import _, pgettext
 
 # The buttons, in order; None is a separator.
-LAYOUT = ("bold", "italic", "strike", None, "link", None, "bullets", "numbers", "quote")
+LAYOUT = ("bold", "italic", "strike", None, "link", None, "bullets", "numbers", "checklist",
+          "quote")
 
 
 def tooltip_for(action: QAction) -> str:
@@ -118,6 +119,7 @@ class FormatToolbar(QToolBar):
             "link": format_icons.link(ink),
             "bullets": format_icons.bulleted_list(ink),
             "numbers": format_icons.numbered_list(ink),
+            "checklist": format_icons.checklist(ink),
             "quote": format_icons.quote(ink),
         }
         for name, icon in icons.items():
