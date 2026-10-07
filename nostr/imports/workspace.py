@@ -208,10 +208,10 @@ def state_word(post: Post, *, importing: bool = False, failed: bool = False) -> 
     is nothing to say."""
     if importing:
         return _(STATE_IMPORTING)
+    if post.imported:           # whatever an earlier import says (review N8)
+        return _(STATE_IMPORTED)
     if failed:
         return _(STATE_FAILED)
-    if post.imported:
-        return _(STATE_IMPORTED)
     if post.skipped:
         return _(STATE_SKIPPED)
     if post.state == NEW:

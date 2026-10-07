@@ -669,7 +669,27 @@ class InboxStore:
                     changed += cursor.rowcount
                     for d_tag in chunk:
                         self._ledger(d_tag, state, now)
+                    changed += self._settle_failed(chunk)
         return changed
+
+    def _settle_failed(self, d_tags: Sequence[str]) -> int:
+        """A post that failed in an import and exists now (imported again,
+        here or in the other app) is no longer a failure of that import
+        (CP2 review N8: it read "Failed" in Imported, and the import kept
+        saying "1 failed"). An import left with nothing failed or to do is
+        complete. A running import keeps its own rows. Returns how many
+        rows changed."""
+        marks = ", ".join("?" * len(d_tags))
+        cursor = self._db.execute(
+            f"UPDATE job_rows SET status = ?, error = '' WHERE status = ? "
+            f"AND d_tag IN ({marks}) AND job_id IN (SELECT id FROM jobs WHERE status IN "
+            f"('partial', 'paused', 'stopped'))", (ROW_EXISTING, ROW_FAILED, *d_tags))
+        if cursor.rowcount:
+            self._db.execute(
+                "UPDATE jobs SET status = 'completed', updated_at = ? WHERE status = "
+                "'partial' AND NOT EXISTS (SELECT 1 FROM job_rows WHERE job_id = jobs.id AND "
+                "status IN (?, ?))", (self._now(), ROW_FAILED, ROW_PENDING))
+        return cursor.rowcount
 
     def mark_imported(self, d_tag: str, state: str = DRAFTED) -> None:
         """A draft was just made from ``d_tag`` here."""
