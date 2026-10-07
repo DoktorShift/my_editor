@@ -194,6 +194,19 @@ class TestFollow:
         # Its posts are there at once, though the site turns readers away.
         assert controller.source(source_key("https://blocked.example/feed")).older_count == 2
 
+    def test_a_pasted_feed_on_this_computer_says_why(self, follow):
+        """CP2 review L-e: it said only "This address can't be followed."
+        without Q-6's reason, which the lookup path gives."""
+        from nostr.imports.errors import LOCAL_NETWORK_MESSAGE
+        follow.use_paste()
+        follow.address.setText("http://192.168.1.10/feed")
+        follow.paste.setPlainText(TWO_ITEM_FEED)
+        follow.look_up()
+        settle()
+        assert follow.state == FOUND            # pasted: nothing was fetched
+        follow.buttons["follow"].click()
+        assert follow.error.text() == LOCAL_NETWORK_MESSAGE
+
     def test_a_pasted_list_of_sources(self, follow):
         follow.use_paste()
         follow.paste.setPlainText(OPML)

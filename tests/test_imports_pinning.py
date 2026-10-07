@@ -368,9 +368,11 @@ def test_a_fetch_under_way_is_freed_without_the_collector():
     fetch(fetcher, "https://blog.example/feed")       # never answered
     refs = [weakref.ref(fetcher), weakref.ref(nam)]
     gc.collect()
+    automatic = gc.isenabled()     # as found: the app may run without it
     gc.disable()
     try:
         del fetcher, nam
         assert [ref() for ref in refs] == [None, None]
     finally:
-        gc.enable()
+        if automatic:
+            gc.enable()

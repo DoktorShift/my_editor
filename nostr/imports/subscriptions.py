@@ -282,12 +282,25 @@ class FeedSubscriptionStore(QObject):
         """Follow a source. The registry is the validation gate, so anything
         a resolver claims (feed URL, Nostr address, ...) is storable and
         nothing else ever syncs to relays."""
+        result = self._add(url, title)
+        if result.get("added"):
+            self._after_mutation()
+        return result
+
+    def add_feeds(self, feeds: Sequence[Tuple[str, str]]) -> List[dict]:
+        """``add_feed`` for many sources (a list of sources): one change of
+        the list, one sync, one publish. Returns each one's result."""
+        results = [self._add(url, title) for url, title in feeds]
+        if any(result.get("added") for result in results):
+            self._after_mutation()
+        return results
+
+    def _add(self, url: str, title: str) -> dict:
         cleaned = (url or "").strip()
         if not is_storable_url(cleaned) or not can_resolve_source(cleaned):
             return {"added": False, "invalid": True}
         if not self._local.add(cleaned, title or ""):
             return {"added": False, "duplicate": True}
-        self._after_mutation()
         return {"added": True}
 
     def remove_feed(self, url: str) -> bool:

@@ -444,7 +444,7 @@ class TestScreenReaders:
         assert unnamed_controls(window) == []
 
     def test_also_with_a_message_and_an_empty_list(self, window):
-        window.banner.say("Skipped 2 posts.", "Undo", lambda: None)
+        window.banner.say("Skipped 2 posts.", "Undo", "undo")
         window.sidebar.select(LIST, SKIPPED_POSTS)
         assert unnamed_controls(window) == []
 
@@ -588,16 +588,22 @@ def test_a_closed_window_is_freed_without_the_collector(tmp_path):
         win.sheet().reject()
         settle()
     win._show_job_card()
+    win.show_view(LIST, INBOX)
+    win.posts.setCurrentIndex(win.posts.model_.index(0))
+    win.skip_or_restore()           # the Undo banner holds no callback of the window
+    assert win.banner.action is not None
     win.close()
     settle()
     ref = weakref.ref(win)
     gc.collect()
+    automatic = gc.isenabled()     # as found: the app may run without it
     gc.disable()
     try:
         del win
         assert ref() is None
     finally:
-        gc.enable()
+        if automatic:
+            gc.enable()
         controller.account_changed(None)
         settle()
 

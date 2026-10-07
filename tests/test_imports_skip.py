@@ -113,6 +113,22 @@ class TestSkip:
         assert window._controller.counts().skipped == 0
         assert window.banner.label.text() == "Restored 1 post."
 
+    def test_the_keys_restore_nothing_in_skipped(self, window):
+        """CP2 review L-b: Delete or Backspace restored posts in Skipped,
+        the opposite of what they mean, with no Undo; and Undo Skip then
+        stood for an older skip."""
+        window.action_bar.skip.click()
+        assert window.can_undo()
+        window.sidebar.select(LIST, SKIPPED_POSTS)
+        window.posts.setFocus()
+        window.posts.setCurrentIndex(window.posts.model_.index(0))
+        QTest.keyClick(window.posts, Qt.Key.Key_Delete)
+        QTest.keyClick(window.posts, Qt.Key.Key_Backspace)
+        assert window._controller.counts().skipped == 1
+        window.action_bar.skip.click()          # Restore, the button
+        assert window._controller.counts().skipped == 0
+        assert not window.can_undo()
+
     def test_files_are_not_skipped(self, window):
         from tests.imports_fakes import make_item
         collection = window._controller.open_posts(kind="file", label="blog.xml",
@@ -186,8 +202,12 @@ def test_the_documents_commands_are_dimmed_while_imports_is_in_front(window):
     copy = registry.add(Command("edit.copy", "Copy", EDIT))
     sidebar = registry.add(Command("view.sidebar", "Show Sidebar", VIEW), enabled=False)
     front = {"window": window}
+    from PySide6.QtGui import QAction
+    fullscreen = QAction("Full Screen")
+    fullscreen.setCheckable(True)
     host = SimpleNamespace(
         commands=registry, act_window_sidebar=sidebar, _m_background=QMenu(),
+        act_fullscreen=fullscreen, isFullScreen=lambda: False,
         _imports_in_front=lambda: front["window"], _update_knit_actions=lambda: None,
         _update_format_buttons=lambda: None,
         _DOCUMENT_COMMANDS=MainWindow._DOCUMENT_COMMANDS,
@@ -206,3 +226,29 @@ def test_the_documents_commands_are_dimmed_while_imports_is_in_front(window):
     MainWindow._update_window_commands(host)
     assert save.isEnabled() and not bold.isEnabled()
     assert not sidebar.isEnabled()
+
+
+def test_a_sheet_of_imports_in_front_counts_as_imports_in_front(window, monkeypatch):
+    """CP2 review L-a: with a sheet of the Imports window up, the window
+    itself is not the active one, so the document's commands came back
+    and Edit > Undo undid text in the document behind."""
+    import main_window
+    window.follow_website()
+    sheet = window.sheet()
+    host = SimpleNamespace(_imports=SimpleNamespace(window=lambda: window))
+    monkeypatch.setattr(main_window.QApplication, "activeWindow", staticmethod(lambda: sheet))
+    assert MainWindow._imports_in_front(host) is window
+    monkeypatch.setattr(main_window.QApplication, "activeWindow", staticmethod(lambda: None))
+    assert MainWindow._imports_in_front(host) is None
+    sheet.reject()
+
+
+def test_full_screen_acts_on_the_window_in_front(window):
+    """CP2 review L-a: View > Full Screen made the editor window behind
+    full screen while the Imports window was in front."""
+    host = SimpleNamespace(_imports_in_front=lambda: window, showFullScreen=None,
+                           showNormal=None)
+    MainWindow._toggle_fullscreen(host, True)
+    assert window.isFullScreen()
+    MainWindow._toggle_fullscreen(host, False)
+    assert not window.isFullScreen()

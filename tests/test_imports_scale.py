@@ -91,3 +91,46 @@ def test_a_finished_check_does_not_freeze_the_window(window):
     took = time.perf_counter() - started
     assert took < 1.0, f"a finished check took {took * 1000:.0f} ms"
     assert controller.page(View(OLDER_POSTS))
+
+
+def test_following_a_long_list_is_one_change(tmp_path, monkeypatch):
+    """CP2 review L-d: Follow All synced the whole list once per source
+    (3.8 s for 400 on the UI thread)."""
+    from nostr.imports.sources.opml import OpmlDocument, OpmlFeed
+    controller = controller_for(tmp_path)
+    synced = []
+    real = controller.inbox.sync_sources
+
+    def counted(*args, **kwargs):
+        synced.append(1)
+        return real(*args, **kwargs)
+    monkeypatch.setattr(controller.inbox, "sync_sources", counted)
+    document = OpmlDocument(title="A list", feeds=tuple(
+        OpmlFeed(f"https://site{n}.example/feed", f"Site {n}") for n in range(400)))
+    started = time.perf_counter()
+    assert controller.follow_all(document) == (400, 0, 0)
+    took = time.perf_counter() - started
+    assert len(synced) == 1
+    assert len(controller.sources()) == 400
+    assert took < 1.0, f"following 400 sources took {took * 1000:.0f} ms"
+    controller.account_changed(None)
+
+
+def test_progress_reads_no_stored_posts(tmp_path):
+    """CP2 review L-d: every progress step read every row's stored post
+    again (68 ms a step for a 2,000-post import)."""
+    from nostr.imports.inbox_store import JobRow
+    controller = controller_for(tmp_path)
+    snapshot = {"guid": "g", "title": "A post", "content_html": "<p>" + "x" * 5000 + "</p>"}
+    controller.inbox.create_job(label="A big import", source_type="inbox", rows=[
+        JobRow(index=n, d_tag=f"rss-{n:016x}", title=f"Post {n}", snapshot=snapshot)
+        for n in range(2000)])
+    (light,) = controller.inbox.jobs(payloads=False)
+    assert all(row.snapshot is None and row.signed_event is None for row in light.rows)
+    started = time.perf_counter()
+    busy, failed = controller.posts_in_progress()
+    controller.activity()
+    took = time.perf_counter() - started
+    assert len(busy) == 2000 and not failed
+    assert took < 0.25, f"a progress step took {took * 1000:.0f} ms"
+    controller.account_changed(None)

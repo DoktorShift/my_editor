@@ -529,7 +529,9 @@ class FollowSheet(_Sheet):
             return
         key = self._controller.follow(result.url, result.feed.title or "", result=result)
         if not key:
-            self._fail(CANT_FOLLOW)
+            # Q-6's reason when it is that (CP2 review L-e: a pasted feed
+            # with a local address said only that it cannot be followed).
+            self._fail(self._controller.why_not_followed(result.url) or CANT_FOLLOW)
             return
         self.followed.emit(key)
         self.accept()

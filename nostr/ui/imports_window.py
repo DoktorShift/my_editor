@@ -404,6 +404,7 @@ class ImportsWindow(QMainWindow):
         self._controller.sync_changed.connect(self._update_notice)
         self.banner = _Banner()
         self.banner.hide()
+        self.banner.acted.connect(self._on_banner_action)
         column.addWidget(self.banner)
         self.list_stack = QStackedWidget()
         self.list_stack.addWidget(self.posts)
@@ -413,7 +414,7 @@ class ImportsWindow(QMainWindow):
         self.action_bar.create_clicked.connect(self.create_drafts)
         self.action_bar.options_clicked.connect(self._show_options)
         self.action_bar.skip_clicked.connect(self.skip_or_restore)
-        self.posts.skip_requested.connect(self.skip_or_restore)
+        self.posts.skip_requested.connect(self._skip_by_key)
         column.addWidget(self.action_bar)
         self.options_popover = OptionsPopover(self)
         self.options_popover.changed.connect(self._choose)
@@ -965,12 +966,29 @@ class ImportsWindow(QMainWindow):
         view = self._scope.view
         return view is not None and view.scope == SKIPPED_POSTS
 
+    def _on_banner_action(self, key: str) -> None:
+        if key == "undo":
+            self.undo_skip()
+        elif key == "drafts":
+            self._show_drafts()
+
+    def _skip_by_key(self) -> None:
+        """Delete or Backspace skips (Q-12). In Skipped they do nothing: the
+        keys mean "set aside", and bringing back is Restore (CP2 review
+        L-b: they restored there, with no Undo)."""
+        if not self._restoring():
+            self.skip_or_restore()
+
     def skip_or_restore(self) -> None:
-        """Skip (Delete or Backspace), or Restore in the Skipped list."""
+        """Skip, or Restore in the Skipped list."""
         chosen = self.targets()
         if self._restoring():
             restored = self._controller.restore(chosen)
             if restored:
+                # Undo is for the last thing done: a skip before this
+                # restore is not it any more.
+                self._last_skip = []
+                self.undo_changed.emit()
                 self.banner.say(ngettext("Restored {count} post.", "Restored {count} posts.",
                                          len(restored)).format(count=len(restored)))
             return
@@ -981,7 +999,7 @@ class ImportsWindow(QMainWindow):
         self._last_skip = moved
         self.banner.say(ngettext("Skipped {count} post.", "Skipped {count} posts.",
                                  len(moved)).format(count=len(moved)),
-                        _("Undo"), self.undo_skip)
+                        _("Undo"), "undo")
         self.undo_changed.emit()
 
     def undo_skip(self) -> None:
@@ -1051,7 +1069,7 @@ class ImportsWindow(QMainWindow):
         if job is None:
             return
         if self._show_drafts is not None:
-            self.banner.say(finished_text(job), _("Show Drafts"), self._show_drafts)
+            self.banner.say(finished_text(job), _("Show Drafts"), "drafts")
         else:
             self.banner.say(finished_text(job))
 
@@ -1426,7 +1444,15 @@ class ImportsWindow(QMainWindow):
 class _Banner(QFrame):
     """A one-line message above the list, with an optional action and a
     close button: what just happened, and the way back where there is
-    one."""
+    one.
+
+    Signals:
+      acted(str)   the action was chosen (its key). A signal, not a
+                   callback kept here: a callback of the window held by
+                   its own child keeps the window alive (CP2 review L-c).
+    """
+
+    acted = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -1449,10 +1475,9 @@ class _Banner(QFrame):
         self.close_button.setToolTip(_("Close Message"))
         self.close_button.clicked.connect(self.hide)
         row.addWidget(self.close_button)
-        self._handler: Optional[Callable[[], None]] = None
+        self._key = ""
 
-    def say(self, text: str, action: str = "",
-            handler: Optional[Callable[[], None]] = None) -> None:
+    def say(self, text: str, action: str = "", key: str = "") -> None:
         self.label.setText(text)
         self.label.setAccessibleName(text)
         if self.action is not None:
@@ -1466,16 +1491,16 @@ class _Banner(QFrame):
             self.action.setAutoDefault(False)
             self.action.clicked.connect(self._act)
             self._row.insertWidget(1, self.action)
-        self._handler = handler
+        self._key = key if action else ""
         color = self.palette().color(QPalette.ColorRole.WindowText)
         self.close_button.setIcon(glyph_icon("close", 14, color))
         self.show()
 
     def _act(self) -> None:
-        handler = self._handler
+        key = self._key
         self.hide()
-        if handler is not None:
-            handler()
+        if key:
+            self.acted.emit(key)
 
 
 class _DropOverlay(QWidget):

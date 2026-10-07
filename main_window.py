@@ -3905,6 +3905,10 @@ class MainWindow(QMainWindow):
                 self._update_knit_actions()
                 self._update_format_buttons()
         self.act_window_sidebar.setEnabled(in_front)
+        # Full Screen says whether the window in front is.
+        blocked = self.act_fullscreen.blockSignals(True)
+        self.act_fullscreen.setChecked((imports or self).isFullScreen())
+        self.act_fullscreen.blockSignals(blocked)
         if in_front:
             shown = imports.act_sidebar.isChecked()
             self.act_window_sidebar.setText(_("Hide Sidebar") if shown else _("Show Sidebar"))
@@ -3918,12 +3922,21 @@ class MainWindow(QMainWindow):
             self._update_window_commands()
 
     def _imports_in_front(self):
-        """The Imports window while it is the window in front. It has no
-        menu bar of its own: the app's Edit commands act on it then, as a
-        Mac app's menu bar acts on its key window."""
+        """The Imports window while it is the window in front, or one of its
+        sheets or alerts is (CP2 review L-a: with a sheet up, Edit > Undo
+        undid text in the document behind). It has no menu bar of its
+        own: the app's Edit commands act on it then, as a Mac app's menu
+        bar acts on its key window."""
         imports = getattr(self, "_imports", None)
         window = imports.window() if imports is not None else None
-        return window if window is not None and window.isActiveWindow() else None
+        if window is None:
+            return None
+        active = QApplication.activeWindow()
+        while active is not None:
+            if active is window:
+                return window
+            active = active.parentWidget()
+        return None
 
     def _undo(self):
         imports = self._imports_in_front()
@@ -4188,10 +4201,14 @@ class MainWindow(QMainWindow):
         self._set_theme(scheme != Qt.ColorScheme.Light)
 
     def _toggle_fullscreen(self, checked: bool):
+        # The window in front goes full screen, as View > Enter Full Screen
+        # does in every Mac app; with the Imports window in front, that one
+        # (CP2 review L-a: this window behind did).
+        window = self._imports_in_front() or self
         if checked:
-            self.showFullScreen()
+            window.showFullScreen()
         else:
-            self.showNormal()
+            window.showNormal()
 
 
     # ----------------------------------------------------------------------

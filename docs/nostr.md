@@ -5,13 +5,13 @@ to Nostr as a short note or a long-form article, signed by your own NIP-46 signe
 so your private key never enters the app, or by a key MyEditor keeps for you on
 this computer. You can create a new account in the app, back it up and restore
 it. You also get private encrypted drafts that sync across your devices, a media
-library on your own Blossom servers, one-way import of any blog via RSS, and
-EINUNDZWANZIG membership.
+library on your own Blossom servers, imports of posts from websites, files and
+links, and EINUNDZWANZIG membership.
 
 - [Publishing](#publishing)
 - [Private encrypted drafts](#private-encrypted-drafts)
 - [Media library (Blossom)](#media-library-blossom)
-- [Import from RSS, Atom, and JSON feeds](#import-from-rss-atom-and-json-feeds)
+- [Imports: follow websites, import files and links](#imports-follow-websites-import-files-and-links)
 - [Joining EINUNDZWANZIG in the app](#joining-einundzwanzig-in-the-app)
 
 ---

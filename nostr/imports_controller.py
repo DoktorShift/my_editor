@@ -57,7 +57,7 @@ from .imports import snapshots, workers
 from .imports.catalogue import ExistingCatalogue
 from .imports.checker import FeedChecker, checks_automatically
 from .imports.constants import IDENTIFIER_PREFIX
-from .imports.errors import SourceError, friendly_message
+from .imports.errors import LOCAL_NETWORK_MESSAGE, SourceError, friendly_message
 from .imports.feed_list import source_key
 from .imports.fulltext import extract_readable_content
 from .rss.parser import FeedItem
@@ -682,6 +682,11 @@ class ImportsController(QObject):
     def is_followed(self, url: str) -> bool:
         return self.subscriptions.has_feed(url)
 
+    def why_not_followed(self, url: str) -> str:
+        """Why ``url`` cannot be followed, in the words the person reads:
+        an address on this computer or its network (Q-6), else none."""
+        return LOCAL_NETWORK_MESSAGE if not _public(url) else ""
+
     def follow(self, url: str, title: str = "", *, result=None) -> str:
         """Follow ``url``. With the ``result`` its lookup gave, its posts are
         there at once: a feed's as a baseline (Older Posts, as the first
@@ -723,9 +728,12 @@ class ImportsController(QObject):
         now, were followed already, and could not be followed (not a
         source, or an address on this computer or its network)."""
         followed = known = refused = 0
-        for feed in document.feeds:
-            added = (self.subscriptions.add_feed(feed.xml_url, feed.title)
-                     if _public(feed.xml_url) else {})
+        public = [feed for feed in document.feeds if _public(feed.xml_url)]
+        refused = len(document.feeds) - len(public)
+        # One change of the list for all of them (CP2 review L-d: one sync
+        # of the whole list per source, 3.8 s for 400 on the UI thread).
+        for added in self.subscriptions.add_feeds(
+                [(feed.xml_url, feed.title) for feed in public]):
             if added.get("added"):
                 followed += 1
             elif added.get("duplicate"):
@@ -1053,7 +1061,7 @@ class ImportsController(QObject):
             return None
         if self.runner.running is not None:
             return self.runner.running
-        waiting = unfinished(self.inbox.jobs())
+        waiting = unfinished(self.inbox.jobs(statuses=UNFINISHED, payloads=False))
         return waiting[0] if waiting else None
 
     def job(self, job_id: str) -> Optional[Job]:
@@ -1069,7 +1077,7 @@ class ImportsController(QObject):
         failed: Set[str] = set()
         if self.inbox is None:
             return busy, failed
-        jobs = unfinished(self.inbox.jobs())
+        jobs = unfinished(self.inbox.jobs(statuses=UNFINISHED, payloads=False))
         running = self.runner.running if self.runner is not None else None
         if running is not None:
             jobs = [running] + [job for job in jobs if job.id != running.id]
@@ -1227,6 +1235,10 @@ def _is_damage(exc: BaseException) -> bool:
     if name.startswith(("SQLITE_CORRUPT", "SQLITE_NOTADB")):
         return True
     return type(exc) is sqlite3.DatabaseError and not name   # InboxStore.check
+
+
+# The statuses of imports that still have posts to do (jobs.unfinished).
+UNFINISHED = ("paused", "running", "pausing", "stopping", "partial")
 
 
 def _release_at_exit(controller_ref) -> Callable[[], None]:

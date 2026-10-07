@@ -256,9 +256,11 @@ def test_a_panel_without_a_parent_is_freed_without_the_collector():
     panel._build_context_menu(panel._list.item(0))
     ref = weakref.ref(panel)
     gc.collect()
+    automatic = gc.isenabled()     # as found: the app may run without it
     gc.disable()
     try:
         del panel
         assert ref() is None
     finally:
-        gc.enable()
+        if automatic:
+            gc.enable()

@@ -760,23 +760,33 @@ class InboxStore:
         row = self._db.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
         return self._job(row) if row else None
 
-    def jobs(self) -> List[Job]:
-        """Every job, newest first."""
-        return [self._job(row) for row in self._db.execute(
-            "SELECT * FROM jobs ORDER BY created_at DESC, rowid DESC")]
+    def jobs(self, *, statuses: Sequence[str] = (), payloads: bool = True) -> List[Job]:
+        """The jobs (with ``statuses`` only, when given), newest first.
+        Without ``payloads`` their rows come without the posts and signed
+        drafts they keep: what progress needs, at a fraction of the cost
+        (CP2 review L-d: every row's post was read again at every step)."""
+        sql, args = "SELECT * FROM jobs", ()
+        if statuses:
+            sql += f" WHERE status IN ({', '.join('?' * len(statuses))})"
+            args = tuple(statuses)
+        return [self._job(row, payloads=payloads) for row in self._db.execute(
+            sql + " ORDER BY created_at DESC, rowid DESC", args)]
 
-    def _job(self, row) -> Job:
+    def _job(self, row, *, payloads: bool = True) -> Job:
         job = Job(id=row["id"], label=row["label"], source_type=row["source_type"],
                   source_url=row["source_url"], status=row["status"],
                   options=json.loads(row["options"] or "{}"), created_at=row["created_at"],
                   updated_at=row["updated_at"], error=row["error"])
-        for r in self._db.execute("SELECT * FROM job_rows WHERE job_id = ? ORDER BY idx",
-                                  (job.id,)):
+        columns = "*" if payloads else "idx, d_tag, title, source_key, status, stage, error"
+        for r in self._db.execute(f"SELECT {columns} FROM job_rows WHERE job_id = ? "
+                                  "ORDER BY idx", (job.id,)):
+            signed = r["signed_event"] if payloads else None
+            snapshot = r["snapshot"] if payloads else None
             job.rows.append(JobRow(
                 index=r["idx"], d_tag=r["d_tag"], title=r["title"], source_key=r["source_key"],
                 status=r["status"], stage=r["stage"], error=r["error"],
-                signed_event=json.loads(r["signed_event"]) if r["signed_event"] else None,
-                snapshot=json.loads(r["snapshot"]) if r["snapshot"] else None))
+                signed_event=json.loads(signed) if signed else None,
+                snapshot=json.loads(snapshot) if snapshot else None))
         return job
 
     def save_job(self, job: Job) -> None:
