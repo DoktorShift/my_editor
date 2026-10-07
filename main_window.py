@@ -66,7 +66,7 @@ from highlighter import (
     detect_language_from_content,
 )
 from settings import load_settings, save_setting
-from welcome import is_pristine_welcome, welcome_html
+from welcome import DEFAULT_KEYS as WELCOME_KEYS, is_pristine_welcome, welcome_html
 from update_check import UpdateChecker
 from updater import (
     UpdateInstaller, detect_install_kind, select_asset, supports_in_app_update,
@@ -1257,8 +1257,10 @@ class MainWindow(QMainWindow):
         # keeps it: HTML documents (owner decision Q-L). Elsewhere it is
         # dimmed, and it has no toolbar button.
         self.act_underline.setToolTip(_("Underlining is kept in HTML documents only."))
-        # Shift-Command-X on a Mac, Alt+Shift+5 elsewhere, as in Google Docs
-        # (Word and LibreOffice have none).
+        # Shift-Command-X on a Mac, Alt+Shift+5 elsewhere, as in Google Docs:
+        # Notes, Pages and TextEdit have no key for it, nor Word or
+        # LibreOffice (the one exception to Apple's keys on a Mac, kept
+        # because writers know it from Google Docs).
         self.act_strike = add(Command("format.strike", _("Strikethrough"), FORMAT,
                                       platform_keys("Ctrl+Shift+X", "Alt+Shift+5"),
                                       checkable=True, keywords=(_("cross out"),)),
@@ -1266,14 +1268,18 @@ class MainWindow(QMainWindow):
         self.act_code = add(Command("format.code", _("Inline Code"), FORMAT,
                                     checkable=True, keywords=(_("monospace"),)),
                             triggered=lambda: self._toggle_style(rich_text.CODE))
-        # Command-\ and Ctrl+\, Google Docs' keys for it.
+        # Command-\ and Ctrl+\, Google Docs' keys for it (Apple's apps have
+        # none).
         self.act_reset_format = add(Command("format.reset", _("Clear Formatting"), FORMAT,
                                             "Ctrl+\\", keywords=(_("plain"),)),
                                     triggered=self._reset_format)
-        # Paragraph styles. Option-Command-0 to 3 on a Mac, as in Google Docs
-        # (Notes' Shift-Command-T, H and J belong to View commands here);
-        # Ctrl+0 to 3 elsewhere, as in LibreOffice, because Ctrl+Alt is
-        # AltGr there and types characters (² and ³ on a German keyboard).
+        # Paragraph styles. Apple Notes' keys on a Mac: Body Shift-Command-B,
+        # Title, Heading and Subheading Shift-Command-T, H and J for
+        # Heading 1 to 3. Ctrl+0 to 3 elsewhere, as in LibreOffice and
+        # Google Docs' numbers, because Ctrl+Alt is AltGr there and types
+        # characters (² and ³ on a German keyboard).
+        mac_style_keys = {0: "Ctrl+Shift+B", 1: "Ctrl+Shift+T", 2: "Ctrl+Shift+H",
+                          3: "Ctrl+Shift+J"}
         self._style_group = QActionGroup(self)
         self._style_group.setExclusionPolicy(QActionGroup.ExclusionPolicy.ExclusiveOptional)
         self.act_styles = []
@@ -1283,7 +1289,7 @@ class MainWindow(QMainWindow):
                 (2, _("Heading 2"), (_("subtitle"), "h2")),
                 (3, _("Heading 3"), ("h3",))):
             action = add(Command(f"format.style.{'body' if not level else f'h{level}'}", title,
-                                 FORMAT, platform_keys(f"Ctrl+Alt+{level}", f"Ctrl+{level}"),
+                                 FORMAT, platform_keys(mac_style_keys[level], f"Ctrl+{level}"),
                                  checkable=True, keywords=words),
                          triggered=lambda n=level: self._set_heading(n))
             self._style_group.addAction(action)
@@ -1964,10 +1970,20 @@ class MainWindow(QMainWindow):
         self._update_window_title()
         return ed
 
+    def _welcome_keys(self) -> dict:
+        """The keys the welcome page names, as this platform writes them."""
+        keys = {}
+        for command in WELCOME_KEYS:
+            shortcut = self.commands.action(command).shortcut()
+            text = shortcut.toString(QKeySequence.SequenceFormat.NativeText)
+            if text:
+                keys[command] = text
+        return keys
+
     def show_welcome_tab(self) -> HtmlEditor:
         """Open a friendly first-run tab introducing the app; returns its editor."""
         ed = self.new_tab()
-        ed.setHtml(welcome_html())
+        ed.setHtml(welcome_html(self._welcome_keys()))
         ed.document().setModified(False)
         ed._is_welcome = True   # so an update restart reopens it as the welcome tab
         self.tabs.setTabText(self.tabs.currentIndex(), _("Welcome"))

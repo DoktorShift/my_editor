@@ -27,8 +27,8 @@ On macOS, `Ctrl` in these tables is the Command key (`⌘`) and `Alt` is Option 
 | `Ctrl+Shift+X` on macOS, `Alt+Shift+5` on Windows and Linux | Strikethrough |
 | | Inline Code (`Format` menu) |
 | `Ctrl+\` | Clear Formatting (a link stays a link) |
-| `Ctrl+Alt+0` on macOS, `Ctrl+0` on Windows and Linux | Style: Body |
-| `Ctrl+Alt+1` to `Ctrl+Alt+3` on macOS, `Ctrl+1` to `Ctrl+3` on Windows and Linux | Style: Heading 1 to 3 (the same heading again makes it Body) |
+| `Ctrl+Shift+B` on macOS, `Ctrl+0` on Windows and Linux | Style: Body |
+| `Ctrl+Shift+T`, `Ctrl+Shift+H`, `Ctrl+Shift+J` on macOS (Notes' Title, Heading and Subheading), `Ctrl+1` to `Ctrl+3` on Windows and Linux | Style: Heading 1 to 3 (the same heading again makes it Body) |
 | `Ctrl+Shift+7` on macOS, `Ctrl+Shift+8` on Windows and Linux | Bulleted List (again: no list) |
 | `Ctrl+Shift+9` on macOS, `Ctrl+Shift+7` on Windows and Linux | Numbered List (again: no list) |
 | `Ctrl+]` / `Ctrl+[` | Increase / Decrease Indent of list items |
@@ -42,7 +42,7 @@ The status bar says, quietly, how long the document is: its words and how long i
 
 The **format toolbar** above the document holds the controls used most: the paragraph style (Body, Heading 1 to 3), Bold, Italic, Strikethrough, Add Link, Bulleted List, Numbered List and Quote. Everything else is in the `Format` and `Insert` menus. `View > Show Toolbar` (`Ctrl+Alt+T` on macOS) hides it; a PDF tab has none.
 
-The keys follow each platform's own conventions: Apple Notes and Pages on macOS, Google Docs and LibreOffice on Windows and Linux. A command no convention has a key for has none.
+The keys follow each platform's own conventions: Apple Notes and Pages on macOS, Google Docs and LibreOffice on Windows and Linux. A command no convention has a key for has none. One exception on macOS: Strikethrough and Clear Formatting, which Apple's apps give no key, keep the keys writers know from Google Docs (`Ctrl+Shift+X`, `Ctrl+\`).
 
 Links: `Ctrl+K` opens a small panel under the words with the link's text and address. It accepts web addresses (`https://` is added when you leave it out), email addresses and, while a Nostr account is in use, Nostr links; it says right there why anything else cannot be a link. Pasting a web address over selected words links them. `Ctrl`-click (`Cmd`-click on macOS) opens a link: web pages in your browser, Nostr links through njump.me. Typing right after a link is not part of it.
 
