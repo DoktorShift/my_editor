@@ -36,7 +36,7 @@ from constants import (
     DARK_BG, DARK_FG, LIGHT_BG, LIGHT_FG, DARK_SELECTION, LIGHT_SELECTION,
     DARK_MENU_BG, DARK_MENU_FG, LIGHT_MENU_BG, LIGHT_MENU_FG,
     DARK_BORDER, LIGHT_BORDER, APP_DISPLAY_NAME, APP_VERSION, APP_URL, TEXT_COLORS,
-    DARK_MUTED_FG, LIGHT_MUTED_FG,
+    DARK_MUTED_FG, LIGHT_MUTED_FG, IPC_SERVER_NAME,
 )
 from widgets import FindBar, LineNumberGutter, FileChangedBar, UpdateBar
 from format_toolbar import FormatToolbar
@@ -192,8 +192,6 @@ from nostr.ui.publish_note_dialog import PublishNoteDialog
 from nostr.ui.save_destination_dialog import SaveDestination, SaveDestinationDialog
 from nostr.ui.stash_kind_dialog import StashChoice, StashKind, StashKindDialog
 from nostr.ui.thumbnail_loader import ThumbnailLoader
-
-_IPC_SERVER_NAME = "minimal-texteditor-ipc"
 
 # Monotonic counter for clipboard / drop upload job names. Pairs with
 # the dialog-side helper but lives here too because main_window also
@@ -615,10 +613,10 @@ class MainWindow(QMainWindow):
     def _start_ipc_server(self):
         """Start a local socket server so that a second launch can forward a
         file path here instead of opening a new window."""
-        QLocalServer.removeServer(_IPC_SERVER_NAME)  # remove stale socket if any
+        QLocalServer.removeServer(IPC_SERVER_NAME)  # remove stale socket if any
         self._ipc_server = QLocalServer(self)
         self._ipc_server.newConnection.connect(self._on_ipc_connection)
-        self._ipc_server.listen(_IPC_SERVER_NAME)
+        self._ipc_server.listen(IPC_SERVER_NAME)
 
     def _on_ipc_connection(self):
         conn = self._ipc_server.nextPendingConnection()

@@ -29,6 +29,10 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# The run's own single-instance socket (constants.IPC_SERVER_NAME), set
+# before any app module is imported: a window a test builds never takes
+# over the socket of a MyEditor the person is using.
+os.environ.setdefault("MYEDITOR_IPC_NAME", f"myeditor-tests-{os.getpid()}")
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 

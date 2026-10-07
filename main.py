@@ -25,8 +25,6 @@ i18n.install(i18n.chosen_language())
 
 from main_window import MainWindow  # noqa: E402
 
-_IPC_SERVER_NAME = "minimal-texteditor-ipc"
-
 
 class EditorApplication(QApplication):
     """QApplication subclass that handles macOS Finder file-open (odoc) events.
@@ -77,7 +75,7 @@ def _forward_to_running_instance(path: str) -> bool:
     """Send a file path to an already-running instance via a local socket.
     Returns True if a running instance was found and the path was forwarded."""
     socket = QLocalSocket()
-    socket.connectToServer(_IPC_SERVER_NAME)
+    socket.connectToServer(constants.IPC_SERVER_NAME)
     if not socket.waitForConnected(300):
         return False
     socket.write((path + "\n").encode("utf-8"))
