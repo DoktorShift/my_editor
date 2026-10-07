@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import os
 
-import pytest
 from PySide6.QtCore import QBuffer, QIODevice
 from PySide6.QtGui import QColor, QImage
 
