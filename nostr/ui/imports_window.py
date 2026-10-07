@@ -109,6 +109,8 @@ from ..imports.inbox_store import (
     View,
 )
 from ..imports_controller import ELSEWHERE
+from .imports_badge import OFFER as BADGE_OFFER
+from .imports_badge import OFFER_ACTION as BADGE_OFFER_ACTION
 from ..imports.workspace import Post, Scope, checked_text, freshness, matches, targets
 from .image_review_dialog import ImageReviewDialog
 from .imports_actions import ActionBar, OptionsPopover
@@ -216,9 +218,11 @@ class ImportsWindow(QMainWindow):
                  open_url: Callable[[QUrl], bool] = QDesktopServices.openUrl,
                  show_drafts: Optional[Callable[[], None]] = None,
                  confirm: Optional[Callable[..., bool]] = None,
-                 parent=None) -> None:
+                 badge=None, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("imports_window")
+        # New posts on the app icon (Q-7): offered once, here (C13).
+        self._badge = badge
         self.setWindowTitle(_("Imports"))
         self.setUnifiedTitleAndToolBarOnMac(True)
         self._controller = controller
@@ -267,6 +271,7 @@ class ImportsWindow(QMainWindow):
         controller.posts_changed.connect(self._on_posts_changed)
         controller.activity_changed.connect(self._update_activity)
         controller.bound_changed.connect(self._on_access_changed)
+        controller.new_posts.connect(self._offer_badge)
         controller.import_finished.connect(self._import_finished)
         self._refresh_sidebar()
         self._update_activity()
@@ -383,6 +388,11 @@ class ImportsWindow(QMainWindow):
         self.article = ArticlePane(prepare=self._controller.prepare_article,
                                    images=self._controller.images, dark=self._dark,
                                    open_url=self._open_url)
+        # Site icons (C12): asked of the controller (which holds no
+        # window), shown when known.
+        for pane in (self.sidebar, self.posts, self.article):
+            pane.icon_for = self._controller.site_icon
+        self._controller.icon_ready.connect(self._on_icon_ready)
         # A link the article cannot open says so (review L9).
         self.article.link_refused.connect(self._link_refused)
         self.article.setMinimumWidth(ARTICLE_MIN)
@@ -972,6 +982,24 @@ class ImportsWindow(QMainWindow):
             self.undo_skip()
         elif key == "drafts":
             self._show_drafts()
+        elif key == "badge" and self._badge is not None:
+            self._badge.set_on(True)
+
+    def _offer_badge(self, *_args) -> None:
+        """New posts are here: the one time the app icon is offered for
+        them (the owner's decision Q-7), unless the line above the list
+        says something else now."""
+        badge = self._badge
+        if (badge is None or not badge.should_offer() or not self.isVisible()
+                or self.banner.isVisible() or not self._controller.counts().inbox):
+            return
+        badge.mark_offered()
+        self.banner.say(BADGE_OFFER, action=BADGE_OFFER_ACTION, key="badge")
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        # New posts that came while the window was closed count too.
+        QTimer.singleShot(0, self, self._offer_badge)
 
     def _skip_by_key(self) -> None:
         """Delete or Backspace skips (Q-12). In Skipped they do nothing: the
@@ -1234,6 +1262,11 @@ class ImportsWindow(QMainWindow):
 
     # Bound slots for the window's own children, not closures over the
     # window: a closure on a child's signal keeps the window alive.
+    def _on_icon_ready(self, _site: str) -> None:
+        self.sidebar.viewport().update()
+        self.posts.viewport().update()
+        self.article.show_icon()
+
     def _on_access_changed(self, bound: bool) -> None:
         """The other MyEditor quit and this one keeps the inbox now (CP1
         review L7): what a read-only view dimmed works again."""

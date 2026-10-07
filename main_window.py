@@ -146,6 +146,10 @@ from nostr.contacts import ContactListFetcher
 from nostr.draft_store import DraftState, DraftStore
 from nostr.draft_deletions import DraftDeletions
 from nostr.draft_sync import DraftSync
+from nostr.imports.favicons import FaviconCache
+from nostr.ui.imports_badge import COMMAND_TITLE as IMPORTS_BADGE_TITLE
+from nostr.ui.imports_badge import SETTINGS_KEY as IMPORTS_BADGE_KEY
+from nostr.ui.imports_badge import AppIconBadge
 from nostr.imports_controller import ImportsController
 from nostr.ui.imports_activity import activity_line
 from nostr.ui.imports_window import SETTINGS_KEY as IMPORTS_SETTINGS_KEY
@@ -444,8 +448,14 @@ class MainWindow(QMainWindow):
             entitled_relays=self._entitled_relays,
             blossom_primary=lambda: self._media_store.settings.primary,
             window_factory=self._make_imports_window,
+            # The sources' site icons, found once and kept (C12).
+            icons=FaviconCache(parent=self),
             parent=self,
         )
+        # The Inbox count on the app icon, when the person wants it (Q-7).
+        self._imports_badge = AppIconBadge(
+            self._imports, load=lambda: load_settings().get(IMPORTS_BADGE_KEY),
+            save=lambda value: save_setting(IMPORTS_BADGE_KEY, value), parent=self)
         # Created lazily inside ``_build_findbar`` so its parent is the
         # central widget rather than ``self`` - keeps Qt's geometry
         # reasoning straightforward.
@@ -572,6 +582,10 @@ class MainWindow(QMainWindow):
 
         self._build_actions()
         self._build_menu()
+        # The app icon setting as kept (not a choice made now), and as
+        # changed where Imports offers it.
+        self._on_imports_badge_changed(self._imports_badge.on)
+        self._imports_badge.changed.connect(self._on_imports_badge_changed)
         self._build_status_bar_view_toggle()
         self._build_findbar()
 
@@ -1562,6 +1576,11 @@ class MainWindow(QMainWindow):
             Command("nostr.imports", _("Imports\u2026"), NOSTR, nostr=True,
                     keywords=("rss", "feed", "import", "sources")),
             triggered=self._open_imports_window)
+        # Q-7: off until turned on here, or where Imports offers it once.
+        self.act_imports_badge = add(
+            Command("nostr.imports_badge", IMPORTS_BADGE_TITLE, NOSTR, checkable=True,
+                    nostr=True, keywords=("dock", "badge", "taskbar", "new posts")),
+            toggled=self._on_imports_badge_toggled)
         self.act_membership = add(
             Command("nostr.membership", _("EINUNDZWANZIG Membership\u2026"), NOSTR,
                     keywords=("einundzwanzig", "21", "join")),
@@ -1729,6 +1748,7 @@ class MainWindow(QMainWindow):
         m_nostr.addSeparator()
         m_nostr.addAction(self.act_nostr_drafts)
         m_nostr.addAction(self.act_nostr_imports)
+        m_nostr.addAction(self.act_imports_badge)
         m_nostr.addSeparator()
         m_nostr.addAction(self.act_membership)
         m_nostr.addSeparator()
@@ -4938,10 +4958,20 @@ class MainWindow(QMainWindow):
             load_settings=lambda: load_settings().get(IMPORTS_SETTINGS_KEY) or {},
             save_settings=lambda value: save_setting(IMPORTS_SETTINGS_KEY, value),
             open_url=lambda url: self._open_external(url.toString()),
-            show_drafts=self._show_drafts_from_imports)
+            show_drafts=self._show_drafts_from_imports, badge=self._imports_badge)
         # Edit > Undo says what it undoes there (Undo Skip).
         window.undo_changed.connect(self._update_undo_redo_buttons)
         return window
+
+    def _on_imports_badge_toggled(self, on: bool) -> None:
+        """Nostr > Show New Posts on the App Icon, chosen (Q-7)."""
+        self._imports_badge.set_on(on)
+
+    def _on_imports_badge_changed(self, on: bool) -> None:
+        """Turned on where Imports offered it: the menu item follows."""
+        blocked = self.act_imports_badge.blockSignals(True)
+        self.act_imports_badge.setChecked(on)
+        self.act_imports_badge.blockSignals(blocked)
 
     def _show_drafts_from_imports(self) -> None:
         """Show Drafts, after an import: this window and its Drafts panel."""

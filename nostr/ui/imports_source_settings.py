@@ -54,7 +54,7 @@ from ..imports.inbox_store import MANUAL_CHECK_GAP
 from ..imports.workspace import freshness
 from .assistant import DEFAULT, LEADING, NORMAL, link_button, text_label
 from .eliding_label import ElidingLabel
-from .imports_glyphs import letter_avatar
+from .imports_glyphs import source_avatar
 from .imports_sheets import _Sheet
 
 ICON = 32
@@ -112,8 +112,10 @@ class SourceSettingsSheet(_Sheet):
         self.icon = QLabel()
         self.icon.setFixedSize(ICON, ICON)
         title = settings.name or settings.own_title or settings.url
-        self.icon.setPixmap(letter_avatar(title, settings.url, ICON,
-                                          dark=self._is_dark, dpr=self.devicePixelRatioF()))
+        self.icon.setPixmap(source_avatar(title, settings.url, ICON,
+                                          dark=self._is_dark, dpr=self.devicePixelRatioF(),
+                                          image=self._controller.site_icon(self._key,
+                                                                           settings.url)))
         row.addWidget(self.icon, 0, Qt.AlignmentFlag.AlignTop)
         text = QVBoxLayout()
         text.setSpacing(0)

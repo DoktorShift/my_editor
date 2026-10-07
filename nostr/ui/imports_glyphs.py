@@ -25,9 +25,20 @@ until its site icon is known.
 from __future__ import annotations
 
 import hashlib
+from typing import Optional
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPalette, QPen, QPixmap
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QIcon,
+    QImage,
+    QPainter,
+    QPainterPath,
+    QPalette,
+    QPen,
+    QPixmap,
+)
 
 from .avatar import initials_for
 
@@ -158,6 +169,26 @@ def hue_for(text: str) -> int:
     """A hue picked by ``text`` (a source's address), the same every time."""
     digest = hashlib.sha256((text or "").encode("utf-8")).digest()
     return int.from_bytes(digest[:2], "big") % 360
+
+
+def source_avatar(title: str, key: str, size: int, *, dark: bool = False,
+                  dpr: float = 1.0, image: Optional[QImage] = None) -> QPixmap:
+    """A source's site icon when it is known (nostr/imports/favicons.py),
+    in the same rounded square, else its letter (C12)."""
+    if image is None or image.isNull():
+        return letter_avatar(title, key, size, dark=dark, dpr=dpr)
+    pixmap = QPixmap(int(size * dpr), int(size * dpr))
+    pixmap.setDevicePixelRatio(dpr)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+    path = QPainterPath()
+    path.addRoundedRect(QRectF(0, 0, size, size), size * 0.24, size * 0.24)
+    painter.setClipPath(path)
+    painter.drawImage(QRectF(0, 0, size, size), image)
+    painter.end()
+    return pixmap
 
 
 def letter_avatar(title: str, key: str, size: int, *, dark: bool = False,

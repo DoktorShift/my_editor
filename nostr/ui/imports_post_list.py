@@ -62,7 +62,7 @@ from PySide6.QtWidgets import (
 from i18n import _, ngettext
 
 from ..imports.workspace import Post, date_text, selectable, state_word
-from .imports_glyphs import is_dark, letter_avatar
+from .imports_glyphs import is_dark, source_avatar
 
 PostRole = Qt.ItemDataRole.UserRole + 1
 CheckedRole = Qt.ItemDataRole.UserRole + 2
@@ -405,11 +405,13 @@ class PostDelegate(QStyledItemDelegate):
 
         # Source, date and the figures.
         avatar = 14
+        icon_for = self._view.icon_for
+        image = icon_for(post.source_key, post.source_url) if icon_for is not None else None
         painter.drawPixmap(QRect(left, y + (small_metrics.lineSpacing() - avatar) // 2,
                                  avatar, avatar),
-                           letter_avatar(post.source_title, post.source_url or post.source_key,
+                           source_avatar(post.source_title, post.source_url or post.source_key,
                                          avatar, dark=is_dark(palette),
-                                         dpr=self._view.devicePixelRatioF()))
+                                         dpr=self._view.devicePixelRatioF(), image=image))
         parts = [post.source_title, date_text(post.published_at or post.found_at)]
         if post.read_minutes:
             parts.append(ngettext("{n} min", "{n} min", post.read_minutes).format(
@@ -537,6 +539,7 @@ class PostList(QListView):
         self.model_ = PostListModel(self)
         self.setModel(self.model_)
         self.setItemDelegate(PostDelegate(self, images))
+        self.icon_for = None        # (source key, address) -> site icon (C12)
         self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)

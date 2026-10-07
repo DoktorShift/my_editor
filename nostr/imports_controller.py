@@ -148,6 +148,7 @@ class ImportsController(QObject):
       new_posts(str, int)        a check put posts in the Inbox (source, count)
       import_finished(str)       an import went through all its posts (its id;
                                  some may have failed)
+      icon_ready(str)            a site's icon is known now (C12)
     """
 
     bound_changed = Signal(bool)
@@ -158,13 +159,14 @@ class ImportsController(QObject):
     new_posts = Signal(str, int)
     import_finished = Signal(str)
     sync_changed = Signal()
+    icon_ready = Signal(str)
 
     def __init__(self, *, relay_pool, relay_directory, session_pool, draft_store=None,
                  entitled_relays: Optional[Callable[[], Sequence[str]]] = None,
                  blossom_primary: Callable[[], str] = lambda: "",
                  config_dir: Optional[Path] = None,
                  subscription_store: Optional[FeedSubscriptionStore] = None,
-                 fetcher=None, images: Optional[RemoteImages] = None,
+                 fetcher=None, images: Optional[RemoteImages] = None, icons=None,
                  item_job_factory=None, resend_factory=None,
                  checker_factory=None, catalogue_factory=None,
                  run_blocking=None, window_factory=None,
@@ -203,6 +205,13 @@ class ImportsController(QObject):
         self.sync_message = ""
         self.subscriptions.sync_status.connect(self._on_sync_status)
         self.images = images or RemoteImages(parent=self)
+        # Site icons (C12): none unless the app gives a cache, so nothing
+        # is fetched for a controller a test makes.
+        self.icons = icons
+        if icons is not None:
+            icons.ready.connect(self.icon_ready)
+        self._sites: Dict[str, str] = {}
+        self.sources_changed.connect(self._forget_sites)
 
         self._profile = None
         self.inbox: Optional[InboxStore] = None
@@ -566,6 +575,21 @@ class ImportsController(QObject):
 
     def source(self, key: str) -> Optional[SourceRow]:
         return self.inbox.source(key) if self.inbox is not None else None
+
+    def site_icon(self, source_key: str = "", url: str = ""):
+        """The site icon of a source (or of the site ``url`` is on) when it
+        is known; the first ask looks it up in the background, and
+        ``icon_ready`` says when it is there. None without one."""
+        if self.icons is None:
+            return None
+        if source_key:
+            if not self._sites and self.inbox is not None:
+                self._sites = {s.key: s.site_url or s.url for s in self.inbox.sources()}
+            url = self._sites.get(source_key) or url
+        return self.icons.icon(url) if url else None
+
+    def _forget_sites(self) -> None:
+        self._sites = {}
 
     def website_of(self, key: str) -> str:
         """A source's website: the one its feed names, else its address's
