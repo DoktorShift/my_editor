@@ -136,6 +136,11 @@ def _repolish(widget: QWidget) -> None:
     widget.style().polish(widget)
 
 
+def _reach_by_keyboard(link: QLabel) -> None:
+    """Tab reaches the link and Return opens it, as a click does."""
+    link.setTextInteractionFlags(Qt.LinksAccessibleByMouse | Qt.LinksAccessibleByKeyboard)
+
+
 class _StepRow(QWidget):
     """One numbered step: badge, title, detail, and room for progress or an error."""
 
@@ -310,6 +315,7 @@ class UpdateDialog(QDialog):
                             f'style="color:{link_color}">{link_text}</a>')
         notes_link.setTextFormat(Qt.RichText)
         notes_link.setOpenExternalLinks(False)
+        _reach_by_keyboard(notes_link)
         notes_link.linkActivated.connect(self.link_activated)
 
         content = QVBoxLayout()
@@ -607,6 +613,7 @@ class WhatsNewDialog(QDialog):
                           f'style="color:{link_color}">{link_text}</a>')
             more.setTextFormat(Qt.RichText)
             more.setOpenExternalLinks(False)
+            _reach_by_keyboard(more)
             more.linkActivated.connect(self.link_activated)
             buttons.addWidget(more)
         buttons.addStretch(1)

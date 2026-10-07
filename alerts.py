@@ -76,7 +76,10 @@ _BUTTON_SPACING = 8
 _EXTRA_CSS = """
 QLabel#alert_title { font-size: 14px; font-weight: 600; }
 QLabel#alert_message { font-size: 12px; }
-QPushButton#alert_details { border: none; background: transparent; min-width: 0; padding: 2px; }
+QPushButton#alert_details {
+    border: 2px solid transparent; border-radius: 3px; background: transparent;
+    min-width: 0; padding: 0px;
+}
 """
 
 
@@ -107,7 +110,8 @@ class Alert(QDialog):
         self.setWindowFlag(Qt.WindowCloseButtonHint, False)
         self.setStyleSheet(
             theme.dialog_stylesheet(dark) + _EXTRA_CSS
-            + f"QPushButton#alert_details {{ color: {theme.dialog_link_color(dark)}; }}")
+            + f"QPushButton#alert_details {{ color: {theme.dialog_link_color(dark)}; }}"
+            + f"QPushButton#alert_details:focus {{ border-color: {theme.focus_ring_color(dark)}; }}")
 
         cancel = next((b for b in buttons if b.role == CANCEL), None)
         default = next(b for b in buttons if b.role == DEFAULT)

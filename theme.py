@@ -34,6 +34,12 @@ from constants import (
 _DIALOG_ACCENT = {True: ("#007ACC", "#1177C7"), False: (LIGHT_SELECTION, "#106EBE")}
 _DIALOG_DESTRUCTIVE = {True: "#FF6B5E", False: "#C0392B"}
 _DIALOG_LINK = {True: "#4FA3F7", False: LIGHT_SELECTION}
+# The ring around the control that has the keyboard focus: the link blue
+# around a plain button (3:1 or more against the button and the window),
+# and around the accent-filled default button a color that stands out
+# from the accent itself.
+_FOCUS_RING = {True: "#4FA3F7", False: LIGHT_SELECTION}
+_FOCUS_RING_ON_ACCENT = {True: "#FFFFFF", False: "#0A2540"}
 
 
 def _palette(is_dark: bool) -> QPalette:
@@ -94,7 +100,9 @@ def dialog_stylesheet(is_dark: bool) -> str:
 
     Covers the surface, text, and the three kinds of push button: normal,
     default (``setDefault(True)``), and destructive (objectName
-    ``destructive``). Dialogs append their own rules after it.
+    ``destructive``), each with a ring that shows when it has the keyboard
+    focus (a thicker border, with the padding reduced to match, so the
+    button keeps its size). Dialogs append their own rules after it.
     """
     if is_dark:
         bg, fg, muted, border, field = DARK_BG, DARK_FG, DARK_MUTED_FG, DARK_BORDER, DARK_MENU_BG
@@ -102,6 +110,7 @@ def dialog_stylesheet(is_dark: bool) -> str:
         bg, fg, muted, border, field = LIGHT_BG, LIGHT_FG, LIGHT_MUTED_FG, LIGHT_BORDER, LIGHT_MENU_BG
     accent, accent_hover = _DIALOG_ACCENT[is_dark]
     destructive = _DIALOG_DESTRUCTIVE[is_dark]
+    ring, ring_on_accent = _FOCUS_RING[is_dark], _FOCUS_RING_ON_ACCENT[is_dark]
     return f"""
     QDialog {{ background: {bg}; }}
     QLabel {{ color: {fg}; font-size: 13px; }}
@@ -114,10 +123,20 @@ def dialog_stylesheet(is_dark: bool) -> str:
     QPushButton:default:hover {{ background: {accent_hover}; border-color: {accent_hover}; }}
     QPushButton#destructive {{ color: {destructive}; }}
     QPushButton#destructive:hover {{ border-color: {destructive}; }}
+    QPushButton:focus, QPushButton#destructive:focus {{
+        border: 2px solid {ring}; padding: 5px 13px;
+    }}
+    QPushButton:default:focus {{ border: 2px solid {ring_on_accent}; }}
     QPushButton:disabled, QPushButton:default:disabled {{
         background: {field}; color: {muted}; border-color: {border};
     }}
     """
+
+
+def focus_ring_color(is_dark: bool) -> str:
+    """The color of the ring around a control with the keyboard focus, for
+    dialogs that draw their own controls (link-like buttons)."""
+    return _FOCUS_RING[is_dark]
 
 
 def error_text_color(is_dark: bool) -> str:

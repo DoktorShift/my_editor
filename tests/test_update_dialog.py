@@ -502,6 +502,29 @@ def test_whats_new_shows_the_notes_with_one_done_button():
     assert buttons == ["Done"]
 
 
+def _link_labels(dialog):
+    return [l for l in dialog.findChildren(update_dialog.QLabel) if "<a " in l.text()]
+
+
+def test_the_links_to_the_release_notes_are_reached_by_keyboard(qt_app):
+    """Tab reaches the link and Return opens it: a link that only answers a
+    click left keyboard users without the release notes."""
+    from PySide6.QtTest import QTest
+    plan = plan_for(updater.MACOS_APP, "3.3", release_url=RELEASE_URL, machine="arm64")
+    for dialog in (UpdateDialog("3.3", "3.2", plan, release_url=RELEASE_URL, is_dark=False),
+                   WhatsNewDialog("3.4", NOTES, release_url=RELEASE_URL, is_dark=False)):
+        link, = _link_labels(dialog)
+        assert link.textInteractionFlags() & Qt.LinksAccessibleByKeyboard
+        assert link.focusPolicy() & Qt.TabFocus
+        opened = recorder(dialog.link_activated)
+        dialog.show()
+        link.setFocus(Qt.TabFocusReason)
+        QTest.keyClick(link, Qt.Key_Tab)          # onto the link inside the label
+        QTest.keyClick(link, Qt.Key_Return)
+        dialog.close()
+        assert opened == [(RELEASE_URL,)], type(dialog).__name__
+
+
 def test_skip_is_explicit_and_says_which_version():
     dialog = automatic_dialog(FakeInstaller())
     skipped = recorder(dialog.skip_requested)

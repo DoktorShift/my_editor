@@ -101,9 +101,11 @@ def stylesheet(is_dark: bool) -> str:
     QPushButton:disabled {{ color: {muted}; }}
     QPushButton:default:disabled {{ background: {field}; color: {muted}; border-color: {border}; }}
     QPushButton#link {{
-        border: none; background: transparent; color: {link}; padding: 2px 0; min-width: 0;
+        border: 2px solid transparent; border-radius: 3px; background: transparent;
+        color: {link}; padding: 0px; min-width: 0;
     }}
     QPushButton#link:hover {{ text-decoration: underline; }}
+    QPushButton#link:focus {{ border-color: {theme.focus_ring_color(is_dark)}; }}
     QPushButton#link:disabled {{ color: {muted}; }}
     QRadioButton {{ font-weight: 600; }}
     QProgressBar {{
