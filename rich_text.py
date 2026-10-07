@@ -51,7 +51,9 @@ def normalize_after_markdown_load(doc) -> None:
     block outside a list loses it; list items keep theirs.
 
     Headings get the room above and below them that the editor gives
-    the ones typed here.
+    the ones typed here, and bulleted lists the shape of their depth
+    (disc, circle, square), as lists made here have: Qt's reader gives
+    every depth a disc.
 
     Call after every ``setMarkdown`` whose result the person edits.
     """
@@ -59,7 +61,15 @@ def normalize_after_markdown_load(doc) -> None:
     stray = [block for block in iter_blocks(doc)
              if block.textList() is None and block.blockFormat().hasProperty(marker)]
     headings = [block for block in iter_blocks(doc) if block.blockFormat().headingLevel()]
-    if not stray and not headings:
+    bullets = {}
+    for block in iter_blocks(doc):
+        text_list = block.textList()
+        if text_list is not None and list_kind_of(text_list) == BULLET:
+            bullets.setdefault(text_list.objectIndex(), text_list)
+    reshaped = [text_list for text_list in bullets.values()
+                if text_list.format().style()
+                != list_format(BULLET, max(1, text_list.format().indent())).style()]
+    if not stray and not headings and not reshaped:
         return
     cursor = QTextCursor(doc)
     cursor.beginEditBlock()
@@ -71,6 +81,10 @@ def normalize_after_markdown_load(doc) -> None:
     for block in headings:
         fmt = block.blockFormat()
         QTextCursor(block).setBlockFormat(heading_block_format(fmt, fmt.headingLevel()))
+    for text_list in reshaped:
+        fmt = text_list.format()
+        fmt.setStyle(list_format(BULLET, max(1, fmt.indent())).style())
+        text_list.setFormat(fmt)
     cursor.endEditBlock()
 
 

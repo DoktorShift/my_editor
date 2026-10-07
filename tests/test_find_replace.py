@@ -154,7 +154,9 @@ def test_the_find_bar_offers_replace_and_options():
     assert not bar.replace_edit.isHidden() and bar.replace_shown()
     bar.match_case.setChecked(True)
     assert bar.options() == FindOptions(match_case=True)
-    assert bar.options_button.text() == "Match Case"
+    assert bar.options_button.text() == "Options (1)"      # short: the bar keeps its width
+    assert bar.options_button.toolTip() == "Match Case"
+    assert bar.options_button.accessibleDescription() == "Match Case"
     asked = []
     bar.replace_requested.connect(lambda: asked.append("one"))
     bar.replace_all_requested.connect(lambda: asked.append("all"))

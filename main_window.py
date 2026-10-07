@@ -898,6 +898,7 @@ class MainWindow(QMainWindow):
         ed.selectionChanged.connect(lambda e=ed: self._on_selection_changed_for_words(e))
         ed.currentCharFormatChanged.connect(self._schedule_format_buttons)
         ed.selectionChanged.connect(self._schedule_format_buttons)
+        ed.selectionChanged.connect(self._update_clipboard_commands)
         self._update_editor_theme(ed)
         self._apply_view_prefs_to_editor(ed)
         ed.set_resource_resolver(self._asset_manager.resolve_image, ASSET_SCHEME)
@@ -1093,12 +1094,45 @@ class MainWindow(QMainWindow):
                 minutes=_number(minutes)))
 
     def _update_undo_redo_buttons(self):
-        ed = self.current_editor()
-        can_undo = ed.document().isUndoAvailable() if ed else False
-        can_redo = ed.document().isRedoAvailable() if ed else False
+        """Undo and Redo for whatever has the focus: a text field (the find
+        field) or the document."""
+        focus = QApplication.focusWidget()
+        if isinstance(focus, QLineEdit):
+            can_undo, can_redo = focus.isUndoAvailable(), focus.isRedoAvailable()
+        else:
+            ed = self.current_editor()
+            can_undo = ed.document().isUndoAvailable() if ed else False
+            can_redo = ed.document().isRedoAvailable() if ed else False
         if hasattr(self, "act_undo"):
             self.act_undo.setEnabled(can_undo)
             self.act_redo.setEnabled(can_redo)
+
+    def _update_clipboard_commands(self) -> None:
+        """Cut, Copy and Delete act on a selection, and are dimmed without
+        one (as the HIG asks of a command that cannot act), for whatever
+        has the focus: a text field, the PDF reader (Copy) or the
+        document."""
+        if not hasattr(self, "act_cut"):
+            return
+        focus = QApplication.focusWidget()
+        if isinstance(focus, QLineEdit):
+            selected, editable = focus.hasSelectedText(), not focus.isReadOnly()
+        elif self.current_pdf_viewer() is not None:
+            selected, editable = True, False      # the reader answers Copy itself
+        else:
+            ed = self.current_editor()
+            selected = ed is not None and ed.textCursor().hasSelection()
+            editable = ed is not None and not ed.isReadOnly()
+        self.act_copy.setEnabled(selected)
+        self.act_cut.setEnabled(selected and editable)
+        self.act_delete.setEnabled(selected and editable)
+
+    def _on_focus_changed(self, _old, _new) -> None:
+        tabs = getattr(self, "tabs", None)
+        if tabs is None or not shiboken6.isValid(tabs):
+            return                                   # the window is closing
+        self._update_clipboard_commands()
+        self._update_undo_redo_buttons()
 
     def _toggle_format(self, fmt: str):
         ed = self.current_editor()
@@ -1746,6 +1780,12 @@ class MainWindow(QMainWindow):
                                replace=True, options=True)
         self.findbar.setVisible(False)
         self.findbar.edit.textChanged.connect(self._on_search_text_changed)
+        # Cut, Copy, Delete, Undo and Redo follow the field while it has
+        # the focus, as they follow the document otherwise.
+        for field in (self.findbar.edit, self.findbar.replace_edit):
+            field.selectionChanged.connect(self._update_clipboard_commands)
+            field.textChanged.connect(self._update_undo_redo_buttons)
+        QApplication.instance().focusChanged.connect(self._on_focus_changed)
         self.findbar.options_changed.connect(self._on_find_options_changed)
         self.findbar.replace_requested.connect(self._replace_current)
         self.findbar.replace_all_requested.connect(self._replace_all)
@@ -3876,11 +3916,21 @@ class MainWindow(QMainWindow):
             self._update_format_buttons()
 
     def _undo(self):
+        """Edit > Undo, for whatever has the focus (the find field takes
+        its own, as its keys do)."""
+        focus = QApplication.focusWidget()
+        if isinstance(focus, QLineEdit):
+            focus.undo()
+            return
         ed = self.current_editor()
         if ed:
             ed.undo()
 
     def _redo(self):
+        focus = QApplication.focusWidget()
+        if isinstance(focus, QLineEdit):
+            focus.redo()
+            return
         ed = self.current_editor()
         if ed:
             ed.redo()
@@ -4052,6 +4102,7 @@ class MainWindow(QMainWindow):
         for action in self._rich_actions:
             action.setEnabled(kind == "rich")
         self.act_underline.setEnabled(bool(self._keeps_underline(self.current_editor())))
+        self._update_clipboard_commands()
         if kind:
             self._update_undo_redo_buttons()
 

@@ -66,12 +66,12 @@ msgstr[1] ""
 msgid "Document"
 msgstr ""
 
-#: editor.py:845
+#: editor.py:785
 #: main_window.py:1227
 msgid "Cut"
 msgstr ""
 
-#: editor.py:846
+#: editor.py:786
 #: main_window.py:1229
 #: update_dialog.py:188
 #: update_dialog.py:194
@@ -79,16 +79,16 @@ msgstr ""
 msgid "Copy"
 msgstr ""
 
-#: editor.py:847
+#: editor.py:787
 #: main_window.py:1231
 msgid "Paste"
 msgstr ""
 
-#: editor.py:783
+#: editor.py:723
 msgid "Command-click to open"
 msgstr ""
 
-#: editor.py:784
+#: editor.py:724
 msgid "Ctrl+click to open"
 msgstr ""
 
@@ -1874,8 +1874,8 @@ msgid "Install"
 msgstr ""
 
 #: rmd_setup_dialog.py:222
-#: widgets.py:471
-#: widgets.py:494
+#: widgets.py:477
+#: widgets.py:500
 #: nostr/ui/account_windows.py:759
 #: nostr/ui/account_windows.py:1095
 #: nostr/ui/connect_dialog.py:250
@@ -2304,7 +2304,7 @@ msgid "Release Notes"
 msgstr ""
 
 #: update_dialog.py:347
-#: widgets.py:493
+#: widgets.py:499
 msgid "What’s New"
 msgstr ""
 
@@ -2334,8 +2334,8 @@ msgid "Skip This Version"
 msgstr ""
 
 #: update_dialog.py:275
-#: widgets.py:470
-#: widgets.py:486
+#: widgets.py:476
+#: widgets.py:492
 msgid "Later"
 msgstr ""
 
@@ -2699,41 +2699,41 @@ msgstr ""
 msgid "Close the find bar (Esc)"
 msgstr ""
 
-#: widgets.py:343
-#: widgets.py:362
+#: widgets.py:349
+#: widgets.py:368
 #: nostr/ui/draft_conflict_banner.py:196
 msgid "Reload"
 msgstr ""
 
-#: widgets.py:349
+#: widgets.py:355
 #: nostr/ui/draft_conflict_banner.py:217
 #: nostr/ui/draft_conflict_banner.py:219
 msgid "Dismiss"
 msgstr ""
 
-#: widgets.py:360
+#: widgets.py:366
 msgid "File was changed externally."
 msgstr ""
 
-#: widgets.py:367
+#: widgets.py:373
 msgid "File was deleted - save to recreate it."
 msgstr ""
 
-#: widgets.py:372
+#: widgets.py:378
 msgid "This file is already open in this tab."
 msgstr ""
 
-#: widgets.py:378
+#: widgets.py:384
 msgid "File type not supported."
 msgstr ""
 
-#: widgets.py:463
-#: widgets.py:485
+#: widgets.py:469
+#: widgets.py:491
 msgid "Update…"
 msgstr ""
 
 #: widgets.py:165
-#: widgets.py:223
+#: widgets.py:226
 msgid "Options"
 msgstr ""
 
@@ -2758,23 +2758,28 @@ msgstr ""
 msgid "Replace All"
 msgstr ""
 
-#: widgets.py:361
+#: widgets.py:367
 msgid "Discard my changes and reload"
 msgstr ""
 
-#: widgets.py:377
+#: widgets.py:383
 #, python-brace-format
 msgid "File type not supported: {names}"
 msgstr ""
 
-#: widgets.py:484
+#: widgets.py:490
 #, python-brace-format
 msgid "MyEditor {version} is available."
 msgstr ""
 
-#: widgets.py:492
+#: widgets.py:498
 #, python-brace-format
 msgid "You’re now using MyEditor {version}."
+msgstr ""
+
+#: widgets.py:226
+#, python-brace-format
+msgid "Options ({count})"
 msgstr ""
 
 #: nostr/account_backup.py:110

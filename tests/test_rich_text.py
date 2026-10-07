@@ -340,3 +340,16 @@ def test_the_state_of_paragraphs_stops_at_the_budget():
     cursor.select(QTextCursor.SelectionType.Document)
     state = rich_text.paragraph_state(cursor)
     assert (state.heading, state.list_kind, state.quoted) == (-1, "mixed", False)
+
+
+
+def test_nested_bullets_read_from_markdown_have_the_shape_of_their_depth():
+    # Review L5 (early range): a nested item made with Tab is a circle; read
+    # back from Markdown it was a disc.
+    from PySide6.QtGui import QTextListFormat
+    doc = from_markdown("- one\n    - two\n        - three\n")
+    shapes = [block_named(doc, text).textList().format().style()
+              for text in ("one", "two", "three")]
+    assert shapes == [QTextListFormat.Style.ListDisc, QTextListFormat.Style.ListCircle,
+                      QTextListFormat.Style.ListSquare]
+    assert assert_round_trip(doc) == "- one\n    - two\n        - three\n"

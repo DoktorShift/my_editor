@@ -786,6 +786,9 @@ class HtmlEditor(QTextEdit):
             menu.addAction(_("Copy"), self.copy)
             menu.addAction(_("Paste"), self.paste_from_clipboard)
         menu.exec(event.globalPos())
+        # Built for this one click: gone with it (the window's shared Color
+        # and Style menus in it are not its children, and stay).
+        menu.deleteLater()
 
     # -------- Bullet Logic (•) --------
     @staticmethod

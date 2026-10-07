@@ -158,7 +158,7 @@ w.tabs.setCurrentIndex(w.tabs.indexOf(ed.parent().parent()))
 app.processEvents()
 r["text_again"] = tb.isVisible()
 txt = os.path.join(os.environ["HOME"], "plain.txt")
-with open(txt, "w") as f:
+with open(txt, "w", encoding="utf-8") as f:
     f.write("plain text\n")
 w.open_path(txt)
 app.processEvents()
