@@ -81,3 +81,22 @@ def test_r_markdown_is_one_submenu_of_the_file_menu():
         "file.knit_html", "file.knit_pdf", "file.rmd_toolchain"]
     knit = win.commands.action("file.knit_html")
     assert knit.shortcut() == QKeySequence("Ctrl+Shift+K")
+
+
+@pytest.mark.parametrize("platform", ["darwin", "win32", "linux"])
+def test_a_mac_has_a_window_menu_and_the_others_do_not(monkeypatch, platform):
+    """Every Mac app has Window > Minimize (Command-M), Zoom and Bring All
+    to Front, and Qt makes none, so Command-M did nothing in MyEditor.
+    Windows and Linux keep these in the title bar."""
+    import main_window
+    monkeypatch.setattr(main_window.sys, "platform", platform)
+    win = window()
+    titles = [m.title() for m in win.menuBar().findChildren(QMenu)
+              if m.parent() is win.menuBar()]
+    if platform != "darwin":
+        assert "Window" not in titles and "window.minimize" not in win.commands
+        return
+    assert titles.index("Window") == titles.index("&Help") - 1     # just before Help
+    entries = [a.objectName() for a in win.m_window.actions() if not a.isSeparator()]
+    assert entries == ["window.minimize", "window.zoom", "window.bring_all"]
+    assert win.commands.action("window.minimize").shortcut() == QKeySequence("Ctrl+M")

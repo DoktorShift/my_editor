@@ -49,7 +49,7 @@ import file_paths
 import i18n
 from i18n import _, ngettext, pgettext
 from commands import (
-    EDIT, FILE, FORMAT, HELP, INSERT, NOSTR, SEARCH, VIEW, Command, CommandRegistry,
+    EDIT, FILE, FORMAT, HELP, INSERT, NOSTR, SEARCH, VIEW, WINDOW, Command, CommandRegistry,
     platform_keys,
 )
 from doc_walk import iter_blocks, iter_image_names, serialize_plain_with_images
@@ -1643,6 +1643,19 @@ class MainWindow(QMainWindow):
                     keywords=("log out",)),
             triggered=self._on_nostr_sign_out)
 
+        # The Window menu every Mac app has, where Command-M minimizes the
+        # window in front (Qt makes none). Windows and Linux keep these in
+        # the title bar.
+        if sys.platform == "darwin":
+            self.act_minimize = add(Command("window.minimize", _("Minimize"), WINDOW,
+                                            "Ctrl+M"),
+                                    triggered=lambda: self._front_window().showMinimized())
+            self.act_zoom = add(Command("window.zoom", _("Zoom"), WINDOW),
+                                triggered=self._zoom_front_window)
+            self.act_bring_all = add(Command("window.bring_all", _("Bring All to Front"),
+                                             WINDOW),
+                                     triggered=self._bring_all_to_front)
+
         # Help
         self.act_welcome = add(Command("help.welcome", _("Welcome"), HELP),
                                triggered=self.show_welcome_tab)
@@ -1803,6 +1816,13 @@ class MainWindow(QMainWindow):
         m_nostr.addAction(self.act_move_to_signer)
         m_nostr.addAction(self.act_nostr_sign_out)
         self._update_account_actions()
+
+        if sys.platform == "darwin":
+            self.m_window = self.menuBar().addMenu(_("Window"))
+            self.m_window.addAction(self.act_minimize)
+            self.m_window.addAction(self.act_zoom)
+            self.m_window.addSeparator()
+            self.m_window.addAction(self.act_bring_all)
 
         help_menu = self.menuBar().addMenu(_("&Help"))
         help_menu.addAction(self.act_welcome)
@@ -3618,6 +3638,29 @@ class MainWindow(QMainWindow):
                message=_("MyEditor will be in {name} the next time you open it.").format(
                    name=name),
                is_dark=self.is_dark_theme)
+
+    # -- a Mac's Window menu ----------------------------------------------------------
+
+    def _front_window(self):
+        """The window in front: this one, Settings, the Imports window…"""
+        return QApplication.activeWindow() or self
+
+    def _zoom_front_window(self) -> None:
+        window = self._front_window()
+        if window.isMaximized():
+            window.showNormal()
+        else:
+            window.showMaximized()
+
+    def _bring_all_to_front(self) -> None:
+        """Every open window of MyEditor in front of other apps' windows,
+        the one in front staying in front."""
+        front = QApplication.activeWindow()
+        for window in QApplication.topLevelWidgets():
+            if window.isVisible() and not window.isMinimized() and window is not front:
+                window.raise_()
+        if front is not None:
+            front.raise_()
 
     def _show_settings(self) -> None:
         """The Settings window: one, brought to the front when it is open."""

@@ -41,8 +41,9 @@ INSERT = "Insert"
 SEARCH = "Search"
 VIEW = "View"
 NOSTR = "Nostr"
+WINDOW = "Window"       # a Mac's Window menu
 HELP = "Help"
-GROUP_ORDER: Tuple[str, ...] = (FILE, EDIT, FORMAT, INSERT, SEARCH, VIEW, NOSTR, HELP)
+GROUP_ORDER: Tuple[str, ...] = (FILE, EDIT, FORMAT, INSERT, SEARCH, VIEW, NOSTR, WINDOW, HELP)
 
 
 @dataclass(frozen=True)

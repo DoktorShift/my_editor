@@ -112,6 +112,7 @@ _GROUP_TITLES = {
     "Insert": pgettext("shortcut group", "Insert"),
     "Search": pgettext("shortcut group", "Search"),
     "View": pgettext("shortcut group", "View"),
+    "Window": pgettext("shortcut group", "Window"),
     "Help": pgettext("shortcut group", "Help"),
     "PDF Reading": pgettext("shortcut group", "PDF Reading"),
 }
