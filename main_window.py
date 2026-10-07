@@ -132,7 +132,6 @@ from workspace import Workspace
 from recent_files import load_recent, add_recent, clear_recent
 
 from nostr.avatar_store import AvatarBatchLoader, AvatarStore
-from nostr.bech32 import encode_note
 from nostr.blossom.errors import friendly_message
 from nostr.media_server_list import publish_server_list
 from nostr.outbox import writer as outbox_writer
@@ -5185,16 +5184,8 @@ class MainWindow(QMainWindow):
         dialog.published.connect(self._on_nostr_note_published)
         dialog.exec()
 
-    def _on_nostr_note_published(self, event_id_hex: str, results):
-        accepted = sum(1 for _relay, ok, _message in results if ok)
-        note_id = encode_note(event_id_hex) if event_id_hex else ""
-        if note_id:
-            msg = _("Published to Nostr: {accepted}/{total} relays · {id}…").format(
-                accepted=accepted, total=len(results), id=note_id[:16])
-        else:
-            msg = _("Published to Nostr: {accepted}/{total} relays").format(
-                accepted=accepted, total=len(results))
-        self.status.showMessage(msg, 8000)
+    def _on_nostr_note_published(self, _event_id_hex: str, results):
+        self._say_published(results, article=False)
 
     def _on_nostr_publish_article(self):
         active = self._profile_store.default()
@@ -5259,15 +5250,27 @@ class MainWindow(QMainWindow):
         dialog.published.connect(self._on_nostr_article_published)
         dialog.exec()
 
-    def _on_nostr_article_published(self, naddr: str, results):
+    def _on_nostr_article_published(self, _naddr: str, results):
+        self._say_published(results, article=True)
+
+    def _say_published(self, results, *, article: bool) -> None:
+        """That it went out, in the status bar, and how many relays took it
+        when not every one did. No event id, which the person has nothing
+        to do with: the Published list and the dialog itself say more."""
         accepted = sum(1 for _relay, ok, _message in results if ok)
-        if naddr:
-            msg = _("Published article to Nostr: {accepted}/{total} relays · {id}…").format(
-                accepted=accepted, total=len(results), id=naddr[:18])
+        total = len(results)
+        if accepted >= total:
+            message = (_("Your article is published.") if article
+                       else _("Your note is published."))
+        elif article:
+            message = ngettext("Your article is published; {accepted} of {total} relay took it.",
+                               "Your article is published; {accepted} of {total} relays took "
+                               "it.", total).format(accepted=accepted, total=total)
         else:
-            msg = _("Published article to Nostr: {accepted}/{total} relays").format(
-                accepted=accepted, total=len(results))
-        self.status.showMessage(msg, 8000)
+            message = ngettext("Your note is published; {accepted} of {total} relay took it.",
+                               "Your note is published; {accepted} of {total} relays took it.",
+                               total).format(accepted=accepted, total=total)
+        self.status.showMessage(message, 8000)
 
     # -- media (Blossom) --------------------------------------------------
 
