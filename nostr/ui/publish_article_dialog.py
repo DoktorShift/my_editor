@@ -900,15 +900,15 @@ class PublishArticleDialog(QDialog):
             self._ask_when_nobody_can_tell(slug, body)
 
     def _ask_when_nobody_can_tell(self, slug: str, body: str) -> None:
-        """A relay the author publishes to did not answer: whether the
+        """None of the relays the author publishes to answered: whether the
         article went out before cannot be told, and a guess would either
         re-date an edit or back-date a new article. The person decides."""
         choice = ask(
             self,
             title=_("Couldn't check whether this article was published before"),
-            message=_("Not every relay you publish to answered. If the article went out "
-                      "before, publishing it as new gives it today's date, and readers "
-                      "see it as a new article."),
+            message=_("None of the relays you publish to answered. If the article went "
+                      "out before, publishing it as new gives it today's date, and "
+                      "readers see it as a new article."),
             buttons=(Button(_("Publish as New"), "new", NORMAL),
                      Button(_("Cancel"), "cancel", CANCEL),
                      Button(_("Try Again"), "again", DEFAULT)),

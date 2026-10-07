@@ -24,7 +24,7 @@ msgstr "Details ausblenden"
 #: alerts.py:275
 #: link_popover.py:99
 #: main_window.py:2710
-#: main_window.py:6063
+#: main_window.py:6075
 #: main_window.py:248
 #: main_window.py:2583
 #: main_window.py:4650
@@ -489,11 +489,11 @@ msgstr[1] "Auf deinen Relays wird ein leerer Ersatz veröffentlicht. Andere Apps
 msgid "No drafts were deleted"
 msgstr "Es wurden keine Entwürfe gelöscht"
 
-#: main_window.py:5988
+#: main_window.py:6000
 msgid "Already saving this draft - wait for it to finish."
 msgstr "Dieser Entwurf wird schon gespeichert. Warte, bis das fertig ist."
 
-#: main_window.py:6051
+#: main_window.py:6063
 msgid "(unknown profile)"
 msgstr "(unbekanntes Profil)"
 
@@ -976,7 +976,7 @@ msgstr "Entwürfe werden gelöscht"
 msgid "Your signer is not responding. Open your signer app and make sure it is running."
 msgstr "Dein Signer antwortet nicht. Öffne deine Signer-App und prüfe, ob sie läuft."
 
-#: main_window.py:6069
+#: main_window.py:6081
 msgid "Saving under the current profile would create a separate draft. How would you like to handle it?"
 msgstr "Wenn du unter dem aktuellen Profil speicherst, entsteht ein eigener Entwurf. Wie möchtest du vorgehen?"
 
@@ -1598,7 +1598,7 @@ msgstr[0] "{count} konnte nicht entfernt werden und ist noch auf deinen Relays. 
 msgstr[1] "{count} konnten nicht entfernt werden und sind noch auf deinen Relays. Du kannst es erneut versuchen."
 
 #: main_window.py:5799
-#: main_window.py:5918
+#: main_window.py:5930
 msgid "Couldn't prepare the draft"
 msgstr "Der Entwurf konnte nicht vorbereitet werden"
 
@@ -1610,7 +1610,7 @@ msgstr "Sein Inhalt konnte nicht für die Verschlüsselung vorbereitet werden."
 msgid "Couldn't save the draft"
 msgstr "Der Entwurf konnte nicht gespeichert werden"
 
-#: main_window.py:6066
+#: main_window.py:6078
 #, python-brace-format
 msgid "This draft was last saved as {original}, but you're signed in as {active}"
 msgstr "Dieser Entwurf wurde zuletzt als {original} gespeichert, aber du bist als {active} angemeldet"
@@ -1662,12 +1662,12 @@ msgstr "Verbinde es erneut unter Nostr > Signer verbinden, um hier zu speichern.
 msgid "It has {size} bytes, and NIP-44 encryption allows {limit}. Split it into smaller drafts or publish it directly."
 msgstr "Er hat {size} Bytes, die Verschlüsselung erlaubt höchstens {limit}. Teile ihn in kleinere Entwürfe auf oder veröffentliche ihn direkt."
 
-#: main_window.py:6058
+#: main_window.py:6070
 #, python-brace-format
 msgid "Switch to {name} and Save"
 msgstr "Zu {name} wechseln und speichern"
 
-#: main_window.py:6061
+#: main_window.py:6073
 #, python-brace-format
 msgid "Save a Copy as {name}"
 msgstr "Kopie als {name} speichern"
@@ -3025,13 +3025,13 @@ msgstr "Ein Relay muss mit ws:// oder wss:// beginnen (erhalten: {relay})"
 #: nostr/deletion.py:263
 #: nostr/draft_sync.py:358
 #: nostr/draft_sync.py:318
-#: nostr/publisher.py:600
-#: nostr/publisher.py:846
+#: nostr/publisher.py:611
+#: nostr/publisher.py:857
 msgid "Connecting to your signer…"
 msgstr "Verbindung zu deinem Signer wird hergestellt …"
 
 #: nostr/deletion.py:299
-#: nostr/publisher.py:1058
+#: nostr/publisher.py:1069
 msgid "Waiting for signature. Approve the deletion on your signer…"
 msgstr "Warte auf die Signatur. Bestätige das Löschen in deinem Signer …"
 
@@ -3064,9 +3064,9 @@ msgid "your signer did not answer"
 msgstr "Signer antwortet nicht"
 
 #: nostr/draft_sync.py:193
-#: nostr/publisher.py:803
-#: nostr/publisher.py:821
-#: nostr/publisher.py:1017
+#: nostr/publisher.py:814
+#: nostr/publisher.py:832
+#: nostr/publisher.py:1028
 msgid "Looking up your relay list…"
 msgstr "Deine Relay-Liste wird abgerufen …"
 
@@ -3280,91 +3280,91 @@ msgstr "Dein Profil wurde nicht geändert. Versuche es gleich noch einmal."
 msgid "unknown error"
 msgstr "unbekannter Fehler"
 
-#: nostr/publisher.py:627
-#: nostr/publisher.py:908
+#: nostr/publisher.py:638
+#: nostr/publisher.py:919
 msgid "Waiting for signature. Approve the request on your signer…"
 msgstr "Warte auf die Signatur. Bestätige die Anfrage in deinem Signer …"
 
-#: nostr/publisher.py:875
+#: nostr/publisher.py:886
 msgid "Encrypting draft. Approve on your signer if prompted…"
 msgstr "Der Entwurf wird verschlüsselt. Bestätige in deinem Signer, wenn er fragt …"
 
-#: nostr/publisher.py:1280
+#: nostr/publisher.py:1291
 msgid "no relay accepted the deletion"
 msgstr "kein Relay hat das Löschen angenommen"
 
-#: nostr/publisher.py:641
+#: nostr/publisher.py:652
 msgid "Finding your relays…"
 msgstr "Deine Relays werden gesucht …"
 
-#: nostr/publisher.py:650
+#: nostr/publisher.py:661
 #, python-brace-format
 msgid "Publishing to {n} relay…"
 msgid_plural "Publishing to {n} relays…"
 msgstr[0] "Wird auf {n} Relay veröffentlicht …"
 msgstr[1] "Wird auf {n} Relays veröffentlicht …"
 
-#: nostr/publisher.py:668
+#: nostr/publisher.py:679
 #, python-brace-format
 msgid "Accepted by {url}. Waiting for the rest…"
 msgstr "Von {url} angenommen. Warte auf die übrigen …"
 
-#: nostr/publisher.py:681
+#: nostr/publisher.py:692
 #, python-brace-format
 msgid "Published. {accepted}/{total} relay accepted."
 msgid_plural "Published. {accepted}/{total} relays accepted."
 msgstr[0] "Veröffentlicht. Angenommen von {accepted}/{total} Relay."
 msgstr[1] "Veröffentlicht. Angenommen von {accepted}/{total} Relays."
 
-#: nostr/publisher.py:927
+#: nostr/publisher.py:938
 #, python-brace-format
 msgid "Publishing draft to {n} relay…"
 msgid_plural "Publishing draft to {n} relays…"
 msgstr[0] "Der Entwurf wird auf {n} Relay gespeichert …"
 msgstr[1] "Der Entwurf wird auf {n} Relays gespeichert …"
 
-#: nostr/publisher.py:938
+#: nostr/publisher.py:949
 #, python-brace-format
 msgid "Draft saved to {accepted}/{total} relay."
 msgid_plural "Draft saved to {accepted}/{total} relays."
 msgstr[0] "Entwurf auf {accepted}/{total} Relay gespeichert."
 msgstr[1] "Entwurf auf {accepted}/{total} Relays gespeichert."
 
-#: nostr/publisher.py:1092
+#: nostr/publisher.py:1103
 #, python-brace-format
 msgid "Removing draft from {n} relay…"
 msgid_plural "Removing draft from {n} relays…"
 msgstr[0] "Der Entwurf wird von {n} Relay entfernt …"
 msgstr[1] "Der Entwurf wird von {n} Relays entfernt …"
 
-#: nostr/publisher.py:1103
+#: nostr/publisher.py:1114
 #, python-brace-format
 msgid "Draft removed on {accepted}/{total} relay."
 msgid_plural "Draft removed on {accepted}/{total} relays."
 msgstr[0] "Entwurf auf {accepted}/{total} Relay entfernt."
 msgstr[1] "Entwurf auf {accepted}/{total} Relays entfernt."
 
-#: nostr/publisher.py:1278
+#: nostr/publisher.py:1289
 #, python-brace-format
 msgid "no relay accepted the deletion ({reasons})"
 msgstr "kein Relay hat das Löschen angenommen ({reasons})"
 
-#: nostr/publisher.py:868
+#: nostr/publisher.py:879
 #, python-brace-format
 msgid "Draft is too large to encrypt ({size} of {limit} bytes). Split it across smaller drafts or publish directly."
 msgstr "Der Entwurf ist zu groß zum Verschlüsseln ({size} von {limit} Bytes). Teile ihn auf kleinere Entwürfe auf oder veröffentliche ihn direkt."
 
-#: nostr/publisher.py:859
+#: nostr/publisher.py:870
 #, python-brace-format
 msgid "Could not serialize draft: {reason}"
 msgstr "Der Entwurf konnte nicht vorbereitet werden: {reason}"
 
-#: nostr/publisher.py:904
+#: nostr/publisher.py:915
 #, python-brace-format
 msgid "Could not build draft wrap: {reason}"
 msgstr "Der Entwurf konnte nicht verpackt werden: {reason}"
 
-#: nostr/publisher.py:881
+#: nostr/publisher.py:892
 #, python-brace-format
 msgid "Could not encrypt draft: {reason}"
 msgstr "Der Entwurf konnte nicht verschlüsselt werden: {reason}"
@@ -7056,8 +7056,8 @@ msgid "Couldn't check whether this article was published before"
 msgstr "Es konnte nicht geprüft werden, ob dieser Artikel schon veröffentlicht wurde"
 
 #: nostr/ui/publish_article_dialog.py:909
-msgid "Not every relay you publish to answered. If the article went out before, publishing it as new gives it today's date, and readers see it as a new article."
-msgstr "Nicht jedes Relay, auf dem du veröffentlichst, hat geantwortet. Wenn der Artikel schon einmal erschienen ist, bekommt er als neu veröffentlicht das heutige Datum, und Leser sehen ihn als neuen Artikel."
+msgid "None of the relays you publish to answered. If the article went out before, publishing it as new gives it today's date, and readers see it as a new article."
+msgstr "Keines der Relays, auf denen du veröffentlichst, hat geantwortet. Wenn der Artikel schon einmal erschienen ist, bekommt er als neu veröffentlicht das heutige Datum, und Leser sehen ihn als neuen Artikel."
 
 #: nostr/ui/publish_article_dialog.py:970
 msgid "No relay accepted the article. See log for details."

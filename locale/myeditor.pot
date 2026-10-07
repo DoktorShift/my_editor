@@ -24,7 +24,7 @@ msgstr ""
 #: alerts.py:275
 #: link_popover.py:99
 #: main_window.py:2710
-#: main_window.py:6063
+#: main_window.py:6075
 #: main_window.py:248
 #: main_window.py:2583
 #: main_window.py:4650
@@ -489,11 +489,11 @@ msgstr[1] ""
 msgid "No drafts were deleted"
 msgstr ""
 
-#: main_window.py:5988
+#: main_window.py:6000
 msgid "Already saving this draft - wait for it to finish."
 msgstr ""
 
-#: main_window.py:6051
+#: main_window.py:6063
 msgid "(unknown profile)"
 msgstr ""
 
@@ -971,7 +971,7 @@ msgstr ""
 msgid "Your signer is not responding. Open your signer app and make sure it is running."
 msgstr ""
 
-#: main_window.py:6069
+#: main_window.py:6081
 msgid "Saving under the current profile would create a separate draft. How would you like to handle it?"
 msgstr ""
 
@@ -1588,7 +1588,7 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: main_window.py:5799
-#: main_window.py:5918
+#: main_window.py:5930
 msgid "Couldn't prepare the draft"
 msgstr ""
 
@@ -1600,7 +1600,7 @@ msgstr ""
 msgid "Couldn't save the draft"
 msgstr ""
 
-#: main_window.py:6066
+#: main_window.py:6078
 #, python-brace-format
 msgid "This draft was last saved as {original}, but you're signed in as {active}"
 msgstr ""
@@ -1652,12 +1652,12 @@ msgstr ""
 msgid "It has {size} bytes, and NIP-44 encryption allows {limit}. Split it into smaller drafts or publish it directly."
 msgstr ""
 
-#: main_window.py:6058
+#: main_window.py:6070
 #, python-brace-format
 msgid "Switch to {name} and Save"
 msgstr ""
 
-#: main_window.py:6061
+#: main_window.py:6073
 #, python-brace-format
 msgid "Save a Copy as {name}"
 msgstr ""
@@ -3010,13 +3010,13 @@ msgstr ""
 #: nostr/deletion.py:263
 #: nostr/draft_sync.py:358
 #: nostr/draft_sync.py:318
-#: nostr/publisher.py:600
-#: nostr/publisher.py:846
+#: nostr/publisher.py:611
+#: nostr/publisher.py:857
 msgid "Connecting to your signer…"
 msgstr ""
 
 #: nostr/deletion.py:299
-#: nostr/publisher.py:1058
+#: nostr/publisher.py:1069
 msgid "Waiting for signature. Approve the deletion on your signer…"
 msgstr ""
 
@@ -3049,9 +3049,9 @@ msgid "your signer did not answer"
 msgstr ""
 
 #: nostr/draft_sync.py:193
-#: nostr/publisher.py:803
-#: nostr/publisher.py:821
-#: nostr/publisher.py:1017
+#: nostr/publisher.py:814
+#: nostr/publisher.py:832
+#: nostr/publisher.py:1028
 msgid "Looking up your relay list…"
 msgstr ""
 
@@ -3265,91 +3265,91 @@ msgstr ""
 msgid "unknown error"
 msgstr ""
 
-#: nostr/publisher.py:627
-#: nostr/publisher.py:908
+#: nostr/publisher.py:638
+#: nostr/publisher.py:919
 msgid "Waiting for signature. Approve the request on your signer…"
 msgstr ""
 
-#: nostr/publisher.py:875
+#: nostr/publisher.py:886
 msgid "Encrypting draft. Approve on your signer if prompted…"
 msgstr ""
 
-#: nostr/publisher.py:1280
+#: nostr/publisher.py:1291
 msgid "no relay accepted the deletion"
 msgstr ""
 
-#: nostr/publisher.py:641
+#: nostr/publisher.py:652
 msgid "Finding your relays…"
 msgstr ""
 
-#: nostr/publisher.py:650
+#: nostr/publisher.py:661
 #, python-brace-format
 msgid "Publishing to {n} relay…"
 msgid_plural "Publishing to {n} relays…"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/publisher.py:668
+#: nostr/publisher.py:679
 #, python-brace-format
 msgid "Accepted by {url}. Waiting for the rest…"
 msgstr ""
 
-#: nostr/publisher.py:681
+#: nostr/publisher.py:692
 #, python-brace-format
 msgid "Published. {accepted}/{total} relay accepted."
 msgid_plural "Published. {accepted}/{total} relays accepted."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/publisher.py:927
+#: nostr/publisher.py:938
 #, python-brace-format
 msgid "Publishing draft to {n} relay…"
 msgid_plural "Publishing draft to {n} relays…"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/publisher.py:938
+#: nostr/publisher.py:949
 #, python-brace-format
 msgid "Draft saved to {accepted}/{total} relay."
 msgid_plural "Draft saved to {accepted}/{total} relays."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/publisher.py:1092
+#: nostr/publisher.py:1103
 #, python-brace-format
 msgid "Removing draft from {n} relay…"
 msgid_plural "Removing draft from {n} relays…"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/publisher.py:1103
+#: nostr/publisher.py:1114
 #, python-brace-format
 msgid "Draft removed on {accepted}/{total} relay."
 msgid_plural "Draft removed on {accepted}/{total} relays."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/publisher.py:1278
+#: nostr/publisher.py:1289
 #, python-brace-format
 msgid "no relay accepted the deletion ({reasons})"
 msgstr ""
 
-#: nostr/publisher.py:868
+#: nostr/publisher.py:879
 #, python-brace-format
 msgid "Draft is too large to encrypt ({size} of {limit} bytes). Split it across smaller drafts or publish directly."
 msgstr ""
 
-#: nostr/publisher.py:859
+#: nostr/publisher.py:870
 #, python-brace-format
 msgid "Could not serialize draft: {reason}"
 msgstr ""
 
-#: nostr/publisher.py:904
+#: nostr/publisher.py:915
 #, python-brace-format
 msgid "Could not build draft wrap: {reason}"
 msgstr ""
 
-#: nostr/publisher.py:881
+#: nostr/publisher.py:892
 #, python-brace-format
 msgid "Could not encrypt draft: {reason}"
 msgstr ""
@@ -7039,7 +7039,7 @@ msgid "Couldn't check whether this article was published before"
 msgstr ""
 
 #: nostr/ui/publish_article_dialog.py:909
-msgid "Not every relay you publish to answered. If the article went out before, publishing it as new gives it today's date, and readers see it as a new article."
+msgid "None of the relays you publish to answered. If the article went out before, publishing it as new gives it today's date, and readers see it as a new article."
 msgstr ""
 
 #: nostr/ui/publish_article_dialog.py:970

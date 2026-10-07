@@ -470,8 +470,8 @@ def published_at_of(event: Optional[dict]) -> Optional[int]:
 
 # What the relays say about an article's first publication.
 FOUND = "found"          # a version is there: it says when
-NEVER = "never"          # every relay the author publishes to answered, none has it
-UNKNOWN = "unknown"      # a relay could not answer: nobody can tell
+NEVER = "never"          # relays that would hold it answered, and none has it
+UNKNOWN = "unknown"      # too few relays answered to tell
 
 
 @dataclass(frozen=True)
@@ -482,14 +482,25 @@ class FirstPublication:
     published_at: Optional[int] = None
 
 
-def first_publication_of(lookup, outbox: Sequence[str]) -> FirstPublication:
-    """FOUND with its date when a version came back; NEVER only when every
-    relay of the author's own list answered (a refusal, a timeout or an
-    unchecked candidate is no evidence that there is none); else UNKNOWN."""
+def first_publication_of(lookup, outbox: Sequence[str],
+                         indexers: Sequence[str] = outbox_defaults.INDEXER_RELAYS
+                         ) -> FirstPublication:
+    """What the relays said about an article's first publication.
+
+    FOUND with its date when any relay returned a version. NEVER (a new
+    article) when none did and at least one of the author's own write
+    relays answered, and, where the outbox layer names indexers, an
+    indexer too: relays fail all the time, and one that is down must not
+    turn every new article into a question. UNKNOWN only when the
+    evidence is too thin: no write relay of the author answered at all
+    (or a relay sent more candidates than could be checked)."""
     if lookup.event is not None:
         when = published_at_of(lookup.event)
         return FirstPublication(FOUND, when) if when else FirstPublication(UNKNOWN)
-    if outbox and not lookup.unchecked and set(outbox) <= set(lookup.answered):
+    answered = set(dedupe_relays(lookup.answered))
+    write_answered = bool(answered & set(dedupe_relays(outbox)))
+    indexed = not indexers or bool(answered & set(dedupe_relays(indexers)))
+    if write_answered and indexed and not lookup.unchecked:
         return FirstPublication(NEVER)
     return FirstPublication(UNKNOWN)
 

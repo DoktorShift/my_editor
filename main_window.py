@@ -5835,15 +5835,27 @@ class MainWindow(QMainWindow):
         """The details of the article in a tab: those its draft holds (an
         imported article's cover, hashtags, first publication date and
         source among them), with the tab's own identifier and title.
-        Empty for a tab that is no article draft."""
+        Empty for a tab that is no article draft.
+
+        An article published from this computer since its draft was last
+        saved gets its first publication date from this computer's record,
+        so the next save puts it into the draft, and every device that
+        opens the draft keeps the date."""
         binding = getattr(ed, "_draft_binding", None) if ed is not None else None
         if binding is None or binding.inner_kind != INNER_KIND_LONG_FORM:
             return ArticleDetails()
         record = self._draft_store.get(binding.identifier)
         details = (ArticleDetails.from_tags(record.inner_tags) if record is not None
                    else ArticleDetails())
-        return details.with_changes(identifier=binding.identifier,
-                                    title=binding.title or details.title)
+        details = details.with_changes(identifier=binding.identifier,
+                                       title=binding.title or details.title)
+        first_publications = getattr(self, "_first_publications", None)
+        profile = (self._profile_store.default()
+                   if getattr(self, "_profile_store", None) is not None else None)
+        if details.published_at is None and first_publications is not None and profile:
+            details = details.with_changes(published_at=first_publications.get(
+                profile.user_pubkey, binding.identifier))
+        return details
 
     def _stash_defaults_for(
         self,

@@ -9,9 +9,20 @@ What must hold:
   draft the tab came from when that draft carries it, from what this
   computer remembers of its own publications, otherwise from the version
   already on the relays (those the author publishes to, reads from, and
-  the indexers). Only an article every relay of the author's list says
-  it does not hold gets "now"; when a relay cannot answer, nobody can
-  tell, and the person decides (review F3: an edit got today's date).
+  the indexers).
+
+  Nothing found counts as a new article, dated now, when at least one of
+  the author's write relays answered (and an indexer, where there are
+  indexers): relays fail all the time, and one that is down must not
+  turn every new article into a question. Only when no write relay
+  answered at all is the evidence too thin; then the person decides, and
+  Cancel signs nothing (review F3: an edit got today's date).
+
+  The reviewer's two live cases (the article's only relay down while
+  another of the author's relays answers; the author's relay list moved
+  to relays that never had it) keep the date on the computer that
+  published the article: its record answers before any relay is asked,
+  and a draft saved after publishing carries the date to other devices.
 """
 
 import os
@@ -84,33 +95,53 @@ def test_the_version_on_the_relays_is_asked_for_by_its_identifier_everywhere_it_
     assert found == [FirstPublication(FOUND, FIRST)]
 
 
-def test_never_published_needs_every_relay_of_the_authors_list_to_answer():
+def _outcome(write, answering, *, how="refuses"):
+    import time as clock
+    from nostr.outbox.defaults import INDEXER_RELAYS
     from tests.outbox_fakes import settle
-    sub, found, _owner = _asking()
+    sub, found, _owner = _asking(write=write)
     for url in sub.urls:
-        if url == "wss://nos.lol" or "kindpag" in url:
+        if url in answering or (url in INDEXER_RELAYS and "indexer" in answering):
             sub.answer(url)                    # nothing stored
-        else:
-            sub.fail(url)                      # the others do not matter for "never"
-    settle()
+        elif how == "refuses":
+            sub.refuse(url, "blocked: maintenance")
+        # else: silent until the time is up
+    deadline = clock.monotonic() + 2
+    while not found and clock.monotonic() < deadline:
+        settle()
+    return found
+
+
+@pytest.mark.parametrize("how", ["refuses", "times out"])
+def test_one_dead_relay_does_not_make_a_new_article_a_question(how):
+    # The coordinator's decision: relays die all the time.
+    found = _outcome(("wss://nos.lol", "wss://down.example"), {"wss://nos.lol", "indexer"},
+                     how=how)
     assert found == [FirstPublication(NEVER)]
 
 
 @pytest.mark.parametrize("how", ["refuses", "times out"])
-def test_a_relay_of_the_authors_list_that_cannot_answer_means_nobody_can_tell(how):
-    import time as clock
-    from tests.outbox_fakes import settle
-    sub, found, _owner = _asking(write=("wss://nos.lol", "wss://down.example"))
-    for url in sub.urls:
-        if url == "wss://down.example":
-            if how == "refuses":
-                sub.refuse(url, "blocked: maintenance")
-            continue
-        sub.answer(url)
-    deadline = clock.monotonic() + 2
-    while not found and clock.monotonic() < deadline:
-        settle()
+def test_with_no_write_relay_answering_nobody_can_tell(how):
+    found = _outcome(("wss://down.example", "wss://gone.example"),
+                     {"wss://read.example", "indexer"}, how=how)
     assert found == [FirstPublication(UNKNOWN)]
+
+
+def test_without_an_indexer_answering_the_evidence_is_too_thin():
+    found = _outcome(("wss://nos.lol",), {"wss://nos.lol"})
+    assert found == [FirstPublication(UNKNOWN)]
+
+
+def test_a_version_found_anywhere_gives_the_date():
+    from tests.outbox_fakes import settle, signed
+    sub, found, _owner = _asking(write=("wss://moved.example", "wss://down.example"))
+    for url in sub.urls:
+        if url == "wss://read.example":
+            sub.answer(url, signed(30023, [["d", "my-post"], ["published_at", str(FIRST)]]))
+        else:
+            sub.refuse(url)
+    settle()
+    assert found == [FirstPublication(FOUND, FIRST)]
 
 
 # -- the publish dialog ---------------------------------------------------------------
@@ -259,6 +290,43 @@ def test_this_computer_remembers_its_own_first_publications(tmp_path, captured):
                     first_publications=FirstPublications(tmp_path / "first.json"))
     again._on_publish()
     assert asked == [] and _published_at(captured[1]) == when
+
+
+@pytest.mark.parametrize("case", ["the article's relay is down, another answers",
+                                  "the relay list moved to relays that never had it"])
+def test_the_publishing_computer_keeps_the_date_in_the_reviewers_cases(tmp_path, captured,
+                                                                       case):
+    # Both cases make the relays look as if the article were new; the
+    # computer that published it answers from its record, unasked.
+    from nostr.first_publications import FirstPublications
+    record = FirstPublications(tmp_path / "first.json")
+    record.remember(PK, "my-post", FIRST)
+    asked = []
+    dialog = _dialog(tmp_path, first_publications=record,
+                     lookup=lambda *args: asked.append(args))
+    dialog._on_publish()
+    assert asked == [] and _published_at(captured[0]) == FIRST
+
+
+def test_a_draft_saved_after_publishing_carries_the_date(tmp_path):
+    # So another device that opens the draft keeps it too.
+    import types
+    from main_window import DraftBinding, MainWindow
+    from nostr.drafts import INNER_KIND_LONG_FORM
+    from nostr.first_publications import FirstPublications
+    record = FirstPublications(tmp_path / "first.json")
+    record.remember(PK, "my-post", FIRST)
+    window = types.SimpleNamespace(
+        _draft_store=types.SimpleNamespace(get=lambda _d: types.SimpleNamespace(
+            inner_tags=[["d", "my-post"], ["title", "Hello"]])),
+        _first_publications=record,
+        _profile_store=types.SimpleNamespace(
+            default=lambda: types.SimpleNamespace(user_pubkey=PK)))
+    ed = types.SimpleNamespace(_draft_binding=DraftBinding(
+        identifier="my-post", inner_kind=INNER_KIND_LONG_FORM, title="Hello"))
+    details = MainWindow._article_details_of(window, ed)
+    assert details.published_at == FIRST
+    assert ["published_at", str(FIRST)] in details.draft_tags("Body")
 
 
 def test_the_record_keeps_the_earliest_date(tmp_path):
