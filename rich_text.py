@@ -154,6 +154,15 @@ def _text_runs(cursor: QTextCursor) -> List[Tuple[int, int, QTextCharFormat]]:
     return list(_iter_text_runs(cursor))
 
 
+def holds_link_or_code(cursor: QTextCursor) -> bool:
+    """Whether the selection holds any part of a link, inline code or a
+    picture: words a typed style must not run across."""
+    if "\ufffc" in cursor.selectedText():
+        return True
+    return any(fmt.isAnchor() or fmt.fontFixedPitch()
+               for _start, _end, fmt in _iter_text_runs(cursor))
+
+
 def selection_has(cursor: QTextCursor, style: str) -> bool:
     """Whether all of the selected text carries ``style``: a selection that
     is only partly bold counts as not bold, so the command makes it all

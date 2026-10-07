@@ -25,6 +25,7 @@ from fonts import code_font, writing_font
 from i18n import _, ngettext
 import image_safety
 import link_url
+import markdown_shortcuts
 import paste
 import rich_text
 import url_safety
@@ -99,6 +100,9 @@ class HtmlEditor(QTextEdit):
         # Whether the document can hold Markdown structure (lists,
         # headings): the window answers per tab; on its own, it can.
         self._holds_structure = lambda: True
+        # Whether typed Markdown turns into what it means
+        # (markdown_shortcuts.py): the person's choice, off until made.
+        self._markdown_shortcuts = lambda: False
         # Who opens a link Command-clicked (Ctrl-clicked elsewhere): the
         # window, which knows where each kind of link goes.
         self._link_opener = None
@@ -566,6 +570,44 @@ class HtmlEditor(QTextEdit):
         self._blink_timer.stop()
         self.viewport().update(self._block_cursor_rect())
 
+    def set_markdown_shortcuts_check(self, check) -> None:
+        """Install ``check()``: whether Markdown Shortcuts are on."""
+        self._markdown_shortcuts = check
+
+    def _shortcuts_apply(self) -> bool:
+        return bool(self._markdown_shortcuts()) and self._holds_structure()
+
+    def _after_typed(self, text: str) -> None:
+        """Markdown Shortcuts, after ``text`` was typed at the caret: the
+        structure or style it completes, as an undo step of its own."""
+        if not text or not self._shortcuts_apply():
+            return
+        cursor = self.textCursor()
+        if text == " ":
+            if markdown_shortcuts.after_space(cursor):
+                self.setTextCursor(cursor)
+                level = cursor.block().blockFormat().headingLevel()
+                self.setCurrentCharFormat(rich_text.restyled(self.currentCharFormat(), level))
+                self._update_active_format()
+        elif text[-1] in markdown_shortcuts.CLOSING_MARKS:
+            style = markdown_shortcuts.after_mark(cursor)
+            if style:
+                self.setTextCursor(cursor)
+                # What is typed next is not in the style just made.
+                fmt = self.currentCharFormat()
+                fmt.merge(rich_text.style_format(style, False))
+                if style == rich_text.CODE:
+                    fmt.clearProperty(QTextFormat.Property.FontFamilies)
+                    fmt.clearProperty(QTextFormat.Property.FontFamily)
+                self.setCurrentCharFormat(fmt)
+                self._update_active_format()
+
+    def inputMethodEvent(self, event):
+        # Characters some keyboards compose (a backtick or a tilde after a
+        # dead key) arrive here rather than as key presses.
+        super().inputMethodEvent(event)
+        self._after_typed(event.commitString())
+
     def set_structure_check(self, check) -> None:
         """Install ``check()``: whether this document holds Markdown
         structure. Where it does not (a .txt file, code, Markdown opened
@@ -925,6 +967,11 @@ class HtmlEditor(QTextEdit):
                     self.ensureCursorVisible()
                     return
             else:
+                if self._shortcuts_apply() and markdown_shortcuts.on_return(c):
+                    # "---" and Return: a divider (Markdown Shortcuts).
+                    self.setTextCursor(c)
+                    self.ensureCursorVisible()
+                    return
                 super().keyPressEvent(e)
                 self._apply_active_format_to_cursor()
                 self.ensureCursorVisible()
@@ -990,10 +1037,14 @@ class HtmlEditor(QTextEdit):
             cursor.insertText(e.text(), fmt)
             cursor.endEditBlock()
             self.setTextCursor(cursor)
+            self._after_typed(e.text())
             self.ensureCursorVisible()
             return
 
         super().keyPressEvent(e)
+        if e.text() and e.text().isprintable():
+            # Typed with Option or AltGr (a tilde on many keyboards).
+            self._after_typed(e.text())
         self.ensureCursorVisible()
 
     # -------- Keys inside Markdown structure --------

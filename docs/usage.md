@@ -68,6 +68,22 @@ A paste goes in the way typing it would: inside a sentence the pasted words beco
 
 **Paste and Match Style** pastes the clipboard's plain text in the style of the text where it goes: inside a heading it is heading text, inside bold words it is bold.
 
+**Markdown Shortcuts** (`Edit > Substitutions > Markdown Shortcuts`, off until you turn it on, and remembered) turn Markdown into what it means as you type it, in documents that can hold Markdown structure:
+
+| Type | You get |
+|---|---|
+| `#`, `##` or `###` and a space, at the start of a paragraph | Heading 1, 2 or 3 |
+| `-`, `*` or `+` and a space | A bulleted list |
+| `1.` or `1)` and a space | A numbered list, starting at the number you typed (right below a list, it goes on from it) |
+| `>` and a space | A quote |
+| `---`, `***` or `___`, then Return | A divider |
+| `**words**` | Bold |
+| `*words*` or `_words_` | Italic (an underscore only at the start of a word, so `snake_case` stays as typed) |
+| `~~words~~` | Strikethrough |
+| `` `words` `` | Code |
+
+`Undo` right after a change brings back exactly what you typed. Nothing changes inside a code block or code words, across a link, after a backslash (`\*`), or in plain-text and code files.
+
 ### Find
 
 `Edit > Find`:

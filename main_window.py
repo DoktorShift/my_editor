@@ -923,6 +923,7 @@ class MainWindow(QMainWindow):
         ed.urls_dropped.connect(self._handle_dropped_urls)
         ed.set_context_menu_filler(self._fill_editor_context_menu)
         ed.set_structure_check(lambda e=ed: self._editor_kind(e) == "rich")
+        ed.set_markdown_shortcuts_check(lambda: self.markdown_shortcuts)
         ed.set_link_opener(self._open_link)
         ed.set_nostr_check(lambda: self.nostr_state.active)
         return ed
@@ -1496,6 +1497,14 @@ class MainWindow(QMainWindow):
         # Option-Command-T on a Mac, as every Mac app's Show Toolbar; no key
         # elsewhere, where none is common (Ctrl+Alt+T opens a terminal).
         self.show_toolbar = bool(load_settings().get("show_toolbar", True))
+        # Typed Markdown turned into what it means ("# " a heading, "**x**"
+        # bold), in Edit > Substitutions as Apple's apps keep such
+        # substitutions; off until the person turns it on.
+        self.markdown_shortcuts = bool(load_settings().get("markdown_shortcuts", False))
+        self.act_markdown_shortcuts = add(
+            Command("edit.markdown_shortcuts", _("Markdown Shortcuts"), EDIT, checkable=True,
+                    keywords=(_("autoformat"), _("substitutions"), "markdown")),
+            toggled=self._set_markdown_shortcuts, checked=self.markdown_shortcuts)
         # Writing in the monospace font, for those who prefer it (Q-K).
         self.monospace_writing = bool(load_settings().get("monospace_writing", False))
         self.act_monospace_writing = add(
@@ -1648,6 +1657,8 @@ class MainWindow(QMainWindow):
         self.m_find.addAction(self.act_find_next)
         self.m_find.addAction(self.act_find_prev)
         self.m_find.addAction(self.act_use_selection)
+        self.m_substitutions = m_edit.addMenu(_("Substitutions"))
+        self.m_substitutions.addAction(self.act_markdown_shortcuts)
         self.m_edit = m_edit
 
         # Insert, between Edit and Format, as in Pages.
@@ -3992,6 +4003,11 @@ class MainWindow(QMainWindow):
         if ed:
             ed.set_heading(level)
             self._update_format_buttons()
+
+    def _set_markdown_shortcuts(self, on: bool) -> None:
+        """Edit > Substitutions > Markdown Shortcuts, remembered."""
+        self.markdown_shortcuts = bool(on)
+        save_setting("markdown_shortcuts", self.markdown_shortcuts)
 
     def _set_monospace_writing(self, on: bool) -> None:
         """View > Use Monospace Font for Writing, remembered."""
