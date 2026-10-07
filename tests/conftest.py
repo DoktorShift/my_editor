@@ -29,7 +29,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tests.app_process import offscreen_fonts  # noqa: E402
+from tests.app_process import offscreen_fonts, release_clipboard  # noqa: E402
 
 # Offscreen unless the run chose another platform (the Windows job uses
 # Windows' own), with the system's fonts also on Windows, so a run on a
@@ -48,6 +48,10 @@ from main_thread_gc import collect_due  # noqa: E402
 _APP = QApplication.instance() or QApplication(sys.argv[:1])
 
 gc.disable()
+
+
+def pytest_unconfigure(config):
+    release_clipboard()
 
 
 @pytest.hookimpl(trylast=True)
