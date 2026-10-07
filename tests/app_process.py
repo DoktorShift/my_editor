@@ -10,10 +10,10 @@ and Linux but in USERPROFILE on Windows, so both point at the test's
 folder.
 
 The child draws offscreen, where a window is active as soon as it asks
-to be, so keys and shortcuts reach it the same way on every system.
-Qt's offscreen platform reads its fonts from a folder instead of asking
-the system; on Windows that folder is the system's own, or the child
-would have no font at all.
+to be, so keys and shortcuts reach it the same way on every system, and
+with the system's fonts (``offscreen_fonts``, which the test run itself
+uses too). It lets go of the clipboard before it ends
+(``release_clipboard``, as the test run does).
 
 The script gets the repository folder and ``args`` as its arguments and
 prints its result as one line: ``RESULT`` and the JSON.
@@ -25,24 +25,57 @@ import json
 import os
 import subprocess
 import sys
+from typing import MutableMapping
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Run at the end of every child's script.
+CHILD_EPILOGUE = "\nfrom tests.app_process import release_clipboard\nrelease_clipboard()\n"
+
+
+def offscreen_fonts(env: MutableMapping[str, str], platform: str = sys.platform) -> None:
+    """Give Qt's offscreen platform in ``env`` the system's fonts.
+
+    On macOS and Linux the offscreen platform asks the system for its
+    fonts. On Windows it reads them from a folder, by default one Qt does
+    not ship, and finds none at all: no monospace font, text measured with
+    nothing, PDFs without text. There it is pointed at the system's fonts
+    folder.
+    """
+    if platform == "win32" and env.get("QT_QPA_PLATFORM") == "offscreen":
+        system_root = os.environ.get("SystemRoot", r"C:\Windows")
+        env.setdefault("QT_QPA_FONTDIR", os.path.join(system_root, "Fonts"))
+
+
+def release_clipboard() -> None:
+    """Let go of what is on the clipboard while Python still runs.
+
+    Qt's offscreen platform keeps the clipboard's contents in a C++ static,
+    destroyed only after Python has finished. A QMimeData made in Python (a
+    copy from the editor, a paste test) then calls into the finished
+    interpreter from its destructor, and the process crashes on its way
+    out: on Windows it ends with an error, on a Mac it waits for the crash
+    reporter. The systems' own platforms keep the clipboard in the
+    application, which goes before Python does.
+    """
+    from PySide6.QtGui import QGuiApplication
+    if isinstance(QGuiApplication.instance(), QGuiApplication):
+        QGuiApplication.clipboard().clear()
 
 
 def child_env(home) -> dict:
     """The environment of a child whose home folder is ``home``."""
     env = dict(os.environ, HOME=str(home), USERPROFILE=str(home), QT_QPA_PLATFORM="offscreen")
-    if sys.platform == "win32":
-        system_root = os.environ.get("SystemRoot", r"C:\Windows")
-        env.setdefault("QT_QPA_FONTDIR", os.path.join(system_root, "Fonts"))
+    offscreen_fonts(env)
     return env
 
 
 def run_window_script(script: str, home, *args: str, timeout: float = 120) -> dict:
     """Run ``script`` with ``home`` as its home folder and return what it
     printed on its RESULT line."""
-    proc = subprocess.run([sys.executable, "-c", script, REPO, *args], env=child_env(home),
-                          capture_output=True, text=True, timeout=timeout)
+    proc = subprocess.run([sys.executable, "-c", script + CHILD_EPILOGUE, REPO, *args],
+                          env=child_env(home), capture_output=True, text=True,
+                          timeout=timeout)
     result = next((out for out in proc.stdout.splitlines() if out.startswith("RESULT ")), None)
     assert result, f"child failed:\n{proc.stdout}\n{proc.stderr}"
     return json.loads(result[len("RESULT "):])

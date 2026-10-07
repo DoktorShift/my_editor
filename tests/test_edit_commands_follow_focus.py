@@ -15,7 +15,7 @@ What must hold:
   A right-click leaves no menu behind.
 """
 
-from tests.app_process import run_window_script  # noqa: E402
+from tests.app_process import run_window_script
 
 SCRIPT = r"""
 import json, os, sys

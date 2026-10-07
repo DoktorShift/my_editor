@@ -31,6 +31,7 @@ the install guide's steps instead (see update_flow.py).
 import hashlib
 import os
 import platform
+import posixpath
 import shlex
 import shutil
 import stat
@@ -153,10 +154,13 @@ def _appimage_writable() -> bool:
 def mac_bundle_path(executable: str = None):
     """The .app folder the running executable lives in, or None.
 
-    A bundle runs from ``<Name>.app/Contents/MacOS/<binary>``.
+    A bundle runs from ``<Name>.app/Contents/MacOS/<binary>``. Like every
+    path of the Mac updates here, its path is a macOS path and is taken
+    apart with posixpath, so the logic is the same, and tested the same,
+    on every system.
     """
-    exe = os.path.realpath(executable or sys.executable)
-    bundle = os.path.dirname(os.path.dirname(os.path.dirname(exe)))
+    exe = posixpath.realpath(executable or sys.executable)
+    bundle = posixpath.dirname(posixpath.dirname(posixpath.dirname(exe)))
     return bundle if bundle.endswith(".app") else None
 
 
@@ -173,7 +177,7 @@ def _mac_bundle_replaceable(executable: str = None) -> bool:
         return False
     if not all(shutil.which(tool) for tool in ("hdiutil", "ditto", "codesign")):
         return False
-    return os.access(os.path.dirname(bundle), os.W_OK) and os.access(bundle, os.W_OK)
+    return os.access(posixpath.dirname(bundle), os.W_OK) and os.access(bundle, os.W_OK)
 
 
 def _deb_installable() -> bool:
@@ -186,8 +190,8 @@ def _deb_installable() -> bool:
 def mac_staging_path(bundle: str) -> str:
     """Where the new app is copied before the swap: hidden, and beside the
     old one, so the final move is a rename on the same disk."""
-    parent, name = os.path.split(bundle)
-    return os.path.join(parent, f".{name}.update")
+    parent, name = posixpath.split(bundle)
+    return posixpath.join(parent, f".{name}.update")
 
 
 class UpdateInstaller(QObject):
@@ -361,7 +365,7 @@ class UpdateInstaller(QObject):
         simply is the new version.
         """
         if self._kind == MACOS_APP:
-            if path and os.path.basename(path).endswith(".update"):
+            if path and posixpath.basename(path).endswith(".update"):
                 shutil.rmtree(path, ignore_errors=True)
         elif self._kind in (WINDOWS_INSTALLER, APPIMAGE):
             _discard(path)
@@ -555,7 +559,7 @@ def mac_swap_script(pid: int, staged: str, bundle: str) -> str:
     install, see MainWindow._report_unfinished_update).
     """
     q = shlex.quote
-    old = os.path.join(os.path.dirname(bundle), f".{os.path.basename(bundle)}.previous")
+    old = posixpath.join(posixpath.dirname(bundle), f".{posixpath.basename(bundle)}.previous")
     return (
         _wait_for_exit(pid)
         + f'rm -rf {q(old)}; '

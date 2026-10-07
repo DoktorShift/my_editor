@@ -36,13 +36,13 @@ _FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 
 _handler: Optional[logging.Handler] = None
 _crash_file: Optional[TextIO] = None
-_crash_reports_before = False
+_reports_crashes = False        # whether crash traces go to crash.log
 
 
 def install(version: str, *, folder: str = LOG_DIR, level: int = logging.WARNING) -> bool:
     """Start writing the log. Returns False when the folder cannot be
     written; the app then runs as before, without a log."""
-    global _handler, _crash_file, _crash_reports_before
+    global _handler, _crash_file, _reports_crashes
     if _handler is not None:
         return True
     try:
@@ -60,10 +60,13 @@ def install(version: str, *, folder: str = LOG_DIR, level: int = logging.WARNING
     if root.level > level or root.level == logging.NOTSET:
         root.setLevel(level)
     _handler, _crash_file = handler, crash_file
-    _crash_reports_before = faulthandler.is_enabled()
     # A crash of the interpreter (a segfault in Qt, say) leaves no Python
-    # trace behind; faulthandler writes the stacks of every thread.
-    faulthandler.enable(file=crash_file, all_threads=True)
+    # trace behind; faulthandler writes the stacks of every thread. Traces
+    # that already go somewhere (python -X faulthandler, a test run) stay
+    # there: faulthandler cannot say where, so they could not be given back.
+    _reports_crashes = not faulthandler.is_enabled()
+    if _reports_crashes:
+        faulthandler.enable(file=crash_file, all_threads=True)
     _hook_uncaught()
     _hook_qt_messages()
     # One line per start that says what ran, so a report shows the
@@ -83,15 +86,15 @@ def log_folder() -> str:
 
 def uninstall() -> None:
     """Stops writing the log (for tests)."""
-    global _handler, _crash_file
+    global _handler, _crash_file, _reports_crashes
     if _handler is not None:
         logging.getLogger().removeHandler(_handler)
         _handler.close()
         _handler = None
-    if _crash_file is not None:
+    if _reports_crashes:
         faulthandler.disable()
-        if _crash_reports_before:
-            faulthandler.enable(file=sys.stderr, all_threads=True)
+        _reports_crashes = False
+    if _crash_file is not None:
         _crash_file.close()
         _crash_file = None
     sys.excepthook = sys.__excepthook__

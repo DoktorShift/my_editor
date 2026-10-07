@@ -13,7 +13,7 @@ What must hold:
 The drafts panel belongs to its own tests.
 """
 
-from tests.app_process import run_window_script  # noqa: E402
+from tests.app_process import run_window_script
 
 SCRIPT = r"""
 import json, os, sys
