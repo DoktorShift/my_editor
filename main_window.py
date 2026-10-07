@@ -145,6 +145,7 @@ from nostr.draft_store import DraftState, DraftStore
 from nostr.draft_deletions import DraftDeletions
 from nostr.draft_sync import DraftSync
 from nostr.imports_controller import ImportsController
+from nostr.ui.imports_activity import activity_line
 from nostr.ui.imports_window import SETTINGS_KEY as IMPORTS_SETTINGS_KEY
 from nostr.ui.imports_window import ImportsWindow
 from nostr.imports.constants import IDENTIFIER_PREFIX as IMPORT_IDENTIFIER_PREFIX
@@ -602,6 +603,11 @@ class MainWindow(QMainWindow):
 
         self.tabs.currentChanged.connect(self._on_tab_changed)
         self._update_undo_redo_buttons()
+        # Edit > Undo follows the window in front (the Imports window has
+        # its own Undo Skip), and the document's own commands are dimmed
+        # while another window is in front.
+        QApplication.instance().focusChanged.connect(self._update_undo_redo_buttons)
+        QApplication.instance().focusChanged.connect(self._update_window_commands)
         self._update_status_bar()
         self._start_ipc_server()
         QTimer.singleShot(0, lambda ws=resumed: self._announce_version_change(ws))
@@ -1093,9 +1099,21 @@ class MainWindow(QMainWindow):
             + " · " + ngettext("{minutes} min read", "{minutes} min read", minutes).format(
                 minutes=_number(minutes)))
 
-    def _update_undo_redo_buttons(self):
-        """Undo and Redo for whatever has the focus: a text field (the find
-        field) or the document."""
+    def _update_undo_redo_buttons(self, *_args):
+        """Undo and Redo for what has the focus: the Imports window when it
+        is in front (Undo Skip there), a text field (the find field), or
+        the document."""
+        if not hasattr(self, "act_undo"):
+            return
+        imports = self._imports_in_front()
+        if imports is not None:
+            # What Undo undoes in the window in front (Undo Skip there).
+            self.act_undo.setText(imports.undo_text())
+            self.act_undo.setEnabled(imports.can_undo())
+            focus = imports.focusWidget()
+            self.act_redo.setEnabled(isinstance(focus, QLineEdit) and focus.isRedoAvailable())
+            return
+        self.act_undo.setText(_("Undo"))
         focus = QApplication.focusWidget()
         if isinstance(focus, QLineEdit):
             can_undo, can_redo = focus.isUndoAvailable(), focus.isRedoAvailable()
@@ -1103,9 +1121,8 @@ class MainWindow(QMainWindow):
             ed = self.current_editor()
             can_undo = ed.document().isUndoAvailable() if ed else False
             can_redo = ed.document().isRedoAvailable() if ed else False
-        if hasattr(self, "act_undo"):
-            self.act_undo.setEnabled(can_undo)
-            self.act_redo.setEnabled(can_redo)
+        self.act_undo.setEnabled(can_undo)
+        self.act_redo.setEnabled(can_redo)
 
     def _update_clipboard_commands(self) -> None:
         """Cut, Copy and Delete act on a selection, and are dimmed without
@@ -1503,6 +1520,12 @@ class MainWindow(QMainWindow):
                                           QKeySequence.StandardKey.FullScreen, checkable=True,
                                           listed_as=_("Full screen")),
                                   toggled=self._toggle_fullscreen)
+        # View > Show Sidebar, for the window in front that has one (the
+        # Imports window); dimmed while this window is in front. Its own
+        # key (Control-Command-S) belongs to that window.
+        self.act_window_sidebar = add(Command("view.sidebar", _("Show Sidebar"), VIEW,
+                                              listed_as=_("Show or hide the sidebar")),
+                                      triggered=self._toggle_window_sidebar, enabled=False)
 
         # Nostr. Only the ones that need an account are marked: Create
         # Account, Connect Signer, Restore and the membership window are
@@ -1692,7 +1715,9 @@ class MainWindow(QMainWindow):
         for action in self.act_languages:
             m_language.addAction(action)
         m_view.addSeparator()
+        m_view.addAction(self.act_window_sidebar)
         m_view.addAction(self.act_fullscreen)
+        self._m_background = m_background
 
         m_nostr = self.menuBar().addMenu("&Nostr")
         m_nostr.addAction(self.act_nostr_publish_note)
@@ -1828,17 +1853,6 @@ class MainWindow(QMainWindow):
         # already owns, so there is one cache, one URL policy and one
         # place where an image request can be made.
         self._drafts_panel.set_preview_image_loader(self._media_image_loader)
-        self._drafts_panel.feeds.bind_runtime(
-            relay_pool=self._relay_pool,
-            relay_directory=self._relay_directory,
-            session_pool=self._session_pool,
-            # Lets imports reuse a pre-prefix identifier that already
-            # exists locally instead of duplicating the draft.
-            draft_store=self._draft_store,
-            entitled_relays=self._entitled_relays,
-            # One list of sources in the app: the imports controller's.
-            subscriptions=self._imports.subscriptions,
-        )
         self._drafts_panel.set_active_profile(self._profile_store.default())
         # The panel's outbound actions all route back through the host.
         self._drafts_panel.open_draft.connect(self._on_panel_open_draft)
@@ -1849,6 +1863,15 @@ class MainWindow(QMainWindow):
         self._drafts_panel.copy_event_id.connect(self._on_panel_copy_event_id)
         self._drafts_panel.refresh_requested.connect(self._draft_sync.refresh)
         self._drafts_panel.close_requested.connect(self._hide_drafts_panel)
+        # The panel's one row about imports (D-2): new posts, how an
+        # import goes, and the Imports window.
+        self._drafts_panel.open_imports.connect(self._open_imports_window)
+        self._drafts_panel.pause_import.connect(self._imports.pause_import)
+        self._drafts_panel.resume_import.connect(self._resume_import)
+        for signal in (self._imports.bound_changed, self._imports.inbox_count_changed,
+                       self._imports.activity_changed):
+            signal.connect(self._update_imports_row)
+        self._update_imports_row()
 
         self._central_splitter = QSplitter(Qt.Horizontal)
         self._central_splitter.setObjectName("central_splitter")
@@ -2195,6 +2218,11 @@ class MainWindow(QMainWindow):
         self.tabs.removeTab(index)
 
     def _close_current_tab(self):
+        # Command-W closes the window in front, also from the menu.
+        imports = self._imports_in_front()
+        if imports is not None:
+            imports.close()
+            return
         idx = self.tabs.currentIndex()
         if idx >= 0:
             self.close_tab(idx)
@@ -3436,7 +3464,12 @@ class MainWindow(QMainWindow):
     def _show_find(self, replace: bool = False):
         """Find… or Find and Replace…: the find bar, its field focused
         (Find and Replace adds the Replace row). In a PDF tab, the PDF
-        reader's own find bar."""
+        reader's own find bar. With the Imports window in front, its
+        search field."""
+        imports = self._imports_in_front()
+        if imports is not None:
+            imports.focus_search()
+            return
         viewer = self.current_pdf_viewer()
         if viewer is not None:
             if viewer.findbar.isVisible():
@@ -3915,9 +3948,75 @@ class MainWindow(QMainWindow):
             ed.reset_to_default()
             self._update_format_buttons()
 
+    # Commands that act on this window's document: dimmed while another
+    # window is in front, as a Mac app dims what the key window cannot do.
+    _DOCUMENT_COMMANDS = frozenset({
+        "file.save", "file.save_as", "file.page_setup", "file.print", "file.print_preview",
+        "file.knit_html", "file.knit_pdf", "search.replace", "search.next",
+        "search.previous", "search.use_selection", "edit.paste_plain",
+        "view.line_numbers", "view.syntax_highlighting", "view.paper_mode", "view.toolbar",
+        "view.highlight_line", "nostr.publish_note", "nostr.publish_article",
+        "nostr.insert_image"})
+    _DOCUMENT_PREFIXES = ("format.", "insert.")
+
+    def _is_document_command(self, command_id: str) -> bool:
+        return (command_id in self._DOCUMENT_COMMANDS
+                or command_id.startswith(self._DOCUMENT_PREFIXES))
+
+    def _update_window_commands(self, *_args) -> None:
+        """Dim the document's commands while the Imports window is in front
+        (and View > Show Sidebar works for it); give them back after."""
+        if not hasattr(self, "commands"):
+            return
+        imports = self._imports_in_front()
+        in_front = imports is not None
+        if in_front != getattr(self, "_document_commands_dimmed", False):
+            self._document_commands_dimmed = in_front
+            kept = self.__dict__.setdefault("_dimmed_were_enabled", {})
+            for command in self.commands.commands():
+                if not self._is_document_command(command.id):
+                    continue
+                action = self.commands.action(command.id)
+                if in_front:
+                    kept[command.id] = action.isEnabled()
+                    action.setEnabled(False)
+                else:
+                    action.setEnabled(kept.pop(command.id, True))
+            if hasattr(self, "_m_background"):
+                self._m_background.setEnabled(not in_front)
+            if not in_front:
+                # What changed meanwhile is asked again.
+                self._update_knit_actions()
+                self._update_format_buttons()
+        self.act_window_sidebar.setEnabled(in_front)
+        if in_front:
+            shown = imports.act_sidebar.isChecked()
+            self.act_window_sidebar.setText(_("Hide Sidebar") if shown else _("Show Sidebar"))
+        else:
+            self.act_window_sidebar.setText(_("Show Sidebar"))
+
+    def _toggle_window_sidebar(self) -> None:
+        imports = self._imports_in_front()
+        if imports is not None:
+            imports.act_sidebar.trigger()
+            self._update_window_commands()
+
+    def _imports_in_front(self):
+        """The Imports window while it is the window in front. It has no
+        menu bar of its own: the app's Edit commands act on it then, as a
+        Mac app's menu bar acts on its key window."""
+        imports = getattr(self, "_imports", None)
+        window = imports.window() if imports is not None else None
+        return window if window is not None and window.isActiveWindow() else None
+
     def _undo(self):
-        """Edit > Undo, for whatever has the focus (the find field takes
-        its own, as its keys do)."""
+        """Edit > Undo, for what has the focus: the Imports window when it
+        is in front (Undo Skip there), a text field (the find field takes
+        its own, as its keys do), or the document."""
+        imports = self._imports_in_front()
+        if imports is not None:
+            imports.undo()
+            return
         focus = QApplication.focusWidget()
         if isinstance(focus, QLineEdit):
             focus.undo()
@@ -3927,6 +4026,12 @@ class MainWindow(QMainWindow):
             ed.undo()
 
     def _redo(self):
+        imports = self._imports_in_front()
+        if imports is not None:
+            focus = imports.focusWidget()
+            if isinstance(focus, (QLineEdit, QTextEdit, QPlainTextEdit)):
+                focus.redo()
+            return
         focus = QApplication.focusWidget()
         if isinstance(focus, QLineEdit):
             focus.redo()
@@ -4026,6 +4131,10 @@ class MainWindow(QMainWindow):
                 return
             {"cut": focus.cut, "copy": focus.copy, "paste": focus.paste,
              "select_all": focus.selectAll}[name]()
+            return
+        imports = self._imports_in_front()
+        if imports is not None:
+            imports.edit(name)
             return
         viewer = self.current_pdf_viewer()
         if viewer is not None:
@@ -4423,6 +4532,10 @@ class MainWindow(QMainWindow):
         if imports is not None:
             imports.flush()
             if imports.subscriptions.is_busy:
+                # The documents are settled and their backups gone: nothing
+                # typed now could be kept, so the window takes no more
+                # input while it says what it finishes (engine review M2).
+                self.setEnabled(False)
                 self.status.showMessage(_("Saving your list of sources…"))
                 imports.subscriptions.wait_until_settled(QUIT_SYNC_WAIT_MS)
         # Close any warm relay sockets and bunker channels so the WebSocket
@@ -4714,16 +4827,58 @@ class MainWindow(QMainWindow):
         self._membership.open_window()
 
     def _open_imports_window(self) -> None:
-        """Nostr > Imports: sources, their posts, and the open one."""
-        self._imports.open_window()
+        """Nostr > Imports: sources, their posts, and the open one. Without
+        an account, or when imports cannot be kept here, it says so."""
+        imports = self._imports
+        if imports.bound:
+            imports.open_window()
+        elif imports.problem:
+            inform(self, title=_("Imports aren't available"), message=imports.problem,
+                   is_dark=self.is_dark_theme)
+        else:
+            inform(self, title=_("Connect a signer first"),
+                   message=_("Connect a Nostr signer (Nostr > Connect Signer\u2026) to "
+                             "follow websites and import posts as drafts."),
+                   is_dark=self.is_dark_theme)
+
+    def _update_imports_row(self, *_args) -> None:
+        """What the Drafts panel's Imports row says."""
+        imports = self._imports
+        job = imports.activity()
+        action = ""
+        if job is not None and not imports.read_only:
+            if job.status == "running":
+                action = "pause"
+            elif job.status == "paused":
+                action = "resume"
+            elif job.status == "partial":
+                action = "retry"
+        self._drafts_panel.set_imports_state(
+            available=imports.bound, new_posts=imports.counts().inbox,
+            activity=activity_line(job), action=action)
+
+    def _resume_import(self) -> None:
+        job = self._imports.activity()
+        if job is not None:
+            self._imports.resume_import(job.id)
 
     def _make_imports_window(self, controller):
         """The Imports window, remembered in settings.json between runs."""
-        return ImportsWindow(
+        window = ImportsWindow(
             controller, dark=self.is_dark_theme,
             load_settings=lambda: load_settings().get(IMPORTS_SETTINGS_KEY) or {},
             save_settings=lambda value: save_setting(IMPORTS_SETTINGS_KEY, value),
-            open_url=lambda url: self._open_external(url.toString()))
+            open_url=lambda url: self._open_external(url.toString()),
+            show_drafts=self._show_drafts_from_imports)
+        # Edit > Undo says what it undoes there (Undo Skip).
+        window.undo_changed.connect(self._update_undo_redo_buttons)
+        return window
+
+    def _show_drafts_from_imports(self) -> None:
+        """Show Drafts, after an import: this window and its Drafts panel."""
+        self._show_drafts_panel()
+        self.raise_()
+        self.activateWindow()
 
     def _on_nostr_profile_connected(self, profile: Profile):
         # New (or re-connected) profile becomes the active one.
@@ -5443,15 +5598,27 @@ class MainWindow(QMainWindow):
             "A blank-content replacement will be published to your relays. "
             "Other clients (and your other devices) will treat them as removed. "
             "This action can't be undone.", count)]
-        if count > 1:
-            # Said before the first prompt appears rather than discovered
-            # at the fourth: each deletion is separately signed, so this
-            # is a row of approvals on the user's phone, not one.
+        # Said before the first prompt appears rather than discovered at
+        # the fourth: each deletion is separately signed, and an imported
+        # draft's takes a second request that tells other apps it is gone
+        # (engine review M7), so this is a row of approvals on the phone.
+        imported = len(self._imported_draft_wraps(deletable))
+        requests = count + imported
+        profile = self._profile_store.default()
+        signs_here = profile is not None and getattr(profile, "is_local", False)
+        if requests > 1 and not signs_here:
             lines.append(ngettext(
                 "Your signer will ask you to approve each one, so expect "
                 "{count} request. You can stop partway through.",
                 "Your signer will ask you to approve each one, so expect "
-                "{count} requests. You can stop partway through.", count).format(count=count))
+                "{count} requests. You can stop partway through.",
+                requests).format(count=requests))
+            if imported:
+                lines.append(ngettext(
+                    "An imported draft takes a second request, which tells other apps "
+                    "it is gone.",
+                    "Imported drafts take a second request each, which tells other "
+                    "apps they are gone.", imported))
         if skipped:
             n = len(skipped)
             lines.append(ngettext(

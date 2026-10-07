@@ -44,6 +44,14 @@ from nostr.ui.drafts_common import THEME_TOKENS
 from nostr.ui.drafts_panel import DraftsPanel, _accessible_row_text
 from nostr.ui.thumbnail_loader import ThumbnailLoader
 from tests.blossom_fakes import FakeNam, FakeReply
+from tests.widget_lifetime import delete_new_windows
+
+
+@pytest.fixture(autouse=True)
+def _windows_deleted():
+    """Every window and panel a test makes is deleted after it: left to
+    the cycle collector, one without a parent can crash it."""
+    yield from delete_new_windows()
 
 
 PK = "a" * 64
@@ -970,10 +978,13 @@ def test_a_context_menu_closes_the_popover_before_it_is_built(panel):
     assert controller.is_disarmed() is True
 
 
-def test_switching_to_feeds_closes_the_preview(panel):
+def test_switching_to_another_view_closes_the_preview(panel):
+    # Another view of the panel (Published) is other data and other rows.
+    from PySide6.QtWidgets import QWidget
     controller = panel._preview
+    panel.add_view("published", "Published", "", QWidget())
     open_preview(panel, 0)
-    panel._seg_feeds.setChecked(True)
+    panel.show_view("published")
     assert controller.is_open() is False
     assert panel.preview_is_available() is False
 

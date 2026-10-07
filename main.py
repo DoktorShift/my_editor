@@ -15,6 +15,7 @@ from PySide6.QtNetwork import QLocalSocket
 import constants
 import diagnostics
 import i18n
+import theme
 
 # The language is chosen before any module that holds texts is imported:
 # many texts are constants, read once when their module loads. A change
@@ -110,7 +111,7 @@ def main():
     # in-app light/dark theme instead of the native platform look. The
     # authoritative palette is set from MainWindow._apply_theme during
     # startup and on every toggle; see theme.apply_app_theme.
-    app.setStyle("Fusion")
+    app.setStyle(theme.AppStyle("Fusion"))
 
     # A build proving it is whole (the release workflow runs this on every
     # bundle): no window, no other instance contacted, just the checks.

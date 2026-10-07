@@ -92,11 +92,12 @@ class FakeRelay:
         self.queries = []
         self.accepted = accepted
 
-    # The query surface (RelayQueryAdapter.latest).
-    def latest(self, relays, filters, on_done):
+    # The query surface: every event, and the relays that answered.
+    def events(self, relays, filters, on_done):
         self.queries.append((list(relays), filters))
         d_tag = filters[0]["#d"][0]
-        on_done(self.stored.get(d_tag))
+        stored = self.stored.get(d_tag)
+        on_done([stored] if stored else [], set(relays))
 
     # The publisher seam.
     def __call__(self, relays, signed, *, on_done):

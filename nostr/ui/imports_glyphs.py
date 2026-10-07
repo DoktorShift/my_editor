@@ -11,8 +11,12 @@ Windows, macOS and Linux.
 - ``clock``   a clock face (Older Posts)
 - ``check``   a check mark (Imported)
 - ``skip``    a circle with a slash (Skipped)
-- ``file``    a page with a folded corner (a file being imported)
+- ``file``    a page with a folded corner (a file opened to import)
+- ``link``    two links of a chain (a link opened to import)
 - ``sidebar`` a window with its left pane marked (Show or Hide Sidebar)
+- ``plus``    a plus sign (Add: follow a website, import a file or a link)
+- ``pause``   two bars (an import that is paused)
+- ``close``   a cross (close a message)
 
 :func:`letter_avatar` draws the round initial that stands for a source
 until its site icon is known.
@@ -118,8 +122,36 @@ def _sidebar(p: QPainter, s: float) -> None:
         p.drawLine(QPointF(s * 0.17, s * y), QPointF(s * 0.29, s * y))
 
 
-_DRAW = {"inbox": _inbox, "clock": _clock, "check": _check, "skip": _skip,
-         "file": _file, "sidebar": _sidebar}
+def _plus(p: QPainter, s: float) -> None:
+    p.drawLine(QPointF(s * 0.5, s * 0.2), QPointF(s * 0.5, s * 0.8))
+    p.drawLine(QPointF(s * 0.2, s * 0.5), QPointF(s * 0.8, s * 0.5))
+
+
+def _link(p: QPainter, s: float) -> None:
+    # Two rounded links of a chain, at an angle.
+    p.save()
+    p.translate(s / 2, s / 2)
+    p.rotate(-45)
+    width, height = s * 0.42, s * 0.24
+    p.drawRoundedRect(QRectF(-width + s * 0.06, -height / 2, width, height),
+                      height / 2, height / 2)
+    p.drawRoundedRect(QRectF(-s * 0.06, -height / 2, width, height), height / 2, height / 2)
+    p.restore()
+
+
+def _pause(p: QPainter, s: float) -> None:
+    p.drawLine(QPointF(s * 0.38, s * 0.26), QPointF(s * 0.38, s * 0.74))
+    p.drawLine(QPointF(s * 0.62, s * 0.26), QPointF(s * 0.62, s * 0.74))
+
+
+def _close(p: QPainter, s: float) -> None:
+    p.drawLine(QPointF(s * 0.3, s * 0.3), QPointF(s * 0.7, s * 0.7))
+    p.drawLine(QPointF(s * 0.7, s * 0.3), QPointF(s * 0.3, s * 0.7))
+
+
+_DRAW = {"close": _close, "inbox": _inbox, "clock": _clock, "check": _check, "skip": _skip,
+         "file": _file, "sidebar": _sidebar, "plus": _plus, "link": _link,
+         "pause": _pause}
 
 
 def hue_for(text: str) -> int:

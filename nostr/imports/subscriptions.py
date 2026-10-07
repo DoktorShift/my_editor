@@ -20,6 +20,14 @@ Disciplines:
   again and both apps' edits since the last sync are merged
   (feed_list.merge). A relay answer that arrives while a publish is on
   its way is merged the same way, so it cannot undo an edit.
+- Only a newer list counts: the store remembers which event the last
+  list seen came from (its time, then its id, as NIP-01 orders
+  replaceable events), and a copy that is not newer (a slow or fallback
+  relay that kept an old one) neither adds nor removes anything.
+- No answer is never "no list": a read counts only when one of the
+  account's own relays answered it. Without that, nothing is published
+  (the change waits, here and in the cache, for a read that is
+  answered), and the old list of this app is not marked as merged.
 - A list this app cannot read (saved with older encryption, or the
   signer is unreachable) is never written over: that would delete the
   other app's sources. The edits stay here until it can be read.
@@ -42,7 +50,7 @@ import json
 import logging
 import time as _time
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 from PySide6.QtCore import QEventLoop, QObject, QTimer, Signal
 
@@ -51,10 +59,12 @@ from i18n import _
 
 from .. import CLIENT_NAME
 from ..bunker import BunkerSessionPool
+from ..drafts import supersedes
 from ..events import build_event, verify_event
 from ..outbox import RelayDirectory, ask_private_relays
-from ..outbox.policy import replacement_created_at
+from ..outbox.policy import normalize_relay_url, replacement_created_at
 from ..profiles import Profile
+from ..queries import fetch_events
 from ..relay import RelayPool
 from .constants import SUBSCRIPTIONS_DEBOUNCE_MS, SUBSCRIPTIONS_KIND
 from .feed_list import (
@@ -69,7 +79,6 @@ from .feed_list import (
     write_payload,
 )
 from .registry import can_resolve_source
-from .sources.nostr import RelayQueryAdapter
 
 __all__ = ["FeedSubscription", "FeedSubscriptionStore", "SourceOptions"]
 
@@ -80,6 +89,41 @@ _CACHE_VERSION = 2
 
 # What a list read from the relays can turn out to be.
 _UNREADABLE = "unreadable"
+_NO_ANSWER = "no answer"
+
+_NOT_ANSWERED = _("Your relays didn't answer, so the change to your sources waits on this "
+                  "computer and is sent once they do.")
+
+
+class _ListQuery(QObject):
+    """Asks relays for events and says which relays answered."""
+
+    def __init__(self, pool: RelayPool, parent: Optional[QObject] = None, *,
+                 timeout_ms: int = 8_000) -> None:
+        super().__init__(parent)
+        self._pool = pool
+        self._timeout_ms = timeout_ms
+
+    def events(self, relays, filters, on_done) -> None:
+        """``on_done(events, answered)``: every validly signed event, and
+        the relays that answered (sent all their stored events); one that
+        refused or could not be reached is not among them."""
+        try:
+            fetch_events(self._pool, list(relays), list(filters),
+                         lambda fetched: on_done(list(fetched.events), set(fetched.answered)),
+                         timeout_ms=self._timeout_ms, parent=self)
+        except Exception:  # noqa: BLE001, settle the callback contract
+            on_done([], set())
+
+
+def _mark(event: Optional[dict]) -> Optional[Tuple[int, str]]:
+    """Which event a list came from: its time and id."""
+    if not isinstance(event, dict):
+        return None
+    try:
+        return int(event.get("created_at", 0)), str(event.get("id") or "")
+    except (TypeError, ValueError):
+        return None
 
 _OLD_ENCRYPTION = _(
     "Your list of sources was saved with an older kind of encryption. Open "
@@ -122,9 +166,7 @@ class FeedSubscriptionStore(QObject):
         self._entitled_relays = entitled_relays
         self._cache_dir = Path(cache_dir) if cache_dir else _CACHE_DIR
         self._query = query if query is not None else (
-            RelayQueryAdapter(relay_pool, parent=self)
-            if relay_pool is not None else None
-        )
+            _ListQuery(relay_pool, parent=self) if relay_pool is not None else None)
         self._publisher = publisher or self._default_publisher
         self._scheduler = scheduler or self._default_scheduler
         self._clock = clock or (lambda: int(_time.time()))
@@ -135,8 +177,10 @@ class FeedSubscriptionStore(QObject):
         # leaves the current state alone.
         self._generation = 0
         self._local = FeedList()
-        # The version last known to be on the relays (None: never seen).
+        # The version last known to be on the relays (None: never seen),
+        # and which event it came from (its time and id).
         self._base: Optional[FeedList] = None
+        self._base_mark: Optional[Tuple[int, str]] = None
         # True while local edits haven't reached relays.
         self._dirty = False
         # The next publish also sends read times (a manual source opened).
@@ -163,8 +207,9 @@ class FeedSubscriptionStore(QObject):
         self._cancel_pending_timer()
         self._generation += 1
         self._profile = profile
-        self._local, self._base = FeedList(), None
+        self._local, self._base, self._base_mark = FeedList(), None, None
         self._dirty = self._send_read_times = self._legacy_merged = False
+        self._known = False
         self._publish_after_run = False
         if profile is None:
             self.feeds_changed.emit()
@@ -173,7 +218,30 @@ class FeedSubscriptionStore(QObject):
         self.feeds_changed.emit()
         self.refresh()
 
+    def update_profile(self, profile: Profile) -> None:
+        """The same account signs another way now (a signer app paired,
+        or its key restored here): what comes next is signed and read
+        through the new profile. Nothing is reloaded and nothing waiting
+        is lost; another account is a switch (``bind_profile``)."""
+        if (self._profile is None or profile is None
+                or profile.user_pubkey.lower() != self._profile.user_pubkey.lower()):
+            self.bind_profile(profile)
+            return
+        self._profile = profile
+
     # -- read API ----------------------------------------------------------
+
+    @property
+    def known(self) -> bool:
+        """Whether the list is known: read from this computer's copy, or
+        from the relays. Until then a source missing from it may only not
+        be loaded yet, so nothing may be removed because of it."""
+        return self._known
+
+    def _mark_known(self) -> None:
+        if not self._known:
+            self._known = True
+            self.feeds_changed.emit()
 
     @property
     def feeds(self) -> List[FeedSubscription]:
@@ -289,11 +357,17 @@ class FeedSubscriptionStore(QObject):
         def _on_shared(relays, result, event) -> None:
             if generation != self._generation:
                 return
+            if result == _NO_ANSWER:
+                # Asked again on the next launch or refresh; until then the
+                # list is not known and nothing is taken for missing.
+                self.sync_status.emit("")
+                return
             if isinstance(result, FeedList):
-                self._adopt(result)
+                self._adopt(result, event)
             if self._legacy_merged:
                 if result != _UNREADABLE:
                     self.sync_status.emit("")
+                    self._mark_known()
                 return
             self._read_list(profile, relays, LEGACY_FEED_LIST_DTAG,
                             lambda legacy, _event: _on_legacy(legacy, result))
@@ -301,25 +375,41 @@ class FeedSubscriptionStore(QObject):
         def _on_legacy(legacy, shared_result) -> None:
             if generation != self._generation:
                 return
-            if legacy == _UNREADABLE:
-                return  # tried again on the next launch
+            if legacy in (_UNREADABLE, _NO_ANSWER):
+                return  # tried again on the next launch, never marked done
             if isinstance(legacy, FeedList):
                 self._merge_legacy(legacy)
             self._legacy_merged = True
             self._save_cache()
             if shared_result != _UNREADABLE:
                 self.sync_status.emit("")
+                self._mark_known()
 
         self._with_relays(profile, _on_relays, reading=True)
 
     # -- internals: merging --------------------------------------------------
 
-    def _adopt(self, remote: FeedList) -> None:
-        """Merge a version read from the relays into the local list."""
+    def _newer_than_base(self, event: Optional[dict]) -> bool:
+        """Whether a list read from the relays is newer than the last one
+        seen (NIP-01: the later time, then the lower id)."""
+        mark = _mark(event)
+        if self._base_mark is None or mark is None:
+            return True
+        return supersedes(mark[0], mark[1], *self._base_mark)
+
+    def _adopt(self, remote: FeedList, event: Optional[dict] = None) -> None:
+        """Merge a version read from the relays into the local list: only
+        one newer than the last seen. An older copy, kept by a slow or a
+        fallback relay, would otherwise remove what the other app added
+        since, or bring back what was removed here."""
+        if event is not None and not self._newer_than_base(event):
+            return
         merged = merge(self._base, self._local, remote)
         changed = merged != self._local
         self._local = merged
         self._base = remote
+        if event is not None:
+            self._base_mark = _mark(event)
         self._dirty = not merged.same_sources(remote) or self._send_read_times
         self._save_cache()
         if changed:
@@ -393,6 +483,7 @@ class FeedSubscriptionStore(QObject):
             return
         if not isinstance(cached, dict):
             return
+        self._known = True
         if cached.get("version") != _CACHE_VERSION:
             # This app's older cache: the list it synced on its own. It is
             # merged with the shared list as soon as that is read.
@@ -401,6 +492,10 @@ class FeedSubscriptionStore(QObject):
         self._local = read_payload(cached.get("local"))
         base = cached.get("base")
         self._base = read_payload(base) if isinstance(base, dict) else None
+        mark = cached.get("baseEvent")
+        if (isinstance(mark, list) and len(mark) == 2 and isinstance(mark[0], int)
+                and isinstance(mark[1], str)):
+            self._base_mark = (mark[0], mark[1])
         self._dirty = bool(cached.get("dirty"))
         self._legacy_merged = bool(cached.get("legacyMerged"))
 
@@ -408,10 +503,11 @@ class FeedSubscriptionStore(QObject):
         if self._profile is None:
             return
         self._write_cache(self._profile.user_pubkey, self._local, self._base,
-                          self._dirty, self._legacy_merged)
+                          self._dirty, self._legacy_merged, self._base_mark)
 
     def _write_cache(self, pubkey: str, local: FeedList, base: Optional[FeedList],
-                     dirty: bool, legacy_merged: bool) -> None:
+                     dirty: bool, legacy_merged: bool,
+                     base_mark: Optional[Tuple[int, str]] = None) -> None:
         path = self._cache_path(pubkey)
         if path is None:
             return
@@ -422,6 +518,7 @@ class FeedSubscriptionStore(QObject):
             "base": write_payload(base, now) if base is not None else None,
             "dirty": dirty,
             "legacyMerged": legacy_merged,
+            "baseEvent": list(base_mark) if base_mark else None,
         }
         # write_json logs why when it cannot write; the list itself stays
         # on the relays.
@@ -429,35 +526,59 @@ class FeedSubscriptionStore(QObject):
 
     # -- internals: relays ---------------------------------------------------
 
-    def _with_relays(self, profile: Profile, on_done: Callable[[List[str]], None], *,
+    def _with_relays(self, profile: Profile, on_done: Callable[..., None], *,
                      reading: bool = False) -> None:
-        """The account's private relays: where the list is written and,
-        so every device finds it, where it is read (which also asks the
-        relays a list written before the account's own was known went)."""
-        ask_private_relays(self._relay_directory, profile, on_done,
-                           entitled=self._entitled_relays, reading=reading)
+        """The account's private relays: where the list is written
+        (``on_done(relays)``), or with ``reading`` where it is read, which
+        also asks the relays a list written before the account's own was
+        known went: ``on_done((read, own))``, ``own`` being the relays it
+        is written to, the only ones whose answer counts."""
+        if not reading:
+            ask_private_relays(self._relay_directory, profile, on_done,
+                               entitled=self._entitled_relays, reading=False)
+            return
+
+        def _own(own: List[str]) -> None:
+            ask_private_relays(self._relay_directory, profile,
+                               lambda read: on_done((read, own)),
+                               entitled=self._entitled_relays, reading=True)
+
+        ask_private_relays(self._relay_directory, profile, _own,
+                           entitled=self._entitled_relays, reading=False)
 
     def _read_list(self, profile: Profile, relays, d_tag: str, on_done) -> None:
         """The newest list under ``d_tag``: ``on_done(result, event)`` with a
-        FeedList, None when there is none, or _UNREADABLE (with the
-        reason already reported)."""
+        FeedList, None when there is none, _NO_ANSWER when none of the
+        account's own relays answered (never taken for "none"), or
+        _UNREADABLE (with the reason already reported).
+
+        ``relays`` is ``(read, own)``. Only the account's own lists count,
+        each checked (kind, ``d``, author, signature) before the newest is
+        chosen, so a relay can neither plant a list nor hide the real one
+        behind a newer forged one."""
+        read, own = relays
         if self._query is None:
             on_done(None, None)
             return
+        counted = {normalize_relay_url(u) or u for u in own}
 
-        def _on_event(event) -> None:
-            if not event or not str(event.get("content") or "").strip():
-                on_done(None, None)
+        def _on_events(events, answered: Set[str]) -> None:
+            answered = {normalize_relay_url(u) or u for u in answered}
+            if not answered or (counted and not (answered & counted)):
+                on_done(_NO_ANSWER, None)
                 return
-            # Only the account's own signature counts: a relay must not be
-            # able to plant sources in the list.
-            if (str(event.get("pubkey", "")).lower() != profile.user_pubkey.lower()
-                    or not verify_event(event)):
-                on_done(None, None)
+            valid = [e for e in events if _is_list_of(e, profile, d_tag)]
+            newest = None
+            for event in valid:
+                if newest is None or supersedes(int(event["created_at"]), event["id"],
+                                                int(newest["created_at"]), newest["id"]):
+                    newest = event
+            if newest is None or not str(newest.get("content") or "").strip():
+                on_done(None, newest)
                 return
-            self._decrypt(profile, event,
-                          lambda text: on_done(_parse(text), event),
-                          lambda reason: _unreadable(reason, event))
+            self._decrypt(profile, newest,
+                          lambda text: on_done(_parse(text), newest),
+                          lambda reason: _unreadable(reason, newest))
 
         def _parse(text: str):
             try:
@@ -474,12 +595,12 @@ class FeedSubscriptionStore(QObject):
             self.sync_status.emit(reason)
             on_done(_UNREADABLE, event)
 
-        self._query.latest(relays, [{
+        self._query.events(read, [{
             "kinds": [SUBSCRIPTIONS_KIND],
             "authors": [profile.user_pubkey],
             "#d": [d_tag],
             "limit": 1,
-        }], _on_event)
+        }], _on_events)
 
     def _decrypt(self, profile: Profile, event: dict, on_text, on_unreadable) -> None:
         """The plaintext of a list, by its ``encrypted`` tag, as STANDUP
@@ -525,7 +646,8 @@ class FeedSubscriptionStore(QObject):
         # What this publish starts from, kept for the case the profile is
         # switched before it is done.
         snapshot = {"base": self._base, "local": self._local.copy(),
-                    "legacy": self._legacy_merged, "reads": self._send_read_times}
+                    "legacy": self._legacy_merged, "reads": self._send_read_times,
+                    "mark": self._base_mark}
 
         def current() -> bool:
             return generation == self._generation
@@ -557,14 +679,28 @@ class FeedSubscriptionStore(QObject):
                 # the other app's sources. The reason is on the status line.
                 _finish(None)
                 return
+            if remote == _NO_ANSWER:
+                # Never write over a list nobody answered for: a newer one
+                # may be on the relays. The change waits (dirty, cached).
+                _finish(_NOT_ANSWERED)
+                return
             base = self._base if current() else snapshot["base"]
             local = self._local if current() else snapshot["local"]
+            base_mark = self._base_mark if current() else snapshot["mark"]
+            mark = _mark(event)
+            if (event is not None and base_mark is not None and mark is not None
+                    and not supersedes(mark[0], mark[1], *base_mark)):
+                # A copy no newer than the last seen (a slow or fallback
+                # relay's): it changes nothing; what is new here goes out.
+                remote, event = base, None
             merged = merge(base, local, remote)
             if current():
                 changed = merged != self._local
                 self._local = merged
                 if remote is not None:
                     self._base = remote
+                    if event is not None:
+                        self._base_mark = mark
                 if changed:
                     self.feeds_changed.emit()
             if remote is not None and merged.same_sources(remote) and not snapshot["reads"]:
@@ -586,33 +722,38 @@ class FeedSubscriptionStore(QObject):
                     on_failure=_failed)
 
             def _sign(client, ciphertext: str) -> None:
+                # After the list it replaces and after the last one seen,
+                # even when this computer's clock runs behind.
+                known = (self._base_mark if current() else snapshot["mark"]) or (0, "")
                 unsigned = build_event(
                     kind=SUBSCRIPTIONS_KIND,
                     content=ciphertext,
                     tags=[["d", FEED_LIST_DTAG], ["client", CLIENT_NAME],
                           ["encrypted", "nip44"]],
                     pubkey_hex=profile.user_pubkey,
-                    created_at=replacement_created_at(remote_event, self._clock()),
+                    created_at=max(replacement_created_at(remote_event, self._clock()),
+                                   known[0] + 1),
                 )
                 client.sign_event(unsigned, on_success=_publish, on_failure=_failed)
 
             def _publish(signed: dict) -> None:
                 self._with_relays(profile, lambda relays: self._publisher(
-                    relays, signed, on_done=lambda accepted, total: _done(accepted)))
+                    relays, signed, on_done=lambda accepted, total: _done(accepted, signed)))
 
-            def _done(accepted: int) -> None:
+            def _done(accepted: int, signed: dict) -> None:
                 if accepted <= 0:
                     _finish(_("Feed subscriptions saved locally; no relay accepted "
                               "the sync yet."))
                     return
                 if current():
                     self._base = content
+                    self._base_mark = _mark(signed)
                     self._send_read_times = False
                     # Edits made while this was on its way go out next.
                     self._dirty = not self._local.same_sources(content)
                 else:
                     self._write_cache(profile.user_pubkey, content, content, False,
-                                      snapshot["legacy"])
+                                      snapshot["legacy"], _mark(signed))
                 _finish(sent=True)
 
             self._session_pool.get(profile, on_ready=_on_ready, on_error=_failed)
@@ -623,12 +764,46 @@ class FeedSubscriptionStore(QObject):
         self._with_relays(profile, _on_read_relays, reading=True)
 
     def _default_publisher(self, relays, signed, *, on_done) -> None:
+        """Publish ``signed`` and answer once: as soon as one relay accepted
+        it (the list is safe then; a relay that never answers must not hold
+        up quitting for the publish timeout), or when all have answered
+        and none did."""
+        relays = list(relays)
         try:
-            job = self._relay_pool.publish(list(relays), signed)
+            job = self._relay_pool.publish(relays, signed)
         except Exception as exc:  # noqa: BLE001, publish must never raise into UI
             _log.warning("subscription publish failed: %s", exc)
-            on_done(0, len(list(relays)))
+            on_done(0, len(relays))
             return
-        job.all_done.connect(
-            lambda results: on_done(
-                sum(1 for _, ok, _ in results if ok), len(results)))
+        answered = []
+
+        def accepted(_url: str) -> None:
+            if not answered:
+                answered.append(True)
+                on_done(1, len(relays))
+
+        def all_done(results) -> None:
+            if not answered:
+                answered.append(True)
+                on_done(sum(1 for _, ok, _ in results if ok), len(results))
+
+        job.first_accept.connect(accepted)
+        job.all_done.connect(all_done)
+
+
+def _is_list_of(event, profile: Profile, d_tag: str) -> bool:
+    """Whether ``event`` is the account's own list under ``d_tag``: the
+    kind, the ``d`` tag, the author and a valid signature."""
+    if not isinstance(event, dict) or event.get("kind") != SUBSCRIPTIONS_KIND:
+        return False
+    if str(event.get("pubkey", "")).lower() != profile.user_pubkey.lower():
+        return False
+    tag = next((t[1] for t in event.get("tags", [])
+                if isinstance(t, list) and len(t) >= 2 and t[0] == "d"), None)
+    if tag != d_tag:
+        return False
+    try:
+        int(event.get("created_at"))
+    except (TypeError, ValueError):
+        return False
+    return verify_event(event)
