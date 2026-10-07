@@ -231,6 +231,31 @@ def test_return_opens_an_article_for_editing_and_a_note_in_the_browser(opened):
     assert len(opened) == 1 and opened[0].startswith("https://njump.me/nevent1")
 
 
+def test_an_article_without_a_link_still_has_its_menu():
+    """Review F17: an identifier over 255 bytes has no address; the menu
+    opens all the same, with Open in Browser and Copy Link dimmed."""
+    view, _model, relays, _said, _edited = make(article("ü" * 130, "Long"))
+    view.set_account(Profile())
+    relays.run()
+    menu = view.menu_for(view._rows.index(0))
+    enabled = {a.text(): a.isEnabled() for a in menu.actions() if not a.isSeparator()}
+    assert enabled == {"Edit": True, "Open in Browser": False, "Copy Link": False,
+                       "Delete from Nostr…": True}
+
+
+def test_a_row_and_its_confirmation_name_a_markdown_note_in_words(answered_alerts):
+    """Review F7: no Markdown in a row or in the confirmation's title."""
+    view, _model, relays, _said, _edited = make(
+        note("![cover](https://example.com/c.png)\nHello **world**"))
+    view.set_account(Profile())
+    relays.run()
+    assert shown(view) == ["Hello world"]
+    select(view, 0)
+    answered_alerts.answers = [False]
+    QTest.keyClick(view._list, Qt.Key.Key_Delete)
+    assert answered_alerts.asked[0]["title"] == "Delete “Hello world” from Nostr?"
+
+
 def test_the_menu_of_an_article_and_of_a_note():
     view, _model, relays, _said, _edited = make(article("essay", "Essay"), note("hello"))
     view.set_account(Profile())

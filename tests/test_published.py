@@ -26,7 +26,7 @@ from nostr import bech32, events, published  # noqa: E402
 from nostr.deletion import address, build_deletion  # noqa: E402
 from nostr.published import (  # noqa: E402
     DELETING, LOADING, NOT_DELETED, PAGE_SIZE, READY, SIGNED_OUT, UNREACHABLE,
-    PublishedItem, PublishedList, deletion_requests, first_line, notes_horizon,
+    PublishedItem, PublishedList, deletion_requests, notes_horizon,
 )
 from nostr.queries import Fetched  # noqa: E402
 from tests.outbox_fakes import (  # noqa: E402
@@ -381,13 +381,30 @@ def test_a_job_let_go_of_is_deleted_once_even_when_the_list_goes_with_it(monkeyp
 
 # -- items and rules ----------------------------------------------------------------------
 
-def test_titles_and_first_lines():
+@pytest.mark.parametrize("body, title", [
+    ("![cover](https://example.com/c.png)\nHello **world**", "Hello world"),
+    ("> a quote I liked\nmy thoughts", "a quote I liked"),
+    ("**Bold opener** and [a link](https://example.com)", "Bold opener and a link"),
+    ("- first point\n- second point", "first point"),
+    ("## Heading of a note\ntext", "Heading of a note"),
+    ("  \n  first   words \nsecond", "first words"),
+    ("", ""),
+])
+def test_a_title_is_words_never_markdown(body, title):
+    """Review F7: the app's one rule for a body without a title
+    (drafts.derive_title_from_markdown), for notes and for articles
+    without a title of their own."""
+    assert PublishedItem(note(body)).title == title
+    assert PublishedItem(signed(30023, [["d", "x"]], body)).title == title
+
+
+def test_an_articles_own_title_comes_first():
     assert PublishedItem(article("d", "  A   title ")).title == "A title"
-    untitled = signed(30023, [["d", "x"]], "\n\n# Heading of the body\nmore")
-    assert PublishedItem(untitled).title == "Heading of the body"
-    assert PublishedItem(note("  \n  first   words \nsecond")).title == "first words"
-    assert PublishedItem(note("")).title == ""
-    assert first_line("x" * 300) == "x" * 200
+
+
+def test_a_long_first_line_is_cut_at_a_word():
+    title = PublishedItem(note("word " * 60)).title
+    assert len(title) <= 90 and title.endswith("…")
 
 
 def test_links_lead_to_the_item_and_name_where_it_is():
@@ -400,10 +417,25 @@ def test_links_lead_to_the_item_and_name_where_it_is():
     assert (event_id, hints, author, kind) == (hello.id, [R1], PK, 1)
 
 
+def test_an_identifier_too_long_for_a_link_has_no_link():
+    """Review F17: NIP-19 holds 255 bytes per value; such an article has
+    no address to open or copy, and asking for one must not raise."""
+    long_d = PublishedItem(article("ü" * 130, "Long"), found_on=(R1,))
+    assert long_d.nostr_address() is None and long_d.web_link() is None
+
+
 def test_the_first_publication_of_an_article_survives_edits():
     edited = PublishedItem(article("d", "T", at=NOW, published=NOW - 9000))
     assert edited.first_published == NOW - 9000
     assert PublishedItem(article("d", "T", at=NOW)).first_published == NOW
+
+
+def test_a_first_publication_after_the_version_itself_gives_way_to_its_time():
+    """Review F10: a version cannot have gone out first after it was made;
+    a published_at in milliseconds sorted the article above everything
+    with a date thousands of years ahead."""
+    milliseconds = PublishedItem(article("d", "T", at=NOW, published=NOW * 1000))
+    assert milliseconds.first_published == NOW
 
 
 def test_the_horizon_is_where_every_relay_is_complete():

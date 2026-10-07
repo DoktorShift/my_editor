@@ -48,6 +48,7 @@ from .bech32 import encode_naddr, encode_nevent
 from .deletion import (
     DELETION_KIND, DeletionJob, DeletionRequest, address_of, read_deletion,
 )
+from .drafts import derive_title_from_markdown
 from .outbox.policy import created_at_of, is_newer
 from .publish_pipeline import mentioned_pubkeys
 from .publisher import published_at_of
@@ -61,6 +62,7 @@ TAG_BATCH = 100               # ids or addresses in one filter
 FILTERS_PER_REQUEST = 4       # filters in one request
 QUERY_TIMEOUT_MS = 8_000
 LINK_HINTS = 2                # relays a link names, so a reader finds the item
+TITLE_CHARS = 90              # a row's title at most; the row elides it to its width
 
 # What the list is doing.
 SIGNED_OUT = "signed_out"     # no account
@@ -112,49 +114,50 @@ class PublishedItem:
     @property
     def first_published(self) -> int:
         """When it first went out: an article's ``published_at`` (NIP-23),
-        kept across edits, or the time it was made."""
+        kept across edits, or the time it was made. A version cannot have
+        gone out first after it was made, so a later ``published_at`` (one
+        written in milliseconds, say) gives way to the version's own time."""
         if self.is_article:
-            return published_at_of(self.event) or self.created_at
+            return min(published_at_of(self.event) or self.created_at, self.created_at)
         return self.created_at
 
     @property
     def title(self) -> str:
-        """An article's title, or its first line without one; a note's
-        first line. "" when there are no words at all."""
+        """An article's title, or, without one, the words its body starts
+        with; a note's first words. The app's one rule for a body that
+        carries no title (drafts.derive_title_from_markdown), so Markdown
+        never reaches a row. "" when there are no words at all."""
         if self.is_article:
             title = " ".join(_tag(self.event, "title").split())
             if title:
                 return title
-            return first_line(self.event.get("content", "")).lstrip("#").strip()
-        return first_line(self.event.get("content", ""))
+        return derive_title_from_markdown(str(self.event.get("content") or ""),
+                                          max_len=TITLE_CHARS)
 
     @property
     def mentioned(self) -> List[Tuple[str, str]]:
         """``(pubkey, relay hint)`` for everyone it mentions."""
         return mentioned_pubkeys(self.event)
 
-    def nostr_address(self) -> str:
+    def nostr_address(self) -> Optional[str]:
         """``naddr1…`` for an article (every version), ``nevent1…`` for a
-        note, naming relays it was found on so a reader finds it."""
+        note, naming relays it was found on so a reader finds it. None when
+        it cannot be written: NIP-19 holds at most 255 bytes per value, and
+        an article's identifier can be longer."""
         hints = [url for url in self.found_on if url.isascii()][:LINK_HINTS]
-        if self.is_article:
-            return encode_naddr(self.identifier, self.pubkey, ARTICLE_KIND, hints)
-        return encode_nevent(self.id, hints, self.pubkey, self.kind)
+        try:
+            if self.is_article:
+                return encode_naddr(self.identifier, self.pubkey, ARTICLE_KIND, hints)
+            return encode_nevent(self.id, hints, self.pubkey, self.kind)
+        except ValueError:
+            return None
 
     def web_link(self) -> Optional[str]:
         """A web address any browser shows it at, None when there is none
         it is safe to open."""
-        link = link_url.web_address_for("nostr:" + self.nostr_address())
+        entity = self.nostr_address()
+        link = link_url.web_address_for("nostr:" + entity) if entity else None
         return link if link and url_safety.is_safe_external_url(link) else None
-
-
-def first_line(text: str, *, limit: int = 200) -> str:
-    """The first line with words on it, its spacing evened out."""
-    for line in str(text or "").splitlines():
-        words = " ".join(line.split())
-        if words:
-            return words[:limit]
-    return ""
 
 
 def _tag(event: dict, name: str) -> str:
