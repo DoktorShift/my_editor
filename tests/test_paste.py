@@ -503,6 +503,39 @@ def paste_into_editor(mime):
     return ed
 
 
+
+def test_raised_and_lowered_digits_keep_their_meaning():
+    # Review L6: "10<sup>6</sup>" arrived as "106".
+    found = paste.from_mime(html("<p>10<sup>6</sup> and mc<sup>2</sup>, H<sub>2</sub>O, "
+                                 "x<sup>-1</sup>, the 4<sup>th</sup></p>"))
+    assert found.document.toPlainText() == (
+        "10\u2076 and mc\u00b2, H\u2082O, x\u207b\u00b9, the 4th")
+
+
+def test_an_html_document_keeps_underline_and_colors_of_a_copy_made_here():
+    # Review L9: the copy came back as its Markdown, without them.
+    from PySide6.QtGui import QColor, QTextCharFormat
+    source = HtmlEditor()
+    fmt = QTextCharFormat()
+    fmt.setFontUnderline(True)
+    fmt.setForeground(QColor("#C0392B"))
+    QTextCursor(source.document()).insertText("red words", fmt)
+    source.selectAll()
+    mime = source.createMimeDataFromSelection()
+    page = HtmlEditor()
+    page.set_local_formats_check(lambda: True)
+    page.insertFromMimeData(mime)
+    probe = QTextCursor(page.document())
+    probe.setPosition(2)
+    assert page.toPlainText() == "red words"
+    assert probe.charFormat().fontUnderline()
+    assert probe.charFormat().foreground().color() == QColor("#C0392B")
+    markdown = HtmlEditor()                     # a Markdown document keeps neither
+    markdown.insertFromMimeData(source.createMimeDataFromSelection())
+    plain = QTextCursor(markdown.document())
+    plain.setPosition(2)
+    assert not plain.charFormat().fontUnderline()
+
 # -- Paste and Match Style ------------------------------------------------------------
 
 def test_paste_and_match_style_takes_the_style_where_it_goes():

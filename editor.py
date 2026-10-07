@@ -107,6 +107,8 @@ class HtmlEditor(QTextEdit):
         # Whether the document can hold Markdown structure (lists,
         # headings): the window answers per tab; on its own, it can.
         self._holds_structure = lambda: True
+        # Whether this document's file keeps underline and colors (HTML).
+        self._keeps_local_formats = lambda: False
         # Whether typed Markdown turns into what it means
         # (markdown_shortcuts.py): the person's choice, off until made.
         self._markdown_shortcuts = lambda: False
@@ -905,6 +907,12 @@ class HtmlEditor(QTextEdit):
             self._close_slash()
             return True
         return False
+
+    def set_local_formats_check(self, check) -> None:
+        """Install ``check()``: whether this document's file keeps what
+        Markdown has no words for (underline, colors), as HTML does. A copy
+        made in this editor then pastes back with them."""
+        self._keeps_local_formats = check
 
     def set_structure_check(self, check) -> None:
         """Install ``check()``: whether this document holds Markdown
@@ -1787,6 +1795,16 @@ class HtmlEditor(QTextEdit):
             self._leave_link_at_end()
             return
         if self._pasted_media(source, text):
+            return
+        if (self._keeps_local_formats() and source.hasFormat(paste.LITERAL_MIME)
+                and source.hasHtml() and not rich_text.is_code_block(cursor.block())):
+            # Copied here, pasted into a file that keeps underline and
+            # colors: Qt's own copy of it, with them.
+            own = QTextDocument()
+            own.setHtml(source.html())
+            rich_text.insert_document(cursor, own)
+            self.setTextCursor(cursor)
+            self.ensureCursorVisible()
             return
         if self._holds_structure() and not rich_text.is_code_block(cursor.block()):
             pasted = paste.from_mime(source)

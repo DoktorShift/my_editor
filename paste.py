@@ -276,12 +276,37 @@ def _kept_href(href: str) -> Optional[str]:
     return address
 
 
+# Raised and lowered digits and signs, as the characters every reader
+# shows ("10<sup>6</sup>" is 10⁶, not 106; "H<sub>2</sub>O" is H₂O).
+_RAISED = str.maketrans("0123456789+-=()ni", "\u2070\u00b9\u00b2\u00b3\u2074\u2075\u2076"
+                        "\u2077\u2078\u2079\u207a\u207b\u207c\u207d\u207e\u207f\u2071")
+_LOWERED = str.maketrans("0123456789+-=()", "\u2080\u2081\u2082\u2083\u2084\u2085\u2086"
+                         "\u2087\u2088\u2089\u208a\u208b\u208c\u208d\u208e")
+
+
+def _script_text(fmt: QTextCharFormat, words: str) -> Optional[str]:
+    """``words`` written raised or lowered with their own characters, when
+    the page raised or lowered them and every one has such a form."""
+    alignment = fmt.verticalAlignment()
+    table = (_RAISED if alignment == QTextCharFormat.VerticalAlignment.AlignSuperScript
+             else _LOWERED if alignment == QTextCharFormat.VerticalAlignment.AlignSubScript
+             else None)
+    if table is None or not words:
+        return None
+    shown = words.translate(table)
+    if any(ch == plain for ch, plain in zip(shown, words) if not ch.isspace()):
+        return None
+    return shown
+
+
 def _tidy_text(doc) -> None:
     """Inline code where the page used a monospace font (the words, not the
     spaces around them); links that cannot work where the article is read
-    lose their link, never their words."""
+    lose their link, never their words; raised and lowered digits keep
+    their meaning."""
     edits = []
     code = []
+    scripts = []
     for block in iter_blocks(doc):
         if block.blockFormat().nonBreakableLines():
             continue
@@ -296,6 +321,9 @@ def _tidy_text(doc) -> None:
                 continue
             changed = QTextCharFormat(fmt)
             words = fragment.text()
+            shown = _script_text(fmt, words)
+            if shown is not None:
+                scripts.append((fragment.position(), fragment.length(), shown))
             if _is_monospace(fmt) and words.strip():
                 lead = len(words) - len(words.lstrip())
                 code.append((fragment.position() + lead, len(words.strip())))
@@ -317,6 +345,13 @@ def _tidy_text(doc) -> None:
         cursor.setPosition(position)
         cursor.setPosition(position + length, QTextCursor.MoveMode.KeepAnchor)
         cursor.mergeCharFormat(rich_text.style_format(rich_text.CODE, True))
+    for position, length, shown in reversed(scripts):    # same lengths: places hold
+        cursor = QTextCursor(doc)
+        cursor.setPosition(position)
+        cursor.setPosition(position + length, QTextCursor.MoveMode.KeepAnchor)
+        fmt = cursor.charFormat()
+        fmt.setVerticalAlignment(QTextCharFormat.VerticalAlignment.AlignNormal)
+        cursor.insertText(shown, fmt)
 
 
 def markdown_from_html(html: str, *, language: str = "") -> Tuple[str, int]:

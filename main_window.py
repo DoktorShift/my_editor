@@ -1094,6 +1094,7 @@ class MainWindow(QMainWindow):
         ed.urls_dropped.connect(self._handle_dropped_urls)
         ed.set_context_menu_filler(self._fill_editor_context_menu)
         ed.set_structure_check(lambda e=ed: self._editor_kind(e) == "rich")
+        ed.set_local_formats_check(lambda e=ed: self._keeps_underline(e))
         ed.set_markdown_shortcuts_check(lambda: self.markdown_shortcuts)
         ed.set_slash_items(self._slash_items)
         ed.set_link_opener(self._open_link)
@@ -2180,10 +2181,18 @@ class MainWindow(QMainWindow):
         self.view_switch = ViewSwitch(
             (self.act_view_write, self.act_view_preview, self.act_view_split),
             dark=self.is_dark_theme)
-        self._view_switch_action = self.format_toolbar.add_trailing(self.view_switch)
+        # The switch sits right of the toolbar, outside it, so a narrow
+        # window never hides it in the toolbar's chevron.
+        self._view_switch_holder = self.format_toolbar.add_trailing(self.view_switch)
+        self.format_bar = QWidget()
+        bar_row = QHBoxLayout(self.format_bar)
+        bar_row.setContentsMargins(0, 0, 0, 0)
+        bar_row.setSpacing(0)
+        bar_row.addWidget(self.format_toolbar, 1)
+        bar_row.addWidget(self._view_switch_holder, 0)
         # Tabs made before the switch existed show their view now.
         QTimer.singleShot(0, lambda: self._apply_view(self.current_editor()))
-        v.addWidget(self.format_toolbar, 0)
+        v.addWidget(self.format_bar, 0)
         v.addWidget(self.findbar, 0)
         v.addWidget(self.update_bar, 0)
         v.addWidget(self.tabs, 1)
@@ -4585,6 +4594,8 @@ class MainWindow(QMainWindow):
             # A PDF has nothing to format; plain text has no paragraph
             # styles, and neither has a table cell.
             self.format_toolbar.setVisible(self.show_toolbar and bool(kind))
+            if getattr(self, "format_bar", None) is not None:
+                self.format_bar.setVisible(self.show_toolbar and bool(kind))
             self.format_toolbar.style_button.setEnabled(kind == "rich" and not reading
                                                         and not in_table)
         # Only the preview shows: nothing to edit there (Copy and Select
@@ -4858,7 +4869,7 @@ class MainWindow(QMainWindow):
 
     def _sync_view_switch(self, ed, shown: str) -> None:
         rich = self._previewable(ed)
-        self._view_switch_action.setVisible(rich)
+        self._view_switch_holder.setVisible(rich)
         for action in (self.act_view_write, self.act_view_preview, self.act_view_split):
             action.setEnabled(rich)
         if not rich:

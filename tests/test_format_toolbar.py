@@ -172,6 +172,39 @@ print("RESULT " + json.dumps(r))
 """
 
 
+NARROW = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+import i18n
+i18n.install("de")
+from PySide6.QtCore import QPoint
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+
+w = main_window.MainWindow()
+w.resize(620, 600)
+w.show()
+ed = w.new_tab()
+app.processEvents()
+switch = w.view_switch
+right = switch.mapTo(w, QPoint(switch.width(), 0)).x()
+r = {"shown": switch.isVisible(), "inside": right <= w.width(),
+     "outside_toolbar": not w.format_toolbar.isAncestorOf(switch)}
+ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_a_narrow_german_window_keeps_the_view_switch_in_sight(tmp_path):
+    # Review L1: at 620 px the German toolbar moved the switch into its
+    # chevron, where a narrow Split (Q-N) needs it.
+    r = run_window_script(NARROW, tmp_path)
+    assert r == {"shown": True, "inside": True, "outside_toolbar": True}
+
+
 def test_the_toolbar_in_the_window(tmp_path):
     r = run_window_script(WINDOW_SCRIPT, tmp_path)
     assert r["shown"]
