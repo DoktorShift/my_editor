@@ -3940,6 +3940,10 @@ msgstr ""
 msgid "it redirects too many times"
 msgstr ""
 
+#: nostr/imports/netguard.py:77
+msgid "the request could not be made"
+msgstr ""
+
 #: nostr/imports/pipeline.py:299
 msgid "(untitled)"
 msgstr ""

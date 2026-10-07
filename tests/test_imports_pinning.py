@@ -376,3 +376,31 @@ def test_a_fetch_under_way_is_freed_without_the_collector():
     finally:
         if automatic:
             gc.enable()
+
+
+class TestItAlwaysEnds:
+    """A fetch ends, whatever raises on the way: Qt's name lookup drops an
+    exception raised in its callback without a word, and a transfer that
+    never ended held one of the two check slots for good."""
+
+    def test_when_making_the_request_raises(self, monkeypatch, caplog):
+        def broken(*_args):
+            raise TypeError("wrong argument types")
+        monkeypatch.setattr(netguard, "pin", broken)
+        nam = FakeNam([FakeReply(body=b"<rss/>")])
+        fetcher = SourceFetcher(guard=NetGuard(resolver({"blog.example": [V4]})), nam=nam)
+        with caplog.at_level(logging.ERROR, logger="nostr.imports.netguard"):
+            out = fetch(fetcher, "https://blog.example/feed")
+        assert out["error"].code == ERROR_CODES.FETCH_ERROR
+        assert netguard.REQUEST_FAILED in str(out["error"])
+        assert "ended with an error" in caplog.text
+
+    def test_when_reading_the_answer_raises(self, monkeypatch):
+        def broken(self, reply):
+            raise ValueError("unexpected")
+        monkeypatch.setattr(netguard._Transfer, "_answered", broken)
+        nam = FakeNam([FakeReply(body=b"<rss/>")])
+        fetcher = SourceFetcher(guard=NetGuard(resolver({"blog.example": [V4]})), nam=nam)
+        out = fetch(fetcher, "https://blog.example/feed")
+        nam.settle()
+        assert "error" in out and "body" not in out

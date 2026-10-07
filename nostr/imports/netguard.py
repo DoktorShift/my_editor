@@ -74,6 +74,7 @@ REDIRECTS = (301, 302, 303, 307, 308)
 # "Couldn't reach that URL: {reason}." (errors.friendly_message).
 UNRESOLVED_REASON = _("the address could not be found")
 TOO_MANY_REDIRECTS = _("it redirects too many times")
+REQUEST_FAILED = _("the request could not be made")
 
 # Errors after which the next checked address of the same name is tried:
 # nothing was answered, the address could not be reached.
@@ -296,11 +297,14 @@ class _Transfer(QObject):
     def _checked(self, addresses: Optional[List[str]]) -> None:
         if not shiboken6.isValid(self):
             return              # the fetcher went while the name was resolved
-        if addresses and not self._guard.proxied(QUrl(self._url)):
-            self._untried = connect_order(addresses)
-        else:
-            self._untried = []
-        self._ask(self._untried.pop(0) if self._untried else None)
+        try:
+            if addresses and not self._guard.proxied(QUrl(self._url)):
+                self._untried = connect_order(addresses)
+            else:
+                self._untried = []
+            self._ask(self._untried.pop(0) if self._untried else None)
+        except Exception:   # noqa: BLE001, see _failed
+            self._failed()
 
     def _ask(self, address: Optional[str]) -> None:
         url = QUrl(self._url)
@@ -335,8 +339,19 @@ class _Transfer(QObject):
             return
         try:
             self._answered(reply)
+        except Exception:   # noqa: BLE001, see _failed
+            self._failed()
         finally:
             reply.deleteLater()
+
+    def _failed(self) -> None:
+        """End the transfer when something raised on the way. Qt calls
+        ``_checked`` and ``_on_finished`` from its own callbacks, and the
+        name lookup's drops an exception without a word: the transfer then
+        never ended, and the check waiting for it (one of the two that run
+        at a time) waited for good."""
+        _log.exception("an import fetch of %s ended with an error", self._url)
+        self._done(Fetched(url=self._url, error=REQUEST_FAILED))
 
     def _answered(self, reply) -> None:
         url = self._url

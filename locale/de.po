@@ -3955,6 +3955,10 @@ msgstr "die Adresse wurde nicht gefunden"
 msgid "it redirects too many times"
 msgstr "sie leitet zu oft weiter"
 
+#: nostr/imports/netguard.py:77
+msgid "the request could not be made"
+msgstr "die Anfrage konnte nicht gestellt werden"
+
 #: nostr/imports/pipeline.py:299
 msgid "(untitled)"
 msgstr "(ohne Titel)"
