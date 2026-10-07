@@ -4524,11 +4524,18 @@ class MainWindow(QMainWindow):
         ed._split_fits = None
         return container, bar
 
+    def _previewable(self, ed) -> bool:
+        """Whether a tab has a preview: a document with Markdown structure,
+        or Markdown opened as its text (published as it is written, so a
+        reader draws it the same way). Plain text, code and R Markdown
+        have none."""
+        return (ed is not None and getattr(ed, "_view_splitter", None) is not None
+                and (self._editor_kind(ed) == "rich" or getattr(ed, "_markdown_source", False)))
+
     def _shown_view(self, ed) -> str:
         """What the tab shows: WRITE, PREVIEW or SPLIT. Split needs room for
         two readable columns; narrower, the side used last shows (Q-N)."""
-        if ed is None or getattr(ed, "_view_splitter", None) is None \
-                or self._editor_kind(ed) != "rich":
+        if not self._previewable(ed):
             return WRITE
         if self.view_mode == SPLIT and not self._split_fits(ed):
             return ed._view_side if ed._view_side in (WRITE, PREVIEW) else WRITE
@@ -4592,8 +4599,7 @@ class MainWindow(QMainWindow):
             self._close_findbar()
 
     def _sync_view_switch(self, ed, shown: str) -> None:
-        rich = ed is not None and self._editor_kind(ed) == "rich" and \
-            getattr(ed, "_view_splitter", None) is not None
+        rich = self._previewable(ed)
         self._view_switch_action.setVisible(rich)
         for action in (self.act_view_write, self.act_view_preview, self.act_view_split):
             action.setEnabled(rich)
@@ -4659,8 +4665,14 @@ class MainWindow(QMainWindow):
         ARTICLE or a NOTE) and what of it readers will not see."""
         names = self._preview_name
         if not self.nostr_state.active:
-            markdown = document_to_markdown(ed.document(), lambda fmt: image_markdown(
-                str(fmt.property(QTextImageFormat.ImageAltText) or ""), fmt.name()))
+            def pictures(fmt):
+                return image_markdown(str(fmt.property(QTextImageFormat.ImageAltText) or ""),
+                                      fmt.name())
+            if getattr(ed, "_markdown_source", False):
+                # Markdown opened as its text: the text is the Markdown.
+                markdown = serialize_plain_with_images(ed.document(), pictures)
+            else:
+                markdown = document_to_markdown(ed.document(), pictures)
             return PreviewContent(DOCUMENT, markdown.rstrip("\n"), names=names)
         profile = self._profile_store.default()
         author = (profile.display_name or profile.npub_short()) if profile is not None else ""

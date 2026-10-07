@@ -194,6 +194,19 @@ plain = w.open_path(txt)
 app.processEvents()
 r["plain"] = {"switch_shown": w.view_switch.isVisible(),
               "text": plain._view_splitter.widget(0).isVisible()}
+md = os.path.join(os.environ["HOME"], "notes.md")
+with open(md, "w", encoding="utf-8") as f:
+    f.write("A claim.[^1]\n\n- one\n- two\n\n[^1]: The source.\n")
+source = w.open_path(md)
+app.processEvents()
+w.act_view_preview.trigger()
+app.processEvents()
+pane = source._preview_pane
+r["md_source"] = {"as_text": bool(getattr(source, "_markdown_source", False)),
+                  "switch_shown": w.view_switch.isVisible(),
+                  "preview": bool(pane and pane.isVisible()),
+                  "drawn": pane.view.toPlainText() if pane else ""}
+source.document().setModified(False)
 for e in (ed, plain):
     e.document().setModified(False)
 w.close()
@@ -227,3 +240,9 @@ def test_write_preview_and_split_in_the_window(tmp_path):
     assert r["wide_again"]["text"] and r["wide_again"]["preview"]
     assert r["wide_again"]["checked"] == [False, False, True]
     assert r["plain"] == {"switch_shown": False, "text": True}
+    # Markdown opened as its text (a footnote) has its preview too: drawn
+    # from its text, as it is published.
+    md = r["md_source"]
+    assert md["as_text"] and md["switch_shown"] and md["preview"]
+    assert "A claim" in md["drawn"] and "[^1]: The source." not in md["drawn"].split("\n")[0]
+    assert "one" in md["drawn"] and "- one" not in md["drawn"]
