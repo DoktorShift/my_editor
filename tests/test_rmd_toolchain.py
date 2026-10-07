@@ -17,6 +17,7 @@ import os
 import sys
 import tarfile
 import zipfile
+from types import SimpleNamespace
 
 import pytest
 
@@ -257,21 +258,73 @@ def test_extract_pandoc_zip_and_tar(sandbox, tmp_path):
     assert extract_pandoc_archive(empty, str(tmp_path / "et")) is None
 
 
-def test_knit_environment_composition(sandbox):
-    from PySide6.QtCore import QProcessEnvironment
+def test_knit_environment_composition(sandbox, monkeypatch):
     bin_dir = sandbox / "pandoc" / "3.5" / "bin"
     bin_dir.mkdir(parents=True)
     binary = bin_dir / "pandoc"
     binary.write_text("", encoding="utf-8")
     rmd_toolchain._save_state({"pandoc": {"version": "3.5",
                                           "bin": str(binary)}})
-    env = QProcessEnvironment()
-    env.insert("PATH", "/usr/bin")
-    env = knit_environment(env)
-    assert env.value("RSTUDIO_PANDOC") == str(bin_dir)
-    assert env.value("PATH").startswith(str(bin_dir) + os.pathsep)
-    assert env.value("R_LIBS_USER") == str(sandbox / "library")
+    monkeypatch.setenv("PATH", os.pathsep.join(["/usr/bin", "/bin"]))
+    monkeypatch.setenv("MYEDITOR_KNIT_TEST", "the person's own")
+    env = knit_environment()
+    assert env["RSTUDIO_PANDOC"] == str(bin_dir)
+    assert env["PATH"] == os.pathsep.join([str(bin_dir), "/usr/bin", "/bin"])
+    assert env["R_LIBS_USER"] == str(sandbox / "library")
+    assert env["MYEDITOR_KNIT_TEST"] == "the person's own"
     assert os.path.isdir(str(sandbox / "library"))
+
+
+@pytest.fixture
+def packaged(monkeypatch):
+    """Run as a packaged Linux build does: PyInstaller put its own
+    libraries first in LD_LIBRARY_PATH and kept the original."""
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/opt/my-editor/_internal")
+    monkeypatch.setenv("LD_LIBRARY_PATH_ORIG", "/usr/local/lib")
+
+
+def test_a_system_program_gets_the_library_path_the_person_had(packaged):
+    env = rmd_toolchain.program_environment()
+    assert env["LD_LIBRARY_PATH"] == "/usr/local/lib"
+    assert "LD_LIBRARY_PATH_ORIG" not in env
+    assert rmd_toolchain.r_environment()["LD_LIBRARY_PATH"] == "/usr/local/lib"
+    assert knit_environment()["LD_LIBRARY_PATH"] == "/usr/local/lib"
+
+
+def test_a_library_path_the_person_did_not_have_is_dropped(packaged, monkeypatch):
+    monkeypatch.delenv("LD_LIBRARY_PATH_ORIG")
+    assert "LD_LIBRARY_PATH" not in rmd_toolchain.program_environment()
+
+
+def test_run_from_source_the_library_path_is_left_alone(monkeypatch):
+    monkeypatch.delattr(sys, "frozen", raising=False)
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/home/me/lib")
+    assert rmd_toolchain.program_environment()["LD_LIBRARY_PATH"] == "/home/me/lib"
+
+
+def test_r_is_run_with_rs_environment(sandbox, packaged, monkeypatch):
+    # Both ways the toolchain runs R hand it r_environment.
+    seen = []
+
+    def run(args, **kwargs):
+        seen.append(kwargs["env"])
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    class Popen:
+        def __init__(self, args, **kwargs):
+            seen.append(kwargs["env"])
+            self.stdout, self.returncode = iter(()), 0
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(rmd_toolchain.subprocess, "run", run)
+    monkeypatch.setattr(rmd_toolchain.subprocess, "Popen", Popen)
+    rmd_toolchain._run_r("Rscript", "1")
+    rmd_toolchain._stream_r("Rscript", "1", log=lambda line: None)
+    assert [env["LD_LIBRARY_PATH"] for env in seen] == ["/usr/local/lib"] * 2
+    assert [env["R_LIBS_USER"] for env in seen] == [str(sandbox / "library")] * 2
 
 
 def test_state_roundtrip(sandbox):

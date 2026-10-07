@@ -346,11 +346,14 @@ class KnitRunner(QObject):
         proc.setWorkingDirectory(os.path.dirname(os.path.abspath(rmd_path)))
         proc.setProcessChannelMode(QProcess.MergedChannels)
 
-        # The system's environment with pandoc and the private R library
-        # added. A new QProcess's own environment is empty: what is added
-        # to it is all Rscript would get, without PATH, HOME or, on
-        # Windows, SystemRoot.
-        env = rmd_toolchain.knit_environment(QProcessEnvironment.systemEnvironment())
+        # R's environment as the toolchain gives it: the person's own, with
+        # pandoc and the app's R library. A new QProcess's own environment
+        # is empty, and what is added to it is all a program then gets (Qt
+        # adds SystemRoot on Windows, and PATH when there is none): Rscript
+        # ran without HOME, TEMP or the system's PATH.
+        env = QProcessEnvironment()
+        for name, value in rmd_toolchain.knit_environment().items():
+            env.insert(name, value)
         proc.setProcessEnvironment(env)
 
         proc.readyReadStandardOutput.connect(self._on_output)
