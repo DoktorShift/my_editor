@@ -430,9 +430,11 @@ class _ShortcutCard(QFrame):
 class ShortcutsDialog(QDialog):
     """Help → Keyboard Shortcuts.
 
-    A modal cheat sheet styled like the keyboard-shortcuts pages found
-    in major desktop applications: category cards laid out in two
-    columns, kbd-style key caps, and a live search across all groups.
+    A reference window styled like the keyboard-shortcuts pages found in
+    major desktop applications: category cards laid out in two columns,
+    kbd-style key caps, and a live search across all groups. It is not
+    modal: it stays open beside the document, so a key can be tried
+    while it is up.
     """
 
     def __init__(self, groups, *, is_dark: bool = True,
@@ -441,7 +443,7 @@ class ShortcutsDialog(QDialog):
         self._groups = tuple(groups)
         self.setObjectName("shortcuts_dialog")
         self.setWindowTitle(_("Keyboard Shortcuts"))
-        self.setModal(True)
+        self.setModal(False)
         # Wide-and-tall by default so all six categories fit without
         # scrolling on the common laptop resolutions. The dialog is
         # resizable so users on small screens can still see everything.

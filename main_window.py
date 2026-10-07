@@ -3641,19 +3641,23 @@ class MainWindow(QMainWindow):
         window.activateWindow()
 
     def _show_shortcuts(self):
-        """Open the cheat-sheet style ``ShortcutsDialog``.
-
-        Replaces the previous plain-text ``QMessageBox`` so we get a
-        searchable, themed, category-grouped surface in keeping with
-        how major desktop apps display their keyboard reference.
-        """
-        from shortcuts_dialog import OTHER_KEYS, ShortcutsDialog, groups_from
-        # Nostr shortcuts are listed once Nostr is in use; before that the
-        # editor shows nothing of it beyond the Nostr menu.
-        groups = groups_from(self.commands.shortcut_groups(
-            OTHER_KEYS, nostr=self.nostr_state.active))
-        dlg = ShortcutsDialog(groups, is_dark=self.is_dark_theme, parent=self)
-        dlg.exec()
+        """Help > Keyboard Shortcuts: a reference window beside the
+        document, not modal, so a key can be tried while it is open; one
+        window, brought to the front when it is already open."""
+        window = getattr(self, "_shortcuts_window", None)
+        if window is None:
+            from shortcuts_dialog import OTHER_KEYS, ShortcutsDialog, groups_from
+            # Nostr shortcuts are listed once Nostr is in use; before that
+            # the editor shows nothing of it beyond the Nostr menu.
+            groups = groups_from(self.commands.shortcut_groups(
+                OTHER_KEYS, nostr=self.nostr_state.active))
+            window = ShortcutsDialog(groups, is_dark=self.is_dark_theme, parent=self)
+            window.setAttribute(Qt.WA_DeleteOnClose, True)
+            window.destroyed.connect(lambda _obj=None: setattr(self, "_shortcuts_window", None))
+            self._shortcuts_window = window
+        window.show()
+        window.raise_()
+        window.activateWindow()
 
     def _show_about(self):
         answer = ask(
@@ -4382,8 +4386,10 @@ class MainWindow(QMainWindow):
         imports_window = getattr(self, "_imports", None) and self._imports.window()
         if imports_window is not None:
             imports_window.apply_theme(self.is_dark_theme)
-        if getattr(self, "_settings_window", None) is not None:
-            self._settings_window.apply_theme(self.is_dark_theme)
+        for name in ("_settings_window", "_shortcuts_window"):
+            window = getattr(self, name, None)
+            if window is not None:
+                window.apply_theme(self.is_dark_theme)
 
     def _on_os_color_scheme_changed(self, scheme):
         if not self._follow_os_theme:

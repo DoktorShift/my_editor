@@ -70,3 +70,24 @@ def test_filtering_finds_keys_written_either_way(monkeypatch):
     assert card.apply_filter("ctrl+s") == 1
     assert card.apply_filter("open") == 1
     assert card.apply_filter("nothing like it") == 0
+
+
+def test_the_window_is_a_reference_beside_the_document_not_modal(qt_app):
+    """Help > Keyboard Shortcuts used to block the document while open; a
+    reference stays open beside it so a key can be tried, and choosing the
+    command again brings the same window to the front."""
+    from types import SimpleNamespace
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from test_commands import StandIn
+    from main_window import MainWindow
+    win = StandIn()
+    MainWindow._build_actions(win)
+    win.nostr_state = SimpleNamespace(active=False)
+    win.is_dark_theme = False
+    win._shortcuts_window = None
+    MainWindow._show_shortcuts(win)
+    first = win._shortcuts_window
+    assert first is not None and first.isVisible() and not first.isModal()
+    MainWindow._show_shortcuts(win)
+    assert win._shortcuts_window is first
+    first.close()
