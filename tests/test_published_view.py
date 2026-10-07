@@ -357,6 +357,56 @@ def test_a_deletion_no_relay_took_offers_try_again(answered_alerts):
                            "Notes and articles you publish appear here.", False, False)
 
 
+def test_relays_that_refused_are_not_blamed_on_the_connection(answered_alerts):
+    """Review F9: a relay that answered with a refusal was reached; the
+    advice to check the connection is for relays that never answered."""
+    view, model, relays, _said, _edited = make(note("hello"), refuse_publish={R1, R2})
+    relays.publisher.reason = "rate-limited: slow down"
+    view.set_account(Profile())
+    relays.run()
+    select(view, 0)
+    answered_alerts.answers = [True, False]         # Delete, then Cancel
+    QTest.keyClick(view._list, Qt.Key.Key_Delete)
+    relays.run()
+    failure = answered_alerts.asked[1]
+    assert failure["message"].startswith("The relays turned the request down.")
+    assert "rate-limited: slow down" in failure["details"]
+
+
+def test_keys_act_on_the_selected_row_only(answered_alerts, opened):
+    """Review F8: when the list appears its first row is where the
+    keyboard rests, not a selection; Delete and Return do nothing until
+    a row is selected."""
+    view, _model, relays, _said, _edited = make(note("only note"))
+    view.set_account(Profile())
+    relays.run()
+    assert view._list.currentIndex().row() == 0
+    assert view._list.selectionModel().selectedIndexes() == []
+    QTest.keyClick(view._list, Qt.Key.Key_Delete)
+    QTest.keyClick(view._list, Qt.Key.Key_Return)
+    assert answered_alerts.asked == [] and opened == []
+    select(view, 0)
+    answered_alerts.answers = [False]
+    QTest.keyClick(view._list, Qt.Key.Key_Delete)
+    assert answered_alerts.asked[0]["title"] == "Delete “only note” from Nostr?"
+
+
+def test_one_date_style_for_the_whole_list():
+    """Review F11: when one row's date in words does not fit, every row
+    writes its date in digits, so the column reads and lines up alike."""
+    view, model, relays, _said, _edited = make(note("a"), article("essay", "Essay"))
+    view.set_account(Profile())
+    relays.run()
+    view.show()
+    assert not view.digit_dates
+    view.resize(110, 480)                           # too narrow for "Article · 10 January 2027"
+    QApplication.processEvents()
+    assert view.digit_dates
+    view.resize(320, 480)
+    QApplication.processEvents()
+    assert not view.digit_dates
+
+
 def test_a_deletion_left_as_it_is_keeps_the_row(answered_alerts):
     view, model, relays, _said, _edited = make(note("hello"), refuse_publish={R1, R2})
     view.set_account(Profile())

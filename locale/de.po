@@ -483,7 +483,7 @@ msgstr "Neuer Versuch zum Entschlüsseln. Bestätige ihn in deiner Signer-App �
 #: nostr/ui/media_library_dialog.py:1237
 #: nostr/ui/media_library_dialog.py:1654
 #: nostr/ui/media_library_dialog.py:1589
-#: nostr/ui/published_view.py:597
+#: nostr/ui/published_view.py:640
 msgid "Delete"
 msgstr "Löschen"
 
@@ -835,8 +835,8 @@ msgstr "PDFs werden nur zum Lesen geöffnet. Es gibt nichts zu speichern."
 
 #: main_window.py:2952
 #: main_window.py:4066
-#: nostr/ui/published_view.py:578
-#: nostr/ui/published_view.py:585
+#: nostr/ui/published_view.py:621
+#: nostr/ui/published_view.py:628
 msgid "That link cannot be opened."
 msgstr "Dieser Link kann nicht geöffnet werden."
 
@@ -881,7 +881,7 @@ msgid "Can't check for updates"
 msgstr "Suche nach Updates nicht möglich"
 
 #: main_window.py:4242
-#: nostr/ui/published_view.py:644
+#: nostr/ui/published_view.py:699
 msgid "Copy Link"
 msgstr "Link kopieren"
 
@@ -6558,7 +6558,7 @@ msgid "Full: {used} of {quota} used"
 msgstr "Voll: {used} von {quota} belegt"
 
 #: nostr/ui/media_library_dialog.py:698
-#: nostr/ui/published_view.py:127
+#: nostr/ui/published_view.py:141
 msgid "Loading…"
 msgstr "Wird geladen …"
 
@@ -7655,8 +7655,8 @@ msgstr "Kein Relay hat die Notiz angenommen. Details stehen im Protokoll."
 msgid "{count} · long note, consider Publish as Article instead"
 msgstr "{count} · lange Notiz, veröffentliche sie besser als Artikel"
 
+#: nostr/ui/published_view.py:155
 #: nostr/ui/published_view.py:141
-#: nostr/ui/published_view.py:127
 msgid "Load More Notes"
 msgstr "Weitere Notizen laden"
 
@@ -7668,15 +7668,15 @@ msgstr "Notiz"
 msgid "Deleting…"
 msgstr "Wird gelöscht …"
 
-#: nostr/ui/published_view.py:133
+#: nostr/ui/published_view.py:147
 msgid "Couldn’t load."
-msgstr "Nicht geladen."
+msgstr "Laden fehlgeschlagen."
 
-#: nostr/ui/published_view.py:138
+#: nostr/ui/published_view.py:152
 msgid "Loading more notes"
 msgstr "Weitere Notizen werden geladen"
 
-#: nostr/ui/published_view.py:140
+#: nostr/ui/published_view.py:154
 msgid "Load More Notes. Couldn’t load more notes. Press Return to try again."
 msgstr "Weitere Notizen laden. Weitere Notizen konnten nicht geladen werden. Drücke Eingabe, um es noch einmal zu versuchen."
 
@@ -7689,27 +7689,31 @@ msgstr "{kind} · {date}"
 msgid "Deleting"
 msgstr "Wird gelöscht"
 
-#: nostr/ui/published_view.py:443
+#: nostr/ui/published_view.py:478
 msgid "Published"
 msgstr "Veröffentlicht"
 
-#: nostr/ui/published_view.py:470
+#: nostr/ui/published_view.py:507
 msgid "Loading"
 msgstr "Wird geladen"
 
-#: nostr/ui/published_view.py:588
+#: nostr/ui/published_view.py:631
 msgid "Link copied."
 msgstr "Link kopiert."
 
-#: nostr/ui/published_view.py:641
+#: nostr/ui/published_view.py:696
 msgid "Open in Browser"
 msgstr "Im Browser öffnen"
 
-#: nostr/ui/published_view.py:649
+#: nostr/ui/published_view.py:704
 msgid "Delete from Nostr…"
 msgstr "Aus Nostr löschen …"
 
-#: nostr/ui/published_view.py:679
+#: nostr/ui/published_view.py:735
+msgid "The relays turned the request down. Show Details says why; you can try again later."
+msgstr "Die Relays haben die Anfrage abgelehnt. Unter „Details einblenden“ steht, warum; du kannst es später erneut versuchen."
+
+#: nostr/ui/published_view.py:738
 msgid "No relay accepted the request. Check your internet connection, then try again."
 msgstr "Kein Relay hat die Anfrage angenommen. Prüfe deine Internetverbindung und versuche es dann erneut."
 
@@ -7718,35 +7722,35 @@ msgstr "Kein Relay hat die Anfrage angenommen. Prüfe deine Internetverbindung u
 msgid "First published {time}"
 msgstr "Zuerst veröffentlicht am {time}"
 
-#: nostr/ui/published_view.py:507
+#: nostr/ui/published_view.py:545
 msgid "No account in use"
 msgstr "Kein Konto aktiv"
 
-#: nostr/ui/published_view.py:508
+#: nostr/ui/published_view.py:546
 msgid "Choose an account in the Nostr menu to see what you published."
 msgstr "Wähle im Nostr-Menü ein Konto, um zu sehen, was du veröffentlicht hast."
 
-#: nostr/ui/published_view.py:543
+#: nostr/ui/published_view.py:586
 msgid "Couldn’t load more notes. Check your internet connection, then try again."
 msgstr "Weitere Notizen konnten nicht geladen werden. Prüfe deine Internetverbindung und versuche es dann erneut."
 
-#: nostr/ui/published_view.py:547
+#: nostr/ui/published_view.py:590
 msgid "Refreshing what you published…"
 msgstr "Deine Veröffentlichungen werden aktualisiert …"
 
-#: nostr/ui/published_view.py:554
+#: nostr/ui/published_view.py:597
 msgid "Couldn’t refresh. Check your internet connection, then try again."
 msgstr "Die Liste konnte nicht aktualisiert werden. Prüfe deine Internetverbindung und versuche es dann erneut."
 
-#: nostr/ui/published_view.py:595
+#: nostr/ui/published_view.py:638
 msgid "Relays that keep it are asked to remove it. People and apps that already saved a copy may still have it. Your draft stays."
 msgstr "Relays, die es speichern, werden gebeten, es zu entfernen. Menschen und Apps, die schon eine Kopie gespeichert haben, können sie weiterhin haben. Dein Entwurf bleibt erhalten."
 
-#: nostr/ui/published_view.py:638
+#: nostr/ui/published_view.py:693
 msgid "Edit"
 msgstr "Bearbeiten"
 
-#: nostr/ui/published_view.py:686
+#: nostr/ui/published_view.py:746
 msgid "Your signer didn’t approve the request. Try again, and approve it on your signer."
 msgstr "Dein Signer hat die Anfrage nicht bestätigt. Versuche es erneut und bestätige sie in deinem Signer."
 
@@ -7755,50 +7759,51 @@ msgstr "Dein Signer hat die Anfrage nicht bestätigt. Versuche es erneut und bes
 msgid "{kind}, first published {time}"
 msgstr "{kind}, zuerst veröffentlicht am {time}"
 
-#: nostr/ui/published_view.py:511
+#: nostr/ui/published_view.py:549
+#: nostr/ui/published_view.py:557
 msgid "Looking for your notes and articles…"
 msgstr "Deine Notizen und Artikel werden gesucht …"
 
-#: nostr/ui/published_view.py:557
+#: nostr/ui/published_view.py:600
 msgid "Some relays didn’t answer, so something may be missing."
 msgstr "Einige Relays haben nicht geantwortet, daher fehlt vielleicht etwas."
 
-#: nostr/ui/published_view.py:670
+#: nostr/ui/published_view.py:725
 #, python-brace-format
 msgid "{accepted} of {total} relay accepted the request to delete “{title}”."
 msgid_plural "{accepted} of {total} relays accepted the request to delete “{title}”."
 msgstr[0] "Die Anfrage, „{title}“ zu löschen, wurde von {accepted} von {total} Relay angenommen."
 msgstr[1] "Die Anfrage, „{title}“ zu löschen, wurde von {accepted} von {total} Relays angenommen."
 
-#: nostr/ui/published_view.py:513
+#: nostr/ui/published_view.py:551
 msgid "Couldn’t load what you published"
 msgstr "Deine Veröffentlichungen konnten nicht geladen werden"
 
-#: nostr/ui/published_view.py:514
+#: nostr/ui/published_view.py:552
 msgid "Check your internet connection, then try again."
 msgstr "Prüfe deine Internetverbindung und versuche es dann erneut."
 
-#: nostr/ui/published_view.py:594
+#: nostr/ui/published_view.py:637
 #, python-brace-format
 msgid "Delete “{title}” from Nostr?"
 msgstr "„{title}“ aus Nostr löschen?"
 
-#: nostr/ui/published_view.py:691
+#: nostr/ui/published_view.py:751
 #, python-brace-format
 msgid "Couldn’t delete “{title}”"
 msgstr "„{title}“ konnte nicht gelöscht werden"
 
-#: nostr/ui/published_view.py:517
+#: nostr/ui/published_view.py:732
+msgid "no answer"
+msgstr "keine Antwort"
+
+#: nostr/ui/published_view.py:560
 msgid "Nothing published yet"
 msgstr "Noch nichts veröffentlicht"
 
-#: nostr/ui/published_view.py:518
+#: nostr/ui/published_view.py:561
 msgid "Notes and articles you publish appear here."
 msgstr "Notizen und Artikel, die du veröffentlichst, erscheinen hier."
-
-#: nostr/ui/published_view.py:677
-msgid "no answer"
-msgstr "keine Antwort"
 
 #: nostr/ui/save_destination_dialog.py:252
 msgid "Where do you want to save?"

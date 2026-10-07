@@ -121,6 +121,20 @@ def tooltip_text(item: PublishedItem) -> str:
         kind=kind_word(item), time=format_absolute_time(item.first_published))))
 
 
+# NIP-01: a relay that refuses an event says why with one of these words
+# first; anything else (a timeout, a lost connection) never reached one.
+# ("duplicate" is not among them: that relay has the request already.)
+_REFUSALS = ("auth-required", "blocked", "error", "invalid", "mute", "pow",
+             "rate-limited", "restricted")
+
+
+def refused_by_relay(message: str) -> bool:
+    """Whether a relay's answer is a refusal (NIP-01's machine-readable
+    prefix) rather than no answer at all."""
+    prefix, colon, _rest = (message or "").partition(":")
+    return bool(colon) and prefix.strip().lower() in _REFUSALS
+
+
 def more_label(model: PublishedList) -> str:
     """The Load More row's words, which stay its action after a failure:
     pressing it again is trying again."""
@@ -281,11 +295,10 @@ class _RowDelegate(QStyledItemDelegate):
                            QFontMetrics(secondary).height())
             painter.setFont(secondary)
             painter.setPen(QColor(meta_colour))
-            meta = index.data(META_ROLE) or ""
-            if painter.fontMetrics().horizontalAdvance(meta) > line_2.width():
-                # Large text on a narrow panel: the date in digits keeps
-                # the whole date in view where the month's name would not.
-                meta = index.data(SHORT_META_ROLE) or meta
+            # Large text on a narrow panel: the date in digits keeps the
+            # whole date in view where the month's name would not, and
+            # every row then writes it so (PublishedView.digit_dates).
+            meta = index.data(SHORT_META_ROLE if self._view.digit_dates else META_ROLE) or ""
             painter.drawText(line_2, int(leading | Qt.AlignmentFlag.AlignVCenter),
                              painter.fontMetrics().elidedText(
                                  meta, Qt.TextElideMode.ElideRight, line_2.width()))
@@ -401,6 +414,7 @@ class PublishedView(QWidget):
         self._is_dark = bool(is_dark)
         self._rows = _Rows(model, self)
         self._last = (model.state, model.refreshing, model.more_failed)
+        self._digit_dates = False
         self._build()
         # Bound methods, not lambdas: they go with the view if it goes first.
         model.changed.connect(self._on_changed)
@@ -420,6 +434,27 @@ class PublishedView(QWidget):
     @property
     def model(self) -> PublishedList:
         return self._model
+
+    @property
+    def digit_dates(self) -> bool:
+        """Whether the rows write their dates in digits: when any row's
+        date in words does not fit its line, all of them do, so the dates
+        read and line up alike."""
+        return self._digit_dates
+
+    def _choose_date_style(self) -> None:
+        room = self._list.viewport().width() - 2 * LIST_GUTTER
+        metrics = QFontMetrics(secondary_font())
+        digits = room > 0 and any(
+            metrics.horizontalAdvance(meta_text(item)) > room for item in self._model.items())
+        if digits != self._digit_dates:
+            self._digit_dates = digits
+            self._list.viewport().update()
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.FontChange:
+            self._choose_date_style()
 
     def set_account(self, profile) -> None:
         self._model.set_account(profile)
@@ -453,8 +488,10 @@ class PublishedView(QWidget):
         self._list.activated.connect(self._on_activated)
         self._list.clicked.connect(self._on_clicked)
         self._list.menu_requested.connect(self._show_menu)
-        # Return and Delete belong to the list, see ``eventFilter``.
+        # Return and Delete belong to the list, see ``eventFilter``; the
+        # viewport's width decides how the dates are written.
         self._list.installEventFilter(self)
+        self._list.viewport().installEventFilter(self)
         self._stack.addWidget(self._list)
 
         self._placeholder = QWidget()
@@ -493,6 +530,7 @@ class PublishedView(QWidget):
         current = self._list.currentIndex()
         row = current.row() if current.isValid() else -1
         self._rows.reload()
+        self._choose_date_style()
         if row >= 0 and not self._list.currentIndex().isValid() and self._rows.rowCount():
             # The row went (deleted): the keyboard stays where it was.
             nearest = self._rows.index(min(row, self._rows.rowCount() - 1))
@@ -616,19 +654,31 @@ class PublishedView(QWidget):
         if self._rows.is_more(index.row()):
             self._load_more()
 
+    def _selected_row(self) -> int:
+        """The row the keys act on: the current one, when it is selected.
+        A row the keyboard merely rests on, with nothing selected (as when
+        the list appears), is not acted on, as in Mail and Finder."""
+        index = self._list.currentIndex()
+        if not index.isValid() or not self._list.selectionModel().isSelected(index):
+            return -1
+        return index.row()
+
     def eventFilter(self, watched, event) -> bool:
+        if watched is self._list.viewport() and event.type() == QEvent.Type.Resize:
+            self._choose_date_style()
         if watched is self._list and event.type() == QEvent.Type.KeyPress:
             key = event.key()
-            row = self._list.currentIndex().row()
+            row = self._selected_row()
+            item = self._rows.item_at(row)
             if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
                 if self._rows.is_more(row):
                     self._load_more()
-                elif self.current_item() is not None:
-                    self._open(self.current_item())
+                elif item is not None:
+                    self._open(item)
                 return True
             if key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
-                if self.current_item() is not None:
-                    self._ask_to_delete(self.current_item())
+                if item is not None:
+                    self._ask_to_delete(item)
                 return True
         return super().eventFilter(watched, event)
 
@@ -681,8 +731,13 @@ class PublishedView(QWidget):
     def _on_not_taken(self, item: PublishedItem, results: list) -> None:
         details = "\n".join(f"{url}: {message or _('no answer')}"
                             for url, _ok, message in results)
-        self._offer_try_again(item, _("No relay accepted the request. Check your internet "
-                                      "connection, then try again."), details)
+        if any(refused_by_relay(message) for _url, _ok, message in results):
+            message = _("The relays turned the request down. Show Details says why; you can "
+                        "try again later.")
+        else:
+            message = _("No relay accepted the request. Check your internet connection, "
+                        "then try again.")
+        self._offer_try_again(item, message, details)
 
     def _on_refused(self, item: PublishedItem, reason: str) -> None:
         if is_signer_silent(reason):

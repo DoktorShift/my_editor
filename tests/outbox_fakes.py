@@ -140,16 +140,17 @@ class FakeSubscription(QObject):
 class FakePool:
     """Relays that accept (or refuse) publishes and remember what they kept."""
 
-    def __init__(self, *, refuse=(), keep=True):
+    def __init__(self, *, refuse=(), keep=True, reason="blocked"):
         self.refuse = set(refuse)
         self.keep = keep
+        self.reason = reason            # what a refusing relay says
         self.published: List[tuple] = []
         self.stored: Dict[str, dict] = {}
         self.subscriptions: List[tuple] = []
 
     def publish(self, urls, event):
         self.published.append((list(urls), event))
-        results = [(u, u not in self.refuse, "" if u not in self.refuse else "blocked")
+        results = [(u, u not in self.refuse, "" if u not in self.refuse else self.reason)
                    for u in urls]
         if self.keep and any(ok for _u, ok, _m in results):
             self.stored[event["id"]] = event
