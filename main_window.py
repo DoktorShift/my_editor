@@ -1863,6 +1863,8 @@ class MainWindow(QMainWindow):
         self._drafts_panel.retry_signer.connect(self._draft_sync.retry_signer)
         self._drafts_panel.copy_event_id.connect(self._on_panel_copy_event_id)
         self._drafts_panel.refresh_requested.connect(self._draft_sync.refresh)
+        # The deletions other apps announce come with the drafts (L13).
+        self._drafts_panel.refresh_requested.connect(self._draft_deletions.refresh)
         self._drafts_panel.close_requested.connect(self._hide_drafts_panel)
         # The panel's one row about imports (D-2): new posts, how an
         # import goes, and the Imports window.
@@ -4865,8 +4867,10 @@ class MainWindow(QMainWindow):
         if self._visible_media_library() is not None:
             self._media_store.refetch_if_targets_changed()
         # Drafts are written to the members' relay as well, so they are
-        # read there too (a no-op when the set of relays did not change).
+        # read there too (a no-op when the set of relays did not change),
+        # and the deletions other apps announce for them with them.
         self._draft_sync.reroute()
+        self._draft_deletions.reroute()
 
     def _visible_media_library(self):
         """The Media Library dialog while it is open, else None.
@@ -5732,13 +5736,22 @@ class MainWindow(QMainWindow):
                 progress.setValue(done)
 
         job.progress.connect(on_progress)
-        job.tombstoned.connect(lambda d, _eid: self._draft_store.remove(d))
+        job.tombstoned.connect(self._on_draft_tombstoned)
         job.finished.connect(
             lambda deleted, failures: self._on_draft_deletion_finished(
                 deleted, failures, total, progress,
             )
         )
         job.start()
+
+    def _on_draft_tombstoned(self, identifier: str, event_id: str) -> None:
+        """A draft deleted here: remembered as deleted, as a request from
+        another app would be (engine review L13). Removing it only let an
+        older copy a slower relay still sends bring it back until the
+        blanked wrap came round; every version up to now is gone, and one
+        saved later on another device is a new draft and stays."""
+        self._draft_store.apply_deletion(identifier, int(time.time()), event_id,
+                                         request=True)
 
     def _imported_draft_wraps(self, deletable: List[Tuple[str, int]]) -> dict:
         """``{d: wrap id}`` for the imported drafts among ``deletable``.
