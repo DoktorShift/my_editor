@@ -15,15 +15,20 @@ way Bear, Notion and standup do:
   a language: "```python"), followed by Return: a code block;
 - "[ ] " or "[x] " at the start of a paragraph or a list item: a
   checklist item, ticked for "[x]";
-- a closing mark: "**bold**", "*italic*" or "_italic_" (the underscore
-  only at the start of a word, so snake_case stays as typed),
-  "~~struck~~", "`code`".
+- a closing mark: "**bold**", "*italic*", "~~struck~~", "`code`", and
+  "_italic_" once the character after it is typed and is no letter or
+  digit (so "snake_case" and "_private_name" stay as typed, as Markdown
+  reads them). The words between the marks never hold the mark itself
+  (an earlier "**a**" kept as typed is not reached back to), and a mark
+  right after a backslash is a literal one.
 
 The typed characters are their own steps on the undo stack and the
 conversion another, so Undo right after it brings back exactly what was
-typed. Nothing is converted in a code block, in inline code, across a
-link or a picture, or in a plain-text or code file (the editor asks
-before it calls in).
+typed. After a conversion, typing goes on in the style the opening mark
+was typed in. Nothing is converted in a code block, in inline code or
+in code still being typed (after an opening backtick), across a link
+or a picture, on marks that are themselves code or a link, or in a
+plain-text or code file (the editor asks before it calls in).
 
 Each function takes a QTextCursor at the caret, changes nothing unless a
 rule applies, and makes each conversion one edit block, moving the
@@ -50,16 +55,19 @@ _DIVIDER = re.compile(r"-{3,}|\*{3,}|_{3,}")
 _FENCE = re.compile(r"(?:`{3,}|~{3,})\s*([\w+#.-]*)\s*")
 # Closing marks, checked in this order against the paragraph's text up to
 # the caret. Bold before italic: "**bold*" is not yet italic, and
-# "**bold**" is bold. A mark after a backslash is a literal one.
+# "**bold**" is bold. The words never hold the mark itself, and neither
+# opening nor closing mark comes right after a backslash.
 _INLINE = (
-    (rich_text.BOLD, re.compile(r"(?<![*\\])\*\*(?=[^\s*])(.+?)(?<=[^\s*])\*\*$")),
-    (rich_text.STRIKE, re.compile(r"(?<![~\\])~~(?=\S)(.+?)(?<=\S)~~$")),
-    (rich_text.ITALIC, re.compile(r"(?<![*\w\\])\*(?=[^\s*])([^*]+?)(?<=[^\s*])\*$")),
-    (rich_text.ITALIC, re.compile(r"(?<![\w\\])_(?=[^\s_])([^_]+?)(?<=[^\s_])_$")),
+    (rich_text.BOLD, re.compile(
+        r"(?<![*\\])\*\*(?=[^\s*])((?:(?!\*\*).)+?)(?<=[^\s*\\])\*\*$")),
+    (rich_text.STRIKE, re.compile(r"(?<![~\\])~~(?=\S)((?:(?!~~).)+?)(?<=[^\s\\])~~$")),
+    (rich_text.ITALIC, re.compile(r"(?<![*\w\\])\*(?=[^\s*])([^*]+?)(?<=[^\s*\\])\*$")),
     (rich_text.CODE, re.compile(r"(?<![`\\])`([^`]+)`$")),
 )
-# The characters that can close an inline mark.
-CLOSING_MARKS = "*_~`"
+# "_italic_", checked once the character after the closing "_" is typed.
+_UNDERSCORE = re.compile(r"(?<![\w\\])_(?=[^\s_])([^_]+?)(?<=[^\s_\\])_$")
+# The characters that close an inline mark as they are typed.
+CLOSING_MARKS = "*~`"
 
 
 def _is_body(block) -> bool:
@@ -78,6 +86,8 @@ def after_space(cursor: QTextCursor) -> str:
         return ""
     block = cursor.block()
     typed = block.text()[:cursor.positionInBlock()]
+    if not _plain_span(cursor.document(), block.position(), block.position() + len(typed)):
+        return ""                     # "`#`": a code word, no heading mark
     task = _TASK_START.fullmatch(typed)
     if task is not None and (_is_body(block) or block.textList() is not None):
         # In an item that has a box already, the box typed sets its tick.
@@ -145,6 +155,8 @@ def on_return(cursor: QTextCursor) -> bool:
     if cursor.hasSelection() or not cursor.atBlockEnd():
         return False
     block = cursor.block()
+    if not _plain_span(cursor.document(), block.position(), block.position() + block.length() - 1):
+        return False                  # "`---`": code words, no divider
     fence = _FENCE.fullmatch(block.text())
     if fence is not None and _is_body(block):
         return _make_code_block(cursor, block, fence.group(1))
@@ -186,21 +198,51 @@ def _plain_span(doc, start: int, end: int) -> bool:
     return not rich_text.holds_link_or_code(probe)
 
 
+def _in_open_code(text: str) -> bool:
+    """Whether ``text`` ends inside code still being typed: after an odd
+    number of backticks that no backslash escapes."""
+    count = 0
+    escaped = False
+    for ch in text:
+        if escaped:
+            escaped = False
+        elif ch == "\\":
+            escaped = True
+        elif ch == "`":
+            count += 1
+    return count % 2 == 1
+
+
 def after_mark(cursor: QTextCursor) -> Optional[str]:
-    """A closing mark (CLOSING_MARKS) was just typed at the caret. When it
-    closes an inline style, style the words between the marks, take the
-    marks away and return the style (rich_text.BOLD, ...); else None."""
+    """A character was just typed at the caret. When it closes an inline
+    style (a closing mark of CLOSING_MARKS, or the character after a
+    closing "_" that is no letter or digit), style the words between the
+    marks, take the marks away and return the style (rich_text.BOLD,
+    ...); else None. The cursor ends after the words (and the character
+    typed after an "_"), carrying the format the opening mark was typed
+    in, for what is typed next."""
     if cursor.hasSelection():
         return None
     block = cursor.block()
     if rich_text.is_code_block(block):
         return None
     typed = block.text()[:cursor.positionInBlock()]
+    if not typed:
+        return None
+    if typed[-1] in CLOSING_MARKS:
+        rules, after = _INLINE, 0
+    elif len(typed) > 1 and typed[-2] == "_" and not typed[-1].isalnum() and typed[-1] != "_":
+        rules, after = ((rich_text.ITALIC, _UNDERSCORE),), 1
+        typed = typed[:-1]
+    else:
+        return None
     doc = cursor.document()
-    for style, pattern in _INLINE:
+    for style, pattern in rules:
         found = pattern.search(typed)
         if found is None:
             continue
+        if style != rich_text.CODE and _in_open_code(typed[:found.start()]):
+            continue                  # "`**x**": code being typed, not bold
         start = block.position() + found.start()
         end = block.position() + len(typed)
         if not _plain_span(doc, start, end):
@@ -208,6 +250,9 @@ def after_mark(cursor: QTextCursor) -> Optional[str]:
         opening = found.start(1) - found.start()
         closing = found.end() - found.end(1)
         words = len(found.group(1))
+        probe = QTextCursor(doc)
+        probe.setPosition(start + 1)
+        before = probe.charFormat()   # what the opening mark was typed in
         edit = QTextCursor(doc)
         edit.beginEditBlock()
         marks = QTextCursor(doc)
@@ -222,6 +267,7 @@ def after_mark(cursor: QTextCursor) -> Optional[str]:
         span.setPosition(start + words, QTextCursor.MoveMode.KeepAnchor)
         span.mergeCharFormat(rich_text.style_format(style, True))
         edit.endEditBlock()
-        cursor.setPosition(start + words)
+        cursor.setPosition(start + words + after)
+        cursor.setCharFormat(before)
         return style
     return None

@@ -90,11 +90,11 @@ A paste goes in the way typing it would: inside a sentence the pasted words beco
 | `---`, `***` or `___`, then Return | A divider |
 | ```` ``` ```` or `~~~`, with a language or none (```` ```python ````), then Return | A code block in that language |
 | `**words**` | Bold |
-| `*words*` or `_words_` | Italic (an underscore only at the start of a word, so `snake_case` stays as typed) |
+| `*words*`, or `_words_` and then a space or a punctuation mark | Italic (`snake_case` and `_private_name` stay as typed) |
 | `~~words~~` | Strikethrough |
 | `` `words` `` | Code |
 
-`Undo` right after a change brings back exactly what you typed. Nothing changes inside a code block or code words, across a link, after a backslash (`\*`), or in plain-text and code files.
+`Undo` right after a change brings back exactly what you typed, and what you type next is in the style you were typing in before the marks. Nothing changes inside a code block or code words, inside code you are still typing (after an opening `` ` ``), across a link, after a backslash (`\*`), or in plain-text and code files; marks that are themselves code (`` `#` ``) make no heading, list or divider. The words between two marks never hold the mark itself, so an earlier `**` you kept as typed stays as it is.
 
 ### Find
 

@@ -630,24 +630,16 @@ class HtmlEditor(QTextEdit):
         if not text or not self._shortcuts_apply():
             return
         cursor = self.textCursor()
-        if text == " ":
-            if markdown_shortcuts.after_space(cursor):
-                self.setTextCursor(cursor)
-                level = cursor.block().blockFormat().headingLevel()
-                self.setCurrentCharFormat(rich_text.restyled(self.currentCharFormat(), level))
-                self._update_active_format()
-        elif text[-1] in markdown_shortcuts.CLOSING_MARKS:
-            style = markdown_shortcuts.after_mark(cursor)
-            if style:
-                self.setTextCursor(cursor)
-                # What is typed next is not in the style just made.
-                fmt = self.currentCharFormat()
-                fmt.merge(rich_text.style_format(style, False))
-                if style == rich_text.CODE:
-                    fmt.clearProperty(QTextFormat.Property.FontFamilies)
-                    fmt.clearProperty(QTextFormat.Property.FontFamily)
-                self.setCurrentCharFormat(fmt)
-                self._update_active_format()
+        if text == " " and markdown_shortcuts.after_space(cursor):
+            self.setTextCursor(cursor)
+            level = cursor.block().blockFormat().headingLevel()
+            self.setCurrentCharFormat(rich_text.restyled(self.currentCharFormat(), level))
+            self._update_active_format()
+        elif not text[-1].isalnum() and markdown_shortcuts.after_mark(cursor):
+            # What is typed next is in the style the opening mark was
+            # typed in, which the cursor carries.
+            self.setTextCursor(cursor)
+            self._update_active_format()
 
     def inputMethodEvent(self, event):
         # Characters some keyboards compose (a backtick or a tilde after a

@@ -7,8 +7,13 @@ What must hold:
   With the setting on, typed Markdown becomes what it means: "# " to
   "### " a heading, "- " "* " "+ " a bulleted list, "3. " a numbered list
   from 3, "> " a quote, "---" and Return a divider; "**bold**",
-  "*italic*", "_italic_", "~~struck~~" and "`code`" when the closing mark
-  is typed. What is typed next is not in the style just made.
+  "*italic*", "~~struck~~" and "`code`" when the closing mark is typed,
+  "_italic_" when the character after it is no letter or digit. What is
+  typed next is in the style the opening mark was typed in.
+
+  Marks inside code being typed stay in the code, and marks that are
+  code make no structure. The words between the marks never hold the
+  mark itself, and a closing mark after a backslash is literal.
 
   Undo right after a conversion brings back exactly what was typed.
 
@@ -132,6 +137,89 @@ def _formats(ed):
     while not it.atEnd():
         yield it.fragment().charFormat()
         it += 1
+
+
+
+# -- code being typed, and marks that are code (review H2) ----------------------------
+
+@pytest.mark.parametrize("text, markdown", [
+    ("Type `**bold**` to get bold", "Type `**bold**` to get bold\n"),
+    ("Use `*x*` for italic", "Use `*x*` for italic\n"),
+    ("Use `~~x~~` to strike", "Use `~~x~~` to strike\n"),
+    ("a `_private_name` b", "a `_private_name` b\n"),
+])
+def test_marks_inside_code_being_typed_stay_in_the_code(text, markdown):
+    ed = typed(text)
+    assert assert_round_trip(ed.document()) == markdown
+    plain = [f for f in _formats(ed) if not rich_text.has_style(f, rich_text.CODE)]
+    assert not any(rich_text.has_style(f, s) for f in plain
+                   for s in (rich_text.BOLD, rich_text.ITALIC, rich_text.STRIKE))
+
+
+@pytest.mark.parametrize("text, markdown", [
+    ("`#` starts a heading", "`#` starts a heading\n"),
+    ("`-` makes no list", "`-` makes no list\n"),
+    ("`>` makes no quote", "`>` makes no quote\n"),
+    ("`---`\nnext", "`---`\n\nnext\n"),
+    ("`[ ]` is no box", "`[ ]` is no box\n"),
+])
+def test_marks_that_are_code_make_no_structure(text, markdown):
+    ed = typed(text)
+    assert assert_round_trip(ed.document()) == markdown
+    block = ed.document().begin()
+    assert not block.blockFormat().headingLevel() and block.textList() is None
+    assert not rich_text.quote_depth(block) and not rich_text.is_divider(block)
+
+
+def test_typing_goes_on_in_the_style_the_opening_mark_was_typed_in():
+    ed = typed("say ")
+    ed.toggle_bold()
+    type_text(ed, "*it* now")
+    fmts = {text: f for text, f in _runs(ed)}
+    assert rich_text.has_style(fmts["it"], rich_text.ITALIC)
+    assert rich_text.has_style(fmts[" now"], rich_text.BOLD)        # bold, as before the mark
+    assert not rich_text.has_style(fmts[" now"], rich_text.ITALIC)
+
+
+def _runs(ed):
+    from doc_walk import iter_block_runs
+    return list(iter_block_runs(ed.document().begin()))
+
+
+# -- edges of the inline rules (review M1) --------------------------------------------
+
+def test_bold_does_not_reach_back_to_an_earlier_literal_mark():
+    ed = typed("**a**")
+    ed.document().undo()                              # "**a**" kept as typed
+    type_text(ed, " and **b**")
+    assert ed.toPlainText() == "**a** and b"
+    assert [t for t, f in _runs(ed) if rich_text.has_style(f, rich_text.BOLD)] == ["b"]
+
+
+def test_strikethrough_does_not_reach_back_either():
+    ed = typed("~~old~~ and ", on=False)
+    ed.set_markdown_shortcuts_check(lambda: True)
+    type_text(ed, "~~new~~")
+    assert ed.toPlainText() == "~~old~~ and new"
+    assert [t for t, f in _runs(ed) if f.fontStrikeOut()] == ["new"]
+
+
+@pytest.mark.parametrize("text", [r"**a\**", r"*a\*", r"~~a\~~", "call _private_name here",
+                                  "x _y_z"])
+def test_an_escaped_or_inner_closing_mark_converts_nothing(text):
+    ed = typed(text)
+    assert ed.toPlainText() == text
+    assert not any(rich_text.has_style(f, s) for f in _formats(ed)
+                   for s in (rich_text.BOLD, rich_text.ITALIC, rich_text.STRIKE))
+
+
+@pytest.mark.parametrize("text, markdown", [
+    ("an _italic_ word", "an *italic* word\n"),
+    ("an _italic_.", "an *italic*.\n"),
+    ("(_italic_)", "(*italic*)\n"),
+])
+def test_an_underscore_closes_once_the_next_character_is_no_letter(text, markdown):
+    assert assert_round_trip(typed(text).document()) == markdown
 
 
 # -- undo ------------------------------------------------------------------------------
