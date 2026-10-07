@@ -18,9 +18,32 @@ thread" is the last thing it says).
 
 So automatic collection is switched off, and the collection Python
 would have made is made on the GUI thread instead: ``collect_due``
-applies Python's own thresholds, and ``GuiThreadCollector`` calls it a
-few times a second while the app runs. The thresholds are Python's, so
-collections cost what they always did, only on the right thread.
+follows Python's own generation counters and thresholds, and
+``GuiThreadCollector`` checks them twice a second while the app runs.
+
+It differs from Python's own policy in two ways, both small at the
+app's size:
+
+- CPython also holds a full collection back while few long-lived
+  objects are new (a rule Python code cannot see), so here a full
+  collection comes whenever the counters call for one, after every
+  dozen or so collections of the middle generation. On a heap of a
+  million long-lived objects that is a full collection of some 25 ms
+  now and then where Python would make none; the app has some 70,000
+  tracked objects after start, and a full collection there takes about
+  5 ms.
+- While the GUI thread is busy outside its event loop (the R check run
+  before a knit, waiting for a worker), nothing is collected: what
+  workers leave meanwhile piles up and is collected at once afterwards.
+  Modal dialogs and other nested event loops keep collecting. A new
+  blocking call on the GUI thread therefore also stops collection, one
+  more reason not to block it.
+
+Written for the generational collector of Python 3.12, which the app is
+built and tested with: Python 3.14's incremental collector counts and
+collects differently (its thresholds read (2000, 10, 0), and collecting
+the middle generation means one increment), so moving to another Python
+needs this module looked at again.
 """
 
 from __future__ import annotations
@@ -40,7 +63,8 @@ def collect_due() -> int:
 
     As Python does: once the youngest generation has grown past its
     threshold, the oldest generation whose count has passed its threshold
-    is collected, with every younger one.
+    is collected, with every younger one (without CPython's extra rule
+    for full collections; see the module's description).
     """
     threshold = gc.get_threshold()
     count = gc.get_count()

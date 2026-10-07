@@ -131,6 +131,15 @@ def test_garbage_from_another_thread_is_collected_on_the_gui_thread():
         collector.stop()
 
 
+def test_python_still_collects_by_generations():
+    # The policy follows the generational collector of Python 3.12. Python
+    # 3.14's incremental collector reports no threshold for the oldest
+    # generation and collects differently: moving to it needs
+    # main_thread_gc looked at again (see its description).
+    threshold = gc.get_threshold()
+    assert len(threshold) == 3 and all(value > 0 for value in threshold)
+
+
 @pytest.mark.parametrize("enabled", [True, False])
 def test_stopping_hands_collection_back_as_it_was(enabled):
     (gc.enable if enabled else gc.disable)()
