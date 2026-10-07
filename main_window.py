@@ -144,6 +144,7 @@ from recent_files import load_recent, add_recent, clear_recent
 
 from nostr.avatar_store import AvatarBatchLoader, AvatarStore
 from nostr.bech32 import encode_note
+from nostr import refs
 from nostr.blossom.errors import friendly_message
 from nostr.media_server_list import publish_server_list
 from nostr.outbox import writer as outbox_writer
@@ -1097,6 +1098,7 @@ class MainWindow(QMainWindow):
         ed.set_context_menu_filler(self._fill_editor_context_menu)
         ed.set_structure_check(lambda e=ed: self._editor_kind(e) == "rich")
         ed.set_local_formats_check(lambda e=ed: self._keeps_underline(e))
+        ed.set_paste_guard(lambda text, e=ed: self._guard_paste(e, text))
         ed.set_markdown_shortcuts_check(lambda: self.markdown_shortcuts)
         ed.set_slash_items(self._slash_items)
         ed.set_link_opener(self._open_link)
@@ -5775,6 +5777,9 @@ class MainWindow(QMainWindow):
         if not self._confirm_images_uploaded(ed):
             return
         content = self._publish_text(ed, "note").strip() if ed is not None else ""
+        if content and not self._no_secret_keys(ed, content):
+            return
+        content = self._publish_text(ed, "note").strip() if ed is not None else ""
         if not content:
             inform(self, title=_("Nothing to publish"),
                    message=_("The current document is empty."))
@@ -5797,6 +5802,60 @@ class MainWindow(QMainWindow):
         dialog.published.connect(self._on_nostr_note_published)
         dialog.exec()
 
+    # -- secret keys: never pasted where Nostr is written, never published ---
+
+    def _guard_paste(self, ed, text: str):
+        """A paste with a Nostr secret key in it, into prose while a Nostr
+        account is in use, is stopped with a warning (the key would be one
+        click from being published); the person may paste the link to the
+        key's owner instead. Plain text, code and other people's
+        documents without an account paste as they are."""
+        if (not refs.secret_keys_in(text) or not self.nostr_state.active
+                or not (self._editor_kind(ed) == "rich" or getattr(ed, "_markdown_source", False))):
+            return text
+        public = refs.without_secret_keys(text)
+        buttons = [Button(_("Don't Paste"), None, DEFAULT)]
+        if public is not None:
+            buttons.insert(0, Button(_("Paste Public Key"), public, NORMAL))
+        return ask(self, title=_("This is a secret key"), caution=True, buttons=buttons,
+                   message=_("Anyone who has it can publish as its owner and read their "
+                             "private messages, and once published it can never be taken "
+                             "back. MyEditor did not paste it. Keep it in a password "
+                             "manager or a signer app."))
+
+    def _no_secret_keys(self, ed, text: str) -> bool:
+        """Whether ``text`` may be published: never with a Nostr secret key
+        in it. The person may replace each one with the link to its owner,
+        in the document, and publish then; else nothing goes out."""
+        if not refs.secret_keys_in(text):
+            return True
+        public = refs.without_secret_keys(text)
+        if public is None:
+            inform(self, title=_("This text contains a secret key"), caution=True,
+                   message=_("Anyone who has it can publish as its owner, and once "
+                             "published it can never be taken back. Remove it before "
+                             "publishing."))
+            return False
+        choice = ask(self, title=_("This text contains a secret key"), caution=True,
+                     message=_("Anyone who has it can publish as its owner, and once "
+                               "published it can never be taken back. Replace it with the "
+                               "public key, which only says who it belongs to?"),
+                     buttons=(Button(_("Replace with Public Key"), True, NORMAL),
+                              Button(_("Cancel"), False, DEFAULT)))
+        if choice is not True:
+            return False
+        doc = ed.document()
+        step = QTextCursor(doc)
+        step.beginEditBlock()
+        for key in refs.secret_keys_in(doc.toPlainText()):
+            replacement = refs.public_reference_for(key) or ""
+            found = doc.find(key)
+            while not found.isNull():
+                found.insertText(replacement)
+                found = doc.find(key, found)
+        step.endEditBlock()
+        return True
+
     def _on_nostr_note_published(self, event_id_hex: str, results):
         accepted = sum(1 for _relay, ok, _message in results if ok)
         note_id = encode_note(event_id_hex) if event_id_hex else ""
@@ -5818,6 +5877,9 @@ class MainWindow(QMainWindow):
 
         ed = self.current_editor()
         if not self._confirm_images_uploaded(ed):
+            return
+        body = self._publish_text(ed, "markdown").rstrip() if ed is not None else ""
+        if body and not self._no_secret_keys(ed, body):
             return
         body = self._publish_text(ed, "markdown").rstrip() if ed is not None else ""
         if not body:

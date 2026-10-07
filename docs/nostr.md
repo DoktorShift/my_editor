@@ -66,6 +66,8 @@ Inside both publish dialogs there's a **Mentions** chip row. Clicking **+ add pe
 
 Picked profiles become inline pills and are emitted on publish as `["p", <pubkey>, <relay-hint>]` tags plus a `nostr:nprofile1…` URI appended to the body, so mention rendering works in every client. Inline `nostr:n…` URIs you paste yourself are also picked up and deduplicated automatically.
 
+A note or article that quotes another one (a `nostr:` link to a note or an article in its text) carries a `q` tag for each (NIP-18: the note's id, a relay hint and its author; the article's address), and a `p` tag for each quoted author, once, also when mentioned. A link inside code is text and quotes nothing.
+
 ### Relays and routing
 
 Relay choice follows the **NIP-65 outbox model**, decided in one place (`nostr/outbox`):
@@ -84,6 +86,7 @@ The publisher uses eager-first-accept semantics: as soon as one relay acknowledg
 
 - **With a signer, no private key in the editor.** All signing goes through NIP-46 over NIP-44 v2 encryption. Every `sign_event` call surfaces an approval prompt in your signer.
 - **An account kept on this computer** has its key in `~/.config/my_editor/nostr_keys.json` (`chmod 600`, folder `chmod 700`), separate from the profiles. It is never shown on screen, and Sign Out deletes it, after an alert that says what a missing backup costs. A damaged key file is set aside, never overwritten.
+- **No secret key goes out by mistake.** While a Nostr account is in use, a paste or drop of a Nostr secret key (`nsec1…`, or an encrypted `ncryptsec1…`) into a document is stopped with a warning; you may paste its public key instead (the link to the key's owner). Nothing is published with a secret key in it: MyEditor offers to replace each one with its public key in the document (one `Undo` takes that back), or, for an encrypted key, asks you to remove it. Plain-text and code files, and documents without an account, paste as they are.
 - **Connection spoof protection.** The `nostrconnect://` flow generates a one-time secret that the editor verifies against the signer's response before completing the handshake.
 - **Profile file permissions.** The on-disk profile store is restricted to the owner. The local channel keypair stored there only authorizes the existing bunker session; it cannot sign anything itself.
 

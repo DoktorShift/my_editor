@@ -109,6 +109,8 @@ class HtmlEditor(QTextEdit):
         self._holds_structure = lambda: True
         # Whether this document's file keeps underline and colors (HTML).
         self._keeps_local_formats = lambda: False
+        # What a paste may bring in (set_paste_guard); everything by default.
+        self._paste_guard = None
         # Whether typed Markdown turns into what it means
         # (markdown_shortcuts.py): the person's choice, off until made.
         self._markdown_shortcuts = lambda: False
@@ -907,6 +909,13 @@ class HtmlEditor(QTextEdit):
             self._close_slash()
             return True
         return False
+
+    def set_paste_guard(self, guard) -> None:
+        """Install ``guard(text) -> text, other text or None``, asked with
+        the words of every paste and drop: the same text pastes as it
+        came, other text is pasted in its place (as plain text), None
+        pastes nothing (a secret key, see MainWindow._guard_paste)."""
+        self._paste_guard = guard
 
     def set_local_formats_check(self, check) -> None:
         """Install ``check()``: whether this document's file keeps what
@@ -1782,6 +1791,14 @@ class HtmlEditor(QTextEdit):
           plain text in the style of the text where it goes."""
         if source is None:
             return
+        if self._paste_guard is not None:
+            words = paste.plain_text(source)
+            allowed = self._paste_guard(words) if words else words
+            if allowed is None:
+                return
+            if allowed != words:
+                self._insert_plain(allowed)
+                return
         cursor = self.textCursor()
         text = source.text() if source.hasText() else ""
         address = text.strip()

@@ -193,6 +193,33 @@ def quote_tags(references: Iterable[Reference],
     return q_tags + p_tags
 
 
+def public_reference_for(secret: str) -> Optional[str]:
+    """The ``nostr:`` link to the person a plain secret key belongs to, or
+    None (an encrypted key, a damaged one)."""
+    key = (secret or "").strip().lower()
+    if not key.startswith("nsec1"):
+        return None
+    try:
+        secret_hex = bech32.decode_nsec(key)
+        from .crypto import get_public_key
+        public = get_public_key(bytes.fromhex(secret_hex))
+    except (ValueError, TypeError):
+        return None
+    return "nostr:" + bech32.encode_npub(public.hex())
+
+
+def without_secret_keys(text: str) -> Optional[str]:
+    """``text`` with every plain secret key replaced by the link to its
+    person, or None when one cannot be (an encrypted key)."""
+    out = text
+    for key in secret_keys_in(text):
+        public = public_reference_for(key)
+        if public is None:
+            return None
+        out = out.replace(key, public)
+    return out
+
+
 def secret_keys_in(text: str) -> List[str]:
     """The Nostr secret keys written in ``text`` (plain or encrypted),
     each once, in order."""
