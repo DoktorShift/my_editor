@@ -395,8 +395,16 @@ class HtmlEditor(QTextEdit):
 
     def visible_range(self):
         """``(first, last)``: the document positions from the start of the
-        first paragraph on screen to the end of the last."""
+        first paragraph on screen to the end of the last.
+
+        Qt lays a long document out a part at a time, and until it has
+        finished, a position on screen can map to the wrong paragraph (the
+        top of a fresh 10,000-line document mapped to its 250th line), so
+        the layout is completed first. That costs nothing once it is done:
+        an edit only lays out what changed. (The status bar used to force
+        it by asking for the page count on every caret move.)"""
         viewport = self.viewport()
+        self.document().documentLayout().documentSize()
         top = self.cursorForPosition(QPoint(0, 0)).block()
         bottom = self.cursorForPosition(
             QPoint(viewport.width() - 1, viewport.height() - 1)).block()

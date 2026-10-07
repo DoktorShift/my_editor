@@ -572,7 +572,6 @@ class MainWindow(QMainWindow):
 
         self._build_actions()
         self._build_menu()
-        self._build_status_bar_view_toggle()
         self._build_findbar()
         self.nostr_state.changed.connect(self._on_nostr_in_use_changed)
 
@@ -661,6 +660,7 @@ class MainWindow(QMainWindow):
         menu_bg = DARK_MENU_BG if self.is_dark_theme else LIGHT_MENU_BG
         menu_fg = DARK_MENU_FG if self.is_dark_theme else LIGHT_MENU_FG
         border = DARK_BORDER if self.is_dark_theme else LIGHT_BORDER
+        muted = DARK_MUTED_FG if self.is_dark_theme else LIGHT_MUTED_FG
         # A dimmed menu item is still read (it says what a command needs, as
         # the Nostr menu's do without an account): dimmer than the rest, as
         # in the editor's context menu, not the border color it vanished in.
@@ -696,6 +696,11 @@ class MainWindow(QMainWindow):
                 border: 1px solid {border};
             }}
             QTabBar QToolButton:hover {{ background: {bg}; }}
+            QPushButton#TabClose {{
+                color: {muted}; background: transparent; border: none;
+                border-radius: 4px; font-size: 18px; padding: 0px;
+            }}
+            QPushButton#TabClose:hover {{ color: {fg}; background: {border}; }}
             QStatusBar {{
                 background: {menu_bg};
                 color: {menu_fg};
@@ -899,6 +904,8 @@ class MainWindow(QMainWindow):
         """
         ed = HtmlEditor()
         ed.document().contentsChanged.connect(self._update_tab_title)
+        # Saved or not, the window's title shows it (a Mac: the close button).
+        ed.document().modificationChanged.connect(self._update_window_title)
         ed.document().undoAvailable.connect(self._update_undo_redo_buttons)
         ed.document().redoAvailable.connect(self._update_undo_redo_buttons)
         ed.cursorPositionChanged.connect(self._update_status_bar)
@@ -962,9 +969,14 @@ class MainWindow(QMainWindow):
         ed = self.current_editor()
         if not ed:
             return
-        self.tabs.setTabText(self.tabs.currentIndex(), self._compose_tab_title(ed))
+        index = self.tabs.currentIndex()
+        self.tabs.setTabText(index, self._compose_tab_title(ed))
+        # Where the file is, for whoever wonders: on the tab, where it does
+        # not take room from the text.
+        self.tabs.setTabToolTip(index, getattr(ed, "_file_path", None) or "")
         # A screen reader announces the text area by its document's name.
         ed.setAccessibleName(self._document_name(ed))
+        self._update_window_title()
         self._update_status_bar()
 
     def _compose_tab_title(self, ed) -> str:
@@ -1009,38 +1021,53 @@ class MainWindow(QMainWindow):
         return _("Untitled")
 
     def _update_status_bar(self):
+        """The status bar's lasting part: the words (beside, see
+        _show_word_count) and, in code and plain text, where lines are
+        lines, the language and the line the caret is on. Its message
+        area is left to what just happened (saved, published): the file's
+        place is the tab's tooltip, and a PDF's page is in its own
+        toolbar, so neither is repeated here."""
         self._update_editor_commands()
-        viewer = self.current_pdf_viewer()
-        if viewer is not None:
-            self.status.showMessage(viewer._file_path)
-            self._line_label.setText(viewer.page_display())
-            self._words_label.setText("")
+        ed = self.current_editor()
+        if self.current_pdf_viewer() is not None or not ed:
+            self._line_label.setText("")
+            if not ed:
+                self._words_label.setText("")
             self._update_format_buttons()
             return
-        ed = self.current_editor()
-        if not ed:
-            self._line_label.setText("")
-            self._words_label.setText("")
-            return
-        path = getattr(ed, "_file_path", None)
-        file_info = path if path else _("(Untitled)")
-        lang = getattr(ed, "_language", None)
-        lang_label = LANGUAGE_DISPLAY_NAMES.get(lang, '') if lang else ''
-        current_line = ed.textCursor().blockNumber() + 1
-        total_lines = ed.document().blockCount()
-        parts = [file_info]
-        if lang_label:
-            parts.append(lang_label)
-        page_count = ed.document().pageCount()
-        if page_count > 1:
-            parts.append(_("Page {count}").format(count=page_count))
-        self.status.showMessage(" | ".join(parts))
-        self._line_label.setText(
-            _("Ln {line} / {total}").format(line=current_line, total=total_lines))
+        parts = []
+        if self._editor_kind(ed) == "source":
+            lang = getattr(ed, "_language", None)
+            if lang and LANGUAGE_DISPLAY_NAMES.get(lang):
+                parts.append(LANGUAGE_DISPLAY_NAMES[lang])
+            parts.append(_("Ln {line} / {total}").format(
+                line=ed.textCursor().blockNumber() + 1, total=ed.document().blockCount()))
+        self._line_label.setText(" \u00b7 ".join(parts))
         self._schedule_format_buttons()
 
-    def _update_window_title(self, *_):
-        self.setWindowTitle("")
+    def _update_window_title(self, *_args):
+        """The document in front names the window, as in every document
+        app: the title bar, the Window and Dock menus on a Mac, the
+        taskbar and Alt+Tab elsewhere, and what a screen reader says
+        when the window comes to the front. Windows and Linux add the
+        app's name after it; a Mac shows unsaved changes in the close
+        button ([*] is Qt's placeholder for them)."""
+        ed = self.current_editor()
+        viewer = self.current_pdf_viewer()
+        if ed is not None:
+            name, modified = self._document_name(ed), ed.document().isModified()
+        elif viewer is not None:
+            name, modified = os.path.basename(viewer._file_path), False
+        else:
+            self.setWindowModified(False)
+            self.setWindowTitle(APP_DISPLAY_NAME)
+            return
+        if sys.platform == "darwin":
+            self.setWindowTitle(f"{name}[*]")
+        else:
+            self.setWindowTitle(_("{document}[*] - {app}").format(document=name,
+                                                                   app=APP_DISPLAY_NAME))
+        self.setWindowModified(modified)
 
     def _on_tab_changed(self, index=None):
         self._update_window_title()
@@ -1784,17 +1811,6 @@ class MainWindow(QMainWindow):
         help_menu.addSeparator()
         help_menu.addAction(self.act_about)
 
-    def _build_status_bar_view_toggle(self):
-        """Quick status-bar toggle for Paper Mode, mirroring the View menu item."""
-        self._paper_btn = QToolButton()
-        self._paper_btn.setText(_("Paper"))
-        self._paper_btn.setToolTip(_("Toggle Paper Mode"))
-        self._paper_btn.setCheckable(True)
-        self._paper_btn.setChecked(self.paper_mode)
-        self._paper_btn.setAutoRaise(True)
-        self._paper_btn.toggled.connect(self._toggle_paper_mode)
-        self.status.addPermanentWidget(self._paper_btn)
-
     def _populate_recent_menu(self):
         self.m_recent.clear()
         self.m_recent.setToolTipsVisible(True)
@@ -2182,26 +2198,14 @@ class MainWindow(QMainWindow):
         self._update_window_title()
 
     def _attach_close_button(self, idx: int, container: QWidget):
+        # Closing a tab is not destructive (unsaved changes are asked
+        # about), so the button is the tab's own quiet color, not red; the
+        # window's stylesheet (TabClose) gives it its colors per theme.
         close_btn = QPushButton("×")
+        close_btn.setObjectName("TabClose")
         close_btn.setFixedSize(24, 24)
-        close_btn.setStyleSheet("""
-            QPushButton {
-                color: #A84444;
-                background: transparent;
-                border: none;
-                border-radius: 4px;
-                font-size: 18px;
-                padding: 0px;
-            }
-            QPushButton:hover {
-                color: #D06060;
-                background: rgba(168, 68, 68, 0.15);
-            }
-            QPushButton:pressed {
-                background: rgba(168, 68, 68, 0.30);
-            }
-        """)
-        close_btn.setToolTip(_("Close tab"))
+        close_btn.setToolTip(_("Close Tab"))
+        close_btn.setAccessibleName(_("Close Tab"))
         close_btn.clicked.connect(lambda: self.close_tab(self.tabs.indexOf(container)))
         self.tabs.tabBar().setTabButton(idx, QTabBar.RightSide, close_btn)
 
@@ -2549,7 +2553,7 @@ class MainWindow(QMainWindow):
         viewer.page_changed.connect(self._on_pdf_page_changed)
 
         idx = self.tabs.addTab(viewer, os.path.basename(path))
-        self.tabs.setTabToolTip(idx, viewer.document_title())
+        self.tabs.setTabToolTip(idx, path)
         self.tabs.setCurrentIndex(idx)
         self._attach_close_button(idx, viewer)
         # Watch the file so a regenerated PDF (LaTeX build, re-export)
@@ -4452,10 +4456,6 @@ class MainWindow(QMainWindow):
             self.act_paper_mode.blockSignals(True)
             self.act_paper_mode.setChecked(on)
             self.act_paper_mode.blockSignals(False)
-        if hasattr(self, "_paper_btn") and self._paper_btn.isChecked() != on:
-            self._paper_btn.blockSignals(True)
-            self._paper_btn.setChecked(on)
-            self._paper_btn.blockSignals(False)
         for i in range(self.tabs.count()):
             ed = self._editor_from_widget(self.tabs.widget(i))
             if ed:
