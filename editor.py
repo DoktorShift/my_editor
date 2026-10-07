@@ -1620,13 +1620,13 @@ class HtmlEditor(QTextEdit):
 
     def _code_key(self, e, cursor, block) -> bool:
         """The keys of a code block. Tab indents by four spaces and
-        Shift+Tab outdents; Return starts the next line with the same
-        indent, and on an empty last line (spaces only count as empty: the
-        indent Return carried over) leaves the block, the line becoming an
-        empty Body paragraph; Command-Return (Ctrl+Return) leaves it from
-        anywhere, as in a table, and Down on the document's last line and
-        Backspace at the start of a block leave it too. True when the key
-        was handled."""
+        Shift+Tab outdents; Return (and Shift+Return) always starts the
+        next line, as far in as the caret's line, so blank lines between
+        functions stay code (ProseMirror's base keymap, as in Notion and
+        Google Docs). The ways out: Command-Return (Ctrl+Return) from any
+        line, as in a table, Down on the document's last line, Backspace
+        at the start of the block, or Body from the Style pop-up. True when
+        the key was handled."""
         key = e.key()
         plain = e.modifiers() in (Qt.NoModifier, Qt.KeypadModifier)
         shift = e.modifiers() == Qt.ShiftModifier
@@ -1648,24 +1648,12 @@ class HtmlEditor(QTextEdit):
         if cursor.hasSelection():
             return False
         _first, last = rich_text.code_run(block)
-        if key in (Qt.Key_Return, Qt.Key_Enter) and plain:
-            if not block.text().strip(" \t") and block == last:
-                cursor.beginEditBlock()
-                if block.text():
-                    spaces = QTextCursor(block)
-                    spaces.movePosition(QTextCursor.MoveOperation.EndOfBlock,
-                                        QTextCursor.MoveMode.KeepAnchor)
-                    spaces.removeSelectedText()
-                rich_text.leave_code(block)
-                cursor.endEditBlock()
-                cursor.setPosition(block.position())
-                self.setTextCursor(cursor)
-                self.setCurrentCharFormat(QTextCharFormat())
-                return True
-            # The new line starts as far in as the one it came from (no
-            # further than where the caret was).
-            text = block.text()
-            indent = text[:len(text) - len(text.lstrip(" \t"))][:cursor.positionInBlock()]
+        if key in (Qt.Key_Return, Qt.Key_Enter) and (plain or shift):
+            # The new line starts as far in as the caret's line (after any
+            # line break in the block), no further than the caret.
+            before = block.text()[:cursor.positionInBlock()]
+            line = before[before.rfind(LINE_BREAK) + 1:]
+            indent = line[:len(line) - len(line.lstrip(" \t"))]
             cursor.beginEditBlock()
             cursor.insertBlock()
             if indent:
@@ -1680,6 +1668,17 @@ class HtmlEditor(QTextEdit):
             cursor.endEditBlock()
             self.setTextCursor(cursor)
             self.setCurrentCharFormat(QTextCharFormat())
+            return True
+        column = cursor.positionInBlock()
+        lead = len(block.text()) - len(block.text().lstrip(" "))
+        if key == Qt.Key_Backspace and plain and 0 < column <= lead:
+            # In the indent, back to the last stop of four, as Tab went.
+            cursor.beginEditBlock()
+            cursor.setPosition(block.position() + (column - 1) // self.CODE_INDENT
+                               * self.CODE_INDENT, QTextCursor.MoveMode.KeepAnchor)
+            cursor.removeSelectedText()
+            cursor.endEditBlock()
+            self.setTextCursor(cursor)
             return True
         if key == Qt.Key_Backspace and plain and cursor.atBlockStart() and block == _first:
             cursor.beginEditBlock()

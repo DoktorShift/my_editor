@@ -50,9 +50,9 @@ The keys follow each platform's own conventions: Apple Notes and Pages on macOS,
 
 **Code blocks.** A code block holds code as it is: set in the monospace font on a tinted box, its lines never wrapped into each other. Make one with `Insert > Code Block`, with `/code` in the slash menu, or by typing ```` ``` ```` and the language (```` ```python ````) and then `Return`. The Style pop-up shows its language ("Code: Python"). Code in a language MyEditor knows (Python, JavaScript, TypeScript, HTML, CSS, JSON, Shell, C, C++, Rust, Go, Java, YAML, TOML and SQL) is colored in the colors code files get, whatever name the block gives it (`py`, `sh`, `c++`). Inside a block:
 
-- `Tab` indents by four spaces and `Shift+Tab` takes up to four away, on every line selected;
-- `Return` starts the next line as far in as the one before;
-- `Return` on an empty last line (one with only the indent `Return` gave it counts as empty), `Cmd+Return` on macOS or `Ctrl+Return` on Windows and Linux from any line, `Down` on the last line of the document, or `Backspace` at the start of the block takes you out of it, onto a Body paragraph; choosing Body in the Style pop-up makes a line text again. (`Shift+Return` gives an empty line inside the block.)
+- `Tab` indents by four spaces and `Shift+Tab` takes up to four away, on every line selected; `Backspace` in the indent goes back four;
+- `Return` always starts the next line, as far in as the one before, so blank lines between functions stay in the block (blank lines after the code are not saved);
+- `Cmd+Return` on macOS or `Ctrl+Return` on Windows and Linux, from any line, `Down` on the last line of the document, or `Backspace` at the start of the block takes you out of it, onto a Body paragraph; choosing Body in the Style pop-up makes a line text again.
 
 Words in code have no styles, so Bold, Italic, Inline Code and links are dimmed there, and a paste is plain text. Markdown writes the block fenced, with its language, as Nostr readers expect it.
 

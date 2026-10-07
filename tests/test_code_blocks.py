@@ -168,17 +168,33 @@ def test_tab_on_several_lines_indents_each_as_one_step():
     assert document_to_markdown(ed.document()).startswith("```\n    one\n    two\n```")
 
 
-def test_return_on_the_empty_last_line_leaves_the_block():
+def test_return_always_adds_a_line_so_blank_lines_stay_code():
+    # Review M3 (CP3): a blank line between two functions ended the block.
+    ed = HtmlEditor()
+    ed.make_code_block("python")
+    type_text(ed, "def a():\n    return 1\n")
+    press(ed, Qt.Key.Key_Backspace)          # the carried indent, to the last stop of four
+    type_text(ed, "\ndef b():\n    return 2")
+    assert assert_round_trip(ed.document()) == (
+        "```python\ndef a():\n    return 1\n\ndef b():\n    return 2\n```\n")
+
+
+def test_blank_lines_after_the_code_are_not_saved():
     ed = editor("```sh\nls\n```\n", caret_after="ls")
-    type_text(ed, "\n\nafter")
-    assert assert_round_trip(ed.document()) == "```sh\nls\n```\n\nafter\n"
+    type_text(ed, "\n\n")
+    assert rich_text.is_code_block(ed.textCursor().block())        # still in the block
+    assert assert_round_trip(ed.document()) == "```sh\nls\n```\n"
 
 
-def test_return_on_a_last_line_of_only_the_carried_indent_leaves_the_block():
-    # Return copies the indent, so the "empty" last line holds spaces.
-    ed = editor("```python\ndef f():\n    pass\n```\n", caret_after="pass")
-    type_text(ed, "\n\nafter")
-    assert assert_round_trip(ed.document()) == "```python\ndef f():\n    pass\n```\n\nafter\n"
+def test_return_takes_the_indent_of_the_caret_s_line():
+    # Review L6 (CP3): a block line holding a line break took the indent
+    # of its first line.
+    ed = editor("```python\nx\n```\n", caret_after="x")
+    cursor = ed.textCursor()
+    cursor.insertText("\u2028        y")
+    ed.setTextCursor(cursor)
+    type_text(ed, "\nz")
+    assert ed.textCursor().block().text() == "        z"
 
 
 def test_command_return_leaves_the_block_from_any_line():
@@ -187,7 +203,7 @@ def test_command_return_leaves_the_block_from_any_line():
     type_text(ed, "between")
     assert assert_round_trip(ed.document()) == "```sh\nls\npwd\n```\n\nbetween\n\nlast\n"
 
-def test_shift_return_gives_an_empty_line_inside_the_block():
+def test_shift_return_adds_a_line_as_return_does():
     ed = editor("```\na\n```\n", caret_after="a")
     press(ed, Qt.Key.Key_Return, Qt.KeyboardModifier.ShiftModifier)
     press(ed, Qt.Key.Key_Return, Qt.KeyboardModifier.ShiftModifier)

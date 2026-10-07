@@ -567,10 +567,15 @@ def _block_markdown(block: _Block) -> str:
     if block.kind == "rule":
         return "---"
     if block.kind == "code":
+        # Blank lines after the code are nothing to keep.
+        lines = block.code_text.split("\n")
+        while len(lines) > 1 and not lines[-1].strip():
+            lines.pop()
+        code_text = "\n".join(lines)
         fence = "```"
-        while fence in block.code_text:
+        while fence in code_text:
             fence += "`"
-        return f"{fence}{block.language}\n{block.code_text}\n{fence}"
+        return f"{fence}{block.language}\n{code_text}\n{fence}"
     if block.kind == "table":
         return _table_markdown(block)
     if block.kind == "quote":
