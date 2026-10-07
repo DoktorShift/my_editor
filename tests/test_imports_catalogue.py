@@ -10,6 +10,7 @@ When no relay answers, the answer is "unavailable", never "nothing".
 from __future__ import annotations
 
 from nostr import events
+from nostr.deletion import build_deletion
 from nostr.draft_deletions import build_deletion_request
 from nostr.draft_store import DraftStore
 from nostr.drafts import DraftWrapMeta
@@ -21,9 +22,9 @@ from tests.outbox_fakes import (
 D1, D2, D3, D4 = "rss-1", "rss-2", "rss-3", "rss-4"
 
 
-def signed(kind, d_tag, content="x", sk=SK):
+def signed(kind, d_tag, content="x", sk=SK, created_at=100):
     return events.sign_event({"kind": kind, "content": content, "tags": [["d", d_tag]],
-                              "created_at": 100}, sk)
+                              "created_at": created_at}, sk)
 
 
 class FakeQuery:
@@ -182,3 +183,28 @@ def test_the_relay_query_says_which_relays_answered():
     assert out == []
     sub.answer("wss://b.example", article, {"id": "forged", "kind": 30023})
     assert out == [([article], {"wss://b.example"})]
+
+
+def test_a_deletion_newer_than_the_draft_reports_removed():
+    """Review L2: rnostr and nostr-rs-relay keep a draft an address request
+    deleted, and the catalogue said "drafted" for a draft that is gone.
+    An article the request covers, found in the outbox, is removed too."""
+    draft_deleted = events.sign_event(build_deletion_request(
+        pubkey_hex=PK, identifier=D1, created_at=200), SK)
+    article_deleted = events.sign_event(build_deletion(
+        PK, addresses=[f"30023:{PK}:{D2}"], kinds=[30023], created_at=200), SK)
+    query = FakeQuery([signed(31234, D1), draft_deleted, signed(30023, D2), article_deleted])
+    out = look_up(catalogue(query), [D1, D2])
+    assert out["found"] == {D1: "removed", D2: "removed"}
+
+
+def test_a_version_newer_than_the_deletion_counts_as_what_it_is():
+    deletion = events.sign_event(build_deletion_request(
+        pubkey_hex=PK, identifier=D1, created_at=200), SK)
+    # The same second is covered (NIP-09: up to the request's time).
+    same_second = look_up(catalogue(FakeQuery([signed(31234, D1, created_at=200),
+                                               deletion])), [D1])
+    assert same_second["found"] == {D1: "removed"}
+    later = look_up(catalogue(FakeQuery([signed(31234, D1, created_at=100), deletion,
+                                         signed(31234, D1, created_at=300)])), [D1])
+    assert later["found"] == {D1: "drafted"}

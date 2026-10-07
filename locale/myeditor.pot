@@ -3693,7 +3693,7 @@ msgstr ""
 msgid "about {amount}"
 msgstr ""
 
-#: nostr/imports/catalogue.py:58
+#: nostr/imports/catalogue.py:64
 msgid "Couldn't check your existing drafts. Try again when you're online."
 msgstr ""
 
@@ -3779,7 +3779,7 @@ msgid "Couldn't reach that URL: {reason}."
 msgstr ""
 
 #: nostr/imports/errors.py:144
-#: nostr/imports/fetch.py:201
+#: nostr/imports/fetch.py:206
 #: nostr/ui/thumbnail_loader.py:272
 msgid "network error"
 msgstr ""
@@ -3797,17 +3797,21 @@ msgstr ""
 msgid "Image was empty"
 msgstr ""
 
+#: nostr/imports/fetch.py:67
+msgid "Image address could not be found"
+msgstr ""
+
 #: nostr/imports/fetch.py:54
 #, python-brace-format
 msgid "Feed exceeds the {size} MiB size limit"
 msgstr ""
 
-#: nostr/imports/fetch.py:106
-#: nostr/imports/fetch.py:131
+#: nostr/imports/fetch.py:107
+#: nostr/imports/fetch.py:134
 msgid "Feed URL must be http(s)"
 msgstr ""
 
-#: nostr/imports/fetch.py:337
+#: nostr/imports/fetch.py:343
 msgid "Could not download the image"
 msgstr ""
 
@@ -3851,6 +3855,10 @@ msgstr ""
 
 #: nostr/imports/jobs.py:66
 msgid "The draft couldn't be saved yet. Try again to send it."
+msgstr ""
+
+#: nostr/imports/netguard.py:53
+msgid "the address could not be found"
 msgstr ""
 
 #: nostr/imports/pipeline.py:299

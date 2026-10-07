@@ -29,6 +29,12 @@ relays drafts are written to answered it (a fallback relay that has
 nothing proves nothing), and when any request goes unanswered the
 answer is "unavailable", never "nothing found", and an import does not
 start. An event counts only when the account signed it.
+
+What was found is judged once every request is answered: a draft or an
+article a deletion request covers (nostr/deletion.py: a version no newer
+than the request) counts as removed, though a relay that ignores the
+request still hands it out; a version newer than the request counts as
+what it is.
 """
 
 from __future__ import annotations
@@ -40,7 +46,7 @@ from PySide6.QtCore import QObject
 
 from i18n import _
 
-from ..deletion import DELETION_KIND, read_deletion
+from ..deletion import DELETION_KIND, DeletionRequest, read_deletion
 from ..drafts import DRAFT_WRAP_KIND
 from ..events import verify_event
 from ..outbox import ask_draft_relays
@@ -114,6 +120,7 @@ class ExistingCatalogue(QObject):
             return
         pubkey = profile.user_pubkey.lower()
         pending = {"sets": 2, "failed": False}
+        evidence = _Evidence(pubkey, set(tags))
 
         def _set_done(ok: bool) -> None:
             if pending["failed"]:
@@ -124,6 +131,9 @@ class ExistingCatalogue(QObject):
                 return
             pending["sets"] -= 1
             if pending["sets"] == 0:
+                # Judged together: a deletion asked of the drafts' relays
+                # covers an article found in the outbox too.
+                evidence.judge(found)
                 on_ready(found)
 
         chunks = [tags[i:i + CHUNK] for i in range(0, len(tags), CHUNK)]
@@ -140,14 +150,14 @@ class ExistingCatalogue(QObject):
             # fallback ones); an answer counts only from the own ones.
             ask_draft_relays(self._relay_directory, profile,
                              lambda read: self._ask_chunks(
-                                 read, [_private_filters(c) for c in chunks], pubkey, found,
-                                 set(tags), _set_done, counted=own),
+                                 read, [_private_filters(c) for c in chunks], evidence,
+                                 _set_done, counted=own),
                              entitled=self._entitled_relays, reading=True)
 
         def _outbox(relays: List[str]) -> None:
             self._ask_chunks(relays, [[{"kinds": [ARTICLE_KIND], "authors": [pubkey],
                                         "#d": chunk}] for chunk in chunks],
-                             pubkey, found, set(tags), _set_done)
+                             evidence, _set_done)
 
         ask_draft_relays(self._relay_directory, profile, _private,
                          entitled=self._entitled_relays, reading=False)
@@ -169,8 +179,8 @@ class ExistingCatalogue(QObject):
             for d_tag, state in self._ledger(tags).items():
                 found.add(d_tag, state)
 
-    def _ask_chunks(self, relays, requests: List[List[dict]], pubkey: str,
-                    found: Existing, wanted: set, done: Callable[[bool], None], *,
+    def _ask_chunks(self, relays, requests: List[List[dict]], evidence: "_Evidence",
+                    done: Callable[[bool], None], *,
                     counted: Optional[Iterable[str]] = None) -> None:
         """Ask ``requests`` one after the other; ``done(True)`` when every
         one was answered (by one of ``counted``, when given), else
@@ -192,7 +202,7 @@ class ExistingCatalogue(QObject):
                 done(False)
                 return
             for event in events:
-                _record(event, pubkey, found, wanted)
+                evidence.add(event)
             if queue:
                 _next()
             else:
@@ -208,28 +218,48 @@ class ExistingCatalogue(QObject):
                      timeout_ms=QUERY_TIMEOUT_MS, parent=self)
 
 
-def _record(event: dict, pubkey: str, found: Existing, wanted: set) -> None:
-    if not isinstance(event, dict) or str(event.get("pubkey", "")).lower() != pubkey:
-        return
-    kind = event.get("kind")
-    if kind == DELETION_KIND:
-        # A deleted draft or article is named by its address.
-        request = read_deletion(event, pubkey)
-        if request is not None:
+class _Evidence:
+    """The account's events found for the identifiers looked up, judged
+    once every request is answered (review L2: a deletion newer than the
+    draft gave "drafted" while any relay kept the draft)."""
+
+    def __init__(self, pubkey: str, wanted: Set[str]) -> None:
+        self._pubkey = pubkey
+        self._wanted = wanted
+        self._requests: List[DeletionRequest] = []
+        self._versions: List[tuple] = []        # (d, state, event)
+
+    def add(self, event: dict) -> None:
+        if not isinstance(event, dict) or str(event.get("pubkey", "")).lower() != self._pubkey:
+            return
+        kind = event.get("kind")
+        if kind == DELETION_KIND:
+            request = read_deletion(event, self._pubkey)
+            if request is not None:
+                self._requests.append(request)
+            return
+        if not verify_event(event):
+            return
+        d_tag = next((t[1] for t in event.get("tags", [])
+                      if isinstance(t, list) and len(t) >= 2 and t[0] == "d"), "")
+        if d_tag not in self._wanted:
+            return
+        if kind == ARTICLE_KIND:
+            self._versions.append((d_tag, PUBLISHED, event))
+        elif kind == DRAFT_WRAP_KIND:
+            self._versions.append((d_tag, DRAFTED if str(event.get("content") or "")
+                                   else REMOVED, event))
+        elif kind == ARTICLE_DRAFT_KIND:
+            self._versions.append((d_tag, DRAFTED, event))
+
+    def judge(self, found: Existing) -> None:
+        # A deleted draft or article is named by its address: removed,
+        # unless a version newer than the request says otherwise.
+        for request in self._requests:
             for d_tag in (request.identifiers(DRAFT_WRAP_KIND)
                           + request.identifiers(ARTICLE_KIND)):
-                if d_tag in wanted:
+                if d_tag in self._wanted:
                     found.add(d_tag, REMOVED)
-        return
-    if not verify_event(event):
-        return
-    d_tag = next((t[1] for t in event.get("tags", [])
-                  if isinstance(t, list) and len(t) >= 2 and t[0] == "d"), "")
-    if d_tag not in wanted:
-        return
-    if kind == ARTICLE_KIND:
-        found.add(d_tag, PUBLISHED)
-    elif kind == DRAFT_WRAP_KIND:
-        found.add(d_tag, DRAFTED if str(event.get("content") or "") else REMOVED)
-    elif kind == ARTICLE_DRAFT_KIND:
-        found.add(d_tag, DRAFTED)
+        for d_tag, state, event in self._versions:
+            covered = any(request.covers(event) for request in self._requests)
+            found.add(d_tag, REMOVED if covered else state)

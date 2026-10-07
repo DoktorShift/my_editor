@@ -11,7 +11,6 @@ seconds at most, before the signer and the relay sockets close.
 
 from __future__ import annotations
 
-import inspect
 import tempfile
 
 from PySide6.QtCore import QTimer
@@ -72,41 +71,51 @@ def test_nothing_to_send_means_no_wait():
     assert not store.is_busy
 
 
-def test_quitting_waits_before_closing_the_signer():
-    source = inspect.getsource(MainWindow.closeEvent)
-    assert source.index("imports.flush()") < source.index("wait_until_settled")
-    assert source.index("wait_until_settled") < source.index("_session_pool.close_all()")
+def closing_host(monkeypatch, order):
+    """A stand-in for the main window with what closeEvent touches;
+    ``order`` records the steps that matter for the list of sources."""
+    import types
+    from PySide6.QtWidgets import QMainWindow, QStatusBar, QTabWidget
+    import main_window
+    monkeypatch.setattr(main_window.workspace, "discard_workspace", lambda: None)
+    host = QMainWindow()
+
+    class Subscriptions:
+        is_busy = True
+
+        def wait_until_settled(self, ms):
+            order.append(("wait", host.isEnabled(), host.status.currentMessage()))
+            return True
+
+    host._imports = types.SimpleNamespace(flush=lambda: order.append("flush"),
+                                          subscriptions=Subscriptions())
+    host._resolve_unsaved_before_closing = lambda: True
+    host._asset_manager = types.SimpleNamespace(flush=lambda: None)
+    host._save_session = lambda: None
+    host.tabs = QTabWidget()
+    host.status = QStatusBar()
+    host._session_pool = types.SimpleNamespace(
+        close_all=lambda: order.append("signer closed"))
+    host._relay_pool = types.SimpleNamespace(close_all=lambda: order.append("relays closed"))
+    return host
+
+
+def test_quitting_waits_before_closing_the_signer(monkeypatch):
+    """The list is sent, quitting waits for it, and only then the signer
+    goes (review L16: this used to read closeEvent's source)."""
+    from PySide6.QtGui import QCloseEvent
+    order = []
+    MainWindow.closeEvent(closing_host(monkeypatch, order), QCloseEvent())
+    steps = [step if isinstance(step, str) else step[0] for step in order]
+    assert steps.index("flush") < steps.index("wait") < steps.index("signer closed")
 
 
 def test_nothing_can_be_typed_while_quitting_waits(monkeypatch):
     """Engine review M2: while quitting waited for the list of sources,
     the window stayed editable and what was typed then was lost without
     a word. It takes no more input while it waits."""
-    import types
     from PySide6.QtGui import QCloseEvent
-    from PySide6.QtWidgets import QMainWindow, QStatusBar, QTabWidget
-    import main_window
-    from main_window import MainWindow
-    monkeypatch.setattr(main_window.workspace, "discard_workspace", lambda: None)
-    host = QMainWindow()
-    seen = {}
-
-    class Subscriptions:
-        is_busy = True
-
-        def wait_until_settled(self, ms):
-            seen["enabled while waiting"] = host.isEnabled()
-            seen["status"] = host.status.currentMessage()
-            return True
-
-    host._imports = types.SimpleNamespace(flush=lambda: None, subscriptions=Subscriptions())
-    host._resolve_unsaved_before_closing = lambda: True
-    host._asset_manager = types.SimpleNamespace(flush=lambda: None)
-    host._save_session = lambda: None
-    host.tabs = QTabWidget()
-    host.status = QStatusBar()
-    host._session_pool = types.SimpleNamespace(close_all=lambda: None)
-    host._relay_pool = types.SimpleNamespace(close_all=lambda: None)
-    MainWindow.closeEvent(host, QCloseEvent())
-    assert seen == {"enabled while waiting": False,
-                    "status": "Saving your list of sources\u2026"}
+    order = []
+    MainWindow.closeEvent(closing_host(monkeypatch, order), QCloseEvent())
+    waits = [step for step in order if isinstance(step, tuple)]
+    assert waits == [("wait", False, "Saving your list of sources\u2026")]

@@ -312,7 +312,8 @@ class DraftStore(QObject):
         A deletion removes only what it is newer than: a relay that lags
         behind can hand out a deletion older than a draft written since.
         A request deletes every version up to its time, the same second
-        included (NIP-09: engine review L1); a blanked wrap replaces only
+        included (NIP-09, the rule of DeletionRequest.covers in
+        nostr/deletion.py; engine review L1); a blanked wrap replaces only
         what it supersedes (NIP-01). Its time is remembered, so a copy the
         deletion replaced, still held by another relay, does not bring the
         draft back.
