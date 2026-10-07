@@ -152,7 +152,7 @@ def test_upload_without_a_profile_never_touches_the_network(tmp_path):
     ctx.store.upload_bytes(BODY, name="a.png")
     assert ctx.nam.calls == []
     assert ctx.pool.calls == 0
-    assert ctx.failures == [("a.png", "Connect a Nostr signer first.")]
+    assert ctx.failures == [("a.png", "Connect your signer app first.")]
 
 
 def test_an_empty_body_is_refused(tmp_path):
@@ -170,7 +170,7 @@ def test_a_signer_refusal_keeps_its_exact_wording(tmp_path):
     ctx.probe()
     assert ctx.verbs() == ["head"]        # refused before the PUT
     assert ctx.failures[0][1] == (
-        "signer rejected the Blossom auth event: user declined"
+        "Your signer app didn’t sign the request: user declined"
     )
     assert ctx.failure_codes == [("a.png", ERROR_CODES.SIGNER_REJECTED)]
 

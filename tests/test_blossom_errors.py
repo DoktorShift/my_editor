@@ -136,8 +136,8 @@ def test_format_err_uses_the_code_and_carries_the_detail():
 
 
 @pytest.mark.parametrize("reason", [
-    "signer rejected the Blossom auth event: user declined",
-    "Connect a Nostr signer first.",
+    "Your signer app didn’t sign the request: user declined",
+    "Connect your signer app first.",
 ])
 def test_signer_strings_pass_through_byte_identical(reason):
     """The asset manager still classifies signer failures by prefix.
