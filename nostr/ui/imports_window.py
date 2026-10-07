@@ -921,16 +921,20 @@ class ImportsWindow(QMainWindow):
                 return
             dialog = ImageReviewDialog(images, self._skip_images, parent=self,
                                        image_source=self._controller.images)
-
-            def done(result: int) -> None:
-                if result == ImageReviewDialog.DialogCode.Accepted:
-                    self._skip_images = dialog.skip_urls()
-                dialog.deleteLater()
-
-            dialog.finished.connect(done)
+            dialog.finished.connect(self._on_review_finished)
             dialog.open()
 
         self._controller.images_of(chosen, on_ready=ready)
+
+    def _on_review_finished(self, result: int) -> None:
+        # A bound slot: a closure over this window on its dialog would
+        # keep the window alive while the dialog is open.
+        dialog = self.sender()
+        if dialog is None:
+            return
+        if result == ImageReviewDialog.DialogCode.Accepted:
+            self._skip_images = dialog.skip_urls()
+        dialog.deleteLater()
 
     def create_drafts(self) -> None:
         """Create N Drafts: an import of the targets, as private drafts."""
