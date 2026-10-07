@@ -537,7 +537,7 @@ msgstr ""
 #: main_window.py:1267
 #: main_window.py:249
 #: nostr/ui/draft_relays_sheet.py:299
-#: nostr/ui/profile_window.py:250
+#: nostr/ui/profile_window.py:254
 #: nostr/ui/save_destination_dialog.py:225
 #: nostr/ui/save_destination_dialog.py:306
 msgid "Save"
@@ -2441,7 +2441,7 @@ msgstr ""
 #: nostr/ui/drafts_panel.py:1108
 #: nostr/ui/imports_activity.py:288
 #: nostr/ui/imports_window.py:1092
-#: nostr/ui/profile_window.py:331
+#: nostr/ui/profile_window.py:335
 #: nostr/ui/publish_article_dialog.py:914
 msgid "Try Again"
 msgstr ""
@@ -4534,6 +4534,7 @@ msgid "Your name"
 msgstr ""
 
 #: nostr/ui/account_windows.py:571
+#: nostr/ui/profile_window.py:67
 msgid "Name:"
 msgstr ""
 
@@ -6823,7 +6824,7 @@ msgid "One moment."
 msgstr ""
 
 #: nostr/ui/membership_window.py:82
-#: nostr/ui/profile_window.py:293
+#: nostr/ui/profile_window.py:297
 msgid "Your signer app may ask you to approve."
 msgstr ""
 
@@ -6868,6 +6869,7 @@ msgid "Optional. Lowercase letters, digits, - and _."
 msgstr ""
 
 #: nostr/ui/membership_window.py:453
+#: nostr/ui/profile_window.py:74
 msgid "Nostr address:"
 msgstr ""
 
@@ -7244,127 +7246,119 @@ msgstr ""
 msgid "Account"
 msgstr ""
 
-#: nostr/ui/profile_window.py:65
-msgid "Name"
-msgstr ""
-
-#: nostr/ui/profile_window.py:65
+#: nostr/ui/profile_window.py:67
 msgid "The name people see"
 msgstr ""
 
-#: nostr/ui/profile_window.py:66
-msgid "Username"
+#: nostr/ui/profile_window.py:68
+msgid "Username:"
 msgstr ""
 
-#: nostr/ui/profile_window.py:66
+#: nostr/ui/profile_window.py:68
 msgid "A short name, without spaces"
 msgstr ""
 
-#: nostr/ui/profile_window.py:67
-msgid "About"
-msgstr ""
-
-#: nostr/ui/profile_window.py:68
-msgid "Picture"
-msgstr ""
-
-#: nostr/ui/profile_window.py:68
-msgid "Address of an image, https://…"
-msgstr ""
-
 #: nostr/ui/profile_window.py:69
-msgid "Banner"
-msgstr ""
-
-#: nostr/ui/profile_window.py:69
-msgid "Address of a wide image, https://…"
+msgid "About:"
 msgstr ""
 
 #: nostr/ui/profile_window.py:70
-msgid "Website"
+msgid "Picture:"
+msgstr ""
+
+#: nostr/ui/profile_window.py:70
+msgid "Address of an image, https://…"
 msgstr ""
 
 #: nostr/ui/profile_window.py:71
-msgid "Lightning Address"
+msgid "Banner:"
 msgstr ""
 
 #: nostr/ui/profile_window.py:71
+msgid "Address of a wide image, https://…"
+msgstr ""
+
+#: nostr/ui/profile_window.py:72
+msgid "Website:"
+msgstr ""
+
+#: nostr/ui/profile_window.py:73
+msgid "Lightning address:"
+msgstr ""
+
+#: nostr/ui/profile_window.py:73
 msgid "you@wallet.example"
 msgstr ""
 
-#: nostr/ui/profile_window.py:72
-msgid "Nostr Address"
-msgstr ""
-
-#: nostr/ui/profile_window.py:72
+#: nostr/ui/profile_window.py:74
 msgid "you@example.com"
 msgstr ""
 
-#: nostr/ui/profile_window.py:92
+#: nostr/ui/profile_window.py:94
 msgid "Enter an image address beginning with https, like https://example.com/picture.jpg."
 msgstr ""
 
-#: nostr/ui/profile_window.py:95
+#: nostr/ui/profile_window.py:97
 msgid "Enter a web address beginning with http or https, like https://example.com."
 msgstr ""
 
-#: nostr/ui/profile_window.py:98
+#: nostr/ui/profile_window.py:100
 msgid "Enter a Lightning address like you@wallet.example."
 msgstr ""
 
-#: nostr/ui/profile_window.py:100
+#: nostr/ui/profile_window.py:102
 msgid "Enter a Nostr address like you@example.com."
 msgstr ""
 
-#: nostr/ui/profile_window.py:102
+#: nostr/ui/profile_window.py:104
 msgid "A username can’t contain spaces."
 msgstr ""
 
-#: nostr/ui/profile_window.py:291
+#: nostr/ui/profile_window.py:295
 msgid "Saving your profile…"
 msgstr ""
 
-#: nostr/ui/profile_window.py:130
+#: nostr/ui/profile_window.py:132
 msgid "Edit Profile"
 msgstr ""
 
-#: nostr/ui/profile_window.py:150
+#: nostr/ui/profile_window.py:152
 msgid "Reading your profile…"
 msgstr ""
 
-#: nostr/ui/profile_window.py:307
+#: nostr/ui/profile_window.py:311
 msgid "Your profile wasn’t saved: it couldn’t be read again just before saving, so nothing was changed. Try again in a moment."
 msgstr ""
 
-#: nostr/ui/profile_window.py:310
+#: nostr/ui/profile_window.py:314
 msgid "Your profile wasn’t saved: the signer didn’t sign it, or too few servers took it. Nothing was changed. Try again in a moment."
 msgstr ""
 
-#: nostr/ui/profile_window.py:165
+#: nostr/ui/profile_window.py:167
 msgid "MyEditor Couldn’t Read Your Profile"
 msgstr ""
 
-#: nostr/ui/profile_window.py:166
+#: nostr/ui/profile_window.py:168
 msgid "Your profile couldn’t be read from the network just now. Editing it without reading it first could replace it, so try again in a moment."
 msgstr ""
 
-#: nostr/ui/profile_window.py:186
+#: nostr/ui/profile_window.py:188
 msgid "Your Profile"
 msgstr ""
 
-#: nostr/ui/profile_window.py:242
+#: nostr/ui/profile_window.py:246
 msgid "You don’t have a profile yet. What you enter here becomes your profile."
 msgstr ""
 
-#: nostr/ui/profile_window.py:244
+#: nostr/ui/profile_window.py:248
 msgid "This is what people see in every Nostr app. An empty field is removed from your profile."
 msgstr ""
 
-#: nostr/ui/profile_window.py:174
+#: nostr/ui/profile_window.py:176
 msgid "This Profile Can’t Be Edited Here"
 msgstr ""
 
-#: nostr/ui/profile_window.py:175
+#: nostr/ui/profile_window.py:177
 msgid "Your profile is stored in a form MyEditor doesn’t understand, so it is left as it is. Edit it in the app that created it."
 msgstr ""
 

@@ -230,3 +230,21 @@ def test_edit_profile_opens_a_window_that_reads_the_active_account(monkeypatch):
     windows[0].close()
     host.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+def test_the_form_reads_like_every_other_form_in_the_app(qt_app):
+    """Labels right-aligned with a colon, as in Create Account, Restore,
+    Settings and the membership application; a screen reader gets the
+    words without the colon."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QFormLayout, QLabel
+    from tests.accessibility import unnamed_controls
+    win = pw.ProfileWindow(read=lambda _done: None, save=lambda _c, _d: None, is_dark=False)
+    form, = win._pages["form"].findChildren(QFormLayout)
+    assert form.labelAlignment() & Qt.AlignRight
+    labels = [w.text() for w in win._pages["form"].findChildren(QLabel)
+              if w.text().endswith(":")]
+    assert "Lightning address:" in labels and "Nostr address:" in labels
+    assert win._edits["lud16"].accessibleName() == "Lightning address"
+    assert unnamed_controls(win) == []
+    win.close()
