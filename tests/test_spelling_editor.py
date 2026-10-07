@@ -174,6 +174,7 @@ with open(code, "w", encoding="utf-8") as f:
     f.write("def mistaek():\n    pass\n")
 py = w.open_path(code)
 r["code_checked"] = py.spelling() is not None
+r["welcome_checked"] = w.show_welcome_tab().spelling() is not None
 w.tabs.setCurrentIndex(w._editor_widget_index(ed))
 w.act_check_spelling.trigger()
 r["off"] = [ed.spelling() is None, ed.highlights("spelling") == [],
@@ -211,7 +212,7 @@ def test_spelling_in_the_window(tmp_path):
     assert r["menu"] == (["mistake", "Ignore Spelling", "Learn Spelling"] if mac
                          else ["mistake", "Ignore All", "Add to Dictionary"])
     assert r["learned"] == ["mistaek"] and r["after_learn"] == []
-    assert r["code_checked"] is False
+    assert r["code_checked"] is False and r["welcome_checked"] is False
     assert r["off"] == [True, True, False]
     assert r["dimmed"]
     assert r["languages"][0] == "System Language" and "Deutsch (Deutschland)" in r["languages"]

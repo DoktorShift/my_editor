@@ -886,9 +886,11 @@ class MainWindow(QMainWindow):
 
     def _spell_checked(self, ed) -> bool:
         """Whether a tab's text is checked: prose (a document with Markdown
-        structure, Markdown or plain text, not code), editable, while Check
-        Spelling While Typing is on."""
-        if ed is None or not self.check_spelling or ed.isReadOnly():
+        structure, Markdown or plain text, not code), editable, not the
+        welcome page (the app's own words, names like Nostr among them),
+        while Check Spelling While Typing is on."""
+        if (ed is None or not self.check_spelling or ed.isReadOnly()
+                or getattr(ed, "_is_welcome", False)):
             return False
         kind = self._editor_kind(ed)
         return kind == "rich" or (kind == "source"
@@ -2356,6 +2358,7 @@ class MainWindow(QMainWindow):
         ed.setHtml(welcome_html(self._welcome_keys()))
         ed.document().setModified(False)
         ed._is_welcome = True   # so an update restart reopens it as the welcome tab
+        self._attach_spelling(ed)
         self.tabs.setTabText(self.tabs.currentIndex(), _("Welcome"))
         self._update_status_bar()
         return ed
