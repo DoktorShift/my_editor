@@ -212,3 +212,109 @@ class TestTheLock:
         assert harness.controller.bound
         assert not harness.controller.read_only
         assert lock.read_text(encoding="utf-8").splitlines()[0] == str(os.getpid())
+
+
+def _damaged_pages(path) -> None:
+    """A real inbox with posts and an import, its first page (the header)
+    kept and every later page scribbled: SQLite's usual damage after a
+    crash during a write, or a copy a sync tool took mid-write."""
+    from nostr.imports.inbox_store import InboxStore, JobRow
+    from tests.imports_fakes import make_item
+    store = InboxStore(path)
+    store.sync_sources([("k", "https://blog.example/feed", "Blog", True)])
+    store.ingest("k", [make_item(f"Post {n}", guid=f"g{n}", content_html="<p>" + "x" * 2000
+                                 + "</p>") for n in range(60)])
+    store.create_job(label="An import", source_type="inbox",
+                     rows=[JobRow(index=0, d_tag="rss-1", title="Post")])
+    store.close()
+    data = bytearray(path.read_bytes())
+    assert len(data) > 3 * 4096
+    for at in range(4096, len(data), 7):
+        data[at] = 0xA5
+    path.write_bytes(bytes(data))
+
+
+class _WindowsRename:
+    """Windows' rule on any system: a file still open cannot be renamed
+    ([WinError 32] on the Windows runner, CP2 review N1)."""
+
+    def __init__(self, monkeypatch):
+        import pathlib
+        import sqlite3
+        from nostr.imports import inbox_store
+        self.open = []
+        tracker = self
+
+        class Tracked(sqlite3.Connection):
+            def __init__(self, database, *args, **kwargs):
+                super().__init__(database, *args, **kwargs)
+                self.database = os.path.realpath(database)
+                tracker.open.append(self)
+
+            def close(self):
+                if self in tracker.open:
+                    tracker.open.remove(self)
+                super().close()
+
+        real_connect = sqlite3.connect
+        monkeypatch.setattr(inbox_store.sqlite3, "connect",
+                            lambda database, **kw: real_connect(database, factory=Tracked, **kw))
+        real_replace = pathlib.Path.replace
+
+        def replace(path, target):
+            if any(c.database == os.path.realpath(str(path)) for c in tracker.open):
+                raise PermissionError(13, "The process cannot access the file because it is "
+                                          "being used by another process", str(path))
+            return real_replace(path, target)
+
+        monkeypatch.setattr(pathlib.Path, "replace", replace)
+
+
+def test_damaged_pages_are_set_aside_and_never_stop_the_start(harness, tmp_path, monkeypatch):
+    """CP2 review N1: only the open was guarded; a file whose pages were
+    damaged opened, then raised out of the next step, out of
+    MainWindow.__init__ with it. On Windows the damaged file was renamed
+    while still open, refused, and imports stayed off with wrong advice."""
+    _WindowsRename(monkeypatch)
+    path = database_path(tmp_path, PK)
+    path.parent.mkdir(parents=True)
+    _damaged_pages(path)
+    harness.controller.account_changed(profile())       # does not raise
+    settle()
+    controller = harness.controller
+    assert controller.bound and not controller.problem
+    assert controller.notice == SET_ASIDE
+    aside = [p.name for p in path.parent.iterdir() if ".damaged-" in p.name]
+    assert len(aside) == 1
+    assert controller.counts().inbox == 0           # a new inbox
+    controller.subscriptions.add_feed("https://blog.example/feed", "Blog")
+    assert [s.url for s in controller.sources()] == ["https://blog.example/feed"]
+
+
+def test_a_file_that_is_not_a_database_is_set_aside_on_windows_too(harness, tmp_path,
+                                                                    monkeypatch):
+    _WindowsRename(monkeypatch)
+    path = database_path(tmp_path, PK)
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"this is not a database at all" * 100)
+    harness.controller.account_changed(profile())
+    settle()
+    assert harness.controller.bound and harness.controller.notice == SET_ASIDE
+
+
+def test_imports_never_stop_the_editor(monkeypatch, caplog):
+    """The last guard: whatever goes wrong in imports, the account still
+    changes and the editor still opens."""
+    import logging
+
+    class Imports:
+        def account_changed(self, profile):
+            raise RuntimeError("something nobody foresaw")
+
+    host = SimpleNamespace(
+        nostr_state=SimpleNamespace(refresh=lambda: None, active=True),
+        _imports=Imports(),
+        _profile_store=SimpleNamespace(default=lambda: None))
+    with caplog.at_level(logging.ERROR):
+        MainWindow._update_account_actions(host)        # does not raise
+    assert "imports could not follow the account" in caplog.text

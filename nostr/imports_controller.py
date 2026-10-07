@@ -271,11 +271,31 @@ class ImportsController(QObject):
             self._exit_hook = _release_at_exit(weakref.ref(self))
             atexit.register(self._exit_hook)
         try:
-            self.inbox = self._open_inbox(path)
+            self._bind_inbox(path)
         except (sqlite3.Error, OSError) as exc:
-            self._release_lock()
-            self._cannot_bind(exc)
-            return
+            if not (_is_damage(exc) and not self.read_only):
+                self._give_up(exc)
+                return
+            # Damaged: set aside (never deleted) and start a new inbox, once.
+            # The other process's file (read only here) is left alone.
+            self._drop_inbox()
+            try:
+                self._set_aside(path, exc)
+                self.notice = SET_ASIDE
+                self._bind_inbox(path)
+            except (sqlite3.Error, OSError) as again:
+                self._give_up(again)
+                return
+        self.bound_changed.emit(True)
+        self._announce()
+
+    def _bind_inbox(self, path: Path) -> None:
+        """Everything binding does with the database, so a damaged file
+        raises here and nowhere later in the binding (CP2 review N1: only
+        the open was guarded, and a file with damaged pages raised out of
+        the next step, and out of MainWindow.__init__ with it)."""
+        self.inbox = InboxStore(path)
+        self.inbox.check()
         if not self.read_only:
             self.inbox.recover_jobs()
             self.inbox.prune_jobs()
@@ -290,33 +310,41 @@ class ImportsController(QObject):
         self.checker = self._checker_factory(self.inbox)
         self.checker.source_checked.connect(self._on_source_checked)
         self.checker.checking.connect(lambda *_args: self.sources_changed.emit())
-        self._sync_sources()
+        self._sync_sources(announce=False)
         self._reconcile_from_drafts()
+        self.counts()       # the lists' numbers read once, here, where it is guarded
         if not self.read_only:
             self.checker.start()
-        self.bound_changed.emit(True)
-        self._announce()
 
-    def _open_inbox(self, path: Path) -> InboxStore:
-        """The account's inbox. A file that is not a database (damaged) is
-        set aside and a new inbox started; one that cannot be opened at
-        all raises."""
-        try:
-            return InboxStore(path)
-        except sqlite3.OperationalError:
-            raise
-        except sqlite3.DatabaseError as exc:
-            if self.read_only:
-                raise       # the other process holds it: leave it alone
-            aside = path.with_name(f"{path.name}.damaged-{int(time.time())}")
-            _log.warning("imports inbox %s is damaged (%s); set aside as %s",
-                         path, exc, aside.name)
-            for suffix in ("", "-wal", "-shm"):
-                part = Path(f"{path}{suffix}")
-                if part.exists():
-                    part.replace(Path(f"{aside}{suffix}"))
-            self.notice = SET_ASIDE
-            return InboxStore(path)
+    def _drop_inbox(self) -> None:
+        """Undo what a binding that failed had made, the database closed."""
+        if self.checker is not None:
+            self.checker.stop()
+        for owned in (self.checker, self.runner, self.catalogue):
+            if isinstance(owned, QObject):
+                owned.deleteLater()
+        if self.inbox is not None:
+            try:
+                self.inbox.close()
+            except sqlite3.Error:
+                _log.warning("could not close the imports inbox", exc_info=True)
+        self.inbox = self.catalogue = self.runner = self.checker = None
+
+    def _set_aside(self, path: Path, exc: BaseException) -> None:
+        """Rename a damaged inbox (and its journal) so a new one starts; the
+        connection is closed already (_drop_inbox), as Windows requires."""
+        aside = path.with_name(f"{path.name}.damaged-{int(time.time())}")
+        _log.warning("imports inbox %s is damaged (%s); set aside as %s",
+                     path, exc, aside.name)
+        for suffix in ("", "-wal", "-shm"):
+            part = Path(f"{path}{suffix}")
+            if part.exists():
+                part.replace(Path(f"{aside}{suffix}"))
+
+    def _give_up(self, exc: BaseException) -> None:
+        self._drop_inbox()
+        self._release_lock()
+        self._cannot_bind(exc)
 
     def _cannot_bind(self, exc: BaseException) -> None:
         _log.warning("imports cannot be kept on this computer: %s", exc)
@@ -362,12 +390,13 @@ class ImportsController(QObject):
     # Sources                                                              #
     # ------------------------------------------------------------------ #
 
-    def _sync_sources(self) -> None:
+    def _sync_sources(self, *, announce: bool = True) -> None:
         if self.inbox is None:
             return
         if self.read_only:
             # The process that checks keeps the inbox in step.
-            self._announce()
+            if announce:
+                self._announce()
             return
         # Until the list is known (this computer's copy read, or the
         # relays answered), a source missing from it is not removed: a
@@ -380,7 +409,8 @@ class ImportsController(QObject):
                               if c.kind == "manual"
                               and not self.subscriptions.has_feed(c.source_url)]:
             del self._collections[collection_id]
-        self._announce()
+        if announce:
+            self._announce()
 
     def sources(self) -> List[SourceRow]:
         return self.inbox.sources() if self.inbox is not None else []
@@ -1074,6 +1104,16 @@ class SourceSettings:
     checking: bool          # automatic checks are on
     copy_images: bool       # defaults for new drafts (synced)
     full_text: bool
+
+
+def _is_damage(exc: BaseException) -> bool:
+    """Whether a database error means the file is damaged (not a database
+    any more, unreadable pages, missing tables), as opposed to one that
+    cannot be opened or written (the folder, the disk, another process)."""
+    name = getattr(exc, "sqlite_errorname", "") or ""
+    if name.startswith(("SQLITE_CORRUPT", "SQLITE_NOTADB")):
+        return True
+    return type(exc) is sqlite3.DatabaseError and not name   # InboxStore.check
 
 
 def _release_at_exit(controller_ref) -> Callable[[], None]:

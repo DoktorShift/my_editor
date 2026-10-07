@@ -5,6 +5,7 @@
 
 import hashlib
 import itertools
+import logging
 import os
 import platform
 import re
@@ -4503,8 +4504,12 @@ class MainWindow(QMainWindow):
             state.refresh()
             imports = getattr(self, "_imports", None)
             if imports is not None:
-                imports.account_changed(self._profile_store.default() if state.active
-                                        else None)
+                try:
+                    imports.account_changed(self._profile_store.default() if state.active
+                                            else None)
+                except Exception:  # noqa: BLE001, imports never stop the editor
+                    logging.getLogger(__name__).exception(
+                        "imports could not follow the account")
         current = self._profile_store.default()
         for name in ("_act_backup_account", "act_move_to_signer"):
             action = getattr(self, name, None)

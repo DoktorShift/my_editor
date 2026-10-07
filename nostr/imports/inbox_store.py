@@ -248,14 +248,38 @@ class InboxStore:
         if path != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(str(path), timeout=5)
-        self._db.row_factory = sqlite3.Row
-        self._db.create_function("fold", 1, _fold, deterministic=True)
-        if path != ":memory:":
-            self._db.execute("PRAGMA journal_mode=WAL")
-        self._migrate()
+        try:
+            self._db.row_factory = sqlite3.Row
+            self._db.create_function("fold", 1, _fold, deterministic=True)
+            if path != ":memory:":
+                self._db.execute("PRAGMA journal_mode=WAL")
+            self._migrate()
+        except BaseException:
+            # Closed at once, not when the half-built store is collected: a
+            # damaged file is then renamed, and Windows renames no file
+            # that is still open (CP2 review N1).
+            self._db.close()
+            raise
 
     def close(self) -> None:
         self._db.close()
+
+    def check(self) -> None:
+        """Raise ``sqlite3.DatabaseError`` when the file is damaged: pages
+        that cannot be read (the usual damage after a crash during a write,
+        or a copy a sync tool took mid-write) or tables that are gone. Run
+        once when the inbox is opened, so damage shows there, where the
+        file can be set aside, and not in a list later."""
+        found = [row[0] for row in self._db.execute("PRAGMA quick_check")]
+        if found != ["ok"]:
+            raise sqlite3.DatabaseError("the inbox is damaged: " + "; ".join(
+                str(line) for line in found[:3]))
+        tables = {row[0] for row in self._db.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'")}
+        missing = {"sources", "items", "ledger", "jobs", "job_rows"} - tables
+        if missing:
+            raise sqlite3.DatabaseError("the inbox is incomplete: " + ", ".join(
+                sorted(missing)))
 
     def _now(self) -> int:
         return int(self._clock())
