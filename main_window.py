@@ -40,7 +40,7 @@ from constants import (
     DARK_BORDER, LIGHT_BORDER, APP_DISPLAY_NAME, APP_VERSION, APP_URL, TEXT_COLORS,
     DARK_MUTED_FG, LIGHT_MUTED_FG,
 )
-from widgets import FindBar, LineNumberGutter, FileChangedBar, UpdateBar
+from widgets import ElidedLabel, FindBar, LineNumberGutter, FileChangedBar, UpdateBar
 from format_toolbar import FormatToolbar
 from atomic_file import (
     read_json, read_text_document, save_document, save_text_document, write_json,
@@ -344,12 +344,13 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.status)
         # Silent while backups succeed; when the document's backup cannot be
         # kept, it says so here until it is kept again (decision Q-J).
-        self._backup_problem = QLabel()
+        self._backup_problem = ElidedLabel()
         self._backup_problem.setObjectName("BackupProblem")
         self._backup_retry = QToolButton()
+        self._backup_retry.setObjectName("BackupRetry")
         self._backup_retry.setText(_("Try Again"))
         self._backup_retry.setAccessibleName(_("Try Backing Up Again"))
-        self._backup_retry.setAutoRaise(True)
+        self._backup_retry.setCursor(Qt.CursorShape.PointingHandCursor)
         self._backup_retry.clicked.connect(self._retry_backup)
         for widget in (self._backup_problem, self._backup_retry):
             widget.setVisible(False)
@@ -4691,7 +4692,9 @@ class MainWindow(QMainWindow):
         title = details.title or next(
             (line.lstrip("# ").strip() for line in markdown.splitlines() if line.strip()), "")
         first = next((line for line in markdown.splitlines() if line.strip()), "")
-        if first.startswith("# ") and first[2:].strip() == title:
+        if details.title and first.startswith("# ") and first[2:].strip() == details.title:
+            # Said only for a title set on purpose: without one, the title
+            # is that first heading, and nothing better can be done yet.
             checks.append(_("The first heading repeats the title, so readers see it twice."))
         article = PreviewArticle(title=title, summary=details.summary, image=details.image,
                                  tags=tuple(details.hashtags), author=author,
@@ -4752,6 +4755,11 @@ class MainWindow(QMainWindow):
         self._backup_problem.setText(text)
         self._backup_problem.setStyleSheet(
             f"color: {theme.error_text_color(self.is_dark_theme)}; padding-right: 4px;")
+        # A link, so it reads as something to click next to the status texts.
+        link = theme.dialog_link_color(self.is_dark_theme)
+        self._backup_retry.setStyleSheet(
+            f"#BackupRetry {{ color: {link}; border: none; background: transparent; "
+            f"padding: 0 4px; }} #BackupRetry:hover {{ text-decoration: underline; }}")
         self._backup_problem.setVisible(bool(text))
         self._backup_retry.setVisible(bool(problem) and problem != TOO_LARGE)
         self._backup_retry.setAccessibleDescription(text)

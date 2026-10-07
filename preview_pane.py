@@ -34,12 +34,11 @@ from PySide6.QtWidgets import (
     QComboBox, QHBoxLayout, QLabel, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
 
-import theme
 from constants import (
     DARK_BORDER, DARK_FG, DARK_MUTED_FG, DARK_SELECTION, LIGHT_BORDER, LIGHT_FG, LIGHT_MUTED_FG,
     LIGHT_SELECTION,
 )
-from i18n import _
+from i18n import _, pgettext
 from nostr.preview import Article, ImageLookup, NameLookup, NostrPreview
 
 # What the preview shows.
@@ -170,7 +169,7 @@ class PreviewPane(QWidget):
         self.setStyleSheet(
             f"#PreviewHeader {{ border-bottom: 1px solid {border}; }}"
             f"#PreviewCaption {{ color: {muted}; }}"
-            f"#PreviewChecks {{ color: {theme.error_text_color(self._dark)};"
+            f"#PreviewChecks {{ color: {muted};"
             f" padding: 8px 16px; border-bottom: 1px solid {border}; }}")
 
 
@@ -183,7 +182,7 @@ class ViewSwitch(QWidget):
                  parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("ViewSwitch")
-        self.setAccessibleName(_("View"))
+        self.setAccessibleName(pgettext("view modes", "View"))
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)

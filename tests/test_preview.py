@@ -107,6 +107,13 @@ def test_a_table_after_code_keeps_its_header():
     assert next(_fragments(step)).charFormat().fontWeight() >= QFont.Weight.Bold
 
 
+def test_list_markers_are_drawn_at_the_size_of_the_words():
+    # Review L7: the markers used the document's default font, small and
+    # raised next to the 13.5 pt serif of the words.
+    doc = pv.body_document("- Bread\n- Coffee\n")
+    assert doc.defaultFont().pointSizeF() == 13.5
+    assert doc.defaultFont().families()[0] == pv.SERIF[0]
+
 def test_reading_time_follows_the_words():
     assert pv.reading_minutes("word " * 225) == 1
     assert pv.reading_minutes("word " * 226) == 2

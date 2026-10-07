@@ -294,6 +294,12 @@ def body_document(markdown: str, *, names: Optional[NameLookup] = None,
     preview when nothing is published."""
     doc = QTextDocument(parent)
     doc.setDocumentMargin(0)
+    # List markers are drawn in the document's font: the body's, so they
+    # sit on the line at the size of its words.
+    body = QFont()
+    body.setFamilies(SERIF)
+    body.setPointSizeF(13.5)
+    doc.setDefaultFont(body)
     read_markdown(doc, markdown_for_preview(markdown, names), MARKDOWN_FEATURES)
     _tidy_tables(doc)
     _style_body(doc.begin(), palette(dark))

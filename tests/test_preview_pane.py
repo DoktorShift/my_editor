@@ -107,6 +107,7 @@ def test_the_switch_is_the_view_commands_and_has_names():
     assert [b.defaultAction() for b in switch.buttons] == actions
     assert [b.objectName() for b in switch.buttons] == ["first", "middle", "last"]
     assert unnamed_controls(switch) == []
+    assert switch.accessibleName() == "View"          # the noun, not the verb
 
 
 # -- in the window ---------------------------------------------------------------------------
