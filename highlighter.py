@@ -2,14 +2,34 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """
-Basic syntax highlighter with language detection by file extension.
+How code and Markdown look on screen, with nothing of it in the document.
+
+The rules for each language (:class:`CodeRules`, :func:`code_rules`) are
+shared by the two highlighters, so a Python file and a Python code block
+in an article are colored alike:
+
+- :class:`SyntaxHighlighter` colors a whole code file, in one language
+  known by the file's extension or guessed from its text;
+- :class:`RichTextLook` gives a document with Markdown structure its
+  looks: code blocks in the code font, colored by the language their
+  fence names (aliases such as "py" or "sh" included); inline code on a
+  tinted chip; links in the link color; footnote marks raised, their
+  definitions quieter.
+
+One highlighter per document: two on one document undo each other's
+work. Every format set here is layout only: nothing is saved, published
+or counted as formatting.
 """
 
 import re
 import os
-from PySide6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor, QFont
+from functools import lru_cache
+from typing import Callable
 
-from fonts import monospace_family
+from PySide6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor, QFont, QTextFormat
+
+import rich_text
+from fonts import code_font, monospace_family
 
 
 _EXT_TO_LANG: dict[str, str] = {
@@ -235,11 +255,15 @@ def detect_language_from_content(text: str) -> str | None:
     return None
 
 
-class SyntaxHighlighter(QSyntaxHighlighter):
-    """Regex-based syntax highlighter supporting common languages."""
+SetFormat = Callable[[int, int, QTextCharFormat], None]
 
-    def __init__(self, document, language: str, is_dark: bool = True):
-        super().__init__(document)
+
+class CodeRules:
+    """The coloring rules of one language in one theme: single-line
+    patterns, and constructs that run over several lines (a block comment,
+    a Python docstring). Built once per language and theme (code_rules)."""
+
+    def __init__(self, language: str | None, is_dark: bool = True):
         self._language = language
         self._is_dark = is_dark
         # (pattern, format) for single-line rules
@@ -247,12 +271,6 @@ class SyntaxHighlighter(QSyntaxHighlighter):
         # (start_pattern, end_pattern, format) for multi-line constructs
         self._ml_rules: list[tuple[re.Pattern, re.Pattern, QTextCharFormat]] = []
         self._build_rules()
-
-    def set_theme(self, is_dark: bool):
-        if self._is_dark != is_dark:
-            self._is_dark = is_dark
-            self._build_rules()
-            self.rehighlight()
 
     # ------------------------------------------------------------------
     # Format helpers
@@ -501,34 +519,35 @@ class SyntaxHighlighter(QSyntaxHighlighter):
         self._add_ml(r'/\*', r'\*/', 'comment', italic=True)
 
     # ------------------------------------------------------------------
-    # Core highlighting logic
+    # Applying them
     # ------------------------------------------------------------------
 
-    def highlightBlock(self, text: str):
-        self.setCurrentBlockState(0)
-
+    def apply(self, text: str, previous_state: int, set_format: SetFormat) -> int:
+        """Color one line through ``set_format(start, length, format)``.
+        ``previous_state`` is what this returned for the line before (0 for
+        none); the result is this line's, which says whether a multi-line
+        construct goes on into the next line."""
         # --- Continue a multiline construct from the previous block ---
         offset = 0
-        prev_state = self.previousBlockState()
-        if prev_state > 0:
-            idx = prev_state - 1
+        if previous_state > 0:
+            idx = previous_state - 1
             if idx < len(self._ml_rules):
                 _, end_pat, fmt = self._ml_rules[idx]
                 m = end_pat.search(text)
                 if m:
-                    self.setFormat(0, m.end(), fmt)
+                    set_format(0, m.end(), fmt)
                     offset = m.end()
                 else:
-                    self.setFormat(0, len(text), fmt)
-                    self.setCurrentBlockState(prev_state)
-                    return
+                    set_format(0, len(text), fmt)
+                    return previous_state
 
         # --- Single-line rules on the remaining text ---
         for pat, fmt in self._rules:
             for m in pat.finditer(text, offset):
-                self.setFormat(m.start(), m.end() - m.start(), fmt)
+                set_format(m.start(), m.end() - m.start(), fmt)
 
         # --- Check whether a multiline construct starts in remaining text ---
+        state = 0
         for i, (start_pat, end_pat, fmt) in enumerate(self._ml_rules):
             m_s = start_pat.search(text, offset)
             if not m_s:
@@ -536,23 +555,60 @@ class SyntaxHighlighter(QSyntaxHighlighter):
             m_e = end_pat.search(text, m_s.end())
             if m_e:
                 # Starts and ends on this line
-                self.setFormat(m_s.start(), m_e.end() - m_s.start(), fmt)
+                set_format(m_s.start(), m_e.end() - m_s.start(), fmt)
             else:
                 # Spans into next block(s)
-                self.setFormat(m_s.start(), len(text) - m_s.start(), fmt)
-                self.setCurrentBlockState(i + 1)
+                set_format(m_s.start(), len(text) - m_s.start(), fmt)
+                state = i + 1
             break  # handle only the first multiline found per line
+        return state
+
+
+@lru_cache(maxsize=64)
+def code_rules(language: str | None, is_dark: bool) -> CodeRules:
+    """The rules of ``language`` in a theme, made once."""
+    return CodeRules(language, is_dark)
+
+
+class SyntaxHighlighter(QSyntaxHighlighter):
+    """Colors a whole code file in one language."""
+
+    def __init__(self, document, language: str, is_dark: bool = True):
+        super().__init__(document)
+        self._language = language
+        self._is_dark = is_dark
+        self._code = code_rules(language, is_dark)
+
+    def set_theme(self, is_dark: bool):
+        if self._is_dark != is_dark:
+            self._is_dark = is_dark
+            self._code = code_rules(self._language, is_dark)
+            self.rehighlight()
+
+    def highlightBlock(self, text: str):
+        state = self._code.apply(text, max(0, self.previousBlockState()), self.setFormat)
+        self.setCurrentBlockState(state)
+
+
+# A footnote mark ("[^1]", "[^note]"), and a paragraph that is one's
+# definition ("[^1]: The source."), as Markdown readers find them.
+FOOTNOTE_MARK = re.compile(r"\[\^[^\]\s]+\]")
+FOOTNOTE_DEFINITION = re.compile(r"\s{0,3}(\[\^[^\]\s]+\]):")
 
 
 class RichTextLook(QSyntaxHighlighter):
     """How a document with Markdown structure looks on screen.
 
-    Some of what a Markdown document holds has no look of its own in a
-    monospaced editor: inline code is set in the same font as the text
-    around it, and a link keeps whatever color the file it came from gave
-    it. This adds the look (a tinted chip behind inline code, links in
-    the theme's link color) without putting anything into the document,
-    so nothing of it is saved, published, or counted as formatting.
+    Some of what a Markdown document holds has no look of its own in the
+    editor: a code block's lines are set in the font of the text around
+    them, inline code too, a link keeps whatever color the file it came
+    from gave it, and a footnote mark is plain text. This adds the look
+    (code blocks in the code font, colored by their language; a tinted
+    chip behind inline code; links in the theme's link color; footnote
+    marks raised in the link color, their definitions quieter) without
+    putting anything into the document, so nothing of it is saved,
+    published, or counted as formatting. (The editor paints the box
+    behind a code block.)
 
     One highlighter per document: a code file gets SyntaxHighlighter, a
     document with Markdown structure this one.
@@ -560,6 +616,7 @@ class RichTextLook(QSyntaxHighlighter):
 
     _CODE_BACKGROUND = {True: "#33363B", False: "#EEF0F2"}
     _LINK = {True: "#4AA3FF", False: "#0A66C2"}
+    _MUTED = {True: "#9A9A9A", False: "#6B6B6B"}
 
     def __init__(self, document, is_dark: bool = True):
         super().__init__(document)
@@ -583,9 +640,67 @@ class RichTextLook(QSyntaxHighlighter):
         self._link = QTextCharFormat()
         self._link.setForeground(QColor(self._LINK[self._is_dark]))
         self._link.setFontUnderline(True)
+        # A code block's lines, in the font code is set in; each language's
+        # colors over it.
+        self._code_line = QTextCharFormat()
+        self._code_line.setFont(code_font())
+        self._over_code: dict[int, tuple] = {}
+        # Footnote marks raised in the link color; definitions quieter.
+        self._footnote_mark = QTextCharFormat()
+        self._footnote_mark.setVerticalAlignment(QTextCharFormat.VerticalAlignment.AlignSuperScript)
+        self._footnote_mark.setForeground(QColor(self._LINK[self._is_dark]))
+        self._footnote_text = QTextCharFormat()
+        self._footnote_text.setForeground(QColor(self._MUTED[self._is_dark]))
+        self._footnote_text.setProperty(QTextFormat.Property.FontSizeAdjustment, -1)
+
+    def _on_code(self, fmt: QTextCharFormat) -> QTextCharFormat:
+        """``fmt`` (a language's color) on a code line, made once. The
+        cache holds ``fmt`` itself too, so its id cannot be reused."""
+        entry = self._over_code.get(id(fmt))
+        if entry is None or entry[0] is not fmt:
+            made = QTextCharFormat(self._code_line)
+            made.merge(fmt)
+            entry = self._over_code[id(fmt)] = (fmt, made)
+        return entry[1]
+
+    def _highlight_code(self, block, text: str, language: str) -> None:
+        self.setFormat(0, len(text), self._code_line)
+        canonical = canonical_language(language)
+        if canonical is None or canonical == "markdown":
+            self.setCurrentBlockState(0)
+            return
+        previous = block.previous()
+        # A construct goes on only from the line before in the same block.
+        state = (max(0, self.previousBlockState())
+                 if previous.isValid() and rich_text.same_code_block(previous, block) else 0)
+        rules = code_rules(canonical, self._is_dark)
+        self.setCurrentBlockState(rules.apply(
+            text, state, lambda start, length, fmt: self.setFormat(
+                start, length, self._on_code(fmt))))
+
+    def _highlight_footnotes(self, text: str) -> None:
+        """A definition ("[^1]: The source.") quieter, its label in the link
+        color; every other mark raised in the link color."""
+        start = 0
+        definition = FOOTNOTE_DEFINITION.match(text)
+        if definition is not None:
+            self.setFormat(0, len(text), self._footnote_text)
+            label = QTextCharFormat(self._footnote_text)
+            label.setForeground(QColor(self._LINK[self._is_dark]))
+            self.setFormat(definition.start(1), definition.end(1) - definition.start(1), label)
+            start = definition.end()
+        for mark in FOOTNOTE_MARK.finditer(text, start):
+            self.setFormat(mark.start(), mark.end() - mark.start(), self._footnote_mark)
 
     def highlightBlock(self, text: str):
         block = self.currentBlock()
+        language = rich_text.code_language(block)
+        if language is not None:
+            self._highlight_code(block, text, language)
+            return
+        self.setCurrentBlockState(0)
+        if "[^" in text:
+            self._highlight_footnotes(text)
         start = block.position()
         it = block.begin()
         while not it.atEnd():

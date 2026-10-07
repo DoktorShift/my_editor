@@ -46,7 +46,7 @@ The **format toolbar** above the document holds the controls used most: the para
 
 The keys follow each platform's own conventions: Apple Notes and Pages on macOS, Google Docs and LibreOffice on Windows and Linux. A command no convention has a key for has none. One exception on macOS: Strikethrough and Clear Formatting, which Apple's apps give no key, keep the keys writers know from Google Docs (`Ctrl+Shift+X`, `Ctrl+\`).
 
-**Code blocks.** A code block holds code as it is: set in the monospace font on a tinted box, its lines never wrapped into each other. Make one with `Insert > Code Block`, with `/code` in the slash menu, or by typing ```` ``` ```` and the language (```` ```python ````) and then `Return`. The Style pop-up shows its language ("Code: Python"). Inside a block:
+**Code blocks.** A code block holds code as it is: set in the monospace font on a tinted box, its lines never wrapped into each other. Make one with `Insert > Code Block`, with `/code` in the slash menu, or by typing ```` ``` ```` and the language (```` ```python ````) and then `Return`. The Style pop-up shows its language ("Code: Python"). Code in a language MyEditor knows (Python, JavaScript, TypeScript, HTML, CSS, JSON, Shell, C, C++, Rust, Go, Java, YAML, TOML and SQL) is colored in the colors code files get, whatever name the block gives it (`py`, `sh`, `c++`). Inside a block:
 
 - `Tab` indents by four spaces and `Shift+Tab` takes up to four away, on every line selected;
 - `Return` starts the next line as far in as the one before;
