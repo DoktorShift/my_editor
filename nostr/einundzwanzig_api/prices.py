@@ -120,10 +120,9 @@ def _round_sats(value: float, exact: bool) -> int:
 
 
 def display_locale() -> QLocale:
-    """The language's way of writing numbers and dates. The pseudo
-    language writes them as English does."""
-    language = i18n.language()
-    return QLocale(i18n.ENGLISH if language == i18n.PSEUDO else language)
+    """The language's way of writing numbers and dates (i18n.display_locale,
+    the one place that decides it)."""
+    return i18n.display_locale()
 
 
 def format_number(value: float, decimals: int = 0) -> str:

@@ -359,6 +359,51 @@ def install_qt_translations(app) -> None:
     app._myeditor_translators = keep
 
 
+# --------------------------------------------------------------------------- #
+# Numbers and dates, the language's way                                         #
+# --------------------------------------------------------------------------- #
+
+def display_locale():
+    """The QLocale numbers and dates are written in: the language MyEditor
+    speaks, not the system's, so a German window never shows an English
+    month name nor an English one a German one. The pseudo language
+    writes them as English does."""
+    from PySide6.QtCore import QLocale
+    return QLocale(ENGLISH if _language == PSEUDO else _language)
+
+
+def _day_pattern(locale, *, short_month: bool) -> str:
+    """The locale's own long date without the weekday ("MMMM d, yyyy" in
+    English, "d. MMMM yyyy" in German), with "MMM" for ``short_month``."""
+    from PySide6.QtCore import QLocale
+    pattern = locale.dateFormat(QLocale.FormatType.LongFormat)
+    pattern = re.sub(r"\s*dddd[,.]?\s*", " ", pattern, count=1).strip(" ,")
+    return pattern.replace("MMMM", "MMM") if short_month else pattern
+
+
+def format_day(day, *, short_month: bool = False) -> str:
+    """``day`` (a QDate, a QDateTime or a datetime.date) the way the
+    language writes a day: "January 6, 2027", "6. Januar 2027"; with
+    ``short_month``, "Jan 6, 2027" for a list row. Never a padded day
+    from a fixed pattern ("06 January 2027")."""
+    from PySide6.QtCore import QDate, QDateTime
+    if isinstance(day, QDateTime):
+        day = day.date()
+    elif not isinstance(day, QDate):
+        day = QDate(day.year, day.month, day.day)
+    locale = display_locale()
+    return locale.toString(day, _day_pattern(locale, short_month=short_month))
+
+
+def format_moment(moment) -> str:
+    """A QDateTime as the day and the clock time, the language's way:
+    "January 6, 2027 at 2:05 PM", "6. Januar 2027 um 14:05"."""
+    from PySide6.QtCore import QLocale
+    locale = display_locale()
+    time = locale.toString(moment.time(), locale.timeFormat(QLocale.FormatType.ShortFormat))
+    return _("{date} at {time}").format(date=format_day(moment), time=time)
+
+
 def chosen_language() -> str:
     """The language setting as saved (``system`` when never chosen). The
     environment variable MYEDITOR_LANGUAGE overrides it, for testing."""

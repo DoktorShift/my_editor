@@ -25,7 +25,6 @@ from PySide6.QtGui import QFont, QFontInfo
 from PySide6.QtWidgets import QApplication
 
 import i18n
-from i18n import _
 from constants import (
     DARK_BG,
     DARK_BORDER,
@@ -250,13 +249,9 @@ def source_host(record: DraftRecord) -> str:
 
 
 def display_locale() -> QLocale:
-    """The locale dates and numbers are written in.
-
-    The language MyEditor speaks rather than the system's, so a German
-    window never shows an English month name, and an English one never
-    a German one.
-    """
-    return QLocale(i18n.language())
+    """The locale dates and numbers are written in: the language MyEditor
+    speaks (i18n.display_locale, the one place that decides it)."""
+    return i18n.display_locale()
 
 
 def format_count(n: int) -> str:
@@ -264,39 +259,38 @@ def format_count(n: int) -> str:
     return display_locale().toString(int(n))
 
 
-def _format_moment(ts: int, pattern: str) -> str:
-    """``ts`` in local time, written with the Qt date ``pattern``."""
+def _moment(ts: int):
+    """``ts`` as a local QDateTime, or None when it is no time."""
     if ts <= 0:
-        return ""
+        return None
     try:
         moment = QDateTime.fromSecsSinceEpoch(int(ts))
     except (ValueError, OverflowError):
-        return ""
-    if not moment.isValid():
-        return ""
-    return display_locale().toString(moment, pattern)
+        return None
+    return moment if moment.isValid() else None
 
 
 def format_absolute_time(ts: int) -> str:
-    """The exact save time, in words, for tooltips and screen readers.
-
-    It was previously unavailable to every user by any means. The
-    pattern is a Qt date format and translated, so each language orders
-    day, month and time its own way.
-    """
-    return _format_moment(ts, _("dd MMMM yyyy 'at' HH:mm"))
+    """The exact save time, in words, for tooltips and screen readers:
+    the language's own way of writing a day and a time ("January 6, 2027
+    at 2:05 PM", "6. Januar 2027 um 14:05")."""
+    moment = _moment(ts)
+    return i18n.format_moment(moment) if moment is not None else ""
 
 
 def format_absolute_date(ts: int) -> str:
     """The day only, for a publication date that has no useful clock time.
 
-    Same formatter as :func:`format_absolute_time` so the two dates on
+    Same day as :func:`format_absolute_time` writes, so the two dates on
     the preview's origin line cannot be formatted differently from one
     another.
     """
-    return _format_moment(ts, _("dd MMMM yyyy"))
+    moment = _moment(ts)
+    return i18n.format_day(moment) if moment is not None else ""
 
 
 def format_short_date(ts: int) -> str:
-    """The day as digits, for a list row with no room for a month name."""
-    return _format_moment(ts, _("yyyy-MM-dd"))
+    """The day with a short month, for a list row with little room
+    ("Jan 6, 2027", "6. Jan. 2027")."""
+    moment = _moment(ts)
+    return i18n.format_day(moment, short_month=True) if moment is not None else ""

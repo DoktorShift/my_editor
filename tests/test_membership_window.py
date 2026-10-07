@@ -397,7 +397,8 @@ def test_the_application_waits_for_the_statutes():
     win = window(api)
     to_apply(win, api)
     assert win.page == APPLY
-    assert "Version 1.3, adopted 20 April 2024." == win._statutes_label.text()
+    # The language's own way of writing a day, not a padded fixed pattern.
+    assert "Version 1.3, adopted April 20, 2024." == win._statutes_label.text()
     send = win.buttons["send"]
     assert not send.isEnabled()
     win._consent.setChecked(True)

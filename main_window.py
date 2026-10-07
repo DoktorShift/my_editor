@@ -17,7 +17,7 @@ from typing import List, Optional, Tuple
 from send2trash import send2trash
 import shiboken6
 from PySide6.QtCore import (
-    QBuffer, QByteArray, QIODevice, Qt, QLocale, QMarginsF, QTimer, QUrl, QFileSystemWatcher,
+    QBuffer, QByteArray, QIODevice, Qt, QMarginsF, QTimer, QUrl, QFileSystemWatcher,
 )
 from PySide6.QtNetwork import QLocalServer
 from PySide6.QtGui import (
@@ -208,7 +208,7 @@ _SAVE_FAILED_HINT = _("Your document is still open. Use Save As to choose anothe
 def _number(n: int) -> str:
     """``n`` with the digit grouping of the reader's language (70,000 in
     English, 70.000 in German)."""
-    return QLocale(i18n.language()).toString(n)
+    return i18n.display_locale().toString(n)
 
 
 # --------------------------------------------------------------------------- #

@@ -36,7 +36,7 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
-from PySide6.QtCore import QBuffer, QIODevice, QLocale, QRect, QSize, Qt, Signal, QUrl
+from PySide6.QtCore import QBuffer, QIODevice, QRect, QSize, Qt, Signal, QUrl
 from PySide6.QtGui import (
     QAction,
     QColor,
@@ -507,7 +507,7 @@ def _format_size(byte_count: int) -> str:
 def _decimal(text: str) -> str:
     """``text`` with its decimal point written the way the language the
     app is shown in writes it (1.5 MiB, 1,5 MiB)."""
-    return text.replace(".", QLocale(i18n.language()).decimalPoint())
+    return text.replace(".", i18n.display_locale().decimalPoint())
 
 
 # --------------------------------------------------------------------------- #

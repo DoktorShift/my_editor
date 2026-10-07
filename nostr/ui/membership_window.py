@@ -56,6 +56,7 @@ from PySide6.QtWidgets import (
 from alerts import CANCEL, Button, ask, confirm_destructive, inform
 from atomic_file import save_text_document
 from alerts import DEFAULT as ALERT_DEFAULT
+import i18n
 from i18n import _
 from nostr import einundzwanzig_api as e21
 from nostr.einundzwanzig import (
@@ -83,14 +84,14 @@ _DEFAULT_NOTE = _("Membership belongs to your Nostr identity and runs for a cale
 
 
 def format_date(iso: str) -> str:
-    """``20 April 2024`` from ``2024-04-20`` (``20. April 2024`` in German);
-    the input unchanged if it is not a date."""
+    """``April 20, 2024`` from ``2024-04-20`` (``20. April 2024`` in German),
+    the language's own way of writing a day; the input unchanged if it is
+    not a date."""
     try:
         day = datetime.date.fromisoformat((iso or "")[:10])
     except ValueError:
         return iso or ""
-    month = e21.display_locale().standaloneMonthName(day.month)
-    return _("{day} {month} {year}").format(day=day.day, month=month, year=day.year)
+    return i18n.format_day(day)
 
 
 def _host(url: str) -> str:
