@@ -52,4 +52,10 @@ gc.disable()
 
 @pytest.hookimpl(trylast=True)
 def pytest_runtest_teardown(item, nextitem):
+    if gc.isenabled():
+        # Every later test would collect on any thread again.
+        gc.disable()
+        pytest.fail("the test left automatic garbage collection on; put it back as it "
+                    "was (the run collects on this thread only, see main_thread_gc)",
+                    pytrace=False)
     collect_due()
