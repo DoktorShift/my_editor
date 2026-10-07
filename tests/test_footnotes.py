@@ -103,7 +103,7 @@ def test_no_footnote_inside_a_code_block():
 MARKED = "A claim[^1] and[^1] again.\n\n`[^1]` in code.\n\n[^1]: The source.\n"
 
 
-def test_a_mark_leads_to_its_note_and_the_label_back_to_the_first_mark():
+def test_a_mark_leads_to_its_note_and_the_note_back_to_the_first_mark():
     ed = editor(MARKED)
     doc = ed.document()
     mark = QTextCursor(doc)
@@ -115,7 +115,11 @@ def test_a_mark_leads_to_its_note_and_the_label_back_to_the_first_mark():
     assert rich_text.footnote_jump(label) == doc.toPlainText().index("[^1]")
     words = QTextCursor(note)
     words.setPosition(note.position() + 10)
-    assert rich_text.footnote_jump(words) is None            # in the note's words
+    # Anywhere in a note leads back too (the keyboard lands in its words).
+    assert rich_text.footnote_jump(words) == doc.toPlainText().index("[^1]")
+    elsewhere = QTextCursor(doc)
+    elsewhere.setPosition(doc.toPlainText().index("again"))
+    assert rich_text.footnote_jump(elsewhere) is None
     assert len(rich_text.footnote_marks(doc, "1")) == 2       # not the one in code
     assert rich_text.footnote_text(doc, "1") == "The source."
 
@@ -154,19 +158,29 @@ ed = w.new_tab()
 ed.setFocus()
 app.processEvents()
 type_text(ed, "A claim")
-r = {"in_insert": [a.objectName() for a in w.m_insert.actions()].count("insert.footnote")}
+r = {"in_insert": [a.objectName() for a in w.m_insert.actions()].count("insert.footnote"),
+     "jump_off": w.act_footnote_jump.isEnabled(),
+     "in_edit": "edit.footnote_jump" in [a.objectName() for a in w.m_edit.actions()]}
 w.act_footnote.trigger()
 type_text(ed, "The source.")
 cursor = ed.textCursor()
 cursor.setPosition(ed.toPlainText().index("[^1]") + 1)
 ed.setTextCursor(cursor)
+app.processEvents()
+r["jump_on_mark"] = [w.act_footnote_jump.isEnabled(), w.act_footnote_jump.text()]
+# A right-click on the mark, the caret elsewhere: the menu is about the mark.
+mark = QTextCursor(ed.document())
+mark.setPosition(ed.toPlainText().index("[^1]") + 2)
+spot = ed.cursorRect(mark).center()
+ed.moveCursor(QTextCursor.MoveOperation.Start)
 menu = QMenu()
-w._fill_editor_context_menu(menu, ed, ed.cursorRect().center())
+w._fill_editor_context_menu(menu, ed, spot)
 go = [a for a in menu.actions() if a.text() == "Go to Note"]
 r["go"] = bool(go)
-if go:
-    go[0].trigger()
+w.act_footnote_jump.trigger()                         # Edit > Go to Note
 r["at_note"] = ed.textCursor().block().text()
+app.processEvents()
+r["back"] = w.act_footnote_jump.text()
 ed.moveCursor(QTextCursor.MoveOperation.End)
 type_text(ed, "\n/foot")
 slash = ed.slash_menu()
@@ -185,6 +199,10 @@ print("RESULT " + json.dumps(r))
 def test_footnotes_in_the_window(tmp_path):
     r = run_window_script(SCRIPT, tmp_path)
     assert r["in_insert"] == 1
+    # Review M8 (CP3): also in the menu bar, for the keyboard.
+    assert r["in_edit"] and r["jump_off"] is False
+    assert r["jump_on_mark"] == [True, "Go to Note"]
     assert r["go"] and r["at_note"] == "[^1]: The source."
+    assert r["back"] == "Go to Mark"
     assert r["slash"] == ["Footnote"]
     assert any("show footnotes as typed" in check for check in r["check"])

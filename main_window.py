@@ -1426,6 +1426,17 @@ class MainWindow(QMainWindow):
                                     and not paragraphs.tasks)
         self.act_numbers.setChecked(paragraphs.list_kind == rich_text.NUMBER)
         self.act_checklist.setChecked(paragraphs.tasks)
+        rich = cursor is not None and self._editor_kind(ed) == "rich"
+        tasks = rich_text.task_blocks(cursor) if rich else []
+        self.act_tick.setEnabled(bool(tasks) and not self._shows_preview_only(ed))
+        self.act_tick.setText(_("Mark as Unchecked") if tasks and all(
+            b.blockFormat().marker() == rich_text.TICKED for b in tasks)
+            else _("Mark as Checked"))
+        target = rich_text.footnote_jump(cursor) if rich else None
+        self.act_footnote_jump.setEnabled(target is not None)
+        self.act_footnote_jump.setText(
+            _("Go to Mark") if target is not None and target < cursor.position()
+            else _("Go to Note"))
         self.act_quote.setChecked(paragraphs.quoted)
         in_link = (cursor is not None and self._editor_kind(ed) == "rich"
                    and rich_text.link_range(cursor) is not None)
@@ -1580,6 +1591,16 @@ class MainWindow(QMainWindow):
                                          keywords=(_("todo"), _("checkbox"), _("task")),
                                          slash_section=slash_menu.LISTS),
                                  triggered=lambda: self._editor_call("toggle_checklist"))
+        # Mark as Checked: Notes' key on a Mac; none elsewhere (Ctrl+Shift+U
+        # is the Unicode input of Linux desktops).
+        self.act_tick = add(Command("format.list.tick", _("Mark as Checked"), FORMAT,
+                                    platform_keys("Ctrl+Shift+U", None),
+                                    keywords=(_("tick"), _("done"), _("task"))),
+                            triggered=self._toggle_ticks)
+        # Go to Note and back (footnotes): the keyboard's way to Command-click.
+        self.act_footnote_jump = add(Command("edit.footnote_jump", _("Go to Note"), EDIT,
+                                             keywords=(_("footnote"),)),
+                                     triggered=self._footnote_jump)
         self.act_indent = add(Command("format.indent", _("Increase Indent"), FORMAT, "Ctrl+]",
                                       keywords=(_("nest"),)),
                               triggered=lambda: self._change_indent(+1))
@@ -1984,6 +2005,7 @@ class MainWindow(QMainWindow):
         self.m_find.addAction(self.act_find_next)
         self.m_find.addAction(self.act_find_prev)
         self.m_find.addAction(self.act_use_selection)
+        m_edit.addAction(self.act_footnote_jump)
         # Spelling, then Substitutions, in the order of Apple's Edit menus.
         self.m_spelling = m_edit.addMenu(_("Spelling"))
         self.m_spelling.addAction(self.act_check_spelling)
@@ -2024,6 +2046,7 @@ class MainWindow(QMainWindow):
         m_format.addAction(self.act_bullets)
         m_format.addAction(self.act_numbers)
         m_format.addAction(self.act_checklist)
+        m_format.addAction(self.act_tick)
         m_format.addAction(self.act_quote)
         m_format.addSeparator()
         m_format.addAction(self.act_indent)
@@ -4664,8 +4687,12 @@ class MainWindow(QMainWindow):
         """The editor's context menu: the window's own commands, so it
         offers what the menus offer, under the same names. On a link, the
         link's own commands come first."""
-        if editor.anchorAt(pos) and not editor.textCursor().hasSelection():
-            editor.setTextCursor(editor.cursorForPosition(pos))
+        clicked = editor.cursorForPosition(pos)
+        if not editor.textCursor().hasSelection() and (
+                editor.anchorAt(pos) or (self._editor_kind(editor) == "rich"
+                                         and rich_text.footnote_jump(clicked) is not None)):
+            # A link or a footnote right-clicked: its commands, there.
+            editor.setTextCursor(clicked)
             self._update_format_buttons()
         self._spelling_context(menu, editor, pos)
         link = editor.link_at_caret() if self._editor_kind(editor) == "rich" else None
@@ -4681,13 +4708,10 @@ class MainWindow(QMainWindow):
             menu.addAction(_("Remove Link"), editor.remove_link)
             menu.addSeparator()
         if self._editor_kind(editor) == "rich":
-            target = rich_text.footnote_jump(editor.textCursor())
-            if target is not None:
-                # A footnote's mark or note: the way to the other, for the
-                # keyboard too (Command-click is the pointer's way).
-                on_mark = target > editor.textCursor().position()
-                menu.addAction(_("Go to Note") if on_mark else _("Go to Mark"),
-                               lambda: editor.jump_to_footnote(editor.textCursor()))
+            if rich_text.footnote_jump(editor.textCursor()) is not None:
+                # A footnote's mark or note: the way to the other (also in
+                # the Edit menu; Command-click is the pointer's way).
+                menu.addAction(self.act_footnote_jump)
                 menu.addSeparator()
         for action in (self.act_cut, self.act_copy, self.act_paste, self.act_paste_plain):
             menu.addAction(action)
@@ -5821,6 +5845,17 @@ class MainWindow(QMainWindow):
         )
         dialog.published.connect(self._on_nostr_note_published)
         dialog.exec()
+
+    def _toggle_ticks(self) -> None:
+        ed = self.current_editor()
+        if ed is not None:
+            ed.toggle_ticks()
+            self._update_format_buttons()
+
+    def _footnote_jump(self) -> None:
+        ed = self.current_editor()
+        if ed is not None:
+            ed.jump_to_footnote(ed.textCursor())
 
     def _fill_insert_menu(self) -> None:
         """The Insert menu as it opens: Nostr's insertions only while a

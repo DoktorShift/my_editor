@@ -178,6 +178,10 @@ class HtmlEditor(QTextEdit):
 
         # Connect to cursor position changes to update active format
         self.cursorPositionChanged.connect(self._update_active_format)
+        # Where the caret is, for a screen reader: a checklist item's state,
+        # a table cell's place (announce.py).
+        self._spoken_place = None
+        self.cursorPositionChanged.connect(self._announce_place)
 
         # Block cursor (terminal-style) for code and plain text: hide Qt's
         # thin cursor, draw our own. Writing gets the insertion point every
@@ -776,6 +780,50 @@ class HtmlEditor(QTextEdit):
         """The slash menu while it is open, else None."""
         menu = self._slash_menu
         return menu if self._slash_at >= 0 and menu is not None and menu.isVisible() else None
+
+    def _announce_place(self) -> None:
+        """Tell a screen reader what the caret has entered that its words
+        do not say: a checklist item ticked or not, a table cell's row,
+        column and header. Once per item or cell."""
+        if not self._holds_structure():
+            return
+        cursor = self.textCursor()
+        block = cursor.block()
+        table = cursor.currentTable()
+        if table is not None:
+            cell = table.cellAt(cursor)
+            place = ("cell", table.firstPosition(), cell.row(), cell.column())
+            if place != self._spoken_place:
+                self._spoken_place = place
+                header = ""
+                if cell.row() > 0:
+                    header = rich_text.cell_text(table.cellAt(0, cell.column()))
+                said = _("Row {row} of {rows}, column {column}").format(
+                    row=cell.row() + 1, rows=table.rows(), column=cell.column() + 1)
+                if header:
+                    said = _("{place}, {header}").format(place=said, header=header)
+                announce.announce(self, said)
+            return
+        if rich_text.is_task(block):
+            place = ("task", block.blockNumber(), block.blockFormat().marker())
+            if place != self._spoken_place:
+                self._spoken_place = place
+                announce.announce(self, _("checked")
+                                  if block.blockFormat().marker() == rich_text.TICKED
+                                  else _("not checked"))
+            return
+        self._spoken_place = None
+
+    def toggle_ticks(self) -> None:
+        """Format > Mark as Checked: tick the checklist items under the
+        caret, or untick them when all are ticked, and say which."""
+        cursor = self.textCursor()
+        ticked = rich_text.toggle_ticks(cursor)
+        if ticked is None:
+            return
+        self._spoken_place = None
+        announce.announce(self, _("checked") if ticked else _("not checked"))
+        self.viewport().update()
 
     def _maybe_ask_mention(self) -> None:
         """An "@" was just typed: ask for a person to mention when it starts

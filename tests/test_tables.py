@@ -235,6 +235,26 @@ def test_rows_and_columns_change_as_one_undo_step(command, markdown):
     assert document_to_markdown(ed.document()) == before
 
 
+def test_moving_through_a_table_tells_where_the_caret_is(monkeypatch):
+    # Review M7 (CP3): a screen reader heard nothing about the cell.
+    import announce
+    heard = []
+    monkeypatch.setattr(announce, "announce", lambda source, text: heard.append(text))
+    ed = editor("| Name | Price |\n| --- | --- |\n| Bread | 3 |\n", caret_after="")
+    ed.setTextCursor(QTextCursor(ed.document()))
+    cursor = ed.textCursor()
+    cursor.setPosition(ed.toPlainText().index("Name"))
+    ed.setTextCursor(cursor)
+    assert heard[-1] == "Row 1 of 2, column 1"
+    tab(ed)
+    assert heard[-1] == "Row 1 of 2, column 2"
+    tab(ed)
+    assert heard[-1] == "Row 2 of 2, column 1, Name"
+    count = len(heard)
+    type_text(ed, "s")                                # in the same cell: nothing new
+    assert len(heard) == count
+
+
 def test_a_new_row_starts_at_its_first_cell():
     ed = editor("| h1 | h2 |\n| --- | --- |\n| a | b |\n", caret_after="b")
     ed.table_command("add_row_below")

@@ -170,6 +170,35 @@ def test_a_click_on_the_box_ticks_it():
     ed.hide()
 
 
+def test_mark_as_checked_ticks_and_unticks_from_the_keyboard(monkeypatch):
+    # Review M2 (CP3): a box could only be ticked with the mouse, and a
+    # screen reader never heard which items were done.
+    import announce
+    heard = []
+    monkeypatch.setattr(announce, "announce", lambda source, text: heard.append(text))
+    ed = editor("- [ ] open\n- [x] done\n")
+    ed.setTextCursor(QTextCursor(block_named(ed.document(), "open")))
+    assert heard[-1] == "not checked"                   # the caret entered it
+    ed.toggle_ticks()
+    assert document_to_markdown(ed.document()) == "- [x] open\n- [x] done\n"
+    assert heard[-1] == "checked"
+    ed.selectAll()
+    ed.toggle_ticks()                                    # all ticked: untick all
+    assert document_to_markdown(ed.document()) == "- [ ] open\n- [ ] done\n"
+    ed.document().undo()
+    assert document_to_markdown(ed.document()) == "- [x] open\n- [x] done\n"
+    ed.setTextCursor(QTextCursor(block_named(ed.document(), "done")))
+    assert heard[-1] == "checked"
+
+
+@pytest.mark.parametrize("platform, keys", [("darwin", "Ctrl+Shift+U"), ("win32", None),
+                                            ("linux", None)])
+def test_mark_as_checked_has_notes_key_on_a_mac_only(platform, keys):
+    # Ctrl+Shift+U is the Unicode input of Linux desktops.
+    from commands import platform_keys
+    assert platform_keys("Ctrl+Shift+U", None, platform=platform) == keys
+
+
 @pytest.mark.parametrize("platform, keys", [("darwin", "Ctrl+Shift+L"),
                                             ("win32", "Ctrl+Shift+9"),
                                             ("linux", "Ctrl+Shift+9")])

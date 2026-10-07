@@ -637,6 +637,27 @@ def set_tick(block, marker) -> None:
     QTextCursor(block).setBlockFormat(fmt)
 
 
+def task_blocks(cursor: QTextCursor) -> list:
+    """The checklist items under the cursor."""
+    return [b for b in _blocks_of(cursor) if is_task(b)]
+
+
+def toggle_ticks(cursor: QTextCursor) -> Optional[bool]:
+    """Mark as Checked: tick the checklist items under the cursor, or, all
+    ticked already, untick them. One undo step; the new state, or None
+    when no checklist item is there."""
+    tasks = task_blocks(cursor)
+    if not tasks:
+        return None
+    ticked = not all(b.blockFormat().marker() == TICKED for b in tasks)
+    edit = QTextCursor(cursor.document())
+    edit.beginEditBlock()
+    for block in tasks:
+        set_tick(block, TICKED if ticked else UNTICKED)
+    edit.endEditBlock()
+    return ticked
+
+
 def toggle_checklist(cursor: QTextCursor) -> None:
     """Checklist over the paragraphs under the cursor, as one step on the
     undo stack: when all of them are checklist items, they become plain
@@ -1028,9 +1049,9 @@ def insert_footnote(cursor: QTextCursor) -> bool:
 
 
 def footnote_jump(cursor: QTextCursor) -> Optional[int]:
-    """Where a click on a footnote leads: from a mark to the words of its
-    definition, from a definition's label back to the first mark. None
-    when the cursor is on neither."""
+    """Where Go to Note (or a Command-click) leads: from a mark to the
+    words of its note, from anywhere in a note (but a mark in it) back to
+    the first mark of that note. None when the cursor is on neither."""
     block = cursor.block()
     if is_code_block(block):
         return None
@@ -1038,9 +1059,6 @@ def footnote_jump(cursor: QTextCursor) -> Optional[int]:
     text = block.text()
     offset = cursor.positionInBlock()
     definition = FOOTNOTE_DEFINITION.match(text)
-    if definition is not None and offset <= definition.end():
-        marks = footnote_marks(doc, definition.group(1))
-        return marks[0][0] if marks else None
     for found in FOOTNOTE_MARK.finditer(text, definition.end() if definition else 0):
         if found.start() <= offset <= found.end() \
                 and not _in_code_words(block, found.start()):
@@ -1050,6 +1068,9 @@ def footnote_jump(cursor: QTextCursor) -> Optional[int]:
             words = FOOTNOTE_DEFINITION.match(target.text())
             rest = target.text()[words.end():]
             return target.position() + words.end() + (len(rest) - len(rest.lstrip(" ")))
+    if definition is not None:
+        marks = footnote_marks(doc, definition.group(1))
+        return marks[0][0] if marks else None
     return None
 
 
@@ -1091,6 +1112,13 @@ def _style_row(table, row: int) -> None:
         words.setPosition(cell.lastPosition(), QTextCursor.MoveMode.KeepAnchor)
         if words.hasSelection():
             words.mergeCharFormat(weight)
+
+
+def cell_text(cell) -> str:
+    """The words of a table cell."""
+    cursor = QTextCursor(cell.firstCursorPosition())
+    cursor.setPosition(cell.lastPosition(), QTextCursor.MoveMode.KeepAnchor)
+    return cursor.selectedText().replace("\u2029", " ").replace("\u2028", " ").strip()
 
 
 def tables_of(doc) -> List[QTextTable]:
