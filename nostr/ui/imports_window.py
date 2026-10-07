@@ -917,7 +917,12 @@ class ImportsWindow(QMainWindow):
         chosen = self.targets()
 
         def ready(images: List[str]) -> None:
-            if not images or chosen != self.targets():
+            if chosen != self.targets():
+                return
+            if not images:
+                # Only images written inline or by a relative address
+                # (review L8): nothing to review, and it says so.
+                self.banner.say(_("None of these posts has an image that can be copied."))
                 return
             dialog = ImageReviewDialog(images, self._skip_images, parent=self,
                                        image_source=self._controller.images)

@@ -356,3 +356,20 @@ def test_the_review_shows_what_the_import_copies(window, monkeypatch):
     window._review_images()
     assert shown == [sorted(snapshots.images_to_copy([item]))]
     assert window._skip_images == {"https://x.example/a.png"}
+
+
+def test_no_image_to_copy_is_said(window, monkeypatch):
+    """Review L8: with only inline or relative images, Review Images did
+    nothing and said nothing."""
+    import dataclasses
+    from nostr.ui.image_review_dialog import ImageReviewDialog
+    controller = window._controller
+    post = window.posts.model_.post(0)
+    item = dataclasses.replace(controller.item(post),
+                               content_html="<p><img src='/relative.png'></p>")
+    opened = []
+    monkeypatch.setattr(controller, "item", lambda _post: item)
+    monkeypatch.setattr(ImageReviewDialog, "open", lambda dialog: opened.append(dialog))
+    window._review_images()
+    assert opened == []
+    assert window.banner.label.text() == "None of these posts has an image that can be copied."
