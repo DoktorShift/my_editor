@@ -64,7 +64,7 @@ from ..events import build_event, verify_event
 from ..outbox import RelayDirectory, ask_private_relays
 from ..outbox.policy import normalize_relay_url, replacement_created_at
 from ..profiles import Profile
-from ..queries import fetch_events_answered
+from ..queries import fetch_events
 from ..relay import RelayPool
 from .constants import SUBSCRIPTIONS_DEBOUNCE_MS, SUBSCRIPTIONS_KIND
 from .feed_list import (
@@ -105,11 +105,13 @@ class _ListQuery(QObject):
         self._timeout_ms = timeout_ms
 
     def events(self, relays, filters, on_done) -> None:
-        """``on_done(events, answered)``: every event, and the relays that
-        answered (sent all their stored events)."""
+        """``on_done(events, answered)``: every validly signed event, and
+        the relays that answered (sent all their stored events); one that
+        refused or could not be reached is not among them."""
         try:
-            fetch_events_answered(self._pool, list(relays), list(filters), on_done,
-                                  timeout_ms=self._timeout_ms, parent=self)
+            fetch_events(self._pool, list(relays), list(filters),
+                         lambda fetched: on_done(list(fetched.events), set(fetched.answered)),
+                         timeout_ms=self._timeout_ms, parent=self)
         except Exception:  # noqa: BLE001, settle the callback contract
             on_done([], set())
 

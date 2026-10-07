@@ -381,6 +381,9 @@ class Subscription(QObject):
 
     Signals:
       event(dict)               - one inner event from ["EVENT", sub_id, event]
+      relay_event(str, dict)    - the same event with the relay that sent it
+                                  (url, event), for a caller that has to
+                                  know where something is kept
       eose()                    - every relay has signalled EOSE (initial
                                   backlog done); never fires when one of
                                   them closed or failed instead
@@ -403,6 +406,7 @@ class Subscription(QObject):
     """
 
     event = Signal(dict)
+    relay_event = Signal(str, dict)     # url, event
     eose = Signal()
     closed = Signal(str)
     relay_eose = Signal(str)            # url
@@ -478,6 +482,7 @@ class Subscription(QObject):
         verb = msg[0]
         if verb == "EVENT" and len(msg) >= 3 and isinstance(msg[2], dict):
             self.event.emit(msg[2])
+            self.relay_event.emit(url, msg[2])
         elif verb == "EOSE":
             if url not in self._ended:
                 self._ended.add(url)

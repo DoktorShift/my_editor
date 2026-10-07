@@ -9,14 +9,14 @@ When no relay answers, the answer is "unavailable", never "nothing".
 
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, Signal
-
 from nostr import events
 from nostr.draft_deletions import build_deletion_request
 from nostr.draft_store import DraftStore
 from nostr.drafts import DraftWrapMeta
 from nostr.imports.catalogue import UNAVAILABLE, ExistingCatalogue
-from tests.outbox_fakes import OTHER_SK, PK, SK, FakeRelayDirectory, Profile, settle
+from tests.outbox_fakes import (
+    OTHER_SK, PK, SK, FakeRelayDirectory, HandPool, Profile, settle,
+)
 
 D1, D2, D3, D4 = "rss-1", "rss-2", "rss-3", "rss-4"
 
@@ -165,38 +165,20 @@ def test_the_draft_store_and_the_ledger_count():
     assert cat.known_locally(D4) is None
 
 
-class FakeSubscription(QObject):
-    event = Signal(dict)
-    relay_eose = Signal(str)
-    relay_closed = Signal(str, str)
-    relay_failed = Signal(str, str)
-
-    def close(self):
-        self.closed = True
-
-
-class FakePool:
-    def __init__(self):
-        self.subscriptions = []
-
-    def subscribe(self, relays, filters):
-        subscription = FakeSubscription()
-        self.subscriptions.append((list(relays), subscription))
-        return subscription
-
-
 def test_the_relay_query_says_which_relays_answered():
-    from nostr.queries import fetch_events_answered
-    pool = FakePool()
+    """Review H3: a relay that refuses the request (more filters than it
+    allows) or cannot be reached is not an answer; only a relay that sent
+    all it keeps is. Read through queries.fetch_events, so a forged event
+    does not count either."""
+    pool = HandPool()
+    cat = ExistingCatalogue(relay_pool=pool, relay_directory=FakeRelayDirectory())
     out = []
-    query = fetch_events_answered(pool, ["wss://a.example", "wss://b.example",
-                                         "wss://c.example"], [{}],
-                                  lambda events_, answered: out.append((events_, answered)))
-    _relays, sub = pool.subscriptions[0]
-    sub.event.emit({"id": "x"})
-    sub.relay_failed.emit("wss://a.example", "down")
-    sub.relay_closed.emit("wss://c.example", "too many filters")
+    cat._relay_query(["wss://a.example", "wss://b.example", "wss://c.example"], [{}],
+                     lambda events_, answered: out.append((events_, answered)))
+    sub = pool.subs[0]
+    article = signed(30023, D1)
+    sub.fail("wss://a.example", "down")
+    sub.refuse("wss://c.example", "error: too many filters")
     assert out == []
-    sub.relay_eose.emit("wss://b.example")
-    assert out == [([{"id": "x"}], {"wss://b.example"})]
-    assert query is not None
+    sub.answer("wss://b.example", article, {"id": "forged", "kind": 30023})
+    assert out == [([article], {"wss://b.example"})]

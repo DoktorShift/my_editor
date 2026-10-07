@@ -23,6 +23,7 @@ which only macOS can do.
 from __future__ import annotations
 
 import logging
+import re
 import sys
 import threading
 from dataclasses import dataclass
@@ -60,9 +61,15 @@ class Unavailable(Exception):
 
 
 def valid_word(word: str) -> bool:
-    """Whether ``word`` may be handed to a system checker at all."""
+    """Whether ``word`` may be handed to a system checker at all: not
+    empty or too long, no spaces or control characters, and no half of
+    an emoji (a lone surrogate, as text cut by another app can hold)."""
     return (0 < len(word) <= MAX_WORD_LENGTH
-            and not any(ch.isspace() or ord(ch) < 32 for ch in word))
+            and not any(ch.isspace() or ord(ch) < 32 or 0xD800 <= ord(ch) <= 0xDFFF
+                        for ch in word))
+
+
+_LONE_SURROGATE = re.compile("[\ud800-\udfff]")
 
 
 class SpellBackend:
@@ -134,6 +141,9 @@ class SpellBackend:
         """Check a whole paragraph in one pass, for systems that can
         (macOS, Windows). None when this backend checks word by word;
         the caller then asks ``check`` for each word."""
+        # Half an emoji is bad input, not a reason to fail: it becomes the
+        # replacement character, which keeps every offset where it was.
+        text = _LONE_SURROGATE.sub("�", text)
         fallback = TextCheck((), language)
         return self._call(lambda: self._check_text(text, self._resolve(language)), fallback)
 
@@ -184,8 +194,13 @@ class SpellBackend:
 
     # -- the guard ------------------------------------------------------------
 
+    def is_own_thread(self) -> bool:
+        """Whether the calling thread is the one the backend belongs to
+        (others get neutral answers)."""
+        return threading.get_ident() == self._thread
+
     def _on_own_thread(self) -> bool:
-        if threading.get_ident() == self._thread:
+        if self.is_own_thread():
             return True
         if not self._warned_thread:
             self._warned_thread = True

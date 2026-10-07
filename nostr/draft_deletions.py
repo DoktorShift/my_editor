@@ -6,7 +6,8 @@ NIP-37 deletes a draft by replacing its wrap with one whose content is
 empty. This app has always done that, and DraftSync reads it. Other
 apps, EINUNDZWANZIG STANDUP among them, delete with a NIP-09 deletion
 request instead: a kind 5 event that names the draft's address,
-``31234:<pubkey>:<d>``. Without reading those, a draft deleted in
+``31234:<pubkey>:<d>`` (nostr/deletion.py keeps the rules of such
+requests). Without reading those, a draft deleted in
 STANDUP stayed in this app's drafts list, and could be published from
 here as if it had never been deleted.
 
@@ -26,23 +27,20 @@ learns about that deletion too and never imports the post again.
 
 from __future__ import annotations
 
-import time
-from typing import Callable, Dict, Iterable, List, Optional, Sequence
+from typing import Callable, Dict, Iterable, Optional, Sequence
 
 from PySide6.QtCore import QObject, Signal
 
-from . import events
+from .deletion import DELETION_KIND, address, build_deletion, read_deletion
 from .drafts import DRAFT_WRAP_KIND
 from .outbox import RelayDirectory, ask_draft_relays
 from .profiles import Profile
 from .relay import RelayPool
 
-DELETION_KIND = 5
-
 
 def draft_address(pubkey_hex: str, identifier: str) -> str:
     """NIP-01 address of a draft wrap: ``31234:<pubkey>:<d>``."""
-    return f"{DRAFT_WRAP_KIND}:{pubkey_hex.lower()}:{identifier}"
+    return address(DRAFT_WRAP_KIND, pubkey_hex, identifier)
 
 
 def build_deletion_request(*, pubkey_hex: str, identifier: str, wrap_id: str = "",
@@ -53,37 +51,19 @@ def build_deletion_request(*, pubkey_hex: str, identifier: str, wrap_id: str = "
     the id of the wrap being replaced when known, and the kind, the
     shape STANDUP sends and reads.
     """
-    tags: List[List[str]] = [["a", draft_address(pubkey_hex, identifier)]]
-    if wrap_id:
-        tags.append(["e", wrap_id])
-    tags.append(["k", str(DRAFT_WRAP_KIND)])
-    return events.build_event(kind=DELETION_KIND, content="", tags=tags,
-                              pubkey_hex=pubkey_hex,
-                              created_at=int(created_at if created_at is not None
-                                             else time.time()))
+    return build_deletion(pubkey_hex, addresses=[draft_address(pubkey_hex, identifier)],
+                          event_ids=[wrap_id] if wrap_id else [], kinds=[DRAFT_WRAP_KIND],
+                          created_at=created_at)
 
 
 def deleted_identifiers(event: dict, pubkey_hex: str) -> Dict[str, int]:
     """``{d: created_at}`` for the drafts of ``pubkey_hex`` that ``event``
     deletes. Empty unless it is a deletion request signed by that key."""
-    pubkey = (pubkey_hex or "").lower()
-    if not isinstance(event, dict) or event.get("kind") != DELETION_KIND:
+    request = read_deletion(event, pubkey_hex)
+    if request is None:
         return {}
-    if str(event.get("pubkey", "")).lower() != pubkey or not events.verify_event(event):
-        return {}
-    try:
-        when = int(event.get("created_at", 0))
-    except (TypeError, ValueError):
-        return {}
-    prefix = f"{DRAFT_WRAP_KIND}:{pubkey}:"
-    found: Dict[str, int] = {}
-    for tag in event.get("tags", []):
-        if (isinstance(tag, list) and len(tag) >= 2 and tag[0] == "a"
-                and isinstance(tag[1], str) and tag[1].lower().startswith(prefix)):
-            identifier = tag[1][len(prefix):]
-            if identifier:
-                found[identifier] = when
-    return found
+    return {identifier: request.created_at
+            for identifier in request.identifiers(DRAFT_WRAP_KIND) if identifier}
 
 
 class DraftDeletions(QObject):

@@ -41,6 +41,11 @@ Span = Tuple[int, int]
 SOFT_HYPHEN = "\u00ad"
 _HYPHENS = "-\u2010\u2011"
 
+MAX_BLOCK_LENGTH = 20_000
+"""A paragraph longer than this (some 3,000 words, six pages without a
+break) is a pasted dump, not prose: it is not read for words, so no
+text can make checking it hold up typing."""
+
 
 class State(NamedTuple):
     """What the text so far leaves open for the next line."""
@@ -58,6 +63,8 @@ class State(NamedTuple):
     """The line before was indented code."""
     first: bool = True
     """No line yet: front matter can still begin."""
+    in_list: bool = False
+    """Inside a list, whose items' own paragraphs are indented too."""
 
 
 START = State()
@@ -138,13 +145,18 @@ _NOT_PROSE = re.compile("|".join(f"(?:{pattern})" for pattern in (
     # Reference labels [text][label] and footnotes [^note].
     r"\]\[[^\[\]]*\]",
     r"\[\^[^\[\]\s]+\]",
-    # Addresses: with a scheme, nostr: and other references, www.
-    r"(?i:\b[a-z][a-z0-9+.\-]*://[^\s<>\"]+)",
+    # Addresses: with a scheme, nostr: and other references, www. A
+    # pattern that can start inside a long run of letters, dots and
+    # hyphens starts only where the run starts: tried from every position
+    # of a pasted token, it would take time in the square of its length.
+    r"(?i:(?<![\w+.\-])[a-z][a-z0-9+.\-]*://[^\s<>\"]+)",
     r"(?i:\b(?:mailto|nostr|lightning|bitcoin|magnet|tel|sms|geo|urn|cashu|lnurl[a-z]*)"
     r":[^\s<>\"]+)",
     r"(?i:\bwww\.[^\s<>\"]+)",
+    # Addresses written without a scheme, with a path: github.com/rinbal.
+    r"(?<![\w.\-/@])[\w-]+(?:\.[\w-]+)*\.[A-Za-z]{2,}/[^\s<>\"]*",
     # E-mail and Nostr addresses (alice@example.com, _@example.com).
-    r"[\w.+\-]+@[\w\-]+(?:\.[\w\-]+)+",
+    r"(?<![\w.+\-])[\w.+\-]+@[\w\-]+(?:\.[\w\-]+)+",
     # Mentions (@alice, @npub1...) and hashtags (#bitcoin).
     r"(?<![\w@])@[\w.\-]+",
     r"(?<![\w&#/])#\w[\w\-]*",
@@ -161,13 +173,18 @@ _NOT_PROSE = re.compile("|".join(f"(?:{pattern})" for pattern in (
 
 # Lines that are not prose as a whole.
 _FENCE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)")
-_INDENTED = re.compile(r"(?: {0,3}\t| {4})")
 _LIST_ITEM = re.compile(r"\s*(?:[-*+\u2022]|\d{1,9}[.)])(?:\s|$)")
-_REFERENCE = re.compile(r" {0,3}\[[^\]]+\]:\s*\S")
+# A link reference definition, whole: [label]: address "title". Not a
+# footnote ([^1]: ...), whose text is prose, and not a line that only
+# begins like one ("[Note]: Read this first.").
+_REFERENCE = re.compile(r" {0,3}\[(?!\^)[^\]]+\]:[ \t]*(?:<[^<>]*>|\S+)"
+                        r"(?:[ \t]+(?:\"[^\"]*\"|'[^']*'|\([^()]*\)))?[ \t]*")
 _FRONT_MATTER = re.compile(r"---[ \t]*")
 _FRONT_MATTER_END = re.compile(r"(?:---|\.\.\.)[ \t]*")
 # What YAML lines look like: indented, a comment, a list item, a key.
-_YAML_LINE = re.compile(r"(?:\s.*|#.*|-(?:\s.*)?|[\w\"'][\w .\"'\-]*:(?:\s.*)?|)")
+# Keys start in lower case (title, tags, output), so a document that
+# begins with a rule and then "Note: ..." is read as prose.
+_YAML_LINE = re.compile(r"(?:\s.*|#.*|-(?:\s.*)?|[a-z_\"'][\w .\"'\-]*:(?:\s.*)?|)")
 
 # What a system checker must not read: line and object breaks become spaces.
 _BLANKS = str.maketrans({LINE_SEPARATOR: " ", OBJECT_REPLACEMENT: " ", "\x00": " "})
@@ -179,6 +196,8 @@ def scan(text: str, state: State = START, skipped: Iterable[Span] = ()) -> Scan:
     """The words to check in ``text`` (one block: a paragraph, or one
     line of a plain text document), starting in ``state``. ``skipped``
     adds spans the caller knows are not prose (formatted code)."""
+    if len(text) > MAX_BLOCK_LENGTH:
+        return Scan((), ((0, len(text)),), advance(text, state))
     spans: List[Span] = list(skipped)
     offset = 0
     for line in text.split(LINE_SEPARATOR):
@@ -188,10 +207,24 @@ def scan(text: str, state: State = START, skipped: Iterable[Span] = ()) -> Scan:
         spans.extend((offset + start, offset + end) for start, end in partial)
         offset += len(line) + 1
     spans.extend(match.span() for match in _NOT_PROSE.finditer(text))
+    candidates: List[Span] = []
+    for match in _TOKEN.finditer(text):
+        start, end = match.span()
+        word_start, word_end = start, end
+        while word_start < word_end and text[word_start] == "_":
+            word_start += 1
+        while word_end > word_start and text[word_end - 1] == "_":
+            word_end -= 1
+        # Underscores around a word are Markdown emphasis (_word_): markup,
+        # which a system checker must not read as part of the word.
+        if word_start > start:
+            spans.append((start, word_start))
+        if word_end < end:
+            spans.append((word_end, end))
+        if word_start < word_end and checkable(text[word_start:word_end]):
+            candidates.append((word_start, word_end))
     merged = _merged(spans)
-    words = _outside((_trimmed(text, *match.span()) for match in _TOKEN.finditer(text)),
-                     merged)
-    return Scan(tuple(words), tuple(merged), state)
+    return Scan(tuple(_outside(candidates, merged)), tuple(merged), state)
 
 
 def advance(text: str, state: State = START) -> State:
@@ -200,6 +233,19 @@ def advance(text: str, state: State = START) -> State:
     for line in text.split(LINE_SEPARATOR):
         state = _line(line, state)[0]
     return state
+
+
+def _indent(line: str) -> int:
+    """How many columns a line is indented (a tab reaches the next four)."""
+    column = 0
+    for ch in line:
+        if ch == " ":
+            column += 1
+        elif ch == "\t":
+            column += 4 - column % 4
+        else:
+            break
+    return column
 
 
 def passed_code(state: State) -> State:
@@ -215,7 +261,7 @@ def _line(line: str, state: State) -> Tuple[State, bool, List[Span]]:
         match = _FENCE.fullmatch(line)
         if (match and match.group(1)[0] == state.fence[0]
                 and len(match.group(1)) >= len(state.fence) and not match.group(2).strip()):
-            return State(blank=False, first=False), True, []
+            return state._replace(fence="", blank=False, first=False), True, []
         return state._replace(first=False), True, []
     if state.front_matter:
         if _FRONT_MATTER_END.fullmatch(line):
@@ -227,23 +273,34 @@ def _line(line: str, state: State) -> Tuple[State, bool, List[Span]]:
     if state.first and _FRONT_MATTER.fullmatch(line):
         return State(front_matter=True, first=False), True, []
 
+    blank = not line.strip()
+    indent = _indent(line)
+    item = bool(_LIST_ITEM.match(line))
+    # A list goes on through blank and indented lines, and ends at the
+    # first line back at the margin after a blank line.
+    in_list = item or (state.in_list and (blank or indent > 0 or not state.blank))
     partial: List[Span] = []
     position = 0
     if state.comment:
         end = line.find("-->")
         if end < 0:
-            return state._replace(first=False), True, []
+            return state._replace(first=False, in_list=in_list), True, []
         partial.append((0, end + 3))
         position = end + 3
     else:
         match = _FENCE.fullmatch(line)
         if match and not (match.group(1)[0] == "`" and "`" in match.group(2)):
-            return State(fence=match.group(1), blank=False, first=False), True, []
-        if (line.strip() and (state.blank or state.indented_code)
-                and _INDENTED.match(line) and not _LIST_ITEM.match(line)):
-            return State(indented_code=True, blank=False, first=False), True, []
-        if _REFERENCE.match(line):
-            return State(blank=False, first=False), True, []
+            return State(fence=match.group(1), blank=False, first=False,
+                         in_list=in_list), True, []
+        # Indented code: four columns in after a blank line. In a list,
+        # where an item's further paragraphs are indented by four, code
+        # needs four more.
+        if (not blank and not item and (state.blank or state.indented_code)
+                and indent >= (8 if state.in_list else 4)):
+            return State(indented_code=True, blank=False, first=False,
+                         in_list=in_list), True, []
+        if _REFERENCE.fullmatch(line):
+            return State(blank=False, first=False, in_list=in_list), True, []
 
     comment = False
     while True:
@@ -257,19 +314,7 @@ def _line(line: str, state: State) -> Tuple[State, bool, List[Span]]:
             break
         partial.append((start, end + 3))
         position = end + 3
-    return State(comment=comment, blank=not line.strip(), first=False), False, partial
-
-
-def _trimmed(text: str, start: int, end: int) -> Optional[Span]:
-    """A token as a word to check, or None. Underscores at its ends are
-    Markdown emphasis (_word_), not part of it."""
-    while start < end and text[start] == "_":
-        start += 1
-    while end > start and text[end - 1] == "_":
-        end -= 1
-    if start < end and checkable(text[start:end]):
-        return start, end
-    return None
+    return State(comment=comment, blank=blank, first=False, in_list=in_list), False, partial
 
 
 def checkable(word: str) -> bool:
@@ -334,13 +379,11 @@ def _merged(spans: List[Span]) -> List[Span]:
     return out
 
 
-def _outside(words: Iterable[Optional[Span]], skipped: Sequence[Span]) -> List[Span]:
+def _outside(words: Iterable[Span], skipped: Sequence[Span]) -> List[Span]:
     """The words that touch nothing skipped (both in order)."""
     out: List[Span] = []
     index = 0
     for word in words:
-        if word is None:
-            continue
         start, end = word
         while index < len(skipped) and skipped[index][1] <= start:
             index += 1
