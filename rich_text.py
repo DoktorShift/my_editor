@@ -19,11 +19,11 @@ test can call it without a window.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterator, List, Tuple
+from typing import Iterator, List, Optional, Tuple
 
 from PySide6.QtGui import (
-    QFont, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextDocument, QTextDocumentFragment,
-    QTextFormat, QTextListFormat,
+    QFont, QFontDatabase, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextDocument,
+    QTextDocumentFragment, QTextFormat, QTextListFormat,
 )
 
 from doc_walk import iter_blocks
@@ -391,6 +391,9 @@ def set_heading(cursor: QTextCursor, level: int) -> None:
     edit = QTextCursor(doc)
     edit.beginEditBlock()
     for block in _blocks_of(cursor):
+        if is_code_block(block):
+            # A paragraph style chosen on a line of code: it is text again.
+            leave_code(block)
         if level:
             if block.textList() is not None:
                 leave_list(block)
@@ -561,7 +564,8 @@ def toggle_list(cursor: QTextCursor, kind: str) -> None:
       kind in place, nesting kept;
     - otherwise they become one list of this kind (a heading becomes
       Body first: a list item is not a heading)."""
-    blocks = _blocks_of(cursor)
+    # Code is code: its lines are no list items.
+    blocks = [b for b in _blocks_of(cursor) if not is_code_block(b)]
     if not blocks:
         return
     doc = cursor.document()
@@ -715,6 +719,7 @@ class ParagraphState:
     list_kind: str = ""
     quoted: bool = False
     tasks: bool = False         # all of them checklist items
+    code: Optional[str] = None  # all code: their language ("" none, "mixed"); else None
 
 
 def paragraph_state(cursor: QTextCursor, *, budget: int = STATE_BUDGET) -> ParagraphState:
@@ -725,22 +730,30 @@ def paragraph_state(cursor: QTextCursor, *, budget: int = STATE_BUDGET) -> Parag
     kind = None
     quoted = True
     tasks = True
+    code = ...
     seen = 0
     for block in _iter_blocks_of(cursor):
         seen += 1
         if seen > budget:
-            return ParagraphState(-1, "mixed", False, False)
+            return ParagraphState(-1, "mixed", False, False, None)
         this_level = block.blockFormat().headingLevel()
         this_kind = list_kind_of(block.textList()) if block.textList() is not None else ""
         level = this_level if level is None or level == this_level else -1
         kind = this_kind if kind is None or kind == this_kind else "mixed"
         quoted = quoted and bool(quote_depth(block))
         tasks = tasks and is_task(block)
-        if level == -1 and kind == "mixed" and not quoted and not tasks:
+        language = code_language(block)
+        if language is None:
+            code = None
+        elif code is ...:
+            code = language
+        elif code is not None and code != language:
+            code = "mixed"
+        if level == -1 and kind == "mixed" and not quoted and not tasks and code is None:
             break
     if not seen:
         return ParagraphState()
-    return ParagraphState(level, kind, quoted, tasks)
+    return ParagraphState(level, kind, quoted, tasks, None if code is ... else code)
 
 
 def toggle_quote(cursor: QTextCursor) -> None:
@@ -916,6 +929,138 @@ def is_code_block(block) -> bool:
     fmt = block.blockFormat()
     return bool(fmt.property(QTextFormat.Property.BlockCodeFence)) or fmt.hasProperty(
         QTextFormat.Property.BlockCodeLanguage)
+
+
+CODE_FENCE = "`"
+
+
+def code_language(block) -> Optional[str]:
+    """The language a code line's block names ("" for none), or None for a
+    paragraph that is no code."""
+    if not is_code_block(block):
+        return None
+    return str(block.blockFormat().property(QTextFormat.Property.BlockCodeLanguage) or "")
+
+
+def _code_key(block):
+    """What makes lines one code block to the Markdown writer: the same
+    fence, language and quote; None for a paragraph that is no code."""
+    language = code_language(block)
+    if language is None:
+        return None
+    fence = block.blockFormat().property(QTextFormat.Property.BlockCodeFence)
+    return str(fence or CODE_FENCE), language, quote_depth(block)
+
+
+def same_code_block(one, other) -> bool:
+    """Whether two lines are lines of one code block (given they are next
+    to each other)."""
+    key = _code_key(one)
+    return key is not None and key == _code_key(other)
+
+
+def code_run(block):
+    """The first and last line of the code block ``block`` is a line of:
+    the lines next to it with the same fence, language and quote, which
+    Markdown writes as one fenced block."""
+    key = _code_key(block)
+    first = last = block
+    while first.previous().isValid() and _code_key(first.previous()) == key:
+        first = first.previous()
+    while last.next().isValid() and _code_key(last.next()) == key:
+        last = last.next()
+    return first, last
+
+
+def _code_text_format() -> QTextCharFormat:
+    """The text format of a code line, as Qt's Markdown reader gives it
+    (the system's fixed font); the editor shows it in its code font."""
+    fmt = QTextCharFormat()
+    fmt.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+    return fmt
+
+
+def _restyle_runs(block, fmt: QTextCharFormat) -> None:
+    """Every piece of text in ``block`` in exactly ``fmt`` (pictures stay)."""
+    whole = QTextCursor(block)
+    whole.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
+    if whole.hasSelection():
+        for start, end, _fmt in _text_runs(whole):
+            piece = QTextCursor(block.document())
+            piece.setPosition(start)
+            piece.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+            piece.setCharFormat(fmt)
+    QTextCursor(block).setBlockCharFormat(fmt)
+
+
+def code_line_format(fmt: QTextBlockFormat, language: str) -> QTextBlockFormat:
+    """``fmt`` made the format of a line of a fenced code block in
+    ``language``, as Qt's Markdown reader makes it (so the writer fences
+    it and names the language)."""
+    fmt.setProperty(QTextFormat.Property.BlockCodeFence, CODE_FENCE)
+    fmt.setProperty(QTextFormat.Property.BlockCodeLanguage, language)
+    fmt.setNonBreakableLines(True)
+    fmt.clearProperty(QTextFormat.Property.BlockMarker)
+    fmt.setTopMargin(0)
+    fmt.setBottomMargin(0)
+    return fmt
+
+
+def make_code_block(cursor: QTextCursor, language: str = "") -> None:
+    """The paragraphs under the cursor become the lines of one code block
+    in ``language`` (as a fence names it; "" for none), as one step on the
+    undo stack. A heading becomes Body and a list item leaves its list
+    first; the words lose their styles, since a code block holds plain
+    text and is written as it is. Dividers and table cells stay."""
+    blocks = [b for b in _blocks_of(cursor) if not is_divider(b)
+              and QTextCursor(b).currentTable() is None]
+    if not blocks:
+        return
+    edit = QTextCursor(cursor.document())
+    edit.beginEditBlock()
+    text = _code_text_format()
+    for block in blocks:
+        if block.blockFormat().headingLevel():
+            set_heading(QTextCursor(block), BODY)
+        if block.textList() is not None:
+            leave_list(block)
+        QTextCursor(block).setBlockFormat(code_line_format(block.blockFormat(), language))
+        _restyle_runs(block, text)
+    edit.endEditBlock()
+
+
+def set_code_language(cursor: QTextCursor, language: str) -> None:
+    """The code blocks under the cursor, each whole, in ``language``
+    ("" for none), as one step on the undo stack."""
+    lines = []
+    for block in _blocks_of(cursor):
+        if is_code_block(block) and block not in lines:
+            first, last = code_run(block)
+            line = first
+            while line.isValid():
+                lines.append(line)
+                if line == last:
+                    break
+                line = line.next()
+    if not lines:
+        return
+    edit = QTextCursor(cursor.document())
+    edit.beginEditBlock()
+    for line in lines:
+        fmt = line.blockFormat()
+        fmt.setProperty(QTextFormat.Property.BlockCodeLanguage, language)
+        QTextCursor(line).setBlockFormat(fmt)
+    edit.endEditBlock()
+
+
+def leave_code(block) -> None:
+    """A line of code becomes a Body paragraph; its words stay, plain."""
+    fmt = block.blockFormat()
+    fmt.clearProperty(QTextFormat.Property.BlockCodeFence)
+    fmt.clearProperty(QTextFormat.Property.BlockCodeLanguage)
+    fmt.setNonBreakableLines(False)
+    QTextCursor(block).setBlockFormat(fmt)
+    _restyle_runs(block, QTextCharFormat())
 
 
 def _has_own_style(block) -> bool:

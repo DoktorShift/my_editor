@@ -36,6 +36,7 @@ On macOS, `Ctrl` in these tables is the Command key (`⌘`) and `Alt` is Option 
 | `Ctrl+'` on macOS (no shortcut on Windows and Linux) | Quote (again: no quote) |
 | `Ctrl+K` | Add Link (Edit Link when the caret is in a link) |
 | | `Insert > Divider`: a horizontal rule (`---`) after the paragraph |
+| | `Insert > Code Block`: the paragraph becomes a block of code, and a short list at the caret asks for its language (`Escape` keeps it plain text). `Format > Code Language` changes it later |
 
 Writing (Markdown files, new documents and drafts) is set in your system's own text font at a reading size, in a column of a comfortable line length; plain text and code files keep the monospace font across the whole window. `View > Use Monospace Font for Writing` sets all writing in monospace.
 
@@ -44,6 +45,14 @@ The status bar says, quietly, how long the document is: its words and how long i
 The **format toolbar** above the document holds the controls used most: the paragraph style (Body, Heading 1 to 3), Bold, Italic, Strikethrough, Add Link, Bulleted List, Numbered List, Checklist and Quote. Everything else is in the `Format` and `Insert` menus. `View > Show Toolbar` (`Ctrl+Alt+T` on macOS) hides it; a PDF tab has none.
 
 The keys follow each platform's own conventions: Apple Notes and Pages on macOS, Google Docs and LibreOffice on Windows and Linux. A command no convention has a key for has none. One exception on macOS: Strikethrough and Clear Formatting, which Apple's apps give no key, keep the keys writers know from Google Docs (`Ctrl+Shift+X`, `Ctrl+\`).
+
+**Code blocks.** A code block holds code as it is: set in the monospace font on a tinted box, its lines never wrapped into each other. Make one with `Insert > Code Block`, with `/code` in the slash menu, or by typing ```` ``` ```` and the language (```` ```python ````) and then `Return`. The Style pop-up shows its language ("Code: Python"). Inside a block:
+
+- `Tab` indents by four spaces and `Shift+Tab` takes up to four away, on every line selected;
+- `Return` starts the next line as far in as the one before;
+- `Return` on an empty last line, `Down` on the last line of the document, or `Backspace` at the start of the block takes you out of it, onto a Body paragraph; choosing Body in the Style pop-up makes a line text again.
+
+Words in code have no styles, so Bold, Italic, Inline Code and links are dimmed there, and a paste is plain text. Markdown writes the block fenced, with its language, as Nostr readers expect it.
 
 Links: `Ctrl+K` opens a small panel under the words with the link's text and address. It accepts web addresses (`https://` is added when you leave it out), email addresses and, while a Nostr account is in use, Nostr links; it says right there why anything else cannot be a link. Pasting a web address over selected words links them. `Ctrl`-click (`Cmd`-click on macOS) opens a link: web pages in your browser, Nostr links through njump.me. Typing right after a link is not part of it.
 
@@ -79,6 +88,7 @@ A paste goes in the way typing it would: inside a sentence the pasted words beco
 | `>` and a space | A quote |
 | `[ ]` or `[x]` and a space, at the start of a paragraph or a list item | A checklist item, ticked for `[x]` |
 | `---`, `***` or `___`, then Return | A divider |
+| ```` ``` ```` or `~~~`, with a language or none (```` ```python ````), then Return | A code block in that language |
 | `**words**` | Bold |
 | `*words*` or `_words_` | Italic (an underscore only at the start of a word, so `snake_case` stays as typed) |
 | `~~words~~` | Strikethrough |

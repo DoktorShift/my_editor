@@ -49,7 +49,7 @@ from typing import List, Optional, Tuple
 
 from PySide6.QtCore import QMimeData
 from PySide6.QtGui import (
-    QTextBlockFormat, QTextCharFormat, QTextCursor, QTextDocument, QTextFormat,
+    QTextBlockFormat, QTextCharFormat, QTextCursor, QTextDocument,
     QTextImageFormat,
 )
 
@@ -223,10 +223,8 @@ def _make_code_blocks(doc, language: str) -> None:
         while blocks and not blocks[-1].text().strip():
             blocks.pop()
         for block in blocks:
-            fmt = block.blockFormat()
-            fmt.setProperty(QTextFormat.Property.BlockCodeFence, "`")
-            fmt.setProperty(QTextFormat.Property.BlockCodeLanguage, run_language or language)
-            QTextCursor(block).setBlockFormat(fmt)
+            QTextCursor(block).setBlockFormat(
+                rich_text.code_line_format(block.blockFormat(), run_language or language))
 
 
 def _make_checklists(doc) -> None:

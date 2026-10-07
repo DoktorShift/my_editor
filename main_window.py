@@ -71,7 +71,7 @@ import rich_text
 import image_safety
 import url_safety
 from highlighter import (
-    LANGUAGE_DISPLAY_NAMES, RichTextLook, SyntaxHighlighter, detect_language,
+    LANGUAGE_DISPLAY_NAMES, RichTextLook, SyntaxHighlighter, canonical_language, detect_language,
     detect_language_from_content,
 )
 from settings import load_settings, save_setting
@@ -1241,6 +1241,9 @@ class MainWindow(QMainWindow):
         for action, style in styles.items():
             action.setChecked(state.get(style, False))
         self._update_style_checks(ed)
+        if self._editing_code() != getattr(self, "_commands_in_code", False):
+            # The caret went into a code block or out of one.
+            self._update_editor_commands()
 
     def _update_style_checks(self, ed) -> None:
         """The Style menu checks the style of the paragraph at the caret
@@ -1251,11 +1254,16 @@ class MainWindow(QMainWindow):
         cursor = ed.textCursor() if ed else None
         paragraphs = (rich_text.paragraph_state(cursor) if cursor is not None
                       else rich_text.ParagraphState())
-        level = paragraphs.heading
+        level = paragraphs.heading if paragraphs.code is None else -1
         for index, action in enumerate(self.act_styles):
             action.setChecked(index == level)
+        for action in self.act_code_languages:
+            action.setChecked(paragraphs.code is not None and action.data() == (
+                canonical_language(paragraphs.code) or paragraphs.code))
         if getattr(self, "format_toolbar", None) is not None:
-            if 0 <= level < len(self.act_styles):
+            if paragraphs.code is not None:
+                name = self._code_style_name(paragraphs.code)
+            elif 0 <= level < len(self.act_styles):
                 name = self.act_styles[level].text()
             elif level > 0:
                 name = _("Heading {level}").format(level=level)
@@ -1444,6 +1452,26 @@ class MainWindow(QMainWindow):
                                                  _("separator")),
                                        slash_section=slash_menu.BLOCKS),
                                triggered=lambda: self._editor_call("insert_divider"))
+        # Code Block: no key (Option-Command-C is Copy Style on a Mac). The
+        # language is asked right after, in a short list at the caret.
+        self.act_code_block = add(Command("insert.code_block", _("Code Block"), INSERT,
+                                          keywords=(_("code"), _("snippet"), _("program"),
+                                                    "fence"),
+                                          slash_section=slash_menu.BLOCKS),
+                                  triggered=self._insert_code_block)
+        # The language of the code block at the caret: Format > Code
+        # Language, one choice of a group.
+        self._code_language_group = QActionGroup(self)
+        self.act_code_languages = []
+        for language, name in [("", _("Plain Text"))] + sorted(
+                ((key, title) for key, title in LANGUAGE_DISPLAY_NAMES.items()
+                 if key != "markdown"), key=lambda pair: pair[1].lower()):
+            action = add(Command(f"format.code_language.{language or 'plain'}", name, FORMAT,
+                                 checkable=True, keywords=(_("code"), _("language"))),
+                         triggered=lambda lang=language: self._set_code_language(lang))
+            action.setData(language)
+            self._code_language_group.addAction(action)
+            self.act_code_languages.append(action)
         # Text colors stay in the document and in local files; Markdown
         # has none, so they never reach Nostr.
         self.act_colors = []
@@ -1494,7 +1522,12 @@ class MainWindow(QMainWindow):
         # (headings, lists, links): off in plain-text tabs as well.
         self._rich_actions = [self.act_strike, self.act_code, *self.act_styles,
                               self.act_bullets, self.act_numbers, self.act_checklist,
-                              self.act_quote, self.act_divider, self.act_link]
+                              self.act_quote, self.act_divider, self.act_link,
+                              self.act_code_block]
+        # Styles of words, which code does not have: off in a code block.
+        self._word_actions = [self.act_bold, self.act_italic, self.act_underline,
+                              self.act_strike, self.act_code, self.act_link,
+                              *self.act_colors, self.act_remove_color, self.act_reset_format]
 
         self._search_matches = []
         self._current_match_index = -1
@@ -1761,6 +1794,7 @@ class MainWindow(QMainWindow):
         self.m_insert.addAction(self.act_link)
         self.m_insert.addSeparator()
         self.m_insert.addAction(self.act_divider)
+        self.m_insert.addAction(self.act_code_block)
 
         m_format = self.menuBar().addMenu(_("F&ormat"))
         self.m_style = m_format.addMenu(_("Style"))
@@ -1786,6 +1820,11 @@ class MainWindow(QMainWindow):
             self.m_color.addAction(action)
         self.m_color.addSeparator()
         self.m_color.addAction(self.act_remove_color)
+        self.m_code_language = m_format.addMenu(_("Code Language"))
+        for action in self.act_code_languages:
+            self.m_code_language.addAction(action)
+            if not action.data():
+                self.m_code_language.addSeparator()         # after Plain Text
         m_format.addSeparator()
         m_format.addAction(self.act_reset_format)
         self.m_format = m_format
@@ -4129,6 +4168,55 @@ class MainWindow(QMainWindow):
             ed.set_heading(level)
             self._update_format_buttons()
 
+    def _editing_code(self) -> bool:
+        """Whether the current tab edits a document with structure and the
+        caret (or the selection) is in a code block."""
+        ed = self.current_editor()
+        return bool(self._editor_kind(ed) == "rich" and not self._shows_preview_only(ed)
+                    and self._caret_in_code(ed))
+
+    @staticmethod
+    def _caret_in_code(ed) -> bool:
+        """Whether the caret, or either end of the selection, is in a code
+        block."""
+        if ed is None:
+            return False
+        cursor = ed.textCursor()
+        doc = ed.document()
+        return (rich_text.is_code_block(doc.findBlock(cursor.selectionStart()))
+                or rich_text.is_code_block(doc.findBlock(cursor.selectionEnd())))
+
+    @staticmethod
+    def _code_style_name(language: str) -> str:
+        """What the Style pop-up says in a code block: "Code: Python"."""
+        if language == "mixed":
+            return pgettext("paragraph style", "Mixed")
+        canonical = canonical_language(language)
+        if canonical is not None:
+            return _("Code: {language}").format(language=LANGUAGE_DISPLAY_NAMES[canonical])
+        if language:
+            return _("Code: {language}").format(language=language)
+        return _("Code")
+
+    def _insert_code_block(self) -> None:
+        """Insert > Code Block: the paragraph at the caret (or those
+        selected) become a code block, and its language is asked in a
+        short list at the caret (Escape keeps it plain text)."""
+        ed = self.current_editor()
+        if ed is None:
+            return
+        ed.make_code_block()
+        self._update_editor_commands()
+        self._update_format_buttons()
+        caret = ed.cursorRect()
+        self.m_code_language.popup(ed.viewport().mapToGlobal(caret.bottomLeft()))
+
+    def _set_code_language(self, language: str) -> None:
+        ed = self.current_editor()
+        if ed is not None:
+            ed.set_code_language(language)
+            self._update_format_buttons()
+
     def _slash_items(self, query: str) -> list:
         """What the slash menu offers for ``query``: the window's commands,
         ranked (CommandRegistry.rank), Nostr ones while Nostr is in use."""
@@ -4264,11 +4352,18 @@ class MainWindow(QMainWindow):
             action.setEnabled(bool(kind) and not reading)
         for action in self._rich_actions:
             action.setEnabled(kind == "rich" and not reading)
+        in_code = self._commands_in_code = bool(self._editing_code())
+        # In a code block, words have no styles: the text is code.
+        if in_code:
+            for action in self._word_actions:
+                action.setEnabled(False)
+        for action in self.act_code_languages:
+            action.setEnabled(in_code)
         self.act_select_all.setEnabled(bool(kind))
         for action in (self.act_find, self.act_replace, self.act_find_next, self.act_find_prev):
             action.setEnabled(not reading)
         self.act_underline.setEnabled(bool(self._keeps_underline(self.current_editor()))
-                                      and not reading)
+                                      and not reading and not in_code)
         self._update_clipboard_commands()
         if kind:
             self._update_undo_redo_buttons()

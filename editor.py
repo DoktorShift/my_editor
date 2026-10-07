@@ -10,7 +10,7 @@ import re
 import sys
 
 from PySide6.QtCore import (
-    Qt, QTimer, QRect, QPoint, QMetaMethod, QEvent, QMimeData, QUrl, Signal,
+    Qt, QTimer, QRect, QRectF, QPoint, QMetaMethod, QEvent, QMimeData, QUrl, Signal,
 )
 from PySide6.QtGui import (
     QAccessible, QAccessibleEvent,
@@ -440,6 +440,7 @@ class HtmlEditor(QTextEdit):
         if self._bg_pattern != "none" or self._paper_mode:
             self._paint_guides(painter)
 
+        self._paint_code_boxes(painter)
         self._paint_quote_bars(painter)
         painter.end()
 
@@ -454,6 +455,37 @@ class HtmlEditor(QTextEdit):
         p2 = QPainter(vp)
         p2.fillRect(rect, color)
         p2.end()
+
+    def _paint_code_boxes(self, painter):
+        """A box behind each code block, as every reader draws one. Only
+        painted: nothing of it is in the document."""
+        vp = self.viewport()
+        block = self.cursorForPosition(QPoint(0, 0)).block()
+        if rich_text.is_code_block(block):
+            block = rich_text.code_run(block)[0]
+        layout = self.document().documentLayout()
+        dx = self.horizontalScrollBar().value()
+        dy = self.verticalScrollBar().value()
+        color = QColor("#2D2F33") if self._is_dark() else QColor("#F1F3F5")
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(color)
+        while block.isValid():
+            rect = layout.blockBoundingRect(block)
+            if rect.top() - dy > vp.height():
+                break
+            if not rich_text.is_code_block(block):
+                block = block.next()
+                continue
+            first, last = rich_text.code_run(block)
+            top = layout.blockBoundingRect(first).top() - dy
+            bottom = layout.blockBoundingRect(last).bottom() - dy
+            left = rect.left() - dx - 6
+            painter.drawRoundedRect(QRectF(left, top - 3, vp.width() - left - 2,
+                                           bottom - top + 6), 6, 6)
+            block = last.next()
+        painter.restore()
 
     def _paint_quote_bars(self, painter):
         """A bar beside each level of a quote, as every reader draws one.
@@ -1126,8 +1158,10 @@ class HtmlEditor(QTextEdit):
                     return
             else:
                 if self._shortcuts_apply() and markdown_shortcuts.on_return(c):
-                    # "---" and Return: a divider (Markdown Shortcuts).
+                    # "---" and Return: a divider; "```python": a code block
+                    # (Markdown Shortcuts).
                     self.setTextCursor(c)
+                    self.setCurrentCharFormat(c.block().charFormat())
                     self.ensureCursorVisible()
                     return
                 super().keyPressEvent(e)
@@ -1213,6 +1247,8 @@ class HtmlEditor(QTextEdit):
         block = cursor.block()
         plain = e.modifiers() in (Qt.NoModifier, Qt.KeypadModifier)
         key = e.key()
+        if rich_text.is_code_block(block) and self._holds_structure():
+            return self._code_key(e, cursor, block)
         if key in (Qt.Key_Tab, Qt.Key_Backtab) and e.modifiers() in (
                 Qt.NoModifier, Qt.ShiftModifier):
             delta = -1 if key == Qt.Key_Backtab or e.modifiers() == Qt.ShiftModifier else 1
@@ -1287,6 +1323,107 @@ class HtmlEditor(QTextEdit):
             self.set_heading(0)
             return True
         return False
+
+    CODE_INDENT = 4
+
+    def _code_key(self, e, cursor, block) -> bool:
+        """The keys of a code block. Tab indents by four spaces and
+        Shift+Tab outdents; Return starts the next line with the same
+        indent, and on an empty last line leaves the block (the line
+        becomes Body); Down on the document's last line, and Backspace at
+        the start of a block, leave it too. True when the key was handled."""
+        key = e.key()
+        plain = e.modifiers() in (Qt.NoModifier, Qt.KeypadModifier)
+        shift = e.modifiers() == Qt.ShiftModifier
+        if key == Qt.Key_Backtab or (key == Qt.Key_Tab and shift):
+            self._outdent_code(cursor)
+            return True
+        if key == Qt.Key_Tab and plain:
+            if cursor.hasSelection() and "\u2029" in cursor.selectedText():
+                self._indent_code_lines(cursor, +1)
+            else:
+                column = cursor.positionInBlock()
+                cursor.insertText(" " * (self.CODE_INDENT - column % self.CODE_INDENT))
+                self.setTextCursor(cursor)
+            return True
+        if cursor.hasSelection():
+            return False
+        _first, last = rich_text.code_run(block)
+        if key in (Qt.Key_Return, Qt.Key_Enter) and plain:
+            if not block.text() and block == last:
+                cursor.beginEditBlock()
+                rich_text.leave_code(block)
+                cursor.endEditBlock()
+                self.setCurrentCharFormat(QTextCharFormat())
+                return True
+            # The new line starts as far in as the one it came from (no
+            # further than where the caret was).
+            text = block.text()
+            indent = text[:len(text) - len(text.lstrip(" \t"))][:cursor.positionInBlock()]
+            cursor.beginEditBlock()
+            cursor.insertBlock()
+            if indent:
+                cursor.insertText(indent)
+            cursor.endEditBlock()
+            self.setTextCursor(cursor)
+            return True
+        if key == Qt.Key_Down and plain and not block.next().isValid():
+            cursor.beginEditBlock()
+            cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+            cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
+            cursor.endEditBlock()
+            self.setTextCursor(cursor)
+            self.setCurrentCharFormat(QTextCharFormat())
+            return True
+        if key == Qt.Key_Backspace and plain and cursor.atBlockStart() and block == _first:
+            cursor.beginEditBlock()
+            rich_text.leave_code(block)
+            cursor.endEditBlock()
+            self.setCurrentCharFormat(QTextCharFormat())
+            return True
+        return False
+
+    def _indent_code_lines(self, cursor, delta: int) -> None:
+        """Four spaces more (+1) or less (-1) at the start of every line of
+        code under the cursor, as one step on the undo stack."""
+        doc = self.document()
+        lines = []
+        block = doc.findBlock(cursor.selectionStart())
+        last = doc.findBlock(cursor.selectionEnd())
+        while block.isValid():
+            if rich_text.is_code_block(block):
+                lines.append(block)
+            if block == last:
+                break
+            block = block.next()
+        edit = QTextCursor(doc)
+        edit.beginEditBlock()
+        for line in lines:
+            start = QTextCursor(line)
+            if delta > 0:
+                start.insertText(" " * self.CODE_INDENT)
+            else:
+                text = line.text()
+                spaces = len(text) - len(text.lstrip(" "))
+                start.setPosition(line.position() + min(spaces, self.CODE_INDENT),
+                                  QTextCursor.MoveMode.KeepAnchor)
+                start.removeSelectedText()
+        edit.endEditBlock()
+
+    def _outdent_code(self, cursor) -> None:
+        self._indent_code_lines(cursor, -1)
+
+    def make_code_block(self, language: str = "") -> None:
+        """Code Block: the paragraphs under the cursor become one."""
+        cursor = self.textCursor()
+        rich_text.make_code_block(cursor, language)
+        self.setTextCursor(cursor)
+        self.setCurrentCharFormat(cursor.block().charFormat())
+
+    def set_code_language(self, language: str) -> None:
+        cursor = self.textCursor()
+        rich_text.set_code_language(cursor, language)
+        self.setTextCursor(cursor)
 
     def _divider_key(self, e, cursor, block) -> bool:
         """A divider holds no text: typing on it goes into the paragraph
@@ -1390,7 +1527,8 @@ class HtmlEditor(QTextEdit):
         text = source.text() if source.hasText() else ""
         address = text.strip()
         if (cursor.hasSelection() and link_url.is_bare_http_url(address)
-                and self._holds_structure() and "\u2029" not in cursor.selectedText()
+                and self._holds_structure() and not rich_text.is_code_block(cursor.block())
+                and "\u2029" not in cursor.selectedText()
                 and not link_url.is_an_address(cursor.selectedText())):
             rich_text.set_link(cursor, "", address)
             cursor.setPosition(cursor.selectionEnd())

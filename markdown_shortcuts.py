@@ -11,7 +11,10 @@ way Bear, Notion and standup do:
   or "1)" for a numbered list (starting at the number typed, unless the
   item continues a list right above), ">" for a quote;
 - a paragraph that holds only "---", "***" or "___", followed by
-  Return: a divider;
+  Return: a divider; one that holds a code fence ("```" or "~~~", with
+  a language: "```python"), followed by Return: a code block;
+- "[ ] " or "[x] " at the start of a paragraph or a list item: a
+  checklist item, ticked for "[x]";
 - a closing mark: "**bold**", "*italic*" or "_italic_" (the underscore
   only at the start of a word, so snake_case stays as typed),
   "~~struck~~", "`code`".
@@ -43,6 +46,8 @@ _BLOCK_START = re.compile(r"(#{1,3}|[-*+]|(\d{1,9})[.)]|>) ")
 _TASK_START = re.compile(r"\[([ xX])\] ")
 # A paragraph that is a divider, before Return.
 _DIVIDER = re.compile(r"-{3,}|\*{3,}|_{3,}")
+# A code fence, with the language it names, before Return.
+_FENCE = re.compile(r"(?:`{3,}|~{3,})\s*([\w+#.-]*)\s*")
 # Closing marks, checked in this order against the paragraph's text up to
 # the caret. Bold before italic: "**bold*" is not yet italic, and
 # "**bold**" is bold. A mark after a backslash is a literal one.
@@ -140,6 +145,9 @@ def on_return(cursor: QTextCursor) -> bool:
     if cursor.hasSelection() or not cursor.atBlockEnd():
         return False
     block = cursor.block()
+    fence = _FENCE.fullmatch(block.text())
+    if fence is not None and _is_body(block):
+        return _make_code_block(cursor, block, fence.group(1))
     if not _DIVIDER.fullmatch(block.text()) or not _is_body(block):
         return False
     doc = cursor.document()
@@ -152,6 +160,20 @@ def on_return(cursor: QTextCursor) -> bool:
     rich_text.insert_divider(at)
     edit.endEditBlock()
     cursor.setPosition(at.position())
+    return True
+
+
+def _make_code_block(cursor: QTextCursor, block, language: str) -> bool:
+    """"```python" and Return: the paragraph becomes the first, empty line
+    of a code block in that language."""
+    edit = QTextCursor(cursor.document())
+    edit.beginEditBlock()
+    marks = QTextCursor(block)
+    marks.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
+    marks.removeSelectedText()
+    rich_text.make_code_block(QTextCursor(block), language)
+    edit.endEditBlock()
+    cursor.setPosition(block.position())
     return True
 
 

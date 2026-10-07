@@ -84,6 +84,34 @@ _LIGHT: dict[str, str] = {
 }
 
 
+# What code fences call a language, by the names this module knows it by
+# (the keys of LANGUAGE_DISPLAY_NAMES).
+_FENCE_ALIASES: dict[str, str] = {
+    'py': 'python', 'python3': 'python', 'py3': 'python',
+    'js': 'javascript', 'jsx': 'javascript', 'node': 'javascript', 'mjs': 'javascript',
+    'ts': 'typescript', 'tsx': 'typescript',
+    'sh': 'bash', 'shell': 'bash', 'zsh': 'bash', 'console': 'bash', 'shellsession': 'bash',
+    'yml': 'yaml',
+    'rs': 'rust',
+    'golang': 'go',
+    'c++': 'cpp', 'cc': 'cpp', 'cxx': 'cpp', 'hpp': 'cpp', 'h++': 'cpp',
+    'h': 'c',
+    'xml': 'html', 'xhtml': 'html', 'svg': 'html', 'htm': 'html',
+    'scss': 'css', 'sass': 'css', 'less': 'css',
+    'jsonc': 'json', 'json5': 'json',
+    'postgresql': 'sql', 'postgres': 'sql', 'mysql': 'sql', 'sqlite': 'sql', 'psql': 'sql',
+    'md': 'markdown',
+}
+
+
+def canonical_language(name: str | None) -> str | None:
+    """The language a code fence names (``py``, ``Python``, ``sh``), as this
+    module knows it, or None when it knows no such language."""
+    key = (name or "").strip().lower()
+    key = _FENCE_ALIASES.get(key, key)
+    return key if key in LANGUAGE_DISPLAY_NAMES else None
+
+
 def detect_language(path: str | None) -> str | None:
     if not path:
         return None
