@@ -672,15 +672,14 @@ class TestBlobFetcher(unittest.TestCase):
         reply.finish()
         self.assertEqual(out["error"], "Image is too large to rehost")
 
-    def test_bytes_from_a_refused_redirect_target_are_not_read(self):
-        # Redirects are followed, so the bytes can arrive from an origin
-        # the caller never named.
-        reply = FakeReply(body=PNG, url="http://127.0.0.1:9000/x.png")
-        fetcher, _nam = self.fetcher([reply])
-        out = self.fetch(fetcher, "https://a.example/x.png")
-        reply.finish()
-        self.assertEqual(out["error"], "URL was not allowed")
-        self.assertNotIn("data", out)
+    def test_redirects_are_never_followed_by_qt_itself(self):
+        # Bytes then only ever come from an address the guard checked.
+        from PySide6.QtNetwork import QNetworkRequest
+        fetcher, nam = self.fetcher([FakeReply(body=PNG)])
+        self.fetch(fetcher, "https://a.example/x.png")
+        request = nam.calls[0][1]
+        self.assertEqual(request.attribute(QNetworkRequest.Attribute.RedirectPolicyAttribute),
+                         QNetworkRequest.RedirectPolicy.ManualRedirectPolicy)
 
     def test_the_content_type_header_names_the_mime(self):
         reply = FakeReply(body=PNG, content_type="image/webp; charset=binary")
@@ -721,28 +720,21 @@ class TestBlobFetcher(unittest.TestCase):
         self.assertEqual(out["error"], "URL was not allowed")
 
     def test_a_redirect_into_the_local_network_is_not_followed(self):
-        from PySide6.QtCore import QUrl
-        reply = FakeReply(body=PNG)
-        allowed = []
-        reply.redirectAllowed.connect(lambda: allowed.append(True))
-        fetcher, _nam = self.fetcher([reply])
+        moved = FakeReply(status=302, raw_headers={"Location": b"http://10.0.0.7/x.png"})
+        fetcher, nam = self.fetcher([moved])
         out = self.fetch(fetcher, "https://a.example/x.png")
-        reply.redirected.emit(QUrl("http://10.0.0.7/x.png"))
-        self.assertEqual(allowed, [])
-        self.assertTrue(reply.aborted)
-        reply.finish()
+        moved.finish()
+        self.assertEqual(len(nam.calls), 1)
         self.assertEqual(out["error"], "URL was not allowed")
 
     def test_a_public_redirect_is_followed(self):
-        from PySide6.QtCore import QUrl
-        reply = FakeReply(body=PNG)
-        allowed = []
-        reply.redirectAllowed.connect(lambda: allowed.append(True))
-        fetcher, _nam = self.fetcher([reply])
+        moved = FakeReply(status=307, raw_headers={"Location": b"https://cdn.example/x.png"})
+        final = FakeReply(body=PNG)
+        fetcher, nam = self.fetcher([moved, final])
         out = self.fetch(fetcher, "https://a.example/x.png")
-        reply.redirected.emit(QUrl("https://cdn.example/x.png"))
-        self.assertEqual(allowed, [True])
-        reply.finish()
+        moved.finish()
+        self.assertEqual(bytes(nam.calls[1][1].rawHeader("Host")), b"cdn.example")
+        final.finish()
         self.assertEqual(out["data"], PNG)
 
     def test_an_empty_body_is_reported_rather_than_uploaded(self):

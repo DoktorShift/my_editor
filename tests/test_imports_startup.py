@@ -192,19 +192,21 @@ class TestTheLock:
         assert controller._exit_hook is None
 
     def test_a_lock_left_by_a_crash_is_taken_over(self, harness, tmp_path):
-        import subprocess
+        """A lock nothing gave back (its process crashed) is taken over at
+        the next start. Left here as such a process leaves it: Qt's own
+        lock file, naming a process that does not exist (no process
+        number can be 4194307: it is above Linux's and macOS's highest and
+        not a multiple of four, as Windows' are), so no other process has
+        to start or end for the test."""
+        from PySide6.QtCore import QLockFile
         lock = database_path(tmp_path, PK).with_suffix(".lock")
         lock.parent.mkdir(parents=True)
-        crashed = subprocess.run(
-            [sys.executable, "-c",
-             "import os, sys\n"
-             "from PySide6.QtCore import QLockFile\n"
-             "lock = QLockFile(sys.argv[1])\n"
-             "assert lock.tryLock(0)\n"
-             "os._exit(0)\n", str(lock)],
-            capture_output=True, text=True, timeout=60)
-        assert crashed.returncode == 0, crashed.stderr
-        assert lock.exists()        # left behind, its process gone
+        mine = QLockFile(str(lock))
+        assert mine.tryLock(0)
+        fields = lock.read_bytes().split(b"\n")
+        mine.unlock()
+        fields[0] = b"4194307"
+        lock.write_bytes(b"\n".join(fields))
         harness.controller.account_changed(profile())
         settle()
         assert harness.controller.bound

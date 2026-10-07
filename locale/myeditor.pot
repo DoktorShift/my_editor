@@ -3789,39 +3789,39 @@ msgid "Couldn't reach that URL: {reason}."
 msgstr ""
 
 #: nostr/imports/errors.py:144
-#: nostr/imports/fetch.py:206
+#: nostr/imports/fetch.py:160
 #: nostr/ui/thumbnail_loader.py:272
 msgid "network error"
 msgstr ""
 
-#: nostr/imports/fetch.py:64
+#: nostr/imports/fetch.py:59
 #: nostr/imports/images.py:67
 msgid "URL was not allowed"
 msgstr ""
 
-#: nostr/imports/fetch.py:65
+#: nostr/imports/fetch.py:60
 msgid "Image is too large to rehost"
 msgstr ""
 
-#: nostr/imports/fetch.py:66
+#: nostr/imports/fetch.py:61
 msgid "Image was empty"
 msgstr ""
 
-#: nostr/imports/fetch.py:67
+#: nostr/imports/fetch.py:62
 msgid "Image address could not be found"
 msgstr ""
 
-#: nostr/imports/fetch.py:54
+#: nostr/imports/fetch.py:49
 #, python-brace-format
 msgid "Feed exceeds the {size} MiB size limit"
 msgstr ""
 
-#: nostr/imports/fetch.py:107
-#: nostr/imports/fetch.py:134
+#: nostr/imports/fetch.py:102
+#: nostr/imports/fetch.py:123
 msgid "Feed URL must be http(s)"
 msgstr ""
 
-#: nostr/imports/fetch.py:343
+#: nostr/imports/fetch.py:243
 msgid "Could not download the image"
 msgstr ""
 
@@ -3867,8 +3867,12 @@ msgstr ""
 msgid "The draft couldn't be saved yet. Try again to send it."
 msgstr ""
 
-#: nostr/imports/netguard.py:53
+#: nostr/imports/netguard.py:75
 msgid "the address could not be found"
+msgstr ""
+
+#: nostr/imports/netguard.py:76
+msgid "it redirects too many times"
 msgstr ""
 
 #: nostr/imports/pipeline.py:299
