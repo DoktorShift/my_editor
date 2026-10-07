@@ -80,6 +80,13 @@ def test_code_and_dividers_are_left_alone():
     assert assert_round_trip(doc) == "- [ ] text\n\n---\n\n```\ncode\n```\n"
 
 
+def test_bulleted_list_on_a_checklist_makes_it_bullets():
+    doc = from_markdown("- [ ] a\n- [x] b\n")
+    rich_text.toggle_list(whole(doc), rich_text.BULLET)
+    assert assert_round_trip(doc) == "- a\n- b\n"
+    doc.undo()
+    assert document_to_markdown(doc) == "- [ ] a\n- [x] b\n"
+
 def test_the_state_says_when_all_are_checklist_items():
     doc = from_markdown("- [ ] a\n- [x] b\n- c\n")
     cursor = select(doc, "a")

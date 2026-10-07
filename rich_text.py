@@ -567,6 +567,9 @@ def toggle_list(cursor: QTextCursor, kind: str) -> None:
     """Bulleted List or Numbered List over the paragraphs under the
     cursor, as one step on the undo stack:
 
+    - all of them checklist items, and Bulleted List: their boxes go, and
+      they are bulleted items (a checklist is not shown as a bulleted
+      list, so the command makes it one);
     - all of them in lists of this kind: they leave the list;
     - all of them in lists, some of another kind: those lists change
       kind in place, nesting kept;
@@ -581,7 +584,10 @@ def toggle_list(cursor: QTextCursor, kind: str) -> None:
     edit.beginEditBlock()
     current = list_kind(cursor)
     all_items = all(b.textList() is not None for b in blocks)
-    if current == kind:
+    if kind == BULLET and all(is_task(b) for b in blocks):
+        for block in blocks:
+            set_tick(block, QTextBlockFormat.MarkerType.NoMarker)
+    elif current == kind:
         for block in blocks:
             leave_list(block)
     elif all_items:

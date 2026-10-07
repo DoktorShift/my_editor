@@ -31,7 +31,7 @@ On macOS, `Ctrl` in these tables is the Command key (`⌘`) and `Alt` is Option 
 | `Ctrl+Shift+T`, `Ctrl+Shift+H`, `Ctrl+Shift+J` on macOS (Notes' Title, Heading and Subheading), `Ctrl+1` to `Ctrl+3` on Windows and Linux | Style: Heading 1 to 3 (the same heading again makes it Body) |
 | `Ctrl+Shift+7` on macOS, `Ctrl+Shift+8` on Windows and Linux | Bulleted List (again: no list) |
 | `Ctrl+Shift+9` on macOS, `Ctrl+Shift+7` on Windows and Linux | Numbered List (again: no list) |
-| `Ctrl+Shift+L` on macOS, `Ctrl+Shift+9` on Windows and Linux | Checklist: boxes to tick (again: plain list items). Click a box to tick it; `Return` starts the next item unticked |
+| `Ctrl+Shift+L` on macOS, `Ctrl+Shift+9` on Windows and Linux | Checklist: boxes to tick (again, or Bulleted List: plain list items). Click a box to tick it; `Return` starts the next item unticked |
 | `Ctrl+]` / `Ctrl+[` | Increase / Decrease Indent of list items |
 | `Ctrl+'` on macOS (no shortcut on Windows and Linux) | Quote (again: no quote) |
 | `Ctrl+K` | Add Link (Edit Link when the caret is in a link) |

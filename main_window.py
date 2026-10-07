@@ -1409,7 +1409,9 @@ class MainWindow(QMainWindow):
             else:
                 name = pgettext("paragraph style", "Mixed")
             self.format_toolbar.set_style_name(name)
-        self.act_bullets.setChecked(paragraphs.list_kind == rich_text.BULLET)
+        # A checklist is shown as one, not as a bulleted list as well.
+        self.act_bullets.setChecked(paragraphs.list_kind == rich_text.BULLET
+                                    and not paragraphs.tasks)
         self.act_numbers.setChecked(paragraphs.list_kind == rich_text.NUMBER)
         self.act_checklist.setChecked(paragraphs.tasks)
         self.act_quote.setChecked(paragraphs.quoted)
