@@ -4414,6 +4414,9 @@ class MainWindow(QMainWindow):
                 self.setEnabled(False)
                 self.status.showMessage(_("Saving your list of sources…"))
                 imports.subscriptions.wait_until_settled(QUIT_SYNC_WAIT_MS)
+            # The inbox closes and its lock goes, so the next start (or a
+            # second MyEditor) finds it free.
+            imports.shutdown()
         # Close any warm relay sockets and bunker channels so the WebSocket
         # layer can flush close frames before the QApplication tears down.
         if hasattr(self, "_session_pool"):
@@ -4516,6 +4519,30 @@ class MainWindow(QMainWindow):
     def _on_create_account(self) -> None:
         self._accounts.create_account()
 
+    def _offer_publishing_account(self) -> None:
+        self._offer_account(
+            title=_("Publishing needs a Nostr account"),
+            message=_("Notes and articles are published from your Nostr account."))
+
+    def _offer_media_account(self) -> None:
+        self._offer_account(
+            title=_("The media library needs a Nostr account"),
+            message=_("Images you upload are kept for your Nostr account."))
+
+    def _offer_account(self, *, title: str, message: str) -> None:
+        """A Nostr command without an account in use: say what it needs and
+        offer the ways in, the Nostr menu's own first two commands (Restore
+        Account is there too). Creating an account is the default: it needs
+        nothing but this app."""
+        choice = ask(self, title=title, message=message, is_dark=self.is_dark_theme,
+                     buttons=(Button(_("Create Account\u2026"), "create", DEFAULT),
+                              Button(_("Connect Signer\u2026"), "connect", NORMAL),
+                              Button(_("Cancel"), None, CANCEL)))
+        if choice == "create":
+            self._on_create_account()
+        elif choice == "connect":
+            self._on_nostr_connect()
+
     def _on_restore_account(self) -> None:
         self._accounts.restore_account()
 
@@ -4530,10 +4557,9 @@ class MainWindow(QMainWindow):
         profile fresh before anything can be changed (nostr/ui/profile_window.py)."""
         active = self._profile_store.default()
         if active is None:
-            inform(self, title=_("Connect a signer first"),
-                   message=_("Connect a Nostr signer (Nostr > Connect Signer\u2026) "
-                             "before editing your profile."),
-                   is_dark=self.is_dark_theme)
+            self._offer_account(
+                title=_("Your profile needs a Nostr account"),
+                message=_("The name and picture people see belong to your Nostr account."))
             return
         editing = ProfileEditing(profile=active, pool=self._relay_pool,
                                  session_pool=self._session_pool,
@@ -4712,10 +4738,9 @@ class MainWindow(QMainWindow):
             inform(self, title=_("Imports aren't available"), message=imports.problem,
                    is_dark=self.is_dark_theme)
         else:
-            inform(self, title=_("Connect a signer first"),
-                   message=_("Connect a Nostr signer (Nostr > Connect Signer\u2026) to "
-                             "follow websites and import posts as drafts."),
-                   is_dark=self.is_dark_theme)
+            self._offer_account(
+                title=_("Imports need a Nostr account"),
+                message=_("Imported posts become drafts in your Nostr account."))
 
     def _update_imports_row(self, *_args) -> None:
         """What the Drafts panel's Imports row says."""
@@ -4915,9 +4940,7 @@ class MainWindow(QMainWindow):
     def _on_nostr_publish_note(self):
         active = self._profile_store.default()
         if active is None:
-            inform(self, title=_("Connect a signer first"),
-                   message=_("Connect a Nostr signer before publishing. Use the avatar "
-                             "chip in the header or Nostr > Connect Signer\u2026"))
+            self._offer_publishing_account()
             return
 
         ed = self.current_editor()
@@ -4960,9 +4983,7 @@ class MainWindow(QMainWindow):
     def _on_nostr_publish_article(self):
         active = self._profile_store.default()
         if active is None:
-            inform(self, title=_("Connect a signer first"),
-                   message=_("Connect a Nostr signer before publishing. Use the avatar "
-                             "chip in the header or Nostr > Connect Signer\u2026"))
+            self._offer_publishing_account()
             return
 
         ed = self.current_editor()
@@ -5042,9 +5063,7 @@ class MainWindow(QMainWindow):
         editing while uploads run in the background."""
         active = self._profile_store.default()
         if active is None:
-            inform(self, title=_("Connect a signer first"),
-                   message=_("Connect a Nostr signer (Nostr > Connect Signer\u2026) "
-                             "before browsing your Blossom media library."))
+            self._offer_media_account()
             return
         # Reading the private library is where the signer prompts are, so
         # it happens when the user opens their media and not before.
@@ -5074,9 +5093,7 @@ class MainWindow(QMainWindow):
         it at the current cursor in the active editor."""
         active = self._profile_store.default()
         if active is None:
-            inform(self, title=_("Connect a signer first"),
-                   message=_("Connect a Nostr signer (Nostr > Connect Signer\u2026) "
-                             "before inserting Blossom images."))
+            self._offer_media_account()
             return
         ed = self.current_editor()
         if ed is None:

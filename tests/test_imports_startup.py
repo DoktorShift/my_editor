@@ -101,29 +101,112 @@ def test_a_damaged_inbox_another_process_holds_is_left_alone(harness, tmp_path):
 class TestTheCommand:
     """Nostr > Imports... says something in every state (M6)."""
 
-    def run(self, imports, monkeypatch):
+    def run(self, imports, monkeypatch, *, answer=None):
         import main_window
-        told = []
+        told, asked, ran = [], [], []
         monkeypatch.setattr(main_window, "inform",
                             lambda parent, **kw: told.append(kw))
-        host = SimpleNamespace(_imports=imports, is_dark_theme=False)
+
+        def ask(parent, **kw):
+            asked.append(kw)
+            return answer
+        monkeypatch.setattr(main_window, "ask", ask)
+        host = SimpleNamespace(_imports=imports, is_dark_theme=False,
+                               _on_create_account=lambda: ran.append("create"),
+                               _on_nostr_connect=lambda: ran.append("connect"))
+        host._offer_account = lambda **kw: MainWindow._offer_account(host, **kw)
         MainWindow._open_imports_window(host)
-        return told
+        return told, asked, ran
 
     def test_bound_opens_the_window(self, monkeypatch):
         opened = []
         imports = SimpleNamespace(bound=True, problem="", open_window=lambda: opened.append(1))
-        assert self.run(imports, monkeypatch) == []
+        assert self.run(imports, monkeypatch) == ([], [], [])
         assert opened == [1]
 
-    def test_without_an_account_it_says_what_to_do(self, monkeypatch):
+    @pytest.mark.parametrize("answer", ["create", "connect", None])
+    def test_without_an_account_it_offers_the_ways_in(self, monkeypatch, answer):
+        """CP2 live run: it said only "Connect a signer first", though an
+        account can also be made, or its key kept, on this computer."""
+        import alerts
         imports = SimpleNamespace(bound=False, problem="", open_window=None)
-        (told,) = self.run(imports, monkeypatch)
-        assert told["title"] == "Connect a signer first"
-        assert "Connect Signer" in told["message"]
+        told, (asked,), ran = self.run(imports, monkeypatch, answer=answer)
+        assert told == []
+        assert asked["title"] == "Imports need a Nostr account"
+        assert asked["message"] == "Imported posts become drafts in your Nostr account."
+        buttons = [(b.label, b.value, b.role) for b in asked["buttons"]]
+        assert buttons == [("Create Account\u2026", "create", alerts.DEFAULT),
+                           ("Connect Signer\u2026", "connect", alerts.NORMAL),
+                           ("Cancel", None, alerts.CANCEL)]
+        assert ran == ([answer] if answer else [])
 
     def test_a_problem_is_said(self, monkeypatch):
         imports = SimpleNamespace(bound=False, problem="It cannot be kept.", open_window=None)
-        (told,) = self.run(imports, monkeypatch)
+        (told,), asked, _ran = self.run(imports, monkeypatch)
+        assert asked == []
         assert (told["title"], told["message"]) == ("Imports aren't available",
                                                     "It cannot be kept.")
+
+
+def test_the_other_nostr_commands_offer_an_account_the_same_way(monkeypatch):
+    """Publishing, the media library and the profile ask the same way."""
+    offered = []
+    host = SimpleNamespace(_profile_store=SimpleNamespace(default=lambda: None),
+                           is_dark_theme=False)
+    host._offer_account = lambda **kw: offered.append(kw["title"])
+    host._offer_publishing_account = lambda: MainWindow._offer_publishing_account(host)
+    host._offer_media_account = lambda: MainWindow._offer_media_account(host)
+    for command in (MainWindow._on_nostr_publish_note, MainWindow._on_nostr_publish_article,
+                    MainWindow._on_nostr_media_library, MainWindow._on_edit_profile):
+        command(host)
+    assert offered == ["Publishing needs a Nostr account", "Publishing needs a Nostr account",
+                       "The media library needs a Nostr account",
+                       "Your profile needs a Nostr account"]
+
+
+class TestTheLock:
+    """CP2 live run: a quit without a closed window left the inbox's lock to
+    its destructor, after the exit handlers, and it complained."""
+
+    def test_a_normal_quit_leaves_no_lock(self, harness, tmp_path):
+        controller = harness.controller
+        controller.account_changed(profile())
+        settle()
+        lock = database_path(tmp_path, PK).with_suffix(".lock")
+        assert lock.exists() and not controller.read_only
+        controller.flush()
+        controller.shutdown()
+        assert not lock.exists()
+        assert not controller.bound
+        assert controller._exit_hook is None
+
+    def test_a_lock_still_held_at_exit_is_given_back(self, harness, tmp_path):
+        controller = harness.controller
+        controller.account_changed(profile())
+        settle()
+        lock = database_path(tmp_path, PK).with_suffix(".lock")
+        hook = controller._exit_hook
+        assert hook is not None
+        hook()                      # what the exit handler does
+        assert not lock.exists()
+        assert controller._exit_hook is None
+
+    def test_a_lock_left_by_a_crash_is_taken_over(self, harness, tmp_path):
+        import subprocess
+        lock = database_path(tmp_path, PK).with_suffix(".lock")
+        lock.parent.mkdir(parents=True)
+        crashed = subprocess.run(
+            [sys.executable, "-c",
+             "import os, sys\n"
+             "from PySide6.QtCore import QLockFile\n"
+             "lock = QLockFile(sys.argv[1])\n"
+             "assert lock.tryLock(0)\n"
+             "os._exit(0)\n", str(lock)],
+            capture_output=True, text=True, timeout=60)
+        assert crashed.returncode == 0, crashed.stderr
+        assert lock.exists()        # left behind, its process gone
+        harness.controller.account_changed(profile())
+        settle()
+        assert harness.controller.bound
+        assert not harness.controller.read_only
+        assert lock.read_text(encoding="utf-8").splitlines()[0] == str(os.getpid())

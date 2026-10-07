@@ -38,9 +38,11 @@ be written to) leaves imports unbound with ``problem`` saying why.
 
 from __future__ import annotations
 
+import atexit
 import logging
 import sqlite3
 import time
+import weakref
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
 
@@ -174,6 +176,7 @@ class ImportsController(QObject):
         self.runner: Optional[ImportRunner] = None
         self.checker = None
         self._lock: Optional[QLockFile] = None
+        self._exit_hook: Optional[Callable[[], None]] = None
         self.read_only = False
         # Why imports could not be bound (a folder that cannot be written
         # to), and a one-time word for the window (a damaged file set aside).
@@ -237,6 +240,12 @@ class ImportsController(QObject):
             self.checker.stop()
         self.close_window()
 
+    def shutdown(self) -> None:
+        """Quitting, after :meth:`flush` and the wait for the list of
+        sources: close the inbox and give its lock back, so the next start
+        (or another MyEditor) finds it free."""
+        self._unbind(QUIT_PAUSED)
+
     def _bind(self) -> None:
         self.problem = self.notice = ""
         path = database_path(self._config_dir, self._profile.user_pubkey)
@@ -246,11 +255,19 @@ class ImportsController(QObject):
             self._cannot_bind(exc)
             return
         self._lock = QLockFile(str(path.with_suffix(".lock")))
-        # Held for the whole session: stale only when its process is gone.
+        # Held for the whole session: stale only when its process is gone,
+        # so a lock left by a crash is taken over at the next start.
         self._lock.setStaleLockTime(0)
         self.read_only = not self._lock.tryLock(0)
         if self.read_only:
             _log.info("imports inbox in use by another process; showing it read-only")
+        else:
+            # Given back at quit (shutdown). A process that ends without
+            # closing its window still gives it back before Python tears
+            # down: left to the lock's destructor, it went after other exit
+            # handlers, when its folder could already be gone.
+            self._exit_hook = _release_at_exit(weakref.ref(self))
+            atexit.register(self._exit_hook)
         try:
             self.inbox = self._open_inbox(path)
         except (sqlite3.Error, OSError) as exc:
@@ -307,6 +324,9 @@ class ImportsController(QObject):
         self.bound_changed.emit(False)
 
     def _release_lock(self) -> None:
+        if self._exit_hook is not None:
+            atexit.unregister(self._exit_hook)
+            self._exit_hook = None
         if self._lock is not None and not self.read_only:
             self._lock.unlock()
         self._lock = None
@@ -986,6 +1006,16 @@ class ImportsController(QObject):
         if window is not None:
             window.close()
             window.deleteLater()
+
+
+def _release_at_exit(controller_ref) -> Callable[[], None]:
+    """An exit handler that gives the inbox's lock back if the controller
+    still holds it (one per lock taken, unregistered when it is given back)."""
+    def release() -> None:
+        controller = controller_ref()
+        if controller is not None and shiboken6.isValid(controller):
+            controller._release_lock()
+    return release
 
 
 def _public(url: str) -> bool:
