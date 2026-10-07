@@ -38,7 +38,7 @@ On macOS, `Ctrl` in these tables is the Command key (`⌘`) and `Alt` is Option 
 | | `Insert > Divider`: a horizontal rule (`---`) after the paragraph |
 | | `Insert > Code Block`: the paragraph becomes a block of code, and a short list at the caret asks for its language (`Escape` keeps it plain text). `Format > Code Language` changes it later |
 
-Writing (Markdown files, new documents and drafts) is set in your system's own text font at a reading size, in a column of a comfortable line length; plain text and code files keep the monospace font across the whole window. `View > Use Monospace Font for Writing` sets all writing in monospace.
+Writing (Markdown files, new documents and drafts) is set in your system's own text font at a reading size, in a column of a comfortable line length, with the thin insertion point of a word processor; plain text and code files keep the monospace font across the whole window, and its block caret. `View > Use Monospace Font for Writing` sets all writing in monospace.
 
 The status bar says, quietly, how long the document is: its words and how long it takes to read (225 words a minute, as the long-form Nostr readers count), or how many words are selected.
 

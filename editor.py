@@ -164,7 +164,9 @@ class HtmlEditor(QTextEdit):
         # Connect to cursor position changes to update active format
         self.cursorPositionChanged.connect(self._update_active_format)
 
-        # Block cursor (terminal-style): hide Qt's thin cursor, draw our own
+        # Block cursor (terminal-style) for code and plain text: hide Qt's
+        # thin cursor, draw our own. Writing gets the insertion point every
+        # word processor has (set_writing_font).
         self.setCursorWidth(0)
         self._cursor_visible = True
         self._blink_timer = QTimer(self)
@@ -341,6 +343,14 @@ class HtmlEditor(QTextEdit):
         self.active_format['color'] = fmt.foreground().color() if fmt.hasProperty(QTextCharFormat.ForegroundBrush) else None
 
     # -------- Block cursor --------
+    WRITING_CARET_WIDTH = 2
+
+    def block_caret_shown(self) -> bool:
+        """Whether the terminal-style block caret is drawn now: in code and
+        plain text, while the text has the focus and nothing is selected."""
+        return (self._writing_measure_chars is None and self.hasFocus()
+                and self._cursor_visible and not self.textCursor().hasSelection())
+
     def _block_cursor_rect(self):
         """Return the rect the block cursor occupies (used for painting and invalidation)."""
         rect = self.cursorRect()
@@ -371,6 +381,10 @@ class HtmlEditor(QTextEdit):
         plain text): the monospace font across the whole width."""
         self.setFont(writing_font() if writing else code_font())
         self._writing_measure_chars = WRITING_MEASURE if writing else None
+        # In a proportional font a block would cover the letter after the
+        # caret: writing gets the thin insertion point of Pages, TextEdit
+        # and Word, code and plain text keep the block.
+        self.setCursorWidth(self.WRITING_CARET_WIDTH if writing else 0)
         self._update_paper_margins()
         self.viewport().update()
 
@@ -449,9 +463,8 @@ class HtmlEditor(QTextEdit):
 
         super().paintEvent(event)
 
-        # Block cursor on top of the text (unchanged behavior).
-        cursor = self.textCursor()
-        if not self.hasFocus() or not self._cursor_visible or cursor.hasSelection():
+        # Block cursor on top of the text, in code and plain text.
+        if not self.block_caret_shown():
             return
         rect = self._block_cursor_rect()
         color = QColor(212, 212, 212, 210) if self._is_dark() else QColor(51, 51, 51, 210)
