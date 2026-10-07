@@ -119,7 +119,7 @@ class TestTheBar:
         model = window.posts.model_
         model.set_checked(0, True)
         model.set_checked(1, True)
-        assert ("Your signer may ask up to 4 times, twice for each draft and once for each "
+        assert ("Your signer app may ask up to 4 times, twice for each draft and once for each "
                 "image.") in bar(window).note.text()
 
     def test_a_key_kept_here_never_asks(self, tmp_path, jobs):
@@ -247,7 +247,7 @@ def test_words():
     assert create_label(1) == "Create Draft"
     assert create_label(5) == "Create 5 Drafts"
     assert signer_note(0) == ""
-    assert signer_note(5).startswith("Your signer may ask up to 5 times, twice for each "
+    assert signer_note(5).startswith("Your signer app may ask up to 5 times, twice for each "
                                      "draft")
 
 

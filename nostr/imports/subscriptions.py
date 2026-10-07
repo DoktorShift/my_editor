@@ -689,8 +689,8 @@ class FeedSubscriptionStore(QObject):
         self._session_pool.get(
             profile, on_ready=_on_ready,
             on_error=lambda reason: on_unreadable(
-                _("Your signer didn't answer, so your list of sources couldn't be read "
-                  "({reason}).").format(reason=reason)))
+                _("Your signer app didn't answer, so your list of sources couldn't be "
+                  "read ({reason}).").format(reason=reason)))
 
     # -- internals: publishing -------------------------------------------------
 

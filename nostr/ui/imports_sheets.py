@@ -109,7 +109,7 @@ FOLLOW_EXAMPLES = (
     _("Medium: medium.com/feed/@name"),
     _("Hugo: example.com/index.xml"),
     _("A podcast's or a YouTube channel's feed"),
-    _("A Nostr author: npub… or name@example.com"),
+    _("A Nostr author: name@example.com, or a link to their profile"),
     _("A sitemap: example.com/sitemap.xml"),
     _("A GitHub folder of Markdown files"),
     _("A list of sources: an address ending in .opml"),
@@ -310,7 +310,7 @@ class FollowSheet(_Sheet):
         label = text_label(_("Website, feed or Nostr address"))
         self.address = QLineEdit(address)
         self.address.setObjectName("imports_address")
-        self.address.setPlaceholderText(_("example.com  ·  npub…  ·  "
+        self.address.setPlaceholderText(_("example.com  ·  example.com/feed  ·  "
                                           "name@example.com"))
         self.address.setClearButtonEnabled(True)
         self.address.setAccessibleName(_("Website, feed or Nostr address"))
@@ -725,8 +725,8 @@ class LinkSheet(_Sheet):
         label = text_label(_("Link to a post, a thread or a file"))
         self.address = QLineEdit()
         self.address.setObjectName("imports_link")
-        self.address.setPlaceholderText(_("bsky.app/profile/…/post/…  ·  "
-                                          "naddr…  ·  a .md file"))
+        self.address.setPlaceholderText(_("example.com/my-post  ·  a Bluesky or Nostr "
+                                          "link  ·  notes.md"))
         self.address.setClearButtonEnabled(True)
         self.address.setAccessibleName(_("Link to a post, a thread or a file"))
         label.setBuddy(self.address)
