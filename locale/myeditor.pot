@@ -24,11 +24,11 @@ msgstr ""
 #: alerts.py:275
 #: link_popover.py:90
 #: main_window.py:2645
-#: main_window.py:6116
+#: main_window.py:6133
 #: main_window.py:250
 #: main_window.py:2518
-#: main_window.py:4545
-#: main_window.py:4670
+#: main_window.py:4562
+#: main_window.py:4687
 msgid "Cancel"
 msgstr ""
 
@@ -170,7 +170,7 @@ msgid "Add Link"
 msgstr ""
 
 #: link_popover.py:84
-#: main_window.py:4120
+#: main_window.py:4133
 msgid "Remove Link"
 msgstr ""
 
@@ -239,8 +239,8 @@ msgstr ""
 
 #: main_window.py:1092
 #: main_window.py:1216
-#: nostr/ui/imports_window.py:1004
-#: nostr/ui/imports_window.py:984
+#: nostr/ui/imports_window.py:1022
+#: nostr/ui/imports_window.py:1002
 msgid "Undo"
 msgstr ""
 
@@ -388,7 +388,7 @@ msgstr ""
 #: update_flow.py:152
 #: update_flow.py:171
 #: update_flow.py:178
-#: nostr/ui/imports_sheets.py:751
+#: nostr/ui/imports_sheets.py:753
 msgid "Open"
 msgstr ""
 
@@ -412,42 +412,42 @@ msgstr ""
 msgid "Save your changes before updating?"
 msgstr ""
 
-#: main_window.py:4478
+#: main_window.py:4495
 #: main_window.py:1496
 msgid "EINUNDZWANZIG Membership…"
 msgstr ""
 
-#: main_window.py:4489
+#: main_window.py:4506
 msgid "Add Profile…"
 msgstr ""
 
-#: main_window.py:4491
+#: main_window.py:4508
 #: nostr/account_controller.py:435
 #: nostr/account_controller.py:441
 msgid "Sign Out"
 msgstr ""
 
-#: main_window.py:4683
+#: main_window.py:4700
 msgid "Your media server list is shared."
 msgstr ""
 
-#: main_window.py:4684
+#: main_window.py:4701
 msgid "Other apps already have this list."
 msgstr ""
 
-#: main_window.py:4685
+#: main_window.py:4702
 msgid "Your current list couldn’t be read, so nothing was changed. Try again later."
 msgstr ""
 
-#: main_window.py:5294
+#: main_window.py:5311
 msgid "Upload this image to your Blossom servers?"
 msgstr ""
 
-#: main_window.py:5428
+#: main_window.py:5445
 msgid "Retrying decryption - approve on your signer…"
 msgstr ""
 
-#: main_window.py:5487
+#: main_window.py:5504
 #: main_window.py:1233
 #: nostr/ui/media_library_dialog.py:1237
 #: nostr/ui/media_library_dialog.py:1654
@@ -456,21 +456,21 @@ msgstr ""
 msgid "Delete"
 msgstr ""
 
-#: main_window.py:5495
+#: main_window.py:5512
 msgid "A blank-content replacement will be published to your relays. Other clients (and your other devices) will treat the draft as removed. This action can't be undone."
 msgid_plural "A blank-content replacement will be published to your relays. Other clients (and your other devices) will treat them as removed. This action can't be undone."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:5623
+#: main_window.py:5640
 msgid "No drafts were deleted"
 msgstr ""
 
-#: main_window.py:6041
+#: main_window.py:6058
 msgid "Already saving this draft - wait for it to finish."
 msgstr ""
 
-#: main_window.py:6104
+#: main_window.py:6121
 msgid "(unknown profile)"
 msgstr ""
 
@@ -485,9 +485,9 @@ msgstr ""
 
 #: main_window.py:1172
 #: nostr/imports/workspace.py:48
-#: nostr/ui/imports_window.py:463
-#: nostr/ui/imports_window.py:738
-#: nostr/ui/imports_window.py:752
+#: nostr/ui/imports_window.py:464
+#: nostr/ui/imports_window.py:739
+#: nostr/ui/imports_window.py:753
 msgid "New"
 msgstr ""
 
@@ -549,7 +549,7 @@ msgid "Paste and Match Style"
 msgstr ""
 
 #: main_window.py:1235
-#: nostr/ui/imports_window.py:841
+#: nostr/ui/imports_window.py:842
 msgid "Select All"
 msgstr ""
 
@@ -670,9 +670,9 @@ msgid "Full Screen"
 msgstr ""
 
 #: main_window.py:1457
-#: main_window.py:3912
-#: main_window.py:3910
-#: nostr/ui/imports_window.py:1333
+#: main_window.py:3916
+#: main_window.py:3914
+#: nostr/ui/imports_window.py:1351
 msgid "Show Sidebar"
 msgstr ""
 
@@ -701,35 +701,35 @@ msgid "Imports…"
 msgstr ""
 
 #: main_window.py:1500
-#: main_window.py:4459
-#: main_window.py:4543
+#: main_window.py:4476
+#: main_window.py:4560
 msgid "Create Account…"
 msgstr ""
 
 #: main_window.py:1504
-#: main_window.py:4461
-#: main_window.py:4544
+#: main_window.py:4478
+#: main_window.py:4561
 #: nostr/ui/membership_window.py:278
 msgid "Connect Signer…"
 msgstr ""
 
 #: main_window.py:1507
-#: main_window.py:4463
+#: main_window.py:4480
 msgid "Restore Account…"
 msgstr ""
 
 #: main_window.py:1511
-#: main_window.py:4485
+#: main_window.py:4502
 msgid "Back Up Account…"
 msgstr ""
 
 #: main_window.py:1515
-#: main_window.py:4487
+#: main_window.py:4504
 msgid "Move Key to Signer App…"
 msgstr ""
 
 #: main_window.py:1519
-#: main_window.py:4482
+#: main_window.py:4499
 msgid "Edit Profile…"
 msgstr ""
 
@@ -795,7 +795,7 @@ msgid "PDFs open read-only; there is nothing to save."
 msgstr ""
 
 #: main_window.py:2859
-#: main_window.py:3964
+#: main_window.py:3977
 #: nostr/ui/published_view.py:578
 #: nostr/ui/published_view.py:585
 msgid "That link cannot be opened."
@@ -833,7 +833,7 @@ msgid "MyEditor closes to install the update. Changes you don't save will be los
 msgstr ""
 
 #: main_window.py:3688
-#: nostr/ui/imports_window.py:1102
+#: nostr/ui/imports_window.py:1120
 msgid "You're up to date"
 msgstr ""
 
@@ -841,131 +841,131 @@ msgstr ""
 msgid "Can't check for updates"
 msgstr ""
 
-#: main_window.py:4117
+#: main_window.py:4130
 msgid "Open Link"
 msgstr ""
 
-#: main_window.py:4119
+#: main_window.py:4132
 #: nostr/ui/published_view.py:644
 msgid "Copy Link"
 msgstr ""
 
-#: main_window.py:4173
+#: main_window.py:4186
 msgid "Switched to Dark theme"
 msgstr ""
 
-#: main_window.py:4174
+#: main_window.py:4187
 msgid "Switched to Light theme"
 msgstr ""
 
-#: main_window.py:4218
+#: main_window.py:4235
 msgid "Line numbers enabled"
 msgstr ""
 
-#: main_window.py:4219
+#: main_window.py:4236
 msgid "Line numbers disabled"
 msgstr ""
 
-#: main_window.py:4236
+#: main_window.py:4253
 msgid "Syntax highlighting enabled"
 msgstr ""
 
-#: main_window.py:4237
+#: main_window.py:4254
 msgid "Syntax highlighting disabled"
 msgstr ""
 
-#: main_window.py:4269
+#: main_window.py:4286
 msgid "Paper mode on"
 msgstr ""
 
-#: main_window.py:4269
+#: main_window.py:4286
 msgid "Paper mode off"
 msgstr ""
 
-#: main_window.py:4279
+#: main_window.py:4296
 msgid "Highlight current line on"
 msgstr ""
 
-#: main_window.py:4280
+#: main_window.py:4297
 msgid "Highlight current line off"
 msgstr ""
 
-#: main_window.py:4370
+#: main_window.py:4387
 msgid "The update wasn’t installed"
 msgstr ""
 
-#: main_window.py:4529
+#: main_window.py:4546
 msgid "Publishing needs a Nostr account"
 msgstr ""
 
-#: main_window.py:4530
+#: main_window.py:4547
 msgid "Notes and articles are published from your Nostr account."
 msgstr ""
 
-#: main_window.py:4534
+#: main_window.py:4551
 msgid "The media library needs a Nostr account"
 msgstr ""
 
-#: main_window.py:4535
+#: main_window.py:4552
 msgid "Images you upload are kept for your Nostr account."
 msgstr ""
 
-#: main_window.py:4581
+#: main_window.py:4598
 msgid "Profile saved."
 msgstr ""
 
-#: main_window.py:4666
+#: main_window.py:4683
 msgid "Tell Other Apps Where Your Media Is?"
 msgstr ""
 
-#: main_window.py:5175
+#: main_window.py:5192
 msgid "That link cannot be inserted."
 msgstr ""
 
-#: main_window.py:5261
+#: main_window.py:5278
 msgid "That image could not be added."
 msgstr ""
 
-#: main_window.py:5298
+#: main_window.py:5315
 msgid "Anyone with the link can view it. The image is already in your document and stays there either way."
 msgstr ""
 
-#: main_window.py:5301
+#: main_window.py:5318
 msgid "Remember this choice"
 msgstr ""
 
-#: main_window.py:5364
+#: main_window.py:5381
 msgid "Draft isn't ready to open yet - still decrypting."
 msgstr ""
 
-#: main_window.py:5470
+#: main_window.py:5487
 msgid ""
 "They use a draft format this editor doesn't recognise, so removing them from here might leave them visible in the other client.\n"
 "\n"
 "To remove them cleanly, open them in the app that created them and delete them there."
 msgstr ""
 
-#: main_window.py:5486
+#: main_window.py:5503
 msgid "Delete “this draft” from your Nostr drafts?"
 msgstr ""
 
-#: main_window.py:5563
+#: main_window.py:5580
 msgid "Deleting drafts…"
 msgstr ""
 
-#: main_window.py:5563
+#: main_window.py:5580
 msgid "Stop"
 msgstr ""
 
-#: main_window.py:5564
+#: main_window.py:5581
 msgid "Deleting drafts"
 msgstr ""
 
-#: main_window.py:5646
+#: main_window.py:5663
 msgid "Your signer is not responding. Open your signer app and make sure it is running."
 msgstr ""
 
-#: main_window.py:6122
+#: main_window.py:6139
 msgid "Saving under the current profile would create a separate draft. How would you like to handle it?"
 msgstr ""
 
@@ -1121,131 +1121,131 @@ msgstr ""
 msgid "{current} of {total}"
 msgstr ""
 
-#: main_window.py:3910
-#: nostr/ui/imports_window.py:1333
+#: main_window.py:3914
+#: nostr/ui/imports_window.py:1351
 msgid "Hide Sidebar"
 msgstr ""
 
-#: main_window.py:4251
+#: main_window.py:4268
 #, python-brace-format
 msgid "Background: {pattern}"
 msgstr ""
 
-#: main_window.py:4416
+#: main_window.py:4433
 msgid "Saving your list of sources…"
 msgstr ""
 
-#: main_window.py:4566
+#: main_window.py:4583
 msgid "Your profile needs a Nostr account"
 msgstr ""
 
-#: main_window.py:4567
+#: main_window.py:4584
 msgid "The name and picture people see belong to your Nostr account."
 msgstr ""
 
-#: main_window.py:4625
+#: main_window.py:4642
 #, python-brace-format
 msgid "Media uploads go to the servers your Nostr profile lists: {hosts}"
 msgstr ""
 
-#: main_window.py:4680
+#: main_window.py:4697
 msgid "There is no media server to share."
 msgstr ""
 
-#: main_window.py:4690
+#: main_window.py:4707
 msgid "The list wasn’t shared. Try again in a moment."
 msgstr ""
 
-#: main_window.py:4810
+#: main_window.py:4827
 #, python-brace-format
 msgid "Connected as {name}"
 msgstr ""
 
-#: main_window.py:4956
-#: main_window.py:4999
+#: main_window.py:4973
+#: main_window.py:5016
 msgid "Nothing to publish"
 msgstr ""
 
-#: main_window.py:4957
-#: main_window.py:5000
+#: main_window.py:4974
+#: main_window.py:5017
 msgid "The current document is empty."
 msgstr ""
 
-#: main_window.py:4981
+#: main_window.py:4998
 #, python-brace-format
 msgid "Published to Nostr: {accepted}/{total} relays · {id}…"
 msgstr ""
 
-#: main_window.py:4984
+#: main_window.py:5001
 #, python-brace-format
 msgid "Published to Nostr: {accepted}/{total} relays"
 msgstr ""
 
-#: main_window.py:5057
+#: main_window.py:5074
 #, python-brace-format
 msgid "Published article to Nostr: {accepted}/{total} relays · {id}…"
 msgstr ""
 
-#: main_window.py:5060
+#: main_window.py:5077
 #, python-brace-format
 msgid "Published article to Nostr: {accepted}/{total} relays"
 msgstr ""
 
-#: main_window.py:5180
+#: main_window.py:5197
 #, python-brace-format
 msgid "Inserted URL only (non-image): {url}"
 msgstr ""
 
-#: main_window.py:5209
+#: main_window.py:5226
 #, python-brace-format
 msgid "Inserted image · alt: {alt}"
 msgstr ""
 
-#: main_window.py:5268
+#: main_window.py:5285
 msgid "Image added. Connect a signer to upload it."
 msgstr ""
 
-#: main_window.py:5292
+#: main_window.py:5309
 #, python-brace-format
 msgid "Upload this image to {hosts}?"
 msgstr ""
 
-#: main_window.py:5489
+#: main_window.py:5506
 #, python-brace-format
 msgid "Delete {count} draft from your Nostr drafts?"
 msgid_plural "Delete {count} drafts from your Nostr drafts?"
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:5492
+#: main_window.py:5509
 #, python-brace-format
 msgid "Delete {count} Draft"
 msgid_plural "Delete {count} Drafts"
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:5518
+#: main_window.py:5535
 msgid "An imported draft takes a second request, which tells other apps it is gone."
 msgid_plural "Imported drafts take a second request each, which tells other apps they are gone."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:5619
+#: main_window.py:5636
 #, python-brace-format
 msgid "{deleted} of {total} draft deleted"
 msgid_plural "{deleted} of {total} drafts deleted"
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:5862
+#: main_window.py:5879
 msgid "Nothing to save as a draft"
 msgstr ""
 
-#: main_window.py:5863
+#: main_window.py:5880
 msgid "The current document is empty. Add some content first."
 msgstr ""
 
-#: main_window.py:5875
+#: main_window.py:5892
 msgid "This draft is too large"
 msgstr ""
 
@@ -1364,12 +1364,12 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: main_window.py:2286
-#: main_window.py:5300
+#: main_window.py:5317
 msgid "Keep Local"
 msgstr ""
 
 #: main_window.py:2286
-#: main_window.py:5300
+#: main_window.py:5317
 #: nostr/ui/media_library_dialog.py:1036
 msgid "Upload"
 msgstr ""
@@ -1496,107 +1496,107 @@ msgid_plural "{count} matches"
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:4321
+#: main_window.py:4338
 #, python-brace-format
 msgid "{count} file(s) from last session could not be found."
 msgid_plural "{count} file(s) from last session could not be found."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:4371
+#: main_window.py:4388
 #, python-brace-format
 msgid "{app} {version} couldn’t replace this version, so you’re still using {current}. Your documents are open as you left them. To try again, choose Help > Check for Updates."
 msgstr ""
 
-#: main_window.py:4667
+#: main_window.py:4684
 #, python-brace-format
 msgid "Other Nostr apps then look on {hosts} for your pictures, in this order. This replaces the list they use now, if you shared one before."
 msgstr ""
 
-#: main_window.py:4671
+#: main_window.py:4688
 msgid "Share List"
 msgstr ""
 
-#: main_window.py:4743
+#: main_window.py:4760
 msgid "Imports aren't available"
 msgstr ""
 
-#: main_window.py:4747
+#: main_window.py:4764
 msgid "Imports need a Nostr account"
 msgstr ""
 
-#: main_window.py:4748
+#: main_window.py:4765
 msgid "Imported posts become drafts in your Nostr account."
 msgstr ""
 
-#: main_window.py:5237
+#: main_window.py:5254
 #, python-brace-format
 msgid "{count} image is waiting."
 msgid_plural "{count} images are waiting."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:5353
+#: main_window.py:5370
 #, python-brace-format
 msgid "Copied event id {id}…"
 msgstr ""
 
-#: main_window.py:5467
+#: main_window.py:5484
 msgid "This draft was created by another Nostr client"
 msgid_plural "These {count} drafts were created by other Nostr clients"
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:5483
+#: main_window.py:5500
 #, python-brace-format
 msgid "Delete “{name}” from your Nostr drafts?"
 msgstr ""
 
-#: main_window.py:5511
+#: main_window.py:5528
 #, python-brace-format
 msgid "Your signer will ask you to approve each one, so expect {count} request. You can stop partway through."
 msgid_plural "Your signer will ask you to approve each one, so expect {count} requests. You can stop partway through."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:5525
+#: main_window.py:5542
 #, python-brace-format
 msgid "{count} draft from another Nostr client is not included, and will be left alone."
 msgid_plural "{count} drafts from another Nostr client are not included, and will be left alone."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:5551
+#: main_window.py:5568
 msgid "Couldn't start the deletion"
 msgstr ""
 
-#: main_window.py:5610
+#: main_window.py:5627
 msgid "Draft deleted."
 msgid_plural "{count} drafts deleted."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:5627
+#: main_window.py:5644
 #, python-brace-format
 msgid "{count} could not be removed and is still on your relays. You can try again."
 msgid_plural "{count} could not be removed and are still on your relays. You can try again."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:5871
-#: main_window.py:5971
+#: main_window.py:5888
+#: main_window.py:5988
 msgid "Couldn't prepare the draft"
 msgstr ""
 
-#: main_window.py:5872
+#: main_window.py:5889
 msgid "Its contents could not be prepared for encryption."
 msgstr ""
 
-#: main_window.py:5899
+#: main_window.py:5916
 msgid "Couldn't save the draft"
 msgstr ""
 
-#: main_window.py:6119
+#: main_window.py:6136
 #, python-brace-format
 msgid "This draft was last saved as {original}, but you're signed in as {active}"
 msgstr ""
@@ -1624,36 +1624,36 @@ msgstr ""
 msgid "Couldn't open “{name}”"
 msgstr ""
 
-#: main_window.py:5534
+#: main_window.py:5551
 msgid "Not included:"
 msgstr ""
 
-#: main_window.py:5574
+#: main_window.py:5591
 #, python-brace-format
 msgid "Deleting draft {current} of {total}…"
 msgstr ""
 
-#: main_window.py:5706
+#: main_window.py:5723
 #: main_window.py:2682
 msgid "That profile isn't connected anymore"
 msgstr ""
 
-#: main_window.py:5707
+#: main_window.py:5724
 #: main_window.py:2683
 msgid "Pair it again from Nostr > Connect Signer to save here."
 msgstr ""
 
-#: main_window.py:5876
+#: main_window.py:5893
 #, python-brace-format
 msgid "It has {size} bytes, and NIP-44 encryption allows {limit}. Split it into smaller drafts or publish it directly."
 msgstr ""
 
-#: main_window.py:6111
+#: main_window.py:6128
 #, python-brace-format
 msgid "Switch to {name} and Save"
 msgstr ""
 
-#: main_window.py:6114
+#: main_window.py:6131
 #, python-brace-format
 msgid "Save a Copy as {name}"
 msgstr ""
@@ -1665,7 +1665,7 @@ msgstr ""
 #: main_window.py:2796
 #: main_window.py:3076
 #: main_window.py:3189
-#: nostr/ui/imports_window.py:1201
+#: nostr/ui/imports_window.py:1219
 #, python-brace-format
 msgid "Couldn't save “{name}”"
 msgstr ""
@@ -1680,7 +1680,7 @@ msgstr ""
 msgid "{error} Check that it's turned on and connected, then try again."
 msgstr ""
 
-#: main_window.py:5552
+#: main_window.py:5569
 #, python-brace-format
 msgid ""
 "These drafts can't be removed from here.\n"
@@ -2352,7 +2352,7 @@ msgstr ""
 #: nostr/ui/draft_relays_sheet.py:294
 #: nostr/ui/drafts_panel.py:1124
 #: nostr/ui/imports_activity.py:288
-#: nostr/ui/imports_window.py:1094
+#: nostr/ui/imports_window.py:1112
 #: nostr/ui/profile_window.py:331
 msgid "Try Again"
 msgstr ""
@@ -3975,16 +3975,16 @@ msgstr ""
 msgid "Your list of sources was saved with an older kind of encryption. Open it once in the app that saved it; until then, changes made here stay on this computer."
 msgstr ""
 
-#: nostr/imports/subscriptions.py:791
+#: nostr/imports/subscriptions.py:804
 #, python-brace-format
 msgid "Your list of sources couldn't be saved online ({reason}). Your changes are kept on this computer."
 msgstr ""
 
-#: nostr/imports/subscriptions.py:617
+#: nostr/imports/subscriptions.py:630
 msgid "it isn't a list of sources"
 msgstr ""
 
-#: nostr/imports/subscriptions.py:656
+#: nostr/imports/subscriptions.py:669
 #, python-brace-format
 msgid "Your signer didn't answer, so your list of sources couldn't be read ({reason})."
 msgstr ""
@@ -3995,13 +3995,13 @@ msgstr ""
 
 #: nostr/imports/workspace.py:50
 #: nostr/ui/imports_window.py:179
-#: nostr/ui/imports_window.py:738
+#: nostr/ui/imports_window.py:739
 msgid "Imported"
 msgstr ""
 
 #: nostr/imports/workspace.py:51
 #: nostr/ui/imports_window.py:180
-#: nostr/ui/imports_window.py:738
+#: nostr/ui/imports_window.py:739
 msgid "Skipped"
 msgstr ""
 
@@ -4800,7 +4800,7 @@ msgid "That file couldn’t be opened. Choose the backup file again, or paste th
 msgstr ""
 
 #: nostr/ui/account_windows.py:1015
-#: nostr/ui/imports_window.py:885
+#: nostr/ui/imports_window.py:886
 msgid "Restore"
 msgstr ""
 
@@ -5507,7 +5507,7 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: nostr/ui/imports_actions.py:98
-#: nostr/ui/imports_window.py:885
+#: nostr/ui/imports_window.py:886
 msgid "Skip"
 msgstr ""
 
@@ -5854,34 +5854,34 @@ msgstr ""
 msgid "Paste the Feed Instead"
 msgstr ""
 
-#: nostr/ui/imports_sheets.py:573
+#: nostr/ui/imports_sheets.py:575
 msgid "Drop a file here"
 msgstr ""
 
-#: nostr/ui/imports_sheets.py:611
-#: nostr/ui/imports_sheets.py:660
+#: nostr/ui/imports_sheets.py:613
+#: nostr/ui/imports_sheets.py:662
 msgid "Import a File"
 msgstr ""
 
-#: nostr/ui/imports_sheets.py:623
-#: nostr/ui/imports_sheets.py:655
+#: nostr/ui/imports_sheets.py:625
+#: nostr/ui/imports_sheets.py:657
 msgid "Show Where to Find Your Export"
 msgstr ""
 
-#: nostr/ui/imports_sheets.py:717
+#: nostr/ui/imports_sheets.py:719
 msgid "Import a Link"
 msgstr ""
 
-#: nostr/ui/imports_sheets.py:718
-#: nostr/ui/imports_sheets.py:724
+#: nostr/ui/imports_sheets.py:720
+#: nostr/ui/imports_sheets.py:726
 msgid "Link to a post, a thread or a file"
 msgstr ""
 
-#: nostr/ui/imports_sheets.py:721
+#: nostr/ui/imports_sheets.py:723
 msgid "bsky.app/profile/…/post/…  ·  naddr…  ·  a .md file"
 msgstr ""
 
-#: nostr/ui/imports_sheets.py:738
+#: nostr/ui/imports_sheets.py:740
 msgid "Follow…"
 msgstr ""
 
@@ -5920,31 +5920,31 @@ msgstr ""
 msgid "You already follow this source."
 msgstr ""
 
-#: nostr/ui/imports_sheets.py:614
+#: nostr/ui/imports_sheets.py:616
 msgid "A blog export, a feed or a Markdown file. Its posts open in Imports, and you choose which become drafts."
 msgstr ""
 
-#: nostr/ui/imports_sheets.py:617
+#: nostr/ui/imports_sheets.py:619
 msgid "ZIP from Medium or Substack, WordPress XML, Ghost JSON, RSS, Atom or JSON Feed, Markdown, or a list of sources (OPML)."
 msgstr ""
 
-#: nostr/ui/imports_sheets.py:648
+#: nostr/ui/imports_sheets.py:650
 msgid "Choose File…"
 msgstr ""
 
-#: nostr/ui/imports_sheets.py:654
+#: nostr/ui/imports_sheets.py:656
 msgid "Hide Where to Find Your Export"
 msgstr ""
 
-#: nostr/ui/imports_sheets.py:696
+#: nostr/ui/imports_sheets.py:698
 msgid "Couldn't read that file."
 msgstr ""
 
-#: nostr/ui/imports_sheets.py:729
+#: nostr/ui/imports_sheets.py:731
 msgid "It is imported once, as a private draft, and not kept as a source."
 msgstr ""
 
-#: nostr/ui/imports_sheets.py:736
+#: nostr/ui/imports_sheets.py:738
 msgid "This looks like a whole source. Follow it to get its new posts too."
 msgstr ""
 
@@ -5962,16 +5962,16 @@ msgstr ""
 msgid "This is a single post. It is imported once and not kept as a source."
 msgstr ""
 
-#: nostr/ui/imports_sheets.py:643
+#: nostr/ui/imports_sheets.py:645
 msgid "Choose Another File…"
 msgstr ""
 
-#: nostr/ui/imports_sheets.py:673
+#: nostr/ui/imports_sheets.py:675
 #, python-brace-format
 msgid "Reading “{file}”…"
 msgstr ""
 
-#: nostr/ui/imports_sheets.py:771
+#: nostr/ui/imports_sheets.py:773
 #, python-brace-format
 msgid "Opening {address}…"
 msgstr ""
@@ -6005,12 +6005,12 @@ msgid "Source Settings"
 msgstr ""
 
 #: nostr/ui/imports_source_settings.py:126
-#: nostr/ui/imports_window.py:671
+#: nostr/ui/imports_window.py:672
 msgid "Open Website"
 msgstr ""
 
 #: nostr/ui/imports_source_settings.py:162
-#: nostr/ui/imports_window.py:665
+#: nostr/ui/imports_window.py:666
 msgid "Check Now"
 msgstr ""
 
@@ -6027,8 +6027,8 @@ msgid "New drafts:"
 msgstr ""
 
 #: nostr/ui/imports_source_settings.py:220
-#: nostr/ui/imports_window.py:720
-#: nostr/ui/imports_window.py:816
+#: nostr/ui/imports_window.py:721
+#: nostr/ui/imports_window.py:817
 msgid "Checking for new posts…"
 msgstr ""
 
@@ -6037,12 +6037,12 @@ msgid "Your other devices use these settings too."
 msgstr ""
 
 #: nostr/ui/imports_source_settings.py:195
-#: nostr/ui/imports_window.py:680
+#: nostr/ui/imports_window.py:681
 msgid "Unsubscribe…"
 msgstr ""
 
 #: nostr/ui/imports_source_settings.py:222
-#: nostr/ui/imports_window.py:721
+#: nostr/ui/imports_window.py:722
 msgid "You can check again in a minute."
 msgstr ""
 
@@ -6056,7 +6056,7 @@ msgid "Inbox"
 msgstr ""
 
 #: nostr/ui/imports_window.py:178
-#: nostr/ui/imports_window.py:464
+#: nostr/ui/imports_window.py:465
 msgid "Older Posts"
 msgstr ""
 
@@ -6065,7 +6065,7 @@ msgid "Imports Toolbar"
 msgstr ""
 
 #: nostr/ui/imports_window.py:311
-#: nostr/ui/imports_window.py:1101
+#: nostr/ui/imports_window.py:1119
 msgid "Follow a Website…"
 msgstr ""
 
@@ -6093,74 +6093,74 @@ msgstr ""
 msgid "Search Posts"
 msgstr ""
 
-#: nostr/ui/imports_window.py:463
+#: nostr/ui/imports_window.py:464
 msgid "New Posts"
 msgstr ""
 
-#: nostr/ui/imports_window.py:464
+#: nostr/ui/imports_window.py:465
 msgid "Older"
 msgstr ""
 
-#: nostr/ui/imports_window.py:473
+#: nostr/ui/imports_window.py:474
 msgid "Source Actions"
 msgstr ""
 
-#: nostr/ui/imports_window.py:474
+#: nostr/ui/imports_window.py:475
 msgid "What you can do with this source"
 msgstr ""
 
-#: nostr/ui/imports_window.py:494
+#: nostr/ui/imports_window.py:495
 msgid "Select All Posts"
 msgstr ""
 
-#: nostr/ui/imports_window.py:674
+#: nostr/ui/imports_window.py:675
 msgid "Copy Address"
 msgstr ""
 
-#: nostr/ui/imports_window.py:677
+#: nostr/ui/imports_window.py:678
 msgid "Source Settings…"
 msgstr ""
 
-#: nostr/ui/imports_window.py:798
+#: nostr/ui/imports_window.py:799
 msgid "Posts you skipped on this computer."
 msgstr ""
 
-#: nostr/ui/imports_window.py:810
+#: nostr/ui/imports_window.py:811
 msgid "Imported once, not kept as a source."
 msgstr ""
 
-#: nostr/ui/imports_window.py:1003
+#: nostr/ui/imports_window.py:1021
 msgid "Undo Skip"
 msgstr ""
 
-#: nostr/ui/imports_window.py:1117
-#: nostr/ui/imports_window.py:1105
+#: nostr/ui/imports_window.py:1135
+#: nostr/ui/imports_window.py:1123
 msgid "No older posts"
 msgstr ""
 
-#: nostr/ui/imports_window.py:1118
+#: nostr/ui/imports_window.py:1136
 msgid "Posts that were already on this source when you followed it appear here."
 msgstr ""
 
-#: nostr/ui/imports_window.py:1183
+#: nostr/ui/imports_window.py:1201
 msgid "Export Sources"
 msgstr ""
 
-#: nostr/ui/imports_window.py:1184
+#: nostr/ui/imports_window.py:1202
 msgid "Lists of sources (*.opml)"
 msgstr ""
 
-#: nostr/ui/imports_window.py:1258
+#: nostr/ui/imports_window.py:1276
 msgid "That link can't be opened from here."
 msgstr ""
 
-#: nostr/ui/imports_window.py:1448
-#: nostr/ui/imports_window.py:1449
+#: nostr/ui/imports_window.py:1474
+#: nostr/ui/imports_window.py:1475
 msgid "Close Message"
 msgstr ""
 
-#: nostr/ui/imports_window.py:1487
-#: nostr/ui/imports_window.py:1504
+#: nostr/ui/imports_window.py:1512
+#: nostr/ui/imports_window.py:1529
 msgid "Drop to Import"
 msgstr ""
 
@@ -6168,163 +6168,163 @@ msgstr ""
 msgid "More Toolbar Items"
 msgstr ""
 
-#: nostr/ui/imports_window.py:665
+#: nostr/ui/imports_window.py:666
 msgid "Read Now"
 msgstr ""
 
-#: nostr/ui/imports_window.py:1054
+#: nostr/ui/imports_window.py:1072
 msgid "Show Drafts"
 msgstr ""
 
-#: nostr/ui/imports_window.py:1084
+#: nostr/ui/imports_window.py:1102
 msgid "No Results"
 msgstr ""
 
-#: nostr/ui/imports_window.py:1095
+#: nostr/ui/imports_window.py:1113
 msgid "No posts"
 msgstr ""
 
-#: nostr/ui/imports_window.py:1095
+#: nostr/ui/imports_window.py:1113
 msgid "This source has no posts to import."
 msgstr ""
 
-#: nostr/ui/imports_window.py:1103
+#: nostr/ui/imports_window.py:1121
 msgid "New posts appear here when MyEditor checks your sources."
 msgstr ""
 
-#: nostr/ui/imports_window.py:1106
+#: nostr/ui/imports_window.py:1124
 msgid "Posts that were already on a source when you followed it appear here."
 msgstr ""
 
-#: nostr/ui/imports_window.py:1109
+#: nostr/ui/imports_window.py:1127
 msgid "Nothing imported yet"
 msgstr ""
 
-#: nostr/ui/imports_window.py:1110
+#: nostr/ui/imports_window.py:1128
 msgid "Posts you import as drafts appear here."
 msgstr ""
 
-#: nostr/ui/imports_window.py:1112
+#: nostr/ui/imports_window.py:1130
 msgid "Nothing skipped"
 msgstr ""
 
-#: nostr/ui/imports_window.py:1113
+#: nostr/ui/imports_window.py:1131
 msgid "Posts you skip on this computer appear here, so you can bring them back."
 msgstr ""
 
-#: nostr/ui/imports_window.py:1116
+#: nostr/ui/imports_window.py:1134
 msgid "No new posts"
 msgstr ""
 
-#: nostr/ui/imports_window.py:1116
+#: nostr/ui/imports_window.py:1134
 msgid "New posts from this source appear here."
 msgstr ""
 
-#: nostr/ui/imports_window.py:1183
-#: nostr/ui/imports_window.py:581
+#: nostr/ui/imports_window.py:1201
+#: nostr/ui/imports_window.py:582
 msgid "Sources"
 msgstr ""
 
-#: nostr/ui/imports_window.py:1268
+#: nostr/ui/imports_window.py:1286
 msgid "Stop this import?"
 msgstr ""
 
-#: nostr/ui/imports_window.py:1269
+#: nostr/ui/imports_window.py:1287
 msgid "Drafts already created stay. The other posts are not imported."
 msgstr ""
 
-#: nostr/ui/imports_window.py:1270
+#: nostr/ui/imports_window.py:1288
 msgid "Stop Import"
 msgstr ""
 
-#: nostr/ui/imports_window.py:592
+#: nostr/ui/imports_window.py:593
 msgid "Files and Links"
 msgstr ""
 
-#: nostr/ui/imports_window.py:658
+#: nostr/ui/imports_window.py:659
 msgid "Remove from List"
 msgstr ""
 
-#: nostr/ui/imports_window.py:805
+#: nostr/ui/imports_window.py:806
 #, python-brace-format
 msgid "{n} post"
 msgid_plural "{n} posts"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/imports_window.py:816
+#: nostr/ui/imports_window.py:817
 msgid "Reading…"
 msgstr ""
 
-#: nostr/ui/imports_window.py:927
+#: nostr/ui/imports_window.py:928
 msgid "None of these posts has an image that can be copied."
 msgstr ""
 
-#: nostr/ui/imports_window.py:982
+#: nostr/ui/imports_window.py:1000
 #, python-brace-format
 msgid "Skipped {count} post."
 msgid_plural "Skipped {count} posts."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/imports_window.py:1094
+#: nostr/ui/imports_window.py:1112
 msgid "Couldn't read this source"
 msgstr ""
 
-#: nostr/ui/imports_window.py:1099
+#: nostr/ui/imports_window.py:1117
 msgid "No sources yet"
 msgstr ""
 
-#: nostr/ui/imports_window.py:1100
+#: nostr/ui/imports_window.py:1118
 msgid "Follow a website to see its new posts here."
 msgstr ""
 
-#: nostr/ui/imports_window.py:1283
+#: nostr/ui/imports_window.py:1301
 #, python-brace-format
 msgid "Following {count} new source."
 msgid_plural "Following {count} new sources."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/imports_window.py:803
+#: nostr/ui/imports_window.py:804
 #, python-brace-format
 msgid "{n} new post"
 msgid_plural "{n} new posts"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/imports_window.py:1085
+#: nostr/ui/imports_window.py:1103
 #, python-brace-format
 msgid "No posts match “{query}”."
 msgstr ""
 
-#: nostr/ui/imports_window.py:1286
+#: nostr/ui/imports_window.py:1304
 #, python-brace-format
 msgid "{count} was followed already."
 msgid_plural "{count} were followed already."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/imports_window.py:1289
+#: nostr/ui/imports_window.py:1307
 #, python-brace-format
 msgid "{count} couldn't be followed."
 msgid_plural "{count} couldn't be followed."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/imports_window.py:974
+#: nostr/ui/imports_window.py:992
 #, python-brace-format
 msgid "Restored {count} post."
 msgid_plural "Restored {count} posts."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/imports_window.py:1092
+#: nostr/ui/imports_window.py:1110
 #, python-brace-format
 msgid "Reading {source}…"
 msgstr ""
 
-#: nostr/ui/imports_window.py:1204
+#: nostr/ui/imports_window.py:1222
 msgid "Choose another place and export again."
 msgstr ""
 
