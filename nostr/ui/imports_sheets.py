@@ -84,6 +84,7 @@ from .assistant import (
     page,
     text_label,
 )
+from .imports_activity import with_its_word
 from .imports_glyphs import letter_avatar
 
 MAIN = "main"
@@ -234,7 +235,7 @@ class _Sheet(AssistantWindow):
     def _wait(self, text: str) -> int:
         """Show the wait; returns the number to check the answer against."""
         self._generation += 1
-        self.busy_label.setText(text)
+        self.busy_label.setText(with_its_word(text))
         self.busy.show()
         self.error.hide()
         self._update_buttons()

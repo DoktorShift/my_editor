@@ -245,3 +245,12 @@ def test_the_drafts_panel_row_follows_the_import(setup):
     controller.read_only = True
     MainWindow._update_imports_row(host)
     assert row.action.isHidden()
+
+
+def test_an_ellipsis_stays_with_its_word():
+    """German writes a space before the ellipsis ("wird vorbereitet ..."),
+    and a wrapped line put the ellipsis alone on the next line."""
+    from nostr.ui.imports_activity import with_its_word
+    assert with_its_word("„A post“ wird vorbereitet …") == (
+        "„A post“ wird vorbereitet …")
+    assert with_its_word("Preparing “A post”…") == "Preparing “A post”…"

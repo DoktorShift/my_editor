@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -99,8 +100,12 @@ class ArticlePane(QWidget):
                                               "browser."))
         self._open.clicked.connect(self.open_original)
         row.addWidget(self._avatar)
-        row.addWidget(self._origin, 1)
+        # Name and date read as one line ("Source  ·  date"): the name takes
+        # no more room than it needs, the space goes after the date.
+        self._origin.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        row.addWidget(self._origin)
         row.addWidget(self._date)
+        row.addStretch(1)
         row.addWidget(self._open)
         layout.addWidget(self._header)
 

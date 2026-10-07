@@ -16,10 +16,11 @@ QLabel, with the whole text.
 
 from __future__ import annotations
 
+import math
 from typing import Optional
 
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QPainter
+from PySide6.QtGui import QFontMetricsF, QPainter
 from PySide6.QtWidgets import QLabel, QSizePolicy, QWidget
 
 
@@ -64,8 +65,11 @@ class ElidingLabel(QLabel):
 
     def sizeHint(self) -> QSize:
         margins = self.contentsMargins()
-        return QSize(self.fontMetrics().horizontalAdvance(self._full)
-                     + margins.left() + margins.right(),
+        # The text's fractional width, rounded up: eliding compares that
+        # width, and a hint rounded down made a label given exactly its
+        # hint elide its own text.
+        width = math.ceil(QFontMetricsF(self.font()).horizontalAdvance(self._full))
+        return QSize(width + margins.left() + margins.right(),
                      self.fontMetrics().height() + margins.top() + margins.bottom())
 
     def minimumSizeHint(self) -> QSize:

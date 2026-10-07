@@ -79,7 +79,7 @@ from __future__ import annotations
 import time
 from typing import Callable, List, NamedTuple, Optional, Tuple
 
-from PySide6.QtCore import QEvent, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPointF, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QAction,
     QColor,
@@ -88,6 +88,7 @@ from PySide6.QtGui import (
     QKeySequence,
     QPainter,
     QPalette,
+    QPen,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -210,8 +211,11 @@ QToolButton#drafts_panel_view_popup {{
     color: {t["row_fg"]};
     border: 1px solid {t["border"]};
     border-radius: 4px;
-    padding: 2px 8px;
+    padding: 2px {_POPUP_CHEVRON_ROOM}px 2px 8px;
 }}
+/* The pop-up button draws its own chevrons in that room (_ViewPopup);
+   the style's arrow sat in the corner, on the view's name. */
+QToolButton#drafts_panel_view_popup::menu-indicator {{ image: none; width: 0px; }}
 QToolButton#drafts_panel_view_popup:hover {{ background: {t["hover_bg"]}; }}
 /* One hairline, where the chrome meets the list. The two bands read as
    a single surface so nothing divides them. layout.md: "Group related
@@ -656,6 +660,10 @@ class _SegmentButton(QPushButton):
         QStylePainter(self).drawControl(QStyle.CE_PushButton, option)
 
 
+# Room on the right of the view pop-up for its chevrons, in pixels.
+_POPUP_CHEVRON_ROOM = 20
+
+
 class _ViewPopup(QToolButton):
     """The view switch where its segments do not fit: a pop-up button
     naming the current view. ``buttons.md``: a pop-up button "displays a
@@ -695,7 +703,23 @@ class _ViewPopup(QToolButton):
         option = QStyleOptionToolButton()
         self.initStyleOption(option)
         option.text = self.painted_text()
-        QStylePainter(self).drawComplexControl(QStyle.CC_ToolButton, option)
+        painter = QStylePainter(self)
+        painter.drawComplexControl(QStyle.CC_ToolButton, option)
+        # A pop-up button's chevrons, up and down (one of several views),
+        # in the room the style sheet keeps for them on the right.
+        unit = max(1.0, self.fontMetrics().height() / 16.0)
+        x = self.width() - _POPUP_CHEVRON_ROOM / 2.0 - 1.0
+        y = self.height() / 2.0
+        half, rise, gap = 3.0 * unit, 2.5 * unit, 1.5 * unit
+        pen = QPen(self.palette().color(self.foregroundRole()), 1.4)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(pen)
+        painter.drawPolyline([QPointF(x - half, y - gap), QPointF(x, y - gap - rise),
+                              QPointF(x + half, y - gap)])
+        painter.drawPolyline([QPointF(x - half, y + gap), QPointF(x, y + gap + rise),
+                              QPointF(x + half, y + gap)])
 
 
 class _ViewSwitch(QWidget):

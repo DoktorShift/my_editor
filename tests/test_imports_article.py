@@ -196,3 +196,15 @@ def test_another_post_never_shows_the_previous_body():
     widget.show_post(replace(POST, key="other", title="Post B"))
     assert widget._stack.currentWidget() is widget._message
     assert widget._message.findChild(QLabel).text() == ""
+
+
+@pytest.mark.parametrize("text", ["Lightning Weekly", "A thoughtful journal", "Imports",
+                                  "Field notes", "Verbraucherzentrale Nordrhein-Westfalen"])
+def test_an_eliding_label_given_its_hint_shows_its_whole_text(text):
+    """The hint was the rounded-down width, and eliding compares the
+    fractional one: a label given exactly its hint showed "Lightning
+    Wee…" in the article header."""
+    from nostr.ui.eliding_label import ElidingLabel
+    label = ElidingLabel(text)
+    label.resize(label.sizeHint())
+    assert label.painted_text() == text

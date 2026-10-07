@@ -100,6 +100,13 @@ def counts_text(job: Job) -> str:
     return ", ".join(parts)
 
 
+def with_its_word(text: str) -> str:
+    """An ellipsis after a space (German writes "wird vorbereitet \u2026")
+    stays with its word where a line wraps, instead of starting a line of
+    its own."""
+    return text.replace(" \u2026", "\u00a0\u2026")
+
+
 def stage_text(job: Job) -> str:
     """The post being made and what is being done to it."""
     if job.status not in RUNNING:
@@ -107,8 +114,8 @@ def stage_text(job: Job) -> str:
     row = next((r for r in job.rows if r.stage), None)
     if row is None:
         return ""
-    return _STAGES.get(row.stage, _STAGES[STAGE_PREPARING]).format(
-        title=row.title or _("Untitled"))
+    return with_its_word(_STAGES.get(row.stage, _STAGES[STAGE_PREPARING]).format(
+        title=row.title or _("Untitled")))
 
 
 def finished_text(job: Job) -> str:
