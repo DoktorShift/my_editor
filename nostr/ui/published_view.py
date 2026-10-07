@@ -162,7 +162,7 @@ class _Rows(QAbstractListModel):
 
     def reload(self) -> None:
         items = self._model.items() if self._model.state == READY else []
-        more = self._model.state == READY and bool(items) and (
+        more = self._model.state == READY and (
             self._model.has_more or self._model.loading_more or self._model.more_failed)
         old_keys = self.keys()
         new_keys = [item.id for item in items] + ([self._MORE] if more else [])
@@ -513,7 +513,12 @@ class PublishedView(QWidget):
             self._show_placeholder(_("Couldn’t load what you published"),
                                    _("Check your internet connection, then try again."),
                                    action=True)
-        elif not self._model.items():
+        elif not self._model.items() and self._model.loading_more:
+            # Reading on past pages that showed nothing (all deleted):
+            # still the first read, as far as the person can tell.
+            self._show_placeholder("", _("Looking for your notes and articles…"), busy=True)
+        elif not self._model.items() and not (self._model.has_more
+                                              or self._model.more_failed):
             self._show_placeholder(_("Nothing published yet"),
                                    _("Notes and articles you publish appear here."))
         else:

@@ -45,14 +45,16 @@ def answer(stored: Iterable[dict], filters: List[dict]) -> List[dict]:
 
 class Relays(HandPool):
     """A pool of relays: ``keep`` stores events on them, ``down`` relays
-    cannot be reached, ``refusing_kinds`` closes requests that ask for
-    those kinds, and ``run`` lets every request that is open be answered
-    (and whatever it leads to) until nothing is left."""
+    cannot be reached, ``unreachable_for`` maps a relay to the kinds it
+    cannot be reached for, ``refusing_kinds`` closes requests that ask
+    for those kinds, and ``run`` lets every request that is open be
+    answered (and whatever it leads to) until nothing is left."""
 
     def __init__(self, *, refuse_publish: Iterable[str] = ()) -> None:
         super().__init__()
         self.stored: Dict[str, List[dict]] = {}
         self.down: Set[str] = set()
+        self.unreachable_for: Dict[str, Set[int]] = {}
         self.refusing_kinds: Set[int] = set()
         self.publisher = FakePool(refuse=refuse_publish)
         self._answered = 0
@@ -75,7 +77,7 @@ class Relays(HandPool):
                 self._answered += 1
                 kinds = {k for flt in sub.filters for k in flt.get("kinds", [])}
                 for url in sub.urls:
-                    if url in self.down:
+                    if url in self.down or kinds & self.unreachable_for.get(url, set()):
                         sub.fail(url)
                     elif kinds & self.refusing_kinds:
                         sub.refuse(url, "blocked: not here")

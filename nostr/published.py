@@ -22,7 +22,14 @@ Reading:
   own newest notes. The list is complete only down to the oldest note of
   the relay that sent a full page and went least far back (the horizon,
   :func:`notes_horizon`); older notes stay out of the list until Load
-  More moves it, so a page never opens a gap in the middle.
+  More moves it, so a page never opens a gap in the middle. A relay that
+  sent a full page has older notes: when it does not answer Load More,
+  nothing moves and Load More says it failed, rather than the list
+  claiming there is nothing older. A page whose notes all turn out to be
+  deleted leads to the next one by itself, a few pages at most, so the
+  list never looks empty while older notes are there.
+- Something may be missing (``partial``) when a relay answered the items
+  but not the question about their deletions, or an answer was cut off.
 - Articles: the newest version of each identifier that no deletion
   covers, all of them at once (there are few, and a writer looks for
   them). Every item knows each relay it was found on.
@@ -49,7 +56,7 @@ from .deletion import (
     DELETION_KIND, DeletionJob, DeletionRequest, address_of, read_deletion,
 )
 from .drafts import derive_title_from_markdown
-from .outbox.policy import created_at_of, is_newer
+from .outbox.policy import created_at_of, dedupe_relays, is_newer
 from .publish_pipeline import mentioned_pubkeys
 from .publisher import published_at_of
 from .queries import Fetched, fetch_events
@@ -61,6 +68,7 @@ ARTICLE_LIMIT = 500           # articles asked for at once
 TAG_BATCH = 100               # ids or addresses in one filter
 FILTERS_PER_REQUEST = 4       # filters in one request
 QUERY_TIMEOUT_MS = 8_000
+AUTO_PAGES = 3                # pages read by themselves after one that showed nothing
 LINK_HINTS = 2                # relays a link names, so a reader finds the item
 TITLE_CHARS = 90              # a row's title at most; the row elides it to its width
 
@@ -181,12 +189,33 @@ def notes_horizon(fetched: Fetched, notes: Iterable[dict], *,
     oldest note of the relay that sent a full page and went least far
     back, and the next page asks for notes from there on.
     """
+    full = _full_pages(fetched, notes, page_size=page_size)
+    return max(full.values()) if full else None
+
+
+def full_relays(fetched: Fetched, notes: Iterable[dict], *,
+                page_size: int = PAGE_SIZE) -> Set[str]:
+    """The relays that sent a full page: they may have older notes."""
+    return set(_full_pages(fetched, notes, page_size=page_size))
+
+
+def _full_pages(fetched: Fetched, notes: Iterable[dict], *, page_size: int) -> Dict[str, int]:
+    """relay -> the oldest note of the full page it sent."""
     times: Dict[str, List[int]] = {}
     for note in notes:
         for relay in fetched.relays_of(note["id"]):
             times.setdefault(relay, []).append(int(note["created_at"]))
-    full = [min(found) for found in times.values() if len(found) >= page_size]
-    return max(full) if full else None
+    return {relay: min(found) for relay, found in times.items() if len(found) >= page_size}
+
+
+@dataclass(frozen=True)
+class _Deletions:
+    """What the question about an answer's deletion requests found."""
+
+    found: Dict[str, DeletionRequest]
+    reached: bool                 # every request reached at least one relay
+    answered_all: Optional[Set[str]] = None   # relays that answered every request
+                                              # completely; None: nothing was asked
 
 
 def deletion_requests(author: str, event_ids: Iterable[str],
@@ -252,6 +281,8 @@ class PublishedList(QObject):
         # author -> the requests this app sent that a relay took, by id
         self._sent_requests: Dict[str, Dict[str, DeletionRequest]] = {}
         self._horizon: Optional[int] = None
+        self._full: Set[str] = set()      # relays whose last page was full
+        self._auto_pages = 0
         self._has_more = False
         self._loading_more = False
         self._more_failed = False
@@ -348,6 +379,10 @@ class PublishedList(QObject):
 
     def load_more(self) -> None:
         """The next page of older notes."""
+        self._auto_pages = 0
+        self._load_more()
+
+    def _load_more(self) -> None:
         if self._state != READY or not self._has_more or self._loading_more:
             return
         self._loading_more = True
@@ -444,29 +479,59 @@ class PublishedList(QObject):
             self._unreachable()
             return
         self._find_deletions(generation, relays, fetched.events,
-                             lambda found, answered: self._take_first_page(
-                                 generation, relays, fetched, found, answered))
+                             lambda checked: self._take_first_page(
+                                 generation, relays, fetched, checked))
 
     def _take_first_page(self, generation: int, relays: List[str], fetched: Fetched,
-                         found: Dict[str, DeletionRequest], answered: bool) -> None:
+                         checked: _Deletions) -> None:
         if generation != self._generation:
             return
-        if not answered:
+        if not checked.reached:
             self._unreachable()
             return
         self._relays = relays
         self._notes, self._articles, self._seen_on = {}, {}, {}
-        self._requests = dict(found)
+        self._requests = dict(checked.found)
         self._absorb(fetched)
         notes = [e for e in fetched.events if e["kind"] == NOTE_KIND]
         self._horizon = notes_horizon(fetched, notes)
+        self._full = full_relays(fetched, notes)
         self._has_more = self._horizon is not None
         self._more_failed = False
-        self._partial = len(fetched.answered) < len(relays)
+        self._partial = (len(fetched.answered) < len(relays)
+                         or self._missing_some(fetched, checked))
         self._state = READY
         self._refreshing = self._refresh_failed = False
+        self._auto_pages = 0
         self._rebuild()
         self.changed.emit()
+        self._go_on_if_nothing_showed(shown_before=0)
+
+    @staticmethod
+    def _missing_some(fetched: Fetched, checked: _Deletions) -> bool:
+        """Whether something may be missing from an answer and the deletion
+        requests asked about it: an answer was cut off, or a relay that
+        answered the items did not answer about their deletions (a
+        deletion it keeps would go unseen)."""
+        if not fetched.complete:
+            return True
+        if checked.answered_all is None:
+            return False
+        return bool(set(fetched.answered) - checked.answered_all)
+
+    def _notes_shown(self) -> int:
+        return sum(1 for item in self._items if not item.is_article)
+
+    def _go_on_if_nothing_showed(self, *, shown_before: int) -> None:
+        """A page whose notes were all deleted shows nothing new; when
+        older notes may be there, read on by itself, a few pages at most,
+        so the list never says nothing is published while notes are."""
+        if self._notes_shown() > shown_before:
+            self._auto_pages = 0
+            return
+        if self._has_more and self._auto_pages < AUTO_PAGES:
+            self._auto_pages += 1
+            self._load_more()
 
     def _unreachable(self) -> None:
         if self._refreshing:
@@ -480,27 +545,37 @@ class PublishedList(QObject):
     def _on_more(self, generation: int, horizon: int, fetched: Fetched) -> None:
         if generation != self._generation:
             return
-        if not fetched.answered:
-            self._loading_more = False
-            self._more_failed = True
-            self.changed.emit()
+        # A relay whose last page was full has older notes. If it did not
+        # answer, how far this page goes is not known: nothing moves, and
+        # Load More says it failed (not that there is nothing older).
+        silent = self._full - set(fetched.answered)
+        if not fetched.answered or silent or not fetched.complete:
+            self._more_did_not_load()
             return
         self._find_deletions(generation, self._relays, fetched.events,
-                             lambda found, answered: self._take_more(
-                                 generation, horizon, fetched, found, answered))
+                             lambda checked: self._take_more(
+                                 generation, horizon, fetched, checked))
+
+    def _more_did_not_load(self) -> None:
+        self._loading_more = False
+        self._more_failed = True
+        self.changed.emit()
 
     def _take_more(self, generation: int, horizon: int, fetched: Fetched,
-                   found: Dict[str, DeletionRequest], answered: bool) -> None:
+                   checked: _Deletions) -> None:
         if generation != self._generation:
             return
-        self._loading_more = False
-        if not answered:
-            self._more_failed = True
-            self.changed.emit()
+        if not checked.reached:
+            self._more_did_not_load()
             return
-        self._requests.update(found)
+        self._loading_more = False
+        shown_before = self._notes_shown()
+        self._requests.update(checked.found)
         self._absorb(fetched)
-        reached = notes_horizon(fetched, [e for e in fetched.events if e["kind"] == NOTE_KIND])
+        self._partial = self._partial or self._missing_some(fetched, checked)
+        notes = [e for e in fetched.events if e["kind"] == NOTE_KIND]
+        reached = notes_horizon(fetched, notes)
+        self._full = full_relays(fetched, notes)
         if reached is None:
             self._horizon, self._has_more = None, False
         else:
@@ -510,32 +585,35 @@ class PublishedList(QObject):
             self._horizon, self._has_more = min(reached, horizon - 1), True
         self._rebuild()
         self.changed.emit()
+        self._go_on_if_nothing_showed(shown_before=shown_before)
 
     def _find_deletions(self, generation: int, relays: Sequence[str], found: Iterable[dict],
-                        on_done: Callable[[Dict[str, DeletionRequest], bool], None]) -> None:
-        """The author's deletion requests that name ``found``; ``answered``
-        is False when some request reached no relay at all."""
+                        on_done: Callable[[_Deletions], None]) -> None:
+        """The author's deletion requests that name ``found``, and how well
+        the relays answered the question (_Deletions)."""
         found = list(found)
         author = self._author()
         requests = deletion_requests(
             author, [e["id"] for e in found],
             [address_of(e) for e in found if e["kind"] == ARTICLE_KIND])
         if not requests:
-            on_done({}, True)
+            on_done(_Deletions({}, True))
             return
-        state = {"left": len(requests), "answered": True, "found": {}}
+        state = {"left": len(requests), "reached": True, "found": {},
+                 "answered_all": set(dedupe_relays(relays))}
 
         def one(fetched: Fetched) -> None:
             if generation != self._generation:
                 return
-            state["answered"] = state["answered"] and bool(fetched.answered)
+            state["reached"] = state["reached"] and bool(fetched.answered)
+            state["answered_all"] &= set(fetched.answered) if fetched.complete else set()
             for event in fetched.events:
                 request = read_deletion(event, author)
                 if request is not None:
                     state["found"][request.id] = request
             state["left"] -= 1
             if state["left"] == 0:
-                on_done(state["found"], state["answered"])
+                on_done(_Deletions(state["found"], state["reached"], state["answered_all"]))
 
         for filters in requests:
             self._ask(relays, filters, one, kinds=(DELETION_KIND,))
@@ -640,6 +718,8 @@ class PublishedList(QObject):
         self._relays = []
         self._notes, self._articles, self._seen_on, self._requests = {}, {}, {}, {}
         self._horizon, self._has_more = None, False
+        self._full = set()
+        self._auto_pages = 0
         self._loading_more = self._more_failed = False
         self._refreshing = self._refresh_failed = self._partial = False
         self._items = []

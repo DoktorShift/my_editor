@@ -170,6 +170,22 @@ def test_an_untitled_item_still_has_a_name():
     assert shown(view) == ["Untitled"]
 
 
+def test_nothing_shown_yet_while_older_notes_may_be_there_is_not_nothing_published():
+    """Review F6: when the pages read so far were all deleted, the view
+    offers Load More instead of "Nothing published yet"."""
+    from nostr import events
+    from nostr.deletion import build_deletion
+    from tests.outbox_fakes import SK
+    many = [note(f"note {n}", at=NOW - 10 * n) for n in range(PAGE_SIZE * 6)]
+    request = events.sign_event(build_deletion(PK, event_ids=[n["id"] for n in many],
+                                               kinds=[1], created_at=NOW), SK)
+    view, model, relays, _said, _edited = make(*many, request)
+    view.set_account(Profile())
+    relays.run()
+    assert model.items() == [] and model.has_more
+    assert shown(view) == ["Load More Notes"]
+
+
 def test_load_more_is_the_last_row_and_return_on_it_loads_more():
     notes = [note(f"note {n}", at=NOW - 10 * n) for n in range(PAGE_SIZE + 3)]
     view, model, relays, _said, _edited = make(*notes)
