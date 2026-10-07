@@ -150,6 +150,23 @@ def test_restore_of_a_stale_record_removes_the_old_file(tmp_path):
     assert [r.get("original_path") for r in surviving] == [None]
 
 
+def test_a_record_spelling_its_file_another_way_restores_under_the_one_spelling(tmp_path):
+    # An older version kept paths as they arrived: with Qt's forward
+    # slashes on Windows, or with steps back. The tab and its new backup
+    # take the one spelling (file_paths), so the file cannot open twice.
+    source = tmp_path / "note.html"
+    source.write_text("<p>on disk</p>", encoding="utf-8")
+    (tmp_path / "sub").mkdir()
+    spelled = (tmp_path / "sub").as_posix() + "/../note.html"
+    assert recovery.EditorBackup(_editor("unsaved edit"), spelled).write_now()
+    record = recovery.find_all_backups()[0]
+
+    restored = MainWindow._restore_one_backup(_window_stub(), record)
+
+    assert restored._file_path == str(source)
+    assert [r["original_path"] for r in recovery.find_all_backups()] == [str(source)]
+
+
 # --------------------------------------------------------------------------- #
 # The fingerprint shortcut
 # --------------------------------------------------------------------------- #

@@ -58,6 +58,25 @@ def test_a_damaged_inbox_is_set_aside_and_a_new_one_started(harness, tmp_path):
     assert not window.notice.isHidden()
 
 
+def test_a_damaged_inbox_is_closed_before_it_is_set_aside(tmp_path, monkeypatch):
+    # Windows cannot move a file that is still open: the store that could
+    # not read it lets go of it first.
+    import sqlite3
+
+    from nostr.imports import inbox_store
+    opened = []
+    connect = sqlite3.connect
+    monkeypatch.setattr(inbox_store.sqlite3, "connect",
+                        lambda *args, **kwargs: opened.append(connect(*args, **kwargs))
+                        or opened[-1])
+    path = tmp_path / "inbox.sqlite"
+    path.write_bytes(b"this is not a database at all" * 100)
+    with pytest.raises(sqlite3.DatabaseError):
+        inbox_store.InboxStore(path)
+    with pytest.raises(sqlite3.ProgrammingError):        # closed
+        opened[0].execute("SELECT 1")
+
+
 @pytest.mark.skipif(sys.platform == "win32" or (hasattr(os, "geteuid") and os.geteuid() == 0),
                     reason="folder permissions do not restrict this user")
 def test_a_folder_that_cannot_be_written_leaves_imports_unbound(harness, tmp_path):

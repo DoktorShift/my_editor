@@ -13,12 +13,7 @@ What must hold:
   and is remembered.
 """
 
-import json
-import os
-import subprocess
-import sys
-
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from tests.app_process import run_window_script
 
 SCRIPT = r"""
 import json, os, sys
@@ -67,12 +62,7 @@ print("RESULT " + json.dumps(r))
 
 
 def test_each_document_gets_its_font(tmp_path):
-    env = dict(os.environ, HOME=str(tmp_path), QT_QPA_PLATFORM="offscreen")
-    proc = subprocess.run([sys.executable, "-c", SCRIPT, REPO], env=env,
-                          capture_output=True, text=True, timeout=120)
-    line = next((l for l in proc.stdout.splitlines() if l.startswith("RESULT ")), None)
-    assert line, f"child failed:\n{proc.stdout}\n{proc.stderr}"
-    r = json.loads(line[len("RESULT "):])
+    r = run_window_script(SCRIPT, tmp_path)
     assert r["new"] is False and r["md"] is False          # writing: proportional
     assert r["new_margin"] > 0                              # in a readable column
     assert r["txt"] is True and r["txt_margin"] == 0        # plain text: monospace, full width
