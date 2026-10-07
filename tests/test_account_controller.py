@@ -408,7 +408,7 @@ def test_the_pairing_dialog_opens_over_the_account_window_and_goes_away(
     s.controller._pair_signer(lambda profile: None, parent=account_window)
     dialog, = FakeConnectDialog.made
     assert dialog.parent() is account_window
-    assert dialog.kwargs["persist"] is False and dialog.kwargs["start_on_qr"] is True
+    assert dialog.kwargs["persist"] is False         # the code shows first by itself
     assert dialog.kwargs["offer_alternatives"] is False
     QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
     assert not shiboken6.isValid(dialog)

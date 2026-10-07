@@ -194,7 +194,7 @@ class AccountController(QObject):
         """Pair a signer app for Create Account, over its window. Nothing is
         saved here: the window checks the account first."""
         dialog = ConnectDialog(self._relay_pool, self._store, parent=parent or self._window,
-                               is_dark=self._is_dark(), persist=False, start_on_qr=True,
+                               is_dark=self._is_dark(), persist=False,
                                offer_alternatives=False)
         dialog.profile_connected.connect(on_profile)
         try:

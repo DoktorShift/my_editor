@@ -879,6 +879,7 @@ msgid "Can't check for updates"
 msgstr "Suche nach Updates nicht möglich"
 
 #: main_window.py:4290
+#: nostr/ui/connect_dialog.py:212
 #: nostr/ui/published_view.py:644
 msgid "Copy Link"
 msgstr "Link kopieren"
@@ -1913,9 +1914,9 @@ msgstr "Installieren"
 #: widgets.py:500
 #: nostr/ui/account_windows.py:754
 #: nostr/ui/account_windows.py:1090
-#: nostr/ui/connect_dialog.py:250
 #: nostr/ui/media_library_dialog.py:1241
 #: nostr/ui/membership_window.py:750
+#: nostr/ui/membership_window.py:824
 msgid "Close"
 msgstr "Schließen"
 
@@ -2417,12 +2418,12 @@ msgstr "Update-Anleitung öffnen"
 
 #: update_dialog.py:284
 #: nostr/ui/account_windows.py:764
-#: nostr/ui/connect_dialog.py:360
 #: nostr/ui/draft_relays_sheet.py:294
 #: nostr/ui/drafts_panel.py:1108
 #: nostr/ui/imports_activity.py:288
 #: nostr/ui/imports_window.py:1092
 #: nostr/ui/profile_window.py:331
+#: nostr/ui/publish_article_dialog.py:914
 msgid "Try Again"
 msgstr "Erneut versuchen"
 
@@ -4897,139 +4898,121 @@ msgstr "Schritt {number}, erledigt"
 msgid "Step {number}, failed"
 msgstr "Schritt {number}, fehlgeschlagen"
 
-#: nostr/ui/connect_dialog.py:188
-msgid "Connect Nostr Signer"
-msgstr "Nostr-Signer verbinden"
+#: nostr/ui/connect_dialog.py:108
+msgid "Connect Signer App"
+msgstr "Signer-App verbinden"
 
-#: nostr/ui/connect_dialog.py:223
-msgid "Paste URI"
+#: nostr/ui/connect_dialog.py:144
+msgid "Scan Code"
+msgstr "Code scannen"
+
+#: nostr/ui/connect_dialog.py:145
+msgid "Paste Link"
 msgstr "Link einfügen"
 
-#: nostr/ui/connect_dialog.py:224
-msgid "Scan QR"
-msgstr "QR-Code scannen"
+#: nostr/ui/connect_dialog.py:146
+msgid "How to connect"
+msgstr "Art der Verbindung"
 
-#: nostr/ui/connect_dialog.py:225
-msgid "Manual"
-msgstr "Manuell"
-
-#: nostr/ui/connect_dialog.py:263
-msgid "Paste a <b>bunker://</b> URI from your signer."
-msgstr "Füge einen <b>bunker://</b>-Link aus deinem Signer ein."
-
-#: nostr/ui/connect_dialog.py:267
-msgid "Your signer (Amber, nsec.app, nsec.bunker, …) has an option to generate a bunker URL. Copy it and paste it below. You'll be asked to approve the connection on the signer side."
-msgstr "Dein Signer (Amber, nsec.app, nsec.bunker …) kann einen bunker-Link erzeugen. Kopiere ihn und füge ihn unten ein. Danach bittet dich dein Signer, die Verbindung zu bestätigen."
-
-#: nostr/ui/connect_dialog.py:278
-msgid "Bunker URL"
-msgstr "Bunker-Link"
-
-#: nostr/ui/connect_dialog.py:288
-#: nostr/ui/connect_dialog.py:479
+#: nostr/ui/connect_dialog.py:173
 msgid "Connect"
 msgstr "Verbinden"
 
-#: nostr/ui/connect_dialog.py:319
-msgid "Scan this QR with your signer."
-msgstr "Scanne diesen QR-Code mit deinem Signer."
+#: nostr/ui/connect_dialog.py:196
+msgid "Code to scan with your signer app"
+msgstr "Code zum Scannen mit deiner Signer-App"
 
-#: nostr/ui/connect_dialog.py:323
-msgid "Open Amber (or any NIP-46 compatible signer), choose <b>Add account</b> → <b>Scan QR</b>, and approve the connection."
-msgstr "Öffne Amber (oder einen anderen kompatiblen Signer), wähle <b>Neues Konto hinzufügen</b> → <b>QR-Code scannen</b> und bestätige die Verbindung."
+#: nostr/ui/connect_dialog.py:206
+msgid "New Code"
+msgstr "Neuer Code"
 
-#: nostr/ui/connect_dialog.py:352
+#: nostr/ui/connect_dialog.py:213
+msgid "For a signer app on this computer"
+msgstr "Für eine Signer-App auf diesem Computer"
+
+#: nostr/ui/connect_dialog.py:226
+msgid "Connection link:"
+msgstr "Verbindungslink:"
+
+#: nostr/ui/connect_dialog.py:230
 msgid "Connection link"
 msgstr "Verbindungslink"
 
-#: nostr/ui/connect_dialog.py:357
-msgid "Copy URI"
-msgstr "Link kopieren"
+#: nostr/ui/connect_dialog.py:288
+msgid "Waiting for your signer app…"
+msgstr "Warten auf deine Signer-App …"
 
-#: nostr/ui/connect_dialog.py:393
-msgid "Waiting for your signer to scan…"
-msgstr "Warten, bis dein Signer scannt …"
+#: nostr/ui/connect_dialog.py:339
+msgid "Contacting your signer app. Approve the request there…"
+msgstr "Deine Signer-App wird kontaktiert. Bestätige die Anfrage dort …"
 
-#: nostr/ui/connect_dialog.py:436
-msgid "Enter the signer's pubkey and its relays."
-msgstr "Gib den öffentlichen Schlüssel des Signers und seine Relays ein."
+#: nostr/ui/connect_dialog.py:374
+msgid "Your signer app answered in a form MyEditor can’t read. An update of the signer app may help."
+msgstr "Deine Signer-App hat in einer Form geantwortet, die MyEditor nicht lesen kann. Ein Update der Signer-App kann helfen."
 
-#: nostr/ui/connect_dialog.py:440
-msgid "Useful when you have a long-lived bunker setup whose pieces you keep separately rather than as one URL."
-msgstr "Praktisch, wenn du einen dauerhaften Bunker eingerichtet hast und seine Teile einzeln statt als einen Link aufbewahrst."
+#: nostr/ui/connect_dialog.py:137
+msgid "Connect Your Signer App"
+msgstr "Verbinde deine Signer-App"
 
-#: nostr/ui/connect_dialog.py:448
-msgid "Bunker pubkey (hex):"
-msgstr "Öffentlicher Schlüssel des Bunkers (hex):"
+#: nostr/ui/connect_dialog.py:139
+msgid "A signer app keeps your private key and asks you before anything is signed. MyEditor never sees the key."
+msgstr "Eine Signer-App bewahrt deinen privaten Schlüssel auf und fragt dich, bevor etwas signiert wird. MyEditor sieht den Schlüssel nie."
 
-#: nostr/ui/connect_dialog.py:452
-msgid "64 hex chars"
-msgstr "64 Hex-Zeichen"
+#: nostr/ui/connect_dialog.py:236
+msgid "Some signer apps show a link instead of scanning a code. Copy it there and paste it here; it starts with bunker://."
+msgstr "Manche Signer-Apps zeigen einen Link, statt einen Code zu scannen. Kopiere ihn dort und füge ihn hier ein; er beginnt mit bunker://."
 
-#: nostr/ui/connect_dialog.py:456
-msgid "Relays (one per line):"
-msgstr "Relays (eines pro Zeile):"
+#: nostr/ui/connect_dialog.py:304
+msgid "This code has expired."
+msgstr "Dieser Code ist abgelaufen."
 
-#: nostr/ui/connect_dialog.py:468
-msgid "Secret (optional):"
-msgstr "Geheimcode (optional):"
+#: nostr/ui/connect_dialog.py:326
+msgid "Link copied. Paste it in your signer app."
+msgstr "Link kopiert. Füge ihn in deiner Signer-App ein."
 
-#: nostr/ui/connect_dialog.py:472
-msgid "Pairing token if your signer gave you one"
-msgstr "Kopplungscode, falls dein Signer dir einen gegeben hat"
+#: nostr/ui/connect_dialog.py:356
+msgid "Your signer app needs you to approve this in the browser window that just opened. Waiting…"
+msgstr "Deine Signer-App möchte, dass du das im eben geöffneten Browserfenster bestätigst. Warten …"
 
-#: nostr/ui/connect_dialog.py:519
-msgid "Contacting signer. Approve the request on your phone…"
-msgstr "Signer wird kontaktiert. Bestätige die Anfrage auf deinem Smartphone …"
+#: nostr/ui/connect_dialog.py:362
+msgid "Your signer app asked for approval at an address that cannot be opened safely, so the connection was not continued."
+msgstr "Deine Signer-App hat eine Bestätigung unter einer Adresse verlangt, die nicht sicher geöffnet werden kann. Die Verbindung wurde deshalb nicht fortgesetzt."
 
-#: nostr/ui/connect_dialog.py:554
-msgid "A signer replied but the message could not be read. It may be using an older encryption format than this app supports."
-msgstr "Ein Signer hat geantwortet, aber die Nachricht ließ sich nicht lesen. Vielleicht nutzt er eine ältere Verschlüsselung, als diese App unterstützt."
+#: nostr/ui/connect_dialog.py:159
+msgid "No signer app yet?"
+msgstr "Noch keine Signer-App?"
 
-#: nostr/ui/connect_dialog.py:417
-msgid "Code expired, press Try Again"
-msgstr "Code abgelaufen, klicke auf „Erneut versuchen“"
-
-#: nostr/ui/connect_dialog.py:536
-msgid "Your signer needs you to approve this in the browser window that just opened. Waiting…"
-msgstr "Bestätige das bitte im gerade geöffneten Browserfenster, dein Signer wartet darauf. Warten …"
-
-#: nostr/ui/connect_dialog.py:542
-msgid "Your signer asked for approval at an address that cannot be opened safely, so the connection was not continued."
-msgstr "Dein Signer hat um Bestätigung unter einer Adresse gebeten, die sich nicht sicher öffnen lässt. Die Verbindung wurde deshalb nicht fortgesetzt."
-
-#: nostr/ui/connect_dialog.py:237
+#: nostr/ui/connect_dialog.py:160
 msgid "Create an Account"
 msgstr "Konto erstellen"
 
-#: nostr/ui/connect_dialog.py:238
+#: nostr/ui/connect_dialog.py:161
 msgid "Restore from Backup"
 msgstr "Aus Sicherung wiederherstellen"
 
-#: nostr/ui/connect_dialog.py:571
-#, python-brace-format
-msgid "Connected as {name}."
-msgstr "Verbunden als {name}."
+#: nostr/ui/connect_dialog.py:258
+msgid "That link can’t be used. Copy it again from your signer app: it starts with bunker://."
+msgstr "Dieser Link lässt sich nicht verwenden. Kopiere ihn erneut aus deiner Signer-App: Er beginnt mit bunker://."
 
-#: nostr/ui/connect_dialog.py:577
+#: nostr/ui/connect_dialog.py:402
 #, python-brace-format
-msgid "Connect failed: {reason}"
-msgstr "Verbinden fehlgeschlagen: {reason}"
+msgid "Couldn’t connect: {reason}"
+msgstr "Verbindung nicht möglich: {reason}"
 
-#: nostr/ui/connect_dialog.py:414
-#, python-brace-format
-msgid "Code expires in {seconds}s"
-msgstr "Code läuft in {seconds} s ab"
+#: nostr/ui/connect_dialog.py:188
+msgid "In your signer app, choose to connect an app (in Amber: Connect app, the scan icon)."
+msgstr "Wähle in deiner Signer-App, eine App zu verbinden (in Amber: „App verbinden“, das Scan-Symbol)."
 
-#: nostr/ui/connect_dialog.py:307
-#, python-brace-format
-msgid "Invalid URI: {error}"
-msgstr "Ungültiger Link: {error}"
+#: nostr/ui/connect_dialog.py:190
+msgid "Scan this code, then approve the request in the app."
+msgstr "Scanne diesen Code und bestätige dann die Anfrage in der App."
 
-#: nostr/ui/connect_dialog.py:509
+#: nostr/ui/connect_dialog.py:308
 #, python-brace-format
-msgid "Invalid input: {error}"
-msgstr "Ungültige Eingabe: {error}"
+msgid "This code works for {seconds} more second."
+msgid_plural "This code works for {seconds} more seconds."
+msgstr[0] "Dieser Code gilt noch {seconds} Sekunde."
+msgstr[1] "Dieser Code gilt noch {seconds} Sekunden."
 
 #: nostr/ui/draft_conflict_banner.py:184
 msgid "A newer version of this draft was published from another device."
