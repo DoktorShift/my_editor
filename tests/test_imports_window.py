@@ -340,7 +340,7 @@ class TestAdding:
     """Add: Follow a Website, Import a File, Import a Link."""
 
     def test_the_add_menu(self, window):
-        actions = window.add_button.menu().actions()
+        actions = window.add_button.menu().actions()[:3]
         assert [a.text() for a in actions] == ["Follow a Website…", "Import a File…",
                                                "Import a Link…"]
         assert all(a.isEnabled() for a in actions)
@@ -350,7 +350,8 @@ class TestAdding:
         controller = controller_for(tmp_path)
         controller.read_only = True
         win = ImportsWindow(controller)
-        assert not any(a.isEnabled() for a in win.add_button.menu().actions())
+        assert not any(a.isEnabled() for a in (win.act_follow, win.act_import_file,
+                                               win.act_import_link))
         win.follow_website()
         assert win.sheet() is None
         assert win.placeholder_button is None

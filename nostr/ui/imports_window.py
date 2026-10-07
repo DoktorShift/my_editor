@@ -53,6 +53,8 @@ person does to it.
 from __future__ import annotations
 
 import base64
+import logging
+import os
 import sys
 from functools import partial
 from typing import Callable, Dict, List, Optional
@@ -72,6 +74,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
     QCheckBox,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -91,6 +94,7 @@ from PySide6.QtWidgets import (
 )
 
 import alerts
+import atomic_file
 import url_safety
 from i18n import _, ngettext
 
@@ -167,6 +171,8 @@ QPushButton#imports_segment[edge="last"] {
 """
 
 # The lists of the sidebar: key, title, glyph.
+_log = logging.getLogger(__name__)
+
 LISTS = (
     (INBOX, _("Inbox"), "inbox"),
     (OLDER_POSTS, _("Older Posts"), "clock"),
@@ -305,8 +311,18 @@ class ImportsWindow(QMainWindow):
         self.act_import_link = QAction(_("Import a Link…"), self)
         self.act_import_link.setObjectName("imports_import_link")
         self.act_import_link.triggered.connect(self.import_link)
+        # Taking the sources elsewhere: after the ways to add, apart from
+        # them, as the spec's Add menu has it (C11).
+        self.act_export = QAction(_("Export Sources…"), self)
+        self.act_export.setObjectName("imports_export")
+        self.act_export.triggered.connect(self.export_sources)
         add_menu = QMenu(self)
-        for action in (self.act_follow, self.act_import_file, self.act_import_link):
+        add_menu.aboutToShow.connect(self._update_export)
+        for action in (self.act_follow, self.act_import_file, self.act_import_link, None,
+                       self.act_export):
+            if action is None:
+                add_menu.addSeparator()
+                continue
             action.setEnabled(not self._controller.read_only)
             add_menu.addAction(action)
         self.add_button = QToolButton()
@@ -1148,6 +1164,38 @@ class ImportsWindow(QMainWindow):
         self._open_sheet(sheet)
         if path:
             sheet.read(path)
+
+    def _update_export(self) -> None:
+        self.act_export.setEnabled(bool(self._controller.sources()))
+
+    def export_sources(self) -> None:
+        """Add > Export Sources...: every source in an OPML file, through
+        the system's save panel (a sheet of this window)."""
+        if not self._controller.sources():
+            return
+        dialog = QFileDialog(self, _("Export Sources"), _("Sources") + ".opml",
+                             _("Lists of sources (*.opml)"))
+        dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
+        dialog.setDefaultSuffix("opml")
+        dialog.fileSelected.connect(self.write_sources)
+        dialog.finished.connect(dialog.deleteLater)
+        self._export_dialog = dialog
+        dialog.open()
+
+    def write_sources(self, path: str) -> None:
+        """Write the sources to ``path``; a failure says why and what to do."""
+        if not path:
+            return
+        try:
+            atomic_file.save_text_document(path, self._controller.sources_as_opml(),
+                                           newline="\n")
+        except OSError as exc:
+            _log.warning("could not export the sources to %s: %s", path, exc)
+            alerts.inform(self, title=_("Couldn't save \u201c{name}\u201d").format(
+                              name=os.path.basename(path)),
+                          message=(exc.strerror or str(exc)) + "\n\n"
+                          + _("Choose another place and export again."),
+                          caution=True, is_dark=self._dark)
 
     def import_link(self) -> None:
         """Add > Import a Link..."""

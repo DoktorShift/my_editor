@@ -59,6 +59,7 @@ from .imports.checker import FeedChecker, checks_automatically
 from .imports.constants import IDENTIFIER_PREFIX
 from .imports.errors import SourceError, friendly_message
 from .imports.feed_list import source_key
+from .imports.sources.opml import OpmlFeed, write_opml
 from .imports.fetch import SourceFetcher
 from .imports.inbox_store import (
     DRAFTED,
@@ -396,6 +397,18 @@ class ImportsController(QObject):
         if source.site_url:
             return source.site_url
         return url_safety.origin_of(source.url) or source.url
+
+    def sources_as_opml(self) -> str:
+        """Every source as an OPML file (Export Sources): what other feed
+        readers import, and EINUNDZWANZIG STANDUP too. Sources that are
+        not feeds go along, so the file brings back the whole list."""
+        feeds = []
+        for source in self.sources():
+            site = self.website_of(source.key)
+            feeds.append(OpmlFeed(
+                xml_url=source.url, title=source.display_title,
+                html_url=site if url_safety.is_safe_external_url(site) else None))
+        return write_opml(feeds, title=_("MyEditor Sources"))
 
     def settings_of(self, key: str) -> Optional["SourceSettings"]:
         """What Source Settings shows for ``key``."""
