@@ -27,13 +27,14 @@ when another view is added (``add_view``), a segmented switch takes its
 place, and where the segments do not fit beside the refresh and close
 buttons it becomes a pop-up button naming the current view, as Apple's
 guidelines ask for tight spaces. Refresh reads the view shown again.
-Where even the pop-up button on a line of its own cannot name a view
-whole (German at 200 percent on the narrowest panel), the panel asks
-for the room, up to MAX_PANEL_WIDTH. Words are never cut to fit: the band
-first changes control, then moves the two buttons to a second line.
-Its narrowest width never depends on how long a label is, so wide
-Windows and Linux fonts, German words and text at 200 percent do not
-widen the panel.
+
+Words are never cut to fit: the band first changes control, then moves
+the two buttons to a second line. Up to the platform's own text size
+its narrowest width never depends on how long a label is, so wide
+Windows and Linux fonts and German words do not widen the panel. Only
+where even the pop-up button on a line of its own cannot name a view
+whole (German at 200 percent on the narrowest panel) does the panel ask
+for that room, up to MAX_PANEL_WIDTH.
 
 The Imports row (the owner's decision D-2: one place for imports, the
 Imports window) says how many new posts wait and opens the window; while

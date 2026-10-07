@@ -5537,14 +5537,15 @@ class MainWindow(QMainWindow):
         self._update_tab_title()
 
     def _edits_article(self, ed, identifier: str) -> bool:
-        """Whether a tab holds the article ``identifier``: opened from the
-        Published view, or a draft of it."""
-        article = getattr(ed, "_published_article", None)
-        if article is not None and article.identifier == identifier:
-            return True
+        """Whether a tab holds the article ``identifier``: a draft of it,
+        or, with no draft, opened from the Published view. A draft decides
+        when there is one (saved under another identifier, the tab is that
+        other article now), as it does for the tab's details and name."""
         binding = getattr(ed, "_draft_binding", None)
-        return (binding is not None and binding.inner_kind == INNER_KIND_LONG_FORM
-                and binding.identifier == identifier)
+        if binding is not None:
+            return binding.inner_kind == INNER_KIND_LONG_FORM and binding.identifier == identifier
+        article = getattr(ed, "_published_article", None)
+        return article is not None and article.identifier == identifier
 
     def _open_draft_relays(self) -> None:
         """Draft Relays…: where the account in use keeps its drafts, in a

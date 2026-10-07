@@ -10,8 +10,8 @@ in the status bar where drafts go now; Edit on an article opens it in a
 tab bound to it (its text, title, summary, cover, hashtags and the date
 it first went out, so publishing it again replaces it, and saving it as
 a draft offers the same article), once (a second Edit brings that tab
-forward), and the tab keeps that through a restart for an update; a
-note opens no tab; the view's status sentences reach the status bar; the
+forward, unless it was saved as a draft of another article since), and
+the tab keeps that through a restart for an update; a note opens no tab; the view's status sentences reach the status bar; the
 view follows the theme; every control of the panel has a name.
 
 The window is built in a child process with its own home folder
@@ -129,6 +129,12 @@ w.tabs.setCurrentIndex(0)
 view.open_requested.emit(item)
 app.processEvents()
 r["second_edit"] = [w.tabs.count() - tabs, w.tabs.currentIndex() == index]
+# Saved as a draft under another identifier, the tab is that other article.
+ed._draft_binding = main_window.DraftBinding(identifier="another-post", inner_kind=30023,
+                                             title="Another post")
+view.open_requested.emit(item)
+app.processEvents()
+r["after_saved_as_another"] = w.tabs.count() - tabs
 note = events.sign_event({"kind": 1, "created_at": 1_800_000_100, "content": "hi",
                           "tags": []}, sk)
 count = w.tabs.count()
@@ -169,6 +175,7 @@ def test_the_published_view_and_draft_relays_in_the_window(tmp_path):
     assert r["stash_defaults"] == ["My Post", "my-post", "In short"]
     assert r["kept_for_restart"]
     assert r["second_edit"] == [1, True]
+    assert r["after_saved_as_another"] == 2
     assert r["note_tabs"] == 0
     assert r["status_from_view"] == "Asked 3 relays to delete it."
     assert r["view_follows_theme"]
