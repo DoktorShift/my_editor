@@ -73,6 +73,15 @@ def test_a_draft_keeps_every_detail_and_only_pictures_still_in_it():
     assert tag_values(tags, "imeta") == [f"url {PICTURE}"]          # the removed one is gone
 
 
+def test_kept_as_tags_the_details_come_back_whole():
+    # A tab written down for a restart keeps them this way: every carried
+    # tag too, whether or not the text still shows its picture.
+    details = ArticleDetails.from_tags(IMPORTED_TAGS)
+    assert ArticleDetails.from_tags(details.tags()) == details
+    assert tag_values(details.tags(), "imeta") == [
+        f"url {PICTURE}", "url https://cdn.example/removed.png"]
+
+
 @pytest.mark.parametrize("tags", [None, [], [["d"]], [["published_at", "soon"]], [[1, 2]]])
 def test_tags_without_details_give_empty_details(tags):
     details = ArticleDetails.from_tags(tags)

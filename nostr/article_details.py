@@ -86,6 +86,15 @@ class ArticleDetails:
 
     def draft_tags(self, content: str) -> List[List[str]]:
         """The tags of an article draft's inner event with ``content``."""
+        return self._detail_tags() + self.carried_tags(content)
+
+    def tags(self) -> List[List[str]]:
+        """Every detail as a tag, the carried ones all as they are:
+        ``from_tags`` makes the same details of them again (for keeping
+        them somewhere, such as a tab written down for a restart)."""
+        return self._detail_tags() + [list(tag) for tag in self.carried]
+
+    def _detail_tags(self) -> List[List[str]]:
         tags: List[List[str]] = [["d", self.identifier]]
         if self.title.strip():
             tags.append(["title", self.title.strip()])
@@ -96,5 +105,4 @@ class ArticleDetails:
         if self.published_at:
             tags.append(["published_at", str(int(self.published_at))])
         tags.extend(["t", tag] for tag in self.hashtags)
-        tags.extend(self.carried_tags(content))
         return tags

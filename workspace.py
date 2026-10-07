@@ -58,6 +58,10 @@ class TabState:
     anchor: int = 0                     # the other end of a selection
     scroll: int = 0                     # vertical scroll bar value
     draft: Optional[dict] = None        # the tab's DraftBinding, as a dict
+    # A published article the tab edits (from the Published view): its
+    # details as tags (nostr.article_details), so publishing it again
+    # still replaces that article after the restart.
+    article: Optional[list] = None
 
 
 @dataclass(frozen=True)
@@ -153,6 +157,11 @@ def _parse_tab(raw) -> Optional[TabState]:
     if kind == PDF and not path:
         return None
     draft = raw.get("draft")
+    article = raw.get("article")
+    if not (isinstance(article, list) and all(
+            isinstance(tag, list) and all(isinstance(part, str) for part in tag)
+            for tag in article)):
+        article = None
     return TabState(
         kind=kind,
         path=path,
@@ -162,6 +171,7 @@ def _parse_tab(raw) -> Optional[TabState]:
         anchor=max(0, _int(raw.get("anchor"))),
         scroll=max(0, _int(raw.get("scroll"))),
         draft=draft if isinstance(draft, dict) else None,
+        article=article,
     )
 
 

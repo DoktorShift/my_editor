@@ -10,7 +10,8 @@ in the status bar where drafts go now; Edit on an article opens it in a
 tab bound to it (its text, title, summary, cover, hashtags and the date
 it first went out, so publishing it again replaces it, and saving it as
 a draft offers the same article), once (a second Edit brings that tab
-forward); a note opens no tab; the view's status sentences reach the status bar; the
+forward), and the tab keeps that through a restart for an update; a
+note opens no tab; the view's status sentences reach the status bar; the
 view follows the theme; every control of the panel has a name.
 
 The window is built in a child process with its own home folder
@@ -29,7 +30,9 @@ from PySide6.QtWidgets import QApplication
 from shiboken6 import isValid
 app = QApplication(sys.argv[:1])
 import main_window
+import workspace_restore
 from nostr import crypto, events
+from nostr.article_details import ArticleDetails
 from nostr.draft_relays import MoveOutcome, SaveOutcome
 from nostr.outbox.writer import WRITTEN, WriteOutcome
 from nostr.profiles import Profile
@@ -119,6 +122,8 @@ r["details"] = [details.identifier, details.title, details.summary, details.imag
                 list(details.hashtags), details.published_at]
 r["markdown"] = w._publish_text(ed, "markdown")
 r["stash_defaults"] = list(w._stash_defaults_for(ed, None)[:3])
+r["kept_for_restart"] = ArticleDetails.from_tags(
+    workspace_restore.capture_editor_tab(ed).article) == details
 index = w.tabs.currentIndex()
 w.tabs.setCurrentIndex(0)
 view.open_requested.emit(item)
@@ -162,6 +167,7 @@ def test_the_published_view_and_draft_relays_in_the_window(tmp_path):
                             ["nostr"], 1700000000]
     assert r["markdown"].startswith("# Hello") and "The body." in r["markdown"]
     assert r["stash_defaults"] == ["My Post", "my-post", "In short"]
+    assert r["kept_for_restart"]
     assert r["second_edit"] == [1, True]
     assert r["note_tabs"] == 0
     assert r["status_from_view"] == "Asked 3 relays to delete it."

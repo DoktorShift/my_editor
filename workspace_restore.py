@@ -30,6 +30,7 @@ from typing import Optional
 from PySide6.QtCore import QEvent, QObject, QTimer
 from PySide6.QtGui import QTextCursor
 
+from nostr.article_details import ArticleDetails
 from recovery import (
     classify_backup, document_is_empty, is_restorable, load_backup_content, read_backup,
 )
@@ -61,6 +62,7 @@ def capture_editor_tab(ed) -> Optional[TabState]:
             return None
     cursor = ed.textCursor()
     binding = getattr(ed, "_draft_binding", None)
+    article = getattr(ed, "_published_article", None)
     return TabState(
         kind=DOCUMENT,
         path=path,
@@ -70,6 +72,7 @@ def capture_editor_tab(ed) -> Optional[TabState]:
         anchor=cursor.anchor(),
         scroll=ed.verticalScrollBar().value(),
         draft=dataclasses.asdict(binding) if binding is not None else None,
+        article=article.tags() if article is not None else None,
     )
 
 
@@ -213,6 +216,8 @@ def resume_tab(window, tab: TabState, *, draft_type):
         ed._backup.take_over(record["_backup_file"])
     if tab.draft:
         ed._draft_binding = _dataclass_from(draft_type, tab.draft)
+    if tab.article:
+        ed._published_article = ArticleDetails.from_tags(tab.article)
     index = _tab_index(window, ed)
     if index >= 0:
         window.tabs.setTabText(index, window._compose_tab_title(ed))
