@@ -74,7 +74,10 @@ def test_misspelled_words_on_screen_are_underlined():
     ed.hide()
 
 
-def test_the_word_being_typed_waits_until_it_is_finished():
+def test_the_word_being_typed_waits_until_it_is_finished(monkeypatch):
+    # The pause that also finishes a word cannot run out while this test
+    # looks: no real short timer races the keys typed here.
+    monkeypatch.setattr(DocumentSpelling, "TYPING_PAUSE_SECONDS", 3600)
     ed, spelling, _checker = checked_editor()
     ed.setFocus()
     type_text(ed, "the wrod")
