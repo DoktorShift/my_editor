@@ -34,7 +34,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QObject, Signal  # noqa: E402
+from PySide6.QtCore import QObject, QTimer, Signal  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from nostr.publisher import (  # noqa: E402
@@ -68,6 +68,11 @@ def test_no_usable_time_is_none(event):
 
 
 def _asking(write=("wss://nos.lol",), read=("wss://read.example",)):
+    """The question, asked: the test answers for each relay by hand.
+
+    Its time never runs out on its own while a test answers (a pause in a
+    slow run, such as a garbage collection, must not end the question
+    first); a test of silence ends it with ``_time_runs_out``."""
     from nostr.outbox.policy import LookupState, RelayList
     from nostr.publisher import find_first_publication
     from tests.outbox_fakes import FakeRelayDirectory, HandPool, settle
@@ -77,9 +82,15 @@ def _asking(write=("wss://nos.lol",), read=("wss://read.example",)):
     found = []
     owner = QObject()
     find_first_publication(pool, directory, PK, "my-post", found.append, parent=owner,
-                           timeout_ms=50)
+                           timeout_ms=3_600_000)
     settle()
     return pool.subs[0], found, owner
+
+
+def _time_runs_out(owner):
+    """The relays still silent never answer: the question's time is up now."""
+    for timer in owner.findChildren(QTimer):
+        timer.timeout.emit()
 
 
 def test_the_version_on_the_relays_is_asked_for_by_its_identifier_everywhere_it_may_be():
@@ -96,19 +107,18 @@ def test_the_version_on_the_relays_is_asked_for_by_its_identifier_everywhere_it_
 
 
 def _outcome(write, answering, *, how="refuses"):
-    import time as clock
     from nostr.outbox.defaults import INDEXER_RELAYS
     from tests.outbox_fakes import settle
-    sub, found, _owner = _asking(write=write)
+    sub, found, owner = _asking(write=write)
     for url in sub.urls:
         if url in answering or (url in INDEXER_RELAYS and "indexer" in answering):
             sub.answer(url)                    # nothing stored
         elif how == "refuses":
             sub.refuse(url, "blocked: maintenance")
         # else: silent until the time is up
-    deadline = clock.monotonic() + 2
-    while not found and clock.monotonic() < deadline:
-        settle()
+    if how == "times out":
+        _time_runs_out(owner)
+    settle()
     return found
 
 
