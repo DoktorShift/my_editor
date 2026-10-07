@@ -4890,8 +4890,12 @@ class MainWindow(QMainWindow):
 
     def _open_imports_window(self) -> None:
         """Nostr > Imports: sources, their posts, and the open one. Without
-        an account, or when imports cannot be kept here, it says so."""
+        an account, or when imports cannot be kept here, it says so; after
+        such a problem it tries once more first, so whatever the message
+        asked to fix (a folder, a full disk, another program) counts."""
         imports = self._imports
+        if not imports.bound and imports.problem:
+            imports.retry()
         if imports.bound:
             imports.open_window()
         elif imports.problem:

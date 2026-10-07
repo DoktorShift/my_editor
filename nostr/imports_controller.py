@@ -39,7 +39,9 @@ be written to) leaves imports unbound with ``problem`` saying why.
 from __future__ import annotations
 
 import atexit
+import errno
 import logging
+import os
 import sqlite3
 import time
 import weakref
@@ -103,9 +105,24 @@ ACCOUNT_CHANGED = _("The account changed. Resume when you're signed in to that a
 QUIT_PAUSED = _("MyEditor was closed during the import. Resume it to go on.")
 ELSEWHERE = _("Imports are checked in another MyEditor window. This one only shows them.")
 ARTICLE_FAILED = _("Couldn't show this post.")
-CANNOT_KEEP = _("MyEditor can't keep imports on this computer: {reason}. Your sources are safe "
-                "on your relays; check that your user folder can be written to, then sign in "
-                "again.")
+# Why imports cannot be kept here, in plain words, each with what to do
+# (CP2 review N1: a damaged inbox was told to check that the user folder
+# can be written to). The error itself goes to the log.
+CANNOT_WRITE = _("MyEditor can't write to the folder where it keeps imports ({folder}). Check "
+                 "that you can write to it, then choose Nostr > Imports again. Your sources are "
+                 "safe on your relays.")
+DISK_FULL = _("The disk is full, so MyEditor can't keep imports on this computer. Free some "
+              "space, then choose Nostr > Imports again. Your sources are safe on your relays.")
+IN_USE = _("Another program is using the imports kept on this computer. Choose Nostr > Imports "
+           "again in a moment.")
+DAMAGED_ELSEWHERE = _("The file that keeps imports on this computer is damaged, and MyEditor is "
+                      "open a second time. Quit the other MyEditor, then choose Nostr > Imports "
+                      "again.")
+DAMAGED_HELD = _("The file that keeps imports on this computer is damaged, and another program "
+                 "is using it, so MyEditor can't set it aside. Quit programs that might use "
+                 "it, such as a backup or sync app, then choose Nostr > Imports again.")
+CANNOT_OPEN = _("MyEditor can't open the imports kept on this computer. Choose Nostr > Imports "
+                "again to try once more. Your sources are safe on your relays.")
 SET_ASIDE = _("The file that keeps imports on this computer was damaged, so MyEditor set it "
               "aside and started a new one. Your sources are kept; posts you had skipped show "
               "again.")
@@ -278,13 +295,20 @@ class ImportsController(QObject):
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
-            self._cannot_bind(exc)
+            self._cannot_bind(exc, path)
             return
         self._lock = QLockFile(str(path.with_suffix(".lock")))
         # Held for the whole session: stale only when its process is gone,
         # so a lock left by a crash is taken over at the next start.
         self._lock.setStaleLockTime(0)
         self.read_only = not self._lock.tryLock(0)
+        if self.read_only and self._lock.error() == QLockFile.LockError.PermissionError:
+            # Not another process: the lock file cannot be made at all.
+            self._lock = None
+            self.read_only = False
+            self._cannot_bind(PermissionError(errno.EACCES, "the lock file cannot be made",
+                                              str(path.with_suffix(".lock"))), path)
+            return
         if self.read_only:
             _log.info("imports inbox in use by another process; showing it read-only")
         else:
@@ -297,18 +321,25 @@ class ImportsController(QObject):
         try:
             self._bind_inbox(path)
         except (sqlite3.Error, OSError) as exc:
-            if not (_is_damage(exc) and not self.read_only):
-                self._give_up(exc)
+            if not _is_damage(exc):
+                self._give_up(exc, path)
+                return
+            if self.read_only:
+                # The other process's file is left alone.
+                self._give_up(exc, path, problem=DAMAGED_ELSEWHERE)
                 return
             # Damaged: set aside (never deleted) and start a new inbox, once.
-            # The other process's file (read only here) is left alone.
             self._drop_inbox()
             try:
                 self._set_aside(path, exc)
+            except OSError as held:
+                self._give_up(held, path, problem=DAMAGED_HELD)
+                return
+            try:
                 self.notice = SET_ASIDE
                 self._bind_inbox(path)
             except (sqlite3.Error, OSError) as again:
-                self._give_up(again)
+                self._give_up(again, path)
                 return
         self.bound_changed.emit(True)
         self._announce()
@@ -365,17 +396,26 @@ class ImportsController(QObject):
             if part.exists():
                 part.replace(Path(f"{aside}{suffix}"))
 
-    def _give_up(self, exc: BaseException) -> None:
+    def _give_up(self, exc: BaseException, path: Path, *, problem: str = "") -> None:
         self._drop_inbox()
         self._release_lock()
-        self._cannot_bind(exc)
+        self._cannot_bind(exc, path, problem=problem)
 
-    def _cannot_bind(self, exc: BaseException) -> None:
+    def _cannot_bind(self, exc: BaseException, path: Path, *, problem: str = "") -> None:
         _log.warning("imports cannot be kept on this computer: %s", exc)
         self.inbox = None
         self.read_only = False
-        self.problem = CANNOT_KEEP.format(reason=getattr(exc, "strerror", None) or str(exc))
+        self.notice = ""
+        self.problem = problem or plain_problem(exc, path.parent)
         self.bound_changed.emit(False)
+
+    def retry(self) -> bool:
+        """Try once more to open the inbox after it could not be opened
+        (Nostr > Imports, once the folder can be written to again or the
+        program holding the file has quit). True when it is open now."""
+        if self._profile is not None and self.inbox is None and self.problem:
+            self._bind()
+        return self.bound
 
     def _release_lock(self) -> None:
         if self._exit_hook is not None:
@@ -1225,6 +1265,22 @@ class SourceSettings:
     checking: bool          # automatic checks are on
     copy_images: bool       # defaults for new drafts (synced)
     full_text: bool
+
+
+def plain_problem(exc: BaseException, folder: Path) -> str:
+    """What to tell the person when the inbox cannot be opened: the cause
+    in plain words and what to do about it."""
+    name = getattr(exc, "sqlite_errorname", "") or ""
+    number = getattr(exc, "errno", None)
+    if name.startswith("SQLITE_FULL") or number in (errno.ENOSPC, getattr(errno, "EDQUOT", -1)):
+        return DISK_FULL
+    if (name.startswith(("SQLITE_READONLY", "SQLITE_CANTOPEN", "SQLITE_PERM"))
+            or isinstance(exc, PermissionError) or number in (errno.EACCES, errno.EPERM,
+                                                              errno.EROFS)):
+        return CANNOT_WRITE.format(folder=os.fspath(folder))
+    if name.startswith(("SQLITE_BUSY", "SQLITE_LOCKED")):
+        return IN_USE
+    return CANNOT_OPEN
 
 
 def _is_damage(exc: BaseException) -> bool:

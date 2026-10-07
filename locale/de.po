@@ -24,7 +24,7 @@ msgstr "Details ausblenden"
 #: alerts.py:275
 #: link_popover.py:99
 #: main_window.py:2751
-#: main_window.py:6295
+#: main_window.py:6299
 #: main_window.py:249
 #: main_window.py:2624
 #: main_window.py:4700
@@ -471,15 +471,15 @@ msgstr "Andere Apps haben diese Liste schon."
 msgid "Your current list couldn’t be read, so nothing was changed. Try again later."
 msgstr "Deine aktuelle Liste ließ sich nicht lesen, daher wurde nichts geändert. Versuch es später noch einmal."
 
-#: main_window.py:5446
+#: main_window.py:5450
 msgid "Upload this image to your Blossom servers?"
 msgstr "Dieses Bild auf deine Medienserver hochladen?"
 
-#: main_window.py:5580
+#: main_window.py:5584
 msgid "Retrying decryption - approve on your signer…"
 msgstr "Neuer Versuch zum Entschlüsseln. Bestätige ihn in deiner Signer-App …"
 
-#: main_window.py:5639
+#: main_window.py:5643
 #: main_window.py:1292
 #: nostr/ui/media_library_dialog.py:1237
 #: nostr/ui/media_library_dialog.py:1654
@@ -488,21 +488,21 @@ msgstr "Neuer Versuch zum Entschlüsseln. Bestätige ihn in deiner Signer-App �
 msgid "Delete"
 msgstr "Löschen"
 
-#: main_window.py:5647
+#: main_window.py:5651
 msgid "A blank-content replacement will be published to your relays. Other clients (and your other devices) will treat the draft as removed. This action can't be undone."
 msgid_plural "A blank-content replacement will be published to your relays. Other clients (and your other devices) will treat them as removed. This action can't be undone."
 msgstr[0] "Auf deinen Relays wird ein leerer Ersatz veröffentlicht. Andere Apps (und deine anderen Geräte) behandeln den Entwurf dann als gelöscht. Das lässt sich nicht rückgängig machen."
 msgstr[1] "Auf deinen Relays wird ein leerer Ersatz veröffentlicht. Andere Apps (und deine anderen Geräte) behandeln die Entwürfe dann als gelöscht. Das lässt sich nicht rückgängig machen."
 
-#: main_window.py:5775
+#: main_window.py:5779
 msgid "No drafts were deleted"
 msgstr "Es wurden keine Entwürfe gelöscht"
 
-#: main_window.py:6220
+#: main_window.py:6224
 msgid "Already saving this draft - wait for it to finish."
 msgstr "Dieser Entwurf wird schon gespeichert. Warte, bis das fertig ist."
 
-#: main_window.py:6283
+#: main_window.py:6287
 msgid "(unknown profile)"
 msgstr "(unbekanntes Profil)"
 
@@ -956,27 +956,27 @@ msgstr "Profil gespeichert."
 msgid "Tell Other Apps Where Your Media Is?"
 msgstr "Anderen Apps sagen, wo deine Medien liegen?"
 
-#: main_window.py:5327
+#: main_window.py:5331
 msgid "That link cannot be inserted."
 msgstr "Dieser Link kann nicht eingefügt werden."
 
-#: main_window.py:5413
+#: main_window.py:5417
 msgid "That image could not be added."
 msgstr "Dieses Bild konnte nicht hinzugefügt werden."
 
-#: main_window.py:5450
+#: main_window.py:5454
 msgid "Anyone with the link can view it. The image is already in your document and stays there either way."
 msgstr "Jeder mit dem Link kann es ansehen. Das Bild ist bereits in deinem Dokument und bleibt dort in jedem Fall."
 
-#: main_window.py:5453
+#: main_window.py:5457
 msgid "Remember this choice"
 msgstr "Diese Auswahl merken"
 
-#: main_window.py:5516
+#: main_window.py:5520
 msgid "Draft isn't ready to open yet - still decrypting."
 msgstr "Der Entwurf lässt sich noch nicht öffnen: Er wird noch entschlüsselt."
 
-#: main_window.py:5622
+#: main_window.py:5626
 msgid ""
 "They use a draft format this editor doesn't recognise, so removing them from here might leave them visible in the other client.\n"
 "\n"
@@ -986,27 +986,27 @@ msgstr ""
 "\n"
 "Um sie sauber zu entfernen, öffne sie in der App, mit der sie erstellt wurden, und lösche sie dort."
 
-#: main_window.py:5638
+#: main_window.py:5642
 msgid "Delete “this draft” from your Nostr drafts?"
 msgstr "Diesen Entwurf aus deinen Nostr-Entwürfen löschen?"
 
-#: main_window.py:5715
+#: main_window.py:5719
 msgid "Deleting drafts…"
 msgstr "Entwürfe werden gelöscht …"
 
-#: main_window.py:5715
+#: main_window.py:5719
 msgid "Stop"
 msgstr "Stoppen"
 
-#: main_window.py:5716
+#: main_window.py:5720
 msgid "Deleting drafts"
 msgstr "Entwürfe werden gelöscht"
 
-#: main_window.py:5798
+#: main_window.py:5802
 msgid "Your signer is not responding. Open your signer app and make sure it is running."
 msgstr "Dein Signer antwortet nicht. Öffne deine Signer-App und prüfe, ob sie läuft."
 
-#: main_window.py:6301
+#: main_window.py:6305
 msgid "Saving under the current profile would create a separate draft. How would you like to handle it?"
 msgstr "Wenn du unter dem aktuellen Profil speicherst, entsteht ein eigener Entwurf. Wie möchtest du vorgehen?"
 
@@ -1203,96 +1203,96 @@ msgstr "Es gibt keinen Medienserver zum Teilen."
 msgid "The list wasn’t shared. Try again in a moment."
 msgstr "Die Liste wurde nicht geteilt. Versuch es gleich noch einmal."
 
-#: main_window.py:4965
+#: main_window.py:4969
 #, python-brace-format
 msgid "Connected as {name}"
 msgstr "Verbunden als {name}"
 
-#: main_window.py:5111
-#: main_window.py:5154
+#: main_window.py:5115
+#: main_window.py:5158
 msgid "Nothing to publish"
 msgstr "Nichts zu veröffentlichen"
 
-#: main_window.py:5112
-#: main_window.py:5155
+#: main_window.py:5116
+#: main_window.py:5159
 msgid "The current document is empty."
 msgstr "Das aktuelle Dokument ist leer."
 
-#: main_window.py:5136
+#: main_window.py:5140
 #, python-brace-format
 msgid "Published to Nostr: {accepted}/{total} relays · {id}…"
 msgstr "Auf Nostr veröffentlicht: {accepted}/{total} Relays · {id}…"
 
-#: main_window.py:5139
+#: main_window.py:5143
 #, python-brace-format
 msgid "Published to Nostr: {accepted}/{total} relays"
 msgstr "Auf Nostr veröffentlicht: {accepted}/{total} Relays"
 
-#: main_window.py:5209
+#: main_window.py:5213
 #, python-brace-format
 msgid "Published article to Nostr: {accepted}/{total} relays · {id}…"
 msgstr "Artikel auf Nostr veröffentlicht: {accepted}/{total} Relays · {id}…"
 
-#: main_window.py:5212
+#: main_window.py:5216
 #, python-brace-format
 msgid "Published article to Nostr: {accepted}/{total} relays"
 msgstr "Artikel auf Nostr veröffentlicht: {accepted}/{total} Relays"
 
-#: main_window.py:5332
+#: main_window.py:5336
 #, python-brace-format
 msgid "Inserted URL only (non-image): {url}"
 msgstr "Nur die Adresse eingefügt (kein Bild): {url}"
 
-#: main_window.py:5361
+#: main_window.py:5365
 #, python-brace-format
 msgid "Inserted image · alt: {alt}"
 msgstr "Bild eingefügt · Bildbeschreibung: {alt}"
 
-#: main_window.py:5420
+#: main_window.py:5424
 msgid "Image added. Connect a signer to upload it."
 msgstr "Bild hinzugefügt. Verbinde einen Signer, um es hochzuladen."
 
-#: main_window.py:5444
+#: main_window.py:5448
 #, python-brace-format
 msgid "Upload this image to {hosts}?"
 msgstr "Dieses Bild auf {hosts} hochladen?"
 
-#: main_window.py:5641
+#: main_window.py:5645
 #, python-brace-format
 msgid "Delete {count} draft from your Nostr drafts?"
 msgid_plural "Delete {count} drafts from your Nostr drafts?"
 msgstr[0] "{count} Entwurf aus deinen Nostr-Entwürfen löschen?"
 msgstr[1] "{count} Entwürfe aus deinen Nostr-Entwürfen löschen?"
 
-#: main_window.py:5644
+#: main_window.py:5648
 #, python-brace-format
 msgid "Delete {count} Draft"
 msgid_plural "Delete {count} Drafts"
 msgstr[0] "{count} Entwurf löschen"
 msgstr[1] "{count} Entwürfe löschen"
 
-#: main_window.py:5670
+#: main_window.py:5674
 msgid "An imported draft takes a second request, which tells other apps it is gone."
 msgid_plural "Imported drafts take a second request each, which tells other apps they are gone."
 msgstr[0] "Ein importierter Entwurf braucht eine zweite Anfrage, die anderen Apps sagt, dass er gelöscht ist."
 msgstr[1] "Importierte Entwürfe brauchen je eine zweite Anfrage, die anderen Apps sagt, dass sie gelöscht sind."
 
-#: main_window.py:5771
+#: main_window.py:5775
 #, python-brace-format
 msgid "{deleted} of {total} draft deleted"
 msgid_plural "{deleted} of {total} drafts deleted"
 msgstr[0] "{deleted} von {total} Entwurf gelöscht"
 msgstr[1] "{deleted} von {total} Entwürfen gelöscht"
 
-#: main_window.py:6010
+#: main_window.py:6014
 msgid "Nothing to save as a draft"
 msgstr "Nichts als Entwurf zu speichern"
 
-#: main_window.py:6011
+#: main_window.py:6015
 msgid "The current document is empty. Add some content first."
 msgstr "Das aktuelle Dokument ist leer. Füge zuerst Inhalt hinzu."
 
-#: main_window.py:6023
+#: main_window.py:6027
 msgid "This draft is too large"
 msgstr "Dieser Entwurf ist zu groß"
 
@@ -1415,12 +1415,12 @@ msgstr[0] "{count} Bild auf deine Medienserver hochladen?"
 msgstr[1] "{count} Bilder auf deine Medienserver hochladen?"
 
 #: main_window.py:2386
-#: main_window.py:5452
+#: main_window.py:5456
 msgid "Keep Local"
 msgstr "Lokal behalten"
 
 #: main_window.py:2386
-#: main_window.py:5452
+#: main_window.py:5456
 #: nostr/ui/media_library_dialog.py:1036
 msgid "Upload"
 msgstr "Hochladen"
@@ -1571,86 +1571,86 @@ msgstr "Andere Nostr-Apps suchen deine Bilder dann auf {hosts}, in dieser Reihen
 msgid "Share List"
 msgstr "Liste teilen"
 
-#: main_window.py:4898
+#: main_window.py:4902
 msgid "Imports aren't available"
 msgstr "Importe sind nicht verfügbar"
 
-#: main_window.py:4902
+#: main_window.py:4906
 msgid "Imports need a Nostr account"
 msgstr "Importe brauchen ein Nostr-Konto"
 
-#: main_window.py:4903
+#: main_window.py:4907
 msgid "Imported posts become drafts in your Nostr account."
 msgstr "Importierte Beiträge werden zu Entwürfen in deinem Nostr-Konto."
 
-#: main_window.py:5389
+#: main_window.py:5393
 #, python-brace-format
 msgid "{count} image is waiting."
 msgid_plural "{count} images are waiting."
 msgstr[0] "{count} Bild wartet."
 msgstr[1] "{count} Bilder warten."
 
-#: main_window.py:5505
+#: main_window.py:5509
 #, python-brace-format
 msgid "Copied event id {id}…"
 msgstr "Kennung {id}… kopiert"
 
-#: main_window.py:5619
+#: main_window.py:5623
 msgid "This draft was created by another Nostr client"
 msgid_plural "These {count} drafts were created by other Nostr clients"
 msgstr[0] "Dieser Entwurf wurde mit einer anderen Nostr-App erstellt"
 msgstr[1] "Diese {count} Entwürfe wurden mit anderen Nostr-Apps erstellt"
 
-#: main_window.py:5635
+#: main_window.py:5639
 #, python-brace-format
 msgid "Delete “{name}” from your Nostr drafts?"
 msgstr "„{name}“ aus deinen Nostr-Entwürfen löschen?"
 
-#: main_window.py:5663
+#: main_window.py:5667
 #, python-brace-format
 msgid "Your signer will ask you to approve each one, so expect {count} request. You can stop partway through."
 msgid_plural "Your signer will ask you to approve each one, so expect {count} requests. You can stop partway through."
 msgstr[0] "Deine Signer-App fragt bei jedem einzeln nach, rechne also mit {count} Anfrage. Du kannst zwischendurch aufhören."
 msgstr[1] "Deine Signer-App fragt bei jedem einzeln nach, rechne also mit {count} Anfragen. Du kannst zwischendurch aufhören."
 
-#: main_window.py:5677
+#: main_window.py:5681
 #, python-brace-format
 msgid "{count} draft from another Nostr client is not included, and will be left alone."
 msgid_plural "{count} drafts from another Nostr client are not included, and will be left alone."
 msgstr[0] "{count} Entwurf aus einer anderen Nostr-App ist nicht dabei und bleibt unverändert."
 msgstr[1] "{count} Entwürfe aus einer anderen Nostr-App sind nicht dabei und bleiben unverändert."
 
-#: main_window.py:5703
+#: main_window.py:5707
 msgid "Couldn't start the deletion"
 msgstr "Das Löschen konnte nicht gestartet werden"
 
-#: main_window.py:5762
+#: main_window.py:5766
 msgid "Draft deleted."
 msgid_plural "{count} drafts deleted."
 msgstr[0] "Entwurf gelöscht."
 msgstr[1] "{count} Entwürfe gelöscht."
 
-#: main_window.py:5779
+#: main_window.py:5783
 #, python-brace-format
 msgid "{count} could not be removed and is still on your relays. You can try again."
 msgid_plural "{count} could not be removed and are still on your relays. You can try again."
 msgstr[0] "{count} konnte nicht entfernt werden und ist noch auf deinen Relays. Du kannst es erneut versuchen."
 msgstr[1] "{count} konnten nicht entfernt werden und sind noch auf deinen Relays. Du kannst es erneut versuchen."
 
-#: main_window.py:6019
-#: main_window.py:6150
+#: main_window.py:6023
+#: main_window.py:6154
 msgid "Couldn't prepare the draft"
 msgstr "Der Entwurf konnte nicht vorbereitet werden"
 
-#: main_window.py:6020
+#: main_window.py:6024
 msgid "Its contents could not be prepared for encryption."
 msgstr "Sein Inhalt konnte nicht für die Verschlüsselung vorbereitet werden."
 
-#: main_window.py:6047
+#: main_window.py:6051
 msgid "Couldn't save the draft"
 msgstr "Der Entwurf konnte nicht gespeichert werden"
 
-#: main_window.py:6298
+#: main_window.py:6302
 #, python-brace-format
 msgid "This draft was last saved as {original}, but you're signed in as {active}"
 msgstr "Dieser Entwurf wurde zuletzt als {original} gespeichert, aber du bist als {active} angemeldet"
@@ -1678,36 +1678,36 @@ msgstr "„{name}“ gibt es bereits"
 msgid "Couldn't open “{name}”"
 msgstr "„{name}“ konnte nicht geöffnet werden"
 
-#: main_window.py:5686
+#: main_window.py:5690
 msgid "Not included:"
 msgstr "Nicht dabei:"
 
-#: main_window.py:5726
+#: main_window.py:5730
 #, python-brace-format
 msgid "Deleting draft {current} of {total}…"
 msgstr "Entwurf {current} von {total} wird gelöscht …"
 
-#: main_window.py:5858
+#: main_window.py:5862
 #: main_window.py:2788
 msgid "That profile isn't connected anymore"
 msgstr "Dieses Profil ist nicht mehr verbunden"
 
-#: main_window.py:5859
+#: main_window.py:5863
 #: main_window.py:2789
 msgid "Pair it again from Nostr > Connect Signer to save here."
 msgstr "Verbinde es erneut unter Nostr > Signer verbinden, um hier zu speichern."
 
-#: main_window.py:6024
+#: main_window.py:6028
 #, python-brace-format
 msgid "It has {size} bytes, and NIP-44 encryption allows {limit}. Split it into smaller drafts or publish it directly."
 msgstr "Er hat {size} Bytes, die Verschlüsselung erlaubt höchstens {limit}. Teile ihn in kleinere Entwürfe auf oder veröffentliche ihn direkt."
 
-#: main_window.py:6290
+#: main_window.py:6294
 #, python-brace-format
 msgid "Switch to {name} and Save"
 msgstr "Zu {name} wechseln und speichern"
 
-#: main_window.py:6293
+#: main_window.py:6297
 #, python-brace-format
 msgid "Save a Copy as {name}"
 msgstr "Kopie als {name} speichern"
@@ -1734,7 +1734,7 @@ msgstr "„{name}“ konnte nicht neu geladen werden"
 msgid "{error} Check that it's turned on and connected, then try again."
 msgstr "{error} Prüfe, ob der Drucker eingeschaltet und verbunden ist, und versuche es dann erneut."
 
-#: main_window.py:5704
+#: main_window.py:5708
 #, python-brace-format
 msgid ""
 "These drafts can't be removed from here.\n"
@@ -3223,48 +3223,68 @@ msgstr "Ein lesbarer, verifizierter Nostr-Name wie du@{domain}, den andere erken
 msgid "{total} in total, up to {per_file} per file."
 msgstr "{total} Speicher, höchstens {per_file} pro Datei."
 
-#: nostr/imports_controller.py:101
+#: nostr/imports_controller.py:103
 msgid "The account changed. Resume when you're signed in to that account again."
 msgstr "Das Konto wurde gewechselt. Setze den Import fort, wenn du wieder mit diesem Konto angemeldet bist."
 
-#: nostr/imports_controller.py:103
+#: nostr/imports_controller.py:105
 msgid "MyEditor was closed during the import. Resume it to go on."
 msgstr "MyEditor wurde während des Imports geschlossen. Setze ihn fort, um weiterzumachen."
 
-#: nostr/imports_controller.py:104
+#: nostr/imports_controller.py:106
 msgid "Imports are checked in another MyEditor window. This one only shows them."
 msgstr "Importe werden in einem anderen MyEditor-Fenster geprüft. Dieses zeigt sie nur an."
 
-#: nostr/imports_controller.py:105
+#: nostr/imports_controller.py:107
 msgid "Couldn't show this post."
 msgstr "Dieser Beitrag konnte nicht angezeigt werden."
 
-#: nostr/imports_controller.py:106
+#: nostr/imports_controller.py:111
 #, python-brace-format
-msgid "MyEditor can't keep imports on this computer: {reason}. Your sources are safe on your relays; check that your user folder can be written to, then sign in again."
-msgstr "MyEditor kann Importe auf diesem Computer nicht speichern: {reason}. Deine Quellen sind auf deinen Relays sicher. Prüfe, ob in deinen Benutzerordner geschrieben werden kann, und melde dich dann erneut an."
+msgid "MyEditor can't write to the folder where it keeps imports ({folder}). Check that you can write to it, then choose Nostr > Imports again. Your sources are safe on your relays."
+msgstr "MyEditor kann nicht in den Ordner schreiben, in dem es Importe speichert ({folder}). Prüfe, ob du dort schreiben darfst, und wähle dann erneut Nostr > Importe. Deine Quellen sind auf deinen Relays sicher."
 
-#: nostr/imports_controller.py:109
+#: nostr/imports_controller.py:114
+msgid "The disk is full, so MyEditor can't keep imports on this computer. Free some space, then choose Nostr > Imports again. Your sources are safe on your relays."
+msgstr "Der Speicher ist voll, darum kann MyEditor Importe auf diesem Computer nicht speichern. Gib etwas Platz frei und wähle dann erneut Nostr > Importe. Deine Quellen sind auf deinen Relays sicher."
+
+#: nostr/imports_controller.py:116
+msgid "Another program is using the imports kept on this computer. Choose Nostr > Imports again in a moment."
+msgstr "Ein anderes Programm verwendet gerade die Importe auf diesem Computer. Wähle gleich noch einmal Nostr > Importe."
+
+#: nostr/imports_controller.py:118
+msgid "The file that keeps imports on this computer is damaged, and MyEditor is open a second time. Quit the other MyEditor, then choose Nostr > Imports again."
+msgstr "Die Datei, in der MyEditor Importe auf diesem Computer speichert, ist beschädigt, und MyEditor ist ein zweites Mal geöffnet. Beende das andere MyEditor und wähle dann erneut Nostr > Importe."
+
+#: nostr/imports_controller.py:121
+msgid "The file that keeps imports on this computer is damaged, and another program is using it, so MyEditor can't set it aside. Quit programs that might use it, such as a backup or sync app, then choose Nostr > Imports again."
+msgstr "Die Datei, in der MyEditor Importe auf diesem Computer speichert, ist beschädigt, und ein anderes Programm verwendet sie, darum kann MyEditor sie nicht beiseitelegen. Beende Programme, die sie verwenden könnten, etwa eine Backup- oder Sync-App, und wähle dann erneut Nostr > Importe."
+
+#: nostr/imports_controller.py:124
+msgid "MyEditor can't open the imports kept on this computer. Choose Nostr > Imports again to try once more. Your sources are safe on your relays."
+msgstr "MyEditor kann die Importe auf diesem Computer nicht öffnen. Wähle erneut Nostr > Importe, um es noch einmal zu versuchen. Deine Quellen sind auf deinen Relays sicher."
+
+#: nostr/imports_controller.py:126
 msgid "The file that keeps imports on this computer was damaged, so MyEditor set it aside and started a new one. Your sources are kept; posts you had skipped show again."
 msgstr "Die Datei, in der MyEditor Importe auf diesem Computer speichert, war beschädigt. MyEditor hat sie beiseitegelegt und eine neue angelegt. Deine Quellen bleiben erhalten; übersprungene Beiträge erscheinen wieder."
 
-#: nostr/imports_controller.py:112
+#: nostr/imports_controller.py:129
 msgid "No sources were found in that list. Is it a subscription export from a feed reader?"
 msgstr "In dieser Liste wurden keine Quellen gefunden. Ist es ein Abo-Export aus einem Feedreader?"
 
-#: nostr/imports_controller.py:114
+#: nostr/imports_controller.py:131
 msgid "Nothing to import was found at that address."
 msgstr "Unter dieser Adresse wurde nichts zum Importieren gefunden."
 
-#: nostr/imports_controller.py:115
+#: nostr/imports_controller.py:132
 msgid "This post is longer than MyEditor keeps here. Open Original reads all of it, and a draft made of it gets the whole post from its page."
 msgstr "Dieser Beitrag ist länger, als MyEditor hier aufbewahrt. „Original öffnen“ zeigt ihn ganz, und ein Entwurf daraus holt den ganzen Beitrag von seiner Seite."
 
-#: nostr/imports_controller.py:117
+#: nostr/imports_controller.py:134
 msgid "Couldn't read the images of these posts."
 msgstr "Die Bilder dieser Beiträge konnten nicht gelesen werden."
 
-#: nostr/imports_controller.py:465
+#: nostr/imports_controller.py:505
 msgid "MyEditor Sources"
 msgstr "MyEditor-Quellen"
 

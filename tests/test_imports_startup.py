@@ -18,7 +18,16 @@ import pytest
 
 from main_window import MainWindow
 from nostr.imports.inbox_store import database_path
-from nostr.imports_controller import SET_ASIDE
+from nostr.imports_controller import (
+    CANNOT_OPEN,
+    CANNOT_WRITE,
+    DAMAGED_ELSEWHERE,
+    DAMAGED_HELD,
+    DISK_FULL,
+    IN_USE,
+    SET_ASIDE,
+    plain_problem,
+)
 from nostr.ui.imports_window import ImportsWindow
 from tests.outbox_fakes import settle
 from tests.test_imports_controller import PK, Harness, profile
@@ -90,10 +99,21 @@ def test_a_folder_that_cannot_be_written_leaves_imports_unbound(harness, tmp_pat
         settle()
         controller = harness.controller
         assert not controller.bound
-        assert controller.problem.startswith("MyEditor can't keep imports on this computer")
+        assert controller.problem == CANNOT_WRITE.format(folder=str(folder))
         assert changes == [False]
         assert harness.checkers == []
-        # Leaving the account forgets the problem with it.
+        # Choosing Imports again tries again: once the folder can be
+        # written to, the inbox opens.
+        assert controller.retry() is False
+        folder.chmod(0o700)
+        assert controller.retry() is True
+        assert controller.bound and controller.problem == ""
+        assert changes == [False, False, True]
+        # Leaving the account forgets a problem with it.
+        controller.account_changed(None)
+        folder.chmod(0o500)
+        controller.account_changed(profile())
+        assert controller.problem == CANNOT_WRITE.format(folder=str(folder))
         controller.account_changed(None)
         assert controller.problem == ""
     finally:
@@ -111,10 +131,68 @@ def test_a_damaged_inbox_another_process_holds_is_left_alone(harness, tmp_path):
         harness.controller.account_changed(profile())
         settle()
         assert not harness.controller.bound
-        assert harness.controller.problem
+        assert harness.controller.problem == DAMAGED_ELSEWHERE
         assert path.read_bytes().startswith(b"garbage")
     finally:
         other.unlock()
+    # The other MyEditor has quit: choosing Imports again sets it aside.
+    assert harness.controller.retry() is True
+    assert harness.controller.notice == SET_ASIDE
+
+
+def test_a_damaged_inbox_another_program_holds_is_said_so(harness, tmp_path, monkeypatch):
+    """Windows refuses to rename a file another program has open (a
+    backup or sync app): it is left as it is, and the message says why."""
+    import pathlib
+    path = database_path(tmp_path, PK)
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"garbage" * 200)
+    real_replace = pathlib.Path.replace
+
+    def held(source, target):
+        if pathlib.Path(source) == path:
+            raise PermissionError(13, "The process cannot access the file because it is "
+                                      "being used by another process", str(source))
+        return real_replace(source, target)
+    monkeypatch.setattr(pathlib.Path, "replace", held)
+    harness.controller.account_changed(profile())
+    settle()
+    assert not harness.controller.bound
+    assert harness.controller.problem == DAMAGED_HELD
+    assert path.read_bytes().startswith(b"garbage")
+    monkeypatch.setattr(pathlib.Path, "replace", real_replace)    # the program quit
+    assert harness.controller.retry() is True
+    assert harness.controller.notice == SET_ASIDE
+
+
+class TestThePlainWords:
+    """Each cause says what to do, never the error's own words (N1)."""
+
+    def sqlite_error(self, name, text="x"):
+        import sqlite3
+        exc = sqlite3.OperationalError(text)
+        exc.sqlite_errorname = name
+        return exc
+
+    def test_the_causes(self, tmp_path):
+        import errno
+        folder = tmp_path / "imports"
+        writable = CANNOT_WRITE.format(folder=str(folder))
+        assert plain_problem(PermissionError(errno.EACCES, "denied"), folder) == writable
+        assert plain_problem(OSError(errno.EROFS, "read-only"), folder) == writable
+        assert plain_problem(self.sqlite_error("SQLITE_READONLY"), folder) == writable
+        assert plain_problem(self.sqlite_error("SQLITE_CANTOPEN"), folder) == writable
+        assert plain_problem(OSError(errno.ENOSPC, "full"), folder) == DISK_FULL
+        assert plain_problem(self.sqlite_error("SQLITE_FULL"), folder) == DISK_FULL
+        assert plain_problem(self.sqlite_error("SQLITE_BUSY"), folder) == IN_USE
+        assert plain_problem(self.sqlite_error("SQLITE_IOERR"), folder) == CANNOT_OPEN
+        assert plain_problem(RuntimeError("?"), folder) == CANNOT_OPEN
+
+    def test_none_says_the_error_or_sign_in(self):
+        for text in (CANNOT_WRITE, DISK_FULL, IN_USE, DAMAGED_ELSEWHERE, DAMAGED_HELD,
+                     CANNOT_OPEN):
+            assert "Nostr > Imports" in text
+            assert "sign in" not in text and "{reason}" not in text
 
 
 class TestTheCommand:
@@ -160,11 +238,25 @@ class TestTheCommand:
         assert ran == ([answer] if answer else [])
 
     def test_a_problem_is_said(self, monkeypatch):
-        imports = SimpleNamespace(bound=False, problem="It cannot be kept.", open_window=None)
+        tried = []
+        imports = SimpleNamespace(bound=False, problem="It cannot be kept.", open_window=None,
+                                  retry=lambda: tried.append(1) or False)
         (told,), asked, _ran = self.run(imports, monkeypatch)
-        assert asked == []
+        assert asked == [] and tried == [1]
         assert (told["title"], told["message"]) == ("Imports aren't available",
                                                     "It cannot be kept.")
+
+    def test_after_a_problem_it_tries_again_first(self, monkeypatch):
+        opened = []
+        imports = SimpleNamespace(bound=False, problem="It cannot be kept.",
+                                  open_window=lambda: opened.append(1))
+
+        def retry():
+            imports.bound, imports.problem = True, ""
+            return True
+        imports.retry = retry
+        assert self.run(imports, monkeypatch) == ([], [], [])
+        assert opened == [1]
 
 
 def test_the_other_nostr_commands_offer_an_account_the_same_way(monkeypatch):
