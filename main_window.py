@@ -1555,13 +1555,16 @@ class MainWindow(QMainWindow):
         self._view_group = QActionGroup(self)
         self.act_view_write = add(Command("view.write", _("Write"), VIEW, checkable=True,
                                           keywords=(_("editor"), _("text"))),
-                                  triggered=lambda: self._choose_view(WRITE))
+                                  triggered=lambda: self._choose_view(WRITE),
+                                  checked=self.view_mode == WRITE)
         self.act_view_preview = add(Command("view.preview", _("Preview"), VIEW, checkable=True,
                                             keywords=(_("reading"), _("read"))),
-                                    triggered=lambda: self._choose_view(PREVIEW))
+                                    triggered=lambda: self._choose_view(PREVIEW),
+                                    checked=self.view_mode == PREVIEW)
         self.act_view_split = add(Command("view.split", _("Split"), VIEW, checkable=True,
                                           keywords=(_("side by side"),)),
-                                  triggered=lambda: self._choose_view(SPLIT))
+                                  triggered=lambda: self._choose_view(SPLIT),
+                                  checked=self.view_mode == SPLIT)
         for action in (self.act_view_write, self.act_view_preview, self.act_view_split):
             self._view_group.addAction(action)
         # Writing in the monospace font, for those who prefer it (Q-K).
@@ -1911,6 +1914,8 @@ class MainWindow(QMainWindow):
             (self.act_view_write, self.act_view_preview, self.act_view_split),
             dark=self.is_dark_theme)
         self._view_switch_action = self.format_toolbar.add_trailing(self.view_switch)
+        # Tabs made before the switch existed show their view now.
+        QTimer.singleShot(0, lambda: self._apply_view(self.current_editor()))
         v.addWidget(self.format_toolbar, 0)
         v.addWidget(self.findbar, 0)
         v.addWidget(self.update_bar, 0)

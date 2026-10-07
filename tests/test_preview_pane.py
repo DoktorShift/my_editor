@@ -127,6 +127,8 @@ from tests.accessibility import unnamed_controls
 w = main_window.MainWindow()
 w.resize(1500, 800)
 w.show()
+app.processEvents()
+at_start = [a.isChecked() for a in (w.act_view_write, w.act_view_preview, w.act_view_split)]
 ed = w.new_tab()
 ed.setFocus()
 ed.insertPlainText("Hello world, a first line")
@@ -148,7 +150,7 @@ def state():
             "split_enabled": w.act_view_split.isEnabled()}
 
 
-r = {"start": state(), "switch_shown": w.view_switch.isVisible()}
+r = {"start": state(), "switch_shown": w.view_switch.isVisible(), "at_start": at_start}
 w.act_view_preview.trigger()
 app.processEvents()
 r["preview"] = state()
@@ -205,6 +207,7 @@ def test_write_preview_and_split_in_the_window(tmp_path):
     assert r["start"] == {"text": True, "preview": False, "checked": [True, False, False],
                           "split_enabled": True}
     assert r["switch_shown"]
+    assert r["at_start"] == [True, False, False]          # before any tab was switched
     assert r["preview"]["text"] is False and r["preview"]["preview"] is True
     assert r["preview"]["checked"] == [False, True, False]
     assert r["preview_words"]
