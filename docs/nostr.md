@@ -89,13 +89,13 @@ The publisher uses eager-first-accept semantics: as soon as one relay acknowledg
 
 ### What you published, and taking it back
 
-The Drafts panel has a second view, **Published**, beside **Drafts**. It lists the notes and articles the account in use has published, newest first by the day each one first went out. An article shows its title, a note its first line, and each row says Article or Note and the date. Editing an article later keeps its first date. Notes come fifty at a time, and **Load More Notes** at the end of the list brings older ones. Articles are read in one go, up to the newest 500; a relay may send fewer by its own rule (strfry sends at most 500), so an account with more articles than that sees its newest ones.
+The Drafts panel has a second view, **Published**, beside **Drafts**: the switch at the top of the panel moves between them (where the panel is narrow, or the text large, it is a pop-up button naming the view shown). Published lists the notes and articles the account in use has published, newest first by the day each one first went out. An article shows its title, a note its first line, and each row says Article or Note and the date. Editing an article later keeps its first date. Notes come fifty at a time, and **Load More Notes** at the end of the list brings older ones. Articles are read in one go, up to the newest 500; a relay may send fewer by its own rule (strfry sends at most 500), so an account with more articles than that sees its newest ones.
 
-The list is read from the relays you publish to. Anything you asked to delete is left out, also when one relay still has a copy and another one has your request. When no relay answers, the view says so and offers **Try Again**; it never looks empty just because nobody answered.
+The list is read from the relays you publish to. Anything you asked to delete is left out, also when one relay still has a copy and another one has your request. The list is read when you first show the view, and again with the refresh button (⟲) at the top of the panel. When no relay answers, the view says so and offers **Try Again**; it never looks empty just because nobody answered.
 
 Right-click a row, or press the Menu key, for:
 
-- **Edit** (articles): opens the article in a tab. Publishing it again replaces it, keeps its address and keeps the date it first went out.
+- **Edit** (articles): opens the article in a tab, with its title, summary, cover and hashtags. Publishing it again replaces it, keeps its address and keeps the date it first went out; saving it as a draft offers the same article. If the article (or a draft of it) is open already, its tab comes forward.
 - **Open in Browser**: shows it on njump.me, a page any browser can open.
 - **Copy Link**: copies that same address, to share.
 - **Delete from Nostr…** (also the Delete key): asks first. Then MyEditor asks the relays to remove it with a deletion request signed by your account (NIP-09). The request goes to every relay the item was found on and to every relay you publish to. The row goes as soon as one relay accepts, and the status line says how many did. If none accepts, an alert says so and offers **Try Again**, which sends the same request again without asking your signer. People and apps that already saved a copy may still have it, and a draft of the item stays.
@@ -121,7 +121,7 @@ In-progress work is saved as a **NIP-37 draft**: a kind 31234 event whose body i
 
 ### Where drafts are kept
 
-Drafts are encrypted wherever they are kept. To keep them on relays of your choice only, for example a relay of your own that lets nobody else read your events, choose **Draft Relays…** in the Drafts panel's menu, add the relays and click **Save**. An address starts with `wss://`; a relay running on this computer may also use `ws://`. You can choose up to ten.
+Drafts are encrypted wherever they are kept. To keep them on relays of your choice only, for example a relay of your own that lets nobody else read your events, choose **Draft Relays…** in the drafts' action menu (the ⋯ button at the end of the search field in the Drafts panel), add the relays and click **Save**. The status bar then says where drafts are saved. An address starts with `wss://`; a relay running on this computer may also use `ws://`. You can choose up to ten.
 
 From then on new drafts are saved only there. Drafts are still looked for on your usual relays too, so drafts saved earlier, or by an app that doesn't know this setting, are found. The choice itself is kept on your relays, encrypted to your own key (NIP-37), so your other devices and apps that read it (Amethyst does) keep drafts in the same place. Apps that don't read it won't see the drafts saved there.
 

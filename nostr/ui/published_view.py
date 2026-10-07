@@ -11,8 +11,9 @@
   └──────────────────────────────────────────┘
 
 The view owns its list, its states and its actions, and fits in any
-container (the Drafts panel shows it as its second view). Its host gives
-it an account and hears from it through two signals:
+container; the Drafts panel shows it as its second view, Published
+(:func:`add_to_panel`). Its host gives it an account and hears from it
+through two signals:
 
     set_account(profile)     whose items to show (None: nobody's)
     refresh()                read again (the panel's refresh button)
@@ -379,6 +380,19 @@ QProgressBar#published_busy {{
 }}
 QProgressBar#published_busy::chunk {{ background: {t["accent"]}; border-radius: 2px; }}
 """
+
+
+# The view's key among the Drafts panel's views.
+PANEL_VIEW = "published"
+
+
+def add_to_panel(panel, view: "PublishedView") -> None:
+    """Make ``view`` the Drafts panel's second view, Published: the
+    switch names it beside Drafts, and the refresh button reads it again
+    while it is shown."""
+    panel.add_view(PANEL_VIEW, _("Published"), _("Your published notes and articles"), view,
+                   refresh=view.refresh,
+                   refresh_name=_("Refresh published notes and articles"))
 
 
 class PublishedView(QWidget):

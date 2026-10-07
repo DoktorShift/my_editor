@@ -7,7 +7,7 @@ Layout, top to bottom:
   ┌──────────────────────────────────────────┐
   │  Drafts                          ⟲    ×  │  chrome band 1
   │  [▢] Imports                    14 new › │  the Imports row
-  │  [ Search drafts…                      ] │  chrome band 2
+  │  [ Search drafts…                 ]   ⋯  │  chrome band 2
   │  Drafts for Alice                        │  status line
   ├──────────────────────────────────────────┤
   │  Article title                      2h   │  list rows
@@ -26,7 +26,10 @@ Band 1 names the panel's view. With one view (Drafts) it is a title;
 when another view is added (``add_view``), a segmented switch takes its
 place, and where the segments do not fit beside the refresh and close
 buttons it becomes a pop-up button naming the current view, as Apple's
-guidelines ask for tight spaces. Words are never cut to fit: the band
+guidelines ask for tight spaces. Refresh reads the view shown again.
+Where even the pop-up button on a line of its own cannot name a view
+whole (German at 200 percent on the narrowest panel), the panel asks
+for the room, up to MAX_PANEL_WIDTH. Words are never cut to fit: the band
 first changes control, then moves the two buttons to a second line.
 Its narrowest width never depends on how long a label is, so wide
 Windows and Linux fonts, German words and text at 200 percent do not
@@ -35,6 +38,12 @@ widen the panel.
 The Imports row (the owner's decision D-2: one place for imports, the
 Imports window) says how many new posts wait and opens the window; while
 an import has posts to do, it says how far it is, with Pause or Resume.
+
+Band 2 is the search field and, at its end, the drafts' action menu (⋯):
+what concerns the account's drafts as a whole, Draft Relays… (where they
+are kept). It sits there and not in band 1, because a third button there
+would take the switch's room and put band 1 on two lines at the
+narrowest width at the platform's own text size.
 
 Each row is two stacked lines with exactly one inline item, the age.
 ``typography.md`` warns that in a horizontally constrained context
@@ -238,6 +247,7 @@ QToolButton#drafts_panel_icon_btn {{
 QToolButton#drafts_panel_icon_btn:hover {{ background: {t["control_hover_bg"]}; }}
 QToolButton#drafts_panel_icon_btn:pressed {{ background: {t["control_pressed_bg"]}; }}
 QToolButton#drafts_panel_icon_btn:disabled {{ color: {t["disabled"]}; }}
+QToolButton#drafts_panel_icon_btn::menu-indicator {{ image: none; width: 0px; }}
 
 QPushButton#drafts_panel_segment {{
     background: transparent;
@@ -781,11 +791,17 @@ class _ViewSwitch(QWidget):
 
     def popup_width(self) -> int:
         """The pop-up button's width for the longest view name, so the
-        band keeps its shape whichever view is up."""
+        band keeps its shape whichever view is up. Each name is measured
+        the way the button sizes its own text (QToolButton.sizeHint), not
+        by its advance, which can be a pixel short."""
         metrics = self.popup.fontMetrics()
-        chrome = self.popup.sizeHint().width() - metrics.horizontalAdvance(self.popup.text())
-        return chrome + max((metrics.horizontalAdvance(title)
-                             for _key, title, _hint in self._views), default=0)
+
+        def text_width(text: str) -> int:
+            return metrics.size(Qt.TextFlag.TextShowMnemonic, text).width()
+
+        chrome = self.popup.sizeHint().width() - text_width(self.popup.text())
+        return chrome + max((text_width(title) for _key, title, _hint in self._views),
+                            default=0)
 
     def use_popup(self, popup: bool) -> None:
         if popup == self.is_popup():
@@ -888,6 +904,14 @@ class _TopBand(QFrame):
     def is_stacked(self) -> bool:
         """True when the icon buttons have moved to their own line."""
         return self._box.direction() == QBoxLayout.TopToBottom
+
+    def popup_room(self) -> int:
+        """The band's width that shows the pop-up button whole on a line
+        of its own, for the longest view name (0 with one view)."""
+        if not self._switch.has_choice():
+            return 0
+        margins = self._box.contentsMargins()
+        return self._switch.popup_width() + margins.left() + margins.right()
 
     def reflow(self) -> None:
         margins = self._box.contentsMargins()
@@ -1276,7 +1300,10 @@ class DraftsPanel(QFrame):
       publish_draft(str)         , identifier to promote draft → real publish
       delete_drafts(list)        , identifiers to tombstone, one or many
       copy_event_id(str)         , copy outer wrap event id to clipboard
-      refresh_requested()        , manual refresh tap on the header
+      refresh_requested()        , manual refresh tap on the header (the
+                                   Drafts view; a view added with a
+                                   ``refresh`` of its own reads again itself)
+      draft_relays_requested()   , Draft Relays… in the action menu
       close_requested()          , × on the header
       view_changed(str)          , another view was chosen (its key)
       open_imports()             , the Imports row: open the Imports window
@@ -1294,7 +1321,8 @@ class DraftsPanel(QFrame):
       set_signer_unsupported(bool), show the "signer lacks NIP-44" state
       apply_theme(is_dark)       , switch dark/light
       set_preview_image_loader(l), hand the hover preview a ThumbnailLoader
-      add_view(key, title, hint, widget), another view beside Drafts
+      add_view(key, title, hint, widget, refresh=, refresh_name=),
+                                   another view beside Drafts
       show_view(key) / current_view()
       set_imports_state(...)     , what the Imports row says
 
@@ -1317,6 +1345,7 @@ class DraftsPanel(QFrame):
     delete_drafts = Signal(list)
     copy_event_id = Signal(str)
     refresh_requested = Signal()
+    draft_relays_requested = Signal()
     close_requested = Signal()
     view_changed = Signal(str)
     open_imports = Signal()
@@ -1348,6 +1377,10 @@ class DraftsPanel(QFrame):
         self._views: List[Tuple[str, str, str]] = [
             (self.DRAFTS_VIEW, _("Drafts"), _("Your saved private drafts"))]
         self._view_pages: dict = {}
+        # How each view reads again, and what the refresh button is
+        # called while it is shown. Drafts: refresh_requested, to the host.
+        self._view_refresh: dict = {}
+        self._refresh_names: dict = {self.DRAFTS_VIEW: _("Refresh drafts")}
 
         self._status_timer = QTimer(self)
         self._status_timer.setSingleShot(True)
@@ -1425,7 +1458,7 @@ class DraftsPanel(QFrame):
         # line, where the holder is only ever as wide as its buttons.
         icons_layout.addStretch(1)
         self._refresh_btn = self._make_icon_button(
-            "⟲", _("Refresh drafts"), self.refresh_requested.emit, control_h,
+            "⟲", _("Refresh drafts"), self._on_refresh, control_h,
         )
         icons_layout.addWidget(self._refresh_btn)
         self._close_btn = self._make_icon_button(
@@ -1447,15 +1480,36 @@ class DraftsPanel(QFrame):
         # label a sighted user hovers cannot drift apart.
         button.setAccessibleName(name)
         button.setMinimumSize(QSize(control_h, control_h))
-        button.clicked.connect(slot)
+        if slot is not None:
+            button.clicked.connect(slot)
         return button
 
+    def _on_refresh(self) -> None:
+        """The view shown reads again: Drafts through the host, another
+        view by its own ``refresh``."""
+        refresh = self._view_refresh.get(self.current_view())
+        if refresh is None:
+            self.refresh_requested.emit()
+        else:
+            refresh()
+
+    def _ask_for_draft_relays(self) -> None:
+        self.draft_relays_requested.emit()
+
+    def _name_refresh_button(self) -> None:
+        name = self._refresh_names.get(self.current_view(), _("Refresh"))
+        self._refresh_btn.setToolTip(name)
+        self._refresh_btn.setAccessibleName(name)
+
     def _build_search_band(self) -> QWidget:
-        """Band 2: the search field, which is the panel's only filter.
+        """Band 2: the search field, which is the panel's only filter, and
+        the drafts' action menu at its end.
 
         ``searching.md``: "If search is important, give it a primary
         position in your app or view." It is the only filter left, so it
-        gets the whole band.
+        gets the band, but for the action menu: a pull-down button, as
+        Apple's guidelines have for a menu of actions on a view, that
+        opens on a click, Space or Return.
 
         There used to be an All / Notes / Articles chip row under it. It
         filtered on ``record.inner_kind``, which comes from the outer
@@ -1485,7 +1539,21 @@ class DraftsPanel(QFrame):
         self._search_edit.setClearButtonEnabled(True)
         self._search_edit.setMinimumHeight(_control_height())
         self._search_edit.textChanged.connect(self._on_search_changed)
-        layout.addWidget(self._search_edit)
+        field_row = QHBoxLayout()
+        field_row.setContentsMargins(0, 0, 0, 0)
+        field_row.setSpacing(6)
+        field_row.addWidget(self._search_edit, 1)
+        self._actions_btn = self._make_icon_button(
+            "⋯", _("Actions for drafts"), None, _control_height())
+        self._actions_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._actions_menu = QMenu(self._actions_btn)
+        self._draft_relays_action = self._actions_menu.addAction(_("Draft Relays…"))
+        self._draft_relays_action.setEnabled(False)       # until there is an account
+        # A bound method, no closure: the menu then keeps nothing alive.
+        self._draft_relays_action.triggered.connect(self._ask_for_draft_relays)
+        self._actions_btn.setMenu(self._actions_menu)
+        field_row.addWidget(self._actions_btn)
+        layout.addLayout(field_row)
 
         # Eliding, for the same reason the row title is: a long display
         # name would otherwise be clipped from the right with no sign it
@@ -1562,15 +1630,26 @@ class DraftsPanel(QFrame):
 
     # -- public API: views --------------------------------------------------
 
-    def add_view(self, key: str, title: str, hint: str, widget: QWidget) -> None:
+    def add_view(self, key: str, title: str, hint: str, widget: QWidget, *,
+                 refresh: Optional[Callable[[], None]] = None,
+                 refresh_name: str = "") -> None:
         """Add a view beside Drafts (another page of the panel). From the
-        second view on, band 1 offers the switch between them."""
+        second view on, band 1 offers the switch between them.
+
+        ``refresh`` is how the view reads again when the refresh button is
+        pressed while it is shown, and ``refresh_name`` what the button is
+        called then (a screen reader and the tooltip say it)."""
         if key in self._view_pages:
             raise ValueError(f"the panel already has a view {key!r}")
         self._views.append((key, title, hint))
         self._view_pages[key] = widget
+        if refresh is not None:
+            self._view_refresh[key] = refresh
+        if refresh_name:
+            self._refresh_names[key] = refresh_name
         self._mode_stack.addWidget(widget)
         self._view_switch.set_views(self._views, self.current_view())
+        self._make_room_for_view_names()
         self._top_band.reflow()
 
     def views(self) -> List[str]:
@@ -1588,6 +1667,7 @@ class DraftsPanel(QFrame):
             return
         self._mode_stack.setCurrentWidget(page)
         self._view_switch.set_current(key)
+        self._name_refresh_button()
         self._top_band.reflow()
         # Another view is other data and other rows, so the drafts
         # preview has nothing to describe there.
@@ -1610,6 +1690,7 @@ class DraftsPanel(QFrame):
     def apply_theme(self, is_dark: bool) -> None:
         self._is_dark = is_dark
         self.setStyleSheet(_panel_css(is_dark))
+        self._actions_menu.setStyleSheet(_menu_css(is_dark))
         self._apply_placeholder_colour(is_dark)
         # Re-styled in place rather than closed: a theme switch is not a
         # reason to take a surface away from someone reading it.
@@ -1684,6 +1765,8 @@ class DraftsPanel(QFrame):
 
     def set_active_profile(self, profile: Optional[Profile]) -> None:
         self._active_profile = profile
+        # Where drafts are kept is the account's: nothing to set without one.
+        self._draft_relays_action.setEnabled(profile is not None)
         self._refresh_empty_state()
         # The status line names the account, so it has to be re-rendered
         # whenever the binding changes.
@@ -2397,7 +2480,18 @@ class DraftsPanel(QFrame):
             # metrics, and recomposing one under the pointer is not
             # worth the code. The next hover builds it at the new size.
             self._preview.close(disarm=True)
+            self._make_room_for_view_names()
         super().changeEvent(event)
+
+    def _make_room_for_view_names(self) -> None:
+        """Never so narrow that the pop-up button, on a line of its own,
+        cuts a view's name: at large text the panel asks for that room,
+        up to MAX_PANEL_WIDTH (past it the name elides, and stays whole
+        in the button's tooltip and accessible name). Below that, the
+        panel's narrowest width stays MIN_PANEL_WIDTH whatever the names."""
+        wanted = max(MIN_PANEL_WIDTH, min(MAX_PANEL_WIDTH, self._top_band.popup_room()))
+        if wanted != self.minimumWidth():
+            self.setMinimumWidth(wanted)
 
     def closeEvent(self, event) -> None:
         self._preview.shutdown()

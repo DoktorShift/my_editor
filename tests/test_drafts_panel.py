@@ -192,7 +192,7 @@ def test_panel_carries_no_second_profile_control():
     assert not hasattr(panel, "set_avatar_store")
     # Only the refresh and close buttons remain in the header.
     buttons = [
-        b for b in panel.findChildren(QToolButton)
+        b for b in panel._top_band.findChildren(QToolButton)
         if b.objectName() == "drafts_panel_icon_btn"
     ]
     assert {b.toolTip() for b in buttons} == {"Refresh drafts", "Close drafts panel"}
@@ -1215,12 +1215,16 @@ def test_the_band_stacks_only_when_the_popup_cannot_sit_beside_the_buttons(sized
 def test_past_every_size_the_popup_elides_and_keeps_its_name(app_font):
     """Far beyond 200 percent no control fits: the pop-up button then
     paints an ellipsis, and the whole name stays in its tooltip and its
-    accessible name. Pins the pixels, not just ``painted_text``."""
+    accessible name. Pins the pixels, not just ``painted_text``.
+
+    (Before that the panel asks for the room the name needs, up to
+    MAX_PANEL_WIDTH: at this size it has asked for all of it.)"""
     font = QFont(app_font.font())
-    font.setPointSizeF(64)
+    font.setPointSizeF(96)
     app_font.setFont(font)
     panel = with_views(GERMAN, MIN_PANEL_WIDTH)
     try:
+        assert panel.minimumWidth() == dp.MAX_PANEL_WIDTH
         popup = panel._view_switch.popup
         assert panel._view_switch.is_popup()
         painted = popup.painted_text()
@@ -1339,6 +1343,7 @@ def test_every_control_has_a_name():
         assert unnamed_controls(two) == []
     finally:
         two.hide()
+
 
 # --------------------------------------------------------------------------- #
 # One row geometry (review F14)                                                #

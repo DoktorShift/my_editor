@@ -183,6 +183,11 @@ from nostr.ui.connect_dialog import ConnectDialog
 from nostr.ui.profile_chip import ProfileChip
 from nostr.ui.draft_conflict_banner import DraftConflictBanner
 from nostr.ui.drafts_panel import DEFAULT_PANEL_WIDTH, DraftsPanel
+from nostr.draft_relays import PrivateDraftRelays
+from nostr.published import PublishedList
+from nostr.ui.draft_relays_sheet import DraftRelaysSheet
+from nostr.ui.published_view import PANEL_VIEW as PUBLISHED_VIEW
+from nostr.ui.published_view import PublishedView, add_to_panel as add_published_view
 from nostr.membership_controller import MembershipController
 from nostr.key_vault import KeyVault
 from nostr.account_controller import AccountController
@@ -999,6 +1004,9 @@ class MainWindow(QMainWindow):
             return os.path.basename(path)
         if binding and binding.title:
             return binding.title
+        published = getattr(ed, "_published_article", None)
+        if published is not None and published.title:
+            return published.title
         if binding:
             return _("Untitled draft")
         return _("Untitled")
@@ -1863,6 +1871,19 @@ class MainWindow(QMainWindow):
         self._drafts_panel.copy_event_id.connect(self._on_panel_copy_event_id)
         self._drafts_panel.refresh_requested.connect(self._draft_sync.refresh)
         self._drafts_panel.close_requested.connect(self._hide_drafts_panel)
+        self._drafts_panel.draft_relays_requested.connect(self._open_draft_relays)
+        # The second view: what the account published, to edit, open,
+        # share or delete. It reads the relays once it is shown
+        # (_follow_account_in_published), not when MyEditor starts.
+        self._published_view = PublishedView(
+            PublishedList(relay_pool=self._relay_pool, relay_directory=self._relay_directory,
+                          session_pool=self._session_pool,
+                          entitled_relays=self._entitled_relays, parent=self),
+            is_dark=self.is_dark_theme)
+        add_published_view(self._drafts_panel, self._published_view)
+        self._drafts_panel.view_changed.connect(self._follow_account_in_published)
+        self._published_view.open_requested.connect(self._on_published_open)
+        self._published_view.status_message.connect(self._on_published_status)
         # The panel's one row about imports (D-2): new posts, how an
         # import goes, and the Imports window.
         self._drafts_panel.open_imports.connect(self._open_imports_window)
@@ -4301,6 +4322,7 @@ class MainWindow(QMainWindow):
         # half the editor on the old palette.
         if getattr(self, "_drafts_panel", None) is not None:
             self._drafts_panel.apply_theme(self.is_dark_theme)
+            self._published_view.apply_theme(self.is_dark_theme)
         for banner in getattr(self, "_tab_conflict_banners", {}).values():
             banner.apply_theme(self.is_dark_theme)
         imports_window = getattr(self, "_imports", None) and self._imports.window()
@@ -4932,6 +4954,7 @@ class MainWindow(QMainWindow):
             self._drafts_panel.set_active_profile(profile)
             self._drafts_panel.set_signer_unsupported(False)
             self._drafts_panel.set_signer_unreachable(False)
+            self._follow_account_in_published()
         # An account created here whose setup was left for later is finished.
         self._accounts.profile_activated(profile)
 
@@ -4983,6 +5006,7 @@ class MainWindow(QMainWindow):
             self._drafts_panel.set_active_profile(profile)
             self._drafts_panel.set_signer_unsupported(False)
             self._drafts_panel.set_signer_unreachable(False)
+            self._follow_account_in_published()
         self._server_list.refresh(profile)
         self._accounts.profile_activated(profile)
 
@@ -5005,6 +5029,7 @@ class MainWindow(QMainWindow):
             self._drafts_panel.set_active_profile(remaining)
             self._drafts_panel.set_signer_unsupported(False)
             self._drafts_panel.set_signer_unreachable(False)
+            self._follow_account_in_published()
         if remaining is not None:
             self._draft_sync.start_for(remaining)
             self._draft_deletions.start_for(remaining)
@@ -5450,6 +5475,7 @@ class MainWindow(QMainWindow):
         self.act_nostr_drafts.setChecked(True)
         self._draft_sync.refresh()
         self._draft_deletions.refresh()
+        self._follow_account_in_published()
 
     def _hide_drafts_panel(self) -> None:
         if self._drafts_panel is None:
@@ -5460,6 +5486,89 @@ class MainWindow(QMainWindow):
     # ----------------------------------------------------------------------
     # NOSTR - drafts panel signal handlers
     # ----------------------------------------------------------------------
+
+    def _follow_account_in_published(self, *_view) -> None:
+        """The Published view shows the account in use. It reads the
+        relays only while it is shown: shown, it gets the account now;
+        hidden, it lets go of another account's items at once and reads
+        when it is shown next."""
+        view = getattr(self, "_published_view", None)
+        if view is None:
+            return
+        profile = self._profile_store.default()
+        shown = (self._drafts_panel.isVisible()
+                 and self._drafts_panel.current_view() == PUBLISHED_VIEW)
+        held = view.model.account
+        if shown:
+            view.set_account(profile)
+        elif held is not None and (profile is None or profile.user_pubkey.lower()
+                                   != held.user_pubkey.lower()):
+            view.set_account(None)
+
+    def _on_published_status(self, text: str) -> None:
+        if text:
+            self.status.showMessage(text, 8000)
+        else:
+            self.status.clearMessage()
+
+    def _on_published_open(self, item) -> None:
+        """Edit a published article in a tab bound to it: publishing the
+        tab replaces the article (same identifier) and keeps the date it
+        first went out, with its summary, cover and hashtags; saving it
+        as a draft offers the same article. A tab that already holds the
+        article, or a draft of it, comes forward instead."""
+        if not item.is_article:
+            return
+        for i in range(self.tabs.count()):
+            ed = self._editor_from_widget(self.tabs.widget(i))
+            if ed is not None and self._edits_article(ed, item.identifier):
+                self.tabs.setCurrentIndex(i)
+                return
+        self.new_tab()
+        ed = self.current_editor()
+        if ed is None:
+            return
+        self._load_markdown(ed, str(item.event.get("content") or ""))
+        ed.document().setModified(False)
+        details = ArticleDetails.from_tags(item.event.get("tags") or [])
+        ed._published_article = details.with_changes(
+            identifier=item.identifier, title=details.title or item.title,
+            published_at=item.first_published)
+        self._update_tab_title()
+
+    def _edits_article(self, ed, identifier: str) -> bool:
+        """Whether a tab holds the article ``identifier``: opened from the
+        Published view, or a draft of it."""
+        article = getattr(ed, "_published_article", None)
+        if article is not None and article.identifier == identifier:
+            return True
+        binding = getattr(ed, "_draft_binding", None)
+        return (binding is not None and binding.inner_kind == INNER_KIND_LONG_FORM
+                and binding.identifier == identifier)
+
+    def _open_draft_relays(self) -> None:
+        """Draft Relays…: where the account in use keeps its drafts, in a
+        sheet on this window."""
+        profile = self._profile_store.default()
+        if profile is None:
+            return
+        relays = PrivateDraftRelays(
+            profile=profile, pool=self._relay_pool, session_pool=self._session_pool,
+            directory=self._relay_directory, entitled_relays=self._entitled_relays)
+        sheet = DraftRelaysSheet(relays, is_dark=self.is_dark_theme, parent=self)
+        relays.setParent(sheet)                   # it goes with the sheet
+        sheet.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        sheet.saved.connect(self._on_draft_relays_saved)
+        sheet.open()
+
+    def _on_draft_relays_saved(self, relays: list) -> None:
+        if relays:
+            text = ngettext("Drafts are now saved only on the relay you chose.",
+                            "Drafts are now saved only on the {count} relays you chose.",
+                            len(relays)).format(count=len(relays))
+        else:
+            text = _("Drafts are saved on your usual relays again.")
+        self.status.showMessage(text, 8000)
 
     def _on_panel_copy_event_id(self, event_id: str) -> None:
         if event_id:
@@ -5870,9 +5979,11 @@ class MainWindow(QMainWindow):
             return
 
         prior: Optional[DraftBinding] = getattr(ed, "_draft_binding", None)
+        published = getattr(ed, "_published_article", None)
         default_kind = (
             StashKind.ARTICLE
-            if prior is not None and prior.inner_kind == INNER_KIND_LONG_FORM
+            if (prior is not None and prior.inner_kind == INNER_KIND_LONG_FORM)
+            or (prior is None and published is not None)
             else StashKind.NOTE
         )
         title_hint, slug_hint, summary_hint, existing_note_id = (
@@ -6024,7 +6135,8 @@ class MainWindow(QMainWindow):
         opens the draft keeps the date."""
         binding = getattr(ed, "_draft_binding", None) if ed is not None else None
         if binding is None or binding.inner_kind != INNER_KIND_LONG_FORM:
-            return ArticleDetails()
+            # An article opened from the Published view carries its own.
+            return getattr(ed, "_published_article", None) or ArticleDetails()
         record = self._draft_store.get(binding.identifier)
         details = (ArticleDetails.from_tags(record.inner_tags) if record is not None
                    else ArticleDetails())
@@ -6066,6 +6178,11 @@ class MainWindow(QMainWindow):
                 for tag in record.inner_tags:
                     if len(tag) >= 2 and tag[0] == "summary" and not summary:
                         summary = tag[1]
+
+        published = getattr(ed, "_published_article", None)
+        if prior is None and published is not None:
+            # An article opened from the Published view: the same article.
+            title, slug, summary = published.title, published.identifier, published.summary
 
         if not title:
             # Fall back to the file basename without extension.
