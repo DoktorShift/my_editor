@@ -13,7 +13,6 @@ from PySide6.QtCore import (
     Qt, QTimer, QRect, QRectF, QPoint, QMetaMethod, QEvent, QMimeData, QUrl, Signal,
 )
 from PySide6.QtGui import (
-    QAccessible, QAccessibleEvent,
     QPainter, QTextBlockFormat, QTextCursor, QTextCharFormat, QColor, QClipboard, QPen,
     QTextOption, QImage, QPixmap, QTextDocument, QTextFormat, QDesktopServices,
 )
@@ -24,6 +23,7 @@ from constants import (
 )
 from fonts import code_font, writing_font
 from i18n import _, ngettext
+import announce
 import image_safety
 import link_url
 import markdown_shortcuts
@@ -110,6 +110,9 @@ class HtmlEditor(QTextEdit):
         self._slash_items = None
         self._slash_menu = None
         self._slash_at = -1
+        self._slash_moved = False        # an item chosen with Up or Down
+        self._slash_shown = None         # the words the list was made for
+        self._slash_said = ""            # the choice screen readers heard last
         self.cursorPositionChanged.connect(self._slash_follow_caret)
         # Who opens a link Command-clicked (Ctrl-clicked elsewhere): the
         # window, which knows where each kind of link goes.
@@ -691,7 +694,9 @@ class HtmlEditor(QTextEdit):
 
     def _refresh_slash(self) -> None:
         query = self._slash_query()
-        if query is None:
+        if query is None or query[:1].isspace():
+            # Gone, or a space right after the slash: a slash in a sentence
+            # ("either / or", "km / h"), not a command.
             self._close_slash()
             return
         items = self._slash_items(query)
@@ -702,14 +707,18 @@ class HtmlEditor(QTextEdit):
             self._slash_menu = SlashMenu(self)
             self._slash_menu.picked.connect(self._pick_slash)
         menu = self._slash_menu
-        menu.show_items(items, headers=not query, dark=self._is_dark())
+        opening = not menu.isVisible()
+        if opening or query != self._slash_shown:
+            menu.show_items(items, headers=not query, dark=self._is_dark())
+            self._slash_shown = query
+            self._slash_moved = False
         if not menu.has_choices():
             # Nothing matches yet: out of the way, while the words may
             # still change into something that does.
             menu.hide()
             return
         menu.open_at(self.cursorRect(), self.viewport())
-        self._announce_slash_choice()
+        self._announce_slash_choice(opening=opening)
 
     def _slash_follow_caret(self) -> None:
         if self._slash_at >= 0:
@@ -717,18 +726,30 @@ class HtmlEditor(QTextEdit):
 
     def _close_slash(self) -> None:
         self._slash_at = -1
+        self._slash_shown = None
+        self._slash_said = ""
         if self._slash_menu is not None:
             self._slash_menu.hide()
         if self.accessibleDescription():
             self.setAccessibleDescription("")
 
-    def _announce_slash_choice(self) -> None:
-        """A screen reader hears the chosen item: the menu itself never has
-        the focus, so the editor describes it (a limit of Qt)."""
+    def _announce_slash_choice(self, *, opening: bool = False) -> None:
+        """Screen readers hear the chosen item, and that the menu opened:
+        the menu never has the focus, so the editor announces it (and
+        describes it, for a reader that asks)."""
         menu = self._slash_menu
-        self.setAccessibleDescription(menu.chosen_title() if menu is not None else "")
-        QAccessible.updateAccessibility(
-            QAccessibleEvent(self, QAccessible.Event.DescriptionChanged))
+        title = menu.chosen_title() if menu is not None else ""
+        self.setAccessibleDescription(title)
+        if not title:
+            return
+        position, count = menu.choice_position()
+        choice = _("{title}, {position} of {count}").format(
+            title=title.rstrip("\u2026"), position=position, count=count)
+        if choice == self._slash_said and not opening:
+            return                            # heard already
+        self._slash_said = choice
+        announce.announce(self, _("Insert menu. {choice}").format(choice=choice)
+                          if opening else choice)
 
     def _pick_slash(self, action) -> None:
         """Take "/words" away and run ``action`` where the slash was, as one
@@ -738,6 +759,8 @@ class HtmlEditor(QTextEdit):
         self._close_slash()
         if start < 0:
             return
+        announce.announce(self, _("{title} applied").format(
+            title=action.text().replace("&", "").rstrip("\u2026")))
         doc = self.document()
         step = QTextCursor(doc)
         step.beginEditBlock()
@@ -761,13 +784,15 @@ class HtmlEditor(QTextEdit):
                                   Qt.KeyboardModifier.KeypadModifier)
         if key in (Qt.Key.Key_Up, Qt.Key.Key_Down) and plain:
             menu.move_choice(-1 if key == Qt.Key.Key_Up else 1)
+            self._slash_moved = True
             self._announce_slash_choice()
             return True
         if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Tab) and plain:
             action = menu.chosen()
-            if action is not None:
+            if action is not None and (self._slash_query() or self._slash_moved):
                 self._pick_slash(action)
                 return True
+            # A bare slash ("the root is /"): the key does what it does.
             self._close_slash()
             return False
         if key == Qt.Key.Key_Escape:

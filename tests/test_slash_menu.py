@@ -11,14 +11,16 @@ What must hold:
   only, Nostr ones only while Nostr is in use.
 
   The words after the slash narrow it, a word that starts with them
-  first ("/he" puts the headings first). Up and Down move, Return or Tab
-  picks: "/words" goes and the command runs there, as one step to undo.
-  Escape closes it and keeps the text; so do the caret leaving the
-  words, three letters that match nothing, and a space after words that
-  match nothing.
+  first ("/he" puts the headings first). Up and Down move (the pointer
+  too), Return or Tab picks: "/words" goes and the command runs there,
+  as one step to undo. Escape closes it and keeps the text; so do a
+  space right after the slash (a slash in a sentence), the caret
+  leaving the words, three letters that match nothing, and a space
+  after words that match nothing. Return after a bare slash ends the
+  paragraph, unless Up or Down chose an item.
 
-  The text keeps the keyboard focus, and a screen reader hears the
-  chosen item through the editor's description.
+  The text keeps the keyboard focus, and screen readers hear the menu
+  open, each choice with its place in the list, and the pick.
 """
 
 import json
@@ -31,8 +33,8 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QPoint, Qt  # noqa: E402
-from PySide6.QtGui import QTextCursor  # noqa: E402
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt  # noqa: E402
+from PySide6.QtGui import QMouseEvent, QTextCursor  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QMainWindow  # noqa: E402
 
@@ -235,6 +237,75 @@ def test_the_ranking_prefers_a_word_that_starts_with_the_query():
     assert [c.title for c in s.registry.rank("", nostr=False)][:4] == [
         "Body", "Heading 1", "Heading 2", "Heading 3"]
     assert s.registry.rank("zzz", nostr=False) == []
+
+
+
+# -- a slash in a sentence (review H3) -------------------------------------------------
+
+@pytest.mark.parametrize("typed, kept", [
+    ("either / or", "either / or"),
+    ("a / b", "a / b"),
+    ("km / h", "km / h"),
+    ("The root directory is /", "The root directory is /"),
+])
+def test_a_slash_in_a_sentence_keeps_the_text_and_return_ends_the_paragraph(typed, kept):
+    s = Setup()
+    type_text(s.editor, typed)
+    press(s.editor, Qt.Key.Key_Return)
+    type_text(s.editor, "next")
+    assert s.editor.toPlainText() == kept + "\nnext"
+    first = s.editor.document().begin()
+    assert not first.blockFormat().headingLevel() and first.textList() is None
+
+
+def test_a_space_right_after_the_slash_closes_the_menu():
+    s = Setup()
+    type_text(s.editor, "/")
+    assert s.editor.slash_menu() is not None
+    type_text(s.editor, " ")
+    assert s.editor.slash_menu() is None
+    type_text(s.editor, "or")
+    assert s.editor.slash_menu() is None
+
+
+def test_a_bare_slash_picks_what_up_or_down_chose():
+    s = Setup()
+    type_text(s.editor, "/")
+    press(s.editor, Qt.Key.Key_Down)                        # Heading 1
+    press(s.editor, Qt.Key.Key_Return)
+    assert s.editor.textCursor().block().blockFormat().headingLevel() == 1
+    assert s.editor.toPlainText() == ""
+
+
+# -- what a screen reader hears (review M3) ---------------------------------------------
+
+def test_screen_readers_hear_the_menu_the_choice_and_the_pick(monkeypatch):
+    import announce
+    heard = []
+    monkeypatch.setattr(announce, "announce", lambda source, text: heard.append(text))
+    s = Setup()
+    type_text(s.editor, "/")
+    count = len([t for t in s.titles() if t not in ("Text", "Lists", "Blocks", "Insert")])
+    assert heard == [f"Insert menu. Body, 1 of {count}"]
+    press(s.editor, Qt.Key.Key_Down)
+    assert heard[-1] == f"Heading 1, 2 of {count}"
+    type_text(s.editor, "he")                               # the list changes under it
+    assert heard[-1] == "Heading 1, 1 of 3"
+    press(s.editor, Qt.Key.Key_Return)
+    assert heard[-1] == "Heading 1 applied"
+
+
+def test_the_pointer_chooses_the_row_it_is_over():
+    s = Setup()
+    type_text(s.editor, "/he")
+    menu = s.editor.slash_menu()
+    rect = menu.list.visualItemRect(menu.list.item(2))      # Heading 3
+    viewport = menu.list.viewport()
+    QApplication.sendEvent(viewport, QMouseEvent(
+        QEvent.Type.MouseMove, QPointF(rect.center()), QPointF(viewport.mapToGlobal(
+            rect.center())), Qt.MouseButton.NoButton, Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier))
+    assert menu.chosen_title() == "Heading 3"
 
 
 # -- in the window -------------------------------------------------------------------------

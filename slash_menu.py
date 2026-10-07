@@ -10,16 +10,18 @@ menus offer, by the same names and with the same keys, and only what can
 act right now (Nostr items only while a Nostr account is in use). The
 words typed after the slash narrow it: "/he" puts the headings first.
 
-Up and Down move, Return or Tab picks, Escape closes it and keeps the
-text. The caret leaving the words, the slash being deleted, three
-letters that match nothing, or a space after words that match nothing
-close it too. Picking takes "/words" away and runs the command there, as
-one step to undo.
+Up and Down move (and so does the pointer, as in every menu), Return or
+Tab picks, Escape closes it and keeps the text. A space right after the
+slash (a slash in a sentence: "either / or"), the caret leaving the
+words, the slash being deleted, three letters that match nothing, or a
+space after words that match nothing close it too; Return right after a
+bare slash, with no item moved to, ends the paragraph as usual. Picking
+takes "/words" away and runs the command there, as one step to undo.
 
 The list never takes the keyboard focus: the text keeps it, and the
-editor hands the menu the keys it needs (HtmlEditor). A screen reader
-hears the chosen item through the editor's description, since Qt cannot
-announce a window that never takes focus by itself.
+editor hands the menu the keys it needs (HtmlEditor). Screen readers
+hear the menu open, each item chosen ("Heading 2, 3 of 9") and what was
+done, through announcements (announce.py).
 """
 
 from __future__ import annotations
@@ -171,6 +173,9 @@ class SlashMenu(QFrame):
         self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.list.setItemDelegate(_Rows(self))
         self.list.itemClicked.connect(self._clicked)
+        # The pointer chooses the row it is over, as in every menu.
+        self.list.setMouseTracking(True)
+        self.list.itemEntered.connect(self._hovered)
         layout.addWidget(self.list)
 
     # -- what is shown ---------------------------------------------------------
@@ -231,6 +236,13 @@ class SlashMenu(QFrame):
         action = self.chosen()
         return action.text().replace("&", "") if action is not None else ""
 
+    def choice_position(self) -> tuple:
+        """Where the chosen item is among the items (from 1), and how many
+        there are: (0, count) when none is chosen."""
+        rows = [i for i, a in enumerate(self._actions) if a is not None]
+        current = self.list.currentRow()
+        return (rows.index(current) + 1 if current in rows else 0), len(rows)
+
     def move_choice(self, step: int) -> None:
         """Up (-1) or Down (+1), skipping group names, wrapping around."""
         rows = [i for i, a in enumerate(self._actions) if a is not None]
@@ -249,6 +261,11 @@ class SlashMenu(QFrame):
         action = self._actions[self.list.row(item)]
         if action is not None:
             self.picked.emit(action)
+
+    def _hovered(self, item: QListWidgetItem) -> None:
+        row = self.list.row(item)
+        if 0 <= row < len(self._actions) and self._actions[row] is not None:
+            self._choose(row)
 
     # -- where it opens ----------------------------------------------------------
 
