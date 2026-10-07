@@ -312,7 +312,16 @@ def test_reading_the_state_stops_at_the_budget(monkeypatch):
     assert len(calls) <= 40 * len(rich_text.INLINE)
     calls.clear()
     assert rich_text.selection_state(cursor, budget=1000)[rich_text.BOLD] is True
-    # The command itself always reads all of it.
+
+
+def test_a_style_button_that_shows_off_turns_its_style_on():
+    # Review L1: past the budget Bold showed off, and the click took bold
+    # away everywhere. The command decides from the same reading.
+    doc = _bold_pieces(3 * 40)
+    cursor = QTextCursor(doc)
+    cursor.select(QTextCursor.SelectionType.Document)
+    assert rich_text.selection_state(cursor, budget=40)[rich_text.BOLD] is False   # shown off
+    assert rich_text.toggle_style(cursor, rich_text.BOLD, budget=40) is True       # so: on
     assert rich_text.selection_has(cursor, rich_text.BOLD) is True
 
 

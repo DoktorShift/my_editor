@@ -157,7 +157,8 @@ def selection_has(cursor: QTextCursor, style: str) -> bool:
 # selection someone reads at once, and a bound on the time one update
 # takes while a long selection is being extended. Past it, a style that
 # could not be checked all the way counts as not applied throughout (its
-# button shows off); the commands themselves always act on all of it.
+# button shows off), and the command decides from the same reading, so a
+# button that shows off always turns its style on (over all of it).
 STATE_BUDGET = 1500
 
 
@@ -181,10 +182,11 @@ def selection_state(cursor: QTextCursor, styles=INLINE, *,
     return {style: seen > 0 and style in still for style in styles}
 
 
-def toggle_style(cursor: QTextCursor, style: str) -> bool:
+def toggle_style(cursor: QTextCursor, style: str, *, budget: int = STATE_BUDGET) -> bool:
     """Turn ``style`` on over the whole selection, or off when all of it
-    has it already. Returns the new state. One step on the undo stack."""
-    on = not selection_has(cursor, style)
+    has it already, read as the toolbar reads it (selection_state). Returns
+    the new state. One step on the undo stack."""
+    on = not selection_state(cursor, (style,), budget=budget)[style]
     cursor.beginEditBlock()
     cursor.mergeCharFormat(style_format(style, on))
     if not on and style == CODE:
