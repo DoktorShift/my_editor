@@ -83,6 +83,13 @@ def test_a_code_block_is_one_step_to_undo():
     assert document_to_markdown(doc) == "one\n\ntwo\n"
 
 
+def test_a_link_made_code_keeps_its_address():
+    # Review L1 (CP3): the address was dropped without a word.
+    doc = from_markdown("See **this** [site](https://example.com) now\n")
+    rich_text.make_code_block(whole(doc), "")
+    assert assert_round_trip(doc) == "```\nSee this [site](https://example.com) now\n```\n"
+
+
 def test_the_language_changes_for_the_whole_block():
     doc = from_markdown("```\nfn main() {\n    x();\n}\n```\n\ntext\n")
     rich_text.set_code_language(at(doc, "x();"), "rust")

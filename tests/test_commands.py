@@ -312,6 +312,20 @@ def test_what_a_tab_can_hold(editor, kind):
     assert MainWindow._editor_kind(None, editor) == kind
 
 
+def test_syntax_highlighting_is_dimmed_in_documents(fresh_window):
+    # Review L2 (CP3): a document's code blocks are always colored, so
+    # View > Syntax Highlighting does nothing there.
+    from main_window import MainWindow
+    win = fresh_window
+    win._editor_kind = lambda ed: MainWindow._editor_kind(win, ed)
+    win.current_editor = lambda: _Editor("/notes/a.md")
+    MainWindow._update_editor_commands(win)
+    assert not win.act_toggle_syntax_hl.isEnabled()
+    win.current_editor = lambda: _Editor("/code/tool.py")
+    MainWindow._update_editor_commands(win)
+    assert win.act_toggle_syntax_hl.isEnabled()
+
+
 def test_editing_commands_follow_the_tab(fresh_window):
     from main_window import MainWindow
     win = fresh_window

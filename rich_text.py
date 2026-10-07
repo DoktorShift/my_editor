@@ -1074,6 +1074,18 @@ def footnote_jump(cursor: QTextCursor) -> Optional[int]:
     return None
 
 
+def orphan_notes(doc) -> List[str]:
+    """The labels of notes no mark in ``doc`` refers to."""
+    marked = {label for _position, label in footnote_marks(doc)}
+    orphans = []
+    for block in _prose_blocks(doc):
+        found = FOOTNOTE_DEFINITION.match(block.text())
+        if found is not None and found.group(1) not in marked \
+                and found.group(1) not in orphans:
+            orphans.append(found.group(1))
+    return orphans
+
+
 def footnote_text(doc, label: str) -> str:
     """The words of footnote ``label``'s definition ("" for none)."""
     block = footnote_definition(doc, label)
@@ -1545,6 +1557,33 @@ def code_line_format(fmt: QTextBlockFormat, language: str) -> QTextBlockFormat:
     return fmt
 
 
+def _links_as_markdown(block) -> None:
+    """Each link in ``block`` written out as its Markdown (``[words](address)``),
+    so code made of the paragraph keeps where the link went."""
+    found = []
+    it = block.begin()
+    while not it.atEnd():
+        fragment = it.fragment()
+        if fragment.isValid() and fragment.charFormat().isAnchor() \
+                and fragment.charFormat().anchorHref():
+            found.append((fragment.position(), fragment.length(), fragment.text(),
+                          fragment.charFormat().anchorHref()))
+        it += 1
+    # Pieces of one link, one after the other, are one link.
+    merged = []
+    for position, length, words, href in found:
+        if merged and merged[-1][3] == href and merged[-1][0] + merged[-1][1] == position:
+            start, size, before, _href = merged[-1]
+            merged[-1] = (start, size + length, before + words, href)
+        else:
+            merged.append((position, length, words, href))
+    for position, length, words, href in reversed(merged):
+        cursor = QTextCursor(block.document())
+        cursor.setPosition(position)
+        cursor.setPosition(position + length, QTextCursor.MoveMode.KeepAnchor)
+        cursor.insertText(f"[{words}]({href})", without_link(cursor.charFormat()))
+
+
 def make_code_block(cursor: QTextCursor, language: str = "") -> None:
     """The paragraphs under the cursor become the lines of one code block
     in ``language`` (as a fence names it; "" for none), as one step on the
@@ -1564,6 +1603,7 @@ def make_code_block(cursor: QTextCursor, language: str = "") -> None:
         if block.textList() is not None:
             leave_list(block)
         QTextCursor(block).setBlockFormat(code_line_format(block.blockFormat(), language))
+        _links_as_markdown(block)
         _restyle_runs(block, text)
     edit.endEditBlock()
 

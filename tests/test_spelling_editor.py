@@ -207,6 +207,12 @@ r["languages"] = [a.text() for a in w.m_spelling_language.actions() if a.text()]
 german = [a for a in w.m_spelling_language.actions() if a.text().startswith("Deutsch")]
 german[0].trigger()
 r["language"] = [ed.spelling().language(), settings.load_settings().get("spelling_language")]
+# Review L5 (CP3): a remembered language without a dictionary falls back.
+w.spelling_language = "fr-FR"
+w._update_spelling_menu()
+r["missing_language"] = [a.text() for a in w.m_spelling_language.actions()
+                         if a.isCheckable() and a.isChecked()]
+r["missing_used"] = w._usable_spelling_language()
 for e in (ed, py):
     e.document().setModified(False)
 w.close()
@@ -232,3 +238,4 @@ def test_spelling_in_the_window(tmp_path):
     assert r["dimmed"]
     assert r["languages"][0] == "System Language" and "Deutsch (Deutschland)" in r["languages"]
     assert r["language"] == ["de-DE", "de-DE"]
+    assert r["missing_language"] == ["System Language"] and r["missing_used"] is None

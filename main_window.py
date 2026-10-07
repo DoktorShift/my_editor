@@ -911,7 +911,7 @@ class MainWindow(QMainWindow):
             if current is None:
                 ed.set_spelling(spelling.DocumentSpelling(
                     self._spell_checker(), ed.document(),
-                    language=self.spelling_language or None))
+                    language=self._usable_spelling_language()))
         elif current is not None:
             current.close()
             ed.set_spelling(None)
@@ -923,6 +923,16 @@ class MainWindow(QMainWindow):
             if ed is not None:
                 found.append(ed)
         return found
+
+    def _usable_spelling_language(self):
+        """The language chosen in Edit > Spelling > Language while the
+        system has its dictionary, else None (the system's language): a
+        choice carried to a computer without it never stops the checking."""
+        chosen = self.spelling_language or None
+        if chosen is None:
+            return None
+        checker = self._spell_checker()
+        return chosen if chosen in checker.languages() else None
 
     def _set_check_spelling(self, on: bool) -> None:
         """Edit > Spelling > Check Spelling While Typing, remembered."""
@@ -946,7 +956,7 @@ class MainWindow(QMainWindow):
         menu.clear()
         menu.setEnabled(available and self.check_spelling)
         group = QActionGroup(menu)
-        chosen = self.spelling_language or ""
+        chosen = self._usable_spelling_language() or ""
         for tag, name in [("", _("System Language"))] + spelling_language_names(
                 checker.languages()):
             action = menu.addAction(name)
@@ -4676,6 +4686,8 @@ class MainWindow(QMainWindow):
         for action in self.act_table_commands:
             action.setEnabled(in_table)
         self.act_select_all.setEnabled(bool(kind))
+        # Code files only: a document's code blocks are always colored.
+        self.act_toggle_syntax_hl.setEnabled(kind != "rich")
         for action in (self.act_find, self.act_replace, self.act_find_next, self.act_find_prev):
             action.setEnabled(not reading)
         self.act_underline.setEnabled(bool(self._keeps_underline(self.current_editor()))
@@ -5019,6 +5031,8 @@ class MainWindow(QMainWindow):
         if rich_text.footnote_marks(ed.document()):
             checks.append(_("Some apps (Amethyst, Coracle, Damus) show footnotes as typed: "
                             "the marks in brackets and the notes at the end."))
+        if rich_text.orphan_notes(ed.document()):
+            checks.append(_("A note no mark refers to: most apps leave it out."))
         details = self._article_details_of(ed)
         title = details.title or next(
             (line.lstrip("# ").strip() for line in markdown.splitlines() if line.strip()), "")

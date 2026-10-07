@@ -103,6 +103,12 @@ def test_no_footnote_inside_a_code_block():
 MARKED = "A claim[^1] and[^1] again.\n\n`[^1]` in code.\n\n[^1]: The source.\n"
 
 
+def test_a_note_no_mark_refers_to_is_named_for_the_preview():
+    # Review L4 (CP3): the preview leaves such a note out, as readers do.
+    ed = editor("A claim[^1].\n\n[^1]: Kept.\n\n[^2]: Orphaned.\n")
+    assert rich_text.orphan_notes(ed.document()) == ["2"]
+
+
 def test_a_mark_leads_to_its_note_and_the_note_back_to_the_first_mark():
     ed = editor(MARKED)
     doc = ed.document()
@@ -189,6 +195,9 @@ r["slash"] = [slash.list.item(i).text() for i in range(slash.list.count())
 press(ed, Qt.Key.Key_Escape)
 w.nostr_state._active = True
 r["check"] = list(w._preview_content(ed, ARTICLE).checks)
+ed.moveCursor(QTextCursor.MoveOperation.End)
+type_text(ed, "\n[^9]: Nobody points here.")
+r["orphan_check"] = list(w._preview_content(ed, ARTICLE).checks)
 w.nostr_state._active = False
 ed.document().setModified(False)
 w.close()
@@ -206,3 +215,5 @@ def test_footnotes_in_the_window(tmp_path):
     assert r["back"] == "Go to Mark"
     assert r["slash"] == ["Footnote"]
     assert any("show footnotes as typed" in check for check in r["check"])
+    assert not any("no mark refers to" in check for check in r["check"])
+    assert any("no mark refers to" in check for check in r["orphan_check"])
