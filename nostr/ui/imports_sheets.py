@@ -56,6 +56,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import file_paths
 from constants import DARK_BORDER, LIGHT_BORDER
 from i18n import _, ngettext
 
@@ -550,12 +551,13 @@ class FollowSheet(_Sheet):
 
 
 def dropped_file(mime) -> str:
-    """The first local file in a drop, or ""."""
+    """The first local file in a drop, in the app's one spelling (a
+    URL's path has forward slashes, also on Windows), or ""."""
     if mime is None or not mime.hasUrls():
         return ""
     for url in mime.urls():
         if url.isLocalFile() and os.path.isfile(url.toLocalFile()):
-            return url.toLocalFile()
+            return file_paths.normalize(url.toLocalFile())
     return ""
 
 
@@ -667,6 +669,9 @@ class FileSheet(_Sheet):
     def read(self, path: str) -> None:
         if not path or self._waiting():
             return
+        # Dropped or chosen in the open panel (which answers with forward
+        # slashes, also on Windows): the app's one spelling either way.
+        path = file_paths.normalize(path)
         self._document = None
         self.note.hide()
         self.sources.hide()

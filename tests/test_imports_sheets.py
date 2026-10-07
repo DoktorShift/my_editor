@@ -308,6 +308,16 @@ class TestFile:
         assert dropped_file(web) == ""
         assert dropped_file(None) == ""
 
+    def test_a_chosen_file_is_read_in_the_apps_spelling(self, controller, tmp_path,
+                                                         monkeypatch):
+        # Qt's open panel answers with forward slashes, also on Windows.
+        (tmp_path / "sub").mkdir()
+        path = self.write(tmp_path, "blog.xml", WXR)
+        asked = []
+        monkeypatch.setattr(controller, "read_file", lambda p, on_done: asked.append(p))
+        FileSheet(controller).read((tmp_path / "sub").as_posix() + "/../blog.xml")
+        assert asked == [path]
+
 
 class TestLink:
     def test_open_is_the_default(self, controller):
