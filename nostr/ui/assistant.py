@@ -405,6 +405,9 @@ class AssistantWindow(QDialog):
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QFrame.Shape.NoFrame)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # It shows nothing of its own: no Tab stop that would look like
+        # the focus went nowhere (a child it scrolls to still gets it).
+        self._scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._scroll.viewport().setAutoFillBackground(False)
         self._scroll.setWidget(self._stack)
         # QScrollArea paints its widget's background by default; the page

@@ -6,10 +6,13 @@ What must hold: it reads the account's list before anything can change,
 and says so when it can't (with Try Again); an address is added only
 when it can be a relay for drafts (wss://, or ws:// on this computer),
 once, and at most ten; Use My Usual Relays empties the form and Save
-makes it so; Save publishes the encrypted list and moves the drafts'
-routing; a save that failed says why and keeps the sheet; a save under
-way can't be cancelled halfway; Return in the address field adds it;
-every control has a name.
+makes it so; Save moves the drafts, with progress, before it publishes
+the encrypted list and moves the drafts' routing; a save that failed
+says why, with the cause, and keeps the sheet; a relay being left that
+did not answer offers Save Anyway; a list changed elsewhere is read
+again rather than written over; a save under way can't be cancelled
+halfway; Return in the address field adds it; the focus starts on the
+list or the field; every control has a name.
 """
 
 import os
@@ -24,18 +27,23 @@ from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from nostr.draft_relays import KIND_PRIVATE_RELAYS, PrivateDraftRelays  # noqa: E402
+from nostr.draft_relays import (  # noqa: E402
+    MOVING_DRAFTS, SAVING_LIST, UNDECRYPTED, UNREACHABLE, MoveOutcome, SaveOutcome,
+)
 from nostr.outbox import defaults  # noqa: E402
-from nostr.outbox.directory import RelayDirectory  # noqa: E402
-from nostr.outbox.writer import FAILED, UNKNOWN_BASE, WRITTEN, WriteOutcome  # noqa: E402
+from nostr.outbox.writer import (  # noqa: E402
+    CAUSE_CHANGED, CAUSE_CLOCK, CAUSE_RELAYS, CAUSE_SIGNER, FAILED, UNKNOWN_BASE, WRITTEN,
+    WriteOutcome,
+)
 from nostr.ui.draft_relays_sheet import (  # noqa: E402
     EDITING, READ_FAILED, SAVING, DraftRelaysSheet,
 )
 from tests.accessibility import unnamed_controls  # noqa: E402
-from tests.outbox_fakes import (  # noqa: E402
-    ABSENT, NOW, PK, FakePool, FakeQuery, FakeSessionPool, Profile, settle,
+from tests.outbox_fakes import PK  # noqa: E402
+from tests.widget_lifetime import delete_new_windows  # noqa: E402
+from tests.test_draft_relays import (  # noqa: E402
+    LIST_ON_MINE, MINE, U1, U2, moving, sent, wrap,
 )
-from tests.test_draft_relays import SealingClient  # noqa: E402
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -43,25 +51,53 @@ def qt_app():
     return QApplication.instance() or QApplication(sys.argv)
 
 
-class Lists:
-    """Stands in for PrivateDraftRelays: answers reads, keeps or parks saves."""
+@pytest.fixture(autouse=True)
+def _windows_deleted():
+    """Every sheet a test opens is deleted after it: left to the cycle
+    collector, one could be destroyed in the middle of a later test."""
+    yield from delete_new_windows()
 
-    def __init__(self, relays=(), *, readable=True, answer=WriteOutcome(WRITTEN)):
+
+SAVED = SaveOutcome(MoveOutcome(), WriteOutcome(WRITTEN))
+
+
+def list_failed(status, cause, event=None):
+    return SaveOutcome(MoveOutcome(), WriteOutcome(status, event=event, cause=cause))
+
+
+class Lists:
+    """Stands in for PrivateDraftRelays: answers reads, and answers saves
+    at once, or with ``answer=None`` keeps one under way until ``finish``
+    (``step`` reports its progress). It holds the sheet's callbacks only
+    while a save is under way, as the real one does."""
+
+    def __init__(self, relays=(), *, readable=True, answer=SAVED, failure=UNREACHABLE):
         self.relays = list(relays)
         self.readable = readable
+        self.failure = failure
         self.answer = answer
         self.saves = []
-        self.parked = []
+        self._pending = None
+        self.last_failure = None
 
     def read(self, on_done):
+        self.last_failure = None if self.readable else self.failure
         on_done(list(self.relays) if self.readable else None)
 
-    def save(self, relays, on_done):
-        self.saves.append(list(relays))
+    def save(self, relays, on_done, *, on_step=None, leave_unread=False):
+        self.saves.append((list(relays), leave_unread))
         if self.answer is None:
-            self.parked.append(on_done)
+            self._pending = (on_done, on_step)
         else:
             on_done(self.answer)
+
+    def step(self, *where):
+        self._pending[1](*where)
+
+    def finish(self, outcome):
+        on_done, _on_step = self._pending
+        self._pending = None
+        on_done(outcome)
 
 
 def open_sheet(lists):
@@ -95,6 +131,20 @@ def test_an_account_without_a_list_uses_its_usual_relays():
     sheet, _saved = open_sheet(Lists([]))
     assert sheet._summary.text() == "Drafts are kept on your usual relays."
     assert not sheet.buttons["usual"].isEnabled()
+
+
+def test_the_focus_starts_on_the_list_or_on_the_field():
+    sheet, _saved = open_sheet(Lists(["wss://mine.example"]))
+    assert sheet.focusWidget() is sheet._list
+    assert sheet._scroll.focusPolicy() == Qt.FocusPolicy.NoFocus   # no invisible Tab stop
+    sheet, _saved = open_sheet(Lists([]))
+    assert sheet.focusWidget() is sheet._field
+
+
+def test_a_list_the_signer_could_not_decrypt_says_so():
+    sheet, _saved = open_sheet(Lists([], readable=False, failure=UNDECRYPTED))
+    assert sheet.state == READ_FAILED and sheet._error.text().startswith(
+        "Couldn’t decrypt where your drafts are kept. Make sure your signer is running")
 
 
 def test_a_list_that_could_not_be_read_is_not_edited_and_offers_try_again():
@@ -162,21 +212,95 @@ def test_use_my_usual_relays_empties_the_form_and_save_makes_it_so():
         "Drafts are kept on your usual relays.")
     assert lists.saves == []                              # nothing changes before Save
     sheet.buttons["save"].click()
-    assert lists.saves == [[]] and saved == [[]] and not sheet.isVisible()
+    assert lists.saves == [([], False)] and saved == [[]] and not sheet.isVisible()
+
+
+def test_it_says_that_drafts_move_with_the_setting():
+    sheet, _saved = open_sheet(Lists([]))
+    texts = [label.text() for label in sheet.findChildren(type(sheet._summary))]
+    assert any("When you change this, your drafts move with it." in text for text in texts)
 
 
 def test_a_save_that_failed_says_why_and_keeps_the_sheet():
-    signed_but_refused = {"kind": KIND_PRIVATE_RELAYS}
+    signed_but_refused = {"kind": 10013}
     for answer, start in (
-            (WriteOutcome(UNKNOWN_BASE), "Couldn’t read the current setting"),
-            (WriteOutcome(FAILED, event=signed_but_refused), "Too few relays took the change."),
-            (WriteOutcome(FAILED, reason="user rejected"), "Your signer didn’t approve")):
+            (list_failed(UNKNOWN_BASE, CAUSE_RELAYS), "Couldn’t read the current setting"),
+            (list_failed(FAILED, CAUSE_RELAYS, signed_but_refused),
+             "Too few relays took the change."),
+            (list_failed(FAILED, CAUSE_CLOCK, signed_but_refused),
+             "The current setting is dated ahead of this computer’s clock"),
+            (list_failed(FAILED, CAUSE_SIGNER), "Your signer didn’t approve"),
+            (SaveOutcome(MoveOutcome(total=2, moved=1, not_moved=("x",))),
+             "Some drafts couldn’t be moved, so nothing was changed. Check your internet"),
+            (SaveOutcome(MoveOutcome(total=2, moved=1, not_moved=("x",), refused=True)),
+             "The relays your drafts would move to turned some of them down")):
         sheet, saved = open_sheet(Lists([], answer=answer))
         add(sheet, "wss://mine.example")
         sheet.buttons["save"].click()
         assert sheet.isVisible() and saved == [] and sheet.state == EDITING
-        assert sheet._error.text().startswith(start)
+        assert sheet._error.text().startswith(start), sheet._error.text()
         assert sheet.buttons["save"].isEnabled()          # try again
+        assert "anyway" not in [spec[0] for spec in sheet._shown_buttons]
+
+
+def test_a_relay_being_left_that_did_not_answer_offers_save_anyway():
+    lists = Lists([MINE], answer=SaveOutcome(MoveOutcome(unread=(MINE,))))
+    sheet, saved = open_sheet(lists)
+    sheet.buttons["usual"].click()
+    sheet.buttons["save"].click()
+    assert sheet._error.text().startswith(f"Couldn’t read the drafts on {MINE}")
+    assert "If that relay is gone for good, choose Save Anyway" in sheet._error.text()
+    assert words(sheet) == ["Save Anyway", "Cancel", "Save"]
+    assert unnamed_controls(sheet) == []
+    lists.answer = SAVED
+    sheet.buttons["anyway"].click()
+    assert lists.saves == [([], False), ([], True)] and saved == [[]]
+
+
+def test_save_anyway_goes_once_the_choice_changes():
+    lists = Lists([MINE, "wss://two.example"],
+                  answer=SaveOutcome(MoveOutcome(unread=(MINE,))))
+    sheet, _saved = open_sheet(lists)
+    sheet._list.setCurrentRow(0)
+    sheet._remove.click()
+    sheet.buttons["save"].click()
+    assert words(sheet)[0] == "Save Anyway"
+    sheet._list.setCurrentRow(0)
+    sheet._remove.click()                                 # another choice now
+    assert words(sheet) == ["Use My Usual Relays", "Cancel", "Save"]
+    assert not sheet._error.isVisibleTo(sheet)
+
+
+def test_a_list_changed_elsewhere_is_read_again_and_not_written_over():
+    lists = Lists([MINE], answer=list_failed(FAILED, CAUSE_CHANGED))
+    sheet, saved = open_sheet(lists)
+    sheet.buttons["usual"].click()
+    lists.relays = ["wss://else.example"]                 # as the other device left it
+    sheet.buttons["save"].click()
+    assert saved == [] and sheet.state == EDITING
+    assert sheet.chosen() == ["wss://else.example"]
+    assert sheet._error.text().startswith("The setting was changed on another device")
+
+
+def test_moving_the_drafts_is_counted():
+    lists = Lists([MINE], answer=None)
+    sheet, _saved = open_sheet(lists)
+    sheet.buttons["usual"].click()
+    sheet.buttons["save"].click()
+    assert sheet._busy_label.text() == "Reading your drafts…"
+    assert sheet._progress.maximum() == 0                 # not counted yet
+    lists.step(MOVING_DRAFTS, 0, 14, 12)
+    assert sheet._busy_label.text() == "Moving 12 drafts…"
+    assert (sheet._progress.maximum(), sheet._progress.value()) == (14, 0)
+    lists.step(MOVING_DRAFTS, 5, 14, 12)
+    assert sheet._progress.value() == 5
+    lists.step(MOVING_DRAFTS, 0, 2, 0)                   # only deleted ones to carry
+    assert sheet._busy_label.text() == "Moving your drafts…"
+    lists.step(SAVING_LIST, 0, 0, 0)
+    assert sheet._busy_label.text().startswith("Saving. Approve the request")
+    assert sheet._progress.maximum() == 0
+    lists.finish(SAVED)
+    assert not sheet.isVisible()
 
 
 def test_a_save_under_way_cannot_be_cancelled_halfway():
@@ -188,7 +312,7 @@ def test_a_save_under_way_cannot_be_cancelled_halfway():
     assert not sheet.buttons["cancel"].isEnabled() and not sheet._field.isEnabled()
     sheet.reject()                                        # Escape, the close box
     assert sheet.isVisible()
-    lists.parked.pop()(WriteOutcome(WRITTEN))
+    lists.finish(SAVED)
     assert saved == [["wss://mine.example"]] and not sheet.isVisible()
 
 
@@ -198,26 +322,23 @@ def test_an_answer_after_the_sheet_closed_is_dropped():
     add(sheet, "wss://mine.example")
     sheet.buttons["save"].click()
     sheet.done(0)
-    lists.parked.pop()(WriteOutcome(WRITTEN))
+    lists.step(MOVING_DRAFTS, 1, 2, 2)                   # dropped too
+    lists.finish(SAVED)
     assert saved == []
 
 
-def test_save_publishes_the_encrypted_list_and_drafts_follow_it():
-    client = SealingClient()
-    pool = FakePool()
-    query = FakeQuery({KIND_PRIVATE_RELAYS: ABSENT})
-    directory = RelayDirectory(pool, query=query, store_path=None)
-    lists = PrivateDraftRelays(profile=Profile(), pool=pool,
-                               session_pool=FakeSessionPool(client), directory=directory,
-                               query=query, clock=lambda: NOW)
+def test_save_moves_the_drafts_then_publishes_the_list_and_drafts_follow_it():
+    draft = wrap("draft-1")
+    lists, relays, directory, _client = moving(LIST_ON_MINE, drafts_on={MINE: [draft]})
     sheet, saved = open_sheet(lists)
-    settle()
-    assert sheet.state == EDITING and sheet.chosen() == []
-    add(sheet, "wss://mine.example")
+    relays.run()
+    assert sheet.state == EDITING and sheet.chosen() == [MINE]
+    sheet.buttons["usual"].click()
     sheet.buttons["save"].click()
-    settle(10)
-    assert saved == [["wss://mine.example"]]
-    (_relays, event), = pool.published
-    assert event["kind"] == KIND_PRIVATE_RELAYS and event["tags"] == []
-    assert event["content"] == 'sealed:[["relay","wss://mine.example"]]'
-    assert directory.draft_relays_of(PK) == ["wss://mine.example"]
+    relays.run(rounds=20)
+    assert saved == [[]] and not sheet.isVisible()
+    (moved_to, moved), (_to, listed) = sent(relays)
+    assert moved == draft and set(moved_to) == {U1, U2}  # the draft first, the list last
+    assert listed["kind"] == 10013 and listed["tags"] == []
+    assert listed["content"] == "sealed:[]"
+    assert directory.draft_relays_of(PK) == []

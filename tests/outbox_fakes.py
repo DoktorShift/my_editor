@@ -293,11 +293,12 @@ class FakeRelayDirectory(QObject):
         known = self.draft_lists.get((author or "").lower())
         return list(known) if known is not None else None
 
-    def draft_relays(self, author, on_done, *, entitled=(), legacy=(), reading=False):
+    def draft_relays(self, author, on_done, *, entitled=(), legacy=(), reading=False,
+                     chosen=None):
         self.calls.append(("draft_relays", author, tuple(entitled), tuple(legacy), reading))
+        mine = self.draft_lists.get(author.lower(), ()) if chosen is None else chosen
         self._later(on_done, policy.draft_relays(
-            self.cached(author), self.draft_lists.get(author.lower(), ()),
-            entitled=entitled, legacy=legacy, reading=reading))
+            self.cached(author), mine, entitled=entitled, legacy=legacy, reading=reading))
 
     def outbox_of(self, author, on_done, *, hints=()):
         self.calls.append(("outbox_of", author, tuple(hints)))

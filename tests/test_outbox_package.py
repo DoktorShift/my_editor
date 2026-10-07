@@ -387,6 +387,7 @@ def test_an_unreadable_list_is_never_replaced():
     outcome = run(writer.add_relay(url="wss://m.com", **deps(FakeQuery({10002: UNKNOWN}),
                                                              client=client)))
     assert outcome.status == writer.UNKNOWN_BASE and client.requests == []
+    assert outcome.cause == writer.CAUSE_RELAYS
 
 
 def test_adding_to_no_list_is_refused():
@@ -427,6 +428,20 @@ def test_a_signer_returning_something_else_is_refused():
     outcome = run(writer.add_relay(url="wss://m.com", **deps(
         FakeQuery({10002: found(base)}), client=FakeClient(tamper=tamper), pool=pool)))
     assert outcome.status == writer.FAILED and pool.published == []
+    assert outcome.cause == writer.CAUSE_SIGNER
+
+
+def test_a_change_made_to_another_base_is_not_written_over_it():
+    base = signed(10002, [["r", "wss://a.com"]])
+    client = FakeClient()
+
+    def mutate(found_base):
+        raise writer.BaseChanged("not the one read")
+
+    outcome = run(writer.ReplaceableWriter(kind=10002, mutate=mutate, **deps(
+        FakeQuery({10002: found(base)}), client=client)))
+    assert outcome.status == writer.FAILED and outcome.cause == writer.CAUSE_CHANGED
+    assert outcome.event is None and client.requests == []
 
 
 def test_one_accepting_relay_is_not_enough_and_the_refusals_are_named():
@@ -434,7 +449,7 @@ def test_one_accepting_relay_is_not_enough_and_the_refusals_are_named():
     everyone_but_a = set(defaults.INDEXER_RELAYS) | {"wss://m.com"}
     outcome = run(writer.add_relay(url="wss://m.com", **deps(
         FakeQuery({10002: found(base)}), pool=FakePool(refuse=everyone_but_a))))
-    assert outcome.status == writer.FAILED
+    assert outcome.status == writer.FAILED and outcome.cause == writer.CAUSE_RELAYS
     assert outcome.accepted == ("wss://a.com",)
     assert ("wss://m.com", "blocked") in outcome.refused
     assert "wss://m.com: blocked" in outcome.reason
@@ -458,7 +473,7 @@ def test_a_base_dated_far_ahead_is_refused_before_signing():
     outcome = run(writer.add_relay(url="wss://m.com", **deps(
         FakeQuery({10002: found(base)}), client=client)))
     assert outcome.status == writer.FAILED and client.requests == []
-    assert "clock" in outcome.reason
+    assert "clock" in outcome.reason and outcome.cause == writer.CAUSE_CLOCK
 
 
 def test_a_base_a_little_ahead_is_followed():

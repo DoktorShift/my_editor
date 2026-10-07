@@ -282,17 +282,21 @@ class RelayDirectory(QObject):
 
     def draft_relays(self, author: str, on_done: Callable[[List[str]], None], *,
                      entitled: Sequence[str] = (), legacy: Sequence[str] = (),
-                     reading: bool = False) -> None:
+                     reading: bool = False,
+                     chosen: Optional[Sequence[str]] = None) -> None:
         """Where the author's drafts are written, or with ``reading`` read
-        from (policy.draft_relays)."""
+        from (policy.draft_relays). ``chosen`` asks the same of another
+        list of the account's draft relays than the one known ([] for
+        none): where drafts would go with it, before it is made the one.
+        Such a question does not wait for the account's list to be read."""
         key = (author or "").lower()
-        if key in self._draft_waiting:
+        if chosen is None and key in self._draft_waiting:
             self._draft_waiting[key].append(lambda: self.draft_relays(
                 key, on_done, entitled=entitled, legacy=legacy, reading=reading))
             return
+        mine = self._draft_lists.get(key, ()) if chosen is None else list(chosen)
         self.lookup(key, lambda relay_list: on_done(policy.draft_relays(
-            relay_list, self._draft_lists.get(key, ()), entitled=entitled,
-            legacy=legacy, reading=reading)))
+            relay_list, mine, entitled=entitled, legacy=legacy, reading=reading)))
 
     def _settle_drafts(self, key: str) -> None:
         self._draft_deadlines.pop(key, None)
@@ -525,14 +529,17 @@ def _copy(relay_list: RelayList) -> RelayList:
 
 
 def ask_draft_relays(directory, profile, on_done: Callable[[List[str]], None], *,
-                     entitled=(), reading: bool = False) -> None:
+                     entitled=(), reading: bool = False,
+                     chosen: Optional[Sequence[str]] = None) -> None:
     """Where ``profile``'s drafts are written, or with ``reading`` read
     from: the account's own draft relays when it has chosen some (NIP-37),
-    otherwise wherever its private records live (``ask_private_relays``)."""
+    otherwise wherever its private records live (``ask_private_relays``).
+    ``chosen``: the same for another list than the one known
+    (RelayDirectory.draft_relays)."""
     directory.draft_relays(profile.user_pubkey, on_done,
                            entitled=policy.relays_from(entitled),
                            legacy=list(getattr(profile, "bunker_relays", None) or ()),
-                           reading=reading)
+                           reading=reading, chosen=chosen)
 
 
 def ask_private_relays(directory, profile, on_done: Callable[[List[str]], None], *,

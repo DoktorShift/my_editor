@@ -24,7 +24,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from nostr.outbox.policy import LookupState, RelayList  # noqa: E402
-from nostr.publish_pipeline import mentioned_pubkeys  # noqa: E402
+from nostr.publish_pipeline import (  # noqa: E402
+    kept_by_relay, mentioned_pubkeys, refused_by_relay,
+)
 from nostr.publisher import PublishJob  # noqa: E402
 from tests.outbox_fakes import (  # noqa: E402
     PK, FakeClient, FakePool, FakeRelayDirectory, FakeSessionPool, Profile, settle,
@@ -327,3 +329,18 @@ def test_closing_a_publish_dialog_stops_its_job(kind, tmp_path):
     dialog = _dialog(kind, tmp_path, job)
     dialog.reject()                                  # Escape, or the close button
     assert job.cancelled
+
+
+@pytest.mark.parametrize("ok, message, kept, refused", [
+    (True, "", True, False),
+    (False, "duplicate: already have this event", True, False),
+    (False, "replaced: have newer event", True, False),      # strfry, rnostr
+    (False, "blocked: not on the list", False, True),
+    (False, "rate-limited: slow down", False, True),
+    (False, "auth-required: sign in first", False, True),
+    (False, "publish timeout", False, False),                # no answer at all
+    (False, "", False, False),
+])
+def test_what_a_relays_answer_means(ok, message, kept, refused):
+    assert kept_by_relay(ok, message) is kept
+    assert refused_by_relay(message) is refused

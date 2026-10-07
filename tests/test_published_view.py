@@ -34,9 +34,17 @@ from tests.outbox_fakes import (  # noqa: E402
     NOW, FakeClient, FakeRelayDirectory, FakeSessionPool, PK, Profile, signed,
 )
 from tests.published_fakes import Relays  # noqa: E402
+from tests.widget_lifetime import delete_new_windows  # noqa: E402
 
 R1, R2 = "wss://one.example", "wss://two.example"
 REAL_ALERT = alerts.Alert          # kept before the tests stand in for it
+
+
+@pytest.fixture(autouse=True)
+def _windows_deleted():
+    """Every view and window a test makes is deleted after it (see
+    tests/widget_lifetime.py)."""
+    yield from delete_new_windows()
 
 
 @pytest.fixture(scope="module", autouse=True)

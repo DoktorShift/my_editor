@@ -60,6 +60,7 @@ import theme
 from i18n import _, ngettext
 
 from ..bunker import humanize_failure, is_signer_silent
+from ..publish_pipeline import refused_by_relay
 from ..published import (
     DELETING, LOADING, READY, SIGNED_OUT, UNREACHABLE, PublishedItem, PublishedList,
 )
@@ -119,20 +120,6 @@ def tooltip_text(item: PublishedItem) -> str:
     """The whole title, and the exact time it first went out."""
     return "\n".join((display_title(item), _("{kind}, first published {time}").format(
         kind=kind_word(item), time=format_absolute_time(item.first_published))))
-
-
-# NIP-01: a relay that refuses an event says why with one of these words
-# first; anything else (a timeout, a lost connection) never reached one.
-# ("duplicate" is not among them: that relay has the request already.)
-_REFUSALS = ("auth-required", "blocked", "error", "invalid", "mute", "pow",
-             "rate-limited", "restricted")
-
-
-def refused_by_relay(message: str) -> bool:
-    """Whether a relay's answer is a refusal (NIP-01's machine-readable
-    prefix) rather than no answer at all."""
-    prefix, colon, _rest = (message or "").partition(":")
-    return bool(colon) and prefix.strip().lower() in _REFUSALS
 
 
 def more_label(model: PublishedList) -> str:

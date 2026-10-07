@@ -56,6 +56,32 @@ Mention = Tuple[str, str]               # (pubkey_hex, relay_hint), hint may be 
 _PUBKEY_HEX = re.compile(r"[0-9a-f]{64}")
 
 
+# NIP-01: a relay that turns an event down says why with one of these
+# words first; anything else (a timeout, a lost connection) never reached
+# one. "duplicate" is not among them: that relay has the event already.
+_REFUSALS = ("auth-required", "blocked", "error", "invalid", "mute", "pow",
+             "rate-limited", "restricted")
+
+
+def _prefix(message: str) -> Optional[str]:
+    prefix, colon, _rest = (message or "").partition(":")
+    return prefix.strip().lower() if colon else None
+
+
+def refused_by_relay(message: str) -> bool:
+    """Whether a relay's "not taken" answer is a refusal (NIP-01's
+    machine-readable prefix) rather than no answer at all."""
+    return _prefix(message) in _REFUSALS
+
+
+def kept_by_relay(ok: bool, message: str) -> bool:
+    """Whether a relay holds the event after it was sent there: it took
+    it, had it already ("duplicate:"), or holds a newer version of it
+    ("replaced:", as strfry and rnostr answer an older version of an
+    addressable event)."""
+    return ok or _prefix(message) in ("duplicate", "replaced")
+
+
 def mentioned_pubkeys(event: dict) -> List[Mention]:
     """``(pubkey, relay hint)`` for everyone an event mentions (its ``p``
     tags), in tag order, once each; the hint is "" when the tag has none."""

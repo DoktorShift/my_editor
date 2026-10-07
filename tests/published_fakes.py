@@ -21,6 +21,8 @@ def matches(event: dict, flt: dict) -> bool:
         return False
     if "until" in flt and event.get("created_at", 0) > flt["until"]:
         return False
+    if "since" in flt and event.get("created_at", 0) < flt["since"]:
+        return False
     for key, values in flt.items():
         if key.startswith("#"):
             name = key[1:]

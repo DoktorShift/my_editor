@@ -89,7 +89,7 @@ The publisher uses eager-first-accept semantics: as soon as one relay acknowledg
 
 ### What you published, and taking it back
 
-The Drafts panel has a second view, **Published**, beside **Drafts**. It lists the notes and articles the account in use has published, newest first by the day each one first went out. An article shows its title, a note its first line, and each row says Article or Note and the date. Editing an article later keeps its first date. Every article is listed; notes come fifty at a time, and **Load More Notes** at the end of the list brings older ones.
+The Drafts panel has a second view, **Published**, beside **Drafts**. It lists the notes and articles the account in use has published, newest first by the day each one first went out. An article shows its title, a note its first line, and each row says Article or Note and the date. Editing an article later keeps its first date. Notes come fifty at a time, and **Load More Notes** at the end of the list brings older ones. Articles are read in one go, up to the newest 500; a relay may send fewer by its own rule (strfry sends at most 500), so an account with more articles than that sees its newest ones.
 
 The list is read from the relays you publish to. Anything you asked to delete is left out, also when one relay still has a copy and another one has your request. When no relay answers, the view says so and offers **Try Again**; it never looks empty just because nobody answered.
 
@@ -125,7 +125,13 @@ Drafts are encrypted wherever they are kept. To keep them on relays of your choi
 
 From then on new drafts are saved only there. Drafts are still looked for on your usual relays too, so drafts saved earlier, or by an app that doesn't know this setting, are found. The choice itself is kept on your relays, encrypted to your own key (NIP-37), so your other devices and apps that read it (Amethyst does) keep drafts in the same place. Apps that don't read it won't see the drafts saved there.
 
-**Use My Usual Relays** empties the list; after **Save**, drafts go where they went before you chose.
+Your drafts move with the setting. When you click **Save**, MyEditor first copies every draft from where drafts are kept now to where they go next, as it is: the drafts are already signed, so your signer is not asked about them, and drafts you deleted stay deleted. The sheet counts them ("Moving 12 drafts…"). Only when every draft is there does the new choice go out (your signer asks for that one), and from then on drafts are saved by it. The copies left on relays you no longer use stay there, encrypted; nothing asks those relays to delete them.
+
+If a draft can't be copied, nothing changes: your drafts stay where they are, and the sheet says what to do. When a relay you are leaving doesn't answer, check your internet connection and try again; if that relay is gone for good, **Save Anyway** changes the setting all the same, and the drafts kept only there are no longer shown. If the setting was changed on another device while the sheet was open, nothing is written over it: the sheet shows the setting as it is now.
+
+**Use My Usual Relays** empties the list; after **Save**, your drafts move back to your usual relays and are saved there again.
+
+Another device that is running while you change this keeps saving drafts by the old setting until MyEditor starts again there. Drafts it saved in the meantime on a relay you left are not shown any more, so change the setting while MyEditor is closed on your other devices, or start it again there afterwards.
 
 ### Recovery
 

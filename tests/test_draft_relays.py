@@ -20,8 +20,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from nostr.draft_relays import (  # noqa: E402
-    KIND_PRIVATE_RELAYS, PrivateDraftRelays, draft_relay_address, parse_private_relays,
-    private_relays_plaintext,
+    KIND_PRIVATE_RELAYS, UNDECRYPTED, UNREACHABLE, PrivateDraftRelays, draft_relay_address,
+    parse_private_relays, private_relays_plaintext,
 )
 from nostr.outbox import writer as outbox_writer  # noqa: E402
 from nostr.outbox.directory import RelayDirectory  # noqa: E402
@@ -76,16 +76,16 @@ def test_the_list_is_read_and_decrypted():
 
 
 def test_none_and_unreadable_are_told_apart():
-    for answer, expected in ((ABSENT, []), (UNKNOWN, None)):
+    for answer, expected, failure in ((ABSENT, [], None), (UNKNOWN, None, UNREACHABLE)):
         drafts, _client, _pool = lists(answer)
         got = []
         drafts.read(got.append)
-        assert got == [expected]
+        assert got == [expected] and drafts.last_failure == failure
     undecryptable = signed(KIND_PRIVATE_RELAYS, [], "garbage")
     drafts, _client, _pool = lists(found(undecryptable))
     got = []
     drafts.read(got.append)
-    assert got == [None]
+    assert got == [None] and drafts.last_failure == UNDECRYPTED     # the signer, not the net
 
 
 def test_publishing_encrypts_the_relays_into_the_content():
@@ -114,6 +114,7 @@ def test_a_signer_that_will_not_encrypt_changes_nothing():
     outcomes = []
     drafts.publish(["wss://mine.example"], outcomes.append)
     assert outcomes[0].status == outbox_writer.FAILED and pool.published == []
+    assert outcomes[0].cause == outbox_writer.CAUSE_SIGNER
 
 
 def test_an_empty_list_is_never_published():
@@ -167,45 +168,268 @@ def test_an_account_without_a_list_has_nothing_to_stop():
     assert client.requests == [] and pool.published == []
 
 
-def test_saving_publishes_the_list_and_then_drafts_follow_it():
-    drafts, _client, pool = lists(ABSENT)
-    directory = drafts._directory
-    outcomes = []
-    drafts.save(["wss://Mine.example/", "wss://two.example"], outcomes.append)
-    settle(10)
-    assert outcomes[0].status == outbox_writer.WRITTEN and pool.published
-    assert directory.draft_relays_of(PK) == ["wss://mine.example", "wss://two.example"]
+# -- saving moves the drafts (review H1) ------------------------------------------------
+
+MINE = "wss://mine.example"           # the account's draft relay before the change
+OTHER = "wss://other.example"         # one it moves to
+U1, U2 = "wss://usual-1.example", "wss://usual-2.example"   # its usual relays
 
 
-def test_saving_none_goes_back_to_the_usual_relays():
-    existing = signed(KIND_PRIVATE_RELAYS, [], 'sealed:[["relay","wss://mine.example"]]')
-    drafts, client, _pool = lists(found(existing))
-    directory = drafts._directory
-    directory.set_draft_relays(PK, ["wss://mine.example"])
-    outcomes = []
-    drafts.save([], outcomes.append)
-    settle(10)
-    assert outcomes[0].ok and client.requests[0]["content"] == "sealed:[]"
+def wrap(d_tag, content="sealed draft", *, at=NOW - 500, extra=()):
+    return signed(31234, [["d", d_tag], ["k", "1"], *extra], content, created_at=at)
+
+
+def moving(answer, *, drafts_on=None, refuse_publish=(), reason="blocked"):
+    """A PrivateDraftRelays that already read ``answer`` (the account's
+    list), on relays a test fills (``drafts_on``: relay -> events) and
+    runs: Relays answers reads and takes or refuses what is sent."""
+    from tests.published_fakes import Relays
+    relays = Relays(refuse_publish=refuse_publish)
+    relays.publisher.reason = reason
+    for relay, events_ in (drafts_on or {}).items():
+        relays.keep(relay, *events_)
+    query = FakeQuery({KIND_PRIVATE_RELAYS: answer})
+    directory = RelayDirectory(relays, query=query, store_path=None)
+    directory.remember(signed(10002, [["r", U1], ["r", U2]], created_at=NOW - 900))
+    client = SealingClient()
+    drafts = PrivateDraftRelays(profile=Profile(), pool=relays,
+                                session_pool=FakeSessionPool(client), directory=directory,
+                                query=query, clock=lambda: NOW)
+    read = []
+    drafts.read(read.append)
+    if read and read[0] is not None:
+        directory.set_draft_relays(PK, read[0])
+    return drafts, relays, directory, client
+
+
+def save(drafts, relays, chosen):
+    outcomes, steps = [], []
+    drafts.save(chosen, outcomes.append, on_step=lambda *step: steps.append(step))
+    relays.run(rounds=20)
+    return outcomes[0] if outcomes else None, steps
+
+
+def sent(relays, kind=None):
+    """(relays, event) of what was published, in order."""
+    return [(urls, event) for urls, event in relays.published
+            if kind is None or event["kind"] == kind]
+
+
+LIST_ON_MINE = found(signed(KIND_PRIVATE_RELAYS, [], 'sealed:[["relay","wss://mine.example"]]'))
+
+
+def test_going_back_to_the_usual_relays_moves_the_drafts_there_first():
+    draft, deleted = wrap("draft-1"), wrap("draft-2", content="")
+    request = signed(5, [["a", f"31234:{PK}:draft-3"], ["k", "31234"]], created_at=NOW - 400)
+    old_version = wrap("draft-1", content="older", at=NOW - 900)
+    drafts, relays, directory, _client = moving(
+        LIST_ON_MINE, drafts_on={MINE: [draft, deleted, request, old_version]})
+    outcome, steps = save(drafts, relays, [])
+    assert outcome.ok and outcome.move.moved == 3 and outcome.move.total == 3
+    moved = sent(relays)[:3]
+    assert {event["id"] for _urls, event in moved} == {draft["id"], deleted["id"], request["id"]}
+    assert all(set(urls) == {U1, U2} for urls, _event in moved)     # where drafts go next
+    (_urls, listed), = sent(relays, KIND_PRIVATE_RELAYS)
+    assert listed["content"] == "sealed:[]" and sent(relays)[-1][1] is listed  # the list last
     assert directory.draft_relays_of(PK) == []
+    # Three events moved, one of them a draft with content (the count shown).
+    assert ("moving_drafts", 3, 3, 1) in steps and steps[-1][0] == "saving_list"
+
+
+def test_moving_to_another_relay_sends_the_drafts_there():
+    draft = wrap("draft-1")
+    drafts, relays, directory, _client = moving(LIST_ON_MINE, drafts_on={MINE: [draft]})
+    outcome, _steps = save(drafts, relays, [OTHER])
+    assert outcome.ok
+    assert sent(relays, 31234) == [([OTHER], draft)]
+    assert directory.draft_relays_of(PK) == [OTHER]
+
+
+def test_a_relay_being_left_that_does_not_answer_changes_nothing():
+    drafts, relays, directory, _client = moving(LIST_ON_MINE,
+                                                drafts_on={MINE: [wrap("draft-1")]})
+    relays.down = {MINE}
+    outcome, _steps = save(drafts, relays, [])
+    assert not outcome.ok and outcome.move.unread == (MINE,) and outcome.write is None
+    assert relays.published == []                       # neither drafts nor the list
+    assert directory.draft_relays_of(PK) == [MINE]      # drafts go where they went
+
+
+def test_a_draft_no_new_relay_took_changes_nothing():
+    drafts, relays, directory, _client = moving(
+        LIST_ON_MINE, drafts_on={MINE: [wrap("draft-1")]}, refuse_publish={U1, U2},
+        reason="publish timeout")
+    outcome, _steps = save(drafts, relays, [])
+    assert not outcome.ok and len(outcome.move.not_moved) == 1
+    assert not outcome.move.refused                     # silence: try again later
+    assert sent(relays, KIND_PRIVATE_RELAYS) == []
+    assert directory.draft_relays_of(PK) == [MINE]
+
+
+def test_a_refusal_is_told_from_silence():
+    drafts, relays, _directory, _client = moving(
+        LIST_ON_MINE, drafts_on={MINE: [wrap("draft-1")]}, refuse_publish={U1, U2},
+        reason="blocked: not on this relay")
+    outcome, _steps = save(drafts, relays, [])
+    assert not outcome.ok and outcome.move.refused      # choose other relays
+
+
+def test_a_draft_one_new_relay_has_already_is_moved_whatever_the_other_says():
+    draft = wrap("draft-1")
+    drafts, relays, _directory, _client = moving(
+        LIST_ON_MINE, drafts_on={MINE: [draft], U1: [draft]}, refuse_publish={U2},
+        reason="blocked: no")
+    outcome, _steps = save(drafts, relays, [])
+    assert outcome.ok and sent(relays, 31234) == [([U2], draft)]
+
+
+def test_a_draft_a_request_deleted_is_left_and_the_request_moves():
+    deleted = wrap("draft-1", at=NOW - 500)
+    request = signed(5, [["a", f"31234:{PK}:draft-1"], ["k", "31234"]], created_at=NOW - 400)
+    saved_again = wrap("draft-2", at=NOW - 300)
+    request_2 = signed(5, [["a", f"31234:{PK}:draft-2"], ["k", "31234"]],
+                       created_at=NOW - 350)       # older than the draft saved after it
+    drafts, relays, _directory, _client = moving(
+        LIST_ON_MINE, drafts_on={MINE: [deleted, request, saved_again, request_2]})
+    outcome, _steps = save(drafts, relays, [])
+    assert outcome.ok
+    assert {event["id"] for _urls, event in sent(relays) if event["kind"] != KIND_PRIVATE_RELAYS} \
+        == {request["id"], saved_again["id"], request_2["id"]}
+
+
+def test_save_anyway_leaves_the_drafts_of_a_relay_that_is_gone():
+    drafts, relays, directory, _client = moving(
+        LIST_ON_MINE, drafts_on={U1: [wrap("draft-1")]})
+    relays.down = {MINE}
+    outcomes = []
+    drafts.save([], outcomes.append, leave_unread=True)
+    relays.run(rounds=20)
+    assert outcomes[0].ok and directory.draft_relays_of(PK) == []
+    (_urls, listed), = sent(relays, KIND_PRIVATE_RELAYS)
+    assert listed["content"] == "sealed:[]"
+
+
+class _Every:
+    """Every relay (as ``Relays.down``)."""
+
+    def __contains__(self, _url):
+        return True
+
+
+def test_nothing_read_at_all_changes_nothing_even_when_leaving_them():
+    drafts, relays, directory, _client = moving(LIST_ON_MINE)
+    relays.down = _Every()
+    outcomes = []
+    drafts.save([], outcomes.append, leave_unread=True)
+    relays.run(rounds=20)
+    assert not outcomes[0].ok and relays.published == []
+    assert directory.draft_relays_of(PK) == [MINE]
+
+
+def test_drafts_saved_by_routing_older_than_the_list_move_too():
+    # Another device moved the drafts to MINE since this one started, and
+    # this one still saved a draft by its older routing, on OLD.
+    old = "wss://old.example"
+    late_one = wrap("draft-9")
+    drafts, relays, directory, _client = moving(LIST_ON_MINE, drafts_on={old: [late_one]})
+    directory.set_draft_relays(PK, [old])
+    outcome, _steps = save(drafts, relays, [OTHER])
+    assert outcome.ok and sent(relays, 31234) == [([OTHER], late_one)]
+
+
+def test_a_draft_saved_while_the_list_is_signed_is_caught_up():
+    drafts, relays, directory, _client = moving(LIST_ON_MINE,
+                                                drafts_on={MINE: [wrap("draft-1")]})
+    late = wrap("draft-2", at=NOW - 5)
+    outcomes = []
+
+    def step(name, *_counts):
+        if name == "saving_list":                 # another device saves now, by the old list
+            relays.keep(MINE, late)
+
+    drafts.save([OTHER], outcomes.append, on_step=step)
+    relays.run(rounds=30)
+    assert outcomes[0].ok
+    assert ([OTHER], late) in sent(relays, 31234)
+    assert directory.draft_relays_of(PK) == [OTHER]
+
+
+def test_a_list_changed_elsewhere_since_it_was_read_is_not_written_over():
+    drafts, relays, directory, _client = moving(LIST_ON_MINE)
+    newer = signed(KIND_PRIVATE_RELAYS, [], 'sealed:[["relay","wss://else.example"]]',
+                   created_at=NOW - 50)
+    drafts._query.answers[KIND_PRIVATE_RELAYS] = found(newer)    # changed on another device
+    outcome, _steps = save(drafts, relays, [OTHER])
+    assert not outcome.ok and outcome.write.cause == outbox_writer.CAUSE_CHANGED
+    assert sent(relays, KIND_PRIVATE_RELAYS) == [] and directory.draft_relays_of(PK) == [MINE]
+
+
+def test_a_relay_that_has_a_newer_version_has_the_draft():
+    drafts, relays, _directory, _client = moving(
+        LIST_ON_MINE, drafts_on={MINE: [wrap("draft-1")]}, refuse_publish={U1, U2},
+        reason="replaced: have newer event")
+    outcome, _steps = save(drafts, relays, [])
+    assert outcome.ok and outcome.move.moved == 1
+
+
+def test_drafts_already_where_they_go_next_are_not_sent_again():
+    draft = wrap("draft-1")
+    drafts, relays, _directory, _client = moving(
+        LIST_ON_MINE, drafts_on={MINE: [draft], U1: [draft], U2: [draft]})
+    outcome, _steps = save(drafts, relays, [])
+    assert outcome.ok and outcome.move.moved == 1 and sent(relays, 31234) == []
+
+
+def test_an_expired_draft_is_left_behind():
+    expired = wrap("old-import", extra=[["expiration", str(NOW - 10)]])
+    drafts, relays, _directory, _client = moving(LIST_ON_MINE, drafts_on={MINE: [expired]})
+    outcome, _steps = save(drafts, relays, [])
+    assert outcome.ok and outcome.move.total == 0 and sent(relays, 31234) == []
+
+
+def test_every_draft_is_read_a_page_at_a_time(monkeypatch):
+    from nostr import draft_relays
+    monkeypatch.setattr(draft_relays, "MOVE_PAGE", 2)
+    many = [wrap(f"draft-{n}", at=NOW - 100 * n) for n in range(5)]
+    drafts, relays, _directory, _client = moving(LIST_ON_MINE, drafts_on={MINE: many})
+    outcome, _steps = save(drafts, relays, [])
+    assert outcome.ok and outcome.move.moved == 5
+
+
+def test_drafts_saved_while_they_move_wait_for_where_they_go_next():
+    drafts, relays, directory, _client = moving(LIST_ON_MINE,
+                                                drafts_on={MINE: [wrap("draft-1")]})
+    outcomes, answers = [], []
+    drafts.save([OTHER], outcomes.append)
+    # A draft being saved now (DraftPublishJob asks this) waits ...
+    from nostr.outbox import ask_draft_relays
+    ask_draft_relays(directory, Profile(), answers.append)
+    settle()
+    assert answers == []
+    relays.run(rounds=20)
+    assert outcomes[0].ok and answers == [[OTHER]]      # ... and goes to the new relay
+
+
+def test_saving_the_same_list_moves_nothing():
+    drafts, relays, _directory, _client = moving(LIST_ON_MINE,
+                                                 drafts_on={MINE: [wrap("draft-1")]})
+    outcome, _steps = save(drafts, relays, [MINE])
+    assert outcome.ok and outcome.move.total == 0 and sent(relays, 31234) == []
 
 
 def test_saving_none_without_a_list_is_already_done():
-    drafts, client, pool = lists(ABSENT)
-    outcomes = []
-    drafts.save([], outcomes.append)
-    settle(10)
-    assert outcomes[0].status == outbox_writer.UNCHANGED and outcomes[0].ok
-    assert pool.published == [] and drafts._directory.draft_relays_of(PK) == []
+    drafts, relays, directory, _client = moving(ABSENT)
+    outcome, _steps = save(drafts, relays, [])
+    assert outcome.ok and outcome.write.status == outbox_writer.UNCHANGED
+    assert sent(relays, KIND_PRIVATE_RELAYS) == [] and directory.draft_relays_of(PK) == []
 
 
-def test_a_save_that_did_not_go_out_leaves_the_drafts_where_they_were():
-    drafts, _client, pool = lists(UNKNOWN)
-    directory = drafts._directory
-    outcomes = []
-    drafts.save(["wss://mine.example"], outcomes.append)
-    settle(10)
-    assert outcomes[0].status == outbox_writer.UNKNOWN_BASE and pool.published == []
-    assert directory.draft_relays_of(PK) is None
+def test_a_list_that_did_not_go_out_leaves_the_drafts_where_they_were():
+    drafts, relays, directory, _client = moving(LIST_ON_MINE)
+    drafts._query.answers[KIND_PRIVATE_RELAYS] = UNKNOWN    # the list can't be read now
+    outcome, _steps = save(drafts, relays, [OTHER])
+    assert outcome.move.ok and outcome.write.status == outbox_writer.UNKNOWN_BASE
+    assert sent(relays, KIND_PRIVATE_RELAYS) == [] and directory.draft_relays_of(PK) == [MINE]
 
 
 def test_saving_only_unusable_addresses_is_refused_before_anything_is_asked():
