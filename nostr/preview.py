@@ -64,6 +64,7 @@ from doc_walk import iter_blocks
 from i18n import _, ngettext
 from markdown_writer import READ_FEATURES, read_markdown
 from nostr import bech32
+from nostr.refs import outside_code
 
 # person's pubkey (hex) -> the name to show, or None
 NameLookup = Callable[[str], Optional[str]]
@@ -139,34 +140,13 @@ def reference_label(reference: str, names: Optional[NameLookup]) -> str:
     return "@" + name
 
 
-def _outside_code(markdown: str, change: Callable[[str], str]) -> str:
-    """Apply ``change`` to the Markdown outside fenced code blocks and
-    inline code, which show references as they are."""
-    out = []
-    fence = None
-    for line in markdown.split("\n"):
-        stripped = line.lstrip()
-        if fence is None and stripped.startswith(("```", "~~~")):
-            fence = stripped[:3]
-            out.append(line)
-            continue
-        if fence is not None:
-            if stripped.startswith(fence):
-                fence = None
-            out.append(line)
-            continue
-        parts = re.split(r"(`+[^`]*`+)", line)
-        out.append("".join(p if p.startswith("`") else change(p) for p in parts))
-    return "\n".join(out)
-
-
 def markdown_for_preview(markdown: str, names: Optional[NameLookup] = None) -> str:
     """The article's Markdown with every ``nostr:`` reference turned into
     a link that reads like the apps show it."""
     def replace(text: str) -> str:
         return _REFERENCE.sub(
             lambda m: f"[{reference_label(m.group(0), names)}]({m.group(0)})", text)
-    return _outside_code(markdown, replace)
+    return outside_code(markdown, replace)
 
 
 # --------------------------------------------------------------------------- #

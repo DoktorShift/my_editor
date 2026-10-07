@@ -57,6 +57,7 @@ from .drafts import (
 from .draft_deletions import build_deletion_request
 from .events import build_event, verify_event
 from .outbox import RelayDirectory, ask_draft_relays, normalize_relay_url
+from . import refs
 from .outbox import defaults as outbox_defaults
 from .outbox.lookup import fetch_replaceable
 from .outbox.policy import dedupe_relays
@@ -355,12 +356,18 @@ def build_note(
     through ``extra_tags`` because only this function holds the final
     content, and the "URL is in the content" check has to run against it.
 
+    Every note or article the content quotes (a ``nostr:`` link to it)
+    gets a ``q`` tag, and its author a ``p`` tag (refs.quote_tags).
+
     Always attaches ``["client", CLIENT_NAME]`` so readers that honour the
     NIP-89 client tag display "Published from MyEditor" under the note.
     """
     final_content, p_tags = _resolve_mentions(content, mentions or [])
     tags: List[List[str]] = [["client", CLIENT_NAME]]
     tags.extend(p_tags)
+    # Quoted notes and articles (NIP-18 q tags) and their authors.
+    tags.extend(refs.quote_tags(refs.find_references(final_content, markdown=False),
+                                [tag[1] for tag in p_tags]))
     tags.extend(build_imeta_tags(media, final_content))
     if extra_tags:
         tags.extend(extra_tags)
@@ -418,6 +425,9 @@ def build_article(
         ["d", slug.strip()],
     ]
     tags.extend(p_tags)
+    # Quoted notes and articles (NIP-18 q tags) and their authors.
+    tags.extend(refs.quote_tags(refs.find_references(final_content),
+                                [tag[1] for tag in p_tags]))
     if title.strip():
         tags.append(["title", title.strip()])
     if summary.strip():
