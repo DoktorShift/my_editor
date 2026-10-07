@@ -4833,7 +4833,7 @@ msgstr "Konto gespeichert"
 
 #: nostr/ui/account_windows.py:724
 msgid "Telling Nostr apps where your posts are"
-msgstr "Nostr-Apps mitteilen, wo deine Beiträge liegen"
+msgstr "Nostr-Apps wird mitgeteilt, wo deine Beiträge liegen"
 
 #: nostr/ui/account_windows.py:725
 msgid "Publishing your profile"
@@ -4867,7 +4867,7 @@ msgstr "Konto auf diesem Computer gespeichert"
 
 #: nostr/ui/account_windows.py:1054
 msgid "Finding where your posts are"
-msgstr "Herausfinden, wo deine Beiträge liegen"
+msgstr "Es wird gesucht, wo deine Beiträge liegen"
 
 #: nostr/ui/account_windows.py:1055
 msgid "Finding your profile"
