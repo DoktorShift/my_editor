@@ -264,28 +264,54 @@ def test_a_link_that_shows_its_own_address_is_written_bare(words, href, written)
     assert document_to_markdown(from_markdown(out)) == out
 
 
-@pytest.mark.parametrize("address", [
+# Addresses whose bare form Qt's reader does not take back whole, in every
+# Qt version this app is built with: written <address>, whatever the version.
+NEVER_BARE = [
     "https://de.wikipedia.org/wiki/M%C3%BCnchen",          # a percent sign
     "https://example.com:8080/x",                          # a port
     "https://mastodon.social/@user",                       # an @
     "https://example.com/a,b",                             # a comma
     "https://example.com/wow!",                            # an exclamation mark
-    "https://example.com/c++",                             # a plus
     "https://example.com/page_(info)",                     # parentheses
     "https://example.com/cdn-cgi/image/width=80,quality=75/a.jpg",
-])
-def test_an_own_address_qt_would_not_read_back_whole_is_kept_whole(address):
-    # Review F2: written bare, these came back as no link, or cut short.
+]
+# Addresses whose bare form some Qt versions take back whole and others do
+# not (6.11.2 reads "c++" back whole, 6.11.1 cuts it): the writer asks the
+# Qt it runs on.
+DEPENDS_ON_QT = [
+    "https://example.com/c++",                             # a plus
+]
+
+
+def _own_address_round_trip(address: str) -> str:
+    """The Markdown of an own-address link, after checking what must hold
+    whatever the Qt version: it reads back as the same whole link, writing
+    it again gives the same Markdown, and a file holding it opens
+    formatted."""
     from markdown_writer import holds_faithfully
     doc = typed(("see ", {}), (address, {"href": address}), (" now", {}))
     out = document_to_markdown(doc)
-    assert out == f"see <{address}> now\n"
     back = from_markdown(out)
     links = [(text, fmt.anchorHref()) for block in [back.begin()]
              for text, fmt in __import__("doc_walk").iter_block_runs(block) if fmt.isAnchor()]
     assert links == [(address, address)]
     assert document_to_markdown(back) == out
     assert holds_faithfully(out)             # an older file with it opens formatted
+    return out
+
+
+@pytest.mark.parametrize("address", NEVER_BARE)
+def test_an_own_address_qt_would_not_read_back_whole_is_kept_whole(address):
+    # Review F2: written bare, these came back as no link, or cut short.
+    assert _own_address_round_trip(address) == f"see <{address}> now\n"
+
+
+@pytest.mark.parametrize("address", DEPENDS_ON_QT + ["https://example.com/plain"])
+def test_an_own_address_is_bare_exactly_when_qt_reads_it_back_whole(address):
+    from markdown_writer import _reads_back_whole
+    bare = _reads_back_whole(address, address)
+    expected = f"see {address} now\n" if bare else f"see <{address}> now\n"
+    assert _own_address_round_trip(address) == expected
 
 
 def test_a_media_address_alone_on_its_line_stays_bare():
