@@ -115,6 +115,11 @@ class _ReplaceableQuery(QObject):
         if d_tag is not None:
             query["#d"] = [d_tag]
         self._sub = pool.subscribe(relays, [query])
+        # However this query goes (answered, or with the object that asked),
+        # its subscription goes too: left open, the relays would go on
+        # sending what matches, and a dropped socket would be reopened for it.
+        self.destroyed.connect(self._sub.close)
+        self.destroyed.connect(self._sub.deleteLater)
         self._sub.event.connect(self._on_event)
         self._sub.relay_eose.connect(self._on_relay_eose)
         self._sub.relay_closed.connect(self._on_relay_refused)
