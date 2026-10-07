@@ -57,9 +57,11 @@ def create_label(count: int) -> str:
 def signer_note(prompts: int) -> str:
     if prompts <= 0:
         return ""
-    return ngettext("Your signer may ask once. Keep it open until this finishes.",
-                    "Your signer may ask up to {count} times, once per draft and image. "
-                    "Keep it open until this finishes.", prompts).format(count=prompts)
+    return ngettext("Your signer may ask up to {count} time, twice for each draft and once "
+                    "for each image. Keep it open until this finishes.",
+                    "Your signer may ask up to {count} times, twice for each draft and once "
+                    "for each image. Keep it open until this finishes.",
+                    prompts).format(count=prompts)
 
 
 class _Note(QLabel):

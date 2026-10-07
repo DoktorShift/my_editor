@@ -5492,52 +5492,53 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: nostr/ui/imports_actions.py:60
-msgid "Your signer may ask once. Keep it open until this finishes."
-msgid_plural "Your signer may ask up to {count} times, once per draft and image. Keep it open until this finishes."
+#, python-brace-format
+msgid "Your signer may ask up to {count} time, twice for each draft and once for each image. Keep it open until this finishes."
+msgid_plural "Your signer may ask up to {count} times, twice for each draft and once for each image. Keep it open until this finishes."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/imports_actions.py:96
+#: nostr/ui/imports_actions.py:98
 #: nostr/ui/imports_window.py:879
 msgid "Skip"
 msgstr ""
 
-#: nostr/ui/imports_actions.py:99
+#: nostr/ui/imports_actions.py:101
 msgid "Options…"
 msgstr ""
 
-#: nostr/ui/imports_actions.py:101
+#: nostr/ui/imports_actions.py:103
 msgid "Copy images, fetch the full article"
 msgstr ""
 
-#: nostr/ui/imports_actions.py:144
+#: nostr/ui/imports_actions.py:146
 msgid "Options for the New Drafts"
 msgstr ""
 
-#: nostr/ui/imports_actions.py:148
+#: nostr/ui/imports_actions.py:150
 #: nostr/ui/imports_source_settings.py:178
 msgid "Copy images to your media server"
 msgstr ""
 
-#: nostr/ui/imports_actions.py:154
+#: nostr/ui/imports_actions.py:156
 msgid "Review Images…"
 msgstr ""
 
-#: nostr/ui/imports_actions.py:160
+#: nostr/ui/imports_actions.py:162
 #: nostr/ui/imports_source_settings.py:184
 msgid "Fetch the full article"
 msgstr ""
 
-#: nostr/ui/imports_actions.py:166
+#: nostr/ui/imports_actions.py:168
 msgid "These posts come from sources with different settings. What you choose here applies to all of them, this time."
 msgstr ""
 
-#: nostr/ui/imports_actions.py:152
+#: nostr/ui/imports_actions.py:154
 #: nostr/ui/imports_source_settings.py:181
 msgid "Drafts keep working if the original site removes its images."
 msgstr ""
 
-#: nostr/ui/imports_actions.py:164
+#: nostr/ui/imports_actions.py:166
 #: nostr/ui/imports_source_settings.py:187
 msgid "Uses the whole article when the feed only has a summary."
 msgstr ""

@@ -955,12 +955,14 @@ class ImportsController(QObject):
         return options.rehost_images, options.fetch_full_text
 
     def signer_prompts(self, posts: Sequence[Post], *, copy_images: bool) -> int:
-        """How often a signer app may ask while ``posts`` become drafts: once
-        a draft, and once an image copied. 0 when the key is kept here."""
+        """At most how often a signer app asks while ``posts`` become drafts:
+        twice a draft (it encrypts the draft, then signs it: CP2 review N7,
+        once was half the truth), and once an image copied, the cover
+        included. 0 when the key is kept here."""
         if self._profile is None or getattr(self._profile, "signer", "remote") == "local":
             return 0
-        images = sum(max(post.image_count, 1 if post.image else 0) for post in posts)
-        return len(posts) + (images if copy_images else 0)
+        images = sum(post.image_count + (1 if post.image else 0) for post in posts)
+        return 2 * len(posts) + (images if copy_images else 0)
 
     def can_create(self) -> bool:
         """Whether drafts can be created now (one import at a time)."""
