@@ -1339,3 +1339,18 @@ def test_every_control_has_a_name():
         assert unnamed_controls(two) == []
     finally:
         two.hide()
+
+# --------------------------------------------------------------------------- #
+# One row geometry (review F14)                                                #
+# --------------------------------------------------------------------------- #
+
+def test_the_panel_keeps_no_copy_of_the_row_geometry():
+    """The panel's lists read alike because their rows come from one
+    place, drafts_common; the panel keeps no copy of it."""
+    from nostr.ui import drafts_common
+    source = pathlib.Path(dp.__file__).read_text(encoding="utf-8")
+    for name in ("GUTTER", "_ROW_PAD_V", "_ROW_LINE_GAP", "_SELECTION_BAR_W"):
+        assert not re.search(rf"^{name}\s*[:=]", source, re.MULTILINE), name
+    assert (dp.GUTTER, dp._ROW_PAD_V, dp._ROW_LINE_GAP, dp._SELECTION_BAR_W) == (
+        drafts_common.LIST_GUTTER, drafts_common.ROW_PAD_V, drafts_common.ROW_LINE_GAP,
+        drafts_common.SELECTION_BAR_W)

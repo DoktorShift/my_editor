@@ -123,7 +123,11 @@ from ..profiles import Profile
 # module back: the panel is what builds the preview's controller. The
 # aliases keep the panel's own body, and its tests, reading as before.
 from .drafts_common import (
+    LIST_GUTTER as GUTTER,
     MIN_CONTROL_PX as _MIN_CONTROL_PX,
+    ROW_LINE_GAP as _ROW_LINE_GAP,
+    ROW_PAD_V as _ROW_PAD_V,
+    SELECTION_BAR_W as _SELECTION_BAR_W,
     THEME_TOKENS as _THEME_TOKENS,
     format_absolute_date,
     format_absolute_time as _format_absolute_time,
@@ -146,21 +150,16 @@ DEFAULT_PANEL_WIDTH: int = 320
 MIN_PANEL_WIDTH: int = 260
 MAX_PANEL_WIDTH: int = 520
 
-# The panel's single gutter. The segmented control, the search field,
-# the status line, the empty state and both row lines all start here.
-# ``layout.md``: "Align components with one another to make them easier
-# to scan and to communicate organization and hierarchy."
-GUTTER: int = 12
+# The panel's single gutter (GUTTER) and the rows' box model (_ROW_PAD_V,
+# _ROW_LINE_GAP, _SELECTION_BAR_W) come from drafts_common, which every
+# list in the panel shares, so its views read alike. The segmented
+# control, the search field, the status line, the empty state and both
+# row lines all start at the gutter. ``layout.md``: "Align components
+# with one another to make them easier to scan and to communicate
+# organization and hierarchy."
 
-# Row box model, all vertical values feed the derived row height below.
-_ROW_PAD_V: int = 7
-_ROW_LINE_GAP: int = 2
+# Between the title and the age on a row's first line.
 _ROW_INLINE_GAP: int = 8
-# Selected rows get a leading bar as well as a fill. ``accessibility.md``:
-# "Offer visual indicators, like distinct shapes or icons, in addition to
-# color to help people perceive differences in function and changes in
-# state."
-_SELECTION_BAR_W: int = 3
 
 # How long a one-off sync narration holds the status line once the store
 # is no longer loading. Matches the main window's own transient status
