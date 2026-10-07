@@ -1220,7 +1220,17 @@ class ImportsWindow(QMainWindow):
         self.notice.setVisible(bool(self.notice.text()))
 
     def _show_source(self, key: str) -> None:
+        """A source just followed, or followed already: where its posts are.
+        Following stores what the lookup found as Older Posts (the first
+        check of a source is a baseline), so a source with nothing New
+        opens on Older, where the posts the sheet promised are (CP2
+        review N4)."""
         self.show_view(SOURCE, key)
+        source = self._controller.source(key)
+        if (source is not None and source.automatic and not source.new_count
+                and source.older_count):
+            self.segment_older.setChecked(True)
+            self._on_segment(OLDER)
 
     def _show_file(self, collection_id: str) -> None:
         self.show_view(FILE, collection_id)

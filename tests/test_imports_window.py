@@ -371,6 +371,10 @@ class TestAdding:
         assert window.sidebar.chosen() == next(e for e in entries(window)
                                                if e.key == source_key(AUTHOR))
         assert window.sheet() is None
+        # Review N4: on Older, where the posts the card promised are (a
+        # first check is a baseline), not on an empty New.
+        assert window.segment_older.isChecked()
+        assert sorted(titles(window)) == ["First", "Second"]
 
     def test_an_empty_inbox_offers_to_follow(self, tmp_path):
         controller = controller_for(tmp_path)
