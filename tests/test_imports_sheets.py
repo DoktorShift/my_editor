@@ -34,6 +34,15 @@ from tests.imports_fakes import TWO_ITEM_FEED, FakeFetcher
 from tests.outbox_fakes import settle
 from tests.test_imports_controller import Harness, profile
 from tests.test_imports_files import OPML, WXR
+from tests.widget_lifetime import delete_new_windows
+
+
+@pytest.fixture(autouse=True)
+def _windows_deleted():
+    """Every window and panel a test makes is deleted after it: left to
+    the cycle collector, one without a parent can crash it."""
+    yield from delete_new_windows()
+
 
 FEED = "https://blog.example/feed"
 LIST = "https://reader.example/subscriptions.opml"

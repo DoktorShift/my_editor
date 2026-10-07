@@ -44,6 +44,14 @@ from nostr.ui.drafts_common import THEME_TOKENS
 from nostr.ui.drafts_panel import DraftsPanel, _accessible_row_text
 from nostr.ui.thumbnail_loader import ThumbnailLoader
 from tests.blossom_fakes import FakeNam, FakeReply
+from tests.widget_lifetime import delete_new_windows
+
+
+@pytest.fixture(autouse=True)
+def _windows_deleted():
+    """Every window and panel a test makes is deleted after it: left to
+    the cycle collector, one without a parent can crash it."""
+    yield from delete_new_windows()
 
 
 PK = "a" * 64

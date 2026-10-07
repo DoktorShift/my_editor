@@ -16,6 +16,7 @@ import pytest
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QKeySequence
 from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
 
 from nostr.imports.feed_list import source_key
 from nostr.imports.inbox_store import INBOX, OLDER_POSTS, SKIPPED_POSTS
@@ -28,6 +29,15 @@ from tests.imports_fakes import FakeCatalogue, FakeFetcher, TWO_ITEM_FEED, inlin
 from tests.imports_fakes import make_item
 from tests.outbox_fakes import FakeRelayDirectory, settle
 from tests.test_imports_subscriptions import FakeRelay, FakeScheduler, FakeSessionPool
+from tests.widget_lifetime import delete_new_windows
+
+
+@pytest.fixture(autouse=True)
+def _windows_deleted():
+    """Every window and panel a test makes is deleted after it: left to
+    the cycle collector, one without a parent can crash it."""
+    yield from delete_new_windows()
+
 
 PK = "ab" * 32
 # The inbox dates posts by the real clock, so the posts here are too.
@@ -118,6 +128,17 @@ def window(tmp_path):
 
 def entries(win):
     return win.sidebar.model_.entries()
+
+
+def source_menu(win, entry):
+    """The toolbar's menu for the source, as it is filled when it opens."""
+    win.show_view(entry.kind, entry.key)
+    win._fill_source_menu()
+    return win.source_menu_button.menu()
+
+
+def command(menu, text):
+    return next(a for a in menu.actions() if a.text() == text)
 
 
 def titles(win):
@@ -437,11 +458,13 @@ class TestUnsubscribe:
         controller.account_changed(None)
 
     def test_it_is_in_the_sources_menu(self, window):
-        from PySide6.QtWidgets import QMenu
         entry = next(e for e in entries(window) if e.kind == SOURCE)
-        menu = QMenu()
-        window._source_actions(menu, entry)
+        menu = source_menu(window, entry)
         assert [a.text() for a in menu.actions() if a.text()][-1] == "Unsubscribe\u2026"
+        asked = []
+        window._confirm_with = lambda **kw: asked.append(kw) or False
+        command(menu, "Unsubscribe\u2026").trigger()
+        assert asked and window._controller.is_followed(entry.url)
 
 
 class TestWhatThePersonIsDoingStays:
@@ -501,20 +524,17 @@ class TestReviewLows:
         assert window.focusWidget() is window.posts
 
     def test_open_website_opens_the_site_not_the_feed(self, window):
-        from PySide6.QtWidgets import QMenu
         opened = []
         window._open_url = lambda url: opened.append(url.toString())
         entry = next(e for e in entries(window) if e.kind == SOURCE and e.url == JOURNAL)
-        menu = QMenu()
-        window._source_actions(menu, entry)
-        next(a for a in menu.actions() if a.text() == "Open Website").trigger()
+        command(source_menu(window, entry), "Open Website").trigger()
         assert opened == ["https://journal.example"]
         window._controller.inbox.set_site(source_key(JOURNAL),
                                           site_url="https://journal.example/blog/")
-        menu = QMenu()
-        window._source_actions(menu, entry)
-        next(a for a in menu.actions() if a.text() == "Open Website").trigger()
+        command(source_menu(window, entry), "Open Website").trigger()
         assert opened[-1] == "https://journal.example/blog/"
+        command(source_menu(window, entry), "Copy Address").trigger()
+        assert QApplication.clipboard().text() == JOURNAL
 
     def test_a_check_under_way_says_so(self, window):
         entry = next(e for e in entries(window) if e.kind == SOURCE and e.automatic)
@@ -526,3 +546,40 @@ class TestReviewLows:
     def test_a_link_that_cannot_be_opened_says_so(self, window):
         window.article.link_refused.emit("mailto:someone@example.com")
         assert window.banner.label.text() == "That link can't be opened from here."
+
+
+def test_a_closed_window_is_freed_without_the_collector(tmp_path):
+    """Left to the cycle collector, a window without a parent can crash it
+    (Shiboken hands its children back to Python one by one). Nothing its
+    children keep may hold the window: no closure over it on their
+    signals, no callback of it in their attributes."""
+    import gc
+    import weakref
+    controller = controller_for(tmp_path)
+    fill(controller)
+    win = ImportsWindow(controller, load_settings=lambda: {},
+                        save_settings=lambda value: None)
+    win.show()
+    settle()
+    entry = next(e for e in entries(win) if e.kind == SOURCE and e.automatic)
+    source_menu(win, entry)
+    for button in win._segment_group.buttons():
+        button.click()
+    win.search.setText("s")
+    for name in ("follow_website", "import_file", "import_link"):
+        getattr(win, name)()
+        win.sheet().reject()
+        settle()
+    win._show_job_card()
+    win.close()
+    settle()
+    ref = weakref.ref(win)
+    gc.collect()
+    gc.disable()
+    try:
+        del win
+        assert ref() is None
+    finally:
+        gc.enable()
+        controller.account_changed(None)
+        settle()

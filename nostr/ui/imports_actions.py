@@ -147,7 +147,7 @@ class OptionsPopover(QFrame):
         column.setSpacing(6)
         self.copy = QCheckBox(_("Copy images to your media server"))
         self.copy.setObjectName("imports_copy_images")
-        self.copy.clicked.connect(lambda: self._clicked(self.copy, COPY_IMAGES))
+        self.copy.clicked.connect(self._copy_clicked)
         column.addWidget(self.copy)
         column.addWidget(_Note(_("Drafts keep working if the original site removes its "
                                  "images."), "imports_hint"))
@@ -159,7 +159,7 @@ class OptionsPopover(QFrame):
         column.addSpacing(6)
         self.full = QCheckBox(_("Fetch the full article"))
         self.full.setObjectName("imports_full_text")
-        self.full.clicked.connect(lambda: self._clicked(self.full, FULL_TEXT))
+        self.full.clicked.connect(self._full_clicked)
         column.addWidget(self.full)
         column.addWidget(_Note(_("Uses the whole article when the feed only has a summary."),
                                "imports_hint"))
@@ -185,6 +185,14 @@ class OptionsPopover(QFrame):
         self.mixed.setVisible(copy is None or full is None)
         self.review.setVisible(has_images)
         self.review.setEnabled(copy is not False)
+
+    # Bound slots, not closures over this popover: a closure on one of its
+    # boxes would keep the popover (and the window) alive.
+    def _copy_clicked(self) -> None:
+        self._clicked(self.copy, COPY_IMAGES)
+
+    def _full_clicked(self) -> None:
+        self._clicked(self.full, FULL_TEXT)
 
     def _clicked(self, box: QCheckBox, key: str) -> None:
         # A mixed box turns on when clicked, and is a plain box after.

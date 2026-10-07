@@ -23,6 +23,14 @@ from nostr.imports.inbox_store import DRAFTED, NEW, SKIPPED
 from nostr.imports.workspace import INBOX_ORIGIN, Post
 from nostr.ui.imports_post_list import PostDelegate, PostList, PostListModel
 from tests.outbox_fakes import settle
+from tests.widget_lifetime import delete_new_windows
+
+
+@pytest.fixture(autouse=True)
+def _windows_deleted():
+    """Every window and panel a test makes is deleted after it: left to
+    the cycle collector, one without a parent can crash it."""
+    yield from delete_new_windows()
 
 
 def post(n, state=NEW, image=""):

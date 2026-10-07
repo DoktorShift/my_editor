@@ -725,6 +725,9 @@ class _ViewSwitch(QWidget):
         self.popup = _ViewPopup(control_h)
         self.popup.setAccessibleName(_("View"))
         self.popup.hide()
+        # One slot for the menu, the view's key on each action: no closure
+        # over this switch, which would keep it and the panel alive.
+        self.popup.menu().triggered.connect(self._on_menu_action)
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(0)
@@ -789,8 +792,13 @@ class _ViewSwitch(QWidget):
             action = menu.addAction(title)
             action.setCheckable(True)
             action.setToolTip(hint)
-            action.triggered.connect(lambda _checked=False, k=key: self.view_chosen.emit(k))
+            action.setData(key)
         self.set_current(current)
+
+    def _on_menu_action(self, action: QAction) -> None:
+        key = action.data()
+        if isinstance(key, str) and key:
+            self.view_chosen.emit(key)
 
     def set_current(self, key: str) -> None:
         self._current = key
@@ -2234,6 +2242,8 @@ class DraftsPanel(QFrame):
         menu = self._build_context_menu(self._item_for_context(pos))
         if menu is not None:
             menu.exec(self._list.mapToGlobal(pos))
+            # One menu per click: kept, each one stayed on the list.
+            menu.deleteLater()
 
     def _build_context_menu(self, item: Optional[QListWidgetItem]) -> Optional[QMenu]:
         """The row's menu, built but not shown.
@@ -2261,9 +2271,13 @@ class DraftsPanel(QFrame):
         # Hover is not allowed to be the only route to the preview:
         # an audit of this panel already flagged hover-only affordances,
         # and the Menu key reaches this menu without a pointer.
+        # Each command is carried on its action and run by one slot of
+        # this panel (``_on_row_command``): a closure over the panel on
+        # one of its children keeps the panel alive.
+        menu.triggered.connect(self._on_row_command)
         act_preview = QAction(_("Show Preview"), menu)
         act_preview.setShortcut(QKeySequence(Qt.Key_Space))
-        act_preview.triggered.connect(lambda: self._show_preview_for(item))
+        act_preview.setData(("preview", identifier))
         act_preview.setEnabled(
             preview_is_eligible(record, now=self.preview_now())
         )
@@ -2275,26 +2289,24 @@ class DraftsPanel(QFrame):
             # retry decryption. Promote it to the top of the menu so
             # right-click → Enter is the recovery path.
             act_retry = QAction(_("Retry Decryption"), menu)
-            act_retry.triggered.connect(
-                lambda: self.retry_decrypt.emit(identifier)
-            )
+            act_retry.setData(("retry", identifier))
             act_retry.setEnabled(bool(record.ciphertext))
             menu.addAction(act_retry)
             menu.addSeparator()
 
         act_open = QAction(_("Open in New Tab"), menu)
-        act_open.triggered.connect(lambda: self.open_draft.emit(identifier))
+        act_open.setData(("open", identifier))
         act_open.setEnabled(record.state is DraftState.READY)
         menu.addAction(act_open)
 
         act_publish = QAction(_("Publish…"), menu)
-        act_publish.triggered.connect(lambda: self.publish_draft.emit(identifier))
+        act_publish.setData(("publish", identifier))
         act_publish.setEnabled(record.state is DraftState.READY)
         menu.addAction(act_publish)
 
         menu.addSeparator()
         act_copy_id = QAction(_("Copy Event ID"), menu)
-        act_copy_id.triggered.connect(lambda: self._copy_event_id(record))
+        act_copy_id.setData(("copy_id", identifier))
         act_copy_id.setEnabled(bool(record.event_id))
         menu.addAction(act_copy_id)
 
@@ -2311,16 +2323,43 @@ class DraftsPanel(QFrame):
         if len(targets) > 1:
             label = ngettext("Delete {n} Draft", "Delete {n} Drafts", len(targets))
             act_delete = QAction(label.format(n=len(targets)), menu)
-            act_delete.triggered.connect(
-                lambda checked=False, ids=list(targets): self._request_delete(ids)
-            )
         else:
             act_delete = QAction(_("Delete Draft"), menu)
-            act_delete.triggered.connect(
-                lambda checked=False, ids=[identifier]: self._request_delete(ids)
-            )
+        act_delete.setData(("delete", list(targets)))
         menu.addAction(act_delete)
         return menu
+
+    def _on_row_command(self, action: QAction) -> None:
+        """A command of a row's menu, by what its action carries. The draft
+        is looked up again here: the list may have been rebuilt while the
+        menu was open."""
+        command = action.data()
+        if not isinstance(command, tuple) or len(command) != 2:
+            return
+        name, target = command
+        if name == "delete":
+            self._request_delete([i for i in target if isinstance(i, str)])
+        elif name == "preview":
+            item = self._item_of(target)
+            if item is not None:
+                self._show_preview_for(item)
+        elif name == "retry":
+            self.retry_decrypt.emit(target)
+        elif name == "open":
+            self.open_draft.emit(target)
+        elif name == "publish":
+            self.publish_draft.emit(target)
+        elif name == "copy_id":
+            record = self._store.get(target) if self._store is not None else None
+            if record is not None:
+                self._copy_event_id(record)
+
+    def _item_of(self, identifier: str) -> Optional[QListWidgetItem]:
+        for row in range(self._list.count()):
+            item = self._list.item(row)
+            if item is not None and item.data(Qt.UserRole) == identifier:
+                return item
+        return None
 
     # -- lifetime ----------------------------------------------------------
 

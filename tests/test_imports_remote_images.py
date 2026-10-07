@@ -17,6 +17,15 @@ from PySide6.QtGui import QColor, QImage
 from nostr.imports import remote_images
 from nostr.imports.remote_images import RemoteImages
 from tests.imports_fakes import inline_run_blocking
+import pytest
+from tests.widget_lifetime import delete_new_windows
+
+
+@pytest.fixture(autouse=True)
+def _windows_deleted():
+    """Every window and panel a test makes is deleted after it: left to
+    the cycle collector, one without a parent can crash it."""
+    yield from delete_new_windows()
 
 
 def png(width: int = 4, height: int = 4) -> bytes:

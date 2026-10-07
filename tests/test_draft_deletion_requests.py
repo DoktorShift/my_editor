@@ -18,6 +18,15 @@ import main_window
 from main_window import MainWindow
 from nostr.draft_store import DraftStore
 from nostr.drafts import DraftWrapMeta
+from tests.widget_lifetime import delete_new_windows
+
+
+@pytest.fixture(autouse=True)
+def _windows_deleted():
+    """Every window and panel a test makes is deleted after it: left to
+    the cycle collector, one without a parent can crash it."""
+    yield from delete_new_windows()
+
 
 PK = "ab" * 32
 

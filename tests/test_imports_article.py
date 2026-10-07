@@ -22,6 +22,16 @@ from nostr.imports.workspace import INBOX_ORIGIN, Post
 from nostr.preview import Article
 from nostr.rss.normalize import html_to_markdown
 from nostr.ui.imports_article import ArticlePane
+import pytest
+from tests.widget_lifetime import delete_new_windows
+
+
+@pytest.fixture(autouse=True)
+def _windows_deleted():
+    """Every window and panel a test makes is deleted after it: left to
+    the cycle collector, one without a parent can crash it."""
+    yield from delete_new_windows()
+
 
 POST = Post(key="c:s:rss-1", origin=INBOX_ORIGIN, source_key="s", source_title="Field notes",
             source_url="https://s.example/feed", d_tag="rss-1", title="Hello", excerpt="",

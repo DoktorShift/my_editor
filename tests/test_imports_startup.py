@@ -22,6 +22,14 @@ from nostr.imports_controller import SET_ASIDE
 from nostr.ui.imports_window import ImportsWindow
 from tests.outbox_fakes import settle
 from tests.test_imports_controller import PK, Harness, profile
+from tests.widget_lifetime import delete_new_windows
+
+
+@pytest.fixture(autouse=True)
+def _windows_deleted():
+    """Every window and panel a test makes is deleted after it: left to
+    the cycle collector, one without a parent can crash it."""
+    yield from delete_new_windows()
 
 
 @pytest.fixture

@@ -31,6 +31,15 @@ from tests.outbox_fakes import FakeRelayDirectory, settle
 from tests.test_imports_jobs import FakeItemJob
 from tests.test_imports_subscriptions import FakeRelay, FakeScheduler, FakeSessionPool
 from tests.test_imports_window import NOW, FakeChecker, Images, fill, JOURNAL, FIELD
+from tests.widget_lifetime import delete_new_windows
+
+
+@pytest.fixture(autouse=True)
+def _windows_deleted():
+    """Every window and panel a test makes is deleted after it: left to
+    the cycle collector, one without a parent can crash it."""
+    yield from delete_new_windows()
+
 
 PK = "ab" * 32
 

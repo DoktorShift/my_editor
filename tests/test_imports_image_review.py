@@ -18,6 +18,15 @@ from nostr.imports.snapshots import has_images, images_to_copy
 from nostr.ui.image_review_dialog import ImageReviewDialog
 from tests.accessibility import unnamed_controls
 from tests.imports_fakes import make_item
+import pytest
+from tests.widget_lifetime import delete_new_windows
+
+
+@pytest.fixture(autouse=True)
+def _windows_deleted():
+    """Every window and panel a test makes is deleted after it: left to
+    the cycle collector, one without a parent can crash it."""
+    yield from delete_new_windows()
 
 
 class Images(QObject):

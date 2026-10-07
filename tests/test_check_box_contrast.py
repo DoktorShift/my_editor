@@ -16,6 +16,14 @@ from PySide6.QtGui import QColor, QImage, QPainter, QPalette
 from PySide6.QtWidgets import QCheckBox, QStyle, QStyleFactory, QStyleOptionButton
 
 import theme
+from tests.widget_lifetime import delete_new_windows
+
+
+@pytest.fixture(autouse=True)
+def _windows_deleted():
+    """Every window and panel a test makes is deleted after it: left to
+    the cycle collector, one without a parent can crash it."""
+    yield from delete_new_windows()
 
 
 def luminance(color: QColor) -> float:

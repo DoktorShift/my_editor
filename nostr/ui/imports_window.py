@@ -55,6 +55,7 @@ from __future__ import annotations
 import base64
 import sys
 import time
+from functools import partial
 from typing import Callable, Dict, List, Optional
 
 from PySide6.QtCore import QByteArray, QPoint, QRectF, QSize, Qt, QTimer, QUrl, Signal
@@ -204,19 +205,18 @@ def freshness(source: SourceRow, *, now: Optional[float] = None) -> str:
 
 class _SearchField(QLineEdit):
     """The toolbar's search field: Escape clears it and goes back to the
-    list."""
+    list (``left``). A signal, not a callback kept here: a callback of the
+    window kept by its own field holds the window in a cycle."""
 
-    def __init__(self, on_escape: Callable[[], None], parent=None) -> None:
-        super().__init__(parent)
-        self._on_escape = on_escape
+    left = Signal()
 
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key.Key_Escape:
             self.clear()
-            self._on_escape()
+            self.left.emit()
             return
         if event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            self._on_escape()
+            self.left.emit()
             return
         super().keyPressEvent(event)
 
@@ -275,16 +275,13 @@ class ImportsWindow(QMainWindow):
         self._drop_overlay = _DropOverlay(self)
         self._drop_overlay.hide()
 
-        # Asks before something cannot be undone: the app's alert, as
-        # alerts.confirm_destructive (title, message, action) -> bool.
-        self._confirm = confirm or (lambda **kw: alerts.confirm_destructive(self, **kw))
-        self.job_card = JobCard(self, confirm_stop=lambda _parent: self._confirm(
-            title=_("Stop this import?"),
-            message=_("Drafts already created stay. The other posts are not imported."),
-            action=_("Stop Import")))
+        # Asks before something cannot be undone (``_confirm``): the app's
+        # alert, as alerts.confirm_destructive (title, message, action).
+        self._confirm_with = confirm
+        self.job_card = JobCard(self)
         self.job_card.pause.connect(controller.pause_import)
         self.job_card.resume.connect(controller.resume_import)
-        self.job_card.stop.connect(controller.stop_import)
+        self.job_card.stop.connect(self._stop_import)
 
         controller.sources_changed.connect(self._refresh_sidebar)
         controller.posts_changed.connect(self._on_posts_changed)
@@ -327,10 +324,10 @@ class ImportsWindow(QMainWindow):
 
         self.act_follow = QAction(_("Follow a Website…"), self)
         self.act_follow.setObjectName("imports_follow")
-        self.act_follow.triggered.connect(lambda: self.follow_website())
+        self.act_follow.triggered.connect(self._follow_from_menu)
         self.act_import_file = QAction(_("Import a File…"), self)
         self.act_import_file.setObjectName("imports_import_file")
-        self.act_import_file.triggered.connect(lambda: self.import_file())
+        self.act_import_file.triggered.connect(self._import_file_from_menu)
         self.act_import_link = QAction(_("Import a Link…"), self)
         self.act_import_link.setObjectName("imports_import_link")
         self.act_import_link.triggered.connect(self.import_link)
@@ -355,14 +352,15 @@ class ImportsWindow(QMainWindow):
         self._activity_action = bar.addWidget(self.activity_button)
         self._activity_action.setVisible(False)
 
-        self.search = _SearchField(self._focus_list)
+        self.search = _SearchField()
+        self.search.left.connect(self._focus_list)
         self.search.setObjectName("imports_search")
         self.search.setPlaceholderText(_("Search"))
         self.search.setAccessibleName(_("Search Posts"))
         self.search.setClearButtonEnabled(True)
         self.search.setMinimumWidth(180)
         self.search.setMaximumWidth(260)
-        self.search.textChanged.connect(lambda _text: self._search_timer.start())
+        self.search.textChanged.connect(self._on_search_edited)
         bar.addWidget(self.search)
         self._toolbar = bar
         # Qt's own button for toolbar items that do not fit.
@@ -382,15 +380,14 @@ class ImportsWindow(QMainWindow):
         self.posts.model_.checks_changed.connect(self._update_selection_band)
         self.posts.model_.checks_changed.connect(self._choices_for_new_targets)
         self.posts.model_.modelReset.connect(self._update_list_state)
-        self.posts.model_.rowsInserted.connect(lambda *_a: self._update_list_state())
+        self.posts.model_.rowsInserted.connect(self._update_list_state)
         self.posts.model_.layoutChanged.connect(self._update_list_state)
 
         self.article = ArticlePane(prepare=self._controller.prepare_article,
                                    images=self._controller.images, dark=self._dark,
                                    open_url=self._open_url)
         # A link the article cannot open says so (review L9).
-        self.article.link_refused.connect(lambda _link: self.banner.say(
-            _("That link can't be opened from here.")))
+        self.article.link_refused.connect(self._link_refused)
         self.article.setMinimumWidth(ARTICLE_MIN)
 
         list_pane = QWidget()
@@ -424,7 +421,7 @@ class ImportsWindow(QMainWindow):
         self.options_popover = OptionsPopover(self)
         self.options_popover.changed.connect(self._choose)
         self.options_popover.review_requested.connect(self._review_images)
-        self.posts.open_post.connect(lambda _post: self._update_actions())
+        self.posts.open_post.connect(self._update_actions)
 
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.splitter.setObjectName("imports_splitter")
@@ -465,6 +462,7 @@ class ImportsWindow(QMainWindow):
         segment_row.setSpacing(0)
         self._segment_group = QButtonGroup(self)
         self._segment_group.setExclusive(True)
+        self._segment_group.buttonClicked.connect(self._on_segment_button)
         self.segment_new = self._segment(_("New"), _("New Posts"), NEW, segment_row, "first")
         self.segment_older = self._segment(_("Older"), _("Older Posts"), OLDER, segment_row,
                                            "last")
@@ -480,6 +478,7 @@ class ImportsWindow(QMainWindow):
         self.source_menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.source_menu_button.setMenu(QMenu(self.source_menu_button))
         self.source_menu_button.menu().aboutToShow.connect(self._fill_source_menu)
+        self.source_menu_button.menu().triggered.connect(self._on_source_command)
         top.addWidget(self.source_menu_button)
         layout.addLayout(top)
 
@@ -512,7 +511,7 @@ class ImportsWindow(QMainWindow):
         button.setProperty("edge", edge)
         button.setAccessibleName(name)
         button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        button.clicked.connect(lambda _checked=False, s=state: self._on_segment(s))
+        button.setProperty("state", state)
         self._segment_group.addButton(button)
         row.addWidget(button)
         return button
@@ -629,6 +628,9 @@ class ImportsWindow(QMainWindow):
         if entry.kind != FILE:
             self._save()
 
+    def _on_segment_button(self, button) -> None:
+        self._on_segment(button.property("state"))
+
     def _on_segment(self, state: str) -> None:
         entry = self.sidebar.chosen()
         if entry is None or entry.kind != SOURCE:
@@ -639,39 +641,60 @@ class ImportsWindow(QMainWindow):
 
     def _show_source_menu(self, entry: Entry, position: QPoint) -> None:
         menu = QMenu(self)
-        if entry.kind == FILE:
-            remove = menu.addAction(_("Remove from List"))
-            remove.triggered.connect(lambda: self._controller.close_collection(entry.key))
-        else:
-            self._source_actions(menu, entry)
+        menu.triggered.connect(self._on_source_command)
+        self._entry_actions(menu, entry)
         menu.exec(position)
+        menu.deleteLater()      # one menu per click
 
     def _fill_source_menu(self) -> None:
         menu = self.source_menu_button.menu()
         menu.clear()
         entry = self.sidebar.chosen()
-        if entry is not None and entry.kind == SOURCE:
+        if entry is not None:
+            self._entry_actions(menu, entry)
+
+    def _entry_actions(self, menu: QMenu, entry: Entry) -> None:
+        if entry.kind == SOURCE:
             self._source_actions(menu, entry)
-        elif entry is not None and entry.kind == FILE:
+        elif entry.kind == FILE:
             remove = menu.addAction(_("Remove from List"))
-            remove.triggered.connect(lambda: self._controller.close_collection(entry.key))
+            remove.setData(("remove", entry))
 
     def _source_actions(self, menu: QMenu, entry: Entry) -> None:
+        # Each command is carried on its action and run by one slot,
+        # ``_on_source_command``: a closure over this window on one of its
+        # menus would keep the window alive.
         check = menu.addAction(_("Check Now") if entry.automatic else _("Read Now"))
         check.setEnabled(not self._controller.read_only)
-        check.triggered.connect(lambda: self.check_now(entry))
+        check.setData(("check", entry))
         # The website, not the feed's address (review L4): what the feed
         # names as its site, else the address's own start page.
         site = self._website_of(entry)
         website = menu.addAction(_("Open Website"))
         website.setEnabled(url_safety.is_safe_external_url(site))
-        website.triggered.connect(lambda: self._open_url(QUrl(site)))
+        website.setData(("website", site))
         copy = menu.addAction(_("Copy Address"))
-        copy.triggered.connect(lambda: QApplication.clipboard().setText(entry.url))
+        copy.setData(("copy", entry.url))
         menu.addSeparator()
         unsubscribe = menu.addAction(_("Unsubscribe\u2026"))
         unsubscribe.setEnabled(not self._controller.read_only)
-        unsubscribe.triggered.connect(lambda: self.unsubscribe(entry))
+        unsubscribe.setData(("unsubscribe", entry))
+
+    def _on_source_command(self, action: QAction) -> None:
+        command = action.data()
+        if not isinstance(command, tuple) or len(command) != 2:
+            return
+        name, target = command
+        if name == "check":
+            self.check_now(target)
+        elif name == "website":
+            self._open_url(QUrl(target))
+        elif name == "copy":
+            QApplication.clipboard().setText(target)
+        elif name == "unsubscribe":
+            self.unsubscribe(target)
+        elif name == "remove":
+            self._controller.close_collection(target.key)
 
     def unsubscribe(self, entry: Entry) -> None:
         """Stop following a source, after asking: its posts leave the
@@ -725,8 +748,11 @@ class ImportsWindow(QMainWindow):
             hidden_word = hidden.get(view.scope, "")
             if view.scope == "source" and view.source_state == NEW:
                 hidden_word = _("New")
+            # Kept by the list's model: over the controller's page, not over
+            # this window, so the model does not hold the window in a cycle.
+            page = self._controller.page
             self.posts.model_.show(
-                lambda after, v=view, q=query: self._controller.page(v, query=q, after=after),
+                lambda after, v=view, q=query: page(v, query=q, after=after),
                 paged=True, page_size=PAGE_SIZE, hidden_word=hidden_word)
         if self.posts.model_.rowCount():
             self.posts.setCurrentIndex(self.posts.model_.index(0))
@@ -1096,14 +1122,16 @@ class ImportsWindow(QMainWindow):
         if self._sheet is not None:
             self._sheet.close()
         self._sheet = sheet
-
-        def finished(_result: int) -> None:
-            if self._sheet is sheet:
-                self._sheet = None
-            sheet.deleteLater()
-
-        sheet.finished.connect(finished)
+        sheet.finished.connect(self._on_sheet_finished)
         sheet.open()
+
+    def _on_sheet_finished(self) -> None:
+        sheet = self.sender()
+        if sheet is None:
+            return
+        if self._sheet is sheet:
+            self._sheet = None
+        sheet.deleteLater()
 
     def sheet(self):
         """The sheet open now, if any."""
@@ -1114,8 +1142,8 @@ class ImportsWindow(QMainWindow):
         if self._controller.read_only:
             return
         sheet = FollowSheet(self._controller, dark=self._dark, address=address, parent=self)
-        sheet.followed.connect(lambda key: self.show_view(SOURCE, key))
-        sheet.show_source.connect(lambda key: self.show_view(SOURCE, key))
+        sheet.followed.connect(self._show_source)
+        sheet.show_source.connect(self._show_source)
         sheet.import_once.connect(self._open_once)
         sheet.followed_list.connect(self._followed_list)
         self._open_sheet(sheet)
@@ -1127,7 +1155,7 @@ class ImportsWindow(QMainWindow):
         if self._controller.read_only:
             return
         sheet = FileSheet(self._controller, dark=self._dark, parent=self)
-        sheet.opened.connect(lambda collection_id: self.show_view(FILE, collection_id))
+        sheet.opened.connect(self._show_file)
         sheet.followed_list.connect(self._followed_list)
         self._open_sheet(sheet)
         if path:
@@ -1138,10 +1166,46 @@ class ImportsWindow(QMainWindow):
         if self._controller.read_only:
             return
         sheet = LinkSheet(self._controller, dark=self._dark, parent=self)
-        sheet.opened.connect(lambda collection_id: self.show_view(FILE, collection_id))
-        sheet.follow.connect(lambda address: QTimer.singleShot(
-            0, self, lambda: self.follow_website(address)))
+        sheet.opened.connect(self._show_file)
+        sheet.follow.connect(self._follow_instead)
         self._open_sheet(sheet)
+
+    # Bound slots for the window's own children, not closures over the
+    # window: a closure on a child's signal keeps the window alive.
+    def _show_source(self, key: str) -> None:
+        self.show_view(SOURCE, key)
+
+    def _show_file(self, collection_id: str) -> None:
+        self.show_view(FILE, collection_id)
+
+    def _follow_instead(self, address: str) -> None:
+        # After the link sheet has closed.
+        QTimer.singleShot(0, self, partial(self.follow_website, address))
+
+    def _follow_from_menu(self) -> None:
+        self.follow_website()
+
+    def _import_file_from_menu(self) -> None:
+        self.import_file()
+
+    def _on_search_edited(self) -> None:
+        self._search_timer.start()
+
+    def _link_refused(self) -> None:
+        self.banner.say(_("That link can't be opened from here."))
+
+    def _confirm(self, **kw) -> bool:
+        if self._confirm_with is not None:
+            return bool(self._confirm_with(**kw))
+        return alerts.confirm_destructive(self, **kw)
+
+    def _stop_import(self, job_id: str) -> None:
+        """Stop on the import's card, after asking."""
+        if self._confirm(
+                title=_("Stop this import?"),
+                message=_("Drafts already created stay. The other posts are not imported."),
+                action=_("Stop Import")):
+            self._controller.stop_import(job_id)
 
     def _open_once(self, result) -> None:
         """A single post from Follow a Website: open it like a link."""

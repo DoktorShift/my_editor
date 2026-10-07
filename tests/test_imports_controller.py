@@ -35,6 +35,15 @@ from tests.test_imports_subscriptions import (
     FakeSessionPool,
 )
 from nostr.imports.subscriptions import FeedSubscriptionStore
+from tests.widget_lifetime import delete_new_windows
+
+
+@pytest.fixture(autouse=True)
+def _windows_deleted():
+    """Every window and panel a test makes is deleted after it: left to
+    the cycle collector, one without a parent can crash it."""
+    yield from delete_new_windows()
+
 
 PK = "ab" * 32
 OTHER = "cd" * 32

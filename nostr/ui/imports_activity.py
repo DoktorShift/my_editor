@@ -22,7 +22,7 @@ colour. The Drafts panel shows the same line (activity_line).
 
 from __future__ import annotations
 
-from typing import Callable, List, Optional
+from typing import List, Optional
 
 from PySide6.QtCore import QPoint, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPalette, QPen, QPixmap
@@ -202,20 +202,18 @@ class JobCard(QFrame):
     Signals:
       pause()          Pause
       resume(str)      Resume, or Try Again (the import's id)
-      stop(str)        Stop (the import's id), after the card asked
+      stop(str)        Stop (the import's id); the window asks first
     """
 
     pause = Signal()
     resume = Signal(str)
     stop = Signal(str)
 
-    def __init__(self, parent: Optional[QWidget] = None, *,
-                 confirm_stop: Callable[[QWidget], bool] = lambda _parent: True) -> None:
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent, Qt.WindowType.Popup)
         self.setObjectName("imports_job_card")
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setAccessibleName(_("Import"))
-        self._confirm_stop = confirm_stop
         self._job: Optional[Job] = None
         column = QVBoxLayout(self)
         column.setContentsMargins(14, 12, 14, 12)
@@ -317,8 +315,7 @@ class JobCard(QFrame):
         if job is None:
             return
         self.hide()
-        if self._confirm_stop(self.parentWidget()):
-            self.stop.emit(job.id)
+        self.stop.emit(job.id)
 
     def open_below(self, anchor: QWidget) -> None:
         self.adjustSize()
