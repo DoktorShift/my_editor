@@ -114,7 +114,7 @@ def test_the_switch_is_the_view_commands_and_has_names():
 # -- in the window ---------------------------------------------------------------------------
 
 SCRIPT = r"""
-import json, os, sys
+import json, os, sys, time
 sys.path.insert(0, sys.argv[1])
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 from PySide6.QtGui import QTextCursor
@@ -156,19 +156,25 @@ app.processEvents()
 r["preview"] = state()
 r["preview_words"] = "Hello world" in ed._preview_pane.view.toPlainText()
 r["bold_in_preview"] = w.act_bold.isEnabled()
+r["undo_in_preview"] = [w.act_undo.isEnabled(), w.act_redo.isEnabled(),
+                        w.format_toolbar.style_button.isEnabled()]
+w._undo()                                     # the key, by habit: nothing happens
+r["text_after_undo"] = ed.toPlainText()
 r["select_all_in_preview"] = w.act_select_all.isEnabled()
 r["names"] = unnamed_controls(ed._preview_pane) + unnamed_controls(w.view_switch)
 w.act_view_write.trigger()
 app.processEvents()
 r["write"] = state()
 r["selection_kept"] = ed.textCursor().selectedText()
-r["undo_kept"] = ed.document().isUndoAvailable()
+r["undo_kept"] = ed.document().isUndoAvailable() and w.act_undo.isEnabled()
 w.act_view_split.trigger()
 app.processEvents()
 r["split"] = state()
 ed.moveCursor(QTextCursor.MoveOperation.End)
 ed.insertPlainText(" and more")
-QTest.qWait(500)
+deadline = time.monotonic() + 5
+while "and more" not in ed._preview_pane.view.toPlainText() and time.monotonic() < deadline:
+    QTest.qWait(20)
 r["redrawn"] = "and more" in ed._preview_pane.view.toPlainText()
 ed._preview_pane.view.setFocus()
 app.processEvents()
@@ -212,6 +218,8 @@ def test_write_preview_and_split_in_the_window(tmp_path):
     assert r["preview"]["checked"] == [False, True, False]
     assert r["preview_words"]
     assert r["bold_in_preview"] is False and r["select_all_in_preview"] is True
+    assert r["undo_in_preview"] == [False, False, False]      # nothing edits the hidden text
+    assert r["text_after_undo"] == "Hello world"
     assert r["names"] == []
     assert r["write"]["text"] and not r["write"]["preview"]
     assert r["selection_kept"] == "Hello" and r["undo_kept"]

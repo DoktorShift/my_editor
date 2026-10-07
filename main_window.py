@@ -1149,7 +1149,8 @@ class MainWindow(QMainWindow):
     def _update_undo_redo_buttons(self, *_args):
         """Undo and Redo for what has the focus: the Imports window when it
         is in front (Undo Skip there), a text field (the find field), or
-        the document."""
+        the document, unless only its preview shows (nothing edits the
+        hidden text)."""
         if not hasattr(self, "act_undo"):
             return
         imports = self._imports_in_front()
@@ -1166,8 +1167,9 @@ class MainWindow(QMainWindow):
             can_undo, can_redo = focus.isUndoAvailable(), focus.isRedoAvailable()
         else:
             ed = self.current_editor()
-            can_undo = ed.document().isUndoAvailable() if ed else False
-            can_redo = ed.document().isRedoAvailable() if ed else False
+            editing = ed is not None and not self._shows_preview_only(ed)
+            can_undo = editing and ed.document().isUndoAvailable()
+            can_redo = editing and ed.document().isRedoAvailable()
         self.act_undo.setEnabled(can_undo)
         self.act_redo.setEnabled(can_redo)
 
@@ -4101,7 +4103,7 @@ class MainWindow(QMainWindow):
             focus.undo()
             return
         ed = self.current_editor()
-        if ed:
+        if ed and not self._shows_preview_only(ed):
             ed.undo()
 
     def _redo(self):
@@ -4116,7 +4118,7 @@ class MainWindow(QMainWindow):
             focus.redo()
             return
         ed = self.current_editor()
-        if ed:
+        if ed and not self._shows_preview_only(ed):
             ed.redo()
 
     def _editor_call(self, name: str) -> None:
@@ -4345,7 +4347,7 @@ class MainWindow(QMainWindow):
         if getattr(self, "format_toolbar", None) is not None:
             # A PDF has nothing to format; plain text has no paragraph styles.
             self.format_toolbar.setVisible(self.show_toolbar and bool(kind))
-            self.format_toolbar.style_button.setEnabled(kind == "rich")
+            self.format_toolbar.style_button.setEnabled(kind == "rich" and not reading)
         # Only the preview shows: nothing to edit there (Copy and Select
         # All act on the preview itself, through the focus).
         for action in self._editor_actions:
