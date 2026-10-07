@@ -414,7 +414,8 @@ class ImportItemsJob(QObject):
                 lambda: build_podcast_markdown(
                     episode,
                     chapters=chapters,
-                    notes=html_to_markdown(item.content_html or "").strip(),
+                    notes=html_to_markdown(item.content_html or "",
+                                           base_url=item.link).strip(),
                 ),
                 lambda markdown: self._publish_template_as_draft(
                     replace(template, content=self._with_footer(markdown, item))),
@@ -551,7 +552,9 @@ class ImportItemsJob(QObject):
             content = extract_readable_content(body, url=item.link)
             if content is None:
                 return None
-            markdown = html_to_markdown(content.html).strip()
+            # The page's own relative links and images, made whole
+            # against the page (CP1 review O3).
+            markdown = html_to_markdown(content.html, base_url=item.link).strip()
             return (markdown, content.title) if markdown else None
 
         def _done(result) -> None:

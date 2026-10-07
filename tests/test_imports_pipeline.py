@@ -619,6 +619,22 @@ class TestFullTextRecovery:
         assert pages.calls == [ARTICLE_URL]
         assert "Paragraph 3" in created[0].inner_event["content"]
 
+    def test_the_pages_relative_links_are_made_whole(self):
+        """CP1 review O3, for a body read from the post's page."""
+        factory, created = make_factory()
+        page = ARTICLE_PAGE.replace(
+            "<p>Paragraph 3 ", "<p>Paragraph 3 <a href='/about'>about</a> "
+                               "<img src='media/pic.jpg' alt='A picture'> ")
+        pages = FakeFetcher({ARTICLE_URL: ("ok", page)})
+        item = make_item("Teaser", guid="t1", link=ARTICLE_URL, content_html=THIN_HTML)
+        job = make_job([item], factory=factory, page_fetcher=pages)
+        job.start()
+        settle()
+        content = created[0].inner_event["content"]
+        from urllib.parse import urljoin
+        assert f"]({urljoin(ARTICLE_URL, '/about')})" in content
+        assert f"]({urljoin(ARTICLE_URL, 'media/pic.jpg')})" in content
+
     def test_page_fetch_failure_keeps_feed_body(self):
         factory, created = make_factory()
         pages = FakeFetcher({ARTICLE_URL: ("err", "HTTP 503")})
