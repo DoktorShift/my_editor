@@ -7,8 +7,10 @@ ships (Menlo, Consolas, Noto Sans Mono). Not every Linux system has
 Noto Sans Mono, and asking Qt for a family it lacks gives the system's
 default font, which is proportional: code and plain text then lost their
 columns. Here a missing family falls back to the system's own monospace
-font. Style sheets cannot carry that fallback, so they use
-``monospace_family()``, the family Qt really draws with.
+font, and when that has no fixed columns either (Qt's offscreen platform
+on Windows names a generic family it cannot find), to the first
+installed family that has them. Style sheets cannot carry that fallback,
+so they use ``monospace_family()``, the family Qt really draws with.
 """
 
 from __future__ import annotations
@@ -29,6 +31,10 @@ def monospace_font(point_size: Optional[float] = None) -> QFont:
         font = QFont(MONO_FONT)
     else:
         font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+        if not QFontInfo(font).fixedPitch():
+            fixed = _first_fixed_pitch_family()
+            if fixed:
+                font.setFamily(fixed)
     font.setStyleHint(QFont.StyleHint.Monospace)
     font.setFixedPitch(True)
     if point_size is not None:
@@ -43,3 +49,9 @@ def monospace_family() -> str:
     if _family is None:
         _family = QFontInfo(monospace_font()).family()
     return _family
+
+
+def _first_fixed_pitch_family() -> Optional[str]:
+    return next((family for family in QFontDatabase.families()
+                 if QFontDatabase.isFixedPitch(family)
+                 and not QFontDatabase.isPrivateFamily(family)), None)

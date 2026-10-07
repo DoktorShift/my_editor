@@ -6,7 +6,7 @@ and the tests draw with the system's fonts on every system."""
 import os
 
 import pytest
-from PySide6.QtGui import QFontDatabase, QFontInfo
+from PySide6.QtGui import QFont, QFontDatabase, QFontInfo
 
 import fonts
 from tests.app_process import offscreen_fonts
@@ -29,6 +29,24 @@ def test_a_missing_preferred_font_falls_back_to_a_monospace_one(monkeypatch):
     monkeypatch.setattr(fonts, "MONO_FONT", "No Such Font Family 2026")
     assert QFontInfo(fonts.monospace_font()).fixedPitch()
     assert QFontInfo(fonts.monospace_font()).family() != "No Such Font Family 2026"
+
+
+def test_a_system_fixed_font_without_fixed_columns_is_not_trusted(monkeypatch):
+    # Qt's offscreen platform on Windows names a generic "monospace" as the
+    # system's fixed font and finds no such family: the first installed
+    # family with fixed columns stands in.
+    monkeypatch.setattr(fonts, "MONO_FONT", "No Such Font Family 2026")
+    # An installed family without fixed columns, which Qt keeps even when
+    # fixed columns are asked for.
+    family = next(f for f in QFontDatabase.families()
+                  if not QFontDatabase.isFixedPitch(f) and not QFontDatabase.isPrivateFamily(f))
+    proportional = QFont(family, 11)
+    assert not QFontInfo(proportional).fixedPitch()
+    monkeypatch.setattr(fonts.QFontDatabase, "systemFont",
+                        staticmethod(lambda kind: QFont(proportional)))
+    font = fonts.monospace_font()
+    assert QFontInfo(font).fixedPitch()
+    assert font.pointSizeF() == proportional.pointSizeF()      # the system's size kept
 
 
 def test_style_sheets_get_a_family_this_system_really_has():
