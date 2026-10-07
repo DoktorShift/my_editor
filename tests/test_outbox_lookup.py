@@ -224,6 +224,21 @@ def test_the_subscription_reports_how_each_relay_ended():
     sub.close()
 
 
+def test_the_subscription_says_which_relay_sent_each_event():
+    pool = StubPool()
+    sub = Subscription(pool, ["wss://a.com", "wss://b.com"], [{"kinds": [1]}])
+    plain, located = [], []
+    sub.event.connect(plain.append)
+    sub.relay_event.connect(lambda url, event: located.append((url, event["id"])))
+    a, b = pool.relays["wss://a.com"], pool.relays["wss://b.com"]
+    a.message.emit(["EVENT", sub.sub_id, {"id": "one"}])
+    b.message.emit(["EVENT", sub.sub_id, {"id": "one"}])
+    b.message.emit(["EVENT", "another subscription", {"id": "two"}])
+    assert located == [("wss://a.com", "one"), ("wss://b.com", "one")]
+    assert plain == [{"id": "one"}, {"id": "one"}]
+    sub.close()
+
+
 def test_a_subscription_asks_again_when_its_relay_comes_back():
     pool = StubPool()
     sub = Subscription(pool, ["wss://a.com"], [{"kinds": [24133]}])

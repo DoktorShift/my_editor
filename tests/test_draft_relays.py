@@ -20,12 +20,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from nostr.draft_relays import (  # noqa: E402
-    KIND_PRIVATE_RELAYS, PrivateDraftRelays, parse_private_relays, private_relays_plaintext,
+    KIND_PRIVATE_RELAYS, PrivateDraftRelays, draft_relay_address, parse_private_relays,
+    private_relays_plaintext,
 )
 from nostr.outbox import writer as outbox_writer  # noqa: E402
 from nostr.outbox.directory import RelayDirectory  # noqa: E402
 from tests.outbox_fakes import (  # noqa: E402
-    ABSENT, NOW, UNKNOWN, FakeClient, FakePool, FakeQuery, FakeSessionPool, Profile,
+    ABSENT, NOW, PK, UNKNOWN, FakeClient, FakePool, FakeQuery, FakeSessionPool, Profile,
     found, settle, signed,
 )
 
@@ -124,3 +125,91 @@ def test_a_list_that_is_not_json_is_not_guessed_at():
     with pytest.raises(ValueError):
         parse_private_relays('{"relay": "wss://x.example"}')
     assert parse_private_relays('[["r", "wss://x.example"], ["relay"]]') == []
+
+
+@pytest.mark.parametrize("typed, address", [
+    ("wss://Relay.Example/", "wss://relay.example"),
+    ("  wss://relay.example:443  ", "wss://relay.example"),
+    ("wss://nas.local:4848", "wss://nas.local:4848"),      # the person's own network
+    ("wss://10.0.0.5", "wss://10.0.0.5"),
+    ("ws://localhost:7777", "ws://localhost:7777"),        # a relay on this computer
+    ("ws://127.0.0.1:4869", "ws://127.0.0.1:4869"),
+    ("ws://[::1]:4869", "ws://[::1]:4869"),
+    ("ws://relay.example", None),                          # readable on the way
+    ("ws://192.168.1.20:7777", None),
+    ("https://relay.example", None),
+    ("relay.example", None),
+    ("wss://", None),
+    ("wss://user@relay.example", None),
+    ("", None),
+])
+def test_an_address_typed_for_drafts(typed, address):
+    assert draft_relay_address(typed) == address
+
+
+def test_going_back_to_the_usual_relays_publishes_an_empty_list():
+    existing = signed(KIND_PRIVATE_RELAYS, [], 'sealed:[["relay","wss://mine.example"]]')
+    drafts, client, pool = lists(found(existing))
+    outcomes = []
+    drafts.clear(outcomes.append)
+    settle(10)
+    assert outcomes[0].status == outbox_writer.WRITTEN
+    assert client.requests[0]["content"] == "sealed:[]" and client.requests[0]["tags"] == []
+    assert parse_private_relays("[]") == []                 # read back: none, the usual relays
+
+
+def test_an_account_without_a_list_has_nothing_to_stop():
+    drafts, client, pool = lists(ABSENT)
+    outcomes = []
+    drafts.clear(outcomes.append)
+    settle(10)
+    assert outcomes[0].status == outbox_writer.REFUSED
+    assert client.requests == [] and pool.published == []
+
+
+def test_saving_publishes_the_list_and_then_drafts_follow_it():
+    drafts, _client, pool = lists(ABSENT)
+    directory = drafts._directory
+    outcomes = []
+    drafts.save(["wss://Mine.example/", "wss://two.example"], outcomes.append)
+    settle(10)
+    assert outcomes[0].status == outbox_writer.WRITTEN and pool.published
+    assert directory.draft_relays_of(PK) == ["wss://mine.example", "wss://two.example"]
+
+
+def test_saving_none_goes_back_to_the_usual_relays():
+    existing = signed(KIND_PRIVATE_RELAYS, [], 'sealed:[["relay","wss://mine.example"]]')
+    drafts, client, _pool = lists(found(existing))
+    directory = drafts._directory
+    directory.set_draft_relays(PK, ["wss://mine.example"])
+    outcomes = []
+    drafts.save([], outcomes.append)
+    settle(10)
+    assert outcomes[0].ok and client.requests[0]["content"] == "sealed:[]"
+    assert directory.draft_relays_of(PK) == []
+
+
+def test_saving_none_without_a_list_is_already_done():
+    drafts, client, pool = lists(ABSENT)
+    outcomes = []
+    drafts.save([], outcomes.append)
+    settle(10)
+    assert outcomes[0].status == outbox_writer.UNCHANGED and outcomes[0].ok
+    assert pool.published == [] and drafts._directory.draft_relays_of(PK) == []
+
+
+def test_a_save_that_did_not_go_out_leaves_the_drafts_where_they_were():
+    drafts, _client, pool = lists(UNKNOWN)
+    directory = drafts._directory
+    outcomes = []
+    drafts.save(["wss://mine.example"], outcomes.append)
+    settle(10)
+    assert outcomes[0].status == outbox_writer.UNKNOWN_BASE and pool.published == []
+    assert directory.draft_relays_of(PK) is None
+
+
+def test_saving_only_unusable_addresses_is_refused_before_anything_is_asked():
+    drafts, client, _pool = lists(ABSENT)
+    with pytest.raises(ValueError):
+        drafts.save(["not a relay"], lambda _outcome: None)
+    assert client.requests == []
