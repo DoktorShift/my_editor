@@ -162,6 +162,51 @@ def test_a_paragraph_becomes_a_heading_and_back(level, marks):
         QTextFormat.Property.FontSizeAdjustment)
 
 
+def test_bold_words_stay_bold_through_a_heading_and_back():
+    # Review F8 (early range): Body, Heading, Body wiped the bold.
+    doc = from_markdown("This is **important** text\n")
+    cursor = QTextCursor(doc.begin())
+    rich_text.set_heading(cursor, 1)
+    assert document_to_markdown(doc) == "# This is important text\n"
+    rich_text.set_heading(cursor, 2)                      # another heading on the way
+    rich_text.set_heading(cursor, 0)
+    assert assert_round_trip(doc) == "This is **important** text\n"
+
+
+def test_return_after_a_heading_that_was_bold_types_plain_words():
+    ed = _editor_with("This is **important**\n")
+    ed.set_heading(1)
+    ed.moveCursor(QTextCursor.MoveOperation.End)
+    type_text(ed, "\nnext")
+    assert document_to_markdown(ed.document()) == "# This is important\n\nnext\n"
+
+
+@pytest.mark.parametrize("first", ["heading", "quote"])
+def test_a_heading_is_never_quoted(first):
+    # Review F5 (early range): "> # Title" is a quote readers drop, and the
+    # file opened as source.
+    from markdown_writer import holds_faithfully
+    doc = from_markdown("Title\n\nBody\n")
+    cursor = QTextCursor(doc.begin())
+    if first == "heading":
+        rich_text.set_heading(cursor, 1)
+        rich_text.toggle_quote(cursor)
+        expected = "> Title\n\nBody\n"
+    else:
+        rich_text.toggle_quote(cursor)
+        rich_text.set_heading(cursor, 1)
+        expected = "# Title\n\nBody\n"
+    markdown = assert_round_trip(doc)
+    assert markdown == expected and holds_faithfully(markdown)
+
+
+def test_a_list_item_made_a_heading_leaves_the_list():
+    # Review F7 (early range): it showed as a heading and was saved bold.
+    doc = from_markdown("- Item one\n- Item two\n")
+    rich_text.set_heading(QTextCursor(block_named(doc, "Item one")), 2)
+    assert assert_round_trip(doc) == "## Item one\n\n- Item two\n"
+
+
 def test_a_typed_heading_looks_like_one_read_from_markdown():
     typed = from_markdown("Title\n")
     rich_text.set_heading(QTextCursor(typed), 2)
@@ -267,7 +312,16 @@ def test_reading_the_state_stops_at_the_budget(monkeypatch):
     assert len(calls) <= 40 * len(rich_text.INLINE)
     calls.clear()
     assert rich_text.selection_state(cursor, budget=1000)[rich_text.BOLD] is True
-    # The command itself always reads all of it.
+
+
+def test_a_style_button_that_shows_off_turns_its_style_on():
+    # Review L1: past the budget Bold showed off, and the click took bold
+    # away everywhere. The command decides from the same reading.
+    doc = _bold_pieces(3 * 40)
+    cursor = QTextCursor(doc)
+    cursor.select(QTextCursor.SelectionType.Document)
+    assert rich_text.selection_state(cursor, budget=40)[rich_text.BOLD] is False   # shown off
+    assert rich_text.toggle_style(cursor, rich_text.BOLD, budget=40) is True       # so: on
     assert rich_text.selection_has(cursor, rich_text.BOLD) is True
 
 
@@ -286,3 +340,16 @@ def test_the_state_of_paragraphs_stops_at_the_budget():
     cursor.select(QTextCursor.SelectionType.Document)
     state = rich_text.paragraph_state(cursor)
     assert (state.heading, state.list_kind, state.quoted) == (-1, "mixed", False)
+
+
+
+def test_nested_bullets_read_from_markdown_have_the_shape_of_their_depth():
+    # Review L5 (early range): a nested item made with Tab is a circle; read
+    # back from Markdown it was a disc.
+    from PySide6.QtGui import QTextListFormat
+    doc = from_markdown("- one\n    - two\n        - three\n")
+    shapes = [block_named(doc, text).textList().format().style()
+              for text in ("one", "two", "three")]
+    assert shapes == [QTextListFormat.Style.ListDisc, QTextListFormat.Style.ListCircle,
+                      QTextListFormat.Style.ListSquare]
+    assert assert_round_trip(doc) == "- one\n    - two\n        - three\n"

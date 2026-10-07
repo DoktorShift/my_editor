@@ -124,6 +124,15 @@ def test_raw_html_shows_as_text_in_an_article():
     assert "<b>not bold</b>" in doc.toPlainText()
 
 
+def test_footnotes_show_as_they_were_written():
+    # Review H3: the preview dropped the definitions and showed the marks
+    # as links.
+    md = "A claim[^1] and more[^2].\n\n[^1]: https://example.com/source\n\n[^2]: Ibid.\n"
+    text = pv.article_document(md, pv.Article(title="T")).toPlainText()
+    assert "A claim[^1] and more[^2]." in text
+    assert "[^1]: https://example.com/source" in text and "[^2]: Ibid." in text
+
+
 def test_an_untitled_article_says_so():
     doc = pv.article_document("Body\n", pv.Article())
     assert doc.toPlainText().startswith("Untitled")

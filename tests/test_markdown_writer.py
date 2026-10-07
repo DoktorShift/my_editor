@@ -197,6 +197,34 @@ def test_footnote_marks_are_written_as_typed():
         "A claim[^1] and another[^note].\n\n[^1]: The source.\n[^note]: More.")
 
 
+FOOTNOTES = ("A claim[^1] and another[^2].\n\n[^1]: https://example.com/source\n\n"
+             "[^2]: Ibid.\n")
+
+
+def test_footnotes_read_back_as_the_text_they_are():
+    # Review H3: Qt's reader took "[^1]: Ibid." for a link definition,
+    # dropped it and made the mark a link.
+    from markdown_writer import read_markdown
+    doc = QTextDocument()
+    read_markdown(doc, FOOTNOTES)
+    assert doc.toPlainText() == ("A claim[^1] and another[^2].\n"
+                                 "[^1]: https://example.com/source\n[^2]: Ibid.")
+    assert document_to_markdown(doc) == FOOTNOTES
+
+
+@pytest.mark.parametrize("markdown, kept", [
+    ("[^1]: Ibid.\n", "\\[^1]: Ibid.\n"),
+    ("> [^q]: quoted\n", "> \\[^q]: quoted\n"),
+    ("```\n[^1]: code\n```\n", "```\n[^1]: code\n```\n"),
+    ("~~~~\n[^1]: code\n~~~\n[^2]: still code\n~~~~\n[^3]: text\n",
+     "~~~~\n[^1]: code\n~~~\n[^2]: still code\n~~~~\n\\[^3]: text\n"),
+    ("A claim[^1].\n", "A claim[^1].\n"),
+])
+def test_only_definitions_outside_code_are_marked_literal(markdown, kept):
+    from markdown_writer import literal_footnotes
+    assert literal_footnotes(markdown) == kept
+
+
 def test_a_footnote_mark_in_bold_text_stays_one():
     doc = typed(("a claim[^1]", {"bold": True}))
     assert document_to_markdown(doc) == "**a claim[^1]**\n"
@@ -236,6 +264,56 @@ def test_a_link_that_shows_its_own_address_is_written_bare(words, href, written)
     assert document_to_markdown(from_markdown(out)) == out
 
 
+# Addresses whose bare form Qt's reader does not take back whole, in every
+# Qt version this app is built with: written <address>, whatever the version.
+NEVER_BARE = [
+    "https://de.wikipedia.org/wiki/M%C3%BCnchen",          # a percent sign
+    "https://example.com:8080/x",                          # a port
+    "https://mastodon.social/@user",                       # an @
+    "https://example.com/a,b",                             # a comma
+    "https://example.com/wow!",                            # an exclamation mark
+    "https://example.com/page_(info)",                     # parentheses
+    "https://example.com/cdn-cgi/image/width=80,quality=75/a.jpg",
+]
+# Addresses whose bare form some Qt versions take back whole and others do
+# not (6.11.2 reads "c++" back whole, 6.11.1 cuts it): the writer asks the
+# Qt it runs on.
+DEPENDS_ON_QT = [
+    "https://example.com/c++",                             # a plus
+]
+
+
+def _own_address_round_trip(address: str) -> str:
+    """The Markdown of an own-address link, after checking what must hold
+    whatever the Qt version: it reads back as the same whole link, writing
+    it again gives the same Markdown, and a file holding it opens
+    formatted."""
+    from markdown_writer import holds_faithfully
+    doc = typed(("see ", {}), (address, {"href": address}), (" now", {}))
+    out = document_to_markdown(doc)
+    back = from_markdown(out)
+    links = [(text, fmt.anchorHref()) for block in [back.begin()]
+             for text, fmt in __import__("doc_walk").iter_block_runs(block) if fmt.isAnchor()]
+    assert links == [(address, address)]
+    assert document_to_markdown(back) == out
+    assert holds_faithfully(out)             # an older file with it opens formatted
+    return out
+
+
+@pytest.mark.parametrize("address", NEVER_BARE)
+def test_an_own_address_qt_would_not_read_back_whole_is_kept_whole(address):
+    # Review F2: written bare, these came back as no link, or cut short.
+    assert _own_address_round_trip(address) == f"see <{address}> now\n"
+
+
+@pytest.mark.parametrize("address", DEPENDS_ON_QT + ["https://example.com/plain"])
+def test_an_own_address_is_bare_exactly_when_qt_reads_it_back_whole(address):
+    from markdown_writer import _reads_back_whole
+    bare = _reads_back_whole(address, address)
+    expected = f"see {address} now\n" if bare else f"see <{address}> now\n"
+    assert _own_address_round_trip(address) == expected
+
+
 def test_a_media_address_alone_on_its_line_stays_bare():
     url = "https://cdn.example/clip.mp4"
     doc = typed("Watch this:\n", (url, {"href": url}), "\nThanks")
@@ -252,6 +330,25 @@ def test_an_own_address_followed_by_text_is_kept_whole(after):
 def test_an_own_address_after_a_word_is_kept_whole():
     url = "https://example.com"
     assert document_to_markdown(typed("see:", (url, {"href": url}))) == f"see:<{url}>\n"
+
+
+NPUB = "npub1" + "q" * 58
+NEVENT = "nevent1" + "q" * 60
+
+
+def test_a_nostr_link_is_written_bare_whatever_its_words():
+    # Review M4 (W2): "[Alice](nostr:npub1...)" is dropped by njump and
+    # read differently elsewhere; the bare reference is shown the same
+    # everywhere (as the person's name, or a card).
+    doc = typed(("Thanks to ", {}), ("Alice", {"href": "nostr:" + NPUB}),
+                (" for ", {}), ("this note", {"href": "nostr:" + NEVENT}), (".", {}))
+    assert document_to_markdown(doc) == f"Thanks to nostr:{NPUB} for nostr:{NEVENT}.\n"
+    assert document_to_note_text(doc) == f"Thanks to nostr:{NPUB} for nostr:{NEVENT}."
+
+
+def test_a_bare_nostr_reference_keeps_a_space_from_the_words_around_it():
+    doc = typed(("see", {}), ("Alice", {"href": "nostr:" + NPUB}), ("today", {}))
+    assert document_to_markdown(doc) == f"see nostr:{NPUB} today\n"
 
 
 def test_a_link_label_with_a_bracket_is_escaped():

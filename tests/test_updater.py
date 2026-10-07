@@ -149,6 +149,23 @@ def test_a_release_without_a_hash_is_never_downloaded():
 
 
 # -- where a Mac app can be replaced ---------------------------------------------
+#
+# Mac paths are macOS paths on every system (updater uses posixpath), so these
+# run everywhere, with the folders that can be written to standing in.
+
+APP = "/Applications/MyEditor.app"
+EXE = APP + "/Contents/MacOS/my-editor"
+TRANSLOCATED = "/private/var/folders/xy/T/AppTranslocation/ABCD/d/MyEditor.app"
+
+
+def writable(monkeypatch, *folders):
+    """Only ``folders`` can be written to."""
+    monkeypatch.setattr(updater.os, "access", lambda path, mode: path in folders)
+
+
+def tools_present(monkeypatch):
+    monkeypatch.setattr(updater.shutil, "which", lambda tool: f"/usr/bin/{tool}")
+
 
 def make_bundle(root, name="MyEditor.app"):
     exe = root / name / "Contents" / "MacOS" / "my-editor"
@@ -157,39 +174,47 @@ def make_bundle(root, name="MyEditor.app"):
     return str(exe)
 
 
-def test_the_bundle_is_found_from_the_executable(tmp_path):
-    exe = make_bundle(tmp_path)
-    assert updater.mac_bundle_path(exe) == os.path.realpath(str(tmp_path / "MyEditor.app"))
-    assert updater.mac_bundle_path(str(tmp_path / "python3")) is None
+def test_the_bundle_is_found_from_the_executable():
+    assert updater.mac_bundle_path(EXE) == APP
+    assert updater.mac_bundle_path("/usr/local/bin/python3") is None
 
 
-def test_a_writable_bundle_can_update_itself(tmp_path, monkeypatch):
-    monkeypatch.setattr(updater.shutil, "which", lambda tool: f"/usr/bin/{tool}")
-    assert updater._mac_bundle_replaceable(make_bundle(tmp_path))
+@pytest.mark.skipif(os.name != "posix", reason="follows a link on the disk, and this "
+                                               "disk's paths are not macOS paths")
+def test_a_linked_executable_is_followed_to_its_bundle(tmp_path):
+    link = tmp_path / "my-editor"
+    link.symlink_to(make_bundle(tmp_path))
+    assert updater.mac_bundle_path(str(link)) == os.path.realpath(str(tmp_path / "MyEditor.app"))
 
 
-def test_a_translocated_app_cannot_update_itself(tmp_path, monkeypatch):
-    monkeypatch.setattr(updater.shutil, "which", lambda tool: f"/usr/bin/{tool}")
-    root = tmp_path / "AppTranslocation" / "ABCD" / "d"
-    root.mkdir(parents=True)
-    assert not updater._mac_bundle_replaceable(make_bundle(root))
+def test_a_writable_bundle_can_update_itself(monkeypatch):
+    tools_present(monkeypatch)
+    writable(monkeypatch, "/Applications", APP)
+    assert updater._mac_bundle_replaceable(EXE)
 
 
-def test_a_read_only_folder_cannot_be_updated_in_place(tmp_path, monkeypatch):
-    monkeypatch.setattr(updater.shutil, "which", lambda tool: f"/usr/bin/{tool}")
-    exe = make_bundle(tmp_path)
-    monkeypatch.setattr(updater.os, "access", lambda path, mode: False)
-    assert not updater._mac_bundle_replaceable(exe)
+def test_a_translocated_app_cannot_update_itself(monkeypatch):
+    tools_present(monkeypatch)
+    writable(monkeypatch, TRANSLOCATED.rsplit("/", 1)[0], TRANSLOCATED)
+    assert not updater._mac_bundle_replaceable(TRANSLOCATED + "/Contents/MacOS/my-editor")
 
 
-def test_missing_system_tools_mean_no_in_place_update(tmp_path, monkeypatch):
+def test_a_read_only_folder_cannot_be_updated_in_place(monkeypatch):
+    tools_present(monkeypatch)
+    writable(monkeypatch, APP)                 # not the folder it sits in
+    assert not updater._mac_bundle_replaceable(EXE)
+    writable(monkeypatch, "/Applications")     # not the app itself
+    assert not updater._mac_bundle_replaceable(EXE)
+
+
+def test_missing_system_tools_mean_no_in_place_update(monkeypatch):
     monkeypatch.setattr(updater.shutil, "which", lambda tool: None)
-    assert not updater._mac_bundle_replaceable(make_bundle(tmp_path))
+    writable(monkeypatch, "/Applications", APP)
+    assert not updater._mac_bundle_replaceable(EXE)
 
 
 def test_the_staging_copy_sits_hidden_beside_the_app():
-    assert updater.mac_staging_path("/Applications/MyEditor.app") == \
-        "/Applications/.MyEditor.app.update"
+    assert updater.mac_staging_path(APP) == "/Applications/.MyEditor.app.update"
 
 
 # -- the scripts, run for real --------------------------------------------------------
@@ -427,7 +452,6 @@ def test_an_image_that_cannot_be_opened_is_reported(tools, mac_install, tmp_path
     assert not mac_install.staged.exists()
 
 
-@posix_only
 def test_an_installer_that_goes_away_after_a_system_step_leaves_memory_intact():
     # The dialog that owns the installer can close right after a step ends.
     # The finished process used to delete itself later, and if the installer
@@ -443,7 +467,7 @@ def test_an_installer_that_goes_away_after_a_system_step_leaves_memory_intact():
         import updater
         installer = updater.UpdateInstaller(updater.DEB)
         codes = []
-        installer._run("true", [], codes.append)
+        installer._run(sys.executable, ["-c", "pass"], codes.append)
         assert installer._process.waitForFinished(10000)
         app.processEvents()
         del installer
@@ -464,13 +488,12 @@ def test_an_installer_that_goes_away_after_a_system_step_leaves_memory_intact():
     assert "ok [0]" in proc.stdout
 
 
-@posix_only
 def test_a_system_step_never_waits_for_typed_input(qt_app):
-    # `cat` reads its input until it ends. With nothing attached it would
-    # wait forever, the way apt-get waits on a question nobody sees.
+    # This step reads its input until it ends. With nothing attached it
+    # would wait forever, the way apt-get waits on a question nobody sees.
     installer = updater.UpdateInstaller(updater.DEB)
     codes = []
-    installer._run("cat", [], codes.append)
+    installer._run(sys.executable, ["-c", "import sys; sys.stdin.read()"], codes.append)
     assert installer._process.waitForFinished(10_000)
     qt_app.processEvents()
     assert codes == [0]
@@ -531,9 +554,8 @@ def test_a_failed_package_install_does_not_name_the_next_step_either(tmp_path, m
 
 
 def test_a_mac_staging_failure_is_explained(tmp_path, monkeypatch):
-    exe = make_bundle(tmp_path)
     seen, calls, _ = prepare_with_exit_code(updater.MACOS_APP, 14, tmp_path, monkeypatch,
-                                            executable=exe)
+                                            executable=EXE)
     assert calls[0][:2] == ["sh", "-c"]
     # The download was checked, so a second try fetches the same app.
     assert seen["failed"] == [("The new version didn't pass the macOS integrity check, "
@@ -541,18 +563,15 @@ def test_a_mac_staging_failure_is_explained(tmp_path, monkeypatch):
 
 
 def test_a_full_disk_while_staging_can_be_tried_again(tmp_path, monkeypatch):
-    exe = make_bundle(tmp_path)
     seen, _, _ = prepare_with_exit_code(updater.MACOS_APP, 13, tmp_path, monkeypatch,
-                                        executable=exe)
+                                        executable=EXE)
     assert seen["failed"][0][1] is True
 
 
 def test_a_staged_mac_app_is_what_gets_applied(tmp_path, monkeypatch):
-    exe = make_bundle(tmp_path)
     seen, _, _ = prepare_with_exit_code(updater.MACOS_APP, 0, tmp_path, monkeypatch,
-                                        executable=exe)
-    bundle = updater.mac_bundle_path(exe)
-    assert seen["prepared"] == [updater.mac_staging_path(bundle)]
+                                        executable=EXE)
+    assert seen["prepared"] == ["/Applications/.MyEditor.app.update"]
 
 
 def test_calling_off_the_restart_removes_what_was_prepared(tmp_path):

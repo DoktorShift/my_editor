@@ -269,9 +269,8 @@ class InboxStore:
                 self._db.execute("PRAGMA journal_mode=WAL")
             self._migrate()
         except BaseException:
-            # Closed at once, not when the half-built store is collected: a
-            # damaged file is then renamed, and Windows renames no file
-            # that is still open (CP2 review N1).
+            # A file that is not a database is set aside by the caller, and
+            # Windows cannot move a file that is still open.
             self._db.close()
             raise
 

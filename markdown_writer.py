@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Callable, List, Optional, Tuple
 
 from PySide6.QtGui import (
@@ -62,6 +63,7 @@ from doc_walk import (
     parse_bullet_line,
     skip_prefix,
 )
+from rich_text import normalize_after_markdown_load
 
 ImageTarget = Callable[[object], Optional[str]]
 
@@ -88,6 +90,28 @@ _ORDERED_STYLES = {
     QTextListFormat.Style.ListLowerRoman,
     QTextListFormat.Style.ListUpperRoman,
 }
+
+# A Nostr reference: a person, a note or an article. Written bare, whatever
+# words its link shows (W2): that is the form every Nostr reader turns into
+# a name or a card the same way; njump and others drop a labelled link to
+# it ([label](nostr:...)) or show its address.
+_NOSTR_REFERENCE = re.compile(r"nostr:(?:npub|nprofile|note|nevent|naddr)1[02-9ac-hj-np-z]+",
+                              re.IGNORECASE)
+
+
+def _is_nostr_reference(href: str) -> bool:
+    return bool(_NOSTR_REFERENCE.fullmatch(href or ""))
+
+
+def _apart(reference: str, before: str, following: Optional["_Span"]) -> str:
+    """``reference`` with a space where a word would otherwise touch it,
+    so readers find where it starts and ends."""
+    if before and before[-1].isalnum():
+        reference = " " + reference
+    if following is not None and following.text[:1].isalnum():
+        reference += " "
+    return reference
+
 
 # A bare web address, and the characters that make a Markdown reader see
 # emphasis or code inside one.
@@ -368,20 +392,37 @@ def _own_address(words: str, href: str) -> str:
     return ""
 
 
+@lru_cache(maxsize=4096)
+def _reads_back_whole(address: str, href: str) -> bool:
+    """Whether Qt's reader (the editor's, the preview's, every reopen)
+    reads ``address``, written bare, back as one link to ``href`` over all
+    of it. It takes only some characters in a bare address: one with a
+    percent sign, a port, an @, a + or an = is not linked at all, one with
+    a comma or ! is cut there."""
+    doc = QTextDocument()
+    doc.setMarkdown(address, READ_FEATURES)
+    block = doc.begin()
+    runs = list(iter_block_runs(block))
+    return (doc.blockCount() == 1 and block.text() == address and bool(runs)
+            and all(fmt.isAnchor() and fmt.anchorHref() == href for _text, fmt in runs))
+
+
 def _autolink(address: str, href: str, before: str, following: Optional[_Span]) -> str:
     """A link that shows its own address, written so every reader links it.
 
     Bare, the way it was typed, where a reader finds it by itself: a web
     address or an email between spaces, with no character a reader would
-    take for emphasis. Readers that look for a bare address (a picture or
-    a video alone on its line becomes a player) find it there. Anywhere
-    else it is written ``<address>``, which every reader keeps whole.
+    take for emphasis, and only one that Qt's reader takes back whole.
+    Readers that look for a bare address (a picture or a video alone on
+    its line becomes a player) find it there. Anywhere else it is written
+    ``<address>``, which every reader keeps whole.
     """
     is_email = "@" in address and "://" not in address
     findable = (address.lower().startswith(("https://", "http://", "www.")) or is_email)
     if (findable and not any(ch in _MARKUP_IN_ADDRESS for ch in address)
             and (not before or before[-1].isspace() or before[-1] == "(")
-            and _ends_a_bare_address(address, following)):
+            and _ends_a_bare_address(address, following)
+            and _reads_back_whole(address, href)):
         return address
     return f"<{address}>" if is_email else f"<{href}>"
 
@@ -416,10 +457,13 @@ def _inline_markdown(spans: List[_Span], hard_break: str = "  \n") -> str:
             while i < len(spans) and spans[i].href == span.href and not spans[i].raw:
                 group.append(spans[i])
                 i += 1
+            following = spans[i] if i < len(spans) else None
+            if _is_nostr_reference(span.href):
+                out.append(_apart(span.href, "".join(out), following))
+                continue
             words = "".join(s.text for s in group).replace(LINE_SEPARATOR, " ")
             address = _own_address(words.strip(), span.href)
             if address and not any(s.bold or s.italic or s.strike for s in group):
-                following = spans[i] if i < len(spans) else None
                 out.append(_autolink(address, span.href, "".join(out), following))
                 continue
             inner = "".join(_styled(s) for s in group)
@@ -566,7 +610,10 @@ def _inline_note(spans: List[_Span]) -> str:
                 i += 1
             label = "".join(group).replace(LINE_SEPARATOR, " ").strip()
             href = span.href
-            if not label or label == href or label.rstrip("/") == href.rstrip("/"):
+            if _is_nostr_reference(href):
+                following = spans[i] if i < len(spans) else None
+                out.append(_apart(href, "".join(out), following))
+            elif not label or label == href or label.rstrip("/") == href.rstrip("/"):
                 out.append(href)
             else:
                 out.append(f"{label} ({href})")
@@ -699,6 +746,45 @@ def _fingerprint(doc) -> list:
     return prints
 
 
+# A footnote definition as typed ("[^1]: Ibid.") at a line's start, maybe
+# inside a quote, and the fence lines around code, where it is code.
+_FOOTNOTE_DEFINITION = re.compile(r"^((?: {0,3}>)* {0,3})\[(?=\^[^\]\s]+\]:)")
+_FENCE_LINE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+
+
+def literal_footnotes(markdown: str) -> str:
+    """``markdown`` with every footnote definition outside code written
+    ``\\[^1]:``, so a reader takes it for the text it is.
+
+    Qt's reader takes a definition whose text is one word or a web address
+    for a link reference definition: the line disappears and the mark
+    that refers to it becomes a link. Footnotes are kept as typed text in
+    the editor (D5), so they must read back as text."""
+    out = []
+    fence = ""
+    for line in markdown.split("\n"):
+        found = _FENCE_LINE.match(line)
+        if fence:
+            if (found and found.group(1)[0] == fence[0] and len(found.group(1)) >= len(fence)
+                    and not found.group(2).strip()):
+                fence = ""
+        elif found:
+            fence = found.group(1)
+        else:
+            line = _FOOTNOTE_DEFINITION.sub(r"\1\\[", line)
+        out.append(line)
+    return "\n".join(out)
+
+
+def read_markdown(doc: QTextDocument, markdown: str, features=READ_FEATURES) -> None:
+    """Read Markdown into ``doc`` the way the editor holds it: the one way
+    the app reads Markdown it wrote or accepted (an opened file or draft,
+    the publish preview, a paste), so what was typed comes back as typed.
+    Replaces what ``doc`` held."""
+    doc.setMarkdown(literal_footnotes(markdown), features)
+    normalize_after_markdown_load(doc)
+
+
 def holds_faithfully(markdown: str) -> bool:
     """Whether the editor can hold this Markdown and write it back without
     losing anything. When it cannot, open it as its Markdown text."""
@@ -727,5 +813,5 @@ def document_to(doc, flavor: str, image_target: Optional[ImageTarget] = None) ->
 __all__: Tuple[str, ...] = (
     "MARKDOWN", "NOTE", "document_blocks", "document_to", "document_to_markdown",
     "document_to_note_text", "has_local_only_formatting", "holds_faithfully",
-    "image_markdown", "READ_FEATURES",
+    "image_markdown", "literal_footnotes", "read_markdown", "READ_FEATURES",
 )

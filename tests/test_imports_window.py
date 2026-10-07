@@ -596,13 +596,14 @@ def test_a_closed_window_is_freed_without_the_collector(tmp_path):
     settle()
     ref = weakref.ref(win)
     gc.collect()
-    automatic = gc.isenabled()     # as found: the app may run without it
+    # As it was afterwards: the test run collects on its own (conftest).
+    collecting = gc.isenabled()
     gc.disable()
     try:
         del win
         assert ref() is None
     finally:
-        if automatic:
+        if collecting:
             gc.enable()
         controller.account_changed(None)
         settle()

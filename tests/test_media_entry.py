@@ -201,20 +201,37 @@ def test_ctrl_v_reports_a_clipboard_image_to_its_listener(qt_app):
 
 
 def test_ctrl_v_pastes_normally_with_nobody_listening(qt_app):
-    # The widget has to stay usable on its own, so an unconsumed image
-    # paste falls through to the plain-text path rather than vanishing.
-    QApplication.clipboard().setImage(_clipboard_image())
+    # The widget has to stay usable on its own: with nobody handling
+    # pictures, a paste still brings in what text the clipboard holds.
+    mime = QMimeData()
+    mime.setImageData(_clipboard_image())
+    mime.setText("caption")
+    QApplication.clipboard().setMimeData(mime)
     ed = HtmlEditor()
     seen = []
-    pasted = []
-    ed.paste_normalized = lambda: pasted.append(True)
     ed.image_pasted.connect(seen.append)
     ed.image_pasted.disconnect()
 
     _ctrl_v(ed)
 
     assert seen == []
-    assert pasted == [True]
+    assert ed.toPlainText() == "caption"
+
+
+def test_a_picture_copied_with_its_text_pastes_the_text(qt_app):
+    # A web page selection carries a picture of itself next to its text:
+    # the text is what was meant.
+    mime = QMimeData()
+    mime.setImageData(_clipboard_image())
+    mime.setText("words")
+    QApplication.clipboard().setMimeData(mime)
+    ed = HtmlEditor()
+    seen = []
+    ed.image_pasted.connect(seen.append)
+
+    _ctrl_v(ed)
+
+    assert seen == [] and ed.toPlainText() == "words"
 
 
 def _drop_urls(editor, *paths):

@@ -21,13 +21,25 @@ def is_pristine_welcome(editor) -> bool:
             and not editor.document().isModified())
 
 
+# The keys the page names, by command, as Windows and Linux write them;
+# the window passes each platform's own (⌘N on a Mac, Strg+N in German).
+DEFAULT_KEYS = {"file.new": "Ctrl+N", "file.open": "Ctrl+O", "file.save": "Ctrl+S",
+                "search.find": "Ctrl+F"}
+
+
 def _page_text(message: str) -> str:
     """A plain (translated) text, made safe to put in the page."""
     return html.escape(message, quote=False)
 
 
-def welcome_html() -> str:
-    """Build the HTML shown in the first-run Welcome tab."""
+def welcome_html(keys=None) -> str:
+    """Build the HTML shown in the first-run Welcome tab. ``keys`` maps a
+    command to its keys as the platform writes them (DEFAULT_KEYS)."""
+    keys = {**DEFAULT_KEYS, **(keys or {})}
+
+    def key_line(command: str, words: str) -> str:
+        return _page_text(words).format(keys=f"<b>{_page_text(keys[command])}</b>")
+
     colors = " ".join(
         f'<span style="color:{color.name()}">{_page_text(_(name))}</span>'
         for name, color in TEXT_COLORS.items()
@@ -37,10 +49,10 @@ def welcome_html() -> str:
     get_started = _page_text(_("Get started"))
     # Each line names its keys in bold.
     lines = [
-        _("<b>Ctrl+N</b> - new file"),
-        _("<b>Ctrl+O</b> - open a file"),
-        _("<b>Ctrl+S</b> - save"),
-        _("<b>Ctrl+F</b> - find"),
+        key_line("file.new", _("{keys} - new file")),
+        key_line("file.open", _("{keys} - open a file")),
+        key_line("file.save", _("{keys} - save")),
+        key_line("search.find", _("{keys} - find")),
         _page_text(_("View > Toggle Dark/Light Theme - switch between dark and light")),
         _page_text(_("Help > Keyboard Shortcuts - for the full list")),
     ]

@@ -11,7 +11,9 @@ Return adds or updates the link, Escape closes the panel, and the
 editor gets the focus back either way.
 
 The popover only asks. What becomes of the answer is the editor's
-business: it connects ``applied(text, address)`` and ``removed()``.
+business: it connects ``applied(text, address)`` and ``removed()``. The
+text is "" unless the person changed it: the linked words stay exactly
+as they are (their spaces, their paragraphs) unless they were retyped.
 """
 
 from __future__ import annotations
@@ -34,7 +36,9 @@ from link_url import is_bare_http_url, normalize_link_input
 
 class LinkPopover(QFrame):
     """Text and Address of a link; ``applied(text, href)`` on Add or
-    Update, ``removed()`` on Remove Link (only while editing a link)."""
+    Update, ``removed()`` on Remove Link (only while editing a link).
+    ``text_editable`` False (words of several paragraphs) shows the words
+    without letting them be retyped."""
 
     applied = Signal(str, str)
     removed = Signal()
@@ -42,7 +46,8 @@ class LinkPopover(QFrame):
     WIDTH = 380
 
     def __init__(self, *, text: str = "", href: str = "", editing: bool = False,
-                 nostr: bool = False, parent: Optional[QWidget] = None) -> None:
+                 nostr: bool = False, text_editable: bool = True,
+                 parent: Optional[QWidget] = None) -> None:
         super().__init__(parent, Qt.WindowType.Popup)
         self.setObjectName("LinkPopover")
         self.setFrameShape(QFrame.Shape.StyledPanel)
@@ -61,6 +66,10 @@ class LinkPopover(QFrame):
         form.setVerticalSpacing(8)
         self.text_edit = QLineEdit(text)
         self.text_edit.setPlaceholderText(_("Same as the address"))
+        if not text_editable:
+            self.text_edit.setEnabled(False)
+            self.text_edit.setToolTip(_("Words from several paragraphs are linked as "
+                                        "they are."))
         self.address_edit = QLineEdit(href)
         self.address_edit.setPlaceholderText("https://example.com")
         self.address_edit.setClearButtonEnabled(True)
@@ -146,7 +155,9 @@ class LinkPopover(QFrame):
         if href is None:
             self.address_edit.setFocus()
             return
-        self.applied.emit(self.text_edit.text().strip(), href)
+        # Only words the person typed replace the linked ones.
+        text = self.text_edit.text().strip() if self.text_edit.isModified() else ""
+        self.applied.emit(text, href)
         self.close()
 
     def _remove(self) -> None:

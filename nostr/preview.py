@@ -55,8 +55,7 @@ from PySide6.QtWidgets import QTextBrowser
 import i18n
 import word_count
 from i18n import _, ngettext
-from markdown_writer import READ_FEATURES
-from rich_text import normalize_after_markdown_load
+from markdown_writer import READ_FEATURES, read_markdown
 from nostr import bech32
 
 # person's pubkey (hex) -> the name to show, or None
@@ -170,7 +169,7 @@ def markdown_for_preview(markdown: str, names: Optional[NameLookup] = None) -> s
 def reading_minutes(markdown: str) -> int:
     """Minutes to read the article, by the one rule (word_count.py); at
     least one, since a byline never says "0 min read"."""
-    return max(1, word_count.reading_minutes(word_count.count_words(markdown)))
+    return max(1, word_count.reading_minutes(word_count.count_markdown_words(markdown)))
 
 
 def _date_text(published_at: int) -> str:
@@ -296,8 +295,7 @@ def article_document(markdown: str, article: Article, *, names: Optional[NameLoo
     doc = QTextDocument(parent)
     doc.setDocumentMargin(0)
     # The body, rendered from exactly the published Markdown.
-    doc.setMarkdown(markdown_for_preview(markdown, names), MARKDOWN_FEATURES)
-    normalize_after_markdown_load(doc)
+    read_markdown(doc, markdown_for_preview(markdown, names), MARKDOWN_FEATURES)
     _tidy_tables(doc)
     _style_body(doc.begin(), colors)
 

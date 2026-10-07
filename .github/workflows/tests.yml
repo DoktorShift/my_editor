@@ -18,15 +18,24 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Windows' own platform, as people run it: the runner has a
+          # desktop to draw on. Qt's offscreen platform finds no fonts on
+          # Windows (it reads them from a folder Qt does not ship), so
+          # text there is measured, wrapped and exported unlike in any
+          # real window.
           - os: windows-latest
             name: windows
+            qt_platform: windows
+          # No screen on these runners: Qt draws into memory, with the
+          # system's fonts.
           - os: macos-latest
             name: macos
+            qt_platform: offscreen
           - os: ubuntu-22.04
             name: linux
+            qt_platform: offscreen
     env:
-      # No screen on the runners: Qt draws into memory.
-      QT_QPA_PLATFORM: offscreen
+      QT_QPA_PLATFORM: ${{ matrix.qt_platform }}
     steps:
       - uses: actions/checkout@v7
 

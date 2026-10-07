@@ -24,6 +24,7 @@ Write in the editor, hit publish, approve on your phone. The document goes out a
 
 - **Short notes** (kind 1, `Ctrl+Shift+P`): the editor's content as plain text, since that is what apps show for a note. Bold and italic are left out; list markers and link addresses stay.
 - **Long-form articles** (NIP-23 kind 30023, `Ctrl+Shift+A`): the body is the same Markdown a `.md` save writes (`markdown_writer.py`): bold, italic, strikethrough, inline code, links, headings, lists, quotes, code blocks, tables and task lists reach Nostr. Underline and colors have no Markdown and stay in local files. Lines typed one under the other become paragraphs of their own (NIP-23 asks for no hard line breaks), and Markdown typed by hand (`## Heading`, `[label](url)`, a code fence) is published as typed. An article draft or `.md` file that holds something the editor cannot show (footnotes, raw HTML, an image without alt text) opens as its Markdown text and is published exactly as written, so nothing is lost. Title, summary, slug (the `d`-tag identifier), cover image, and hashtags come with it. Re-publishing with the same slug replaces the previous version, so an article stays addressable as one `naddr1…` link across edits.
+- **The date an article first went out** stays with it through every edit: readers date the article by it. MyEditor takes it from the article's draft, or from what this computer remembers of its own publications (`~/.config/my_editor/article_first_published.json`), or asks the relays you publish to, the ones you read from and the indexers. An article none of them holds is new and dated today, as long as at least one of the relays you publish to (and an indexer) answered: one relay that is down does not hold up a new article. When none of the relays you publish to answers, nobody can tell whether the article went out before, so MyEditor asks you: **Try Again**, **Publish as New** (today's date) or **Cancel**. A draft saved after publishing keeps the date, so another device that opens the draft keeps it too.
 
 Both flows display a `Published from MyEditor` client tag so readers that honour NIP-89 can show which app produced the note.
 
@@ -116,6 +117,7 @@ In-progress work is saved as a **NIP-37 draft**: a kind 31234 event whose body i
 - **`Ctrl+S`** on a draft-bound tab silently re-saves the draft. Same shortcut, no questions, exactly like saving a local file.
 - Double-click a row to open the draft in a new tab. Right-click for Publish, Copy event id, or Delete.
 - An article draft holds the article's Markdown and opens with its formatting (headings, bold, lists); a note draft opens as typed.
+- An article draft also keeps the article's details: its title, summary, cover image, hashtags, the date it was first published and, for an imported post, where it came from. Saving the draft again keeps all of them, and **Publish Article** offers them, so an imported post goes out with its cover, hashtags and original date.
 
 ### Where drafts are kept
 

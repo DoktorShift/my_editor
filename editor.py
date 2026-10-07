@@ -6,31 +6,47 @@ HTML Editor widget with bullet and format logic.
 """
 
 import os
+import re
 import sys
 
-from PySide6.QtCore import Qt, QTimer, QRect, QPoint, QMetaMethod, QEvent, QUrl, Signal
+from PySide6.QtCore import (
+    Qt, QTimer, QRect, QPoint, QMetaMethod, QEvent, QMimeData, QUrl, Signal,
+)
 from PySide6.QtGui import (
     QPainter, QTextBlockFormat, QTextCursor, QTextCharFormat, QColor, QClipboard, QPen,
-    QTextOption, QImage, QTextDocument, QTextFormat, QDesktopServices,
+    QTextOption, QImage, QPixmap, QTextDocument, QTextFormat, QDesktopServices,
 )
 from PySide6.QtWidgets import QTextEdit, QMenu, QApplication, QToolTip
 from constants import (
     DARK_BG, DARK_FG, LIGHT_BG, LIGHT_FG, DARK_SELECTION, LIGHT_SELECTION,
     DARK_GUIDE, LIGHT_GUIDE, DARK_CURRENT_LINE, LIGHT_CURRENT_LINE, DARK_PAPER, LIGHT_PAPER,
 )
-from fonts import monospace_family
-from i18n import _
+from fonts import code_font, writing_font
+from i18n import _, ngettext
+import image_safety
 import link_url
+import paste
 import rich_text
 import url_safety
 from link_popover import LinkPopover, clipboard_address
 
+
+# Characters per line when writing: within the 50 to 75 that typography
+# (and nostrdesign.org's UI tips) give for comfortable reading.
+WRITING_MEASURE = 72
 
 # Stand-in painted for an image whose bytes have not arrived yet. Its
 # size is deliberately modest: it is replaced in place once the real
 # image resolves, and a large box would reflow the whole document twice.
 _PLACEHOLDER_SIZE = (160, 100)
 _PLACEHOLDER_COLOR = "#c8c8c8"
+
+
+def _n_pictures_left_out(count: int) -> str:
+    return ngettext("A picture could not be pasted with the text. Copy it on its own "
+                    "and paste it.",
+                    "{count} pictures could not be pasted with the text. Copy each on its "
+                    "own and paste it.", count).format(count=count)
 
 
 def _is_document_relative(url) -> bool:
@@ -55,12 +71,26 @@ class HtmlEditor(QTextEdit):
     # connected decide. Nothing is emitted when nobody is listening, so
     # the widget stays usable on its own (tests, previews).
     image_pasted = Signal(object)    # QImage from the clipboard
-    urls_dropped = Signal(list)      # list[QUrl] dropped on the editor
+    urls_dropped = Signal(list)      # list[QUrl] dropped on the editor (or image files pasted)
+    # A short message for the status bar about what the editor just did
+    # (a paste that had to leave pictures out).
+    notice = Signal(str)
+    # The part of the document on screen changed (scrolled, resized):
+    # whoever paints only what is visible (find highlights, spelling)
+    # paints again.
+    visible_area_changed = Signal()
+
+    # Kinds of highlights shown over the text, bottom to top: each kind
+    # keeps its own (set_highlights), the editor shows them together.
+    HIGHLIGHT_LAYERS = ("spelling", "find")
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAcceptRichText(True)
         self.setUndoRedoEnabled(True)
+        # What a screen reader calls the text area until the window names
+        # it after its document.
+        self.setAccessibleName(_("Document"))
 
         # Who fills the context menu: the window puts its own commands
         # there (the same ones as in its menus). Without one, the menu has
@@ -96,12 +126,17 @@ class HtmlEditor(QTextEdit):
                 color: {DARK_FG};
                 border: none;
                 selection-background-color: {DARK_SELECTION};
-                font-family: "{monospace_family()}";
-                font-size: 14px;
-                line-height: 1.5;
                 padding: 8px;
             }}
         """)
+        # Code and plain text are set in the monospace font; writing gets
+        # the system's text font (set_writing_font). The font is set here,
+        # not in the style sheet, which could only name a family.
+        self.setFont(code_font())
+        # Characters per line when writing; None for code (full width).
+        self._writing_measure_chars = None
+        self._highlights = {layer: [] for layer in self.HIGHLIGHT_LAYERS}
+        self.verticalScrollBar().valueChanged.connect(self.visible_area_changed)
 
         # Track active formatting state for persistent formatting
         self.active_format = {
@@ -189,74 +224,14 @@ class HtmlEditor(QTextEdit):
         return super().loadResource(type_, url)
 
     # -------- Format Toggles --------
-    def _all_in_selection(self, cursor: QTextCursor, check) -> bool:
-        """Return True if every text fragment in the selection passes check(QTextCharFormat).
-        Uses block/fragment iteration (efficient, no char-by-char loop)."""
-        start = cursor.selectionStart()
-        end = cursor.selectionEnd()
-        doc = self.document()
-        block = doc.findBlock(start)
-        while block.isValid() and block.position() < end:
-            it = block.begin()
-            while not it.atEnd():
-                frag = it.fragment()
-                if frag.isValid():
-                    frag_start = frag.position()
-                    frag_end = frag_start + frag.length()
-                    if frag_end > start and frag_start < end:
-                        if not check(frag.charFormat()):
-                            return False
-                it += 1
-            block = block.next()
-        return True
-
     def toggle_bold(self):
-        cursor = self.textCursor()
-        fmt = QTextCharFormat()
-        if cursor.hasSelection():
-            all_bold = self._all_in_selection(cursor, lambda f: f.fontWeight() > 400)
-            new_weight = 400 if all_bold else 700
-            fmt.setFontWeight(new_weight)
-            cursor.mergeCharFormat(fmt)
-            self.setTextCursor(cursor)
-        else:
-            current = self.currentCharFormat()
-            new_weight = 400 if current.fontWeight() > 400 else 700
-            fmt.setFontWeight(new_weight)
-            self.mergeCurrentCharFormat(fmt)
-        self.active_format['bold'] = (new_weight > 400)
+        self.active_format['bold'] = self.toggle_style(rich_text.BOLD)
 
     def toggle_italic(self):
-        cursor = self.textCursor()
-        fmt = QTextCharFormat()
-        if cursor.hasSelection():
-            all_italic = self._all_in_selection(cursor, lambda f: f.fontItalic())
-            new_italic = not all_italic
-            fmt.setFontItalic(new_italic)
-            cursor.mergeCharFormat(fmt)
-            self.setTextCursor(cursor)
-        else:
-            current = self.currentCharFormat()
-            new_italic = not current.fontItalic()
-            fmt.setFontItalic(new_italic)
-            self.mergeCurrentCharFormat(fmt)
-        self.active_format['italic'] = new_italic
+        self.active_format['italic'] = self.toggle_style(rich_text.ITALIC)
 
     def toggle_underline(self):
-        cursor = self.textCursor()
-        fmt = QTextCharFormat()
-        if cursor.hasSelection():
-            all_underline = self._all_in_selection(cursor, lambda f: f.fontUnderline())
-            new_underline = not all_underline
-            fmt.setFontUnderline(new_underline)
-            cursor.mergeCharFormat(fmt)
-            self.setTextCursor(cursor)
-        else:
-            current = self.currentCharFormat()
-            new_underline = not current.fontUnderline()
-            fmt.setFontUnderline(new_underline)
-            self.mergeCurrentCharFormat(fmt)
-        self.active_format['underline'] = new_underline
+        self.active_format['underline'] = self.toggle_style(rich_text.UNDERLINE)
 
     def apply_color(self, qcolor: QColor | None):
         cursor = self.textCursor()
@@ -375,19 +350,57 @@ class HtmlEditor(QTextEdit):
         self._update_paper_margins()
         self.viewport().update()
 
+    def set_writing_font(self, writing: bool) -> None:
+        """Writing (Markdown, drafts): the system's text font at a reading
+        size, in a column of a comfortable line length. Otherwise (code,
+        plain text): the monospace font across the whole width."""
+        self.setFont(writing_font() if writing else code_font())
+        self._writing_measure_chars = WRITING_MEASURE if writing else None
+        self._update_paper_margins()
+        self.viewport().update()
+
     def _update_paper_margins(self):
-        if not self._paper_mode:
+        """The text column: Paper Mode's page, or the writing measure, or
+        the whole width."""
+        chars = self._paper_measure_chars if self._paper_mode else self._writing_measure_chars
+        if not chars:
             self.setViewportMargins(0, 0, 0, 0)
             return
-        char_w = self.fontMetrics().horizontalAdvance("0") or 8
-        measure = char_w * self._paper_measure_chars
+        metrics = self.fontMetrics()
+        char_w = (metrics.averageCharWidth() if self._writing_measure_chars
+                  else metrics.horizontalAdvance("0")) or 8
+        measure = char_w * chars
         side = int(max(0, (self.width() - measure) / 2))
         self.setViewportMargins(side, 0, side, 0)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if self._paper_mode:
+        if self._paper_mode or self._writing_measure_chars:
             self._update_paper_margins()
+        self.visible_area_changed.emit()
+
+    # -------- Highlights over the text --------
+    def set_highlights(self, layer: str, selections) -> None:
+        """Show ``selections`` (QTextEdit.ExtraSelection) as the highlights
+        of one kind (HIGHLIGHT_LAYERS), in place of that kind's earlier
+        ones; the other kinds stay. Each highlight holds a cursor the
+        document moves on every edit, so callers keep them to what is on
+        screen (visible_range)."""
+        self._highlights[layer] = list(selections)
+        self.setExtraSelections([s for name in self.HIGHLIGHT_LAYERS
+                                 for s in self._highlights[name]])
+
+    def highlights(self, layer: str) -> list:
+        return list(self._highlights[layer])
+
+    def visible_range(self):
+        """``(first, last)``: the document positions from the start of the
+        first paragraph on screen to the end of the last."""
+        viewport = self.viewport()
+        top = self.cursorForPosition(QPoint(0, 0)).block()
+        bottom = self.cursorForPosition(
+            QPoint(viewport.width() - 1, viewport.height() - 1)).block()
+        return top.position(), bottom.position() + bottom.length()
 
     def _is_dark(self) -> bool:
         return hasattr(self, "_theme_colors") and self._theme_colors["bg"] == DARK_BG
@@ -605,16 +618,41 @@ class HtmlEditor(QTextEdit):
             text = cursor.selectedText()
         else:
             href = clipboard_address()
-            text = cursor.selectedText().replace("\u2029", " ").replace("\u2028", " ")
-        popover = LinkPopover(text=text, href=href, editing=found is not None,
-                              nostr=self._nostr_active(), parent=self)
+            cursor = self._trimmed_selection(cursor)
+            self.setTextCursor(cursor)
+            text = cursor.selectedText()
+        several = "\u2029" in text
+        popover = LinkPopover(text=text.replace("\u2029", " ").replace("\u2028", " "),
+                              href=href, editing=found is not None,
+                              nostr=self._nostr_active(), text_editable=not several,
+                              parent=self)
         popover.applied.connect(self.apply_link)
         popover.removed.connect(self.remove_link)
         # Escape, Cancel or a click elsewhere: the writing goes on here.
-        popover.destroyed.connect(lambda _obj=None: self.setFocus())
+        # (A method, not a lambda: Qt drops the connection if the editor
+        # goes first, a lambda would call into a deleted editor.)
+        popover.destroyed.connect(self._link_popover_closed)
         popover.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         start_rect = self.cursorRect(self._selection_start_cursor())
         popover.show_below(start_rect, self.viewport())
+
+    def _link_popover_closed(self, _popover=None) -> None:
+        self.setFocus()
+
+    @staticmethod
+    def _trimmed_selection(cursor: QTextCursor) -> QTextCursor:
+        """The selection without the spaces (and paragraph ends) at its
+        edges: they stay outside the link, as words processors keep them,
+        instead of being deleted with it."""
+        selected = cursor.selectedText()
+        if not selected.strip():
+            return cursor
+        lead = len(selected) - len(selected.lstrip())
+        trail = len(selected) - len(selected.rstrip())
+        trimmed = QTextCursor(cursor)
+        trimmed.setPosition(cursor.selectionStart() + lead)
+        trimmed.setPosition(cursor.selectionEnd() - trail, QTextCursor.MoveMode.KeepAnchor)
+        return trimmed
 
     def _selection_start_cursor(self) -> QTextCursor:
         cursor = QTextCursor(self.textCursor())
@@ -622,8 +660,9 @@ class HtmlEditor(QTextEdit):
         return cursor
 
     def apply_link(self, text: str, href: str) -> None:
-        """Link the selection (or insert ``text``, or the address itself,
-        when nothing is selected) to ``href``."""
+        """Link the selection to ``href``: its words as they are, or
+        ``text`` in their place when the person retyped them. With nothing
+        selected, ``text`` (or else the address itself) is inserted."""
         cursor = self.textCursor()
         if not cursor.hasSelection() and not text:
             text = link_url.display_href(href, limit=10_000)
@@ -643,10 +682,11 @@ class HtmlEditor(QTextEdit):
             self._link_opener(href)
             return
         web = link_url.web_address_for(href)
+        mail = link_url.mail_address_for(href)
         if web and url_safety.is_safe_external_url(web):
             QDesktopServices.openUrl(QUrl(web))
-        elif href.lower().startswith("mailto:"):
-            QDesktopServices.openUrl(QUrl(href))
+        elif mail:
+            QDesktopServices.openUrl(QUrl(mail))
 
     def _leave_link_at_end(self) -> None:
         """Typing right before or right after a link is not part of it
@@ -746,6 +786,9 @@ class HtmlEditor(QTextEdit):
             menu.addAction(_("Copy"), self.copy)
             menu.addAction(_("Paste"), self.paste_from_clipboard)
         menu.exec(event.globalPos())
+        # Built for this one click: gone with it (the window's shared Color
+        # and Style menus in it are not its children, and stay).
+        menu.deleteLater()
 
     # -------- Bullet Logic (•) --------
     @staticmethod
@@ -816,10 +859,6 @@ class HtmlEditor(QTextEdit):
         if (e.key() == Qt.Key_Z and e.modifiers() == (Qt.ControlModifier | Qt.ShiftModifier)) or \
            (e.key() == Qt.Key_Y and e.modifiers() == Qt.ControlModifier):
             self.redo()
-            return
-
-        if e.key() == Qt.Key_V and e.modifiers() == Qt.ControlModifier:
-            self.paste_from_clipboard()
             return
 
         if e.text() and e.text().isprintable():
@@ -1017,7 +1056,7 @@ class HtmlEditor(QTextEdit):
             fmt = block.blockFormat()
             if cursor.atBlockEnd():
                 fmt = rich_text.heading_block_format(fmt, 0)
-                char = rich_text.body_char_format(cursor.charFormat())
+                char = rich_text.body_char_format(cursor.charFormat(), own_weight=False)
             else:
                 char = cursor.charFormat()
             cursor.insertBlock(fmt, char)
@@ -1081,59 +1120,119 @@ class HtmlEditor(QTextEdit):
                 and self.isSignalConnected(QMetaMethod.fromSignal(self.urls_dropped))):
             self.urls_dropped.emit(list(event.mimeData().urls()))
             event.acceptProposedAction()
-        elif event.mimeData().hasText():
-            cursor = self.cursorForPosition(event.position().toPoint())
-            self.setTextCursor(cursor)
-            fmt = QTextCharFormat()
-            fmt.setFontWeight(400)
-            fmt.setFontItalic(False)
-            fmt.setFontUnderline(False)
-            fmt.clearForeground()
-            cursor.insertText(event.mimeData().text(), fmt)
-            self.setTextCursor(cursor)
-            event.acceptProposedAction()
         else:
+            # Text goes where it was dropped, the way a paste would put it
+            # there (insertFromMimeData), as one step on the undo stack.
             super().dropEvent(event)
 
+    # -------- Paste --------
     def paste_from_clipboard(self):
-        """Paste (Ctrl+V, Edit > Paste). A clipboard image is reported to
-        whoever owns media handling; with nobody listening it falls
-        through to the plain-text path that strips foreign formatting."""
-        clip = QApplication.clipboard()
+        """Paste (Edit > Paste, the context menu): the same as the
+        keyboard's paste, which Qt sends to insertFromMimeData."""
+        self.insertFromMimeData(QApplication.clipboard().mimeData())
+
+    def paste_normalized(self):
+        """Paste and Match Style: the clipboard's text, in the style of the
+        text where it goes."""
+        self._insert_plain(paste.plain_text(QApplication.clipboard().mimeData()))
+
+    def canInsertFromMimeData(self, source):
+        return source.hasFormat(paste.MARKDOWN_MIME) or super().canInsertFromMimeData(source)
+
+    def createMimeDataFromSelection(self):
+        """Copy: the text and HTML other apps read, and, where the document
+        holds Markdown structure, the selection as this editor writes
+        Markdown, so a paste here keeps every structure exactly. (Qt's own
+        copy would offer Qt's Markdown, which reads a heading's weight as
+        bold, and builds an OpenDocument copy of every selection.)"""
+        if not self._holds_structure():
+            return super().createMimeDataFromSelection()
         cursor = self.textCursor()
-        text = (clip.text() or "").strip()
-        if (cursor.hasSelection() and link_url.is_bare_http_url(text) and self._holds_structure()
-                and "\u2029" not in cursor.selectedText()):
-            # A web address pasted over words makes them a link to it.
-            rich_text.set_link(cursor, "", text)
+        fragment = cursor.selection()
+        mime = QMimeData()
+        mime.setText(fragment.toPlainText())
+        mime.setHtml(fragment.toHtml())
+        mime.setData(paste.MARKDOWN_MIME, paste.selection_markdown(cursor).encode("utf-8"))
+        return mime
+
+    def insertFromMimeData(self, source):
+        """Every paste and every drop of text arrives here.
+
+        - A web address pasted over words makes them a link to it (over
+          an address, it replaces it: the words would say one address
+          and the link go to another).
+        - Pictures (image files copied in a file manager, a picture copied
+          on its own) go to whoever handles media, when someone does.
+        - In a document that holds Markdown structure, outside a code
+          block, the paste comes with what Markdown can say of it
+          (paste.py); elsewhere, and for text that is not Markdown, it is
+          plain text in the style of the text where it goes."""
+        if source is None:
+            return
+        cursor = self.textCursor()
+        text = source.text() if source.hasText() else ""
+        address = text.strip()
+        if (cursor.hasSelection() and link_url.is_bare_http_url(address)
+                and self._holds_structure() and "\u2029" not in cursor.selectedText()
+                and not link_url.is_an_address(cursor.selectedText())):
+            rich_text.set_link(cursor, "", address)
             cursor.setPosition(cursor.selectionEnd())
             self.setTextCursor(cursor)
             self._leave_link_at_end()
             return
-        if clip.mimeData().hasImage():
-            image = clip.image()
-            if not image.isNull() and self.isSignalConnected(
-                    QMetaMethod.fromSignal(self.image_pasted)):
-                self.image_pasted.emit(image)
-                return
-        self.paste_normalized()
-
-    def paste_normalized(self):
-        """Paste plain text with default formatting (no external styles, no baked colors)."""
-        plain_text = QApplication.clipboard().text()
-        if not plain_text:
+        if self._pasted_media(source, text):
             return
+        if self._holds_structure() and not rich_text.is_code_block(cursor.block()):
+            pasted = paste.from_mime(source)
+            if pasted is not None:
+                if pasted.left_out:
+                    self.notice.emit(_n_pictures_left_out(pasted.left_out))
+                if not pasted.document.isEmpty():
+                    rich_text.insert_document(cursor, pasted.document)
+                    self.setTextCursor(cursor)
+                    self.ensureCursorVisible()
+                    return
+        if getattr(self, "_markdown_source", False) and source.hasFormat(paste.MARKDOWN_MIME):
+            # Markdown opened as its text: what was copied, as Markdown.
+            text = bytes(source.data(paste.MARKDOWN_MIME)).decode("utf-8", "replace")
+        self._insert_plain(text or paste.plain_text(source))
 
+    def _pasted_media(self, source, text: str) -> bool:
+        """Report pasted pictures to whoever handles media. True when
+        someone took them."""
+        if source.hasUrls() and self.isSignalConnected(
+                QMetaMethod.fromSignal(self.urls_dropped)):
+            urls = list(source.urls())
+            if urls and all(u.isLocalFile() and image_safety.is_image_file(u.toLocalFile())
+                            for u in urls):
+                # Image files copied in the Finder or Explorer.
+                self.urls_dropped.emit(urls)
+                return True
+        if source.hasImage() and not text.strip() and self.isSignalConnected(
+                QMetaMethod.fromSignal(self.image_pasted)):
+            image = source.imageData()
+            if isinstance(image, QPixmap):
+                image = image.toImage()
+            if isinstance(image, QImage) and not image.isNull():
+                self.image_pasted.emit(image)
+                return True
+        return False
+
+    def _insert_plain(self, text: str) -> None:
+        """Insert plain text in the style of the text where it goes (the
+        way typing would: not into a link it only touches). A table cell
+        holds one line, so line breaks become spaces there."""
+        if not text:
+            return
         cursor = self.textCursor()
+        cursor.beginEditBlock()
         if cursor.hasSelection():
             cursor.removeSelectedText()
-
-        fmt = QTextCharFormat()
-        fmt.setFontWeight(400)
-        fmt.setFontItalic(False)
-        fmt.setFontUnderline(False)
-        fmt.clearForeground()
-
-        cursor.insertText(plain_text, fmt)
+            self.setTextCursor(cursor)
+        if cursor.currentTable() is not None and self._holds_structure():
+            text = re.sub(r"[ \t]*[\r\n]+[ \t]*", " ", text.strip())
+        self._leave_link_at_end()
+        cursor.insertText(text, self.currentCharFormat())
+        cursor.endEditBlock()
         self.setTextCursor(cursor)
         self.ensureCursorVisible()

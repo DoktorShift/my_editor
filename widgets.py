@@ -218,9 +218,15 @@ class FindBar(QFrame):
     def _options_toggled(self) -> None:
         if self.options_button is not None:
             chosen = [a.text() for a in (self.match_case, self.whole_words) if a.isChecked()]
-            # The button says which options are on, so a search that finds
-            # nothing is not a mystery.
-            self.options_button.setText(", ".join(chosen) if chosen else _("Options"))
+            # The button says that options are on, so a search that finds
+            # nothing is not a mystery; which ones, its tooltip and its
+            # description say (the names would widen the bar past the
+            # window: "Groß-/Kleinschreibung beachten, Nur ganze Wörter").
+            self.options_button.setText(
+                _("Options ({count})").format(count=len(chosen)) if chosen else _("Options"))
+            names = ", ".join(chosen)
+            self.options_button.setToolTip(names)
+            self.options_button.setAccessibleDescription(names)
         self.options_changed.emit()
 
     def show_replace(self, shown: bool) -> None:

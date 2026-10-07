@@ -15,15 +15,20 @@ words why it cannot be a link:
 
 Anything that runs code or reaches into the reader's own computer
 (``javascript:``, ``data:``, ``file:``, ``vbscript:``) is refused, as is
-any other scheme: what is published opens on strangers' devices.
+any other scheme: what is published opens on strangers' devices. A web
+address is held to the same rule the app opens links by
+(url_safety.is_safe_external_url): no name or password in it (the
+classic disguise ``https://good.example@evil.example/``, and a password
+published for everyone) and a port that can be one.
 """
 
 from __future__ import annotations
 
 import re
 from typing import Optional, Tuple
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit
 
+import url_safety
 from i18n import _
 
 _NOSTR_ENTITY = re.compile(r"(?:npub|nprofile|note|nevent|naddr)1[02-9ac-hj-np-z]{6,}")
@@ -37,6 +42,21 @@ def _ask_for(nostr: bool) -> str:
     if nostr:
         return _("Enter a web address, an email address or a Nostr link.")
     return _("Enter a web address or an email address.")
+
+
+def _web_address_problem(address: str) -> str:
+    """Why a web address cannot be a link, or "" when it can: the rule
+    links are opened by, said in plain words."""
+    parts = urlsplit(address)
+    if "@" in parts.netloc:
+        return _("An address with a name or password in it cannot be a link.")
+    try:
+        parts.port
+    except ValueError:
+        return _("That address has a port number that cannot be.")
+    if not url_safety.is_safe_external_url(address):
+        return _("That address is missing the name of the website.")
+    return ""
 
 
 def normalize_link_input(raw: str, *, nostr: bool = False) -> Tuple[Optional[str], str]:
@@ -65,10 +85,8 @@ def normalize_link_input(raw: str, *, nostr: bool = False) -> Tuple[Optional[str
     if scheme and not text[scheme.end():].isdigit() and "." not in scheme.group(1):
         name = scheme.group(1).lower()
         if name in ("http", "https"):
-            host = urlsplit(text).hostname or ""
-            if not host:
-                return None, _("That address is missing the name of the website.")
-            return text, ""
+            problem = _web_address_problem(text)
+            return (None, problem) if problem else (text, "")
         if name == "nostr":
             return None, _("That is not a Nostr link.")
         if name in _DANGEROUS:
@@ -77,7 +95,8 @@ def normalize_link_input(raw: str, *, nostr: bool = False) -> Tuple[Optional[str
             return None, _("Only web addresses, email addresses and Nostr links can be links.")
         return None, _("Only web addresses and email addresses can be links.")
     if _DOMAIN.fullmatch(text):
-        return "https://" + text, ""
+        problem = _web_address_problem("https://" + text)
+        return (None, problem) if problem else ("https://" + text, "")
     return None, _ask_for(nostr)
 
 
@@ -87,8 +106,18 @@ def is_bare_http_url(text: str) -> bool:
     text = (text or "").strip()
     if not text or any(ch.isspace() for ch in text):
         return False
-    parts = urlsplit(text)
-    return parts.scheme.lower() in ("http", "https") and bool(parts.hostname)
+    return url_safety.is_safe_external_url(text)
+
+
+def is_an_address(text: str) -> bool:
+    """Whether ``text`` is itself one web or email address (words a
+    pasted address replaces instead of linking)."""
+    text = (text or "").strip()
+    if not text or any(ch.isspace() for ch in text):
+        return False
+    lowered = text.lower()
+    return (lowered.startswith(("http://", "https://", "www.", "mailto:"))
+            or bool(_EMAIL.fullmatch(text)))
 
 
 def display_href(href: str, limit: int = 60) -> str:
@@ -99,6 +128,28 @@ def display_href(href: str, limit: int = 60) -> str:
         return shown
     keep = (limit - 1) // 2
     return shown[:keep] + "\u2026" + shown[-keep:]
+
+
+# What a mail app is given from an email link: the address and the fields
+# it fills in. Others are left out; some mail apps have attached a file
+# from the reader's own disk for "?attach=/path".
+_MAIL_FIELDS = ("subject", "body", "cc", "bcc")
+
+
+def mail_address_for(href: str) -> Optional[str]:
+    """The ``mailto:`` link the mail app is given for ``href``: its address
+    with only a subject, body, cc and bcc; None when it is no email link."""
+    if not href.lower().startswith("mailto:"):
+        return None
+    address, _sep, query = href[len("mailto:"):].partition("?")
+    kept = [(key, value) for key, value in parse_qsl(query, keep_blank_values=True)
+            if key.lower() in _MAIL_FIELDS]
+    if not address.strip() and not kept:
+        return None
+    url = "mailto:" + address.strip()
+    if kept:
+        url += "?" + urlencode(kept, quote_via=quote)
+    return url
 
 
 def web_address_for(href: str) -> Optional[str]:
