@@ -21,12 +21,9 @@ What must hold:
   "Close Tab" for a screen reader (it used to be the glyph "×").
 """
 
-import json
-import os
-import subprocess
 import sys
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from tests.app_process import run_window_script
 
 SCRIPT = r"""
 import json, os, sys
@@ -78,12 +75,7 @@ print("RESULT " + json.dumps(r))
 
 
 def test_the_window_names_the_document_and_the_status_bar_repeats_nothing(tmp_path):
-    env = dict(os.environ, HOME=str(tmp_path), QT_QPA_PLATFORM="offscreen")
-    proc = subprocess.run([sys.executable, "-c", SCRIPT, REPO], env=env,
-                          capture_output=True, text=True, timeout=120)
-    line = next((l for l in proc.stdout.splitlines() if l.startswith("RESULT ")), None)
-    assert line, f"child failed:\n{proc.stdout}\n{proc.stderr}"
-    r = json.loads(line[len("RESULT "):])
+    r = run_window_script(SCRIPT, tmp_path)
     expected = "note.md[*]" if sys.platform == "darwin" else "note.md[*] - MyEditor"
     assert r["title"] == expected
     assert r["modified_before"] is False and r["modified_after"] is True
