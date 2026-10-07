@@ -16,7 +16,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Iterable, Optional, Tuple
+from urllib.parse import urljoin, urlsplit
 
+from bs4 import BeautifulSoup
 from markdownify import ATX, markdownify as _markdownify
 
 from .dtag import derive_identifier
@@ -40,16 +42,39 @@ class ArticleTemplate:
     hashtags: Tuple[str, ...]
 
 
-def html_to_markdown(html: str) -> str:
-    """HTML to Markdown with TS-reference-aligned options."""
+def html_to_markdown(html: str, *, base_url: Optional[str] = None) -> str:
+    """HTML to Markdown with TS-reference-aligned options.
+
+    ``base_url`` (the post's own page) makes relative links and images
+    whole: a feed's ``<a href="/about">`` or ``<img src="/media/a.jpg">``
+    points nowhere in a draft or an article read elsewhere (CP1 review
+    O3). A link to a place in the post itself (``#notes``) is left alone.
+    """
     if not html:
         return ""
+    if base_url and urlsplit(base_url).scheme in ("http", "https"):
+        html = _absolute(html, base_url)
     return _markdownify(
         html,
         heading_style=ATX,
         bullets="-",
         strong_em_symbol="_",
     )
+
+
+def _absolute(html: str, base_url: str) -> str:
+    if "href" not in html and "src" not in html:
+        return html
+    soup = BeautifulSoup(html, "html.parser")
+    changed = False
+    for tag, attribute in (("a", "href"), ("img", "src")):
+        for element in soup.find_all(tag):
+            value = (element.get(attribute) or "").strip()
+            if not value or value.startswith("#") or urlsplit(value).scheme:
+                continue
+            element[attribute] = urljoin(base_url, value)
+            changed = True
+    return str(soup) if changed else html
 
 
 def _merge_hashtags(
@@ -97,7 +122,7 @@ def item_to_article(
     if (item.content_markdown or "").strip():
         markdown = str(item.content_markdown).strip()
     else:
-        markdown = html_to_markdown(item.content_html).strip()
+        markdown = html_to_markdown(item.content_html, base_url=item.link).strip()
     if append_source_link and item.link:
         markdown = (markdown + source_link_footer(item.link)).strip()
 

@@ -144,7 +144,8 @@ def images_to_copy(items: Iterable[FeedItem]) -> List[str]:
     UI thread for many posts."""
     found: List[str] = []
     for item in items:
-        markdown = item.content_markdown or html_to_markdown(item.content_html or "")
+        markdown = item.content_markdown or html_to_markdown(item.content_html or "",
+                                                             base_url=item.link)
         for url in [item.image or "", *scan_markdown_images(markdown)]:
             if url and url not in found and url.lower().startswith(("http://", "https://")):
                 found.append(url)
