@@ -34,7 +34,7 @@ from typing import Callable, Dict, Optional
 import shiboken6
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from alerts import CANCEL, DEFAULT, Button, ask, confirm_destructive, inform
+from alerts import CANCEL, DEFAULT, DESTRUCTIVE, Button, ask, confirm_destructive, inform
 from i18n import _, ngettext
 from nostr.outbox import writer as outbox_writer
 from nostr.outbox.defaults import STARTER_LIST
@@ -392,9 +392,11 @@ class AccountController(QObject):
                       "MyEditor still keeps a copy of it on this computer. Deleting it "
                       "leaves the key only where you approve what is signed."
                       ).format(name=name),
-            buttons=(Button(_("Keep Key"), False, CANCEL),
-                     Button(_("Delete Key"), True, DEFAULT)),
-            is_dark=self._is_dark())
+            # Deleting is the person's own choice, never the default:
+            # without a backup, the signer app would hold the only copy.
+            buttons=(Button(_("Delete Key"), True, DESTRUCTIVE),
+                     Button(_("Keep Key"), False, DEFAULT)),
+            caution=True, is_dark=self._is_dark())
         if choice is True:
             self._forget_key(profile.user_pubkey)
 

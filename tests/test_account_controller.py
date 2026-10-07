@@ -372,6 +372,9 @@ def test_pairing_an_app_offers_to_delete_the_key_kept_here(tmp_path, alerts):
     assert not s.vault.has(PK)
     titles = [a["title"] for a in alerts.asked]
     assert titles == ["Delete the private key kept on this computer?"] * 2
+    # Deleting is offered, never the default: Return and Escape keep the key.
+    roles = {b.label: b.role for b in alerts.asked[0]["buttons"]}
+    assert roles == {"Delete Key": "destructive", "Keep Key": "default"}
 
 
 def test_backing_up_a_local_account_without_its_key_says_what_to_do(tmp_path, alerts):
