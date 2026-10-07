@@ -965,7 +965,8 @@ class HtmlEditor(QTextEdit):
         self.setCurrentCharFormat(rich_text.without_link(fmt))
 
     def mousePressEvent(self, event):
-        # Command-click (Ctrl-click on Windows and Linux) opens a link.
+        # Command-click (Ctrl-click on Windows and Linux) opens a link, and
+        # goes from a footnote's mark to its note and back.
         if (event.button() == Qt.MouseButton.LeftButton
                 and event.modifiers() & Qt.KeyboardModifier.ControlModifier):
             href = self.anchorAt(event.position().toPoint())
@@ -973,16 +974,60 @@ class HtmlEditor(QTextEdit):
                 self._open_link(href)
                 event.accept()
                 return
+            if self._holds_structure() and self.jump_to_footnote(
+                    self.cursorForPosition(event.position().toPoint())):
+                event.accept()
+                return
         super().mousePressEvent(event)
+
+    def jump_to_footnote(self, at: QTextCursor) -> bool:
+        """From a footnote's mark to the words of its note, or from a
+        note's label to where it is marked first. True when it went."""
+        target = rich_text.footnote_jump(at)
+        if target is None:
+            return False
+        cursor = self.textCursor()
+        cursor.setPosition(target)
+        self.setTextCursor(cursor)
+        self.ensureCursorVisible()
+        return True
+
+    def insert_footnote(self) -> None:
+        """Insert > Footnote: the next number's mark at the caret, and its
+        note at the end of the document, where the caret goes."""
+        cursor = self.textCursor()
+        if rich_text.insert_footnote(cursor):
+            self.setTextCursor(cursor)
+            self.setCurrentCharFormat(QTextCharFormat())
+            self.ensureCursorVisible()
+
+    def _footnote_tip(self, point) -> str:
+        """The note of the footnote mark at ``point`` ("" for none)."""
+        if not self._holds_structure():
+            return ""
+        cursor = self.cursorForPosition(point)
+        block = cursor.block()
+        if rich_text.is_code_block(block):
+            return ""
+        offset = cursor.positionInBlock()
+        for found in rich_text.FOOTNOTE_MARK.finditer(block.text()):
+            if found.start() <= offset <= found.end():
+                return rich_text.footnote_text(self.document(), found.group(1))
+        return ""
 
     def viewportEvent(self, event):
         if event.type() == QEvent.Type.ToolTip:
             href = self.anchorAt(event.pos())
+            note = "" if href else self._footnote_tip(event.pos())
             if href:
                 how = (_("Command-click to open") if sys.platform == "darwin"
                        else _("Ctrl+click to open"))
                 QToolTip.showText(event.globalPos(),
                                   link_url.display_href(href) + "\n" + how, self)
+            elif note:
+                how = (_("Command-click to go to the note") if sys.platform == "darwin"
+                       else _("Ctrl+click to go to the note"))
+                QToolTip.showText(event.globalPos(), note + "\n" + how, self)
             else:
                 QToolTip.hideText()
             return True

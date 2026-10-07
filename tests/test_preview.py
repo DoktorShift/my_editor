@@ -131,13 +131,53 @@ def test_raw_html_shows_as_text_in_an_article():
     assert "<b>not bold</b>" in doc.toPlainText()
 
 
-def test_footnotes_show_as_they_were_written():
-    # Review H3: the preview dropped the definitions and showed the marks
-    # as links.
-    md = "A claim[^1] and more[^2].\n\n[^1]: https://example.com/source\n\n[^2]: Ibid.\n"
-    text = pv.article_document(md, pv.Article(title="T")).toPlainText()
-    assert "A claim[^1] and more[^2]." in text
-    assert "[^1]: https://example.com/source" in text and "[^2]: Ibid." in text
+def _pieces(doc):
+    """(text, format) of every piece of ``doc``, copied."""
+    from PySide6.QtGui import QTextCharFormat
+    out = []
+    block = doc.begin()
+    while block.isValid():
+        it = block.begin()
+        while not it.atEnd():
+            fragment = it.fragment()
+            if fragment.isValid():
+                out.append((fragment.text(), QTextCharFormat(fragment.charFormat())))
+            it += 1
+        block = block.next()
+    return out
+
+
+FOOTNOTES = ("A claim[^b] and more[^a], again[^b]. Not[^9] a note, nor `[^a]`.\n\n"
+             "[^a]: Ibid.\n\n[^b]: [The source](https://example.com/source)\n\n"
+             "[^z]: Never marked.\n")
+
+
+def test_footnotes_show_as_the_readers_draw_them():
+    # The early review's H3 had the preview drop the notes; now they are
+    # drawn the way the long-form readers do.
+    doc = pv.article_document(FOOTNOTES, pv.Article(title="T"))
+    text = doc.toPlainText()
+    assert "A claim1 and more2, again1. Not[^9] a note, nor [^a]." in text
+    assert "Never marked" not in text and "[^b]:" not in text
+    blocks = [b for b in text.split("\n") if b.strip()]
+    assert blocks[-2:] == ["The source \u21a9", "Ibid. \u21a9"]     # by first use
+    pieces = _pieces(doc)
+    marks = [(t, f.anchorHref(), f.anchorNames()) for t, f in pieces
+             if f.verticalAlignment() == f.VerticalAlignment.AlignSuperScript]
+    assert marks == [("1", "#fn-1", ["fnref-1"]), ("2", "#fn-2", ["fnref-2"]),
+                     ("1", "#fn-1", [])]
+    backs = [f.anchorHref() for t, f in pieces if t == "\u21a9"]
+    assert backs == ["#fnref-1", "#fnref-2"]
+    places = [f.anchorNames() for t, f in pieces if f.anchorNames() and f.anchorNames()[0]
+              .startswith("fn-")]
+    assert places == [["fn-1"], ["fn-2"]]
+    linked = "".join(t for t, f in pieces if f.anchorHref() == "https://example.com/source")
+    assert linked == "The source"                                  # the note keeps its link
+
+
+def test_an_article_without_notes_shows_its_marks_as_typed():
+    doc = pv.article_document("A claim[^1].\n", pv.Article(title="T"))
+    assert "A claim[^1]." in doc.toPlainText()
 
 
 def test_an_untitled_article_says_so():

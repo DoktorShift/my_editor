@@ -591,9 +591,9 @@ class SyntaxHighlighter(QSyntaxHighlighter):
 
 
 # A footnote mark ("[^1]", "[^note]"), and a paragraph that is one's
-# definition ("[^1]: The source."), as Markdown readers find them.
-FOOTNOTE_MARK = re.compile(r"\[\^[^\]\s]+\]")
-FOOTNOTE_DEFINITION = re.compile(r"\s{0,3}(\[\^[^\]\s]+\]):")
+# definition ("[^1]: The source."): rich_text's, the one way they are found.
+FOOTNOTE_MARK = rich_text.FOOTNOTE_MARK
+FOOTNOTE_DEFINITION = rich_text.FOOTNOTE_DEFINITION
 
 
 class RichTextLook(QSyntaxHighlighter):
@@ -687,7 +687,8 @@ class RichTextLook(QSyntaxHighlighter):
             self.setFormat(0, len(text), self._footnote_text)
             label = QTextCharFormat(self._footnote_text)
             label.setForeground(QColor(self._LINK[self._is_dark]))
-            self.setFormat(definition.start(1), definition.end(1) - definition.start(1), label)
+            begin = text.index("[")
+            self.setFormat(begin, definition.end() - 1 - begin, label)
             start = definition.end()
         for mark in FOOTNOTE_MARK.finditer(text, start):
             self.setFormat(mark.start(), mark.end() - mark.start(), self._footnote_mark)

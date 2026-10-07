@@ -1476,6 +1476,13 @@ class MainWindow(QMainWindow):
             action.setData(language)
             self._code_language_group.addAction(action)
             self.act_code_languages.append(action)
+        # Footnote: its mark at the caret, its note at the end of the
+        # document, where the caret goes (literal Markdown, rich_text.py).
+        self.act_footnote = add(Command("insert.footnote", _("Footnote"), INSERT,
+                                        keywords=(_("note"), _("source"), _("reference"),
+                                                  _("citation")),
+                                        slash_section=slash_menu.INSERT),
+                                triggered=lambda: self._editor_call("insert_footnote"))
         # Table...: its size is chosen on a grid at the caret (table_picker).
         self.act_table = add(Command("insert.table", _("Table\u2026"), INSERT,
                                      keywords=(_("grid"), _("rows"), _("columns")),
@@ -1545,7 +1552,7 @@ class MainWindow(QMainWindow):
         self._rich_actions = [self.act_strike, self.act_code, *self.act_styles,
                               self.act_bullets, self.act_numbers, self.act_checklist,
                               self.act_quote, self.act_divider, self.act_link,
-                              self.act_code_block, self.act_table]
+                              self.act_code_block, self.act_table, self.act_footnote]
         # Paragraph structure, which a table cell (one line of words in
         # Markdown) cannot hold: off in a table.
         self._block_actions = [*self.act_styles, self.act_bullets, self.act_numbers,
@@ -1555,7 +1562,8 @@ class MainWindow(QMainWindow):
         # Styles of words, which code does not have: off in a code block.
         self._word_actions = [self.act_bold, self.act_italic, self.act_underline,
                               self.act_strike, self.act_code, self.act_link,
-                              *self.act_colors, self.act_remove_color, self.act_reset_format]
+                              *self.act_colors, self.act_remove_color, self.act_reset_format,
+                              self.act_footnote]
 
         self._search_matches = []
         self._current_match_index = -1
@@ -1824,6 +1832,7 @@ class MainWindow(QMainWindow):
         self.m_insert.addAction(self.act_table)
         self.m_insert.addAction(self.act_divider)
         self.m_insert.addAction(self.act_code_block)
+        self.m_insert.addAction(self.act_footnote)
 
         m_format = self.menuBar().addMenu(_("F&ormat"))
         self.m_style = m_format.addMenu(_("Style"))
@@ -4468,6 +4477,15 @@ class MainWindow(QMainWindow):
             menu.addAction(_("Copy Link"), lambda: self._copy_link(href))
             menu.addAction(_("Remove Link"), editor.remove_link)
             menu.addSeparator()
+        if self._editor_kind(editor) == "rich":
+            target = rich_text.footnote_jump(editor.textCursor())
+            if target is not None:
+                # A footnote's mark or note: the way to the other, for the
+                # keyboard too (Command-click is the pointer's way).
+                on_mark = target > editor.textCursor().position()
+                menu.addAction(_("Go to Note") if on_mark else _("Go to Mark"),
+                               lambda: editor.jump_to_footnote(editor.textCursor()))
+                menu.addSeparator()
         for action in (self.act_cut, self.act_copy, self.act_paste, self.act_paste_plain):
             menu.addAction(action)
         menu.addSeparator()
@@ -4762,6 +4780,9 @@ class MainWindow(QMainWindow):
             text = self._publish_payload(ed, "note")[0]
             return PreviewContent(NOTE, text, author=author, names=names, checks=tuple(checks))
         markdown = self._publish_payload(ed, "markdown")[0]
+        if rich_text.footnote_marks(ed.document()):
+            checks.append(_("Some apps (Amethyst, Coracle, Damus) show footnotes as typed: "
+                            "the marks in brackets and the notes at the end."))
         details = self._article_details_of(ed)
         title = details.title or next(
             (line.lstrip("# ").strip() for line in markdown.splitlines() if line.strip()), "")
@@ -6833,10 +6854,11 @@ class MainWindow(QMainWindow):
         """Put Markdown in the editor so that nothing of it is lost.
 
         Markdown the editor can hold all of opens with its formatting
-        shown, and is written back the same. Anything else (footnotes, raw
-        HTML, an image without alt text, a draft saved as plain text by an
-        earlier version) opens as its Markdown text, and is saved and
-        published exactly as written."""
+        shown (footnotes as their text), and is written back the same.
+        Anything else (raw HTML, an image without alt text, a footnote of
+        two paragraphs, a draft saved as plain text by an earlier version)
+        opens as its Markdown text, and is saved and published exactly as
+        written."""
         if holds_faithfully(content):
             read_markdown(ed.document(), content)
             ed._loaded_as_markdown = True

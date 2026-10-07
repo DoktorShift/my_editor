@@ -25,6 +25,10 @@ In both, a ``nostr:`` reference to a person shows as "@Name" (their
 name when it is known, a shortened key otherwise); one to a note or an
 article shows as a labelled link, since cards differ between apps.
 
+Footnotes in an article show as most long-form readers draw them: raised
+numbers by first use, and the notes numbered at the end (the preview
+also says that some apps show them as typed).
+
 :func:`article_document` and :func:`note_document` build a
 QTextDocument; :class:`NostrPreview` shows one in a QTextBrowser, with
 images from an injected loader (no loader, no network).
@@ -35,7 +39,7 @@ from __future__ import annotations
 import html
 import re
 from dataclasses import dataclass, field
-from typing import Callable, Iterable, Optional, Sequence
+from typing import Callable, List, Optional, Sequence
 
 import shiboken6
 from PySide6.QtCore import QDate, QLocale, QUrl
@@ -49,11 +53,14 @@ from PySide6.QtGui import (
     QTextDocument,
     QTextFormat,
     QTextImageFormat,
+    QTextListFormat,
 )
 from PySide6.QtWidgets import QTextBrowser
 
 import i18n
+import rich_text
 import word_count
+from doc_walk import iter_blocks
 from i18n import _, ngettext
 from markdown_writer import READ_FEATURES, read_markdown
 from nostr import bech32
@@ -302,8 +309,122 @@ def body_document(markdown: str, *, names: Optional[NameLookup] = None,
     doc.setDefaultFont(body)
     read_markdown(doc, markdown_for_preview(markdown, names), MARKDOWN_FEATURES)
     _tidy_tables(doc)
+    notes = _render_footnotes(doc)
     _style_body(doc.begin(), palette(dark))
+    if notes:
+        _anchor_notes(doc, len(notes))
     return doc
+
+
+# --------------------------------------------------------------------------- #
+# Footnotes                                                                    #
+# --------------------------------------------------------------------------- #
+
+def _render_footnotes(doc: QTextDocument) -> List[int]:
+    """Footnotes the way the long-form readers draw them (Primal,
+    YakiHonne, noStrudel, njump, Highlighter, as GitHub does): each mark a
+    raised number, by first use, that leads to its note; the notes
+    numbered under a rule at the end, each with a way back. A mark with no
+    note stays as typed, and a note no mark refers to is not shown, as in
+    those readers. Returns the numbers given, in order."""
+    notes = {}
+    defining = []
+    for block in iter_blocks(doc):
+        if rich_text.is_code_block(block):
+            continue
+        found = rich_text.FOOTNOTE_DEFINITION.match(block.text())
+        if found is None:
+            continue
+        defining.append(block)
+        if found.group(1) not in notes:
+            rest = block.text()[found.end():]
+            words = QTextCursor(block)
+            words.setPosition(block.position() + found.end() + len(rest) - len(rest.lstrip()))
+            words.movePosition(QTextCursor.MoveOperation.EndOfBlock,
+                               QTextCursor.MoveMode.KeepAnchor)
+            notes[found.group(1)] = words.selection()
+    if not notes:
+        return []
+    numbers = {}
+    marks = []
+    for block in iter_blocks(doc):
+        if rich_text.is_code_block(block) or block in defining:
+            continue
+        for found in rich_text.FOOTNOTE_MARK.finditer(block.text()):
+            label = found.group(1)
+            probe = QTextCursor(block)
+            probe.setPosition(block.position() + found.start() + 1)
+            if label in notes and not probe.charFormat().fontFixedPitch():
+                first = label not in numbers
+                numbers.setdefault(label, len(numbers) + 1)
+                marks.append((block.position() + found.start(), found.end() - found.start(),
+                              numbers[label], first))
+    cursor = QTextCursor(doc)
+    cursor.beginEditBlock()
+    for position, length, number, first in reversed(marks):
+        mark = QTextCursor(doc)
+        mark.setPosition(position)
+        mark.setPosition(position + length, QTextCursor.MoveMode.KeepAnchor)
+        fmt = QTextCharFormat(mark.charFormat())
+        fmt.setVerticalAlignment(QTextCharFormat.VerticalAlignment.AlignSuperScript)
+        fmt.setAnchor(True)
+        fmt.setAnchorHref(f"#fn-{number}")
+        if first:
+            fmt.setAnchorNames([f"fnref-{number}"])
+        mark.insertText(str(number), fmt)
+    for block in reversed(defining):
+        gone = QTextCursor(block)
+        if block.previous().isValid():
+            gone.setPosition(block.position() - 1)
+            gone.setPosition(block.position() + block.length() - 1,
+                             QTextCursor.MoveMode.KeepAnchor)
+        else:
+            gone.movePosition(QTextCursor.MoveOperation.NextBlock,
+                              QTextCursor.MoveMode.KeepAnchor)
+        gone.removeSelectedText()
+    if numbers:
+        end = QTextCursor(doc)
+        end.movePosition(QTextCursor.MoveOperation.End)
+        rule = QTextBlockFormat()
+        rule.setProperty(QTextFormat.Property.BlockTrailingHorizontalRulerWidth, 1)
+        end.insertBlock(rule, QTextCharFormat())
+        listed = None
+        for label, number in sorted(numbers.items(), key=lambda item: item[1]):
+            end.insertBlock(QTextBlockFormat(), QTextCharFormat())
+            if listed is None:
+                listed = end.createList(QTextListFormat.Style.ListDecimal)
+            else:
+                listed.add(end.block())
+            end.insertFragment(notes[label])
+            back = QTextCharFormat()
+            back.setAnchor(True)
+            back.setAnchorHref(f"#fnref-{number}")
+            end.insertText(" ", QTextCharFormat())
+            end.insertText("\u21a9", back)
+    cursor.endEditBlock()
+    return sorted(numbers.values())
+
+
+def _anchor_notes(doc: QTextDocument, count: int) -> None:
+    """Each note's place, for its mark's link to go to: on the note's first
+    letter, which keeps its color (after _style_body)."""
+    found = 0
+    for block in iter_blocks(doc):
+        text_list = block.textList()
+        if text_list is None or text_list.format().style() != QTextListFormat.Style.ListDecimal:
+            continue
+        if not block.text().endswith("\u21a9"):
+            continue
+        found += 1
+        if found > count:
+            break
+        first = QTextCursor(block)
+        first.movePosition(QTextCursor.MoveOperation.NextCharacter,
+                           QTextCursor.MoveMode.KeepAnchor)
+        place = QTextCharFormat()
+        place.setAnchor(True)
+        place.setAnchorNames([f"fn-{found}"])
+        first.mergeCharFormat(place)
 
 
 def article_document(markdown: str, article: Article, *, names: Optional[NameLookup] = None,

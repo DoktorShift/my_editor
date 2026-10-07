@@ -18,6 +18,7 @@ test can call it without a window.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Iterator, List, Optional, Tuple
 
@@ -830,6 +831,140 @@ def remove_divider(block) -> None:
 # own format, which the writer leaves out), cells of one line each (a
 # Return in a cell is a line separator, written as a space), no merged
 # cells and no alignment.
+
+# --------------------------------------------------------------------------- #
+# Footnotes                                                                    #
+# --------------------------------------------------------------------------- #
+# Footnotes are kept as the text Markdown writes for them: a mark ("[^1]")
+# where the note belongs, and a paragraph that defines it ("[^1]: The
+# source.") at the end. Qt has no footnotes, and text survives every way
+# a document travels (files, drafts, backups, the clipboard); the
+# highlighter gives them their look, and the preview draws them the way
+# the reading apps do.
+
+# A mark, and a paragraph that is a definition, as Markdown readers find them.
+FOOTNOTE_MARK = re.compile(r"\[\^([^\]\s]+)\]")
+FOOTNOTE_DEFINITION = re.compile(r"\s{0,3}\[\^([^\]\s]+)\]:")
+
+
+def _prose_blocks(doc) -> Iterator:
+    """The paragraphs of ``doc`` that are text, not code."""
+    for block in iter_blocks(doc):
+        if not is_code_block(block):
+            yield block
+
+
+def _in_code_words(block, offset: int) -> bool:
+    cursor = QTextCursor(block)
+    cursor.setPosition(block.position() + offset + 1)
+    return has_style(cursor.charFormat(), CODE)
+
+
+def footnote_definition(doc, label: str):
+    """The paragraph that defines footnote ``label``, or None."""
+    for block in _prose_blocks(doc):
+        found = FOOTNOTE_DEFINITION.match(block.text())
+        if found is not None and found.group(1) == label:
+            return block
+    return None
+
+
+def footnote_marks(doc, label: Optional[str] = None) -> List[Tuple[int, str]]:
+    """(position, label) of every footnote mark in ``doc`` (only those of
+    ``label`` when given), in order: not the label of a definition, not
+    in code."""
+    marks = []
+    for block in _prose_blocks(doc):
+        text = block.text()
+        definition = FOOTNOTE_DEFINITION.match(text)
+        start = definition.end() if definition is not None else 0
+        for found in FOOTNOTE_MARK.finditer(text, start):
+            if (label is None or found.group(1) == label) \
+                    and not _in_code_words(block, found.start()):
+                marks.append((block.position() + found.start(), found.group(1)))
+    return marks
+
+
+def next_footnote_label(doc) -> str:
+    """The label of a new footnote: one more than the highest number used."""
+    numbers = [int(label) for _position, label in footnote_marks(doc) if label.isdigit()]
+    for block in _prose_blocks(doc):
+        found = FOOTNOTE_DEFINITION.match(block.text())
+        if found is not None and found.group(1).isdigit():
+            numbers.append(int(found.group(1)))
+    return str(max(numbers, default=0) + 1)
+
+
+def insert_footnote(cursor: QTextCursor) -> bool:
+    """A footnote: its mark ("[^2]", the next number) at the cursor, and a
+    paragraph that defines it at the end of the document (after an empty
+    one, unless the last paragraph defines a footnote already), where the
+    cursor goes to write the note. One step on the undo stack. False
+    where a mark would be code or cannot stand (a code block)."""
+    if is_code_block(cursor.block()) or is_divider(cursor.block()):
+        return False
+    doc = cursor.document()
+    label = next_footnote_label(doc)
+    edit = QTextCursor(doc)
+    edit.beginEditBlock()
+    if cursor.hasSelection():
+        cursor.setPosition(cursor.selectionEnd())
+    words = without_link(cursor.charFormat())
+    words.clearProperty(QTextFormat.Property.FontFixedPitch)
+    words.clearProperty(QTextFormat.Property.FontFamilies)
+    words.clearProperty(QTextFormat.Property.FontFamily)
+    cursor.insertText(f"[^{label}]", words)
+    end = QTextCursor(doc)
+    end.movePosition(QTextCursor.MoveOperation.End)
+    last = end.block()
+    if QTextCursor(last).currentTable() is not None:
+        end.insertBlock(QTextBlockFormat(), QTextCharFormat())
+    elif last.text() and not FOOTNOTE_DEFINITION.match(last.text()):
+        end.insertBlock(QTextBlockFormat(), QTextCharFormat())
+        end.insertBlock(QTextBlockFormat(), QTextCharFormat())
+    elif last.text():
+        end.insertBlock(QTextBlockFormat(), QTextCharFormat())
+    else:
+        end.setBlockFormat(QTextBlockFormat())
+    end.insertText(f"[^{label}]: ", QTextCharFormat())
+    edit.endEditBlock()
+    cursor.setPosition(end.position())
+    return True
+
+
+def footnote_jump(cursor: QTextCursor) -> Optional[int]:
+    """Where a click on a footnote leads: from a mark to the words of its
+    definition, from a definition's label back to the first mark. None
+    when the cursor is on neither."""
+    block = cursor.block()
+    if is_code_block(block):
+        return None
+    doc = cursor.document()
+    text = block.text()
+    offset = cursor.positionInBlock()
+    definition = FOOTNOTE_DEFINITION.match(text)
+    if definition is not None and offset <= definition.end():
+        marks = footnote_marks(doc, definition.group(1))
+        return marks[0][0] if marks else None
+    for found in FOOTNOTE_MARK.finditer(text, definition.end() if definition else 0):
+        if found.start() <= offset <= found.end() \
+                and not _in_code_words(block, found.start()):
+            target = footnote_definition(doc, found.group(1))
+            if target is None:
+                return None
+            words = FOOTNOTE_DEFINITION.match(target.text())
+            rest = target.text()[words.end():]
+            return target.position() + words.end() + (len(rest) - len(rest.lstrip(" ")))
+    return None
+
+
+def footnote_text(doc, label: str) -> str:
+    """The words of footnote ``label``'s definition ("" for none)."""
+    block = footnote_definition(doc, label)
+    if block is None:
+        return ""
+    return block.text()[FOOTNOTE_DEFINITION.match(block.text()).end():].strip()
+
 
 def table_format() -> QTextTableFormat:
     """How a table looks in the editor: a thin grid across the column."""

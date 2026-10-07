@@ -747,12 +747,15 @@ def has_local_only_formatting(doc) -> bool:
 
 
 # Markdown the editor's document cannot hold, so reading it in would lose
-# something: footnotes, raw HTML, an image without alt text (Qt drops it),
-# a link title, a link around an image, a heading inside a quote,
-# a paragraph continued inside a list item, and lines that wrap inside a
-# paragraph (a draft saved as plain text by an earlier version).
+# something: a footnote whose note goes on in a second paragraph (the
+# editor keeps footnotes as their text, one paragraph each), raw HTML, an
+# image without alt text (Qt drops it), a link title, a link around an
+# image, a heading inside a quote, a paragraph continued inside a list
+# item, and lines that wrap inside a paragraph (a draft saved as plain
+# text by an earlier version).
 _LOSSY = [
-    re.compile(r"\[\^[^\]]+\]"),                         # footnote
+    re.compile(r"^ {0,3}\[\^[^\]]+\]:.*\n(?:[ \t]*\n)+(?: {4}|\t)\S",
+               re.MULTILINE),                              # a note of two paragraphs
     re.compile(r"<(?:[A-Za-z][\w-]*[\s/>]|/[A-Za-z]|!--)"),  # raw HTML
     re.compile(r"!\[\]\("),                                # image without alt text
     re.compile(r"\]\((?!<)[^)\s]+\s+[\"'(]"),              # link title
@@ -851,10 +854,11 @@ def holds_faithfully(markdown: str) -> bool:
     losing anything. When it cannot, open it as its Markdown text."""
     if any(pattern.search(markdown) for pattern in _LOSSY) or _soft_wrapped(markdown):
         return False
+    # Read as the editor reads it, footnotes as their text.
     first = QTextDocument()
-    first.setMarkdown(markdown, READ_FEATURES)
+    first.setMarkdown(literal_footnotes(markdown), READ_FEATURES)
     second = QTextDocument()
-    second.setMarkdown(document_to_markdown(first), READ_FEATURES)
+    second.setMarkdown(literal_footnotes(document_to_markdown(first)), READ_FEATURES)
     return _fingerprint(first) == _fingerprint(second)
 
 
