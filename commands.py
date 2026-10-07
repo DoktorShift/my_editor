@@ -57,11 +57,12 @@ class Command:
     nostr: bool = False              # needs a Nostr account to mean anything
     keywords: Tuple[str, ...] = ()   # other words people use for it
     # The words the Keyboard Shortcuts window uses, when they differ from
-    # the menu title ("Toggle theme" for "Toggle Dark/Light Theme").
+    # the menu title ("Open file" for "Open…").
     listed_as: str = ""
-    # Where macOS puts it. Only About and Quit move to the application
-    # menu; every other command stays where it was put, whatever its title
-    # says in any language (Qt would otherwise guess from the words).
+    # Where macOS puts it. Only About, Settings and Quit move to the
+    # application menu; every other command stays where it was put,
+    # whatever its title says in any language (Qt would otherwise guess
+    # from the words).
     role: QAction.MenuRole = QAction.MenuRole.NoRole
 
 

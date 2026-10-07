@@ -77,6 +77,7 @@ from alerts import (
     confirm_destructive, inform,
 )
 from update_dialog import UpdateDialog, WhatsNewDialog
+from settings_window import SettingsWindow
 from update_flow import AUTOMATIC, guide_url, plan_for
 import theme
 from export_html import document_to_html, normalize_after_set_html, sniff_image_ext
@@ -1297,6 +1298,13 @@ class MainWindow(QMainWindow):
         self.act_select_all = add(Command("edit.select_all", _("Select All"), EDIT,
                                           QKeySequence.StandardKey.SelectAll),
                                   triggered=lambda: self._edit_focused("select_all"))
+        # Settings: in the application menu on a Mac (Command-comma), at the
+        # end of the Edit menu elsewhere (Ctrl+comma, as GNOME and most apps).
+        self.act_settings = add(Command("app.settings", _("Settings\u2026"), EDIT, "Ctrl+,",
+                                        listed_as=_("Settings"),
+                                        keywords=("preferences", "options"),
+                                        role=QAction.MenuRole.PreferencesRole),
+                                triggered=self._show_settings)
 
         # Formatting
         self.act_bold = add(Command("format.bold", _("Bold"), FORMAT, "Ctrl+B",
@@ -1499,7 +1507,8 @@ class MainWindow(QMainWindow):
         self._language_group.setExclusive(True)
         chosen = i18n.chosen_language()
         self.act_languages = []
-        for code in [i18n.SYSTEM] + i18n.available():
+        self._language_codes = [i18n.SYSTEM] + i18n.available()
+        for code in self._language_codes:
             title = (_("System Language") if code == i18n.SYSTEM
                      else i18n.LANGUAGE_NAMES.get(code, code))
             action = add(Command(f"view.language.{code}", title, VIEW, checkable=True,
@@ -1672,6 +1681,11 @@ class MainWindow(QMainWindow):
         self.m_find.addAction(self.act_find_next)
         self.m_find.addAction(self.act_find_prev)
         self.m_find.addAction(self.act_use_selection)
+        # On a Mac Settings moves to the application menu; a separator left
+        # here would end the Edit menu with a line.
+        if sys.platform != "darwin":
+            m_edit.addSeparator()
+        m_edit.addAction(self.act_settings)
         self.m_edit = m_edit
 
         # Insert, between Edit and Format, as in Pages.
@@ -3581,17 +3595,41 @@ class MainWindow(QMainWindow):
         else:
             self.findbar.set_match_info(_("No matches"))
 
-    def _choose_language(self, code: str) -> None:
-        """Remember the language; it is used from the next start on."""
+    def _choose_language(self, code: str, tell: bool = True) -> None:
+        """Remember the language; it is used from the next start on. View >
+        Language says so in an alert; Settings (``tell`` False) says it
+        under its choice."""
         save_setting(i18n.SETTING, code)
+        for known, action in zip(self._language_codes, self.act_languages):
+            action.setChecked(known == code)
         target = i18n.resolve(code)
-        if target == i18n.language():
+        if target == i18n.language() or not tell:
             return
         name = i18n.LANGUAGE_NAMES.get(target, target)
         inform(self, title=_("Restart MyEditor to Change the Language"),
                message=_("MyEditor will be in {name} the next time you open it.").format(
                    name=name),
                is_dark=self.is_dark_theme)
+
+    def _show_settings(self) -> None:
+        """The Settings window: one, brought to the front when it is open."""
+        window = getattr(self, "_settings_window", None)
+        if window is None:
+            window = SettingsWindow(
+                appearance=self.act_appearance,
+                languages=list(zip(self._language_codes, self.act_languages)),
+                choose_language=lambda code: self._choose_language(code, tell=False),
+                monospace=self.act_monospace_writing,
+                paste_choice=lambda: load_settings().get(_PASTE_UPLOAD_SETTING, "ask"),
+                choose_paste=lambda value: save_setting(_PASTE_UPLOAD_SETTING, value),
+                nostr_in_use=lambda: self.nostr_state.active,
+                is_dark=self.is_dark_theme, parent=self)
+            window.setAttribute(Qt.WA_DeleteOnClose, True)
+            window.destroyed.connect(lambda _obj=None: setattr(self, "_settings_window", None))
+            self._settings_window = window
+        window.show()
+        window.raise_()
+        window.activateWindow()
 
     def _show_shortcuts(self):
         """Open the cheat-sheet style ``ShortcutsDialog``.
@@ -4335,6 +4373,8 @@ class MainWindow(QMainWindow):
         imports_window = getattr(self, "_imports", None) and self._imports.window()
         if imports_window is not None:
             imports_window.apply_theme(self.is_dark_theme)
+        if getattr(self, "_settings_window", None) is not None:
+            self._settings_window.apply_theme(self.is_dark_theme)
 
     def _on_os_color_scheme_changed(self, scheme):
         if not self._follow_os_theme:
@@ -4692,6 +4732,8 @@ class MainWindow(QMainWindow):
         """Nothing of Nostr stays on screen once no account is in use."""
         if not active:
             self._hide_drafts_panel()
+        if getattr(self, "_settings_window", None) is not None:
+            self._settings_window.refresh()
 
     def _say_an_account_is_needed(self) -> None:
         """For a Nostr command reached without an account in use (its menu

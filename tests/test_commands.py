@@ -235,16 +235,18 @@ def test_menu_titles_follow_title_case_and_no_em_dashes(main_window_commands):
             assert word[0].isupper() or not word[0].isalpha(), command.title
 
 
-def test_only_about_and_quit_move_to_the_macos_application_menu(main_window_commands):
+def test_only_about_settings_and_quit_move_to_the_macos_application_menu(
+        main_window_commands):
     # Qt guesses an action's place from its words unless told; a German
     # title starting with "Einstellungen" or "Optionen" would otherwise be
-    # moved out of its menu on a Mac.
+    # moved out of its menu on a Mac. Settings is told, and goes there.
     roles = {c.id: c.role for c in main_window_commands.commands.commands()}
     assert roles.pop("help.about") == QAction.MenuRole.AboutRole
     assert roles.pop("file.quit") == QAction.MenuRole.QuitRole
+    assert roles.pop("app.settings") == QAction.MenuRole.PreferencesRole
     assert set(roles.values()) == {QAction.MenuRole.NoRole}
     by_id = {c.id: c for c in main_window_commands.commands.commands()}
-    for command_id in ("help.about", "file.quit", "file.save"):
+    for command_id in ("help.about", "file.quit", "app.settings", "file.save"):
         action = main_window_commands.commands.action(command_id)
         assert action.menuRole() == by_id[command_id].role
 

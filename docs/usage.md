@@ -99,6 +99,8 @@ Lists are real lists, written to Markdown as `- item` and `1. item`, nested by f
 
 The **`View`** menu holds the appearance options: `View > Appearance` (Automatic follows your computer's light or dark appearance as it changes; Light and Dark stay as chosen), line numbers, syntax highlighting, background style (lined, dashed, dotted, grid), paper mode, and highlight current line. Nothing around the document repeats a menu: the window shows the format toolbar, the tabs and the text.
 
+**Settings** (`MyEditor > Settings…` on a Mac, `Cmd+,`; `Edit > Settings…` on Windows and Linux, `Ctrl+,`) gathers the choices you make once: the appearance, the language, the writing font, and, while a Nostr account is in use, what happens to a pasted image (ask every time, upload it, or keep it local). Each choice applies at once, and each is also in its menu.
+
 `Help > Keyboard Shortcuts` lists every shortcut as it is on the computer in use: on a Mac in Apple's symbols (`⇧⌘S`), elsewhere with your keyboard's key names (`Strg+Umschalt+S` on a German one). It is built from the same command list as the menus (`commands.py`), so the two always agree; the Nostr shortcuts appear there once an account is in use.
 
 ### Nostr
