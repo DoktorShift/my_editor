@@ -17,20 +17,34 @@ from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QP
 SIZE = 18
 _SCALES = (1, 2, 3)
 
+# How strongly a command that cannot act now is drawn: its ink at this
+# opacity, light and dark alike (the style's own dimming barely shows on
+# a dark toolbar).
+DISABLED_OPACITY = 0.32
+
+
+def dimmed(color: QColor) -> QColor:
+    """``color`` as a command that cannot act now shows it."""
+    ink = QColor(color)
+    ink.setAlphaF(ink.alphaF() * DISABLED_OPACITY)
+    return ink
+
 
 def _icon(draw, color: QColor) -> QIcon:
     """An icon from ``draw(painter, color)`` on an 18 by 18 square, made
-    for every common screen scale."""
+    for every common screen scale, with its dimmed form for a command
+    that cannot act now."""
     icon = QIcon()
-    for scale in _SCALES:
-        pixmap = QPixmap(SIZE * scale, SIZE * scale)
-        pixmap.setDevicePixelRatio(scale)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        draw(painter, QColor(color))
-        painter.end()
-        icon.addPixmap(pixmap)
+    for mode, ink in ((QIcon.Mode.Normal, QColor(color)), (QIcon.Mode.Disabled, dimmed(color))):
+        for scale in _SCALES:
+            pixmap = QPixmap(SIZE * scale, SIZE * scale)
+            pixmap.setDevicePixelRatio(scale)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            draw(painter, QColor(ink))
+            painter.end()
+            icon.addPixmap(pixmap, mode)
     return icon
 
 
