@@ -1055,8 +1055,9 @@ def _place(cursor: QTextCursor, table, row: int, column: int) -> None:
 
 
 def add_table_row(cursor: QTextCursor, *, below: bool) -> bool:
-    """A row above or below the one at the cursor, which goes into it. A
-    row added above the header is the new header. One undo step."""
+    """A row above or below the one at the cursor, which goes to its first
+    cell, ready to be filled. A row added above the header is the new
+    header. One undo step."""
     table = cursor.currentTable()
     if table is None:
         return False
@@ -1069,7 +1070,7 @@ def add_table_row(cursor: QTextCursor, *, below: bool) -> bool:
     if row == 0:
         _style_row(table, 1)              # the old header is a row now
     edit.endEditBlock()
-    _place(cursor, table, row, cell.column())
+    _place(cursor, table, row, 0)
     return True
 
 

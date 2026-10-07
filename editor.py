@@ -1551,12 +1551,19 @@ class HtmlEditor(QTextEdit):
     def _code_key(self, e, cursor, block) -> bool:
         """The keys of a code block. Tab indents by four spaces and
         Shift+Tab outdents; Return starts the next line with the same
-        indent, and on an empty last line leaves the block (the line
-        becomes Body); Down on the document's last line, and Backspace at
-        the start of a block, leave it too. True when the key was handled."""
+        indent, and on an empty last line (spaces only count as empty: the
+        indent Return carried over) leaves the block, the line becoming an
+        empty Body paragraph; Command-Return (Ctrl+Return) leaves it from
+        anywhere, as in a table, and Down on the document's last line and
+        Backspace at the start of a block leave it too. True when the key
+        was handled."""
         key = e.key()
         plain = e.modifiers() in (Qt.NoModifier, Qt.KeypadModifier)
         shift = e.modifiers() == Qt.ShiftModifier
+        if key in (Qt.Key_Return, Qt.Key_Enter) and (
+                e.modifiers() & ~Qt.KeypadModifier) == Qt.ControlModifier:
+            self._leave_code_block(cursor, block)
+            return True
         if key == Qt.Key_Backtab or (key == Qt.Key_Tab and shift):
             self._outdent_code(cursor)
             return True
@@ -1572,10 +1579,17 @@ class HtmlEditor(QTextEdit):
             return False
         _first, last = rich_text.code_run(block)
         if key in (Qt.Key_Return, Qt.Key_Enter) and plain:
-            if not block.text() and block == last:
+            if not block.text().strip(" \t") and block == last:
                 cursor.beginEditBlock()
+                if block.text():
+                    spaces = QTextCursor(block)
+                    spaces.movePosition(QTextCursor.MoveOperation.EndOfBlock,
+                                        QTextCursor.MoveMode.KeepAnchor)
+                    spaces.removeSelectedText()
                 rich_text.leave_code(block)
                 cursor.endEditBlock()
+                cursor.setPosition(block.position())
+                self.setTextCursor(cursor)
                 self.setCurrentCharFormat(QTextCharFormat())
                 return True
             # The new line starts as far in as the one it came from (no
@@ -1604,6 +1618,16 @@ class HtmlEditor(QTextEdit):
             self.setCurrentCharFormat(QTextCharFormat())
             return True
         return False
+
+    def _leave_code_block(self, cursor, block) -> None:
+        """Out of the code block, into a new Body paragraph right after it."""
+        _first, last = rich_text.code_run(block)
+        cursor.beginEditBlock()
+        cursor.setPosition(last.position() + last.length() - 1)
+        cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
+        cursor.endEditBlock()
+        self.setTextCursor(cursor)
+        self.setCurrentCharFormat(QTextCharFormat())
 
     def _indent_code_lines(self, cursor, delta: int) -> None:
         """Four spaces more (+1) or less (-1) at the start of every line of

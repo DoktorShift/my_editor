@@ -217,6 +217,13 @@ def test_rows_and_columns_change_as_one_undo_step(command, markdown):
     assert document_to_markdown(ed.document()) == before
 
 
+def test_a_new_row_starts_at_its_first_cell():
+    ed = editor("| h1 | h2 |\n| --- | --- |\n| a | b |\n", caret_after="b")
+    ed.table_command("add_row_below")
+    type_text(ed, "x")
+    assert assert_round_trip(ed.document()) == (
+        "| h1 | h2 |\n| --- | --- |\n| a | b |\n| x |   |\n")
+
 def test_a_row_added_above_the_header_is_the_new_header():
     ed = editor("| h1 | h2 |\n| --- | --- |\n| a | b |\n", caret_after="h1")
     ed.table_command("add_row_above")

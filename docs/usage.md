@@ -52,7 +52,7 @@ The keys follow each platform's own conventions: Apple Notes and Pages on macOS,
 
 - `Tab` indents by four spaces and `Shift+Tab` takes up to four away, on every line selected;
 - `Return` starts the next line as far in as the one before;
-- `Return` on an empty last line, `Down` on the last line of the document, or `Backspace` at the start of the block takes you out of it, onto a Body paragraph; choosing Body in the Style pop-up makes a line text again.
+- `Return` on an empty last line (one with only the indent `Return` gave it counts as empty), `Cmd+Return` on macOS or `Ctrl+Return` on Windows and Linux from any line, `Down` on the last line of the document, or `Backspace` at the start of the block takes you out of it, onto a Body paragraph; choosing Body in the Style pop-up makes a line text again. (`Shift+Return` gives an empty line inside the block.)
 
 Words in code have no styles, so Bold, Italic, Inline Code and links are dimmed there, and a paste is plain text. Markdown writes the block fenced, with its language, as Nostr readers expect it.
 

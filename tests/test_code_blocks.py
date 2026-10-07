@@ -174,6 +174,26 @@ def test_return_on_the_empty_last_line_leaves_the_block():
     assert assert_round_trip(ed.document()) == "```sh\nls\n```\n\nafter\n"
 
 
+def test_return_on_a_last_line_of_only_the_carried_indent_leaves_the_block():
+    # Return copies the indent, so the "empty" last line holds spaces.
+    ed = editor("```python\ndef f():\n    pass\n```\n", caret_after="pass")
+    type_text(ed, "\n\nafter")
+    assert assert_round_trip(ed.document()) == "```python\ndef f():\n    pass\n```\n\nafter\n"
+
+
+def test_command_return_leaves_the_block_from_any_line():
+    ed = editor("```sh\nls\npwd\n```\n\nlast\n", caret_after="l")
+    press(ed, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
+    type_text(ed, "between")
+    assert assert_round_trip(ed.document()) == "```sh\nls\npwd\n```\n\nbetween\n\nlast\n"
+
+def test_shift_return_gives_an_empty_line_inside_the_block():
+    ed = editor("```\na\n```\n", caret_after="a")
+    press(ed, Qt.Key.Key_Return, Qt.KeyboardModifier.ShiftModifier)
+    press(ed, Qt.Key.Key_Return, Qt.KeyboardModifier.ShiftModifier)
+    type_text(ed, "b")
+    assert assert_round_trip(ed.document()) == "```\na\n\nb\n```\n"
+
 def test_down_on_the_last_line_of_the_document_leaves_the_block():
     ed = editor("```sh\nls\n```\n")
     press(ed, Qt.Key.Key_Down)
