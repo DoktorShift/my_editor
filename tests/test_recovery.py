@@ -95,12 +95,14 @@ def _window_stub():
         editors.append(ed)
         return ed
 
-    return types.SimpleNamespace(
+    stub = types.SimpleNamespace(
         _new_wired_editor=new_editor,
         _new_backup=lambda ed, path: recovery.EditorBackup(ed, path),
         _reload_from_disk=lambda *a: None,
         _attach_close_button=lambda *a: None,
         _attach_highlighter=lambda *a: None,
+        _remember_split=lambda *a: None,
+        _width_changed=lambda *a: None,
         _asset_manager=types.SimpleNamespace(adopt_data_uri=lambda uri: None),
         _watcher=types.SimpleNamespace(addPath=lambda p: None),
         is_dark_theme=False,
@@ -108,6 +110,8 @@ def _window_stub():
         tabs=_Tabs(),
         editors=editors,
     )
+    stub._editor_container = lambda ed: MainWindow._editor_container(stub, ed)
+    return stub
 
 
 # --------------------------------------------------------------------------- #

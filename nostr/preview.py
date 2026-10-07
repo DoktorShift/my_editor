@@ -288,16 +288,24 @@ MARKDOWN_FEATURES = QTextDocument.MarkdownFeature(
     READ_FEATURES.value | QTextDocument.MarkdownFeature.MarkdownNoHTML.value)
 
 
+def body_document(markdown: str, *, names: Optional[NameLookup] = None,
+                  dark: bool = False, parent=None) -> QTextDocument:
+    """Markdown as the readers show an article's body: the document's
+    preview when nothing is published."""
+    doc = QTextDocument(parent)
+    doc.setDocumentMargin(0)
+    read_markdown(doc, markdown_for_preview(markdown, names), MARKDOWN_FEATURES)
+    _tidy_tables(doc)
+    _style_body(doc.begin(), palette(dark))
+    return doc
+
+
 def article_document(markdown: str, article: Article, *, names: Optional[NameLookup] = None,
                      dark: bool = False, parent=None) -> QTextDocument:
     """The article as readers will see it."""
     colors = palette(dark)
-    doc = QTextDocument(parent)
-    doc.setDocumentMargin(0)
     # The body, rendered from exactly the published Markdown.
-    read_markdown(doc, markdown_for_preview(markdown, names), MARKDOWN_FEATURES)
-    _tidy_tables(doc)
-    _style_body(doc.begin(), colors)
+    doc = body_document(markdown, names=names, dark=dark, parent=parent)
 
     # The header goes in front: cover, title, summary, byline, a rule. A
     # new block is opened before the body's first one, which keeps its own
@@ -442,6 +450,10 @@ class NostrPreview(QTextBrowser):
                      names: Optional[NameLookup] = None) -> None:
         self._show(article_document(markdown, article, names=names, dark=self._dark,
                                     parent=self))
+
+    def show_markdown(self, markdown: str, *, names: Optional[NameLookup] = None) -> None:
+        """Markdown as it reads, without an article's header."""
+        self._show(body_document(markdown, names=names, dark=self._dark, parent=self))
 
     def show_note(self, text: str, *, author: str = "",
                   names: Optional[NameLookup] = None) -> None:

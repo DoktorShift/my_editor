@@ -22,7 +22,7 @@ from typing import Dict, Optional
 
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QAction, QColor, QKeySequence
-from PySide6.QtWidgets import QMenu, QPushButton, QToolBar, QToolButton, QWidget
+from PySide6.QtWidgets import QMenu, QPushButton, QSizePolicy, QToolBar, QToolButton, QWidget
 
 import format_icons
 from constants import (
@@ -91,6 +91,14 @@ class FormatToolbar(QToolBar):
             more.setToolTip(_("More Formatting"))
         self.set_style_name(_("Body"))
         self.set_dark(dark)
+
+    def add_trailing(self, widget: QWidget) -> QAction:
+        """Put ``widget`` at the toolbar's far end (the Write, Preview and
+        Split switch); the returned action shows or hides it."""
+        spacer = QWidget(self)
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.addWidget(spacer)
+        return self.addWidget(widget)
 
     # -- what the window tells it ------------------------------------------------
 

@@ -17,7 +17,8 @@ from typing import List, Optional, Tuple
 from send2trash import send2trash
 import shiboken6
 from PySide6.QtCore import (
-    QBuffer, QByteArray, QIODevice, Qt, QLocale, QMarginsF, QTimer, QUrl, QFileSystemWatcher,
+    QBuffer, QByteArray, QEvent, QIODevice, QObject, Qt, QLocale, QMarginsF, QTimer, QUrl,
+    QFileSystemWatcher,
 )
 from PySide6.QtNetwork import QLocalServer
 from PySide6.QtGui import (
@@ -53,6 +54,12 @@ from commands import (
 )
 import slash_menu
 from slash_menu import SlashItem
+import preview_pane
+from preview_pane import (
+    ARTICLE, DOCUMENT, NOTE, PREVIEW, SPLIT, SPLIT_MIN_WIDTH, WRITE, PreviewContent, PreviewPane,
+    ViewSwitch,
+)
+from nostr.preview import Article as PreviewArticle
 from doc_walk import iter_blocks, iter_image_names, serialize_plain_with_images
 from markdown_writer import (
     document_to, document_to_markdown, has_local_only_formatting, holds_faithfully,
@@ -257,6 +264,21 @@ def _ask_save_changes(parent, title: str, *, save_label: str = "",
 QUIT_SYNC_WAIT_MS = 5_000
 
 
+class _WidthWatcher(QObject):
+    """Calls ``changed()`` when a widget's width changes (a tab's Split
+    needs room for two readable columns)."""
+
+    def __init__(self, widget, changed) -> None:
+        super().__init__(widget)
+        self._changed = changed
+        widget.installEventFilter(self)
+
+    def eventFilter(self, obj, event) -> bool:
+        if event.type() == QEvent.Type.Resize and event.size().width() != event.oldSize().width():
+            self._changed()
+        return False
+
+
 class MainWindow(QMainWindow):
     def __init__(self, initial_path: str | None = None):
         super().__init__()
@@ -363,6 +385,8 @@ class MainWindow(QMainWindow):
         self.nostr_state = NostrState(lambda: self._profile_store.default(), parent=self)
         self.profile_chip.setVisible(self.nostr_state.active)
         self.nostr_state.changed.connect(self.profile_chip.setVisible)
+        # The preview shows what will be published only while Nostr is in use.
+        self.nostr_state.changed.connect(lambda _active: self._redraw_preview())
         # Where everyone reads and writes (NIP-65): verified, cached, and the
         # user's own lists remembered across launches. Every job and panel
         # that touches relays asks it where to go.
@@ -834,6 +858,9 @@ class MainWindow(QMainWindow):
         editor.set_writing_font(writing)
 
     def _update_editor_theme(self, editor):
+        pane = getattr(editor, "_preview_pane", None)
+        if pane is not None:
+            pane.set_dark(self.is_dark_theme)
         bg = DARK_BG if self.is_dark_theme else LIGHT_BG
         fg = DARK_FG if self.is_dark_theme else LIGHT_FG
         selection = DARK_SELECTION if self.is_dark_theme else LIGHT_SELECTION
@@ -1051,6 +1078,7 @@ class MainWindow(QMainWindow):
 
     def _on_tab_changed(self, index=None):
         self._show_backup_status()
+        self._apply_view(self.current_editor())
         self._update_window_title()
         self._update_word_count()
         self._update_undo_redo_buttons()
@@ -1136,6 +1164,9 @@ class MainWindow(QMainWindow):
         focus = QApplication.focusWidget()
         if isinstance(focus, QLineEdit):
             selected, editable = focus.hasSelectedText(), not focus.isReadOnly()
+        elif isinstance(focus, QTextEdit) and not isinstance(focus, HtmlEditor):
+            # The preview, or another text that is not the document.
+            selected, editable = focus.textCursor().hasSelection(), not focus.isReadOnly()
         elif self.current_pdf_viewer() is not None:
             selected, editable = True, False      # the reader answers Copy itself
         else:
@@ -1146,10 +1177,11 @@ class MainWindow(QMainWindow):
         self.act_cut.setEnabled(selected and editable)
         self.act_delete.setEnabled(selected and editable)
 
-    def _on_focus_changed(self, _old, _new) -> None:
+    def _on_focus_changed(self, _old, new) -> None:
         tabs = getattr(self, "tabs", None)
         if tabs is None or not shiboken6.isValid(tabs):
             return                                   # the window is closing
+        self._note_side_in_use(new)
         self._update_clipboard_commands()
         self._update_undo_redo_buttons()
 
@@ -1515,6 +1547,23 @@ class MainWindow(QMainWindow):
             Command("edit.markdown_shortcuts", _("Markdown Shortcuts"), EDIT, checkable=True,
                     keywords=(_("autoformat"), _("substitutions"), "markdown")),
             toggled=self._set_markdown_shortcuts, checked=self.markdown_shortcuts)
+        # Write, Preview and Split: the text, its preview, or both side by
+        # side, for every document that holds Markdown (app-wide, like
+        # standup's). No key: no platform has one for it.
+        mode = load_settings().get("view_mode", WRITE)
+        self.view_mode = mode if mode in preview_pane.MODES else WRITE
+        self._view_group = QActionGroup(self)
+        self.act_view_write = add(Command("view.write", _("Write"), VIEW, checkable=True,
+                                          keywords=(_("editor"), _("text"))),
+                                  triggered=lambda: self._choose_view(WRITE))
+        self.act_view_preview = add(Command("view.preview", _("Preview"), VIEW, checkable=True,
+                                            keywords=(_("reading"), _("read"))),
+                                    triggered=lambda: self._choose_view(PREVIEW))
+        self.act_view_split = add(Command("view.split", _("Split"), VIEW, checkable=True,
+                                          keywords=(_("side by side"),)),
+                                  triggered=lambda: self._choose_view(SPLIT))
+        for action in (self.act_view_write, self.act_view_preview, self.act_view_split):
+            self._view_group.addAction(action)
         # Writing in the monospace font, for those who prefer it (Q-K).
         self.monospace_writing = bool(load_settings().get("monospace_writing", False))
         self.act_monospace_writing = add(
@@ -1707,6 +1756,10 @@ class MainWindow(QMainWindow):
 
         m_view = self.menuBar().addMenu(_("&View"))
         self.m_view = m_view
+        m_view.addAction(self.act_view_write)
+        m_view.addAction(self.act_view_preview)
+        m_view.addAction(self.act_view_split)
+        m_view.addSeparator()
         m_view.addAction(self.act_show_toolbar)
         m_view.addSeparator()
         m_view.addAction(self.act_monospace_writing)
@@ -1854,6 +1907,10 @@ class MainWindow(QMainWindow):
              "link": self.act_link, "bullets": self.act_bullets, "numbers": self.act_numbers,
              "quote": self.act_quote},
             self.m_style, dark=self.is_dark_theme)
+        self.view_switch = ViewSwitch(
+            (self.act_view_write, self.act_view_preview, self.act_view_split),
+            dark=self.is_dark_theme)
+        self._view_switch_action = self.format_toolbar.add_trailing(self.view_switch)
         v.addWidget(self.format_toolbar, 0)
         v.addWidget(self.findbar, 0)
         v.addWidget(self.update_bar, 0)
@@ -1945,28 +2002,7 @@ class MainWindow(QMainWindow):
         load_backup_content(ed, backup, modified=True)
         self._attach_highlighter(ed, ed._file_path)
 
-        container = QWidget()
-        vbox = QVBoxLayout(container)
-        vbox.setContentsMargins(0, 0, 0, 0)
-        vbox.setSpacing(0)
-
-        bar = FileChangedBar()
-        bar.update_theme(self.is_dark_theme)
-        bar.reload_requested.connect(lambda b=bar, e=ed: self._reload_from_disk(e, b))
-        vbox.addWidget(bar)
-
-        editor_area = QWidget()
-        layout = QHBoxLayout(editor_area)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        if self.show_line_numbers:
-            gutter = LineNumberGutter(ed)
-            layout.addWidget(gutter)
-            ed._line_gutter = gutter
-
-        layout.addWidget(ed)
-        vbox.addWidget(editor_area)
+        container, bar = self._editor_container(ed)
 
         base_name = os.path.basename(original_path) if original_path else _("Untitled")
         if freshness == "stale":
@@ -1997,28 +2033,7 @@ class MainWindow(QMainWindow):
         """Open an untitled tab, make it current, and return its editor."""
         ed = self._new_wired_editor()
 
-        container = QWidget()
-        vbox = QVBoxLayout(container)
-        vbox.setContentsMargins(0, 0, 0, 0)
-        vbox.setSpacing(0)
-
-        bar = FileChangedBar()
-        bar.update_theme(self.is_dark_theme)
-        bar.reload_requested.connect(lambda b=bar, e=ed: self._reload_from_disk(e, b))
-        vbox.addWidget(bar)
-
-        editor_area = QWidget()
-        layout = QHBoxLayout(editor_area)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        if self.show_line_numbers:
-            gutter = LineNumberGutter(ed)
-            layout.addWidget(gutter)
-            ed._line_gutter = gutter
-
-        layout.addWidget(ed)
-        vbox.addWidget(editor_area)
+        container, bar = self._editor_container(ed)
 
         idx = self.tabs.addTab(container, _("Untitled") + "*")
         self.tabs.setCurrentIndex(idx)
@@ -2474,28 +2489,7 @@ class MainWindow(QMainWindow):
         ed.document().setModified(False)
         self._attach_highlighter(ed, path)
 
-        container = QWidget()
-        vbox = QVBoxLayout(container)
-        vbox.setContentsMargins(0, 0, 0, 0)
-        vbox.setSpacing(0)
-
-        bar = FileChangedBar()
-        bar.update_theme(self.is_dark_theme)
-        bar.reload_requested.connect(lambda b=bar, e=ed: self._reload_from_disk(e, b))
-        vbox.addWidget(bar)
-
-        editor_area = QWidget()
-        layout = QHBoxLayout(editor_area)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        if self.show_line_numbers:
-            gutter = LineNumberGutter(ed)
-            layout.addWidget(gutter)
-            ed._line_gutter = gutter
-
-        layout.addWidget(ed)
-        vbox.addWidget(editor_area)
+        container, bar = self._editor_container(ed)
 
         idx = self.tabs.addTab(container, os.path.basename(path))
         self.tabs.setCurrentIndex(idx)
@@ -4135,15 +4129,22 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "_editor_actions"):
             return
         kind = self._editor_kind(self.current_editor())
+        reading = self._shows_preview_only(self.current_editor())
         if getattr(self, "format_toolbar", None) is not None:
             # A PDF has nothing to format; plain text has no paragraph styles.
             self.format_toolbar.setVisible(self.show_toolbar and bool(kind))
             self.format_toolbar.style_button.setEnabled(kind == "rich")
+        # Only the preview shows: nothing to edit there (Copy and Select
+        # All act on the preview itself, through the focus).
         for action in self._editor_actions:
-            action.setEnabled(bool(kind))
+            action.setEnabled(bool(kind) and not reading)
         for action in self._rich_actions:
-            action.setEnabled(kind == "rich")
-        self.act_underline.setEnabled(bool(self._keeps_underline(self.current_editor())))
+            action.setEnabled(kind == "rich" and not reading)
+        self.act_select_all.setEnabled(bool(kind))
+        for action in (self.act_find, self.act_replace, self.act_find_next, self.act_find_prev):
+            action.setEnabled(not reading)
+        self.act_underline.setEnabled(bool(self._keeps_underline(self.current_editor()))
+                                      and not reading)
         self._update_clipboard_commands()
         if kind:
             self._update_undo_redo_buttons()
@@ -4205,6 +4206,8 @@ class MainWindow(QMainWindow):
         self.profile_chip.set_dark_theme(self.is_dark_theme)
         if getattr(self, 'format_toolbar', None) is not None:
             self.format_toolbar.set_dark(self.is_dark_theme)
+        if getattr(self, 'view_switch', None) is not None:
+            self.view_switch.set_dark(self.is_dark_theme)
         if hasattr(self, 'update_bar'):
             self.update_bar.update_theme(self.is_dark_theme)
         for i in range(self.tabs.count()):
@@ -4265,6 +4268,239 @@ class MainWindow(QMainWindow):
     def _on_backup_status(self, ed) -> None:
         if ed is self.current_editor():
             self._show_backup_status()
+
+    # -- Write, Preview, Split ------------------------------------------------
+
+    def _editor_container(self, ed):
+        """A tab's content and its file-changed bar: the bar over the text
+        (with its line numbers), the preview beside it when it shows."""
+        container = QWidget()
+        vbox = QVBoxLayout(container)
+        vbox.setContentsMargins(0, 0, 0, 0)
+        vbox.setSpacing(0)
+        bar = FileChangedBar()
+        bar.update_theme(self.is_dark_theme)
+        bar.reload_requested.connect(lambda b=bar, e=ed: self._reload_from_disk(e, b))
+        vbox.addWidget(bar)
+        editor_area = QWidget()
+        layout = QHBoxLayout(editor_area)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        if self.show_line_numbers:
+            gutter = LineNumberGutter(ed)
+            layout.addWidget(gutter)
+            ed._line_gutter = gutter
+        layout.addWidget(ed)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
+        splitter.addWidget(editor_area)
+        splitter.splitterMoved.connect(lambda *_args, s=splitter: self._remember_split(s))
+        _WidthWatcher(splitter, lambda e=ed: self._width_changed(e))
+        vbox.addWidget(splitter)
+        ed._view_splitter = splitter
+        ed._view_side = WRITE           # the side used last, for a narrow Split
+        ed._preview_pane = None
+        ed._split_fits = None
+        return container, bar
+
+    def _shown_view(self, ed) -> str:
+        """What the tab shows: WRITE, PREVIEW or SPLIT. Split needs room for
+        two readable columns; narrower, the side used last shows (Q-N)."""
+        if ed is None or getattr(ed, "_view_splitter", None) is None \
+                or self._editor_kind(ed) != "rich":
+            return WRITE
+        if self.view_mode == SPLIT and not self._split_fits(ed):
+            return ed._view_side if ed._view_side in (WRITE, PREVIEW) else WRITE
+        return self.view_mode
+
+    @staticmethod
+    def _split_fits(ed) -> bool:
+        return ed._view_splitter.width() >= SPLIT_MIN_WIDTH
+
+    def _shows_preview_only(self, ed) -> bool:
+        return ed is not None and self._shown_view(ed) == PREVIEW
+
+    def _choose_view(self, mode: str) -> None:
+        """Write, Preview or Split, chosen. In a tab too narrow for Split
+        while Split is the choice, Write and Preview flip the side shown,
+        and Split comes back when there is room."""
+        ed = self.current_editor()
+        if (mode != SPLIT and self.view_mode == SPLIT and ed is not None
+                and getattr(ed, "_view_splitter", None) is not None
+                and not self._split_fits(ed)):
+            ed._view_side = mode
+        else:
+            self.view_mode = mode
+            save_setting("view_mode", mode)
+            if ed is not None and mode != SPLIT:
+                ed._view_side = mode
+        self._apply_view(ed)
+
+    def _apply_view(self, ed) -> None:
+        """Show the tab's text, preview or both, as chosen."""
+        if getattr(self, "view_switch", None) is None:
+            return
+        splitter = getattr(ed, "_view_splitter", None) if ed is not None else None
+        shown = self._shown_view(ed)
+        if splitter is not None:
+            ed._split_fits = self._split_fits(ed)
+            editor_area = splitter.widget(0)
+            pane = ed._preview_pane
+            if shown != WRITE:
+                pane = self._preview_pane_for(ed)
+            if shown == PREVIEW:
+                had_focus = ed.hasFocus()
+                pane.show()
+                editor_area.hide()
+                if had_focus:
+                    pane.view.setFocus()
+            else:
+                editor_area.show()
+                if pane is not None:
+                    pane.setVisible(shown == SPLIT)
+                if shown == SPLIT:
+                    ratio = float(load_settings().get("split_ratio", 0.5))
+                    ratio = min(0.8, max(0.2, ratio))
+                    width = splitter.width()
+                    splitter.setSizes([round(width * ratio), width - round(width * ratio)])
+                if pane is not None and pane.view.hasFocus():
+                    ed.setFocus()
+        self._sync_view_switch(ed, shown)
+        self._update_editor_commands()
+        if shown == PREVIEW and self.findbar.isVisible():
+            self._close_findbar()
+
+    def _sync_view_switch(self, ed, shown: str) -> None:
+        rich = ed is not None and self._editor_kind(ed) == "rich" and \
+            getattr(ed, "_view_splitter", None) is not None
+        self._view_switch_action.setVisible(rich)
+        for action in (self.act_view_write, self.act_view_preview, self.act_view_split):
+            action.setEnabled(rich)
+        if not rich:
+            return
+        fits = self._split_fits(ed)
+        self.act_view_split.setEnabled(fits)
+        self.act_view_split.setToolTip("" if fits else
+                                       _("Make the window wider to show both"))
+        {WRITE: self.act_view_write, PREVIEW: self.act_view_preview,
+         SPLIT: self.act_view_split}[shown].setChecked(True)
+
+    def _width_changed(self, ed) -> None:
+        """A tab got wider or narrower: Split may fit now, or not any more.
+        Looked at once the layout has settled, never in the middle of it."""
+        if ed is self.current_editor() and self.view_mode == SPLIT:
+            QTimer.singleShot(0, lambda e=ed: self._width_settled(e))
+
+    def _width_settled(self, ed) -> None:
+        if (shiboken6.isValid(ed) and ed is self.current_editor() and self.view_mode == SPLIT
+                and ed._split_fits is not None and ed._split_fits != self._split_fits(ed)):
+            self._apply_view(ed)
+
+    def _remember_split(self, splitter) -> None:
+        sizes = splitter.sizes()
+        if len(sizes) == 2 and sum(sizes) > 0 and all(sizes):
+            save_setting("split_ratio", round(sizes[0] / sum(sizes), 3))
+
+    def _note_side_in_use(self, widget) -> None:
+        """The side of a tab that has the focus is the one a narrow Split
+        shows."""
+        while widget is not None:
+            if isinstance(widget, HtmlEditor):
+                if getattr(widget, "_view_splitter", None) is not None:
+                    widget._view_side = WRITE
+                return
+            if isinstance(widget, PreviewPane):
+                ed = self._editor_from_widget(widget.parentWidget())
+                if ed is not None:
+                    ed._view_side = PREVIEW
+                return
+            widget = widget.parentWidget()
+
+    def _preview_pane_for(self, ed) -> PreviewPane:
+        """The tab's preview, made the first time it shows."""
+        if ed._preview_pane is None:
+            binding = getattr(ed, "_draft_binding", None)
+            pane = PreviewPane(
+                lambda kind, e=ed: self._preview_content(e, kind),
+                images=lambda name, e=ed: self._preview_image(e, name),
+                dark=self.is_dark_theme,
+                note=binding is not None and binding.inner_kind == INNER_KIND_SHORT_NOTE)
+            pane.setVisible(False)
+            ed._view_splitter.addWidget(pane)
+            ed.document().contentsChanged.connect(pane.schedule)
+            pane.view.selectionChanged.connect(self._update_clipboard_commands)
+            ed._preview_pane = pane
+        return ed._preview_pane
+
+    def _preview_content(self, ed, kind: str) -> PreviewContent:
+        """What the preview of ``ed`` draws: the document as it reads, or,
+        while a Nostr account is in use, what will be published (as an
+        ARTICLE or a NOTE) and what of it readers will not see."""
+        names = self._preview_name
+        if not self.nostr_state.active:
+            markdown = document_to_markdown(ed.document(), lambda fmt: image_markdown(
+                str(fmt.property(QTextImageFormat.ImageAltText) or ""), fmt.name()))
+            return PreviewContent(DOCUMENT, markdown, names=names)
+        profile = self._profile_store.default()
+        author = (profile.display_name or profile.npub_short()) if profile is not None else ""
+        checks = []
+        missing = self._pictures_not_uploaded(ed)
+        if missing:
+            checks.append(ngettext(
+                "A picture is not uploaded yet: readers will not see it.",
+                "{count} pictures are not uploaded yet: readers will not see them.",
+                missing).format(count=missing))
+        if kind == NOTE:
+            text = self._publish_payload(ed, "note")[0]
+            return PreviewContent(NOTE, text, author=author, names=names, checks=tuple(checks))
+        markdown = self._publish_payload(ed, "markdown")[0]
+        details = self._article_details_of(ed)
+        title = details.title or next(
+            (line.lstrip("# ").strip() for line in markdown.splitlines() if line.strip()), "")
+        first = next((line for line in markdown.splitlines() if line.strip()), "")
+        if first.startswith("# ") and first[2:].strip() == title:
+            checks.append(_("The first heading repeats the title, so readers see it twice."))
+        article = PreviewArticle(title=title, summary=details.summary, image=details.image,
+                                 tags=tuple(details.hashtags), author=author,
+                                 published_at=details.published_at or 0)
+        return PreviewContent(ARTICLE, markdown, article, author, names, tuple(checks))
+
+    def _redraw_preview(self) -> None:
+        ed = self.current_editor()
+        pane = getattr(ed, "_preview_pane", None) if ed is not None else None
+        if pane is not None and pane.isVisible():
+            pane.render()
+
+    def _preview_name(self, pubkey: str):
+        person = self._known_people.get(pubkey)
+        return person.display_name if person is not None and person.display_name else None
+
+    def _pictures_not_uploaded(self, ed) -> int:
+        """Pictures in the document that would not be published: kept on
+        this computer only."""
+        count = 0
+        for name in iter_image_names(ed.document()):
+            sha = parse_asset_key(name)
+            if sha is not None:
+                asset = self._asset_manager.get(sha)
+                if asset is None or not asset.is_uploaded:
+                    count += 1
+            elif not name.lower().startswith(("http://", "https://")):
+                count += 1
+        return count
+
+    def _preview_image(self, ed, name: str):
+        """A picture the preview names: from this app's own media (also by
+        its published address), or beside the document's file. Never from
+        the network."""
+        if parse_asset_key(name) is not None:
+            return self._asset_manager.resolve_image(name)
+        if name.lower().startswith(("http://", "https://")):
+            asset = self._asset_manager.find_by_url(name)
+            if asset is not None:
+                return self._asset_manager.resolve_image(f"{ASSET_SCHEME}:{asset.sha256}")
+            return None
+        return self._resolve_local_image(ed, name)
 
     def _show_backup_status(self) -> None:
         """Say, for the current document only, that its backup is not kept,
