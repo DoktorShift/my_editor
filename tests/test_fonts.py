@@ -1,11 +1,15 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The monospace font is monospace on every system, installed or not."""
+"""The monospace font is monospace on every system, installed or not,
+and the tests draw with the system's fonts on every system."""
+
+import os
 
 import pytest
 from PySide6.QtGui import QFontDatabase, QFontInfo
 
 import fonts
+from tests.app_process import offscreen_fonts
 
 
 @pytest.fixture(autouse=True)
@@ -35,3 +39,21 @@ def test_style_sheets_get_a_family_this_system_really_has():
 def test_the_editor_style_sheet_uses_it():
     from editor import HtmlEditor
     assert f'font-family: "{fonts.monospace_family()}"' in HtmlEditor().styleSheet()
+
+
+def test_the_offscreen_platform_gets_the_system_fonts_on_windows(monkeypatch):
+    # The test run and its child processes draw offscreen; on Windows that
+    # platform reads fonts from a folder and would otherwise find none.
+    monkeypatch.setenv("SystemRoot", r"D:\Windows")
+    env = {"QT_QPA_PLATFORM": "offscreen"}
+    offscreen_fonts(env, platform="win32")
+    assert env["QT_QPA_FONTDIR"] == os.path.join(r"D:\Windows", "Fonts")
+    chosen = {"QT_QPA_PLATFORM": "offscreen", "QT_QPA_FONTDIR": r"C:\Fonts"}
+    offscreen_fonts(chosen, platform="win32")
+    assert chosen["QT_QPA_FONTDIR"] == r"C:\Fonts"            # a folder chosen stays
+    # Windows' own platform, and offscreen elsewhere, ask the system.
+    for platform, qt_platform in (("win32", "windows"), ("darwin", "offscreen"),
+                                  ("linux", "offscreen")):
+        env = {"QT_QPA_PLATFORM": qt_platform}
+        offscreen_fonts(env, platform=platform)
+        assert "QT_QPA_FONTDIR" not in env

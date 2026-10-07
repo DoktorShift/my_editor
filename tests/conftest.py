@@ -28,7 +28,14 @@ import sys
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from tests.app_process import offscreen_fonts  # noqa: E402
+
+# Offscreen unless the run chose another platform (the Windows job uses
+# Windows' own), with the system's fonts also on Windows, so a run on a
+# Windows machine measures text as the workflow does.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+offscreen_fonts(os.environ)
 # The run's own single-instance socket (constants.IPC_SERVER_NAME), set
 # before any app module is imported: a window a test builds never takes
 # over the socket of a MyEditor the person is using.
