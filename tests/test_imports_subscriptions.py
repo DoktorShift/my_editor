@@ -571,3 +571,66 @@ class TestQuitting:
 def _settled():
     yield
     settle()
+
+
+class Offline(FakeRelay):
+    """Relays that answer nothing until ``online`` is set."""
+
+    def __init__(self):
+        super().__init__()
+        self.online = False
+
+    def events(self, relays, filters, on_done):
+        if self.online:
+            super().events(relays, filters, on_done)
+        else:
+            self.queries.append((list(relays), filters))
+            on_done([], set())
+
+
+class TestSaysWhatHappens:
+    """CP2 review N3: nothing heard the list's messages since the Feeds
+    page went, and a change that could not be shared waited silently."""
+
+    def test_a_change_that_cannot_be_shared_says_so_and_tries_again(self, tmp_path):
+        from nostr.imports.subscriptions import NOT_SHARED, RETRY_DELAYS_MS
+        relay = Offline()
+        store, _, scheduler = bound(tmp_path, relay=relay)
+        said = []
+        store.sync_status.connect(said.append)
+        store.add_feed(FEED_URL, "My Blog")
+        publish(store, scheduler)
+        assert said[-1] == NOT_SHARED
+        assert relay.published == []
+        # Tried again after a pause; nothing to sign while nothing answers.
+        assert [e[0] for e in scheduler.scheduled if e[2]] == [RETRY_DELAYS_MS[0]]
+        publish(store, scheduler)
+        assert [e[0] for e in scheduler.scheduled if e[2]] == [RETRY_DELAYS_MS[1]]
+        relay.online = True
+        publish(store, scheduler)
+        assert [f["url"] for f in relay.payload()["feeds"]] == [FEED_URL]
+        assert said[-1] == ""                   # nothing left to say
+        assert not [e for e in scheduler.scheduled if e[2]]
+
+    def test_a_read_that_is_answered_sends_what_waits(self, tmp_path):
+        relay = Offline()
+        store, _, scheduler = bound(tmp_path, relay=relay)
+        store.add_feed(FEED_URL, "My Blog")
+        publish(store, scheduler)               # not shared: kept, dirty
+        store.bind_profile(None)
+        relay.online = True
+        again, _, scheduler2 = make_store(tmp_path, relay=relay)
+        again.bind_profile(PROFILE)             # the next launch
+        settle()
+        assert [e for e in scheduler2.scheduled if e[2]], "nothing was sent"
+        publish(again, scheduler2)
+        assert [f["url"] for f in relay.payload()["feeds"]] == [FEED_URL]
+
+    def test_a_list_that_cannot_be_read_online_says_the_copy_here_is_shown(self, tmp_path):
+        from nostr.imports.subscriptions import NOT_READ
+        store, _, _ = make_store(tmp_path, relay=Offline())
+        said = []
+        store.sync_status.connect(said.append)
+        store.bind_profile(PROFILE)
+        settle()
+        assert said[-1] == NOT_READ

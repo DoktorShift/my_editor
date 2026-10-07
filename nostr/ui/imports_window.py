@@ -388,13 +388,14 @@ class ImportsWindow(QMainWindow):
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(0)
         column.addWidget(self._build_list_header())
-        self.notice = QLabel(ELSEWHERE if self._controller.read_only
-                             else self._controller.notice)
+        self.notice = QLabel()
         self.notice.setObjectName("imports_notice")
         self.notice.setWordWrap(True)
         self.notice.setContentsMargins(16, 6, 16, 6)
-        self.notice.setVisible(bool(self.notice.text()))
+        self.notice.setTextFormat(Qt.TextFormat.PlainText)
         column.addWidget(self.notice)
+        self._update_notice()
+        self._controller.sync_changed.connect(self._update_notice)
         self.banner = _Banner()
         self.banner.hide()
         column.addWidget(self.banner)
@@ -1208,6 +1209,16 @@ class ImportsWindow(QMainWindow):
 
     # Bound slots for the window's own children, not closures over the
     # window: a closure on a child's signal keeps the window alive.
+    def _update_notice(self) -> None:
+        """One quiet line above the list for what the person should know:
+        that another MyEditor checks the sources, that a damaged inbox was
+        set aside, how the list of sources is being read and shared."""
+        controller = self._controller
+        parts = [ELSEWHERE if controller.read_only else controller.notice,
+                 controller.sync_message]
+        self.notice.setText("\n".join(part for part in parts if part))
+        self.notice.setVisible(bool(self.notice.text()))
+
     def _show_source(self, key: str) -> None:
         self.show_view(SOURCE, key)
 

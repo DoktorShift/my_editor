@@ -137,7 +137,8 @@ class TestNoAnswerIsNotNoList:
         publish(store, scheduler)
         assert len(relay.published) == sent
         assert store._dirty                     # waits here, and in the cache
-        assert any("didn't answer" in text for text in statuses)
+        from nostr.imports.subscriptions import NOT_SHARED
+        assert statuses[-1] == NOT_SHARED       # said, and tried again later
         # Once the relays answer, the change goes out, merged with theirs.
         relay.silent.clear()
         relay.answers[FEED_LIST_DTAG] = [list_event([A, X], NOW)]

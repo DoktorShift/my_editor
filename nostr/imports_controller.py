@@ -60,6 +60,7 @@ from .imports.constants import IDENTIFIER_PREFIX
 from .imports.errors import SourceError, friendly_message
 from .imports.feed_list import source_key
 from .imports.sources.opml import OpmlFeed, write_opml
+from .imports.subscriptions import SYNCING
 from .imports.fetch import SourceFetcher
 from .imports.inbox_store import (
     DRAFTED,
@@ -130,6 +131,7 @@ class ImportsController(QObject):
     activity_changed = Signal()
     new_posts = Signal(str, int)
     import_finished = Signal(str)
+    sync_changed = Signal()
 
     def __init__(self, *, relay_pool, relay_directory, session_pool, draft_store=None,
                  entitled_relays: Optional[Callable[[], Sequence[str]]] = None,
@@ -170,6 +172,10 @@ class ImportsController(QObject):
             relay_directory=relay_directory, entitled_relays=entitled_relays,
             parent=self)
         self.subscriptions.feeds_changed.connect(self._sync_sources)
+        # What the list of sources says about being read and shared, for
+        # the window (CP2 review N3); a read under way says nothing.
+        self.sync_message = ""
+        self.subscriptions.sync_status.connect(self._on_sync_status)
         self.images = images or RemoteImages(parent=self)
 
         self._profile = None
@@ -227,9 +233,20 @@ class ImportsController(QObject):
         self._unbind(ACCOUNT_CHANGED)
         self._generation += 1
         self._profile = profile
+        if self.sync_message:
+            self.sync_message = ""      # the previous account's
+            self.sync_changed.emit()
         self.subscriptions.bind_profile(profile)
         if profile is not None:
             self._bind()
+
+    def _on_sync_status(self, text: str) -> None:
+        if text == SYNCING or text == self.sync_message:
+            return
+        if text:
+            _log.warning("list of sources: %s", text)
+        self.sync_message = text
+        self.sync_changed.emit()
 
     def flush(self) -> None:
         """Quitting: send pending changes to the list of sources, pause a

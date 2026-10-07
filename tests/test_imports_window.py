@@ -74,12 +74,13 @@ class Images(QObject):
         pass
 
 
-def controller_for(tmp_path, *, manual=()):
-    relay = FakeRelay()
+def controller_for(tmp_path, *, manual=(), relay=None, scheduler=None):
+    relay = relay if relay is not None else FakeRelay()
     store = FeedSubscriptionStore(
         session_pool=FakeSessionPool(), relay_pool=None,
         relay_directory=FakeRelayDirectory(), cache_dir=tmp_path / "cache",
-        query=relay, publisher=relay, scheduler=FakeScheduler(), clock=lambda: NOW)
+        query=relay, publisher=relay, scheduler=scheduler or FakeScheduler(),
+        clock=lambda: NOW)
     fetcher = FakeFetcher({AUTHOR: ("ok", TWO_ITEM_FEED)})
     controller = ImportsController(
         relay_pool=None, relay_directory=FakeRelayDirectory(), session_pool=None,
@@ -595,3 +596,27 @@ def test_a_closed_window_is_freed_without_the_collector(tmp_path):
         gc.enable()
         controller.account_changed(None)
         settle()
+
+
+def test_the_list_of_sources_says_when_a_change_is_not_shared(tmp_path):
+    """CP2 review N3: the list's messages reached no one since the Feeds
+    page went; a change that could not be shared waited without a word."""
+    from nostr.imports.subscriptions import NOT_SHARED
+    from tests.test_imports_subscriptions import Offline
+    relay, scheduler = Offline(), FakeScheduler()
+    controller = controller_for(tmp_path, relay=relay, scheduler=scheduler)
+    win = ImportsWindow(controller, load_settings=lambda: {},
+                        save_settings=lambda value: None)
+    win.show()
+    settle()
+    controller.subscriptions.add_feed(JOURNAL, "A journal")
+    scheduler.fire()
+    settle()
+    assert win.notice.text() == NOT_SHARED and not win.notice.isHidden()
+    relay.online = True
+    scheduler.fire()            # the next try, now answered
+    settle()
+    assert win.notice.text() == "" and win.notice.isHidden()
+    win.close()
+    controller.account_changed(None)
+    settle()

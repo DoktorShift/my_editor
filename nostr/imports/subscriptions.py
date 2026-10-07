@@ -91,8 +91,16 @@ _CACHE_VERSION = 2
 _UNREADABLE = "unreadable"
 _NO_ANSWER = "no answer"
 
-_NOT_ANSWERED = _("Your relays didn't answer, so the change to your sources waits on this "
-                  "computer and is sent once they do.")
+# What the list's status says (sync_status), in plain words: the window
+# shows it (CP2 review N3: nothing heard these since the Feeds page went).
+SYNCING = _("Reading your list of sources\u2026")      # under way: not shown
+NOT_READ = _("Your list of sources couldn't be read online, so MyEditor shows the copy "
+             "kept on this computer.")
+NOT_SHARED = _("Your latest changes to your sources are kept on this computer for now: "
+               "the list couldn't be saved online. MyEditor tries again on its own.")
+UNREADABLE = _("Your list of sources couldn't be read ({reason}).")
+# Pauses before an unshared change is sent again, then every half hour.
+RETRY_DELAYS_MS = (2 * 60_000, 5 * 60_000, 15 * 60_000, 30 * 60_000)
 
 
 class _ListQuery(QObject):
@@ -183,6 +191,8 @@ class FeedSubscriptionStore(QObject):
         self._base_mark: Optional[Tuple[int, str]] = None
         # True while local edits haven't reached relays.
         self._dirty = False
+        # Tries since a change could not be shared (the pause grows).
+        self._retries = 0
         # The next publish also sends read times (a manual source opened).
         self._send_read_times = False
         self._legacy_merged = False
@@ -209,6 +219,7 @@ class FeedSubscriptionStore(QObject):
         self._profile = profile
         self._local, self._base, self._base_mark = FeedList(), None, None
         self._dirty = self._send_read_times = self._legacy_merged = False
+        self._retries = 0
         self._known = False
         self._publish_after_run = False
         if profile is None:
@@ -346,7 +357,7 @@ class FeedSubscriptionStore(QObject):
         if profile is None or self._query is None:
             return
         generation = self._generation
-        self.sync_status.emit(_("Syncing feed subscriptions…"))
+        self.sync_status.emit(SYNCING)
 
         def _on_relays(relays) -> None:
             if generation != self._generation:
@@ -360,10 +371,13 @@ class FeedSubscriptionStore(QObject):
             if result == _NO_ANSWER:
                 # Asked again on the next launch or refresh; until then the
                 # list is not known and nothing is taken for missing.
-                self.sync_status.emit("")
+                self.sync_status.emit(NOT_READ)
                 return
             if isinstance(result, FeedList):
                 self._adopt(result, event)
+            if result != _UNREADABLE:
+                # Answered: a change that waits here goes out now.
+                self._send_waiting()
             if self._legacy_merged:
                 if result != _UNREADABLE:
                     self.sync_status.emit("")
@@ -428,6 +442,20 @@ class FeedSubscriptionStore(QObject):
             self._after_mutation()
 
     # -- internals: mutation plumbing --------------------------------------
+
+    def _send_waiting(self) -> None:
+        if self._dirty and self._cancel_timer is None and not self.is_busy:
+            self._schedule_publish()
+
+    def _retry_later(self) -> None:
+        """Send a change that could not be shared again after a pause that
+        grows (two minutes, five, fifteen, then every half hour). Each try
+        reads first, so a signer is asked only once the list can be read."""
+        if self._cancel_timer is not None:
+            return
+        delay = RETRY_DELAYS_MS[min(self._retries, len(RETRY_DELAYS_MS) - 1)]
+        self._retries += 1
+        self._cancel_timer = self._scheduler(delay, self._on_debounce_fired)
 
     def _after_mutation(self) -> None:
         self._dirty = True
@@ -586,8 +614,7 @@ class FeedSubscriptionStore(QObject):
             except (TypeError, ValueError):
                 payload = None
             if not isinstance(payload, dict):
-                self.sync_status.emit(_("Couldn't decrypt the synced feed list: {reason}")
-                                      .format(reason=_("it isn't a list of sources")))
+                self.sync_status.emit(UNREADABLE.format(reason=_("it isn't a list of sources")))
                 return _UNREADABLE
             return read_payload(payload)
 
@@ -621,14 +648,13 @@ class FeedSubscriptionStore(QObject):
             else:
                 decrypt = client.nip44_decrypt_self
             decrypt(content, on_success=on_text,
-                    on_failure=lambda reason: on_unreadable(
-                        _("Couldn't decrypt the synced feed list: {reason}").format(
-                            reason=reason)))
+                    on_failure=lambda reason: on_unreadable(UNREADABLE.format(reason=reason)))
 
         self._session_pool.get(
             profile, on_ready=_on_ready,
             on_error=lambda reason: on_unreadable(
-                _("Couldn't reach the signer to sync feeds: {reason}").format(reason=reason)))
+                _("Your signer didn't answer, so your list of sources couldn't be read "
+                  "({reason}).").format(reason=reason)))
 
     # -- internals: publishing -------------------------------------------------
 
@@ -658,6 +684,8 @@ class FeedSubscriptionStore(QObject):
             if current():
                 if not sent:
                     self._dirty = True
+                else:
+                    self._retries = 0
                 self._save_cache()
                 if status is not None:
                     self.sync_status.emit(status)
@@ -667,6 +695,8 @@ class FeedSubscriptionStore(QObject):
                         self._publish_now()
                         return
                     self._schedule_publish()
+                elif self._dirty and not sent and status == NOT_SHARED:
+                    self._retry_later()
             if not self.is_busy:
                 self.settled.emit()
 
@@ -682,7 +712,7 @@ class FeedSubscriptionStore(QObject):
             if remote == _NO_ANSWER:
                 # Never write over a list nobody answered for: a newer one
                 # may be on the relays. The change waits (dirty, cached).
-                _finish(_NOT_ANSWERED)
+                _finish(NOT_SHARED)
                 return
             base = self._base if current() else snapshot["base"]
             local = self._local if current() else snapshot["local"]
@@ -742,8 +772,7 @@ class FeedSubscriptionStore(QObject):
 
             def _done(accepted: int, signed: dict) -> None:
                 if accepted <= 0:
-                    _finish(_("Feed subscriptions saved locally; no relay accepted "
-                              "the sync yet."))
+                    _finish(NOT_SHARED)
                     return
                 if current():
                     self._base = content
@@ -759,7 +788,8 @@ class FeedSubscriptionStore(QObject):
             self._session_pool.get(profile, on_ready=_on_ready, on_error=_failed)
 
         def _failed(reason: str) -> None:
-            _finish(_("Couldn't sync feed subscriptions: {reason}").format(reason=reason))
+            _finish(_("Your list of sources couldn't be saved online ({reason}). Your "
+                      "changes are kept on this computer.").format(reason=reason))
 
         self._with_relays(profile, _on_read_relays, reading=True)
 
