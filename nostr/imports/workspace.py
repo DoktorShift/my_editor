@@ -74,6 +74,7 @@ class Post:
     state: str = ""             # "" for a post nothing was done with yet
     revision: int = 0
     collection: str = ""        # the Collection a held post belongs to
+    trimmed: bool = False       # its text is no longer kept (Q-9)
 
     @property
     def imported(self) -> bool:
@@ -96,7 +97,7 @@ def post_from_row(row: PostRow) -> Post:
                 excerpt=row.excerpt, image=row.image, link=row.link, author=row.author,
                 published_at=row.published_at, found_at=row.found_at,
                 read_minutes=row.read_minutes, image_count=row.image_count,
-                state=row.state, revision=row.revision)
+                state=row.state, revision=row.revision, trimmed=row.trimmed)
 
 
 def post_from_item(item: FeedItem, *, collection: str, source_key: str = "",

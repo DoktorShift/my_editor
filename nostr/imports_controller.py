@@ -131,6 +131,8 @@ NO_SOURCES_IN_LIST = _("No sources were found in that list. Is it a subscription
 NOTHING_FOUND = _("Nothing to import was found at that address.")
 PARTIAL_POST = _("This post is longer than MyEditor keeps here. Open Original reads all of "
                  "it, and a draft made of it gets the whole post from its page.")
+TRIMMED_POST = _("MyEditor no longer keeps the text of this post here. Open Original reads "
+                 "it, and a draft made of it gets the post from its page.")
 IMAGES_UNREADABLE = _("Couldn't read the images of these posts.")
 
 
@@ -216,6 +218,11 @@ class ImportsController(QObject):
         self._watch.setInterval(self.WATCH_MS)
         self._watch.timeout.connect(self._watch_other)
         self._seen_version = None
+        # Posts let go of their text when they have been kept long enough
+        # (Q-9): at binding, then a few times a day.
+        self._trim_timer = QTimer(self)
+        self._trim_timer.setInterval(self.TRIM_MS)
+        self._trim_timer.timeout.connect(self._trim_text)
         # Why imports could not be bound (a folder that cannot be written
         # to), and a one-time word for the window (a damaged file set aside).
         self.problem = ""
@@ -359,10 +366,25 @@ class ImportsController(QObject):
         if self.read_only:
             self._seen_version = self._data_version()
             self._watch.start()
+        else:
+            self._trim_timer.start()
         self.bound_changed.emit(True)
         self._announce()
 
     WATCH_MS = 3000
+    TRIM_MS = 6 * 3600 * 1000
+
+    def _trim_text(self) -> None:
+        if self.inbox is None or self.read_only:
+            self._trim_timer.stop()
+            return
+        try:
+            trimmed = self.inbox.trim_text()
+        except sqlite3.Error:
+            _log.warning("could not let go of the text of old posts", exc_info=True)
+            return
+        if trimmed:
+            self._announce()
 
     def _data_version(self):
         try:
@@ -412,6 +434,7 @@ class ImportsController(QObject):
         if not self.read_only:
             self.inbox.recover_jobs()
             self.inbox.prune_jobs()
+            self.inbox.trim_text()
         self.catalogue = self._catalogue_factory(self.inbox)
         self.runner = ImportRunner(
             store=self.inbox, catalogue=self.catalogue, profile=self._profile,
@@ -456,6 +479,7 @@ class ImportsController(QObject):
 
     def _give_up(self, exc: BaseException, path: Path, *, problem: str = "") -> None:
         self._watch.stop()
+        self._trim_timer.stop()
         self._drop_inbox()
         self._release_lock()
         self._cannot_bind(exc, path, problem=problem)
@@ -487,6 +511,7 @@ class ImportsController(QObject):
     def _unbind(self, reason: str) -> None:
         self.problem = self.notice = ""
         self._watch.stop()
+        self._trim_timer.stop()
         if self.inbox is None:
             return
         self.close_window()
@@ -1025,7 +1050,8 @@ class ImportsController(QObject):
                 return
             content = template.content
             if item.partial:
-                content += "\n\n*" + PARTIAL_POST + "*"
+                note = TRIMMED_POST if post.trimmed else PARTIAL_POST
+                content += "\n\n*" + note + "*"
             on_ready(content, Article(
                 title=template.title, summary=template.summary,
                 image=template.image or snapshots.cover(item), tags=template.hashtags,

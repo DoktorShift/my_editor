@@ -63,6 +63,11 @@ CHECK_LEASE = 120
 MANUAL_CHECK_GAP = 60
 PAGE_SIZE = 50
 FINISHED_JOB_DAYS = 7
+# How long a post keeps its text here (the owner's decision Q-9): while it
+# waits in the inbox, 90 days at most; skipped or imported, 30 days. Then
+# it keeps its title, link and state, enough to know it again.
+WAITING_TEXT_DAYS = 90
+SETTLED_TEXT_DAYS = 30
 
 NEW, OLDER, SKIPPED = "new", "older", "skipped"
 DRAFTED, PUBLISHED, REMOVED = "drafted", "published", "removed"
@@ -130,6 +135,8 @@ class PostRow:
     image_count: int
     source_title: str = ""
     source_url: str = ""
+    # Its text is no longer kept (Q-9): importing it reads its page.
+    trimmed: bool = False
 
     @property
     def key(self) -> Tuple[str, str]:
@@ -245,6 +252,16 @@ def _cut(item: FeedItem) -> FeedItem:
                    summary=cut(item.summary), partial=True)
 
 
+def _trimmed(snapshot: dict) -> dict:
+    """What a post keeps once its text is gone (Q-9): what makes it the
+    same post again (its identifier comes from guid, link and title), its
+    date, and the mark that its text must be read from its page."""
+    kept = {name: snapshot.get(name) for name in ("guid", "title", "link", "published_at",
+                                                  "title_from_url")}
+    kept.update(content_html="", partial=True, trimmed=True, categories=[])
+    return kept
+
+
 def database_path(config_dir: Path, pubkey: str) -> Path:
     return Path(config_dir) / "imports" / f"{pubkey.lower()}.sqlite3"
 
@@ -312,6 +329,17 @@ class InboxStore:
             self._db.executescript(
                 "BEGIN; CREATE TABLE IF NOT EXISTS skip_memory (d_tag TEXT PRIMARY KEY, "
                 "at INTEGER NOT NULL); PRAGMA user_version = 2; COMMIT;")
+        if version < 3:
+            # When each post took its state, and whether its text is gone
+            # (Q-9). Skipped and imported posts already here count from
+            # now, since when they took their state was not kept.
+            columns = {row[1] for row in self._db.execute("PRAGMA table_info(items)")}
+            added = "".join(
+                f"ALTER TABLE items ADD COLUMN {name} INTEGER NOT NULL DEFAULT 0; "
+                for name in ("changed_at", "trimmed") if name not in columns)
+            self._db.executescript(
+                f"BEGIN; {added}UPDATE items SET changed_at = {int(self._now())} "
+                "WHERE changed_at = 0; PRAGMA user_version = 3; COMMIT;")
 
     # ------------------------------------------------------------------ #
     # Sources                                                              #
@@ -523,13 +551,13 @@ class InboxStore:
                 self._db.execute(
                     "INSERT INTO items (source_key, d_tag, snapshot, found_at, published_at, "
                     "position, state, previous_state, revision, title, excerpt, image, link, "
-                    "author, read_minutes, image_count) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)",
+                    "author, read_minutes, image_count, changed_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (key, d_tag, text, now, published, _position(now, published), state,
                      state if state in (NEW, OLDER) else fresh,
                      item.title or "", snapshots.excerpt(item), snapshots.cover(item),
                      item.link or "", item.author or "",
-                     snapshots.minutes_of(item), snapshots.images_in(item)))
+                     snapshots.minutes_of(item), snapshots.images_in(item), now))
             if waiting:
                 # A post dated ahead waits for its time; the feed must be
                 # read again then, not answered "unchanged" (review L6).
@@ -594,7 +622,7 @@ class InboxStore:
             state=row["state"], revision=row["revision"], read_minutes=row["read_minutes"],
             image_count=row["image_count"],
             source_title=row["s_title"] or row["s_feed_title"] or row["s_url"],
-            source_url=row["s_url"])
+            source_url=row["s_url"], trimmed=bool(row["trimmed"]))
 
     def post(self, source_key: str, d_tag: str) -> Optional[PostRow]:
         row = self._db.execute(
@@ -608,6 +636,36 @@ class InboxStore:
         row = self._db.execute("SELECT snapshot FROM items WHERE source_key = ? AND d_tag = ?",
                                (source_key, d_tag)).fetchone()
         return snapshots.from_snapshot(json.loads(row["snapshot"])) if row else None
+
+    def trim_text(self) -> int:
+        """Let go of the text of the posts kept long enough (Q-9): one
+        waiting in the inbox 90 days after it arrived, one skipped or
+        imported 30 days after that. Each keeps its title, link, date and
+        state; opening it says its text is no longer here, and a draft made
+        of it reads its page. Returns how many posts let go."""
+        now = self._now()
+        waiting = now - WAITING_TEXT_DAYS * 24 * 3600
+        settled = now - SETTLED_TEXT_DAYS * 24 * 3600
+        rows = self._db.execute(
+            "SELECT rowid, snapshot FROM items WHERE trimmed = 0 AND ("
+            "(state IN (?, ?) AND found_at < ?) OR "
+            "(state NOT IN (?, ?) AND changed_at < ?))",
+            (NEW, OLDER, waiting, NEW, OLDER, settled)).fetchall()
+        if not rows:
+            return 0
+        with self._db:
+            for row in rows:
+                try:
+                    snapshot = json.loads(row["snapshot"])
+                except ValueError:
+                    snapshot = {}
+                self._db.execute(
+                    "UPDATE items SET snapshot = ?, trimmed = 1, excerpt = '', image = '', "
+                    "author = '', read_minutes = 0, image_count = 0, "
+                    "revision = revision + 1 WHERE rowid = ?",
+                    (json.dumps(_trimmed(snapshot if isinstance(snapshot, dict) else {}),
+                                ensure_ascii=False), row["rowid"]))
+        return len(rows)
 
     def counts(self) -> Counts:
         found = {row["state"]: row["n"] for row in self._db.execute(
@@ -660,9 +718,9 @@ class InboxStore:
             else:
                 state, previous = row["previous_state"], row["previous_state"]
             self._db.execute(
-                "UPDATE items SET state = ?, previous_state = ?, revision = revision + 1 "
-                "WHERE source_key = ? AND d_tag = ? AND revision = ?",
-                (state, previous, source_key, d_tag, revision))
+                "UPDATE items SET state = ?, previous_state = ?, revision = revision + 1, "
+                "changed_at = ? WHERE source_key = ? AND d_tag = ? AND revision = ?",
+                (state, previous, self._now(), source_key, d_tag, revision))
         return revision + 1
 
     # -- what is imported ---------------------------------------------------------
@@ -683,9 +741,9 @@ class InboxStore:
                     marks = ", ".join("?" * len(chunk))
                     kept = ", ".join("?" * len(keep))
                     cursor = self._db.execute(
-                        f"UPDATE items SET state = ?, revision = revision + 1 "
+                        f"UPDATE items SET state = ?, revision = revision + 1, changed_at = ? "
                         f"WHERE d_tag IN ({marks}) AND state NOT IN ({kept})",
-                        (state, *chunk, *keep))
+                        (state, now, *chunk, *keep))
                     changed += cursor.rowcount
                     for d_tag in chunk:
                         self._ledger(d_tag, state, now)

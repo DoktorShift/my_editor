@@ -3281,10 +3281,14 @@ msgid "This post is longer than MyEditor keeps here. Open Original reads all of 
 msgstr "Dieser Beitrag ist länger, als MyEditor hier aufbewahrt. „Original öffnen“ zeigt ihn ganz, und ein Entwurf daraus holt den ganzen Beitrag von seiner Seite."
 
 #: nostr/imports_controller.py:134
+msgid "MyEditor no longer keeps the text of this post here. Open Original reads it, and a draft made of it gets the post from its page."
+msgstr "MyEditor bewahrt den Text dieses Beitrags hier nicht mehr auf. „Original öffnen“ zeigt ihn, und ein Entwurf daraus holt den Beitrag von seiner Seite."
+
+#: nostr/imports_controller.py:136
 msgid "Couldn't read the images of these posts."
 msgstr "Die Bilder dieser Beiträge konnten nicht gelesen werden."
 
-#: nostr/imports_controller.py:565
+#: nostr/imports_controller.py:590
 msgid "MyEditor Sources"
 msgstr "MyEditor-Quellen"
 
@@ -3929,7 +3933,7 @@ msgstr "Bild konnte nicht heruntergeladen werden"
 msgid "Empty mirror response"
 msgstr "Leere Antwort beim Kopieren"
 
-#: nostr/imports/inbox_store.py:79
+#: nostr/imports/inbox_store.py:84
 msgid "This source has reached its inbox limit. Unsubscribe and follow it again to start a fresh inbox; your drafts are kept."
 msgstr "Diese Quelle hat die Grenze ihres Eingangs erreicht. Beende das Abonnement und folge ihr erneut, um mit einem neuen Eingang zu beginnen; deine Entwürfe bleiben erhalten."
 
@@ -3983,7 +3987,7 @@ msgstr "die Anfrage konnte nicht gestellt werden"
 msgid "(untitled)"
 msgstr "(ohne Titel)"
 
-#: nostr/imports/pipeline.py:616
+#: nostr/imports/pipeline.py:619
 #, python-brace-format
 msgid "{failed} of {total} image(s) couldn't be mirrored; originals kept."
 msgid_plural "{failed} of {total} image(s) couldn't be mirrored; originals kept."
@@ -4005,27 +4009,27 @@ msgstr "Beitrag konnte nicht aufbereitet werden: {error}"
 msgid "Fetching chapters for '{title}'…"
 msgstr "Kapitel für „{title}“ werden geladen …"
 
-#: nostr/imports/pipeline.py:445
+#: nostr/imports/pipeline.py:446
 #, python-brace-format
 msgid "Resolving '{title}' from Nostr…"
 msgstr "„{title}“ wird aus Nostr geladen …"
 
-#: nostr/imports/pipeline.py:529
+#: nostr/imports/pipeline.py:530
 #, python-brace-format
 msgid "Fetching full text for '{title}'…"
 msgstr "Volltext für „{title}“ wird geladen …"
 
-#: nostr/imports/pipeline.py:606
+#: nostr/imports/pipeline.py:609
 #, python-brace-format
 msgid "Mirroring images {n}/{total}…"
 msgstr "Bild {n} von {total} wird kopiert …"
 
-#: nostr/imports/pipeline.py:683
+#: nostr/imports/pipeline.py:686
 #, python-brace-format
 msgid "Could not build article: {error}"
 msgstr "Artikel konnte nicht erstellt werden: {error}"
 
-#: nostr/imports/pipeline.py:701
+#: nostr/imports/pipeline.py:704
 #, python-brace-format
 msgid "Could not start draft job: {error}"
 msgstr "Entwurf konnte nicht gespeichert werden: {error}"
@@ -4103,86 +4107,86 @@ msgstr "Übersprungen"
 msgid "Failed"
 msgstr "Fehlgeschlagen"
 
-#: nostr/imports/workspace.py:259
+#: nostr/imports/workspace.py:260
 #: nostr/ui/imports_sheets.py:509
 msgid "MyEditor reads this source when you open it."
 msgstr "MyEditor liest diese Quelle, wenn du sie öffnest."
 
-#: nostr/imports/workspace.py:278
+#: nostr/imports/workspace.py:279
 msgid "Not checked yet."
 msgstr "Noch nicht geprüft."
 
-#: nostr/imports/workspace.py:282
+#: nostr/imports/workspace.py:283
 msgid "Checked just now"
 msgstr "Gerade eben geprüft"
 
-#: nostr/imports/workspace.py:263
+#: nostr/imports/workspace.py:264
 #: nostr/ui/imports_sidebar.py:148
 msgid "Not checked automatically"
 msgstr "Nicht automatisch geprüft"
 
-#: nostr/imports/workspace.py:283
+#: nostr/imports/workspace.py:284
 #, python-brace-format
 msgid "Checked {when}"
 msgstr "Geprüft: {when}"
 
-#: nostr/imports/workspace.py:289
+#: nostr/imports/workspace.py:290
 #, python-brace-format
 msgid "{count} of {total} selected"
 msgid_plural "{count} of {total} selected"
 msgstr[0] "{count} von {total} ausgewählt"
 msgstr[1] "{count} von {total} ausgewählt"
 
-#: nostr/imports/workspace.py:234
+#: nostr/imports/workspace.py:235
 msgid "just now"
 msgstr "gerade eben"
 
-#: nostr/imports/workspace.py:234
+#: nostr/imports/workspace.py:235
 msgid "Just now"
 msgstr "Gerade eben"
 
-#: nostr/imports/workspace.py:243
+#: nostr/imports/workspace.py:244
 msgid "yesterday"
 msgstr "gestern"
 
-#: nostr/imports/workspace.py:243
+#: nostr/imports/workspace.py:244
 msgid "Yesterday"
 msgstr "Gestern"
 
-#: nostr/imports/workspace.py:244
+#: nostr/imports/workspace.py:245
 #, python-brace-format
 msgid "{n} day ago"
 msgid_plural "{n} days ago"
 msgstr[0] "vor {n} Tag"
 msgstr[1] "vor {n} Tagen"
 
-#: nostr/imports/workspace.py:264
+#: nostr/imports/workspace.py:265
 #, python-brace-format
 msgid "Not checked automatically · Checked {when}"
 msgstr "Nicht automatisch geprüft · Zuletzt geprüft: {when}"
 
-#: nostr/imports/workspace.py:237
+#: nostr/imports/workspace.py:238
 #, python-brace-format
 msgid "{n} min ago"
 msgid_plural "{n} min ago"
 msgstr[0] "vor {n} Min."
 msgstr[1] "vor {n} Min."
 
-#: nostr/imports/workspace.py:240
+#: nostr/imports/workspace.py:241
 #, python-brace-format
 msgid "{n} h ago"
 msgid_plural "{n} h ago"
 msgstr[0] "vor {n} Std."
 msgstr[1] "vor {n} Std."
 
-#: nostr/imports/workspace.py:270
+#: nostr/imports/workspace.py:271
 #, python-brace-format
 msgid "Next try in {n} hour."
 msgid_plural "Next try in {n} hours."
 msgstr[0] "Nächster Versuch in {n} Stunde."
 msgstr[1] "Nächster Versuch in {n} Stunden."
 
-#: nostr/imports/workspace.py:274
+#: nostr/imports/workspace.py:275
 #, python-brace-format
 msgid "Next try in {n} minute."
 msgid_plural "Next try in {n} minutes."
