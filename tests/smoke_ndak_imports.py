@@ -18,6 +18,7 @@ relays, and the synced feed list (kind 30078) is checked across devices.
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import os
 import sys
@@ -137,6 +138,13 @@ def resolve(value, fetcher=None, directory=None):
 
 
 def run_import(result, **kwargs):
+    # Newer builds make the job ask whether a post is already imported
+    # (is_imported is required, so nothing can overwrite by forgetting it).
+    # This area drives the bare job to check what it writes, so it answers
+    # "not imported"; the app's own import path, which never overwrites an
+    # edited draft, is exercised by the M3 flows.
+    if "is_imported" in inspect.signature(ImportItemsJob).parameters:
+        kwargs.setdefault("is_imported", lambda _identifier: False)
     job = ImportItemsJob(items=list(result.feed.items), feed_url=result.url, profile=alice,
                          relay_pool=a.pool, relay_directory=a.directory, session_pool=a.sessions,
                          entitled_relays=(), **kwargs)
