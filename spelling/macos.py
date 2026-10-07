@@ -110,6 +110,15 @@ class MacBackend(SpellBackend):
         with self._pool():
             self._checker.ignoreWord(word, inSpellDocumentWithTag=self._tag)
 
+    def _unlearn(self, word: str, language: str) -> bool:
+        with self._pool():
+            self._checker.unlearnWord(word)
+            return not bool(self._checker.hasLearnedWord(word))
+
+    def _has_learned(self, word: str, language: str) -> bool:
+        with self._pool():
+            return bool(self._checker.hasLearnedWord(word))
+
     # -- paragraphs -----------------------------------------------------------
 
     def _check_text(self, text: str, language: str) -> Optional[TextCheck]:

@@ -8,7 +8,7 @@ msgstr ""
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
 #: alerts.py:82
-#: main_window.py:3945
+#: main_window.py:3954
 msgid "OK"
 msgstr "OK"
 
@@ -23,12 +23,12 @@ msgstr "Details ausblenden"
 
 #: alerts.py:275
 #: link_popover.py:100
-#: main_window.py:3081
-#: main_window.py:7134
+#: main_window.py:3090
+#: main_window.py:7143
 #: main_window.py:263
-#: main_window.py:2954
-#: main_window.py:5536
-#: main_window.py:5947
+#: main_window.py:2963
+#: main_window.py:5545
+#: main_window.py:5956
 msgid "Cancel"
 msgstr "Abbrechen"
 
@@ -82,12 +82,12 @@ msgid "{title}, {position} of {count}"
 msgstr "{title}, {position} von {count}"
 
 #: editor.py:1275
-#: main_window.py:1502
+#: main_window.py:1511
 msgid "Cut"
 msgstr "Ausschneiden"
 
 #: editor.py:1276
-#: main_window.py:1504
+#: main_window.py:1513
 #: update_dialog.py:188
 #: update_dialog.py:194
 #: nostr/ui/account_windows.py:221
@@ -95,7 +95,7 @@ msgid "Copy"
 msgstr "Kopieren"
 
 #: editor.py:1277
-#: main_window.py:1506
+#: main_window.py:1515
 msgid "Paste"
 msgstr "Einsetzen"
 
@@ -136,13 +136,13 @@ msgid "{place}, {header}"
 msgstr "{place}, {header}"
 
 #: export_html.py:382
-#: main_window.py:1198
-#: main_window.py:2336
-#: main_window.py:3301
-#: main_window.py:3666
-#: main_window.py:4075
-#: main_window.py:2367
-#: main_window.py:2546
+#: main_window.py:1207
+#: main_window.py:2345
+#: main_window.py:3310
+#: main_window.py:3675
+#: main_window.py:4084
+#: main_window.py:2376
+#: main_window.py:2555
 msgid "Untitled"
 msgstr "Ohne Titel"
 
@@ -161,7 +161,7 @@ msgid "Format"
 msgstr "Format"
 
 #: format_toolbar.py:68
-#: main_window.py:2036
+#: main_window.py:2045
 msgid "Style"
 msgstr "Stil"
 
@@ -170,7 +170,7 @@ msgid "Paragraph style"
 msgstr "Absatzstil"
 
 #: format_toolbar.py:93
-#: main_window.py:1562
+#: main_window.py:1571
 msgid "Body"
 msgstr "Text"
 
@@ -180,8 +180,8 @@ msgid "{command} ({keys})"
 msgstr "{command} ({keys})"
 
 #: format_toolbar.py:70
-#: main_window.py:4463
-#: main_window.py:1422
+#: main_window.py:4472
+#: main_window.py:1431
 msgctxt "paragraph style"
 msgid "Mixed"
 msgstr "Gemischt"
@@ -232,7 +232,7 @@ msgid "Words from several paragraphs are linked as they are."
 msgstr "Wörter aus mehreren Absätzen werden so verlinkt, wie sie sind."
 
 #: link_popover.py:94
-#: main_window.py:4708
+#: main_window.py:4717
 msgid "Remove Link"
 msgstr "Link entfernen"
 
@@ -292,7 +292,7 @@ msgstr "Dein Dokument ist weiterhin geöffnet. Wähle mit „Speichern unter“ 
 msgid "Your changes will be lost if you don't save them."
 msgstr "Deine Änderungen gehen verloren, wenn du sie nicht speicherst."
 
-#: main_window.py:4469
+#: main_window.py:4478
 msgid "Code"
 msgstr "Code"
 
@@ -316,185 +316,185 @@ msgstr "Erneut versuchen"
 msgid "Try Backing Up Again"
 msgstr "Sicherung erneut versuchen"
 
-#: main_window.py:1175
-#: main_window.py:1186
-#: main_window.py:2407
-#: main_window.py:1946
+#: main_window.py:1184
+#: main_window.py:1195
+#: main_window.py:2416
+#: main_window.py:1955
 msgid "Welcome"
 msgstr "Willkommen"
 
-#: main_window.py:1197
+#: main_window.py:1206
 msgid "Untitled draft"
 msgstr "Unbenannter Entwurf"
 
-#: main_window.py:1215
+#: main_window.py:1224
 msgid "(Untitled)"
 msgstr "(Unbenannt)"
 
-#: main_window.py:1313
-#: main_window.py:1498
+#: main_window.py:1322
+#: main_window.py:1507
 #: nostr/ui/imports_window.py:1002
 #: nostr/ui/imports_window.py:982
 msgid "Undo"
 msgstr "Widerrufen"
 
-#: main_window.py:1534
+#: main_window.py:1543
 msgid "Underlining is kept in HTML documents only."
 msgstr "Unterstreichungen bleiben nur in HTML-Dokumenten erhalten."
 
-#: main_window.py:1769
+#: main_window.py:1778
 msgctxt "background"
 msgid "None"
 msgstr "Ohne"
 
-#: main_window.py:1770
+#: main_window.py:1779
 msgctxt "background"
 msgid "Lines"
 msgstr "Linien"
 
-#: main_window.py:1771
+#: main_window.py:1780
 msgctxt "background"
 msgid "Dashed"
 msgstr "Gestrichelt"
 
-#: main_window.py:1772
+#: main_window.py:1781
 msgctxt "background"
 msgid "Dots"
 msgstr "Punkte"
 
-#: main_window.py:1773
+#: main_window.py:1782
 msgctxt "background"
 msgid "Grid"
 msgstr "Raster"
 
-#: main_window.py:1969
+#: main_window.py:1978
 msgid "&File"
 msgstr "&Datei"
 
-#: main_window.py:1973
+#: main_window.py:1982
 msgid "Recent Files"
 msgstr "Zuletzt geöffnet"
 
-#: main_window.py:1991
+#: main_window.py:2000
 msgid "&Edit"
 msgstr "&Bearbeiten"
 
-#: main_window.py:2002
+#: main_window.py:2011
 msgctxt "menu"
 msgid "Find"
 msgstr "Suchen"
 
-#: main_window.py:2010
+#: main_window.py:2019
 msgid "Spelling"
 msgstr "Rechtschreibung"
 
-#: main_window.py:2017
+#: main_window.py:2026
 msgid "Substitutions"
 msgstr "Ersetzungen"
 
-#: main_window.py:2022
+#: main_window.py:2031
 msgid "&Insert"
 msgstr "&Einfügen"
 
-#: main_window.py:2035
+#: main_window.py:2044
 msgid "F&ormat"
 msgstr "F&ormat"
 
-#: main_window.py:2055
+#: main_window.py:2064
 msgid "Color"
 msgstr "Farbe"
 
-#: main_window.py:2060
+#: main_window.py:2069
 msgid "Code Language"
 msgstr "Code-Sprache"
 
-#: main_window.py:2065
+#: main_window.py:2074
 msgid "Table"
 msgstr "Tabelle"
 
-#: main_window.py:2074
+#: main_window.py:2083
 msgid "&View"
 msgstr "D&arstellung"
 
-#: main_window.py:2090
+#: main_window.py:2099
 msgid "Background"
 msgstr "Hintergrund"
 
-#: main_window.py:2098
-#: main_window.py:2015
+#: main_window.py:2107
+#: main_window.py:2024
 msgid "Language"
 msgstr "Sprache"
 
-#: main_window.py:2128
+#: main_window.py:2137
 msgid "&Help"
 msgstr "&Hilfe"
 
-#: main_window.py:2141
+#: main_window.py:2150
 msgid "Paper"
 msgstr "Papier"
 
-#: main_window.py:2142
+#: main_window.py:2151
 msgid "Toggle Paper Mode"
 msgstr "Papiermodus ein- oder ausschalten"
 
-#: main_window.py:2419
+#: main_window.py:2428
 msgid "Rename"
 msgstr "Umbenennen"
 
-#: main_window.py:2426
+#: main_window.py:2435
 msgid "Delete File..."
 msgstr "Datei löschen …"
 
-#: main_window.py:2443
+#: main_window.py:2452
 #, python-brace-format
 msgid "Move “{name}” to the Recycle Bin?"
 msgstr "„{name}“ in den Papierkorb verschieben?"
 
-#: main_window.py:2444
+#: main_window.py:2453
 msgid "You can restore it from the Recycle Bin until you empty it."
 msgstr "Du kannst sie aus dem Papierkorb wiederherstellen, bis du ihn leerst."
 
-#: main_window.py:2445
+#: main_window.py:2454
 msgid "Move to Recycle Bin"
 msgstr "In den Papierkorb verschieben"
 
-#: main_window.py:2446
+#: main_window.py:2455
 #, python-brace-format
 msgid "Couldn't move “{name}” to the Recycle Bin"
 msgstr "„{name}“ konnte nicht in den Papierkorb verschoben werden"
 
-#: main_window.py:2448
+#: main_window.py:2457
 #, python-brace-format
 msgid "Move “{name}” to the Trash?"
 msgstr "„{name}“ in den Papierkorb verschieben?"
 
-#: main_window.py:2449
+#: main_window.py:2458
 msgid "You can restore it from the Trash until you empty it."
 msgstr "Du kannst sie aus dem Papierkorb wiederherstellen, bis du ihn leerst."
 
-#: main_window.py:2450
+#: main_window.py:2459
 msgid "Move to Trash"
 msgstr "In den Papierkorb verschieben"
 
-#: main_window.py:2451
+#: main_window.py:2460
 #, python-brace-format
 msgid "Couldn't move “{name}” to the Trash"
 msgstr "„{name}“ konnte nicht in den Papierkorb verschoben werden"
 
-#: main_window.py:2477
+#: main_window.py:2486
 msgid "Rename File"
 msgstr "Datei umbenennen"
 
-#: main_window.py:2477
+#: main_window.py:2486
 msgid "New filename:"
 msgstr "Neuer Dateiname:"
 
-#: main_window.py:2529
-#: main_window.py:1489
+#: main_window.py:2538
+#: main_window.py:1498
 msgid "Close tab"
 msgstr "Tab schließen"
 
-#: main_window.py:2768
+#: main_window.py:2777
 #: update_flow.py:140
 #: update_flow.py:152
 #: update_flow.py:171
@@ -503,67 +503,67 @@ msgstr "Tab schließen"
 msgid "Open"
 msgstr "Öffnen"
 
-#: main_window.py:3142
+#: main_window.py:3151
 msgid "Save As"
 msgstr "Speichern unter"
 
-#: main_window.py:3716
+#: main_window.py:3725
 msgid "Print Preview"
 msgstr "Druckvorschau"
 
-#: main_window.py:3779
+#: main_window.py:3788
 msgid "Knitting…"
 msgstr "Wird umgewandelt …"
 
-#: main_window.py:3804
+#: main_window.py:3813
 msgid "Knit failed."
 msgstr "Umwandlung fehlgeschlagen."
 
-#: main_window.py:4103
+#: main_window.py:4112
 msgid "Save your changes before updating?"
 msgstr "Änderungen vor dem Update speichern?"
 
-#: main_window.py:5072
+#: main_window.py:5081
 msgid "This document is too large to keep a backup of."
 msgstr "Dieses Dokument ist zu groß für eine Sicherung."
 
-#: main_window.py:5371
-#: main_window.py:1914
+#: main_window.py:5380
+#: main_window.py:1923
 msgid "EINUNDZWANZIG Membership…"
 msgstr "EINUNDZWANZIG-Mitgliedschaft …"
 
-#: main_window.py:5382
+#: main_window.py:5391
 msgid "Add Profile…"
 msgstr "Profil hinzufügen …"
 
-#: main_window.py:5384
+#: main_window.py:5393
 #: nostr/account_controller.py:435
 #: nostr/account_controller.py:441
 msgid "Sign Out"
 msgstr "Abmelden"
 
-#: main_window.py:5549
+#: main_window.py:5558
 msgid "Your media server list is shared."
 msgstr "Deine Medienserver-Liste ist geteilt."
 
-#: main_window.py:5550
+#: main_window.py:5559
 msgid "Other apps already have this list."
 msgstr "Andere Apps haben diese Liste schon."
 
-#: main_window.py:5551
+#: main_window.py:5560
 msgid "Your current list couldn’t be read, so nothing was changed. Try again later."
 msgstr "Deine aktuelle Liste ließ sich nicht lesen, daher wurde nichts geändert. Versuch es später noch einmal."
 
-#: main_window.py:6285
+#: main_window.py:6294
 msgid "Upload this image to your Blossom servers?"
 msgstr "Dieses Bild auf deine Medienserver hochladen?"
 
-#: main_window.py:6419
+#: main_window.py:6428
 msgid "Retrying decryption - approve on your signer…"
 msgstr "Neuer Versuch zum Entschlüsseln. Bestätige ihn in deiner Signer-App …"
 
-#: main_window.py:6478
-#: main_window.py:1515
+#: main_window.py:6487
+#: main_window.py:1524
 #: nostr/ui/media_library_dialog.py:1237
 #: nostr/ui/media_library_dialog.py:1654
 #: nostr/ui/media_library_dialog.py:1589
@@ -571,68 +571,68 @@ msgstr "Neuer Versuch zum Entschlüsseln. Bestätige ihn in deiner Signer-App �
 msgid "Delete"
 msgstr "Löschen"
 
-#: main_window.py:6486
+#: main_window.py:6495
 msgid "A blank-content replacement will be published to your relays. Other clients (and your other devices) will treat the draft as removed. This action can't be undone."
 msgid_plural "A blank-content replacement will be published to your relays. Other clients (and your other devices) will treat them as removed. This action can't be undone."
 msgstr[0] "Auf deinen Relays wird ein leerer Ersatz veröffentlicht. Andere Apps (und deine anderen Geräte) behandeln den Entwurf dann als gelöscht. Das lässt sich nicht rückgängig machen."
 msgstr[1] "Auf deinen Relays wird ein leerer Ersatz veröffentlicht. Andere Apps (und deine anderen Geräte) behandeln die Entwürfe dann als gelöscht. Das lässt sich nicht rückgängig machen."
 
-#: main_window.py:6614
+#: main_window.py:6623
 msgid "No drafts were deleted"
 msgstr "Es wurden keine Entwürfe gelöscht"
 
-#: main_window.py:7059
+#: main_window.py:7068
 msgid "Already saving this draft - wait for it to finish."
 msgstr "Dieser Entwurf wird schon gespeichert. Warte, bis das fertig ist."
 
-#: main_window.py:7122
+#: main_window.py:7131
 msgid "(unknown profile)"
 msgstr "(unbekanntes Profil)"
 
-#: main_window.py:995
+#: main_window.py:1004
 msgid "Ignore Spelling"
 msgstr "Schreibweise ignorieren"
 
-#: main_window.py:995
+#: main_window.py:1004
 msgid "Ignore All"
 msgstr "Alle ignorieren"
 
-#: main_window.py:997
+#: main_window.py:1006
 msgid "Learn Spelling"
 msgstr "Schreibweise lernen"
 
-#: main_window.py:997
+#: main_window.py:1006
 msgid "Add to Dictionary"
 msgstr "Zum Wörterbuch hinzufügen"
 
-#: main_window.py:1432
+#: main_window.py:1441
 msgid "Mark as Unchecked"
 msgstr "Als nicht erledigt markieren"
 
-#: main_window.py:1434
-#: main_window.py:1596
+#: main_window.py:1443
+#: main_window.py:1605
 msgid "Mark as Checked"
 msgstr "Als erledigt markieren"
 
-#: main_window.py:1438
+#: main_window.py:1447
 msgid "Go to Mark"
 msgstr "Zum Fußnotenverweis gehen"
 
-#: main_window.py:1439
-#: main_window.py:1601
+#: main_window.py:1448
+#: main_window.py:1610
 msgid "Go to Note"
 msgstr "Zur Fußnote gehen"
 
-#: main_window.py:1443
+#: main_window.py:1452
 msgid "Edit Link…"
 msgstr "Link bearbeiten …"
 
-#: main_window.py:1443
-#: main_window.py:1620
+#: main_window.py:1452
+#: main_window.py:1629
 msgid "Add Link…"
 msgstr "Link hinzufügen …"
 
-#: main_window.py:1454
+#: main_window.py:1463
 #: nostr/imports/workspace.py:48
 #: nostr/ui/imports_window.py:466
 #: nostr/ui/imports_window.py:736
@@ -640,11 +640,11 @@ msgstr "Link hinzufügen …"
 msgid "New"
 msgstr "Neu"
 
-#: main_window.py:1457
+#: main_window.py:1466
 msgid "Open…"
 msgstr "Öffnen …"
 
-#: main_window.py:1460
+#: main_window.py:1469
 #: main_window.py:264
 #: nostr/ui/draft_relays_sheet.py:299
 #: nostr/ui/profile_window.py:250
@@ -653,336 +653,336 @@ msgstr "Öffnen …"
 msgid "Save"
 msgstr "Speichern"
 
-#: main_window.py:1466
+#: main_window.py:1475
 msgid "Save As…"
 msgstr "Speichern unter …"
 
-#: main_window.py:1468
+#: main_window.py:1477
 msgid "Page Setup…"
 msgstr "Seite einrichten …"
 
-#: main_window.py:1472
+#: main_window.py:1481
 msgid "Print…"
 msgstr "Drucken …"
 
-#: main_window.py:1475
+#: main_window.py:1484
 msgid "Print Preview…"
 msgstr "Druckvorschau …"
 
-#: main_window.py:1480
+#: main_window.py:1489
 msgid "Knit to HTML"
 msgstr "In HTML umwandeln (Knit)"
 
-#: main_window.py:1483
+#: main_window.py:1492
 msgid "Knit to PDF"
 msgstr "In PDF umwandeln (Knit)"
 
-#: main_window.py:1485
+#: main_window.py:1494
 msgid "R Markdown Toolchain…"
 msgstr "R-Markdown-Werkzeuge …"
 
-#: main_window.py:1488
+#: main_window.py:1497
 msgid "Close Tab"
 msgstr "Tab schließen"
 
-#: main_window.py:1491
+#: main_window.py:1500
 msgid "Quit"
 msgstr "Beenden"
 
-#: main_window.py:1500
+#: main_window.py:1509
 msgid "Redo"
 msgstr "Wiederholen"
 
-#: main_window.py:1511
+#: main_window.py:1520
 msgid "Paste and Match Style"
 msgstr "Einsetzen und Stil anpassen"
 
-#: main_window.py:1517
+#: main_window.py:1526
 #: nostr/ui/imports_window.py:839
 msgid "Select All"
 msgstr "Alles auswählen"
 
-#: main_window.py:1522
+#: main_window.py:1531
 msgid "Bold"
 msgstr "Fett"
 
-#: main_window.py:1525
+#: main_window.py:1534
 msgid "Italic"
 msgstr "Kursiv"
 
-#: main_window.py:1528
+#: main_window.py:1537
 msgid "Underline"
 msgstr "Unterstrichen"
 
-#: main_window.py:1539
+#: main_window.py:1548
 msgid "Strikethrough"
 msgstr "Durchgestrichen"
 
-#: main_window.py:1543
+#: main_window.py:1552
 msgid "Inline Code"
 msgstr "Code im Text"
 
-#: main_window.py:1548
+#: main_window.py:1557
 msgid "Clear Formatting"
 msgstr "Formatierung entfernen"
 
-#: main_window.py:1563
+#: main_window.py:1572
 msgid "Heading 1"
 msgstr "Überschrift 1"
 
-#: main_window.py:1564
+#: main_window.py:1573
 msgid "Heading 2"
 msgstr "Überschrift 2"
 
-#: main_window.py:1565
+#: main_window.py:1574
 msgid "Heading 3"
 msgstr "Überschrift 3"
 
-#: main_window.py:1575
+#: main_window.py:1584
 msgid "Bulleted List"
 msgstr "Aufzählung"
 
-#: main_window.py:1580
+#: main_window.py:1589
 msgid "Numbered List"
 msgstr "Nummerierte Liste"
 
-#: main_window.py:1588
+#: main_window.py:1597
 msgid "Checklist"
 msgstr "Checkliste"
 
-#: main_window.py:1604
+#: main_window.py:1613
 msgid "Increase Indent"
 msgstr "Einzug vergrößern"
 
-#: main_window.py:1607
+#: main_window.py:1616
 msgid "Decrease Indent"
 msgstr "Einzug verkleinern"
 
-#: main_window.py:1612
+#: main_window.py:1621
 msgid "Quote"
 msgstr "Zitat"
 
-#: main_window.py:1624
+#: main_window.py:1633
 msgid "Divider"
 msgstr "Trennlinie"
 
-#: main_window.py:1631
+#: main_window.py:1640
 msgid "Code Block"
 msgstr "Codeblock"
 
-#: main_window.py:1651
+#: main_window.py:1660
 msgid "Footnote"
 msgstr "Fußnote"
 
-#: main_window.py:1657
+#: main_window.py:1666
 msgid "Table…"
 msgstr "Tabelle …"
 
-#: main_window.py:1682
+#: main_window.py:1691
 msgid "Remove Color"
 msgstr "Farbe entfernen"
 
-#: main_window.py:1687
+#: main_window.py:1696
 msgid "Find…"
 msgstr "Suchen …"
 
-#: main_window.py:1693
+#: main_window.py:1702
 msgid "Find and Replace…"
 msgstr "Suchen und Ersetzen …"
 
-#: main_window.py:1697
+#: main_window.py:1706
 msgid "Find Next"
 msgstr "Weitersuchen"
 
-#: main_window.py:1701
+#: main_window.py:1710
 msgid "Find Previous"
 msgstr "Vorheriges suchen"
 
-#: main_window.py:1707
+#: main_window.py:1716
 msgid "Use Selection for Find"
 msgstr "Auswahl für Suche verwenden"
 
-#: main_window.py:1745
+#: main_window.py:1754
 msgid "Toggle Dark/Light Theme"
 msgstr "Erscheinungsbild wechseln (dunkel/hell)"
 
-#: main_window.py:1750
+#: main_window.py:1759
 msgid "Show Line Numbers"
 msgstr "Zeilennummern einblenden"
 
-#: main_window.py:1754
+#: main_window.py:1763
 msgid "Syntax Highlighting"
 msgstr "Syntaxhervorhebung"
 
-#: main_window.py:1760
+#: main_window.py:1769
 msgid "Paper Mode"
 msgstr "Papiermodus"
 
-#: main_window.py:1795
+#: main_window.py:1804
 #: main_window.py:950
 msgid "System Language"
 msgstr "Systemsprache"
 
-#: main_window.py:1815
+#: main_window.py:1824
 msgid "Check Spelling While Typing"
 msgstr "Rechtschreibung während der Texteingabe prüfen"
 
-#: main_window.py:1820
+#: main_window.py:1829
 msgid "Markdown Shortcuts"
 msgstr "Markdown-Kürzel"
 
-#: main_window.py:1829
+#: main_window.py:1838
 msgid "Write"
 msgstr "Schreiben"
 
-#: main_window.py:1833
+#: main_window.py:1842
 #: nostr/preview.py:543
 #: nostr/ui/media_library_dialog.py:1635
 msgid "Preview"
 msgstr "Vorschau"
 
-#: main_window.py:1837
+#: main_window.py:1846
 msgid "Split"
 msgstr "Geteilt"
 
-#: main_window.py:1846
+#: main_window.py:1855
 msgid "Use Monospace Font for Writing"
 msgstr "Dicktengleiche Schrift zum Schreiben verwenden"
 
-#: main_window.py:1849
+#: main_window.py:1858
 msgid "Show Toolbar"
 msgstr "Symbolleiste anzeigen"
 
-#: main_window.py:1854
+#: main_window.py:1863
 msgid "Highlight Current Line"
 msgstr "Aktuelle Zeile hervorheben"
 
-#: main_window.py:1861
+#: main_window.py:1870
 msgid "Full Screen"
 msgstr "Vollbild"
 
-#: main_window.py:1868
-#: main_window.py:4341
-#: main_window.py:4339
+#: main_window.py:1877
+#: main_window.py:4350
+#: main_window.py:4348
 #: nostr/ui/imports_window.py:1279
 msgid "Show Sidebar"
 msgstr "Seitenleiste einblenden"
 
-#: main_window.py:1876
+#: main_window.py:1885
 msgid "Publish as Note…"
 msgstr "Als Notiz veröffentlichen …"
 
-#: main_window.py:1880
+#: main_window.py:1889
 msgid "Publish as Article…"
 msgstr "Als Artikel veröffentlichen …"
 
-#: main_window.py:1886
+#: main_window.py:1895
 msgid "Media Library…"
 msgstr "Mediathek …"
 
-#: main_window.py:1890
+#: main_window.py:1899
 msgid "Insert Image…"
 msgstr "Bild einfügen …"
 
-#: main_window.py:1896
+#: main_window.py:1905
 msgid "Insert Mention…"
 msgstr "Erwähnung einfügen …"
 
-#: main_window.py:1904
+#: main_window.py:1913
 msgid "Drafts…"
 msgstr "Entwürfe …"
 
-#: main_window.py:1910
+#: main_window.py:1919
 msgid "Imports…"
 msgstr "Importe …"
 
-#: main_window.py:1918
-#: main_window.py:5352
+#: main_window.py:1927
+#: main_window.py:5361
 msgid "Create Account…"
 msgstr "Konto erstellen …"
 
-#: main_window.py:1922
-#: main_window.py:5354
+#: main_window.py:1931
+#: main_window.py:5363
 #: nostr/ui/membership_window.py:278
 msgid "Connect Signer…"
 msgstr "Signer verbinden …"
 
-#: main_window.py:1925
-#: main_window.py:5356
+#: main_window.py:1934
+#: main_window.py:5365
 msgid "Restore Account…"
 msgstr "Konto wiederherstellen …"
 
-#: main_window.py:1929
-#: main_window.py:5378
+#: main_window.py:1938
+#: main_window.py:5387
 msgid "Back Up Account…"
 msgstr "Konto sichern …"
 
-#: main_window.py:1933
-#: main_window.py:5380
+#: main_window.py:1942
+#: main_window.py:5389
 msgid "Move Key to Signer App…"
 msgstr "Schlüssel in Signer-App verschieben …"
 
-#: main_window.py:1937
-#: main_window.py:5375
+#: main_window.py:1946
+#: main_window.py:5384
 msgid "Edit Profile…"
 msgstr "Profil bearbeiten …"
 
-#: main_window.py:1941
+#: main_window.py:1950
 msgid "Sign Out Active Profile"
 msgstr "Aktives Profil abmelden"
 
-#: main_window.py:1948
+#: main_window.py:1957
 #: shortcuts_dialog.py:443
 #: shortcuts_dialog.py:461
 msgid "Keyboard Shortcuts"
 msgstr "Tastaturkurzbefehle"
 
-#: main_window.py:1951
+#: main_window.py:1960
 msgid "Installation Help"
 msgstr "Hilfe zur Installation"
 
-#: main_window.py:1953
+#: main_window.py:1962
 msgid "Check for Updates…"
 msgstr "Nach Updates suchen …"
 
-#: main_window.py:1956
+#: main_window.py:1965
 msgid "Show Log Files"
 msgstr "Protokolldateien anzeigen"
 
-#: main_window.py:1959
+#: main_window.py:1968
 msgctxt "help menu"
 msgid "About"
 msgstr "Über MyEditor"
 
-#: main_window.py:1968
+#: main_window.py:1977
 msgid "More Menus"
 msgstr "Weitere Menüs"
 
-#: main_window.py:2155
+#: main_window.py:2164
 msgid "(empty)"
 msgstr "(leer)"
 
-#: main_window.py:2422
+#: main_window.py:2431
 msgid "Save the file first before renaming"
 msgstr "Speichere die Datei zuerst, um sie umzubenennen"
 
-#: main_window.py:2429
+#: main_window.py:2438
 msgid "No file on disk to delete"
 msgstr "Es gibt keine Datei zum Löschen"
 
-#: main_window.py:2728
+#: main_window.py:2737
 msgid "Images added. Connect a signer to upload them."
 msgstr "Bilder hinzugefügt. Verbinde einen Signer, um sie hochzuladen."
 
-#: main_window.py:2738
+#: main_window.py:2747
 msgid "They're already in your document and stay there either way."
 msgstr "Sie sind bereits in deinem Dokument und bleiben dort in jedem Fall."
 
-#: main_window.py:3069
+#: main_window.py:3078
 msgid "Formatting, colors and images will be permanently removed from the saved file."
 msgstr "Formatierung, Farben und Bilder werden dauerhaft aus der gespeicherten Datei entfernt."
 
-#: main_window.py:3072
+#: main_window.py:3081
 msgid ""
 "Saves all colors, bold, italic and formatting.\n"
 "Best choice for editing in this editor."
@@ -990,172 +990,172 @@ msgstr ""
 "Speichert alle Farben, Fett, Kursiv und Formatierungen.\n"
 "Die beste Wahl, um in diesem Editor weiterzuarbeiten."
 
-#: main_window.py:3090
+#: main_window.py:3099
 msgid "PDFs open read-only; there is nothing to save."
 msgstr "PDFs werden nur zum Lesen geöffnet. Es gibt nichts zu speichern."
 
-#: main_window.py:3297
-#: main_window.py:4411
+#: main_window.py:3306
+#: main_window.py:4420
 #: nostr/ui/published_view.py:578
 #: nostr/ui/published_view.py:585
 msgid "That link cannot be opened."
 msgstr "Dieser Link kann nicht geöffnet werden."
 
-#: main_window.py:3695
+#: main_window.py:3704
 msgid "Nothing printed: those pages aren't in the document."
 msgstr "Nichts gedruckt: Diese Seiten gibt es im Dokument nicht."
 
-#: main_window.py:3800
+#: main_window.py:3809
 msgid "Couldn't knit the document"
 msgstr "Das Dokument konnte nicht umgewandelt werden"
 
-#: main_window.py:3801
+#: main_window.py:3810
 msgid "R Markdown stopped with an error. The details show what it reported."
 msgstr "R Markdown ist mit einem Fehler abgebrochen. Die Details zeigen, was es gemeldet hat."
 
-#: main_window.py:3910
-#: main_window.py:4216
-#: main_window.py:4252
+#: main_window.py:3919
+#: main_window.py:4225
+#: main_window.py:4261
 #: pdf_viewer.py:970
 msgid "No matches"
 msgstr "Keine Treffer"
 
-#: main_window.py:3919
+#: main_window.py:3928
 msgid "Restart MyEditor to Change the Language"
 msgstr "Starte MyEditor neu, um die Sprache zu wechseln"
 
-#: main_window.py:4079
+#: main_window.py:4088
 msgid "MyEditor couldn't keep a copy of this document for the restart. Your changes will be lost if you don't save them."
 msgstr "MyEditor konnte für den Neustart keine Kopie dieses Dokuments anlegen. Deine Änderungen gehen verloren, wenn du sie nicht speicherst."
 
-#: main_window.py:4104
+#: main_window.py:4113
 msgid "MyEditor closes to install the update. Changes you don't save will be lost."
 msgstr "MyEditor wird geschlossen, um das Update zu installieren. Änderungen, die du nicht speicherst, gehen verloren."
 
-#: main_window.py:4131
+#: main_window.py:4140
 #: nostr/ui/imports_window.py:1100
 msgid "You're up to date"
 msgstr "Du bist auf dem neuesten Stand"
 
-#: main_window.py:4138
+#: main_window.py:4147
 msgid "Can't check for updates"
 msgstr "Suche nach Updates nicht möglich"
 
-#: main_window.py:4707
+#: main_window.py:4716
 #: nostr/ui/published_view.py:644
 msgid "Copy Link"
 msgstr "Link kopieren"
 
-#: main_window.py:4773
+#: main_window.py:4782
 msgid "Switched to Dark theme"
 msgstr "Dunkles Erscheinungsbild aktiviert"
 
-#: main_window.py:4774
+#: main_window.py:4783
 msgid "Switched to Light theme"
 msgstr "Helles Erscheinungsbild aktiviert"
 
-#: main_window.py:4931
+#: main_window.py:4940
 msgid "Make the window wider to show both"
 msgstr "Mach das Fenster breiter, um beides zu zeigen"
 
-#: main_window.py:5011
+#: main_window.py:5020
 msgid "Some apps (Amethyst, Coracle, Damus) show footnotes as typed: the marks in brackets and the notes at the end."
 msgstr "Manche Apps (Amethyst, Coracle, Damus) zeigen Fußnoten so, wie sie getippt sind: die Verweise in Klammern und die Fußnoten am Ende."
 
-#: main_window.py:5020
+#: main_window.py:5029
 msgid "The first heading repeats the title, so readers see it twice."
 msgstr "Die erste Überschrift wiederholt den Titel, Leser sehen ihn also zweimal."
 
-#: main_window.py:5074
+#: main_window.py:5083
 msgid "Couldn't keep a backup of this document."
 msgstr "Für dieses Dokument kann keine Sicherung angelegt werden."
 
-#: main_window.py:5114
+#: main_window.py:5123
 msgid "Line numbers enabled"
 msgstr "Zeilennummern eingeblendet"
 
-#: main_window.py:5115
+#: main_window.py:5124
 msgid "Line numbers disabled"
 msgstr "Zeilennummern ausgeblendet"
 
-#: main_window.py:5132
+#: main_window.py:5141
 msgid "Syntax highlighting enabled"
 msgstr "Syntaxhervorhebung eingeschaltet"
 
-#: main_window.py:5133
+#: main_window.py:5142
 msgid "Syntax highlighting disabled"
 msgstr "Syntaxhervorhebung ausgeschaltet"
 
-#: main_window.py:5165
+#: main_window.py:5174
 msgid "Paper mode on"
 msgstr "Papiermodus ein"
 
-#: main_window.py:5165
+#: main_window.py:5174
 msgid "Paper mode off"
 msgstr "Papiermodus aus"
 
-#: main_window.py:5175
+#: main_window.py:5184
 msgid "Highlight current line on"
 msgstr "Aktuelle Zeile hervorheben: ein"
 
-#: main_window.py:5176
+#: main_window.py:5185
 msgid "Highlight current line off"
 msgstr "Aktuelle Zeile hervorheben: aus"
 
-#: main_window.py:5266
+#: main_window.py:5275
 msgid "The update wasn’t installed"
 msgstr "Das Update wurde nicht installiert"
 
-#: main_window.py:5447
+#: main_window.py:5456
 msgid "Profile saved."
 msgstr "Profil gespeichert."
 
-#: main_window.py:5532
+#: main_window.py:5541
 msgid "Tell Other Apps Where Your Media Is?"
 msgstr "Anderen Apps sagen, wo deine Medien liegen?"
 
-#: main_window.py:5920
+#: main_window.py:5929
 msgid "Don't Paste"
 msgstr "Nicht einsetzen"
 
-#: main_window.py:5923
+#: main_window.py:5932
 msgid "This is a secret key"
 msgstr "Das ist ein geheimer Schlüssel"
 
-#: main_window.py:5924
+#: main_window.py:5933
 msgid "Anyone who has it can publish as its owner and read their private messages, and once published it can never be taken back. MyEditor did not paste it. Keep it in a password manager or a signer app."
 msgstr "Wer ihn hat, kann im Namen seines Besitzers veröffentlichen und dessen private Nachrichten lesen, und einmal veröffentlicht, lässt er sich nie mehr zurückholen. MyEditor hat ihn nicht eingesetzt. Bewahre ihn in einem Passwortmanager oder einer Signer-App auf."
 
-#: main_window.py:5942
-#: main_window.py:5937
+#: main_window.py:5951
+#: main_window.py:5946
 msgid "This text contains a secret key"
 msgstr "Dieser Text enthält einen geheimen Schlüssel"
 
-#: main_window.py:5943
+#: main_window.py:5952
 msgid "Anyone who has it can publish as its owner, and once published it can never be taken back. Replace it with the public key, which only says who it belongs to?"
 msgstr "Wer ihn hat, kann im Namen seines Besitzers veröffentlichen, und einmal veröffentlicht, lässt er sich nie mehr zurückholen. Durch den öffentlichen Schlüssel ersetzen, der nur sagt, wem er gehört?"
 
-#: main_window.py:6166
+#: main_window.py:6175
 msgid "That link cannot be inserted."
 msgstr "Dieser Link kann nicht eingefügt werden."
 
-#: main_window.py:6252
+#: main_window.py:6261
 msgid "That image could not be added."
 msgstr "Dieses Bild konnte nicht hinzugefügt werden."
 
-#: main_window.py:6289
+#: main_window.py:6298
 msgid "Anyone with the link can view it. The image is already in your document and stays there either way."
 msgstr "Jeder mit dem Link kann es ansehen. Das Bild ist bereits in deinem Dokument und bleibt dort in jedem Fall."
 
-#: main_window.py:6292
+#: main_window.py:6301
 msgid "Remember this choice"
 msgstr "Diese Auswahl merken"
 
-#: main_window.py:6355
+#: main_window.py:6364
 msgid "Draft isn't ready to open yet - still decrypting."
 msgstr "Der Entwurf lässt sich noch nicht öffnen: Er wird noch entschlüsselt."
 
-#: main_window.py:6461
+#: main_window.py:6470
 msgid ""
 "They use a draft format this editor doesn't recognise, so removing them from here might leave them visible in the other client.\n"
 "\n"
@@ -1165,27 +1165,27 @@ msgstr ""
 "\n"
 "Um sie sauber zu entfernen, öffne sie in der App, mit der sie erstellt wurden, und lösche sie dort."
 
-#: main_window.py:6477
+#: main_window.py:6486
 msgid "Delete “this draft” from your Nostr drafts?"
 msgstr "Diesen Entwurf aus deinen Nostr-Entwürfen löschen?"
 
-#: main_window.py:6554
+#: main_window.py:6563
 msgid "Deleting drafts…"
 msgstr "Entwürfe werden gelöscht …"
 
-#: main_window.py:6554
+#: main_window.py:6563
 msgid "Stop"
 msgstr "Stoppen"
 
-#: main_window.py:6555
+#: main_window.py:6564
 msgid "Deleting drafts"
 msgstr "Entwürfe werden gelöscht"
 
-#: main_window.py:6637
+#: main_window.py:6646
 msgid "Your signer is not responding. Open your signer app and make sure it is running."
 msgstr "Dein Signer antwortet nicht. Öffne deine Signer-App und prüfe, ob sie läuft."
 
-#: main_window.py:7140
+#: main_window.py:7149
 msgid "Saving under the current profile would create a separate draft. How would you like to handle it?"
 msgstr "Wenn du unter dem aktuellen Profil speicherst, entsteht ein eigener Entwurf. Wie möchtest du vorgehen?"
 
@@ -1193,125 +1193,125 @@ msgstr "Wenn du unter dem aktuellen Profil speicherst, entsteht ein eigener Entw
 msgid "Don't Save"
 msgstr "Nicht speichern"
 
-#: main_window.py:1228
+#: main_window.py:1237
 #, python-brace-format
 msgid "Ln {line} / {total}"
 msgstr "Zeile {line} / {total}"
 
-#: main_window.py:1455
+#: main_window.py:1464
 msgid "New tab"
 msgstr "Neuer Tab"
 
-#: main_window.py:1458
+#: main_window.py:1467
 msgid "Open file"
 msgstr "Datei öffnen"
 
-#: main_window.py:1481
+#: main_window.py:1490
 msgid "Knit R Markdown to HTML"
 msgstr "R Markdown in HTML umwandeln (Knit)"
 
-#: main_window.py:1562
+#: main_window.py:1571
 msgid "paragraph"
 msgstr "Absatz"
 
-#: main_window.py:1562
-#: main_window.py:1830
+#: main_window.py:1571
+#: main_window.py:1839
 msgid "text"
 msgstr "Fließtext"
 
-#: main_window.py:1563
+#: main_window.py:1572
 msgid "title"
 msgstr "Titel"
 
-#: main_window.py:1564
+#: main_window.py:1573
 msgid "subtitle"
 msgstr "Untertitel"
 
-#: main_window.py:1640
+#: main_window.py:1649
 msgid "Plain Text"
 msgstr "Reiner Text"
 
-#: main_window.py:1688
+#: main_window.py:1697
 msgid "Find"
 msgstr "Suchen"
 
-#: main_window.py:1695
+#: main_window.py:1704
 msgid "Find and replace"
 msgstr "Suchen und ersetzen"
 
-#: main_window.py:1699
+#: main_window.py:1708
 msgid "Find next"
 msgstr "Weitersuchen"
 
-#: main_window.py:1703
+#: main_window.py:1712
 msgid "Find previous"
 msgstr "Vorheriges suchen"
 
-#: main_window.py:1746
+#: main_window.py:1755
 msgid "Toggle theme"
 msgstr "Erscheinungsbild wechseln"
 
-#: main_window.py:1751
+#: main_window.py:1760
 msgid "Toggle line numbers"
 msgstr "Zeilennummern ein- oder ausblenden"
 
-#: main_window.py:1755
+#: main_window.py:1764
 msgid "Toggle syntax highlighting"
 msgstr "Syntaxhervorhebung ein- oder ausschalten"
 
-#: main_window.py:1863
+#: main_window.py:1872
 msgid "Full screen"
 msgstr "Vollbild"
 
-#: main_window.py:1869
+#: main_window.py:1878
 msgid "Show or hide the sidebar"
 msgstr "Seitenleiste ein- oder ausblenden"
 
-#: main_window.py:1877
+#: main_window.py:1886
 msgid "Publish as note"
 msgstr "Als Notiz veröffentlichen"
 
-#: main_window.py:1881
+#: main_window.py:1890
 msgid "Publish as article"
 msgstr "Als Artikel veröffentlichen"
 
-#: main_window.py:1887
+#: main_window.py:1896
 #: nostr/ui/media_library_dialog.py:786
 msgid "Media library"
 msgstr "Mediathek"
 
-#: main_window.py:1891
+#: main_window.py:1900
 #: nostr/ui/media_library_dialog.py:786
 msgid "Insert image"
 msgstr "Bild einfügen"
 
-#: main_window.py:1905
+#: main_window.py:1914
 msgid "Toggle Drafts panel"
 msgstr "Entwürfe ein- oder ausblenden"
 
-#: main_window.py:2166
+#: main_window.py:2175
 msgid "Clear Recent Files"
 msgstr "Einträge löschen"
 
-#: main_window.py:2338
+#: main_window.py:2347
 #, python-brace-format
 msgid "{name} (recovered copy)"
 msgstr "{name} (wiederhergestellte Kopie)"
 
-#: main_window.py:2340
+#: main_window.py:2349
 #, python-brace-format
 msgid "{name} (recovered)"
 msgstr "{name} (wiederhergestellt)"
 
-#: main_window.py:2491
+#: main_window.py:2500
 msgid "Choose a different name."
 msgstr "Wähle einen anderen Namen."
 
-#: main_window.py:2614
+#: main_window.py:2623
 msgid "Save All"
 msgstr "Alle speichern"
 
-#: main_window.py:3079
+#: main_window.py:3088
 msgid ""
 "Saves all colors, bold, italic and formatting.\n"
 "Compatible with Word, LibreOffice and other apps."
@@ -1319,566 +1319,574 @@ msgstr ""
 "Speichert alle Farben, Fett, Kursiv und Formatierungen.\n"
 "Funktioniert mit Word, LibreOffice und anderen Apps."
 
-#: main_window.py:3699
+#: main_window.py:3708
 #, python-brace-format
 msgid "Sent {count} page to {where}."
 msgid_plural "Sent {count} pages to {where}."
 msgstr[0] "{count} Seite an {where} gesendet."
 msgstr[1] "{count} Seiten an {where} gesendet."
 
-#: main_window.py:3702
+#: main_window.py:3711
 #, python-brace-format
 msgid "Sent {count} page to the printer."
 msgid_plural "Sent {count} pages to the printer."
 msgstr[0] "{count} Seite an den Drucker gesendet."
 msgstr[1] "{count} Seiten an den Drucker gesendet."
 
-#: main_window.py:3783
+#: main_window.py:3792
 #, python-brace-format
 msgid "Knit complete: {path}"
 msgstr "Umwandlung fertig: {path}"
 
-#: main_window.py:4077
+#: main_window.py:4086
 #, python-brace-format
 msgid "Do you want to save the changes you made to “{name}” before updating?"
 msgstr "Möchtest du die Änderungen an „{name}“ vor dem Update speichern?"
 
-#: main_window.py:4260
+#: main_window.py:4269
 #, python-brace-format
 msgid "{current} of {total}"
 msgstr "{current} von {total}"
 
-#: main_window.py:4339
+#: main_window.py:4348
 #: nostr/ui/imports_window.py:1279
 msgid "Hide Sidebar"
 msgstr "Seitenleiste ausblenden"
 
-#: main_window.py:4466
-#: main_window.py:4468
+#: main_window.py:4475
+#: main_window.py:4477
 #, python-brace-format
 msgid "Code: {language}"
 msgstr "Code: {language}"
 
-#: main_window.py:4705
+#: main_window.py:4714
 msgid "Open Link"
 msgstr "Link öffnen"
 
-#: main_window.py:5147
+#: main_window.py:5156
 #, python-brace-format
 msgid "Background: {pattern}"
 msgstr "Hintergrund: {pattern}"
 
-#: main_window.py:5312
+#: main_window.py:5321
 msgid "Saving your list of sources…"
 msgstr "Deine Liste der Quellen wird gesichert …"
 
-#: main_window.py:5430
-#: main_window.py:5815
-#: main_window.py:5976
-#: main_window.py:6058
-#: main_window.py:6090
-#: main_window.py:5612
+#: main_window.py:5439
+#: main_window.py:5824
+#: main_window.py:5985
+#: main_window.py:6067
+#: main_window.py:6099
+#: main_window.py:5621
 msgid "Connect a signer first"
 msgstr "Verbinde zuerst einen Signer"
 
-#: main_window.py:5431
+#: main_window.py:5440
 msgid "Connect a Nostr signer (Nostr > Connect Signer…) before editing your profile."
 msgstr "Verbinde einen Nostr-Signer (Nostr > Signer verbinden …), bevor du dein Profil bearbeitest."
 
-#: main_window.py:5491
+#: main_window.py:5500
 #, python-brace-format
 msgid "Media uploads go to the servers your Nostr profile lists: {hosts}"
 msgstr "Medien werden auf die Server hochgeladen, die dein Nostr-Profil angibt: {hosts}"
 
-#: main_window.py:5546
+#: main_window.py:5555
 msgid "There is no media server to share."
 msgstr "Es gibt keinen Medienserver zum Teilen."
 
-#: main_window.py:5556
+#: main_window.py:5565
 msgid "The list wasn’t shared. Try again in a moment."
 msgstr "Die Liste wurde nicht geteilt. Versuch es gleich noch einmal."
 
-#: main_window.py:5677
+#: main_window.py:5686
 #, python-brace-format
 msgid "Connected as {name}"
 msgstr "Verbunden als {name}"
 
-#: main_window.py:5816
-#: main_window.py:5977
+#: main_window.py:5825
+#: main_window.py:5986
 msgid "Connect a Nostr signer before publishing. Use the avatar chip in the header or Nostr > Connect Signer…"
 msgstr "Verbinde einen Nostr-Signer, bevor du etwas veröffentlichst. Nutze dazu dein Profilbild oben im Fenster oder Nostr > Signer verbinden …"
 
-#: main_window.py:5828
-#: main_window.py:5989
+#: main_window.py:5837
+#: main_window.py:5998
 msgid "Nothing to publish"
 msgstr "Nichts zu veröffentlichen"
 
-#: main_window.py:5829
-#: main_window.py:5990
+#: main_window.py:5838
+#: main_window.py:5999
 msgid "The current document is empty."
 msgstr "Das aktuelle Dokument ist leer."
 
-#: main_window.py:5922
+#: main_window.py:5931
 msgid "Paste Public Key"
 msgstr "Öffentlichen Schlüssel einsetzen"
 
-#: main_window.py:5938
+#: main_window.py:5947
 msgid "Anyone who has it can publish as its owner, and once published it can never be taken back. Remove it before publishing."
 msgstr "Wer ihn hat, kann im Namen seines Besitzers veröffentlichen, und einmal veröffentlicht, lässt er sich nie mehr zurückholen. Entferne ihn vor dem Veröffentlichen."
 
-#: main_window.py:5966
+#: main_window.py:5975
 #, python-brace-format
 msgid "Published to Nostr: {accepted}/{total} relays · {id}…"
 msgstr "Auf Nostr veröffentlicht: {accepted}/{total} Relays · {id}…"
 
-#: main_window.py:5969
+#: main_window.py:5978
 #, python-brace-format
 msgid "Published to Nostr: {accepted}/{total} relays"
 msgstr "Auf Nostr veröffentlicht: {accepted}/{total} Relays"
 
-#: main_window.py:6044
+#: main_window.py:6053
 #, python-brace-format
 msgid "Published article to Nostr: {accepted}/{total} relays · {id}…"
 msgstr "Artikel auf Nostr veröffentlicht: {accepted}/{total} Relays · {id}…"
 
-#: main_window.py:6047
+#: main_window.py:6056
 #, python-brace-format
 msgid "Published article to Nostr: {accepted}/{total} relays"
 msgstr "Artikel auf Nostr veröffentlicht: {accepted}/{total} Relays"
 
-#: main_window.py:6059
+#: main_window.py:6068
 msgid "Connect a Nostr signer (Nostr > Connect Signer…) before browsing your Blossom media library."
 msgstr "Verbinde einen Nostr-Signer (Nostr > Signer verbinden …), bevor du deine Mediathek öffnest."
 
-#: main_window.py:6091
+#: main_window.py:6100
 msgid "Connect a Nostr signer (Nostr > Connect Signer…) before inserting Blossom images."
 msgstr "Verbinde einen Nostr-Signer (Nostr > Signer verbinden …), bevor du Bilder aus deiner Mediathek einfügst."
 
-#: main_window.py:6171
+#: main_window.py:6180
 #, python-brace-format
 msgid "Inserted URL only (non-image): {url}"
 msgstr "Nur die Adresse eingefügt (kein Bild): {url}"
 
-#: main_window.py:6200
+#: main_window.py:6209
 #, python-brace-format
 msgid "Inserted image · alt: {alt}"
 msgstr "Bild eingefügt · Bildbeschreibung: {alt}"
 
-#: main_window.py:6259
+#: main_window.py:6268
 msgid "Image added. Connect a signer to upload it."
 msgstr "Bild hinzugefügt. Verbinde einen Signer, um es hochzuladen."
 
-#: main_window.py:6283
+#: main_window.py:6292
 #, python-brace-format
 msgid "Upload this image to {hosts}?"
 msgstr "Dieses Bild auf {hosts} hochladen?"
 
-#: main_window.py:6480
+#: main_window.py:6489
 #, python-brace-format
 msgid "Delete {count} draft from your Nostr drafts?"
 msgid_plural "Delete {count} drafts from your Nostr drafts?"
 msgstr[0] "{count} Entwurf aus deinen Nostr-Entwürfen löschen?"
 msgstr[1] "{count} Entwürfe aus deinen Nostr-Entwürfen löschen?"
 
-#: main_window.py:6483
+#: main_window.py:6492
 #, python-brace-format
 msgid "Delete {count} Draft"
 msgid_plural "Delete {count} Drafts"
 msgstr[0] "{count} Entwurf löschen"
 msgstr[1] "{count} Entwürfe löschen"
 
-#: main_window.py:6509
+#: main_window.py:6518
 msgid "An imported draft takes a second request, which tells other apps it is gone."
 msgid_plural "Imported drafts take a second request each, which tells other apps they are gone."
 msgstr[0] "Ein importierter Entwurf braucht eine zweite Anfrage, die anderen Apps sagt, dass er gelöscht ist."
 msgstr[1] "Importierte Entwürfe brauchen je eine zweite Anfrage, die anderen Apps sagt, dass sie gelöscht sind."
 
-#: main_window.py:6610
+#: main_window.py:6619
 #, python-brace-format
 msgid "{deleted} of {total} draft deleted"
 msgid_plural "{deleted} of {total} drafts deleted"
 msgstr[0] "{deleted} von {total} Entwurf gelöscht"
 msgstr[1] "{deleted} von {total} Entwürfen gelöscht"
 
-#: main_window.py:6849
+#: main_window.py:6858
 msgid "Nothing to save as a draft"
 msgstr "Nichts als Entwurf zu speichern"
 
-#: main_window.py:6850
+#: main_window.py:6859
 msgid "The current document is empty. Add some content first."
 msgstr "Das aktuelle Dokument ist leer. Füge zuerst Inhalt hinzu."
 
-#: main_window.py:6862
+#: main_window.py:6871
 msgid "This draft is too large"
 msgstr "Dieser Entwurf ist zu groß"
 
-#: main_window.py:992
+#: main_window.py:987
+msgid "Unlearn Spelling"
+msgstr "Schreibweise verlernen"
+
+#: main_window.py:987
+msgid "Remove from Dictionary"
+msgstr "Aus dem Wörterbuch entfernen"
+
+#: main_window.py:1002
 msgid "No Guesses Found"
 msgstr "Keine Vorschläge gefunden"
 
-#: main_window.py:1225
+#: main_window.py:1234
 #, python-brace-format
 msgid "Page {count}"
 msgstr "Seite {count}"
 
-#: main_window.py:1288
+#: main_window.py:1297
 #, python-brace-format
 msgid "{selected} of {count} word"
 msgid_plural "{selected} of {count} words"
 msgstr[0] "{selected} von {count} Wort"
 msgstr[1] "{selected} von {count} Wörtern"
 
-#: main_window.py:1295
+#: main_window.py:1304
 #, python-brace-format
 msgid "{minutes} min read"
 msgid_plural "{minutes} min read"
 msgstr[0] "{minutes} Min. Lesezeit"
 msgstr[1] "{minutes} Min. Lesezeit"
 
-#: main_window.py:1513
+#: main_window.py:1522
 msgid "plain text"
 msgstr "reiner Text"
 
-#: main_window.py:1541
+#: main_window.py:1550
 msgid "cross out"
 msgstr "durchstreichen"
 
-#: main_window.py:1544
+#: main_window.py:1553
 msgid "monospace"
 msgstr "dicktengleich"
 
-#: main_window.py:1549
+#: main_window.py:1558
 msgid "plain"
 msgstr "schlicht"
 
-#: main_window.py:1577
+#: main_window.py:1586
 msgid "bullets"
 msgstr "Aufzählungszeichen"
 
-#: main_window.py:1577
-#: main_window.py:1583
+#: main_window.py:1586
+#: main_window.py:1592
 msgid "list"
 msgstr "Liste"
 
-#: main_window.py:1583
+#: main_window.py:1592
 msgid "numbers"
 msgstr "Nummern"
 
-#: main_window.py:1583
+#: main_window.py:1592
 msgid "ordered"
 msgstr "geordnet"
 
-#: main_window.py:1591
+#: main_window.py:1600
 msgid "todo"
 msgstr "aufgabe"
 
-#: main_window.py:1591
+#: main_window.py:1600
 msgid "checkbox"
 msgstr "kontrollkästchen"
 
-#: main_window.py:1591
-#: main_window.py:1598
+#: main_window.py:1600
+#: main_window.py:1607
 msgid "task"
 msgstr "erledigen"
 
-#: main_window.py:1598
+#: main_window.py:1607
 msgid "tick"
 msgstr "abhaken"
 
-#: main_window.py:1598
+#: main_window.py:1607
 msgid "done"
 msgstr "erledigt"
 
-#: main_window.py:1602
+#: main_window.py:1611
 msgid "footnote"
 msgstr "fußnote"
 
-#: main_window.py:1605
+#: main_window.py:1614
 msgid "nest"
 msgstr "verschachteln"
 
-#: main_window.py:1614
-#: main_window.py:1653
+#: main_window.py:1623
+#: main_window.py:1662
 msgid "citation"
 msgstr "Zitat"
 
-#: main_window.py:1614
+#: main_window.py:1623
 msgid "blockquote"
 msgstr "blockzitat"
 
-#: main_window.py:1621
+#: main_window.py:1630
 msgid "web address"
 msgstr "Webadresse"
 
-#: main_window.py:1621
+#: main_window.py:1630
 msgid "hyperlink"
 msgstr "Hyperlink"
 
-#: main_window.py:1625
+#: main_window.py:1634
 msgid "horizontal rule"
 msgstr "horizontale Linie"
 
-#: main_window.py:1625
+#: main_window.py:1634
 msgid "line"
 msgstr "Linie"
 
-#: main_window.py:1626
+#: main_window.py:1635
 msgid "separator"
 msgstr "trennlinie"
 
-#: main_window.py:1632
-#: main_window.py:1644
+#: main_window.py:1641
+#: main_window.py:1653
 msgid "code"
 msgstr "code"
 
-#: main_window.py:1632
+#: main_window.py:1641
 msgid "snippet"
 msgstr "schnipsel"
 
-#: main_window.py:1632
+#: main_window.py:1641
 msgid "program"
 msgstr "programm"
 
-#: main_window.py:1652
+#: main_window.py:1661
 msgid "note"
 msgstr "anmerkung"
 
-#: main_window.py:1652
+#: main_window.py:1661
 msgid "source"
 msgstr "quelle"
 
-#: main_window.py:1652
+#: main_window.py:1661
 msgid "reference"
 msgstr "verweis"
 
-#: main_window.py:1658
+#: main_window.py:1667
 msgid "grid"
 msgstr "raster"
 
-#: main_window.py:1658
+#: main_window.py:1667
 msgid "rows"
 msgstr "zeilen"
 
-#: main_window.py:1658
+#: main_window.py:1667
 msgid "columns"
 msgstr "spalten"
 
-#: main_window.py:1669
+#: main_window.py:1678
 msgid "Add Row Above"
 msgstr "Zeile oberhalb hinzufügen"
 
-#: main_window.py:1669
+#: main_window.py:1678
 msgid "Add Row Below"
 msgstr "Zeile unterhalb hinzufügen"
 
-#: main_window.py:1670
+#: main_window.py:1679
 msgid "Add Column Before"
 msgstr "Spalte davor hinzufügen"
 
-#: main_window.py:1671
+#: main_window.py:1680
 msgid "Add Column After"
 msgstr "Spalte danach hinzufügen"
 
-#: main_window.py:1672
+#: main_window.py:1681
 msgid "Delete Row"
 msgstr "Zeile löschen"
 
-#: main_window.py:1672
+#: main_window.py:1681
 msgid "Delete Column"
 msgstr "Spalte löschen"
 
-#: main_window.py:1673
+#: main_window.py:1682
 msgid "Delete Table"
 msgstr "Tabelle löschen"
 
-#: main_window.py:1816
+#: main_window.py:1825
 msgid "spelling"
 msgstr "rechtschreibung"
 
-#: main_window.py:1816
+#: main_window.py:1825
 msgid "spellcheck"
 msgstr "rechtschreibprüfung"
 
-#: main_window.py:1821
+#: main_window.py:1830
 msgid "autoformat"
 msgstr "automatisch formatieren"
 
-#: main_window.py:1821
+#: main_window.py:1830
 msgid "substitutions"
 msgstr "ersetzungen"
 
-#: main_window.py:1830
+#: main_window.py:1839
 msgid "editor"
 msgstr "editor"
 
-#: main_window.py:1834
+#: main_window.py:1843
 msgid "reading"
 msgstr "lesen"
 
-#: main_window.py:1834
+#: main_window.py:1843
 msgid "read"
 msgstr "lesen"
 
-#: main_window.py:1838
+#: main_window.py:1847
 msgid "side by side"
 msgstr "nebeneinander"
 
-#: main_window.py:1847
+#: main_window.py:1856
 msgid "font"
 msgstr "Schrift"
 
-#: main_window.py:1847
+#: main_window.py:1856
 msgid "typewriter"
 msgstr "Schreibmaschine"
 
-#: main_window.py:1892
+#: main_window.py:1901
 msgid "picture"
 msgstr "bild"
 
-#: main_window.py:1892
+#: main_window.py:1901
 msgid "photo"
 msgstr "foto"
 
-#: main_window.py:1897
+#: main_window.py:1906
 msgid "person"
 msgstr "person"
 
-#: main_window.py:1897
+#: main_window.py:1906
 msgid "people"
 msgstr "leute"
 
-#: main_window.py:1897
+#: main_window.py:1906
 msgid "tag"
 msgstr "markieren"
 
-#: main_window.py:2348
+#: main_window.py:2357
 #, python-brace-format
 msgid "Recovered a copy. The file on disk is newer: {path}"
 msgstr "Eine Kopie wurde wiederhergestellt. Die Datei auf dem Datenträger ist neuer: {path}"
 
-#: main_window.py:2497
+#: main_window.py:2506
 msgid "Couldn't rename the file"
 msgstr "Die Datei konnte nicht umbenannt werden"
 
-#: main_window.py:2548
-#: main_window.py:2606
+#: main_window.py:2557
+#: main_window.py:2615
 #, python-brace-format
 msgid "Do you want to save the changes you made to “{name}”?"
 msgstr "Möchtest du die Änderungen an „{name}“ speichern?"
 
-#: main_window.py:2611
+#: main_window.py:2620
 #, python-brace-format
 msgid "Do you want to save the changes to {count} document?"
 msgid_plural "Do you want to save the changes to {count} documents?"
 msgstr[0] "Möchtest du die Änderungen an {count} Dokument speichern?"
 msgstr[1] "Möchtest du die Änderungen an {count} Dokumenten speichern?"
 
-#: main_window.py:2718
+#: main_window.py:2727
 #, python-brace-format
 msgid "Could not add: {names}"
 msgstr "Nicht hinzugefügt: {names}"
 
-#: main_window.py:2735
+#: main_window.py:2744
 #, python-brace-format
 msgid "Upload {count} image to your Blossom servers?"
 msgid_plural "Upload {count} images to your Blossom servers?"
 msgstr[0] "{count} Bild auf deine Medienserver hochladen?"
 msgstr[1] "{count} Bilder auf deine Medienserver hochladen?"
 
-#: main_window.py:2739
-#: main_window.py:6291
+#: main_window.py:2748
+#: main_window.py:6300
 msgid "Keep Local"
 msgstr "Lokal behalten"
 
-#: main_window.py:2739
-#: main_window.py:6291
+#: main_window.py:2748
+#: main_window.py:6300
 #: nostr/ui/media_library_dialog.py:1036
 msgid "Upload"
 msgstr "Hochladen"
 
-#: main_window.py:2763
+#: main_window.py:2772
 #, python-brace-format
 msgid "Supported files ({patterns})"
 msgstr "Unterstützte Dateien ({patterns})"
 
-#: main_window.py:2764
+#: main_window.py:2773
 #, python-brace-format
 msgid "Note files ({patterns})"
 msgstr "Notizdateien ({patterns})"
 
-#: main_window.py:2765
+#: main_window.py:2774
 #, python-brace-format
 msgid "PDF documents ({patterns})"
 msgstr "PDF-Dokumente ({patterns})"
 
-#: main_window.py:2766
+#: main_window.py:2775
 #, python-brace-format
 msgid "All files ({patterns})"
 msgstr "Alle Dateien ({patterns})"
 
-#: main_window.py:2947
+#: main_window.py:2956
 #, python-brace-format
 msgid "Upload {count} image before publishing?"
 msgid_plural "Upload {count} images before publishing?"
 msgstr[0] "{count} Bild vor dem Veröffentlichen hochladen?"
 msgstr[1] "{count} Bilder vor dem Veröffentlichen hochladen?"
 
-#: main_window.py:2949
+#: main_window.py:2958
 #, python-brace-format
 msgid "{count} image in this document is not on Blossom yet. Publishing now would break it for readers."
 msgid_plural "{count} images in this document are not on Blossom yet. Publishing now would break them for readers."
 msgstr[0] "{count} Bild in diesem Dokument ist noch nicht hochgeladen. Wenn du jetzt veröffentlichst, fehlt es für deine Leser."
 msgstr[1] "{count} Bilder in diesem Dokument sind noch nicht hochgeladen. Wenn du jetzt veröffentlichst, fehlen sie für deine Leser."
 
-#: main_window.py:2954
+#: main_window.py:2963
 msgid "Upload Now"
 msgstr "Jetzt hochladen"
 
-#: main_window.py:3068
+#: main_window.py:3077
 #, python-brace-format
 msgid "Save as {ext} Anyway"
 msgstr "Trotzdem als {ext} speichern"
 
-#: main_window.py:3071
-#: main_window.py:3078
+#: main_window.py:3080
+#: main_window.py:3087
 #, python-brace-format
 msgid "Save as {ext}"
 msgstr "Als {ext} speichern"
 
-#: main_window.py:3083
+#: main_window.py:3092
 #, python-brace-format
 msgid "Save as {ext} without formatting?"
 msgstr "Ohne Formatierung als {ext} speichern?"
 
-#: main_window.py:3084
+#: main_window.py:3093
 #, python-brace-format
 msgid "This document has colors, text formatting or images that {ext} can't store."
 msgstr "Dieses Dokument enthält Farben, Textformatierung oder Bilder, die {ext} nicht speichern kann."
 
-#: main_window.py:3230
-#: main_window.py:3511
-#: main_window.py:3624
+#: main_window.py:3239
+#: main_window.py:3520
+#: main_window.py:3633
 #, python-brace-format
 msgid "Saved: {path}"
 msgstr "Gespeichert: {path}"
 
-#: main_window.py:3688
+#: main_window.py:3697
 msgid "Couldn't print"
 msgstr "Drucken nicht möglich"
 
-#: main_window.py:3907
+#: main_window.py:3916
 #, python-brace-format
 msgid "{count} replaced"
 msgid_plural "{count} replaced"
 msgstr[0] "{count} ersetzt"
 msgstr[1] "{count} ersetzt"
 
-#: main_window.py:3920
+#: main_window.py:3929
 #, python-brace-format
 msgid "MyEditor will be in {name} the next time you open it."
 msgstr "Die Sprache „{name}“ gilt ab dem nächsten Öffnen von MyEditor."
 
-#: main_window.py:3942
+#: main_window.py:3951
 #, python-brace-format
 msgid ""
 "Version {version}\n"
@@ -1889,31 +1897,31 @@ msgstr ""
 "Ein schlichter, ablenkungsfreier Texteditor.\n"
 "Entwickelt von rinbal."
 
-#: main_window.py:3944
+#: main_window.py:3953
 msgid "Source Code"
 msgstr "Quellcode"
 
-#: main_window.py:4022
+#: main_window.py:4031
 #, python-brace-format
 msgid "The log files are in {folder}"
 msgstr "Die Protokolldateien liegen in {folder}"
 
-#: main_window.py:4132
+#: main_window.py:4141
 #, python-brace-format
 msgid "{app} {version} is the newest version."
 msgstr "{app} {version} ist die neueste Version."
 
-#: main_window.py:4139
+#: main_window.py:4148
 #, python-brace-format
 msgid "{app} couldn't reach GitHub. Check your internet connection, then try again."
 msgstr "{app} konnte GitHub nicht erreichen. Prüfe deine Internetverbindung und versuche es dann erneut."
 
-#: main_window.py:4247
+#: main_window.py:4256
 #, python-brace-format
 msgid "Wrapped · {matches}"
 msgstr "Von vorn · {matches}"
 
-#: main_window.py:4257
+#: main_window.py:4266
 #: pdf_viewer.py:973
 #, python-brace-format
 msgid "{count} match"
@@ -1921,212 +1929,212 @@ msgid_plural "{count} matches"
 msgstr[0] "{count} Treffer"
 msgstr[1] "{count} Treffer"
 
-#: main_window.py:5002
+#: main_window.py:5011
 msgid "A picture is not uploaded yet: readers will not see it."
 msgid_plural "{count} pictures are not uploaded yet: readers will not see them."
 msgstr[0] "Ein Bild ist noch nicht hochgeladen: Leser werden es nicht sehen."
 msgstr[1] "{count} Bilder sind noch nicht hochgeladen: Leser werden sie nicht sehen."
 
-#: main_window.py:5217
+#: main_window.py:5226
 #, python-brace-format
 msgid "{count} file(s) from last session could not be found."
 msgid_plural "{count} file(s) from last session could not be found."
 msgstr[0] "{count} Datei aus der letzten Sitzung wurde nicht gefunden."
 msgstr[1] "{count} Dateien aus der letzten Sitzung wurden nicht gefunden."
 
-#: main_window.py:5267
+#: main_window.py:5276
 #, python-brace-format
 msgid "{app} {version} couldn’t replace this version, so you’re still using {current}. Your documents are open as you left them. To try again, choose Help > Check for Updates."
 msgstr "{app} {version} konnte diese Version nicht ersetzen, du verwendest also weiterhin {current}. Deine Dokumente sind so geöffnet, wie du sie verlassen hast. Um es erneut zu versuchen, wähle Hilfe > Nach Updates suchen."
 
-#: main_window.py:5533
+#: main_window.py:5542
 #, python-brace-format
 msgid "Other Nostr apps then look on {hosts} for your pictures, in this order. This replaces the list they use now, if you shared one before."
 msgstr "Andere Nostr-Apps suchen deine Bilder dann auf {hosts}, in dieser Reihenfolge. Das ersetzt die Liste, die sie jetzt verwenden, falls du schon einmal eine geteilt hast."
 
-#: main_window.py:5537
+#: main_window.py:5546
 msgid "Share List"
 msgstr "Liste teilen"
 
-#: main_window.py:5609
+#: main_window.py:5618
 msgid "Imports aren't available"
 msgstr "Importe sind nicht verfügbar"
 
-#: main_window.py:5613
+#: main_window.py:5622
 msgid "Connect a Nostr signer (Nostr > Connect Signer…) to follow websites and import posts as drafts."
 msgstr "Verbinde einen Nostr-Signer (Nostr > Signer verbinden …), um Websites zu folgen und Beiträge als Entwürfe zu importieren."
 
-#: main_window.py:5946
+#: main_window.py:5955
 msgid "Replace with Public Key"
 msgstr "Durch öffentlichen Schlüssel ersetzen"
 
-#: main_window.py:6228
+#: main_window.py:6237
 #, python-brace-format
 msgid "{count} image is waiting."
 msgid_plural "{count} images are waiting."
 msgstr[0] "{count} Bild wartet."
 msgstr[1] "{count} Bilder warten."
 
-#: main_window.py:6344
+#: main_window.py:6353
 #, python-brace-format
 msgid "Copied event id {id}…"
 msgstr "Kennung {id}… kopiert"
 
-#: main_window.py:6458
+#: main_window.py:6467
 msgid "This draft was created by another Nostr client"
 msgid_plural "These {count} drafts were created by other Nostr clients"
 msgstr[0] "Dieser Entwurf wurde mit einer anderen Nostr-App erstellt"
 msgstr[1] "Diese {count} Entwürfe wurden mit anderen Nostr-Apps erstellt"
 
-#: main_window.py:6474
+#: main_window.py:6483
 #, python-brace-format
 msgid "Delete “{name}” from your Nostr drafts?"
 msgstr "„{name}“ aus deinen Nostr-Entwürfen löschen?"
 
-#: main_window.py:6502
+#: main_window.py:6511
 #, python-brace-format
 msgid "Your signer will ask you to approve each one, so expect {count} request. You can stop partway through."
 msgid_plural "Your signer will ask you to approve each one, so expect {count} requests. You can stop partway through."
 msgstr[0] "Deine Signer-App fragt bei jedem einzeln nach, rechne also mit {count} Anfrage. Du kannst zwischendurch aufhören."
 msgstr[1] "Deine Signer-App fragt bei jedem einzeln nach, rechne also mit {count} Anfragen. Du kannst zwischendurch aufhören."
 
-#: main_window.py:6516
+#: main_window.py:6525
 #, python-brace-format
 msgid "{count} draft from another Nostr client is not included, and will be left alone."
 msgid_plural "{count} drafts from another Nostr client are not included, and will be left alone."
 msgstr[0] "{count} Entwurf aus einer anderen Nostr-App ist nicht dabei und bleibt unverändert."
 msgstr[1] "{count} Entwürfe aus einer anderen Nostr-App sind nicht dabei und bleiben unverändert."
 
-#: main_window.py:6542
+#: main_window.py:6551
 msgid "Couldn't start the deletion"
 msgstr "Das Löschen konnte nicht gestartet werden"
 
-#: main_window.py:6601
+#: main_window.py:6610
 msgid "Draft deleted."
 msgid_plural "{count} drafts deleted."
 msgstr[0] "Entwurf gelöscht."
 msgstr[1] "{count} Entwürfe gelöscht."
 
-#: main_window.py:6618
+#: main_window.py:6627
 #, python-brace-format
 msgid "{count} could not be removed and is still on your relays. You can try again."
 msgid_plural "{count} could not be removed and are still on your relays. You can try again."
 msgstr[0] "{count} konnte nicht entfernt werden und ist noch auf deinen Relays. Du kannst es erneut versuchen."
 msgstr[1] "{count} konnten nicht entfernt werden und sind noch auf deinen Relays. Du kannst es erneut versuchen."
 
-#: main_window.py:6858
-#: main_window.py:6989
+#: main_window.py:6867
+#: main_window.py:6998
 msgid "Couldn't prepare the draft"
 msgstr "Der Entwurf konnte nicht vorbereitet werden"
 
-#: main_window.py:6859
+#: main_window.py:6868
 msgid "Its contents could not be prepared for encryption."
 msgstr "Sein Inhalt konnte nicht für die Verschlüsselung vorbereitet werden."
 
-#: main_window.py:6886
+#: main_window.py:6895
 msgid "Couldn't save the draft"
 msgstr "Der Entwurf konnte nicht gespeichert werden"
 
-#: main_window.py:7137
+#: main_window.py:7146
 #, python-brace-format
 msgid "This draft was last saved as {original}, but you're signed in as {active}"
 msgstr "Dieser Entwurf wurde zuletzt als {original} gespeichert, aber du bist als {active} angemeldet"
 
-#: main_window.py:1293
+#: main_window.py:1302
 #, python-brace-format
 msgid "{count} word"
 msgid_plural "{count} words"
 msgstr[0] "{count} Wort"
 msgstr[1] "{count} Wörter"
 
-#: main_window.py:1644
+#: main_window.py:1653
 msgid "language"
 msgstr "sprache"
 
-#: main_window.py:1666
+#: main_window.py:1675
 msgid "table"
 msgstr "tabelle"
 
-#: main_window.py:2490
+#: main_window.py:2499
 #, python-brace-format
 msgid "“{name}” already exists"
 msgstr "„{name}“ gibt es bereits"
 
-#: main_window.py:2856
-#: main_window.py:2821
+#: main_window.py:2865
+#: main_window.py:2830
 #, python-brace-format
 msgid "Couldn't open “{name}”"
 msgstr "„{name}“ konnte nicht geöffnet werden"
 
-#: main_window.py:6525
+#: main_window.py:6534
 msgid "Not included:"
 msgstr "Nicht dabei:"
 
-#: main_window.py:6565
+#: main_window.py:6574
 #, python-brace-format
 msgid "Deleting draft {current} of {total}…"
 msgstr "Entwurf {current} von {total} wird gelöscht …"
 
-#: main_window.py:6697
-#: main_window.py:3118
+#: main_window.py:6706
+#: main_window.py:3127
 msgid "That profile isn't connected anymore"
 msgstr "Dieses Profil ist nicht mehr verbunden"
 
-#: main_window.py:6698
-#: main_window.py:3119
+#: main_window.py:6707
+#: main_window.py:3128
 msgid "Pair it again from Nostr > Connect Signer to save here."
 msgstr "Verbinde es erneut unter Nostr > Signer verbinden, um hier zu speichern."
 
-#: main_window.py:6863
+#: main_window.py:6872
 #, python-brace-format
 msgid "It has {size} bytes, and NIP-44 encryption allows {limit}. Split it into smaller drafts or publish it directly."
 msgstr "Er hat {size} Bytes, die Verschlüsselung erlaubt höchstens {limit}. Teile ihn in kleinere Entwürfe auf oder veröffentliche ihn direkt."
 
-#: main_window.py:7129
+#: main_window.py:7138
 #, python-brace-format
 msgid "Switch to {name} and Save"
 msgstr "Zu {name} wechseln und speichern"
 
-#: main_window.py:7132
+#: main_window.py:7141
 #, python-brace-format
 msgid "Save a Copy as {name}"
 msgstr "Kopie als {name} speichern"
 
-#: main_window.py:1420
+#: main_window.py:1429
 #, python-brace-format
 msgid "Heading {level}"
 msgstr "Überschrift {level}"
 
-#: main_window.py:1666
+#: main_window.py:1675
 msgid "row"
 msgstr "zeile"
 
-#: main_window.py:1666
+#: main_window.py:1675
 msgid "column"
 msgstr "spalte"
 
-#: main_window.py:1680
+#: main_window.py:1689
 msgid "color"
 msgstr "Farbe"
 
-#: main_window.py:3234
-#: main_window.py:3514
-#: main_window.py:3627
+#: main_window.py:3243
+#: main_window.py:3523
+#: main_window.py:3636
 #, python-brace-format
 msgid "Couldn't save “{name}”"
 msgstr "„{name}“ konnte nicht gespeichert werden"
 
-#: main_window.py:3274
+#: main_window.py:3283
 #, python-brace-format
 msgid "Couldn't reload “{name}”"
 msgstr "„{name}“ konnte nicht neu geladen werden"
 
-#: main_window.py:3689
+#: main_window.py:3698
 #, python-brace-format
 msgid "{error} Check that it's turned on and connected, then try again."
 msgstr "{error} Prüfe, ob der Drucker eingeschaltet und verbunden ist, und versuche es dann erneut."
 
-#: main_window.py:6543
+#: main_window.py:6552
 #, python-brace-format
 msgid ""
 "These drafts can't be removed from here.\n"

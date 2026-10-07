@@ -60,6 +60,18 @@ def test_learning_and_ignoring_reach_windows():
     assert backend.check("Nostr", "en-US") and backend.check("zap", "en-US")
 
 
+def test_a_learned_word_is_taken_out_again_on_windows_10():
+    backend, ole = backend_with()
+    assert backend.learn("Nostrr", "en-US") is True
+    assert backend.has_learned("Nostrr", "en-US") is None        # Windows cannot tell
+    assert backend.unlearn("Nostrr", "en-US") is True
+    checker = ole.factory.checkers["en-US"]
+    assert checker.removed == ["Nostrr"] and checker.added == []
+    assert checker.second.references == 0                         # released
+    checker.windows_8 = True
+    assert backend.unlearn("Nostrr", "en-US") is False             # no Remove there
+
+
 def test_one_checker_per_language_made_once():
     backend, ole = backend_with()
     backend.check("Haus", "de-DE")

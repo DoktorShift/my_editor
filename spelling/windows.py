@@ -49,6 +49,8 @@ class GUID(ctypes.Structure):
 
 CLSID_SpellCheckerFactory = GUID.of("7AB36653-1796-484B-BDFA-E74F1DB7C1DC")
 IID_ISpellCheckerFactory = GUID.of("8E018A9D-2415-4677-BF08-794EA61F94BB")
+# Windows 10 adds Remove (taking a word out of the person's dictionary).
+IID_ISpellChecker2 = GUID.of("E7ED1C71-87F7-4378-A840-C9200DACEE47")
 
 
 def _method(index: int, *argtypes):
@@ -62,6 +64,7 @@ def _method(index: int, *argtypes):
     return call
 
 
+_query_interface = _method(0, POINTER(GUID), POINTER(c_void_p))           # IUnknown
 _release = _method(2)                                                     # IUnknown::Release
 _enum_string_next = _method(3, c_ulong, POINTER(c_void_p), POINTER(c_ulong))  # IEnumString::Next
 _supported_languages = _method(3, POINTER(c_void_p))                   # ISpellCheckerFactory
@@ -71,6 +74,7 @@ _check = _method(4, c_wchar_p, POINTER(c_void_p))                      # ISpellC
 _suggest = _method(5, c_wchar_p, POINTER(c_void_p))
 _add = _method(6, c_wchar_p)
 _ignore = _method(7, c_wchar_p)
+_remove = _method(16, c_wchar_p)                                          # ISpellChecker2
 _next_error = _method(3, POINTER(c_void_p))                            # IEnumSpellingError
 _start_index = _method(3, POINTER(c_ulong))                            # ISpellingError
 _length = _method(4, POINTER(c_ulong))
@@ -207,6 +211,20 @@ class WindowsBackend(SpellBackend):
             return False
         _ok(_ignore(checker, word))
         return None
+
+    def _unlearn(self, word: str, language: str) -> Optional[bool]:
+        checker = self._checker(language)
+        if not checker:
+            return False
+        second = c_void_p()
+        if _query_interface(checker, byref(IID_ISpellChecker2), byref(second)) < 0 \
+                or not second.value:
+            return False          # Windows 8: no way to take a word out
+        try:
+            _ok(_remove(second, word))
+        finally:
+            _release(second)
+        return True
 
     # -- inside ---------------------------------------------------------------
 

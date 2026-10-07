@@ -13,7 +13,7 @@ from __future__ import annotations
 import ctypes
 import re
 from ctypes import POINTER, c_int, c_long, c_ulong, c_void_p, c_wchar_p
-from typing import Callable, Dict, Iterable, List, Sequence
+from typing import Callable, Dict, Iterable, List, Optional, Sequence
 
 from spelling.backends import Unavailable
 from spelling.windows import S_FALSE, S_OK, _FUNCTYPE
@@ -57,11 +57,11 @@ class FakeCom:
     ``(argument types, function)`` pair returning an HRESULT."""
 
     def __init__(self, registry: Registry, name: str,
-                 methods: Sequence[tuple]) -> None:
+                 methods: Sequence[tuple], query=None) -> None:
         self.name = name
         self.references = 1
         registry.objects.append(self)
-        table = [((c_void_p, POINTER(c_void_p)), lambda iid, out: E_NOINTERFACE),
+        table = [((c_void_p, POINTER(c_void_p)), query or (lambda iid, out: E_NOINTERFACE)),
                  ((), self._add_ref), ((), self._release)] + list(methods)
         self._callbacks = [_FUNCTYPE(c_long, c_void_p, *argtypes)(self._method(function))
                            for argtypes, function in table]
@@ -139,13 +139,35 @@ class FakeChecker:
         self.added: List[str] = []
         self.ignored: List[str] = []
         self.fail_check = False
+        self.removed: List[str] = []
+        self.windows_8 = False                  # no ISpellChecker2 (no Remove)
+        self.second: Optional[FakeCom] = None
         self.com = FakeCom(registry, f"ISpellChecker {language}", [
             ((POINTER(c_void_p),), lambda out: E_FAIL),            # LanguageTag
             ((c_wchar_p, POINTER(c_void_p)), self._check),
             ((c_wchar_p, POINTER(c_void_p)), self._suggest),
             ((c_wchar_p,), self._add),
             ((c_wchar_p,), self._ignore),
-        ])
+        ], query=self._query)
+
+    def _query(self, iid, out):
+        """ISpellChecker2 (Windows 10): ISpellChecker's methods, then Remove."""
+        if self.windows_8:
+            return E_NOINTERFACE
+        if self.second is None:
+            filler = [((), lambda: E_FAIL)] * 13        # LanguageTag .. ComprehensiveCheck
+            self.second = FakeCom(self.registry, f"ISpellChecker2 {self.language}",
+                                  filler + [((c_wchar_p,), self._remove)])
+        else:
+            self.second._add_ref()
+        out[0] = self.second.pointer
+        return S_OK
+
+    def _remove(self, word):
+        self.removed.append(word)
+        if word in self.added:
+            self.added.remove(word)
+        return S_OK
 
     def right(self, word: str) -> bool:
         return word in self.known or word in self.added or word in self.ignored

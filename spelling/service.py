@@ -81,12 +81,16 @@ class SpellChecker(QObject):
     """The system checker started or stopped working."""
     wordAccepted = Signal(str)
     """A word was learned or ignored: it is no longer misspelled."""
+    wordRejected = Signal(str)
+    """A word was unlearned: it may be misspelled again."""
 
     def __init__(self, backend: Optional[SpellBackend] = None,
                  parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._backend = backend if backend is not None else create_backend()
         self._known: Dict[Tuple[str, str], bool] = {}
+        # Words learned here, for a system that cannot say what it learned.
+        self._learned: set = set()
         self._available: Optional[bool] = None
         self._default: Optional[str] = None
 
@@ -131,11 +135,37 @@ class SpellChecker(QObject):
     def learn(self, word: str, language: Optional[str] = None) -> bool:
         """Add ``word`` to the person's dictionary for good (the system's,
         shared with other apps where the system has one)."""
-        return self._accept(word, self._backend.learn(_for_checker(word), self._language(language)))
+        taken = self._backend.learn(_for_checker(word), self._language(language))
+        if taken:
+            self._learned.add(_for_checker(word).casefold())
+        return self._accept(word, taken)
 
     def ignore(self, word: str, language: Optional[str] = None) -> bool:
         """Accept ``word`` everywhere until the app quits."""
         return self._accept(word, self._backend.ignore(_for_checker(word), self._language(language)))
+
+    def unlearn(self, word: str, language: Optional[str] = None) -> bool:
+        """Take ``word`` out of the person's dictionary again (Unlearn
+        Spelling); every document checks its blocks with it again."""
+        taken = self._backend.unlearn(_for_checker(word), self._language(language))
+        self._notice()
+        if taken:
+            rejected = _for_checker(word).casefold()
+            self._learned.discard(rejected)
+            for key in [key for key in self._known if key[1].casefold() == rejected]:
+                del self._known[key]
+            self.wordRejected.emit(words.clean(word))
+        return taken
+
+    def has_learned(self, word: str, language: Optional[str] = None) -> bool:
+        """Whether ``word`` is in the person's dictionary: as the system
+        says, or, where it cannot tell (Windows), learned here since the
+        app started."""
+        known = self._backend.has_learned(_for_checker(word), self._language(language))
+        self._notice()
+        if known is None:
+            return _for_checker(word).casefold() in self._learned
+        return bool(known)
 
     def find_misspellings(self, text: str, language: Optional[str] = None) -> List[Misspelling]:
         """The misspelled words of a short plain text (a title, a
@@ -319,6 +349,7 @@ class DocumentSpelling(QObject):
         document.contentsChange.connect(self._changed)
         checker.availabilityChanged.connect(self._availability_changed)
         checker.wordAccepted.connect(self._word_accepted)
+        checker.wordRejected.connect(self._word_rejected)
         self._restart()
 
     # -- what the editor asks -----------------------------------------------
@@ -410,7 +441,8 @@ class DocumentSpelling(QObject):
         self._pause.stop()
         for signal, slot in ((self._document.contentsChange, self._changed),
                              (self._checker.availabilityChanged, self._availability_changed),
-                             (self._checker.wordAccepted, self._word_accepted)):
+                             (self._checker.wordAccepted, self._word_accepted),
+                             (self._checker.wordRejected, self._word_rejected)):
             try:
                 signal.disconnect(slot)
             except (RuntimeError, TypeError):
@@ -600,6 +632,18 @@ class DocumentSpelling(QObject):
             self._shown = [()] * len(self._found)
             self.misspellingsChanged.emit(0, len(self._found) - 1)
         self._dirty = bytearray(b"\x01") * len(self._found)
+
+    def _word_rejected(self, word: str) -> None:
+        """An unlearned word: the blocks that hold it are checked again."""
+        rejected = _for_checker(word).casefold()
+        block = self._document.begin()
+        number = 0
+        while block.isValid() and number < len(self._dirty):
+            if rejected in _for_checker(block.text()).casefold():
+                self._dirty[number] = 1
+            block = block.next()
+            number += 1
+        self._schedule()
 
     def _word_accepted(self, word: str) -> None:
         accepted = _for_checker(word).casefold()

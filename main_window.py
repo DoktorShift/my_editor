@@ -976,7 +976,17 @@ class MainWindow(QMainWindow):
             return
         position = editor.cursorForPosition(pos).position()
         word = checks.misspelling_at(position)
+        mac = sys.platform == "darwin"
         if word is None:
+            # A word learned (by mistake, perhaps): it can be unlearned.
+            under = editor.cursorForPosition(pos)
+            under.select(QTextCursor.SelectionType.WordUnderCursor)
+            learned = under.selectedText().strip()
+            checker = self._spell_checker()
+            if learned and checker.has_learned(learned, checks.language()):
+                menu.addAction(_("Unlearn Spelling") if mac else _("Remove from Dictionary"),
+                               lambda: checker.unlearn(learned, checks.language()))
+                menu.addSeparator()
             return
         block = editor.document().findBlock(position)
         checker = self._spell_checker()
@@ -991,7 +1001,6 @@ class MainWindow(QMainWindow):
         if not guesses:
             menu.addAction(_("No Guesses Found")).setEnabled(False)
         menu.addSeparator()
-        mac = sys.platform == "darwin"
         menu.addAction(_("Ignore Spelling") if mac else _("Ignore All"),
                        lambda: checker.ignore(word.word, word.language))
         menu.addAction(_("Learn Spelling") if mac else _("Add to Dictionary"),

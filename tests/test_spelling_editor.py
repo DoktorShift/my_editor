@@ -161,14 +161,25 @@ r["underlined"] = [m.cursor.selectedText() for m in ed.highlights("spelling")]
 spot = ed.cursorRect(ed.textCursor())
 cursor = ed.textCursor()
 cursor.setPosition(ed.toPlainText().index("mistaek") + 2)
-menu = QMenu()
+menu = QMenu(ed)
 w._fill_editor_context_menu(menu, ed, ed.cursorRect(cursor).center())
 r["menu"] = [a.text() for a in menu.actions() if a.text()][:3]
 learn = [a for a in menu.actions() if a.text() in ("Learn Spelling", "Add to Dictionary")]
 learn[0].trigger()
 drain(ed.spelling())
-r["learned"] = backend.learned
+r["learned"] = list(backend.learned)
 r["after_learn"] = [m.cursor.selectedText() for m in ed.highlights("spelling")]
+menu.deleteLater()
+app.processEvents()
+menu = QMenu(ed)
+w._fill_editor_context_menu(menu, ed, ed.cursorRect(cursor).center())
+unlearn = [a for a in menu.actions()
+           if a.text() in ("Unlearn Spelling", "Remove from Dictionary")]
+r["unlearn_offered"] = [a.text() for a in unlearn]
+unlearn[0].trigger()
+drain(ed.spelling())
+r["after_unlearn"] = [list(backend.learned),
+                      [m.cursor.selectedText() for m in ed.highlights("spelling")]]
 code = os.path.join(os.environ["HOME"], "tool.py")
 with open(code, "w", encoding="utf-8") as f:
     f.write("def mistaek():\n    pass\n")
@@ -212,6 +223,10 @@ def test_spelling_in_the_window(tmp_path):
     assert r["menu"] == (["mistake", "Ignore Spelling", "Learn Spelling"] if mac
                          else ["mistake", "Ignore All", "Add to Dictionary"])
     assert r["learned"] == ["mistaek"] and r["after_learn"] == []
+    # Review M9 (CP3): a learned word can be taken back.
+    assert r["unlearn_offered"] == (["Unlearn Spelling"] if mac
+                                    else ["Remove from Dictionary"])
+    assert r["after_unlearn"] == [[], ["mistaek"]]
     assert r["code_checked"] is False and r["welcome_checked"] is False
     assert r["off"] == [True, True, False]
     assert r["dimmed"]
