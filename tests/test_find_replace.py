@@ -216,15 +216,8 @@ print("RESULT " + json.dumps(r))
 
 
 def test_find_and_replace_in_the_window(tmp_path):
-    import json
-    import subprocess
-    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    env = dict(os.environ, HOME=str(tmp_path), QT_QPA_PLATFORM="offscreen")
-    proc = subprocess.run([sys.executable, "-c", WINDOW_SCRIPT, repo], env=env,
-                          capture_output=True, text=True, timeout=120)
-    line = next((l for l in proc.stdout.splitlines() if l.startswith("RESULT ")), None)
-    assert line, f"child failed:\n{proc.stdout}\n{proc.stderr}"
-    r = json.loads(line[len("RESULT "):])
+    from tests.app_process import run_window_script
+    r = run_window_script(WINDOW_SCRIPT, tmp_path)
     assert r["replace_row"]
     assert r["count"] == "3 matches"
     assert r["first"] == [4, 8]
@@ -281,15 +274,8 @@ print("RESULT " + json.dumps(r))
 def test_replace_all_stays_quick_with_thousands_of_matches(tmp_path):
     # Review H2: one highlight cursor per match made Replace All of
     # 54,000 matches take 84 seconds. Only what is on screen is painted.
-    import json
-    import subprocess
-    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    env = dict(os.environ, HOME=str(tmp_path), QT_QPA_PLATFORM="offscreen")
-    proc = subprocess.run([sys.executable, "-c", MANY_SCRIPT, repo], env=env,
-                          capture_output=True, text=True, timeout=120)
-    line = next((l for l in proc.stdout.splitlines() if l.startswith("RESULT ")), None)
-    assert line, f"child failed:\n{proc.stdout}\n{proc.stderr}"
-    r = json.loads(line[len("RESULT "):])
+    from tests.app_process import run_window_script
+    r = run_window_script(MANY_SCRIPT, tmp_path)
     assert r["matches"] == 20000
     assert 0 < r["painted"] < 400                      # what is on screen, not 20,000
     assert r["left"] == 0 and r["back"] == 20000
@@ -356,15 +342,8 @@ print("RESULT " + json.dumps(r))
 
 def test_find_next_and_replace_go_on_from_the_caret(tmp_path):
     # Review M1: they went back to the first match after any edit.
-    import json
-    import subprocess
-    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    env = dict(os.environ, HOME=str(tmp_path), QT_QPA_PLATFORM="offscreen")
-    proc = subprocess.run([sys.executable, "-c", CARET_SCRIPT, repo], env=env,
-                          capture_output=True, text=True, timeout=120)
-    line = next((l for l in proc.stdout.splitlines() if l.startswith("RESULT ")), None)
-    assert line, f"child failed:\n{proc.stdout}\n{proc.stderr}"
-    r = json.loads(line[len("RESULT "):])
+    from tests.app_process import run_window_script
+    r = run_window_script(CARET_SCRIPT, tmp_path)
     assert r["next"] == "fish| C"                       # the one after "fish B": fish C
     assert r["after_edit"] == "fish| C"
     assert r["previous"] == "fish| C"                   # back from after "fish C": fish C

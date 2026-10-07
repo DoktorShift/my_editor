@@ -14,7 +14,9 @@ from PySide6.QtGui import QIcon
 from PySide6.QtNetwork import QLocalSocket
 import constants
 import diagnostics
+import file_paths
 import i18n
+from main_thread_gc import GuiThreadCollector
 import theme
 
 # The language is chosen before any module that holds texts is imported:
@@ -23,8 +25,6 @@ import theme
 i18n.install(i18n.chosen_language())
 
 from main_window import MainWindow  # noqa: E402
-
-_IPC_SERVER_NAME = "minimal-texteditor-ipc"
 
 
 class EditorApplication(QApplication):
@@ -76,7 +76,7 @@ def _forward_to_running_instance(path: str) -> bool:
     """Send a file path to an already-running instance via a local socket.
     Returns True if a running instance was found and the path was forwarded."""
     socket = QLocalSocket()
-    socket.connectToServer(_IPC_SERVER_NAME)
+    socket.connectToServer(constants.IPC_SERVER_NAME)
     if not socket.waitForConnected(300):
         return False
     socket.write((path + "\n").encode("utf-8"))
@@ -89,6 +89,9 @@ def main():
     # First, so even a failure while starting up is in the log.
     diagnostics.install(constants.APP_VERSION)
     app = EditorApplication(sys.argv)
+    # Garbage is collected on this thread only, never on a worker's: Qt
+    # objects must be destroyed on the thread they belong to.
+    GuiThreadCollector(app)
     # Qt's own words (file dialogs, standard buttons) in the same language.
     i18n.install_qt_translations(app)
     app.setApplicationName(constants.APP_DISPLAY_NAME)
@@ -119,7 +122,9 @@ def main():
         import self_test
         sys.exit(self_test.run())
 
-    initial_path = sys.argv[1] if len(sys.argv) > 1 else None
+    # Absolute before it is handed on: the running window started in
+    # another folder, so a relative path would mean another file there.
+    initial_path = file_paths.normalize(sys.argv[1]) if len(sys.argv) > 1 else None
 
     if initial_path and _forward_to_running_instance(initial_path):
         sys.exit(0)

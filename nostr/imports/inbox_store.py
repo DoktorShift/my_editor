@@ -248,11 +248,17 @@ class InboxStore:
         if path != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(str(path), timeout=5)
-        self._db.row_factory = sqlite3.Row
-        self._db.create_function("fold", 1, _fold, deterministic=True)
-        if path != ":memory:":
-            self._db.execute("PRAGMA journal_mode=WAL")
-        self._migrate()
+        try:
+            self._db.row_factory = sqlite3.Row
+            self._db.create_function("fold", 1, _fold, deterministic=True)
+            if path != ":memory:":
+                self._db.execute("PRAGMA journal_mode=WAL")
+            self._migrate()
+        except BaseException:
+            # A file that is not a database is set aside by the caller, and
+            # Windows cannot move a file that is still open.
+            self._db.close()
+            raise
 
     def close(self) -> None:
         self._db.close()

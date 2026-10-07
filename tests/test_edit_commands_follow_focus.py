@@ -15,12 +15,7 @@ What must hold:
   A right-click leaves no menu behind.
 """
 
-import json
-import os
-import subprocess
-import sys
-
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from tests.app_process import run_window_script
 
 SCRIPT = r"""
 import json, os, sys
@@ -83,12 +78,7 @@ print("RESULT " + json.dumps(r))
 
 
 def test_edit_commands_follow_the_focus_and_the_selection(tmp_path):
-    env = dict(os.environ, HOME=str(tmp_path), QT_QPA_PLATFORM="offscreen")
-    proc = subprocess.run([sys.executable, "-c", SCRIPT, REPO], env=env,
-                          capture_output=True, text=True, timeout=120)
-    line = next((l for l in proc.stdout.splitlines() if l.startswith("RESULT ")), None)
-    assert line, f"child failed:\n{proc.stdout}\n{proc.stderr}"
-    r = json.loads(line[len("RESULT "):])
+    r = run_window_script(SCRIPT, tmp_path)
     assert r["empty"] == [False, False, False]          # review L3 (early range)
     assert r["selected"] == [True, True, True]
     assert r["field_empty"] == [False, False]

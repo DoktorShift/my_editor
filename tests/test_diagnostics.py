@@ -117,3 +117,37 @@ def test_help_show_log_files_opens_the_folder(tmp_path, monkeypatch):
     Window()._show_log_files()
     assert opened == [QUrl.fromLocalFile(str(tmp_path / "logs"))]
     assert (tmp_path / "logs").is_dir()
+
+
+class _CrashReports:
+    """Stands in for faulthandler: where crash traces go."""
+
+    def __init__(self, target=None):
+        self.target = target
+
+    def is_enabled(self):
+        return self.target is not None
+
+    def enable(self, file, all_threads=True):
+        self.target = file
+
+    def disable(self):
+        self.target = None
+
+
+@pytest.mark.parametrize("before", [None, "a test run"])
+def test_crash_traces_go_to_the_crash_log_unless_they_already_go_elsewhere(
+        folder, monkeypatch, before):
+    # Traces that already go somewhere (python -X faulthandler, a test
+    # run) stay there: faulthandler cannot say where, so taking them
+    # over could never be undone, and a test run lost every crash trace
+    # after the first test that installed the log.
+    reports = _CrashReports(before)
+    monkeypatch.setattr(diagnostics, "faulthandler", reports)
+    diagnostics.install("1.0", folder=folder)
+    if before is None:
+        assert reports.target.name == os.path.join(folder, diagnostics.CRASH_NAME)
+    else:
+        assert reports.target == before
+    diagnostics.uninstall()
+    assert reports.target == before

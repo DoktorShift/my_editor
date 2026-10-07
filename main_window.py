@@ -37,7 +37,7 @@ from constants import (
     DARK_BG, DARK_FG, LIGHT_BG, LIGHT_FG, DARK_SELECTION, LIGHT_SELECTION,
     DARK_MENU_BG, DARK_MENU_FG, LIGHT_MENU_BG, LIGHT_MENU_FG,
     DARK_BORDER, LIGHT_BORDER, APP_DISPLAY_NAME, APP_VERSION, APP_URL, TEXT_COLORS,
-    DARK_MUTED_FG, LIGHT_MUTED_FG,
+    DARK_MUTED_FG, LIGHT_MUTED_FG, IPC_SERVER_NAME,
 )
 from widgets import FindBar, LineNumberGutter, FileChangedBar, UpdateBar
 from format_toolbar import FormatToolbar
@@ -45,6 +45,7 @@ from atomic_file import (
     read_json, read_text_document, save_document, save_text_document, write_json,
 )
 import diagnostics
+import file_paths
 import i18n
 from i18n import _, ngettext, pgettext
 from commands import (
@@ -192,8 +193,6 @@ from nostr.ui.publish_note_dialog import PublishNoteDialog
 from nostr.ui.save_destination_dialog import SaveDestination, SaveDestinationDialog
 from nostr.ui.stash_kind_dialog import StashChoice, StashKind, StashKindDialog
 from nostr.ui.thumbnail_loader import ThumbnailLoader
-
-_IPC_SERVER_NAME = "minimal-texteditor-ipc"
 
 # Monotonic counter for clipboard / drop upload job names. Pairs with
 # the dialog-side helper but lives here too because main_window also
@@ -623,14 +622,15 @@ class MainWindow(QMainWindow):
     def _start_ipc_server(self):
         """Start a local socket server so that a second launch can forward a
         file path here instead of opening a new window."""
-        QLocalServer.removeServer(_IPC_SERVER_NAME)  # remove stale socket if any
+        QLocalServer.removeServer(IPC_SERVER_NAME)  # remove stale socket if any
         self._ipc_server = QLocalServer(self)
         self._ipc_server.newConnection.connect(self._on_ipc_connection)
-        self._ipc_server.listen(_IPC_SERVER_NAME)
+        self._ipc_server.listen(IPC_SERVER_NAME)
 
     def _on_ipc_connection(self):
         conn = self._ipc_server.nextPendingConnection()
         conn.waitForReadyRead(300)
+        # An absolute path: the second launch made it so in its own folder.
         path = conn.readAll().data().decode("utf-8").strip()
         conn.deleteLater()
         if path and os.path.isfile(path):
@@ -1918,7 +1918,8 @@ class MainWindow(QMainWindow):
             # than guess at a format this build does not know.
             return None
 
-        original_path = backup.get("original_path")
+        # Possibly written by an older version, in another spelling.
+        original_path = file_paths.normalize(backup.get("original_path") or "") or None
         backup_file = backup["_backup_file"]
         freshness = classify_backup(backup)
 
@@ -2125,9 +2126,13 @@ class MainWindow(QMainWindow):
             return
 
         new_name = new_name.strip()
-        new_path = os.path.join(directory, new_name)
+        new_path = file_paths.normalize(os.path.join(directory, new_name))
 
-        if os.path.exists(new_path):
+        # Any entry with that name is a clash, a link (even a broken one)
+        # included: renaming onto it would replace it. Only changing the
+        # case of the name, where the disk ignores case (Windows, a Mac),
+        # finds the file itself, and that is a rename.
+        if os.path.lexists(new_path) and not file_paths.is_case_change(old_path, new_path):
             inform(self, title=_("\u201c{name}\u201d already exists").format(name=new_name),
                    message=_("Choose a different name."))
             return
@@ -2311,7 +2316,8 @@ class MainWindow(QMainWindow):
         for url in urls:
             if not url.isLocalFile():
                 continue
-            path = url.toLocalFile()
+            # A URL's path has forward slashes, also on Windows.
+            path = file_paths.normalize(url.toLocalFile())
             ext = os.path.splitext(path)[1].lower()
             if ext in _SUPPORTED_EXTS:
                 self.open_path(path)
@@ -2437,9 +2443,15 @@ class MainWindow(QMainWindow):
         Returns the new tab's editor, or its PDF viewer. Returns None when
         no tab was opened: the file is open already (its tab becomes
         current) or it could not be read (the person is told why).
+
+        Every way of opening a file ends here (the Open dialog, the recent
+        files, the last session, the system's file manager, a second
+        launch), so the path takes the app's one spelling here, and a file
+        already open under another spelling is found.
         """
+        path = file_paths.normalize(path)
         for i in range(self.tabs.count()):
-            if self._tab_file_path(self.tabs.widget(i)) == path:
+            if file_paths.same_file(self._tab_file_path(self.tabs.widget(i)), path):
                 self.tabs.setCurrentIndex(i)
                 bar = self._bar_from_widget(self.tabs.widget(i))
                 if bar:
@@ -2802,6 +2814,8 @@ class MainWindow(QMainWindow):
         )
         if not path:
             return False
+        # Qt's dialog answers with forward slashes, also on Windows.
+        path = file_paths.normalize(path)
 
         # Auto-add extension if the user didn't type one
         if not any(path.lower().endswith(e) for e in _SAVE_EXTS):

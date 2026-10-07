@@ -3,6 +3,7 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
+import os
 import sys
 
 from PySide6.QtGui import QColor
@@ -31,6 +32,13 @@ APP_INSTALL_GUIDE_URL = f"https://{_REPO_OWNER}.github.io/{_REPO_NAME}/install/"
 # reached or reports that it has no key.
 # MYEDITOR_MEMBERSHIP_SERVICE in the environment overrides it.
 MEMBERSHIP_SERVICE_URL = "https://e21.rinbal.de"
+
+# The local socket the running window listens on, so that a second launch
+# hands it the file to open instead of opening a second window (main.py,
+# MainWindow). MYEDITOR_IPC_NAME in the environment names another: a test
+# run, or a second copy run from source, then never takes over the socket
+# of the MyEditor the person is using.
+IPC_SERVER_NAME = os.environ.get("MYEDITOR_IPC_NAME") or "minimal-texteditor-ipc"
 
 # UI theme colors
 DARK_BG = "#1E1E1E"
