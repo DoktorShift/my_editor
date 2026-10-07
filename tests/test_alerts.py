@@ -14,6 +14,13 @@ as a second headline. So these tests hold the alert to its contract:
   when there is no Cancel), and a destructive button is red and never the
   default.
 
+  The buttons stand where the Human Interface Guidelines put them, on
+  every platform, whatever order Qt's button box would pick there: in a
+  row the default at the trailing edge, Cancel beside it and a destructive
+  choice at the leading edge; in a stack the default on top and Cancel at
+  the bottom. (A German stack once had the default between the other
+  two.) Tab follows that order, and the default button has the focus.
+
   Names and error text are shown as text, never interpreted as markup.
 
   No stock QMessageBox call is left in the app, so the old look can't come
@@ -30,9 +37,11 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtCore import QPoint, Qt  # noqa: E402
 from PySide6.QtGui import QIcon, QPixmap, QColor  # noqa: E402
-from PySide6.QtWidgets import QApplication, QDialog, QDialogButtonBox  # noqa: E402
+from PySide6.QtWidgets import (  # noqa: E402
+    QApplication, QDialog, QDialogButtonBox, QProxyStyle, QStyle, QWidget,
+)
 
 import alerts  # noqa: E402
 import theme  # noqa: E402
@@ -99,12 +108,104 @@ def test_exactly_one_default_button():
         Alert(None, title="t", buttons=(Button("A", 1, DEFAULT), Button("B", 2, DEFAULT)))
 
 
-def test_roles_map_to_the_platforms_button_order():
+def seen_order(alert):
+    """The buttons' labels as a person sees them: left to right in a row,
+    top to bottom in a stack."""
+    alert.show()
+    QApplication.processEvents()
+    spots = {label: button.mapTo(alert, QPoint(0, 0))
+             for label, button in alert.buttons.items()}
+    alert.close()
+    key = ((lambda label: spots[label].y()) if alert.orientation == Qt.Vertical
+           else (lambda label: spots[label].x()))
+    return sorted(spots, key=key)
+
+
+class _ButtonLayoutStyle(QProxyStyle):
+    """The style a platform brings, as far as button order goes."""
+
+    def __init__(self, layout):
+        super().__init__("Fusion")
+        self._layout = layout
+
+    def styleHint(self, hint, option=None, widget=None, data=None):  # noqa: N802
+        if hint == QStyle.StyleHint.SH_DialogButtonLayout:
+            return int(self._layout)
+        return super().styleHint(hint, option, widget, data)
+
+
+LAYOUTS = [QDialogButtonBox.ButtonLayout.WinLayout, QDialogButtonBox.ButtonLayout.MacLayout,
+           QDialogButtonBox.ButtonLayout.KdeLayout, QDialogButtonBox.ButtonLayout.GnomeLayout]
+
+
+@pytest.fixture(params=LAYOUTS, ids=["windows", "mac", "kde", "gnome"])
+def platform_style(request, qt_app):
+    """Each platform's preferred button order, in turn. The style the
+    tests run with is put back by name afterwards (Fusion)."""
+    before = qt_app.style().name() or "Fusion"
+    qt_app.setStyle(_ButtonLayoutStyle(request.param))
+    yield request.param
+    qt_app.setStyle(before)
+
+
+def test_in_a_row_the_default_is_trailing_with_cancel_beside_it(platform_style):
     alert = Alert(None, title="t", buttons=save_changes_buttons())
-    box = alert.button_box
-    assert box.buttonRole(alert.buttons["Save"]) == QDialogButtonBox.AcceptRole
-    assert box.buttonRole(alert.buttons["Cancel"]) == QDialogButtonBox.RejectRole
-    assert box.buttonRole(alert.buttons["Don't Save"]) == QDialogButtonBox.DestructiveRole
+    assert alert.orientation == Qt.Horizontal
+    assert seen_order(alert) == ["Don't Save", "Cancel", "Save"]
+
+
+def test_other_choices_sit_beside_cancel_and_the_default_stays_trailing(platform_style):
+    alert = Alert(None, title="t", buttons=(Button("Again", "again", DEFAULT),
+                                            Button("New", "new", NORMAL),
+                                            Button("Cancel", "cancel", CANCEL)))
+    assert seen_order(alert) == ["New", "Cancel", "Again"]
+
+
+def test_a_destructive_choice_stands_away_from_the_default(platform_style):
+    alert = Alert(None, title="t", buttons=(Button("Delete", True, DESTRUCTIVE),
+                                            Button("Cancel", False, DEFAULT)))
+    alert.show()
+    QApplication.processEvents()
+    delete, cancel = alert.buttons["Delete"], alert.buttons["Cancel"]
+    gap = cancel.mapTo(alert, QPoint(0, 0)).x() - delete.mapTo(alert, QPoint(0, 0)).x()
+    alert.close()
+    assert gap > delete.width() + 8          # not side by side: a space between them
+    assert seen_order(alert) == ["Delete", "Cancel"]
+
+
+def test_in_a_stack_the_default_is_on_top_and_cancel_at_the_bottom(platform_style):
+    # German titles, which once stacked with the default in the middle.
+    alert = Alert(None, title="t", buttons=(
+        Button("Als neu veröffentlichen und ersetzen", "new", NORMAL),
+        Button("Abbrechen", "cancel", CANCEL),
+        Button("Erneut versuchen", "again", DEFAULT),
+        Button("Entwurf löschen und schließen", "drop", DESTRUCTIVE)))
+    assert alert.orientation == Qt.Vertical
+    assert seen_order(alert) == ["Erneut versuchen", "Als neu veröffentlichen und ersetzen",
+                                 "Entwurf löschen und schließen", "Abbrechen"]
+
+
+def test_tab_follows_the_order_and_starts_on_the_default():
+    alert = Alert(None, title="t", buttons=save_changes_buttons(), checkbox="Remember")
+    assert alert.focusWidget() is alert.buttons["Save"]
+    chain, widget = [], alert.checkbox
+    for _ in range(4):
+        chain.append(widget)
+        widget = widget.nextInFocusChain()
+        while widget.focusPolicy() & Qt.TabFocus == 0 or widget is alert:
+            widget = widget.nextInFocusChain()
+    assert chain == [alert.checkbox, alert.buttons["Don't Save"], alert.buttons["Cancel"],
+                     alert.buttons["Save"]]
+
+
+def test_space_on_the_focused_button_chooses_the_default():
+    from PySide6.QtTest import QTest
+    alert = Alert(None, title="t", buttons=save_changes_buttons())
+    alert.show()
+    alert.activateWindow()
+    QApplication.processEvents()
+    QTest.keyClick(QApplication.focusWidget() or alert, Qt.Key_Space)
+    assert alert.value == "save"
 
 
 @pytest.mark.parametrize("is_dark", [False, True])
@@ -145,13 +246,16 @@ def test_long_button_titles_stack_instead_of_overflowing():
         Button("Save as .html", "html", NORMAL),
         Button("Save as .rtf", "rtf", NORMAL),
         Button("Cancel", "cancel", DEFAULT)))
-    assert alert.button_box.orientation() == Qt.Vertical
+    assert alert.orientation == Qt.Vertical
+    assert seen_order(alert) == ["Cancel", "Save as .html", "Save as .rtf",
+                                 "Save as .txt Anyway"]
 
 
 def test_two_short_buttons_sit_side_by_side():
     alert = Alert(None, title="t", buttons=(Button("Cancel", False, CANCEL),
                                             Button("OK", True, DEFAULT)))
-    assert alert.button_box.orientation() == Qt.Horizontal
+    assert alert.orientation == Qt.Horizontal
+    assert seen_order(alert) == ["Cancel", "OK"]
 
 
 def test_the_caution_badge_marks_the_icon():

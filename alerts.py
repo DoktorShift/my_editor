@@ -18,10 +18,18 @@ Buttons carry a role instead of per-call styling:
     DESTRUCTIVE  removes or discards something; red text, never the default
     NORMAL       any other choice
 
-A QDialogButtonBox places them in each platform's own order (Cancel left of
-the default on macOS and Linux, and so on), and every color comes from
-theme.dialog_stylesheet, so no call site can paint light text on a light
-background again.
+The role also decides where a button goes, the same on every platform, as
+the Human Interface Guidelines lay it out: in a row, the default at the
+trailing edge with Cancel beside it, other choices next to Cancel, and a
+destructive one at the leading edge, away from the default; in a stack
+(when the titles are too long for a row), the default on top and Cancel at
+the bottom. Qt's QDialogButtonBox would reorder them per platform (the
+default first on Windows, between the other two in a Windows stack), so
+the alert lays them out itself. The keyboard follows the same order, and
+the default button has the focus, so Space and Return both choose it.
+
+Every color comes from theme.dialog_stylesheet, so no call site can paint
+light text on a light background again.
 
 Call sites use the functions at the bottom (ask, ask_with_checkbox, inform,
 confirm_destructive). They all build the dialog through the module-level
@@ -31,16 +39,18 @@ confirm_destructive). They all build the dialog through the module-level
 from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
+    QBoxLayout,
     QCheckBox,
     QDialog,
-    QDialogButtonBox,
+    QHBoxLayout,
     QLabel,
     QPlainTextEdit,
     QPushButton,
     QVBoxLayout,
+    QWidget,
 )
 
 import theme
@@ -52,17 +62,16 @@ CANCEL = "cancel"
 DESTRUCTIVE = "destructive"
 NORMAL = "normal"
 
-_BOX_ROLES = {
-    DEFAULT: QDialogButtonBox.AcceptRole,
-    CANCEL: QDialogButtonBox.RejectRole,
-    DESTRUCTIVE: QDialogButtonBox.DestructiveRole,
-    NORMAL: QDialogButtonBox.ActionRole,
-}
+# Leading to trailing in a row, after the destructive buttons at the leading
+# edge; and top to bottom in a stack.
+_ROW_TRAILING = (NORMAL, CANCEL, DEFAULT)
+_STACK = (DEFAULT, NORMAL, DESTRUCTIVE, CANCEL)
 
 # Apple's alerts are narrow: long text wraps rather than widening the alert.
 _WIDTH = 300
 _WIDE = 380          # three buttons, or details to read
 _ICON = 64
+_BUTTON_SPACING = 8
 
 _EXTRA_CSS = """
 QLabel#alert_title { font-size: 14px; font-weight: 600; }
@@ -122,8 +131,10 @@ class Alert(QDialog):
         layout.addWidget(self.message_label)
 
         self.details_view = None
+        self._details_toggle = None
         if details:
-            layout.addWidget(self._details(details), 0, Qt.AlignHCenter)
+            self._details_toggle = self._details(details)
+            layout.addWidget(self._details_toggle, 0, Qt.AlignHCenter)
             layout.addWidget(self.details_view)
 
         self.checkbox = None
@@ -133,10 +144,15 @@ class Alert(QDialog):
             layout.addWidget(self.checkbox, 0, Qt.AlignHCenter)
 
         layout.addSpacing(12)
-        self.button_box = QDialogButtonBox()
+        width = _WIDE if (len(buttons) > 2 or details) else _WIDTH
+        self.setFixedWidth(width)
         self.buttons = {}
+        made = []
+        # Made inside the alert from the start, so they are measured with its
+        # stylesheet when the row is chosen.
+        self.button_row = QWidget(self)
         for spec in buttons:
-            button = self.button_box.addButton(spec.label, _BOX_ROLES[spec.role])
+            button = QPushButton(spec.label, self.button_row)
             button.setToolTip(spec.tooltip)
             button.setAutoDefault(False)
             button.setDefault(spec.role == DEFAULT)
@@ -144,11 +160,17 @@ class Alert(QDialog):
                 button.setObjectName("destructive")
             button.clicked.connect(lambda _=False, v=spec.value: self._choose(v))
             self.buttons[spec.label] = button
-        layout.addWidget(self.button_box)
-
-        width = _WIDE if (len(buttons) > 2 or details) else _WIDTH
-        self.setFixedWidth(width)
-        self._fit_buttons(width - 40)
+            made.append((spec.role, button))
+        self.ordered_buttons = self._lay_out(made, width - 40)
+        layout.addWidget(self.button_row)
+        self._follow_in_tab_order([w for w in (self._details_toggle, self.checkbox)
+                                   if w is not None] + self.ordered_buttons)
+        # Space acts on the button with the focus, so it starts on the
+        # default, the choice Return makes. Where Tab skips buttons (a Mac
+        # without keyboard navigation) nothing has the focus, as in a
+        # native alert, and Return still chooses the default.
+        if QGuiApplication.styleHints().tabFocusBehavior() == Qt.TabFocusAllControls:
+            next(b for role, b in made if role == DEFAULT).setFocus()
 
     # -- building ------------------------------------------------------------
     @staticmethod
@@ -180,16 +202,46 @@ class Alert(QDialog):
         toggle.clicked.connect(flip)
         return toggle
 
-    def _fit_buttons(self, available: int) -> None:
-        """Side by side when they fit, otherwise stacked full width, as
-        macOS does for long button titles."""
-        buttons = self.button_box.buttons()
-        needed = sum(b.sizeHint().width() for b in buttons) + 8 * (len(buttons) - 1)
-        if needed > available:
-            self.button_box.setOrientation(Qt.Vertical)
-            self.button_box.setCenterButtons(True)
-            for button in buttons:
+    def _lay_out(self, made, available: int) -> list:
+        """Put the ``(role, button)`` pairs in a row when they fit, otherwise
+        in a stack, full width, as macOS does for long button titles.
+        Returns the buttons in the order they appear (and are tabbed to)."""
+        buttons = [button for _role, button in made]
+        needed = (sum(b.sizeHint().width() for b in buttons)
+                  + _BUTTON_SPACING * (len(buttons) - 1))
+        if needed <= available:
+            row = QHBoxLayout(self.button_row)
+            leading = [b for role, b in made if role == DESTRUCTIVE]
+            trailing = [b for kind in _ROW_TRAILING for role, b in made if role == kind]
+            for button in leading:
+                row.addWidget(button)
+            row.addStretch(1)
+            for button in trailing:
+                row.addWidget(button)
+            ordered = leading + trailing
+        else:
+            row = QVBoxLayout(self.button_row)
+            ordered = [b for kind in _STACK for role, b in made if role == kind]
+            for button in ordered:
                 button.setMinimumWidth(available)
+                row.addWidget(button)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(_BUTTON_SPACING)
+        return ordered
+
+    @property
+    def orientation(self) -> Qt.Orientation:
+        """Qt.Horizontal for a row of buttons, Qt.Vertical for a stack."""
+        layout = self.button_row.layout()
+        return (Qt.Vertical if layout.direction() in (QBoxLayout.TopToBottom,
+                                                      QBoxLayout.BottomToTop)
+                else Qt.Horizontal)
+
+    @staticmethod
+    def _follow_in_tab_order(widgets) -> None:
+        """Tab moves through ``widgets`` in this order: the order they are seen in."""
+        for first, second in zip(widgets, widgets[1:]):
+            QWidget.setTabOrder(first, second)
 
     # -- answering -----------------------------------------------------------
     def _choose(self, value) -> None:
