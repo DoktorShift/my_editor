@@ -4440,7 +4440,7 @@ class MainWindow(QMainWindow):
         if not self.nostr_state.active:
             markdown = document_to_markdown(ed.document(), lambda fmt: image_markdown(
                 str(fmt.property(QTextImageFormat.ImageAltText) or ""), fmt.name()))
-            return PreviewContent(DOCUMENT, markdown, names=names)
+            return PreviewContent(DOCUMENT, markdown.rstrip("\n"), names=names)
         profile = self._profile_store.default()
         author = (profile.display_name or profile.npub_short()) if profile is not None else ""
         checks = []
