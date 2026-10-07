@@ -23,9 +23,7 @@ What must hold:
   open, each choice with its place in the list, and the pick.
 """
 
-import json
 import os
-import subprocess
 import sys
 
 import pytest
@@ -33,7 +31,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QEvent, QPoint, QPointF, Qt  # noqa: E402
+from PySide6.QtCore import QEvent, QPointF, Qt  # noqa: E402
 from PySide6.QtGui import QMouseEvent, QTextCursor  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QMainWindow  # noqa: E402
@@ -48,7 +46,7 @@ from slash_menu import SlashItem  # noqa: E402
 from tests.accessibility import unnamed_controls  # noqa: E402
 from tests.rich_text_helpers import press, type_text  # noqa: E402
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from tests.app_process import run_window_script  # noqa: E402
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -361,12 +359,7 @@ print("RESULT " + json.dumps(r))
 
 
 def test_the_window_offers_its_own_commands(tmp_path):
-    env = dict(os.environ, HOME=str(tmp_path), QT_QPA_PLATFORM="offscreen")
-    proc = subprocess.run([sys.executable, "-c", SCRIPT, REPO], env=env,
-                          capture_output=True, text=True, timeout=120)
-    line = next((l for l in proc.stdout.splitlines() if l.startswith("RESULT ")), None)
-    assert line, f"child failed:\n{proc.stdout}\n{proc.stderr}"
-    r = json.loads(line[len("RESULT "):])
+    r = run_window_script(SCRIPT, tmp_path)
     assert r["groups"] == ["Text", "Lists", "Blocks", "Insert"]
     assert r["markdown"] == "## Title\n"
     assert r["plain_menu"] is False

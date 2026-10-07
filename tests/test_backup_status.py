@@ -11,12 +11,7 @@ What must hold:
   too large to back up says so, without Try Again, which could not help.
 """
 
-import json
-import os
-import subprocess
-import sys
-
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from tests.app_process import run_window_script  # noqa: E402
 
 SCRIPT = r"""
 import json, os, sys
@@ -70,12 +65,7 @@ print("RESULT " + json.dumps(r))
 
 
 def test_the_status_bar_speaks_only_when_a_backup_fails(tmp_path):
-    env = dict(os.environ, HOME=str(tmp_path), QT_QPA_PLATFORM="offscreen")
-    proc = subprocess.run([sys.executable, "-c", SCRIPT, REPO], env=env,
-                          capture_output=True, text=True, timeout=120)
-    line = next((l for l in proc.stdout.splitlines() if l.startswith("RESULT ")), None)
-    assert line, f"child failed:\n{proc.stdout}\n{proc.stderr}"
-    r = json.loads(line[len("RESULT "):])
+    r = run_window_script(SCRIPT, tmp_path)
     assert r["quiet"] == [False, "", False]
     assert r["failed"] == [True, "Couldn't keep a backup of this document.", True]
     assert r["names"] == []

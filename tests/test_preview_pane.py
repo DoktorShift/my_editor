@@ -20,9 +20,7 @@ What must hold:
   there is room (decision Q-N).
 """
 
-import json
 import os
-import subprocess
 import sys
 
 import pytest
@@ -39,7 +37,7 @@ from preview_pane import (  # noqa: E402
 )
 from tests.accessibility import unnamed_controls  # noqa: E402
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from tests.app_process import run_window_script  # noqa: E402
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -204,12 +202,7 @@ print("RESULT " + json.dumps(r))
 
 
 def test_write_preview_and_split_in_the_window(tmp_path):
-    env = dict(os.environ, HOME=str(tmp_path), QT_QPA_PLATFORM="offscreen")
-    proc = subprocess.run([sys.executable, "-c", SCRIPT, REPO], env=env,
-                          capture_output=True, text=True, timeout=120)
-    line = next((l for l in proc.stdout.splitlines() if l.startswith("RESULT ")), None)
-    assert line, f"child failed:\n{proc.stdout}\n{proc.stderr}"
-    r = json.loads(line[len("RESULT "):])
+    r = run_window_script(SCRIPT, tmp_path)
     assert r["start"] == {"text": True, "preview": False, "checked": [True, False, False],
                           "split_enabled": True}
     assert r["switch_shown"]

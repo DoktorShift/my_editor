@@ -244,8 +244,6 @@ def test_the_editor_paints_a_box_behind_a_code_block():
 
 # -- in the window ---------------------------------------------------------------------------
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
 SCRIPT = r"""
 import json, os, sys
 sys.path.insert(0, sys.argv[1])
@@ -295,14 +293,8 @@ print("RESULT " + json.dumps(r))
 
 
 def test_insert_code_block_in_the_window(tmp_path):
-    import json
-    import subprocess
-    env = dict(os.environ, HOME=str(tmp_path), QT_QPA_PLATFORM="offscreen")
-    proc = subprocess.run([sys.executable, "-c", SCRIPT, REPO], env=env,
-                          capture_output=True, text=True, timeout=120)
-    line = next((l for l in proc.stdout.splitlines() if l.startswith("RESULT ")), None)
-    assert line, f"child failed:\n{proc.stdout}\n{proc.stderr}"
-    r = json.loads(line[len("RESULT "):])
+    from tests.app_process import run_window_script
+    r = run_window_script(SCRIPT, tmp_path)
     assert r["asked"]                                  # the language, at the caret
     assert r["titles"][0] == "Plain Text"
     assert r["style"] == "Code: Python"

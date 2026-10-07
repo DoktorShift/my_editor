@@ -24,9 +24,7 @@ What must hold:
   The setting is off until turned on, and remembered.
 """
 
-import json
 import os
-import subprocess
 import sys
 
 import pytest
@@ -42,7 +40,7 @@ from editor import HtmlEditor  # noqa: E402
 from markdown_writer import document_to_markdown, read_markdown  # noqa: E402
 from tests.rich_text_helpers import assert_round_trip, type_text  # noqa: E402
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from tests.app_process import run_window_script  # noqa: E402
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -307,12 +305,7 @@ print("RESULT " + json.dumps(r))
 
 
 def test_the_setting_is_off_until_turned_on_and_remembered(tmp_path):
-    env = dict(os.environ, HOME=str(tmp_path), QT_QPA_PLATFORM="offscreen")
-    proc = subprocess.run([sys.executable, "-c", SCRIPT, REPO], env=env,
-                          capture_output=True, text=True, timeout=120)
-    line = next((l for l in proc.stdout.splitlines() if l.startswith("RESULT ")), None)
-    assert line, f"child failed:\n{proc.stdout}\n{proc.stderr}"
-    r = json.loads(line[len("RESULT "):])
+    r = run_window_script(SCRIPT, tmp_path)
     assert r["default"] is False and r["in_menu"]
     assert r["off"] == "# off"
     assert r["on_heading"] == 1 and r["remembered"] is True
