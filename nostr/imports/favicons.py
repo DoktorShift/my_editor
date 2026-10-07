@@ -24,11 +24,13 @@ import logging
 import os
 import re
 import time
+import weakref
 from html import unescape
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 from urllib.parse import urljoin, urlsplit
 
+import shiboken6
 from PySide6.QtCore import (
     QBuffer,
     QByteArray,
@@ -128,6 +130,20 @@ def decode_icon(data: bytes) -> Optional[QImage]:
     finally:
         buffer.close()
     return best
+
+
+def _later(cache: "FaviconCache", method: str, *args) -> Callable[[Fetched], None]:
+    """What a request calls when it ends, holding the cache weakly: the
+    request is a child of the cache's network manager, and a callback
+    holding the cache would close a reference cycle through them, which
+    only the cycle collector frees, in an order Qt does not survive."""
+    ref = weakref.ref(cache)
+
+    def answered(fetched: Fetched) -> None:
+        alive = ref()
+        if alive is not None and shiboken6.isValid(alive):
+            getattr(alive, method)(*args, fetched)
+    return answered
 
 
 class FaviconCache(QObject):
@@ -240,16 +256,15 @@ class FaviconCache(QObject):
         # The page the address names, unless it is a feed: then the site's
         # home page.
         home = site + "/" if _FEEDISH.search(urlsplit(url).path or "/") else url
+        self._get(home, MAX_PAGE_BYTES, _later(self, "_page_read", site, home))
 
-        def page_read(fetched: Fetched) -> None:
-            candidates = []
-            if fetched.ok and 200 <= fetched.status < 300 and fetched.data:
-                text = fetched.data[:MAX_PAGE_BYTES].decode("utf-8", errors="replace")
-                candidates = icons_named(text, fetched.url or home)
-            candidates.append(site + "/favicon.ico")
-            self._try(site, list(dict.fromkeys(candidates)))
-
-        self._get(home, MAX_PAGE_BYTES, page_read)
+    def _page_read(self, site: str, home: str, fetched: Fetched) -> None:
+        candidates = []
+        if fetched.ok and 200 <= fetched.status < 300 and fetched.data:
+            text = fetched.data[:MAX_PAGE_BYTES].decode("utf-8", errors="replace")
+            candidates = icons_named(text, fetched.url or home)
+        candidates.append(site + "/favicon.ico")
+        self._try(site, list(dict.fromkeys(candidates)))
 
     def _try(self, site: str, candidates: List[str]) -> None:
         if not candidates:
@@ -257,23 +272,20 @@ class FaviconCache(QObject):
             return
         first, rest = candidates[0], candidates[1:]
         if first.startswith("data:"):
-            data = image_safety.data_uri_bytes(first) or b""
-            image = decode_icon(data)
+            image = decode_icon(image_safety.data_uri_bytes(first) or b"")
             if image is not None:
                 self._found(site, image)
             else:
                 self._try(site, rest)
             return
+        self._get(first, MAX_ICON_BYTES, _later(self, "_icon_read", site, rest))
 
-        def answered(fetched: Fetched) -> None:
-            image = (decode_icon(fetched.data)
-                     if fetched.ok and 200 <= fetched.status < 300 else None)
-            if image is not None:
-                self._found(site, image)
-            else:
-                self._try(site, rest)
-
-        self._get(first, MAX_ICON_BYTES, answered)
+    def _icon_read(self, site: str, rest: List[str], fetched: Fetched) -> None:
+        image = decode_icon(fetched.data) if fetched.ok and 200 <= fetched.status < 300 else None
+        if image is not None:
+            self._found(site, image)
+        else:
+            self._try(site, rest)
 
     def _found(self, site: str, image: Optional[QImage]) -> None:
         self._running.discard(site)

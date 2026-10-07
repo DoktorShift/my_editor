@@ -230,3 +230,24 @@ class TestShown:
         middle = shown.pixelColor(shown.width() // 2, shown.height() // 2)
         assert (middle.red(), middle.green(), middle.blue()) == (255, 0, 0)
         pane.deleteLater()
+
+
+def test_a_lookup_under_way_does_not_keep_the_cache(tmp_path):
+    """The request is a child of the cache's network manager: a callback
+    holding the cache would make a cycle only the collector frees (the
+    crash pattern of CP2)."""
+    import gc
+    import weakref
+    calls = []
+    icons = FaviconCache(tmp_path, get=lambda url, max_bytes, on_done: calls.append(on_done))
+    icons.icon(HOME)
+    ref = weakref.ref(icons)
+    automatic = gc.isenabled()
+    gc.disable()
+    try:
+        del icons
+        assert ref() is None
+        calls[0](Fetched(url=HOME, status=404))      # a late answer changes nothing
+    finally:
+        if automatic:
+            gc.enable()
