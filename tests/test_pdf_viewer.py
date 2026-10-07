@@ -512,3 +512,35 @@ def test_links_hit_follow_and_miss(tmp_path, qt_app, monkeypatch):
 def test_pdf_is_supported_for_open_and_drop():
     from main_window import _SUPPORTED_EXTS
     assert '.pdf' in _SUPPORTED_EXTS
+
+
+# -- the reader's toolbar ------------------------------------------------------------
+
+def test_every_control_of_the_reader_has_a_name(sample_pdf, qt_app):
+    from tests.accessibility import unnamed_controls
+    tab = _shown(PdfViewerTab(sample_pdf, is_dark=False), qt_app)
+    assert unnamed_controls(tab) == []
+    # The zoom buttons show glyphs; their names say what they do.
+    assert tab._zoom_out_btn.accessibleName() == "Zoom Out"
+    assert tab._zoom_in_btn.accessibleName() == "Zoom In"
+    assert tab._page_edit.accessibleName() == "Page"
+
+
+def test_the_tooltips_name_the_keys_the_platform_way(sample_pdf, qt_app):
+    from PySide6.QtGui import QKeySequence
+    tab = PdfViewerTab(sample_pdf, is_dark=False)
+    zoom_in = QKeySequence(QKeySequence.StandardKey.ZoomIn).toString(
+        QKeySequence.SequenceFormat.NativeText)
+    assert tab._zoom_in_btn.toolTip() == f"Zoom in ({zoom_in})"
+    fit = QKeySequence("Ctrl+0").toString(QKeySequence.SequenceFormat.NativeText)
+    assert tab._fit_width_btn.toolTip() == f"Fit page width ({fit})"
+    if sys.platform == "darwin":
+        assert "Ctrl" not in tab._fit_width_btn.toolTip()
+
+
+@pytest.mark.parametrize("dark", [True, False])
+def test_the_chosen_fit_is_marked_in_the_accent_not_orange(sample_pdf, dark):
+    tab = PdfViewerTab(sample_pdf, is_dark=dark)
+    css = tab._toolbar.styleSheet().upper()
+    assert "#FF8C00" not in css and "#E88000" not in css and "#FFB347" not in css
+    assert "QTOOLBUTTON:FOCUS" in css

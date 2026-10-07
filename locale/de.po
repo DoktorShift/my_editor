@@ -132,6 +132,7 @@ msgid "Body"
 msgstr "Text"
 
 #: format_toolbar.py:43
+#: pdf_viewer.py:166
 #, python-brace-format
 msgid "{command} ({keys})"
 msgstr "{command} ({keys})"
@@ -858,7 +859,7 @@ msgstr "R Markdown ist mit einem Fehler abgebrochen. Die Details zeigen, was es 
 #: main_window.py:3591
 #: main_window.py:3921
 #: main_window.py:3957
-#: pdf_viewer.py:970
+#: pdf_viewer.py:989
 msgid "No matches"
 msgstr "Keine Treffer"
 
@@ -1524,7 +1525,7 @@ msgid "Wrapped · {matches}"
 msgstr "Von vorn · {matches}"
 
 #: main_window.py:3962
-#: pdf_viewer.py:973
+#: pdf_viewer.py:992
 #, python-brace-format
 msgid "{count} match"
 msgid_plural "{count} matches"
@@ -1750,78 +1751,89 @@ msgstr "Ausrichtung:"
 msgid "Margins:"
 msgstr "Ränder:"
 
-#: pdf_viewer.py:580
+#: pdf_viewer.py:535
+#: pdf_viewer.py:592
+msgid "Table of contents"
+msgstr "Inhaltsverzeichnis"
+
+#: pdf_viewer.py:591
 msgid "Contents"
 msgstr "Inhalt"
 
-#: pdf_viewer.py:581
-msgid "Table of contents (F12)"
-msgstr "Inhaltsverzeichnis (F12)"
+#: pdf_viewer.py:599
+#: pdf_viewer.py:603
+msgid "Page"
+msgstr "Seite"
 
-#: pdf_viewer.py:604
-msgid "Zoom out (Ctrl+-)"
-msgstr "Verkleinern (Strg+-)"
+#: pdf_viewer.py:619
+msgid "Zoom Out"
+msgstr "Verkleinern"
 
-#: pdf_viewer.py:608
-#: pdf_viewer.py:909
+#: pdf_viewer.py:625
+#: pdf_viewer.py:928
 msgid "Fit"
 msgstr "Angepasst"
 
-#: pdf_viewer.py:615
-msgid "Zoom in (Ctrl++)"
-msgstr "Vergrößern (Strg++)"
+#: pdf_viewer.py:632
+msgid "Zoom In"
+msgstr "Vergrößern"
 
-#: pdf_viewer.py:622
+#: pdf_viewer.py:641
 msgid "Fit Width"
 msgstr "Seitenbreite"
 
-#: pdf_viewer.py:623
-msgid "Fit page width (Ctrl+0)"
-msgstr "An die Seitenbreite anpassen (Strg+0)"
-
-#: pdf_viewer.py:630
+#: pdf_viewer.py:649
 msgid "Fit Page"
 msgstr "Ganze Seite"
 
-#: pdf_viewer.py:631
+#: pdf_viewer.py:620
+msgid "Zoom out"
+msgstr "Verkleinern"
+
+#: pdf_viewer.py:633
+msgid "Zoom in"
+msgstr "Vergrößern"
+
+#: pdf_viewer.py:642
+#: shortcuts_dialog.py:100
+msgid "Fit page width"
+msgstr "An Seitenbreite anpassen"
+
+#: pdf_viewer.py:650
 #: shortcuts_dialog.py:102
 msgid "Fit whole page"
 msgstr "Ganze Seite einpassen"
 
-#: pdf_viewer.py:588
-msgid "Page"
-msgstr "Seite"
-
-#: pdf_viewer.py:681
+#: pdf_viewer.py:700
 msgid "Password required"
 msgstr "Passwort erforderlich"
 
-#: pdf_viewer.py:687
+#: pdf_viewer.py:706
 msgid "The document is password protected."
 msgstr "Das Dokument ist durch ein Passwort geschützt."
 
-#: pdf_viewer.py:695
+#: pdf_viewer.py:714
 msgid "The file could not be found."
 msgstr "Die Datei wurde nicht gefunden."
 
-#: pdf_viewer.py:696
+#: pdf_viewer.py:715
 msgid "The file is not a valid PDF."
 msgstr "Die Datei ist kein gültiges PDF."
 
-#: pdf_viewer.py:698
+#: pdf_viewer.py:717
 msgid "The document uses an unsupported security scheme."
 msgstr "Das Dokument verwendet ein nicht unterstütztes Sicherheitsverfahren."
 
-#: pdf_viewer.py:700
+#: pdf_viewer.py:719
 msgid "The document could not be opened."
 msgstr "Das Dokument konnte nicht geöffnet werden."
 
-#: pdf_viewer.py:801
+#: pdf_viewer.py:820
 #, python-brace-format
 msgid "Page {page} / {total}"
 msgstr "Seite {page} / {total}"
 
-#: pdf_viewer.py:682
+#: pdf_viewer.py:701
 #, python-brace-format
 msgid ""
 "'{name}' is password protected.\n"
@@ -1830,7 +1842,7 @@ msgstr ""
 "„{name}“ ist durch ein Passwort geschützt.\n"
 "Gib das Passwort ein, um es zu öffnen:"
 
-#: pdf_viewer.py:906
+#: pdf_viewer.py:925
 #, python-brace-format
 msgid "{percent}%"
 msgstr "{percent} %"
@@ -2346,10 +2358,6 @@ msgstr "Vergrößern (auch Strg+Mausrad)"
 #: shortcuts_dialog.py:99
 msgid "Zoom out (also Ctrl+wheel)"
 msgstr "Verkleinern (auch Strg+Mausrad)"
-
-#: shortcuts_dialog.py:100
-msgid "Fit page width"
-msgstr "An Seitenbreite anpassen"
 
 #: shortcuts_dialog.py:101
 msgid "Actual size"
