@@ -21,7 +21,7 @@ Reading:
 - Notes come a page at a time, and every relay answers a page with its
   own newest notes. The list is complete only down to the oldest note of
   the relay that sent a full page and went least far back (the horizon,
-  :func:`notes_horizon`); older notes stay out of the list until Load
+  queries.page_horizon); older notes stay out of the list until Load
   More moves it, so a page never opens a gap in the middle. A relay that
   sent a full page has older notes: when it does not answer Load More,
   nothing moves and Load More says it failed, rather than the list
@@ -59,7 +59,7 @@ from .drafts import derive_title_from_markdown
 from .outbox.policy import created_at_of, dedupe_relays, is_newer
 from .publish_pipeline import mentioned_pubkeys
 from .publisher import published_at_of
-from .queries import Fetched, fetch_events
+from .queries import Fetched, fetch_events, full_pages, page_horizon
 
 NOTE_KIND = 1
 ARTICLE_KIND = 30023
@@ -178,35 +178,6 @@ def _tag(event: dict, name: str) -> str:
 # --------------------------------------------------------------------------- #
 # Rules                                                                       #
 # --------------------------------------------------------------------------- #
-
-def notes_horizon(fetched: Fetched, notes: Iterable[dict], *,
-                  page_size: int = PAGE_SIZE) -> Optional[int]:
-    """How far back a page of notes is complete, None when it is all.
-
-    Each relay answers with its own newest ``page_size`` notes. One that
-    sent fewer has nothing older; one that sent a full page may have,
-    from before its oldest note. So the page is complete down to the
-    oldest note of the relay that sent a full page and went least far
-    back, and the next page asks for notes from there on.
-    """
-    full = _full_pages(fetched, notes, page_size=page_size)
-    return max(full.values()) if full else None
-
-
-def full_relays(fetched: Fetched, notes: Iterable[dict], *,
-                page_size: int = PAGE_SIZE) -> Set[str]:
-    """The relays that sent a full page: they may have older notes."""
-    return set(_full_pages(fetched, notes, page_size=page_size))
-
-
-def _full_pages(fetched: Fetched, notes: Iterable[dict], *, page_size: int) -> Dict[str, int]:
-    """relay -> the oldest note of the full page it sent."""
-    times: Dict[str, List[int]] = {}
-    for note in notes:
-        for relay in fetched.relays_of(note["id"]):
-            times.setdefault(relay, []).append(int(note["created_at"]))
-    return {relay: min(found) for relay, found in times.items() if len(found) >= page_size}
-
 
 @dataclass(frozen=True)
 class _Deletions:
@@ -494,8 +465,8 @@ class PublishedList(QObject):
         self._requests = dict(checked.found)
         self._absorb(fetched)
         notes = [e for e in fetched.events if e["kind"] == NOTE_KIND]
-        self._horizon = notes_horizon(fetched, notes)
-        self._full = full_relays(fetched, notes)
+        self._horizon = page_horizon(fetched, notes, PAGE_SIZE)
+        self._full = set(full_pages(fetched, notes, PAGE_SIZE))
         self._has_more = self._horizon is not None
         self._more_failed = False
         self._partial = (len(fetched.answered) < len(relays)
@@ -574,8 +545,8 @@ class PublishedList(QObject):
         self._absorb(fetched)
         self._partial = self._partial or self._missing_some(fetched, checked)
         notes = [e for e in fetched.events if e["kind"] == NOTE_KIND]
-        reached = notes_horizon(fetched, notes)
-        self._full = full_relays(fetched, notes)
+        reached = page_horizon(fetched, notes, PAGE_SIZE)
+        self._full = set(full_pages(fetched, notes, PAGE_SIZE))
         if reached is None:
             self._horizon, self._has_more = None, False
         else:

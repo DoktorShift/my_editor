@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QObject, QTimer
 
@@ -56,6 +56,32 @@ class Fetched:
     def relays_of(self, event_id: str) -> Tuple[str, ...]:
         """The relays that sent the event with this id."""
         return self.seen_on.get(event_id, ())
+
+
+def full_pages(fetched: Fetched, events: Iterable[dict], page_size: int) -> Dict[str, int]:
+    """relay -> the oldest of the events it sent, for each relay that sent
+    a full page (``page_size`` or more, newest first): it may have older
+    ones."""
+    times: Dict[str, List[int]] = {}
+    for event in events:
+        for relay in fetched.relays_of(event["id"]):
+            times.setdefault(relay, []).append(int(event["created_at"]))
+    return {relay: min(found) for relay, found in times.items() if len(found) >= page_size}
+
+
+def page_horizon(fetched: Fetched, events: Iterable[dict], page_size: int) -> Optional[int]:
+    """How far back a page of newest-first events is complete; None when
+    it is all there is.
+
+    Each relay answers with its own newest ``page_size`` events. One that
+    sent fewer has nothing older; one that sent a full page may have,
+    from before its oldest event. So the page is complete down to the
+    oldest event of the relay that sent a full page and went least far
+    back, and the next page asks from there (``until``, which includes
+    that second).
+    """
+    full = full_pages(fetched, events, page_size)
+    return max(full.values()) if full else None
 
 
 def fetch_events(

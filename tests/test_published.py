@@ -26,9 +26,9 @@ from nostr import bech32, events, published  # noqa: E402
 from nostr.deletion import address, build_deletion  # noqa: E402
 from nostr.published import (  # noqa: E402
     DELETING, LOADING, NOT_DELETED, PAGE_SIZE, READY, SIGNED_OUT, UNREACHABLE,
-    PublishedItem, PublishedList, deletion_requests, notes_horizon,
+    PublishedItem, PublishedList, deletion_requests,
 )
-from nostr.queries import Fetched  # noqa: E402
+from nostr.queries import Fetched, page_horizon  # noqa: E402
 from tests.outbox_fakes import (  # noqa: E402
     NOW, OTHER_PK, OTHER_SK, PK, SK, FakeClient, FakeRelayDirectory, FakeSessionPool,
     Profile, settle, signed,
@@ -529,9 +529,9 @@ def test_the_horizon_is_where_every_relay_is_complete():
     b = [{"id": f"b{n}", "created_at": 100 - 10 * n} for n in range(3)]
     fetched = Fetched(seen_on={**{e["id"]: ("wss://a",) for e in a},
                                **{e["id"]: ("wss://b",) for e in b}})
-    assert notes_horizon(fetched, a + b, page_size=3) == 98
-    assert notes_horizon(fetched, a + b[:2], page_size=3) == 98
-    assert notes_horizon(fetched, a[:2] + b[:2], page_size=3) is None
+    assert page_horizon(fetched, a + b, 3) == 98
+    assert page_horizon(fetched, a + b[:2], 3) == 98
+    assert page_horizon(fetched, a[:2] + b[:2], 3) is None
 
 
 def test_deletion_requests_are_asked_in_bounded_pieces():
