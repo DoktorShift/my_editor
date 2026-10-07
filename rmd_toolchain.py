@@ -167,10 +167,38 @@ def find_pandoc() -> tuple[str | None, str]:
     return None, "missing"
 
 
+def program_environment() -> dict[str, str]:
+    """The environment for a program of the system (R, pandoc, LaTeX): the
+    person's own, as the app was given it.
+
+    A packaged Linux build (PyInstaller) puts its own libraries first in
+    LD_LIBRARY_PATH and keeps what was there in LD_LIBRARY_PATH_ORIG. A
+    system program started with that would load the bundle's copies of
+    libz, libssl or libstdc++ instead of its own, so, as PyInstaller's
+    documentation asks, the original comes back, or the variable goes when
+    there was none. Run from source, nothing is changed.
+    """
+    env = os.environ.copy()
+    if getattr(sys, "frozen", False):
+        original = env.pop("LD_LIBRARY_PATH_ORIG", None)
+        if original is not None:
+            env["LD_LIBRARY_PATH"] = original
+        else:
+            env.pop("LD_LIBRARY_PATH", None)
+    return env
+
+
+def r_environment() -> dict[str, str]:
+    """R's environment: the person's own (program_environment), with the
+    app's private library, where rmarkdown and tinytex are installed."""
+    env = program_environment()
+    env["R_LIBS_USER"] = _LIBRARY_DIR
+    return env
+
+
 def _run_r(rscript: str, expr: str, timeout: int = 60,
            extra_env: dict | None = None) -> subprocess.CompletedProcess:
-    env = os.environ.copy()
-    env["R_LIBS_USER"] = _LIBRARY_DIR
+    env = r_environment()
     if extra_env:
         env.update(extra_env)
     kwargs = {}
@@ -237,14 +265,16 @@ def ready_to_knit(to_pdf: bool = False) -> bool:
     return base and (s["latex"].present if to_pdf else True)
 
 
-def knit_environment(env):
-    """Augment a QProcessEnvironment for KnitRunner."""
+def knit_environment() -> dict[str, str]:
+    """R's environment for a knit (KnitRunner): r_environment, with the
+    pandoc found first on PATH and handed to rmarkdown, the way RStudio
+    hands it its own."""
+    env = r_environment()
     pandoc_dir, _source = find_pandoc()
     if pandoc_dir:
-        env.insert("RSTUDIO_PANDOC", pandoc_dir)
-        env.insert("PATH", pandoc_dir + os.pathsep + env.value("PATH", ""))
+        env["RSTUDIO_PANDOC"] = pandoc_dir
+        env["PATH"] = pandoc_dir + os.pathsep + env.get("PATH", "")
     os.makedirs(_LIBRARY_DIR, exist_ok=True)
-    env.insert("R_LIBS_USER", _LIBRARY_DIR)
     return env
 
 
@@ -444,7 +474,7 @@ def _install_r_linux(log, cancel=None) -> str:
     log(_("Installing R via the system package manager:") + f"\n  {pm_cmd}")
     proc = subprocess.Popen(["pkexec", "sh", "-c", pm_cmd],
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            text=True)
+                            text=True, env=program_environment())
     for line in proc.stdout:
         if cancel is not None and cancel.is_set():
             proc.kill()
@@ -561,8 +591,7 @@ def install_tinytex(log=None, cancel=None) -> None:
 
 
 def _stream_r(rscript: str, expr: str, log, cancel=None) -> None:
-    env = os.environ.copy()
-    env["R_LIBS_USER"] = _LIBRARY_DIR
+    env = r_environment()
     kwargs = {}
     if sys.platform == "win32":
         kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
