@@ -106,6 +106,7 @@ def stylesheet(is_dark: bool) -> str:
     }}
     QPushButton#link:hover {{ text-decoration: underline; }}
     QPushButton#link:focus {{ border-color: {theme.focus_ring_color(is_dark)}; }}
+    QPushButton#link[tone="destructive"] {{ color: {theme.attention_color(is_dark)}; }}
     QPushButton#link:disabled {{ color: {muted}; }}
     QRadioButton {{ font-weight: 600; }}
     QProgressBar {{

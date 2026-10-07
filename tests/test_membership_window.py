@@ -944,3 +944,18 @@ def test_a_page_is_never_cut_off_at_the_side(long_note):
     assert win._scroll.geometry().right() <= win.width()
     assert win._pay_intro.width() <= win._scroll.viewport().width()
     win.close()
+
+
+def test_the_data_links_wrap_whole_and_delete_is_said_in_red(qt_app):
+    """German link titles clipped at both ends of one row; they wrap now.
+    Deleting the membership data is said in the destructive red."""
+    win = window(FakeApi(), known_member=True)
+    win.show()
+    qt_app.processEvents()
+    try:
+        for link in (win._details_link, win._export_link, win._erase_link):
+            if link.isVisible():
+                assert link.width() >= link.sizeHint().width(), link.text()
+        assert win._erase_link.property("tone") == "destructive"
+    finally:
+        win.close()

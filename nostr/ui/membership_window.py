@@ -67,6 +67,7 @@ from nostr.qr import make_qr_pixmap
 from nostr.ui.assistant import (
     DEFAULT, LEADING, NORMAL, AssistantWindow, busy_bar, link_button, page, text_label,
 )
+from nostr.ui.flow_layout import FlowLayout
 
 # Pages.
 OVERVIEW = "overview"
@@ -914,17 +915,18 @@ class MembershipWindow(AssistantWindow):
         col.addWidget(self._member_note)
         col.addStretch(1)
 
-        links = QHBoxLayout()
-        links.setSpacing(16)
+        # In rows that wrap, so longer words (German) never clip them.
+        links = FlowLayout(spacing=16)
         self._receipt_link = link_button(_("Receipt"), self._open_receipt)
         self._details_link = link_button(
             _("Show Membership Details"), lambda: self._load_status(back=self._show_member))
         self._export_link = link_button(_("Export My Data…"), self._export)
         self._erase_link = link_button(_("Delete My Data…"), self._erase)
+        # Deleting is said in red, as a destructive button is.
+        self._erase_link.setProperty("tone", "destructive")
         for link in (self._receipt_link, self._details_link, self._export_link,
                      self._erase_link):
             links.addWidget(link)
-        links.addStretch(1)
         col.addLayout(links)
         self.add_page(MEMBER, body)
 
