@@ -260,10 +260,16 @@ def test_the_cell_is_tall_enough_for_the_state_line(tmp_path, monkeypatch):
     assert height >= dialog_module._THUMB_SIZE + longest * 16
 
 
-def test_the_tile_still_carries_size_and_hash():
+def test_the_tile_carries_size_and_when_it_was_uploaded_not_a_hash():
     label = _short_label(media(), PRIVATE)
-    assert CIPHER_SHA[:8] in label
+    assert CIPHER_SHA[:8] not in label             # a hash prefix tells nobody anything
     assert "B" in label
+    uploaded = MediaFile(hash=CIPHER_SHA, url="https://one.example/x", mime_type="image/png",
+                         size=2048, uploaded_at_ms=1_799_000_000_000)
+    lines = _short_label(uploaded, PUBLIC).splitlines()
+    assert lines[0].strip() == "2 KB" and "2027" in lines[1]
+    unknown = MediaFile(hash=CIPHER_SHA, url="https://one.example/x", mime_type="image/png")
+    assert _short_label(unknown, PUBLIC).splitlines()[1] == "PNG"
 
 
 # --------------------------------------------------------------------- #

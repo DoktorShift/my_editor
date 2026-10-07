@@ -36,7 +36,7 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
-from PySide6.QtCore import QBuffer, QIODevice, QRect, QSize, Qt, Signal, QUrl
+from PySide6.QtCore import QBuffer, QDateTime, QIODevice, QRect, QSize, Qt, Signal, QUrl
 from PySide6.QtGui import (
     QAction,
     QColor,
@@ -167,8 +167,9 @@ QComboBox QAbstractItemView::item:selected { background: #094771; color: #FFFFFF
 QComboBox QAbstractItemView::item:hover { background: #2A2D2E; }
 QPushButton#media_primary { background: #094771; border-color: #1177BB; color: #FFFFFF; }
 QPushButton#media_primary:hover { background: #1177BB; }
-QPushButton#media_destructive { background: #5A1D1D; border-color: #8B2F2F; color: #FFFFFF; }
-QPushButton#media_destructive:hover { background: #8B2F2F; }
+QPushButton#media_destructive { color: #FF6B5E; }
+QPushButton#media_destructive:hover { border-color: #FF6B5E; }
+QPushButton#media_destructive:disabled { color: #6A6A6A; }
 QListWidget {
     background: #1E1E1E;
     color: #D4D4D4;
@@ -292,8 +293,9 @@ QComboBox QAbstractItemView::item:selected { background: #CCE4F7; color: #003366
 QComboBox QAbstractItemView::item:hover { background: #F2F2F2; }
 QPushButton#media_primary { background: #0066CC; border-color: #0055AA; color: #FFFFFF; }
 QPushButton#media_primary:hover { background: #0077E0; }
-QPushButton#media_destructive { background: #C0392B; border-color: #922B22; color: #FFFFFF; }
-QPushButton#media_destructive:hover { background: #D54839; }
+QPushButton#media_destructive { color: #C0392B; }
+QPushButton#media_destructive:hover { border-color: #C0392B; }
+QPushButton#media_destructive:disabled { color: #BBBBBB; }
 QListWidget {
     background: #FAFAFA;
     color: #333333;
@@ -497,10 +499,12 @@ _paste_counter = itertools.count(1)
 
 
 def _format_size(byte_count: int) -> str:
+    """A file's size the way a person reads it, in the units the storage
+    line beside it uses: 117 KB, 1.2 MB."""
     if byte_count >= 1024 * 1024:
-        return _decimal(f"{byte_count / (1024 * 1024):.1f} MiB")
+        return _decimal(f"{byte_count / (1024 * 1024):.1f} MB")
     if byte_count >= 1024:
-        return _decimal(f"{byte_count / 1024:.1f} KiB")
+        return f"{round(byte_count / 1024)} KB"
     return f"{byte_count} B"
 
 
@@ -591,7 +595,7 @@ class _PreviewDialog(QDialog):
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle(_("Media preview"))
+        self.setWindowTitle(_("Preview"))
         # Default to roughly half of a typical 1080p panel so the image
         # has real room. Minimum keeps the controls usable on small
         # laptops.
@@ -646,7 +650,7 @@ class _PreviewDialog(QDialog):
         self._download_btn.clicked.connect(self._download)
         action_row.addWidget(self._download_btn)
 
-        self._open_btn = QPushButton(_("Open in browser"))
+        self._open_btn = QPushButton(_("Open in Browser"))
         self._open_btn.clicked.connect(self._open_browser)
         action_row.addWidget(self._open_btn)
 
@@ -783,7 +787,7 @@ class MediaLibraryDialog(QDialog):
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle(_("Media library") if not pick_mode else _("Insert image"))
+        self.setWindowTitle(_("Media Library") if not pick_mode else _("Insert Image"))
         # A friendly name for a server origin, when it has one (the
         # members' server of an association). None means "use the host".
         self._server_label = server_label or (lambda _origin: None)
@@ -996,18 +1000,12 @@ class MediaLibraryDialog(QDialog):
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(10)
 
-        header = QLabel(_("Your Nostr media (Blossom)"))
-        font = header.font()
-        font.setPointSize(font.pointSize() + 1)
-        font.setBold(True)
-        header.setFont(font)
-        layout.addWidget(header)
-
         # Filter / sort row + Upload / Refresh.
         toolbar = QHBoxLayout()
         toolbar.setSpacing(8)
 
         self._filter_combo = _styled_combo()
+        _name(self._filter_combo, _("Show"))
         self._filter_combo.addItem(_("All files"), "all")
         self._filter_combo.addItem(_("Images"), "image")
         self._filter_combo.addItem(_("Videos"), "video")
@@ -1016,6 +1014,7 @@ class MediaLibraryDialog(QDialog):
         toolbar.addWidget(self._filter_combo)
 
         self._sort_combo = _styled_combo()
+        _name(self._sort_combo, _("Sort"))
         self._sort_combo.addItem(_("Newest first"), "newest")
         self._sort_combo.addItem(_("Oldest first"), "oldest")
         self._sort_combo.addItem(_("Largest first"), "largest")
@@ -1026,7 +1025,7 @@ class MediaLibraryDialog(QDialog):
         # Which server's files to show. Rebuilt whenever the set of
         # servers changes (a membership that resolves adds its server).
         self._source_combo = _styled_combo()
-        self._source_combo.setAccessibleName(_("Show files from"))
+        _name(self._source_combo, _("Show files from"))
         self._source_combo.addItem(_("All servers"), "")
         self._source_combo.currentIndexChanged.connect(self._on_source_changed)
         toolbar.addWidget(self._source_combo)
@@ -1127,6 +1126,7 @@ class MediaLibraryDialog(QDialog):
 
         # Grid.
         self._grid = QListWidget()
+        self._grid.setAccessibleName(_("Files"))
         self._grid.setViewMode(QListWidget.IconMode)
         self._grid.setIconSize(QSize(_THUMB_SIZE, _THUMB_SIZE))
         self._grid.setResizeMode(QListWidget.Adjust)
@@ -1141,6 +1141,7 @@ class MediaLibraryDialog(QDialog):
         self._grid.customContextMenuRequested.connect(self._on_grid_context)
         self._grid.itemDoubleClicked.connect(self._on_item_activated)
         self._grid.itemSelectionChanged.connect(self._refresh_pick_notice)
+        self._grid.itemSelectionChanged.connect(self._update_selection_actions)
         layout.addWidget(self._grid, 1)
 
         # Empty state placeholder (shown when grid is empty).
@@ -1149,7 +1150,9 @@ class MediaLibraryDialog(QDialog):
         ))
         self._empty_label.setObjectName("media_empty")
         self._empty_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self._empty_label)
+        # It stands where the grid stands, and takes the room the grid
+        # would, so an empty library does not spread its rows apart.
+        layout.addWidget(self._empty_label, 1)
 
         # Discoverability hint, surfaces the double-click / right-click /
         # paste / delete affordances that aren't obvious from the grid alone.
@@ -1190,6 +1193,8 @@ class MediaLibraryDialog(QDialog):
             alt_label = QLabel(_("Alt text (optional):"))
             alt_row.addWidget(alt_label)
             self._alt_edit = QLineEdit()
+            alt_label.setBuddy(self._alt_edit)
+            self._alt_edit.setAccessibleName(_("Alt text"))
             self._alt_edit.setPlaceholderText(_("Describe the image for screen readers"))
             self._alt_edit.setClearButtonEnabled(True)
             alt_row.addWidget(self._alt_edit, 1)
@@ -1231,7 +1236,7 @@ class MediaLibraryDialog(QDialog):
             self._download_btn = QPushButton(_("Download"))
             self._download_btn.clicked.connect(self._on_download_clicked)
             bottom.addWidget(self._download_btn)
-            self._open_btn = QPushButton(_("Open in browser"))
+            self._open_btn = QPushButton(_("Open in Browser"))
             self._open_btn.clicked.connect(self._on_open_browser_clicked)
             bottom.addWidget(self._open_btn)
             self._delete_btn = QPushButton(_("Delete"))
@@ -1243,6 +1248,7 @@ class MediaLibraryDialog(QDialog):
             bottom.addWidget(self._close_btn)
 
         layout.addLayout(bottom)
+        self._update_selection_actions()
 
     # ------------------------------------------------------------------
     # Keyboard shortcuts
@@ -1346,6 +1352,19 @@ class MediaLibraryDialog(QDialog):
         # to go with it rather than describe a file that is no longer
         # picked.
         self._refresh_pick_notice()
+        self._update_selection_actions()
+
+    def _update_selection_actions(self) -> None:
+        """What acts on chosen files is dimmed while none is chosen, as the
+        HIG asks of a command that cannot act (it used to answer "Select a
+        file first." after the click, with Delete always red and ready)."""
+        chosen = bool(self._grid.selectedItems())
+        names = (("_select_btn",) if self._pick_mode
+                 else ("_copy_btn", "_download_btn", "_open_btn", "_delete_btn"))
+        for name in names:
+            button = getattr(self, name, None)
+            if button is not None:
+                button.setEnabled(chosen)
 
     def _add_grid_item(self, media: MediaFile) -> None:
         state = self._shown_state(media.hash)
@@ -1536,7 +1555,7 @@ class MediaLibraryDialog(QDialog):
                     "*.mp3 *.wav *.ogg *.pdf")
         paths, _filter = QFileDialog.getOpenFileNames(
             self,
-            _("Upload to Blossom"),
+            _("Choose Files to Upload"),
             "",
             _("Media files ({patterns})").format(patterns=patterns) + ";;" + _("All files (*)"),
         )
@@ -1581,8 +1600,8 @@ class MediaLibraryDialog(QDialog):
         if not confirm_destructive(
                 self,
                 title=ngettext(
-                    "Delete {count} file from your Blossom servers?",
-                    "Delete {count} files from your Blossom servers?",
+                    "Delete {count} file from your media servers?",
+                    "Delete {count} files from your media servers?",
                     count,
                 ).format(count=count),
                 message=message,
@@ -1635,12 +1654,12 @@ class MediaLibraryDialog(QDialog):
         act_preview = menu.addAction(_("Preview"))
         menu.addSeparator()
         act_copy = menu.addAction(_("Copy URL"))
-        act_open = menu.addAction(_("Open in browser"))
+        act_open = menu.addAction(_("Open in Browser"))
         act_download = menu.addAction(_("Download…"))
         # Per-server copy submenu, useful when a file is mirrored on
         # several servers and the user wants a specific CDN.
         if len(media.urls) > 1:
-            per_server = menu.addMenu(_("Copy URL from server"))
+            per_server = menu.addMenu(_("Copy URL from Server"))
             for entry in media.urls:
                 server = entry.get("server", "")
                 url = entry.get("url", "")
@@ -2006,12 +2025,29 @@ def _meta_text(media: MediaFile) -> str:
     )
 
 
-def _short_label(media: MediaFile, state: str = PUBLIC) -> str:
-    """Card label: size, hash prefix, and the file's visibility.
+def _name(combo: QComboBox, name: str) -> None:
+    """Name a pop-up menu and the list it opens, for a screen reader."""
+    combo.setAccessibleName(name)
+    combo.view().setAccessibleName(name)
 
-    Filenames aren't carried by Blossom, so the hash prefix is our best
-    stable identifier; we put the more useful info (size + mirror count)
-    on the first line where users actually look.
+
+def _identity_line(media: MediaFile) -> str:
+    """The tile's second line: the day the file was uploaded, or, without
+    one, its type ("PNG"). Media servers keep no file names, and the hash
+    prefix that stood here told nobody anything; the picture itself is
+    how people tell images apart."""
+    if media.uploaded_at_ms > 0:
+        uploaded = QDateTime.fromMSecsSinceEpoch(int(media.uploaded_at_ms))
+        if uploaded.isValid():
+            return i18n.format_day(uploaded, short_month=True)
+    kind = (media.mime_type or "").split("/")[-1].split("+")[0].split(";")[0].upper()
+    return _("File") if kind in ("", "OCTET-STREAM") else kind
+
+
+def _short_label(media: MediaFile, state: str = PUBLIC) -> str:
+    """Card label: size, when it was uploaded (or its type), and the
+    file's visibility (see _identity_line). The size and mirror count are
+    on the first line, where people look.
 
     The third line is the visibility word, and an ordinary public blob
     simply does not have one: everything in a plain library is public, so
@@ -2021,7 +2057,7 @@ def _short_label(media: MediaFile, state: str = PUBLIC) -> str:
     """
     server_count = len(media.urls)
     badge = f"· {server_count}×" if server_count > 1 else ""
-    lines = [f"{_format_size(media.size)} {badge}", f"{media.hash[:8]}…"]
+    lines = [f"{_format_size(media.size)} {badge}", _identity_line(media)]
     state_label = _STATE_LABELS.get(state, "")
     if state_label:
         lines.append(state_label)

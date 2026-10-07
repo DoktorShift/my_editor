@@ -195,7 +195,7 @@ def test_a_file_not_yet_checked_is_warned_about_while_the_library_loads(
     dialog._grid.selectAll()
     dialog._on_delete_clicked()
     assert asked and asked[0]["message"].startswith("This may be a private file")
-    assert asked[0]["title"] == "Delete 1 file from your Blossom servers?"
+    assert asked[0]["title"] == "Delete 1 file from your media servers?"
 
 
 def test_a_checked_public_file_gets_the_plain_warning(tmp_path, monkeypatch):
