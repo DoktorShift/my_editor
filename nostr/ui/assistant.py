@@ -373,7 +373,10 @@ class _ShownPageStack(QStackedWidget):
 
     QStackedWidget asks for the room of its largest page, so a narrow page
     would be laid out as wide as the widest one and cut off at the side of
-    a window sized for it."""
+    a window sized for it. The same goes for the height a page needs at a
+    given width, which the scroll area asks for: answered for the tallest
+    page, a short one scrolled (a waiting page showed only a scroll bar,
+    its words far below, out of sight)."""
 
     def sizeHint(self) -> QSize:
         page = self.currentWidget()
@@ -382,6 +385,10 @@ class _ShownPageStack(QStackedWidget):
     def minimumSizeHint(self) -> QSize:
         page = self.currentWidget()
         return page.minimumSizeHint() if page is not None else super().minimumSizeHint()
+
+    def heightForWidth(self, width: int) -> int:  # noqa: N802, Qt's name
+        page = self.currentWidget()
+        return page.heightForWidth(width) if page is not None else super().heightForWidth(width)
 
 
 class AssistantWindow(QDialog):
