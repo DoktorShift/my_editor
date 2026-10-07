@@ -163,7 +163,8 @@ rep.check("the avatar is downloaded, decoded and cached",
           ok and got.last[1].width() == 48
           and any((nd.HOME / ".cache/my_editor/nostr_avatars").glob(f"{alice.user_pubkey}-*")),
           str(got.last))
-for bad_url in ("http://127.0.0.1:7811/avatar.png", "javascript:alert(1)", "file:///etc/hosts"):
+for bad_url in (f"http://127.0.0.1:{nd.FAKE_WEB_PORT}/avatar.png", "javascript:alert(1)",
+                "file:///etc/hosts"):
     got = nd.Catch(loader.ready, loader.failed)
     loader.load(bob, bad_url)
     got.wait(5_000)

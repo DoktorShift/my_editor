@@ -78,7 +78,9 @@ RELAY_NAMES = {RNOSTR: "rnostr", NRS: "nostr-rs-relay", STRFRY: "strfry",
 BLOSSOM_A = "http://localhost:7801"     # default server 1 (primary)
 BLOSSOM_B = "http://localhost:7802"     # default server 2 (mirror)
 BLOSSOM_M = "http://localhost:7803"     # stands in for the members' Blossom server
-FAKE_WEB_PORT = 7811
+# Each run starts its own web server; runs at the same time need ports of
+# their own, so NDAK_WEB_PORT moves it (the relays above are shared).
+FAKE_WEB_PORT = int(os.environ.get("NDAK_WEB_PORT") or 7811)
 FAKE_WEB = f"http://localhost:{FAKE_WEB_PORT}"   # roster, prices, feeds, nostr.json
 SIDECAR_PORT = 7812
 ASSOCIATION_PORT = 7813
