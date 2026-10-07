@@ -22,8 +22,8 @@ Write in the editor, hit publish, approve on your phone. The document goes out a
 
 ### What you can publish
 
-- **Short notes** (kind 1, `Ctrl+Shift+P`): the editor's content as plain text, since that is what apps show for a note. Bold and italic are left out; list markers and link addresses stay.
-- **Long-form articles** (NIP-23 kind 30023, `Ctrl+Shift+A`): the body is the same Markdown a `.md` save writes (`markdown_writer.py`): bold, italic, strikethrough, inline code, links, headings, lists, quotes, code blocks, tables and task lists reach Nostr. Underline and colors have no Markdown and stay in local files. Lines typed one under the other become paragraphs of their own (NIP-23 asks for no hard line breaks), and Markdown typed by hand (`## Heading`, `[label](url)`, a code fence) is published as typed. Footnotes are kept as the text Markdown writes for them (`[^1]` and `[^1]: the note`) and published as such; the preview draws them as most reading apps do and says which apps show them as typed. An article draft or `.md` file that holds something the editor cannot show (raw HTML, an image without alt text, a footnote of two paragraphs, a tab in code, code inside a list item, aligned table columns) opens as its Markdown text and is published exactly as written, so nothing is lost. Title, summary, slug (the `d`-tag identifier), cover image, and hashtags come with it. Re-publishing with the same slug replaces the previous version, so an article stays addressable as one `naddr1…` link across edits.
+- **Short notes** (kind 1, `Nostr > Publish as Note…`): the editor's content as plain text, since that is what apps show for a note. Bold and italic are left out; list markers and link addresses stay.
+- **Long-form articles** (NIP-23 kind 30023, `Nostr > Publish as Article…`): the body is the same Markdown a `.md` save writes (`markdown_writer.py`): bold, italic, strikethrough, inline code, links, headings, lists, quotes, code blocks, tables and task lists reach Nostr. Underline and colors have no Markdown and stay in local files. Lines typed one under the other become paragraphs of their own (NIP-23 asks for no hard line breaks), and Markdown typed by hand (`## Heading`, `[label](url)`, a code fence) is published as typed. Footnotes are kept as the text Markdown writes for them (`[^1]` and `[^1]: the note`) and published as such; the preview draws them as most reading apps do and says which apps show them as typed. An article draft or `.md` file that holds something the editor cannot show (raw HTML, an image without alt text, a footnote of two paragraphs, a tab in code, code inside a list item, aligned table columns) opens as its Markdown text and is published exactly as written, so nothing is lost. Title, summary, slug (the `d`-tag identifier), cover image, and hashtags come with it. Re-publishing with the same slug replaces the previous version, so an article stays addressable as one `naddr1…` link across edits.
 - **The date an article first went out** stays with it through every edit: readers date the article by it. MyEditor takes it from the article's draft, or from what this computer remembers of its own publications (`~/.config/my_editor/article_first_published.json`), or asks the relays you publish to, the ones you read from and the indexers. An article none of them holds is new and dated today, as long as at least one of the relays you publish to (and an indexer) answered: one relay that is down does not hold up a new article. When none of the relays you publish to answers, nobody can tell whether the article went out before, so MyEditor asks you: **Try Again**, **Publish as New** (today's date) or **Cancel**. A draft saved after publishing keeps the date, so another device that opens the draft keeps it too.
 
 Both flows display a `Published from MyEditor` client tag so readers that honour NIP-89 can show which app produced the note.
@@ -117,7 +117,7 @@ In-progress work is saved as a **NIP-37 draft**: a kind 31234 event whose body i
 
 ### How to use it
 
-- **`Ctrl+Shift+D`** opens the Drafts panel on the right.
+- **`Nostr > Drafts…`** opens the Drafts panel on the right.
 - **`Ctrl+Shift+S`** asks where to save the current tab: local file or private Nostr draft. The choice can be remembered per tab.
 - **`Ctrl+S`** on a draft-bound tab silently re-saves the draft. Same shortcut, no questions, exactly like saving a local file.
 - Double-click a row to open the draft in a new tab. Right-click for Publish, Copy event id, or Delete.
@@ -151,9 +151,9 @@ Upload images, video, and audio to your own Blossom servers, browse them in a bu
 
 ### Capabilities
 
-- **Library dialog** (`Ctrl+Shift+M`): sortable, filterable grid of every blob your pubkey hosts on the configured servers. Per-file: preview, copy URL, download, open in browser, delete (across all mirrors).
+- **Library dialog** (`Nostr > Media Library…`): sortable, filterable grid of every blob your pubkey hosts on the configured servers. Per-file: preview, copy URL, download, open in browser, delete (across all mirrors).
 - **Upload** four ways: the **Upload** button, drag a file onto the drop zone, **paste** an image with `Ctrl+V` while the grid has focus, or drag an image onto the editor itself.
-- **Insert into notes** (`Ctrl+Shift+I`): pick from the library; alt text is offered inline. Markdown tabs get `![alt](url)`; rich-text tabs embed the cached image. Pasted screenshots auto-upload and auto-insert at the cursor.
+- **Insert into notes** (`Nostr > Insert Image…`, also in the Insert menu while an account is in use): pick from the library; alt text is offered inline. Markdown tabs get `![alt](url)`; rich-text tabs embed the cached image. Pasted screenshots auto-upload and auto-insert at the cursor.
 - **Hero image for articles**: the Publish Article dialog has a *Cover image* row with a built-in picker; selected images upload to Blossom in the same flow.
 - **Mirroring by default**: every upload is mirrored to all configured servers in parallel. Deletes fan out across every server the blob lives on; success on one is treated as success.
 - **Dedupe by sha256**: the same file across N servers shows up as one entry; the tile shows a *Nx* badge so you know how widely it's mirrored.

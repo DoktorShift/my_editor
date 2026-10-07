@@ -654,7 +654,7 @@ class PublishArticleDialog(QDialog):
         # similar so users know where the asset comes from without us
         # having to write docs.
         hint = QLabel(
-            _("Picked images upload to your Blossom servers automatically.")
+            _("Pictures you pick are uploaded to your media servers.")
             if self._media_store is not None
             else _("Paste an image URL hosted anywhere on the public web.")
         )
@@ -967,7 +967,8 @@ class PublishArticleDialog(QDialog):
         accepted = sum(1 for _url, ok, _message in results if ok)
         if accepted == 0:
             self._set_status(
-                _("No relay accepted the article. See log for details."), error=True
+                _("The article was not published: no relay took it. Check your internet "
+                  "connection and try again."), error=True
             )
             self._set_busy(False)
             return

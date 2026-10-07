@@ -407,7 +407,8 @@ class PublishNoteDialog(QDialog):
         self._job = None
         accepted = sum(1 for _url, ok, _message in results if ok)
         if accepted == 0:
-            self._set_status(_("No relay accepted the note. See log for details."), error=True)
+            self._set_status(_("The note was not published: no relay took it. Check your "
+                               "internet connection and try again."), error=True)
             self._set_busy(False)
             return
         self.published.emit(self._signed_event_id or "", results)

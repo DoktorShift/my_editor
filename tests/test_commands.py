@@ -209,8 +209,10 @@ def test_the_shortcut_window_lists_every_command_shortcut(main_window_commands):
     for command in win.commands.commands():
         if command.shortcut is not None:
             assert any(keys == key_text(command.shortcut) for keys, _w in listed), command.id
-    # The Media Library's shortcut was missing from the old hand-kept list.
-    assert ("Ctrl+Shift+M", "Media library") in listed
+    # The UI audit: no invented keys for Nostr commands (Q-A).
+    nostr_keys = [c.id for c in win.commands.commands()
+                  if c.id.startswith("nostr.") and c.shortcut is not None]
+    assert nostr_keys == []
 
 
 def test_the_nostr_commands_that_need_an_account_are_marked(main_window_commands):

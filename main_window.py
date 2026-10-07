@@ -1890,23 +1890,25 @@ class MainWindow(QMainWindow):
 
         # Nostr. Only the ones that need an account are marked: Create
         # Account, Connect Signer, Restore and the membership window are
-        # how a person starts using Nostr.
+        # how a person starts using Nostr. No keys: no platform has a
+        # convention for them (Shift-Command-P is Page Setup in Apple's
+        # apps), and keys are not invented (decision Q-A).
         self.act_nostr_publish_note = add(
-            Command("nostr.publish_note", _("Publish as Note…"), NOSTR, "Ctrl+Shift+P",
+            Command("nostr.publish_note", _("Publish as Note…"), NOSTR,
                     nostr=True, listed_as=_("Publish as note"), keywords=("post", "kind 1")),
             triggered=self._on_nostr_publish_note)
         self.act_nostr_publish_article = add(
-            Command("nostr.publish_article", _("Publish as Article…"), NOSTR, "Ctrl+Shift+A",
+            Command("nostr.publish_article", _("Publish as Article…"), NOSTR,
                     nostr=True, listed_as=_("Publish as article"), keywords=("long", "blog")),
             triggered=self._on_nostr_publish_article)
         # Media (Blossom) - browse the user's uploaded blobs, upload new
         # ones, or insert one into the current document at the cursor.
         self.act_nostr_media = add(
-            Command("nostr.media_library", _("Media Library…"), NOSTR, "Ctrl+Shift+M",
+            Command("nostr.media_library", _("Media Library…"), NOSTR,
                     nostr=True, listed_as=_("Media library"), keywords=("images", "upload")),
             triggered=self._on_nostr_media_library)
         self.act_nostr_insert_image = add(
-            Command("nostr.insert_image", _("Insert Image…"), NOSTR, "Ctrl+Shift+I",
+            Command("nostr.insert_image", _("Insert Image…"), NOSTR,
                     nostr=True, listed_as=_("Insert image"),
                     keywords=(_("picture"), _("photo")), slash_section=slash_menu.INSERT),
             triggered=self._on_nostr_insert_image)
@@ -1916,11 +1918,10 @@ class MainWindow(QMainWindow):
                     keywords=(_("person"), _("people"), _("tag"), "@"),
                     slash_section=slash_menu.INSERT),
             triggered=lambda: self._ask_mention(self.current_editor(), -1))
-        # Drafts surface - the side-docked panel. ``Ctrl+Shift+D`` (D
-        # for Draft) toggles it, sitting alongside the other Ctrl+Shift
-        # Nostr shortcuts.
+        # Drafts surface - the side-docked panel, toggled from the Nostr
+        # menu (no key, as above).
         self.act_nostr_drafts = add(
-            Command("nostr.drafts", _("Drafts…"), NOSTR, "Ctrl+Shift+D", checkable=True,
+            Command("nostr.drafts", _("Drafts…"), NOSTR, checkable=True,
                     nostr=True, listed_as=_("Toggle Drafts panel")),
             triggered=self._on_toggle_drafts_panel)
         # Imports: the window of sources, their posts and the open one. No

@@ -150,13 +150,10 @@ The **`View`** menu holds the appearance options: theme, line numbers, syntax hi
 
 ### Nostr
 
+The Nostr commands have no shortcuts of their own: no platform has a convention for them. They are in the `Nostr` menu (and in Help > Keyboard Shortcuts' search): Publish as Note…, Publish as Article…, Media Library…, Insert Image…, Drafts….
+
 | Shortcut | Action |
 |---|---|
-| `Ctrl+Shift+P` | Publish current document as a short note (kind 1) |
-| `Ctrl+Shift+A` | Publish current document as a long-form article (kind 30023) |
-| `Ctrl+Shift+M` | Open the Media Library (Blossom) |
-| `Ctrl+Shift+I` | Insert image from the Media Library at the cursor |
-| `Ctrl+Shift+D` | Open or close the Drafts panel |
 | `Ctrl+Shift+S` | Save current document (chooser: local file or private Nostr draft) |
 
 The **`Nostr`** menu also exposes `Drafts…`, `Connect Signer…`, and `Sign Out Active Profile` for managing identities. While an account is in use, its avatar sits at the right end of the tab row: a one-click profile switcher. See the [Nostr guide](nostr.md) for the full workflow.
