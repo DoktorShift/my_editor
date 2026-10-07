@@ -174,22 +174,28 @@ def check_box_border(palette: QPalette) -> QColor:
 
 
 class AppStyle(QProxyStyle):
-    """Fusion, with check boxes whose frame can be seen on the dark theme
-    too (review M5). Everything else is Fusion's."""
+    """Fusion, with check boxes and radio buttons whose frame can be seen
+    on the dark theme too (review M5; Fusion's radio ring was as faint as
+    its check box frame, so an unchecked choice in Create Account and in
+    Settings showed no circle at all). Everything else is Fusion's."""
 
     _BOXES = (QStyle.PrimitiveElement.PE_IndicatorCheckBox,
               QStyle.PrimitiveElement.PE_IndicatorItemViewItemCheck)
+    _RADIO = QStyle.PrimitiveElement.PE_IndicatorRadioButton
 
     def drawPrimitive(self, element, option, painter, widget=None):  # noqa: N802
         super().drawPrimitive(element, option, painter, widget)
-        if element not in self._BOXES or option is None:
+        if option is None or (element not in self._BOXES and element != self._RADIO):
             return
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(QPen(check_box_border(option.palette), 1))
         frame = QRectF(option.rect).adjusted(0.5, 0.5, -0.5, -0.5)
-        painter.drawRoundedRect(frame, 2, 2)
+        if element == self._RADIO:
+            painter.drawEllipse(frame)
+        else:
+            painter.drawRoundedRect(frame, 2, 2)
         painter.restore()
 
 
