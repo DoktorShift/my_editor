@@ -845,12 +845,26 @@ class ImportsController(QObject):
 
     def defaults_for(self, posts: Sequence[Post]) -> Tuple[Optional[bool], Optional[bool]]:
         """What the sources of ``posts`` choose for new drafts: copy images,
-        fetch the full article. Each is None when the sources differ."""
-        found = {(self._source_defaults(post.source_key)) for post in posts} or {(True, True)}
+        fetch the full article. Each is None when the sources differ.
+
+        Asked on every change of the checks, so each source is read once,
+        from the list of sources in memory (CP2 review N2: two database
+        queries a checked post made one key press 312 ms at 2,000 checked
+        posts)."""
+        sources = {(post.source_key, post.source_url) for post in posts}
+        found = {self._defaults_of(key, url) for key, url in sources} or {(True, True)}
         copy = {pair[0] for pair in found}
         full = {pair[1] for pair in found}
         return (copy.pop() if len(copy) == 1 else None,
                 full.pop() if len(full) == 1 else None)
+
+    def _defaults_of(self, key: str, url: str) -> Tuple[bool, bool]:
+        """A followed source's defaults for new drafts; a post of no followed
+        source (a file, a link) gets both."""
+        if not key or not url or not self.subscriptions.has_feed(url):
+            return True, True
+        options = self.subscriptions.options_for(url)
+        return options.rehost_images, options.fetch_full_text
 
     def _source_defaults(self, key: str) -> Tuple[bool, bool]:
         source = self.source(key) if key else None
