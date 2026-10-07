@@ -574,6 +574,7 @@ class MainWindow(QMainWindow):
         self._build_menu()
         self._build_status_bar_view_toggle()
         self._build_findbar()
+        self.nostr_state.changed.connect(self._on_nostr_in_use_changed)
 
         # The find bar and the account chip construct themselves in dark
         # mode; bring them in line with a light theme detected above.
@@ -660,6 +661,10 @@ class MainWindow(QMainWindow):
         menu_bg = DARK_MENU_BG if self.is_dark_theme else LIGHT_MENU_BG
         menu_fg = DARK_MENU_FG if self.is_dark_theme else LIGHT_MENU_FG
         border = DARK_BORDER if self.is_dark_theme else LIGHT_BORDER
+        # A dimmed menu item is still read (it says what a command needs, as
+        # the Nostr menu's do without an account): dimmer than the rest, as
+        # in the editor's context menu, not the border color it vanished in.
+        dimmed = "#6A6A6A" if self.is_dark_theme else "#999999"
 
         self.setStyleSheet(f"""
             QMainWindow {{ background: {bg}; }}
@@ -708,7 +713,7 @@ class MainWindow(QMainWindow):
                 border: 1px solid {border};
             }}
             QMenu::item:selected {{ background: {bg}; }}
-            QMenu::item:disabled {{ color: {border}; }}
+            QMenu::item:disabled {{ color: {dimmed}; }}
             QScrollBar:vertical {{
                 background: {menu_bg};
                 width: 12px;
@@ -1552,7 +1557,7 @@ class MainWindow(QMainWindow):
         # for Draft) toggles it, sitting alongside the other Ctrl+Shift
         # Nostr shortcuts.
         self.act_nostr_drafts = add(
-            Command("nostr.drafts", _("Drafts…"), NOSTR, "Ctrl+Shift+D", checkable=True,
+            Command("nostr.drafts", _("Drafts"), NOSTR, "Ctrl+Shift+D", checkable=True,
                     nostr=True, listed_as=_("Toggle Drafts panel")),
             triggered=self._on_toggle_drafts_panel)
         # Imports: the window of sources, their posts and the open one. No
@@ -1570,7 +1575,8 @@ class MainWindow(QMainWindow):
                     keywords=("new", "key", "sign up")),
             triggered=self._on_create_account)
         self.act_nostr_connect = add(
-            Command("nostr.connect", _("Connect Signer…"), NOSTR, keywords=("login", "bunker")),
+            Command("nostr.connect", _("Connect Signer App\u2026"), NOSTR,
+                    keywords=("login", "bunker", "signer")),
             triggered=self._on_nostr_connect)
         self.act_restore_account = add(
             Command("nostr.restore_account", _("Restore Account\u2026"), NOSTR,
@@ -1589,7 +1595,7 @@ class MainWindow(QMainWindow):
                     keywords=("name", "picture", "about", "lightning address")),
             triggered=self._on_edit_profile)
         self.act_nostr_sign_out = add(
-            Command("nostr.sign_out", _("Sign Out Active Profile"), NOSTR, nostr=True,
+            Command("nostr.sign_out", _("Sign Out"), NOSTR, nostr=True,
                     keywords=("log out",)),
             triggered=self._on_nostr_sign_out)
 
@@ -1607,7 +1613,8 @@ class MainWindow(QMainWindow):
         self.act_show_logs = add(Command("help.show_logs", _("Show Log Files"), HELP,
                                          keywords=("diagnostics", "bug report", "crash")),
                                  triggered=self._show_log_files)
-        self.act_about = add(Command("help.about", pgettext("help menu", "About"), HELP,
+        self.act_about = add(Command("help.about",
+                                     _("About {app}").format(app=APP_DISPLAY_NAME), HELP,
                                      role=QAction.MenuRole.AboutRole),
                              triggered=self._show_about)
 
@@ -1730,15 +1737,17 @@ class MainWindow(QMainWindow):
         m_nostr.addAction(self.act_nostr_imports)
         m_nostr.addSeparator()
         m_nostr.addAction(self.act_membership)
+        # The ways to an account, then the account in use.
         m_nostr.addSeparator()
         m_nostr.addAction(self.act_create_account)
         m_nostr.addAction(self.act_nostr_connect)
         m_nostr.addAction(self.act_restore_account)
+        m_nostr.addSeparator()
         m_nostr.addAction(self.act_edit_profile)
         m_nostr.addAction(self._act_backup_account)
         m_nostr.addAction(self.act_move_to_signer)
-        self._update_account_actions()
         m_nostr.addAction(self.act_nostr_sign_out)
+        self._update_account_actions()
 
         help_menu = self.menuBar().addMenu(_("&Help"))
         help_menu.addAction(self.act_welcome)
@@ -2364,10 +2373,7 @@ class MainWindow(QMainWindow):
         if not pending:
             return
         if self._profile_store.default() is None:
-            self.status.showMessage(
-                _("Images added. Connect a signer to upload them."), 6000
-            )
-            return
+            return          # a local image; nothing of Nostr without an account
 
         count = len(pending)
         upload = ask(
@@ -4578,7 +4584,7 @@ class MainWindow(QMainWindow):
         if not profiles:
             act = menu.addAction(_("Create Account\u2026"))
             act.triggered.connect(self._on_create_account)
-            act = menu.addAction(_("Connect Signer\u2026"))
+            act = menu.addAction(_("Connect Signer App\u2026"))
             act.triggered.connect(self._on_nostr_connect)
             act = menu.addAction(_("Restore Account\u2026"))
             act.triggered.connect(self._on_restore_account)
@@ -4606,8 +4612,10 @@ class MainWindow(QMainWindow):
             act_backup.triggered.connect(self._on_backup_account)
             act_move = menu.addAction(_("Move Key to Signer App\u2026"))
             act_move.triggered.connect(self._on_move_to_signer)
-        act_add = menu.addAction(_("Add Profile\u2026"))
+        # Connecting offers creating and restoring an account too.
+        act_add = menu.addAction(_("Add Account\u2026"))
         act_add.triggered.connect(self._on_nostr_connect)
+        menu.addSeparator()
         act_signout = menu.addAction(_("Sign Out"))
         act_signout.triggered.connect(self._on_nostr_sign_out)
 
@@ -4626,11 +4634,47 @@ class MainWindow(QMainWindow):
             if imports is not None:
                 imports.account_changed(self._profile_store.default() if state.active
                                         else None)
+        self._update_nostr_commands()
+
+    # The account's own commands that need its key kept on this computer.
+    _LOCAL_KEY_COMMANDS = frozenset({"nostr.backup_account", "nostr.move_to_signer"})
+
+    def _update_nostr_commands(self) -> None:
+        """The Nostr menu's commands that act for an account are dimmed while
+        none is in use, as the HIG asks of a command that cannot act; the
+        ways to an account (create, connect, restore) and the membership
+        stay available next to them. Back Up and Move Key also need the
+        key on this computer. A document command dimmed while the Imports
+        window is in front gets its new state when that window goes."""
+        if not hasattr(self, "commands"):
+            return
         current = self._profile_store.default()
-        for name in ("_act_backup_account", "act_move_to_signer"):
-            action = getattr(self, name, None)
-            if action is not None:
-                action.setEnabled(current is not None and current.is_local)
+        active = self.nostr_state.active
+        dimmed = getattr(self, "_document_commands_dimmed", False)
+        kept = self.__dict__.setdefault("_dimmed_were_enabled", {})
+        for command in self.commands.commands(NOSTR):
+            if not command.nostr:
+                continue
+            enabled = active
+            if command.id in self._LOCAL_KEY_COMMANDS:
+                enabled = active and current is not None and current.is_local
+            if dimmed and self._is_document_command(command.id):
+                kept[command.id] = enabled
+            else:
+                self.commands.action(command.id).setEnabled(enabled)
+
+    def _on_nostr_in_use_changed(self, active: bool) -> None:
+        """Nothing of Nostr stays on screen once no account is in use."""
+        if not active:
+            self._hide_drafts_panel()
+
+    def _say_an_account_is_needed(self) -> None:
+        """For a Nostr command reached without an account in use (its menu
+        item is dimmed then): where to get one."""
+        inform(self, title=_("No Nostr account in use"),
+               message=_("Create an account, connect your signer app or restore an "
+                         "account from its backup, all in the Nostr menu."),
+               is_dark=self.is_dark_theme)
 
     # -- creating, restoring and backing up accounts ---------------------------
     # The windows and the network work behind them are the account
@@ -4654,10 +4698,7 @@ class MainWindow(QMainWindow):
         profile fresh before anything can be changed (nostr/ui/profile_window.py)."""
         active = self._profile_store.default()
         if active is None:
-            inform(self, title=_("Connect a signer first"),
-                   message=_("Connect a Nostr signer (Nostr > Connect Signer\u2026) "
-                             "before editing your profile."),
-                   is_dark=self.is_dark_theme)
+            self._say_an_account_is_needed()
             return
         editing = ProfileEditing(profile=active, pool=self._relay_pool,
                                  session_pool=self._session_pool,
@@ -4836,10 +4877,7 @@ class MainWindow(QMainWindow):
             inform(self, title=_("Imports aren't available"), message=imports.problem,
                    is_dark=self.is_dark_theme)
         else:
-            inform(self, title=_("Connect a signer first"),
-                   message=_("Connect a Nostr signer (Nostr > Connect Signer\u2026) to "
-                             "follow websites and import posts as drafts."),
-                   is_dark=self.is_dark_theme)
+            self._say_an_account_is_needed()
 
     def _update_imports_row(self, *_args) -> None:
         """What the Drafts panel's Imports row says."""
@@ -5039,9 +5077,7 @@ class MainWindow(QMainWindow):
     def _on_nostr_publish_note(self):
         active = self._profile_store.default()
         if active is None:
-            inform(self, title=_("Connect a signer first"),
-                   message=_("Connect a Nostr signer before publishing. Use the avatar "
-                             "chip in the header or Nostr > Connect Signer\u2026"))
+            self._say_an_account_is_needed()
             return
 
         ed = self.current_editor()
@@ -5084,9 +5120,7 @@ class MainWindow(QMainWindow):
     def _on_nostr_publish_article(self):
         active = self._profile_store.default()
         if active is None:
-            inform(self, title=_("Connect a signer first"),
-                   message=_("Connect a Nostr signer before publishing. Use the avatar "
-                             "chip in the header or Nostr > Connect Signer\u2026"))
+            self._say_an_account_is_needed()
             return
 
         ed = self.current_editor()
@@ -5163,9 +5197,7 @@ class MainWindow(QMainWindow):
         editing while uploads run in the background."""
         active = self._profile_store.default()
         if active is None:
-            inform(self, title=_("Connect a signer first"),
-                   message=_("Connect a Nostr signer (Nostr > Connect Signer\u2026) "
-                             "before browsing your Blossom media library."))
+            self._say_an_account_is_needed()
             return
         # Reading the private library is where the signer prompts are, so
         # it happens when the user opens their media and not before.
@@ -5195,9 +5227,7 @@ class MainWindow(QMainWindow):
         it at the current cursor in the active editor."""
         active = self._profile_store.default()
         if active is None:
-            inform(self, title=_("Connect a signer first"),
-                   message=_("Connect a Nostr signer (Nostr > Connect Signer\u2026) "
-                             "before inserting Blossom images."))
+            self._say_an_account_is_needed()
             return
         ed = self.current_editor()
         if ed is None:
@@ -5362,11 +5392,7 @@ class MainWindow(QMainWindow):
         self._insert_asset(editor, asset, alt="image")
 
         if asset.is_uploaded or self._profile_store.default() is None:
-            if not asset.is_uploaded:
-                self.status.showMessage(
-                    _("Image added. Connect a signer to upload it."), 6000
-                )
-            return
+            return          # nothing of Nostr without an account
 
         choice = load_settings().get(_PASTE_UPLOAD_SETTING, "ask")
         if choice == "never":

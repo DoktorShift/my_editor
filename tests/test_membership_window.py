@@ -317,7 +317,7 @@ def test_without_a_price_the_fee_stays_as_the_association_states_it():
 def test_without_a_signer_the_way_on_is_connecting_one():
     win = window(pubkey=None)
     asked = recorder(win.connect_requested)
-    assert default_button(win).text() == "Connect Signer…"
+    assert default_button(win).text() == "Connect Signer App…"
     default_button(win).click()
     assert asked == [()]
 

@@ -350,6 +350,11 @@ def _png_file(tmp_path, name="shot.png", data=PNG_BYTES):
     return str(path)
 
 
+def _speaks_of_nostr(messages) -> bool:
+    words = ("signer", "upload", "nostr", "blossom", "server")
+    return any(word in message.lower() for message in messages for word in words)
+
+
 def test_a_paste_lands_in_the_document_with_no_signer(tmp_path):
     # A pasted screenshot exists nowhere else. Nothing about signers,
     # servers or networks may be a reason for it to vanish.
@@ -360,7 +365,9 @@ def test_a_paste_lands_in_the_document_with_no_signer(tmp_path):
     assert len(win.image_names()) == 1
     assert win.image_names()[0].startswith(f"{ASSET_SCHEME}:")
     assert win._uploader.calls == []
-    assert any("Connect a signer" in m for m in win.status.messages)
+    # Without an account the editor says nothing of Nostr: a local image
+    # is just an image (uploading is asked when publishing).
+    assert not _speaks_of_nostr(win.status.messages)
 
 
 def test_a_paste_that_cannot_encode_falls_back_to_a_normal_paste(tmp_path):
@@ -461,7 +468,7 @@ def test_a_drop_inserts_every_image_with_no_signer(tmp_path):
 
     assert len(win.image_names()) == 2
     assert win._uploader.calls == []
-    assert any("Connect a signer" in m for m in win.status.messages)
+    assert not _speaks_of_nostr(win.status.messages)    # none without an account
 
 
 def test_a_dropped_image_keeps_the_filename_as_its_alt_text(tmp_path):

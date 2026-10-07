@@ -107,6 +107,7 @@ class TestTheCommand:
         monkeypatch.setattr(main_window, "inform",
                             lambda parent, **kw: told.append(kw))
         host = SimpleNamespace(_imports=imports, is_dark_theme=False)
+        host._say_an_account_is_needed = lambda: MainWindow._say_an_account_is_needed(host)
         MainWindow._open_imports_window(host)
         return told
 
@@ -119,8 +120,8 @@ class TestTheCommand:
     def test_without_an_account_it_says_what_to_do(self, monkeypatch):
         imports = SimpleNamespace(bound=False, problem="", open_window=None)
         (told,) = self.run(imports, monkeypatch)
-        assert told["title"] == "Connect a signer first"
-        assert "Connect Signer" in told["message"]
+        assert told["title"] == "No Nostr account in use"
+        assert "signer app" in told["message"] and "Nostr menu" in told["message"]
 
     def test_a_problem_is_said(self, monkeypatch):
         imports = SimpleNamespace(bound=False, problem="It cannot be kept.", open_window=None)

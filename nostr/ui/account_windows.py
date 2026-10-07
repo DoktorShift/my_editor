@@ -60,7 +60,7 @@ from nostr.outbox.defaults import STARTER_LIST
 from nostr.account_backup import (
     BackupError, FoundKey, backup_text, find_key, password_problem, suggested_file_name,
 )
-from nostr.profiles import Profile
+from nostr.profiles import Profile, short_npub
 from nostr.qr import make_qr_pixmap
 from nostr.ui.assistant import (
     DEFAULT, LEADING, NORMAL, AssistantWindow, StepList, busy_bar, copy_secret,
@@ -96,11 +96,6 @@ KEY_NOT_SAVED = _("Your key couldn’t be saved on this computer. Make sure the 
                   "has free space, then try again.")
 CLOSE_ANY_TIME = _("You can close this window. MyEditor keeps going in the background.")
 FINISH_LATER = _("If you finish later, MyEditor tries again the next time you open it.")
-
-
-def short_npub(pubkey_hex: str) -> str:
-    npub = bech32.encode_npub(pubkey_hex)
-    return f"{npub[:12]}…{npub[-6:]}"
 
 
 def local_profile(pubkey_hex: str, *, relays=None) -> Profile:

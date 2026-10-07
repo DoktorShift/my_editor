@@ -275,7 +275,8 @@ class MembershipWindow(AssistantWindow):
         self._set_overview_note(note)
         if not self._pubkey:
             buttons = [("not_now", _("Not Now"), NORMAL, self.reject),
-                       ("connect", _("Connect Signer…"), DEFAULT, self._ask_to_connect)]
+                       ("connect", _("Connect Signer App\u2026"), DEFAULT,
+                        self._ask_to_connect)]
         elif self._service == "unavailable":
             buttons = [("not_now", _("Not Now"), NORMAL, self.reject),
                        ("website", _("Join on the Website"), DEFAULT, self._join_on_website)]
