@@ -6,7 +6,7 @@ name: Tests
 # is merged.
 on:
   push:
-    branches: [main, dev]
+    branches: [main, dev, ci-windows-debug]
   pull_request:
   workflow_dispatch:
 

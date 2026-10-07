@@ -1,0 +1,98 @@
+name: Windows debug
+
+# Temporary: runs every test file in its own process on Windows, with
+# Qt's offscreen platform and with the native Windows platform, so one
+# crash cannot hide the other results, and runs the whole suite under
+# the Windows debugger so a crash leaves a native stack trace.
+on:
+  push:
+    branches: [ci-windows-debug]
+  workflow_dispatch:
+
+jobs:
+  windows:
+    name: Windows (${{ matrix.platform }})
+    runs-on: windows-latest
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [offscreen, windows]
+    env:
+      QT_QPA_PLATFORM: ${{ matrix.platform }}
+      PYTHONFAULTHANDLER: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: packaging/requirements-test.lock
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r packaging/requirements-test.lock
+      - name: Describe the fonts Qt sees
+        shell: bash
+        run: |
+          mkdir -p results
+          python - > results/_fonts.txt 2>&1 <<'EOF'
+          import sys
+          from PySide6.QtGui import QFont, QFontDatabase, QFontInfo
+          from PySide6.QtWidgets import QApplication
+          app = QApplication(sys.argv[:1])
+          print("platform", app.platformName())
+          fams = QFontDatabase.families()
+          print("families", len(fams))
+          print("fixed", [f for f in fams if QFontDatabase.isFixedPitch(f)][:40])
+          print("general", QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont).family())
+          print("fixedsys", QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont).family())
+          f = QFont("monospace"); f.setStyleHint(QFont.StyleHint.TypeWriter)
+          print("monospace ->", QFontInfo(f).family(), QFontInfo(f).fixedPitch())
+          EOF
+          cat results/_fonts.txt
+      - name: Run each test file alone
+        shell: bash
+        run: |
+          set +e
+          for f in tests/test_*.py; do
+            name=$(basename "$f" .py)
+            python -m pytest -q -p no:cacheprovider -rfEs --tb=short "$f" > "results/$name.txt" 2>&1
+            echo "$name exit $?" >> results/_summary.txt
+          done
+          grep -v " exit 0$\| exit 5$" results/_summary.txt > results/_failing.txt
+          cat results/_failing.txt
+          exit 0
+      - name: Find the debugger
+        shell: pwsh
+        run: |
+          $cdb = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits" -Recurse -Filter cdb.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -like '*\x64\*' } | Select-Object -First 1
+          if ($cdb) { "CDB=$($cdb.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8; "found $($cdb.FullName)" }
+          else { "no cdb.exe" }
+      - name: Run the whole suite once, under the debugger when there is one
+        shell: bash
+        timeout-minutes: 30
+        run: |
+          set +e
+          cat > cdb.txt <<'EOF'
+          .symfix C:\symcache
+          sxd -c2 ".echo === SECOND CHANCE ===; .lastevent; .exr -1; .ecxr; kn 100; ~*kn 50; q" av
+          sxe -c ".echo === FAIL FAST ===; .lastevent; .exr -1; kn 100; ~*kn 50; q" c0000409
+          sxe -c ".echo === HEAP ===; .lastevent; .exr -1; kn 100; ~*kn 50; q" c0000374
+          sxe -c ".echo === STACK OVERFLOW ===; .lastevent; .exr -1; kn 100; q" sov
+          g
+          EOF
+          if [ -n "$CDB" ]; then
+            "$CDB" -lines -G -cf cdb.txt python -X faulthandler -m pytest -v -p no:cacheprovider --capture=sys -rfEs --tb=short tests > results/_whole_suite.txt 2>&1 < /dev/null
+          else
+            python -X faulthandler -m pytest -v -p no:cacheprovider --capture=sys -rfEs --tb=short tests > results/_whole_suite.txt 2>&1
+          fi
+          echo "whole suite exit $?" >> results/_summary.txt
+          tail -n 60 results/_whole_suite.txt
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-results-${{ matrix.platform }}
+          path: results/
