@@ -24,7 +24,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from nostr.outbox.policy import LookupState, RelayList  # noqa: E402
-from nostr.publisher import PublishJob, mentioned_pubkeys  # noqa: E402
+from nostr.publish_pipeline import mentioned_pubkeys  # noqa: E402
+from nostr.publisher import PublishJob  # noqa: E402
 from tests.outbox_fakes import (  # noqa: E402
     PK, FakeClient, FakePool, FakeRelayDirectory, FakeSessionPool, Profile, settle,
 )
@@ -194,6 +195,39 @@ def test_a_refused_signature_publishes_nothing_when_the_plan_lands_later():
     d.parked.pop()()
     settle()
     assert failures == ["user said no"] and pool.published == []
+
+
+def test_a_signer_that_returns_another_event_gets_nothing_published():
+    """Review F18: every publish checks the signer's answer, as the
+    deletion of a published item already did."""
+    from nostr import events
+    from tests.outbox_fakes import SK
+
+    def other_content(event):
+        return events.sign_event(dict(event, content="not what was written"), SK)
+
+    pool = FakePool()
+    job = make_job(note(), pool=pool,
+                   session_pool=FakeSessionPool(FakeClient(tamper=other_content)))
+    seen = run(job)
+    assert seen["completed"] == [] and len(seen["failed"]) == 1
+    assert pool.published == []
+
+
+def test_each_relays_answer_is_reported_and_the_same_event_can_go_again():
+    pool = FakePool(refuse={"wss://w2.example"})
+    client = FakeClient()
+    job = make_job(note(), pool=pool, session_pool=FakeSessionPool(client))
+    answers = []
+    job.relay_result.connect(lambda *answer: answers.append(answer))
+    seen = run(job)
+    assert sorted(answers) == [("wss://w1.example", True, ""),
+                               ("wss://w2.example", False, "blocked")]
+    assert len(seen["completed"]) == 1
+    assert job.send_again() is True
+    settle()
+    assert len(client.requests) == 1                     # signed once
+    assert pool.published[1] == pool.published[0]        # the same event, the same relays
 
 
 # -- reading the mentions off the event ----------------------------------------------

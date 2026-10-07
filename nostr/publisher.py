@@ -61,6 +61,7 @@ from .outbox import defaults as outbox_defaults
 from .outbox.lookup import fetch_replaceable
 from .outbox.policy import dedupe_relays
 from .profiles import Profile
+from .publish_pipeline import Mention, PublishPipeline, PublishResult
 from .relay import RelayPool
 
 
@@ -81,10 +82,6 @@ def _safe_reason(reason: str) -> str:
     if len(reason) <= _MAX_REASON_CHARS:
         return reason
     return reason[:_MAX_REASON_CHARS - 1].rstrip() + "…"
-
-
-PublishResult = Tuple[str, bool, str]  # (relay_url, ok, message)
-Mention = Tuple[str, str]              # (pubkey_hex, relay_hint), hint may be empty
 
 
 # --------------------------------------------------------------------------- #
@@ -550,16 +547,19 @@ def slugify(text: str, *, fallback: str = "untitled") -> str:
 # PublishJob: outbox, sign, publish                                           #
 # --------------------------------------------------------------------------- #
 
-class PublishJob(QObject):
-    """One end-to-end publish of any unsigned event.
+class PublishJob(PublishPipeline):
+    """One end-to-end publish of a note, an article or any other public event.
 
-    The relay plan and the signature are fetched at the same time, and
-    the event goes out once both are in. Where it goes is the relay
-    directory's decision (RelayDirectory.publish_plan), never this job's.
+    The shared pipeline (publish_pipeline.PublishPipeline): the routing and
+    the signature at the same time, the signed event checked to be exactly
+    the one asked for, then out to the relays the relay directory chose
+    (RelayDirectory.publish_plan), never to relays of this job's choosing.
 
     Signals (fired in this order on the happy path):
       status_changed(str)     human-readable progress text
       signed(str)             event id (hex) of the signed event
+      relay_result(str, bool, str)
+      first_accept(str)
       completed(list)         final list of PublishResult tuples
                               [(url, ok, message), …], fired even when
                               zero relays accepted
@@ -572,148 +572,30 @@ class PublishJob(QObject):
     event has gone to the relays, cancelling only silences the job.
     """
 
-    status_changed = Signal(str)
     signed = Signal(str)
-    completed = Signal(list)
-    failed = Signal(str)
 
-    def __init__(
-        self,
-        *,
-        relay_pool: RelayPool,
-        relay_directory: RelayDirectory,
-        session_pool: BunkerSessionPool,
-        profile: Profile,
-        unsigned_event: dict,
-        entitled_relays: Sequence[str] = (),
-        parent: Optional[QObject] = None,
-    ) -> None:
-        super().__init__(parent)
-        if unsigned_event.get("pubkey") != profile.user_pubkey:
-            raise ValueError(
-                "unsigned event pubkey does not match the publishing profile"
-            )
-        self._relay_pool = relay_pool
-        self._relay_directory = relay_directory
-        self._session_pool = session_pool
-        # Relays this account has standing on beyond its own list.
-        self._entitled_relays = list(entitled_relays)
-        self._profile = profile
-        self._unsigned = unsigned_event
-        self._plan = None
-        self._signed_event: Optional[dict] = None
-        self._sent = False
-        self._failed = False
-        self._cancelled = False
+    def _signed(self, event: dict) -> None:
+        self.signed.emit(event["id"])
 
-    def start(self) -> None:
-        """Kick off the publish. Safe to call once per instance."""
-        self.status_changed.emit(_("Connecting to your signer…"))
-        self._relay_directory.publish_plan(
-            self._profile.user_pubkey,
-            self._on_plan_ready,
-            mentioned=mentioned_pubkeys(self._unsigned),
-            entitled=self._entitled_relays,
-        )
-        self._session_pool.get(
-            self._profile,
-            on_ready=self._on_bunker_ready,
-            on_error=self._fail,
-        )
-
-    def cancel(self) -> None:
-        """Stop: publish nothing more and emit nothing more."""
-        self._cancelled = True
-
-    # -- pipeline ----------------------------------------------------------
-
-    def _on_plan_ready(self, plan) -> None:
-        self._plan = plan
-        self._publish_when_ready()
-
-    def _on_bunker_ready(self, client) -> None:
-        if self._failed or self._cancelled:
-            return
-        self.status_changed.emit(
-            _("Waiting for signature. Approve the request on your signer…")
-        )
-        client.sign_event(
-            self._unsigned,
-            on_success=self._on_signed,
-            on_failure=self._fail,
-        )
-
-    def _on_signed(self, signed_event: dict) -> None:
-        if self._failed or self._cancelled:
-            return
-        self._signed_event = signed_event
-        self.signed.emit(signed_event["id"])
-        if self._plan is None:
-            self.status_changed.emit(_("Finding your relays…"))
-        self._publish_when_ready()
-
-    def _publish_when_ready(self) -> None:
-        if (self._sent or self._failed or self._cancelled or self._plan is None
-                or self._signed_event is None):
-            return
-        self._sent = True
-        relays = self._plan.targets
-        self.status_changed.emit(ngettext(
-            "Publishing to {n} relay…", "Publishing to {n} relays…", len(relays),
-        ).format(n=len(relays)))
-        job = self._relay_pool.publish(relays, self._signed_event)
-        job.first_accept.connect(self._on_first_accept)
-        job.all_done.connect(self._on_publish_done)
-
-    def _fail(self, reason: str) -> None:
-        if self._failed or self._sent or self._cancelled:
-            return
-        self._failed = True
-        self.failed.emit(reason)
-
-    def _on_first_accept(self, url: str) -> None:
-        if self._cancelled:
-            return
+    def _accepted_words(self, url: str) -> str:
         # Surface the win immediately so the dialog can flip to a success
         # state even before the slower relays finish reporting.
-        self.status_changed.emit(_("Accepted by {url}. Waiting for the rest…").format(url=url))
+        return _("Accepted by {url}. Waiting for the rest…").format(url=url)
 
-    def _on_publish_done(self, results: List[PublishResult]) -> None:
-        accepted = sum(1 for _url, ok, _message in results if ok)
+    def _done_words(self, accepted: int, total: int) -> str:
+        return ngettext(
+            "Published. {accepted}/{total} relay accepted.",
+            "Published. {accepted}/{total} relays accepted.", total,
+        ).format(accepted=accepted, total=total)
+
+    def _answered(self, results: List[PublishResult]) -> None:
         # NIP-65: the mentioned people's relays that now hold this event
         # also get the author's relay list, so whoever reads it there can
         # find the rest of what the author writes.
         took_it = {normalize_relay_url(url) for url, ok, _message in results if ok}
-        reached = [url for url in self._plan.inbox if url in took_it]
+        reached = [url for url in self.plan.inbox if url in took_it]
         if reached:
             self._relay_directory.share_relay_list(self._profile.user_pubkey, reached)
-        if self._cancelled:
-            return
-        self.status_changed.emit(ngettext(
-            "Published. {accepted}/{total} relay accepted.",
-            "Published. {accepted}/{total} relays accepted.", len(results),
-        ).format(accepted=accepted, total=len(results)))
-        self.completed.emit(results)
-
-
-_PUBKEY_HEX = re.compile(r"[0-9a-f]{64}")
-
-
-def mentioned_pubkeys(event: dict) -> List[Tuple[str, str]]:
-    """``(pubkey, relay hint)`` for everyone an event mentions (its ``p``
-    tags), in tag order, once each; the hint is "" when the tag has none."""
-    out: List[Tuple[str, str]] = []
-    seen: set = set()
-    for tag in event.get("tags", []):
-        if not isinstance(tag, list) or len(tag) < 2 or tag[0] != "p":
-            continue
-        pubkey = str(tag[1]).lower()
-        if pubkey in seen or not _PUBKEY_HEX.fullmatch(pubkey):
-            continue
-        seen.add(pubkey)
-        hint = tag[2] if len(tag) >= 3 and isinstance(tag[2], str) else ""
-        out.append((pubkey, hint))
-    return out
 
 
 # --------------------------------------------------------------------------- #

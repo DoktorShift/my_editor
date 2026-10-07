@@ -3042,28 +3042,12 @@ msgstr ""
 msgid "relay must be ws:// or wss://, got {relay}"
 msgstr ""
 
-#: nostr/deletion.py:263
-#: nostr/draft_sync.py:358
-#: nostr/draft_sync.py:318
-#: nostr/publisher.py:611
-#: nostr/publisher.py:857
-msgid "Connecting to your signer…"
-msgstr ""
-
-#: nostr/deletion.py:299
-#: nostr/publisher.py:1069
+#: nostr/deletion.py:238
+#: nostr/publisher.py:951
 msgid "Waiting for signature. Approve the deletion on your signer…"
 msgstr ""
 
-#: nostr/deletion.py:350
-msgid "The signer didn’t sign the request."
-msgstr ""
-
-#: nostr/deletion.py:303
-msgid "The signer returned a different event."
-msgstr ""
-
-#: nostr/deletion.py:326
+#: nostr/deletion.py:241
 #, python-brace-format
 msgid "Asking {n} relay to delete it…"
 msgid_plural "Asking {n} relays to delete it…"
@@ -3084,14 +3068,21 @@ msgid "your signer did not answer"
 msgstr ""
 
 #: nostr/draft_sync.py:193
-#: nostr/publisher.py:814
-#: nostr/publisher.py:832
-#: nostr/publisher.py:1028
+#: nostr/publisher.py:696
+#: nostr/publisher.py:714
+#: nostr/publisher.py:910
 msgid "Looking up your relay list…"
 msgstr ""
 
 #: nostr/draft_sync.py:251
 msgid "Refreshing drafts…"
+msgstr ""
+
+#: nostr/draft_sync.py:358
+#: nostr/draft_sync.py:318
+#: nostr/publish_pipeline.py:127
+#: nostr/publisher.py:739
+msgid "Connecting to your signer…"
 msgstr ""
 
 #: nostr/draft_sync.py:653
@@ -3308,95 +3299,103 @@ msgstr ""
 msgid "Your profile wasn’t changed. Try again in a moment."
 msgstr ""
 
-#: nostr/publisher.py:80
-msgid "unknown error"
-msgstr ""
-
-#: nostr/publisher.py:638
-#: nostr/publisher.py:919
+#: nostr/publish_pipeline.py:151
+#: nostr/publisher.py:801
 msgid "Waiting for signature. Approve the request on your signer…"
 msgstr ""
 
-#: nostr/publisher.py:886
-msgid "Encrypting draft. Approve on your signer if prompted…"
-msgstr ""
-
-#: nostr/publisher.py:1298
-msgid "no relay accepted the deletion"
-msgstr ""
-
-#: nostr/publisher.py:652
-msgid "Finding your relays…"
-msgstr ""
-
-#: nostr/publisher.py:661
+#: nostr/publish_pipeline.py:154
 #, python-brace-format
 msgid "Publishing to {n} relay…"
 msgid_plural "Publishing to {n} relays…"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/publisher.py:679
+#: nostr/publish_pipeline.py:194
+msgid "The signer returned a different event."
+msgstr ""
+
+#: nostr/publish_pipeline.py:199
+msgid "Finding your relays…"
+msgstr ""
+
+#: nostr/publish_pipeline.py:240
+msgid "The signer didn’t sign the request."
+msgstr ""
+
+#: nostr/publisher.py:81
+msgid "unknown error"
+msgstr ""
+
+#: nostr/publisher.py:768
+msgid "Encrypting draft. Approve on your signer if prompted…"
+msgstr ""
+
+#: nostr/publisher.py:1180
+msgid "no relay accepted the deletion"
+msgstr ""
+
+#: nostr/publisher.py:583
 #, python-brace-format
 msgid "Accepted by {url}. Waiting for the rest…"
 msgstr ""
 
-#: nostr/publisher.py:692
+#: nostr/publisher.py:586
 #, python-brace-format
 msgid "Published. {accepted}/{total} relay accepted."
 msgid_plural "Published. {accepted}/{total} relays accepted."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/publisher.py:938
+#: nostr/publisher.py:820
 #, python-brace-format
 msgid "Publishing draft to {n} relay…"
 msgid_plural "Publishing draft to {n} relays…"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/publisher.py:949
+#: nostr/publisher.py:831
 #, python-brace-format
 msgid "Draft saved to {accepted}/{total} relay."
 msgid_plural "Draft saved to {accepted}/{total} relays."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/publisher.py:1107
+#: nostr/publisher.py:989
 #, python-brace-format
 msgid "Removing draft from {n} relay…"
 msgid_plural "Removing draft from {n} relays…"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/publisher.py:1121
+#: nostr/publisher.py:1003
 #, python-brace-format
 msgid "Draft removed on {accepted}/{total} relay."
 msgid_plural "Draft removed on {accepted}/{total} relays."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/publisher.py:1296
+#: nostr/publisher.py:1178
 #, python-brace-format
 msgid "no relay accepted the deletion ({reasons})"
 msgstr ""
 
-#: nostr/publisher.py:879
+#: nostr/publisher.py:761
 #, python-brace-format
 msgid "Draft is too large to encrypt ({size} of {limit} bytes). Split it across smaller drafts or publish directly."
 msgstr ""
 
-#: nostr/publisher.py:870
+#: nostr/publisher.py:752
 #, python-brace-format
 msgid "Could not serialize draft: {reason}"
 msgstr ""
 
-#: nostr/publisher.py:915
+#: nostr/publisher.py:797
 #, python-brace-format
 msgid "Could not build draft wrap: {reason}"
 msgstr ""
 
-#: nostr/publisher.py:892
+#: nostr/publisher.py:774
 #, python-brace-format
 msgid "Could not encrypt draft: {reason}"
 msgstr ""

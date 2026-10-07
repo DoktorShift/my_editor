@@ -49,7 +49,8 @@ from .deletion import (
     DELETION_KIND, DeletionJob, DeletionRequest, address_of, read_deletion,
 )
 from .outbox.policy import created_at_of, is_newer
-from .publisher import mentioned_pubkeys, published_at_of
+from .publish_pipeline import mentioned_pubkeys
+from .publisher import published_at_of
 from .queries import Fetched, fetch_events
 
 NOTE_KIND = 1

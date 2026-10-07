@@ -134,8 +134,7 @@ def deletion_job(target, *, pool=None, client=None, found_on=(FOUND,), mentioned
                       session_pool=FakeSessionPool(client or FakeClient()), profile=Profile(),
                       event=target, found_on=found_on, mentioned=mentioned,
                       entitled_relays=entitled, clock=lambda: NOW)
-    seen = {"signed": [], "results": [], "first": [], "completed": [], "failed": []}
-    job.signed.connect(seen["signed"].append)
+    seen = {"results": [], "first": [], "completed": [], "failed": []}
     job.relay_result.connect(lambda *result: seen["results"].append(result))
     job.first_accept.connect(seen["first"].append)
     job.completed.connect(seen["completed"].append)
@@ -153,7 +152,7 @@ def test_an_article_is_asked_back_by_id_and_by_address_with_its_kind():
     assert sent["kind"] == DELETION_KIND and sent["pubkey"] == PK and sent["content"] == ""
     assert sent["tags"] == [["a", f"30023:{PK}:my-post"], ["e", target["id"]], ["k", "30023"]]
     assert sent["created_at"] == NOW and events.verify_event(sent)
-    assert seen["signed"] == [sent] and job.request == sent
+    assert job.request == sent
     assert relays == [FOUND] + WRITE              # where it was found, then where it goes
     assert seen["first"] == [FOUND]
     assert [r[0] for r in seen["results"]] == relays
@@ -259,4 +258,4 @@ def test_a_cancelled_job_sends_nothing_and_says_nothing_more():
     client.parked.pop()()                          # approved after all
     settle()
     assert pool.published == []
-    assert seen == {"signed": [], "results": [], "first": [], "completed": [], "failed": []}
+    assert seen == {"results": [], "first": [], "completed": [], "failed": []}
