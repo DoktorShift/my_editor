@@ -1839,17 +1839,19 @@ class MainWindow(QMainWindow):
         menu item (reached by the keyboard like any other, in the menu's
         own color, since clearing the list deletes no file), dimmed while
         the list is empty, as a Mac's Open Recent menu does."""
+        # The menu owns its items, so clear() deletes them (owned by the
+        # window, every refill used to leave the old ones behind).
         self.m_recent.clear()
         self.m_recent.setToolTipsVisible(True)
         entries = [p for p in load_recent() if os.path.exists(p)]
         for path in entries:
-            action = QAction(os.path.basename(path), self)
+            action = QAction(os.path.basename(path), self.m_recent)
             action.setToolTip(path)
             action.triggered.connect(lambda checked, p=path: self.open_path(p))
             self.m_recent.addAction(action)
         if entries:
             self.m_recent.addSeparator()
-        clear = QAction(_("Clear Recent Files"), self)
+        clear = QAction(_("Clear Recent Files"), self.m_recent)
         clear.setEnabled(bool(entries))
         clear.triggered.connect(self._clear_recent_files)
         self.m_recent.addAction(clear)

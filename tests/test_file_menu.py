@@ -100,3 +100,16 @@ def test_a_mac_has_a_window_menu_and_the_others_do_not(monkeypatch, platform):
     entries = [a.objectName() for a in win.m_window.actions() if not a.isSeparator()]
     assert entries == ["window.minimize", "window.zoom", "window.bring_all"]
     assert win.commands.action("window.minimize").shortcut() == QKeySequence("Ctrl+M")
+
+
+def test_refilling_the_list_leaves_no_old_items_behind(monkeypatch):
+    from PySide6.QtGui import QAction
+    win = window()
+    recent_items(win, monkeypatch, ["/notes/a.md"])
+    before = len(win.findChildren(QAction))
+    for _ in range(3):
+        recent_items(win, monkeypatch, ["/notes/a.md"])
+    QApplication.processEvents()
+    from PySide6.QtCore import QCoreApplication, QEvent
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    assert len(win.findChildren(QAction)) == before
