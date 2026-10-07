@@ -122,6 +122,8 @@ QPushButton, QToolButton {
 }
 QPushButton:hover, QToolButton:hover { background: #3C3C3C; }
 QPushButton:pressed, QToolButton:pressed { background: #1E1E1E; }
+/* The control with the keyboard focus: the app's ring (theme.py). */
+QPushButton:focus, QToolButton:focus { border: 2px solid #4FA3F7; padding: 5px 13px; }
 QPushButton:disabled, QToolButton:disabled { background: #252526; color: #6A6A6A; border-color: #2D2D2D; }
 QComboBox {
     background: #2D2D30;
@@ -248,6 +250,7 @@ QPushButton, QToolButton {
 }
 QPushButton:hover, QToolButton:hover { background: #E1E1E1; }
 QPushButton:pressed, QToolButton:pressed { background: #D0D0D0; }
+QPushButton:focus, QToolButton:focus { border: 2px solid #0078D4; padding: 5px 13px; }
 QPushButton:disabled, QToolButton:disabled { background: #F8F8F8; color: #BBBBBB; border-color: #EBEBEB; }
 QComboBox {
     background: #FFFFFF;

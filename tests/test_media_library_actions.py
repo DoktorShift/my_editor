@@ -83,3 +83,12 @@ def test_no_protocol_name_on_screen(tmp_path, monkeypatch):
 def test_every_control_has_a_name(tmp_path, monkeypatch, pick_mode):
     dialog = build_dialog(tmp_path, monkeypatch, records=[media()], pick_mode=pick_mode)
     assert unnamed_controls(dialog) == []
+
+
+@pytest.mark.parametrize("dark", [True, False])
+def test_the_focused_button_shows_the_apps_ring(tmp_path, monkeypatch, dark):
+    import theme
+    css = (dialog_module._DARK_CSS if dark else dialog_module._LIGHT_CSS)
+    rule = css[css.index("QPushButton:focus"):]
+    rule = rule[:rule.index("}")]
+    assert theme.focus_ring_color(dark) in rule and "2px" in rule
