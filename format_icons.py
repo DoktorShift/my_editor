@@ -50,10 +50,11 @@ def _icon(draw, color: QColor) -> QIcon:
 
 def letter(text: str, color: QColor, *, bold: bool = False, italic: bool = False,
            strike: bool = False) -> QIcon:
-    """A letter in the style it stands for."""
+    """A letter in the style it stands for (two letters, such as "H1",
+    a little smaller, so they fit)."""
     def draw(painter: QPainter, ink: QColor) -> None:
         font = QFont()
-        font.setPixelSize(15)
+        font.setPixelSize(15 if len(text) < 2 else 11)
         font.setBold(bold)
         font.setItalic(italic)
         font.setStrikeOut(strike)
@@ -118,4 +119,17 @@ def link(color: QColor) -> QIcon:
             path = QPainterPath()
             path.addRoundedRect(QRectF(x - 4.6, -2.6, 9.2, 5.2), 2.6, 2.6)
             painter.drawPath(path)
+    return _icon(draw, color)
+
+
+def divider(color: QColor) -> QIcon:
+    """A rule across, between two faint lines of text."""
+    def draw(painter: QPainter, ink: QColor) -> None:
+        painter.setPen(_pen(ink, 1.8))
+        painter.drawLine(QPointF(2, 9), QPointF(16, 9))
+        faint = QColor(ink)
+        faint.setAlphaF(ink.alphaF() * 0.45)
+        painter.setPen(_pen(faint, 1.2))
+        painter.drawLine(QPointF(4, 4), QPointF(14, 4))
+        painter.drawLine(QPointF(4, 14), QPointF(14, 14))
     return _icon(draw, color)

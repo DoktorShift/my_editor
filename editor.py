@@ -13,6 +13,7 @@ from PySide6.QtCore import (
     Qt, QTimer, QRect, QPoint, QMetaMethod, QEvent, QMimeData, QUrl, Signal,
 )
 from PySide6.QtGui import (
+    QAccessible, QAccessibleEvent,
     QPainter, QTextBlockFormat, QTextCursor, QTextCharFormat, QColor, QClipboard, QPen,
     QTextOption, QImage, QPixmap, QTextDocument, QTextFormat, QDesktopServices,
 )
@@ -28,6 +29,7 @@ import link_url
 import markdown_shortcuts
 import paste
 import rich_text
+from slash_menu import SlashMenu
 import url_safety
 from link_popover import LinkPopover, clipboard_address
 
@@ -103,6 +105,12 @@ class HtmlEditor(QTextEdit):
         # Whether typed Markdown turns into what it means
         # (markdown_shortcuts.py): the person's choice, off until made.
         self._markdown_shortcuts = lambda: False
+        # The slash menu (slash_menu.py): what it offers for the words after
+        # the slash, from the window; where the slash is while it is open.
+        self._slash_items = None
+        self._slash_menu = None
+        self._slash_at = -1
+        self.cursorPositionChanged.connect(self._slash_follow_caret)
         # Who opens a link Command-clicked (Ctrl-clicked elsewhere): the
         # window, which knows where each kind of link goes.
         self._link_opener = None
@@ -566,6 +574,10 @@ class HtmlEditor(QTextEdit):
 
     def focusOutEvent(self, event):
         super().focusOutEvent(event)
+        menu = self._slash_menu
+        if menu is not None and not menu.underMouse():
+            # A click on the menu itself picks; anything else closes it.
+            self._close_slash()
         self._cursor_visible = False
         self._blink_timer.stop()
         self.viewport().update(self._block_cursor_rect())
@@ -578,8 +590,11 @@ class HtmlEditor(QTextEdit):
         return bool(self._markdown_shortcuts()) and self._holds_structure()
 
     def _after_typed(self, text: str) -> None:
-        """Markdown Shortcuts, after ``text`` was typed at the caret: the
-        structure or style it completes, as an undo step of its own."""
+        """After ``text`` was typed at the caret: the slash menu for a "/"
+        at the start of a word, and Markdown Shortcuts: the structure or
+        style the text completes, as an undo step of its own."""
+        if text == "/":
+            self._maybe_open_slash()
         if not text or not self._shortcuts_apply():
             return
         cursor = self.textCursor()
@@ -607,6 +622,133 @@ class HtmlEditor(QTextEdit):
         # dead key) arrive here rather than as key presses.
         super().inputMethodEvent(event)
         self._after_typed(event.commitString())
+
+    # -------- The slash menu --------
+    def set_slash_items(self, provider) -> None:
+        """Install ``provider(query) -> [slash_menu.SlashItem]``: what the
+        slash menu offers for the words typed after the slash. Without
+        one, "/" is only a character."""
+        self._slash_items = provider
+
+    def slash_menu(self):
+        """The slash menu while it is open, else None."""
+        menu = self._slash_menu
+        return menu if self._slash_at >= 0 and menu is not None and menu.isVisible() else None
+
+    def _maybe_open_slash(self) -> None:
+        """A "/" was just typed: the slash menu, at the start of a word in a
+        paragraph that can take structure (not in code or a table)."""
+        if self._slash_items is None or not self._holds_structure():
+            return
+        cursor = self.textCursor()
+        block = cursor.block()
+        if rich_text.is_code_block(block) or cursor.currentTable() is not None:
+            return
+        before = block.text()[:cursor.positionInBlock() - 1]
+        if before and not before[-1].isspace():
+            return
+        self._slash_at = cursor.position() - 1
+        self._refresh_slash()
+
+    def _slash_query(self):
+        """The words typed after the slash, or None when the caret has
+        left them or the slash is gone."""
+        at = self._slash_at
+        cursor = self.textCursor()
+        doc = self.document()
+        if (at < 0 or cursor.hasSelection() or cursor.position() <= at
+                or doc.findBlock(at).position() != cursor.block().position()
+                or doc.characterAt(at) != "/"):
+            return None
+        words = QTextCursor(doc)
+        words.setPosition(at + 1)
+        words.setPosition(cursor.position(), QTextCursor.MoveMode.KeepAnchor)
+        return words.selectedText()
+
+    def _refresh_slash(self) -> None:
+        query = self._slash_query()
+        if query is None:
+            self._close_slash()
+            return
+        items = self._slash_items(query)
+        if not items and (len(query) >= 3 or query.endswith(" ")):
+            self._close_slash()
+            return
+        if self._slash_menu is None:
+            self._slash_menu = SlashMenu(self)
+            self._slash_menu.picked.connect(self._pick_slash)
+        menu = self._slash_menu
+        menu.show_items(items, headers=not query, dark=self._is_dark())
+        if not menu.has_choices():
+            # Nothing matches yet: out of the way, while the words may
+            # still change into something that does.
+            menu.hide()
+            return
+        menu.open_at(self.cursorRect(), self.viewport())
+        self._announce_slash_choice()
+
+    def _slash_follow_caret(self) -> None:
+        if self._slash_at >= 0:
+            self._refresh_slash()
+
+    def _close_slash(self) -> None:
+        self._slash_at = -1
+        if self._slash_menu is not None:
+            self._slash_menu.hide()
+        if self.accessibleDescription():
+            self.setAccessibleDescription("")
+
+    def _announce_slash_choice(self) -> None:
+        """A screen reader hears the chosen item: the menu itself never has
+        the focus, so the editor describes it (a limit of Qt)."""
+        menu = self._slash_menu
+        self.setAccessibleDescription(menu.chosen_title() if menu is not None else "")
+        QAccessible.updateAccessibility(
+            QAccessibleEvent(self, QAccessible.Event.DescriptionChanged))
+
+    def _pick_slash(self, action) -> None:
+        """Take "/words" away and run ``action`` where the slash was, as one
+        step to undo."""
+        start = self._slash_at
+        end = self.textCursor().position()
+        self._close_slash()
+        if start < 0:
+            return
+        doc = self.document()
+        step = QTextCursor(doc)
+        step.beginEditBlock()
+        words = QTextCursor(doc)
+        words.setPosition(start)
+        words.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+        words.removeSelectedText()
+        self.setTextCursor(words)
+        action.trigger()
+        step.endEditBlock()
+        self.setFocus()
+
+    def _slash_key(self, e) -> bool:
+        """The keys of the open slash menu. True when one was handled."""
+        menu = self.slash_menu()
+        if menu is None:
+            return False
+        key = e.key()
+        plain = e.modifiers() in (Qt.KeyboardModifier.NoModifier,
+                                  Qt.KeyboardModifier.KeypadModifier)
+        if key in (Qt.Key.Key_Up, Qt.Key.Key_Down) and plain:
+            menu.move_choice(-1 if key == Qt.Key.Key_Up else 1)
+            self._announce_slash_choice()
+            return True
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Tab) and plain:
+            action = menu.chosen()
+            if action is not None:
+                self._pick_slash(action)
+                return True
+            self._close_slash()
+            return False
+        if key == Qt.Key.Key_Escape:
+            self._close_slash()
+            return True
+        return False
 
     def set_structure_check(self, check) -> None:
         """Install ``check()``: whether this document holds Markdown
@@ -888,6 +1030,14 @@ class HtmlEditor(QTextEdit):
             self._apply_active_format_to_cursor()
 
     def keyPressEvent(self, e):
+        if self._slash_key(e):
+            return
+        self._key_press(e)
+        if self._slash_at >= 0:
+            # The words after the slash changed (or the caret left them).
+            self._refresh_slash()
+
+    def _key_press(self, e):
         # Keep cursor solid immediately after a keypress; blink restarts from now
         old_cursor_rect = self._block_cursor_rect()
         self._cursor_visible = True

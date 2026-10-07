@@ -51,6 +51,8 @@ from commands import (
     EDIT, FILE, FORMAT, HELP, INSERT, NOSTR, SEARCH, VIEW, Command, CommandRegistry,
     platform_keys,
 )
+import slash_menu
+from slash_menu import SlashItem
 from doc_walk import iter_blocks, iter_image_names, serialize_plain_with_images
 from markdown_writer import (
     document_to, document_to_markdown, has_local_only_formatting, holds_faithfully,
@@ -924,6 +926,7 @@ class MainWindow(QMainWindow):
         ed.set_context_menu_filler(self._fill_editor_context_menu)
         ed.set_structure_check(lambda e=ed: self._editor_kind(e) == "rich")
         ed.set_markdown_shortcuts_check(lambda: self.markdown_shortcuts)
+        ed.set_slash_items(self._slash_items)
         ed.set_link_opener(self._open_link)
         ed.set_nostr_check(lambda: self.nostr_state.active)
         return ed
@@ -1340,7 +1343,8 @@ class MainWindow(QMainWindow):
                 (3, _("Heading 3"), ("h3",))):
             action = add(Command(f"format.style.{'body' if not level else f'h{level}'}", title,
                                  FORMAT, platform_keys(mac_style_keys[level], f"Ctrl+{level}"),
-                                 checkable=True, keywords=words),
+                                 checkable=True, keywords=words,
+                                 slash_section=slash_menu.TEXT),
                          triggered=lambda n=level: self._set_heading(n))
             self._style_group.addAction(action)
             self.act_styles.append(action)
@@ -1348,12 +1352,14 @@ class MainWindow(QMainWindow):
         # Docs' elsewhere (Ctrl+Shift+8 and 7).
         self.act_bullets = add(Command("format.list.bullet", _("Bulleted List"), FORMAT,
                                        platform_keys("Ctrl+Shift+7", "Ctrl+Shift+8"),
-                                       checkable=True, keywords=(_("bullets"), _("list"))),
+                                       checkable=True, keywords=(_("bullets"), _("list")),
+                                       slash_section=slash_menu.LISTS),
                                triggered=lambda: self._toggle_list(rich_text.BULLET))
         self.act_numbers = add(Command("format.list.number", _("Numbered List"), FORMAT,
                                        platform_keys("Ctrl+Shift+9", "Ctrl+Shift+7"),
                                        checkable=True,
-                                       keywords=(_("numbers"), _("list"), _("ordered"))),
+                                       keywords=(_("numbers"), _("list"), _("ordered")),
+                                       slash_section=slash_menu.LISTS),
                                triggered=lambda: self._toggle_list(rich_text.NUMBER))
         self.act_indent = add(Command("format.indent", _("Increase Indent"), FORMAT, "Ctrl+]",
                                       keywords=(_("nest"),)),
@@ -1365,16 +1371,20 @@ class MainWindow(QMainWindow):
         # LibreOffice have none.
         self.act_quote = add(Command("format.quote", _("Quote"), FORMAT,
                                      platform_keys("Ctrl+'", None),
-                                     checkable=True, keywords=(_("citation"),)),
+                                     checkable=True, keywords=(_("citation"), _("blockquote")),
+                                     slash_section=slash_menu.BLOCKS),
                              triggered=lambda: self._editor_call("toggle_quote"))
 
         # Insert. Command-K, as in Pages, Mail and Notes; the title says
         # Edit Link… while the caret is in a link.
         self.act_link = add(Command("insert.link", _("Add Link\u2026"), INSERT, "Ctrl+K",
-                                    keywords=(_("web address"), "url", _("hyperlink"))),
+                                    keywords=(_("web address"), "url", _("hyperlink")),
+                                    slash_section=slash_menu.INSERT),
                             triggered=lambda: self._editor_call("show_link_popover"))
         self.act_divider = add(Command("insert.divider", _("Divider"), INSERT,
-                                       keywords=(_("horizontal rule"), _("line"))),
+                                       keywords=(_("horizontal rule"), _("line"),
+                                                 _("separator")),
+                                       slash_section=slash_menu.BLOCKS),
                                triggered=lambda: self._editor_call("insert_divider"))
         # Text colors stay in the document and in local files; Markdown
         # has none, so they never reach Nostr.
@@ -1547,7 +1557,8 @@ class MainWindow(QMainWindow):
             triggered=self._on_nostr_media_library)
         self.act_nostr_insert_image = add(
             Command("nostr.insert_image", _("Insert Image…"), NOSTR, "Ctrl+Shift+I",
-                    nostr=True, listed_as=_("Insert image"), keywords=("picture", "photo")),
+                    nostr=True, listed_as=_("Insert image"),
+                    keywords=(_("picture"), _("photo")), slash_section=slash_menu.INSERT),
             triggered=self._on_nostr_insert_image)
         # Drafts surface - the side-docked panel. ``Ctrl+Shift+D`` (D
         # for Draft) toggles it, sitting alongside the other Ctrl+Shift
@@ -4003,6 +4014,12 @@ class MainWindow(QMainWindow):
         if ed:
             ed.set_heading(level)
             self._update_format_buttons()
+
+    def _slash_items(self, query: str) -> list:
+        """What the slash menu offers for ``query``: the window's commands,
+        ranked (CommandRegistry.rank), Nostr ones while Nostr is in use."""
+        return [SlashItem(command.slash_section, self.commands.action(command.id))
+                for command in self.commands.rank(query, nostr=self.nostr_state.active)]
 
     def _set_markdown_shortcuts(self, on: bool) -> None:
         """Edit > Substitutions > Markdown Shortcuts, remembered."""

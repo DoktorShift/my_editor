@@ -113,6 +113,8 @@ The find bar's Options menu offers Match Case and Whole Words. A replacement tak
 
 Lists are real lists, written to Markdown as `- item` and `1. item`, nested by four spaces. In plain-text files (`.txt`, code, R Markdown), `Tab` types a bullet as text (`    • item`) instead, as before.
 
+**The slash menu.** Type `/` at the start of a word to insert structure without leaving the keyboard: a short list opens under the caret with the paragraph styles, the lists, the blocks (quote, divider) and what can be inserted (a link, and while a Nostr account is in use, a picture from your media library). It holds the same commands as the menus, with their keys. Type a few letters to narrow it (`/he` for the headings, `/list`, `/rule`), move with `Up` and `Down`, and press `Return` or `Tab` to choose: the `/` and your letters go, and the command acts where they were. One `Undo` brings them back. `Escape` closes the list and keeps what you typed; so does moving the caret away, or letters that match nothing. It opens only where a document can hold structure, and never in a code block or a table.
+
 The **`View`** menu holds the appearance options: theme, line numbers, syntax highlighting, background style (lined, dashed, dotted, grid), paper mode, and highlight current line. Nothing around the document repeats a menu: the window shows the format toolbar, the tabs and the text.
 
 `Help > Keyboard Shortcuts` lists every shortcut as it is on the computer in use: on a Mac in Apple's symbols (`⇧⌘S`), elsewhere with your keyboard's key names (`Strg+Umschalt+S` on a German one). It is built from the same command list as the menus (`commands.py`), so the two always agree; the Nostr shortcuts appear there once an account is in use.
