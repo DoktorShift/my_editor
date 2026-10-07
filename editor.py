@@ -157,6 +157,10 @@ class HtmlEditor(QTextEdit):
         self._writing_measure_chars = None
         self._highlights = {layer: [] for layer in self.HIGHLIGHT_LAYERS}
         self.verticalScrollBar().valueChanged.connect(self.visible_area_changed)
+        # Spelling (spelling.DocumentSpelling), while it is checked here.
+        self._spelling = None
+        self.visible_area_changed.connect(self._spelling_follow_view)
+        self.cursorPositionChanged.connect(self._spelling_follow_caret)
 
         # Track active formatting state for persistent formatting
         self.active_format = {
@@ -426,6 +430,90 @@ class HtmlEditor(QTextEdit):
 
     def highlights(self, layer: str) -> list:
         return list(self._highlights[layer])
+
+    # -------- Spelling --------
+    def set_spelling(self, spelling) -> None:
+        """Check this document's spelling with ``spelling`` (a
+        spelling.DocumentSpelling of its document), or stop (None): the
+        misspelled words on screen are underlined the platform's way."""
+        old = self._spelling
+        if old is spelling:
+            return
+        if old is not None:
+            try:
+                old.misspellingsChanged.disconnect(self._spelling_changed)
+            except (RuntimeError, TypeError):
+                pass
+        self._spelling = spelling
+        if spelling is None:
+            self.set_highlights("spelling", [])
+            return
+        spelling.misspellingsChanged.connect(self._spelling_changed)
+        spelling.set_cursor_position(self.textCursor().position())
+        self._spelling_follow_view()
+
+    def spelling(self):
+        """The document's spelling while it is checked, else None."""
+        return self._spelling
+
+    def visible_blocks(self) -> tuple:
+        """(first, last): the numbers of the blocks on screen."""
+        first, last = self.visible_range()
+        doc = self.document()
+        return (doc.findBlock(first).blockNumber(),
+                doc.findBlock(max(first, last - 1)).blockNumber())
+
+    def _spelling_follow_caret(self) -> None:
+        if self._spelling is not None:
+            self._spelling.set_cursor_position(self.textCursor().position())
+
+    def _spelling_follow_view(self) -> None:
+        if self._spelling is None:
+            return
+        first, last = self.visible_blocks()
+        self._spelling.set_visible_blocks(first, last)
+        self._draw_spelling()
+
+    def _spelling_changed(self, first: int, last: int) -> None:
+        shown_first, shown_last = self.visible_blocks()
+        if last >= shown_first and first <= shown_last:
+            self._draw_spelling()
+
+    def _draw_spelling(self) -> None:
+        """Underline the misspelled words of the blocks on screen."""
+        spelling = self._spelling
+        if spelling is None:
+            return
+        underline = QTextCharFormat()
+        underline.setUnderlineStyle(QTextCharFormat.UnderlineStyle.SpellCheckUnderline)
+        underline.setUnderlineColor(QColor("#E5484D"))
+        first, last = self.visible_blocks()
+        doc = self.document()
+        selections = []
+        block = doc.findBlockByNumber(first)
+        while block.isValid() and block.blockNumber() <= last:
+            for word in spelling.misspellings(block):
+                mark = QTextEdit.ExtraSelection()
+                mark.cursor = QTextCursor(doc)
+                mark.cursor.setPosition(block.position() + word.start)
+                mark.cursor.setPosition(block.position() + word.end,
+                                        QTextCursor.MoveMode.KeepAnchor)
+                mark.format = underline
+                selections.append(mark)
+            block = block.next()
+        self.set_highlights("spelling", selections)
+
+    def replace_misspelling(self, misspelling, block_position: int, words: str) -> None:
+        """A suggestion for a misspelled word, in its place and in its
+        format, as one step to undo."""
+        cursor = QTextCursor(self.document())
+        cursor.setPosition(block_position + misspelling.start)
+        cursor.setPosition(block_position + misspelling.end, QTextCursor.MoveMode.KeepAnchor)
+        fmt = cursor.charFormat()
+        cursor.beginEditBlock()
+        cursor.insertText(words, fmt)
+        cursor.endEditBlock()
+        self.setTextCursor(cursor)
 
     def visible_range(self):
         """``(first, last)``: the document positions from the start of the

@@ -55,6 +55,7 @@ from commands import (
 import slash_menu
 from slash_menu import SlashItem
 from table_picker import TablePicker
+import spelling
 import preview_pane
 from preview_pane import (
     ARTICLE, DOCUMENT, NOTE, PREVIEW, SPLIT, SPLIT_MIN_WIDTH, WRITE, PreviewContent, PreviewPane,
@@ -280,6 +281,21 @@ class _WidthWatcher(QObject):
             self._changed()
         return False
 
+
+
+def spelling_language_names(tags) -> list:
+    """(tag, name) of the languages a spell checker offers, by name: the
+    language as its speakers write it, with its country where several
+    are offered ("Deutsch (Deutschland)", "English (United States)")."""
+    named = []
+    for tag in tags:
+        locale = QLocale(tag.replace("-", "_"))
+        name = locale.nativeLanguageName() or tag
+        name = name[:1].upper() + name[1:]
+        if "-" in tag and locale.nativeTerritoryName():
+            name = f"{name} ({locale.nativeTerritoryName()})"
+        named.append((tag, name))
+    return sorted(named, key=lambda pair: pair[1].casefold())
 
 class MainWindow(QMainWindow):
     def __init__(self, initial_path: str | None = None):
@@ -831,6 +847,7 @@ class MainWindow(QMainWindow):
                 editor.document(), lang, self.is_dark_theme
             )
             self._update_editor_font(editor)     # code: the monospace font
+            self._attach_spelling(editor)        # code is not checked
             self._update_status_bar()
 
     @staticmethod
@@ -855,6 +872,123 @@ class MainWindow(QMainWindow):
         elif self._editor_kind(editor) == "rich":
             editor._highlighter = RichTextLook(editor.document(), self.is_dark_theme)
         self._update_editor_font(editor)
+        self._attach_spelling(editor)
+
+    # -- spelling (Edit > Spelling; the system's own checker, spelling/) ---------
+
+    def _spell_checker(self):
+        """The app's one link to the system spell checker, made at first
+        use (it reaches the system checker only when it checks)."""
+        if getattr(self, "_checker", None) is None:
+            self._checker = spelling.SpellChecker(parent=self)
+            self._checker.availabilityChanged.connect(self._spelling_available)
+        return self._checker
+
+    def _spell_checked(self, ed) -> bool:
+        """Whether a tab's text is checked: prose (a document with Markdown
+        structure, Markdown or plain text, not code), editable, while Check
+        Spelling While Typing is on."""
+        if ed is None or not self.check_spelling or ed.isReadOnly():
+            return False
+        kind = self._editor_kind(ed)
+        return kind == "rich" or (kind == "source"
+                                  and getattr(ed, "_language", None) in (None, "markdown"))
+
+    def _attach_spelling(self, ed) -> None:
+        """Start or stop checking a tab's spelling, as it should be now."""
+        if ed is None or not hasattr(ed, "set_spelling"):
+            return
+        current = ed.spelling()
+        if self._spell_checked(ed):
+            if current is None:
+                ed.set_spelling(spelling.DocumentSpelling(
+                    self._spell_checker(), ed.document(),
+                    language=self.spelling_language or None))
+        elif current is not None:
+            current.close()
+            ed.set_spelling(None)
+
+    def _all_editors(self) -> list:
+        found = []
+        for i in range(self.tabs.count()):
+            ed = self._editor_from_widget(self.tabs.widget(i))
+            if ed is not None:
+                found.append(ed)
+        return found
+
+    def _set_check_spelling(self, on: bool) -> None:
+        """Edit > Spelling > Check Spelling While Typing, remembered."""
+        self.check_spelling = bool(on)
+        save_setting("check_spelling", self.check_spelling)
+        for ed in self._all_editors():
+            self._attach_spelling(ed)
+
+    def _spelling_available(self, available: bool) -> None:
+        self.act_check_spelling.setEnabled(available)
+
+    def _update_spelling_menu(self) -> None:
+        """Edit > Spelling as it opens: dimmed where the system has no
+        checker; on Windows and Linux, the languages it can check."""
+        checker = self._spell_checker()
+        available = checker.is_available()
+        self.act_check_spelling.setEnabled(available)
+        menu = getattr(self, "m_spelling_language", None)
+        if menu is None:
+            return
+        menu.clear()
+        menu.setEnabled(available and self.check_spelling)
+        group = QActionGroup(menu)
+        chosen = self.spelling_language or ""
+        for tag, name in [("", _("System Language"))] + spelling_language_names(
+                checker.languages()):
+            action = menu.addAction(name)
+            action.setCheckable(True)
+            action.setChecked(tag == chosen)
+            action.triggered.connect(lambda _c=False, t=tag: self._set_spelling_language(t))
+            group.addAction(action)
+            if not tag:
+                menu.addSeparator()
+
+    def _set_spelling_language(self, tag: str) -> None:
+        """Edit > Spelling > Language (Windows and Linux), remembered: every
+        document is checked in it ("" for the system's language)."""
+        self.spelling_language = tag
+        save_setting("spelling_language", tag)
+        for ed in self._all_editors():
+            current = ed.spelling()
+            if current is not None:
+                current.set_language(tag or None)
+
+    def _spelling_context(self, menu, editor, pos) -> None:
+        """A misspelled word under the pointer: what it might be, and
+        Ignore Spelling and Learn Spelling (Ignore All and Add to
+        Dictionary on Windows and Linux, as Word and LibreOffice say)."""
+        checks = editor.spelling() if hasattr(editor, "spelling") else None
+        if checks is None or editor.textCursor().hasSelection():
+            return
+        position = editor.cursorForPosition(pos).position()
+        word = checks.misspelling_at(position)
+        if word is None:
+            return
+        block = editor.document().findBlock(position)
+        checker = self._spell_checker()
+        guesses = checker.suggestions(word.word, word.language)[:5]
+        bold = menu.font()
+        bold.setBold(True)
+        for guess in guesses:
+            action = menu.addAction(guess)
+            action.setFont(bold)
+            action.triggered.connect(
+                lambda _c=False, g=guess, b=block.position(): editor.replace_misspelling(word, b, g))
+        if not guesses:
+            menu.addAction(_("No Guesses Found")).setEnabled(False)
+        menu.addSeparator()
+        mac = sys.platform == "darwin"
+        menu.addAction(_("Ignore Spelling") if mac else _("Ignore All"),
+                       lambda: checker.ignore(word.word, word.language))
+        menu.addAction(_("Learn Spelling") if mac else _("Add to Dictionary"),
+                       lambda: checker.learn(word.word, word.language))
+        menu.addSeparator()
 
     def _update_editor_font(self, editor) -> None:
         """Writing in the system's text font, code and plain text in the
@@ -1637,6 +1771,14 @@ class MainWindow(QMainWindow):
         # Typed Markdown turned into what it means ("# " a heading, "**x**"
         # bold), in Edit > Substitutions as Apple's apps keep such
         # substitutions; off until the person turns it on.
+        # Spelling, with the system's own checker (decision Q-O): on, as in
+        # Apple's apps; dimmed where the system has no checker.
+        self.check_spelling = bool(load_settings().get("check_spelling", True))
+        self.spelling_language = str(load_settings().get("spelling_language", "") or "")
+        self.act_check_spelling = add(
+            Command("edit.check_spelling", _("Check Spelling While Typing"), EDIT,
+                    checkable=True, keywords=(_("spelling"), _("spellcheck"))),
+            toggled=self._set_check_spelling, checked=self.check_spelling)
         self.markdown_shortcuts = bool(load_settings().get("markdown_shortcuts", False))
         self.act_markdown_shortcuts = add(
             Command("edit.markdown_shortcuts", _("Markdown Shortcuts"), EDIT, checkable=True,
@@ -1821,6 +1963,14 @@ class MainWindow(QMainWindow):
         self.m_find.addAction(self.act_find_next)
         self.m_find.addAction(self.act_find_prev)
         self.m_find.addAction(self.act_use_selection)
+        # Spelling, then Substitutions, in the order of Apple's Edit menus.
+        self.m_spelling = m_edit.addMenu(_("Spelling"))
+        self.m_spelling.addAction(self.act_check_spelling)
+        if sys.platform != "darwin":
+            # macOS tells the language of each paragraph by itself;
+            # elsewhere the person says which one (the system's at first).
+            self.m_spelling_language = self.m_spelling.addMenu(_("Language"))
+        self.m_spelling.aboutToShow.connect(self._update_spelling_menu)
         self.m_substitutions = m_edit.addMenu(_("Substitutions"))
         self.m_substitutions.addAction(self.act_markdown_shortcuts)
         self.m_edit = m_edit
@@ -4465,6 +4615,7 @@ class MainWindow(QMainWindow):
         if editor.anchorAt(pos) and not editor.textCursor().hasSelection():
             editor.setTextCursor(editor.cursorForPosition(pos))
             self._update_format_buttons()
+        self._spelling_context(menu, editor, pos)
         link = editor.link_at_caret() if self._editor_kind(editor) == "rich" else None
         if link is not None:
             # A link's own commands, here only: they mean something only

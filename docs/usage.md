@@ -108,6 +108,8 @@ A paste goes in the way typing it would: inside a sentence the pasted words beco
 
 `Undo` right after a change brings back exactly what you typed, and what you type next is in the style you were typing in before the marks. Nothing changes inside a code block or code words, inside code you are still typing (after an opening `` ` ``), across a link, after a backslash (`\*`), or in plain-text and code files; marks that are themselves code (`` `#` ``) make no heading, list or divider. The words between two marks never hold the mark itself, so an earlier `**` you kept as typed stays as it is.
 
+**Spelling.** MyEditor checks your spelling with your system's own spell checker, the one your other apps use: misspelled words get the system's underline (dotted on macOS, wavy elsewhere) once you have finished typing them. Right-click a misspelled word for what it might be (choose one to put it in place; `Undo` takes it back), `Ignore Spelling` (accepted everywhere until MyEditor quits) and `Learn Spelling` (added to your own dictionary for good); on Windows and Linux they are called `Ignore All` and `Add to Dictionary`. `Edit > Spelling > Check Spelling While Typing` turns it off and on, and is remembered; it is dimmed where the system has no spell checker. macOS tells the language of each paragraph by itself; on Windows and Linux, `Edit > Spelling > Language` chooses the language (your system's at first), also remembered. Documents and Markdown and plain-text files are checked; code files, code blocks and inline code, web and Nostr addresses, hashtags and mentions are not.
+
 ### Find
 
 `Edit > Find`:
@@ -208,8 +210,11 @@ or `F12`); the button stays greyed out when the PDF has no outline.
 
 Right-clicking in the editor opens a context menu with the same commands as the menus:
 
+- on a misspelled word: what it might be, Ignore Spelling, Learn Spelling (Ignore All and Add to Dictionary on Windows and Linux)
+- on a footnote's mark or a note's label: Go to Note / Go to Mark
 - on a link: Open Link, Edit Link, Copy Link, Remove Link
 - Cut / Copy / Paste / Paste and Match Style
+- in a table: Table (add rows and columns, delete them or the table)
 - Bold / Italic / Underline / Strikethrough / Inline Code
 - **Color**: one of six text colors (Red, Green, Orange, Yellow, Blue, Purple), or **Remove Color**
 - **Clear Formatting**: every style and color at once; links stay links
