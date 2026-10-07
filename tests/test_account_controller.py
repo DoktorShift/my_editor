@@ -257,7 +257,7 @@ def test_a_restore_that_finds_nothing_offers_a_relay_list_once(tmp_path, alerts)
     report.finished.connect(lambda ok, msg: finished.append(ok))
     s.controller._account_ready(profile, "", report, created=False)
     settle()
-    assert (STEP_RELAYS, "done", "This account has no relay list yet.") in steps
+    assert (STEP_RELAYS, "done", "None yet.") in steps
     assert (STEP_PROFILE, "done", "No public profile found.") in steps
     assert [key for key, state, _d in steps if state == "active"] == [STEP_RELAYS, STEP_PROFILE]
     assert finished == [True] and s.relays.published == []

@@ -2396,8 +2396,8 @@ class MainWindow(QMainWindow):
         count = len(pending)
         upload = ask(
             self,
-            title=ngettext("Upload {count} image to your Blossom servers?",
-                           "Upload {count} images to your Blossom servers?",
+            title=ngettext("Upload {count} image to your media servers?",
+                           "Upload {count} images to your media servers?",
                            count).format(count=count),
             message=_("They're already in your document and stay there either way."),
             buttons=(Button(_("Keep Local"), False, CANCEL), Button(_("Upload"), True, DEFAULT)))
@@ -2628,9 +2628,11 @@ class MainWindow(QMainWindow):
             title=ngettext("Upload {count} image before publishing?",
                            "Upload {count} images before publishing?", count).format(count=count),
             message=ngettext(
-                "{count} image in this document is not on Blossom yet. Publishing now "
+                "{count} image in this document is not on your media server yet. "
+                "Publishing now "
                 "would break it for readers.",
-                "{count} images in this document are not on Blossom yet. Publishing now "
+                "{count} images in this document are not on your media server yet. "
+                "Publishing now "
                 "would break them for readers.", count).format(count=count),
             buttons=(Button(_("Cancel"), False, CANCEL), Button(_("Upload Now"), True, DEFAULT)))
         if upload:
@@ -2796,9 +2798,9 @@ class MainWindow(QMainWindow):
                     if outcome == "switch":
                         if not self._switch_active_profile_to(mismatch_pk):
                             inform(
-                                self, title=_("That profile isn't connected anymore"),
-                                message=_("Pair it again from Nostr > Connect Signer to save "
-                                          "here."))
+                                self, title=_("That account isn\u2019t signed in anymore"),
+                                message=_("Connect it again with Nostr > Connect Signer "
+                                          "App\u2026 to save here."))
                             return False
                 self._restash_with_binding(ed, binding)
                 return True
@@ -4812,7 +4814,8 @@ class MainWindow(QMainWindow):
         publishes became its upload servers. Said once, where it shows."""
         hosts = ", ".join(url_safety.host_of(s) or s for s in servers)
         self.status.showMessage(
-            _("Media uploads go to the servers your Nostr profile lists: {hosts}").format(
+            _("Media uploads go to the media servers your Nostr account lists: "
+              "{hosts}").format(
                 hosts=hosts), 8000)
         if self._visible_media_library() is not None:
             self._media_store.refetch_if_targets_changed()
@@ -5472,7 +5475,7 @@ class MainWindow(QMainWindow):
         if hosts:
             title = _("Upload this image to {hosts}?").format(hosts=hosts)
         else:
-            title = _("Upload this image to your Blossom servers?")
+            title = _("Upload this image to your media servers?")
         upload, remember = ask_with_checkbox(
             self,
             title=title,
@@ -5606,7 +5609,8 @@ class MainWindow(QMainWindow):
         signer round-trip - no relay re-fetch.
         """
         self._draft_sync.retry_decrypt(identifier)
-        self.status.showMessage(_("Retrying decryption - approve on your signer…"), 6000)
+        self.status.showMessage(_("Trying again. Approve the request in your signer "
+                                  "app\u2026"), 6000)
 
     def _on_panel_delete_drafts(self, identifiers: list) -> None:
         """Delete one draft or twenty, through one question and one run.
@@ -5690,9 +5694,9 @@ class MainWindow(QMainWindow):
         signs_here = profile is not None and getattr(profile, "is_local", False)
         if requests > 1 and not signs_here:
             lines.append(ngettext(
-                "Your signer will ask you to approve each one, so expect "
+                "Your signer app will ask you to approve each one, so expect "
                 "{count} request. You can stop partway through.",
-                "Your signer will ask you to approve each one, so expect "
+                "Your signer app will ask you to approve each one, so expect "
                 "{count} requests. You can stop partway through.",
                 requests).format(count=requests))
             if imported:
@@ -5824,8 +5828,8 @@ class MainWindow(QMainWindow):
             # The panel may be closed, and this is the same condition that
             # makes publishing fail, so it belongs in the window too.
             self.status.showMessage(
-                _("Your signer is not responding. Open your signer app and "
-                  "make sure it is running."), 8000,
+                _("Your signer app is not responding. Open it and make sure it is "
+                  "running."), 8000,
             )
 
     def _on_draft_sync_bunker_error(self, message: str) -> None:
@@ -5884,8 +5888,9 @@ class MainWindow(QMainWindow):
                     # confirmation - surface and bail rather than fall
                     # through to a save under the wrong identity.
                     inform(
-                        self, title=_("That profile isn't connected anymore"),
-                        message=_("Pair it again from Nostr > Connect Signer to save here."))
+                        self, title=_("That account isn\u2019t signed in anymore"),
+                        message=_("Connect it again with Nostr > Connect Signer "
+                                  "App\u2026 to save here."))
                     return
                 # After the switch, the binding now matches active, so
                 # we proceed normally below.
@@ -6309,7 +6314,7 @@ class MainWindow(QMainWindow):
                 return p.display_name or p.npub_short()
             if pk:
                 return f"{pk[:8]}…{pk[-4:]}"
-            return _("(unknown profile)")
+            return _("(unknown account)")
 
         active_label = _label_for(active, active.user_pubkey if active else "")
         original_label = _label_for(original, original_pubkey)
@@ -6327,7 +6332,7 @@ class MainWindow(QMainWindow):
             title=_("This draft was last saved as {original}, but you're "
                     "signed in as {active}").format(original=original_label,
                                                     active=active_label),
-            message=_("Saving under the current profile would create a separate "
+            message=_("Saving under the current account would create a separate "
                       "draft. How would you like to handle it?"),
             buttons=buttons, caution=True)
 

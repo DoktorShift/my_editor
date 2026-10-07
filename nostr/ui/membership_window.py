@@ -79,7 +79,7 @@ _QR_SIZE = 216
 _ASK_SIGNER = _("Approve the request in your signer app.")
 _ONE_MOMENT = _("One moment.")
 _SIGNER_MAY_ASK = _("Your signer app may ask you to approve.")
-_DEFAULT_NOTE = _("Membership belongs to your Nostr identity and runs for a calendar "
+_DEFAULT_NOTE = _("Membership belongs to your Nostr account and runs for a calendar "
                   "year. You renew it yourself; nothing is charged automatically.")
 
 
@@ -236,7 +236,7 @@ class MembershipWindow(AssistantWindow):
         col.addWidget(text_label(
             _("EINUNDZWANZIG brings Bitcoiners together across the German-speaking "
               "world, with local meetups, education and exchange. Membership supports "
-              "the community and adds services to your Nostr identity.")))
+              "the community and adds services to your Nostr account.")))
         col.addSpacing(4)
         # Everything the association lists for its members, in its order.
         for service in MEMBER_SERVICES:
@@ -290,8 +290,8 @@ class MembershipWindow(AssistantWindow):
 
     def _set_overview_note(self, note: str) -> None:
         if not self._pubkey:
-            note = note or _("Membership belongs to a Nostr identity. Connect your "
-                             "signer to join.")
+            note = note or _("Membership belongs to a Nostr account. Connect your "
+                             "signer app, or create an account, to join.")
         elif self._service == "unavailable":
             note = note or _("Joining in the app isn’t available right now. "
                              "You can join on the EINUNDZWANZIG website.")

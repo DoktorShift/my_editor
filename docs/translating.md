@@ -54,11 +54,11 @@ The German translation should read like a well-made German app, in the everyday 
 
 | English | Deutsch |
 |---|---|
-| account | Konto |
+| account (never "profile" or "identity" for it; a profile is the name and picture people see) | Konto |
 | article | Artikel |
 | back up (an account) | (Konto) sichern; backup file: Sicherungsdatei |
 | bold / italic / underline / strikethrough | Fett / Kursiv / Unterstrichen / Durchgestrichen |
-| connect a signer | Signer verbinden |
+| connect a signer app | Signer-App verbinden |
 | draft | Entwurf |
 | EINUNDZWANZIG | EINUNDZWANZIG |
 | feed | Feed |
@@ -90,13 +90,14 @@ The German translation should read like a well-made German app, in the everyday 
 | restore | wiederherstellen |
 | save / save as | speichern / speichern unter |
 | sats | Sats |
+| settings (the window) | Einstellungen |
 | sign out | abmelden |
 | signer app | Signer-App |
 | statutes | Satzung |
 | subscribe / subscription | abonnieren / Abonnement |
 | syntax highlighting | Syntaxhervorhebung |
 | tab | Tab |
-| theme (dark / light) | Erscheinungsbild (dunkel / hell) |
+| appearance (automatic / light / dark) | Erscheinungsbild (automatisch / hell / dunkel) |
 | update (software) | Update; install update: Update installieren |
 | upload / download | hochladen / herunterladen |
 | wallet | Wallet |

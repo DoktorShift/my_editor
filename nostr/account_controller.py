@@ -35,7 +35,7 @@ import shiboken6
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from alerts import CANCEL, DEFAULT, DESTRUCTIVE, Button, ask, confirm_destructive, inform
-from i18n import _, ngettext
+from i18n import _
 from nostr.outbox import writer as outbox_writer
 from nostr.outbox.defaults import STARTER_LIST
 from nostr.outbox.lookup import fetch_replaceable
@@ -294,14 +294,11 @@ class AccountController(QObject):
 
         def relays_known(relay_list) -> None:
             state["relays"] = relay_list
+            # In plain words: the step says what was looked for.
             if relay_list.found:
-                count = len(relay_list.write)
-                window.step(STEP_RELAYS, "done",
-                            ngettext("Found, with {count} relay to write to.",
-                                     "Found, with {count} relays to write to.",
-                                     count).format(count=count))
+                window.step(STEP_RELAYS, "done", _("Found."))
             elif relay_list.state is LookupState.ABSENT:
-                window.step(STEP_RELAYS, "done", _("This account has no relay list yet."))
+                window.step(STEP_RELAYS, "done", _("None yet."))
             else:
                 window.step(STEP_RELAYS, "error", _("Couldn’t check right now."))
             window.step(STEP_PROFILE, "active")
@@ -426,7 +423,8 @@ class AccountController(QObject):
         elif has_key:
             confirmed = confirm_destructive(
                 self._window, title=title,
-                message=_("Your key stays in your signer. MyEditor forgets this connection "
+                message=_("Your key stays in your signer app. MyEditor forgets this "
+                          "connection "
                           "and deletes the copy of the key it keeps on this computer."),
                 action=_("Sign Out and Delete Key"), is_dark=self._is_dark())
         elif profile.is_local:
@@ -438,7 +436,7 @@ class AccountController(QObject):
         else:
             confirmed = confirm_destructive(
                 self._window, title=title,
-                message=_("Your key stays in your signer. MyEditor only forgets "
+                message=_("Your key stays in your signer app. MyEditor only forgets "
                           "this connection."),
                 action=_("Sign Out"), is_dark=self._is_dark())
         if not confirmed:

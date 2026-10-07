@@ -721,7 +721,7 @@ class CreateAccountWindow(_AmberSteps, AssistantWindow):
         col.addWidget(self._setup_intro)
         self._steps = StepList([
             (STEP_SAVED, _("Account saved")),
-            (STEP_RELAYS, _("Publishing your relay list")),
+            (STEP_RELAYS, _("Telling Nostr apps where your posts are")),
             (STEP_PROFILE, _("Publishing your profile")),
         ])
         col.addWidget(self._steps)
@@ -1051,7 +1051,7 @@ class RestoreAccountWindow(AssistantWindow):
         col.addWidget(self._who)
         self._steps = StepList([
             (STEP_SAVED, _("Account saved on this computer")),
-            (STEP_RELAYS, _("Finding your relay list")),
+            (STEP_RELAYS, _("Finding where your posts are")),
             (STEP_PROFILE, _("Finding your profile")),
         ])
         col.addWidget(self._steps)
