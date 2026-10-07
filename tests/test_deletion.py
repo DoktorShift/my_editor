@@ -79,6 +79,17 @@ def test_reading_writes_ids_and_addresses_one_way():
     assert req.identifiers(31234) == []
 
 
+def test_an_address_with_other_digits_than_ascii_is_skipped_not_raised():
+    # "²".isdigit() is True and int("²") raises: a request with one such
+    # address once raised out of every reader of deletion requests.
+    from nostr.draft_deletions import deleted_identifiers
+    odd = request(addresses=[f"²:{PK}:x", f"٣:{PK}:y", address(31234, PK, "draft-1")],
+                  kinds=[31234])
+    req = read_deletion(odd, PK)
+    assert req is not None and req.addresses == {f"31234:{PK}:draft-1"}
+    assert deleted_identifiers(odd, PK) == {"draft-1": NOW}
+
+
 def test_an_id_covers_that_event_whenever_it_was_made():
     note = signed(1, [], "a note", created_at=NOW + 500)    # dated after the request
     req = read_deletion(request(event_ids=[note["id"]]), PK)

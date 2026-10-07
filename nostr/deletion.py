@@ -88,13 +88,16 @@ def _d_of(event: dict) -> str:
     return ""
 
 
+_KIND = re.compile(r"[0-9]+")   # ASCII only: str.isdigit() also takes "²", which int() refuses
+
+
 def _normal_address(value: str) -> Optional[str]:
     """An ``a`` tag's address with kind and pubkey written one way, or None."""
     parts = value.split(":", 2)
     if len(parts) != 3:
         return None
     kind, pubkey, identifier = parts
-    if not kind.isdigit() or not _HEX64.fullmatch(pubkey.lower()):
+    if not _KIND.fullmatch(kind) or not _HEX64.fullmatch(pubkey.lower()):
         return None
     return address(int(kind), pubkey, identifier)
 
