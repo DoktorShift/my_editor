@@ -189,8 +189,35 @@ Mirror your own blog, or a website you follow, into private Nostr drafts. Choose
 - Check the posts you want, or just open one, and choose **Create Drafts** (Command-Return or Ctrl+Return). **Options…** chooses whether images are copied to your media server and whether the whole article is fetched when a feed has only a summary. Imported drafts you don't change are removed after 90 days; once you change and save one, it stays like any draft you wrote.
 - **Skip** (or Delete) sets posts aside on this computer; Undo, in the message or in Edit > Undo, brings them back, and so does Restore in the Skipped list.
 - The toolbar shows how an import is going. Its card pauses, resumes, stops, and tries posts that failed again; the Drafts panel's Imports row shows the same line.
+- **Add > Export Sources…** writes every source to an OPML file, which other feed readers (and EINUNDZWANZIG STANDUP) import.
 
 Each draft keeps the post's title, summary, cover image, hashtags and original date.
+
+### Each source's settings
+
+Choose **Source Settings…** in a source's menu (the button beside it in the sidebar, or a right-click):
+
+- Its name as MyEditor shows it, and its address. Under the name it says when it was last checked ("Checked 4 min ago").
+- **Check for new posts automatically.** When it is off, the source is read only when you open it or choose **Check Now**, and the sidebar shows a pause mark beside it.
+- Its defaults for new drafts: copy images to your media server, and fetch the whole article when the feed has only a summary. They travel with your list of sources, so EINUNDZWANZIG STANDUP uses them too.
+- **Check Now** asks the source at once (once a minute at most).
+- **Unsubscribe…** removes the source from your list on your relays, and its posts from this computer. Drafts made of them stay.
+
+While MyEditor is open, each source that is checked automatically has its own schedule. Above 50 sources the time between checks stretches, so that no more than about 200 checks run in an hour, two at a time. Each check asks only for what changed since the last one: a feed that did not change costs no download. A source that fails is asked again later, a little later each time, and its sidebar row shows a red dot with the reason.
+
+Sources show their website's icon once MyEditor has found it (the icon the home page names, or its `/favicon.ico`), and their first letter until then. Icons are kept in `~/.cache/my_editor/favicons` and looked for again after 30 days.
+
+### New posts on the app icon
+
+**Nostr > Show New Posts on the App Icon** puts the number of posts waiting in the Inbox on MyEditor's icon: in the Dock on macOS, on the taskbar on Windows, in the launcher where a Linux desktop has one. It is off until you turn it on; the Imports window offers it once, the first time new posts arrive there. There are no other notifications.
+
+### What is kept on this computer, and for how long
+
+The inbox (each source's checks, the posts, what you skipped, imports under way) is kept for your account in `~/.config/my_editor/imports/`, and never shared. A post keeps its text while it waits in the Inbox, 90 days at most; a post you skipped or imported keeps it 30 days. After that it keeps its title, link and state, which is enough to recognise it again: it is never offered as new again, and opening it says that its text is no longer kept here. **Open Original** reads it, and a draft made of it gets the post from its page.
+
+A damaged inbox file is set aside (renamed, never deleted) and a new one started; the window says so once. When the inbox cannot be opened at all, **Nostr > Imports…** says why in plain words and what to do (a folder that cannot be written to, a full disk, a program that holds the file), and tries again the next time you choose it.
+
+With MyEditor open twice, the second one shows Imports read only and says so above the list, while the first checks and imports. When the first quits, the second takes over within a few seconds.
 
 ### Addresses that work
 
@@ -204,7 +231,7 @@ Auto-discovery reads `<link rel="alternate" type="application/rss+xml">` from th
 
 Supports RSS 2.0, Atom, and JSON Feed (WordPress, Ghost, Hugo, Jekyll, Substack, Bear, Mataroa, and friends).
 
-Nothing an import reads may point into your own network: feeds, pages, podcast chapters and images on `localhost`, local-only names (`router`, `nas.local`, `.lan`), private or link-local addresses, or names that resolve to one are refused, and every redirect is checked the same way before it is followed (five at most).
+Nothing an import reads may point into your own network: feeds, pages, podcast chapters, site icons and images on `localhost`, local-only names (`router`, `nas.local`, `.lan`), private or link-local addresses, or names that resolve to one are refused, and every redirect is checked the same way before it is followed (five at most). Each connection then goes to the very address that was checked, so a name whose answer changes after the check cannot lead into your network either (DNS rebinding). Behind a proxy the address is still checked, and the proxy makes the connection.
 
 ### Nostr-native publishers
 
@@ -216,7 +243,8 @@ The sources you subscribe to are one private list on your relays, the same list 
 
 - Both apps' edits are kept: before saving, MyEditor reads the list again and merges (sources added in either app stay, sources removed in either app go, a title or a default changed here wins over the other app's unchanged one).
 - Whatever MyEditor does not understand (sources only STANDUP reads, keys it does not know) is written back unchanged.
-- A list MyEditor cannot read (one saved with an older kind of encryption, or while the signer is unreachable) is never written over; your changes stay on this computer until it can be read.
+- A list saved with the older encryption, NIP-04, is read too: with a key kept on this computer, or through your signer app when it offers that (MyEditor asks for it when it pairs). MyEditor writes the list back with NIP-44 only.
+- A list MyEditor cannot read (while your signer app does not answer, or one it cannot decrypt) is never written over; your changes stay on this computer until it can be read, and the Imports window says so above the list.
 - The list MyEditor kept before (`d` = `myeditor:feed-sources`) is merged in once and not written again.
 - Quitting waits a few seconds for changes that are still on their way. Changes that could not be sent yet are kept with the list on this computer and sent at the next start.
 
