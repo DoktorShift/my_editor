@@ -202,6 +202,10 @@ macOS shows a preview inside its print dialog. On Windows and Linux,
 | `.rtf` | Rich Text Format |
 | `.Rmd` | R Markdown: YAML frontmatter plus Pandoc markdown with headings, lists, links, strikethrough and inline code; colors and underline use Pandoc spans, images go into a `<name>_media/` folder next to the file |
 
+## Backups
+
+Files are saved when you choose Save. What you type is backed up as you go (two seconds after you stop typing, and every fifteen seconds while you type), in `~/.cache/my_editor/backups/`, and offered back exactly as it was after a crash. The status bar says nothing about it while it works. When a document's backup cannot be written (a full or read-only disk), it says "Couldn't keep a backup of this document." with **Try Again**, until a backup is written again; a document too large to back up says so instead.
+
 ---
 
 ## R Markdown knitting

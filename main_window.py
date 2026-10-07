@@ -122,7 +122,8 @@ def _extension_from_filter(selected_filter: str) -> Optional[str]:
     m = re.search(r'\(\*(\.[0-9A-Za-z]+)', selected_filter)
     return m.group(1) if m else None
 from recovery import (
-    EditorBackup, classify_backup, find_all_backups, is_restorable, load_backup_content,
+    KEPT, TOO_LARGE, EditorBackup, classify_backup, find_all_backups, is_restorable,
+    load_backup_content,
 )
 import workspace
 import workspace_restore
@@ -316,6 +317,18 @@ class MainWindow(QMainWindow):
 
         self.status = QStatusBar()
         self.setStatusBar(self.status)
+        # Silent while backups succeed; when the document's backup cannot be
+        # kept, it says so here until it is kept again (decision Q-J).
+        self._backup_problem = QLabel()
+        self._backup_problem.setObjectName("BackupProblem")
+        self._backup_retry = QToolButton()
+        self._backup_retry.setText(_("Try Again"))
+        self._backup_retry.setAccessibleName(_("Try Backing Up Again"))
+        self._backup_retry.setAutoRaise(True)
+        self._backup_retry.clicked.connect(self._retry_backup)
+        for widget in (self._backup_problem, self._backup_retry):
+            widget.setVisible(False)
+            self.status.addPermanentWidget(widget)
         # How long the document is, quietly: words and reading time, or
         # the words of the selection while there is one.
         self._words_label = QLabel()
@@ -764,6 +777,7 @@ class MainWindow(QMainWindow):
         self._line_label.setStyleSheet(f"color: {label_color}; font-size: 12px;")
         muted = DARK_MUTED_FG if self.is_dark_theme else LIGHT_MUTED_FG
         self._words_label.setStyleSheet(f"color: {muted}; font-size: 12px;")
+        self._show_backup_status()
 
         for i in range(self.tabs.count()):
             ed = self._editor_from_widget(self.tabs.widget(i))
@@ -1032,6 +1046,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("")
 
     def _on_tab_changed(self, index=None):
+        self._show_backup_status()
         self._update_window_title()
         self._update_word_count()
         self._update_undo_redo_buttons()
@@ -1949,9 +1964,7 @@ class MainWindow(QMainWindow):
         elif ed._file_path:
             self._watcher.addPath(ed._file_path)
 
-        ed._backup = EditorBackup(
-            ed, ed._file_path, externalize=self._asset_manager.adopt_data_uri
-        )
+        ed._backup = self._new_backup(ed, ed._file_path)
         ed._backup.take_over(backup_file)
         return ed
 
@@ -2003,9 +2016,7 @@ class MainWindow(QMainWindow):
 
         ed.setHtml("<div></div>")
         self._attach_highlighter(ed, None)
-        ed._backup = EditorBackup(
-            ed, None, externalize=self._asset_manager.adopt_data_uri
-        )
+        ed._backup = self._new_backup(ed, None)
         ed.setFocus()
         self._update_window_title()
         return ed
@@ -2467,9 +2478,7 @@ class MainWindow(QMainWindow):
         idx = self.tabs.addTab(container, os.path.basename(path))
         self.tabs.setCurrentIndex(idx)
         self._attach_close_button(idx, container)
-        ed._backup = EditorBackup(
-            ed, path, externalize=self._asset_manager.adopt_data_uri
-        )
+        ed._backup = self._new_backup(ed, path)
         self._watcher.addPath(path)
         add_recent(path)
         self._populate_recent_menu()
@@ -4211,6 +4220,47 @@ class MainWindow(QMainWindow):
     # ----------------------------------------------------------------------
     # LINE NUMBERS
     # ----------------------------------------------------------------------
+    # -- backups -------------------------------------------------------------
+
+    def _new_backup(self, ed, path) -> EditorBackup:
+        """The document's crash backup, which reports here when it cannot
+        be kept."""
+        backup = EditorBackup(ed, path, externalize=self._asset_manager.adopt_data_uri)
+        backup.set_status_listener(lambda _problem, e=ed: self._on_backup_status(e))
+        return backup
+
+    def _on_backup_status(self, ed) -> None:
+        if ed is self.current_editor():
+            self._show_backup_status()
+
+    def _show_backup_status(self) -> None:
+        """Say, for the current document only, that its backup is not kept,
+        and offer to try again where trying again can help."""
+        if not hasattr(self, "_backup_problem"):
+            return
+        ed = self.current_editor()
+        backup = getattr(ed, "_backup", None) if ed is not None else None
+        problem = backup.problem if backup is not None else KEPT
+        if problem == TOO_LARGE:
+            text = _("This document is too large to keep a backup of.")
+        elif problem:
+            text = _("Couldn't keep a backup of this document.")
+        else:
+            text = ""
+        self._backup_problem.setText(text)
+        self._backup_problem.setStyleSheet(
+            f"color: {theme.error_text_color(self.is_dark_theme)}; padding-right: 4px;")
+        self._backup_problem.setVisible(bool(text))
+        self._backup_retry.setVisible(bool(problem) and problem != TOO_LARGE)
+        self._backup_retry.setAccessibleDescription(text)
+
+    def _retry_backup(self) -> None:
+        ed = self.current_editor()
+        backup = getattr(ed, "_backup", None) if ed is not None else None
+        if backup is not None:
+            backup.write_now()
+        self._show_backup_status()
+
     def _toggle_line_numbers(self):
         self.show_line_numbers = not self.show_line_numbers
         self.act_toggle_line_numbers.setChecked(self.show_line_numbers)

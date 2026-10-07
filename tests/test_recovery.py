@@ -97,6 +97,7 @@ def _window_stub():
 
     return types.SimpleNamespace(
         _new_wired_editor=new_editor,
+        _new_backup=lambda ed, path: recovery.EditorBackup(ed, path),
         _reload_from_disk=lambda *a: None,
         _attach_close_button=lambda *a: None,
         _attach_highlighter=lambda *a: None,
@@ -743,3 +744,37 @@ def test_a_document_opened_as_markdown_text_stays_that_way(tmp_path):
 def test_backups_follow_the_typing_closely():
     assert recovery._DEBOUNCE_MS == 2_000
     assert recovery._MAX_INTERVAL_MS == 15_000
+
+
+
+# --------------------------------------------------------------------------- #
+# A backup that cannot be kept says so (decision Q-J)
+# --------------------------------------------------------------------------- #
+
+def test_a_failed_backup_is_reported_and_so_is_its_recovery(tmp_path, monkeypatch):
+    import atomic_file
+    ed = _editor("words worth keeping")
+    backup = recovery.EditorBackup(ed, str(tmp_path / "note.html"))
+    heard = []
+    backup.set_status_listener(heard.append)
+    assert backup.write_now() and heard == []            # silent while it works
+    real = atomic_file._replace
+    monkeypatch.setattr(atomic_file, "_replace",
+                        lambda *_: (_ for _ in ()).throw(OSError(28, "No space left")))
+    ed.setHtml("<p>more words</p>")
+    assert backup.write_now() is False
+    assert backup.problem == recovery.WRITE_FAILED and heard == [recovery.WRITE_FAILED]
+    ed.setHtml("<p>even more</p>")
+    backup.write_now()
+    assert heard == [recovery.WRITE_FAILED]              # said once, not on every tick
+    monkeypatch.setattr(atomic_file, "_replace", real)
+    assert backup.write_now()
+    assert backup.problem == recovery.KEPT and heard == [recovery.WRITE_FAILED, recovery.KEPT]
+
+
+def test_a_document_too_large_to_back_up_says_so(monkeypatch):
+    monkeypatch.setattr(recovery, "MAX_BACKUP_BYTES", 10)
+    ed = _editor("a document longer than ten bytes")
+    backup = recovery.EditorBackup(ed, None)
+    assert backup.write_now() is False
+    assert backup.problem == recovery.TOO_LARGE
