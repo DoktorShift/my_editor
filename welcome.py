@@ -53,7 +53,7 @@ def welcome_html(keys=None) -> str:
         key_line("file.open", _("{keys} - open a file")),
         key_line("file.save", _("{keys} - save")),
         key_line("search.find", _("{keys} - find")),
-        _page_text(_("View > Toggle Dark/Light Theme - switch between dark and light")),
+        _page_text(_("View > Appearance - light, dark, or the same as your computer")),
         _page_text(_("Help > Keyboard Shortcuts - for the full list")),
     ]
     items = "\n".join(f"        <li>{line}</li>" for line in lines)

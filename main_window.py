@@ -65,7 +65,7 @@ from highlighter import (
     LANGUAGE_DISPLAY_NAMES, RichTextLook, SyntaxHighlighter, detect_language,
     detect_language_from_content,
 )
-from settings import load_settings, save_setting
+from settings import load_settings, save_setting, save_settings
 from welcome import DEFAULT_KEYS as WELCOME_KEYS, is_pristine_welcome, welcome_html
 from update_check import UpdateChecker
 from updater import (
@@ -268,9 +268,8 @@ class MainWindow(QMainWindow):
             self.is_dark_theme = False
         else:
             self.is_dark_theme = self._detect_os_dark_theme()
-        # While True, the app follows OS color scheme changes live. Set to
-        # False the moment the user picks a theme explicitly (with
-        # View > Toggle Dark/Light Theme) so their choice sticks.
+        # While True (View > Appearance > Automatic), the app follows the
+        # system's light or dark appearance live; Light or Dark sticks.
         self._follow_os_theme = theme_pref is None
         QGuiApplication.styleHints().colorSchemeChanged.connect(self._on_os_color_scheme_changed)
 
@@ -579,7 +578,7 @@ class MainWindow(QMainWindow):
         # The find bar and the account chip construct themselves in dark
         # mode; bring them in line with a light theme detected above.
         if not self.is_dark_theme:
-            self._set_theme(self.is_dark_theme, announce=False)
+            self._set_theme(self.is_dark_theme)
 
         # Startup order: the tabs an update restart wrote down come back
         # first, in their own order; then the file named on the command
@@ -1438,13 +1437,23 @@ class MainWindow(QMainWindow):
         self._current_match_index = -1
         self._last_search_text = ""
 
-        # Theme, line numbers and syntax highlighting: menu items without
-        # keys, since no platform convention gives them one (their old keys
-        # were this app's own; Shift-Command-L is Notes' Checklist).
-        self.act_toggle_theme = add(Command("view.theme", _("Toggle Dark/Light Theme"), VIEW,
-                                            listed_as=_("Toggle theme"),
-                                            keywords=("dark", "light")),
-                                    triggered=self._toggle_theme)
+        # Appearance, line numbers and syntax highlighting: menu items
+        # without keys, since no platform convention gives them one (their
+        # old keys were this app's own; Shift-Command-L is Notes' Checklist).
+        # Appearance is the system's (followed as it changes) unless Light
+        # or Dark is chosen; Automatic goes back to the system's.
+        self._appearance_group = QActionGroup(self)
+        self._appearance_group.setExclusive(True)
+        self.act_appearance = {}
+        for mode, title in (("system", pgettext("appearance", "Automatic")),
+                            ("light", pgettext("appearance", "Light")),
+                            ("dark", pgettext("appearance", "Dark"))):
+            action = add(Command(f"view.appearance.{mode}", title, VIEW, checkable=True,
+                                 keywords=(_("appearance"), _("theme"), "dark", "light")),
+                         triggered=lambda m=mode: self.set_appearance(m),
+                         checked=self.appearance == mode)
+            self._appearance_group.addAction(action)
+            self.act_appearance[mode] = action
         self.act_toggle_line_numbers = add(
             Command("view.line_numbers", _("Show Line Numbers"), VIEW,
                     checkable=True, listed_as=_("Toggle line numbers")),
@@ -1704,7 +1713,9 @@ class MainWindow(QMainWindow):
         m_view.addSeparator()
         m_view.addAction(self.act_monospace_writing)
         m_view.addSeparator()
-        m_view.addAction(self.act_toggle_theme)
+        self.m_appearance = m_view.addMenu(_("Appearance"))
+        for action in self.act_appearance.values():
+            self.m_appearance.addAction(action)
         m_view.addAction(self.act_toggle_line_numbers)
         m_view.addAction(self.act_toggle_syntax_hl)
         m_view.addSeparator()
@@ -4261,14 +4272,40 @@ class MainWindow(QMainWindow):
 
 
     # ----------------------------------------------------------------------
-    # THEME TOGGLE
+    # APPEARANCE
     # ----------------------------------------------------------------------
-    def _set_theme(self, is_dark: bool, announce: bool = True):
+    @property
+    def appearance(self) -> str:
+        """"system" while the system's appearance is followed, else "light"
+        or "dark"."""
+        if self._follow_os_theme:
+            return "system"
+        return "dark" if self.is_dark_theme else "light"
+
+    def set_appearance(self, mode: str) -> None:
+        """Automatic ("system": the system's light or dark, followed as it
+        changes), Light or Dark; remembered across launches. View >
+        Appearance and Settings both choose through here."""
+        settings = load_settings()
+        if mode == "system":
+            settings.pop("theme", None)
+            is_dark = self._detect_os_dark_theme()
+        else:
+            settings["theme"] = mode
+            is_dark = mode == "dark"
+        save_settings(settings)
+        self._follow_os_theme = mode == "system"
+        if is_dark != self.is_dark_theme:
+            self._set_theme(is_dark)
+        self.act_appearance[mode].setChecked(True)
+
+    def _set_theme(self, is_dark: bool):
         """Apply is_dark to every theme-aware widget in the window.
 
-        Shared by the manual toggle (View > Toggle Dark/Light Theme) and the
-        OS color-scheme-follow path, so the fan-out logic lives in one
-        place instead of being duplicated.
+        Shared by View > Appearance and the path that follows the system's
+        appearance, so the fan-out logic lives in one place instead of
+        being duplicated. The change itself is the feedback; nothing is
+        said about it.
         """
         self.is_dark_theme = is_dark
         self._apply_theme()
@@ -4298,18 +4335,6 @@ class MainWindow(QMainWindow):
         imports_window = getattr(self, "_imports", None) and self._imports.window()
         if imports_window is not None:
             imports_window.apply_theme(self.is_dark_theme)
-        if announce:
-            message = (_("Switched to Dark theme") if self.is_dark_theme
-                       else _("Switched to Light theme"))
-            self.status.showMessage(message, 2000)
-
-    def _toggle_theme(self):
-        target = not self.is_dark_theme
-        self._set_theme(target)
-        # The user made an explicit choice - stop following the OS scheme
-        # and remember this choice across restarts.
-        self._follow_os_theme = False
-        save_setting("theme", "dark" if target else "light")
 
     def _on_os_color_scheme_changed(self, scheme):
         if not self._follow_os_theme:
