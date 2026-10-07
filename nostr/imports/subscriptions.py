@@ -658,10 +658,18 @@ class FeedSubscriptionStore(QObject):
                 if decrypt is None:
                     on_unreadable(_OLD_ENCRYPTION)
                     return
-            else:
-                decrypt = client.nip44_decrypt_self
-            decrypt(content, on_success=on_text,
-                    on_failure=lambda reason: on_unreadable(UNREADABLE.format(reason=reason)))
+
+                def refused(reason: str) -> None:
+                    # A signer app that does not read NIP-04: what to do is
+                    # the same as without one.
+                    _log.warning("the list of sources (NIP-04) was not read: %s", reason)
+                    on_unreadable(_OLD_ENCRYPTION)
+
+                decrypt(content, on_success=on_text, on_failure=refused)
+                return
+            client.nip44_decrypt_self(
+                content, on_success=on_text,
+                on_failure=lambda reason: on_unreadable(UNREADABLE.format(reason=reason)))
 
         self._session_pool.get(
             profile, on_ready=_on_ready,

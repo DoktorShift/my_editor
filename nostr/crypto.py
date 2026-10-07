@@ -25,7 +25,7 @@ from hashlib import sha256
 from typing import Tuple
 
 from coincurve import PrivateKey, PublicKey, PublicKeyXOnly
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 # --------------------------------------------------------------------------- #
 # NIP-44 v2 protocol constants                                                #
@@ -315,3 +315,39 @@ def encrypt_to(plaintext: str, sk: bytes, pubkey_xonly: bytes) -> str:
 def decrypt_from(payload_b64: str, sk: bytes, pubkey_xonly: bytes) -> str:
     """Derive the conversation key on the fly and decrypt."""
     return decrypt(payload_b64, conversation_key(sk, pubkey_xonly))
+
+
+# --------------------------------------------------------------------------- #
+# NIP-04, read only                                                           #
+# --------------------------------------------------------------------------- #
+#
+# NIP-04 is the older encryption NIP-44 replaced. Lists saved by older apps
+# (EINUNDZWANZIG STANDUP's list of sources, tagged "nip04") still use it, so
+# MyEditor reads it; it never writes it.
+
+def nip04_decrypt(content: str, sk: bytes, pubkey_xonly: bytes) -> str:
+    """Decrypt a NIP-04 message: ``base64(ciphertext) + "?iv=" +
+    base64(iv)``, AES-256-CBC keyed by the raw x coordinate of the shared
+    point (as ``ecdh_x``, not hashed), PKCS#7 padding. Raises ValueError
+    on anything malformed, a wrong key or a damaged message included."""
+    if not isinstance(content, str) or "?iv=" not in content:
+        raise ValueError("not a NIP-04 message")
+    data_b64, iv_b64 = content.split("?iv=", 1)
+    try:
+        data = base64.b64decode("".join(data_b64.split()), validate=True)
+        iv = base64.b64decode("".join(iv_b64.split()), validate=True)
+    except ValueError as exc:
+        raise ValueError("invalid base64") from exc
+    if len(iv) != 16:
+        raise ValueError("invalid iv")
+    if not data or len(data) % 16:
+        raise ValueError("invalid ciphertext length")
+    decryptor = Cipher(algorithms.AES(ecdh_x(sk, pubkey_xonly)), modes.CBC(iv)).decryptor()
+    padded = decryptor.update(data) + decryptor.finalize()
+    pad = padded[-1]
+    if not 1 <= pad <= 16 or padded[-pad:] != bytes([pad]) * pad:
+        raise ValueError("invalid padding")
+    try:
+        return padded[:-pad].decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("not text") from exc

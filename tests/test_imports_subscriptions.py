@@ -634,3 +634,53 @@ class TestSaysWhatHappens:
         store.bind_profile(PROFILE)
         settle()
         assert said[-1] == NOT_READ
+
+
+class TestOldEncryption:
+    """A list an older app saved with NIP-04 is read; what MyEditor writes
+    back is NIP-44, never NIP-04."""
+
+    def test_it_is_read_and_written_back_with_nip44(self, tmp_path):
+        from nostr import crypto
+        from nostr.local_signer import LocalSigner
+        from tests.test_nip04 import PK1, SK1, TO_SELF
+        account = SimpleNamespace(user_pubkey=PK1, bunker_relays=["wss://bunker.example"])
+        relay = FakeRelay()
+        relay.stored[FEED_LIST_DTAG] = events.sign_event(
+            {"kind": SUBSCRIPTIONS_KIND, "content": TO_SELF, "created_at": NOW - 100,
+             "tags": [["d", FEED_LIST_DTAG], ["encrypted", "nip04"]]}, bytes.fromhex(SK1))
+        signer = LocalSigner(bytes.fromhex(SK1))
+        store, _, scheduler = make_store(tmp_path, relay=relay,
+                                         session_pool=FakeSessionPool(client=signer))
+        store.bind_profile(account)
+        settle()
+        assert [(f.url, f.title) for f in store.feeds] == [
+            ("https://blog.example/feed", "Ein Blog über Bäume")]
+        store.add_feed("https://other.example/feed")
+        publish(store, scheduler)
+        settle()
+        (_relays, written), = relay.published
+        assert ["encrypted", "nip44"] in written["tags"]
+        assert not any(t[:2] == ["encrypted", "nip04"] for t in written["tags"])
+        sk = bytes.fromhex(SK1)
+        payload = json.loads(crypto.decrypt_from(written["content"], sk, bytes.fromhex(PK1)))
+        assert {f["url"] for f in payload["feeds"]} == {
+            "https://blog.example/feed", "https://other.example/feed"}
+        signer.close()
+
+    def test_a_signer_app_that_does_not_read_it_says_what_to_do(self, tmp_path):
+        relay = FakeRelay()
+        relay.put(FEED_LIST_DTAG, {"feeds": [{"url": "https://standup.example/feed"}]},
+                  tag=("encrypted", "nip04"))
+        signer = FakeSigner()
+        signer.nip04_decrypt_self = (
+            lambda ct, on_success, on_failure, **_kw: on_failure("permission denied"))
+        statuses = []
+        store, _, _ = make_store(tmp_path, relay=relay,
+                                 session_pool=FakeSessionPool(client=signer))
+        store.sync_status.connect(statuses.append)
+        store.bind_profile(PROFILE)
+        settle()
+        assert store.feeds == []
+        assert any("older kind of encryption" in s for s in statuses)
+        assert not any("permission denied" in s for s in statuses)
