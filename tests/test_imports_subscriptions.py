@@ -684,3 +684,28 @@ class TestOldEncryption:
         assert store.feeds == []
         assert any("older kind of encryption" in s for s in statuses)
         assert not any("permission denied" in s for s in statuses)
+
+
+class TestReadingAgain:
+    """``reload``: the list as another MyEditor on this computer left it
+    (CP1 review L7), never dropping a change still waiting here."""
+
+    def test_it_reads_what_the_other_one_saved(self, tmp_path):
+        relay = FakeRelay()
+        other, _, other_scheduler = bound(tmp_path, relay=relay)
+        this, _, _ = bound(tmp_path, relay=relay)
+        other.add_feed(FEED_URL, "Blog")          # saved to this computer's copy
+        assert not this.has_feed(FEED_URL)
+        this.reload()
+        settle()
+        assert this.has_feed(FEED_URL) and this.known
+
+    def test_a_change_waiting_here_stays(self, tmp_path):
+        relay = FakeRelay(accepted=False)
+        store, _, scheduler = bound(tmp_path, relay=relay)
+        store.add_feed(FEED_URL, "Blog")
+        publish(store, scheduler)                 # refused: still waiting
+        assert store._dirty
+        store.reload()
+        settle()
+        assert store.has_feed(FEED_URL) and store._dirty

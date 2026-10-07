@@ -428,3 +428,81 @@ def test_a_lost_copy_of_the_list_never_empties_the_inbox(tmp_path):
     assert [s.url for s in controller.sources()] == [FEED]
     assert controller.counts().skipped == 1
     controller.account_changed(None)
+
+
+class TestTheSecondProcess:
+    """CP1 review L7: a second MyEditor showing the inbox read only never
+    refreshed, and stayed read only after the first one quit."""
+
+    def test_it_shows_what_the_first_one_changes(self, tmp_path):
+        first, second = Harness(tmp_path), Harness(tmp_path)
+        first.controller.account_changed(profile())
+        second.controller.account_changed(profile())
+        settle()
+        assert second.controller.read_only and second.controller._watch.isActive()
+        first.controller.subscriptions.add_feed(FEED, "Blog")
+        first.controller.inbox.ingest(source_key(FEED), [make_item("Post", guid="g-1")])
+        changed = []
+        second.controller.posts_changed.connect(lambda: changed.append(1))
+        second.controller._watch_other()
+        assert changed == [1]
+        assert len(second.controller.page(View(OLDER_POSTS))) == 1
+        second.controller._watch_other()            # nothing new: nothing reloaded
+        assert changed == [1]
+        first.controller.account_changed(None)
+        second.controller.account_changed(None)
+        settle()
+
+    def test_it_keeps_the_inbox_when_the_first_one_quits(self, tmp_path):
+        first, second = Harness(tmp_path), Harness(tmp_path)
+        first.controller.account_changed(profile())
+        second.controller.account_changed(profile())
+        settle()
+        first.controller.subscriptions.add_feed(FEED, "Blog")
+        first.controller.inbox.ingest(source_key(FEED), [make_item("Post", guid="g-1")])
+        second.controller._watch_other()
+        assert second.controller.read_only           # the first still runs
+        bound = []
+        second.controller.bound_changed.connect(bound.append)
+        first.controller.account_changed(None)      # quits
+        second.controller._watch_other()
+        controller = second.controller
+        assert not controller.read_only and controller.bound
+        assert bound == [True]
+        assert not controller._watch.isActive()
+        assert second.checkers[-1].started == 1     # it checks now
+        # The source the first one followed after this one started is kept,
+        # with its posts: the list is read again before the inbox follows it.
+        assert [s.key for s in controller.sources()] == [source_key(FEED)]
+        assert len(controller.page(View(OLDER_POSTS))) == 1
+        assert controller.check_now(source_key(FEED))
+        # And it holds the lock: a third one only shows the inbox.
+        third = Harness(tmp_path)
+        third.controller.account_changed(profile())
+        settle()
+        assert third.controller.read_only
+        third.controller.account_changed(None)
+        controller.account_changed(None)
+        settle()
+
+    def test_the_window_stays_and_works_again(self, tmp_path):
+        from nostr.imports_controller import ELSEWHERE
+        from nostr.ui.imports_window import ImportsWindow
+        cleanup = delete_new_windows()
+        next(cleanup)
+        try:
+            first, second = Harness(tmp_path), Harness(tmp_path)
+            first.controller.account_changed(profile())
+            second.controller.account_changed(profile())
+            settle()
+            window = ImportsWindow(second.controller)
+            assert not window.act_follow.isEnabled()
+            assert window.notice.text() == ELSEWHERE
+            first.controller.account_changed(None)
+            second.controller._watch_other()
+            assert window.act_follow.isEnabled()
+            assert ELSEWHERE not in window.notice.text()
+            second.controller.account_changed(None)
+            settle()
+        finally:
+            next(cleanup, None)

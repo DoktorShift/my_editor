@@ -266,6 +266,7 @@ class ImportsWindow(QMainWindow):
         controller.sources_changed.connect(self._refresh_sidebar)
         controller.posts_changed.connect(self._on_posts_changed)
         controller.activity_changed.connect(self._update_activity)
+        controller.bound_changed.connect(self._on_access_changed)
         controller.import_finished.connect(self._import_finished)
         self._refresh_sidebar()
         self._update_activity()
@@ -1233,6 +1234,17 @@ class ImportsWindow(QMainWindow):
 
     # Bound slots for the window's own children, not closures over the
     # window: a closure on a child's signal keeps the window alive.
+    def _on_access_changed(self, bound: bool) -> None:
+        """The other MyEditor quit and this one keeps the inbox now (CP1
+        review L7): what a read-only view dimmed works again."""
+        if not bound:
+            return
+        writable = not self._controller.read_only
+        for action in (self.act_follow, self.act_import_file, self.act_import_link):
+            action.setEnabled(writable)
+        self._update_notice()
+        self._update_actions()
+
     def _update_notice(self) -> None:
         """One quiet line above the list for what the person should know:
         that another MyEditor checks the sources, that a damaged inbox was

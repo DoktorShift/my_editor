@@ -277,6 +277,11 @@ class InboxStore:
     def close(self) -> None:
         self._db.close()
 
+    def data_version(self) -> int:
+        """A number that changes when another connection (another
+        MyEditor) has changed the inbox since the last call."""
+        return int(self._db.execute("PRAGMA data_version").fetchone()[0])
+
     def check(self) -> None:
         """Raise ``sqlite3.DatabaseError`` when the file is damaged: pages
         that cannot be read (the usual damage after a crash during a write,

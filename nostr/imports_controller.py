@@ -210,6 +210,12 @@ class ImportsController(QObject):
         self._lock: Optional[QLockFile] = None
         self._exit_hook: Optional[Callable[[], None]] = None
         self.read_only = False
+        # Read only, the other process's changes are looked for and its
+        # lock tried every few seconds (CP1 review L7).
+        self._watch = QTimer(self)
+        self._watch.setInterval(self.WATCH_MS)
+        self._watch.timeout.connect(self._watch_other)
+        self._seen_version = None
         # Why imports could not be bound (a folder that cannot be written
         # to), and a one-time word for the window (a damaged file set aside).
         self.problem = ""
@@ -312,12 +318,21 @@ class ImportsController(QObject):
         if self.read_only:
             _log.info("imports inbox in use by another process; showing it read-only")
         else:
-            # Given back at quit (shutdown). A process that ends without
-            # closing its window still gives it back before Python tears
-            # down: left to the lock's destructor, it went after other exit
-            # handlers, when its folder could already be gone.
-            self._exit_hook = _release_at_exit(weakref.ref(self))
-            atexit.register(self._exit_hook)
+            self._hold_lock()
+        self._open(path)
+
+    def _hold_lock(self) -> None:
+        """The lock is this process's for the session. Given back at quit
+        (shutdown); a process that ends without closing its window still
+        gives it back before Python tears down: left to the lock's
+        destructor, it went after other exit handlers, when its folder
+        could already be gone."""
+        self._exit_hook = _release_at_exit(weakref.ref(self))
+        atexit.register(self._exit_hook)
+
+    def _open(self, path: Path) -> None:
+        """Open the inbox at ``path`` as the lock decided (``read_only``),
+        a damaged one set aside once."""
         try:
             self._bind_inbox(path)
         except (sqlite3.Error, OSError) as exc:
@@ -341,8 +356,51 @@ class ImportsController(QObject):
             except (sqlite3.Error, OSError) as again:
                 self._give_up(again, path)
                 return
+        if self.read_only:
+            self._seen_version = self._data_version()
+            self._watch.start()
         self.bound_changed.emit(True)
         self._announce()
+
+    WATCH_MS = 3000
+
+    def _data_version(self):
+        try:
+            return self.inbox.data_version() if self.inbox is not None else None
+        except sqlite3.Error:
+            _log.warning("could not tell whether the other MyEditor changed the imports",
+                         exc_info=True)
+            return None
+
+    def _watch_other(self) -> None:
+        """Read only: show what the process that checks has changed, and
+        keep the inbox when that process has quit (CP1 review L7: this one
+        never refreshed, and stayed read only until it was restarted)."""
+        if self.inbox is None or not self.read_only or self._lock is None:
+            self._watch.stop()
+            return
+        if self._lock.tryLock(0):
+            self._take_over()
+            return
+        version = self._data_version()
+        if version is not None and version != self._seen_version:
+            self._seen_version = version
+            self._announce()
+
+    def _take_over(self) -> None:
+        """The other MyEditor quit: this one checks and imports now, with
+        the lock it just took. The window stays open."""
+        _log.info("the other MyEditor quit; this one keeps the imports inbox now")
+        self._watch.stop()
+        path = database_path(self._config_dir, self._profile.user_pubkey)
+        self._drop_inbox()
+        self.read_only = False
+        self._hold_lock()
+        # The list as the other MyEditor left it: syncing the inbox with
+        # the one read when this one started would remove the sources it
+        # followed since, and their posts with them.
+        self.subscriptions.reload()
+        self._open(path)
 
     def _bind_inbox(self, path: Path) -> None:
         """Everything binding does with the database, so a damaged file
@@ -397,6 +455,7 @@ class ImportsController(QObject):
                 part.replace(Path(f"{aside}{suffix}"))
 
     def _give_up(self, exc: BaseException, path: Path, *, problem: str = "") -> None:
+        self._watch.stop()
         self._drop_inbox()
         self._release_lock()
         self._cannot_bind(exc, path, problem=problem)
@@ -427,6 +486,7 @@ class ImportsController(QObject):
 
     def _unbind(self, reason: str) -> None:
         self.problem = self.notice = ""
+        self._watch.stop()
         if self.inbox is None:
             return
         self.close_window()

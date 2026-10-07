@@ -229,6 +229,21 @@ class FeedSubscriptionStore(QObject):
         self.feeds_changed.emit()
         self.refresh()
 
+    def reload(self) -> None:
+        """Read the list again, this computer's copy first, then the relays:
+        another MyEditor may have changed it since it was read here (the one
+        that kept the inbox before this one, CP1 review L7). A change still
+        waiting here is never dropped: then only the relays are asked, and
+        what they answer is merged as always."""
+        profile = self._profile
+        if profile is None:
+            return
+        if self._dirty or self._cancel_timer is not None:
+            self.refresh()
+            return
+        self._profile = None
+        self.bind_profile(profile)
+
     def update_profile(self, profile: Profile) -> None:
         """The same account signs another way now (a signer app paired,
         or its key restored here): what comes next is signed and read
