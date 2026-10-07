@@ -736,7 +736,7 @@ class DraftPublishJob(QObject):
     def _on_relays_ready(self, publish_relays: List[str]) -> None:
         if self._cancelled:
             return
-        self._emit_status(_("Connecting to your signer…"))
+        self._emit_status(_("Connecting to your signer app…"))
         self._session_pool.get(
             self._profile,
             on_ready=lambda client: self._on_bunker_ready(client, publish_relays),
@@ -765,7 +765,7 @@ class DraftPublishJob(QObject):
                      limit=numbers.toString(MAX_INNER_PAYLOAD_BYTES)))
             return
         self._emit_status(
-            _("Encrypting draft. Approve on your signer if prompted…")
+            _("Encrypting the draft. Approve the request in your signer app if it asks…")
         )
         client.nip44_encrypt_self(
             plaintext,
@@ -794,11 +794,11 @@ class DraftPublishJob(QObject):
                 extra_tags=self._extra_wrap_tags,
             )
         except ValueError as exc:
-            self._emit_failed(_("Could not build draft wrap: {reason}").format(reason=exc))
+            self._emit_failed(_("Couldn’t prepare the draft: {reason}").format(reason=exc))
             return
 
         self._emit_status(
-            _("Waiting for signature. Approve the request on your signer…")
+            _("Waiting for your signer app. Approve the request there…")
         )
         client.sign_event(
             self._wrap_unsigned,
@@ -948,7 +948,7 @@ class DraftDeleteJob(QObject):
             client_name=CLIENT_NAME,
         )
         self._emit_status(
-            _("Waiting for signature. Approve the deletion on your signer…")
+            _("Waiting for your signer app. Approve the deletion there…")
         )
         client.sign_event(
             unsigned,

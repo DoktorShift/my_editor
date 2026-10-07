@@ -259,7 +259,7 @@ def test_inner_pubkey_mismatch_fails_the_record():
 
     record = sync._store.get("y")
     assert record.state is DraftState.FAILED
-    assert "different identity" in record.failure_reason
+    assert record.failure_reason == "Saved by another account"
 
 
 def test_inner_pubkey_match_accepts_the_record():

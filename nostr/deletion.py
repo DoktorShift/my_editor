@@ -235,7 +235,7 @@ class DeletionJob(PublishPipeline):
         return list(self._targets or ())
 
     def _waiting_words(self) -> str:
-        return _("Waiting for signature. Approve the deletion on your signer…")
+        return _("Waiting for your signer app. Approve the deletion there…")
 
     def _sending_words(self, count: int) -> str:
         return ngettext("Asking {n} relay to delete it…", "Asking {n} relays to delete it…",

@@ -178,7 +178,8 @@ def test_panel_builds_with_no_profile_and_no_store():
     panel = DraftsPanel(is_dark=True)
     panel.set_active_profile(None)
     assert panel._body_stack.currentIndex() == 1
-    assert "Connect a signer" in panel._empty_body.text()
+    assert panel._empty_title.text() == "No Nostr account in use"
+    assert "connect your signer app" in panel._empty_body.text()
     assert panel._status_label.full_text() == ""
     # An empty line collapses instead of leaving a blank strip of chrome.
     assert not panel._status_label.isVisibleTo(panel)
@@ -740,9 +741,10 @@ def test_an_unsupported_signer_outranks_everything_else():
     store = populated_store()
     panel = bound_panel(store)
     panel.set_signer_unsupported(True)
-    assert panel._status_label.full_text() == "Signer cannot decrypt drafts (no NIP-44)"
+    assert panel._status_label.full_text() == "Your signer app can’t decrypt drafts"
     assert panel._status_label.property("error") == "true"
-    assert panel._empty_title.text() == "Signer does not support NIP-44"
+    assert panel._empty_title.text() == "Your signer app can’t decrypt drafts"
+    assert "NIP" not in panel._empty_body.text()          # no protocol terms
 
 
 def test_failed_drafts_are_counted_on_the_status_line():

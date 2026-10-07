@@ -144,7 +144,7 @@ def test_the_focus_starts_on_the_list_or_on_the_field():
 def test_a_list_the_signer_could_not_decrypt_says_so():
     sheet, _saved = open_sheet(Lists([], readable=False, failure=UNDECRYPTED))
     assert sheet.state == READ_FAILED and sheet._error.text().startswith(
-        "Couldn’t decrypt where your drafts are kept. Make sure your signer is running")
+        "Couldn’t decrypt where your drafts are kept. Make sure your signer app is running")
 
 
 def test_a_list_that_could_not_be_read_is_not_edited_and_offers_try_again():
@@ -229,7 +229,7 @@ def test_a_save_that_failed_says_why_and_keeps_the_sheet():
              "Too few relays took the change."),
             (list_failed(FAILED, CAUSE_CLOCK, signed_but_refused),
              "The current setting is dated ahead of this computer’s clock"),
-            (list_failed(FAILED, CAUSE_SIGNER), "Your signer didn’t approve"),
+            (list_failed(FAILED, CAUSE_SIGNER), "Your signer app didn’t approve"),
             (SaveOutcome(MoveOutcome(total=2, moved=1, not_moved=("x",))),
              "Some drafts couldn’t be moved, so nothing was changed. Check your internet"),
             (SaveOutcome(MoveOutcome(total=2, moved=1, not_moved=("x",), refused=True)),

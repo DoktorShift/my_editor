@@ -150,7 +150,7 @@ class PublishPipeline(QObject):
 
     def start(self) -> None:
         """Ask for the routing and the signature. Once per instance."""
-        self._say(_("Connecting to your signer…"))
+        self._say(_("Connecting to your signer app…"))
         self._relay_directory.publish_plan(self._author, self._on_plan,
                                            mentioned=self._mentioned,
                                            entitled=relays_from(self._entitled))
@@ -174,7 +174,7 @@ class PublishPipeline(QObject):
     # -- what a subclass says and does ---------------------------------------
 
     def _waiting_words(self) -> str:
-        return _("Waiting for signature. Approve the request on your signer…")
+        return _("Waiting for your signer app. Approve the request there…")
 
     def _sending_words(self, count: int) -> str:
         return ngettext("Publishing to {n} relay…", "Publishing to {n} relays…",
@@ -217,7 +217,8 @@ class PublishPipeline(QObject):
         if self._failed or self._cancelled:
             return
         if not signed_matches(event, self._unsigned, self._author):
-            self._fail(_("The signer returned a different event."))
+            self._fail(_("Your signer app signed something other than what was asked, "
+                         "so nothing was sent."))
             return
         self._signed_event = event
         self._signed(event)
@@ -263,4 +264,4 @@ class PublishPipeline(QObject):
         if self._failed or self._sent or self._cancelled:
             return
         self._failed = True
-        self.failed.emit(reason or _("The signer didn’t sign the request."))
+        self.failed.emit(reason or _("Your signer app didn’t sign the request."))

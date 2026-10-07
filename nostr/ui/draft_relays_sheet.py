@@ -177,7 +177,7 @@ class DraftRelaysSheet(AssistantWindow):
         if relays is None:
             if self._relays.last_failure == UNDECRYPTED:
                 message = _("Couldn’t decrypt where your drafts are kept. Make sure your "
-                            "signer is running, then try again.")
+                            "signer app is running, then try again.")
             else:
                 message = _("Couldn’t read where your drafts are kept. Check your internet "
                             "connection, then try again.")
@@ -278,7 +278,7 @@ class DraftRelaysSheet(AssistantWindow):
         elif step in (READING_DRAFTS, SAVING_LIST):
             self._busy_label.setText(
                 _("Reading your drafts…") if step == READING_DRAFTS
-                else _("Saving. Approve the request on your signer if it asks…"))
+                else _("Saving. Approve the request in your signer app if it asks…"))
             self._progress.setRange(0, 0)
 
     def _on_saved(self, generation: int, chosen: List[str], outcome: SaveOutcome) -> None:
@@ -328,8 +328,8 @@ class DraftRelaysSheet(AssistantWindow):
             return _("Too few relays took the change. Check your internet connection, "
                      "then try again.")
         if cause == CAUSE_SIGNER:
-            return _("Your signer didn’t approve the change. Try again, and approve it "
-                     "on your signer.")
+            return _("Your signer app didn’t approve the change. Try again, and approve "
+                     "it when your signer app asks.")
         return _("Couldn’t save the change. Try again.")
 
     def _changed(self) -> bool:
