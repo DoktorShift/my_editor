@@ -1491,7 +1491,8 @@ class HtmlEditor(QTextEdit):
         self._insert_plain(paste.plain_text(QApplication.clipboard().mimeData()))
 
     def canInsertFromMimeData(self, source):
-        return source.hasFormat(paste.MARKDOWN_MIME) or super().canInsertFromMimeData(source)
+        return (source.hasFormat(paste.LITERAL_MIME) or source.hasFormat(paste.MARKDOWN_MIME)
+                or super().canInsertFromMimeData(source))
 
     def createMimeDataFromSelection(self):
         """Copy: the text and HTML other apps read, and, where the document
@@ -1507,6 +1508,10 @@ class HtmlEditor(QTextEdit):
         mime.setText(fragment.toPlainText())
         mime.setHtml(fragment.toHtml())
         mime.setData(paste.MARKDOWN_MIME, paste.selection_markdown(cursor).encode("utf-8"))
+        # What a paste here reads: the words as they are, the structure as
+        # Markdown.
+        mime.setData(paste.LITERAL_MIME,
+                     paste.selection_markdown(cursor, literal=True).encode("utf-8"))
         return mime
 
     def insertFromMimeData(self, source):

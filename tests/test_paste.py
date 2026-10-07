@@ -396,6 +396,103 @@ def test_image_files_copied_in_a_file_manager_go_to_the_media_handler(tmp_path):
     assert len(seen) == 1 and ed.toPlainText() == "notes.pdf"
 
 
+
+# -- what was text stays text (review H1) ---------------------------------------------
+
+LITERAL = [
+    "Use the <div> element and more words",
+    "Connect with ssh <user>@<host> and run it.",
+    "Literal **stars** and [x](y) and `tick` and ~~gone~~",
+    "3 < 5 && 7 > 2; AT&T &copy; done",
+    "# not a heading",
+    "- not a list",
+    "1. not numbered",
+    "2) neither",
+    "---",
+    "> not quoted",
+    "see https://example.com/a_b_c and www.example.com or me@example.com",
+    "C:\\Users\\name and a\\",
+    "snake_case and _private_name_ and *x*",
+    "[^1] and [^1]: a note",
+]
+
+
+def plain_and_unstyled(ed) -> tuple:
+    """The document's text, and every piece of it that has a style."""
+    from doc_walk import iter_block_runs
+    styled = [t for block in __import__("doc_walk").iter_blocks(ed.document())
+              for t, f in iter_block_runs(block)
+              if f.isAnchor() or f.fontFixedPitch() or f.fontItalic() or f.fontStrikeOut()
+              or rich_text.has_style(f, rich_text.BOLD)]
+    return ed.toPlainText(), styled
+
+
+@pytest.mark.parametrize("words", LITERAL)
+def test_text_copied_here_pastes_back_as_the_same_text(words):
+    source = HtmlEditor()
+    QTextCursor(source.document()).insertText(words)
+    source.selectAll()
+    mime = source.createMimeDataFromSelection()
+    target = editor()
+    target.insertFromMimeData(mime)
+    assert plain_and_unstyled(target) == (words, [])
+
+
+def test_text_dragged_here_keeps_every_word():
+    ed = editor()
+    QTextCursor(ed.document()).insertText("Use the <div> element, then **this**.")
+    ed.resize(500, 200)
+    ed.show()
+    QApplication.processEvents()
+    ed.selectAll()
+    mime = ed.createMimeDataFromSelection()          # what a drag carries
+    ed.moveCursor(QTextCursor.MoveOperation.End)
+    end = ed.cursorRect().center()
+    event = QDropEvent(QPointF(end.x() + 40, end.y()), Qt.DropAction.CopyAction,
+                       mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    ed.dropEvent(event)
+    assert ed.toPlainText() == "Use the <div> element, then **this**." * 2
+    ed.hide()
+
+
+def test_a_page_that_shows_markup_as_text_pastes_it_as_text():
+    words, styled = plain_and_unstyled(paste_into_editor(html(
+        "<p>Use the &lt;div&gt; element and a &lt;b&gt;bold&lt;/b&gt; tag; "
+        "3 &lt; 5 &amp;&amp; 7 &gt; 2. Literal [x](y), `tick` and **stars**.</p>")))
+    assert words == ("Use the <div> element and a <b>bold</b> tag; 3 < 5 && 7 > 2. "
+                     "Literal [x](y), `tick` and **stars**.")
+    assert styled == []
+
+
+def test_a_page_keeps_its_own_structure_around_literal_text():
+    found = paste.from_mime(html("<p><b>Bold</b> and <a href='https://example.com/a'>"
+                                 "a [link]</a> in <code>*code*</code></p>"))
+    assert with_pictures(found.document) == (
+        "**Bold** and [a [link\\]](https://example.com/a) in `*code*`\n")
+
+
+def test_markdown_pasted_as_text_keeps_its_tags_as_text():
+    found = paste.from_mime(text("- Use <div> for blocks\n- and <span> inline\n"))
+    assert found.document.toPlainText() == "Use <div> for blocks\nand <span> inline"
+    assert block_named(found.document, "Use <div> for blocks").textList() is not None
+
+
+def test_leading_spaces_copied_here_stay():
+    source = HtmlEditor()
+    QTextCursor(source.document()).insertText("    four spaces in")
+    source.selectAll()
+    target = editor()
+    target.insertFromMimeData(source.createMimeDataFromSelection())
+    assert target.toPlainText() == "    four spaces in"         # spaces that do not break
+    assert not rich_text.is_code_block(target.document().begin())
+
+
+def paste_into_editor(mime):
+    ed = editor()
+    ed.insertFromMimeData(mime)
+    return ed
+
+
 # -- Paste and Match Style ------------------------------------------------------------
 
 def test_paste_and_match_style_takes_the_style_where_it_goes():
