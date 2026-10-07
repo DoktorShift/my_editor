@@ -131,6 +131,20 @@ LOCAL_TOPOLOGY = {
 EXTRA_PATCHES: Dict[str, Dict[str, Any]] = {}
 
 
+def own_instance_socket(name: str) -> None:
+    """Give this run's main window a single-instance socket of its own, so
+    it never hands files to (or takes over the socket of) a MyEditor open on
+    this computer. Call it before bootstrap().
+
+    Builds with ``constants.IPC_SERVER_NAME`` read the name from
+    MYEDITOR_IPC_NAME when ``constants`` loads (child processes inherit it);
+    older builds kept their own copy in ``main_window._IPC_SERVER_NAME``.
+    """
+    os.environ["MYEDITOR_IPC_NAME"] = name
+    if "IPC_SERVER_NAME" not in (ROOT / "constants.py").read_text(encoding="utf-8"):
+        EXTRA_PATCHES.setdefault("main_window", {})["_IPC_SERVER_NAME"] = name
+
+
 def _rebuild_member_benefits(module) -> None:
     # MEMBER_BENEFITS is built from MEMBER_RELAY and MEMBER_BLOSSOM while the
     # module runs, so it is built again from the local values.

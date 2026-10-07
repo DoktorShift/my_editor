@@ -29,7 +29,7 @@ import smoke_ndak_common as nd  # noqa: E402
 
 # A name of its own for the single-instance socket, so a real MyEditor
 # running on this computer keeps its own.
-nd.EXTRA_PATCHES["main_window"] = {"_IPC_SERVER_NAME": f"ndak-ipc-{os.getpid()}"}
+nd.own_instance_socket(f"ndak-ipc-{os.getpid()}")
 nd.bootstrap("app")
 app = nd.qt_app()
 
