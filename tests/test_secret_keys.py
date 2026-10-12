@@ -320,6 +320,25 @@ def test_the_slug_message_has_the_room_it_needs(language, typed):
         i18n.install(i18n.ENGLISH)
 
 
+def test_a_key_in_the_slug_never_leaves_the_computer(tmp_path, monkeypatch):
+    """Said under the slug, with its section opened, before anything is
+    sent: not even the question whether the article went out before."""
+    import announce
+    monkeypatch.setattr(announce, "announce", lambda source, text: None)
+    dialog = _dialog("article", tmp_path, None)
+    dialog._job = None
+    asked = []
+    dialog._published_at_lookup = lambda *args: asked.append(args)
+    dialog._title_edit.setText(f"Backup {NSEC}")                # the slug follows it
+    assert not dialog._slug_problem.isHidden() and "slug" in dialog._slug_problem.text()
+    assert dialog._advanced_open and not dialog._advanced_panel.isHidden()
+    assert not dialog._publish_btn.isEnabled()
+    dialog._on_publish()
+    assert asked == [] and dialog._relay_pool.published == []
+    dialog._title_edit.setText("Backup")
+    assert dialog._slug_problem.isHidden() and dialog._publish_btn.isEnabled()
+
+
 def test_save_as_draft_refuses_a_key_in_the_slug(monkeypatch):
     import announce
     from nostr.ui.stash_kind_dialog import StashKind, StashKindDialog

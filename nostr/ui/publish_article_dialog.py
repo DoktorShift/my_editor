@@ -30,6 +30,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import announce
+import theme
 import word_count
 from alerts import CANCEL, DEFAULT, NORMAL, Button, ask
 from i18n import _, language, ngettext
@@ -61,7 +63,7 @@ from ..media.publish_copy import PublicCopyMaker
 from .media_library_dialog import MediaLibraryDialog
 from .publish_copy_dialog import resolve_pick
 from .mention_chips import MentionChipRow
-from .secret_key_check import publishable
+from .secret_key_check import publishable, slug_problem
 from .thumbnail_loader import ThumbnailLoader
 
 
@@ -524,7 +526,14 @@ class PublishArticleDialog(QDialog):
         compact_row = QHBoxLayout()
         compact_row.setContentsMargins(0, 0, 0, 0)
         compact_row.setSpacing(12)
-        compact_row.addWidget(_make_field(_("Slug (article ID)"), self._slug_edit), 1)
+        slug_field = _make_field(_("Slug (article ID)"), self._slug_edit)
+        # Why the slug can't be published, under it.
+        self._slug_problem = QLabel()
+        self._slug_problem.setObjectName("article_field_error")
+        self._slug_problem.setWordWrap(True)
+        self._slug_problem.hide()
+        slug_field.layout().addWidget(self._slug_problem)
+        compact_row.addWidget(slug_field, 1)
         compact_row.addWidget(_make_field(_("Hashtags"), self._tags_edit), 1)
         adv.addLayout(compact_row)
 
@@ -576,7 +585,9 @@ class PublishArticleDialog(QDialog):
         self._refresh_advanced_toggle_label()
 
     def _apply_theme(self) -> None:
-        self.setStyleSheet(_DARK_CSS if self._is_dark else _LIGHT_CSS)
+        error = theme.error_text_color(self._is_dark)
+        self.setStyleSheet((_DARK_CSS if self._is_dark else _LIGHT_CSS)
+                           + f"QLabel#article_field_error {{ color: {error}; font-size: 11px; }}")
         self._switch_menu.setStyleSheet(
             _DARK_MENU_CSS if self._is_dark else _LIGHT_MENU_CSS
         )
@@ -824,9 +835,16 @@ class PublishArticleDialog(QDialog):
     def _refresh_publish_enabled(self) -> None:
         slug = self._slug_edit.text().strip()
         body = self._body_edit.toPlainText().strip()
+        # A key in the slug is said under it, before anything is sent (not
+        # even the question whether the article went out before), with the
+        # slug's section open so the field it names can be seen.
+        problem = slug_problem(slug) or ""
+        announce.field_problem(self._slug_edit, self._slug_problem, problem)
+        if problem and not self._advanced_open:
+            self._toggle_advanced()
         # NIP-23 requires the d-tag; body without anything to say isn't useful.
         self._publish_btn.setEnabled(self._job is None and not self._looking_up
-                                     and bool(slug) and bool(body))
+                                     and bool(slug) and bool(body) and not problem)
 
     def _set_status(self, text: str, *, error: bool = False) -> None:
         self._status.setText(text)
@@ -863,7 +881,8 @@ class PublishArticleDialog(QDialog):
     def _on_publish(self) -> None:
         slug = self._slug_edit.text().strip()
         body = self._body_edit.toPlainText().strip()
-        if not slug or not body or self._job is not None or self._looking_up:
+        if (not slug or not body or self._job is not None or self._looking_up
+                or slug_problem(slug)):
             return
         known = self._first_published.get(slug) or (
             self._first_publications.get(self._current_profile.user_pubkey, slug)
