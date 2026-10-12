@@ -972,3 +972,28 @@ def test_a_signer_app_that_comes_back_reads_the_list_at_once():
     sync.stop()
     sync.deleteLater()
     settle()
+
+
+def test_a_relay_left_behind_that_never_answers_does_not_hold_the_loading_line():
+    # Review L11: a relay that drops packets kept "Refreshing drafts…" up
+    # for a minute at every refresh.
+    from nostr.draft_store import DraftStore
+    from nostr.draft_sync import DraftSync
+    _lists, relays, directory, client = moving(LIST_ON_MINE)
+    directory.leave_drafts_behind(PK, ["wss://dropping.example"], since=None)
+    relays.silent = {"wss://dropping.example"}
+    store = DraftStore()
+    sync = DraftSync(relay_pool=relays, relay_directory=directory,
+                     session_pool=FakeSessionPool(client), store=store)
+    said = []
+    sync.status_changed.connect(said.append)
+    sync._profile = Profile()
+    store.bind_profile(PK)
+    sync._read_relays = reading_relays(directory) + ["wss://dropping.example"]
+    store.set_loading(True)
+    sync._open_subscription()
+    relays.run(rounds=5)
+    assert not store.is_loading and said[-1].startswith("Loaded")
+    sync.stop()
+    sync.deleteLater()
+    settle()

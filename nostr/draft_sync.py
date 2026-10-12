@@ -460,13 +460,19 @@ class DraftSync(QObject):
         self._subscription = self._relay_pool.subscribe(self._read_relays, filters)
         self._subscription.event.connect(self._on_wrap_event)
         # Loading is over when every relay has ended one way or another: a
-        # relay that cannot be reached must not keep it going for good.
-        self._unanswered = {normalize_relay_url(u) or u for u in self._read_relays}
+        # relay that cannot be reached must not keep it going for good. The
+        # relays left behind are read in the background, as Mail checks an
+        # account without holding the window: one that never answers must
+        # not keep "Refreshing drafts…" up, and what it sends arrives later.
+        left = set(self._relay_directory.drafts_left_behind(self._profile.user_pubkey))
+        self._unanswered = {normalize_relay_url(u) or u for u in self._read_relays} - left
         self._asking_sign_in = set()
         for signal in (self._subscription.relay_eose, self._subscription.relay_closed,
                        self._subscription.relay_failed):
             signal.connect(self._on_relay_ended)
         self._subscription.relay_closed.connect(self._on_relay_closed)
+        if not self._unanswered:
+            self._on_eose()
 
     def _on_relay_closed(self, url: str, reason: str) -> None:
         if reason.startswith("auth-required:"):

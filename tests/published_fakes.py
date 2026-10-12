@@ -52,7 +52,8 @@ class Relays(HandPool):
     for those kinds, ``ignoring_until`` relays answer as if no ``until``
     was asked, ``write_only`` relays take events but close every request
     asking for them sign in first, ``keeps_nothing`` relays answer OK and
-    keep nothing, and ``run`` lets every request that is open be
+    keep nothing, ``silent`` relays never end a request (packets dropped),
+    and ``run`` lets every request that is open be
     answered (and whatever it leads to) until nothing is left."""
 
     def __init__(self, *, refuse_publish: Iterable[str] = ()) -> None:
@@ -64,6 +65,7 @@ class Relays(HandPool):
         self.ignoring_until: Set[str] = set()
         self.write_only: Set[str] = set()
         self.keeps_nothing: Set[str] = set()
+        self.silent: Set[str] = set()
         self.publisher = FakePool(refuse=refuse_publish)
         self._answered = 0
 
@@ -91,6 +93,8 @@ class Relays(HandPool):
                 self._answered += 1
                 kinds = {k for flt in sub.filters for k in flt.get("kinds", [])}
                 for url in sub.urls:
+                    if url in self.silent:
+                        continue
                     if url in self.down or kinds & self.unreachable_for.get(url, set()):
                         sub.fail(url)
                     elif url in self.write_only:
