@@ -242,9 +242,8 @@ class WholeLinkTests(unittest.TestCase):
         feed = with_whole_links(parse_feed(self.FEED), "https://feeds.example/blog.xml")
         post, whole, place = feed.items
         self.assertEqual(post.link, "https://feeds.example/2026/10/post")
-        self.assertEqual(post.link_as_written, "/2026/10/post")
-        self.assertEqual(post.identity_link, "/2026/10/post")   # the identifier's seed
-        self.assertEqual((whole.link, whole.link_as_written), ("https://other.example/p", None))
+        self.assertEqual(post.guid, "/2026/10/post")    # the identifier's seed, as written
+        self.assertEqual(whole.link, "https://other.example/p")
         self.assertEqual(place.link, "#top")
 
     def test_without_an_address_the_site_the_feed_names(self) -> None:

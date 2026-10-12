@@ -60,15 +60,6 @@ class FeedItem:
     # most 256 KiB of a post, as EINUNDZWANZIG STANDUP does). Importing
     # such a post reads its own page for the whole text.
     partial: bool = False
-    # The link as the feed wrote it, when that was relative and ``link``
-    # was made whole (``with_whole_links``). The draft identifier comes
-    # from it, so it stays what earlier imports gave (nostr/rss/dtag.py).
-    link_as_written: Optional[str] = None
-
-    @property
-    def identity_link(self) -> Optional[str]:
-        """The link the draft identifier is derived from."""
-        return self.link_as_written or self.link
 
 
 @dataclass(frozen=True)
@@ -87,7 +78,9 @@ def with_whole_links(feed: Feed, address: Optional[str]) -> Feed:
     ``address``, where the feed was read (without one, against the site
     the feed names). A relative link left the post's own relative links
     and images, its "Originally published at" line and Open Original
-    pointing nowhere (CP3 review L8)."""
+    pointing nowhere (CP3 review L8). An item without a guid keeps the
+    link as written as its guid (the parser gives it one), so its draft
+    identifier stays what earlier imports gave (nostr/rss/dtag.py)."""
     base = address if _is_web_address(address) else feed.link
     if not _is_web_address(base):
         return feed
@@ -95,7 +88,7 @@ def with_whole_links(feed: Feed, address: Optional[str]) -> Feed:
     for item in feed.items:
         link = (item.link or "").strip()
         if link and not link.startswith("#") and not urlsplit(link).scheme:
-            item = replace(item, link=urljoin(base, link), link_as_written=item.link)
+            item = replace(item, link=urljoin(base, link))
         items.append(item)
     return replace(feed, items=tuple(items))
 
