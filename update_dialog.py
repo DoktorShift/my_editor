@@ -197,7 +197,9 @@ class _StepRow(QWidget):
         def on_copy():
             QApplication.clipboard().setText(command)
             copy.setText(_("Copied"))
-            QTimer.singleShot(1500, lambda: copy.setText(_("Copy")))
+            # Tied to the button: a dialog closed within the 1.5 s takes the
+            # timer with it, instead of leaving it a deleted button to set.
+            QTimer.singleShot(1500, copy, lambda: copy.setText(_("Copy")))
 
         copy.clicked.connect(on_copy)
         row = QHBoxLayout()

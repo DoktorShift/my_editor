@@ -44,7 +44,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QObject, Qt, Signal  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
-from PySide6.QtWidgets import QApplication, QDialog  # noqa: E402
+from PySide6.QtWidgets import QApplication, QDialog, QPushButton  # noqa: E402
 
 import updater  # noqa: E402
 import update_dialog  # noqa: E402
@@ -559,6 +559,25 @@ def test_return_on_skip_follows_the_system(qt_app, monkeypatch, mac):
         assert bool(skipped) == (not mac)
     finally:
         dialog.close()
+
+
+def test_copy_then_closing_leaves_no_timer_behind(qt_app, monkeypatch):
+    # The M3 review saw "Internal C++ object already deleted": Copy turns
+    # into "Copied" and back after 1.5 s, and the timer outlived a dialog
+    # closed within that time.
+    from PySide6.QtCore import QEvent
+    from PySide6.QtTest import QTest
+    errors = []
+    monkeypatch.setattr(sys, "excepthook", lambda *exc: errors.append(exc))
+    plan = plan_for(updater.SOURCE, "3.3", release_url=RELEASE_URL)
+    dialog = UpdateDialog("3.3", "3.2", plan, release_url=RELEASE_URL, is_dark=False)
+    copy = next(b for b in dialog.findChildren(QPushButton) if b.text() == "Copy")
+    copy.click()
+    assert copy.text() == "Copied"
+    dialog.deleteLater()
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    QTest.qWait(1700)
+    assert errors == []
 
 
 def test_skip_is_explicit_and_says_which_version():
