@@ -1133,6 +1133,28 @@ class HtmlEditor(QTextEdit):
         elif mail:
             QDesktopServices.openUrl(QUrl(mail))
 
+    def _step_out_of_mention(self) -> None:
+        """A mention is one name: what is typed or pasted with the caret
+        inside it goes after it, as in Slack and Notion. (Words inside it
+        would be part of the link, which is written as the bare address.)"""
+        cursor = self.textCursor()
+        mention = rich_text.mention_at(cursor) if self._holds_structure() else None
+        if mention is not None and mention[0] < cursor.position() < mention[1]:
+            cursor.setPosition(mention[1])
+            self.setTextCursor(cursor)
+
+    def _remove_mention(self, start: int, end: int) -> None:
+        """A mention goes as a whole (Backspace, Delete): half a name links
+        to nobody."""
+        cursor = self.textCursor()
+        cursor.beginEditBlock()
+        cursor.setPosition(start)
+        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+        cursor.removeSelectedText()
+        cursor.endEditBlock()
+        self.setTextCursor(cursor)
+        self.ensureCursorVisible()
+
     def _leave_link_at_end(self) -> None:
         """Typing right before or right after a link is not part of it
         (links are not "sticky", as in every word processor); typing
@@ -1360,6 +1382,7 @@ class HtmlEditor(QTextEdit):
             return
 
         if e.text() and e.text().isprintable():
+            self._step_out_of_mention()
             # The caret may have arrived at a link's edge without moving
             # (a document loaded around it): what is typed is not the link.
             self._leave_link_at_end()
@@ -1436,17 +1459,10 @@ class HtmlEditor(QTextEdit):
                 return
 
         elif e.key() == Qt.Key_Backspace:
-            mention = rich_text.mention_before(c) if self._holds_structure() else None
-            if mention is not None and e.modifiers() in (Qt.NoModifier, Qt.KeypadModifier):
-                # A mention goes as a whole: half a name links to nobody.
-                cursor = self.textCursor()
-                cursor.beginEditBlock()
-                cursor.setPosition(mention[0])
-                cursor.setPosition(mention[1], QTextCursor.MoveMode.KeepAnchor)
-                cursor.removeSelectedText()
-                cursor.endEditBlock()
-                self.setTextCursor(cursor)
-                self.ensureCursorVisible()
+            mention = rich_text.mention_at(c) if self._holds_structure() else None
+            if (mention is not None and mention[0] < c.position() <= mention[1]
+                    and e.modifiers() in (Qt.NoModifier, Qt.KeypadModifier)):
+                self._remove_mention(*mention)
                 return
             if not c.hasSelection() and c.positionInBlock() <= spaces + (2 if has_bullet else 0) and (spaces > 0 or has_bullet):
                 if has_bullet:
@@ -1484,6 +1500,11 @@ class HtmlEditor(QTextEdit):
                 return
 
         elif e.key() == Qt.Key_Delete:
+            mention = rich_text.mention_at(c) if self._holds_structure() else None
+            if (mention is not None and mention[0] <= c.position() < mention[1]
+                    and e.modifiers() in (Qt.NoModifier, Qt.KeypadModifier)):
+                self._remove_mention(*mention)
+                return
             # Delete key: one character per undo step
             cursor = self.textCursor()
             cursor.beginEditBlock()
@@ -1891,6 +1912,7 @@ class HtmlEditor(QTextEdit):
           plain text in the style of the text where it goes."""
         if source is None:
             return
+        self._step_out_of_mention()
         if self._paste_guard is not None:
             words = paste.plain_text(source)
             allowed = self._paste_guard(words) if words else words

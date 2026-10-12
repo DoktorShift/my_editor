@@ -903,17 +903,15 @@ def insert_mention(cursor: QTextCursor, href: str, name: str) -> None:
     edit.endEditBlock()
 
 
-def mention_before(cursor: QTextCursor) -> Optional[Tuple[int, int]]:
-    """(start, end) of the mention that ends right at the caret, or None."""
-    if cursor.hasSelection() or cursor.atBlockStart():
+def mention_at(cursor: QTextCursor) -> Optional[Tuple[int, int]]:
+    """(start, end) of the mention the caret is in or touches from either
+    side, or None (also with a selection)."""
+    if cursor.hasSelection():
         return None
     found = link_range(cursor)
-    if found is None:
+    if found is None or not is_mention(found[2]):
         return None
-    start, end, href = found
-    if end != cursor.position() or not is_mention(href):
-        return None
-    return start, end
+    return found[0], found[1]
 
 
 def link_references(doc, label_for) -> int:

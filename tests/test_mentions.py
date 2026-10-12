@@ -29,7 +29,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QObject, Qt, Signal  # noqa: E402
+from PySide6.QtCore import QMimeData, QObject, Qt, Signal  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from editor import HtmlEditor  # noqa: E402
@@ -100,6 +100,42 @@ def test_backspace_after_a_mention_takes_it_away_whole():
     press(ed, Qt.Key.Key_Backspace)                   # the space
     press(ed, Qt.Key.Key_Backspace)                   # the whole mention
     assert ed.toPlainText() == "Hi "
+
+
+def test_a_mention_is_one_unit_for_typing_delete_and_paste():
+    def mentioned():
+        ed = editor()
+        type_text(ed, "Hi @")
+        ed.insert_mention(ed.asked[0], HREF, "Alice")
+        type_text(ed, "and you")
+        return ed
+
+    def caret(ed, position):
+        cursor = ed.textCursor()
+        cursor.setPosition(position)
+        ed.setTextCursor(cursor)
+
+    ed = mentioned()
+    caret(ed, len("Hi @Ali"))
+    type_text(ed, "ce, ")                             # goes after the name, kept
+    assert ed.toPlainText() == "Hi @Alicece,  and you"
+    # (Written apart from the address, which would otherwise take the letters in.)
+    assert document_to_markdown(ed.document()) == f"Hi {HREF} ce,  and you\n"
+    ed = mentioned()
+    caret(ed, len("Hi "))
+    press(ed, Qt.Key.Key_Delete)                      # at its start: the whole mention
+    assert ed.toPlainText() == "Hi  and you"
+    ed = mentioned()
+    caret(ed, len("Hi @Al"))
+    press(ed, Qt.Key.Key_Backspace)                   # inside it: the whole mention too
+    assert ed.toPlainText() == "Hi  and you"
+    ed = mentioned()
+    caret(ed, len("Hi @Al"))
+    pasted = QMimeData()
+    pasted.setText("dear")
+    ed.insertFromMimeData(pasted)
+    assert "@Alicedear" in ed.toPlainText()
+    assert "dear" in document_to_markdown(ed.document())
 
 
 def test_a_mention_read_back_from_markdown_has_its_name_again():
