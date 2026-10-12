@@ -277,6 +277,13 @@ class DraftSync(QObject):
         self._follow_draft_list()
         self._open_subscription()
 
+    def refresh_by_hand(self) -> None:
+        """Refresh, asked for by the person: a draft relay list the signer
+        app did not decrypt is asked about again too."""
+        if self._draft_list_reader is not None:
+            self._draft_list_reader.ask_again()
+        self.refresh()
+
     def reroute(self) -> None:
         """Work out the private relays again and follow them.
 

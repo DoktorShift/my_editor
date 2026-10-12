@@ -650,6 +650,9 @@ class PrivateDraftRelays(QObject):
         self._known: Optional[List[str]] = None
         self._read_id: Optional[str] = None
         self.last_failure: Optional[str] = None    # why the last read answered None
+        # The list the signer app did not decrypt: not asked about again
+        # until another one is read, or ``ask_again``.
+        self._declined_id: Optional[str] = None
         self._saving: Optional[_Save] = None
 
     @property
@@ -667,7 +670,9 @@ class PrivateDraftRelays(QObject):
         device already knows (it wrote or read it, here or in the sheet) is
         not decrypted again, so asking costs no signer prompt while nothing
         changed; one older than that, an answer that arrived late, is not
-        followed, and the list known is the answer."""
+        followed, and the list known is the answer. A list the signer app
+        did not decrypt is not asked about again (every refresh would ask)
+        until another one is read, or ``ask_again``."""
         author = self._profile.user_pubkey.lower()
         relays = lookup_relays(known=self._directory.cached(author), own=True)
 
@@ -690,12 +695,22 @@ class PrivateDraftRelays(QObject):
                 answer(known["relays"], known)
             elif event is None:
                 answer([])
+            elif event.get("id") == self._declined_id:
+                answer(None, failure=UNDECRYPTED)
             else:
-                self._decrypt(str(event.get("content") or ""), lambda read: answer(
-                    read, event, None if read is not None else UNDECRYPTED))
+                def decrypted(read: Optional[List[str]]) -> None:
+                    self._declined_id = None if read is not None else event.get("id")
+                    answer(read, event, None if read is not None else UNDECRYPTED)
+
+                self._decrypt(str(event.get("content") or ""), decrypted)
 
         self._query(self._pool, relays, kind=KIND_PRIVATE_RELAYS, author=author,
                     on_done=found, parent=self)
+
+    def ask_again(self) -> None:
+        """Let the next read ask the signer app again for a list it did not
+        decrypt (the person asked to refresh)."""
+        self._declined_id = None
 
     def _decrypt(self, ciphertext: str, on_done) -> None:
         def plaintext(text: str) -> None:

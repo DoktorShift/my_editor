@@ -1877,7 +1877,7 @@ class MainWindow(QMainWindow):
         self._drafts_panel.retry_decrypt.connect(self._on_panel_retry_decrypt)
         self._drafts_panel.retry_signer.connect(self._draft_sync.retry_signer)
         self._drafts_panel.copy_event_id.connect(self._on_panel_copy_event_id)
-        self._drafts_panel.refresh_requested.connect(self._draft_sync.refresh)
+        self._drafts_panel.refresh_requested.connect(self._draft_sync.refresh_by_hand)
         self._drafts_panel.close_requested.connect(self._hide_drafts_panel)
         self._drafts_panel.draft_relays_requested.connect(self._open_draft_relays)
         # The second view: what the account published, to edit, open,

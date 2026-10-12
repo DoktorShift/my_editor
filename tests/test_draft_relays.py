@@ -764,3 +764,28 @@ def test_a_late_answer_with_an_older_list_does_not_undo_a_save():
     settle()
     assert out[0].ok and directory.draft_relays_of(PK) == [OTHER]
     assert directory.drafts_left_behind(PK) is None
+
+
+def test_a_list_the_signer_declined_is_not_asked_about_on_every_refresh():
+    # Review L7: every five minutes the signer app was asked again.
+    from nostr.draft_store import DraftStore
+    from nostr.draft_sync import DraftSync
+    _lists, relays, directory, _client = moving(ABSENT)
+    client = CountingClient(refuse=True)
+    query = FakeQuery({KIND_PRIVATE_RELAYS: LIST_ON_MINE})
+    sync = DraftSync(relay_pool=relays, relay_directory=directory,
+                     session_pool=FakeSessionPool(client), store=DraftStore())
+    sync._profile = Profile()
+    sync._draft_list_reader = PrivateDraftRelays(
+        profile=Profile(), pool=relays, session_pool=FakeSessionPool(client),
+        directory=directory, query=query, parent=sync)
+    for _refresh in range(3):
+        sync._follow_draft_list()
+        settle()
+    assert client.decrypted == 1
+    sync.refresh_by_hand()                                  # the person asks: ask again
+    settle()
+    assert client.decrypted == 2
+    sync.stop()
+    sync.deleteLater()
+    settle()
