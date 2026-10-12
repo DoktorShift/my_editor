@@ -7686,7 +7686,7 @@ msgstr "Personen suchen"
 #: nostr/ui/mention_picker.py:165
 #: nostr/ui/mention_picker.py:365
 msgid "Following"
-msgstr "Gefolgt"
+msgstr "Folge ich"
 
 #: nostr/ui/mention_picker.py:373
 msgid "Searching Nostr…"
