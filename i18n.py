@@ -345,18 +345,47 @@ def install(choice: str = SYSTEM, *, locale_dir: Optional[str] = None) -> str:
 
 
 def install_qt_translations(app) -> None:
-    """Qt's own words (file dialogs, standard buttons) in the same language."""
-    if _language in (ENGLISH, PSEUDO):
-        return
+    """Qt's own words (file dialogs, standard buttons) in the same language,
+    and MyEditor's own word where Qt's is out of date."""
     from PySide6.QtCore import QLibraryInfo, QTranslator
-    path = QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)
     keep = getattr(app, "_myeditor_translators", [])
-    for name in ("qtbase", "qt"):
-        translator = QTranslator(app)
-        if translator.load(f"{name}_{_language}", path):
-            app.installTranslator(translator)
-            keep.append(translator)
+    if _language not in (ENGLISH, PSEUDO):
+        path = QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)
+        for name in ("qtbase", "qt"):
+            translator = QTranslator(app)
+            if translator.load(f"{name}_{_language}", path):
+                app.installTranslator(translator)
+                keep.append(translator)
+    # Installed last, so Qt asks it first.
+    own_words = _own_words_translator(app)
+    app.installTranslator(own_words)
+    keep.append(own_words)
     app._myeditor_translators = keep
+
+
+def _own_words_translator(parent):
+    """A translator for the few words MyEditor says instead of Qt's.
+
+    A Mac's application menu titles the Settings command itself, with the
+    word macOS used before Ventura: Qt asks for "Preferences..." in the
+    contexts below and never shows the command's own text. macOS 13 and
+    the HIG call it Settings, and so do MyEditor's window and docs. Every
+    other text is left to Qt's translations: the answer is None (a null
+    text, which Qt reads as "not translated here"; an empty one would be
+    taken as the translation)."""
+    from PySide6.QtCore import QTranslator
+
+    class OwnWords(QTranslator):
+        def translate(self, context, source_text, disambiguation=None, n=-1):
+            if context in ("QMenuBar", "MAC_APPLICATION_MENU") \
+                    and source_text == "Preferences...":
+                return _("Settings\u2026")
+            return None
+
+        def isEmpty(self) -> bool:
+            return False
+
+    return OwnWords(parent)
 
 
 # --------------------------------------------------------------------------- #

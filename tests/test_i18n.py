@@ -228,3 +228,25 @@ def test_a_variable_that_would_break_the_lookup_is_found(source):
 ])
 def test_code_that_is_fine_is_not_reported(source):
     assert shadowing(source) == []
+
+
+@pytest.mark.parametrize("language, word", [("en", "Settings…"),
+                                            ("de", "Einstellungen …")])
+def test_a_mac_names_the_settings_command_settings(language, word):
+    # Qt's Cocoa plugin titles the command in the application menu itself,
+    # asking for "Preferences..." (the pre-Ventura word) in these contexts.
+    from PySide6.QtCore import QCoreApplication
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    i18n.install(language)
+    try:
+        i18n.install_qt_translations(app)
+        for context in ("QMenuBar", "MAC_APPLICATION_MENU"):
+            assert QCoreApplication.translate(context, "Preferences...") == word
+        # Every other text is left to Qt's own translations.
+        assert QCoreApplication.translate("MAC_APPLICATION_MENU", "Quit %1") \
+            == ("Quit %1" if language == "en" else "%1 beenden")
+    finally:
+        for translator in app.__dict__.pop("_myeditor_translators", []):
+            app.removeTranslator(translator)
+        i18n.install(i18n.ENGLISH)
