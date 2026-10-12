@@ -1126,7 +1126,13 @@ class MainWindow(QMainWindow):
             self.act_undo.setText(imports.undo_text())
             self.act_undo.setEnabled(imports.can_undo())
             focus = QApplication.focusWidget()
-            self.act_redo.setEnabled(isinstance(focus, QLineEdit) and focus.isRedoAvailable())
+            if isinstance(focus, QLineEdit):
+                can_redo = focus.isRedoAvailable()
+            elif isinstance(focus, (QTextEdit, QPlainTextEdit)):
+                can_redo = not focus.isReadOnly() and focus.document().isRedoAvailable()
+            else:
+                can_redo = False
+            self.act_redo.setEnabled(can_redo)
             return
         self.act_undo.setText(_("Undo"))
         focus = QApplication.focusWidget()
@@ -1142,13 +1148,24 @@ class MainWindow(QMainWindow):
     def _update_clipboard_commands(self) -> None:
         """Cut, Copy and Delete act on a selection, and are dimmed without
         one (as the HIG asks of a command that cannot act), for whatever
-        has the focus: a text field, the PDF reader (Copy) or the
-        document."""
+        has the focus: a text field (the find field, a sheet's), the
+        Imports window, the PDF reader (Copy) or the document."""
         if not hasattr(self, "act_cut"):
             return
         focus = QApplication.focusWidget()
+        imports = self._imports_in_front()
         if isinstance(focus, QLineEdit):
             selected, editable = focus.hasSelectedText(), not focus.isReadOnly()
+        elif isinstance(focus, (QTextEdit, QPlainTextEdit)) and not isinstance(focus, HtmlEditor):
+            selected, editable = focus.textCursor().hasSelection(), not focus.isReadOnly()
+        elif imports is not None:
+            # Never the document behind (N2 of the CP3 fixes review): Copy
+            # copies the open post's link and Delete skips, nothing while
+            # a sheet is in front without a text field focused.
+            self.act_copy.setEnabled(imports.can_edit("copy"))
+            self.act_cut.setEnabled(imports.can_edit("cut"))
+            self.act_delete.setEnabled(imports.can_edit("delete"))
+            return
         elif self.current_pdf_viewer() is not None:
             selected, editable = True, False      # the reader answers Copy itself
         else:
@@ -4962,8 +4979,9 @@ class MainWindow(QMainWindow):
             save_settings=lambda value: save_setting(IMPORTS_SETTINGS_KEY, value),
             open_url=lambda url: self._open_external(url.toString()),
             show_drafts=self._show_drafts_from_imports, badge=self._imports_badge)
-        # Edit > Undo says what it undoes there (Undo Skip).
-        window.undo_changed.connect(self._update_undo_redo_buttons)
+        # The Edit menu says what it acts on there (Undo Skip, a sheet's field).
+        window.edit_changed.connect(self._update_undo_redo_buttons)
+        window.edit_changed.connect(self._update_clipboard_commands)
         return window
 
     def _on_imports_badge_toggled(self, on: bool) -> None:

@@ -207,10 +207,11 @@ class ImportsWindow(QMainWindow):
     """The Imports window for one account (see the module docstring).
 
     Signals:
-      undo_changed()   what Edit > Undo would undo here changed
+      edit_changed()   what the Edit menu acts on here changed: the last
+                       skip, the open post, or a sheet's text field
     """
 
-    undo_changed = Signal()
+    edit_changed = Signal()
 
     def __init__(self, controller, *, dark: bool = False,
                  load_settings: Callable[[], dict] = dict,
@@ -900,6 +901,7 @@ class ImportsWindow(QMainWindow):
         # Files and links are imported once: nothing there is skipped.
         self.action_bar.skip.setVisible(not self._scope.is_collection)
         self.action_bar.setVisible(model.selectable_count() > 0)
+        self.edit_changed.emit()
 
     def _copy_and_full(self, posts: List[Post]):
         """The options the next drafts get: the sources' defaults, and over
@@ -1017,7 +1019,7 @@ class ImportsWindow(QMainWindow):
                 # Undo is for the last thing done: a skip before this
                 # restore is not it any more.
                 self._last_skip = []
-                self.undo_changed.emit()
+                self.edit_changed.emit()
                 self.banner.say(ngettext("Restored {count} post.", "Restored {count} posts.",
                                          len(restored)).format(count=len(restored)))
             return
@@ -1029,13 +1031,13 @@ class ImportsWindow(QMainWindow):
         self.banner.say(ngettext("Skipped {count} post.", "Skipped {count} posts.",
                                  len(moved)).format(count=len(moved)),
                         _("Undo"), "undo")
-        self.undo_changed.emit()
+        self.edit_changed.emit()
 
     def undo_skip(self) -> None:
         moved, self._last_skip = self._last_skip, []
         if moved and self._controller.undo_skip(moved):
             self.banner.hide()
-        self.undo_changed.emit()
+        self.edit_changed.emit()
 
     def sheet_in_front(self) -> bool:
         """Whether one of this window's sheets or alerts is in front. It
@@ -1068,6 +1070,20 @@ class ImportsWindow(QMainWindow):
             focus.undo()
         elif self._undo_skip_available():
             self.undo_skip()
+
+    def can_edit(self, name: str) -> bool:
+        """Whether :meth:`edit` can do ``name`` (copy, cut, delete) now,
+        for the Edit menu to dim what cannot act. Nothing while a sheet is
+        in front."""
+        if self.sheet_in_front():
+            return False
+        if name == "copy":
+            post = self.posts.current_post()
+            return post is not None and bool(post.link)
+        if name == "delete":
+            skip = self.action_bar.skip
+            return self.action_bar.isVisible() and skip.isVisible() and skip.isEnabled()
+        return False
 
     def edit(self, name: str) -> None:
         """The app's Edit commands for this window (copy, select_all,
@@ -1195,6 +1211,12 @@ class ImportsWindow(QMainWindow):
             self._sheet.close()
         self._sheet = sheet
         sheet.finished.connect(self._on_sheet_finished)
+        # The Edit menu follows the sheet's fields as they change, the way
+        # it follows the document (N2 of the CP3 fixes review).
+        for kind in (QLineEdit, QPlainTextEdit, QTextEdit):
+            for field in sheet.findChildren(kind):
+                field.textChanged.connect(self.edit_changed)
+                field.selectionChanged.connect(self.edit_changed)
         sheet.open()
 
     def _on_sheet_finished(self) -> None:

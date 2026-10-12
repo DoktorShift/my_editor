@@ -299,6 +299,49 @@ def test_a_sheet_takes_the_edit_commands_and_keeps_its_window(window, monkeypatc
     sheet.reject()
 
 
+def test_the_edit_menu_follows_a_sheets_field(window, monkeypatch):
+    """N2 of the CP3 fixes review: with a sheet up, the Edit menu kept the
+    state it had when the sheet opened (Undo dimmed after typing in it),
+    and with a check box focused Cut, Copy and Delete followed the
+    document in the other window. As in Mail, they follow the field."""
+    import main_window
+    from PySide6.QtGui import QAction
+    from editor import HtmlEditor
+    document = HtmlEditor()
+    document.setPlainText("Text in the document")
+    document.selectAll()
+    host = SimpleNamespace(
+        _imports_in_front=lambda: window, current_editor=lambda: document,
+        current_pdf_viewer=lambda: None, act_undo=QAction("Undo"), act_redo=QAction("Redo"),
+        act_cut=QAction("Cut"), act_copy=QAction("Copy"), act_delete=QAction("Delete"))
+    menu = []
+    window.edit_changed.connect(lambda: (MainWindow._update_undo_redo_buttons(host),
+                                         MainWindow._update_clipboard_commands(host),
+                                         menu.append(1)))
+    window.source_settings(window._controller.sources()[0].key)
+    sheet = window.sheet()
+    monkeypatch.setattr(main_window.QApplication, "activeWindow", staticmethod(lambda: sheet))
+    focus = {"widget": sheet.name}
+    monkeypatch.setattr(main_window.QApplication, "focusWidget",
+                        staticmethod(lambda: focus["widget"]))
+    sheet.name.setFocus()
+    sheet.name.end(False)
+    QTest.keyClicks(sheet.name, "!")                    # the menu hears it at once
+    assert menu
+    assert host.act_undo.isEnabled()
+    assert not (host.act_cut.isEnabled() or host.act_copy.isEnabled()
+                or host.act_delete.isEnabled())         # nothing selected in Name
+    sheet.name.selectAll()
+    assert host.act_cut.isEnabled() and host.act_copy.isEnabled()
+    focus["widget"] = sheet.copy_images                 # a check box of the sheet
+    MainWindow._update_undo_redo_buttons(host)
+    MainWindow._update_clipboard_commands(host)
+    assert not (host.act_undo.isEnabled() or host.act_cut.isEnabled()
+                or host.act_copy.isEnabled() or host.act_delete.isEnabled())
+    sheet.reject()
+    document.deleteLater()
+
+
 def test_full_screen_acts_on_the_window_in_front(window):
     """CP2 review L-a: View > Full Screen made the editor window behind
     full screen while the Imports window was in front."""
