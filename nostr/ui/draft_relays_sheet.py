@@ -33,8 +33,9 @@ then do drafts follow it (PrivateDraftRelays.save); it can't be
 cancelled halfway. When a draft could not be moved, nothing is changed
 and the sheet says what to do. When a relay being left did not answer,
 Save Anyway (in place of Use My Usual Relays) changes the setting all
-the same, leaving the drafts kept only there behind: for a relay that is
-gone for good.
+the same, leaving the drafts kept only on the relays it named behind:
+for a relay that is gone for good. Any other relay being left must still
+answer.
 
 Keys: Return in the address field adds it, elsewhere it saves; Delete or
 Backspace in the list removes the selected relay; Escape cancels. Once
@@ -47,7 +48,7 @@ Signals:
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, Optional, Sequence
 
 from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import (
@@ -88,8 +89,10 @@ class DraftRelaysSheet(AssistantWindow):
         self._generation = 0
         self._shown_buttons: list = []
         # The choice a save failed for because a relay being left did not
-        # answer: while the form shows it, Save Anyway is offered.
+        # answer: while the form shows it, Save Anyway is offered, and
+        # leaves the drafts of the relays named then (``_unread``) behind.
         self._left_unread: Optional[List[str]] = None
+        self._unread: List[str] = []
         self._build()
         self._read_list()
 
@@ -247,7 +250,7 @@ class DraftRelaysSheet(AssistantWindow):
 
     # -- saving ----------------------------------------------------------------
 
-    def _save(self, *, leave_unread: bool = False) -> None:
+    def _save(self, *, leave_unread: Sequence[str] = ()) -> None:
         if self._state != EDITING or not self._changed():
             return
         chosen = self.chosen()
@@ -258,10 +261,10 @@ class DraftRelaysSheet(AssistantWindow):
             chosen, lambda outcome: self._on_saved(generation, chosen, outcome),
             on_step=lambda step, done, total, drafts: self._on_step(
                 generation, step, done, total, drafts),
-            leave_unread=leave_unread)
+            leave_unread=list(leave_unread))
 
     def _save_anyway(self) -> None:
-        self._save(leave_unread=True)
+        self._save(leave_unread=self._unread)
 
     def _on_step(self, generation: int, step: str, done: int, total: int,
                  drafts: int) -> None:
@@ -296,6 +299,7 @@ class DraftRelaysSheet(AssistantWindow):
                 "was changed here. This is the setting as it is now."))
             return
         self._left_unread = list(chosen) if outcome.move.unread else None
+        self._unread = list(outcome.move.unread)
         self._set_state(EDITING, error=self._why_not_saved(outcome))
 
     @staticmethod

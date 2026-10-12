@@ -84,8 +84,8 @@ class Lists:
         self.last_failure = None if self.readable else self.failure
         on_done(list(self.relays) if self.readable else None)
 
-    def save(self, relays, on_done, *, on_step=None, leave_unread=False):
-        self.saves.append((list(relays), leave_unread))
+    def save(self, relays, on_done, *, on_step=None, leave_unread=()):
+        self.saves.append((list(relays), list(leave_unread)))
         if self.answer is None:
             self._pending = (on_done, on_step)
         else:
@@ -212,7 +212,7 @@ def test_use_my_usual_relays_empties_the_form_and_save_makes_it_so():
         "Drafts are kept on your usual relays.")
     assert lists.saves == []                              # nothing changes before Save
     sheet.buttons["save"].click()
-    assert lists.saves == [([], False)] and saved == [[]] and not sheet.isVisible()
+    assert lists.saves == [([], [])] and saved == [[]] and not sheet.isVisible()
 
 
 def test_it_says_that_drafts_move_with_the_setting():
@@ -254,7 +254,7 @@ def test_a_relay_being_left_that_did_not_answer_offers_save_anyway():
     assert unnamed_controls(sheet) == []
     lists.answer = SAVED
     sheet.buttons["anyway"].click()
-    assert lists.saves == [([], False), ([], True)] and saved == [[]]
+    assert lists.saves == [([], []), ([], [MINE])] and saved == [[]]   # MINE only
 
 
 def test_save_anyway_goes_once_the_choice_changes():

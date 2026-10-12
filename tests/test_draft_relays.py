@@ -302,11 +302,27 @@ def test_save_anyway_leaves_the_drafts_of_a_relay_that_is_gone():
         LIST_ON_MINE, drafts_on={U1: [wrap("draft-1")]})
     relays.down = {MINE}
     outcomes = []
-    drafts.save([], outcomes.append, leave_unread=True)
+    drafts.save([], outcomes.append, leave_unread=[MINE])
     relays.run(rounds=20)
     assert outcomes[0].ok and directory.draft_relays_of(PK) == []
     (_urls, listed), = sent(relays, KIND_PRIVATE_RELAYS)
     assert listed["content"] == "sealed:[]"
+
+
+def test_save_anyway_leaves_only_the_relays_it_named():
+    # Agreeing to leave MINE's drafts is not agreeing to leave SECOND's:
+    # SECOND going quiet too stops the change, and says so.
+    second = "wss://second.example"
+    list_on_both = found(signed(
+        KIND_PRIVATE_RELAYS, [], f'sealed:[["relay","{MINE}"],["relay","{second}"]]'))
+    drafts, relays, directory, _client = moving(list_on_both,
+                                                drafts_on={second: [wrap("draft-1")]})
+    relays.down = {MINE, second}
+    outcomes = []
+    drafts.save([], outcomes.append, leave_unread=[MINE])
+    relays.run(rounds=20)
+    assert not outcomes[0].ok and outcomes[0].move.unread == (second,)
+    assert relays.published == [] and directory.draft_relays_of(PK) == [MINE, second]
 
 
 class _Every:
@@ -320,7 +336,7 @@ def test_nothing_read_at_all_changes_nothing_even_when_leaving_them():
     drafts, relays, directory, _client = moving(LIST_ON_MINE)
     relays.down = _Every()
     outcomes = []
-    drafts.save([], outcomes.append, leave_unread=True)
+    drafts.save([], outcomes.append, leave_unread=[MINE])
     relays.run(rounds=20)
     assert not outcomes[0].ok and relays.published == []
     assert directory.draft_relays_of(PK) == [MINE]

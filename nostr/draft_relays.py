@@ -41,8 +41,9 @@ this runs, saving a draft waits for the answer
 list after it was copied.
 
 A relay being left that does not answer stops the change, as its drafts
-would vanish, unless the person chooses to leave them behind
-(``leave_unread``: for a relay that is gone for good). The copies on the
+would vanish, unless the person chose to leave that relay's drafts
+behind (``leave_unread`` names it: for a relay that is gone for good).
+Every other relay being left must still answer. The copies on the
 relays left stay there; removing them would take a signed deletion
 request for each.
 
@@ -383,7 +384,7 @@ class _Save(QObject):
     def __init__(self, *, pool, directory, profile, entitled, clock,
                  current: List[str], chosen: List[str],
                  write: Callable[[Callable[[WriteOutcome], None]], None],
-                 leave_unread: bool, on_done: Callable[[SaveOutcome], None],
+                 leave_unread: Sequence[str], on_done: Callable[[SaveOutcome], None],
                  on_step: Callable[[str, int, int, int], None],
                  parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -396,7 +397,7 @@ class _Save(QObject):
         self._current = current
         self._chosen = chosen
         self._write = write
-        self._leave_unread = leave_unread
+        self._leave_unread = set(dedupe_relays(leave_unread))
         self._on_done = on_done
         self._on_step = on_step
         self._started = int(clock())
@@ -433,9 +434,10 @@ class _Save(QObject):
         self._source = dedupe_relays(self._routes["source"] + self._routes["source_here"])
         self._destination = self._routes["destination"]
         # Relays not read after the change must answer now, or their
-        # drafts would vanish; unless the person chose to leave them.
-        self._must_read = [] if self._leave_unread else [
-            url for url in self._source if url not in self._routes["read_next"]]
+        # drafts would vanish; but for those the person chose to leave.
+        self._must_read = [url for url in self._source
+                           if url not in self._routes["read_next"]
+                           and url not in self._leave_unread]
         self._on_step(READING_DRAFTS, 0, 0, 0)
         mover = DraftMove(pool=self._pool, author=self._author, source=self._source,
                           destination=self._destination, must_read=self._must_read,
@@ -576,7 +578,7 @@ class PrivateDraftRelays(QObject):
 
     def save(self, relays: Sequence[str], on_done: Callable[[SaveOutcome], None], *,
              on_step: Optional[Callable[[str, int, int, int], None]] = None,
-             leave_unread: bool = False) -> None:
+             leave_unread: Sequence[str] = ()) -> None:
         """Make ``relays`` the account's draft relays, or with none go back
         to the usual relays: move the drafts to where they go next, publish
         the list, and then save drafts by it (see the module's text).
@@ -584,7 +586,9 @@ class PrivateDraftRelays(QObject):
         ``on_step(step, done, total, drafts)`` says where it is:
         READING_DRAFTS; MOVING_DRAFTS with the events settled, to send, and
         the drafts with content among them; SAVING_LIST. ``leave_unread``
-        changes the list although a relay being left did not answer."""
+        names the relays being left whose drafts the person agreed to leave
+        behind (they did not answer); every other relay being left must
+        still answer."""
         chosen = dedupe_relays(relays, cap=defaults.PRIVATE_CAP)
         if relays and not chosen:
             raise ValueError("no usable relay for drafts")
@@ -607,7 +611,7 @@ class PrivateDraftRelays(QObject):
 
         _Save(pool=self._pool, directory=self._directory, profile=self._profile,
               entitled=self._entitled, clock=self._clock, current=list(current),
-              chosen=chosen, write=write, leave_unread=leave_unread, on_done=done,
+              chosen=chosen, write=write, leave_unread=list(leave_unread), on_done=done,
               on_step=on_step or (lambda _step, _done, _total, _drafts: None),
               parent=self).start()
 
