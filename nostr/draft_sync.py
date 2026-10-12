@@ -348,6 +348,10 @@ class DraftSync(QObject):
         if self._profile is None or self._bunker_unsupported:
             return
         self._clear_signer_unreachable()
+        # The draft relay list too: it may have been left unread while
+        # the signer app was away.
+        if self._draft_list_reader is not None:
+            self._draft_list_reader.ask_again()
         if self._bunker is None:
             gen = self._generation
             self.status_changed.emit(_("Connecting to your signer app…"))
@@ -415,6 +419,9 @@ class DraftSync(QObject):
             return
         self._bunker = client
         self._clear_signer_unreachable()
+        # A draft relay list that could not be decrypted while the signer
+        # app was away is read now that it answers.
+        self._follow_draft_list()
         self._open_subscription()
         # A reconnect finds drafts we already gave up on, and the relay
         # will not re-deliver their wraps because the store already holds

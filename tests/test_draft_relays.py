@@ -912,3 +912,63 @@ def test_a_slow_decrypt_answered_after_a_save_here_does_not_undo_it():
     sync.stop()
     sync.deleteLater()
     settle()
+
+
+def test_a_signer_app_that_could_not_be_reached_is_asked_again_at_the_next_refresh():
+    # Review L10: "unreachable" was remembered as "declined", so a list
+    # changed while this device was off was not followed until a refresh
+    # by hand. A real decline is still remembered.
+    from nostr.draft_store import DraftStore
+    from nostr.draft_sync import DraftSync
+
+    class Waking(FakeSessionPool):
+        up = False
+
+        def get(self, profile, on_ready, on_error):
+            if self.up:
+                on_ready(self.client)
+            else:
+                on_error("signer app did not answer")
+
+    lists, relays, directory, _client = moving(LIST_ON_MINE)
+    elsewhere = signed(KIND_PRIVATE_RELAYS, [], f'sealed:[["relay","{OTHER}"]]',
+                       created_at=NOW - 60)
+    lists._query.answers[KIND_PRIVATE_RELAYS] = found(elsewhere)
+    sessions = Waking(SealingClient())
+    sync = DraftSync(relay_pool=relays, relay_directory=directory, session_pool=sessions,
+                     store=DraftStore())
+    sync._profile = Profile()
+    sync._draft_list_reader = PrivateDraftRelays(
+        profile=Profile(), pool=relays, session_pool=sessions, directory=directory,
+        query=lists._query, parent=sync)
+    sync._follow_draft_list()                               # the phone is asleep
+    settle()
+    assert directory.draft_relays_of(PK) == [MINE]
+    sessions.up = True
+    sync._follow_draft_list()                               # the next automatic refresh
+    settle()
+    assert directory.draft_relays_of(PK) == [OTHER]
+    sync.stop()
+    sync.deleteLater()
+    settle()
+
+
+def test_a_signer_app_that_comes_back_reads_the_list_at_once():
+    from nostr.draft_store import DraftStore
+    from nostr.draft_sync import DraftSync
+    lists, relays, directory, client = moving(LIST_ON_MINE)
+    elsewhere = signed(KIND_PRIVATE_RELAYS, [], f'sealed:[["relay","{OTHER}"]]',
+                       created_at=NOW - 60)
+    lists._query.answers[KIND_PRIVATE_RELAYS] = found(elsewhere)
+    sync = DraftSync(relay_pool=relays, relay_directory=directory,
+                     session_pool=FakeSessionPool(client), store=DraftStore())
+    sync._profile = Profile()
+    sync._draft_list_reader = PrivateDraftRelays(
+        profile=Profile(), pool=relays, session_pool=FakeSessionPool(client),
+        directory=directory, query=lists._query, parent=sync)
+    sync._on_bunker_ready(sync._generation, client)         # the signer app answers now
+    settle()
+    assert directory.draft_relays_of(PK) == [OTHER]
+    sync.stop()
+    sync.deleteLater()
+    settle()

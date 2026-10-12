@@ -80,6 +80,7 @@ from nostr.outbox.policy import (
 from nostr.outbox.writer import (
     CAUSE_SIGNER, FAILED, REFUSED, UNCHANGED, BaseChanged, ReplaceableWriter, WriteOutcome,
 )
+from nostr.bunker import is_signer_silent
 from nostr.publish_pipeline import kept_by_relay, refused_by_relay
 from nostr.queries import Fetched, fetch_events, full_pages
 
@@ -696,8 +697,9 @@ class PrivateDraftRelays(QObject):
         self._known: Optional[List[str]] = None
         self._read_id: Optional[str] = None
         self.last_failure: Optional[str] = None    # why the last read answered None
-        # The list the signer app did not decrypt: not asked about again
-        # until another one is read, or ``ask_again``.
+        # The list the signer app declined to decrypt: not asked about again
+        # until another one is read, or ``ask_again`` (a signer app that
+        # could not be reached is asked again next time).
         self._declined_id: Optional[str] = None
         self._saving: Optional[_Save] = None
 
@@ -749,8 +751,8 @@ class PrivateDraftRelays(QObject):
             elif event.get("id") == self._declined_id:
                 answer(None, failure=UNDECRYPTED)
             else:
-                def decrypted(read: Optional[List[str]]) -> None:
-                    self._declined_id = None if read is not None else event.get("id")
+                def decrypted(read: Optional[List[str]], declined: bool) -> None:
+                    self._declined_id = event.get("id") if declined else None
                     answer(read, event, None if read is not None else UNDECRYPTED)
 
                 self._decrypt(str(event.get("content") or ""), decrypted)
@@ -764,17 +766,22 @@ class PrivateDraftRelays(QObject):
         self._declined_id = None
 
     def _decrypt(self, ciphertext: str, on_done) -> None:
+        """``on_done(relays, declined)``: the list decrypted, or None, with
+        ``declined`` True when the signer app answered and would answer the
+        same again (it refused, or what it gave back is no list), False when
+        it could not be reached or did not answer (worth asking again)."""
         def plaintext(text: str) -> None:
             try:
-                on_done(parse_private_relays(text))
+                on_done(parse_private_relays(text), False)
             except (ValueError, TypeError):
-                on_done(None)
+                on_done(None, True)
 
         self._session_pool.get(
             self._profile,
-            lambda client: client.nip44_decrypt_self(ciphertext, plaintext,
-                                                     lambda _reason: on_done(None)),
-            lambda _reason: on_done(None))
+            lambda client: client.nip44_decrypt_self(
+                ciphertext, plaintext,
+                lambda reason: on_done(None, not is_signer_silent(reason or ""))),
+            lambda _reason: on_done(None, False))
 
     def publish(self, relays: Sequence[str], on_done: Callable[[WriteOutcome], None], *,
                 over=_ANY) -> None:
