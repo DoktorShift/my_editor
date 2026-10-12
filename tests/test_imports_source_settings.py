@@ -115,6 +115,16 @@ class TestDoneAndCancel:
             "rehostImages": False, "fetchFullText": True}
         assert any(f.get("title") == "Journal" for f in payload["feeds"])
 
+    def test_done_with_nothing_changed_sends_nothing(self, controller):
+        """CP3 review L4: Done wrote the defaults the sheet showed back as a
+        change, and the list went out again (a signer request)."""
+        before = published(controller)
+        sent = len(controller.subscriptions._query.published)
+        sheet = sheet_for(controller, JOURNAL)
+        sheet.buttons["done"].click()
+        assert published(controller) == before
+        assert len(controller.subscriptions._query.published) == sent
+
     def test_turning_checks_off_stays_on_this_computer(self, controller):
         sheet = sheet_for(controller, JOURNAL)
         sheet.automatic.setChecked(False)
