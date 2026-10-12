@@ -463,7 +463,8 @@ class AssistantWindow(QDialog):
         changes, so text that arrives later fits too.
 
         A page that cannot get narrower than the window (a row of longer
-        words) widens the window the same way."""
+        words) widens the window the same way, and so does a row of buttons
+        whose words need more room."""
         page = self._stack.currentWidget()
         layout = page.layout() if page is not None else None
         if layout is None:
@@ -493,7 +494,10 @@ class AssistantWindow(QDialog):
         wide = self._stack.minimumSizeHint().width() + bar
         if wide != self._scroll.minimumWidth():
             self._scroll.setMinimumWidth(wide)
-        window = max(self._base_width, wide + sides, narrowest + sides)
+        # The buttons keep their words whole too: a longer translation of
+        # them widens the window rather than cutting them.
+        buttons = self._button_row.sizeHint().width()
+        window = max(self._base_width, wide + sides, narrowest + sides, buttons + sides)
         if window != self.minimumWidth():
             self.setMinimumWidth(window)
 
@@ -548,3 +552,4 @@ class AssistantWindow(QDialog):
             for spec in specs:
                 if spec[2] == placement:
                     self._button_row.addWidget(make(*spec))
+        self.fit_page()             # the new buttons may need a wider window

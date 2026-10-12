@@ -467,3 +467,19 @@ def test_relays_still_looked_at_are_listed_and_one_can_be_let_go(monkeypatch):
     sheet._stop_looking.click()                                 # Stop Looking
     assert lists.left_behind == [] and not sheet._left.isVisibleTo(sheet)
 
+
+
+def test_the_buttons_keep_their_words_whole_at_the_narrowest_width():
+    # Round 2 screenshots: at its narrowest the German sheet cut
+    # "Meine üblichen Relays verwenden" short.
+    import i18n
+    i18n.install("de")
+    try:
+        sheet, _saved = open_sheet(Lists([MINE]))
+        sheet.resize(sheet.minimumWidth(), sheet.height())
+        QApplication.processEvents()
+        assert all(button.width() >= button.sizeHint().width()
+                   for button in sheet.buttons.values()), [
+            (b.text(), b.width(), b.sizeHint().width()) for b in sheet.buttons.values()]
+    finally:
+        i18n.install("en")
