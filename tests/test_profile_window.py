@@ -145,6 +145,36 @@ def test_a_field_with_a_problem_says_so_and_blocks_saving(key, value, problem):
     assert not win.buttons["save"].isEnabled()
 
 
+def test_a_key_in_a_part_not_shown_is_left_out_and_said_before_saving():
+    """A key already in the profile, in a part the window doesn't show
+    (another app's "bio", the older "displayName"): saving without it is
+    what takes it out, so Save is offered, and the person is told."""
+    from nostr.outbox.policy import merge_profile_content
+    win, net = window()
+    content = {"name": "alice", "bio": "My key: " + NSEC, "displayName": NSEC,
+               "display_name": "Alice"}
+    net.reads[0](found(**content))
+    note = win._form_note.text()
+    assert "“bio”" in note and "“displayName”" in note and "secret key" in note
+    assert win.buttons["save"].isEnabled()
+    win._save_changes()
+    changes = net.saves[0][0]
+    assert changes == {"bio": "", "displayName": ""}
+    merged = merge_profile_content(json.dumps(content), changes)
+    assert NSEC not in merged and json.loads(merged)["name"] == "alice"
+
+
+def test_the_signers_refusal_is_said_as_it_is():
+    from nostr import refs
+    from i18n import _
+    win, net = window()
+    net.reads[0](found(name="alice"))
+    edit(win, "name", "alicia")
+    win._save_changes()
+    net.saves[0][1](SimpleNamespace(status=outbox_writer.FAILED, reason=_(refs.SECRET_KEY_REFUSED)))
+    assert win._form_note.text() == _(refs.SECRET_KEY_REFUSED)
+
+
 def test_a_field_problem_is_read_with_the_field_and_said_once(monkeypatch):
     import announce
     heard = []

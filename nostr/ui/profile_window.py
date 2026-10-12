@@ -29,13 +29,13 @@ import json
 import re
 import weakref
 from dataclasses import dataclass
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, List, Optional
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QFormLayout, QLabel, QLineEdit, QPlainTextEdit, QVBoxLayout, QWidget
 
 import announce
-from i18n import N_, _
+from i18n import N_, _, ngettext
 from nostr import refs
 from nostr.outbox.policy import LookupState
 from nostr.outbox.writer import UNCHANGED, UNKNOWN_BASE, WRITTEN
@@ -125,6 +125,19 @@ def profile_fields(event: Optional[dict]) -> Dict[str, str]:
     return values
 
 
+def hidden_secret_fields(event: Optional[dict]) -> List[str]:
+    """The parts of a profile this window doesn't show (other apps' own,
+    or the older display name key) that hold a Nostr secret key. They are
+    public already; saving without them takes the key out of the profile,
+    and a profile with them would not be signed."""
+    if event is None:
+        return []
+    data = json.loads(event.get("content") or "{}")
+    shown = {field.key for field in FIELDS}
+    return [key for key, value in data.items() if key not in shown
+            and refs.secret_keys_in(value if isinstance(value, str) else json.dumps(value))]
+
+
 class ProfileWindow(AssistantWindow):
     """Edit Profile, for the active account."""
 
@@ -137,6 +150,8 @@ class ProfileWindow(AssistantWindow):
         self._save = save
         self._signs_locally = signs_locally
         self._loaded: Dict[str, str] = {}
+        # Parts the window doesn't show that hold a secret key: left out.
+        self._removing: List[str] = []
         self._new_profile = False
         self._closed = False
         self._edits: Dict[str, QWidget] = {}
@@ -174,6 +189,7 @@ class ProfileWindow(AssistantWindow):
             return
         try:
             self._loaded = profile_fields(result.event)
+            self._removing = hidden_secret_fields(result.event)
         except ValueError:
             self._show_problem(
                 _("This Profile Can’t Be Edited Here"),
@@ -243,11 +259,20 @@ class ProfileWindow(AssistantWindow):
                 edit.setText(self._loaded.get(field.key, ""))
             edit.blockSignals(False)
             self._errors[field.key].hide()
-        self._set_form_note(
-            _("You don’t have a profile yet. What you enter here becomes your profile.")
-            if self._new_profile else
-            _("This is what people see in every Nostr app. An empty field is removed "
-              "from your profile."))
+        if self._removing:
+            names = ", ".join(f"“{key}”" for key in self._removing)
+            self._set_form_note(ngettext(
+                "Your profile has a secret key in {names}, a part this window doesn’t show. "
+                "Saving leaves that part out, which takes the key out of your profile.",
+                "Your profile has a secret key in {names}, parts this window doesn’t show. "
+                "Saving leaves those parts out, which takes the key out of your profile.",
+                len(self._removing)).format(names=names), problem=True)
+        else:
+            self._set_form_note(
+                _("You don’t have a profile yet. What you enter here becomes your profile.")
+                if self._new_profile else
+                _("This is what people see in every Nostr app. An empty field is removed "
+                  "from your profile."))
         self._show_form_page()
 
     def _show_form_page(self) -> None:
@@ -262,9 +287,12 @@ class ProfileWindow(AssistantWindow):
         self._form_note.setText(text)
 
     def changes(self) -> Dict[str, str]:
-        """The fields that differ from the profile as it was read."""
-        return {field.key: self._value(field.key) for field in FIELDS
-                if self._value(field.key) != self._loaded.get(field.key, "")}
+        """The fields that differ from the profile as it was read, and the
+        parts holding a secret key, left out (an empty value removes)."""
+        changes = {key: "" for key in self._removing}
+        changes.update({field.key: self._value(field.key) for field in FIELDS
+                        if self._value(field.key) != self._loaded.get(field.key, "")})
+        return changes
 
     def _on_edited(self) -> None:
         problems = False
@@ -309,6 +337,9 @@ class ProfileWindow(AssistantWindow):
         if outcome.status == UNKNOWN_BASE:
             note = _("Your profile wasn’t saved: it couldn’t be read again just before "
                      "saving, so nothing was changed. Try again in a moment.")
+        elif outcome.reason == _(refs.SECRET_KEY_REFUSED):
+            # A key arrived in a part of it since it was read: no retry helps.
+            note = outcome.reason
         else:
             note = _("Your profile wasn’t saved: the signer didn’t sign it, or too few "
                      "servers took it. Nothing was changed. Try again in a moment.")

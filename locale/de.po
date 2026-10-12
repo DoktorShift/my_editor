@@ -647,7 +647,7 @@ msgstr "Öffnen …"
 #: main_window.py:1482
 #: main_window.py:264
 #: nostr/ui/draft_relays_sheet.py:299
-#: nostr/ui/profile_window.py:254
+#: nostr/ui/profile_window.py:280
 #: nostr/ui/save_destination_dialog.py:225
 #: nostr/ui/save_destination_dialog.py:306
 msgid "Save"
@@ -7270,7 +7270,7 @@ msgid "One moment."
 msgstr "Einen Moment."
 
 #: nostr/ui/membership_window.py:80
-#: nostr/ui/profile_window.py:297
+#: nostr/ui/profile_window.py:324
 msgid "Your signer app may ask you to approve."
 msgstr "Deine Signer-App fragt dich eventuell nach einer Bestätigung."
 
@@ -7712,166 +7712,177 @@ msgstr "Nostr-Profil"
 msgid "Connect Nostr"
 msgstr "Nostr verbinden"
 
-#: nostr/ui/profile_window.py:66
+#: nostr/ui/profile_window.py:67
 msgid "Name"
 msgstr "Name"
 
-#: nostr/ui/profile_window.py:66
+#: nostr/ui/profile_window.py:67
 msgid "The name people see"
 msgstr "Der Name, den andere sehen"
 
-#: nostr/ui/profile_window.py:67
+#: nostr/ui/profile_window.py:68
 msgid "Username"
 msgstr "Benutzername"
 
-#: nostr/ui/profile_window.py:67
+#: nostr/ui/profile_window.py:68
 msgid "A short name, without spaces"
 msgstr "Ein kurzer Name ohne Leerzeichen"
 
-#: nostr/ui/profile_window.py:68
+#: nostr/ui/profile_window.py:69
 msgid "About"
 msgstr "Über mich"
 
-#: nostr/ui/profile_window.py:69
+#: nostr/ui/profile_window.py:70
 msgid "Picture"
 msgstr "Profilbild"
 
-#: nostr/ui/profile_window.py:69
+#: nostr/ui/profile_window.py:70
 msgid "Address of an image, https://…"
 msgstr "Adresse eines Bildes, https://…"
 
-#: nostr/ui/profile_window.py:70
+#: nostr/ui/profile_window.py:71
 msgid "Banner"
 msgstr "Titelbild"
 
-#: nostr/ui/profile_window.py:70
+#: nostr/ui/profile_window.py:71
 msgid "Address of a wide image, https://…"
 msgstr "Adresse eines breiten Bildes, https://…"
 
-#: nostr/ui/profile_window.py:71
+#: nostr/ui/profile_window.py:72
 msgid "Website"
 msgstr "Website"
 
-#: nostr/ui/profile_window.py:72
+#: nostr/ui/profile_window.py:73
 msgid "Lightning Address"
 msgstr "Lightning-Adresse"
 
-#: nostr/ui/profile_window.py:72
+#: nostr/ui/profile_window.py:73
 msgid "you@wallet.example"
 msgstr "du@wallet.example"
 
-#: nostr/ui/profile_window.py:73
+#: nostr/ui/profile_window.py:74
 msgid "Nostr Address"
 msgstr "Nostr-Adresse"
 
-#: nostr/ui/profile_window.py:73
+#: nostr/ui/profile_window.py:74
 msgid "you@example.com"
 msgstr "du@example.com"
 
-#: nostr/ui/profile_window.py:93
+#: nostr/ui/profile_window.py:94
 msgid "This holds a secret key. Anyone who has it can publish as its owner, so it never goes into a profile. Remove it."
 msgstr "Hier steht ein geheimer Schlüssel. Wer ihn hat, kann im Namen seines Besitzers veröffentlichen, deshalb kommt er nie in ein Profil. Entferne ihn."
 
-#: nostr/ui/profile_window.py:96
+#: nostr/ui/profile_window.py:97
 msgid "Enter an image address beginning with https, like https://example.com/picture.jpg."
 msgstr "Gib eine Bildadresse ein, die mit https beginnt, etwa https://example.com/bild.jpg."
 
-#: nostr/ui/profile_window.py:99
+#: nostr/ui/profile_window.py:100
 msgid "Enter a web address beginning with http or https, like https://example.com."
 msgstr "Gib eine Webadresse ein, die mit http oder https beginnt, etwa https://example.com."
 
-#: nostr/ui/profile_window.py:102
+#: nostr/ui/profile_window.py:103
 msgid "Enter a Lightning address like you@wallet.example."
 msgstr "Gib eine Lightning-Adresse ein, etwa du@wallet.example."
 
-#: nostr/ui/profile_window.py:104
+#: nostr/ui/profile_window.py:105
 msgid "Enter a Nostr address like you@example.com."
 msgstr "Gib eine Nostr-Adresse ein, etwa du@example.com."
 
-#: nostr/ui/profile_window.py:106
+#: nostr/ui/profile_window.py:107
 msgid "A username can’t contain spaces."
 msgstr "Ein Benutzername darf keine Leerzeichen enthalten."
 
-#: nostr/ui/profile_window.py:295
+#: nostr/ui/profile_window.py:322
 msgid "Saving your profile…"
 msgstr "Dein Profil wird gespeichert …"
 
-#: nostr/ui/profile_window.py:134
+#: nostr/ui/profile_window.py:148
 msgid "Edit Profile"
 msgstr "Profil bearbeiten"
 
-#: nostr/ui/profile_window.py:154
+#: nostr/ui/profile_window.py:170
 msgid "Reading your profile…"
 msgstr "Dein Profil wird gelesen …"
 
-#: nostr/ui/profile_window.py:311
+#: nostr/ui/profile_window.py:338
 msgid "Your profile wasn’t saved: it couldn’t be read again just before saving, so nothing was changed. Try again in a moment."
 msgstr "Dein Profil wurde nicht gespeichert: Es ließ sich kurz vor dem Speichern nicht noch einmal lesen, daher wurde nichts geändert. Versuch es gleich noch einmal."
 
-#: nostr/ui/profile_window.py:314
-msgid "Your profile wasn’t saved: the signer didn’t sign it, or too few servers took it. Nothing was changed. Try again in a moment."
-msgstr "Dein Profil wurde nicht gespeichert: Der Signer hat es nicht signiert, oder zu wenige Server haben es angenommen. Es wurde nichts geändert. Versuch es gleich noch einmal."
-
-#: nostr/ui/profile_window.py:169
+#: nostr/ui/profile_window.py:185
 msgid "MyEditor Couldn’t Read Your Profile"
 msgstr "MyEditor konnte dein Profil nicht lesen"
 
-#: nostr/ui/profile_window.py:170
+#: nostr/ui/profile_window.py:186
 msgid "Your profile couldn’t be read from the network just now. Editing it without reading it first could replace it, so try again in a moment."
 msgstr "Dein Profil ließ sich gerade nicht aus dem Netzwerk lesen. Es ohne vorheriges Lesen zu bearbeiten, könnte es ersetzen. Versuch es deshalb gleich noch einmal."
 
-#: nostr/ui/profile_window.py:190
+#: nostr/ui/profile_window.py:207
 msgid "Your Profile"
 msgstr "Dein Profil"
 
-#: nostr/ui/profile_window.py:246
-msgid "You don’t have a profile yet. What you enter here becomes your profile."
-msgstr "Du hast noch kein Profil. Was du hier eingibst, wird dein Profil."
+#: nostr/ui/profile_window.py:344
+msgid "Your profile wasn’t saved: the signer didn’t sign it, or too few servers took it. Nothing was changed. Try again in a moment."
+msgstr "Dein Profil wurde nicht gespeichert: Der Signer hat es nicht signiert, oder zu wenige Server haben es angenommen. Es wurde nichts geändert. Versuch es gleich noch einmal."
 
-#: nostr/ui/profile_window.py:248
-msgid "This is what people see in every Nostr app. An empty field is removed from your profile."
-msgstr "Das sehen andere in jeder Nostr-App. Ein leeres Feld wird aus deinem Profil entfernt."
-
-#: nostr/ui/profile_window.py:178
+#: nostr/ui/profile_window.py:195
 msgid "This Profile Can’t Be Edited Here"
 msgstr "Dieses Profil lässt sich hier nicht bearbeiten"
 
-#: nostr/ui/profile_window.py:179
+#: nostr/ui/profile_window.py:196
 msgid "Your profile is stored in a form MyEditor doesn’t understand, so it is left as it is. Edit it in the app that created it."
 msgstr "Dein Profil ist in einer Form gespeichert, die MyEditor nicht versteht. Es bleibt daher unverändert. Bearbeite es in der App, mit der es erstellt wurde."
 
-#: nostr/ui/publish_article_dialog.py:354
+#: nostr/ui/profile_window.py:272
+msgid "You don’t have a profile yet. What you enter here becomes your profile."
+msgstr "Du hast noch kein Profil. Was du hier eingibst, wird dein Profil."
+
+#: nostr/ui/profile_window.py:274
+msgid "This is what people see in every Nostr app. An empty field is removed from your profile."
+msgstr "Das sehen andere in jeder Nostr-App. Ein leeres Feld wird aus deinem Profil entfernt."
+
+#: nostr/ui/profile_window.py:264
+#, python-brace-format
+msgid "Your profile has a secret key in {names}, a part this window doesn’t show. Saving leaves that part out, which takes the key out of your profile."
+msgid_plural "Your profile has a secret key in {names}, parts this window doesn’t show. Saving leaves those parts out, which takes the key out of your profile."
+msgstr[0] "In deinem Profil steht ein geheimer Schlüssel in {names}, einem Teil, den dieses Fenster nicht zeigt. Beim Speichern wird dieser Teil weggelassen, und damit verschwindet der Schlüssel aus deinem Profil."
+msgstr[1] "In deinem Profil steht ein geheimer Schlüssel in {names}, Teilen, die dieses Fenster nicht zeigt. Beim Speichern werden diese Teile weggelassen, und damit verschwindet der Schlüssel aus deinem Profil."
+
+#: nostr/ui/publish_article_dialog.py:356
 msgid "Publish as Article"
 msgstr "Als Artikel veröffentlichen"
 
-#: nostr/ui/publish_article_dialog.py:453
+#: nostr/ui/publish_article_dialog.py:455
 msgid "Article title"
 msgstr "Titel des Artikels"
 
-#: nostr/ui/publish_article_dialog.py:461
+#: nostr/ui/publish_article_dialog.py:463
 msgid "Short summary (one sentence)"
 msgstr "Kurze Zusammenfassung (ein Satz)"
 
-#: nostr/ui/publish_article_dialog.py:472
+#: nostr/ui/publish_article_dialog.py:474
 msgid "Write your article in Markdown…"
 msgstr "Schreib deinen Artikel in Markdown …"
 
-#: nostr/ui/publish_article_dialog.py:510
-#: nostr/ui/stash_kind_dialog.py:404
+#: nostr/ui/publish_article_dialog.py:512
+#: nostr/ui/stash_kind_dialog.py:405
 msgid "article-slug"
 msgstr "mein-artikel"
 
-#: nostr/ui/publish_article_dialog.py:522
+#: nostr/ui/publish_article_dialog.py:524
 msgid "comma, separated, hashtags"
 msgstr "durch, Komma, getrennt"
 
-#: nostr/ui/publish_article_dialog.py:568
+#: nostr/ui/publish_article_dialog.py:529
+msgid "Slug (article ID)"
+msgstr "Kurzname (Artikel-ID)"
+
+#: nostr/ui/publish_article_dialog.py:577
 #: nostr/ui/publish_note_dialog.py:282
 msgid "Publish"
 msgstr "Veröffentlichen"
 
-#: nostr/ui/publish_article_dialog.py:626
-#: nostr/ui/publish_article_dialog.py:727
+#: nostr/ui/publish_article_dialog.py:637
+#: nostr/ui/publish_article_dialog.py:738
 msgid ""
 "No cover\n"
 "selected"
@@ -7879,69 +7890,65 @@ msgstr ""
 "Kein Titelbild\n"
 "ausgewählt"
 
-#: nostr/ui/publish_article_dialog.py:638
+#: nostr/ui/publish_article_dialog.py:649
 msgid "Cover image"
 msgstr "Titelbild"
 
-#: nostr/ui/publish_article_dialog.py:690
+#: nostr/ui/publish_article_dialog.py:701
 msgid "Choose hero image"
 msgstr "Titelbild auswählen"
 
-#: nostr/ui/publish_article_dialog.py:877
+#: nostr/ui/publish_article_dialog.py:896
 msgid "Checking whether this article was published before…"
 msgstr "Prüfe, ob dieser Artikel schon veröffentlicht wurde …"
 
-#: nostr/ui/publish_article_dialog.py:527
-msgid "Slug (article ID)"
-msgstr "Kurzname (Artikel-ID)"
-
-#: nostr/ui/publish_article_dialog.py:528
+#: nostr/ui/publish_article_dialog.py:537
 msgid "Hashtags"
 msgstr "Hashtags"
 
-#: nostr/ui/publish_article_dialog.py:553
+#: nostr/ui/publish_article_dialog.py:562
 #: nostr/ui/publish_note_dialog.py:266
 msgid "Publishing as"
 msgstr "Veröffentlichen als"
 
-#: nostr/ui/publish_article_dialog.py:647
+#: nostr/ui/publish_article_dialog.py:658
 msgid "Choose or upload…"
 msgstr "Auswählen oder hochladen …"
 
-#: nostr/ui/publish_article_dialog.py:658
+#: nostr/ui/publish_article_dialog.py:669
 msgid "Pictures you pick are uploaded to your media servers."
 msgstr "Bilder, die du auswählst, werden auf deine Medienserver hochgeladen."
 
-#: nostr/ui/publish_article_dialog.py:660
+#: nostr/ui/publish_article_dialog.py:671
 msgid "Paste an image URL hosted anywhere on the public web."
 msgstr "Füge die Adresse eines Bildes ein, das öffentlich im Web liegt."
 
-#: nostr/ui/publish_article_dialog.py:761
+#: nostr/ui/publish_article_dialog.py:772
 msgid "▾  Advanced"
 msgstr "▾  Erweitert"
 
-#: nostr/ui/publish_article_dialog.py:763
+#: nostr/ui/publish_article_dialog.py:774
 msgid "▸  Advanced  ·  slug, cover image, hashtags"
 msgstr "▸  Erweitert  ·  Kurzname, Titelbild, Hashtags"
 
-#: nostr/ui/publish_article_dialog.py:800
+#: nostr/ui/publish_article_dialog.py:811
 #: nostr/ui/publish_note_dialog.py:323
 msgid "(no profiles)"
 msgstr "(keine Profile)"
 
-#: nostr/ui/publish_article_dialog.py:909
+#: nostr/ui/publish_article_dialog.py:928
 msgid "Couldn't check whether this article was published before"
 msgstr "Es konnte nicht geprüft werden, ob dieser Artikel schon veröffentlicht wurde"
 
-#: nostr/ui/publish_article_dialog.py:910
+#: nostr/ui/publish_article_dialog.py:929
 msgid "None of the relays you publish to answered. If the article went out before, publishing it as new gives it today's date, and readers see it as a new article."
 msgstr "Keines der Relays, auf denen du veröffentlichst, hat geantwortet. Wenn der Artikel schon einmal erschienen ist, bekommt er als neu veröffentlicht das heutige Datum, und Leser sehen ihn als neuen Artikel."
 
-#: nostr/ui/publish_article_dialog.py:974
+#: nostr/ui/publish_article_dialog.py:993
 msgid "The article was not published: no relay took it. Check your internet connection and try again."
 msgstr "Der Artikel wurde nicht veröffentlicht: Kein Relay hat ihn angenommen. Prüfe deine Internetverbindung und versuche es erneut."
 
-#: nostr/ui/publish_article_dialog.py:731
+#: nostr/ui/publish_article_dialog.py:742
 msgid ""
 "Preview shown\n"
 "for library picks"
@@ -7949,24 +7956,24 @@ msgstr ""
 "Vorschau nur für\n"
 "Bilder der Mediathek"
 
-#: nostr/ui/publish_article_dialog.py:773
+#: nostr/ui/publish_article_dialog.py:784
 #, python-brace-format
 msgid "{words} word · ~{minutes} min read"
 msgid_plural "{words} words · ~{minutes} min read"
 msgstr[0] "{words} Wort · ~{minutes} Min. Lesezeit"
 msgstr[1] "{words} Wörter · ~{minutes} Min. Lesezeit"
 
-#: nostr/ui/publish_article_dialog.py:997
+#: nostr/ui/publish_article_dialog.py:1016
 #: nostr/ui/publish_note_dialog.py:421
 #, python-brace-format
 msgid "Publish failed: {reason}"
 msgstr "Veröffentlichen fehlgeschlagen: {reason}"
 
-#: nostr/ui/publish_article_dialog.py:913
+#: nostr/ui/publish_article_dialog.py:932
 msgid "Publish as New"
 msgstr "Als neu veröffentlichen"
 
-#: nostr/ui/publish_article_dialog.py:941
+#: nostr/ui/publish_article_dialog.py:960
 #, python-brace-format
 msgid "Cannot build article: {reason}"
 msgstr "Artikel kann nicht erstellt werden: {reason}"
@@ -8338,52 +8345,52 @@ msgstr "Wer ihn hat, kann im Namen seines Besitzers veröffentlichen, und einmal
 msgid "Replace with Public Key"
 msgstr "Durch öffentlichen Schlüssel ersetzen"
 
-#: nostr/ui/stash_kind_dialog.py:301
-#: nostr/ui/stash_kind_dialog.py:342
+#: nostr/ui/stash_kind_dialog.py:302
+#: nostr/ui/stash_kind_dialog.py:343
 msgid "Save as Nostr draft"
 msgstr "Als Nostr-Entwurf speichern"
 
-#: nostr/ui/stash_kind_dialog.py:347
+#: nostr/ui/stash_kind_dialog.py:348
 msgid "Drafts are end-to-end encrypted to your key. Pick the kind so the draft can be promoted to a publish later."
 msgstr "Entwürfe sind Ende-zu-Ende mit deinem Schlüssel verschlüsselt. Wähle die Art, damit du den Entwurf später veröffentlichen kannst."
 
-#: nostr/ui/stash_kind_dialog.py:398
+#: nostr/ui/stash_kind_dialog.py:399
 msgid "Article title (used to derive the slug)"
 msgstr "Artikeltitel (daraus entsteht der Slug)"
 
-#: nostr/ui/stash_kind_dialog.py:408
+#: nostr/ui/stash_kind_dialog.py:409
 msgid "Slug (the draft's d-tag)"
 msgstr "Slug (Kennung des Entwurfs)"
 
-#: nostr/ui/stash_kind_dialog.py:419
+#: nostr/ui/stash_kind_dialog.py:420
 msgid "Optional one-sentence summary"
 msgstr "Optionale Zusammenfassung in einem Satz"
 
-#: nostr/ui/stash_kind_dialog.py:428
+#: nostr/ui/stash_kind_dialog.py:429
 msgid "Save draft"
 msgstr "Entwurf speichern"
 
-#: nostr/ui/stash_kind_dialog.py:359
+#: nostr/ui/stash_kind_dialog.py:360
 msgid "Short note"
 msgstr "Kurze Notiz"
 
-#: nostr/ui/stash_kind_dialog.py:360
+#: nostr/ui/stash_kind_dialog.py:361
 msgid "Quick thought, plain text. Kind 1 when published. No slug: the draft is identified by a private UUID."
 msgstr "Ein kurzer Gedanke als reiner Text. Wird als Notiz veröffentlicht. Ohne Slug: Der Entwurf erhält eine private Kennung."
 
-#: nostr/ui/stash_kind_dialog.py:366
+#: nostr/ui/stash_kind_dialog.py:367
 msgid "Long-form article"
 msgstr "Langer Artikel"
 
-#: nostr/ui/stash_kind_dialog.py:367
+#: nostr/ui/stash_kind_dialog.py:368
 msgid "Markdown post with a stable slug. Kind 30023 when published; the slug ties the draft to the eventual article so re-stashing replaces in place."
 msgstr "Ein Markdown-Beitrag mit festem Slug. Wird als Artikel veröffentlicht. Der Slug verbindet den Entwurf mit dem späteren Artikel, sodass erneutes Speichern ihn ersetzt."
 
-#: nostr/ui/stash_kind_dialog.py:401
+#: nostr/ui/stash_kind_dialog.py:402
 msgid "Title"
 msgstr "Titel"
 
-#: nostr/ui/stash_kind_dialog.py:421
+#: nostr/ui/stash_kind_dialog.py:422
 msgid "Summary (optional)"
 msgstr "Zusammenfassung (optional)"
 
