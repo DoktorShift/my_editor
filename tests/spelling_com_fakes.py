@@ -2,10 +2,11 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Stand-ins for the Windows Spell Checking API's COM objects.
 
-Each is a real function table of ctypes callbacks, laid out as in
-spellcheck.h, so the Windows backend's own calls (table offsets,
-arguments, strings to free, objects to release) run on every platform.
-Error positions count UTF-16 units, as Windows does.
+Each is a real function table of ctypes callbacks, laid out by the
+backend's own lists of each interface's functions (whose order
+tests/test_spelling_windows.py pins to spellcheck.h), so the backend's
+calls (arguments, strings to free, objects to release) run on every
+platform. Error positions count UTF-16 units, as Windows does.
 """
 
 from __future__ import annotations
@@ -16,7 +17,10 @@ from ctypes import POINTER, c_int, c_long, c_ulong, c_void_p, c_wchar_p
 from typing import Callable, Dict, Iterable, List, Optional, Sequence
 
 from spelling.backends import Unavailable
-from spelling.windows import S_FALSE, S_OK, _FUNCTYPE
+from spelling.windows import (
+    ENUM_SPELLING_ERROR, ENUM_STRING, S_FALSE, S_OK, SPELL_CHECKER, SPELL_CHECKER_2,
+    SPELL_CHECKER_FACTORY, SPELLING_ERROR, _FUNCTYPE,
+)
 
 E_NOINTERFACE = -2147467262
 E_FAIL = -2147467259
@@ -53,16 +57,24 @@ class Registry:
 
 
 class FakeCom:
-    """A COM object made in Python: IUnknown, then ``methods``, each an
-    ``(argument types, function)`` pair returning an HRESULT."""
+    """A COM object made in Python with the functions of ``interface``
+    (their names, in order). ``functions`` gives some of them, by name,
+    as an ``(argument types, function)`` pair returning an HRESULT; the
+    others fail. IUnknown's three are its own, QueryInterface answered by
+    ``query``."""
 
-    def __init__(self, registry: Registry, name: str,
-                 methods: Sequence[tuple], query=None) -> None:
+    def __init__(self, registry: Registry, name: str, interface: Sequence[str],
+                 functions: Dict[str, tuple], query=None) -> None:
         self.name = name
         self.references = 1
         registry.objects.append(self)
-        table = [((c_void_p, POINTER(c_void_p)), query or (lambda iid, out: E_NOINTERFACE)),
-                 ((), self._add_ref), ((), self._release)] + list(methods)
+        functions = {"QueryInterface": ((c_void_p, POINTER(c_void_p)),
+                                        query or (lambda iid, out: E_NOINTERFACE)),
+                     "AddRef": ((), self._add_ref), "Release": ((), self._release),
+                     **functions}
+        unknown = set(functions) - set(interface)
+        assert not unknown, f"{name} has no {sorted(unknown)}"
+        table = [functions.get(function, ((), lambda: E_FAIL)) for function in interface]
         self._callbacks = [_FUNCTYPE(c_long, c_void_p, *argtypes)(self._method(function))
                            for argtypes, function in table]
         self._table = (c_void_p * len(self._callbacks))(
@@ -103,17 +115,16 @@ def string_enum(registry: Registry, items: Iterable[str]) -> FakeCom:
         fetched[0] = 1
         return S_OK
 
-    return FakeCom(registry, "IEnumString",
-                   [((c_ulong, POINTER(c_void_p), POINTER(c_ulong)), next_)])
+    return FakeCom(registry, "IEnumString", ENUM_STRING,
+                   {"Next": ((c_ulong, POINTER(c_void_p), POINTER(c_ulong)), next_)})
 
 
 def error(registry: Registry, start: int, length: int, action: int) -> FakeCom:
-    return FakeCom(registry, "ISpellingError", [
-        ((POINTER(c_ulong),), _put(start)),
-        ((POINTER(c_ulong),), _put(length)),
-        ((POINTER(c_int),), _put(action)),
-        ((POINTER(c_void_p),), lambda out: E_FAIL),
-    ])
+    return FakeCom(registry, "ISpellingError", SPELLING_ERROR, {
+        "StartIndex": ((POINTER(c_ulong),), _put(start)),
+        "Length": ((POINTER(c_ulong),), _put(length)),
+        "CorrectiveAction": ((POINTER(c_int),), _put(action)),
+    })
 
 
 def error_enum(registry: Registry, errors: Iterable[tuple]) -> FakeCom:
@@ -126,7 +137,8 @@ def error_enum(registry: Registry, errors: Iterable[tuple]) -> FakeCom:
         out[0] = error(registry, *pending.pop(0)).pointer
         return S_OK
 
-    return FakeCom(registry, "IEnumSpellingError", [((POINTER(c_void_p),), next_)])
+    return FakeCom(registry, "IEnumSpellingError", ENUM_SPELLING_ERROR,
+                   {"Next": ((POINTER(c_void_p),), next_)})
 
 
 class FakeChecker:
@@ -140,28 +152,37 @@ class FakeChecker:
         self.ignored: List[str] = []
         self.fail_check = False
         self.removed: List[str] = []
+        self.comprehensive_checks: List[str] = []
         self.windows_8 = False                  # no ISpellChecker2 (no Remove)
         self.second: Optional[FakeCom] = None
-        self.com = FakeCom(registry, f"ISpellChecker {language}", [
-            ((POINTER(c_void_p),), lambda out: E_FAIL),            # LanguageTag
-            ((c_wchar_p, POINTER(c_void_p)), self._check),
-            ((c_wchar_p, POINTER(c_void_p)), self._suggest),
-            ((c_wchar_p,), self._add),
-            ((c_wchar_p,), self._ignore),
-        ], query=self._query)
+        self.com = FakeCom(registry, f"ISpellChecker {language}", SPELL_CHECKER,
+                           self._functions(), query=self._query)
+
+    def _functions(self) -> Dict[str, tuple]:
+        return {"Check": ((c_wchar_p, POINTER(c_void_p)), self._check),
+                "Suggest": ((c_wchar_p, POINTER(c_void_p)), self._suggest),
+                "Add": ((c_wchar_p,), self._add),
+                "Ignore": ((c_wchar_p,), self._ignore),
+                "ComprehensiveCheck": ((c_wchar_p, POINTER(c_void_p)), self._comprehensive)}
 
     def _query(self, iid, out):
-        """ISpellChecker2 (Windows 10): ISpellChecker's methods, then Remove."""
+        """ISpellChecker2 (Windows 10): ISpellChecker's functions, then Remove."""
         if self.windows_8:
             return E_NOINTERFACE
         if self.second is None:
-            filler = [((), lambda: E_FAIL)] * 13        # LanguageTag .. ComprehensiveCheck
             self.second = FakeCom(self.registry, f"ISpellChecker2 {self.language}",
-                                  filler + [((c_wchar_p,), self._remove)])
+                                  SPELL_CHECKER_2,
+                                  {**self._functions(), "Remove": ((c_wchar_p,), self._remove)})
         else:
             self.second._add_ref()
         out[0] = self.second.pointer
         return S_OK
+
+    def _comprehensive(self, text, out):
+        """Called by nothing the backend does: a call landing here is a
+        call meant for another slot."""
+        self.comprehensive_checks.append(text)
+        return E_FAIL
 
     def _remove(self, word):
         self.removed.append(word)
@@ -212,11 +233,11 @@ class FakeFactory:
         self.registry = registry
         self.words = words
         self.checkers: Dict[str, FakeChecker] = {}
-        self.com = FakeCom(registry, "ISpellCheckerFactory", [
-            ((POINTER(c_void_p),), self._languages),
-            ((c_wchar_p, POINTER(c_int)), self._supported),
-            ((c_wchar_p, POINTER(c_void_p)), self._create),
-        ])
+        self.com = FakeCom(registry, "ISpellCheckerFactory", SPELL_CHECKER_FACTORY, {
+            "SupportedLanguages": ((POINTER(c_void_p),), self._languages),
+            "IsSupported": ((c_wchar_p, POINTER(c_int)), self._supported),
+            "CreateSpellChecker": ((c_wchar_p, POINTER(c_void_p)), self._create),
+        })
 
     def _languages(self, out):
         out[0] = string_enum(self.registry, list(self.words)).pointer
