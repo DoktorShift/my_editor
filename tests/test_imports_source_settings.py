@@ -85,6 +85,20 @@ class TestWhatItShows:
         assert not sheet.website.isVisibleTo(sheet)      # no website to open
         assert unnamed_controls(sheet) == []
 
+    def test_it_opens_on_the_name_and_shows_the_icon_when_it_arrives(self, controller,
+                                                                     monkeypatch):
+        """CP3 review L7: the sheet opened with nothing to type in, and its
+        icon stayed the letter when the site's icon arrived later."""
+        from PySide6.QtGui import QColor, QImage
+        sheet = sheet_for(controller, JOURNAL)
+        assert sheet.focusWidget() is sheet.name
+        letter = sheet.icon.pixmap().toImage()
+        icon = QImage(64, 64, QImage.Format.Format_ARGB32)
+        icon.fill(QColor("#2a9d8f"))
+        monkeypatch.setattr(controller, "site_icon", lambda *_args: icon)
+        controller.icon_ready.emit("journal.example")
+        assert sheet.icon.pixmap().toImage() != letter
+
     def test_the_name_follows_what_is_typed(self, controller):
         sheet = sheet_for(controller, JOURNAL)
         sheet.name.setText("My favourite journal")

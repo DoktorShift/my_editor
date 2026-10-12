@@ -99,8 +99,12 @@ class SourceSettingsSheet(_Sheet):
         self._add_error()
         self._finish()
         self.refresh()
-        # A check that ends while the sheet is open shows at once.
+        # A check that ends while the sheet is open shows at once, and so
+        # does the site's icon when it arrives (CP3 review L7).
         controller.sources_changed.connect(self.refresh)
+        controller.icon_ready.connect(self._on_icon_ready)
+        # The field the sheet is for, as the Follow and Link sheets do.
+        self.name.setFocus()
 
     # -- parts ---------------------------------------------------------------------
 
@@ -112,10 +116,7 @@ class SourceSettingsSheet(_Sheet):
         self.icon = QLabel()
         self.icon.setFixedSize(ICON, ICON)
         title = settings.name or settings.own_title or settings.url
-        self.icon.setPixmap(source_avatar(title, settings.url, ICON,
-                                          dark=self._is_dark, dpr=self.devicePixelRatioF(),
-                                          image=self._controller.site_icon(self._key,
-                                                                           settings.url)))
+        self._show_icon()
         row.addWidget(self.icon, 0, Qt.AlignmentFlag.AlignTop)
         text = QVBoxLayout()
         text.setSpacing(0)
@@ -197,6 +198,17 @@ class SourceSettingsSheet(_Sheet):
         return [("unsubscribe", _("Unsubscribe…"), LEADING, self.unsubscribe, True),
                 ("cancel", _("Cancel"), NORMAL, self.reject, True),
                 ("done", _("Done"), DEFAULT, self.accept, True)]
+
+    def _show_icon(self) -> None:
+        """The site's icon, or the letter of its name until it is known."""
+        settings = self._settings
+        self.icon.setPixmap(source_avatar(
+            settings.name or settings.own_title or settings.url, settings.url, ICON,
+            dark=self._is_dark, dpr=self.devicePixelRatioF(),
+            image=self._controller.site_icon(self._key, settings.url)))
+
+    def _on_icon_ready(self, _site: str) -> None:
+        self._show_icon()
 
     # -- state -----------------------------------------------------------------------
 
