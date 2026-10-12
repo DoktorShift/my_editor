@@ -464,6 +464,9 @@ class StashKindDialog(QDialog):
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)
         self._fit()                  # opened with a message under the slug
+        if not self._slug_problem.isHidden():
+            # Said before the window was there to say it from: again now.
+            announce.announce(self._slug_edit, self._slug_problem.text())
 
     def _on_title_changed(self, text: str) -> None:
         if self._slug_is_auto:

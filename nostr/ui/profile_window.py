@@ -267,6 +267,7 @@ class ProfileWindow(AssistantWindow):
                 "Your profile has a secret key in {names}, parts this window doesn’t show. "
                 "Saving leaves those parts out, which takes the key out of your profile.",
                 len(self._removing)).format(names=names), problem=True)
+            announce.announce(self._form_note, self._form_note.text())
         else:
             self._set_form_note(
                 _("You don’t have a profile yet. What you enter here becomes your profile.")
@@ -338,8 +339,11 @@ class ProfileWindow(AssistantWindow):
             note = _("Your profile wasn’t saved: it couldn’t be read again just before "
                      "saving, so nothing was changed. Try again in a moment.")
         elif outcome.reason == _(refs.SECRET_KEY_REFUSED):
-            # A key arrived in a part of it since it was read: no retry helps.
-            note = outcome.reason
+            # A key arrived since it was read, in a part this window doesn't
+            # show (its own fields are checked): no retry here helps.
+            note = _("Your profile wasn’t saved: since it was read, a secret key was added "
+                     "to a part of it this window doesn’t show. Close this window and open "
+                     "Edit Profile again; it will offer to leave that part out.")
         else:
             note = _("Your profile wasn’t saved: the signer didn’t sign it, or too few "
                      "servers took it. Nothing was changed. Try again in a moment.")

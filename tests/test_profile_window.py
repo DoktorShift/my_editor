@@ -145,17 +145,21 @@ def test_a_field_with_a_problem_says_so_and_blocks_saving(key, value, problem):
     assert not win.buttons["save"].isEnabled()
 
 
-def test_a_key_in_a_part_not_shown_is_left_out_and_said_before_saving():
+def test_a_key_in_a_part_not_shown_is_left_out_and_said_before_saving(monkeypatch):
     """A key already in the profile, in a part the window doesn't show
     (another app's "bio", the older "displayName"): saving without it is
     what takes it out, so Save is offered, and the person is told."""
+    import announce
     from nostr.outbox.policy import merge_profile_content
+    heard = []
+    monkeypatch.setattr(announce, "announce", lambda source, text: heard.append(text))
     win, net = window()
     content = {"name": "alice", "bio": "My key: " + NSEC, "displayName": NSEC,
                "display_name": "Alice"}
     net.reads[0](found(**content))
     note = win._form_note.text()
     assert "“bio”" in note and "“displayName”" in note and "secret key" in note
+    assert heard == [note]                                         # said once, on opening
     assert win.buttons["save"].isEnabled()
     win._save_changes()
     changes = net.saves[0][0]
@@ -164,7 +168,10 @@ def test_a_key_in_a_part_not_shown_is_left_out_and_said_before_saving():
     assert NSEC not in merged and json.loads(merged)["name"] == "alice"
 
 
-def test_the_signers_refusal_is_said_as_it_is():
+def test_a_key_added_elsewhere_since_reading_is_said_with_what_to_do():
+    """The signer refused: a key reached a part the window doesn't show
+    after it read the profile. Trying again here can't help; opening Edit
+    Profile again offers to leave that part out."""
     from nostr import refs
     from i18n import _
     win, net = window()
@@ -172,7 +179,8 @@ def test_the_signers_refusal_is_said_as_it_is():
     edit(win, "name", "alicia")
     win._save_changes()
     net.saves[0][1](SimpleNamespace(status=outbox_writer.FAILED, reason=_(refs.SECRET_KEY_REFUSED)))
-    assert win._form_note.text() == _(refs.SECRET_KEY_REFUSED)
+    note = win._form_note.text()
+    assert "open Edit Profile again" in note and "try again" not in note.lower()
 
 
 def test_a_field_problem_is_read_with_the_field_and_said_once(monkeypatch):

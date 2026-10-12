@@ -418,7 +418,8 @@ def test_a_key_in_the_slug_never_leaves_the_computer(tmp_path, monkeypatch):
     """Said under the slug, with its section opened, before anything is
     sent: not even the question whether the article went out before."""
     import announce
-    monkeypatch.setattr(announce, "announce", lambda source, text: None)
+    heard = []
+    monkeypatch.setattr(announce, "announce", lambda source, text: heard.append(text))
     dialog = _dialog("article", tmp_path, None)
     dialog._job = None
     asked = []
@@ -431,6 +432,11 @@ def test_a_key_in_the_slug_never_leaves_the_computer(tmp_path, monkeypatch):
     assert asked == [] and dialog._relay_pool.published == []
     dialog._title_edit.setText("Backup")
     assert dialog._slug_problem.isHidden() and dialog._publish_btn.isEnabled()
+    dialog._title_edit.setText(f"Backup {NSEC}")
+    heard.clear()
+    dialog.show()                              # opened with it: said once shown
+    assert heard == [dialog._slug_problem.text()]
+    dialog.close()
 
 
 def test_save_as_draft_refuses_a_key_in_the_slug(monkeypatch):
@@ -444,6 +450,9 @@ def test_save_as_draft_refuses_a_key_in_the_slug(monkeypatch):
     assert "slug" in dialog._slug_problem.text()
     assert dialog._slug_edit.accessibleDescription() == dialog._slug_problem.text()
     assert heard == [dialog._slug_problem.text()]
+    dialog.show()                              # said before it was shown: said again
+    assert heard == [dialog._slug_problem.text()] * 2
+    dialog.close()
     dialog._slug_edit.setText("backup")
     dialog._on_slug_edited("backup")
     assert dialog._save_btn.isEnabled() and dialog._slug_problem.isHidden()

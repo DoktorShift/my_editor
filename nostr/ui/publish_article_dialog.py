@@ -594,6 +594,12 @@ class PublishArticleDialog(QDialog):
             _DARK_MENU_CSS if self._is_dark else _LIGHT_MENU_CSS
         )
 
+    def showEvent(self, event) -> None:  # type: ignore[override]
+        super().showEvent(event)
+        if not self._slug_problem.isHidden():
+            # Said before the window was there to say it from: again now.
+            announce.announce(self._slug_edit, self._slug_problem.text())
+
     # -- title ↔ slug coupling --------------------------------------------
 
     def _on_title_changed(self, text: str) -> None:
