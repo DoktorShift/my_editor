@@ -64,7 +64,7 @@ The German translation should read like a well-made German app, in the everyday 
 | feed | Feed |
 | fee (membership) | Mitgliedsbeitrag |
 | find / replace | Suchen / Ersetzen |
-| full screen | Vollbild |
+| full screen; Enter / Exit Full Screen (the View menu) | Vollbild; Vollbildmodus aktivieren / Vollbildmodus beenden |
 | heading | Überschrift |
 | image | Bild |
 | import | importieren |

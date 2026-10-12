@@ -17,7 +17,7 @@ from typing import List, Optional, Tuple
 from send2trash import send2trash
 import shiboken6
 from PySide6.QtCore import (
-    QBuffer, QByteArray, QIODevice, Qt, QMarginsF, QTimer, QUrl, QFileSystemWatcher,
+    QBuffer, QByteArray, QEvent, QIODevice, Qt, QMarginsF, QTimer, QUrl, QFileSystemWatcher,
 )
 from PySide6.QtNetwork import QLocalServer
 from PySide6.QtGui import (
@@ -1565,10 +1565,12 @@ class MainWindow(QMainWindow):
         # Distraction-free reading and writing: the whole window can go
         # full screen. QKeySequence.FullScreen is F11 on Windows/Linux
         # and Ctrl+Cmd+F on macOS, matching each platform's convention.
-        self.act_fullscreen = add(Command("view.fullscreen", _("Full Screen"), VIEW,
-                                          QKeySequence.StandardKey.FullScreen, checkable=True,
+        # Named for what it does next, as Notes, Pages and Finder name it
+        # (changeEvent keeps the name in step with the window).
+        self.act_fullscreen = add(Command("view.fullscreen", _("Enter Full Screen"), VIEW,
+                                          QKeySequence.StandardKey.FullScreen,
                                           listed_as=_("Full screen")),
-                                  toggled=self._toggle_fullscreen)
+                                  triggered=self._toggle_fullscreen)
         # View > Show Sidebar, for the window in front that has one (the
         # Imports window); dimmed while this window is in front. Its own
         # key (Control-Command-S) belongs to that window.
@@ -4445,11 +4447,19 @@ class MainWindow(QMainWindow):
             return
         self._set_theme(scheme != Qt.ColorScheme.Light)
 
-    def _toggle_fullscreen(self, checked: bool):
-        if checked:
-            self.showFullScreen()
-        else:
-            self.showNormal()
+    def _toggle_fullscreen(self, *_args):
+        """Into full screen, or back to the size the window had (a maximized
+        window comes back maximized)."""
+        self.setWindowState(self.windowState() ^ Qt.WindowState.WindowFullScreen)
+
+    def changeEvent(self, event):  # noqa: N802, Qt's name
+        super().changeEvent(event)
+        # However the window got there: the menu, its key, or the window's
+        # own full-screen button on a Mac. (A state set while the window is
+        # being built comes before its commands.)
+        if event.type() == QEvent.Type.WindowStateChange and hasattr(self, "act_fullscreen"):
+            self.act_fullscreen.setText(
+                _("Exit Full Screen") if self.isFullScreen() else _("Enter Full Screen"))
 
 
     # ----------------------------------------------------------------------

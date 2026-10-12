@@ -88,3 +88,41 @@ def test_the_window_names_the_document_and_the_status_bar_repeats_nothing(tmp_pa
     assert r["status_buttons"] == []                    # no Paper switch
     assert r["source_line_label"].endswith("Ln 1 / 3")
     assert "Python" in r["source_line_label"]
+
+
+FULL_SCREEN_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+
+w = main_window.MainWindow()
+w.show()
+w.showMaximized()
+app.processEvents()
+r = {"at_start": w.act_fullscreen.text(), "checkable": w.act_fullscreen.isCheckable()}
+w.act_fullscreen.trigger()
+app.processEvents()
+r["in_full_screen"] = [w.isFullScreen(), w.act_fullscreen.text()]
+w.act_fullscreen.trigger()
+app.processEvents()
+r["back"] = [w.isFullScreen(), w.isMaximized(), w.act_fullscreen.text()]
+w.setWindowState(Qt.WindowState.WindowFullScreen)    # the window's own button
+app.processEvents()
+r["by_the_window"] = w.act_fullscreen.text()
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_full_screen_is_named_for_what_it_does_next(tmp_path):
+    # Review, decision 4: Notes, Pages and Finder say Enter Full Screen and
+    # then Exit Full Screen, not a checkmarked "Full Screen".
+    r = run_window_script(FULL_SCREEN_SCRIPT, tmp_path)
+    assert r["at_start"] == "Enter Full Screen" and not r["checkable"]
+    assert r["in_full_screen"] == [True, "Exit Full Screen"]
+    assert r["back"] == [False, True, "Enter Full Screen"]      # maximized again
+    assert r["by_the_window"] == "Exit Full Screen"
