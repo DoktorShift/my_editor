@@ -4051,27 +4051,21 @@ msgstr ""
 msgid "Your latest changes to your sources are kept on this computer for now: the list couldn't be saved online. MyEditor tries again on its own."
 msgstr ""
 
-#: nostr/imports/subscriptions.py:101
-#, python-brace-format
-msgid "Your list of sources couldn't be read ({reason})."
+#: nostr/imports/subscriptions.py:103
+msgid "Your list of sources couldn't be read."
 msgstr ""
 
-#: nostr/imports/subscriptions.py:136
+#: nostr/imports/subscriptions.py:104
+msgid "Your signer app didn't answer, so your list of sources couldn't be read."
+msgstr ""
+
+#: nostr/imports/subscriptions.py:139
 msgid "Your list of sources was saved with an older kind of encryption. Open it once in the app that saved it; until then, changes made here stay on this computer."
 msgstr ""
 
-#: nostr/imports/subscriptions.py:854
+#: nostr/imports/subscriptions.py:867
 #, python-brace-format
 msgid "Your list of sources couldn't be saved online ({reason}). Your changes are kept on this computer."
-msgstr ""
-
-#: nostr/imports/subscriptions.py:672
-msgid "it isn't a list of sources"
-msgstr ""
-
-#: nostr/imports/subscriptions.py:719
-#, python-brace-format
-msgid "Your signer app didn't answer, so your list of sources couldn't be read ({reason})."
 msgstr ""
 
 #: nostr/imports/workspace.py:49

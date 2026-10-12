@@ -58,7 +58,7 @@ from atomic_file import write_json
 from i18n import _
 
 from .. import CLIENT_NAME
-from ..bunker import BunkerSessionPool
+from ..bunker import BunkerSessionPool, is_signer_silent
 from ..drafts import supersedes
 from ..events import build_event, verify_event
 from ..outbox import RelayDirectory, ask_private_relays
@@ -98,7 +98,10 @@ NOT_READ = _("Your list of sources couldn't be read online, so MyEditor shows th
              "kept on this computer.")
 NOT_SHARED = _("Your latest changes to your sources are kept on this computer for now: "
                "the list couldn't be saved online. MyEditor tries again on its own.")
-UNREADABLE = _("Your list of sources couldn't be read ({reason}).")
+# Why a list could not be read goes to the log, never into these words:
+# it is English, and seldom something a person can act on (CP3 review L5).
+UNREADABLE = _("Your list of sources couldn't be read.")
+SIGNER_SILENT = _("Your signer app didn't answer, so your list of sources couldn't be read.")
 # Pauses before an unshared change is sent again, then every half hour.
 RETRY_DELAYS_MS = (2 * 60_000, 5 * 60_000, 15 * 60_000, 30 * 60_000)
 
@@ -678,7 +681,8 @@ class FeedSubscriptionStore(QObject):
             except (TypeError, ValueError):
                 payload = None
             if not isinstance(payload, dict):
-                self.sync_status.emit(UNREADABLE.format(reason=_("it isn't a list of sources")))
+                _log.warning("the list of sources is not a list")
+                self.sync_status.emit(UNREADABLE)
                 return _UNREADABLE
             return read_payload(payload)
 
@@ -703,30 +707,30 @@ class FeedSubscriptionStore(QObject):
             on_text(content)  # no encryption (a list from before it was used)
             return
 
+        def failed(reason: str, words: str) -> None:
+            """A signer app that did not answer is said as such, whatever
+            else ``words`` would advise (CP3 review L9: a timeout read as
+            the older encryption)."""
+            _log.warning("the list of sources (%s) was not read: %s", algorithm, reason)
+            silent = is_signer_silent(reason) or reason == "not connected"
+            on_unreadable(SIGNER_SILENT if silent else words)
+
         def _on_ready(client) -> None:
             if algorithm == "nip04":
                 decrypt = getattr(client, "nip04_decrypt_self", None)
                 if decrypt is None:
                     on_unreadable(_OLD_ENCRYPTION)
                     return
-
-                def refused(reason: str) -> None:
-                    # A signer app that does not read NIP-04: what to do is
-                    # the same as without one.
-                    _log.warning("the list of sources (NIP-04) was not read: %s", reason)
-                    on_unreadable(_OLD_ENCRYPTION)
-
-                decrypt(content, on_success=on_text, on_failure=refused)
+                # A signer app that refuses NIP-04: what to do is the same
+                # as without one.
+                decrypt(content, on_success=on_text,
+                        on_failure=lambda reason: failed(reason, _OLD_ENCRYPTION))
                 return
-            client.nip44_decrypt_self(
-                content, on_success=on_text,
-                on_failure=lambda reason: on_unreadable(UNREADABLE.format(reason=reason)))
+            client.nip44_decrypt_self(content, on_success=on_text,
+                                      on_failure=lambda reason: failed(reason, UNREADABLE))
 
-        self._session_pool.get(
-            profile, on_ready=_on_ready,
-            on_error=lambda reason: on_unreadable(
-                _("Your signer app didn't answer, so your list of sources couldn't be "
-                  "read ({reason}).").format(reason=reason)))
+        self._session_pool.get(profile, on_ready=_on_ready,
+                               on_error=lambda reason: failed(reason, SIGNER_SILENT))
 
     # -- internals: publishing -------------------------------------------------
 

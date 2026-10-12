@@ -704,6 +704,34 @@ class TestOldEncryption:
         assert any("older kind of encryption" in s for s in statuses)
         assert not any("permission denied" in s for s in statuses)
 
+    @pytest.mark.parametrize("algorithm", ["nip44", "nip04"])
+    @pytest.mark.parametrize("reason,said", [
+        ("invalid MAC", "UNREADABLE"),
+        ("timed out waiting for signer", "SIGNER_SILENT"),
+        ("not connected", "SIGNER_SILENT")])
+    def test_why_it_could_not_be_read_is_said_in_plain_words(self, tmp_path, algorithm,
+                                                              reason, said):
+        """CP3 review L5: the signer's own English reason stood inside the
+        sentence (in German too). L9: a signer app that did not answer got
+        the advice for a list saved with the older encryption."""
+        from nostr.imports import subscriptions
+        relay = FakeRelay()
+        relay.put(FEED_LIST_DTAG, {"feeds": [{"url": FEED_URL}]}, tag=("encrypted", algorithm))
+        signer = FakeSigner(nip04=True)
+        fail = lambda ct, on_success, on_failure, **_kw: on_failure(reason)  # noqa: E731
+        signer.nip04_decrypt_self = signer.nip44_decrypt_self = fail
+        statuses = []
+        store, _, _ = make_store(tmp_path, relay=relay,
+                                 session_pool=FakeSessionPool(client=signer))
+        store.sync_status.connect(statuses.append)
+        store.bind_profile(PROFILE)
+        settle()
+        expected = getattr(subscriptions, said)
+        if algorithm == "nip04" and said == "UNREADABLE":
+            expected = subscriptions._OLD_ENCRYPTION      # a refusal: what to do
+        assert statuses[-1] == expected
+        assert not any(reason in s for s in statuses)
+
 
 class TestReadingAgain:
     """``reload``: the list as another MyEditor on this computer left it
