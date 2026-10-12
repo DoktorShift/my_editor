@@ -262,6 +262,44 @@ def test_a_draft_whose_slug_holds_a_key_is_deleted_by_its_wrap_id_alone():
     assert failed == [] and [event["kind"] for event in sent] == [31234]
 
 
+def test_a_key_is_never_sent_to_a_search_relay(tmp_path):
+    from nostr.known_people import KnownPeople
+    from nostr.search import Nip50SearchClient
+    from tests.outbox_fakes import HandPool
+    pool = HandPool()
+    client = Nip50SearchClient(pool, KnownPeople(tmp_path / "people.json"))
+    found = []
+    client.results.connect(lambda query, people: found.append(people))
+    client.search(f"  {NSEC} ")
+    assert pool.subs == [] and found == [[]]
+    client.search("alice")
+    assert len(pool.subs) == 1 and pool.subs[0].filters[0]["search"] == "alice"
+
+
+def test_the_people_search_says_why_a_key_is_not_searched(tmp_path, monkeypatch):
+    import announce
+    from PySide6.QtCore import QRect
+    from nostr.known_people import KnownPeople
+    from nostr.search import Nip50SearchClient
+    from nostr.ui.mention_picker import MentionPicker
+    from tests.outbox_fakes import HandPool
+    heard = []
+    monkeypatch.setattr(announce, "announce", lambda source, text: heard.append(text))
+    pool = HandPool()
+    people = KnownPeople(tmp_path / "people.json")
+    picker = MentionPicker(people, Nip50SearchClient(pool, people), is_dark=False)
+    picker.open_at(QRect(0, 0, 1, 1), picker)
+    picker._search_edit.setText(NSEC)                         # pasted
+    picker._run_search()                                      # the debounce firing
+    problem = picker._problem.text()
+    assert "secret key" in problem and not picker._problem.isHidden()
+    assert picker._search_edit.accessibleDescription() == problem and heard == [problem]
+    assert pool.subs == [] and picker._hint.text() != "Searching Nostr…"
+    picker._search_edit.setText("ali")
+    assert picker._problem.isHidden()
+    picker.hide()
+
+
 def test_a_signer_app_is_never_asked_to_sign_a_key():
     from nostr.bunker import BunkerClient
     from tests.outbox_fakes import FakePool

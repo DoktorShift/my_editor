@@ -303,7 +303,7 @@ def test_the_picker_stays_on_the_screen_at_the_bottom(tmp_path):
     assert area.contains(frame), (frame, area)
     assert frame.bottom() < host.mapToGlobal(caret.topLeft()).y()   # above the caret
     picker.set_dark(True)
-    assert picker.styleSheet() == mention_picker._DARK_CSS
+    assert picker.styleSheet() == mention_picker._style(True)
     picker.hide()
     host.close()
 
@@ -365,7 +365,7 @@ r["slash_with"] = "Insert Mention…" in [c.title for c in w.commands.rank(
 from nostr.ui import mention_picker
 w._set_theme(not w.is_dark_theme, announce=False)
 r["picker_follows_theme"] = picker.styleSheet() == (
-    mention_picker._DARK_CSS if w.is_dark_theme else mention_picker._LIGHT_CSS)
+    mention_picker._style(w.is_dark_theme))
 ed.document().setModified(False)
 w.close()
 print("RESULT " + json.dumps(r))

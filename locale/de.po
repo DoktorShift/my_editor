@@ -7676,36 +7676,40 @@ msgstr "+ Person hinzufügen"
 msgid "Remove {name}"
 msgstr "{name} entfernen"
 
-#: nostr/ui/mention_picker.py:227
+#: nostr/ui/mention_picker.py:236
 msgid "Mention"
 msgstr "Erwähnung"
 
-#: nostr/ui/mention_picker.py:264
+#: nostr/ui/mention_picker.py:273
 msgid "People"
 msgstr "Personen"
 
-#: nostr/ui/mention_picker.py:271
+#: nostr/ui/mention_picker.py:280
 msgid "Search people…"
 msgstr "Personen suchen …"
 
-#: nostr/ui/mention_picker.py:272
+#: nostr/ui/mention_picker.py:281
 msgid "Search People"
 msgstr "Personen suchen"
 
-#: nostr/ui/mention_picker.py:165
-#: nostr/ui/mention_picker.py:365
+#: nostr/ui/mention_picker.py:168
+#: nostr/ui/mention_picker.py:385
 msgid "Following"
 msgstr "Folge ich"
 
-#: nostr/ui/mention_picker.py:373
+#: nostr/ui/mention_picker.py:324
+msgid "This is a secret key, so it isn’t searched for. Search for the person’s name or public key instead."
+msgstr "Das ist ein geheimer Schlüssel, deshalb wird nicht danach gesucht. Suche stattdessen nach dem Namen oder dem öffentlichen Schlüssel der Person."
+
+#: nostr/ui/mention_picker.py:393
 msgid "Searching Nostr…"
 msgstr "Suche auf Nostr …"
 
-#: nostr/ui/mention_picker.py:377
+#: nostr/ui/mention_picker.py:397
 msgid "No matches yet. Keep typing"
 msgstr "Noch keine Treffer. Tippe weiter"
 
-#: nostr/ui/mention_picker.py:378
+#: nostr/ui/mention_picker.py:398
 msgid "Type to search people"
 msgstr "Tippe, um Personen zu suchen"
 

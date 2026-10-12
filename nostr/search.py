@@ -23,7 +23,7 @@ from typing import List, Optional
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from . import events
+from . import events, refs
 from .contacts import parse_metadata_event
 from .known_people import KnownPeople, Person
 from .outbox.defaults import SEARCH_RELAYS
@@ -76,7 +76,9 @@ class Nip50SearchClient(QObject):
         self._current_query = query
         self._batch = []
         self._seen = set()
-        if not query:
+        # A secret key is never sent to a search relay: whoever runs one
+        # sees, and may keep, what is searched for.
+        if not query or refs.secret_keys_in(query):
             self.results.emit(query, [])
             return
         if not self._relays:

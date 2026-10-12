@@ -34,9 +34,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import announce
+import theme
 from i18n import _
 from popup_placement import place_below
 
+from .. import refs
 from ..avatar_store import AvatarStore
 from ..known_people import KnownPeople, Person
 from ..nip05_check import Nip05Check
@@ -167,6 +170,12 @@ class _ResultRow(QWidget):
             layout.addWidget(badge)
 
 
+def _style(is_dark: bool) -> str:
+    error = theme.error_text_color(is_dark)
+    return ((_DARK_CSS if is_dark else _LIGHT_CSS)
+            + f"QLabel#picker_problem {{ color: {error}; font-size: 11px; padding: 0 2px; }}")
+
+
 def _short_pk(pubkey_hex: str) -> str:
     return f"{pubkey_hex[:10]}…{pubkey_hex[-4:]}"
 
@@ -239,7 +248,7 @@ class MentionPicker(QWidget):
         self._last_people: List[Person] = []
 
         self._build_ui()
-        self.setStyleSheet(_DARK_CSS if is_dark else _LIGHT_CSS)
+        self.setStyleSheet(_style(is_dark))
 
         self._debounce = QTimer(self)
         self._debounce.setSingleShot(True)
@@ -271,12 +280,18 @@ class MentionPicker(QWidget):
         self._search_edit.setPlaceholderText(_("Search people…"))
         self._search_edit.setAccessibleName(_("Search People"))
         self._search_edit.textChanged.connect(self._on_text_changed)
+        # What can't be searched for, under the field.
+        self._problem = QLabel("")
+        self._problem.setObjectName("picker_problem")
+        self._problem.setWordWrap(True)
+        self._problem.hide()
 
         self._hint = QLabel("")
         self._hint.setObjectName("picker_hint")
         self._hint.setVisible(False)
 
         outer.addWidget(self._search_edit)
+        outer.addWidget(self._problem)
         outer.addWidget(self._list, 1)
         outer.addWidget(self._hint)
 
@@ -295,7 +310,7 @@ class MentionPicker(QWidget):
     def set_dark(self, is_dark: bool) -> None:
         """Follow the window's appearance (light or dark)."""
         self._is_dark = is_dark
-        self.setStyleSheet(_DARK_CSS if is_dark else _LIGHT_CSS)
+        self.setStyleSheet(_style(is_dark))
 
     def reject(self) -> None:  # type: ignore[override]
         self._search_client.cancel()
@@ -303,7 +318,12 @@ class MentionPicker(QWidget):
 
     # -- search pipeline ---------------------------------------------------
 
-    def _on_text_changed(self, _text: str) -> None:
+    def _on_text_changed(self, text: str) -> None:
+        # A secret key pasted here (where the public key was meant) is never
+        # sent to a search relay (Nip50SearchClient.search); this says why.
+        announce.field_problem(self._search_edit, self._problem, _(
+            "This is a secret key, so it isn’t searched for. Search for the person’s "
+            "name or public key instead.") if refs.secret_keys_in(text) else "")
         self._debounce.start()
         # Show immediate local results while debouncing; feels snappier.
         self._refresh_for_query(self._search_edit.text())
@@ -312,7 +332,7 @@ class MentionPicker(QWidget):
         query = self._search_edit.text().strip()
         local = self._known_people.search(query, limit=_MAX_VISIBLE_RESULTS)
         self._render(local, searching=False)
-        if query and len(local) < _LOCAL_HIT_THRESHOLD:
+        if query and len(local) < _LOCAL_HIT_THRESHOLD and not refs.secret_keys_in(query):
             self._render(local, searching=True)
             self._search_client.search(query)
         else:
