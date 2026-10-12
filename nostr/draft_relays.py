@@ -380,6 +380,8 @@ class DraftMove(QObject):
 
     def _on_sent(self, event: dict, already: bool, results: list) -> None:
         self._in_flight -= 1
+        if self._done:
+            return              # stopped: the sends on their way are no longer counted
         for url, ok, message in results:
             # "replaced:" is kept too, but as a newer version: not this id.
             if ok or (kept_by_relay(ok, message) and not message.startswith("replaced:")):

@@ -450,6 +450,38 @@ def test_a_save_stopped_while_the_drafts_are_read_changes_nothing():
     assert answers == [[MINE]] and directory.draft_relays_of(PK) == [MINE]
 
 
+def test_sends_on_their_way_when_a_save_is_stopped_are_let_go_quietly():
+    # Review L6: answers to sends made before Cancel reached a mover the
+    # sheet had deleted, and every one raised in the log.
+    import sys
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from tests.outbox_fakes import FakeJob
+    drafts, relays, _directory, _client = moving(
+        LIST_ON_MINE, drafts_on={MINE: [wrap(f"d{n}") for n in range(3)]})
+    held = []
+
+    def hold(urls, event):
+        job = FakeJob()
+        held.append((job, [(url, True, "") for url in urls]))
+        return job
+
+    relays.publisher.publish = hold
+    drafts.save([], lambda _outcome: None)
+    relays.run(rounds=10)
+    assert held and drafts.cancel()
+    drafts.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    errors, real_hook = [], sys.excepthook
+    sys.excepthook = lambda kind, value, _tb: errors.append(f"{kind.__name__}: {value}")
+    try:
+        for job, results in held:
+            job.report(results)
+        settle(5)
+    finally:
+        sys.excepthook = real_hook
+    assert errors == []
+
+
 def test_a_list_on_its_way_can_not_be_stopped():
     drafts, relays, _directory, _client = moving(LIST_ON_MINE,
                                                  drafts_on={MINE: [wrap("draft-1")]})
