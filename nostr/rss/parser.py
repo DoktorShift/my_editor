@@ -17,10 +17,11 @@ import calendar
 import json
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any, Callable, List, Mapping, Optional, Sequence, Tuple
+from urllib.parse import urljoin, urlsplit
 
 import feedparser
 
@@ -59,6 +60,15 @@ class FeedItem:
     # most 256 KiB of a post, as EINUNDZWANZIG STANDUP does). Importing
     # such a post reads its own page for the whole text.
     partial: bool = False
+    # The link as the feed wrote it, when that was relative and ``link``
+    # was made whole (``with_whole_links``). The draft identifier comes
+    # from it, so it stays what earlier imports gave (nostr/rss/dtag.py).
+    link_as_written: Optional[str] = None
+
+    @property
+    def identity_link(self) -> Optional[str]:
+        """The link the draft identifier is derived from."""
+        return self.link_as_written or self.link
 
 
 @dataclass(frozen=True)
@@ -70,6 +80,28 @@ class Feed:
     link: Optional[str]
     description: Optional[str]
     items: Tuple[FeedItem, ...] = field(default_factory=tuple)
+
+
+def with_whole_links(feed: Feed, address: Optional[str]) -> Feed:
+    """``feed`` with each item's relative link made whole against
+    ``address``, where the feed was read (without one, against the site
+    the feed names). A relative link left the post's own relative links
+    and images, its "Originally published at" line and Open Original
+    pointing nowhere (CP3 review L8)."""
+    base = address if _is_web_address(address) else feed.link
+    if not _is_web_address(base):
+        return feed
+    items = []
+    for item in feed.items:
+        link = (item.link or "").strip()
+        if link and not link.startswith("#") and not urlsplit(link).scheme:
+            item = replace(item, link=urljoin(base, link), link_as_written=item.link)
+        items.append(item)
+    return replace(feed, items=tuple(items))
+
+
+def _is_web_address(url: Optional[str]) -> bool:
+    return urlsplit(url or "").scheme in ("http", "https")
 
 
 class RssError(Exception):

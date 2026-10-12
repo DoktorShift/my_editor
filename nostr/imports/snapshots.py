@@ -42,13 +42,14 @@ _MD_IMAGE = re.compile(r"!\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)")
 _MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 _MD_MARKS = re.compile(r"(?m)^\s{0,3}(?:#{1,6}\s+|>\s?|[-*+]\s+|\d+[.)]\s+)|[*_`~]+")
 _FIELDS = ("guid", "title", "link", "summary", "content_html", "published_at",
-           "image", "author", "title_from_url", "content_markdown", "partial")
+           "image", "author", "title_from_url", "content_markdown", "partial",
+           "link_as_written")
 
 
 def identifier_of(item: FeedItem) -> str:
     """The draft identifier an import of ``item`` gets (the same in
     STANDUP, nostr/rss/dtag.py)."""
-    return derive_identifier(guid=item.guid, link=item.link, title=item.title,
+    return derive_identifier(guid=item.guid, link=item.identity_link, title=item.title,
                              prefix=IDENTIFIER_PREFIX)
 
 
@@ -85,6 +86,7 @@ def from_snapshot(data: Dict[str, Any]) -> FeedItem:
         content_markdown=data.get("content_markdown") or None,
         podcast=podcast,
         partial=bool(data.get("partial")),
+        link_as_written=data.get("link_as_written") or None,
     )
 
 

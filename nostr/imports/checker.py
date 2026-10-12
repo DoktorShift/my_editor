@@ -44,7 +44,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from i18n import _
 
 from ..rss.discovery import looks_like_html
-from ..rss.parser import RssError, parse_feed
+from ..rss.parser import RssError, parse_feed, with_whole_links
 from . import workers
 from .errors import ERROR_CODES, SourceError, friendly_message
 from .inbox_store import CHECK_INTERVAL, InboxStore, SourceRow
@@ -233,7 +233,8 @@ class FeedChecker(QObject):
                 self._discover(source, live)
                 return
             self._run_blocking(
-                lambda: enrich_feed_with_podcast(parse_feed(text), text),
+                lambda: with_whole_links(enrich_feed_with_podcast(parse_feed(text), text),
+                                         meta.get("final_url", "") or url),
                 lambda feed: live() and self._ingest(
                     key, feed, etag=meta.get("etag", ""),
                     last_modified=meta.get("last_modified", ""),

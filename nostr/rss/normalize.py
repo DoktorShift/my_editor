@@ -128,7 +128,7 @@ def item_to_article(
 
     slug = derive_identifier(
         guid=item.guid,
-        link=item.link,
+        link=item.identity_link,
         title=item.title,
         prefix=identifier_prefix,
     )

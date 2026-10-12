@@ -19,7 +19,7 @@ from nostr.imports.checker import (
     interval_for,
 )
 from nostr.imports.errors import ERROR_CODES, SourceError
-from nostr.imports.inbox_store import INBOX, InboxStore, View
+from nostr.imports.inbox_store import INBOX, OLDER_POSTS, InboxStore, View
 from tests.imports_fakes import inline_run_blocking, rss_feed
 
 T0 = 1_800_000_000
@@ -135,6 +135,22 @@ def test_new_posts_arrive_in_the_inbox_and_the_next_check_is_conditional():
     assert h.fetcher.requests[-1] == (FEED, '"v1"', "Mon")
     assert h.checked[-1] == (FEED, 1)
     assert [p.title for p in h.store.page(View(INBOX))] == ["b"]
+
+
+def test_a_relative_post_link_is_made_whole_and_keeps_its_identifier():
+    """CP3 review L8: the inbox kept a relative post link, so Open Original
+    and the draft's footer pointed nowhere; the identifier stays the one
+    the link as written gives (earlier imports, nostr/rss/dtag.py)."""
+    from nostr.imports.snapshots import identifier_of
+    from nostr.rss.parser import parse_feed
+    body = rss_feed([{"title": "Post", "link": "/2026/post",
+                      "pubdate": "Fri, 15 Jan 2027 08:05:00 GMT"}])
+    h = Harness({FEED: ("body", body, {"final_url": FEED})})
+    h.checker.start()
+    h.checker.tick()
+    (post,) = h.store.page(View(OLDER_POSTS))
+    assert post.link == "https://blog.example/2026/post"
+    assert post.d_tag == identifier_of(parse_feed(body).items[0])
 
 
 def test_an_unchanged_feed_is_a_success():
