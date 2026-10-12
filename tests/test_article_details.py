@@ -212,12 +212,12 @@ def test_tags_another_app_gave_an_article_survive_editing_it_here():
     assert [list(tag) for tag in details.carried] == [
         ["zap", pk, "wss://r.example", "1"], ["zap", "b" * 64, "", "2"],
         ["content-warning", "spoilers"], ["alt", "An article"], ["L", "ugc"],
-        ["l", "review", "ugc"]]
+        ["l", "review", "ugc"], ["q", "d" * 64]]          # nothing makes q again (L2)
     event = build_article(content="The body.", pubkey_hex=pk, slug=details.identifier,
                           title=details.title, published_at=details.published_at,
                           extra_tags=details.carried_tags("The body."))
     tags = event["tags"]
-    for tag in theirs[3:9]:
+    for tag in theirs[3:9] + [["q", "d" * 64]]:
         assert tag in tags
     assert [tag for tag in tags if tag[0] == "client"] == [["client", CLIENT_NAME]]
     assert ["p", "c" * 64] not in tags                   # made again from the text
