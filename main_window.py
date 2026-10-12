@@ -1292,7 +1292,8 @@ class MainWindow(QMainWindow):
         self.act_rmd_toolchain = add(Command("file.rmd_toolchain", _("R Markdown Toolchain…"),
                                              FILE),
                                      triggered=self._on_rmd_toolchain)
-        self.act_close_tab = add(Command("file.close_tab", _("Close Tab"), FILE, "Ctrl+W",
+        self.act_close_tab = add(Command("file.close_tab", _("Close Tab"), FILE,
+                                         QKeySequence.StandardKey.Close,
                                          listed_as=_("Close tab")),
                                  triggered=self._close_current_tab)
         self.act_quit = add(Command("file.quit", _("Quit"), FILE, "Ctrl+Q",

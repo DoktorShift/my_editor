@@ -460,3 +460,11 @@ def test_the_welcome_page_says_where_publishing_lives_and_sells_no_local_colors(
     assert "signer" not in page and "Drafts" not in page and "Imports" not in page
     assert "<a " not in page                       # nothing to click: the menu is the door
     assert "Colors" not in page and "color:" not in page
+
+
+def test_close_tab_answers_every_key_the_system_binds_to_close(main_window_commands):
+    # On Windows, apps with tabs close one with Ctrl+F4 as well as Ctrl+W;
+    # Close Tab takes the system's own list, as the other windows' Close does.
+    keys = {k.toString() for k in main_window_commands.act_close_tab.shortcuts()}
+    expected = {k.toString() for k in QKeySequence.keyBindings(QKeySequence.StandardKey.Close)}
+    assert keys == expected and "Ctrl+W" in keys
