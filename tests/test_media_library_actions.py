@@ -117,3 +117,23 @@ def test_a_focused_accent_button_shows_a_ring_that_stands_out_from_the_accent(
         assert focused != unfocused
     finally:
         dialog.close()
+
+
+@pytest.mark.parametrize("dark", [True, False])
+def test_an_accent_button_that_cannot_be_chosen_looks_dimmed(tmp_path, monkeypatch, dark):
+    # Review N2: with no file chosen, Insert was dimmed but drawn in the full
+    # accent with white text, the same as when it could be chosen.
+    from PySide6.QtGui import QColor
+    from PySide6.QtWidgets import QApplication
+    from constants import DARK_MENU_BG, LIGHT_MENU_BG
+    dialog = build_dialog(tmp_path, monkeypatch, records=[media()], pick_mode=True)
+    dialog.setStyleSheet(dialog_module._DARK_CSS if dark else dialog_module._LIGHT_CSS)
+    dialog.show()
+    QApplication.processEvents()
+    try:
+        insert = dialog._select_btn
+        assert not insert.isEnabled()
+        inside = insert.grab().toImage().pixelColor(6, insert.height() // 2)
+        assert inside == QColor(DARK_MENU_BG if dark else LIGHT_MENU_BG)
+    finally:
+        dialog.close()

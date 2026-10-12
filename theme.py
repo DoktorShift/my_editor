@@ -123,24 +123,29 @@ def dialog_stylesheet(is_dark: bool) -> str:
     QPushButton:focus, QPushButton#destructive:focus {{
         border: 2px solid {ring}; padding: 5px 13px;
     }}
+    QPushButton:disabled {{ background: {field}; color: {muted}; border-color: {border}; }}
     {accent_button_css("QPushButton:default", is_dark)}
-    QPushButton:disabled, QPushButton:default:disabled {{
-        background: {field}; color: {muted}; border-color: {border};
-    }}
     """
 
 
 def accent_button_css(selector: str, is_dark: bool) -> str:
     """Style rules that draw the buttons ``selector`` matches as the
     accent-filled button (a dialog's default action): the fill, its hover,
-    and, with the keyboard focus, a ring in the color that stands out from
-    the fill (the plain ring would be blue on blue). The rule for the plain
-    ring must come first or be less specific."""
+    with the keyboard focus a ring in the color that stands out from the
+    fill (the plain ring would be blue on blue), and while it cannot be
+    chosen the plain button's dimmed look, as a Mac dims a default button.
+    The rules for the plain button must come first or be less specific."""
     accent, accent_hover = _DIALOG_ACCENT[is_dark]
     ring = _FOCUS_RING_ON_ACCENT[is_dark]
+    if is_dark:
+        field, muted, border = DARK_MENU_BG, DARK_MUTED_FG, DARK_BORDER
+    else:
+        field, muted, border = LIGHT_MENU_BG, LIGHT_MUTED_FG, LIGHT_BORDER
     return (f"{selector} {{ background: {accent}; color: #FFFFFF; border-color: {accent}; }}\n"
             f"{selector}:hover {{ background: {accent_hover}; border-color: {accent_hover}; }}\n"
-            f"{selector}:focus {{ border: 2px solid {ring}; }}\n")
+            f"{selector}:focus {{ border: 2px solid {ring}; }}\n"
+            f"{selector}:disabled {{ background: {field}; color: {muted}; "
+            f"border-color: {border}; }}\n")
 
 
 def focus_ring_color(is_dark: bool) -> str:
