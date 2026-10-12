@@ -725,9 +725,14 @@ class PrivateDraftRelays(QObject):
         def answer(read: Optional[List[str]], event: Optional[dict] = None,
                    failure: Optional[str] = None) -> None:
             self.last_failure = failure
-            if read is not None:
+            if read is not None and not self._directory.follow_draft_relays(
+                    author, read, event=event):
+                # A newer list became known while this one was decrypted
+                # (saved here meanwhile): that one is what drafts follow,
+                # and the answer.
+                read = list(self._directory.draft_list_known(author)["relays"])
+            elif read is not None:
                 self._known, self._read_id = list(read), (event or {}).get("id")
-                self._directory.follow_draft_relays(author, read, event=event)
             on_done(read)
 
         def found(result) -> None:

@@ -871,3 +871,44 @@ def test_each_relay_left_behind_keeps_its_own_date():
     directory.leave_drafts_behind(PK, [k2], since=NOW - 100)
     directory.leave_drafts_behind(PK, [k1], since=NOW - 50)        # the earlier date stays
     assert directory.drafts_left_behind(PK) == {k1: NOW - 900, k2: NOW - 100}
+
+
+def test_a_slow_decrypt_answered_after_a_save_here_does_not_undo_it():
+    # Review L9: the read refused the older list, and DraftSync set it anyway.
+    from nostr.draft_store import DraftStore
+    from nostr.draft_sync import DraftSync
+    from nostr.outbox import ask_draft_relays
+    elsewhere_relay = "wss://else.example"
+    held = []
+
+    class Holding(SealingClient):
+        def nip44_decrypt_self(self, ciphertext, on_success, on_failure):
+            held.append(lambda: SealingClient.nip44_decrypt_self(
+                self, ciphertext, on_success, on_failure))
+
+    lists, relays, directory, _client = moving(LIST_ON_MINE)
+    sync = DraftSync(relay_pool=relays, relay_directory=directory,
+                     session_pool=FakeSessionPool(Holding()), store=DraftStore())
+    sync._profile = Profile()
+    sync._draft_list_reader = PrivateDraftRelays(
+        profile=Profile(), pool=relays, session_pool=FakeSessionPool(Holding()),
+        directory=directory, query=lists._query, parent=sync)
+    elsewhere = signed(KIND_PRIVATE_RELAYS, [], f'sealed:[["relay","{elsewhere_relay}"]]',
+                       created_at=NOW - 60)
+    lists._query.answers[KIND_PRIVATE_RELAYS] = found(elsewhere)
+    sync._follow_draft_list()                               # the decrypt waits ...
+    settle()
+    lists._known, lists._read_id = [elsewhere_relay], elsewhere["id"]
+    directory.follow_draft_relays(PK, [elsewhere_relay], event=elsewhere)
+    out = []
+    lists.save([OTHER], out.append)                         # ... while the sheet saves here
+    relays.run(rounds=20)
+    held[0]()
+    settle()
+    answers = []
+    ask_draft_relays(directory, Profile(), answers.append)
+    settle()
+    assert out[0].ok and directory.draft_relays_of(PK) == [OTHER] and answers == [[OTHER]]
+    sync.stop()
+    sync.deleteLater()
+    settle()
