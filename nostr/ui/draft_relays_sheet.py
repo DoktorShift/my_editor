@@ -72,8 +72,8 @@ from typing import List, Optional, Sequence
 
 from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import (
-    QAbstractItemView, QHBoxLayout, QLabel, QLineEdit, QListWidget, QPushButton, QVBoxLayout,
-    QWidget,
+    QAbstractItemView, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton,
+    QVBoxLayout, QWidget,
 )
 
 from alerts import confirm_destructive
@@ -192,6 +192,12 @@ class DraftRelaysSheet(AssistantWindow):
         self._left_list = QListWidget()
         self._left_list.setAccessibleName(_("Relays still looked at for drafts"))
         self._left_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        # One line per relay, never a sideways scroll bar over the rows: a
+        # long address is shortened in the middle, as Finder shortens long
+        # names, and its tooltip and accessible name hold it whole.
+        self._left_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._left_list.setTextElideMode(Qt.TextElideMode.ElideMiddle)
+        self._left_list.setWordWrap(False)
         self._left_list.itemSelectionChanged.connect(self._update)
         left_column.addWidget(self._left_list)
         under_left = QHBoxLayout()
@@ -300,7 +306,11 @@ class DraftRelaysSheet(AssistantWindow):
 
     def _show_relays_left_behind(self) -> None:
         self._left_list.clear()
-        self._left_list.addItems(self._relays.drafts_left_behind())
+        for relay in self._relays.drafts_left_behind():
+            item = QListWidgetItem(relay)
+            item.setToolTip(relay)
+            item.setData(Qt.ItemDataRole.AccessibleTextRole, relay)
+            self._left_list.addItem(item)
         # As tall as its relays, up to three rows (usually one or two): the
         # sheet stays short, and a longer list scrolls.
         rows = min(max(self._left_list.count(), 1), 3)

@@ -483,3 +483,20 @@ def test_the_buttons_keep_their_words_whole_at_the_narrowest_width():
             (b.text(), b.width(), b.sizeHint().width()) for b in sheet.buttons.values()]
     finally:
         i18n.install("en")
+
+
+def test_a_long_address_still_looked_at_is_shortened_in_the_middle_not_hidden():
+    # Review round 3, L14: a long address put a sideways scroll bar over
+    # the only row, and the relay the person decides about could not be seen.
+    long = "wss://relay.example.org/a/very/long/path/that/goes/on/and/on/for/drafts/only"
+    lists = Lists([MINE])
+    lists.left_behind = [long]
+    sheet, _saved = open_sheet(lists)
+    sheet.resize(sheet.minimumWidth(), sheet.height())
+    QApplication.processEvents()
+    view = sheet._left_list
+    assert view.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    assert view.textElideMode() == Qt.TextElideMode.ElideMiddle
+    assert view.viewport().height() >= view.sizeHintForRow(0)        # the row whole
+    item = view.item(0)
+    assert item.toolTip() == long and item.data(Qt.ItemDataRole.AccessibleTextRole) == long
