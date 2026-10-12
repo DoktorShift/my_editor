@@ -98,7 +98,9 @@ class DraftRelaysSheet(AssistantWindow):
         self._shown_buttons: list = []
         # The choice a save failed for because a relay being left did not
         # answer: while the form shows it, Save Anyway is offered, and
-        # leaves the drafts of the relays named then (``_unread``) behind.
+        # leaves the drafts of the relays named so far (``_unread``) behind:
+        # agreeing to leave one relay's drafts holds for that choice until
+        # it changes, so a second relay going quiet adds to it.
         self._left_unread: Optional[List[str]] = None
         self._unread: List[str] = []
         self._build()
@@ -320,8 +322,10 @@ class DraftRelaysSheet(AssistantWindow):
                 "The setting was changed on another device while this was open, so nothing "
                 "was changed here. This is the setting as it is now."))
             return
+        agreed = self._unread if self._left_unread == chosen else []
         self._left_unread = list(chosen) if outcome.move.unread else None
-        self._unread = list(outcome.move.unread)
+        self._unread = (list(dict.fromkeys([*agreed, *outcome.move.unread]))
+                        if outcome.move.unread else [])
         self._set_state(EDITING, error=self._why_not_saved(outcome))
 
     def _show_left_behind(self, relays) -> None:
@@ -415,6 +419,7 @@ class DraftRelaysSheet(AssistantWindow):
         if self._left_unread is not None and self._left_unread != self.chosen():
             # Another choice now: what the failure said is about the old one.
             self._left_unread = None
+            self._unread = []
             self._error.hide()
         editing = self._state == EDITING
         # Where drafts go is said once it is known, not while reading.

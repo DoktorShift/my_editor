@@ -282,6 +282,22 @@ def test_after_a_failed_save_the_summary_does_not_state_the_form_as_the_setting(
     assert sheet._summary.text() == "Drafts are saved only on these relays:"
 
 
+def test_relays_agreed_to_leave_add_up_while_the_choice_stays():
+    # Review N3, live: agreeing to leave MINE's drafts, then SECOND going
+    # quiet, must not ask about MINE again.
+    second = "wss://second.example"
+    lists = Lists([MINE, second], answer=SaveOutcome(MoveOutcome(unread=(MINE,))))
+    sheet, saved = open_sheet(lists)
+    sheet.buttons["usual"].click()
+    sheet.buttons["save"].click()
+    lists.answer = SaveOutcome(MoveOutcome(unread=(second,)))
+    sheet.buttons["anyway"].click()
+    assert sheet._error.text().startswith(f"Couldn’t read the drafts on {second}")
+    lists.answer = SAVED
+    sheet.buttons["anyway"].click()
+    assert lists.saves == [([], []), ([], [MINE]), ([], [MINE, second])] and saved == [[]]
+
+
 def test_save_anyway_goes_once_the_choice_changes():
     lists = Lists([MINE, "wss://two.example"],
                   answer=SaveOutcome(MoveOutcome(unread=(MINE,))))
