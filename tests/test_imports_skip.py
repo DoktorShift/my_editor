@@ -220,6 +220,7 @@ def test_the_documents_commands_are_dimmed_while_imports_is_in_front(window, mon
     assert copy.isEnabled()          # acts on the window in front
     assert sidebar.isEnabled() and sidebar.text() == "Hide Sidebar"
     assert host.act_close_tab.isEnabled()       # File > Close closes it
+    assert host.act_close_tab.text() == "Close Window"      # S5: it has no tabs
     import main_window
     window.follow_website()
     sheet = window.sheet()
@@ -237,6 +238,7 @@ def test_the_documents_commands_are_dimmed_while_imports_is_in_front(window, mon
     MainWindow._update_window_commands(host)
     assert save.isEnabled() and not bold.isEnabled()
     assert not sidebar.isEnabled()
+    assert host.act_close_tab.text() == "Close Tab"
 
 
 def test_a_sheet_of_imports_in_front_counts_as_imports_in_front(window, monkeypatch):

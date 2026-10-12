@@ -4069,7 +4069,10 @@ class MainWindow(QMainWindow):
                 self._update_knit_actions()
                 self._update_format_buttons()
         self.act_window_sidebar.setEnabled(in_front)
-        # A sheet blocks its window: it is not closed under it.
+        # File > Close names what it closes (HIG; Mail's Close Window): the
+        # Imports window has no tabs. A sheet blocks its window: it is not
+        # closed under it.
+        self.act_close_tab.setText(_("Close Window") if in_front else _("Close Tab"))
         self.act_close_tab.setEnabled(not (in_front and imports.sheet_in_front()))
         # Full Screen says whether the window in front is.
         blocked = self.act_fullscreen.blockSignals(True)
