@@ -121,13 +121,14 @@ def short_key(npub: str) -> str:
     return f"{npub[:9]}\u2026{npub[-4:]}" if len(npub) > 16 else npub
 
 
-def person_name(entity: str, names: Optional[Callable[[str], Optional[str]]] = None) -> str:
+def person_name(entity: str,
+                names: Optional[Callable[[str], Optional[str]]] = None) -> Optional[str]:
     """How a person a reference names is called: their name when ``names``
-    (pubkey -> name or None) knows it, else their short key; the entity
-    itself when it does not decode."""
+    (pubkey -> name or None) knows it, else their short key; None when
+    the entity names no person (it does not decode, or names a note)."""
     reference = read_entity(entity)
     if reference is None or reference.kind != PERSON:
-        return entity
+        return None
     name = names(reference.pubkey) if names else None
     return name or short_key(bech32.encode_npub(reference.pubkey))
 

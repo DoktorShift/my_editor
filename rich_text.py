@@ -870,7 +870,11 @@ def remove_divider(block) -> None:
 # (NIP-27); read back, link_references gives it its name again.
 
 MENTION_HREF = re.compile(r"nostr:(?:npub|nprofile)1[02-9ac-hj-np-z]+")
-_REFERENCE_TEXT = re.compile(r"nostr:((?:npub|nprofile)1[02-9ac-hj-np-z]+)")
+# A bare address in written text: on its own, not the end of a word.
+_REFERENCE_TEXT = re.compile(r"(?<!\w)nostr:((?:npub|nprofile)1[02-9ac-hj-np-z]+)")
+_MENTION_NAME_MAX = 64
+# The two invisible characters a name may keep: they join emoji and letters.
+_JOINERS = "\u200c\u200d"
 
 
 def is_mention(href: str) -> bool:
@@ -884,6 +888,19 @@ def mention_format(href: str) -> QTextCharFormat:
     return fmt
 
 
+def mention_words(name: str) -> str:
+    """What a mention of ``name`` shows: "@" and the name on one line (a
+    line break or a run of spaces is one space), at most 64 characters of
+    it, without the invisible characters that could turn the text around
+    it or hide in it (a profile's name is anyone's text)."""
+    kept = "".join(" " if char.isspace() else char for char in name
+                   if char.isspace() or char.isprintable() or char in _JOINERS)
+    words = " ".join(kept.split()).lstrip("@")
+    if len(words) > _MENTION_NAME_MAX:
+        words = words[:_MENTION_NAME_MAX - 1].rstrip() + "\u2026"
+    return "@" + words
+
+
 def insert_mention(cursor: QTextCursor, href: str, name: str) -> None:
     """The mention of ``name`` (its link ``href``) at the cursor, in place
     of the selection, then a space unless one follows. One undo step; the
@@ -893,7 +910,7 @@ def insert_mention(cursor: QTextCursor, href: str, name: str) -> None:
     if cursor.hasSelection():
         cursor.removeSelectedText()
     plain = without_link(cursor.charFormat())
-    cursor.insertText("@" + name.lstrip("@"), mention_format(href))
+    cursor.insertText(mention_words(name), mention_format(href))
     # (The end of a paragraph reads as a separator, not as a space.)
     following = cursor.document().characterAt(cursor.position())
     if following not in (" ", "\t", "\u00a0"):
@@ -945,8 +962,9 @@ def plain_text_of(fragment: QTextDocumentFragment) -> str:
 def link_references(doc, label_for) -> int:
     """Each bare mention in ``doc`` (``nostr:npub1…`` written as text, as
     Markdown keeps a mention) made a mention again: a link whose words are
-    "@" and ``label_for(entity)``. Not in code, not in a link already.
-    Returns how many."""
+    "@" and ``label_for(entity)``. Not in code, not in a link already, not
+    touching a word before it, and not where ``label_for`` gives None (the
+    address names no person: it does not decode). Returns how many."""
     found = []
     for block in iter_blocks(doc):
         if is_code_block(block):
@@ -957,19 +975,22 @@ def link_references(doc, label_for) -> int:
             fmt = probe.charFormat()
             if fmt.isAnchor() or has_style(fmt, CODE):
                 continue
+            label = label_for(match.group(1))
+            if label is None:
+                continue
             found.append((block.position() + match.start(), match.end() - match.start(),
-                          match.group(0), match.group(1)))
+                          match.group(0), label))
     if not found:
         return 0
     edit = QTextCursor(doc)
     edit.beginEditBlock()
-    for position, length, href, entity in reversed(found):
+    for position, length, href, label in reversed(found):
         cursor = QTextCursor(doc)
         cursor.setPosition(position)
         cursor.setPosition(position + length, QTextCursor.MoveMode.KeepAnchor)
         fmt = QTextCharFormat(cursor.charFormat())
         fmt.merge(mention_format(href))
-        cursor.insertText("@" + label_for(entity).lstrip("@"), fmt)
+        cursor.insertText(mention_words(label), fmt)
     edit.endEditBlock()
     return len(found)
 

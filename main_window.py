@@ -5893,8 +5893,9 @@ class MainWindow(QMainWindow):
 
     # -- mentions ----------------------------------------------------------------
 
-    def _mention_label(self, entity: str) -> str:
-        """The name a mention shows: the person's, when known."""
+    def _mention_label(self, entity: str) -> Optional[str]:
+        """The name a mention shows: the person's, when known; None when
+        ``entity`` names no person."""
         def name(pubkey: str):
             person = self._known_people.get(pubkey)
             return person.display_name if person is not None else None

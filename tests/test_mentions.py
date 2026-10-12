@@ -32,6 +32,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QMimeData, QObject, QRect, Qt, Signal  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
+import rich_text  # noqa: E402
 from editor import HtmlEditor  # noqa: E402
 from markdown_writer import document_to_markdown  # noqa: E402
 from nostr import bech32  # noqa: E402
@@ -149,6 +150,26 @@ def test_a_mention_read_back_from_markdown_has_its_name_again():
     unknown = editor()
     MainWindow._load_markdown(unknown, f"Hello {HREF}\n")
     assert unknown.toPlainText() == f"Hello @{NPUB[:9]}…{NPUB[-4:]}"
+
+
+def test_a_name_shows_on_one_line_without_hidden_characters():
+    ed = editor()
+    type_text(ed, "Hi @")
+    ed.insert_mention(ed.asked[0], HREF, "Mallory\nNew\u202e  paragraph")
+    assert ed.document().blockCount() == 1
+    assert ed.toPlainText() == "Hi @Mallory New paragraph "
+    assert document_to_markdown(ed.document()) == f"Hi {HREF}\n"
+    assert rich_text.mention_words("x" * 100) == "@" + "x" * 63 + "\u2026"
+    assert rich_text.mention_words("\U0001F468\u200d\U0001F469") == "@\U0001F468\u200d\U0001F469"
+
+
+@pytest.mark.parametrize("written", [f"Xnostr:{NPUB} y\n", f"see {HREF}s\n"])
+def test_an_address_touching_a_word_or_damaged_stays_as_written(written):
+    from main_window import MainWindow
+    ed = editor()
+    MainWindow._load_markdown(ed, written)
+    assert ed.toPlainText() == written.rstrip("\n")
+    assert document_to_markdown(ed.document()) == written
 
 
 def test_without_an_account_an_address_stays_as_written():
