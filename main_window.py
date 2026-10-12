@@ -1177,17 +1177,20 @@ class MainWindow(QMainWindow):
         (Copy) or the document. Cut, Copy and Delete need a selection,
         Paste a place that takes text and something on the clipboard (T2
         of the CP3 fixes review: it followed the kind of tab, not the
-        focus). Paste and Match Style goes with Paste."""
+        focus). Paste and Match Style needs words on the clipboard."""
         if not hasattr(self, "act_cut"):
             return
         field = _text_field(QApplication.focusWidget())
         imports = self._imports_in_front()
+        clipboard = QApplication.clipboard().mimeData()
+        has_words = clipboard is not None and (clipboard.hasText() or clipboard.hasHtml())
         if field is not None:
             selected = (field.hasSelectedText() if isinstance(field, QLineEdit)
                         else field.textCursor().hasSelection())
             editable = not field.isReadOnly()
-            pastes = editable and (bool(QApplication.clipboard().text())
+            pastes = editable and (clipboard is not None and clipboard.hasText()
                                    if isinstance(field, QLineEdit) else field.canPaste())
+            plain = pastes
         elif imports is not None:
             # Never the document behind (N2 of the CP3 fixes review): Copy
             # copies the posts' links and Delete skips; nothing takes a
@@ -1199,17 +1202,20 @@ class MainWindow(QMainWindow):
             self.act_paste_plain.setEnabled(False)
             return
         elif self.current_pdf_viewer() is not None:
-            selected, editable, pastes = True, False, False   # the reader answers Copy
+            selected, editable, pastes, plain = True, False, False, False   # Copy only
         else:
             ed = self.current_editor()
             selected = ed is not None and ed.textCursor().hasSelection()
             editable = ed is not None and not ed.isReadOnly()
+            # What the editor takes, a picture included; Paste and Match
+            # Style pastes words only.
             pastes = editable and ed.canPaste()
+            plain = editable and has_words
         self.act_copy.setEnabled(selected)
         self.act_cut.setEnabled(selected and editable)
         self.act_delete.setEnabled(selected and editable)
         self.act_paste.setEnabled(pastes)
-        self.act_paste_plain.setEnabled(pastes)
+        self.act_paste_plain.setEnabled(plain)
 
     def _on_focus_changed(self, _old, new) -> None:
         tabs = getattr(self, "tabs", None)

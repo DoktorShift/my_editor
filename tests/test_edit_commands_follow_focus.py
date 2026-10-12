@@ -15,6 +15,8 @@ What must hold:
   A right-click leaves no menu behind.
 """
 
+import pytest
+
 from tests.app_process import run_window_script
 
 SCRIPT = r"""
@@ -164,3 +166,46 @@ def test_paste_in_a_pdf_tabs_find_field(monkeypatch):
     host._update_clipboard_commands()
     assert not host.act_paste.isEnabled() and host.act_copy.isEnabled()
     field.deleteLater()
+
+
+@pytest.mark.parametrize("name", ["a.txt", "b.md", "c.html"])
+def test_a_picture_on_the_clipboard_pastes_from_the_menu(name, monkeypatch):
+    """U1 of the CP3 fixes review: with only a picture on the clipboard,
+    Edit > Paste was dimmed in every document while Command-V pasted it.
+    What the editor takes, the menu offers, and Paste pastes it; Paste and
+    Match Style, which pastes words, stays dimmed."""
+    import main_window
+    from PySide6.QtCore import QMimeData, QObject
+    from PySide6.QtGui import QAction, QColor, QImage
+    from PySide6.QtWidgets import QApplication
+    from editor import HtmlEditor
+    from main_window import MainWindow
+
+    class Host(QObject):
+        _update_clipboard_commands = MainWindow._update_clipboard_commands
+        _edit_focused = MainWindow._edit_focused
+
+    document = HtmlEditor()
+    document._file_path = f"/notes/{name}"
+    pasted = []
+    document.image_pasted.connect(pasted.append)      # as MainWindow handles media
+    host = Host()
+    host._imports_in_front, host.current_pdf_viewer = lambda: None, lambda: None
+    host.current_editor = lambda: document
+    for action in ("cut", "copy", "delete", "paste", "paste_plain"):
+        setattr(host, f"act_{action}", QAction(action))
+    monkeypatch.setattr(main_window.QApplication, "focusWidget", staticmethod(lambda: document))
+    picture = QImage(16, 16, QImage.Format.Format_ARGB32)
+    picture.fill(QColor("#2a9d8f"))
+    mime = QMimeData()
+    mime.setImageData(picture)
+    QApplication.clipboard().setMimeData(mime)
+    host._update_clipboard_commands()
+    assert host.act_paste.isEnabled() and not host.act_paste_plain.isEnabled()
+    host._edit_focused("paste")
+    assert len(pasted) == 1
+    unhandled = HtmlEditor()                          # nobody takes media: nothing to paste
+    assert not unhandled.canPaste()
+    for editor in (document, unhandled):
+        editor.document().setModified(False)
+        editor.deleteLater()

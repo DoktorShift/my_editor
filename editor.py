@@ -1137,7 +1137,14 @@ class HtmlEditor(QTextEdit):
         self._insert_plain(paste.plain_text(QApplication.clipboard().mimeData()))
 
     def canInsertFromMimeData(self, source):
-        return source.hasFormat(paste.MARKDOWN_MIME) or super().canInsertFromMimeData(source)
+        """What a paste or a drop can bring here: what insertFromMimeData
+        takes, a picture on its own included while someone handles media
+        (``_pasted_media``). Edit > Paste, a drop and the keys then agree
+        (U1 of the CP3 fixes review: a screenshot dimmed Paste while
+        Command-V pasted it)."""
+        return (source.hasFormat(paste.MARKDOWN_MIME) or super().canInsertFromMimeData(source)
+                or (source.hasImage() and self.isSignalConnected(
+                    QMetaMethod.fromSignal(self.image_pasted))))
 
     def createMimeDataFromSelection(self):
         """Copy: the text and HTML other apps read, and, where the document
