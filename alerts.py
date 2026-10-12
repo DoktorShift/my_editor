@@ -170,12 +170,7 @@ class Alert(QDialog):
         self._follow_in_tab_order(
             [w for w in (self._details_toggle, self.details_view, self.checkbox)
              if w is not None] + self.ordered_buttons)
-        # Space acts on the button with the focus, so it starts on the
-        # default, the choice Return makes. Where Tab skips buttons (a Mac
-        # without keyboard navigation) nothing has the focus, as in a
-        # native alert, and Return still chooses the default.
-        if QGuiApplication.styleHints().tabFocusBehavior() == Qt.TabFocusAllControls:
-            next(b for role, b in made if role == DEFAULT).setFocus()
+        start_on_default(next(b for role, b in made if role == DEFAULT))
 
     # -- building ------------------------------------------------------------
     @staticmethod
@@ -270,6 +265,17 @@ class Alert(QDialog):
     def run(self):
         self.exec()
         return self._value
+
+
+def start_on_default(button: QPushButton) -> None:
+    """Give a dialog's default button the keyboard focus.
+
+    Space acts on the button with the focus, so it starts on the default,
+    the choice Return makes. Where Tab skips buttons (a Mac without
+    keyboard navigation) nothing has the focus, as in a native alert, and
+    Return still chooses the default."""
+    if QGuiApplication.styleHints().tabFocusBehavior() == Qt.TabFocusAllControls:
+        button.setFocus()
 
 
 def _icon_pixmap(caution: bool) -> QPixmap:

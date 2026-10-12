@@ -48,6 +48,7 @@ from PySide6.QtWidgets import (
 )
 
 import theme
+from alerts import start_on_default
 from i18n import _
 from constants import (
     DARK_BORDER, DARK_FG, DARK_MENU_BG, DARK_MUTED_FG,
@@ -384,6 +385,7 @@ class UpdateDialog(QDialog):
         default = _DEFAULT_BUTTON.get(state)
         if default:
             self._buttons[default].setDefault(True)
+            start_on_default(self._buttons[default])
 
     def _reset_rows(self) -> None:
         for row in self._rows:

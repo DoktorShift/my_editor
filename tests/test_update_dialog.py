@@ -525,6 +525,21 @@ def test_the_links_to_the_release_notes_are_reached_by_keyboard(qt_app):
         assert opened == [(RELEASE_URL,)], type(dialog).__name__
 
 
+def test_software_update_opens_on_its_default_button(qt_app):
+    # Review L3: the release-notes link took the first focus, and Space
+    # there did nothing. Space acts on the default, as in an alert.
+    plan = plan_for(updater.MACOS_APP, "3.3", release_url=RELEASE_URL, machine="arm64")
+    for dialog in (UpdateDialog("3.3", "3.2", plan, release_url=RELEASE_URL, is_dark=False),
+                   automatic_dialog(FakeInstaller())):
+        dialog.show()
+        qt_app.processEvents()
+        try:
+            default, = [b for b in dialog._buttons.values() if b.isDefault()]
+            assert dialog.focusWidget() is default, default.text()
+        finally:
+            dialog.close()
+
+
 def test_skip_is_explicit_and_says_which_version():
     dialog = automatic_dialog(FakeInstaller())
     skipped = recorder(dialog.skip_requested)
