@@ -8,31 +8,31 @@ msgstr ""
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
 #: alerts.py:94
-#: main_window.py:3712
+#: main_window.py:3717
 msgid "OK"
 msgstr ""
 
-#: alerts.py:193
+#: alerts.py:188
 msgid "Details"
 msgstr ""
 
-#: alerts.py:198
-#: alerts.py:205
+#: alerts.py:193
+#: alerts.py:200
 msgid "Show Details"
 msgstr ""
 
-#: alerts.py:205
+#: alerts.py:200
 msgid "Hide Details"
 msgstr ""
 
-#: alerts.py:333
+#: alerts.py:339
 #: link_popover.py:99
 #: main_window.py:2797
-#: main_window.py:6397
+#: main_window.py:6416
 #: main_window.py:248
 #: main_window.py:2670
-#: main_window.py:4927
-#: update_dialog.py:282
+#: main_window.py:4934
+#: update_dialog.py:283
 msgid "Cancel"
 msgstr ""
 
@@ -77,8 +77,8 @@ msgstr ""
 
 #: editor.py:802
 #: main_window.py:1311
-#: update_dialog.py:193
-#: update_dialog.py:199
+#: update_dialog.py:194
+#: update_dialog.py:200
 #: nostr/ui/account_windows.py:216
 msgid "Copy"
 msgstr ""
@@ -101,7 +101,7 @@ msgstr ""
 #: main_window.py:2018
 #: main_window.py:3017
 #: main_window.py:3382
-#: main_window.py:3842
+#: main_window.py:3847
 #: main_window.py:2072
 #: main_window.py:2240
 msgid "Untitled"
@@ -167,7 +167,7 @@ msgctxt "format button"
 msgid "S"
 msgstr ""
 
-#: i18n.py:433
+#: i18n.py:437
 #, python-brace-format
 msgid "{date} at {time}"
 msgstr ""
@@ -203,7 +203,7 @@ msgid "Words from several paragraphs are linked as they are."
 msgstr ""
 
 #: link_popover.py:93
-#: main_window.py:4355
+#: main_window.py:4360
 msgid "Remove Link"
 msgstr ""
 
@@ -455,47 +455,47 @@ msgstr ""
 msgid "Knit failed."
 msgstr ""
 
-#: main_window.py:3870
+#: main_window.py:3875
 msgid "Save your changes before updating?"
 msgstr ""
 
-#: main_window.py:4724
+#: main_window.py:4729
 #: main_window.py:1614
 msgid "EINUNDZWANZIG Membership…"
 msgstr ""
 
-#: main_window.py:4736
+#: main_window.py:4741
 msgid "Add Account…"
 msgstr ""
 
-#: main_window.py:4739
+#: main_window.py:4744
 #: main_window.py:1642
-#: nostr/account_controller.py:435
-#: nostr/account_controller.py:441
+#: nostr/account_controller.py:436
+#: nostr/account_controller.py:442
 msgid "Sign Out"
 msgstr ""
 
-#: main_window.py:4940
+#: main_window.py:4947
 msgid "Your media server list is shared."
 msgstr ""
 
-#: main_window.py:4941
+#: main_window.py:4948
 msgid "Other apps already have this list."
 msgstr ""
 
-#: main_window.py:4942
+#: main_window.py:4949
 msgid "Your current list couldn’t be read, so nothing was changed. Try again later."
 msgstr ""
 
-#: main_window.py:5546
+#: main_window.py:5553
 msgid "Upload this image to your media servers?"
 msgstr ""
 
-#: main_window.py:5680
+#: main_window.py:5699
 msgid "Trying again. Approve the request in your signer app…"
 msgstr ""
 
-#: main_window.py:5740
+#: main_window.py:5759
 #: main_window.py:1322
 #: nostr/ui/media_library_dialog.py:1247
 #: nostr/ui/media_library_dialog.py:1678
@@ -504,21 +504,21 @@ msgstr ""
 msgid "Delete"
 msgstr ""
 
-#: main_window.py:5748
+#: main_window.py:5767
 msgid "A blank-content replacement will be published to your relays. Other clients (and your other devices) will treat the draft as removed. This action can't be undone."
 msgid_plural "A blank-content replacement will be published to your relays. Other clients (and your other devices) will treat them as removed. This action can't be undone."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:5876
+#: main_window.py:5895
 msgid "No drafts were deleted"
 msgstr ""
 
-#: main_window.py:6322
+#: main_window.py:6341
 msgid "Already saving this draft - wait for it to finish."
 msgstr ""
 
-#: main_window.py:6385
+#: main_window.py:6404
 msgid "(unknown account)"
 msgstr ""
 
@@ -532,7 +532,7 @@ msgid "Add Link…"
 msgstr ""
 
 #: main_window.py:1261
-#: nostr/imports/workspace.py:48
+#: nostr/imports/workspace.py:46
 #: nostr/ui/imports_window.py:466
 #: nostr/ui/imports_window.py:736
 #: nostr/ui/imports_window.py:750
@@ -729,8 +729,8 @@ msgid "Full Screen"
 msgstr ""
 
 #: main_window.py:1575
-#: main_window.py:4108
-#: main_window.py:4106
+#: main_window.py:4113
+#: main_window.py:4111
 #: nostr/ui/imports_window.py:1279
 msgid "Show Sidebar"
 msgstr ""
@@ -762,33 +762,33 @@ msgid "Imports…"
 msgstr ""
 
 #: main_window.py:1618
-#: main_window.py:4705
+#: main_window.py:4710
 msgid "Create Account…"
 msgstr ""
 
 #: main_window.py:1622
-#: main_window.py:4707
+#: main_window.py:4712
 #: nostr/ui/membership_window.py:280
 msgid "Connect Signer App…"
 msgstr ""
 
 #: main_window.py:1626
-#: main_window.py:4709
+#: main_window.py:4714
 msgid "Restore Account…"
 msgstr ""
 
 #: main_window.py:1630
-#: main_window.py:4731
+#: main_window.py:4736
 msgid "Back Up Account…"
 msgstr ""
 
 #: main_window.py:1634
-#: main_window.py:4733
+#: main_window.py:4738
 msgid "Move Key to Signer App…"
 msgstr ""
 
 #: main_window.py:1638
-#: main_window.py:4728
+#: main_window.py:4733
 msgid "Edit Profile…"
 msgstr ""
 
@@ -845,7 +845,7 @@ msgid "PDFs open read-only; there is nothing to save."
 msgstr ""
 
 #: main_window.py:3013
-#: main_window.py:4178
+#: main_window.py:4183
 #: nostr/ui/published_view.py:578
 #: nostr/ui/published_view.py:585
 msgid "That link cannot be opened."
@@ -864,8 +864,8 @@ msgid "R Markdown stopped with an error. The details show what it reported."
 msgstr ""
 
 #: main_window.py:3626
-#: main_window.py:3983
-#: main_window.py:4019
+#: main_window.py:3988
+#: main_window.py:4024
 #: pdf_viewer.py:1001
 msgid "No matches"
 msgstr ""
@@ -874,137 +874,138 @@ msgstr ""
 msgid "Restart MyEditor to Change the Language"
 msgstr ""
 
-#: main_window.py:3846
+#: main_window.py:3851
 msgid "MyEditor couldn't keep a copy of this document for the restart. Your changes will be lost if you don't save them."
 msgstr ""
 
-#: main_window.py:3871
+#: main_window.py:3876
 msgid "MyEditor closes to install the update. Changes you don't save will be lost."
 msgstr ""
 
-#: main_window.py:3898
+#: main_window.py:3903
 #: nostr/ui/imports_window.py:1100
 msgid "You're up to date"
 msgstr ""
 
-#: main_window.py:3905
+#: main_window.py:3910
 msgid "Can't check for updates"
 msgstr ""
 
-#: main_window.py:4354
+#: main_window.py:4359
 #: nostr/ui/connect_dialog.py:212
 #: nostr/ui/published_view.py:644
 msgid "Copy Link"
 msgstr ""
 
-#: main_window.py:4471
+#: main_window.py:4476
 msgid "Line numbers enabled"
 msgstr ""
 
-#: main_window.py:4472
+#: main_window.py:4477
 msgid "Line numbers disabled"
 msgstr ""
 
-#: main_window.py:4489
+#: main_window.py:4494
 msgid "Syntax highlighting enabled"
 msgstr ""
 
-#: main_window.py:4490
+#: main_window.py:4495
 msgid "Syntax highlighting disabled"
 msgstr ""
 
-#: main_window.py:4518
+#: main_window.py:4523
 msgid "Paper mode on"
 msgstr ""
 
-#: main_window.py:4518
+#: main_window.py:4523
 msgid "Paper mode off"
 msgstr ""
 
-#: main_window.py:4528
+#: main_window.py:4533
 msgid "Highlight current line on"
 msgstr ""
 
-#: main_window.py:4529
+#: main_window.py:4534
 msgid "Highlight current line off"
 msgstr ""
 
-#: main_window.py:4619
+#: main_window.py:4624
 msgid "The update wasn’t installed"
 msgstr ""
 
-#: main_window.py:4796
+#: main_window.py:4803
+#: nostr/ui/drafts_panel.py:1884
 msgid "No Nostr account in use"
 msgstr ""
 
-#: main_window.py:4797
+#: main_window.py:4804
 msgid "Create an account, connect your signer app or restore an account from its backup, all in the Nostr menu."
 msgstr ""
 
-#: main_window.py:4837
+#: main_window.py:4844
 msgid "Profile saved."
 msgstr ""
 
-#: main_window.py:4923
+#: main_window.py:4930
 msgid "Tell Other Apps Where Your Media Is?"
 msgstr ""
 
-#: main_window.py:5308
+#: main_window.py:5315
 msgid "Your article is published."
 msgstr ""
 
-#: main_window.py:5309
+#: main_window.py:5316
 msgid "Your note is published."
 msgstr ""
 
-#: main_window.py:5431
+#: main_window.py:5438
 msgid "That link cannot be inserted."
 msgstr ""
 
-#: main_window.py:5517
+#: main_window.py:5524
 msgid "That image could not be added."
 msgstr ""
 
-#: main_window.py:5550
+#: main_window.py:5557
 msgid "Anyone with the link can view it. The image is already in your document and stays there either way."
 msgstr ""
 
-#: main_window.py:5553
+#: main_window.py:5560
 msgid "Remember this choice"
 msgstr ""
 
-#: main_window.py:5616
+#: main_window.py:5635
 msgid "Draft isn't ready to open yet - still decrypting."
 msgstr ""
 
-#: main_window.py:5723
+#: main_window.py:5742
 msgid ""
 "They use a draft format this editor doesn't recognise, so removing them from here might leave them visible in the other client.\n"
 "\n"
 "To remove them cleanly, open them in the app that created them and delete them there."
 msgstr ""
 
-#: main_window.py:5739
+#: main_window.py:5758
 msgid "Delete “this draft” from your Nostr drafts?"
 msgstr ""
 
-#: main_window.py:5816
+#: main_window.py:5835
 msgid "Deleting drafts…"
 msgstr ""
 
-#: main_window.py:5816
+#: main_window.py:5835
 msgid "Stop"
 msgstr ""
 
-#: main_window.py:5817
+#: main_window.py:5836
 msgid "Deleting drafts"
 msgstr ""
 
-#: main_window.py:5899
+#: main_window.py:5918
 msgid "Your signer app is not responding. Open it and make sure it is running."
 msgstr ""
 
-#: main_window.py:6403
+#: main_window.py:6422
 msgid "Saving under the current account would create a separate draft. How would you like to handle it?"
 msgstr ""
 
@@ -1156,113 +1157,113 @@ msgstr[1] ""
 msgid "Knit complete: {path}"
 msgstr ""
 
-#: main_window.py:3844
+#: main_window.py:3849
 #, python-brace-format
 msgid "Do you want to save the changes you made to “{name}” before updating?"
 msgstr ""
 
-#: main_window.py:4027
+#: main_window.py:4032
 #, python-brace-format
 msgid "{current} of {total}"
 msgstr ""
 
-#: main_window.py:4106
+#: main_window.py:4111
 #: nostr/ui/imports_window.py:1279
 msgid "Hide Sidebar"
 msgstr ""
 
-#: main_window.py:4352
+#: main_window.py:4357
 msgid "Open Link"
 msgstr ""
 
-#: main_window.py:4504
+#: main_window.py:4509
 #, python-brace-format
 msgid "Background: {pattern}"
 msgstr ""
 
-#: main_window.py:4665
+#: main_window.py:4670
 msgid "Saving your list of sources…"
 msgstr ""
 
-#: main_window.py:4881
+#: main_window.py:4888
 #, python-brace-format
 msgid "Media uploads go to the media servers your Nostr account lists: {hosts}"
 msgstr ""
 
-#: main_window.py:4937
+#: main_window.py:4944
 msgid "There is no media server to share."
 msgstr ""
 
-#: main_window.py:4947
+#: main_window.py:4954
 msgid "The list wasn’t shared. Try again in a moment."
 msgstr ""
 
-#: main_window.py:5065
+#: main_window.py:5072
 #, python-brace-format
 msgid "Connected as {name}"
 msgstr ""
 
-#: main_window.py:5211
-#: main_window.py:5246
+#: main_window.py:5218
+#: main_window.py:5253
 msgid "Nothing to publish"
 msgstr ""
 
-#: main_window.py:5212
-#: main_window.py:5247
+#: main_window.py:5219
+#: main_window.py:5254
 msgid "The current document is empty."
 msgstr ""
 
-#: main_window.py:5436
+#: main_window.py:5443
 #, python-brace-format
 msgid "Inserted URL only (non-image): {url}"
 msgstr ""
 
-#: main_window.py:5465
+#: main_window.py:5472
 #, python-brace-format
 msgid "Inserted image · alt: {alt}"
 msgstr ""
 
-#: main_window.py:5544
+#: main_window.py:5551
 #, python-brace-format
 msgid "Upload this image to {hosts}?"
 msgstr ""
 
-#: main_window.py:5742
+#: main_window.py:5761
 #, python-brace-format
 msgid "Delete {count} draft from your Nostr drafts?"
 msgid_plural "Delete {count} drafts from your Nostr drafts?"
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:5745
+#: main_window.py:5764
 #, python-brace-format
 msgid "Delete {count} Draft"
 msgid_plural "Delete {count} Drafts"
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:5771
+#: main_window.py:5790
 msgid "An imported draft takes a second request, which tells other apps it is gone."
 msgid_plural "Imported drafts take a second request each, which tells other apps they are gone."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:5872
+#: main_window.py:5891
 #, python-brace-format
 msgid "{deleted} of {total} draft deleted"
 msgid_plural "{deleted} of {total} drafts deleted"
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:6112
+#: main_window.py:6131
 msgid "Nothing to save as a draft"
 msgstr ""
 
-#: main_window.py:6113
+#: main_window.py:6132
 msgid "The current document is empty. Add some content first."
 msgstr ""
 
-#: main_window.py:6125
+#: main_window.py:6144
 msgid "This draft is too large"
 msgstr ""
 
@@ -1395,13 +1396,13 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: main_window.py:2430
-#: main_window.py:5552
+#: main_window.py:5559
 #: settings_window.py:55
 msgid "Keep Local"
 msgstr ""
 
 #: main_window.py:2430
-#: main_window.py:5552
+#: main_window.py:5559
 #: settings_window.py:55
 #: nostr/ui/media_library_dialog.py:1040
 msgid "Upload"
@@ -1489,7 +1490,7 @@ msgstr[1] ""
 msgid "MyEditor will be in {name} the next time you open it."
 msgstr ""
 
-#: main_window.py:3709
+#: main_window.py:3714
 #, python-brace-format
 msgid ""
 "Version {version}\n"
@@ -1497,31 +1498,31 @@ msgid ""
 "Built by rinbal."
 msgstr ""
 
-#: main_window.py:3711
+#: main_window.py:3716
 msgid "Source Code"
 msgstr ""
 
-#: main_window.py:3789
+#: main_window.py:3794
 #, python-brace-format
 msgid "The log files are in {folder}"
 msgstr ""
 
-#: main_window.py:3899
+#: main_window.py:3904
 #, python-brace-format
 msgid "{app} {version} is the newest version."
 msgstr ""
 
-#: main_window.py:3906
+#: main_window.py:3911
 #, python-brace-format
 msgid "{app} couldn't reach GitHub. Check your internet connection, then try again."
 msgstr ""
 
-#: main_window.py:4014
+#: main_window.py:4019
 #, python-brace-format
 msgid "Wrapped · {matches}"
 msgstr ""
 
-#: main_window.py:4024
+#: main_window.py:4029
 #: pdf_viewer.py:1004
 #, python-brace-format
 msgid "{count} match"
@@ -1529,113 +1530,113 @@ msgid_plural "{count} matches"
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:4570
+#: main_window.py:4575
 #, python-brace-format
 msgid "{count} file(s) from last session could not be found."
 msgid_plural "{count} file(s) from last session could not be found."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:4620
+#: main_window.py:4625
 #, python-brace-format
 msgid "{app} {version} couldn’t replace this version, so you’re still using {current}. Your documents are open as you left them. To try again, choose Help > Check for Updates."
 msgstr ""
 
-#: main_window.py:4924
+#: main_window.py:4931
 #, python-brace-format
 msgid "Other Nostr apps then look on {hosts} for your pictures, in this order. This replaces the list they use now, if you shared one before."
 msgstr ""
 
-#: main_window.py:4928
+#: main_window.py:4935
 msgid "Share List"
 msgstr ""
 
-#: main_window.py:5000
+#: main_window.py:5007
 msgid "Imports aren't available"
 msgstr ""
 
-#: main_window.py:5311
+#: main_window.py:5318
 #, python-brace-format
 msgid "Your article is published; {accepted} of {total} relay took it."
 msgid_plural "Your article is published; {accepted} of {total} relays took it."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:5315
+#: main_window.py:5322
 #, python-brace-format
 msgid "Your note is published; {accepted} of {total} relay took it."
 msgid_plural "Your note is published; {accepted} of {total} relays took it."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:5493
+#: main_window.py:5500
 #, python-brace-format
 msgid "{count} image is waiting."
 msgid_plural "{count} images are waiting."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:5605
+#: main_window.py:5624
 #, python-brace-format
 msgid "Copied event id {id}…"
 msgstr ""
 
-#: main_window.py:5720
+#: main_window.py:5739
 msgid "This draft was created by another Nostr client"
 msgid_plural "These {count} drafts were created by other Nostr clients"
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:5736
+#: main_window.py:5755
 #, python-brace-format
 msgid "Delete “{name}” from your Nostr drafts?"
 msgstr ""
 
-#: main_window.py:5764
+#: main_window.py:5783
 #, python-brace-format
 msgid "Your signer app will ask you to approve each one, so expect {count} request. You can stop partway through."
 msgid_plural "Your signer app will ask you to approve each one, so expect {count} requests. You can stop partway through."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:5778
+#: main_window.py:5797
 #, python-brace-format
 msgid "{count} draft from another Nostr client is not included, and will be left alone."
 msgid_plural "{count} drafts from another Nostr client are not included, and will be left alone."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:5804
+#: main_window.py:5823
 msgid "Couldn't start the deletion"
 msgstr ""
 
-#: main_window.py:5863
+#: main_window.py:5882
 msgid "Draft deleted."
 msgid_plural "{count} drafts deleted."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:5880
+#: main_window.py:5899
 #, python-brace-format
 msgid "{count} could not be removed and is still on your relays. You can try again."
 msgid_plural "{count} could not be removed and are still on your relays. You can try again."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:6121
-#: main_window.py:6252
+#: main_window.py:6140
+#: main_window.py:6271
 msgid "Couldn't prepare the draft"
 msgstr ""
 
-#: main_window.py:6122
+#: main_window.py:6141
 msgid "Its contents could not be prepared for encryption."
 msgstr ""
 
-#: main_window.py:6149
+#: main_window.py:6168
 msgid "Couldn't save the draft"
 msgstr ""
 
-#: main_window.py:6400
+#: main_window.py:6419
 #, python-brace-format
 msgid "This draft was last saved as {original}, but you're signed in as {active}"
 msgstr ""
@@ -1671,36 +1672,36 @@ msgstr ""
 msgid "Couldn't open “{name}”"
 msgstr ""
 
-#: main_window.py:5787
+#: main_window.py:5806
 msgid "Not included:"
 msgstr ""
 
-#: main_window.py:5827
+#: main_window.py:5846
 #, python-brace-format
 msgid "Deleting draft {current} of {total}…"
 msgstr ""
 
-#: main_window.py:5959
+#: main_window.py:5978
 #: main_window.py:2834
 msgid "That account isn’t signed in anymore"
 msgstr ""
 
-#: main_window.py:5960
+#: main_window.py:5979
 #: main_window.py:2835
 msgid "Connect it again with Nostr > Connect Signer App… to save here."
 msgstr ""
 
-#: main_window.py:6126
+#: main_window.py:6145
 #, python-brace-format
-msgid "It has {size} bytes, and NIP-44 encryption allows {limit}. Split it into smaller drafts or publish it directly."
+msgid "It has {size} bytes, and encryption allows {limit}. Split it into smaller drafts or publish it directly."
 msgstr ""
 
-#: main_window.py:6392
+#: main_window.py:6411
 #, python-brace-format
 msgid "Switch to {name} and Save"
 msgstr ""
 
-#: main_window.py:6395
+#: main_window.py:6414
 #, python-brace-format
 msgid "Save a Copy as {name}"
 msgstr ""
@@ -1726,7 +1727,7 @@ msgstr ""
 msgid "{error} Check that it's turned on and connected, then try again."
 msgstr ""
 
-#: main_window.py:5805
+#: main_window.py:5824
 #, python-brace-format
 msgid ""
 "These drafts can't be removed from here.\n"
@@ -2278,7 +2279,7 @@ msgstr ""
 msgid "Filter Shortcuts"
 msgstr ""
 
-#: shortcuts_dialog.py:510
+#: shortcuts_dialog.py:508
 msgid "No shortcuts match your filter."
 msgstr ""
 
@@ -2378,38 +2379,38 @@ msgstr ""
 msgid "Toggle table of contents"
 msgstr ""
 
-#: update_dialog.py:91
+#: update_dialog.py:92
 msgid "The update is installed. Try again, or quit MyEditor and open it again."
 msgstr ""
 
-#: update_dialog.py:87
+#: update_dialog.py:88
 msgid "Try again, or use the update guide."
 msgstr ""
 
-#: update_dialog.py:88
+#: update_dialog.py:89
 msgid "Use the update guide to install this update."
 msgstr ""
 
-#: update_dialog.py:258
+#: update_dialog.py:259
 msgid "Software Update"
 msgstr ""
 
-#: update_dialog.py:313
+#: update_dialog.py:314
 #: update_flow.py:194
 msgid "Release Notes"
 msgstr ""
 
-#: update_dialog.py:353
+#: update_dialog.py:354
 #: widgets.py:498
 msgid "What’s New"
 msgstr ""
 
-#: update_dialog.py:361
-#: update_dialog.py:599
+#: update_dialog.py:362
+#: update_dialog.py:601
 msgid "Release notes"
 msgstr ""
 
-#: update_dialog.py:620
+#: update_dialog.py:622
 #: widgets.py:142
 #: nostr/ui/account_windows.py:383
 #: nostr/ui/account_windows.py:788
@@ -2420,27 +2421,27 @@ msgstr ""
 msgid "Done"
 msgstr ""
 
-#: update_dialog.py:198
+#: update_dialog.py:199
 #: nostr/ui/membership_window.py:765
 msgid "Copied"
 msgstr ""
 
-#: update_dialog.py:279
+#: update_dialog.py:280
 msgid "Skip This Version"
 msgstr ""
 
-#: update_dialog.py:280
+#: update_dialog.py:281
 #: widgets.py:475
 #: widgets.py:491
 msgid "Later"
 msgstr ""
 
-#: update_dialog.py:283
+#: update_dialog.py:284
 #: update_flow.py:180
 msgid "Open Update Guide"
 msgstr ""
 
-#: update_dialog.py:284
+#: update_dialog.py:285
 #: nostr/ui/account_windows.py:764
 #: nostr/ui/draft_relays_sheet.py:294
 #: nostr/ui/drafts_panel.py:1108
@@ -2451,29 +2452,29 @@ msgstr ""
 msgid "Try Again"
 msgstr ""
 
-#: update_dialog.py:468
+#: update_dialog.py:470
 msgid "Update canceled. Nothing was changed."
 msgstr ""
 
-#: update_dialog.py:611
+#: update_dialog.py:613
 msgid "Full Release Notes"
 msgstr ""
 
-#: update_dialog.py:301
+#: update_dialog.py:302
 #, python-brace-format
 msgid "MyEditor {version} is available"
 msgstr ""
 
-#: update_dialog.py:303
+#: update_dialog.py:304
 #, python-brace-format
 msgid "You have version {version}."
 msgstr ""
 
-#: update_dialog.py:507
+#: update_dialog.py:509
 msgid "MyEditor couldn't start the update."
 msgstr ""
 
-#: update_dialog.py:591
+#: update_dialog.py:593
 #, python-brace-format
 msgid "What’s New in MyEditor {version}"
 msgstr ""
@@ -2949,14 +2950,14 @@ msgid "That private key is incomplete or mistyped. Copy the whole key from your 
 msgstr ""
 
 #: nostr/account_controller.py:344
-msgid "Publish a relay list for this account?"
+msgid "Tell Nostr apps where your posts are?"
 msgstr ""
 
-#: nostr/account_controller.py:387
+#: nostr/account_controller.py:388
 msgid "Delete the private key kept on this computer?"
 msgstr ""
 
-#: nostr/account_controller.py:415
+#: nostr/account_controller.py:416
 #, python-brace-format
 msgid "Sign out of {name}?"
 msgstr ""
@@ -2975,16 +2976,16 @@ msgstr ""
 msgid "Found."
 msgstr ""
 
-#: nostr/account_controller.py:358
+#: nostr/account_controller.py:359
 msgid "Your relay list is published."
 msgstr ""
 
-#: nostr/account_controller.py:420
+#: nostr/account_controller.py:421
 msgid "MyEditor deletes the private key it keeps for this account. Without a backup, nobody can get this account back."
 msgstr ""
 
-#: nostr/account_controller.py:422
-#: nostr/account_controller.py:429
+#: nostr/account_controller.py:423
+#: nostr/account_controller.py:430
 msgid "Sign Out and Delete Key"
 msgstr ""
 
@@ -3015,10 +3016,10 @@ msgstr ""
 
 #: nostr/account_controller.py:345
 #, python-brace-format
-msgid "Other Nostr apps use a relay list to find your notes and articles, and this account doesn’t have one yet. MyEditor can publish its recommended relays: {hosts}."
+msgid "Other Nostr apps find your notes and articles through a relay list, and this account doesn’t have one yet. MyEditor can publish one with its recommended relays: {hosts}."
 msgstr ""
 
-#: nostr/account_controller.py:348
+#: nostr/account_controller.py:349
 #: nostr/ui/media_library_dialog.py:1085
 #: nostr/ui/membership_window.py:279
 #: nostr/ui/membership_window.py:283
@@ -3027,40 +3028,40 @@ msgstr ""
 msgid "Not Now"
 msgstr ""
 
-#: nostr/account_controller.py:349
+#: nostr/account_controller.py:350
 msgid "Publish Relay List"
 msgstr ""
 
-#: nostr/account_controller.py:360
+#: nostr/account_controller.py:361
 msgid "This account already has a relay list."
 msgstr ""
 
-#: nostr/account_controller.py:362
+#: nostr/account_controller.py:363
 msgid "The relay list wasn’t published. Try again later."
 msgstr ""
 
-#: nostr/account_controller.py:388
+#: nostr/account_controller.py:389
 #, python-brace-format
 msgid "{name} now signs with your signer app, which holds the same key. MyEditor still keeps a copy of it on this computer. Deleting it leaves the key only where you approve what is signed."
 msgstr ""
 
-#: nostr/account_controller.py:394
+#: nostr/account_controller.py:395
 msgid "Delete Key"
 msgstr ""
 
-#: nostr/account_controller.py:395
+#: nostr/account_controller.py:396
 msgid "Keep Key"
 msgstr ""
 
-#: nostr/account_controller.py:404
+#: nostr/account_controller.py:405
 msgid "The private key couldn’t be deleted"
 msgstr ""
 
-#: nostr/account_controller.py:405
+#: nostr/account_controller.py:406
 msgid "MyEditor couldn’t change the file it keeps keys in. Make sure the disk isn’t full or read-only, then try again."
 msgstr ""
 
-#: nostr/account_controller.py:426
+#: nostr/account_controller.py:427
 msgid "Your key stays in your signer app. MyEditor forgets this connection and deletes the copy of the key it keeps on this computer."
 msgstr ""
 
@@ -3069,16 +3070,16 @@ msgstr ""
 msgid "Welcome back, {name}."
 msgstr ""
 
-#: nostr/account_controller.py:433
+#: nostr/account_controller.py:434
 msgid "This account’s private key isn’t on this computer. MyEditor forgets the account."
 msgstr ""
 
-#: nostr/account_controller.py:439
+#: nostr/account_controller.py:440
 msgid "Your key stays in your signer app. MyEditor only forgets this connection."
 msgstr ""
 
 #: nostr/bunker.py:98
-msgid "Your signer did not answer. Open your signer app, make sure it is running, and try again."
+msgid "Your signer app did not answer. Open it, make sure it is running, and try again."
 msgstr ""
 
 #: nostr/bunker.py:170
@@ -3103,20 +3104,20 @@ msgstr ""
 #: nostr/draft_sync.py:318
 #: nostr/publisher.py:611
 #: nostr/publisher.py:857
-msgid "Connecting to your signer…"
+msgid "Connecting to your signer app…"
 msgstr ""
 
 #: nostr/deletion.py:299
 #: nostr/publisher.py:1069
-msgid "Waiting for signature. Approve the deletion on your signer…"
+msgid "Waiting for signature. Approve the deletion in your signer app…"
 msgstr ""
 
 #: nostr/deletion.py:350
-msgid "The signer didn’t sign the request."
+msgid "Your signer app didn’t sign the request."
 msgstr ""
 
 #: nostr/deletion.py:303
-msgid "The signer returned a different event."
+msgid "Your signer app signed something other than what was asked."
 msgstr ""
 
 #: nostr/deletion.py:326
@@ -3136,7 +3137,7 @@ msgid "Untitled note"
 msgstr ""
 
 #: nostr/draft_sync.py:78
-msgid "your signer did not answer"
+msgid "your signer app did not answer"
 msgstr ""
 
 #: nostr/draft_sync.py:193
@@ -3151,7 +3152,7 @@ msgid "Refreshing drafts…"
 msgstr ""
 
 #: nostr/draft_sync.py:653
-msgid "This signer doesn't support NIP-44 encryption, so private drafts are unavailable for this profile."
+msgid "This signer app can’t encrypt drafts, so drafts aren’t available for this account."
 msgstr ""
 
 #: nostr/draft_sync.py:412
@@ -3164,7 +3165,7 @@ msgstr ""
 
 #: nostr/draft_sync.py:396
 #, python-brace-format
-msgid "Signer unavailable: {reason}"
+msgid "Signer app unavailable: {reason}"
 msgstr ""
 
 #: nostr/draft_sync.py:477
@@ -3175,7 +3176,7 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: nostr/draft_sync.py:662
-msgid "signer lacks NIP-44 support"
+msgid "the signer app can’t decrypt drafts"
 msgstr ""
 
 #: nostr/draft_sync.py:565
@@ -3371,11 +3372,11 @@ msgstr ""
 
 #: nostr/publisher.py:638
 #: nostr/publisher.py:919
-msgid "Waiting for signature. Approve the request on your signer…"
+msgid "Waiting for signature. Approve the request in your signer app…"
 msgstr ""
 
 #: nostr/publisher.py:886
-msgid "Encrypting draft. Approve on your signer if prompted…"
+msgid "Encrypting the draft. Approve it in your signer app if it asks…"
 msgstr ""
 
 #: nostr/publisher.py:1298
@@ -3721,7 +3722,7 @@ msgid "Your signer app did not approve it. Try again, and approve the request wh
 msgstr ""
 
 #: nostr/einundzwanzig_api/messages.py:161
-msgid "Your signer did not answer"
+msgid "Your signer app did not answer"
 msgstr ""
 
 #: nostr/einundzwanzig_api/messages.py:162
@@ -4071,69 +4072,69 @@ msgstr ""
 
 #: nostr/imports/subscriptions.py:631
 #, python-brace-format
-msgid "Couldn't reach the signer to sync feeds: {reason}"
+msgid "Couldn't reach your signer app to sync feeds: {reason}"
 msgstr ""
 
-#: nostr/imports/workspace.py:49
+#: nostr/imports/workspace.py:47
 msgid "Importing"
 msgstr ""
 
-#: nostr/imports/workspace.py:50
+#: nostr/imports/workspace.py:48
 #: nostr/ui/imports_window.py:174
 #: nostr/ui/imports_window.py:736
 msgid "Imported"
 msgstr ""
 
-#: nostr/imports/workspace.py:51
+#: nostr/imports/workspace.py:49
 #: nostr/ui/imports_window.py:175
 #: nostr/ui/imports_window.py:736
 msgid "Skipped"
 msgstr ""
 
-#: nostr/imports/workspace.py:52
+#: nostr/imports/workspace.py:50
 #: nostr/ui/media_library_dialog.py:1973
 #: nostr/ui/publish_copy_dialog.py:91
 msgid "Failed"
 msgstr ""
 
-#: nostr/imports/workspace.py:256
+#: nostr/imports/workspace.py:250
 #, python-brace-format
 msgid "{count} of {total} selected"
 msgid_plural "{count} of {total} selected"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/imports/workspace.py:234
+#: nostr/imports/workspace.py:232
 msgid "just now"
 msgstr ""
 
-#: nostr/imports/workspace.py:234
+#: nostr/imports/workspace.py:232
 msgid "Just now"
 msgstr ""
 
-#: nostr/imports/workspace.py:243
+#: nostr/imports/workspace.py:241
 msgid "yesterday"
 msgstr ""
 
-#: nostr/imports/workspace.py:243
+#: nostr/imports/workspace.py:241
 msgid "Yesterday"
 msgstr ""
 
-#: nostr/imports/workspace.py:244
+#: nostr/imports/workspace.py:242
 #, python-brace-format
 msgid "{n} day ago"
 msgid_plural "{n} days ago"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/imports/workspace.py:237
+#: nostr/imports/workspace.py:235
 #, python-brace-format
 msgid "{n} min ago"
 msgid_plural "{n} min ago"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/imports/workspace.py:240
+#: nostr/imports/workspace.py:238
 #, python-brace-format
 msgid "{n} h ago"
 msgid_plural "{n} h ago"
@@ -4252,11 +4253,11 @@ msgid "[hidden]"
 msgstr ""
 
 #: nostr/media/private_library.py:343
-msgid "the signer gave no reason"
+msgid "the signer app gave no reason"
 msgstr ""
 
 #: nostr/media/private_library.py:347
-msgid "the signer gave no reason this app can repeat"
+msgid "the signer app gave no reason MyEditor can repeat"
 msgstr ""
 
 #: nostr/media/private_library.py:598
@@ -4304,7 +4305,7 @@ msgstr ""
 
 #: nostr/media/private_library.py:679
 #, python-brace-format
-msgid "Couldn't reach your signer, so your private library stayed closed: {reason}"
+msgid "Couldn't reach your signer app, so your private library stayed closed: {reason}"
 msgstr ""
 
 #: nostr/media/private_library.py:773
@@ -4320,7 +4321,7 @@ msgstr ""
 
 #: nostr/media/private_library.py:753
 #, python-brace-format
-msgid "Your signer could not open this file: {reason}"
+msgid "Your signer app could not open this file: {reason}"
 msgstr ""
 
 #: nostr/media/private_preview.py:51
@@ -5108,7 +5109,7 @@ msgid "That relay is already in the list."
 msgstr ""
 
 #: nostr/ui/draft_relays_sheet.py:230
-msgid "Saving. Approve the request on your signer if it asks…"
+msgid "Saving. Approve the request in your signer app if it asks…"
 msgstr ""
 
 #: nostr/ui/draft_relays_sheet.py:246
@@ -5116,7 +5117,7 @@ msgid "Too few relays took the change. Check your internet connection, then try 
 msgstr ""
 
 #: nostr/ui/draft_relays_sheet.py:249
-msgid "Your signer didn’t approve the change. Try again, and approve it on your signer."
+msgid "Your signer app didn’t approve the change. Try again, and approve it there."
 msgstr ""
 
 #: nostr/ui/draft_relays_sheet.py:278
@@ -5229,28 +5230,28 @@ msgstr[1] ""
 msgid "Decrypting {ready} of {total}"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:1921
+#: nostr/ui/drafts_panel.py:1922
 #, python-brace-format
-msgid "Press {shortcut} in any tab to save its contents as an encrypted draft on Nostr. Drafts sync to your other devices signed in with the same profile."
+msgid "Press {shortcut} in any tab to save its contents as an encrypted draft on Nostr. Drafts sync to your other devices signed in with the same account."
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:2302
+#: nostr/ui/drafts_panel.py:2303
 msgid "Show Preview"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:2321
+#: nostr/ui/drafts_panel.py:2322
 msgid "Open in New Tab"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:2326
+#: nostr/ui/drafts_panel.py:2327
 msgid "Publish…"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:2332
+#: nostr/ui/drafts_panel.py:2333
 msgid "Copy Event ID"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:2348
+#: nostr/ui/drafts_panel.py:2349
 #, python-brace-format
 msgid "Delete {n} Draft"
 msgid_plural "Delete {n} Drafts"
@@ -5290,47 +5291,40 @@ msgid "Your saved private drafts"
 msgstr ""
 
 #: nostr/ui/drafts_panel.py:1824
-msgid "Signer cannot decrypt drafts (no NIP-44)"
+#: nostr/ui/drafts_panel.py:1892
+msgid "Your signer app can’t decrypt drafts"
 msgstr ""
 
 #: nostr/ui/drafts_panel.py:1830
-#: nostr/ui/drafts_panel.py:1904
-msgid "Your signer is not responding"
-msgstr ""
-
-#: nostr/ui/drafts_panel.py:1884
-msgid "Connect a Nostr profile"
+#: nostr/ui/drafts_panel.py:1905
+msgid "Your signer app is not responding"
 msgstr ""
 
 #: nostr/ui/drafts_panel.py:1885
-msgid "Drafts are end-to-end encrypted to your Nostr key. Connect a signer from Nostr → Connect Signer… to view, search, and create drafts."
-msgstr ""
-
-#: nostr/ui/drafts_panel.py:1892
-msgid "Signer does not support NIP-44"
+msgid "Drafts are end-to-end encrypted to your Nostr key. Create an account, connect your signer app or restore an account, all in the Nostr menu, to see, search and write drafts."
 msgstr ""
 
 #: nostr/ui/drafts_panel.py:1893
-msgid "This profile's signer cannot decrypt drafts. Connect a NIP-44-capable signer (Amber, nsec.app) to use drafts."
+msgid "Drafts need a signer app that can encrypt them, such as Amber or nsec.app. Connect one with Nostr > Connect Signer App…"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:1905
-msgid "Drafts stay encrypted until your signer unlocks them. Open your signer app, make sure it is running, then try again."
+#: nostr/ui/drafts_panel.py:1906
+msgid "Drafts stay encrypted until your signer app unlocks them. Open it, make sure it is running, then try again."
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:1925
+#: nostr/ui/drafts_panel.py:1926
 msgid "No private drafts yet"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:1931
+#: nostr/ui/drafts_panel.py:1932
 msgid "No matching drafts"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:2315
+#: nostr/ui/drafts_panel.py:2316
 msgid "Retry Decryption"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:2351
+#: nostr/ui/drafts_panel.py:2352
 msgid "Delete Draft"
 msgstr ""
 
@@ -5366,12 +5360,12 @@ msgstr ""
 msgid "Drafts for {name}"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:1907
+#: nostr/ui/drafts_panel.py:1908
 #: nostr/ui/publish_copy_dialog.py:254
 msgid "Try again"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:1933
+#: nostr/ui/drafts_panel.py:1934
 msgid "Clear search"
 msgstr ""
 
@@ -5382,7 +5376,7 @@ msgid_plural "Imports, {count} new posts"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/drafts_panel.py:1932
+#: nostr/ui/drafts_panel.py:1933
 #, python-brace-format
 msgid "No draft matches \"{query}\"."
 msgstr ""
@@ -5508,8 +5502,8 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: nostr/ui/imports_actions.py:60
-msgid "Your signer may ask once. Keep it open until this finishes."
-msgid_plural "Your signer may ask up to {count} times, once per draft and image. Keep it open until this finishes."
+msgid "Your signer app may ask once. Keep it open until this finishes."
+msgid_plural "Your signer app may ask up to {count} times, once per draft and image. Keep it open until this finishes."
 msgstr[0] ""
 msgstr[1] ""
 
@@ -7336,7 +7330,7 @@ msgid "Your profile wasn’t saved: it couldn’t be read again just before savi
 msgstr ""
 
 #: nostr/ui/profile_window.py:314
-msgid "Your profile wasn’t saved: the signer didn’t sign it, or too few servers took it. Nothing was changed. Try again in a moment."
+msgid "Your profile wasn’t saved: your signer app didn’t sign it, or too few servers took it. Nothing was changed. Try again in a moment."
 msgstr ""
 
 #: nostr/ui/profile_window.py:167
@@ -7495,7 +7489,7 @@ msgid "Cannot build article: {reason}"
 msgstr ""
 
 #: nostr/ui/publish_copy_dialog.py:108
-msgid "This picture has not been checked against your private library, so it was not used. Wait for the library to finish opening, or reconnect your signer, then try again."
+msgid "This picture has not been checked against your private library, so it was not used. Wait for the library to finish opening, or reconnect your signer app, then try again."
 msgstr ""
 
 #: nostr/ui/publish_copy_dialog.py:82
@@ -7600,7 +7594,7 @@ msgid "Stopping. Nothing new will be uploaded."
 msgstr ""
 
 #: nostr/ui/publish_copy_dialog.py:488
-msgid "This picture is private, and this app cannot make a public copy of it right now. Connect your signer and try again."
+msgid "This picture is private, and this app cannot make a public copy of it right now. Connect your signer app and try again."
 msgstr ""
 
 #: nostr/ui/publish_copy_dialog.py:576
@@ -7754,7 +7748,7 @@ msgid "Edit"
 msgstr ""
 
 #: nostr/ui/published_view.py:686
-msgid "Your signer didn’t approve the request. Try again, and approve it on your signer."
+msgid "Your signer app didn’t approve the request. Try again, and approve it there."
 msgstr ""
 
 #: nostr/ui/published_view.py:120
@@ -7836,7 +7830,7 @@ msgid "Save as private Nostr draft"
 msgstr ""
 
 #: nostr/ui/save_destination_dialog.py:274
-msgid "End-to-end encrypted to your Nostr key. Only you can decrypt it. Will appear on other devices signed in with the same profile."
+msgid "End-to-end encrypted to your Nostr key. Only you can decrypt it. Will appear on other devices signed in with the same account."
 msgstr ""
 
 #: nostr/ui/stash_kind_dialog.py:299

@@ -227,8 +227,8 @@ class DraftRelaysSheet(AssistantWindow):
         chosen = self.chosen()
         self._generation += 1
         generation = self._generation
-        self._set_state(SAVING, busy=_("Saving. Approve the request on your signer if it "
-                                       "asks…"))
+        self._set_state(SAVING, busy=_("Saving. Approve the request in your signer app if "
+                                       "it asks…"))
         self._relays.save(chosen, lambda outcome: self._on_saved(generation, chosen, outcome))
 
     def _on_saved(self, generation: int, chosen: List[str], outcome: WriteOutcome) -> None:
@@ -246,8 +246,8 @@ class DraftRelaysSheet(AssistantWindow):
             message = _("Too few relays took the change. Check your internet connection, "
                         "then try again.")
         else:
-            message = _("Your signer didn’t approve the change. Try again, and approve it "
-                        "on your signer.")
+            message = _("Your signer app didn’t approve the change. Try again, and "
+                        "approve it there.")
         self._set_state(EDITING, error=message)
 
     def _changed(self) -> bool:

@@ -628,7 +628,7 @@ class FeedSubscriptionStore(QObject):
         self._session_pool.get(
             profile, on_ready=_on_ready,
             on_error=lambda reason: on_unreadable(
-                _("Couldn't reach the signer to sync feeds: {reason}").format(reason=reason)))
+                _("Couldn't reach your signer app to sync feeds: {reason}").format(reason=reason)))
 
     # -- internals: publishing -------------------------------------------------
 

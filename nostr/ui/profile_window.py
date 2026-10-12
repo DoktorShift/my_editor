@@ -311,8 +311,8 @@ class ProfileWindow(AssistantWindow):
             note = _("Your profile wasn’t saved: it couldn’t be read again just before "
                      "saving, so nothing was changed. Try again in a moment.")
         else:
-            note = _("Your profile wasn’t saved: the signer didn’t sign it, or too few "
-                     "servers took it. Nothing was changed. Try again in a moment.")
+            note = _("Your profile wasn’t saved: your signer app didn’t sign it, or too "
+                     "few servers took it. Nothing was changed. Try again in a moment.")
         self._set_form_note(note, problem=True)
         self._show_form_page()
 

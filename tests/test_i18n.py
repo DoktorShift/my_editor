@@ -20,6 +20,7 @@ What must hold:
 """
 
 import os
+import re
 import subprocess
 import sys
 
@@ -257,3 +258,29 @@ def test_a_mac_names_the_settings_command_settings(tmp_path, language, word, qui
     r = run_window_script(_QT_WORDS_SCRIPT, tmp_path, language)
     assert r["QMenuBar"] == r["MAC_APPLICATION_MENU"] == word
     assert r["quit"] == quit_word           # every other text is left to Qt's own
+
+
+# The glossary (docs/translating.md): an account is an account (its profile
+# is the name and picture people see), a signer app is a signer app, and no
+# text names a protocol. Review L7: the publishing flow still said "your
+# signer", "this profile" and "NIP-44".
+_OFF_GLOSSARY = (
+    re.compile(r"\bsigner\b(?!\s+apps?\b)", re.IGNORECASE),
+    re.compile(r"\b(?:same|for this|connect a Nostr) profile\b|\bprofile's\b",
+               re.IGNORECASE),
+    re.compile(r"\bNIP-\d"),
+)
+
+
+def test_every_text_speaks_the_glossarys_words():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(   # scripts/i18n.py, not the app's i18n
+        "catalog_tool", os.path.join(ROOT, "scripts", "i18n.py"))
+    catalog_tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(catalog_tool)
+    messages, _problems = catalog_tool.extract()
+    off = sorted({f"{message.references[0]}: {text}"
+                  for message in messages.values()
+                  for text in (message.msgid, message.plural) if text
+                  if any(rule.search(text) for rule in _OFF_GLOSSARY)})
+    assert off == []

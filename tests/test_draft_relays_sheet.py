@@ -170,7 +170,7 @@ def test_a_save_that_failed_says_why_and_keeps_the_sheet():
     for answer, start in (
             (WriteOutcome(UNKNOWN_BASE), "Couldn’t read the current setting"),
             (WriteOutcome(FAILED, event=signed_but_refused), "Too few relays took the change."),
-            (WriteOutcome(FAILED, reason="user rejected"), "Your signer didn’t approve")):
+            (WriteOutcome(FAILED, reason="user rejected"), "Your signer app didn’t approve")):
         sheet, saved = open_sheet(Lists([], answer=answer))
         add(sheet, "wss://mine.example")
         sheet.buttons["save"].click()

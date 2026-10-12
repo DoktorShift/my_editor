@@ -261,7 +261,7 @@ def test_a_restore_that_finds_nothing_offers_a_relay_list_once(tmp_path, alerts)
     assert (STEP_PROFILE, "done", "No public profile found.") in steps
     assert [key for key, state, _d in steps if state == "active"] == [STEP_RELAYS, STEP_PROFILE]
     assert finished == [True] and s.relays.published == []
-    assert [a["title"] for a in alerts.asked] == ["Publish a relay list for this account?"]
+    assert [a["title"] for a in alerts.asked] == ["Tell Nostr apps where your posts are?"]
     s.controller.offer_relay_list(profile)    # declined: not asked again
     assert len(alerts.asked) == 1
 

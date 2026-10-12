@@ -340,11 +340,11 @@ def _safe_reason(reason: object, *, echo_of: str = "") -> str:
     """
     text = str(reason or "").strip()
     if not text:
-        return _("the signer gave no reason")
+        return _("the signer app gave no reason")
     if len(text) > _MAX_REASON_CHARS:
         text = text[:_MAX_REASON_CHARS].rstrip() + "..."
     if _echoes(text, echo_of):
-        return _("the signer gave no reason this app can repeat")
+        return _("the signer app gave no reason MyEditor can repeat")
     return _OPAQUE_RUN.sub(_REDACTED, text)
 
 
@@ -676,8 +676,8 @@ class PrivateLibrary(QObject):
         self._batch_active = False
         self._loading = False
         self._emit_status(
-            _("Couldn't reach your signer, so your private library stayed "
-              "closed: {reason}").format(reason=_safe_reason(reason))
+            _("Couldn't reach your signer app, so your private library "
+              "stayed closed: {reason}").format(reason=_safe_reason(reason))
         )
         self.library_changed.emit()
 
@@ -750,7 +750,7 @@ class PrivateLibrary(QObject):
             return
         self._failures.append(LibraryFailure(
             identifier=identifier,
-            reason=_("Your signer could not open this file: {reason}").format(
+            reason=_("Your signer app could not open this file: {reason}").format(
                 reason=_safe_reason(reason, echo_of=ciphertext)),
         ))
         self._settle()

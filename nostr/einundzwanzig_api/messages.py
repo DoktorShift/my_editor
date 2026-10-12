@@ -158,7 +158,7 @@ _COPY: Dict[str, Tuple[str, str]] = {
           "request when your signer app asks."),
     ),
     ErrorCode.SIGNER_UNREACHABLE: (
-        _("Your signer did not answer"),
+        _("Your signer app did not answer"),
         _("Open your signer app, make sure it is running, and try again."),
     ),
     ErrorCode.BAD_RESPONSE: (

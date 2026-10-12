@@ -171,7 +171,7 @@ from nostr.media.publish_copy import PublicCopyMaker
 from nostr.media.visibility import PublicLedger
 from nostr.metadata import AvatarLoader, ProfileMetadataFetcher
 from nostr.outbox.directory import RelayDirectory
-from nostr.profiles import Profile, ProfileStore
+from nostr.profiles import Profile, ProfileStore, short_npub
 from nostr.publisher import (
     DraftBulkDeleteJob,
     DraftPublishJob,
@@ -6142,7 +6142,7 @@ class MainWindow(QMainWindow):
             return
         if payload_bytes > MAX_INNER_PAYLOAD_BYTES:
             inform(self, title=_("This draft is too large"),
-                   message=_("It has {size} bytes, and NIP-44 encryption allows {limit}. "
+                   message=_("It has {size} bytes, and encryption allows {limit}. "
                              "Split it into smaller drafts or publish it directly.").format(
                        size=_number(payload_bytes), limit=_number(MAX_INNER_PAYLOAD_BYTES)))
             return
@@ -6400,7 +6400,7 @@ class MainWindow(QMainWindow):
             if p is not None:
                 return p.display_name or p.npub_short()
             if pk:
-                return f"{pk[:8]}…{pk[-4:]}"
+                return short_npub(pk)
             return _("(unknown account)")
 
         active_label = _label_for(active, active.user_pubkey if active else "")

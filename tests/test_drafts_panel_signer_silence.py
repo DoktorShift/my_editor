@@ -111,7 +111,7 @@ def test_it_outranks_the_failure_count_too():
     assert status_of(p)[1] is True
 
     p.set_signer_unreachable(True)
-    assert "signer is not responding" in status_of(p)[0].lower()
+    assert "signer app is not responding" in status_of(p)[0].lower()
 
 
 def test_a_stale_narration_line_does_not_outrank_the_explanation():
@@ -123,14 +123,14 @@ def test_a_stale_narration_line_does_not_outrank_the_explanation():
     assert status_of(p)[0] == "Refreshing drafts…"
 
     p.set_signer_unreachable(True)
-    assert "signer is not responding" in status_of(p)[0].lower()
+    assert "signer app is not responding" in status_of(p)[0].lower()
 
 
 def test_an_incapable_signer_still_wins_because_no_retry_can_help():
     p = panel(locked_store(2))
     p.set_signer_unreachable(True)
     p.set_signer_unsupported(True)
-    assert "NIP-44" in status_of(p)[0]
+    assert "can’t decrypt drafts" in status_of(p)[0]
 
 
 def test_clearing_it_returns_the_line_to_normal():
@@ -178,7 +178,7 @@ def test_drafts_that_did_decrypt_keep_the_screen():
     p.set_signer_unreachable(True)
     assert not showing_placeholder(p)
     # The line still carries the message, and each row keeps its retry.
-    assert "signer is not responding" in status_of(p)[0].lower()
+    assert "signer app is not responding" in status_of(p)[0].lower()
 
 
 def test_recovering_puts_the_list_back():

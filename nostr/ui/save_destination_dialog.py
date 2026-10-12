@@ -273,7 +273,7 @@ class SaveDestinationDialog(QDialog):
             title=_("Save as private Nostr draft"),
             hint=_(
                 "End-to-end encrypted to your Nostr key. Only you can decrypt it. "
-                "Will appear on other devices signed in with the same profile."
+                "Will appear on other devices signed in with the same account."
             ),
         )
         self._group.addButton(self._local_card.radio, 0)

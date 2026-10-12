@@ -608,7 +608,7 @@ class PublishJob(QObject):
 
     def start(self) -> None:
         """Kick off the publish. Safe to call once per instance."""
-        self.status_changed.emit(_("Connecting to your signer…"))
+        self.status_changed.emit(_("Connecting to your signer app…"))
         self._relay_directory.publish_plan(
             self._profile.user_pubkey,
             self._on_plan_ready,
@@ -635,7 +635,7 @@ class PublishJob(QObject):
         if self._failed or self._cancelled:
             return
         self.status_changed.emit(
-            _("Waiting for signature. Approve the request on your signer…")
+            _("Waiting for signature. Approve the request in your signer app…")
         )
         client.sign_event(
             self._unsigned,
@@ -854,7 +854,7 @@ class DraftPublishJob(QObject):
     def _on_relays_ready(self, publish_relays: List[str]) -> None:
         if self._cancelled:
             return
-        self._emit_status(_("Connecting to your signer…"))
+        self._emit_status(_("Connecting to your signer app…"))
         self._session_pool.get(
             self._profile,
             on_ready=lambda client: self._on_bunker_ready(client, publish_relays),
@@ -883,7 +883,7 @@ class DraftPublishJob(QObject):
                      limit=numbers.toString(MAX_INNER_PAYLOAD_BYTES)))
             return
         self._emit_status(
-            _("Encrypting draft. Approve on your signer if prompted…")
+            _("Encrypting the draft. Approve it in your signer app if it asks…")
         )
         client.nip44_encrypt_self(
             plaintext,
@@ -916,7 +916,7 @@ class DraftPublishJob(QObject):
             return
 
         self._emit_status(
-            _("Waiting for signature. Approve the request on your signer…")
+            _("Waiting for signature. Approve the request in your signer app…")
         )
         client.sign_event(
             self._wrap_unsigned,
@@ -1066,7 +1066,7 @@ class DraftDeleteJob(QObject):
             client_name=CLIENT_NAME,
         )
         self._emit_status(
-            _("Waiting for signature. Approve the deletion on your signer…")
+            _("Waiting for signature. Approve the deletion in your signer app…")
         )
         client.sign_event(
             unsigned,

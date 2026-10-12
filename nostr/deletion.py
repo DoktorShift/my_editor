@@ -260,7 +260,7 @@ class DeletionJob(QObject):
 
     def start(self) -> None:
         """Ask for the routing and the signature. Once per job."""
-        self._emit_status(_("Connecting to your signer…"))
+        self._emit_status(_("Connecting to your signer app…"))
         self._relay_directory.publish_plan(self._author, self._on_plan,
                                            mentioned=self._mentioned,
                                            entitled=relays_from(self._entitled))
@@ -296,11 +296,11 @@ class DeletionJob(QObject):
         if self._cancelled or self._done:
             return
         unsigned = self._unsigned()
-        self._emit_status(_("Waiting for signature. Approve the deletion on your signer…"))
+        self._emit_status(_("Waiting for signature. Approve the deletion in your signer app…"))
 
         def signed(event: dict) -> None:
             if not signed_matches(event, unsigned, self._author):
-                self._fail(_("The signer returned a different event."))
+                self._fail(_("Your signer app signed something other than what was asked."))
                 return
             self._on_signed(event)
 
@@ -347,7 +347,7 @@ class DeletionJob(QObject):
         if self._cancelled or self._done or self._sent:
             return
         self._done = True
-        self.failed.emit(reason or _("The signer didn’t sign the request."))
+        self.failed.emit(reason or _("Your signer app didn’t sign the request."))
 
     def _emit_status(self, text: str) -> None:
         if not self._cancelled:

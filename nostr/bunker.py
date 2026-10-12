@@ -96,8 +96,8 @@ def humanize_failure(reason: str) -> str:
     """
     if is_signer_silent(reason):
         return _(
-            "Your signer did not answer. Open your signer app, make sure "
-            "it is running, and try again."
+            "Your signer app did not answer. Open it, make sure it is "
+            "running, and try again."
         )
     return reason
 

@@ -341,10 +341,11 @@ class AccountController(QObject):
             return
         hosts = ", ".join(url.split("://", 1)[1] for url, _marker in STARTER_LIST)
         choice = ask(
-            self._window, title=_("Publish a relay list for this account?"),
-            message=_("Other Nostr apps use a relay list to find your notes and "
-                      "articles, and this account doesn’t have one yet. MyEditor "
-                      "can publish its recommended relays: {hosts}.").format(hosts=hosts),
+            self._window, title=_("Tell Nostr apps where your posts are?"),
+            message=_("Other Nostr apps find your notes and articles through a "
+                      "relay list, and this account doesn’t have one yet. MyEditor "
+                      "can publish one with its recommended relays: {hosts}."
+                      ).format(hosts=hosts),
             buttons=(Button(_("Not Now"), False, CANCEL),
                      Button(_("Publish Relay List"), True, DEFAULT)),
             is_dark=self._is_dark())

@@ -683,8 +683,8 @@ class PublishedView(QWidget):
         if is_signer_silent(reason):
             self._offer_try_again(item, humanize_failure(reason), "")
         else:
-            self._offer_try_again(item, _("Your signer didn’t approve the request. Try "
-                                          "again, and approve it on your signer."), reason)
+            self._offer_try_again(item, _("Your signer app didn’t approve the request. "
+                                          "Try again, and approve it there."), reason)
 
     def _offer_try_again(self, item: PublishedItem, message: str, details: str) -> None:
         again = alerts.ask(

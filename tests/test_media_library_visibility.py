@@ -775,7 +775,7 @@ def test_a_files_own_reason_is_on_that_file(tmp_path, monkeypatch):
 
     library = FakePrivateLibrary(failures=[
         LibraryFailure(identifier=CIPHER_SHA,
-                       reason="Your signer could not open this file: refused."),
+                       reason="Your signer app could not open this file: refused."),
         LibraryFailure(identifier="b" * 64,
                        reason="This record is not a file, so it was skipped."),
     ])
@@ -785,7 +785,7 @@ def test_a_files_own_reason_is_on_that_file(tmp_path, monkeypatch):
     dialog.bind_private_library(library)
 
     tooltip = dialog._grid.item(0).toolTip()
-    assert "Your signer could not open this file" in tooltip
+    assert "Your signer app could not open this file" in tooltip
     # And not somebody else's reason.
     assert "not a file" not in tooltip
 

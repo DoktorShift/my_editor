@@ -1821,13 +1821,13 @@ class DraftsPanel(QFrame):
         actually reading the list and so said nothing there.
         """
         if self._signer_unsupported:
-            return _("Signer cannot decrypt drafts (no NIP-44)"), True
+            return _("Your signer app can’t decrypt drafts"), True
         # Outranks both the failure count and the decrypting count. Those
         # describe drafts; this describes the one thing standing between
         # the user and all of them, and it is the only line here whose
         # remedy is somewhere other than this app.
         if self._signer_unreachable:
-            return _("Your signer is not responding"), True
+            return _("Your signer app is not responding"), True
 
         failed = ready = total = 0
         for record in self._store or []:
@@ -1881,17 +1881,18 @@ class DraftsPanel(QFrame):
         """
         if self._active_profile is None:
             self._show_placeholder(
-                _("Connect a Nostr profile"),
-                _("Drafts are end-to-end encrypted to your Nostr key. Connect a "
-                  "signer from Nostr → Connect Signer… to view, search, and "
-                  "create drafts."),
+                _("No Nostr account in use"),
+                _("Drafts are end-to-end encrypted to your Nostr key. Create an "
+                  "account, connect your signer app or restore an account, all "
+                  "in the Nostr menu, to see, search and write drafts."),
             )
             return
         if self._signer_unsupported:
             self._show_placeholder(
-                _("Signer does not support NIP-44"),
-                _("This profile's signer cannot decrypt drafts. Connect a "
-                  "NIP-44-capable signer (Amber, nsec.app) to use drafts."),
+                _("Your signer app can’t decrypt drafts"),
+                _("Drafts need a signer app that can encrypt them, such as "
+                  "Amber or nsec.app. Connect one with Nostr > Connect Signer "
+                  "App…"),
             )
             return
         # Only when there is nothing readable to show. A signer that went
@@ -1901,9 +1902,9 @@ class DraftsPanel(QFrame):
         # carry the message.
         if self._signer_unreachable and not self._has_readable_draft():
             self._show_placeholder(
-                _("Your signer is not responding"),
-                _("Drafts stay encrypted until your signer unlocks them. Open "
-                  "your signer app, make sure it is running, then try again."),
+                _("Your signer app is not responding"),
+                _("Drafts stay encrypted until your signer app unlocks them. "
+                  "Open it, make sure it is running, then try again."),
                 action=_("Try again"),
                 on_action=self.retry_signer.emit,
             )
@@ -1920,7 +1921,7 @@ class DraftsPanel(QFrame):
                 return
             body = _("Press {shortcut} in any tab to save its contents "
                      "as an encrypted draft on Nostr. Drafts sync to your other "
-                     "devices signed in with the same profile.")
+                     "devices signed in with the same account.")
             self._show_placeholder(
                 _("No private drafts yet"),
                 body.format(shortcut=_save_shortcut_text()),
