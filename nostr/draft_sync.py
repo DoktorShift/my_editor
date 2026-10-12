@@ -587,7 +587,7 @@ class DraftSync(QObject):
         if mover is not None:
             mover.deleteLater()
         if outcome.ok:
-            self._relay_directory.drafts_moved_from(self._profile.user_pubkey, [relay])
+            self._relay_directory.stop_reading_drafts_on(self._profile.user_pubkey, [relay])
 
     # -- internal: bunker decryption queue --------------------------------
 

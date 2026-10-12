@@ -532,7 +532,7 @@ msgstr "Öffnen …"
 
 #: main_window.py:1244
 #: main_window.py:254
-#: nostr/ui/draft_relays_sheet.py:475
+#: nostr/ui/draft_relays_sheet.py:543
 #: nostr/ui/profile_window.py:250
 #: nostr/ui/save_destination_dialog.py:225
 #: nostr/ui/save_destination_dialog.py:306
@@ -2443,7 +2443,7 @@ msgstr "Versionshinweise"
 #: nostr/ui/account_windows.py:793
 #: nostr/ui/account_windows.py:854
 #: nostr/ui/account_windows.py:1104
-#: nostr/ui/draft_relays_sheet.py:466
+#: nostr/ui/draft_relays_sheet.py:534
 #: nostr/ui/image_review_dialog.py:124
 msgid "Done"
 msgstr "Fertig"
@@ -2471,7 +2471,7 @@ msgstr "Update-Anleitung öffnen"
 #: update_dialog.py:279
 #: nostr/ui/account_windows.py:769
 #: nostr/ui/connect_dialog.py:360
-#: nostr/ui/draft_relays_sheet.py:464
+#: nostr/ui/draft_relays_sheet.py:532
 #: nostr/ui/drafts_panel.py:1138
 #: nostr/ui/imports_activity.py:288
 #: nostr/ui/imports_window.py:1092
@@ -3133,7 +3133,7 @@ msgstr[0] "{n} Relay wird gebeten, es zu löschen …"
 msgstr[1] "{n} Relays werden gebeten, es zu löschen …"
 
 #: nostr/draft_store.py:302
-#: nostr/draft_sync.py:725
+#: nostr/draft_sync.py:731
 #: nostr/ui/drafts_panel.py:503
 #: nostr/ui/drafts_panel.py:550
 msgid "Could not decrypt"
@@ -3165,7 +3165,7 @@ msgstr "Entwürfe werden aktualisiert …"
 msgid "Connecting to your signer app…"
 msgstr "Verbindung zu deiner Signer-App wird hergestellt …"
 
-#: nostr/draft_sync.py:759
+#: nostr/draft_sync.py:765
 msgid "Your signer app can’t decrypt drafts, so they can’t be shown for this account."
 msgstr "Deine Signer-App kann Entwürfe nicht entschlüsseln, daher können sie für dieses Konto nicht angezeigt werden."
 
@@ -3173,11 +3173,11 @@ msgstr "Deine Signer-App kann Entwürfe nicht entschlüsseln, daher können sie 
 msgid "No relays available to fetch drafts."
 msgstr "Keine Relays verfügbar, um Entwürfe zu laden."
 
-#: nostr/draft_sync.py:541
+#: nostr/draft_sync.py:547
 msgid "Your draft relays show drafts only after you sign in to them, which MyEditor can’t do yet. New drafts are saved on your usual relays."
 msgstr "Deine Relays für Entwürfe zeigen Entwürfe erst, wenn du dich bei ihnen anmeldest, und das kann MyEditor noch nicht. Neue Entwürfe werden auf deinen üblichen Relays gespeichert."
 
-#: nostr/draft_sync.py:687
+#: nostr/draft_sync.py:693
 msgid "Saved by another account"
 msgstr "Von einem anderen Konto gespeichert"
 
@@ -3186,20 +3186,20 @@ msgstr "Von einem anderen Konto gespeichert"
 msgid "Signer app unavailable: {reason}"
 msgstr "Signer-App nicht erreichbar: {reason}"
 
-#: nostr/draft_sync.py:525
+#: nostr/draft_sync.py:531
 #, python-brace-format
 msgid "Loaded {n} draft."
 msgid_plural "Loaded {n} drafts."
 msgstr[0] "{n} Entwurf geladen."
 msgstr[1] "{n} Entwürfe geladen."
 
-#: nostr/draft_sync.py:768
+#: nostr/draft_sync.py:774
 #: nostr/ui/drafts_panel.py:1954
 #: nostr/ui/drafts_panel.py:2023
 msgid "Your signer app can’t decrypt drafts"
 msgstr "Deine Signer-App kann Entwürfe nicht entschlüsseln"
 
-#: nostr/draft_sync.py:671
+#: nostr/draft_sync.py:677
 #, python-brace-format
 msgid "The draft is damaged: {error}"
 msgstr "Der Entwurf ist beschädigt: {error}"
@@ -5110,161 +5110,191 @@ msgstr "Meine behalten"
 msgid "Dismiss and let the next save from this tab win."
 msgstr "Schließen. Beim nächsten Speichern aus diesem Tab gilt deine Version."
 
-#: nostr/ui/draft_relays_sheet.py:403
+#: nostr/ui/draft_relays_sheet.py:468
 msgid "Couldn’t save the change. Try again."
 msgstr "Die Änderung konnte nicht gespeichert werden. Versuche es erneut."
 
-#: nostr/ui/draft_relays_sheet.py:91
-#: nostr/ui/draft_relays_sheet.py:121
+#: nostr/ui/draft_relays_sheet.py:108
+#: nostr/ui/draft_relays_sheet.py:138
 msgid "Draft Relays"
 msgstr "Relays für Entwürfe"
 
-#: nostr/ui/draft_relays_sheet.py:130
+#: nostr/ui/draft_relays_sheet.py:147
 msgid "Draft relays"
 msgstr "Relays für Entwürfe"
 
-#: nostr/ui/draft_relays_sheet.py:139
+#: nostr/ui/draft_relays_sheet.py:156
 msgid "Remove"
 msgstr "Entfernen"
 
-#: nostr/ui/draft_relays_sheet.py:147
+#: nostr/ui/draft_relays_sheet.py:164
 msgid "Add a relay:"
 msgstr "Relay hinzufügen:"
 
-#: nostr/ui/draft_relays_sheet.py:153
+#: nostr/ui/draft_relays_sheet.py:170
 #: nostr/ui/imports_window.py:340
 msgid "Add"
 msgstr "Hinzufügen"
 
-#: nostr/ui/draft_relays_sheet.py:384
+#: nostr/ui/draft_relays_sheet.py:193
+msgid "Relays still looked at for drafts"
+msgstr "Relays, auf denen noch nach Entwürfen gesucht wird"
+
+#: nostr/ui/draft_relays_sheet.py:200
+msgid "Stop Looking…"
+msgstr "Nicht mehr suchen …"
+
+#: nostr/ui/draft_relays_sheet.py:449
 msgid "The relays your drafts would move to turned some of them down, so nothing was changed. Choose other relays, then try again."
 msgstr "Die Relays, auf die deine Entwürfe umziehen sollten, haben einige davon abgelehnt, daher wurde nichts geändert. Wähle andere Relays und versuche es dann erneut."
 
-#: nostr/ui/draft_relays_sheet.py:387
+#: nostr/ui/draft_relays_sheet.py:452
 msgid "Some drafts couldn’t be moved, so nothing was changed. Check your internet connection, then try again."
 msgstr "Einige Entwürfe konnten nicht umziehen, daher wurde nichts geändert. Prüfe deine Internetverbindung und versuche es dann erneut."
 
-#: nostr/ui/draft_relays_sheet.py:390
+#: nostr/ui/draft_relays_sheet.py:455
 msgid "Couldn’t read the current setting, so nothing was changed. Check your internet connection, then try again."
 msgstr "Die aktuelle Einstellung konnte nicht gelesen werden, daher wurde nichts geändert. Prüfe deine Internetverbindung und versuche es dann erneut."
 
-#: nostr/ui/draft_relays_sheet.py:394
+#: nostr/ui/draft_relays_sheet.py:459
 msgid "The current setting is dated ahead of this computer’s clock, so nothing was changed. Check the date and time on this computer, then try again."
 msgstr "Die aktuelle Einstellung ist später datiert, als die Uhr dieses Computers zeigt, daher wurde nichts geändert. Prüfe Datum und Uhrzeit dieses Computers und versuche es dann erneut."
 
-#: nostr/ui/draft_relays_sheet.py:398
+#: nostr/ui/draft_relays_sheet.py:463
 msgid "Too few relays took the change. Check your internet connection, then try again."
 msgstr "Zu wenige Relays haben die Änderung angenommen. Prüfe deine Internetverbindung und versuche es dann erneut."
 
-#: nostr/ui/draft_relays_sheet.py:401
+#: nostr/ui/draft_relays_sheet.py:466
 msgid "Your signer app didn’t approve the change. Try again, and approve it when your signer app asks."
 msgstr "Deine Signer-App hat die Änderung nicht bestätigt. Versuche es erneut und bestätige sie, wenn deine Signer-App fragt."
 
-#: nostr/ui/draft_relays_sheet.py:123
+#: nostr/ui/draft_relays_sheet.py:140
 msgid "Drafts are encrypted wherever they are kept. With relays chosen here, drafts are saved only there. When you change this, your drafts move with it. Apps that don’t read this setting won’t see the drafts saved there."
 msgstr "Entwürfe sind verschlüsselt, wo immer sie liegen. Mit hier gewählten Relays werden Entwürfe nur dort gespeichert. Wenn du das änderst, ziehen deine Entwürfe mit um. Apps, die diese Einstellung nicht lesen, sehen die dort gespeicherten Entwürfe nicht."
 
-#: nostr/ui/draft_relays_sheet.py:179
+#: nostr/ui/draft_relays_sheet.py:186
+msgid "Still looking for drafts on:"
+msgstr "Noch auf der Suche nach Entwürfen auf:"
+
+#: nostr/ui/draft_relays_sheet.py:188
+msgid "These relays are no longer in the setting, but may still hold drafts saved there before it changed. MyEditor moves them to where drafts are kept now once each relay answers."
+msgstr "Diese Relays gehören nicht mehr zur Einstellung, können aber noch Entwürfe enthalten, die dort vor der Änderung gespeichert wurden. MyEditor verschiebt sie dorthin, wo Entwürfe jetzt liegen, sobald das jeweilige Relay antwortet."
+
+#: nostr/ui/draft_relays_sheet.py:222
 msgid "The setting is saved."
 msgstr "Die Einstellung ist gespeichert."
 
-#: nostr/ui/draft_relays_sheet.py:191
+#: nostr/ui/draft_relays_sheet.py:234
 msgid "Reading where your drafts are kept…"
 msgstr "Es wird gelesen, wo deine Entwürfe liegen …"
 
-#: nostr/ui/draft_relays_sheet.py:199
+#: nostr/ui/draft_relays_sheet.py:242
 msgid "Couldn’t decrypt where your drafts are kept. Make sure your signer app is running, then try again."
 msgstr "Es konnte nicht entschlüsselt werden, wo deine Entwürfe liegen. Prüfe, ob deine Signer-App läuft, und versuche es dann erneut."
 
-#: nostr/ui/draft_relays_sheet.py:202
+#: nostr/ui/draft_relays_sheet.py:245
 msgid "Couldn’t read where your drafts are kept. Check your internet connection, then try again."
 msgstr "Es konnte nicht gelesen werden, wo deine Entwürfe liegen. Prüfe deine Internetverbindung und versuche es dann erneut."
 
-#: nostr/ui/draft_relays_sheet.py:227
+#: nostr/ui/draft_relays_sheet.py:271
 msgid "Enter a relay’s address. It starts with wss://."
 msgstr "Gib die Adresse eines Relays ein. Sie beginnt mit wss://."
 
-#: nostr/ui/draft_relays_sheet.py:230
+#: nostr/ui/draft_relays_sheet.py:274
 msgid "That relay is already in the list."
 msgstr "Dieses Relay steht schon in der Liste."
 
-#: nostr/ui/draft_relays_sheet.py:277
-#: nostr/ui/draft_relays_sheet.py:301
+#: nostr/ui/draft_relays_sheet.py:317
+msgid "Stop Looking"
+msgstr "Nicht mehr suchen"
+
+#: nostr/ui/draft_relays_sheet.py:342
+#: nostr/ui/draft_relays_sheet.py:366
 msgid "Reading your drafts…"
 msgstr "Deine Entwürfe werden gelesen …"
 
-#: nostr/ui/draft_relays_sheet.py:469
+#: nostr/ui/draft_relays_sheet.py:537
 msgid "Save Anyway"
 msgstr "Trotzdem speichern"
 
-#: nostr/ui/draft_relays_sheet.py:471
+#: nostr/ui/draft_relays_sheet.py:539
 msgid "Use My Usual Relays"
 msgstr "Meine üblichen Relays verwenden"
 
-#: nostr/ui/draft_relays_sheet.py:296
+#: nostr/ui/draft_relays_sheet.py:361
 msgid "Moving your drafts…"
 msgstr "Deine Entwürfe ziehen um …"
 
-#: nostr/ui/draft_relays_sheet.py:321
+#: nostr/ui/draft_relays_sheet.py:386
 msgid "The setting was changed on another device while this was open, so nothing was changed here. This is the setting as it is now."
 msgstr "Die Einstellung wurde auf einem anderen Gerät geändert, während dies hier offen war, daher wurde hier nichts geändert. So ist die Einstellung jetzt."
 
-#: nostr/ui/draft_relays_sheet.py:336
+#: nostr/ui/draft_relays_sheet.py:401
 #, python-brace-format
 msgid "Drafts saved during the change may still be only on {relays}, which didn’t answer. MyEditor keeps looking for them there and moves them once it answers."
 msgid_plural "Drafts saved during the change may still be only on {relays}, which didn’t answer. MyEditor keeps looking for them there and moves them once they answer."
 msgstr[0] "Entwürfe, die während der Änderung gespeichert wurden, liegen vielleicht noch nur auf {relays}, das nicht geantwortet hat. MyEditor sucht dort weiter nach ihnen und verschiebt sie, sobald es antwortet."
 msgstr[1] "Entwürfe, die während der Änderung gespeichert wurden, liegen vielleicht noch nur auf {relays}, die nicht geantwortet haben. MyEditor sucht dort weiter nach ihnen und verschiebt sie, sobald sie antworten."
 
-#: nostr/ui/draft_relays_sheet.py:355
+#: nostr/ui/draft_relays_sheet.py:420
 #, python-brace-format
 msgid "Couldn’t read the drafts on {relays}, so nothing was changed. Check your internet connection, then try again. If that relay is gone for good, choose Save Anyway: the drafts kept only there won’t be shown any more."
 msgid_plural "Couldn’t read the drafts on {relays}, so nothing was changed. Check your internet connection, then try again. If those relays are gone for good, choose Save Anyway: the drafts kept only there won’t be shown any more."
 msgstr[0] "Die Entwürfe auf {relays} konnten nicht gelesen werden, daher wurde nichts geändert. Prüfe deine Internetverbindung und versuche es dann erneut. Wenn es dieses Relay nicht mehr gibt, wähle „Trotzdem speichern“: Die Entwürfe, die nur dort liegen, werden dann nicht mehr angezeigt."
 msgstr[1] "Die Entwürfe auf {relays} konnten nicht gelesen werden, daher wurde nichts geändert. Prüfe deine Internetverbindung und versuche es dann erneut. Wenn es diese Relays nicht mehr gibt, wähle „Trotzdem speichern“: Die Entwürfe, die nur dort liegen, werden dann nicht mehr angezeigt."
 
-#: nostr/ui/draft_relays_sheet.py:364
+#: nostr/ui/draft_relays_sheet.py:429
 #, python-brace-format
 msgid "{relays} sends only its newest drafts, whichever part MyEditor asks for, so the older ones there can’t be moved, and nothing was changed. If you can do without the drafts kept only there, choose Save Anyway: they won’t be shown any more."
 msgid_plural "{relays} send only their newest drafts, whichever part MyEditor asks for, so the older ones there can’t be moved, and nothing was changed. If you can do without the drafts kept only there, choose Save Anyway: they won’t be shown any more."
 msgstr[0] "{relays} schickt nur seine neuesten Entwürfe, egal, welchen Teil MyEditor anfragt. Die älteren dort lassen sich daher nicht verschieben, und es wurde nichts geändert. Wenn du auf die Entwürfe verzichten kannst, die nur dort liegen, wähle „Trotzdem speichern“: Sie werden dann nicht mehr angezeigt."
 msgstr[1] "{relays} schicken nur ihre neuesten Entwürfe, egal, welchen Teil MyEditor anfragt. Die älteren dort lassen sich daher nicht verschieben, und es wurde nichts geändert. Wenn du auf die Entwürfe verzichten kannst, die nur dort liegen, wähle „Trotzdem speichern“: Sie werden dann nicht mehr angezeigt."
 
-#: nostr/ui/draft_relays_sheet.py:375
+#: nostr/ui/draft_relays_sheet.py:440
 #, python-brace-format
 msgid "{relays} didn’t give your drafts back when MyEditor asked, so nothing was changed. Some relays show drafts only after you sign in to them, which MyEditor can’t do yet. Choose another relay, then try again."
 msgid_plural "{relays} didn’t give your drafts back when MyEditor asked, so nothing was changed. Some relays show drafts only after you sign in to them, which MyEditor can’t do yet. Choose other relays, then try again."
 msgstr[0] "{relays} hat deine Entwürfe auf Nachfrage nicht zurückgegeben, daher wurde nichts geändert. Manche Relays zeigen Entwürfe erst, wenn du dich bei ihnen anmeldest, und das kann MyEditor noch nicht. Wähle ein anderes Relay und versuche es dann erneut."
 msgstr[1] "{relays} haben deine Entwürfe auf Nachfrage nicht zurückgegeben, daher wurde nichts geändert. Manche Relays zeigen Entwürfe erst, wenn du dich bei ihnen anmeldest, und das kann MyEditor noch nicht. Wähle andere Relays und versuche es dann erneut."
 
-#: nostr/ui/draft_relays_sheet.py:443
+#: nostr/ui/draft_relays_sheet.py:508
 msgid "Drafts will be saved only on these relays:"
 msgstr "Entwürfe werden dann nur auf diesen Relays gespeichert:"
 
-#: nostr/ui/draft_relays_sheet.py:445
+#: nostr/ui/draft_relays_sheet.py:510
 msgid "Drafts will be kept on your usual relays."
 msgstr "Entwürfe liegen dann auf deinen üblichen Relays."
 
-#: nostr/ui/draft_relays_sheet.py:447
+#: nostr/ui/draft_relays_sheet.py:512
 msgid "Drafts are saved only on these relays:"
 msgstr "Entwürfe werden nur auf diesen Relays gespeichert:"
 
-#: nostr/ui/draft_relays_sheet.py:449
+#: nostr/ui/draft_relays_sheet.py:514
 msgid "Drafts are kept on your usual relays."
 msgstr "Entwürfe liegen auf deinen üblichen Relays."
 
-#: nostr/ui/draft_relays_sheet.py:233
+#: nostr/ui/draft_relays_sheet.py:277
 #, python-brace-format
 msgid "Drafts can be kept on at most {count} relay."
 msgid_plural "Drafts can be kept on at most {count} relays."
 msgstr[0] "Entwürfe können auf höchstens {count} Relay liegen."
 msgstr[1] "Entwürfe können auf höchstens {count} Relays liegen."
 
-#: nostr/ui/draft_relays_sheet.py:302
+#: nostr/ui/draft_relays_sheet.py:314
+#, python-brace-format
+msgid "Stop looking for drafts on {relay}?"
+msgstr "Nicht mehr nach Entwürfen auf {relay} suchen?"
+
+#: nostr/ui/draft_relays_sheet.py:315
+#, python-brace-format
+msgid "Drafts kept only on {relay} won’t be shown any more."
+msgstr "Entwürfe, die nur auf {relay} liegen, werden dann nicht mehr angezeigt."
+
+#: nostr/ui/draft_relays_sheet.py:367
 msgid "Saving. Approve the request in your signer app if it asks…"
 msgstr "Wird gespeichert. Bestätige die Anfrage in deiner Signer-App, wenn sie fragt …"
 
-#: nostr/ui/draft_relays_sheet.py:295
+#: nostr/ui/draft_relays_sheet.py:360
 #, python-brace-format
 msgid "Moving {count} draft…"
 msgid_plural "Moving {count} drafts…"

@@ -334,7 +334,8 @@ class RelayDirectory(QObject):
                             since: Optional[int]) -> None:
         """``relays`` are no longer draft relays but may hold drafts saved
         ``since`` then (None: at any time): each is read with the draft
-        relays until ``drafts_moved_from`` says its drafts moved. A relay
+        relays until ``stop_reading_drafts_on`` (its drafts moved, or the person let
+        them go). A relay
         left again keeps the earlier of its two dates."""
         key = (author or "").lower()
         left = self._drafts_left.setdefault(key, {})
@@ -351,8 +352,9 @@ class RelayDirectory(QObject):
         time from which drafts there are to be moved (None: all of them)."""
         return dict(self._drafts_left.get((author or "").lower(), {}))
 
-    def drafts_moved_from(self, author: str, relays: Sequence[str]) -> None:
-        """The drafts left on ``relays`` are where drafts go now."""
+    def stop_reading_drafts_on(self, author: str, relays: Sequence[str]) -> None:
+        """No longer read ``relays`` for drafts left behind: their drafts are
+        where drafts go now, or the person chose to let them go."""
         key = (author or "").lower()
         left = self._drafts_left.get(key)
         if not left:

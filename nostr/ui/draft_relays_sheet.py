@@ -18,6 +18,13 @@ title bar), opened from the Drafts panel's action menu:
                                    [Remove]
     Add a relay: [ wss://            ] [Add]
 
+    Still looking for drafts on:          (only while there are such relays)
+    These relays are no longer in the setting ...
+    ┌──────────────────────────────────────┐
+    │ wss://old.example                    │
+    └──────────────────────────────────────┘
+                                [Stop Looking…]
+
     [Use My Usual Relays]     [Cancel] [Save]
 
 It reads the account's list first (nostr/draft_relays.py), and edits
@@ -33,14 +40,22 @@ drafts but does not give them back is no place for them, and the sheet
 names it), then publishes the encrypted list (or an empty one), and only
 then do drafts follow it (PrivateDraftRelays.save). Cancel (or Escape)
 stops it while the drafts are read or moved, and nothing changes; once
-the list itself is being saved, the change can't be called back. When a draft could not be moved, nothing is changed
-and the sheet says what to do. When a relay being left did not answer,
+the list itself is being saved, the change can't be called back. When a
+draft could not be moved, nothing is changed and the sheet says what to
+do. When a relay being left did not answer,
 Save Anyway (in place of Use My Usual Relays) changes the setting all
 the same, leaving the drafts kept only on the relays it named behind:
 for a relay that is gone for good. Any other relay being left must still
 answer. When one being left stops answering only after the list went
 out, the setting is saved, and a last page says that drafts saved there
 meanwhile are looked for there and moved once it answers (Done closes).
+
+Relays no longer in the setting that may still hold drafts (a list
+changed on another device, or a relay that went quiet during a change)
+are read until each answers (RelayDirectory.leave_drafts_behind). The
+sheet lists them, so the person can see what MyEditor still looks at,
+and Stop Looking… lets one go, after asking ("Drafts kept only on … won't
+be shown any more", Cancel the default).
 
 Keys: Return in the address field adds it, elsewhere it saves; Delete or
 Backspace in the list removes the selected relay; Escape cancels. Once
@@ -57,9 +72,11 @@ from typing import List, Optional, Sequence
 
 from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import (
-    QAbstractItemView, QHBoxLayout, QLabel, QLineEdit, QListWidget, QPushButton, QWidget,
+    QAbstractItemView, QHBoxLayout, QLabel, QLineEdit, QListWidget, QPushButton, QVBoxLayout,
+    QWidget,
 )
 
+from alerts import confirm_destructive
 from i18n import _, ngettext
 
 from ..draft_relays import (
@@ -162,6 +179,32 @@ class DraftRelaysSheet(AssistantWindow):
         self._error.hide()
         column.addWidget(self._error)
 
+        self._left = QWidget()
+        left_column = QVBoxLayout(self._left)
+        left_column.setContentsMargins(0, 8, 0, 0)
+        left_column.setSpacing(6)
+        left_column.addWidget(text_label(_("Still looking for drafts on:"), "item_title"))
+        left_column.addWidget(text_label(
+            _("These relays are no longer in the setting, but may still hold drafts saved "
+              "there before it changed. MyEditor moves them to where drafts are kept now "
+              "once each relay answers."),
+            "muted"))
+        self._left_list = QListWidget()
+        self._left_list.setAccessibleName(_("Relays still looked at for drafts"))
+        self._left_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self._left_list.setMinimumHeight(self._left_list.fontMetrics().height() * 3 + 12)
+        self._left_list.itemSelectionChanged.connect(self._update)
+        left_column.addWidget(self._left_list)
+        under_left = QHBoxLayout()
+        under_left.addStretch(1)
+        self._stop_looking = QPushButton(_("Stop Looking…"))
+        self._stop_looking.setAutoDefault(False)
+        self._stop_looking.clicked.connect(self._stop_looking_on_selected)
+        under_left.addWidget(self._stop_looking)
+        left_column.addLayout(under_left)
+        self._left.hide()
+        column.addWidget(self._left)
+
         self._busy = QWidget()
         busy_row = QHBoxLayout(self._busy)
         busy_row.setContentsMargins(0, 0, 0, 0)
@@ -207,6 +250,7 @@ class DraftRelaysSheet(AssistantWindow):
         self._left_unread = None
         self._list.clear()
         self._list.addItems(self._read)
+        self._show_relays_left_behind()
         self._set_state(EDITING, error=then_say)
         # The list to work on when there is one, otherwise the field to
         # start one.
@@ -252,6 +296,27 @@ class DraftRelaysSheet(AssistantWindow):
         """Like Restore Defaults: the form changes, Save makes it so."""
         self._list.clear()
         self._update()
+
+    # -- relays left behind ----------------------------------------------------
+
+    def _show_relays_left_behind(self) -> None:
+        self._left_list.clear()
+        self._left_list.addItems(self._relays.drafts_left_behind())
+        self._left.setVisible(self._left_list.count() > 0)
+        self._update()
+
+    def _stop_looking_on_selected(self) -> None:
+        item = self._left_list.currentItem()
+        if self._state != EDITING or item is None or not item.isSelected():
+            return
+        relay = item.text()
+        if confirm_destructive(
+                self, title=_("Stop looking for drafts on {relay}?").format(relay=relay),
+                message=_("Drafts kept only on {relay} won’t be shown any more.").format(
+                    relay=relay),
+                action=_("Stop Looking"), is_dark=self._is_dark):
+            self._relays.stop_reading(relay)
+            self._show_relays_left_behind()
 
     def eventFilter(self, watched, event) -> bool:
         if event.type() == QEvent.Type.KeyPress:
@@ -453,6 +518,9 @@ class DraftRelaysSheet(AssistantWindow):
         self._add.setEnabled(editing and bool(self._field.text().strip()))
         selected = self._list.currentItem()
         self._remove.setEnabled(editing and selected is not None and selected.isSelected())
+        left = self._left_list.currentItem()
+        self._left_list.setEnabled(editing)
+        self._stop_looking.setEnabled(editing and left is not None and left.isSelected())
         if not self._error.isVisible():
             self._field.setAccessibleDescription("")
         self._update_buttons()

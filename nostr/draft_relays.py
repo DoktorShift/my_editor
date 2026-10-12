@@ -760,6 +760,15 @@ class PrivateDraftRelays(QObject):
         self._query(self._pool, relays, kind=KIND_PRIVATE_RELAYS, author=author,
                     on_done=found, parent=self)
 
+    def drafts_left_behind(self) -> List[str]:
+        """Relays no longer among the draft relays that may still hold
+        drafts, read until each answers (RelayDirectory.leave_drafts_behind)."""
+        return sorted(self._directory.drafts_left_behind(self.author))
+
+    def stop_reading(self, relay: str) -> None:
+        """Let the drafts left on ``relay`` go: it is no longer read."""
+        self._directory.stop_reading_drafts_on(self.author, [relay])
+
     def ask_again(self) -> None:
         """Let the next read ask the signer app again for a list it did not
         decrypt (the person asked to refresh)."""

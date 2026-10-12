@@ -81,6 +81,13 @@ class Lists:
         self.last_failure = None
         self.cancelled = 0
         self.list_on_its_way = False
+        self.left_behind = []
+
+    def drafts_left_behind(self):
+        return list(self.left_behind)
+
+    def stop_reading(self, relay):
+        self.left_behind.remove(relay)
 
     def cancel(self):
         if self.list_on_its_way:
@@ -430,3 +437,33 @@ def test_save_moves_the_drafts_then_publishes_the_list_and_drafts_follow_it():
     assert listed["kind"] == 10013 and listed["tags"] == []
     assert listed["content"] == "sealed:[]"
     assert directory.draft_relays_of(PK) == []
+
+
+def test_relays_still_looked_at_are_listed_and_one_can_be_let_go(monkeypatch):
+    # Review L11: relays left behind were read for good, and the person
+    # could neither see them nor stop it.
+    import nostr.ui.draft_relays_sheet as sheet_module
+    asked, answers = [], [False, True]
+    monkeypatch.setattr(sheet_module, "confirm_destructive",
+                        lambda parent, *, title, message, action, **_kw: (
+                            asked.append((title, message, action)), answers.pop(0))[1])
+    gone = "wss://old.example"
+    lists = Lists([MINE])
+    sheet, _saved = open_sheet(lists)
+    assert not sheet._left.isVisibleTo(sheet)                  # none: nothing shown
+    sheet.done(0)
+    lists.left_behind = [gone]
+    sheet, _saved = open_sheet(lists)
+    assert sheet._left.isVisibleTo(sheet)
+    assert [sheet._left_list.item(0).text()] == [gone]
+    assert not sheet._stop_looking.isEnabled()                  # nothing selected
+    assert unnamed_controls(sheet) == []
+    sheet._left_list.setCurrentRow(0)
+    sheet._stop_looking.click()                                 # Cancel, the default
+    assert asked == [(f"Stop looking for drafts on {gone}?",
+                      f"Drafts kept only on {gone} won’t be shown any more.", "Stop Looking")]
+    assert lists.left_behind == [gone]
+    sheet._left_list.setCurrentRow(0)
+    sheet._stop_looking.click()                                 # Stop Looking
+    assert lists.left_behind == [] and not sheet._left.isVisibleTo(sheet)
+

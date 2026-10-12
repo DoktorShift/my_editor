@@ -310,8 +310,8 @@ class FakeRelayDirectory(QObject):
     def set_draft_relays_locked(self, author, locked):
         self.calls.append(("set_draft_relays_locked", author, locked))
 
-    def drafts_moved_from(self, author, relays):
-        self.calls.append(("drafts_moved_from", author, tuple(relays)))
+    def stop_reading_drafts_on(self, author, relays):
+        self.calls.append(("stop_reading_drafts_on", author, tuple(relays)))
 
     def draft_relays_of(self, author):
         known = self.draft_lists.get((author or "").lower())

@@ -58,6 +58,9 @@ class Lists:
     def save(self, relays, on_done, *, on_step=None, leave_unread=False):
         on_done(SaveOutcome(MoveOutcome(), WriteOutcome(WRITTEN)))
 
+    def drafts_left_behind(self):
+        return []
+
     def setParent(self, parent):
         self.parent = parent
 
