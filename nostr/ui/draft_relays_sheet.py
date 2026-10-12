@@ -322,10 +322,12 @@ class DraftRelaysSheet(AssistantWindow):
                 "The setting was changed on another device while this was open, so nothing "
                 "was changed here. This is the setting as it is now."))
             return
+        # Relays being left whose drafts can't all be read (not answering,
+        # or sending only their newest): Save Anyway may leave them behind.
+        stuck = (*outcome.move.unread, *outcome.move.unpaged)
         agreed = self._unread if self._left_unread == chosen else []
-        self._left_unread = list(chosen) if outcome.move.unread else None
-        self._unread = (list(dict.fromkeys([*agreed, *outcome.move.unread]))
-                        if outcome.move.unread else [])
+        self._left_unread = list(chosen) if stuck else None
+        self._unread = list(dict.fromkeys([*agreed, *stuck])) if stuck else []
         self._set_state(EDITING, error=self._why_not_saved(outcome))
 
     def _show_left_behind(self, relays) -> None:
@@ -358,6 +360,15 @@ class DraftRelaysSheet(AssistantWindow):
                 "internet connection, then try again. If those relays are gone for good, "
                 "choose Save Anyway: the drafts kept only there won’t be shown any more.",
                 len(move.unread)).format(relays=", ".join(move.unread))
+        if move.unpaged:
+            return ngettext(
+                "{relays} sends only its newest drafts, however MyEditor asks, so the older "
+                "ones there can’t be moved, and nothing was changed. If the drafts kept only "
+                "there can stay behind, choose Save Anyway: they won’t be shown any more.",
+                "{relays} send only their newest drafts, however MyEditor asks, so the older "
+                "ones there can’t be moved, and nothing was changed. If the drafts kept only "
+                "there can stay behind, choose Save Anyway: they won’t be shown any more.",
+                len(move.unpaged)).format(relays=", ".join(move.unpaged))
         if move.unreadable:
             return ngettext(
                 "{relays} didn’t give your drafts back when MyEditor asked, so nothing was "

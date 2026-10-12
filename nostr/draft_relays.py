@@ -81,7 +81,7 @@ from nostr.outbox.writer import (
     CAUSE_SIGNER, FAILED, REFUSED, UNCHANGED, BaseChanged, ReplaceableWriter, WriteOutcome,
 )
 from nostr.publish_pipeline import kept_by_relay, refused_by_relay
-from nostr.queries import Fetched, fetch_events, full_pages, page_horizon
+from nostr.queries import Fetched, fetch_events, full_pages
 
 KIND_PRIVATE_RELAYS = 10013
 
@@ -197,10 +197,13 @@ class MoveOutcome:
     refused: bool = False                # a relay turned one down (not just silence)
     unreadable: Tuple[str, ...] = ()     # relays to keep drafts on that did not give
                                          # them back when asked (``verify``)
+    unpaged: Tuple[str, ...] = ()        # relays being left that send only their newest
+                                         # drafts, so their older ones can't be read
 
     @property
     def ok(self) -> bool:
-        return not self.unread and not self.not_moved and not self.unreadable
+        return (not self.unread and not self.not_moved and not self.unreadable
+                and not self.unpaged)
 
 
 class DraftMove(QObject):
@@ -216,9 +219,10 @@ class DraftMove(QObject):
 
     Every relay of ``must_read`` (those not read any more once the list
     changed) has to answer, or the move ends at once, having sent
-    nothing. So does a relay that cannot be read a page at a time (it
-    sends events newer than the page asked for), as its older drafts
-    would never be reached. ``since`` reads only what was saved from then
+    nothing. A relay that cannot be read a page at a time (it sends
+    events newer than the page asked for, so its older drafts would never
+    be reached) ends it the same way when it is one of them (``unpaged``);
+    any other is no longer asked, as nothing depends on it. ``since`` reads only what was saved from then
     on, ``skip`` leaves out what a first pass moved (the catch-up), and
     ``stop`` ends it where it is, sending nothing more.
 
@@ -276,6 +280,7 @@ class DraftMove(QObject):
         self._not_moved: List[str] = []
         self._refused = False
         self._pages = 0
+        self._unpaged: Set[str] = set()
         self._done = False
 
     @property
@@ -297,6 +302,9 @@ class DraftMove(QObject):
     # -- reading -------------------------------------------------------------
 
     def _read(self, which: str, until: Optional[int]) -> None:
+        if not self._source:                     # no relay left to ask
+            self._read_next(which)
+            return
         self._pages += 1
         kind = DRAFT_WRAP_KIND if which == self._WRAPS else DELETION_KIND
         flt: dict = {"kinds": [kind], "authors": [self._author], "limit": MOVE_PAGE}
@@ -328,11 +336,16 @@ class DraftMove(QObject):
         unpaged = {relay for event in fetched.events
                    if until is not None and int(event["created_at"]) > until
                    for relay in fetched.relays_of(event["id"])}
-        if unpaged:
+        if unpaged & self._must_read:
             # It sends its newest drafts whatever page is asked for, so its
-            # older ones can't be reached: the same as not answering.
-            self._finish(unread=unpaged)
+            # older ones can't be reached, and it is about to be left.
+            self._finish(unpaged=unpaged & self._must_read)
             return
+        if unpaged:
+            # Kept, or left with the person's consent: its drafts stay where
+            # they are readable, or behind; it is not asked again.
+            self._unpaged |= unpaged
+            self._source = [url for url in self._source if url not in self._unpaged]
         for event in fetched.events:
             self._seen_on.setdefault(event["id"], set()).update(fetched.relays_of(event["id"]))
             if which == self._WRAPS:
@@ -343,16 +356,24 @@ class DraftMove(QObject):
                 self._requests[event["id"]] = event
                 for identifier, when in deleted_identifiers(event, self._author).items():
                     self._deleted[identifier] = max(when, self._deleted.get(identifier, when))
-        horizon = page_horizon(fetched, fetched.events, MOVE_PAGE)
+        full = {relay: oldest for relay, oldest
+                in full_pages(fetched, fetched.events, MOVE_PAGE).items()
+                if relay not in self._unpaged}
+        horizon = max(full.values()) if full else None      # as page_horizon, of the rest
         if horizon is not None and self._pages >= MOVE_PAGES_AT_MOST:
             # More pages than any account's drafts fill: something keeps
             # the reading from ending, so its relays count as not read.
-            self._finish(unread=set(full_pages(fetched, fetched.events, MOVE_PAGE)))
+            self._finish(unread=set(full))
         elif horizon is not None:
             # A relay sent a full page: read on from where it ended, or past
             # a second that held a whole page, so the reading ends.
             self._read(which, horizon if until is None or horizon < until else until - 1)
-        elif which == self._WRAPS:
+        else:
+            self._read_next(which)
+
+    def _read_next(self, which: str) -> None:
+        """One reading is done: the requests next, then the sending."""
+        if which == self._WRAPS:
             self._read(self._REQUESTS, None)
         else:
             self._send_all()
@@ -467,8 +488,8 @@ class DraftMove(QObject):
         else:
             self._finish(unreadable=self._unreadable)
 
-    def _finish(self, *, unread: Set[str] = frozenset(),
-                unreadable: Set[str] = frozenset()) -> None:
+    def _finish(self, *, unread: Set[str] = frozenset(), unreadable: Set[str] = frozenset(),
+                unpaged: Set[str] = frozenset()) -> None:
         if self._done:
             return
         self._done = True
@@ -476,7 +497,8 @@ class DraftMove(QObject):
                                        unread=tuple(sorted(unread)),
                                        not_moved=tuple(self._not_moved),
                                        refused=self._refused,
-                                       unreadable=tuple(sorted(unreadable))))
+                                       unreadable=tuple(sorted(unreadable)),
+                                       unpaged=tuple(sorted(unpaged))))
 
 
 @dataclass(frozen=True)
@@ -628,7 +650,8 @@ class _Save(QObject):
         # draft moved, once it answers (DraftSync).
         left: Tuple[str, ...] = ()
         if not outcome.ok:
-            left = outcome.unread or (tuple(self._must_read) if outcome.not_moved else ())
+            left = (outcome.unread or outcome.unpaged
+                    or (tuple(self._must_read) if outcome.not_moved else ()))
             logger.warning("drafts saved during the change were not all copied: %s", outcome)
         if left:
             self._directory.leave_drafts_behind(

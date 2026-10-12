@@ -421,9 +421,33 @@ def test_a_relay_that_ignores_the_page_asked_for_is_not_read_forever(monkeypatch
     drafts, relays, directory, _client = moving(LIST_ON_MINE, drafts_on={MINE: many})
     relays.ignoring_until = {MINE}
     outcome, _steps = save(drafts, relays, [])
-    assert outcome is not None and not outcome.ok and outcome.move.unread == (MINE,)
+    assert outcome is not None and not outcome.ok and outcome.move.unpaged == (MINE,)
+    assert outcome.move.unread == ()                   # it answered: not a connection matter
     assert len(relays.subs) <= 3                       # two pages, not hundreds
     assert relays.published == [] and directory.draft_relays_of(PK) == [MINE]
+
+
+def test_save_anyway_passes_a_relay_that_ignores_the_page_asked_for(monkeypatch):
+    # Review M2: Save Anyway failed the same way every time.
+    from nostr import draft_relays
+    monkeypatch.setattr(draft_relays, "MOVE_PAGE", 3)
+    many = [wrap(f"draft-{n}", at=NOW - 100 * n) for n in range(5)]
+    drafts, relays, directory, _client = moving(LIST_ON_MINE, drafts_on={MINE: many})
+    relays.ignoring_until = {MINE}
+    outcomes = []
+    drafts.save([], outcomes.append, leave_unread=[MINE])
+    relays.run(rounds=20)
+    assert outcomes[0].ok and directory.draft_relays_of(PK) == []
+
+
+def test_a_kept_relay_that_ignores_the_page_asked_for_blocks_nothing(monkeypatch):
+    from nostr import draft_relays
+    monkeypatch.setattr(draft_relays, "MOVE_PAGE", 3)
+    many = [wrap(f"draft-{n}", at=NOW - 100 * n) for n in range(5)]
+    drafts, relays, directory, _client = moving(LIST_ON_MINE, drafts_on={MINE: many})
+    relays.ignoring_until = {MINE}
+    outcome, _steps = save(drafts, relays, [MINE, OTHER])
+    assert outcome.ok and directory.draft_relays_of(PK) == [MINE, OTHER]
 
 
 def test_a_reading_that_does_not_end_is_given_up(monkeypatch):

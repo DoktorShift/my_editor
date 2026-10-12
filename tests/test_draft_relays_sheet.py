@@ -282,6 +282,21 @@ def test_after_a_failed_save_the_summary_does_not_state_the_form_as_the_setting(
     assert sheet._summary.text() == "Drafts are saved only on these relays:"
 
 
+def test_a_relay_that_sends_only_its_newest_drafts_is_named_for_that_and_can_be_left():
+    # Review M2: it was blamed on the internet connection, and Save Anyway
+    # could not get past it.
+    lists = Lists([MINE], answer=SaveOutcome(MoveOutcome(unpaged=(MINE,))))
+    sheet, saved = open_sheet(lists)
+    sheet.buttons["usual"].click()
+    sheet.buttons["save"].click()
+    assert sheet._error.text().startswith(f"{MINE} sends only its newest drafts")
+    assert "internet connection" not in sheet._error.text()
+    assert words(sheet) == ["Save Anyway", "Cancel", "Save"]
+    lists.answer = SAVED
+    sheet.buttons["anyway"].click()
+    assert lists.saves[-1] == ([], [MINE]) and saved == [[]]
+
+
 def test_relays_agreed_to_leave_add_up_while_the_choice_stays():
     # Review N3, live: agreeing to leave MINE's drafts, then SECOND going
     # quiet, must not ask about MINE again.
