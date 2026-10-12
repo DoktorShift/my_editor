@@ -302,11 +302,12 @@ def test_a_sheet_takes_the_edit_commands_and_keeps_its_window(window, monkeypatc
 
 
 def test_the_edit_menu_follows_the_focused_field(window, monkeypatch):
-    """N2 and S4 of the CP3 fixes reviews: with a sheet up, the Edit menu
+    """N2, S4 and T2 of the CP3 fixes reviews: with a sheet up, the Edit menu
     kept the state it had when the sheet opened (Undo dimmed after typing
     in it), with a check box focused Cut, Copy and Delete followed the
     document in the other window, and a selection in the article did not
-    enable Copy. As in Mail, they follow the field with the focus as it
+    enable Copy, and Paste stayed enabled where nothing takes a paste. As
+    in Mail, they follow the field with the focus as it
     changes, through the one place that follows focused fields."""
     import main_window
     from PySide6.QtCore import QObject
@@ -329,7 +330,8 @@ def test_the_edit_menu_follows_the_focused_field(window, monkeypatch):
     host._imports_in_front, host.current_pdf_viewer = lambda: window, lambda: None
     host.act_undo, host.act_redo = QAction("Undo"), QAction("Redo")
     host.act_cut, host.act_copy = QAction("Cut"), QAction("Copy")
-    host.act_delete = QAction("Delete")
+    host.act_delete, host.act_paste = QAction("Delete"), QAction("Paste")
+    host.act_paste_plain = QAction("Paste and Match Style")
     focus = {"widget": None}
     monkeypatch.setattr(main_window.QApplication, "focusWidget",
                         staticmethod(lambda: focus["widget"]))
@@ -338,10 +340,15 @@ def test_the_edit_menu_follows_the_focused_field(window, monkeypatch):
         focus["widget"] = widget
         MainWindow._on_focus_changed(host, None, widget)
 
+    from PySide6.QtWidgets import QApplication
+    QApplication.clipboard().setText("PASTED")
+    focus_on(window.posts)                              # T2: nothing here takes a paste
+    assert not (host.act_paste.isEnabled() or host.act_paste_plain.isEnabled())
     window.source_settings(window._controller.sources()[0].key)
     sheet = window.sheet()
     monkeypatch.setattr(main_window.QApplication, "activeWindow", staticmethod(lambda: sheet))
     focus_on(sheet.name)
+    assert host.act_paste.isEnabled() and host.act_paste_plain.isEnabled()
     sheet.name.end(False)
     QTest.keyClicks(sheet.name, "!")                    # the menu hears it at once
     assert host.act_undo.isEnabled()
@@ -351,7 +358,8 @@ def test_the_edit_menu_follows_the_focused_field(window, monkeypatch):
     assert host.act_cut.isEnabled() and host.act_copy.isEnabled()
     focus_on(sheet.copy_images)                         # a check box of the sheet
     assert not (host.act_undo.isEnabled() or host.act_cut.isEnabled()
-                or host.act_copy.isEnabled() or host.act_delete.isEnabled())
+                or host.act_copy.isEnabled() or host.act_delete.isEnabled()
+                or host.act_paste.isEnabled())
     sheet.reject()
     monkeypatch.setattr(main_window.QApplication, "activeWindow", staticmethod(lambda: window))
     pane = window.article._preview
@@ -359,6 +367,7 @@ def test_the_edit_menu_follows_the_focused_field(window, monkeypatch):
     assert not host.act_copy.isEnabled()
     pane.selectAll()                                    # text selected in the article
     assert host.act_copy.isEnabled() and not host.act_cut.isEnabled()
+    assert not host.act_paste.isEnabled()               # it is read only
     focus_on(None)
     document.deleteLater()
 
@@ -375,7 +384,8 @@ def test_edit_delete_skips_only_where_the_key_does(window, monkeypatch):
     host = SimpleNamespace(
         _imports_in_front=lambda: window, current_editor=lambda: None,
         current_pdf_viewer=lambda: None, act_cut=QAction("Cut"), act_copy=QAction("Copy"),
-        act_delete=QAction("Delete"))
+        act_delete=QAction("Delete"), act_paste=QAction("Paste"),
+        act_paste_plain=QAction("Paste and Match Style"))
     controller = window._controller
     MainWindow._update_clipboard_commands(host)
     assert host.act_delete.isEnabled()                  # the post list: Skip

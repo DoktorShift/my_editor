@@ -649,6 +649,8 @@ class MainWindow(QMainWindow):
         # its own Undo Skip), and the document's own commands are dimmed
         # while another window is in front.
         QApplication.instance().focusChanged.connect(self._update_undo_redo_buttons)
+        # Paste follows what is on the clipboard, as it follows the focus.
+        QApplication.clipboard().dataChanged.connect(self._update_clipboard_commands)
         QApplication.instance().focusChanged.connect(self._update_window_commands)
         self._update_status_bar()
         self._start_ipc_server()
@@ -1168,36 +1170,46 @@ class MainWindow(QMainWindow):
         self.act_undo.setEnabled(can_undo)
         self.act_redo.setEnabled(can_redo)
 
-    def _update_clipboard_commands(self) -> None:
-        """Cut, Copy and Delete act on a selection, and are dimmed without
-        one (as the HIG asks of a command that cannot act), for whatever
-        has the focus: a text field (the find field, a sheet's), the
-        Imports window, the PDF reader (Copy) or the document."""
+    def _update_clipboard_commands(self, *_args) -> None:
+        """Cut, Copy, Paste and Delete for whatever has the focus, dimmed
+        where they cannot act (as the HIG asks): a text field (the find
+        field, a sheet's or a dialog's), the Imports window, the PDF reader
+        (Copy) or the document. Cut, Copy and Delete need a selection,
+        Paste a place that takes text and something on the clipboard (T2
+        of the CP3 fixes review: it followed the kind of tab, not the
+        focus). Paste and Match Style goes with Paste."""
         if not hasattr(self, "act_cut"):
             return
-        focus = QApplication.focusWidget()
+        field = _text_field(QApplication.focusWidget())
         imports = self._imports_in_front()
-        if isinstance(focus, QLineEdit):
-            selected, editable = focus.hasSelectedText(), not focus.isReadOnly()
-        elif isinstance(focus, (QTextEdit, QPlainTextEdit)) and not isinstance(focus, HtmlEditor):
-            selected, editable = focus.textCursor().hasSelection(), not focus.isReadOnly()
+        if field is not None:
+            selected = (field.hasSelectedText() if isinstance(field, QLineEdit)
+                        else field.textCursor().hasSelection())
+            editable = not field.isReadOnly()
+            pastes = editable and (bool(QApplication.clipboard().text())
+                                   if isinstance(field, QLineEdit) else field.canPaste())
         elif imports is not None:
             # Never the document behind (N2 of the CP3 fixes review): Copy
-            # copies the open post's link and Delete skips, nothing while
-            # a sheet is in front without a text field focused.
+            # copies the posts' links and Delete skips; nothing takes a
+            # paste, and nothing acts while a sheet is in front.
             self.act_copy.setEnabled(imports.can_edit("copy"))
             self.act_cut.setEnabled(imports.can_edit("cut"))
             self.act_delete.setEnabled(imports.can_edit("delete"))
+            self.act_paste.setEnabled(False)
+            self.act_paste_plain.setEnabled(False)
             return
         elif self.current_pdf_viewer() is not None:
-            selected, editable = True, False      # the reader answers Copy itself
+            selected, editable, pastes = True, False, False   # the reader answers Copy
         else:
             ed = self.current_editor()
             selected = ed is not None and ed.textCursor().hasSelection()
             editable = ed is not None and not ed.isReadOnly()
+            pastes = editable and ed.canPaste()
         self.act_copy.setEnabled(selected)
         self.act_cut.setEnabled(selected and editable)
         self.act_delete.setEnabled(selected and editable)
+        self.act_paste.setEnabled(pastes)
+        self.act_paste_plain.setEnabled(pastes)
 
     def _on_focus_changed(self, _old, new) -> None:
         tabs = getattr(self, "tabs", None)
@@ -4046,7 +4058,7 @@ class MainWindow(QMainWindow):
     _DOCUMENT_COMMANDS = frozenset({
         "file.save", "file.save_as", "file.page_setup", "file.print", "file.print_preview",
         "file.knit_html", "file.knit_pdf", "search.replace", "search.next",
-        "search.previous", "search.use_selection", "edit.paste_plain",
+        "search.previous", "search.use_selection",
         "view.line_numbers", "view.syntax_highlighting", "view.paper_mode", "view.toolbar",
         "view.highlight_line", "nostr.publish_note", "nostr.publish_article",
         "nostr.insert_image"})
@@ -4267,13 +4279,16 @@ class MainWindow(QMainWindow):
         ed.setFocus()
 
     def _paste_plain(self) -> None:
-        focus = QApplication.focusWidget()
-        if isinstance(focus, QLineEdit):
-            focus.paste()
-            return
-        ed = self.current_editor()
-        if ed:
-            ed.paste_normalized()
+        field = _text_field(QApplication.focusWidget())
+        if isinstance(field, QLineEdit):
+            field.paste()
+        elif field is not None:
+            if not field.isReadOnly():
+                field.insertPlainText(QApplication.clipboard().text())
+        elif self._imports_in_front() is None:
+            ed = self.current_editor()
+            if ed:
+                ed.paste_normalized()
 
     def _use_selection_for_find(self) -> None:
         """The selected words become what Find looks for (Command-E): Find

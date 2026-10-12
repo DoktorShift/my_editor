@@ -54,6 +54,16 @@ w._undo()
 r["field_after_undo"] = field.text()
 r["document_after_undo"] = ed.toPlainText()
 
+# Paste follows the clipboard and the focus (T2 of the CP3 fixes review).
+ed.setFocus()
+app.processEvents()
+QApplication.clipboard().clear()
+app.processEvents()
+r["paste_empty_clipboard"] = [w.act_paste.isEnabled(), w.act_paste_plain.isEnabled()]
+QApplication.clipboard().setText("PASTED")
+app.processEvents()
+r["paste_with_text"] = [w.act_paste.isEnabled(), w.act_paste_plain.isEnabled()]
+
 # A multi-line field in a window of its own (Edit Profile's About):
 # Undo and Redo are its own, never the document's behind (T1 of the CP3
 # fixes review).
@@ -121,3 +131,36 @@ def test_edit_commands_follow_the_focus_and_the_selection(tmp_path):
     assert r["about_after_undo"] != "about me" and r["document_unchanged_by_undo"]
     assert r["about_after_redo"] == "about me"
     assert not r["read_only_undo_enabled"]
+    # T2: nothing to paste dims Paste, text on the clipboard enables it.
+    assert r["paste_empty_clipboard"] == [False, False]
+    assert r["paste_with_text"] == [True, True]
+
+
+def test_paste_in_a_pdf_tabs_find_field(monkeypatch):
+    """T2 of the CP3 fixes review: on a PDF tab, Paste was dimmed while
+    the find field had the focus and would take it."""
+    import main_window
+    from PySide6.QtCore import QObject
+    from PySide6.QtGui import QAction
+    from PySide6.QtWidgets import QApplication, QLineEdit
+    from main_window import MainWindow
+
+    class Host(QObject):
+        _update_clipboard_commands = MainWindow._update_clipboard_commands
+
+    host = Host()
+    host._imports_in_front, host.current_editor = lambda: None, lambda: None
+    host.current_pdf_viewer = lambda: object()
+    for name in ("cut", "copy", "delete", "paste", "paste_plain"):
+        setattr(host, f"act_{name}", QAction(name))
+    field = QLineEdit()
+    QApplication.clipboard().setText("12")
+    focus = {"widget": field}
+    monkeypatch.setattr(main_window.QApplication, "focusWidget",
+                        staticmethod(lambda: focus["widget"]))
+    host._update_clipboard_commands()
+    assert host.act_paste.isEnabled()
+    focus["widget"] = None                       # the reader: it copies, takes no paste
+    host._update_clipboard_commands()
+    assert not host.act_paste.isEnabled() and host.act_copy.isEnabled()
+    field.deleteLater()
