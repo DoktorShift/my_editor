@@ -36,7 +36,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import rich_text  # noqa: E402
 from editor import HtmlEditor  # noqa: E402
-from markdown_writer import document_to_markdown, read_markdown  # noqa: E402
+from markdown_writer import document_to_markdown, holds_faithfully, read_markdown  # noqa: E402
 from tests.rich_text_helpers import (  # noqa: E402
     assert_round_trip, block_named, from_markdown, press, select, type_text,
 )
@@ -186,11 +186,15 @@ def test_return_always_adds_a_line_so_blank_lines_stay_code():
         "```python\ndef a():\n    return 1\n\ndef b():\n    return 2\n```\n")
 
 
-def test_blank_lines_after_the_code_are_not_saved():
+def test_blank_lines_at_the_end_of_the_code_are_saved_as_shown():
+    # Review L7: dropping them made a file with such a block open as its
+    # Markdown text, since saving would have changed it.
     ed = editor("```sh\nls\n```\n", caret_after="ls")
     type_text(ed, "\n\n")
     assert rich_text.is_code_block(ed.textCursor().block())        # still in the block
-    assert assert_round_trip(ed.document()) == "```sh\nls\n```\n"
+    assert assert_round_trip(ed.document()) == "```sh\nls\n\n\n```\n"
+    for written in ("```\nx\n\n```\n", "Text\n\n```py\na = 1\n\n\n```\n\nMore\n"):
+        assert holds_faithfully(written)
 
 
 def test_return_takes_the_indent_of_the_caret_s_line():
