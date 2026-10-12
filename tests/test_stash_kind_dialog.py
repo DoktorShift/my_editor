@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Pins how Save as Nostr Draft is used without a mouse.
+"""Pins how Save as Nostr Draft is used without a mouse, and that its
+kind cards are never cut off.
 
 What must hold:
 
@@ -9,6 +10,11 @@ What must hold:
   the other, which opens the article's fields. Each is named for a screen
   reader. (Review R4: the cards answered the mouse only, and the dialog
   opened with the focus on Cancel.)
+
+  The window takes the height its wrapped hints need, in English and in
+  German, and cannot be made smaller than that. (The German "Langer
+  Artikel" hint lost its first and last lines at the narrowest width,
+  and the English one too.)
 """
 
 import os
@@ -23,7 +29,8 @@ from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from nostr.ui.stash_kind_dialog import StashKindDialog  # noqa: E402
+import i18n  # noqa: E402
+from nostr.ui.stash_kind_dialog import StashKind, StashKindDialog  # noqa: E402
 from tests.accessibility import unnamed_controls  # noqa: E402
 
 
@@ -61,3 +68,20 @@ def test_the_kinds_are_a_radio_group_the_keyboard_reaches(shown):
     QTest.keyClick(article, Qt.Key.Key_Left)
     assert note.isChecked() and not dialog._article_panel.isVisible()
     assert unnamed_controls(dialog) == []
+
+
+@pytest.mark.parametrize("language", ["en", "de"])
+@pytest.mark.parametrize("kind", [StashKind.NOTE, StashKind.ARTICLE])
+def test_no_hint_is_cut_off_even_at_the_narrowest(shown, language, kind):
+    i18n.install(language)
+    try:
+        dialog = shown(default=kind)
+        before = dialog.size()
+        dialog.resize(1, 1)                      # as small as a person can drag it
+        QApplication.processEvents()
+        assert dialog.size() == before
+        for card in (dialog._note_card, dialog._article_card):
+            hint = card.hint_label
+            assert hint.height() >= hint.heightForWidth(hint.width()), (language, hint.text())
+    finally:
+        i18n.install(i18n.ENGLISH)

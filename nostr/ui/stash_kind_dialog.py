@@ -340,6 +340,9 @@ class StashKindDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 22, 24, 18)
         root.setSpacing(14)
+        # The window takes the height its wrapped hints need at its width,
+        # so no hint is ever cut off, in any language (as Settings does).
+        root.setSizeConstraint(QVBoxLayout.SizeConstraint.SetFixedSize)
 
         title = QLabel(_("Save as Nostr draft"))
         title.setObjectName("stash_kind_title")
