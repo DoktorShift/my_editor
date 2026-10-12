@@ -14,7 +14,8 @@ than the room a view's name needs; the buttons stay inside it. The
 panel's action menu sits in band 1, opens on Return and Enter too, and
 holds Refresh (the view shown reads again, named for it), Draft Relays…
 (only with an account, asking the host for it) and, in the Drafts view,
-Select All and Delete; every control has a name.
+Select All and Delete; Tab reaches the switch on the view shown; every
+control has a name.
 """
 
 import os
@@ -270,6 +271,30 @@ def test_refresh_reads_the_view_shown_again_and_is_named_for_it():
         assert (drafts_refreshed, published_refreshed) == ([True], [True])
         panel.show_view("drafts")
         assert refresh.text() == "Refresh Drafts"
+    finally:
+        panel.hide()
+
+
+# --------------------------------------------------------------------------- #
+# The switch and the keyboard (review N10)                                    #
+# --------------------------------------------------------------------------- #
+
+def test_tab_reaches_the_switch_on_the_view_shown():
+    from PySide6.QtCore import Qt
+    panel, _view = panel_with_published(DEFAULT_PANEL_WIDTH)
+    try:
+        drafts, published = panel._view_switch.segments
+        assert drafts.focusPolicy() == Qt.FocusPolicy.StrongFocus
+        assert published.focusPolicy() == Qt.FocusPolicy.ClickFocus
+        panel.show_view(PANEL_VIEW)                              # by the host, or a click
+        assert published.focusPolicy() == Qt.FocusPolicy.StrongFocus
+        assert drafts.focusPolicy() == Qt.FocusPolicy.ClickFocus
+        if panel._view_switch.is_popup():
+            return                                               # no segments to reach
+        panel.activateWindow()
+        panel._actions_btn.setFocus(Qt.FocusReason.OtherFocusReason)
+        panel.focusNextPrevChild(False)                          # Shift-Tab, back to it
+        assert panel.focusWidget() is published
     finally:
         panel.hide()
 

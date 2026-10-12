@@ -847,6 +847,11 @@ class _ViewSwitch(QWidget):
             chosen = view_key == key
             if index < len(self.segments):
                 self.segments[index].setChecked(chosen)
+                # Tab reaches the switch on the view shown, as it reaches a
+                # group of radio buttons on the one chosen; the arrow keys
+                # move between the views.
+                self.segments[index].setFocusPolicy(
+                    Qt.FocusPolicy.StrongFocus if chosen else Qt.FocusPolicy.ClickFocus)
             actions = self.popup.menu().actions()
             if index < len(actions):
                 actions[index].setChecked(chosen)
