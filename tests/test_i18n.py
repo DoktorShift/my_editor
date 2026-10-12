@@ -265,21 +265,36 @@ def test_a_mac_names_the_settings_command_settings(tmp_path, language, word, qui
 # text names a protocol, in English and in German. Review L7: the publishing
 # flow still said "your signer", "this profile" and "NIP-44"; review N3:
 # "(no profiles)" for the accounts got through a list of bad phrases. So
-# "profile" is refused everywhere except where it can only mean the profile
-# people see: "your profile", "Edit Profile", "a public profile" and so on.
+# "profile" is refused everywhere except in the phrases below, where it can
+# only mean the profile people see. A phrase is a beginning: what follows
+# it is the same profile ("Your profile name", "Dein Profilname").
 _SIGNER = {"en": re.compile(r"\bsigner\b(?!\s+apps?\b)", re.IGNORECASE),
            "de": re.compile(r"\bSigner\b(?!-App)")}
-_PROFILE = {"en": re.compile(r"\bprofiles?\b", re.IGNORECASE),
-            "de": re.compile(r"Profil", re.IGNORECASE)}
-_PUBLIC_PROFILE = {
-    "en": re.compile(r"\b(?:your|my|public|Nostr|edit|on) profile\b|\bprofile saved\b"
-                     r"|\bhave a profile\b|^This Profile Can’t Be Edited Here$"
-                     r"|bsky\.app/profile/", re.IGNORECASE),
-    "de": re.compile(r"\b(?:dein|deinem|deine|mein|meinem|im|kein|öffentliches)"
-                     r" Profil\b|Nostr-Profil|Profil (?:bearbeiten|gespeichert|wird)"
-                     r"|Profilbild|^Dieses Profil lässt sich hier nicht bearbeiten$"
-                     r"|bsky\.app/profile/", re.IGNORECASE),
+_PROFILE = {"en": re.compile(r"profile", re.IGNORECASE),
+            "de": re.compile(r"profil", re.IGNORECASE)}
+_PUBLIC_PROFILE_PHRASES = {
+    "en": (
+        r"\b(?:your|my) profile",            # Your profile shows it now.
+        r"\bpublic profile",                 # No public profile found.
+        r"\bNostr profile",                  # No Nostr profile is published at ...
+        r"\bedit profile",                   # Edit Profile..., the window's title
+        r"\bon profile",                     # Show on Profile
+        r"\bprofile saved",                  # Profile saved.
+        r"\bhave a profile",                 # You don't have a profile yet.
+        r"^this profile can’t be edited here$",
+        r"bsky\.app/profile/",               # an address someone pastes
+    ),
+    "de": (
+        r"\b(?:dein|deinem|deine|mein|meinem|im|kein|öffentliches) Profil",
+        r"Nostr-Profil",
+        r"\bProfil (?:bearbeiten|gespeichert|wird)",
+        r"\bProfilbild",
+        r"^Dieses Profil lässt sich hier nicht bearbeiten$",
+        r"bsky\.app/profile/",
+    ),
 }
+_PUBLIC_PROFILE = {language: re.compile("|".join(phrases), re.IGNORECASE)
+                   for language, phrases in _PUBLIC_PROFILE_PHRASES.items()}
 
 
 def _off_glossary(text: str, language: str) -> bool:
@@ -288,27 +303,47 @@ def _off_glossary(text: str, language: str) -> bool:
     return bool(_PROFILE[language].search(_PUBLIC_PROFILE[language].sub("", text)))
 
 
-def test_every_text_speaks_the_glossarys_words():
+def _code_texts():
+    """Every text in the code, with where it is said (scripts/i18n.py)."""
     import importlib.util
     spec = importlib.util.spec_from_file_location(   # scripts/i18n.py, not the app's i18n
         "catalog_tool", os.path.join(ROOT, "scripts", "i18n.py"))
     catalog_tool = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(catalog_tool)
     messages, _problems = catalog_tool.extract()
-    off = sorted({f"{message.references[0]}: {text}"
-                  for message in messages.values()
-                  for text in (message.msgid, message.plural) if text
-                  if _off_glossary(text, "en")})
+    return {text: message.references[0] for message in messages.values()
+            for text in (message.msgid, message.plural) if text}
+
+
+def test_every_text_speaks_the_glossarys_words():
+    off = sorted(f"{where}: {text}" for text, where in _code_texts().items()
+                 if _off_glossary(text, "en"))
     assert off == []
 
 
 def test_the_german_texts_speak_the_glossarys_words_too():
     with open(os.path.join(ROOT, "locale", "de.po"), encoding="utf-8") as f:
-        po = f.read()
-    translations = [
-        "".join(re.findall(r'"(.*)"', block))
-        for block in re.findall(r'^msgstr(?:\[\d\])? ((?:".*"\n?)+)', po, re.MULTILINE)]
-    off = sorted(text for text in translations if text and _off_glossary(text, "de"))
+        entries = list(i18n._po_entries(f.read()))
+    where = _code_texts()
+    off, imperative = [], []
+    for entry in entries:
+        for german in entry.get("msgstr", []):
+            said = f"{where.get(entry['msgid'], '?')}: {entry['msgid']} -> {german}"
+            if german and _off_glossary(german, "de"):
+                off.append(said)
+            # One form of address: du, in the full imperative (docs/translating.md).
+            if re.search(r"\b[Vv]ersuch es\b", german):
+                imperative.append(said)
     assert off == []
-    # One form of address: du, in the full imperative (docs/translating.md).
-    assert [text for text in translations if re.search(r"\b[Vv]ersuch es\b", text)] == []
+    assert imperative == []
+
+
+@pytest.mark.parametrize("text, language, off", [
+    ("Your profile name", "en", False), ("Dein Profilname", "de", False),
+    ("Copy profile link", "en", True), ("Profillink kopieren", "de", True),
+    ("(no profiles)", "en", True), ("(keine Profile)", "de", True),
+    ("Edit Profile…", "en", False), ("Profil bearbeiten …", "de", False),
+    ("Dein Signer", "de", True), ("deine Signer-Apps", "de", False),
+])
+def test_the_glossary_rules_read_both_languages_alike(text, language, off):
+    assert _off_glossary(text, language) == off
