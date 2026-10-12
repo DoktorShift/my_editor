@@ -216,8 +216,9 @@ class DraftMove(QObject):
     one may take drafts and then show them only after a sign-in (NIP-42),
     or keep nothing. So each relay of ``verify`` (the relays the person
     chose for drafts) is asked, once all is sent, for the drafts it took;
-    one that refuses, stays silent or leaves one out is ``unreadable``,
-    and drafts are not to be kept there.
+    one that refuses to answer, or answers and leaves one out, is
+    ``unreadable``, and drafts are not to be kept there. One that can't be
+    reached says nothing either way, as when drafts are sent there.
 
     Signals:
       progress(int, int, int)  events settled, events to send, and of
@@ -432,7 +433,9 @@ class DraftMove(QObject):
         for url in self._verify:
             given = {event["id"] for event in fetched.events if url in fetched.relays_of(
                 event["id"])}
-            if url not in fetched.answered or (self._held.get(url, set()) & asked) - given:
+            refused = url in fetched.closed
+            left_out = url in fetched.answered and (self._held.get(url, set()) & asked) - given
+            if refused or left_out:
                 self._unreadable.add(url)
         if self._pages_to_check:
             self._check_page()

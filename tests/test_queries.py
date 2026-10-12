@@ -71,6 +71,7 @@ def test_it_ends_when_every_relay_ended_one_way_or_another():
     sub.answer(C)
     assert out[0].answered == (C,)
     assert set(out[0].refused) == {A, B}
+    assert out[0].closed == (B,)              # it answered "no"; A was not reached
 
 
 def test_a_relay_that_never_ends_is_neither_answered_nor_refused():

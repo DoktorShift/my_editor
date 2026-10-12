@@ -50,6 +50,7 @@ class Fetched:
     seen_on: Mapping[str, Tuple[str, ...]] = field(default_factory=dict)  # id -> relays
     answered: Tuple[str, ...] = ()      # relays that ended their stored events (EOSE)
     refused: Tuple[str, ...] = ()       # relays that closed the request or were not reached
+    closed: Tuple[str, ...] = ()        # of them, those that closed it: they answered "no"
     complete: bool = True               # False: events were left unread (MAX_COPIES), so
                                         # what came back is not all there is
 
@@ -133,6 +134,7 @@ class _EventsQuery(QObject):
         self._flooded = False
         self._answered: List[str] = []
         self._refused: List[str] = []
+        self._closed: List[str] = []
         self._finished = False
         self._sub: Optional[Subscription] = None
         self._timer: Optional[QTimer] = None
@@ -147,7 +149,7 @@ class _EventsQuery(QObject):
         self.destroyed.connect(self._sub.deleteLater)
         self._sub.relay_event.connect(self._on_event)
         self._sub.relay_eose.connect(self._on_relay_eose)
-        self._sub.relay_closed.connect(self._on_relay_refused)
+        self._sub.relay_closed.connect(self._on_relay_closed)
         self._sub.relay_failed.connect(self._on_relay_refused)
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
@@ -184,6 +186,11 @@ class _EventsQuery(QObject):
             self._answered.append(url)
         self._finish_when_settled()
 
+    def _on_relay_closed(self, url: str, reason: str = "") -> None:
+        if url not in self._answered and url not in self._refused:
+            self._closed.append(url)
+        self._on_relay_refused(url, reason)
+
     def _on_relay_refused(self, url: str, _reason: str = "") -> None:
         if url not in self._answered and url not in self._refused:
             self._refused.append(url)
@@ -205,7 +212,7 @@ class _EventsQuery(QObject):
         result = Fetched(events=tuple(self._events.values()),
                          seen_on={k: tuple(v) for k, v in self._seen_on.items()},
                          answered=tuple(self._answered), refused=tuple(self._refused),
-                         complete=not self._flooded)
+                         closed=tuple(self._closed), complete=not self._flooded)
         try:
             self._on_done(result)
         finally:

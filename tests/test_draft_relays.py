@@ -493,6 +493,17 @@ def test_a_relay_that_would_not_show_drafts_is_found_out_with_no_draft_to_move()
     assert sent(relays, KIND_PRIVATE_RELAYS) == [] and directory.draft_relays_of(PK) == []
 
 
+def test_a_relay_that_cannot_be_reached_is_not_judged_by_the_read_back():
+    # Down now is not "keeps nothing": as when drafts are sent there, a
+    # relay that does not answer says nothing either way.
+    gone = "wss://gone.example"
+    drafts, relays, directory, _client = moving(LIST_ON_MINE,
+                                                drafts_on={MINE: [wrap("draft-1")]})
+    relays.down = {gone}
+    outcome, _steps = save(drafts, relays, [MINE, gone])
+    assert outcome.ok and directory.draft_relays_of(PK) == [MINE, gone]
+
+
 def test_only_the_relay_that_does_not_give_them_back_is_named():
     drafts, relays, _directory, _client = moving(LIST_ON_MINE,
                                                  drafts_on={MINE: [wrap("draft-1")]})
