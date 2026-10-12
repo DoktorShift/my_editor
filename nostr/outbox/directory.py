@@ -109,9 +109,13 @@ class RelayDirectory(QObject):
         # each until its drafts are moved, however long that takes: nothing
         # is given up without the person knowing (leave_drafts_behind).
         self._drafts_left: Dict[str, Dict[str, Optional[int]]] = {}
+        # author -> relays being chosen for its drafts right now (the Draft
+        # Relays sheet moving drafts there): the account's own while so.
+        self._draft_relays_chosen: Dict[str, List[str]] = {}
         # authors whose every draft relay asks for a sign-in before it shows
-        # drafts (NIP-42, which MyEditor can't do yet): drafts saved there
-        # could be read back by nobody, so they go to the usual relays.
+        # drafts and did not take it (NIP-42; the signer app declined, say):
+        # drafts saved there could be read back by nobody, so they go to the
+        # usual relays.
         self._draft_relays_locked: set = set()
         # author -> the newest draft list this device wrote or followed in
         # this session: id, created_at, relays (see ``follow_draft_relays``).
@@ -370,10 +374,32 @@ class RelayDirectory(QObject):
             self._save()
         self.changed.emit(key)            # what drafts are read from changed
 
+    def own_relays(self, author: str) -> List[str]:
+        """Every relay the account itself chose: its relay list, its draft
+        relays, those it still reads drafts left behind on, and those being
+        chosen for its drafts right now. Signing in to a relay that asks
+        (nostr/relay_auth.py) is offered to these only."""
+        key = (author or "").lower()
+        mine = self.cached(key)
+        return policy.dedupe_relays(
+            list(mine.write) + list(mine.read) + list(self._draft_lists.get(key, ()))
+            + list(self._drafts_left.get(key, {})) + list(self._draft_relays_chosen.get(key, ())))
+
+    def choosing_draft_relays(self, author: str, relays: Sequence[str]) -> None:
+        """The relays being chosen for the account's drafts right now
+        (empty: none any more): they count as its own (``own_relays``)
+        while its drafts are moved there and read back."""
+        key = (author or "").lower()
+        if relays:
+            self._draft_relays_chosen[key] = list(relays)
+        else:
+            self._draft_relays_chosen.pop(key, None)
+
     def set_draft_relays_locked(self, author: str, locked: bool) -> None:
         """Whether every draft relay of the account asked for a sign-in
-        when its drafts were last read: while so, drafts are saved on the
-        usual relays (they are still read from the draft relays too)."""
+        and did not take it when its drafts were last read: while so,
+        drafts are saved on the usual relays (they are still read from the
+        draft relays too)."""
         key = (author or "").lower()
         if locked != (key in self._draft_relays_locked):
             (self._draft_relays_locked.add if locked else self._draft_relays_locked.discard)(key)

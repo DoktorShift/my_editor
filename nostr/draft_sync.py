@@ -145,7 +145,8 @@ class DraftSync(QObject):
         self._profile: Optional[Profile] = None
         self._subscription: Optional[Subscription] = None
         # Read relays that have not ended their stored drafts yet, and those
-        # that asked for a sign-in instead.
+        # that asked for a sign-in and did not take it (the relay pool signs
+        # in when asked; the signer app may decline).
         self._unanswered: set = set()
         self._asking_sign_in: set = set()
         self._bunker: Optional[BunkerClient] = None
@@ -537,10 +538,10 @@ class DraftSync(QObject):
         self._move_drafts_left_behind()
 
     def _follow_locked_draft_relays(self) -> None:
-        """Drafts saved on relays that show them only after a sign-in
-        (which MyEditor can't do yet) would be read back by no device: when
-        every draft relay asked for one, drafts go to the usual relays until
-        one of them shows drafts again."""
+        """Drafts saved on relays that show them only after a sign-in that
+        did not work (the signer app declined it, or the relay refused it)
+        would be read back by no device: when every draft relay is so,
+        drafts go to the usual relays until one of them shows drafts again."""
         author = self._profile.user_pubkey.lower()
         chosen = self._relay_directory.draft_relays_of(author) or []
         locked = bool(chosen) and all(
@@ -548,8 +549,9 @@ class DraftSync(QObject):
         self._relay_directory.set_draft_relays_locked(author, locked)
         if locked:
             self.status_changed.emit(_(
-                "Your draft relays show drafts only after you sign in to them, which "
-                "MyEditor can’t do yet. New drafts are saved on your usual relays."))
+                "Your draft relays ask you to sign in before they show your drafts, and "
+                "signing in didn’t work. New drafts are saved on your usual relays until "
+                "it does."))
 
     # -- internal: drafts left on relays no longer used --------------------
 

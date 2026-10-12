@@ -136,6 +136,8 @@ from nostr.blossom.errors import friendly_message
 from nostr.media_server_list import publish_server_list
 from nostr.outbox import writer as outbox_writer
 from nostr.profile_editing import ProfileEditing
+from nostr.relay import NOT_CHOSEN
+from nostr.relay_auth import DECLINED, AccountSignIn
 from nostr.state import NostrState
 from nostr.ui.profile_window import ProfileWindow
 from nostr.blossom.server_list import UserServerList
@@ -365,6 +367,14 @@ class MainWindow(QMainWindow):
         self._key_vault = KeyVault()
         self._session_pool = BunkerSessionPool(self._relay_pool, parent=self,
                                                vault=self._key_vault)
+        # A relay of the account's own that asks for a sign-in (NIP-42)
+        # gets one, signed by the account's signer; no other relay does.
+        self._relay_pool.sign_in = AccountSignIn(
+            profile=lambda: self._profile_store.default(),
+            session_pool=self._session_pool, directory=self._relay_directory,
+            entitled=self._entitled_relays)
+        self._relay_pool.signing_in.connect(self._on_relay_signing_in)
+        self._relay_pool.sign_in_failed.connect(self._on_relay_sign_in_failed)
         # Creating, restoring, backing up and signing out of accounts, and
         # telling the network about a new one (nostr/account_controller.py).
         self._accounts = AccountController(
@@ -4758,6 +4768,22 @@ class MainWindow(QMainWindow):
         dialog.create_requested.connect(lambda: QTimer.singleShot(0, self._on_create_account))
         dialog.restore_requested.connect(lambda: QTimer.singleShot(0, self._on_restore_account))
         dialog.exec()
+
+    # -- relays that ask for a sign-in (NIP-42) -------------------------------
+
+    def _on_relay_signing_in(self, relay: str) -> None:
+        self.status.showMessage(_("Signing in to {relay}…").format(relay=relay), 5000)
+
+    def _on_relay_sign_in_failed(self, relay: str, reason: str, sent: bool) -> None:
+        if reason == NOT_CHOSEN:
+            return
+        if sent:
+            text = _("{relay} didn’t accept your sign-in.")
+        elif reason == DECLINED:
+            text = _("{relay} asks you to sign in, and your signer app declined.")
+        else:
+            text = _("Couldn’t sign in to {relay}. Try again in a moment.")
+        self.status.showMessage(text.format(relay=relay), 8000)
 
     # -- association membership --------------------------------------------
 

@@ -712,8 +712,8 @@ def test_drafts_left_behind_are_moved_and_then_no_longer_read():
 
 def test_drafts_go_to_the_usual_relays_while_every_draft_relay_asks_for_a_sign_in():
     # Set by another app: a draft relay that shows drafts only after a
-    # sign-in, which MyEditor can't do yet. A draft saved there would be
-    # read back by no device.
+    # sign-in that did not work (the signer app declined it, say). A draft
+    # saved there would be read back by no device.
     from nostr.draft_store import DraftStore
     from nostr.draft_sync import DraftSync
     from nostr.outbox import ask_draft_relays
@@ -741,7 +741,8 @@ def test_drafts_go_to_the_usual_relays_while_every_draft_relay_asks_for_a_sign_i
 
     read_drafts()
     assert LOCKED not in writing() and set(writing()) >= {U1, U2}
-    assert said[-1].startswith("Your draft relays show drafts only after you sign in")
+    assert said[-1].startswith("Your draft relays ask you to sign in before they show your "
+                               "drafts, and signing in didn’t work.")
     relays.write_only = set()                              # it shows drafts now
     read_drafts()
     assert writing() == [LOCKED]

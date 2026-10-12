@@ -461,11 +461,11 @@ class DraftRelaysSheet(AssistantWindow):
         if move.unreadable:
             return ngettext(
                 "{relays} didn’t give your drafts back when MyEditor asked, so nothing was "
-                "changed. Some relays show drafts only after you sign in to them, which "
-                "MyEditor can’t do yet. Choose another relay, then try again.",
+                "changed. If your signer app asked you to approve signing in to it, approve "
+                "that, then try again. Otherwise choose another relay.",
                 "{relays} didn’t give your drafts back when MyEditor asked, so nothing was "
-                "changed. Some relays show drafts only after you sign in to them, which "
-                "MyEditor can’t do yet. Choose other relays, then try again.",
+                "changed. If your signer app asked you to approve signing in to them, "
+                "approve that, then try again. Otherwise choose other relays.",
                 len(move.unreadable)).format(relays=", ".join(move.unreadable))
         if move.not_moved and move.refused:
             return _("The relays your drafts would move to turned some of them down, so "

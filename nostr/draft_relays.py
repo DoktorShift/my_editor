@@ -228,8 +228,8 @@ class DraftMove(QObject):
     ``stop`` ends it where it is, sending nothing more.
 
     A relay's "OK" says it took a draft, not that it will give it back:
-    one may take drafts and then show them only after a sign-in (NIP-42),
-    or keep nothing. So each relay of ``verify`` (the relays the person
+    one may show drafts only after a sign-in (NIP-42) that the signer app
+    then declines, or keep nothing. So each relay of ``verify`` (the relays the person
     chose for drafts) is asked, once all is sent, for the drafts it took;
     one that refuses to answer, or answers and leaves one out, is
     ``unreadable``, and drafts are not to be kept there. One that can't be
@@ -562,6 +562,9 @@ class _Save(QObject):
     def start(self) -> None:
         # Drafts saved from now on wait for where this leaves them.
         self._directory.expect_draft_relays(self._author, timeout_ms=MOVE_WAIT_MS)
+        # The relays chosen are the account's own from now on: one that
+        # asks for a sign-in before it takes or shows drafts gets it.
+        self._directory.choosing_draft_relays(self._author, self._chosen)
         # The routing this device saves by may lag behind the list just
         # read (changed on another device since it started): drafts are
         # read from both.
@@ -609,6 +612,7 @@ class _Save(QObject):
             for mover in self._movers:
                 mover.stop()
             self._ended = True
+            self._directory.choosing_draft_relays(self._author, ())
             self._directory.set_draft_relays(self._author, None)
         return True
 
@@ -661,6 +665,7 @@ class _Save(QObject):
 
     def _end(self, outcome: SaveOutcome, *, follow: Optional[List[str]]) -> None:
         self._ended = True
+        self._directory.choosing_draft_relays(self._author, ())
         # None: drafts go where they went; either way saving them goes on.
         self._directory.set_draft_relays(self._author, follow)
         self._on_done(outcome)
