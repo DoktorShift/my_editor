@@ -50,7 +50,9 @@ class Relays(HandPool):
     cannot be reached, ``unreachable_for`` maps a relay to the kinds it
     cannot be reached for, ``refusing_kinds`` closes requests that ask
     for those kinds, ``ignoring_until`` relays answer as if no ``until``
-    was asked, and ``run`` lets every request that is open be
+    was asked, ``write_only`` relays take events but close every request
+    asking for them sign in first, ``keeps_nothing`` relays answer OK and
+    keep nothing, and ``run`` lets every request that is open be
     answered (and whatever it leads to) until nothing is left."""
 
     def __init__(self, *, refuse_publish: Iterable[str] = ()) -> None:
@@ -60,6 +62,8 @@ class Relays(HandPool):
         self.unreachable_for: Dict[str, Set[int]] = {}
         self.refusing_kinds: Set[int] = set()
         self.ignoring_until: Set[str] = set()
+        self.write_only: Set[str] = set()
+        self.keeps_nothing: Set[str] = set()
         self.publisher = FakePool(refuse=refuse_publish)
         self._answered = 0
 
@@ -71,6 +75,12 @@ class Relays(HandPool):
         self.stored.setdefault(relay, []).extend(events)
 
     def publish(self, urls, event):
+        # A relay that takes an event gives it back when asked, as relays
+        # do (``write_only`` relays take it and refuse every read).
+        for url in urls:
+            if (url not in self.publisher.refuse and url not in self.keeps_nothing
+                    and event not in self.stored.get(url, [])):
+                self.keep(url, event)
         return self.publisher.publish(urls, event)
 
     def run(self, rounds: int = 12) -> None:
@@ -83,6 +93,8 @@ class Relays(HandPool):
                 for url in sub.urls:
                     if url in self.down or kinds & self.unreachable_for.get(url, set()):
                         sub.fail(url)
+                    elif url in self.write_only:
+                        sub.refuse(url, "auth-required: sign in to read")
                     elif kinds & self.refusing_kinds:
                         sub.refuse(url, "blocked: not here")
                     else:

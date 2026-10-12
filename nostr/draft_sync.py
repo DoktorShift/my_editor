@@ -142,8 +142,10 @@ class DraftSync(QObject):
 
         self._profile: Optional[Profile] = None
         self._subscription: Optional[Subscription] = None
-        # Read relays that have not ended their stored drafts yet.
+        # Read relays that have not ended their stored drafts yet, and those
+        # that asked for a sign-in instead.
         self._unanswered: set = set()
+        self._asking_sign_in: set = set()
         self._bunker: Optional[BunkerClient] = None
         self._read_relays: List[str] = []
 
@@ -444,9 +446,15 @@ class DraftSync(QObject):
         # Loading is over when every relay has ended one way or another: a
         # relay that cannot be reached must not keep it going for good.
         self._unanswered = {normalize_relay_url(u) or u for u in self._read_relays}
+        self._asking_sign_in = set()
         for signal in (self._subscription.relay_eose, self._subscription.relay_closed,
                        self._subscription.relay_failed):
             signal.connect(self._on_relay_ended)
+        self._subscription.relay_closed.connect(self._on_relay_closed)
+
+    def _on_relay_closed(self, url: str, reason: str) -> None:
+        if reason.startswith("auth-required:"):
+            self._asking_sign_in.add(normalize_relay_url(url) or url)
 
     def _on_relay_ended(self, url: str, *_reason) -> None:
         self._unanswered.discard(normalize_relay_url(url) or url)
@@ -500,7 +508,23 @@ class DraftSync(QObject):
         self.status_changed.emit(
             ngettext("Loaded {n} draft.", "Loaded {n} drafts.", count).format(n=count)
         )
+        self._follow_locked_draft_relays()
         self._move_drafts_left_behind()
+
+    def _follow_locked_draft_relays(self) -> None:
+        """Drafts saved on relays that show them only after a sign-in
+        (which MyEditor can't do yet) would be read back by no device: when
+        every draft relay asked for one, drafts go to the usual relays until
+        one of them shows drafts again."""
+        author = self._profile.user_pubkey.lower()
+        chosen = self._relay_directory.draft_relays_of(author) or []
+        locked = bool(chosen) and all(
+            (normalize_relay_url(url) or url) in self._asking_sign_in for url in chosen)
+        self._relay_directory.set_draft_relays_locked(author, locked)
+        if locked:
+            self.status_changed.emit(_(
+                "Your draft relays show drafts only after you sign in to them, which "
+                "MyEditor can’t do yet. New drafts are saved on your usual relays."))
 
     # -- internal: drafts left on relays no longer used --------------------
 

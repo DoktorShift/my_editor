@@ -122,6 +122,10 @@ class RelayDirectory(QObject):
         # its draft relays no longer read but may still hold drafts: they
         # are read until those drafts are moved (DraftsLeftBehind).
         self._drafts_left: Dict[str, DraftsLeftBehind] = {}
+        # authors whose every draft relay asks for a sign-in before it shows
+        # drafts (NIP-42, which MyEditor can't do yet): drafts saved there
+        # could be read back by nobody, so they go to the usual relays.
+        self._draft_relays_locked: set = set()
         # author -> what waits for the draft list being read right now, and
         # until when it waits. One timer serves every wait: a timer per wait,
         # connected to a closure over this object, could outlive or destroy it.
@@ -351,6 +355,15 @@ class RelayDirectory(QObject):
             self._save()
         self.changed.emit(key)            # what drafts are read from changed
 
+    def set_draft_relays_locked(self, author: str, locked: bool) -> None:
+        """Whether every draft relay of the account asked for a sign-in
+        when its drafts were last read: while so, drafts are saved on the
+        usual relays (they are still read from the draft relays too)."""
+        key = (author or "").lower()
+        if locked != (key in self._draft_relays_locked):
+            (self._draft_relays_locked.add if locked else self._draft_relays_locked.discard)(key)
+            self.changed.emit(key)
+
     def draft_relays_of(self, author: str) -> Optional[List[str]]:
         """The account's draft relays as known now, [] for none, None when
         not known."""
@@ -372,6 +385,8 @@ class RelayDirectory(QObject):
                 key, on_done, entitled=entitled, legacy=legacy, reading=reading))
             return
         mine = self._draft_lists.get(key, ()) if chosen is None else list(chosen)
+        if chosen is None and not reading and key in self._draft_relays_locked:
+            mine = ()
         left = self.drafts_left_behind(key) if reading and chosen is None else None
         self.lookup(key, lambda relay_list: on_done(policy.dedupe_relays(
             policy.draft_relays(relay_list, mine, entitled=entitled, legacy=legacy,

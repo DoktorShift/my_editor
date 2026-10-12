@@ -185,10 +185,12 @@ class MoveOutcome:
     unread: Tuple[str, ...] = ()         # relays being left that did not answer
     not_moved: Tuple[str, ...] = ()      # ids of the events no relay took
     refused: bool = False                # a relay turned one down (not just silence)
+    unreadable: Tuple[str, ...] = ()     # relays to keep drafts on that did not give
+                                         # them back when asked (``verify``)
 
     @property
     def ok(self) -> bool:
-        return not self.unread and not self.not_moved
+        return not self.unread and not self.not_moved and not self.unreadable
 
 
 class DraftMove(QObject):
@@ -210,6 +212,13 @@ class DraftMove(QObject):
     on, ``skip`` leaves out what a first pass moved (the catch-up), and
     ``stop`` ends it where it is, sending nothing more.
 
+    A relay's "OK" says it took a draft, not that it will give it back:
+    one may take drafts and then show them only after a sign-in (NIP-42),
+    or keep nothing. So each relay of ``verify`` (the relays the person
+    chose for drafts) is asked, once all is sent, for the drafts it took;
+    one that refuses, stays silent or leaves one out is ``unreadable``,
+    and drafts are not to be kept there.
+
     Signals:
       progress(int, int, int)  events settled, events to send, and of
                                them drafts with content ("Moving 12 drafts…")
@@ -223,6 +232,7 @@ class DraftMove(QObject):
 
     def __init__(self, *, pool, author: str, source: Sequence[str],
                  destination: Sequence[str], must_read: Sequence[str] = (),
+                 verify: Sequence[str] = (),
                  since: Optional[int] = None, skip: Sequence[str] = (),
                  clock: Callable[[], float] = time.time,
                  parent: Optional[QObject] = None) -> None:
@@ -232,6 +242,7 @@ class DraftMove(QObject):
         self._source = dedupe_relays(source)
         self._destination = dedupe_relays(destination)
         self._must_read = set(dedupe_relays(must_read))
+        self._verify = dedupe_relays(verify)
         self._since = since
         self._skip = set(skip)
         self._clock = clock
@@ -239,6 +250,9 @@ class DraftMove(QObject):
         self._requests: Dict[str, dict] = {}         # id -> a request deleting drafts
         self._deleted: Dict[str, int] = {}           # d -> when a request deleted it
         self._seen_on: Dict[str, Set[str]] = {}      # id -> relays that sent it
+        self._held: Dict[str, Set[str]] = {}         # relay -> ids it holds now
+        self._pages_to_check: List[List[str]] = []   # ids still to read back
+        self._unreadable: Set[str] = set()
         self._queue: List[dict] = []
         self._in_flight = 0
         self._total = 0
@@ -256,7 +270,7 @@ class DraftMove(QObject):
 
     def start(self) -> None:
         if not self._source:
-            self._finish()
+            self._read_back()
             return
         self._read(self._WRAPS, None)
 
@@ -342,7 +356,7 @@ class DraftMove(QObject):
                            if event["kind"] == DRAFT_WRAP_KIND and event.get("content"))
         self.progress.emit(0, self._total, self._drafts)
         if not self._queue:
-            self._finish()
+            self._read_back()
             return
         self._pump()
 
@@ -350,6 +364,8 @@ class DraftMove(QObject):
         while self._queue and self._in_flight < SENDS_AT_ONCE and not self._done:
             event = self._queue.pop(0)
             has_it = self._seen_on.get(event["id"], set())
+            for url in has_it:
+                self._held.setdefault(url, set()).add(str(event["id"]))
             targets = [url for url in self._destination if url not in has_it]
             if not self._destination or not targets:
                 # Nowhere to go, or every relay there has it already.
@@ -363,6 +379,11 @@ class DraftMove(QObject):
 
     def _on_sent(self, event: dict, already: bool, results: list) -> None:
         self._in_flight -= 1
+        for url, ok, message in results:
+            # "replaced:" is kept too, but as a newer version: not this id.
+            if ok or (kept_by_relay(ok, message) and not message.startswith("replaced:")):
+                self._held.setdefault(normalize_relay_url(url) or url, set()).add(
+                    str(event["id"]))
         kept = already or any(kept_by_relay(ok, message) for _url, ok, message in results)
         refused = not kept and any(not ok and refused_by_relay(message)
                                    for _url, ok, message in results)
@@ -375,16 +396,59 @@ class DraftMove(QObject):
         settled = len(self._moved) + len(self._not_moved)
         self.progress.emit(settled, self._total, self._drafts)
         if settled == self._total:
-            self._finish()
+            self._read_back()
 
-    def _finish(self, *, unread: Set[str] = frozenset()) -> None:
+    # -- reading back ----------------------------------------------------------
+
+    def _read_back(self) -> None:
+        """Ask each relay of ``verify`` for the drafts it took, a page of
+        ids at a time; the first question also asks for any draft, so a
+        relay that took none still has to answer."""
+        if self._done:
+            return
+        if self._not_moved or not self._verify:
+            self._finish()
+            return
+        ids = sorted({i for url in self._verify for i in self._held.get(url, ())})
+        self._pages_to_check = [ids[at:at + MOVE_PAGE] for at in range(0, len(ids), MOVE_PAGE)]
+        self._check_page(first=True)
+
+    def _check_page(self, *, first: bool = False) -> None:
+        chunk = self._pages_to_check.pop(0) if self._pages_to_check else []
+        filters: List[dict] = [{"ids": chunk, "authors": [self._author]}] if chunk else []
+        if first:
+            filters.append({"kinds": [DRAFT_WRAP_KIND], "authors": [self._author], "limit": 1})
+        if not filters:
+            self._finish(unreadable=self._unreadable)
+            return
+        fetch_events(self._pool, self._verify, filters,
+                     lambda fetched: self._on_checked(set(chunk), fetched),
+                     accept=lambda event: str(event.get("pubkey", "")).lower() == self._author,
+                     timeout_ms=MOVE_QUERY_TIMEOUT_MS, parent=self)
+
+    def _on_checked(self, asked: Set[str], fetched: Fetched) -> None:
+        if self._done:
+            return
+        for url in self._verify:
+            given = {event["id"] for event in fetched.events if url in fetched.relays_of(
+                event["id"])}
+            if url not in fetched.answered or (self._held.get(url, set()) & asked) - given:
+                self._unreadable.add(url)
+        if self._pages_to_check:
+            self._check_page()
+        else:
+            self._finish(unreadable=self._unreadable)
+
+    def _finish(self, *, unread: Set[str] = frozenset(),
+                unreadable: Set[str] = frozenset()) -> None:
         if self._done:
             return
         self._done = True
         self.finished.emit(MoveOutcome(moved=len(self._moved), total=self._total,
                                        unread=tuple(sorted(unread)),
                                        not_moved=tuple(self._not_moved),
-                                       refused=self._refused))
+                                       refused=self._refused,
+                                       unreadable=tuple(sorted(unreadable))))
 
 
 @dataclass(frozen=True)
@@ -476,7 +540,7 @@ class _Save(QObject):
         self._on_step(READING_DRAFTS, 0, 0, 0)
         mover = DraftMove(pool=self._pool, author=self._author, source=self._source,
                           destination=self._destination, must_read=self._must_read,
-                          clock=self._clock, parent=self)
+                          verify=self._chosen, clock=self._clock, parent=self)
         mover.progress.connect(
             lambda done, total, drafts: self._on_step(MOVING_DRAFTS, done, total, drafts))
         mover.finished.connect(lambda outcome: self._moved(outcome, mover.moved_ids))

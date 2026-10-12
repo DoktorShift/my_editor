@@ -28,7 +28,9 @@ Use My Usual Relays empties the list, the way Restore Defaults resets a
 settings sheet; nothing changes before Save.
 
 Save moves the drafts to where they go next ("Moving 12 drafts…", with
-progress), then publishes the encrypted list (or an empty one), and only
+progress), reads them back from the relays chosen (a relay that takes
+drafts but does not give them back is no place for them, and the sheet
+names it), then publishes the encrypted list (or an empty one), and only
 then do drafts follow it (PrivateDraftRelays.save). Cancel (or Escape)
 stops it while the drafts are read or moved, and nothing changes; once
 the list itself is being saved, the change can't be called back. When a draft could not be moved, nothing is changed
@@ -352,6 +354,15 @@ class DraftRelaysSheet(AssistantWindow):
                 "internet connection, then try again. If those relays are gone for good, "
                 "choose Save Anyway: the drafts kept only there won’t be shown any more.",
                 len(move.unread)).format(relays=", ".join(move.unread))
+        if move.unreadable:
+            return ngettext(
+                "{relays} didn’t give your drafts back when MyEditor asked, so nothing was "
+                "changed. Some relays show drafts only after you sign in to them, which "
+                "MyEditor can’t do yet. Choose another relay, then try again.",
+                "{relays} didn’t give your drafts back when MyEditor asked, so nothing was "
+                "changed. Some relays show drafts only after you sign in to them, which "
+                "MyEditor can’t do yet. Choose other relays, then try again.",
+                len(move.unreadable)).format(relays=", ".join(move.unreadable))
         if move.not_moved and move.refused:
             return _("The relays your drafts would move to turned some of them down, so "
                      "nothing was changed. Choose other relays, then try again.")

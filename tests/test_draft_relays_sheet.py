@@ -243,7 +243,10 @@ def test_a_save_that_failed_says_why_and_keeps_the_sheet():
             (SaveOutcome(MoveOutcome(total=2, moved=1, not_moved=("x",))),
              "Some drafts couldn’t be moved, so nothing was changed. Check your internet"),
             (SaveOutcome(MoveOutcome(total=2, moved=1, not_moved=("x",), refused=True)),
-             "The relays your drafts would move to turned some of them down")):
+             "The relays your drafts would move to turned some of them down"),
+            (SaveOutcome(MoveOutcome(total=1, moved=1, unreadable=("wss://mine.example",))),
+             "wss://mine.example didn’t give your drafts back when MyEditor asked, so "
+             "nothing was changed. Some relays show drafts only after you sign in")):
         sheet, saved = open_sheet(Lists([], answer=answer))
         add(sheet, "wss://mine.example")
         sheet.buttons["save"].click()

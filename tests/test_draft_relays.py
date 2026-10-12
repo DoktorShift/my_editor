@@ -464,6 +464,43 @@ def test_a_list_on_its_way_can_not_be_stopped():
     assert outcomes[0].ok
 
 
+LOCKED = "wss://locked.example"       # takes drafts, shows them only after a sign-in
+
+
+def test_a_relay_that_takes_drafts_but_does_not_give_them_back_is_not_kept():
+    drafts, relays, directory, _client = moving(LIST_ON_MINE,
+                                                drafts_on={MINE: [wrap("draft-1")]})
+    relays.write_only = {LOCKED}
+    outcome, _steps = save(drafts, relays, [LOCKED])
+    assert not outcome.ok and outcome.move.unreadable == (LOCKED,) and outcome.write is None
+    assert sent(relays, KIND_PRIVATE_RELAYS) == [] and directory.draft_relays_of(PK) == [MINE]
+
+
+def test_a_relay_that_answers_ok_and_keeps_nothing_is_not_kept():
+    drafts, relays, directory, _client = moving(LIST_ON_MINE,
+                                                drafts_on={MINE: [wrap("draft-1")]})
+    relays.keeps_nothing = {OTHER}
+    outcome, _steps = save(drafts, relays, [OTHER])
+    assert not outcome.ok and outcome.move.unreadable == (OTHER,)
+    assert directory.draft_relays_of(PK) == [MINE]
+
+
+def test_a_relay_that_would_not_show_drafts_is_found_out_with_no_draft_to_move():
+    drafts, relays, directory, _client = moving(ABSENT)
+    relays.write_only = {LOCKED}
+    outcome, _steps = save(drafts, relays, [LOCKED])
+    assert not outcome.ok and outcome.move.unreadable == (LOCKED,)
+    assert sent(relays, KIND_PRIVATE_RELAYS) == [] and directory.draft_relays_of(PK) == []
+
+
+def test_only_the_relay_that_does_not_give_them_back_is_named():
+    drafts, relays, _directory, _client = moving(LIST_ON_MINE,
+                                                 drafts_on={MINE: [wrap("draft-1")]})
+    relays.write_only = {LOCKED}
+    outcome, _steps = save(drafts, relays, [OTHER, LOCKED])
+    assert not outcome.ok and outcome.move.unreadable == (LOCKED,)
+
+
 def test_drafts_saved_while_they_move_wait_for_where_they_go_next():
     drafts, relays, directory, _client = moving(LIST_ON_MINE,
                                                 drafts_on={MINE: [wrap("draft-1")]})
@@ -589,6 +626,46 @@ def test_drafts_left_behind_are_moved_and_then_no_longer_read():
     relays.run(rounds=10)
     assert sent(relays, 31234) == [([OTHER], draft)]
     assert directory.drafts_left_behind(PK) is None and MINE not in reading_relays(directory)
+    sync.stop()
+    sync.deleteLater()
+    settle()
+
+
+def test_drafts_go_to_the_usual_relays_while_every_draft_relay_asks_for_a_sign_in():
+    # Set by another app: a draft relay that shows drafts only after a
+    # sign-in, which MyEditor can't do yet. A draft saved there would be
+    # read back by no device.
+    from nostr.draft_store import DraftStore
+    from nostr.draft_sync import DraftSync
+    from nostr.outbox import ask_draft_relays
+    on_locked = found(signed(KIND_PRIVATE_RELAYS, [], f'sealed:[["relay","{LOCKED}"]]'))
+    _drafts, relays, directory, client = moving(on_locked)
+    relays.write_only = {LOCKED}
+    sync = DraftSync(relay_pool=relays, relay_directory=directory,
+                     session_pool=FakeSessionPool(client), store=DraftStore(),
+                     read_draft_list=lambda _profile, on_done: on_done([LOCKED]))
+    said = []
+    sync.status_changed.connect(said.append)
+    sync._profile = Profile()
+
+    def read_drafts():
+        sync._read_relays = reading_relays(directory)
+        sync._store.set_loading(True)
+        sync._open_subscription()
+        relays.run(rounds=5)
+
+    def writing():
+        answers = []
+        ask_draft_relays(directory, Profile(), answers.append)
+        settle()
+        return answers[0]
+
+    read_drafts()
+    assert LOCKED not in writing() and set(writing()) >= {U1, U2}
+    assert said[-1].startswith("Your draft relays show drafts only after you sign in")
+    relays.write_only = set()                              # it shows drafts now
+    read_drafts()
+    assert writing() == [LOCKED]
     sync.stop()
     sync.deleteLater()
     settle()
