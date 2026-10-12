@@ -412,6 +412,58 @@ def test_every_draft_is_read_a_page_at_a_time(monkeypatch):
     assert outcome.ok and outcome.move.moved == 5
 
 
+def test_a_relay_that_ignores_the_page_asked_for_is_not_read_forever(monkeypatch):
+    # It sends its newest drafts whatever ``until`` says: its older ones
+    # can never be reached, so it counts as a relay that did not answer.
+    from nostr import draft_relays
+    monkeypatch.setattr(draft_relays, "MOVE_PAGE", 3)
+    many = [wrap(f"draft-{n}", at=NOW - 100 * n) for n in range(5)]
+    drafts, relays, directory, _client = moving(LIST_ON_MINE, drafts_on={MINE: many})
+    relays.ignoring_until = {MINE}
+    outcome, _steps = save(drafts, relays, [])
+    assert outcome is not None and not outcome.ok and outcome.move.unread == (MINE,)
+    assert len(relays.subs) <= 3                       # two pages, not hundreds
+    assert relays.published == [] and directory.draft_relays_of(PK) == [MINE]
+
+
+def test_a_reading_that_does_not_end_is_given_up(monkeypatch):
+    from nostr import draft_relays
+    monkeypatch.setattr(draft_relays, "MOVE_PAGE", 2)
+    monkeypatch.setattr(draft_relays, "MOVE_PAGES_AT_MOST", 2)
+    many = [wrap(f"draft-{n}", at=NOW - 100 * n) for n in range(6)]
+    drafts, relays, _directory, _client = moving(LIST_ON_MINE, drafts_on={MINE: many})
+    outcome, _steps = save(drafts, relays, [])
+    assert not outcome.ok and outcome.move.unread == (MINE,) and relays.published == []
+
+
+def test_a_save_stopped_while_the_drafts_are_read_changes_nothing():
+    drafts, relays, directory, _client = moving(LIST_ON_MINE,
+                                                drafts_on={MINE: [wrap("draft-1")]})
+    outcomes, answers = [], []
+    drafts.save([OTHER], outcomes.append)
+    assert drafts.cancel()
+    relays.run(rounds=20)
+    assert outcomes == [] and relays.published == []
+    from nostr.outbox import ask_draft_relays
+    ask_draft_relays(directory, Profile(), answers.append)   # saving a draft goes on
+    settle()
+    assert answers == [[MINE]] and directory.draft_relays_of(PK) == [MINE]
+
+
+def test_a_list_on_its_way_can_not_be_stopped():
+    drafts, relays, _directory, _client = moving(LIST_ON_MINE,
+                                                 drafts_on={MINE: [wrap("draft-1")]})
+    outcomes = []
+
+    def step(name, *_counts):
+        if name == "saving_list":
+            assert not drafts.cancel()
+
+    drafts.save([OTHER], outcomes.append, on_step=step)
+    relays.run(rounds=20)
+    assert outcomes[0].ok
+
+
 def test_drafts_saved_while_they_move_wait_for_where_they_go_next():
     drafts, relays, directory, _client = moving(LIST_ON_MINE,
                                                 drafts_on={MINE: [wrap("draft-1")]})

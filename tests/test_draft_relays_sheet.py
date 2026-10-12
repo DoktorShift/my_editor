@@ -10,8 +10,8 @@ makes it so; Save moves the drafts, with progress, before it publishes
 the encrypted list and moves the drafts' routing; a save that failed
 says why, with the cause, and keeps the sheet; a relay being left that
 did not answer offers Save Anyway; a list changed elsewhere is read
-again rather than written over; a save under way can't be cancelled
-halfway; Return in the address field adds it; the focus starts on the
+again rather than written over; a save can be cancelled until the list
+itself is on its way, and not after; Return in the address field adds it; the focus starts on the
 list or the field; every control has a name.
 """
 
@@ -79,6 +79,15 @@ class Lists:
         self.saves = []
         self._pending = None
         self.last_failure = None
+        self.cancelled = 0
+        self.list_on_its_way = False
+
+    def cancel(self):
+        if self.list_on_its_way:
+            return False
+        self.cancelled += 1
+        self._pending = None
+        return True
 
     def read(self, on_done):
         self.last_failure = None if self.readable else self.failure
@@ -92,6 +101,7 @@ class Lists:
             on_done(self.answer)
 
     def step(self, *where):
+        self.list_on_its_way = where[0] == SAVING_LIST
         self._pending[1](*where)
 
     def finish(self, outcome):
@@ -303,15 +313,27 @@ def test_moving_the_drafts_is_counted():
     assert not sheet.isVisible()
 
 
-def test_a_save_under_way_cannot_be_cancelled_halfway():
+def test_a_save_can_be_cancelled_until_the_list_is_on_its_way():
     lists = Lists([], answer=None)
     sheet, saved = open_sheet(lists)
     add(sheet, "wss://mine.example")
     sheet.buttons["save"].click()
     assert sheet.state == SAVING and sheet._busy.isVisibleTo(sheet)
-    assert not sheet.buttons["cancel"].isEnabled() and not sheet._field.isEnabled()
+    assert sheet.buttons["cancel"].isEnabled() and not sheet._field.isEnabled()
+    lists.step(MOVING_DRAFTS, 1, 4, 4)
+    QTest.keyClick(sheet, Qt.Key.Key_Escape)
+    assert lists.cancelled == 1 and saved == [] and not sheet.isVisible()
+
+
+def test_a_list_on_its_way_cannot_be_called_back():
+    lists = Lists([], answer=None)
+    sheet, saved = open_sheet(lists)
+    add(sheet, "wss://mine.example")
+    sheet.buttons["save"].click()
+    lists.step(SAVING_LIST, 0, 0, 0)
+    assert not sheet.buttons["cancel"].isEnabled()
     sheet.reject()                                        # Escape, the close box
-    assert sheet.isVisible()
+    assert sheet.isVisible() and lists.cancelled == 0
     lists.finish(SAVED)
     assert saved == [["wss://mine.example"]] and not sheet.isVisible()
 

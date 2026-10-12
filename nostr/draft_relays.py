@@ -76,7 +76,7 @@ from nostr.outbox.writer import (
     CAUSE_SIGNER, FAILED, REFUSED, UNCHANGED, BaseChanged, ReplaceableWriter, WriteOutcome,
 )
 from nostr.publish_pipeline import kept_by_relay, refused_by_relay
-from nostr.queries import Fetched, fetch_events, page_horizon
+from nostr.queries import Fetched, fetch_events, full_pages, page_horizon
 
 KIND_PRIVATE_RELAYS = 10013
 
@@ -93,6 +93,7 @@ SAVING_LIST = "saving_list"
 MOVE_PAGE = 100               # wraps asked for at once: below every relay's own ceiling
                               # we know of (strfry 500, rnostr 2000), so a relay that
                               # sends fewer has no older ones
+MOVE_PAGES_AT_MOST = 500      # pages one reading asks for before it gives up (50,000 events)
 SENDS_AT_ONCE = 8             # drafts on their way at the same time
 MOVE_QUERY_TIMEOUT_MS = 10_000
 MOVE_WAIT_MS = 120_000        # how long saving a draft waits for a change to end
@@ -198,8 +199,11 @@ class DraftMove(QObject):
 
     Every relay of ``must_read`` (those not read any more once the list
     changed) has to answer, or the move ends at once, having sent
-    nothing. ``since`` reads only what was saved from then on, and
-    ``skip`` leaves out what a first pass moved (the catch-up).
+    nothing. So does a relay that cannot be read a page at a time (it
+    sends events newer than the page asked for), as its older drafts
+    would never be reached. ``since`` reads only what was saved from then
+    on, ``skip`` leaves out what a first pass moved (the catch-up), and
+    ``stop`` ends it where it is, sending nothing more.
 
     Signals:
       progress(int, int, int)  events settled, events to send, and of
@@ -237,6 +241,7 @@ class DraftMove(QObject):
         self._moved: List[str] = []
         self._not_moved: List[str] = []
         self._refused = False
+        self._pages = 0
         self._done = False
 
     @property
@@ -250,9 +255,15 @@ class DraftMove(QObject):
             return
         self._read(self._WRAPS, None)
 
+    def stop(self) -> None:
+        """End the move where it is: nothing more is read or sent, and
+        ``finished`` is not emitted. What reached a relay stays there."""
+        self._done = True
+
     # -- reading -------------------------------------------------------------
 
     def _read(self, which: str, until: Optional[int]) -> None:
+        self._pages += 1
         kind = DRAFT_WRAP_KIND if which == self._WRAPS else DELETION_KIND
         flt: dict = {"kinds": [kind], "authors": [self._author], "limit": MOVE_PAGE}
         if which == self._REQUESTS:
@@ -280,6 +291,14 @@ class DraftMove(QObject):
             # read: moving the rest would still strand them.
             self._finish(unread=silent or set(self._source) - answered or set(self._source))
             return
+        unpaged = {relay for event in fetched.events
+                   if until is not None and int(event["created_at"]) > until
+                   for relay in fetched.relays_of(event["id"])}
+        if unpaged:
+            # It sends its newest drafts whatever page is asked for, so its
+            # older ones can't be reached: the same as not answering.
+            self._finish(unread=unpaged)
+            return
         for event in fetched.events:
             self._seen_on.setdefault(event["id"], set()).update(fetched.relays_of(event["id"]))
             if which == self._WRAPS:
@@ -291,7 +310,11 @@ class DraftMove(QObject):
                 for identifier, when in deleted_identifiers(event, self._author).items():
                     self._deleted[identifier] = max(when, self._deleted.get(identifier, when))
         horizon = page_horizon(fetched, fetched.events, MOVE_PAGE)
-        if horizon is not None:
+        if horizon is not None and self._pages >= MOVE_PAGES_AT_MOST:
+            # More pages than any account's drafts fill: something keeps
+            # the reading from ending, so its relays count as not read.
+            self._finish(unread=set(full_pages(fetched, fetched.events, MOVE_PAGE)))
+        elif horizon is not None:
             # A relay sent a full page: read on from where it ended, or past
             # a second that held a whole page, so the reading ends.
             self._read(which, horizon if until is None or horizon < until else until - 1)
@@ -408,6 +431,9 @@ class _Save(QObject):
         self._move = MoveOutcome()
         self._moved_ids: List[str] = []
         self._written: Optional[WriteOutcome] = None
+        self._movers: List[DraftMove] = []
+        self._writing = False        # the list's own change began: no way back from here
+        self._ended = False
 
     def start(self) -> None:
         # Drafts saved from now on wait for where this leaves them.
@@ -429,7 +455,7 @@ class _Save(QObject):
 
     def _routed(self, name: str, relays: List[str]) -> None:
         self._routes[name] = list(relays)
-        if len(self._routes) < 4:
+        if len(self._routes) < 4 or self._ended:
             return
         self._source = dedupe_relays(self._routes["source"] + self._routes["source_here"])
         self._destination = self._routes["destination"]
@@ -445,9 +471,26 @@ class _Save(QObject):
         mover.progress.connect(
             lambda done, total, drafts: self._on_step(MOVING_DRAFTS, done, total, drafts))
         mover.finished.connect(lambda outcome: self._moved(outcome, mover.moved_ids))
+        self._movers.append(mover)
         mover.start()
 
+    def cancel(self) -> bool:
+        """Stop the change while the drafts are read or moved: the list
+        stays as it is and drafts go where they went (copies that reached
+        the new relays stay there, unused). False once the list's own
+        change began, which can't be called back."""
+        if self._writing:
+            return False
+        if not self._ended:
+            for mover in self._movers:
+                mover.stop()
+            self._ended = True
+            self._directory.set_draft_relays(self._author, None)
+        return True
+
     def _moved(self, outcome: MoveOutcome, moved_ids: List[str]) -> None:
+        if self._ended:
+            return
         self._move, self._moved_ids = outcome, moved_ids
         if not outcome.ok:
             self._end(SaveOutcome(outcome), follow=None)
@@ -455,6 +498,7 @@ class _Save(QObject):
         self._write_list()
 
     def _write_list(self) -> None:
+        self._writing = True
         self._on_step(SAVING_LIST, 0, 0, 0)
         self._write(self._on_written)
 
@@ -483,6 +527,7 @@ class _Save(QObject):
         self._end(SaveOutcome(self._move, self._written), follow=self._chosen)
 
     def _end(self, outcome: SaveOutcome, *, follow: Optional[List[str]]) -> None:
+        self._ended = True
         # None: drafts go where they went; either way saving them goes on.
         self._directory.set_draft_relays(self._author, follow)
         self._on_done(outcome)
@@ -519,6 +564,7 @@ class PrivateDraftRelays(QObject):
         self._known: Optional[List[str]] = None
         self._read_id: Optional[str] = None
         self.last_failure: Optional[str] = None    # why the last read answered None
+        self._saving: Optional[_Save] = None
 
     def read(self, on_done: Callable[[Optional[List[str]]], None]) -> None:
         """``on_done(relays)``, ``on_done([])`` for none, ``on_done(None)``
@@ -609,11 +655,18 @@ class PrivateDraftRelays(QObject):
                 self._read_id = (outcome.write.event or {}).get("id")
             on_done(outcome)
 
-        _Save(pool=self._pool, directory=self._directory, profile=self._profile,
-              entitled=self._entitled, clock=self._clock, current=list(current),
-              chosen=chosen, write=write, leave_unread=list(leave_unread), on_done=done,
-              on_step=on_step or (lambda _step, _done, _total, _drafts: None),
-              parent=self).start()
+        self._saving = _Save(
+            pool=self._pool, directory=self._directory, profile=self._profile,
+            entitled=self._entitled, clock=self._clock, current=list(current),
+            chosen=chosen, write=write, leave_unread=list(leave_unread), on_done=done,
+            on_step=on_step or (lambda _step, _done, _total, _drafts: None), parent=self)
+        self._saving.start()
+
+    def cancel(self) -> bool:
+        """Stop the save under way while its drafts are read or moved
+        (``on_done`` is not called); False once the list's own change
+        began, which can't be called back."""
+        return self._saving is None or self._saving.cancel()
 
     def _write(self, plaintext: str, *, on_absent: str,
                on_done: Callable[[WriteOutcome], None], over=_ANY) -> None:

@@ -49,7 +49,8 @@ class Relays(HandPool):
     """A pool of relays: ``keep`` stores events on them, ``down`` relays
     cannot be reached, ``unreachable_for`` maps a relay to the kinds it
     cannot be reached for, ``refusing_kinds`` closes requests that ask
-    for those kinds, and ``run`` lets every request that is open be
+    for those kinds, ``ignoring_until`` relays answer as if no ``until``
+    was asked, and ``run`` lets every request that is open be
     answered (and whatever it leads to) until nothing is left."""
 
     def __init__(self, *, refuse_publish: Iterable[str] = ()) -> None:
@@ -58,6 +59,7 @@ class Relays(HandPool):
         self.down: Set[str] = set()
         self.unreachable_for: Dict[str, Set[int]] = {}
         self.refusing_kinds: Set[int] = set()
+        self.ignoring_until: Set[str] = set()
         self.publisher = FakePool(refuse=refuse_publish)
         self._answered = 0
 
@@ -84,5 +86,8 @@ class Relays(HandPool):
                     elif kinds & self.refusing_kinds:
                         sub.refuse(url, "blocked: not here")
                     else:
-                        sub.answer(url, *answer(self.stored.get(url, []), sub.filters))
+                        filters = sub.filters if url not in self.ignoring_until else [
+                            {k: v for k, v in flt.items() if k != "until"}
+                            for flt in sub.filters]
+                        sub.answer(url, *answer(self.stored.get(url, []), filters))
         settle()

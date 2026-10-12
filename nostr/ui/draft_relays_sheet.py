@@ -29,8 +29,9 @@ settings sheet; nothing changes before Save.
 
 Save moves the drafts to where they go next ("Moving 12 drafts…", with
 progress), then publishes the encrypted list (or an empty one), and only
-then do drafts follow it (PrivateDraftRelays.save); it can't be
-cancelled halfway. When a draft could not be moved, nothing is changed
+then do drafts follow it (PrivateDraftRelays.save). Cancel (or Escape)
+stops it while the drafts are read or moved, and nothing changes; once
+the list itself is being saved, the change can't be called back. When a draft could not be moved, nothing is changed
 and the sheet says what to do. When a relay being left did not answer,
 Save Anyway (in place of Use My Usual Relays) changes the setting all
 the same, leaving the drafts kept only on the relays it named behind:
@@ -86,6 +87,7 @@ class DraftRelaysSheet(AssistantWindow):
         self._relays = relays
         self._read: List[str] = []        # the account's list, as last read
         self._state = READING
+        self._list_saving = False     # the save reached the list's own change
         self._generation = 0
         self._shown_buttons: list = []
         # The choice a save failed for because a relay being left did not
@@ -256,6 +258,7 @@ class DraftRelaysSheet(AssistantWindow):
         chosen = self.chosen()
         self._generation += 1
         generation = self._generation
+        self._list_saving = False
         self._set_state(SAVING, busy=_("Reading your drafts…"))
         self._relays.save(
             chosen, lambda outcome: self._on_saved(generation, chosen, outcome),
@@ -283,6 +286,9 @@ class DraftRelaysSheet(AssistantWindow):
                 _("Reading your drafts…") if step == READING_DRAFTS
                 else _("Saving. Approve the request in your signer app if it asks…"))
             self._progress.setRange(0, 0)
+        if step == SAVING_LIST:
+            self._list_saving = True
+            self._update_buttons()
 
     def _on_saved(self, generation: int, chosen: List[str], outcome: SaveOutcome) -> None:
         if generation != self._generation:
@@ -394,8 +400,11 @@ class DraftRelaysSheet(AssistantWindow):
             leading = ("usual", _("Use My Usual Relays"), LEADING, self._use_usual_relays,
                        editing and self._list.count() > 0)
         return [leading,
-                ("cancel", _("Cancel"), NORMAL, self.reject, self._state != SAVING),
+                ("cancel", _("Cancel"), NORMAL, self.reject, self._can_cancel()),
                 ("save", _("Save"), DEFAULT, self._save, editing and self._changed())]
+
+    def _can_cancel(self) -> bool:
+        return self._state != SAVING or not self._list_saving
 
     def _update_buttons(self) -> None:
         """Lay the buttons out again only when they change (a new layout
@@ -412,9 +421,10 @@ class DraftRelaysSheet(AssistantWindow):
     # -- closing -----------------------------------------------------------------
 
     def reject(self) -> None:
-        # A change on its way to the signer and the relays can't be called
-        # back: the sheet stays until it is answered, and says so.
-        if self._state == SAVING:
+        # Drafts being read or moved can be left where they are; a list on
+        # its way to the signer and the relays can't be called back: the
+        # sheet stays until it is answered, and says so.
+        if self._state == SAVING and not (self._can_cancel() and self._relays.cancel()):
             return
         super().reject()
 
