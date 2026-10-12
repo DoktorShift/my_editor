@@ -545,6 +545,37 @@ class TestTheSecondProcess:
         second.controller.account_changed(None)
         settle()
 
+    def test_one_that_cannot_open_the_inbox_keeps_its_lock(self, tmp_path, monkeypatch):
+        """S1 of the CP3 fixes review: the first MyEditor that could not
+        open the inbox gave its lock back but went on writing the list, and
+        a second one took the lock and wrote it too. The lock stays its
+        own until it unbinds, and trying again goes on with it."""
+        import sqlite3
+        from nostr import imports_controller
+        first, second, third = Harness(tmp_path), Harness(tmp_path), Harness(tmp_path)
+
+        class Unreadable(imports_controller.InboxStore):
+            def check(self):
+                raise sqlite3.OperationalError("disk I/O error")
+        monkeypatch.setattr(imports_controller, "InboxStore", Unreadable)
+        first.controller.account_changed(profile())
+        monkeypatch.undo()
+        settle()
+        assert not first.controller.bound and first.controller.problem
+        assert not first.controller.subscriptions.read_only
+        second.controller.account_changed(profile())
+        settle()
+        assert second.controller.read_only and second.controller.subscriptions.read_only
+        assert first.controller.retry()                 # the same lock, the inbox open now
+        assert not first.controller.read_only
+        first.controller.account_changed(None)          # gives the lock back
+        third.controller.account_changed(profile())
+        settle()
+        assert not third.controller.read_only
+        for harness in (second, third):
+            harness.controller.account_changed(None)
+        settle()
+
     def test_the_window_stays_and_works_again(self, tmp_path):
         from nostr.imports_controller import ELSEWHERE
         from nostr.ui.imports_window import ImportsWindow

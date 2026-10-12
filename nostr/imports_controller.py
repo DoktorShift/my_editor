@@ -320,6 +320,15 @@ class ImportsController(QObject):
         except OSError as exc:
             self._cannot_bind(exc, path)
             return
+        # A lock this process kept after the inbox could not be opened is
+        # still its own: trying again (``retry``) goes on with it.
+        if (self._lock is None or not self._lock.isLocked()) and not self._take_lock(path):
+            return
+        self._open(path)
+
+    def _take_lock(self, path: Path) -> bool:
+        """Take the inbox's lock, or learn that another MyEditor keeps it
+        (``read_only``). False when no lock can be made at all."""
         self._lock = QLockFile(str(path.with_suffix(".lock")))
         # Held for the whole session: stale only when its process is gone,
         # so a lock left by a crash is taken over at the next start.
@@ -331,7 +340,7 @@ class ImportsController(QObject):
             self.read_only = self.subscriptions.read_only = False
             self._cannot_bind(PermissionError(errno.EACCES, "the lock file cannot be made",
                                               str(path.with_suffix(".lock"))), path)
-            return
+            return False
         # The list of sources follows the lock: while another MyEditor keeps
         # it, that one writes the list, also when this one then cannot open
         # the inbox (CP3 review M1, and N1 of its fixes).
@@ -340,7 +349,7 @@ class ImportsController(QObject):
             _log.info("imports inbox in use by another process; showing it read-only")
         else:
             self._hold_lock()
-        self._open(path)
+        return True
 
     def _hold_lock(self) -> None:
         """The lock is this process's for the session. Given back at quit
@@ -495,7 +504,11 @@ class ImportsController(QObject):
         self._watch.stop()
         self._trim_timer.stop()
         self._drop_inbox()
-        self._release_lock()
+        if self.read_only:
+            self._release_lock()    # only tried: nothing of it is this one's
+        # A lock this process holds stays its own until it unbinds: given
+        # back here, a second MyEditor took it and wrote the list too, while
+        # this one still did (S1 of the CP3 fixes review).
         self._cannot_bind(exc, path, problem=problem)
 
     def _cannot_bind(self, exc: BaseException, path: Path, *, problem: str = "") -> None:
@@ -528,6 +541,7 @@ class ImportsController(QObject):
         self._watch.stop()
         self._trim_timer.stop()
         if self.inbox is None:
+            self._release_lock()    # one kept after the inbox could not be opened
             return
         self.close_window()
         if self.runner is not None and self.runner.busy():
