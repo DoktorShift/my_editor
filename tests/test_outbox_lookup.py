@@ -202,6 +202,8 @@ class StubRelay(QObject):
 
 
 class StubPool:
+    sign_in = None                       # nobody signs in (NIP-42)
+
     def __init__(self):
         self.relays = {}
 

@@ -5,11 +5,13 @@
 References:
   - NIP-01: https://github.com/nostr-protocol/nips/blob/master/01.md
   - NIP-20 (OK response): folded into NIP-01
+  - NIP-42: https://github.com/nostr-protocol/nips/blob/master/42.md
 
 Wire messages we send (client -> relay):
   ["EVENT", <event>]                           # publish
   ["REQ", <sub_id>, <filter>, ...]             # subscribe
   ["CLOSE", <sub_id>]                          # cancel subscription
+  ["AUTH", <signed kind 22242 event>]          # sign in (NIP-42)
 
 Wire messages we handle (relay -> client):
   ["OK", <event_id>, <bool>, <message>]        # publish ack
@@ -17,7 +19,7 @@ Wire messages we handle (relay -> client):
   ["EOSE", <sub_id>]                           # end of stored events
   ["NOTICE", <message>]                        # human-readable info / error
   ["CLOSED", <sub_id>, <message>]              # subscription terminated
-  ["AUTH", <challenge>]                        # NIP-42 - not implemented yet
+  ["AUTH", <challenge>]                        # what a sign-in has to sign
 
 Design notes:
   - One Relay per URL, shared across all jobs. WebSocket stays warm so
@@ -32,19 +34,28 @@ Design notes:
     back. That is what keeps a signer app's channel (NIP-46) and live
     draft sync working through a dropped connection. A relay nobody
     subscribes to is not reopened: the next publish opens a fresh socket.
+  - Signing in (NIP-42) happens only when a relay refuses a request with
+    "auth-required:", never unasked: signing in tells the relay who you
+    are. Who signs in, and where they may, is the ``sign_in`` of the
+    request or of the pool (nostr/relay_auth.py). The request is sent
+    again once after the relay accepted the sign-in; a second refusal is
+    final. A sign-in lasts as long as the connection.
 """
 
 from __future__ import annotations
 
 import json
 import secrets
-from typing import Any, Dict, List, Optional, Tuple
+import time
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 from PySide6.QtWebSockets import QWebSocket
 
 from i18n import _
 
+from . import crypto, events
 from .outbox.policy import normalize_relay_url
 
 
@@ -61,8 +72,56 @@ DEFAULT_CONNECT_TIMEOUT_MS: int = 5000
 RECONNECT_FIRST_MS: int = 1000
 RECONNECT_LONGEST_MS: int = 60_000
 
+# A relay that refuses a request until you sign in starts its reason so.
+AUTH_REQUIRED: str = "auth-required:"
+
+# Signing in: how long a relay that asked for it has to send the challenge
+# to sign, and to accept or refuse the signed answer. Signing itself has
+# no limit here: a signer app waits for the person, as long as it waits.
+SIGN_IN_CHALLENGE_WAIT_MS: int = 5000
+SIGN_IN_ANSWER_MS: int = DEFAULT_PUBLISH_TIMEOUT_MS
+
+# Why a sign-in did not happen, when the relay is not one to sign in to.
+NOT_CHOSEN: str = "not a relay this account chose"
+
+AUTH_KIND: int = 22242
+
+
+def sign_in_event(url: str, challenge: str, *, created_at: Optional[int] = None) -> dict:
+    """The unsigned answer to a relay's challenge (NIP-42)."""
+    return {"kind": AUTH_KIND, "content": "",
+            "tags": [["relay", url], ["challenge", challenge]],
+            "created_at": int(created_at if created_at is not None else time.time())}
+
+
+class KeySignIn:
+    """Signs in with a key kept here, wherever it is asked: a signer app's
+    channel key (nostr/bunker.py), which says nothing about the account.
+    The account's own sign-in is nostr/relay_auth.py."""
+
+    def __init__(self, secret_key: bytes) -> None:
+        self._sk = bytes(secret_key)
+        self.pubkey = crypto.get_public_key(self._sk).hex()
+
+    def may_sign_in(self, url: str) -> bool:
+        return True
+
+    def sign(self, url: str, challenge: str, on_signed: Callable[[dict], None],
+             on_failed: Callable[[str], None]) -> None:
+        on_signed(events.sign_event(sign_in_event(url, challenge), self._sk))
+
 
 PublishResult = Tuple[str, bool, str]  # (url, ok, message)
+
+
+@dataclass
+class _SignIn:
+    """A sign-in under way on one relay, for one key."""
+    signer: Any
+    waiters: List[Callable[[bool, str], None]]
+    timer: QTimer
+    asked: bool = False                 # the signer was asked to sign
+    event_id: Optional[str] = None      # the signed answer, once sent
 
 
 # --------------------------------------------------------------------------- #
@@ -77,12 +136,18 @@ class Relay(QObject):
       disconnected()       - socket closed for any reason
       message(list)        - a parsed JSON array from the relay
       error(str)           - connection or socket-level error
+      sign_in_started()    - signing in to this relay began
+      sign_in_ended(bool, str, bool)
+                           - it ended: whether the relay accepted it, why
+                             not, and whether a signed answer was sent
     """
 
     connected = Signal()
     disconnected = Signal()
     message = Signal(list)
     error = Signal(str)
+    sign_in_started = Signal()
+    sign_in_ended = Signal(bool, str, bool)
 
     def __init__(self, url: str, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -102,6 +167,12 @@ class Relay(QObject):
         self._retry = QTimer(self)
         self._retry.setSingleShot(True)
         self._retry.timeout.connect(self.open)
+        # Signing in (NIP-42): the challenge this connection was given, the
+        # keys signed in on it, and the sign-ins under way by key.
+        self._challenge: Optional[str] = None
+        self._signed_in: set = set()
+        self._sign_ins: Dict[str, _SignIn] = {}
+        self._connection = 0                 # counts connections lost
 
     @property
     def url(self) -> str:
@@ -165,7 +236,15 @@ class Relay(QObject):
     def _on_disconnected(self) -> None:
         self._opening = False
         self._connected = False
+        # A sign-in belongs to the connection: the next one asks again.
+        # Requests hear of the lost connection first, so one waiting for a
+        # sign-in counts the relay as lost, not as refusing.
+        self._connection += 1
+        self._challenge = None
+        self._signed_in.clear()
         self.disconnected.emit()
+        for key in list(self._sign_ins):
+            self._end_sign_in(key, False, "relay disconnected")
         self._reconnect_later()
 
     def _on_text_message(self, text: str) -> None:
@@ -175,6 +254,10 @@ class Relay(QObject):
             return
         if not isinstance(parsed, list) or not parsed:
             return
+        if parsed[0] == "AUTH" and len(parsed) >= 2 and isinstance(parsed[1], str):
+            self._on_challenge(parsed[1])
+        elif parsed[0] == "OK" and len(parsed) >= 3:
+            self._on_sign_in_answer(parsed)
         self.message.emit(parsed)
 
     def _on_error(self, _code) -> None:
@@ -182,6 +265,87 @@ class Relay(QObject):
         self.error.emit(self._ws.errorString())
         if not self._connected:
             self._reconnect_later()     # an attempt that never connected
+
+    # -- signing in (NIP-42) --------------------------------------------------
+
+    def sign_in(self, signer, on_done: Callable[[bool, str], None]) -> None:
+        """Sign in to this relay as ``signer``, for a request it refused
+        with "auth-required:"; ``on_done(ok, reason)`` once.
+
+        ``signer`` (nostr/relay_auth.py) says whose key it is (``pubkey``),
+        whether this relay is one to sign in to (``may_sign_in``), and
+        signs the answer to the challenge (``sign``). A key already
+        signed in on this connection is done at once; a sign-in already
+        under way for it is joined, so the signer is asked once."""
+        key = signer.pubkey
+        if not key or not signer.may_sign_in(self._url):
+            on_done(False, NOT_CHOSEN)
+            return
+        if key in self._signed_in:
+            on_done(True, "")
+            return
+        pending = self._sign_ins.get(key)
+        if pending is not None:
+            pending.waiters.append(on_done)
+            return
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.timeout.connect(lambda k=key: self._sign_in_ran_out(k))
+        self._sign_ins[key] = _SignIn(signer, [on_done], timer)
+        self.sign_in_started.emit()
+        if self._challenge is None:
+            timer.start(SIGN_IN_CHALLENGE_WAIT_MS)     # the relay sends it any moment
+        else:
+            self._ask_signer(key)
+
+    def _on_challenge(self, challenge: str) -> None:
+        self._challenge = challenge
+        for key, pending in list(self._sign_ins.items()):
+            if not pending.asked:
+                self._ask_signer(key)
+
+    def _ask_signer(self, key: str) -> None:
+        pending = self._sign_ins[key]
+        pending.asked = True
+        pending.timer.stop()                 # the signer takes the time it takes
+        challenge, connection = self._challenge, self._connection
+
+        def signed(event: dict) -> None:
+            if self._sign_ins.get(key) is not pending:
+                return
+            if self._connection != connection or not self.send(["AUTH", event]):
+                self._end_sign_in(key, False, "relay disconnected")
+                return
+            pending.event_id = event.get("id")
+            pending.timer.start(SIGN_IN_ANSWER_MS)
+
+        def failed(reason: str) -> None:
+            if self._sign_ins.get(key) is pending:
+                self._end_sign_in(key, False, reason)
+
+        pending.signer.sign(self._url, challenge, signed, failed)
+
+    def _on_sign_in_answer(self, msg: list) -> None:
+        for key, pending in list(self._sign_ins.items()):
+            if pending.event_id is not None and msg[1] == pending.event_id:
+                self._end_sign_in(key, bool(msg[2]), str(msg[3]) if len(msg) >= 4 else "")
+                return
+
+    def _sign_in_ran_out(self, key: str) -> None:
+        pending = self._sign_ins.get(key)
+        if pending is not None:
+            self._end_sign_in(key, False, "the relay did not answer the sign-in"
+                              if pending.asked else "the relay sent nothing to sign")
+
+    def _end_sign_in(self, key: str, ok: bool, reason: str) -> None:
+        pending = self._sign_ins.pop(key)
+        pending.timer.stop()
+        pending.timer.deleteLater()
+        if ok:
+            self._signed_in.add(key)
+        self.sign_in_ended.emit(ok, reason, pending.event_id is not None)
+        for done in pending.waiters:
+            done(ok, reason)
 
 
 # --------------------------------------------------------------------------- #
@@ -211,12 +375,19 @@ class PublishJob(QObject):
         event: dict,
         timeout_ms: int = DEFAULT_PUBLISH_TIMEOUT_MS,
         parent: Optional[QObject] = None,
+        *,
+        sign_in=None,
     ) -> None:
         super().__init__(parent)
         if "id" not in event or "sig" not in event:
             raise ValueError("PublishJob requires a fully signed event")
 
         self._pool = pool
+        # Who signs in when a relay asks before it takes the event, and the
+        # relays asked so far (once each) and still signing in.
+        self._sign_in = sign_in if sign_in is not None else pool.sign_in
+        self._sign_in_asked: set[str] = set()
+        self._signing_in: set[str] = set()
         self._event = event
         self._event_id = event["id"]
         self._timeout_ms = timeout_ms
@@ -286,7 +457,27 @@ class PublishJob(QObject):
             return
         ok = bool(msg[2])
         message = str(msg[3]) if len(msg) >= 4 else ""
+        if (not ok and message.startswith(AUTH_REQUIRED) and self._sign_in is not None
+                and url not in self._sign_in_asked):
+            self._sign_in_asked.add(url)
+            self._signing_in.add(url)
+            self._pool.get_or_create(url).sign_in(
+                self._sign_in, lambda done, _why, u=url, m=message: self._signed_in(u, done, m))
+            return
         self._finish(url, ok, message)
+
+    def _signed_in(self, url: str, ok: bool, refusal: str) -> None:
+        """Signing in ended: send the event again once, or the relay's
+        refusal stands."""
+        self._signing_in.discard(url)
+        if url not in self._pending:
+            return
+        if not ok:
+            self._finish(url, False, refusal)
+        elif not self._pool.get_or_create(url).send(["EVENT", self._event]):
+            self._finish(url, False, _("send failed (not connected)"))
+        elif not self._timer.isActive():
+            self._timer.start()             # a full wait for the answer
 
     def _on_disconnected(self, url: str) -> None:
         if url in self._pending:
@@ -297,7 +488,9 @@ class PublishJob(QObject):
             self._finish(url, False, _("socket error: {error}").format(error=err))
 
     def _on_overall_timeout(self) -> None:
-        for url in list(self._pending):
+        # A relay still signing in waits for that (a signer app waits for
+        # the person); it gets its full wait once it sent the event again.
+        for url in list(self._pending - self._signing_in):
             self._finish(url, False, _("publish timeout"))
 
     # -- finalize -----------------------------------------------------------
@@ -336,35 +529,60 @@ class RelayPool(QObject):
     URLs are normalized (trailing slash stripped, lowercased scheme/host)
     so that callers using slightly different forms of the same URL share
     the same connection.
+
+    Signals:
+      signing_in(str)                 - signing in to this relay began (url)
+      sign_in_failed(str, str, bool)  - it did not work: url, why, and
+                                        whether a signed answer was sent
+                                        (False: the signer did not sign)
     """
+
+    signing_in = Signal(str)
+    sign_in_failed = Signal(str, str, bool)
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._relays: Dict[str, Relay] = {}
+        # Who signs in when a relay asks (nostr/relay_auth.py), for every
+        # request that does not name its own; None: nobody does.
+        self.sign_in = None
 
     def get_or_create(self, url: str) -> Relay:
         normalized = _normalize(url)
         relay = self._relays.get(normalized)
         if relay is None:
             relay = Relay(normalized, parent=self)
+            relay.sign_in_started.connect(lambda u=normalized: self.signing_in.emit(u))
+            relay.sign_in_ended.connect(
+                lambda ok, why, sent, u=normalized: self._sign_in_ended(u, ok, why, sent))
             self._relays[normalized] = relay
         return relay
+
+    def _sign_in_ended(self, url: str, ok: bool, why: str, sent: bool) -> None:
+        if not ok:
+            self.sign_in_failed.emit(url, why, sent)
 
     def publish(
         self,
         urls: List[str],
         event: dict,
         timeout_ms: int = DEFAULT_PUBLISH_TIMEOUT_MS,
+        *,
+        sign_in=None,
     ) -> PublishJob:
-        return PublishJob(self, urls, event, timeout_ms=timeout_ms, parent=self)
+        return PublishJob(self, urls, event, timeout_ms=timeout_ms, parent=self,
+                          sign_in=sign_in)
 
     def subscribe(
         self,
         urls: List[str],
         filters: List[Dict[str, Any]],
         sub_id: Optional[str] = None,
+        *,
+        sign_in=None,
     ) -> "Subscription":
-        return Subscription(self, urls, filters, sub_id=sub_id, parent=self)
+        return Subscription(self, urls, filters, sub_id=sub_id, parent=self,
+                            sign_in=sign_in)
 
     def close_all(self) -> None:
         for relay in self._relays.values():
@@ -403,6 +621,10 @@ class Subscription(QObject):
     relay's socket drops and comes back, the REQ is sent again, so the
     subscription keeps receiving from it (a relay's end is still reported
     once, the first time).
+
+    A relay that closes it with "auth-required:" is signed in to (once
+    per connection) and asked again; only if that does not work is it
+    reported closed, with the relay's reason.
     """
 
     event = Signal(dict)
@@ -420,9 +642,13 @@ class Subscription(QObject):
         filters: List[Dict[str, Any]],
         sub_id: Optional[str] = None,
         parent: Optional[QObject] = None,
+        *,
+        sign_in=None,
     ) -> None:
         super().__init__(parent)
         self._pool = pool
+        self._sign_in = sign_in if sign_in is not None else pool.sign_in
+        self._sign_in_asked: set[str] = set()    # relays asked, this connection
         self._urls: List[str] = list(dict.fromkeys(_normalize(u) for u in urls))
         self._filters = list(filters)
         # 8 random bytes -> 16 hex chars; well under the 64-char NIP-01 cap.
@@ -456,7 +682,7 @@ class Subscription(QObject):
         self._connections.append((relay, "disconnected", disc_slot))
 
         # Every (re)connection gets the REQ, not only the first.
-        conn_slot = lambda u=url: self._send_req(u)
+        conn_slot = lambda u=url: self._reconnected(u)
         relay.connected.connect(conn_slot)
         self._connections.append((relay, "connected", conn_slot))
         relay.hold()
@@ -464,6 +690,10 @@ class Subscription(QObject):
             self._send_req(url)
         else:
             relay.open()
+
+    def _reconnected(self, url: str) -> None:
+        self._sign_in_asked.discard(url)     # a new connection signs in anew
+        self._send_req(url)
 
     def _send_req(self, url: str) -> None:
         if self._closed:
@@ -493,10 +723,28 @@ class Subscription(QObject):
                 self.eose.emit()
         elif verb == "CLOSED":
             reason = str(msg[2]) if len(msg) >= 3 else ""
-            if url not in self._ended:
-                self._ended.add(url)
-                self.relay_closed.emit(url, reason)
-            self.closed.emit(reason)
+            if (reason.startswith(AUTH_REQUIRED) and self._sign_in is not None
+                    and url not in self._sign_in_asked):
+                self._sign_in_asked.add(url)
+                self._pool.get_or_create(url).sign_in(
+                    self._sign_in, lambda ok, _why, u=url, r=reason: self._signed_in(u, ok, r))
+                return
+            self._report_closed(url, reason)
+
+    def _signed_in(self, url: str, ok: bool, refusal: str) -> None:
+        """Signing in ended: ask again, or the relay's refusal stands."""
+        if self._closed:
+            return
+        if ok:
+            self._send_req(url)
+        else:
+            self._report_closed(url, refusal)
+
+    def _report_closed(self, url: str, reason: str) -> None:
+        if url not in self._ended:
+            self._ended.add(url)
+            self.relay_closed.emit(url, reason)
+        self.closed.emit(reason)
 
     def _on_relay_lost(self, url: str, reason: str) -> None:
         """A relay that will not answer this subscription any more."""
