@@ -293,12 +293,17 @@ def test_a_key_in_the_slug_is_refused_never_rewritten(tmp_path, answers):
     assert ["d", f"backup-{NSEC}"] in without_secret_keys(unsigned)["tags"]   # never changed
 
 
-def test_save_as_draft_refuses_a_key_in_the_slug():
+def test_save_as_draft_refuses_a_key_in_the_slug(monkeypatch):
+    import announce
     from nostr.ui.stash_kind_dialog import StashKind, StashKindDialog
+    heard = []
+    monkeypatch.setattr(announce, "announce", lambda source, text: heard.append(text))
     dialog = StashKindDialog(default=StashKind.ARTICLE, suggested_title=f"Backup {NSEC}")
     assert not dialog._save_btn.isEnabled()
     assert not dialog._slug_problem.isHidden()
     assert "slug" in dialog._slug_problem.text()
+    assert dialog._slug_edit.accessibleDescription() == dialog._slug_problem.text()
+    assert heard == [dialog._slug_problem.text()]
     dialog._slug_edit.setText("backup")
     dialog._on_slug_edited("backup")
     assert dialog._save_btn.isEnabled() and dialog._slug_problem.isHidden()

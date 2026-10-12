@@ -34,6 +34,7 @@ from typing import Callable, Dict, Optional
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QFormLayout, QLabel, QLineEdit, QPlainTextEdit, QVBoxLayout, QWidget
 
+import announce
 from i18n import N_, _
 from nostr import refs
 from nostr.outbox.policy import LookupState
@@ -269,9 +270,7 @@ class ProfileWindow(AssistantWindow):
         problems = False
         for field in FIELDS:
             problem = field_problem(field, self._value(field.key))
-            label = self._errors[field.key]
-            label.setText(problem or "")
-            label.setVisible(bool(problem))
+            announce.field_problem(self._edits[field.key], self._errors[field.key], problem or "")
             problems = problems or bool(problem)
         button = self.buttons.get("save")
         if button is not None:

@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import announce
 import theme
 from i18n import _
 
@@ -471,8 +472,7 @@ class StashKindDialog(QDialog):
         # nice-to-have but not strictly required by the protocol.
         slug = self._slug_edit.text().strip()
         problem = slug_problem(slug)
-        self._slug_problem.setText(problem or "")
-        self._slug_problem.setVisible(bool(problem))
+        announce.field_problem(self._slug_edit, self._slug_problem, problem or "")
         self._save_btn.setEnabled(bool(slug) and not problem)
 
     def _on_accept(self) -> None:

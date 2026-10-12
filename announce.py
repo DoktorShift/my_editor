@@ -25,3 +25,16 @@ def announce(source, text: str) -> None:
     if not text:
         return
     QAccessible.updateAccessibility(QAccessibleAnnouncementEvent(source, text))
+
+
+def field_problem(field, label, problem: str) -> None:
+    """Say what is wrong with ``field`` in ``label`` under it, or nothing
+    when ``problem`` is empty: shown, read with the field (its accessible
+    description) when the field gets the focus, and announced when it
+    first appears or changes, not again with every key typed."""
+    said = label.text() if not label.isHidden() else ""
+    label.setText(problem)
+    label.setVisible(bool(problem))
+    field.setAccessibleDescription(problem)
+    if problem and problem != said:
+        announce(field, problem)
