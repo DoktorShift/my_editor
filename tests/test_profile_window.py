@@ -36,6 +36,9 @@ from nostr.outbox.policy import LookupState  # noqa: E402
 from nostr.outbox import writer as outbox_writer  # noqa: E402
 from nostr.ui import profile_window as pw  # noqa: E402
 from nostr.ui.profile_window import FIELDS, FORM, PROBLEM, READING, SAVING  # noqa: E402
+from nostr.bech32 import encode_nsec  # noqa: E402
+
+NSEC = encode_nsec("11" * 32)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -130,6 +133,8 @@ def test_the_older_display_name_key_is_shown():
     ("lud16", "alice", "Lightning address"),
     ("nip05", "alice@", "Nostr address"),
     ("name", "two words", "spaces"),
+    ("display_name", "Alice " + NSEC, "secret key"),
+    ("about", "My key: " + NSEC, "secret key"),
 ])
 def test_a_field_with_a_problem_says_so_and_blocks_saving(key, value, problem):
     win, net = window()

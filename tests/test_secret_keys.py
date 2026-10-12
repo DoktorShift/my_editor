@@ -15,10 +15,15 @@ What must hold:
   addresses too), title, summary and every tag, whatever was typed into
   the publish dialog. The person may publish it with each key replaced by
   its owner's public key, or not at all; an encrypted key has no public
-  key to offer and must be removed. PublishJob refuses to sign such an
-  event at all.
+  key to offer and must be removed. A key in an article's or a draft's
+  slug is refused: the slug is published as it is and never rewritten.
+  Edit Profile shows a key in a field as that field's problem.
+
+  Underneath, both signers (a key kept here, a signer app) refuse any
+  event with a key in its content or tags, so no other way gets one out.
 """
 
+import json
 import os
 import sys
 
@@ -38,7 +43,7 @@ from nostr.publisher import PublishJob, build_article, build_note, without_secre
 from nostr.ui import secret_key_check  # noqa: E402
 from tests.app_process import run_window_script  # noqa: E402
 from tests.outbox_fakes import PK, settle  # noqa: E402
-from tests.test_publish_job import _dialog, make_job  # noqa: E402
+from tests.test_publish_job import _dialog  # noqa: E402
 
 SECRET = "11" * 32
 NSEC = bech32.encode_nsec(SECRET)
@@ -172,9 +177,51 @@ def test_replacing_keys_builds_the_event_again_with_an_id_that_fits():
     assert without_secret_keys(build_note("ncryptsec1" + "q" * 40, PK)) is None
 
 
-def test_an_event_with_a_key_in_it_is_never_signed():
-    with pytest.raises(ValueError):
-        make_job(build_note(f"oops {NSEC}", PK))
+def _sign_locally(event):
+    from nostr.local_signer import LocalSigner
+    signer = LocalSigner(bytes.fromhex(SECRET))
+    outcome = {}
+    signer.sign_event(event, lambda signed: outcome.update(signed=signed),
+                      lambda reason: outcome.update(refused=reason))
+    settle()
+    return outcome
+
+
+@pytest.mark.parametrize("event", [
+    {"kind": 0, "content": json.dumps({"about": f"My key: {NSEC}"}), "tags": []},
+    {"kind": 31234, "content": "c2VjcmV0", "tags": [["d", f"backup-{NSEC}"], ["k", "30023"]]},
+    {"kind": 1, "content": "ncryptsec1" + "q" * 60, "tags": []},
+])
+def test_a_signer_never_signs_an_event_with_a_key_in_it(event):
+    """The last line, where every event is signed: a profile, a draft's
+    plain slug, an encrypted key published as text."""
+    event = {**event, "created_at": 1_800_000_000}
+    assert _sign_locally(event) == {"refused": refs.SECRET_KEY_REFUSED}
+
+
+def test_an_encrypted_draft_is_signed():
+    from nostr import crypto
+    secret = bytes.fromhex(SECRET)
+    me = get_public_key(secret)
+    sealed = crypto.encrypt_to(f"my notes {NSEC}", secret, me)     # ciphertext only
+    outcome = _sign_locally({"kind": 31234, "content": sealed, "created_at": 1_800_000_000,
+                             "tags": [["d", "my-post"], ["k", "30023"]]})
+    assert "signed" in outcome and outcome["signed"]["content"] == sealed
+
+
+def test_a_signer_app_is_never_asked_to_sign_a_key():
+    from nostr.bunker import BunkerClient
+    from tests.outbox_fakes import FakePool
+    client = BunkerClient(FakePool())
+    client._is_connected = True
+    sent, refused = [], []
+    client._send_request = lambda **kw: sent.append(kw)
+    client.sign_event({"kind": 0, "content": f"{{\"name\": \"{NSEC}\"}}", "tags": [],
+                       "created_at": 1_800_000_000}, lambda signed: None, refused.append)
+    assert refused == [refs.SECRET_KEY_REFUSED] and sent == []
+    client.sign_event({"kind": 1, "content": "hello", "tags": [], "created_at": 1_800_000_000},
+                      lambda signed: None, refused.append)
+    assert len(sent) == 1
 
 
 @pytest.fixture
@@ -223,3 +270,25 @@ def test_a_key_in_any_field_of_the_article_dialog_is_not_published(tmp_path, ans
     assert refs.secret_keys_in_event(event) == []
     assert event["content"] == f"[backup]({OWNER})"
     assert ["title", f"About {OWNER}"] in event["tags"]
+
+
+def test_a_key_in_the_slug_is_refused_never_rewritten(tmp_path, answers):
+    queue, asked = answers
+    dialog = _dialog("article", tmp_path, None)
+    published_before = len(dialog._relay_pool.published)
+    dialog._publish(f"backup-{NSEC}", "Body.", 1_800_000_000)
+    assert asked == [["OK"]] and dialog._job is None
+    assert len(dialog._relay_pool.published) == published_before
+    unsigned = build_article(f"Mine {NSEC}", PK, f"backup-{NSEC}")
+    assert ["d", f"backup-{NSEC}"] in without_secret_keys(unsigned)["tags"]   # never changed
+
+
+def test_save_as_draft_refuses_a_key_in_the_slug():
+    from nostr.ui.stash_kind_dialog import StashKind, StashKindDialog
+    dialog = StashKindDialog(default=StashKind.ARTICLE, suggested_title=f"Backup {NSEC}")
+    assert not dialog._save_btn.isEnabled()
+    assert not dialog._slug_problem.isHidden()
+    assert "slug" in dialog._slug_problem.text()
+    dialog._slug_edit.setText("backup")
+    dialog._on_slug_edited("backup")
+    assert dialog._save_btn.isEnabled() and dialog._slug_problem.isHidden()

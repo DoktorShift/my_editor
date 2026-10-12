@@ -8,7 +8,8 @@ owner and read their messages, and it can never be taken back. So the
 event itself is looked at, after every field has gone into it (the
 text, link addresses, title, summary, tags, every carried tag), right
 before it goes to the signer. Mail asks the same way at Send, not while
-the message is written.
+the message is written. The signers refuse such an event in any case
+(refs.SECRET_KEY_REFUSED); this is where the person is asked.
 """
 
 from __future__ import annotations
@@ -16,10 +17,20 @@ from __future__ import annotations
 from typing import Optional
 
 from alerts import CANCEL, DEFAULT, Button, ask, inform
-from i18n import _
+from i18n import N_, _
 
 from .. import refs
 from ..publisher import without_secret_keys
+
+# A key in the slug: it is published as it is, and is never rewritten.
+SLUG_HOLDS_A_KEY = N_("A secret key can’t be part of the slug, which is published as it "
+                      "is. Change the title or the slug.")
+
+
+def slug_problem(slug: str) -> Optional[str]:
+    """Why ``slug`` (an article's or a draft's address) can't be used, or
+    None."""
+    return _(SLUG_HOLDS_A_KEY) if refs.secret_keys_in(slug) else None
 
 
 def publishable(parent, unsigned: dict, *, is_dark: Optional[bool] = None) -> Optional[dict]:
@@ -29,6 +40,12 @@ def publishable(parent, unsigned: dict, *, is_dark: Optional[bool] = None) -> Op
     encrypted and has no owner to name)."""
     if not refs.secret_keys_in_event(unsigned):
         return unsigned
+    slug = next((tag[1] for tag in unsigned["tags"] if tag[:1] == ["d"] and len(tag) > 1), "")
+    problem = slug_problem(slug)
+    if problem:
+        inform(parent, title=_("This text contains a secret key"), caution=True,
+               is_dark=is_dark, message=problem)
+        return None
     public = without_secret_keys(unsigned)
     if public is None:
         inform(parent, title=_("This text contains a secret key"), caution=True,

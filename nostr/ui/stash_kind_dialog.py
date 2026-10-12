@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import theme
 from i18n import _
 
 from ..drafts import (
@@ -50,6 +51,7 @@ from ..drafts import (
     new_note_identifier,
 )
 from ..publisher import slugify
+from .secret_key_check import slug_problem
 
 
 class StashKind(Enum):
@@ -403,7 +405,15 @@ class StashKindDialog(QDialog):
         seed_slug = suggested_slug or (slugify(suggested_title) if suggested_title else "")
         self._slug_edit.setText(seed_slug)
         self._slug_edit.textEdited.connect(self._on_slug_edited)
-        article_layout.addWidget(_field(_("Slug (the draft's d-tag)"), self._slug_edit))
+        slug_field = _field(_("Slug (the draft's d-tag)"), self._slug_edit)
+        # Why the slug can't be saved, under it (the draft's slug is not
+        # encrypted: relays and readers see it).
+        self._slug_problem = QLabel()
+        self._slug_problem.setObjectName("stash_kind_error")
+        self._slug_problem.setWordWrap(True)
+        self._slug_problem.hide()
+        slug_field.layout().addWidget(self._slug_problem)
+        article_layout.addWidget(slug_field)
 
         self._summary_edit = QLineEdit()
         self._summary_edit.setPlaceholderText(_("Optional one-sentence summary"))
@@ -424,7 +434,9 @@ class StashKindDialog(QDialog):
         self._refresh_save_enabled()
 
     def _apply_theme(self) -> None:
-        self.setStyleSheet(_DARK_CSS if self._is_dark else _LIGHT_CSS)
+        error = theme.error_text_color(self._is_dark)
+        self.setStyleSheet((_DARK_CSS if self._is_dark else _LIGHT_CSS)
+                           + f"QLabel#stash_kind_error {{ color: {error}; font-size: 11px; }}")
 
     # -- behaviour ---------------------------------------------------------
 
@@ -457,8 +469,11 @@ class StashKindDialog(QDialog):
             return
         # Articles need a non-empty slug to be addressable. Title is
         # nice-to-have but not strictly required by the protocol.
-        slug_ok = bool(self._slug_edit.text().strip())
-        self._save_btn.setEnabled(slug_ok)
+        slug = self._slug_edit.text().strip()
+        problem = slug_problem(slug)
+        self._slug_problem.setText(problem or "")
+        self._slug_problem.setVisible(bool(problem))
+        self._save_btn.setEnabled(bool(slug) and not problem)
 
     def _on_accept(self) -> None:
         if self._kind is StashKind.NOTE:
@@ -473,7 +488,7 @@ class StashKindDialog(QDialog):
             )
         else:
             slug = self._slug_edit.text().strip()
-            if not slug:
+            if not slug or slug_problem(slug):
                 # Defensive: the OK button shouldn't have been enabled.
                 return
             self._choice = StashChoice(

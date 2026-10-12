@@ -35,6 +35,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QFormLayout, QLabel, QLineEdit, QPlainTextEdit, QVBoxLayout, QWidget
 
 from i18n import N_, _
+from nostr import refs
 from nostr.outbox.policy import LookupState
 from nostr.outbox.writer import UNCHANGED, UNKNOWN_BASE, WRITTEN
 from nostr.ui.assistant import (
@@ -88,6 +89,9 @@ def field_problem(field: Field, value: str) -> Optional[str]:
     value = value.strip()
     if not value:
         return None
+    if refs.secret_keys_in(value):
+        return _("This holds a secret key. Anyone who has it can publish as its owner, so "
+                 "it never goes into a profile. Remove it.")
     if field.kind == "image" and not _SECURE_WEB.match(value):
         return _("Enter an image address beginning with https, like "
                  "https://example.com/picture.jpg.")

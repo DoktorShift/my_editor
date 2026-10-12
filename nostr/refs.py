@@ -28,7 +28,7 @@ import re
 from dataclasses import dataclass
 from typing import Callable, Iterable, List, Optional, Sequence, Tuple
 
-from i18n import _
+from i18n import N_, _
 
 from . import bech32
 from .outbox.policy import normalize_relay_url
@@ -247,6 +247,13 @@ def secret_keys_in(text: str) -> List[str]:
         if key not in found:
             found.append(key)
     return found
+
+
+# Why a signer (LocalSigner, BunkerClient) refuses an event: every event
+# MyEditor publishes is signed there, so no way around the windows' own
+# checks gets a key out. Encrypted content (drafts, a signer's channel)
+# cannot hold one in plain text, so it never trips this.
+SECRET_KEY_REFUSED = N_("a secret key is in it, and nothing with a secret key in it is signed")
 
 
 def secret_keys_in_event(event: dict) -> List[str]:
