@@ -259,6 +259,15 @@ def _ask_save_changes(parent, title: str, *, save_label: str = "",
 QUIT_SYNC_WAIT_MS = 5_000
 
 
+def _field_signals(field) -> list:
+    """What changes in a text field that the Edit menu shows: its text
+    (what Undo undoes), its selection (what Cut and Copy act on)."""
+    signals = [field.textChanged, field.selectionChanged]
+    if not isinstance(field, QLineEdit):
+        signals += [field.undoAvailable, field.redoAvailable]
+    return signals
+
+
 class MainWindow(QMainWindow):
     def __init__(self, initial_path: str | None = None):
         super().__init__()
@@ -1176,10 +1185,31 @@ class MainWindow(QMainWindow):
         self.act_cut.setEnabled(selected and editable)
         self.act_delete.setEnabled(selected and editable)
 
-    def _on_focus_changed(self, _old, _new) -> None:
+    def _on_focus_changed(self, _old, new) -> None:
         tabs = getattr(self, "tabs", None)
         if tabs is None or not shiboken6.isValid(tabs):
             return                                   # the window is closing
+        self._follow_field(new)
+        self._on_field_changed()
+
+    def _follow_field(self, widget) -> None:
+        """Cut, Copy, Delete, Undo and Redo follow the text field with the
+        focus as it changes, as they follow the document: a find field, a
+        sheet's field, the Imports window's article (S4 of the CP3 fixes
+        review). The one place for every field; the document has its own
+        connections."""
+        old = getattr(self, "_followed_field", None)
+        if old is not None and shiboken6.isValid(old):
+            for signal in _field_signals(old):
+                signal.disconnect(self._on_field_changed)
+        self._followed_field = None
+        if isinstance(widget, (QLineEdit, QTextEdit, QPlainTextEdit)) and not isinstance(
+                widget, HtmlEditor):
+            for signal in _field_signals(widget):
+                signal.connect(self._on_field_changed)
+            self._followed_field = widget
+
+    def _on_field_changed(self, *_args) -> None:
         self._update_clipboard_commands()
         self._update_undo_redo_buttons()
 
@@ -1843,11 +1873,6 @@ class MainWindow(QMainWindow):
                                replace=True, options=True)
         self.findbar.setVisible(False)
         self.findbar.edit.textChanged.connect(self._on_search_text_changed)
-        # Cut, Copy, Delete, Undo and Redo follow the field while it has
-        # the focus, as they follow the document otherwise.
-        for field in (self.findbar.edit, self.findbar.replace_edit):
-            field.selectionChanged.connect(self._update_clipboard_commands)
-            field.textChanged.connect(self._update_undo_redo_buttons)
         QApplication.instance().focusChanged.connect(self._on_focus_changed)
         self.findbar.options_changed.connect(self._on_find_options_changed)
         self.findbar.replace_requested.connect(self._replace_current)

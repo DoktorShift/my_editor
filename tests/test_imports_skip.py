@@ -299,46 +299,65 @@ def test_a_sheet_takes_the_edit_commands_and_keeps_its_window(window, monkeypatc
     sheet.reject()
 
 
-def test_the_edit_menu_follows_a_sheets_field(window, monkeypatch):
-    """N2 of the CP3 fixes review: with a sheet up, the Edit menu kept the
-    state it had when the sheet opened (Undo dimmed after typing in it),
-    and with a check box focused Cut, Copy and Delete followed the
-    document in the other window. As in Mail, they follow the field."""
+def test_the_edit_menu_follows_the_focused_field(window, monkeypatch):
+    """N2 and S4 of the CP3 fixes reviews: with a sheet up, the Edit menu
+    kept the state it had when the sheet opened (Undo dimmed after typing
+    in it), with a check box focused Cut, Copy and Delete followed the
+    document in the other window, and a selection in the article did not
+    enable Copy. As in Mail, they follow the field with the focus as it
+    changes, through the one place that follows focused fields."""
     import main_window
+    from PySide6.QtCore import QObject
     from PySide6.QtGui import QAction
+    from PySide6.QtWidgets import QWidget
     from editor import HtmlEditor
     document = HtmlEditor()
     document.setPlainText("Text in the document")
     document.selectAll()
-    host = SimpleNamespace(
-        _imports_in_front=lambda: window, current_editor=lambda: document,
-        current_pdf_viewer=lambda: None, act_undo=QAction("Undo"), act_redo=QAction("Redo"),
-        act_cut=QAction("Cut"), act_copy=QAction("Copy"), act_delete=QAction("Delete"))
-    menu = []
-    window.edit_changed.connect(lambda: (MainWindow._update_undo_redo_buttons(host),
-                                         MainWindow._update_clipboard_commands(host),
-                                         menu.append(1)))
+
+    class Host(QObject):
+        """The menu bar's part of MainWindow, with its own updaters."""
+        _follow_field = MainWindow._follow_field
+        _on_field_changed = MainWindow._on_field_changed
+        _update_clipboard_commands = MainWindow._update_clipboard_commands
+        _update_undo_redo_buttons = MainWindow._update_undo_redo_buttons
+
+    host = Host()
+    host.tabs, host.current_editor = QWidget(), lambda: document
+    host._imports_in_front, host.current_pdf_viewer = lambda: window, lambda: None
+    host.act_undo, host.act_redo = QAction("Undo"), QAction("Redo")
+    host.act_cut, host.act_copy = QAction("Cut"), QAction("Copy")
+    host.act_delete = QAction("Delete")
+    focus = {"widget": None}
+    monkeypatch.setattr(main_window.QApplication, "focusWidget",
+                        staticmethod(lambda: focus["widget"]))
+
+    def focus_on(widget):
+        focus["widget"] = widget
+        MainWindow._on_focus_changed(host, None, widget)
+
     window.source_settings(window._controller.sources()[0].key)
     sheet = window.sheet()
     monkeypatch.setattr(main_window.QApplication, "activeWindow", staticmethod(lambda: sheet))
-    focus = {"widget": sheet.name}
-    monkeypatch.setattr(main_window.QApplication, "focusWidget",
-                        staticmethod(lambda: focus["widget"]))
-    sheet.name.setFocus()
+    focus_on(sheet.name)
     sheet.name.end(False)
     QTest.keyClicks(sheet.name, "!")                    # the menu hears it at once
-    assert menu
     assert host.act_undo.isEnabled()
     assert not (host.act_cut.isEnabled() or host.act_copy.isEnabled()
                 or host.act_delete.isEnabled())         # nothing selected in Name
     sheet.name.selectAll()
     assert host.act_cut.isEnabled() and host.act_copy.isEnabled()
-    focus["widget"] = sheet.copy_images                 # a check box of the sheet
-    MainWindow._update_undo_redo_buttons(host)
-    MainWindow._update_clipboard_commands(host)
+    focus_on(sheet.copy_images)                         # a check box of the sheet
     assert not (host.act_undo.isEnabled() or host.act_cut.isEnabled()
                 or host.act_copy.isEnabled() or host.act_delete.isEnabled())
     sheet.reject()
+    monkeypatch.setattr(main_window.QApplication, "activeWindow", staticmethod(lambda: window))
+    pane = window.article._preview
+    focus_on(pane)
+    assert not host.act_copy.isEnabled()
+    pane.selectAll()                                    # text selected in the article
+    assert host.act_copy.isEnabled() and not host.act_cut.isEnabled()
+    focus_on(None)
     document.deleteLater()
 
 

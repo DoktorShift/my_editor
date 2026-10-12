@@ -208,7 +208,8 @@ class ImportsWindow(QMainWindow):
 
     Signals:
       edit_changed()   what the Edit menu acts on here changed: the last
-                       skip, the open post, or a sheet's text field
+                       skip, or the posts an action applies to (a text
+                       field with the focus the menu follows itself)
     """
 
     edit_changed = Signal()
@@ -1224,12 +1225,6 @@ class ImportsWindow(QMainWindow):
             self._sheet.close()
         self._sheet = sheet
         sheet.finished.connect(self._on_sheet_finished)
-        # The Edit menu follows the sheet's fields as they change, the way
-        # it follows the document (N2 of the CP3 fixes review).
-        for kind in (QLineEdit, QPlainTextEdit, QTextEdit):
-            for field in sheet.findChildren(kind):
-                field.textChanged.connect(self.edit_changed)
-                field.selectionChanged.connect(self.edit_changed)
         sheet.open()
 
     def _on_sheet_finished(self) -> None:
