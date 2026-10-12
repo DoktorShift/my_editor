@@ -297,8 +297,12 @@ _PUBLIC_PROFILE = {language: re.compile("|".join(phrases), re.IGNORECASE)
                    for language, phrases in _PUBLIC_PROFILE_PHRASES.items()}
 
 
+# Protocol names: a NIP number, or an event kind ("Kind 1 when published").
+_PROTOCOL = re.compile(r"\bNIP-\d|\bkind\s+\d", re.IGNORECASE)
+
+
 def _off_glossary(text: str, language: str) -> bool:
-    if _SIGNER[language].search(text) or re.search(r"\bNIP-\d", text):
+    if _SIGNER[language].search(text) or _PROTOCOL.search(text):
         return True
     return bool(_PROFILE[language].search(_PUBLIC_PROFILE[language].sub("", text)))
 
@@ -344,6 +348,8 @@ def test_the_german_texts_speak_the_glossarys_words_too():
     ("(no profiles)", "en", True), ("(keine Profile)", "de", True),
     ("Edit Profile…", "en", False), ("Profil bearbeiten …", "de", False),
     ("Dein Signer", "de", True), ("deine Signer-Apps", "de", False),
+    ("Kind 1 when published.", "en", True), ("a short note (kind 1)", "en", True),
+    ("Published as a note.", "en", False),
 ])
 def test_the_glossary_rules_read_both_languages_alike(text, language, off):
     assert _off_glossary(text, language) == off

@@ -218,7 +218,7 @@ class PublishNoteDialog(QDialog):
         layout.setContentsMargins(20, 18, 20, 16)
         layout.setSpacing(10)
 
-        header = QLabel(_("Publish a short note (kind 1) to Nostr."))
+        header = QLabel(_("Publish a short note to Nostr."))
         layout.addWidget(header)
 
         hint = QLabel(_(

@@ -363,16 +363,16 @@ class StashKindDialog(QDialog):
         self._note_card = _KindCard(
             title=_("Short note"),
             hint=_(
-                "Quick thought, plain text. Kind 1 when published. "
-                "No slug: the draft is identified by a private UUID."
+                "A quick thought, as plain text. Published as a note. "
+                "No slug: the draft gets a private identifier."
             ),
         )
         self._article_card = _KindCard(
             title=_("Long-form article"),
             hint=_(
-                "Markdown post with a stable slug. Kind 30023 when "
-                "published; the slug ties the draft to the eventual "
-                "article so re-stashing replaces in place."
+                "A Markdown post with a fixed slug. Published as an "
+                "article. The slug ties the draft to the article it "
+                "becomes, so saving it again replaces it."
             ),
         )
         self._group.addButton(self._note_card.radio, 0)
