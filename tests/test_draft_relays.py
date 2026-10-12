@@ -997,3 +997,36 @@ def test_a_relay_left_behind_that_never_answers_does_not_hold_the_loading_line()
     sync.stop()
     sync.deleteLater()
     settle()
+
+
+@pytest.mark.parametrize("first_failure, declined", [
+    ("user rejected", True),                       # the signer app said no
+    ("not connected", False),                      # this client's own session errors ...
+    ("reopening channel", False),
+    ("closed by client", False),
+    ("dropped from session pool", False),
+    ("application shutdown", False),
+    ("user pubkey not yet known", False),
+    ("timed out waiting for signer", False),       # ... and silence: asked again
+])
+def test_only_the_signer_apps_own_refusal_counts_as_declined(first_failure, declined):
+    # Review round 3, L10: a session that reopened by itself was taken for
+    # a refusal, and a list changed elsewhere was not followed.
+    class OnceFailing(SealingClient):
+        def __init__(self):
+            super().__init__()
+            self.tries = 0
+
+        def nip44_decrypt_self(self, ciphertext, on_success, on_failure):
+            self.tries += 1
+            if self.tries == 1:
+                on_failure(first_failure)
+            else:
+                super().nip44_decrypt_self(ciphertext, on_success, on_failure)
+
+    client = OnceFailing()
+    reader, _client, _pool = lists(found(signed(
+        KIND_PRIVATE_RELAYS, [], f'sealed:[["relay","{OTHER}"]]')), client)
+    for _refresh in range(3):
+        reader.read(lambda _relays: None)
+    assert (client.tries == 1) is declined

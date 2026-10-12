@@ -80,7 +80,7 @@ from nostr.outbox.policy import (
 from nostr.outbox.writer import (
     CAUSE_SIGNER, FAILED, REFUSED, UNCHANGED, BaseChanged, ReplaceableWriter, WriteOutcome,
 )
-from nostr.bunker import is_signer_silent
+from nostr.bunker import is_signer_answer
 from nostr.publish_pipeline import kept_by_relay, refused_by_relay
 from nostr.queries import Fetched, fetch_events, full_pages
 
@@ -789,7 +789,7 @@ class PrivateDraftRelays(QObject):
             self._profile,
             lambda client: client.nip44_decrypt_self(
                 ciphertext, plaintext,
-                lambda reason: on_done(None, not is_signer_silent(reason or ""))),
+                lambda reason: on_done(None, is_signer_answer(reason or ""))),
             lambda _reason: on_done(None, False))
 
     def publish(self, relays: Sequence[str], on_done: Callable[[WriteOutcome], None], *,

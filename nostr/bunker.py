@@ -79,10 +79,32 @@ SIGNER_SILENT_NEEDLES: Tuple[str, ...] = (
 )
 
 
+# The failure reasons this client gives itself when its session to the
+# signer app is not there (not connected yet, closed, reopened, dropped):
+# the signer app was never asked, so nothing it would say is known.
+SESSION_ERROR_NEEDLES: Tuple[str, ...] = (
+    "not connected",
+    "user pubkey not yet known",
+    "closed by client",
+    "reopening channel",
+    "dropped from session pool",
+    "application shutdown",
+)
+
+
 def is_signer_silent(reason: str) -> bool:
     """True if ``reason`` means the signer never answered."""
     lowered = (reason or "").lower()
     return any(needle in lowered for needle in SIGNER_SILENT_NEEDLES)
+
+
+def is_signer_answer(reason: str) -> bool:
+    """True if ``reason`` is the signer app's own answer (a refusal, an
+    error it sent), rather than silence or this client's session not being
+    there: asking again would be answered the same way."""
+    lowered = (reason or "").lower()
+    return not is_signer_silent(lowered) and not any(
+        needle in lowered for needle in SESSION_ERROR_NEEDLES)
 
 
 def humanize_failure(reason: str) -> str:
