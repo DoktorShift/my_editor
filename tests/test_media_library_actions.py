@@ -92,3 +92,28 @@ def test_the_focused_button_shows_the_apps_ring(tmp_path, monkeypatch, dark):
     rule = css[css.index("QPushButton:focus"):]
     rule = rule[:rule.index("}")]
     assert theme.focus_ring_color(dark) in rule and "2px" in rule
+
+
+@pytest.mark.parametrize("dark", [True, False])
+def test_a_focused_accent_button_shows_a_ring_that_stands_out_from_the_accent(
+        tmp_path, monkeypatch, dark):
+    # Review M3: the accent button's own border outranked the ring, so a
+    # focused Upload looked the same as an unfocused one.
+    import theme
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QColor
+    from PySide6.QtWidgets import QApplication
+    dialog = build_dialog(tmp_path, monkeypatch, records=[media()])
+    dialog.setStyleSheet(dialog_module._DARK_CSS if dark else dialog_module._LIGHT_CSS)
+    dialog.show()
+    QApplication.processEvents()
+    try:
+        upload = dialog._upload_btn
+        unfocused = upload.grab().toImage().pixelColor(1, upload.height() // 2)
+        upload.setFocus(Qt.TabFocusReason)
+        QApplication.processEvents()
+        focused = upload.grab().toImage().pixelColor(1, upload.height() // 2)
+        assert focused == QColor(theme.focus_ring_on_accent_color(dark))
+        assert focused != unfocused
+    finally:
+        dialog.close()

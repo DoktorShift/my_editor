@@ -30,8 +30,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import types
 
-from PySide6.QtCore import QPointF, QUrl
-from PySide6.QtGui import QTextDocument
+from PySide6.QtCore import QPointF, Qt, QUrl
+from PySide6.QtGui import QColor, QTextDocument
 from PySide6.QtPdfWidgets import QPdfView
 from PySide6.QtWidgets import QApplication
 
@@ -544,3 +544,24 @@ def test_the_chosen_fit_is_marked_in_the_accent_not_orange(sample_pdf, dark):
     css = tab._toolbar.styleSheet().upper()
     assert "#FF8C00" not in css and "#E88000" not in css and "#FFB347" not in css
     assert "QTOOLBUTTON:FOCUS" in css
+
+
+@pytest.mark.parametrize("dark", [True, False])
+def test_a_focused_toolbar_button_shows_the_ring_also_when_checked(sample_pdf, qt_app, dark):
+    # Review M3: the ring was the checked border's own blue, so focusing the
+    # fit button in use changed nothing on screen.
+    import theme
+    tab = _shown(PdfViewerTab(sample_pdf, is_dark=dark), qt_app)
+    try:
+        for button, ring in ((tab._fit_width_btn, theme.focus_ring_on_accent_color(dark)),
+                             (tab._fit_page_btn, theme.focus_ring_color(dark))):
+            unfocused = button.grab().toImage().pixelColor(1, button.height() // 2)
+            size_before = button.size()
+            button.setFocus(Qt.TabFocusReason)
+            qt_app.processEvents()
+            focused = button.grab().toImage().pixelColor(1, button.height() // 2)
+            assert focused == QColor(ring), button.objectName()
+            assert focused != unfocused
+            assert button.size() == size_before        # the ring takes no extra room
+    finally:
+        tab.close()

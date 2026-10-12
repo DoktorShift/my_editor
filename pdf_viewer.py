@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
     QTreeView, QVBoxLayout, QWidget,
 )
 
+import theme
 from atomic_file import read_json, write_json
 from i18n import _, ngettext
 from url_safety import is_safe_external_url
@@ -106,7 +107,6 @@ QToolButton {
 }
 QToolButton:hover { background: #3C3C3C; }
 QToolButton:checked { background: #264F78; color: #FFFFFF; border-color: #3794FF; }
-QToolButton:focus { border-color: #4FA3F7; }
 """
 
 _TOOLBAR_LIGHT_CSS = """
@@ -125,8 +125,20 @@ QToolButton {
 }
 QToolButton:hover { background: #E1E1E1; }
 QToolButton:checked { background: #DCEBFA; color: #0B4F8A; border-color: #0078D4; }
-QToolButton:focus { border-color: #0078D4; }
 """
+
+
+def _toolbar_css(is_dark: bool) -> str:
+    """The toolbar's style with the app's focus ring: 2 px wide (the padding
+    gives up the extra pixel, so a button keeps its size), and on a checked
+    button (the fit mode in use) the ring that stands out from its fill
+    rather than the checked border's own blue."""
+    ring = theme.focus_ring_color(is_dark)
+    on_checked = theme.focus_ring_on_accent_color(is_dark)
+    return (_TOOLBAR_DARK_CSS if is_dark else _TOOLBAR_LIGHT_CSS) + (
+        f"QToolButton:focus {{ border: 2px solid {ring}; padding: 2px 7px; }}\n"
+        f"QToolButton:checked:focus {{ border-color: {on_checked}; }}\n")
+
 
 # Surface painted around the pages. Slightly darker than the page in
 # light mode, the app backdrop in dark mode, so pages read as sheets.
@@ -997,7 +1009,7 @@ class PdfViewerTab(QWidget):
 
     def update_theme(self, is_dark: bool):
         self.is_dark = is_dark
-        self._toolbar.setStyleSheet(_TOOLBAR_DARK_CSS if is_dark else _TOOLBAR_LIGHT_CSS)
+        self._toolbar.setStyleSheet(_toolbar_css(is_dark))
         self.outline.setStyleSheet(_OUTLINE_DARK_CSS if is_dark else _OUTLINE_LIGHT_CSS)
         self.findbar.is_dark = is_dark
         self.findbar._update_theme()

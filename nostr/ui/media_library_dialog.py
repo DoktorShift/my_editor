@@ -73,6 +73,7 @@ from alerts import confirm_destructive
 from atomic_file import save_document
 
 import i18n
+import theme
 import url_safety
 from i18n import _, ngettext
 from ..blossom.store import MediaFile, MediaStore
@@ -167,8 +168,6 @@ QComboBox QAbstractItemView::item {
 }
 QComboBox QAbstractItemView::item:selected { background: #094771; color: #FFFFFF; }
 QComboBox QAbstractItemView::item:hover { background: #2A2D2E; }
-QPushButton#media_primary { background: #094771; border-color: #1177BB; color: #FFFFFF; }
-QPushButton#media_primary:hover { background: #1177BB; }
 QPushButton#media_destructive { color: #FF6B5E; }
 QPushButton#media_destructive:hover { border-color: #FF6B5E; }
 QPushButton#media_destructive:disabled { color: #6A6A6A; }
@@ -294,8 +293,6 @@ QComboBox QAbstractItemView::item {
 }
 QComboBox QAbstractItemView::item:selected { background: #CCE4F7; color: #003366; }
 QComboBox QAbstractItemView::item:hover { background: #F2F2F2; }
-QPushButton#media_primary { background: #0066CC; border-color: #0055AA; color: #FFFFFF; }
-QPushButton#media_primary:hover { background: #0077E0; }
 QPushButton#media_destructive { color: #C0392B; }
 QPushButton#media_destructive:hover { border-color: #C0392B; }
 QPushButton#media_destructive:disabled { color: #BBBBBB; }
@@ -347,6 +344,11 @@ QFrame#media_drop_zone[drag_active="true"] {
     border-color: #0066CC;
 }
 """
+
+# The accent-filled action (Upload, Insert, Create): the app's accent and
+# its focus ring, as every dialog's default button has them (theme.py).
+_DARK_CSS += theme.accent_button_css("QPushButton#media_primary", True)
+_LIGHT_CSS += theme.accent_button_css("QPushButton#media_primary", False)
 
 
 _THUMB_SIZE = 128

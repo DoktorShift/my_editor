@@ -108,9 +108,8 @@ def dialog_stylesheet(is_dark: bool) -> str:
         bg, fg, muted, border, field = DARK_BG, DARK_FG, DARK_MUTED_FG, DARK_BORDER, DARK_MENU_BG
     else:
         bg, fg, muted, border, field = LIGHT_BG, LIGHT_FG, LIGHT_MUTED_FG, LIGHT_BORDER, LIGHT_MENU_BG
-    accent, accent_hover = _DIALOG_ACCENT[is_dark]
     destructive = _DIALOG_DESTRUCTIVE[is_dark]
-    ring, ring_on_accent = _FOCUS_RING[is_dark], _FOCUS_RING_ON_ACCENT[is_dark]
+    ring = _FOCUS_RING[is_dark]
     return f"""
     QDialog {{ background: {bg}; }}
     QLabel {{ color: {fg}; font-size: 13px; }}
@@ -119,24 +118,41 @@ def dialog_stylesheet(is_dark: bool) -> str:
         padding: 6px 14px; border-radius: 5px; min-width: 72px;
     }}
     QPushButton:hover {{ border-color: {muted}; }}
-    QPushButton:default {{ background: {accent}; color: #FFFFFF; border-color: {accent}; }}
-    QPushButton:default:hover {{ background: {accent_hover}; border-color: {accent_hover}; }}
     QPushButton#destructive {{ color: {destructive}; }}
     QPushButton#destructive:hover {{ border-color: {destructive}; }}
     QPushButton:focus, QPushButton#destructive:focus {{
         border: 2px solid {ring}; padding: 5px 13px;
     }}
-    QPushButton:default:focus {{ border: 2px solid {ring_on_accent}; }}
+    {accent_button_css("QPushButton:default", is_dark)}
     QPushButton:disabled, QPushButton:default:disabled {{
         background: {field}; color: {muted}; border-color: {border};
     }}
     """
 
 
+def accent_button_css(selector: str, is_dark: bool) -> str:
+    """Style rules that draw the buttons ``selector`` matches as the
+    accent-filled button (a dialog's default action): the fill, its hover,
+    and, with the keyboard focus, a ring in the color that stands out from
+    the fill (the plain ring would be blue on blue). The rule for the plain
+    ring must come first or be less specific."""
+    accent, accent_hover = _DIALOG_ACCENT[is_dark]
+    ring = _FOCUS_RING_ON_ACCENT[is_dark]
+    return (f"{selector} {{ background: {accent}; color: #FFFFFF; border-color: {accent}; }}\n"
+            f"{selector}:hover {{ background: {accent_hover}; border-color: {accent_hover}; }}\n"
+            f"{selector}:focus {{ border: 2px solid {ring}; }}\n")
+
+
 def focus_ring_color(is_dark: bool) -> str:
     """The color of the ring around a control with the keyboard focus, for
     dialogs that draw their own controls (link-like buttons)."""
     return _FOCUS_RING[is_dark]
+
+
+def focus_ring_on_accent_color(is_dark: bool) -> str:
+    """The ring's color on a control filled with the accent or its tint (a
+    checked toolbar button), where the plain ring would not show."""
+    return _FOCUS_RING_ON_ACCENT[is_dark]
 
 
 def error_text_color(is_dark: bool) -> str:
