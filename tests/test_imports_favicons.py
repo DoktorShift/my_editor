@@ -185,6 +185,54 @@ class TestTheCache:
         assert {url for url, _ in web.asked} >= {"https://site2.example/",
                                                  "https://site3.example/"}
 
+    def test_only_a_few_of_the_sites_own_icons_are_tried(self, tmp_path):
+        """CP3 review L11: one home page naming 500 icons on 500 hosts sent
+        502 requests, each host learning the person's address."""
+        page = ("<html><head>" + "".join(
+            f'<link rel="icon" href="https://tracker{n}.example.net/i.png">'
+            for n in range(500)) + "".join(
+            f'<link rel="icon" href="https://static.blog.example/{n}.png">'
+            for n in range(6)) + "</head></html>").encode()
+        web = Web({HOME: (200, page)})
+        cache(tmp_path, web).icon(HOME)
+        asked = [url for url, _ in web.asked]
+        assert asked == [HOME] + [f"https://static.blog.example/{n}.png" for n in range(4)] + [
+            HOME + "favicon.ico"]
+
+    def test_a_lookup_nothing_answered_leaves_no_mark(self, tmp_path):
+        """CP3 review L12: offline, the site was taken for one without an
+        icon for a week. It is asked again after a pause, or at the next
+        start."""
+        clock = Clock()
+        asked = []
+
+        def unreachable(url, max_bytes, on_done):
+            asked.append(url)
+            on_done(Fetched(url=url, unresolved=True))
+        icons = FaviconCache(tmp_path / "favicons", get=unreachable, clock=clock)
+        assert icons.icon(HOME) is None
+        assert len(asked) == 2 and not list((tmp_path / "favicons").glob("*"))
+        icons.icon(HOME)
+        assert len(asked) == 2                     # not on every repaint
+        clock.now += favicons.OFFLINE_PAUSE + 1
+        icons.icon(HOME)
+        assert len(asked) == 4                     # after the pause
+        FaviconCache(tmp_path / "favicons", get=unreachable, clock=clock).icon(HOME)
+        assert len(asked) == 6                     # and at the next start
+
+    def test_a_cache_that_cannot_be_written_asks_once_a_day(self, tmp_path, monkeypatch):
+        clock = Clock()
+        web = Web()
+        icons = cache(tmp_path, web, clock)
+        monkeypatch.setattr(favicons.atomic_file, "write_bytes",
+                            lambda *_a, **_k: (_ for _ in ()).throw(OSError("read-only")))
+        for _repaint in range(10):
+            icons.icon(HOME)
+        assert len(web.asked) == 2
+        clock.now += DAY + 1
+        icons.icon(HOME)
+        assert len(web.asked) == 4
+
     def test_a_nostr_author_has_none(self, tmp_path):
         web = Web()
         assert cache(tmp_path, web).icon("npub1example") is None

@@ -5,7 +5,8 @@
 A source shows its site's icon once it is known, and its letter until
 then (nostr/ui/imports_glyphs.py). :class:`FaviconCache` finds the icon
 the way a browser does: the icons the home page names in its head
-(``<link rel="icon">``, ``apple-touch-icon``), else ``/favicon.ico``.
+(``<link rel="icon">``, ``apple-touch-icon``), the best four of those on
+the site's own host or its subdomains, else ``/favicon.ico``.
 
 Every request goes through the importer's network guard, pinned to the
 address it checked (nostr/imports/netguard.py), and an icon may be 64 KiB
@@ -14,7 +15,10 @@ never rendered), with ICO, the format of ``/favicon.ico``, decoded here
 under the same limits. What is found is kept as a small PNG in
 ``~/.cache/my_editor/favicons/<sha256 of the site>.png`` and looked for
 again after 30 days; a site without a usable icon is asked again after
-a week. Two sites are looked up at a time.
+a week. A lookup that nothing answered (offline) leaves no mark: it is
+tried again after a few minutes, or at the next start. Within a session
+a site is looked up once a day at most, whether or not the cache can be
+written. Two sites are looked up at a time.
 """
 
 from __future__ import annotations
@@ -56,6 +60,9 @@ ICON_PIXELS = 64                       # kept at this size, drawn at 16 to 32
 REFRESH_DAYS = 30
 RETRY_DAYS = 7
 AT_ONCE = 2
+NAMED_AT_MOST = 4                      # icons a page names that are tried
+ONCE_A_DAY = 24 * 3600                 # a site looked up, within a session
+OFFLINE_PAUSE = 10 * 60                # after a lookup nothing answered
 _USER_AGENT = b"MyEditor (site icon)"
 
 _LINK = re.compile(r"<link\b[^>]*>", re.IGNORECASE)
@@ -101,6 +108,29 @@ def icons_named(page: str, page_url: str) -> List[str]:
         rank = (0 if 32 <= largest <= 256 else 1, 1 if ico else 0, 1 if touch else 0)
         found.append((rank, len(found), urljoin(page_url, href)))
     return [url for _rank, _n, url in sorted(found)]
+
+
+def own_icons(candidates: List[str], site: str) -> List[str]:
+    """The best few of the icons a page names that are the site's own: on
+    its host or a subdomain of it ("www." aside), or inline. A page naming
+    hundreds of icons on other hosts kept a lookup busy for hours and sent
+    the person's address to each of them (CP3 review L11)."""
+    host = (urlsplit(site).hostname or "").removeprefix("www.")
+
+    def own(url: str) -> bool:
+        if url.startswith("data:"):
+            return True
+        other = urlsplit(url).hostname or ""
+        return other == host or other.endswith("." + host)
+
+    return [url for url in candidates if own(url)][:NAMED_AT_MOST]
+
+
+def _answered(fetched: Fetched) -> bool:
+    """Whether the site said something: an answer of any status, or an
+    address the guard refuses (it stays refused). Not a name that did not
+    resolve or a connection that failed."""
+    return fetched.status > 0 or bool(fetched.refused)
 
 
 def decode_icon(data: bytes) -> Optional[QImage]:
@@ -173,6 +203,10 @@ class FaviconCache(QObject):
         self._queue: List[tuple] = []        # (site, address) waiting
         self._waiting: set = set()
         self._running: set = set()
+        # When each site may be looked up again in this session, whatever
+        # the cache holds (CP3 review L12: a cache that could not be written
+        # started a lookup on every repaint).
+        self._not_before: Dict[str, float] = {}
 
     # -- asking ---------------------------------------------------------------
 
@@ -205,6 +239,8 @@ class FaviconCache(QObject):
         if site in self._waiting or site in self._running:
             return False
         now = self._clock()
+        if now < self._not_before.get(site, 0):
+            return False
         for suffix, days in ((".png", REFRESH_DAYS), (".none", RETRY_DAYS)):
             try:
                 age = now - os.path.getmtime(self._path(site, suffix))
@@ -262,13 +298,15 @@ class FaviconCache(QObject):
         candidates = []
         if fetched.ok and 200 <= fetched.status < 300 and fetched.data:
             text = fetched.data[:MAX_PAGE_BYTES].decode("utf-8", errors="replace")
-            candidates = icons_named(text, fetched.url or home)
+            candidates = own_icons(icons_named(text, fetched.url or home), site)
         candidates.append(site + "/favicon.ico")
-        self._try(site, list(dict.fromkeys(candidates)))
+        self._try(site, list(dict.fromkeys(candidates)), _answered(fetched))
 
-    def _try(self, site: str, candidates: List[str]) -> None:
+    def _try(self, site: str, candidates: List[str], answered: bool) -> None:
+        """Try the icons in turn; ``answered`` says whether the site has
+        said anything so far in this lookup."""
         if not candidates:
-            self._found(site, None)
+            self._found(site, None, answered=answered)
             return
         first, rest = candidates[0], candidates[1:]
         if first.startswith("data:"):
@@ -276,19 +314,30 @@ class FaviconCache(QObject):
             if image is not None:
                 self._found(site, image)
             else:
-                self._try(site, rest)
+                self._try(site, rest, answered)
             return
-        self._get(first, MAX_ICON_BYTES, _later(self, "_icon_read", site, rest))
+        self._get(first, MAX_ICON_BYTES, _later(self, "_icon_read", site, rest, answered))
 
-    def _icon_read(self, site: str, rest: List[str], fetched: Fetched) -> None:
+    def _icon_read(self, site: str, rest: List[str], answered: bool,
+                   fetched: Fetched) -> None:
         image = decode_icon(fetched.data) if fetched.ok and 200 <= fetched.status < 300 else None
         if image is not None:
             self._found(site, image)
         else:
-            self._try(site, rest)
+            self._try(site, rest, answered or _answered(fetched))
 
-    def _found(self, site: str, image: Optional[QImage]) -> None:
+    def _found(self, site: str, image: Optional[QImage], *, answered: bool = True) -> None:
+        """The lookup of ``site`` ended. Only an icon, or a site that said
+        it has none, is kept: after a lookup nothing answered (offline)
+        the site is asked again after a pause, never taken for one without
+        an icon for a week (CP3 review L12)."""
         self._running.discard(site)
+        now = self._clock()
+        if image is None and not answered:
+            self._not_before[site] = now + OFFLINE_PAUSE
+            self._next()
+            return
+        self._not_before[site] = now + ONCE_A_DAY
         self._keep(site, image)
         if image is not None:
             self._images[site] = self._read(site) or image
