@@ -25,7 +25,8 @@ destructive one at the leading edge, away from the default; in a stack
 (when the titles are too long for a row), the default on top and Cancel at
 the bottom. A QDialogButtonBox has no stack and no leading destructive
 button, so the alert lays them out itself. (Other dialogs' button boxes
-follow the same row order through the app's style, theme.AppStyle.) The keyboard follows the same order, and
+follow the same row order through the app's style, theme.AppStyle, and
+answer Return the same way through return_chooses_the_action.) The keyboard follows the same order, and
 the default button has the focus, so Space and Return both choose it.
 
 Every color comes from theme.dialog_stylesheet, so no call site can paint
@@ -45,6 +46,7 @@ from PySide6.QtWidgets import (
     QBoxLayout,
     QCheckBox,
     QDialog,
+    QDialogButtonBox,
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
@@ -276,6 +278,18 @@ def start_on_default(button: QPushButton) -> None:
     Return still chooses the default."""
     if QGuiApplication.styleHints().tabFocusBehavior() == Qt.TabFocusAllControls:
         button.setFocus()
+
+
+def return_chooses_the_action(box: QDialogButtonBox) -> None:
+    """Let a dialog's button box answer the keyboard as an alert does: Return
+    chooses the action (the box's accept button, which the box makes the
+    default when the dialog is shown) whichever button has the focus, and
+    Space the focused one. Call it once the box has its buttons, and make no
+    button the default by hand: done before the box is in its dialog, that
+    left Qt to choose the first button in the row, Cancel."""
+    for button in box.buttons():
+        if isinstance(button, QPushButton):
+            button.setAutoDefault(False)
 
 
 def _icon_pixmap(caution: bool) -> QPixmap:

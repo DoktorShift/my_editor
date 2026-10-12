@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from alerts import return_chooses_the_action
 from i18n import _
 
 from ..drafts import (
@@ -416,7 +417,7 @@ class StashKindDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
         self._save_btn = buttons.button(QDialogButtonBox.Ok)
         self._save_btn.setText(_("Save draft"))
-        self._save_btn.setDefault(True)
+        return_chooses_the_action(buttons)
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)

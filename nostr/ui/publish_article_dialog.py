@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 import word_count
-from alerts import CANCEL, DEFAULT, NORMAL, Button, ask
+from alerts import CANCEL, DEFAULT, NORMAL, Button, ask, return_chooses_the_action
 from i18n import _, display_locale, ngettext
 
 from ..article_details import ArticleDetails
@@ -565,7 +565,7 @@ class PublishArticleDialog(QDialog):
         buttons = QDialogButtonBox()
         self._cancel_btn = buttons.addButton(QDialogButtonBox.Cancel)
         self._publish_btn = buttons.addButton(_("Publish"), QDialogButtonBox.AcceptRole)
-        self._publish_btn.setDefault(True)
+        return_chooses_the_action(buttons)
         self._cancel_btn.clicked.connect(self._on_cancel)
         self._publish_btn.clicked.connect(self._on_publish)
         footer.addWidget(buttons)

@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from alerts import return_chooses_the_action
 from i18n import _
 
 
@@ -304,7 +305,7 @@ class SaveDestinationDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
         ok_button = buttons.button(QDialogButtonBox.Ok)
         ok_button.setText(_("Save"))
-        ok_button.setDefault(True)
+        return_chooses_the_action(buttons)
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
