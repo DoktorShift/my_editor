@@ -1492,9 +1492,14 @@ class DraftsPanel(QFrame):
             button.clicked.connect(slot)
         return button
 
-    def _on_refresh(self) -> None:
+    def refresh_name(self) -> str:
+        """What Refresh is called for the view shown ("Refresh Drafts")."""
+        return self._refresh_names.get(self.current_view(), _("Refresh"))
+
+    def refresh_shown_view(self) -> None:
         """The view shown reads again: Drafts through the host, another
-        view by its own ``refresh``."""
+        view by its own ``refresh`` (the action menu, and the host's menu
+        bar command)."""
         refresh = self._view_refresh.get(self.current_view())
         if refresh is None:
             self.refresh_requested.emit()
@@ -1520,7 +1525,7 @@ class DraftsPanel(QFrame):
         # Bound methods, no closures: the menu then keeps nothing alive.
         menu.aboutToShow.connect(self._update_actions_menu)
         self._refresh_action = menu.addAction(self._refresh_names[self.DRAFTS_VIEW])
-        self._refresh_action.triggered.connect(self._on_refresh)
+        self._refresh_action.triggered.connect(self.refresh_shown_view)
         self._draft_relays_action = menu.addAction(_("Draft Relays…"))
         self._draft_relays_action.setEnabled(False)       # until there is an account
         self._draft_relays_action.triggered.connect(self._ask_for_draft_relays)
@@ -1536,7 +1541,7 @@ class DraftsPanel(QFrame):
         """Bring the action menu up to date for the view shown and the
         drafts selected (before it opens, and when the view changes)."""
         view = self.current_view()
-        self._refresh_action.setText(self._refresh_names.get(view, _("Refresh")))
+        self._refresh_action.setText(self.refresh_name())
         drafts = view == self.DRAFTS_VIEW
         for action in (self._bulk_separator, self._select_all_action,
                        self._delete_selected_action):

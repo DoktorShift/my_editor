@@ -1563,6 +1563,14 @@ class MainWindow(QMainWindow):
             Command("nostr.drafts", _("Drafts…"), NOSTR, "Ctrl+Shift+D", checkable=True,
                     nostr=True, listed_as=_("Toggle Drafts panel")),
             triggered=self._on_toggle_drafts_panel)
+        # The Drafts panel's view reads again (its title follows the view
+        # shown). In the menu bar, where every command of the app is listed,
+        # and in the panel's action menu; each platform's own key for it.
+        self.act_refresh_drafts = add(
+            Command("nostr.refresh_drafts", _("Refresh Drafts"), NOSTR,
+                    QKeySequence.StandardKey.Refresh, nostr=True,
+                    listed_as=_("Refresh the Drafts panel"), keywords=("reload", "sync")),
+            triggered=self._refresh_drafts_panel, enabled=False)
         # Where the account keeps its drafts: a sheet on this window. In the
         # menu bar, where every command of the app is listed, and in the
         # Drafts panel's action menu.
@@ -1742,6 +1750,7 @@ class MainWindow(QMainWindow):
         m_nostr.addAction(self.act_nostr_insert_image)
         m_nostr.addSeparator()
         m_nostr.addAction(self.act_nostr_drafts)
+        m_nostr.addAction(self.act_refresh_drafts)
         m_nostr.addAction(self.act_draft_relays)
         m_nostr.addAction(self.act_nostr_imports)
         m_nostr.addSeparator()
@@ -1890,6 +1899,7 @@ class MainWindow(QMainWindow):
             is_dark=self.is_dark_theme)
         add_published_view(self._drafts_panel, self._published_view)
         self._drafts_panel.view_changed.connect(self._follow_account_in_published)
+        self._drafts_panel.view_changed.connect(self._update_refresh_command)
         self._published_view.open_requested.connect(self._on_published_open)
         self._published_view.status_message.connect(self._on_published_status)
         # The panel's one row about imports (D-2): new posts, how an
@@ -4684,6 +4694,7 @@ class MainWindow(QMainWindow):
         if draft_relays is not None:
             # Where drafts are kept is the account's: nothing to set without one.
             draft_relays.setEnabled(current is not None)
+        self._update_refresh_command()
 
     # -- creating, restoring and backing up accounts ---------------------------
     # The windows and the network work behind them are the account
@@ -5493,12 +5504,29 @@ class MainWindow(QMainWindow):
         self._draft_sync.refresh()
         self._draft_deletions.refresh()
         self._follow_account_in_published()
+        self._update_refresh_command()
 
     def _hide_drafts_panel(self) -> None:
         if self._drafts_panel is None:
             return
         self._drafts_panel.hide()
         self.act_nostr_drafts.setChecked(False)
+        self._update_refresh_command()
+
+    def _refresh_drafts_panel(self) -> None:
+        """Nostr > Refresh Drafts: the panel's view shown reads again."""
+        if self._drafts_panel is not None and self._drafts_panel.isVisible():
+            self._drafts_panel.refresh_shown_view()
+
+    def _update_refresh_command(self, *_view) -> None:
+        """Refresh is named for the panel's view shown, and offered while
+        the panel is shown with an account in use."""
+        action = getattr(self, "act_refresh_drafts", None)
+        panel = getattr(self, "_drafts_panel", None)
+        if action is None or panel is None:
+            return
+        action.setText(panel.refresh_name())
+        action.setEnabled(panel.isVisible() and self._profile_store.default() is not None)
 
     # ----------------------------------------------------------------------
     # NOSTR - drafts panel signal handlers

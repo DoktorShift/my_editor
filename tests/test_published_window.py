@@ -3,7 +3,8 @@
 """The Published view and Draft Relays in the document window.
 
 What must hold: the Drafts panel has Drafts and Published; Nostr > Draft
-Relays… is in the menu bar, enabled while an account is in use; the Published
+Relays… is in the menu bar, enabled while an account is in use, and Nostr >
+Refresh Drafts while the panel is shown, named for its view; the Published
 view reads the relays only once it is shown, for the account in use;
 Draft Relays… in the drafts' action menu opens the sheet on the window
 for that account (with the relays a membership adds), and a save says
@@ -67,6 +68,7 @@ w.show()
 app.processEvents()
 panel, view = w._drafts_panel, w._published_view
 r = {"views": panel.views()}
+from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import QMenu
 r["menu_bar_has_draft_relays"] = [m.title() for m in w.menuBar().findChildren(QMenu)
                                   if w.act_draft_relays in m.actions()] == ["&Nostr"]
@@ -86,12 +88,22 @@ w._update_account_actions()
 r["draft_relays_with_account"] = w.act_draft_relays.isEnabled()
 w._follow_account_in_published()
 r["read_while_hidden"] = list(read_for)
+r["refresh_while_hidden"] = w.act_refresh_drafts.isEnabled()
 w._show_drafts_panel()
 app.processEvents()
 r["read_with_drafts_shown"] = list(read_for)
+r["refresh_menu"] = [w.act_refresh_drafts.text(), w.act_refresh_drafts.isEnabled(),
+                     w.act_refresh_drafts.shortcut().toString()
+                     == QKeySequence(QKeySequence.StandardKey.Refresh).toString(),
+                     [m.title() for m in w.menuBar().findChildren(QMenu)
+                      if w.act_refresh_drafts in m.actions()]]
 panel.show_view("published")
 app.processEvents()
 r["read_once_shown"] = list(read_for)
+refreshed = []
+view.model.refresh = lambda: refreshed.append(True)
+w.act_refresh_drafts.trigger()
+r["refresh_published"] = [w.act_refresh_drafts.text(), refreshed]
 r["unnamed"] = unnamed_controls(panel)
 
 # Draft Relays...
@@ -179,6 +191,11 @@ print("RESULT " + json.dumps(r))
 def test_the_published_view_and_draft_relays_in_the_window(tmp_path):
     r = run_window_script(SCRIPT, tmp_path)
     assert r["views"] == ["drafts", "published"]
+    # Nostr > Refresh Drafts: offered while the panel is shown, named for its
+    # view, with the platform's own key, and it reads that view again (L8).
+    assert not r["refresh_while_hidden"]
+    assert r["refresh_menu"] == ["Refresh Drafts", True, True, ["&Nostr"]]
+    assert r["refresh_published"] == ["Refresh Published Notes and Articles", [True]]
     # Nostr > Draft Relays…, enabled while an account is in use (review N9).
     assert r["menu_bar_has_draft_relays"]
     assert not r["draft_relays_without_account"] and r["draft_relays_with_account"]
