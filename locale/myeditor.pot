@@ -532,7 +532,7 @@ msgstr ""
 
 #: main_window.py:1244
 #: main_window.py:254
-#: nostr/ui/draft_relays_sheet.py:449
+#: nostr/ui/draft_relays_sheet.py:457
 #: nostr/ui/profile_window.py:250
 #: nostr/ui/save_destination_dialog.py:225
 #: nostr/ui/save_destination_dialog.py:306
@@ -2369,7 +2369,7 @@ msgstr ""
 #: nostr/ui/account_windows.py:793
 #: nostr/ui/account_windows.py:854
 #: nostr/ui/account_windows.py:1104
-#: nostr/ui/draft_relays_sheet.py:440
+#: nostr/ui/draft_relays_sheet.py:448
 #: nostr/ui/image_review_dialog.py:124
 msgid "Done"
 msgstr ""
@@ -2397,7 +2397,7 @@ msgstr ""
 #: update_dialog.py:279
 #: nostr/ui/account_windows.py:769
 #: nostr/ui/connect_dialog.py:360
-#: nostr/ui/draft_relays_sheet.py:438
+#: nostr/ui/draft_relays_sheet.py:446
 #: nostr/ui/drafts_panel.py:1132
 #: nostr/ui/imports_activity.py:288
 #: nostr/ui/imports_window.py:1092
@@ -5125,19 +5125,11 @@ msgstr ""
 msgid "Reading your drafts…"
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:422
-msgid "Drafts are saved only on these relays:"
-msgstr ""
-
-#: nostr/ui/draft_relays_sheet.py:423
-msgid "Drafts are kept on your usual relays."
-msgstr ""
-
-#: nostr/ui/draft_relays_sheet.py:443
+#: nostr/ui/draft_relays_sheet.py:451
 msgid "Save Anyway"
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:445
+#: nostr/ui/draft_relays_sheet.py:453
 msgid "Use My Usual Relays"
 msgstr ""
 
@@ -5169,6 +5161,22 @@ msgid "{relays} didn’t give your drafts back when MyEditor asked, so nothing w
 msgid_plural "{relays} didn’t give your drafts back when MyEditor asked, so nothing was changed. Some relays show drafts only after you sign in to them, which MyEditor can’t do yet. Choose other relays, then try again."
 msgstr[0] ""
 msgstr[1] ""
+
+#: nostr/ui/draft_relays_sheet.py:425
+msgid "Drafts will be saved only on these relays:"
+msgstr ""
+
+#: nostr/ui/draft_relays_sheet.py:427
+msgid "Drafts will be kept on your usual relays."
+msgstr ""
+
+#: nostr/ui/draft_relays_sheet.py:429
+msgid "Drafts are saved only on these relays:"
+msgstr ""
+
+#: nostr/ui/draft_relays_sheet.py:431
+msgid "Drafts are kept on your usual relays."
+msgstr ""
 
 #: nostr/ui/draft_relays_sheet.py:231
 #, python-brace-format

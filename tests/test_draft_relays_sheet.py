@@ -219,7 +219,7 @@ def test_use_my_usual_relays_empties_the_form_and_save_makes_it_so():
     sheet, saved = open_sheet(lists)
     sheet.buttons["usual"].click()
     assert sheet.chosen() == [] and sheet._summary.text() == (
-        "Drafts are kept on your usual relays.")
+        "Drafts will be kept on your usual relays.")      # once saved, not yet
     assert lists.saves == []                              # nothing changes before Save
     sheet.buttons["save"].click()
     assert lists.saves == [([], [])] and saved == [[]] and not sheet.isVisible()
@@ -268,6 +268,18 @@ def test_a_relay_being_left_that_did_not_answer_offers_save_anyway():
     lists.answer = SAVED
     sheet.buttons["anyway"].click()
     assert lists.saves == [([], []), ([], [MINE])] and saved == [[]]   # MINE only
+
+
+def test_after_a_failed_save_the_summary_does_not_state_the_form_as_the_setting():
+    lists = Lists([MINE], answer=SaveOutcome(MoveOutcome(unread=(MINE,))))
+    sheet, _saved = open_sheet(lists)
+    assert sheet._summary.text() == "Drafts are saved only on these relays:"
+    sheet.buttons["usual"].click()
+    sheet.buttons["save"].click()
+    assert sheet._error.text().endswith("won’t be shown any more.")
+    assert sheet._summary.text() == "Drafts will be kept on your usual relays."
+    add(sheet, MINE)                                      # back to the setting as read
+    assert sheet._summary.text() == "Drafts are saved only on these relays:"
 
 
 def test_save_anyway_goes_once_the_choice_changes():

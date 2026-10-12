@@ -419,8 +419,16 @@ class DraftRelaysSheet(AssistantWindow):
         editing = self._state == EDITING
         # Where drafts go is said once it is known, not while reading.
         known = self._state in (EDITING, SAVING)
-        self._summary.setText(_("Drafts are saved only on these relays:") if self._list.count()
-                              else _("Drafts are kept on your usual relays."))
+        # The setting as it is, or, once the form differs from it, as it
+        # will be after Save (not as if it were so already).
+        if self._changed():
+            self._summary.setText(_("Drafts will be saved only on these relays:")
+                                  if self._list.count()
+                                  else _("Drafts will be kept on your usual relays."))
+        else:
+            self._summary.setText(_("Drafts are saved only on these relays:")
+                                  if self._list.count()
+                                  else _("Drafts are kept on your usual relays."))
         self._summary.setVisible(known)
         self._list.setEnabled(editing)
         self._field.setEnabled(editing)
