@@ -663,31 +663,36 @@ class PrivateDraftRelays(QObject):
         decrypted (UNDECRYPTED).
 
         Drafts follow what was read (RelayDirectory.follow_draft_relays):
-        a list changed on another device is followed here too. The same
-        list read again is not decrypted again, so asking costs no signer
-        prompt while nothing changed."""
+        a list changed on another device is followed here too. A list this
+        device already knows (it wrote or read it, here or in the sheet) is
+        not decrypted again, so asking costs no signer prompt while nothing
+        changed; one older than that, an answer that arrived late, is not
+        followed, and the list known is the answer."""
         author = self._profile.user_pubkey.lower()
         relays = lookup_relays(known=self._directory.cached(author), own=True)
 
-        def answer(read: Optional[List[str]], event_id: Optional[str] = None,
+        def answer(read: Optional[List[str]], event: Optional[dict] = None,
                    failure: Optional[str] = None) -> None:
             self.last_failure = failure
             if read is not None:
-                self._known, self._read_id = list(read), event_id
-                self._directory.follow_draft_relays(author, read)
+                self._known, self._read_id = list(read), (event or {}).get("id")
+                self._directory.follow_draft_relays(author, read, event=event)
             on_done(read)
 
         def found(result) -> None:
-            if result.state is LookupState.ABSENT:
-                answer([])
-            elif result.state is LookupState.UNKNOWN or result.event is None:
+            known = self._directory.draft_list_known(author)
+            event = result.event if result.state is LookupState.FOUND else None
+            if result.state is LookupState.UNKNOWN or (
+                    result.state is LookupState.FOUND and event is None):
                 answer(None, failure=UNREACHABLE)
-            elif self._known is not None and result.event.get("id") == self._read_id:
-                answer(list(self._known), self._read_id)
+            elif known is not None and (event is None or event.get("id") == known["id"]
+                                        or not is_newer(event, known)):
+                answer(known["relays"], known)
+            elif event is None:
+                answer([])
             else:
-                event = result.event
                 self._decrypt(str(event.get("content") or ""), lambda read: answer(
-                    read, event.get("id"), None if read is not None else UNDECRYPTED))
+                    read, event, None if read is not None else UNDECRYPTED))
 
         self._query(self._pool, relays, kind=KIND_PRIVATE_RELAYS, author=author,
                     on_done=found, parent=self)
@@ -752,6 +757,8 @@ class PrivateDraftRelays(QObject):
             if outcome.ok:
                 self._known = list(chosen)
                 self._read_id = (outcome.write.event or {}).get("id")
+                if outcome.write.event is not None:
+                    self._directory.remember_draft_list(author, outcome.write.event, chosen)
             on_done(outcome)
 
         self._saving = _Save(

@@ -126,6 +126,9 @@ class RelayDirectory(QObject):
         # drafts (NIP-42, which MyEditor can't do yet): drafts saved there
         # could be read back by nobody, so they go to the usual relays.
         self._draft_relays_locked: set = set()
+        # author -> the newest draft list this device wrote or followed in
+        # this session: id, created_at, relays (see ``follow_draft_relays``).
+        self._draft_list_events: Dict[str, dict] = {}
         # author -> what waits for the draft list being read right now, and
         # until when it waits. One timer serves every wait: a timer per wait,
         # connected to a closure over this object, could outlive or destroy it.
@@ -297,12 +300,40 @@ class RelayDirectory(QObject):
                 self.changed.emit(key)
         self._settle_drafts(key)
 
-    def follow_draft_relays(self, author: str, relays: Optional[Sequence[str]]) -> None:
-        """A draft list read now, perhaps changed on another device: drafts
+    def draft_list_known(self, author: str) -> Optional[dict]:
+        """The newest draft list this device wrote or followed in this
+        session (``id``, ``created_at`` and the decrypted ``relays``), or
+        None."""
+        known = self._draft_list_events.get((author or "").lower())
+        return dict(known) if known is not None else None
+
+    def remember_draft_list(self, author: str, event: dict, relays: Sequence[str]) -> None:
+        """The draft list this device has just written: it is the newest
+        known, and a read answered with an older one is not followed."""
+        self._draft_list_events[(author or "").lower()] = {
+            "id": event.get("id"), "created_at": event.get("created_at"),
+            "relays": list(relays)}
+
+    def follow_draft_relays(self, author: str, relays: Optional[Sequence[str]], *,
+                            event: Optional[dict] = None) -> bool:
+        """A draft list read now (``event``: the list's event, None when
+        the account has none), perhaps changed on another device: drafts
         follow it (``set_draft_relays``), and the draft relays it no longer
         has are left behind with whatever this device saved there before it
-        knew (``leave_drafts_behind``)."""
+        knew (``leave_drafts_behind``).
+
+        A list older than the newest known here, or none while one is
+        known, is an answer that arrived late (a read asked before a change
+        reached the relays): it is not followed, and False is returned."""
         key = (author or "").lower()
+        known = self._draft_list_events.get(key)
+        if known is not None and (event is None or (
+                event.get("id") != known["id"] and not policy.is_newer(event, known))):
+            return False
+        if event is not None and relays is not None:
+            self._draft_list_events[key] = {"id": event.get("id"),
+                                            "created_at": event.get("created_at"),
+                                            "relays": list(relays)}
         before = self._draft_lists.get(key)
         if relays is not None and before is not None:
             now = policy.dedupe_relays(relays, cap=defaults.PRIVATE_CAP)
@@ -310,6 +341,7 @@ class RelayDirectory(QObject):
             if left:
                 self.leave_drafts_behind(key, left, since=None)
         self.set_draft_relays(key, relays)
+        return True
 
     def leave_drafts_behind(self, author: str, relays: Sequence[str], *,
                             since: Optional[int]) -> None:

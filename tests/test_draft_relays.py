@@ -655,7 +655,8 @@ def test_drafts_left_behind_are_moved_and_then_no_longer_read():
     from nostr.draft_sync import DraftSync
     draft = wrap("draft-1")
     drafts, relays, directory, client = moving(LIST_ON_MINE, drafts_on={MINE: [draft]})
-    directory.follow_draft_relays(PK, [OTHER])             # learned from another device
+    directory.follow_draft_relays(                          # learned from another device
+        PK, [OTHER], event=signed(KIND_PRIVATE_RELAYS, [], "sealed:", created_at=NOW - 10))
     sync = DraftSync(relay_pool=relays, relay_directory=directory,
                      session_pool=FakeSessionPool(client), store=DraftStore(),
                      read_draft_list=lambda _profile, on_done: on_done([OTHER]))
@@ -712,3 +713,54 @@ def test_drafts_go_to_the_usual_relays_while_every_draft_relay_asks_for_a_sign_i
     sync.stop()
     sync.deleteLater()
     settle()
+
+
+# -- the newest list known (review L5) ---------------------------------------------------
+
+class CountingClient(SealingClient):
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.decrypted = 0
+
+    def nip44_decrypt_self(self, ciphertext, on_success, on_failure):
+        self.decrypted += 1
+        super().nip44_decrypt_self(ciphertext, on_success, on_failure)
+
+
+def another_reader(sheet_lists, relays, directory, client):
+    """A second PrivateDraftRelays for the account (as DraftSync keeps)."""
+    return PrivateDraftRelays(profile=Profile(), pool=relays,
+                              session_pool=FakeSessionPool(client), directory=directory,
+                              query=sheet_lists._query, clock=lambda: NOW)
+
+
+def test_a_list_this_device_wrote_is_not_decrypted_again_by_another_reader():
+    lists, relays, directory, _client = moving(LIST_ON_MINE)
+    client = CountingClient()
+    reader = another_reader(lists, relays, directory, client)
+    reader.read(lambda _relays: None)
+    out = []
+    lists.save([OTHER], out.append)
+    relays.run(rounds=20)
+    written = [event for _urls, event in relays.published
+               if event["kind"] == KIND_PRIVATE_RELAYS][-1]
+    lists._query.answers[KIND_PRIVATE_RELAYS] = found(written)
+    before = client.decrypted
+    got = []
+    reader.read(got.append)
+    assert out[0].ok and got == [[OTHER]] and client.decrypted == before   # no signer prompt
+
+
+def test_a_late_answer_with_an_older_list_does_not_undo_a_save():
+    lists, relays, directory, _client = moving(LIST_ON_MINE)
+    reader = another_reader(lists, relays, directory, CountingClient())
+    held = []
+    reader._query = lambda _pool, _relays, **kw: held.append(kw["on_done"])
+    reader.read(lambda _relays: None)                       # asked before the save ...
+    out = []
+    lists.save([OTHER], out.append)
+    relays.run(rounds=20)
+    held[0](LIST_ON_MINE)                                   # ... answered after it
+    settle()
+    assert out[0].ok and directory.draft_relays_of(PK) == [OTHER]
+    assert directory.drafts_left_behind(PK) is None

@@ -289,10 +289,17 @@ class FakeRelayDirectory(QObject):
             self.draft_lists[author.lower()] = list(relays)
             self.changed.emit(author.lower())
 
-    def follow_draft_relays(self, author, relays):
+    def draft_list_known(self, author):
+        return None
+
+    def remember_draft_list(self, author, event, relays):
+        self.calls.append(("remember_draft_list", author, event.get("id"), tuple(relays)))
+
+    def follow_draft_relays(self, author, relays, *, event=None):
         self.calls.append(("follow_draft_relays", author,
                            None if relays is None else tuple(relays)))
         self.set_draft_relays(author, relays)
+        return True
 
     def leave_drafts_behind(self, author, relays, *, since):
         self.calls.append(("leave_drafts_behind", author, tuple(relays), since))
