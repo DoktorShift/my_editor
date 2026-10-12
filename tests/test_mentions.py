@@ -29,7 +29,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QMimeData, QObject, Qt, Signal  # noqa: E402
+from PySide6.QtCore import QMimeData, QObject, QRect, Qt, Signal  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from editor import HtmlEditor  # noqa: E402
@@ -214,7 +214,7 @@ def test_the_picker_shows_an_address_only_once_confirmed(tmp_path):
                          source="contact"))
     check = FakeCheck()
     picker = MentionPicker(people, FakeSearch(), address_check=check, is_dark=False)
-    picker.open_at(picker.pos())
+    picker.open_at(QRect(0, 0, 1, 1), picker)
     person = people.get(ALICE)
     assert picker.confirmed_address(person) == ""              # not yet answered
     spoken = picker._list.item(0).data(Qt.ItemDataRole.AccessibleTextRole)
@@ -231,6 +231,29 @@ def test_the_picker_shows_an_address_only_once_confirmed(tmp_path):
     picker.hide()
 
 
+def test_the_picker_stays_on_the_screen_at_the_bottom(tmp_path):
+    from PySide6.QtGui import QGuiApplication
+    from PySide6.QtWidgets import QWidget
+    from nostr.ui import mention_picker
+    from nostr.ui.mention_picker import MentionPicker
+    people = KnownPeople(tmp_path / "people.json")
+    people.upsert(Person(pubkey=ALICE, display_name="Alice", source="contact"))
+    host = QWidget()
+    area = QGuiApplication.primaryScreen().availableGeometry()
+    host.setGeometry(area)
+    host.show()
+    picker = MentionPicker(people, FakeSearch(), parent=host, is_dark=False)
+    caret = QRect(40, area.height() - 30, 2, 18)                # writing at the bottom
+    picker.open_at(caret, host)
+    frame = picker.frameGeometry()
+    assert area.contains(frame), (frame, area)
+    assert frame.bottom() < host.mapToGlobal(caret.topLeft()).y()   # above the caret
+    picker.set_dark(True)
+    assert picker.styleSheet() == mention_picker._DARK_CSS
+    picker.hide()
+    host.close()
+
+
 @pytest.mark.parametrize("key", [Qt.Key.Key_Return, Qt.Key.Key_Enter])
 def test_return_in_the_picker_picks_the_person_on_every_system(tmp_path, key):
     from PySide6.QtTest import QTest
@@ -240,7 +263,7 @@ def test_return_in_the_picker_picks_the_person_on_every_system(tmp_path, key):
     picker = MentionPicker(people, FakeSearch(), is_dark=False)
     picked = []
     picker.picked.connect(picked.append)
-    picker.open_at(picker.pos())
+    picker.open_at(QRect(0, 0, 1, 1), picker)
     QTest.keyClicks(picker._search_edit, "Ali")
     QTest.keyClick(picker._search_edit, key)
     assert [person.display_name for person in picked] == ["Alice"]
@@ -285,6 +308,10 @@ r["text"] = ed.toPlainText()
 r["markdown"] = document_to_markdown(ed.document())
 r["slash_with"] = "Insert Mention…" in [c.title for c in w.commands.rank(
     "mention", nostr=True)]
+from nostr.ui import mention_picker
+w._set_theme(not w.is_dark_theme, announce=False)
+r["picker_follows_theme"] = picker.styleSheet() == (
+    mention_picker._DARK_CSS if w.is_dark_theme else mention_picker._LIGHT_CSS)
 ed.document().setModified(False)
 w.close()
 print("RESULT " + json.dumps(r))
@@ -300,3 +327,4 @@ def test_mentions_in_the_window(tmp_path):
     nprofile = bech32.encode_nprofile(ALICE, ["wss://relay.example.com"])
     assert r["markdown"] == f"Hi @ nostr:{nprofile}\n"
     assert r["slash_with"]
+    assert r["picker_follows_theme"]

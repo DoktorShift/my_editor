@@ -393,6 +393,8 @@ class MainWindow(QMainWindow):
         self._line_label = QLabel()
         self._line_label.setContentsMargins(0, 0, 8, 0)
         self.status.addPermanentWidget(self._line_label)
+        # The mention picker at the caret, made on its first use.
+        self._mention_picker = None
 
         self._apply_theme()
 
@@ -452,7 +454,6 @@ class MainWindow(QMainWindow):
         self._known_people = KnownPeople()
         # A person's Nostr address shows only once their domain confirmed it.
         self._address_check = Nip05Check(parent=self)
-        self._mention_picker = None
         self._search_client = Nip50SearchClient(
             self._relay_pool, self._known_people, parent=self
         )
@@ -834,6 +835,8 @@ class MainWindow(QMainWindow):
         muted = DARK_MUTED_FG if self.is_dark_theme else LIGHT_MUTED_FG
         self._words_label.setStyleSheet(f"color: {muted}; font-size: 12px;")
         self._show_backup_status()
+        if self._mention_picker is not None:
+            self._mention_picker.set_dark(self.is_dark_theme)
 
         for i in range(self.tabs.count()):
             ed = self._editor_from_widget(self.tabs.widget(i))
@@ -5910,8 +5913,7 @@ class MainWindow(QMainWindow):
                 parent=self, is_dark=self.is_dark_theme, address_check=self._address_check)
             self._mention_picker.picked.connect(self._mention_picked)
         self._mention_target = (ed, at)
-        caret = ed.cursorRect()
-        self._mention_picker.open_at(ed.viewport().mapToGlobal(caret.bottomLeft()))
+        self._mention_picker.open_at(ed.cursorRect(), ed.viewport())
 
     def _mention_picked(self, person) -> None:
         ed, at = getattr(self, "_mention_target", (None, -1))

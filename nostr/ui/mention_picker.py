@@ -6,7 +6,7 @@ Usage from a parent widget (e.g. the publish dialog):
 
     picker = MentionPicker(known_people, search_client, parent=self)
     picker.picked.connect(self._on_mention_picked)
-    picker.open_at(button.mapToGlobal(button.rect().bottomLeft()))
+    picker.open_at(button.rect(), button)
 
 The popup auto-dismisses on click-outside (Qt.Popup window flag).
 Keyboard navigation: ↑/↓ to move, Enter to pick, Esc to cancel.
@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from PySide6.QtCore import QPoint, Qt, QTimer, Signal
+from PySide6.QtCore import QRect, Qt, QTimer, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 )
 
 from i18n import _
+from popup_placement import place_below
 
 from ..avatar_store import AvatarStore
 from ..known_people import KnownPeople, Person
@@ -281,13 +282,20 @@ class MentionPicker(QWidget):
 
     # -- public API --------------------------------------------------------
 
-    def open_at(self, global_pos: QPoint) -> None:
-        """Show the popup with its top-left at ``global_pos``."""
-        self.move(global_pos)
-        self.show()
+    def open_at(self, anchor: QRect, parent: QWidget) -> None:
+        """Show the popup under ``anchor`` (in ``parent``'s coordinates: the
+        caret, or the button that asked), or above it when the screen has
+        no room below, as every popup at the caret does."""
         self._search_edit.clear()
         self._refresh_for_query("")
+        place_below(self, anchor, parent)
+        self.show()
         self._search_edit.setFocus()
+
+    def set_dark(self, is_dark: bool) -> None:
+        """Follow the window's appearance (light or dark)."""
+        self._is_dark = is_dark
+        self.setStyleSheet(_DARK_CSS if is_dark else _LIGHT_CSS)
 
     def reject(self) -> None:  # type: ignore[override]
         self._search_client.cancel()
