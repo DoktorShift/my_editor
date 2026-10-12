@@ -192,7 +192,6 @@ class DraftRelaysSheet(AssistantWindow):
         self._left_list = QListWidget()
         self._left_list.setAccessibleName(_("Relays still looked at for drafts"))
         self._left_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self._left_list.setMinimumHeight(self._left_list.fontMetrics().height() * 3 + 12)
         self._left_list.itemSelectionChanged.connect(self._update)
         left_column.addWidget(self._left_list)
         under_left = QHBoxLayout()
@@ -302,6 +301,13 @@ class DraftRelaysSheet(AssistantWindow):
     def _show_relays_left_behind(self) -> None:
         self._left_list.clear()
         self._left_list.addItems(self._relays.drafts_left_behind())
+        # As tall as its relays, up to three rows (usually one or two): the
+        # sheet stays short, and a longer list scrolls.
+        rows = min(max(self._left_list.count(), 1), 3)
+        row = self._left_list.sizeHintForRow(0) if self._left_list.count() else 0
+        self._left_list.setFixedHeight(
+            rows * (row or self._left_list.fontMetrics().height())
+            + 2 * self._left_list.frameWidth() + 4)
         self._left.setVisible(self._left_list.count() > 0)
         self._update()
 
