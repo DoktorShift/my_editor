@@ -14,7 +14,14 @@
     approval prompts in parallel and matches the bunker's request /
     response cadence.
   - An auto-refresh ``QTimer`` (5-minute default) that re-issues the
-    REQ to pick up drafts produced from other devices.
+    REQ to pick up drafts produced from other devices, and reads the
+    account's draft relay list again, so a list changed on another
+    device is followed (nostr/draft_relays.py; an unchanged list costs
+    no signer prompt).
+  - Moving drafts left behind: when the draft relays changed and a relay
+    no longer among them may still hold drafts saved there meanwhile
+    (RelayDirectory.drafts_left_behind), each reading ends by moving
+    them to where drafts go now (DraftMove), until one move succeeds.
 
 Cancellation model:
   Each ``start_for`` / ``stop`` cycle increments a monotonic
@@ -40,7 +47,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from i18n import _, ngettext
 
 from .bunker import BunkerClient, BunkerSessionPool, is_signer_silent
-from .draft_relays import PrivateDraftRelays
+from .draft_relays import DraftMove, MoveOutcome, PrivateDraftRelays
 from .draft_store import DraftState, DraftStore
 from .drafts import (
     DRAFT_WRAP_KIND,
@@ -120,6 +127,7 @@ class DraftSync(QObject):
         # for tests.
         self._read_draft_list = read_draft_list or self._read_draft_list_from_relays
         self._draft_list_reader: Optional[PrivateDraftRelays] = None
+        self._left_move: Optional[DraftMove] = None
         # For NIP-40: expired wraps are ignored, whichever relay sends them.
         self._clock = clock
         self._relay_pool = relay_pool
@@ -202,14 +210,25 @@ class DraftSync(QObject):
 
     def _read_draft_list_from_relays(
             self, profile: Profile, on_done: Callable[[Optional[List[str]]], None]) -> None:
-        # One reader at a time, kept until the next account replaces it; an
-        # older one still answering only updates what it read, by author.
-        if self._draft_list_reader is not None:
-            self._draft_list_reader.deleteLater()
-        self._draft_list_reader = PrivateDraftRelays(
-            profile=profile, pool=self._relay_pool, session_pool=self._session_pool,
-            directory=self._relay_directory, parent=self)
+        # One reader per account, kept until the next account replaces it
+        # (it knows the list it decrypted, so reading it again costs no
+        # prompt); an older one still answering only updates what it read,
+        # by author.
+        reader = self._draft_list_reader
+        if reader is None or reader.author != profile.user_pubkey.lower():
+            if reader is not None:
+                reader.deleteLater()
+            self._draft_list_reader = PrivateDraftRelays(
+                profile=profile, pool=self._relay_pool, session_pool=self._session_pool,
+                directory=self._relay_directory, parent=self)
         self._draft_list_reader.read(on_done)
+
+    def _follow_draft_list(self) -> None:
+        """Read the account's draft relay list again: drafts follow it if
+        another device changed it."""
+        author = self._profile.user_pubkey.lower()
+        self._read_draft_list(self._profile, lambda relays: self._relay_directory
+                              .set_draft_relays(author, relays))
 
     def stop(self) -> None:
         """Tear down the subscription and invalidate in-flight callbacks.
@@ -221,6 +240,10 @@ class DraftSync(QObject):
         # without touching the next profile's state.
         self._generation += 1
         self._refresh_timer.stop()
+        if self._left_move is not None:
+            self._left_move.stop()
+            self._left_move.deleteLater()
+            self._left_move = None
         if self._subscription is not None:
             self._subscription.close()
             self._subscription = None
@@ -249,6 +272,7 @@ class DraftSync(QObject):
             self._subscription = None
         self._store.set_loading(True)
         self.status_changed.emit(_("Refreshing drafts…"))
+        self._follow_draft_list()
         self._open_subscription()
 
     def reroute(self) -> None:
@@ -476,6 +500,42 @@ class DraftSync(QObject):
         self.status_changed.emit(
             ngettext("Loaded {n} draft.", "Loaded {n} drafts.", count).format(n=count)
         )
+        self._move_drafts_left_behind()
+
+    # -- internal: drafts left on relays no longer used --------------------
+
+    def _move_drafts_left_behind(self) -> None:
+        if self._profile is None or self._left_move is not None:
+            return
+        left = self._relay_directory.drafts_left_behind(self._profile.user_pubkey)
+        if left is None:
+            return
+        gen = self._generation
+        ask_draft_relays(self._relay_directory, self._profile,
+                         lambda destination, g=gen: self._start_left_move(g, left, destination),
+                         entitled=self._entitled_relays)
+
+    def _start_left_move(self, gen: int, left, destination: List[str]) -> None:
+        if not self._is_current(gen) or self._left_move is not None:
+            return
+        # Signed events, sent as they are: no signer prompt. Every relay
+        # left behind must answer, or it is tried again after the next
+        # reading.
+        mover = DraftMove(pool=self._relay_pool, author=self._profile.user_pubkey,
+                          source=left.relays, destination=destination,
+                          must_read=left.relays, since=left.since, clock=self._clock,
+                          parent=self)
+        self._left_move = mover
+        mover.finished.connect(lambda outcome, g=gen: self._left_moved(g, left, outcome))
+        mover.start()
+
+    def _left_moved(self, gen: int, left, outcome: MoveOutcome) -> None:
+        if not self._is_current(gen):
+            return
+        self._left_move.deleteLater()
+        self._left_move = None
+        if outcome.ok:
+            self._relay_directory.drafts_moved_from(self._profile.user_pubkey, left.relays)
 
     # -- internal: bunker decryption queue --------------------------------
 

@@ -38,7 +38,12 @@ a short pass copies what was saved in the meantime, and only then do
 drafts follow the new list (RelayDirectory.set_draft_relays). While all
 this runs, saving a draft waits for the answer
 (RelayDirectory.expect_draft_relays), so nothing is saved by the old
-list after it was copied.
+list after it was copied. A relay being left that does not answer that
+pass is not given up: it is read on with the draft relays, and what was
+saved there meanwhile is moved once it answers (DraftSync, and
+RelayDirectory.leave_drafts_behind). The same holds for a list changed
+on another device: the relays it no longer has are read until the drafts
+this device saved there in the meantime have moved.
 
 A relay being left that does not answer stops the change, as its drafts
 would vanish, unless the person chose to leave that relay's drafts
@@ -385,10 +390,14 @@ class DraftMove(QObject):
 @dataclass(frozen=True)
 class SaveOutcome:
     """What saving the draft relays did: the drafts' move, then the list's
-    own change (None when it was not tried, because the move failed)."""
+    own change (None when it was not tried, because the move failed).
+    ``left_behind``: relays being left that did not answer the last pass,
+    so drafts saved there during the change may still be only there (they
+    are read, and moved once those relays answer)."""
 
     move: MoveOutcome
     write: Optional[WriteOutcome] = None
+    left_behind: Tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -522,9 +531,17 @@ class _Save(QObject):
         late.start()
 
     def _caught_up(self, outcome: MoveOutcome) -> None:
+        # The list is out: drafts follow it whatever this pass found. A
+        # relay being left that kept a draft from it is read on, and the
+        # draft moved, once it answers (DraftSync).
+        left: Tuple[str, ...] = ()
         if not outcome.ok:
+            left = outcome.unread or (tuple(self._must_read) if outcome.not_moved else ())
             logger.warning("drafts saved during the change were not all copied: %s", outcome)
-        self._end(SaveOutcome(self._move, self._written), follow=self._chosen)
+        if left:
+            self._directory.leave_drafts_behind(
+                self._author, left, since=self._started - CATCH_UP_SLACK_S)
+        self._end(SaveOutcome(self._move, self._written, left), follow=self._chosen)
 
     def _end(self, outcome: SaveOutcome, *, follow: Optional[List[str]]) -> None:
         self._ended = True
@@ -566,10 +583,20 @@ class PrivateDraftRelays(QObject):
         self.last_failure: Optional[str] = None    # why the last read answered None
         self._saving: Optional[_Save] = None
 
+    @property
+    def author(self) -> str:
+        """The account whose list this is (its public key, lowercase)."""
+        return self._profile.user_pubkey.lower()
+
     def read(self, on_done: Callable[[Optional[List[str]]], None]) -> None:
         """``on_done(relays)``, ``on_done([])`` for none, ``on_done(None)``
         when it could not be read (``last_failure`` is UNREACHABLE) or
-        decrypted (UNDECRYPTED)."""
+        decrypted (UNDECRYPTED).
+
+        Drafts follow what was read (RelayDirectory.follow_draft_relays):
+        a list changed on another device is followed here too. The same
+        list read again is not decrypted again, so asking costs no signer
+        prompt while nothing changed."""
         author = self._profile.user_pubkey.lower()
         relays = lookup_relays(known=self._directory.cached(author), own=True)
 
@@ -578,6 +605,7 @@ class PrivateDraftRelays(QObject):
             self.last_failure = failure
             if read is not None:
                 self._known, self._read_id = list(read), event_id
+                self._directory.follow_draft_relays(author, read)
             on_done(read)
 
         def found(result) -> None:
@@ -585,6 +613,8 @@ class PrivateDraftRelays(QObject):
                 answer([])
             elif result.state is LookupState.UNKNOWN or result.event is None:
                 answer(None, failure=UNREACHABLE)
+            elif self._known is not None and result.event.get("id") == self._read_id:
+                answer(list(self._known), self._read_id)
             else:
                 event = result.event
                 self._decrypt(str(event.get("content") or ""), lambda read: answer(

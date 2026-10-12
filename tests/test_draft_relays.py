@@ -505,3 +505,90 @@ def test_saving_only_unusable_addresses_is_refused_before_anything_is_asked():
     with pytest.raises(ValueError):
         drafts.save(["not a relay"], lambda _outcome: None)
     assert client.requests == []
+
+
+# -- drafts left behind (review N4, N5) -------------------------------------------------
+
+def reading_relays(directory):
+    from nostr.outbox import ask_draft_relays
+    answers = []
+    ask_draft_relays(directory, Profile(), answers.append, reading=True)
+    settle()
+    return answers[0]
+
+
+def test_a_relay_left_that_goes_quiet_after_the_list_went_out_is_read_on():
+    # A draft saved on MINE while the list is signed, and MINE stops
+    # answering then: the change stands, MINE is read on, and the sheet
+    # is told which relay may still hold drafts.
+    drafts, relays, directory, _client = moving(LIST_ON_MINE,
+                                                drafts_on={MINE: [wrap("draft-1")]})
+    late = wrap("draft-2", at=NOW - 5)
+    outcomes = []
+
+    def step(name, *_counts):
+        if name == "saving_list":
+            relays.keep(MINE, late)
+            relays.down = {MINE}
+
+    drafts.save([OTHER], outcomes.append, on_step=step)
+    relays.run(rounds=30)
+    assert outcomes[0].ok and outcomes[0].left_behind == (MINE,)
+    assert ([OTHER], late) not in sent(relays, 31234)
+    assert directory.draft_relays_of(PK) == [OTHER]
+    left = directory.drafts_left_behind(PK)
+    assert left.relays == (MINE,) and left.since is not None and left.since < NOW
+    assert MINE in reading_relays(directory)
+
+
+def test_a_list_changed_on_another_device_leaves_the_old_draft_relays_read():
+    drafts, relays, directory, client = moving(LIST_ON_MINE)
+    elsewhere = signed(KIND_PRIVATE_RELAYS, [], 'sealed:[["relay","wss://else.example"]]',
+                       created_at=NOW - 50)
+    drafts._query.answers[KIND_PRIVATE_RELAYS] = found(elsewhere)
+    read = []
+    drafts.read(read.append)
+    assert read == [["wss://else.example"]]
+    assert directory.draft_relays_of(PK) == ["wss://else.example"]   # followed at once
+    left = directory.drafts_left_behind(PK)
+    assert left.relays == (MINE,) and left.since is None
+    assert MINE in reading_relays(directory)
+
+
+def test_the_same_list_read_again_is_not_decrypted_again():
+    class Counting(SealingClient):
+        decrypted = 0
+
+        def nip44_decrypt_self(self, ciphertext, on_success, on_failure):
+            Counting.decrypted += 1
+            super().nip44_decrypt_self(ciphertext, on_success, on_failure)
+
+    drafts, _client, _pool = lists(LIST_ON_MINE, Counting())
+    got = []
+    drafts.read(got.append)
+    drafts.read(got.append)
+    assert got == [[MINE], [MINE]] and Counting.decrypted == 1
+
+
+def test_drafts_left_behind_are_moved_and_then_no_longer_read():
+    from nostr.draft_store import DraftStore
+    from nostr.draft_sync import DraftSync
+    draft = wrap("draft-1")
+    drafts, relays, directory, client = moving(LIST_ON_MINE, drafts_on={MINE: [draft]})
+    directory.follow_draft_relays(PK, [OTHER])             # learned from another device
+    sync = DraftSync(relay_pool=relays, relay_directory=directory,
+                     session_pool=FakeSessionPool(client), store=DraftStore(),
+                     read_draft_list=lambda _profile, on_done: on_done([OTHER]))
+    sync._profile = Profile()
+    relays.down = {MINE}
+    sync._move_drafts_left_behind()                        # MINE is quiet: tried again later
+    relays.run(rounds=10)
+    assert sent(relays, 31234) == [] and directory.drafts_left_behind(PK) is not None
+    relays.down = set()
+    sync._move_drafts_left_behind()
+    relays.run(rounds=10)
+    assert sent(relays, 31234) == [([OTHER], draft)]
+    assert directory.drafts_left_behind(PK) is None and MINE not in reading_relays(directory)
+    sync.stop()
+    sync.deleteLater()
+    settle()

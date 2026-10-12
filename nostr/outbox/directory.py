@@ -65,6 +65,21 @@ _TTL = {
 }
 
 
+@dataclass(frozen=True)
+class DraftsLeftBehind:
+    """Relays that may still hold drafts no relay the account reads now
+    has: drafts saved there ``since`` then (None: at any time) are to be
+    moved to where drafts go. Given up ``DRAFTS_LEFT_DAYS`` after ``added``
+    (a relay gone for good would be asked for ever)."""
+
+    relays: Tuple[str, ...]
+    since: Optional[int]
+    added: int
+
+
+DRAFTS_LEFT_DAYS = 30
+
+
 @dataclass
 class _Pending:
     """A lookup under way: who waits for it, which relays it asked, and
@@ -103,6 +118,10 @@ class RelayDirectory(QObject):
         # author -> the relays the account keeps its drafts on (NIP-37 kind
         # 10013, decrypted; empty: it has no such list). Absent: not known.
         self._draft_lists: Dict[str, List[str]] = {}
+        # author -> relays the account's drafts were routed to before, that
+        # its draft relays no longer read but may still hold drafts: they
+        # are read until those drafts are moved (DraftsLeftBehind).
+        self._drafts_left: Dict[str, DraftsLeftBehind] = {}
         # author -> what waits for the draft list being read right now, and
         # until when it waits. One timer serves every wait: a timer per wait,
         # connected to a closure over this object, could outlive or destroy it.
@@ -274,6 +293,64 @@ class RelayDirectory(QObject):
                 self.changed.emit(key)
         self._settle_drafts(key)
 
+    def follow_draft_relays(self, author: str, relays: Optional[Sequence[str]]) -> None:
+        """A draft list read now, perhaps changed on another device: drafts
+        follow it (``set_draft_relays``), and the draft relays it no longer
+        has are left behind with whatever this device saved there before it
+        knew (``leave_drafts_behind``)."""
+        key = (author or "").lower()
+        before = self._draft_lists.get(key)
+        if relays is not None and before is not None:
+            now = policy.dedupe_relays(relays, cap=defaults.PRIVATE_CAP)
+            left = [url for url in before if url not in now]
+            if left:
+                self.leave_drafts_behind(key, left, since=None)
+        self.set_draft_relays(key, relays)
+
+    def leave_drafts_behind(self, author: str, relays: Sequence[str], *,
+                            since: Optional[int]) -> None:
+        """``relays`` are no longer draft relays but may hold drafts saved
+        ``since`` then (None: at any time): they are read with the draft
+        relays until ``drafts_moved_from`` says those drafts moved."""
+        key = (author or "").lower()
+        known = self._drafts_left.get(key)
+        urls = policy.dedupe_relays([*(known.relays if known else ()), *relays])
+        if known is not None and (known.since is None or since is None):
+            since = None
+        elif known is not None:
+            since = min(known.since, since)
+        self._drafts_left[key] = DraftsLeftBehind(
+            tuple(urls), since, known.added if known else int(time.time()))
+        self._drafts_left_changed(key)
+
+    def drafts_left_behind(self, author: str) -> Optional[DraftsLeftBehind]:
+        """Relays the account's drafts may still be left on, or None."""
+        key = (author or "").lower()
+        known = self._drafts_left.get(key)
+        if known is not None and time.time() - known.added > DRAFTS_LEFT_DAYS * 86_400:
+            del self._drafts_left[key]
+            self._drafts_left_changed(key)
+            return None
+        return known
+
+    def drafts_moved_from(self, author: str, relays: Sequence[str]) -> None:
+        """The drafts left on ``relays`` are where drafts go now."""
+        key = (author or "").lower()
+        known = self._drafts_left.get(key)
+        if known is None:
+            return
+        rest = tuple(url for url in known.relays if url not in set(relays))
+        if rest:
+            self._drafts_left[key] = DraftsLeftBehind(rest, known.since, known.added)
+        else:
+            del self._drafts_left[key]
+        self._drafts_left_changed(key)
+
+    def _drafts_left_changed(self, key: str) -> None:
+        if self._is_own(key):
+            self._save()
+        self.changed.emit(key)            # what drafts are read from changed
+
     def draft_relays_of(self, author: str) -> Optional[List[str]]:
         """The account's draft relays as known now, [] for none, None when
         not known."""
@@ -295,8 +372,11 @@ class RelayDirectory(QObject):
                 key, on_done, entitled=entitled, legacy=legacy, reading=reading))
             return
         mine = self._draft_lists.get(key, ()) if chosen is None else list(chosen)
-        self.lookup(key, lambda relay_list: on_done(policy.draft_relays(
-            relay_list, mine, entitled=entitled, legacy=legacy, reading=reading)))
+        left = self.drafts_left_behind(key) if reading and chosen is None else None
+        self.lookup(key, lambda relay_list: on_done(policy.dedupe_relays(
+            policy.draft_relays(relay_list, mine, entitled=entitled, legacy=legacy,
+                                reading=reading),
+            left.relays if left else ())))
 
     def _settle_drafts(self, key: str) -> None:
         self._draft_deadlines.pop(key, None)
@@ -506,6 +586,16 @@ class RelayDirectory(QObject):
             if isinstance(author, str) and isinstance(relays, list):
                 self._draft_lists[author.lower()] = policy.dedupe_relays(
                     [r for r in relays if isinstance(r, str)], cap=defaults.PRIVATE_CAP)
+        left = data.get("drafts_left") if isinstance(data, dict) else None
+        for author, entry in (left.items() if isinstance(left, dict) else ()):
+            try:
+                relays = policy.dedupe_relays([r for r in entry["relays"] if isinstance(r, str)])
+                since = None if entry.get("since") is None else int(entry["since"])
+                added = int(entry["added"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if isinstance(author, str) and relays:
+                self._drafts_left[author.lower()] = DraftsLeftBehind(tuple(relays), since, added)
 
     def _save(self) -> None:
         if self._store_path is None:
@@ -514,9 +604,11 @@ class RelayDirectory(QObject):
         lists = {k: e.event for k, e in self._entries.items()
                  if k in own and e.found and e.event is not None}
         drafts = {k: v for k, v in self._draft_lists.items() if k in own}
+        left = {k: {"relays": list(v.relays), "since": v.since, "added": v.added}
+                for k, v in self._drafts_left.items() if k in own}
         try:
-            write_text(self._store_path,
-                       json.dumps({"version": 1, "lists": lists, "drafts": drafts}))
+            write_text(self._store_path, json.dumps(
+                {"version": 1, "lists": lists, "drafts": drafts, "drafts_left": left}))
         except (OSError, TypeError, ValueError) as exc:
             # The lists are still known for this session; only the head
             # start on the next launch is lost.

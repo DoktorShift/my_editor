@@ -281,6 +281,21 @@ def test_save_anyway_goes_once_the_choice_changes():
     assert not sheet._error.isVisibleTo(sheet)
 
 
+def test_drafts_left_on_a_relay_that_went_quiet_are_said_once_saved():
+    lists = Lists([MINE], answer=SaveOutcome(MoveOutcome(), WriteOutcome(WRITTEN),
+                                             left_behind=(MINE,)))
+    sheet, saved = open_sheet(lists)
+    sheet.buttons["usual"].click()
+    sheet.buttons["save"].click()
+    assert saved == [[]] and sheet.isVisible()            # saved, with a word on it
+    assert sheet._left_note.text().startswith(
+        f"Drafts saved during the change may still be only on {MINE}, which didn’t answer.")
+    assert words(sheet) == ["Done"] and sheet.focusWidget() is sheet.buttons["done"]
+    assert unnamed_controls(sheet) == []
+    sheet.buttons["done"].click()
+    assert not sheet.isVisible()
+
+
 def test_a_list_changed_elsewhere_is_read_again_and_not_written_over():
     lists = Lists([MINE], answer=list_failed(FAILED, CAUSE_CHANGED))
     sheet, saved = open_sheet(lists)

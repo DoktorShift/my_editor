@@ -36,7 +36,9 @@ and the sheet says what to do. When a relay being left did not answer,
 Save Anyway (in place of Use My Usual Relays) changes the setting all
 the same, leaving the drafts kept only on the relays it named behind:
 for a relay that is gone for good. Any other relay being left must still
-answer.
+answer. When one being left stops answering only after the list went
+out, the setting is saved, and a last page says that drafts saved there
+meanwhile are looked for there and moved once it answers (Done closes).
 
 Keys: Return in the address field adds it, elsewhere it saves; Delete or
 Backspace in the list removes the selected relay; Escape cancels. Once
@@ -67,12 +69,14 @@ from ..outbox.writer import CAUSE_CHANGED, CAUSE_CLOCK, CAUSE_RELAYS, CAUSE_SIGN
 from .assistant import DEFAULT, LEADING, NORMAL, AssistantWindow, busy_bar, page, text_label
 
 MAIN = "main"
+LEFT_BEHIND = "left_behind"
 
 # What the sheet is doing.
 READING = "reading"
 READ_FAILED = "read_failed"
 EDITING = "editing"
 SAVING = "saving"
+SAVED = "saved"              # saved, with a note on drafts left behind
 
 
 class DraftRelaysSheet(AssistantWindow):
@@ -166,6 +170,13 @@ class DraftRelaysSheet(AssistantWindow):
         column.addWidget(self._busy)
         column.addStretch(1)
         self.add_page(MAIN, widget)
+
+        widget, column = page(10)
+        column.addWidget(text_label(_("The setting is saved."), "title"))
+        self._left_note = text_label("", "muted")
+        column.addWidget(self._left_note)
+        column.addStretch(1)
+        self.add_page(LEFT_BEHIND, widget)
         self.show_page(MAIN, [])
 
     # -- reading ---------------------------------------------------------------
@@ -294,9 +305,12 @@ class DraftRelaysSheet(AssistantWindow):
         if generation != self._generation:
             return
         if outcome.ok:
-            self._state = EDITING
             self.saved.emit(list(chosen))
-            self.accept()
+            if outcome.left_behind:
+                self._show_left_behind(outcome.left_behind)
+            else:
+                self._state = EDITING
+                self.accept()
             return
         if outcome.write is not None and outcome.write.cause == CAUSE_CHANGED:
             # Not written over: show the setting as it is now, to decide again.
@@ -307,6 +321,24 @@ class DraftRelaysSheet(AssistantWindow):
         self._left_unread = list(chosen) if outcome.move.unread else None
         self._unread = list(outcome.move.unread)
         self._set_state(EDITING, error=self._why_not_saved(outcome))
+
+    def _show_left_behind(self, relays) -> None:
+        """Saved, but a relay being left did not answer the last pass:
+        drafts saved there meanwhile are read on and moved once it does."""
+        self._left_note.setText(ngettext(
+            "Drafts saved during the change may still be only on {relays}, which didn’t "
+            "answer. MyEditor keeps looking for them there and moves them once it answers.",
+            "Drafts saved during the change may still be only on {relays}, which didn’t "
+            "answer. MyEditor keeps looking for them there and moves them once they answer.",
+            len(relays)).format(relays=", ".join(relays)))
+        self._state = SAVED
+        specs = self._buttons()
+        self._shown_buttons = [spec[:3] for spec in specs]
+        self.show_page(LEFT_BEHIND, [spec[:4] for spec in specs])
+        # The page's one button takes the focus from the list just hidden
+        # (a button laid out now is shown only later: show it first).
+        self.buttons["done"].show()
+        self.buttons["done"].setFocus()
 
     @staticmethod
     def _why_not_saved(outcome: SaveOutcome) -> str:
@@ -393,6 +425,8 @@ class DraftRelaysSheet(AssistantWindow):
         if self._state == READ_FAILED:
             return [("cancel", _("Cancel"), NORMAL, self.reject, True),
                     ("retry", _("Try Again"), DEFAULT, self._read_list, True)]
+        if self._state == SAVED:
+            return [("done", _("Done"), DEFAULT, self.accept, True)]
         editing = self._state == EDITING
         if self._offers_save_anyway():
             leading = ("anyway", _("Save Anyway"), LEADING, self._save_anyway, True)
