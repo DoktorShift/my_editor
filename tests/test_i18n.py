@@ -230,23 +230,30 @@ def test_code_that_is_fine_is_not_reported(source):
     assert shadowing(source) == []
 
 
-@pytest.mark.parametrize("language, word", [("en", "Settings…"),
-                                            ("de", "Einstellungen …")])
-def test_a_mac_names_the_settings_command_settings(language, word):
+_QT_WORDS_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+import i18n
+i18n.install(sys.argv[2])
+from PySide6.QtCore import QCoreApplication
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+i18n.install_qt_translations(app)
+r = {context: QCoreApplication.translate(context, "Preferences...")
+     for context in ("QMenuBar", "MAC_APPLICATION_MENU")}
+r["quit"] = QCoreApplication.translate("MAC_APPLICATION_MENU", "Quit %1")
+print("RESULT " + json.dumps(r))
+"""
+
+
+@pytest.mark.parametrize("language, word, quit_word", [
+    ("en", "Settings…", "Quit %1"), ("de", "Einstellungen …", "%1 beenden")])
+def test_a_mac_names_the_settings_command_settings(tmp_path, language, word, quit_word):
     # Qt's Cocoa plugin titles the command in the application menu itself,
     # asking for "Preferences..." (the pre-Ventura word) in these contexts.
-    from PySide6.QtCore import QCoreApplication
-    from PySide6.QtWidgets import QApplication
-    app = QApplication.instance() or QApplication([])
-    i18n.install(language)
-    try:
-        i18n.install_qt_translations(app)
-        for context in ("QMenuBar", "MAC_APPLICATION_MENU"):
-            assert QCoreApplication.translate(context, "Preferences...") == word
-        # Every other text is left to Qt's own translations.
-        assert QCoreApplication.translate("MAC_APPLICATION_MENU", "Quit %1") \
-            == ("Quit %1" if language == "en" else "%1 beenden")
-    finally:
-        for translator in app.__dict__.pop("_myeditor_translators", []):
-            app.removeTranslator(translator)
-        i18n.install(i18n.ENGLISH)
+    # In a process of its own: a translator changes the whole application.
+    from tests.app_process import run_window_script
+    r = run_window_script(_QT_WORDS_SCRIPT, tmp_path, language)
+    assert r["QMenuBar"] == r["MAC_APPLICATION_MENU"] == word
+    assert r["quit"] == quit_word           # every other text is left to Qt's own
