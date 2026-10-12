@@ -154,3 +154,29 @@ def test_a_focused_dialog_button_is_drawn_with_the_ring(qapp, is_dark):
             assert button.size() == size_before        # the ring takes no extra room
     finally:
         dialog.close()
+
+
+@pytest.mark.parametrize("base", ["Fusion", "Windows"])
+def test_every_button_box_puts_cancel_first_and_the_default_trailing(qapp, base):
+    # Review L8: a button box follows the platform's order, which on Windows
+    # and KDE puts the default first, while the alerts follow the HIG on
+    # every system; one flow showed both orders. The app's style decides.
+    from PySide6.QtWidgets import QDialog, QDialogButtonBox, QVBoxLayout
+
+    dialog = QDialog()
+    dialog.setStyle(theme.AppStyle(base))
+    box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
+                           | QDialogButtonBox.StandardButton.Cancel
+                           | QDialogButtonBox.StandardButton.Help)
+    box.setStyle(dialog.style())
+    QVBoxLayout(dialog).addWidget(box)
+    dialog.show()
+    qapp.processEvents()
+    try:
+        left_to_right = sorted(box.buttons(), key=lambda b: b.mapTo(dialog, b.rect().topLeft()).x())
+        roles = [box.buttonRole(b) for b in left_to_right]
+        assert roles == [QDialogButtonBox.ButtonRole.HelpRole,
+                         QDialogButtonBox.ButtonRole.RejectRole,
+                         QDialogButtonBox.ButtonRole.AcceptRole]
+    finally:
+        dialog.close()

@@ -23,9 +23,9 @@ the Human Interface Guidelines lay it out: in a row, the default at the
 trailing edge with Cancel beside it, other choices next to Cancel, and a
 destructive one at the leading edge, away from the default; in a stack
 (when the titles are too long for a row), the default on top and Cancel at
-the bottom. Qt's QDialogButtonBox would reorder them per platform (the
-default first on Windows, between the other two in a Windows stack), so
-the alert lays them out itself. The keyboard follows the same order, and
+the bottom. A QDialogButtonBox has no stack and no leading destructive
+button, so the alert lays them out itself. (Other dialogs' button boxes
+follow the same row order through the app's style, theme.AppStyle.) The keyboard follows the same order, and
 the default button has the focus, so Space and Return both choose it.
 
 Every color comes from theme.dialog_stylesheet, so no call site can paint

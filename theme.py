@@ -20,7 +20,7 @@ apply_app_theme() once at startup and again on every theme change.
 
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPalette, QPen
-from PySide6.QtWidgets import QApplication, QProxyStyle, QStyle
+from PySide6.QtWidgets import QApplication, QDialogButtonBox, QProxyStyle, QStyle
 
 from constants import (
     DARK_BG, DARK_BORDER, DARK_FG, DARK_MENU_BG, DARK_MUTED_FG, DARK_SELECTION,
@@ -193,11 +193,20 @@ class AppStyle(QProxyStyle):
     """Fusion, with check boxes and radio buttons whose frame can be seen
     on the dark theme too (review M5; Fusion's radio ring was as faint as
     its check box frame, so an unchecked choice in Create Account and in
-    Settings showed no circle at all). Everything else is Fusion's."""
+    Settings showed no circle at all), and with every dialog's buttons in
+    the order the HIG gives on every system: Cancel, then the default
+    action at the trailing end, as MyEditor's alerts have them (a button
+    box would otherwise put the default first on Windows and KDE, so one
+    flow showed both orders). Everything else is Fusion's."""
 
     _BOXES = (QStyle.PrimitiveElement.PE_IndicatorCheckBox,
               QStyle.PrimitiveElement.PE_IndicatorItemViewItemCheck)
     _RADIO = QStyle.PrimitiveElement.PE_IndicatorRadioButton
+
+    def styleHint(self, hint, option=None, widget=None, returnData=None):  # noqa: N802
+        if hint == QStyle.StyleHint.SH_DialogButtonLayout:
+            return QDialogButtonBox.ButtonLayout.MacLayout.value
+        return super().styleHint(hint, option, widget, returnData)
 
     def drawPrimitive(self, element, option, painter, widget=None):  # noqa: N802
         super().drawPrimitive(element, option, painter, widget)
