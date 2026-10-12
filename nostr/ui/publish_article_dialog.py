@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import theme
 import word_count
 from alerts import CANCEL, DEFAULT, NORMAL, Button, ask, answer_return_as_the_system_does
 from i18n import _, display_locale, ngettext
@@ -575,7 +576,8 @@ class PublishArticleDialog(QDialog):
         self._refresh_advanced_toggle_label()
 
     def _apply_theme(self) -> None:
-        self.setStyleSheet(_DARK_CSS if self._is_dark else _LIGHT_CSS)
+        self.setStyleSheet((_DARK_CSS if self._is_dark else _LIGHT_CSS)
+                           + theme.default_and_focus_css(self._is_dark))
         self._switch_menu.setStyleSheet(
             _DARK_MENU_CSS if self._is_dark else _LIGHT_MENU_CSS
         )

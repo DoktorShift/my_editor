@@ -109,7 +109,6 @@ def dialog_stylesheet(is_dark: bool) -> str:
     else:
         bg, fg, muted, border, field = LIGHT_BG, LIGHT_FG, LIGHT_MUTED_FG, LIGHT_BORDER, LIGHT_MENU_BG
     destructive = _DIALOG_DESTRUCTIVE[is_dark]
-    ring = _FOCUS_RING[is_dark]
     return f"""
     QDialog {{ background: {bg}; }}
     QLabel {{ color: {fg}; font-size: 13px; }}
@@ -120,12 +119,22 @@ def dialog_stylesheet(is_dark: bool) -> str:
     QPushButton:hover {{ border-color: {muted}; }}
     QPushButton#destructive {{ color: {destructive}; }}
     QPushButton#destructive:hover {{ border-color: {destructive}; }}
-    QPushButton:focus, QPushButton#destructive:focus {{
-        border: 2px solid {ring}; padding: 5px 13px;
-    }}
     QPushButton:disabled {{ background: {field}; color: {muted}; border-color: {border}; }}
-    {accent_button_css("QPushButton:default", is_dark)}
+    {default_and_focus_css(is_dark)}
     """
+
+
+def default_and_focus_css(is_dark: bool) -> str:
+    """Style rules for a dialog's push buttons that show what the keyboard
+    will do: the ring around the button with the focus (2 px, the padding
+    giving up the extra pixel so the button keeps its size; 6 px by 14 px
+    padding and a 1 px border are what it is drawn for) and the default
+    button in the accent. Every dialog with its own button style appends
+    them after it, so the default and the focus show there too."""
+    ring = _FOCUS_RING[is_dark]
+    return (f"QPushButton:focus, QPushButton#destructive:focus "
+            f"{{ border: 2px solid {ring}; padding: 5px 13px; }}\n"
+            + accent_button_css("QPushButton:default", is_dark))
 
 
 def accent_button_css(selector: str, is_dark: bool) -> str:

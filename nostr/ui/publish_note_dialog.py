@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+import theme
 from alerts import answer_return_as_the_system_does
 from i18n import _, ngettext
 
@@ -288,7 +289,8 @@ class PublishNoteDialog(QDialog):
         layout.addLayout(bottom)
 
     def _apply_theme(self) -> None:
-        self.setStyleSheet(_DARK_DIALOG_CSS if self._is_dark else _LIGHT_DIALOG_CSS)
+        self.setStyleSheet((_DARK_DIALOG_CSS if self._is_dark else _LIGHT_DIALOG_CSS)
+                           + theme.default_and_focus_css(self._is_dark))
         self._switch_menu.setStyleSheet(
             _DARK_MENU_CSS if self._is_dark else _LIGHT_MENU_CSS
         )
