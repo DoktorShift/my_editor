@@ -139,6 +139,27 @@ def test_a_mention_is_one_unit_for_typing_delete_and_paste():
     assert "dear" in document_to_markdown(ed.document())
 
 
+@pytest.mark.parametrize("preedit", [False, True])
+def test_input_method_text_inside_a_mention_goes_after_it(preedit):
+    """A dead key, the accent menu or CJK input commits its text through
+    the input method, not as a key press."""
+    from PySide6.QtGui import QInputMethodEvent
+    ed = editor()
+    type_text(ed, "Hi @")
+    ed.insert_mention(ed.asked[0], HREF, "Alice")
+    type_text(ed, "and you")
+    cursor = ed.textCursor()
+    cursor.setPosition(len("Hi @Ali"))
+    ed.setTextCursor(cursor)
+    if preedit:                                       # composing starts inside it
+        ed.inputMethodEvent(QInputMethodEvent("\u00b4", []))
+    commit = QInputMethodEvent()
+    commit.setCommitString("\u00e9")
+    ed.inputMethodEvent(commit)
+    assert ed.toPlainText() == "Hi @Alice\u00e9 and you"
+    assert document_to_markdown(ed.document()) == f"Hi {HREF} \u00e9 and you\n"
+
+
 def test_a_mention_read_back_from_markdown_has_its_name_again():
     from main_window import MainWindow
     ed = editor()

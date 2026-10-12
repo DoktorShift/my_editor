@@ -765,7 +765,11 @@ class HtmlEditor(QTextEdit):
 
     def inputMethodEvent(self, event):
         # Characters some keyboards compose (a backtick or a tilde after a
-        # dead key) arrive here rather than as key presses.
+        # dead key, the accent menu, Chinese, Japanese or Korean input)
+        # arrive here rather than as key presses: inside a mention, they go
+        # after it, as typed letters do (composing starts there too).
+        if event.commitString() or event.preeditString():
+            self._step_out_of_mention()
         super().inputMethodEvent(event)
         self._after_typed(event.commitString())
 
