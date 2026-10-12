@@ -38,7 +38,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Iterable, Optional, Sequence
 
 import shiboken6
-from PySide6.QtCore import QDate, QLocale, QUrl
+from PySide6.QtCore import QDate, QUrl
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -176,7 +176,7 @@ def _date_text(published_at: int) -> str:
     from PySide6.QtCore import QDateTime
     when = (QDateTime.fromSecsSinceEpoch(published_at).date() if published_at
             else QDate.currentDate())
-    return QLocale(i18n.language()).toString(when, QLocale.FormatType.ShortFormat)
+    return i18n.format_day(when, short_month=True)
 
 
 def _char(*, size: float = 0, bold: bool = False, color: str = "",

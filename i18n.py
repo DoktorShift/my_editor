@@ -401,27 +401,31 @@ def display_locale():
     return QLocale(ENGLISH if _language == PSEUDO else _language)
 
 
-def _day_pattern(locale, *, short_month: bool) -> str:
+def _day_pattern(locale, *, short_month: bool, year: bool) -> str:
     """The locale's own long date without the weekday ("MMMM d, yyyy" in
-    English, "d. MMMM yyyy" in German), with "MMM" for ``short_month``."""
+    English, "d. MMMM yyyy" in German), with "MMM" for ``short_month``,
+    and without the year and its separator unless ``year``."""
     from PySide6.QtCore import QLocale
     pattern = locale.dateFormat(QLocale.FormatType.LongFormat)
     pattern = re.sub(r"\s*dddd[,.]?\s*", " ", pattern, count=1).strip(" ,")
+    if not year:
+        pattern = re.sub(r"[\s,./-]*y+[\s,./-]*", " ", pattern).strip(" ,/-")
     return pattern.replace("MMMM", "MMM") if short_month else pattern
 
 
-def format_day(day, *, short_month: bool = False) -> str:
+def format_day(day, *, short_month: bool = False, year: bool = True) -> str:
     """``day`` (a QDate, a QDateTime or a datetime.date) the way the
     language writes a day: "January 6, 2027", "6. Januar 2027"; with
-    ``short_month``, "Jan 6, 2027" for a list row. Never a padded day
-    from a fixed pattern ("06 January 2027")."""
+    ``short_month``, "Jan 6, 2027" for a list row; without ``year``,
+    "Jan 6", "6. Jan.", for a day of this year in a list. Never a padded
+    day from a fixed pattern ("06 January 2027")."""
     from PySide6.QtCore import QDate, QDateTime
     if isinstance(day, QDateTime):
         day = day.date()
     elif not isinstance(day, QDate):
         day = QDate(day.year, day.month, day.day)
     locale = display_locale()
-    return locale.toString(day, _day_pattern(locale, short_month=short_month))
+    return locale.toString(day, _day_pattern(locale, short_month=short_month, year=year))
 
 
 def format_moment(moment) -> str:

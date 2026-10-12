@@ -37,10 +37,10 @@ import re
 from dataclasses import dataclass
 from typing import Callable, Iterable, List, Optional, Sequence, Tuple
 
-from PySide6.QtCore import QLocale, QObject, Signal
+from PySide6.QtCore import QObject, Signal
 
 import url_safety
-from i18n import _, language, ngettext
+from i18n import _, display_locale, ngettext
 
 from . import CLIENT_NAME
 from .bech32 import decode_npub, decode_nprofile, encode_nprofile
@@ -875,7 +875,7 @@ class DraftPublishJob(QObject):
         # round-trip + approval prompt for an inevitable failure.
         payload_bytes = len(plaintext.encode("utf-8"))
         if payload_bytes > MAX_INNER_PAYLOAD_BYTES:
-            numbers = QLocale(language())
+            numbers = display_locale()
             self._emit_failed(_(
                 "Draft is too large to encrypt ({size} of {limit} bytes). "
                 "Split it across smaller drafts or publish directly."

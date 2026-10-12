@@ -13,9 +13,12 @@ What must hold:
   A list row can have the month shortened ("Jan 6, 2027"); a time comes
   with the day, the language's way ("2:05 PM", "14:05").
 
-  The Drafts panel's and the Published view's helpers, and the membership
-  window's statutes date, go through these, so every window writes a day
-  the same way.
+  A list leaves out the year of a day in this year ("Jan 6").
+
+  The Drafts panel's and the Published view's helpers, the membership
+  window's statutes date, the article preview's byline and the Imports
+  list go through these, and numbers through the same locale, so every
+  window writes a day and a count the same way.
 """
 
 import datetime
@@ -76,3 +79,29 @@ def test_the_windows_write_a_day_through_it(language):
     assert drafts_common.format_absolute_time(stamp).startswith("January 6, 2027 at ")
     assert format_date("2024-04-20") == "April 20, 2024"
     assert format_date("not a date") == "not a date"
+
+
+def test_a_list_leaves_out_this_years_year(language):
+    language("en")
+    assert i18n.format_day(DAY, short_month=True, year=False) == "Jan 6"
+    language("de")
+    assert i18n.format_day(DAY, short_month=True, year=False) == "6. Jan."
+
+
+@pytest.mark.parametrize("code, day, older, count", [
+    ("en", "Jan 6, 2027", "Jan 6", "12,345"),
+    ("pseudo", "Jan 6, 2027", "Jan 6", "12,345"),     # written as English writes it
+    ("de", "6. Jan. 2027", "6. Jan.", "12.345"),
+])
+def test_the_preview_the_imports_and_the_counts_write_through_it(language, code, day,
+                                                                older, count):
+    # Review L6: the article preview's byline, the Imports list and the word
+    # counts each built a locale of their own ("1/6/27" next to "Jan 6, 2027",
+    # and nothing for the pseudo language).
+    language(code)
+    from nostr import preview
+    from nostr.imports import workspace
+    stamp = QDateTime(QDate(2027, 1, 6), QTime(12, 0)).toSecsSinceEpoch()
+    assert preview._date_text(stamp) == day
+    assert workspace.date_text(stamp, now=stamp + 30 * 86400) == older
+    assert i18n.display_locale().toString(12345) == count

@@ -13,7 +13,7 @@ from __future__ import annotations
 import time
 from typing import Callable, List, Optional, Sequence
 
-from PySide6.QtCore import QLocale, QSize, Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtWidgets import (
     QDialog,
@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 
 import word_count
 from alerts import CANCEL, DEFAULT, NORMAL, Button, ask
-from i18n import _, language, ngettext
+from i18n import _, display_locale, ngettext
 
 from ..article_details import ArticleDetails
 from ..first_publications import FirstPublications
@@ -771,7 +771,7 @@ class PublishArticleDialog(QDialog):
         minutes = word_count.reading_minutes(words)
         self._meta_label.setText(ngettext(
             "{words} word · ~{minutes} min read", "{words} words · ~{minutes} min read", words,
-        ).format(words=QLocale(language()).toString(words), minutes=minutes))
+        ).format(words=display_locale().toString(words), minutes=minutes))
 
     # -- profile switcher --------------------------------------------------
 

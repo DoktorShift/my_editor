@@ -18,7 +18,7 @@ It also holds the rules the window's parts share: which list is shown
 checked posts, else the open one), which posts can be chosen at all, the
 one word that says what became of a post, and how a post's date reads.
 
-Pure Python apart from QLocale for dates; no widgets.
+Pure Python; no widgets.
 """
 
 from __future__ import annotations
@@ -27,8 +27,6 @@ import time
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Dict, List, Optional, Sequence
-
-from PySide6.QtCore import QDate, QLocale
 
 import i18n
 from i18n import N_, _, ngettext
@@ -243,12 +241,8 @@ def date_text(timestamp: int, *, now: Optional[float] = None,
             return _("yesterday") if in_sentence else _("Yesterday")
         return ngettext("{n} day ago", "{n} days ago", days).format(n=days)
     day = datetime.fromtimestamp(int(timestamp))
-    locale = QLocale(i18n.language())
-    date = QDate(day.year, day.month, day.day)
-    english = locale.language() == QLocale.Language.English
-    if day.year == datetime.fromtimestamp(int(now)).year:
-        return locale.toString(date, "MMM d" if english else "d. MMM")
-    return locale.toString(date, "MMM d, yyyy" if english else "d. MMM yyyy")
+    this_year = day.year == datetime.fromtimestamp(int(now)).year
+    return i18n.format_day(day, short_month=True, year=not this_year)
 
 
 def checked_text(count: int, total: int) -> str:
