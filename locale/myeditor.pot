@@ -66,27 +66,27 @@ msgstr[1] ""
 msgid "Document"
 msgstr ""
 
-#: editor.py:825
-#: editor.py:811
+#: editor.py:829
+#: editor.py:815
 msgid "checked"
 msgstr ""
 
-#: editor.py:825
-#: editor.py:813
+#: editor.py:829
+#: editor.py:817
 msgid "not checked"
 msgstr ""
 
-#: editor.py:937
+#: editor.py:941
 #, python-brace-format
 msgid "{title}, {position} of {count}"
 msgstr ""
 
-#: editor.py:1300
+#: editor.py:1304
 #: main_window.py:1524
 msgid "Cut"
 msgstr ""
 
-#: editor.py:1301
+#: editor.py:1305
 #: main_window.py:1526
 #: update_dialog.py:188
 #: update_dialog.py:194
@@ -94,43 +94,43 @@ msgstr ""
 msgid "Copy"
 msgstr ""
 
-#: editor.py:1302
+#: editor.py:1306
 #: main_window.py:1528
 msgid "Paste"
 msgstr ""
 
-#: editor.py:953
+#: editor.py:957
 #, python-brace-format
 msgid "{title} applied"
 msgstr ""
 
-#: editor.py:1234
+#: editor.py:1238
 msgid "Command-click to open"
 msgstr ""
 
-#: editor.py:1235
+#: editor.py:1239
 msgid "Ctrl+click to open"
 msgstr ""
 
-#: editor.py:801
+#: editor.py:805
 #, python-brace-format
 msgid "Row {row} of {rows}, column {column}"
 msgstr ""
 
-#: editor.py:942
+#: editor.py:946
 #, python-brace-format
 msgid "Insert menu. {choice}"
 msgstr ""
 
-#: editor.py:1239
+#: editor.py:1243
 msgid "Command-click to go to the note"
 msgstr ""
 
-#: editor.py:1240
+#: editor.py:1244
 msgid "Ctrl+click to go to the note"
 msgstr ""
 
-#: editor.py:804
+#: editor.py:808
 #, python-brace-format
 msgid "{place}, {header}"
 msgstr ""
@@ -3855,23 +3855,23 @@ msgstr ""
 msgid "Could not encrypt draft: {reason}"
 msgstr ""
 
-#: nostr/refs.py:256
-msgid "a secret key is in it, and nothing with a secret key in it is signed"
-msgstr ""
-
-#: nostr/refs.py:106
-msgid "Paste a link to a note or an article."
+#: nostr/refs.py:259
+msgid "It contains a secret key, and MyEditor never signs anything with a secret key in it. Remove the key and try again."
 msgstr ""
 
 #: nostr/refs.py:109
-msgid "That is not a link to a note or an article on Nostr."
+msgid "Paste a link to a note or an article."
 msgstr ""
 
 #: nostr/refs.py:112
+msgid "That is not a link to a note or an article on Nostr."
+msgstr ""
+
+#: nostr/refs.py:115
 msgid "That link is damaged: a part of it is missing or mistyped."
 msgstr ""
 
-#: nostr/refs.py:114
+#: nostr/refs.py:117
 msgid "That is a link to a person. To mention someone, type @ and their name."
 msgstr ""
 

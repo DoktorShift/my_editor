@@ -65,6 +65,16 @@ def test_a_plain_key_has_its_owner_and_an_encrypted_one_has_none():
     assert refs.public_reference_for(NSEC) == OWNER
     assert refs.without_secret_keys(f"my key {NSEC}.") == f"my key {OWNER}."
     assert refs.without_secret_keys(f"[it](nostr:{NSEC})") == f"[it]({OWNER})"
+
+
+@pytest.mark.parametrize("text", [f"my backup _{NSEC}_ here", f"backup_{NSEC}",
+                                  f"my_{NSEC}", f"({NSEC})", f"nostr:{NSEC}"])
+def test_a_key_is_found_after_any_character_but_a_letter_or_digit(text):
+    assert refs.secret_keys_in(text) == [NSEC]
+
+
+def test_a_key_inside_a_longer_word_is_not_one():
+    assert refs.secret_keys_in(f"x{NSEC}") == [] and refs.secret_keys_in(f"9{NSEC}") == []
     assert refs.without_secret_keys(f"{NSEC} ncryptsec1{'q' * 40}") is None
 
 

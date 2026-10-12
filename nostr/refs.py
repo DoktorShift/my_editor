@@ -45,7 +45,10 @@ _ENTITY_IN = re.compile(
 # A reference in written text.
 _REFERENCE = re.compile(r"nostr:((?:npub|nprofile|note|nevent|naddr)1[02-9ac-hj-np-z]+)")
 # A Nostr secret key in written text, plain or encrypted (NIP-49).
-SECRET_KEY = re.compile(r"\b(?:nsec|ncryptsec)1[02-9ac-hj-np-z]{20,}", re.IGNORECASE)
+# Not after a letter or a digit; after "_" it is still a key (Markdown
+# italics, "backup_nsec1...").
+SECRET_KEY = re.compile(r"(?<![0-9A-Za-z])(?:nsec|ncryptsec)1[02-9ac-hj-np-z]{20,}",
+                        re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -253,7 +256,8 @@ def secret_keys_in(text: str) -> List[str]:
 # MyEditor publishes is signed there, so no way around the windows' own
 # checks gets a key out. Encrypted content (drafts, a signer's channel)
 # cannot hold one in plain text, so it never trips this.
-SECRET_KEY_REFUSED = N_("a secret key is in it, and nothing with a secret key in it is signed")
+SECRET_KEY_REFUSED = N_("It contains a secret key, and MyEditor never signs anything with a "
+                        "secret key in it. Remove the key and try again.")
 
 
 def secret_keys_in_event(event: dict) -> List[str]:
