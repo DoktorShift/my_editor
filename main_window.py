@@ -5516,13 +5516,34 @@ class MainWindow(QMainWindow):
         tab replaces the article (same identifier) and keeps the date it
         first went out, with its summary, cover and hashtags; saving it
         as a draft offers the same article. A tab that already holds the
-        article, or a draft of it, comes forward instead."""
+        article, or a draft of it, comes forward instead.
+
+        An article published from here keeps its draft under the same
+        identifier, often with changes not published yet: that draft is
+        what opens when it holds the published text, and otherwise the
+        person chooses (Open Draft is the default), so the unpublished
+        words are never hidden behind the published ones."""
         if not item.is_article:
             return
         for i in range(self.tabs.count()):
             ed = self._editor_from_widget(self.tabs.widget(i))
             if ed is not None and self._edits_article(ed, item.identifier):
                 self.tabs.setCurrentIndex(i)
+                return
+        draft = self._draft_of_published(item)
+        if draft is not None:
+            same = (draft.state is DraftState.READY
+                    and draft.content == str(item.event.get("content") or ""))
+            choice = "draft" if same else ask(
+                self, title=_("This article has a draft with changes you haven’t published."),
+                message=_("Open the draft to go on with it, or open the version that "
+                          "is published."),
+                buttons=(Button(_("Cancel"), None, CANCEL),
+                         Button(_("Open Published Version"), "published", NORMAL),
+                         Button(_("Open Draft"), "draft", DEFAULT)))
+            if choice == "draft":
+                self._on_panel_open_draft(item.identifier)
+            if choice != "published":
                 return
         self.new_tab()
         ed = self.current_editor()
@@ -5535,6 +5556,15 @@ class MainWindow(QMainWindow):
             identifier=item.identifier, title=details.title or item.title,
             published_at=item.first_published)
         self._update_tab_title()
+
+    def _draft_of_published(self, item):
+        """The account's article draft with the published article's
+        identifier, or None (drafts are known for the account in use only)."""
+        author = str(item.event.get("pubkey") or "").lower()
+        if author != (self._draft_store.profile_pubkey or "").lower():
+            return None
+        record = self._draft_store.get(item.identifier)
+        return record if record is not None and record.is_article else None
 
     def _edits_article(self, ed, identifier: str) -> bool:
         """Whether a tab holds the article ``identifier``: a draft of it,
@@ -6004,6 +6034,8 @@ class MainWindow(QMainWindow):
             return
 
         choice: StashChoice = dlg.choice
+        if not self._may_replace_draft(prior, choice.identifier):
+            return
         if not self._confirm_images_uploaded(ed):
             return
         flavor = "markdown" if choice.kind is StashKind.ARTICLE else "note"
@@ -6014,6 +6046,22 @@ class MainWindow(QMainWindow):
         if inner is None:
             return
         self._fire_draft_publish_job(ed, profile, choice, inner)
+
+    def _may_replace_draft(self, prior: Optional[DraftBinding], identifier: str) -> bool:
+        """Saving as a draft under an identifier another draft has replaces
+        that draft on every device: asked first, the way Save As asks before
+        it replaces a file (Cancel is the default). A tab bound to that
+        draft just saves it again."""
+        if prior is not None and prior.identifier == identifier:
+            return True
+        existing = self._draft_store.get(identifier)
+        if existing is None:
+            return True
+        return confirm_destructive(
+            self, title=_("A draft named “{name}” already exists. Do you want to replace "
+                          "it?").format(name=existing.title or identifier),
+            message=_("Replacing it overwrites its text on all your devices."),
+            action=_("Replace"))
 
     def _restash_with_binding(self, ed, binding: DraftBinding) -> None:
         """Silent re-save of a draft-bound tab - no dialogs.
