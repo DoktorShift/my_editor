@@ -24,9 +24,10 @@ People mentioned are tagged by ``publisher.extract_inline_mentions``.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
-from typing import Callable, Iterable, List, Optional, Sequence, Tuple
+from typing import Callable, Iterable, Iterator, List, Optional, Sequence, Tuple
 
 from i18n import N_, _
 
@@ -262,8 +263,28 @@ SECRET_KEY_REFUSED = N_("It contains a secret key, and MyEditor never signs anyt
 
 def secret_keys_in_event(event: dict) -> List[str]:
     """The Nostr secret keys in what ``event`` makes public: its content
-    and every value of every tag, each once, in order."""
-    values = [event.get("content") or ""]
+    (and, when it is JSON, as a profile is, every string in it as read, so
+    an escape such as ``\n`` before a key hides nothing) and every value of
+    every tag, each once, in order."""
+    content = event.get("content") or ""
+    values = [content]
+    try:
+        values += list(_strings_in(json.loads(content)))
+    except (ValueError, RecursionError):
+        pass                        # not JSON (or absurdly deep): the text is all there is
     values += [value for tag in event.get("tags") or () for value in tag
                if isinstance(value, str)]
     return secret_keys_in("\n".join(values))
+
+
+def _strings_in(value) -> Iterator[str]:
+    """Every string in a value read from JSON, keys too, at any depth."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield key
+            yield from _strings_in(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _strings_in(item)

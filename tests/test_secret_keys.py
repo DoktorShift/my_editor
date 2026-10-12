@@ -209,6 +209,19 @@ def test_a_signer_never_signs_an_event_with_a_key_in_it(event):
     assert _sign_locally(event) == {"refused": refs.SECRET_KEY_REFUSED}
 
 
+@pytest.mark.parametrize("about", [f"My key:\n{NSEC}", f"My key:\t{NSEC}", f"\r\n{NSEC}",
+                                   f"Caf\u00e9{NSEC}"])
+def test_a_key_behind_a_json_escape_is_found(about):
+    """A profile's JSON writes a line break before a key as \\n, and with
+    ensure_ascii a letter as \\uXXXX: the strings are read, not the text."""
+    for ascii_only in (False, True):
+        event = {"kind": 0, "created_at": 1_800_000_000, "tags": [],
+                 "content": json.dumps({"about": about, "more": [{"deep": about}]},
+                                       ensure_ascii=ascii_only)}
+        assert refs.secret_keys_in_event(event) == [NSEC]
+        assert _sign_locally(event) == {"refused": refs.SECRET_KEY_REFUSED}
+
+
 def test_an_encrypted_draft_is_signed():
     from nostr import crypto
     secret = bytes.fromhex(SECRET)
