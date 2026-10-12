@@ -1125,7 +1125,7 @@ class MainWindow(QMainWindow):
             # What Undo undoes in the window in front (Undo Skip there).
             self.act_undo.setText(imports.undo_text())
             self.act_undo.setEnabled(imports.can_undo())
-            focus = imports.focusWidget()
+            focus = QApplication.focusWidget()
             self.act_redo.setEnabled(isinstance(focus, QLineEdit) and focus.isRedoAvailable())
             return
         self.act_undo.setText(_("Undo"))
@@ -2249,7 +2249,8 @@ class MainWindow(QMainWindow):
         # Command-W closes the window in front, also from the menu.
         imports = self._imports_in_front()
         if imports is not None:
-            imports.close()
+            if not imports.sheet_in_front():    # never closed under its sheet
+                imports.close()
             return
         idx = self.tabs.currentIndex()
         if idx >= 0:
@@ -4026,6 +4027,8 @@ class MainWindow(QMainWindow):
                 self._update_knit_actions()
                 self._update_format_buttons()
         self.act_window_sidebar.setEnabled(in_front)
+        # A sheet blocks its window: it is not closed under it.
+        self.act_close_tab.setEnabled(not (in_front and imports.sheet_in_front()))
         # Full Screen says whether the window in front is.
         blocked = self.act_fullscreen.blockSignals(True)
         self.act_fullscreen.setChecked((imports or self).isFullScreen())
@@ -4078,7 +4081,7 @@ class MainWindow(QMainWindow):
     def _redo(self):
         imports = self._imports_in_front()
         if imports is not None:
-            focus = imports.focusWidget()
+            focus = QApplication.focusWidget()
             if isinstance(focus, (QLineEdit, QTextEdit, QPlainTextEdit)):
                 focus.redo()
             return

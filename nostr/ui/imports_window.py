@@ -1037,30 +1037,44 @@ class ImportsWindow(QMainWindow):
             self.banner.hide()
         self.undo_changed.emit()
 
+    def sheet_in_front(self) -> bool:
+        """Whether one of this window's sheets or alerts is in front. It
+        blocks the window (HIG, sheets), so the Edit commands reach only
+        its text field and the window is not closed under it, as in Mail
+        (CP3 review M2)."""
+        active = QApplication.activeWindow()
+        return active is not None and active is not self
+
+    def _undo_skip_available(self) -> bool:
+        return bool(self._last_skip) and not self.sheet_in_front()
+
     def can_undo(self) -> bool:
         """Whether Edit > Undo has something to undo here."""
-        focus = self.focusWidget()
+        focus = QApplication.focusWidget()
         if _is_text_field(focus):
             return _text_can_undo(focus)
-        return bool(self._last_skip)
+        return self._undo_skip_available()
 
     def undo_text(self) -> str:
         """Edit > Undo's words while this window is in front."""
-        if self._last_skip and not _is_text_field(self.focusWidget()):
+        if self._undo_skip_available() and not _is_text_field(QApplication.focusWidget()):
             return _("Undo Skip")
         return _("Undo")
 
     def undo(self) -> None:
         """Edit > Undo: the text being typed, or else the last skip."""
-        focus = self.focusWidget()
+        focus = QApplication.focusWidget()
         if _is_text_field(focus):
             focus.undo()
-            return
-        self.undo_skip()
+        elif self._undo_skip_available():
+            self.undo_skip()
 
     def edit(self, name: str) -> None:
         """The app's Edit commands for this window (copy, select_all,
-        delete) when the focus is not in a text field."""
+        delete) when the focus is not in a text field. With a sheet in
+        front they do nothing here."""
+        if self.sheet_in_front():
+            return
         if name == "select_all":
             self.posts.model_.check_all()
             self._update_selection_band()

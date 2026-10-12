@@ -189,7 +189,7 @@ class TestTheMenuBar:
         assert not stand_in.act_undo.isEnabled()
 
 
-def test_the_documents_commands_are_dimmed_while_imports_is_in_front(window):
+def test_the_documents_commands_are_dimmed_while_imports_is_in_front(window, monkeypatch):
     """Review M9: the menu bar is the app's while the Imports window is
     in front; what it cannot do there is dimmed, and View > Show Sidebar
     works for it."""
@@ -207,7 +207,7 @@ def test_the_documents_commands_are_dimmed_while_imports_is_in_front(window):
     fullscreen.setCheckable(True)
     host = SimpleNamespace(
         commands=registry, act_window_sidebar=sidebar, _m_background=QMenu(),
-        act_fullscreen=fullscreen, isFullScreen=lambda: False,
+        act_fullscreen=fullscreen, isFullScreen=lambda: False, act_close_tab=QAction("Close"),
         _imports_in_front=lambda: front["window"], _update_knit_actions=lambda: None,
         _update_format_buttons=lambda: None,
         _DOCUMENT_COMMANDS=MainWindow._DOCUMENT_COMMANDS,
@@ -219,6 +219,17 @@ def test_the_documents_commands_are_dimmed_while_imports_is_in_front(window):
     assert not save.isEnabled() and not bold.isEnabled()
     assert copy.isEnabled()          # acts on the window in front
     assert sidebar.isEnabled() and sidebar.text() == "Hide Sidebar"
+    assert host.act_close_tab.isEnabled()       # File > Close closes it
+    import main_window
+    window.follow_website()
+    sheet = window.sheet()
+    monkeypatch.setattr(main_window.QApplication, "activeWindow", staticmethod(lambda: sheet))
+    MainWindow._update_window_commands(host)
+    assert not host.act_close_tab.isEnabled()   # but not under its sheet (CP3 review M2)
+    sheet.reject()
+    monkeypatch.setattr(main_window.QApplication, "activeWindow", staticmethod(lambda: None))
+    MainWindow._update_window_commands(host)
+    assert host.act_close_tab.isEnabled()
     MainWindow._toggle_window_sidebar(host)
     assert not window.act_sidebar.isChecked()
     assert sidebar.text() == "Show Sidebar"
@@ -240,6 +251,51 @@ def test_a_sheet_of_imports_in_front_counts_as_imports_in_front(window, monkeypa
     assert MainWindow._imports_in_front(host) is window
     monkeypatch.setattr(main_window.QApplication, "activeWindow", staticmethod(lambda: None))
     assert MainWindow._imports_in_front(host) is None
+    sheet.reject()
+
+
+def test_a_sheet_takes_the_edit_commands_and_keeps_its_window(window, monkeypatch):
+    """CP3 review M2: with Source Settings up, Edit > Undo undid the skip
+    behind the sheet instead of the typing in it, Edit > Delete skipped a
+    post behind it, and File > Close closed the window under it. As in
+    Mail, a sheet takes the Edit commands for its text field, does nothing
+    else with them, and its window is not closed under it."""
+    import main_window
+    from PySide6.QtGui import QAction
+    window.posts.setFocus()
+    QTest.keyClick(window.posts, Qt.Key.Key_Delete)
+    controller = window._controller
+    assert controller.counts().skipped == 1
+    window.source_settings(controller.sources()[0].key)
+    sheet = window.sheet()
+    monkeypatch.setattr(main_window.QApplication, "activeWindow", staticmethod(lambda: sheet))
+    sheet.name.setFocus()
+    monkeypatch.setattr(main_window.QApplication, "focusWidget",
+                        staticmethod(lambda: sheet.name))
+    QTest.keyClicks(sheet.name, " renamed")
+    typed = sheet.name.text()
+    closed = []
+    window.close = lambda: closed.append(True)
+    host = SimpleNamespace(
+        _imports_in_front=lambda: window, current_editor=lambda: None,
+        current_pdf_viewer=lambda: None, act_undo=QAction("Undo"), act_redo=QAction("Redo"))
+    MainWindow._update_undo_redo_buttons(host)
+    assert host.act_undo.text() == "Undo" and host.act_undo.isEnabled()
+    MainWindow._undo(host)
+    assert sheet.name.text() != typed                 # the typing is undone
+    assert controller.counts().skipped == 1           # the skip behind stays
+    monkeypatch.setattr(main_window.QApplication, "focusWidget",
+                        staticmethod(lambda: sheet.copy_images))
+    inbox = controller.counts().inbox
+    for name in ("delete", "select_all"):
+        MainWindow._edit_focused(host, name)
+    assert controller.counts().inbox == inbox and not window.posts.model_.checked()
+    MainWindow._update_undo_redo_buttons(host)
+    assert not host.act_undo.isEnabled()              # nothing of the window behind
+    MainWindow._undo(host)
+    assert controller.counts().skipped == 1
+    MainWindow._close_current_tab(host)
+    assert closed == [] and sheet.isVisible()
     sheet.reject()
 
 
