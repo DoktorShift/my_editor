@@ -72,7 +72,8 @@ def alert(tmp_path):
 
 def alert_with_details(tmp_path):
     return Alert(None, title="Couldn’t publish", message="No relay answered.",
-                 buttons=(Button("Cancel", "cancel", CANCEL), Button("Try Again", "retry", DEFAULT)),
+                 buttons=(Button("Cancel", "cancel", CANCEL),
+                          Button("Try Again", "retry", DEFAULT)),
                  details="wss://relay.example: timed out", is_dark=False)
 
 

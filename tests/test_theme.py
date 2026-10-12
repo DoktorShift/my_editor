@@ -173,7 +173,8 @@ def test_every_button_box_puts_cancel_first_and_the_default_trailing(qapp, base)
     dialog.show()
     qapp.processEvents()
     try:
-        left_to_right = sorted(box.buttons(), key=lambda b: b.mapTo(dialog, b.rect().topLeft()).x())
+        left_to_right = sorted(box.buttons(),
+                               key=lambda b: b.mapTo(dialog, b.rect().topLeft()).x())
         roles = [box.buttonRole(b) for b in left_to_right]
         assert roles == [QDialogButtonBox.ButtonRole.HelpRole,
                          QDialogButtonBox.ButtonRole.RejectRole,
