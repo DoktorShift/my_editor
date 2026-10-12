@@ -5,15 +5,41 @@
 The link popover and the slash menu open right below the words they are
 about, the way Pages and Mail place theirs, and above them when the
 screen has no room below; they never stick out past the screen's sides.
+A window asks here how much of the screen it may take.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QRect
+from typing import Optional
+
+from PySide6.QtCore import QPoint, QRect, QSize
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QWidget
 
 GAP = 6
+# Room left for a window's title bar, which its frame adds to the size
+# the window asks for.
+TITLE_BAR = 40
+
+
+def available_area(widget: QWidget) -> Optional[QRect]:
+    """The part of the screen ``widget`` is shown on (or, not shown yet,
+    the main screen) that windows may use: without the menu bar, the
+    Dock or the taskbar. None when there is no screen."""
+    handle = widget.windowHandle()
+    screen = (handle.screen() if handle is not None else None) \
+        or QGuiApplication.primaryScreen()
+    return screen.availableGeometry() if screen is not None else None
+
+
+def fitting_size(widget: QWidget, wanted: QSize) -> QSize:
+    """``wanted``, made small enough that the whole window, title bar
+    included, fits the screen it opens on (its buttons stay on screen)."""
+    area = available_area(widget)
+    if area is None:
+        return wanted
+    return QSize(min(wanted.width(), area.width()),
+                 min(wanted.height(), area.height() - TITLE_BAR))
 
 
 def place_below(popup: QWidget, anchor: QRect, parent: QWidget) -> QPoint:

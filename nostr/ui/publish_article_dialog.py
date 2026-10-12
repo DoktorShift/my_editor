@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 import announce
 import theme
 import word_count
+from popup_placement import fitting_size
 from alerts import CANCEL, DEFAULT, NORMAL, Button, ask
 from i18n import _, language, ngettext
 
@@ -355,8 +356,9 @@ class PublishArticleDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(_("Publish as Article"))
         self.setModal(True)
-        self.resize(760, 680)
         self.setMinimumSize(640, 520)
+        # Never taller than the screen it opens on: Publish stays on it.
+        self.resize(fitting_size(self, QSize(760, 680)))
 
         self._store = store
         self._relay_pool = relay_pool
