@@ -2273,10 +2273,13 @@ class MainWindow(QMainWindow):
         self.tabs.removeTab(index)
 
     def _close_current_tab(self):
-        # Command-W closes the window in front, also from the menu.
-        imports = self._imports_in_front()
-        if imports is not None:
-            imports.close()
+        # Command-W closes the window in front (Settings, Keyboard
+        # Shortcuts, Imports...), also from the menu: on a Mac the menu
+        # bar takes the key before the window in front sees it. In this
+        # window it closes the tab.
+        front = self._front_window()
+        if front is not self:
+            front.close()
             return
         idx = self.tabs.currentIndex()
         if idx >= 0:

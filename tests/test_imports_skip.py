@@ -131,8 +131,8 @@ class TestTheMenuBar:
 
     def stand_in(self, window):
         return SimpleNamespace(
-            _imports_in_front=lambda: window, current_editor=lambda: None,
-            current_pdf_viewer=lambda: None)
+            _imports_in_front=lambda: window, _front_window=lambda: window,
+            current_editor=lambda: None, current_pdf_viewer=lambda: None)
 
     def test_edit_undo(self, window):
         window.posts.setFocus()

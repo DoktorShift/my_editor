@@ -126,3 +126,53 @@ def test_full_screen_is_named_for_what_it_does_next(tmp_path):
     assert r["in_full_screen"] == [True, "Exit Full Screen"]
     assert r["back"] == [False, True, "Enter Full Screen"]      # maximized again
     assert r["by_the_window"] == "Exit Full Screen"
+
+
+CLOSE_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+
+w = main_window.MainWindow()
+w.show()
+w.new_tab()
+app.processEvents()
+r = {}
+for name, opener, attr in (("settings", w._show_settings, "_settings_window"),
+                           ("shortcuts", w._show_shortcuts, "_shortcuts_window")):
+    opener()
+    app.processEvents()
+    getattr(w, attr).activateWindow()
+    app.processEvents()
+    tabs = w.tabs.count()
+    w.act_close_tab.trigger()          # what a Mac's menu bar does with Command-W
+    app.processEvents()
+    window = getattr(w, attr, None)
+    r[name] = {"closed": window is None or not window.isVisible(),
+               "tabs_closed": tabs - w.tabs.count()}
+w.activateWindow()
+app.processEvents()
+tabs = w.tabs.count()
+w.act_close_tab.trigger()
+app.processEvents()
+r["document"] = tabs - w.tabs.count()
+for i in range(w.tabs.count()):
+    ed = w._editor_from_widget(w.tabs.widget(i))
+    if ed is not None:
+        ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_command_w_closes_the_window_in_front_not_a_tab_behind_it(tmp_path):
+    # Review R1: on a Mac the menu bar's Close Tab takes Command-W before
+    # Settings or Keyboard Shortcuts sees it, and closed a document tab
+    # behind the window instead.
+    r = run_window_script(CLOSE_SCRIPT, tmp_path)
+    assert r["settings"] == {"closed": True, "tabs_closed": 0}
+    assert r["shortcuts"] == {"closed": True, "tabs_closed": 0}
+    assert r["document"] == 1                   # in the document window, a tab
