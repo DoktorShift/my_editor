@@ -1078,11 +1078,9 @@ class ImportsWindow(QMainWindow):
         if self.sheet_in_front():
             return False
         if name == "copy":
-            post = self.posts.current_post()
-            return post is not None and bool(post.link)
+            return bool(self._links())
         if name == "delete":
-            skip = self.action_bar.skip
-            return self.action_bar.isVisible() and skip.isVisible() and skip.isEnabled()
+            return self._delete_skips()
         return False
 
     def edit(self, name: str) -> None:
@@ -1095,11 +1093,26 @@ class ImportsWindow(QMainWindow):
             self.posts.model_.check_all()
             self._update_selection_band()
         elif name == "delete":
-            self.skip_or_restore()
+            if self._delete_skips():
+                self._skip_by_key()
         elif name == "copy":
-            post = self.posts.current_post()
-            if post is not None and post.link:
-                QApplication.clipboard().setText(post.link)
+            links = self._links()
+            if links:
+                QApplication.clipboard().setText("\n".join(links))
+
+    def _links(self) -> List[str]:
+        """Copy's text: the address of each post an action applies to, one
+        per line, as Mail copies every selected message (S3 of the CP3
+        fixes review: only the open post's)."""
+        return [post.link for post in self.targets() if post.link]
+
+    def _delete_skips(self) -> bool:
+        """Edit > Delete does what the Delete key does in the post list:
+        Skip (Q-12), and nothing in Skipped or with the focus elsewhere
+        (S2 of the CP3 fixes review: it restored there, with no Undo)."""
+        skip = self.action_bar.skip
+        return (QApplication.focusWidget() is self.posts and not self._restoring()
+                and self.action_bar.isVisible() and skip.isVisible() and skip.isEnabled())
 
     # ------------------------------------------------------------------ #
     # How an import is going                                               #

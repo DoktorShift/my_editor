@@ -342,6 +342,63 @@ def test_the_edit_menu_follows_a_sheets_field(window, monkeypatch):
     document.deleteLater()
 
 
+def test_edit_delete_skips_only_where_the_key_does(window, monkeypatch):
+    """S2 of the CP3 fixes review: Edit > Delete restored posts in Skipped,
+    with no Undo, and skipped the open post with the sidebar focused. It
+    does what the Delete key does in the post list, and nothing else."""
+    import main_window
+    from PySide6.QtGui import QAction
+    focus = {"widget": window.posts}
+    monkeypatch.setattr(main_window.QApplication, "focusWidget",
+                        staticmethod(lambda: focus["widget"]))
+    host = SimpleNamespace(
+        _imports_in_front=lambda: window, current_editor=lambda: None,
+        current_pdf_viewer=lambda: None, act_cut=QAction("Cut"), act_copy=QAction("Copy"),
+        act_delete=QAction("Delete"))
+    controller = window._controller
+    MainWindow._update_clipboard_commands(host)
+    assert host.act_delete.isEnabled()                  # the post list: Skip
+    focus["widget"] = window.sidebar
+    MainWindow._update_clipboard_commands(host)
+    assert not host.act_delete.isEnabled()
+    MainWindow._edit_focused(host, "delete")
+    assert controller.counts().skipped == 0
+    focus["widget"] = window.posts
+    MainWindow._edit_focused(host, "delete")
+    assert controller.counts().skipped == 1
+    window.sidebar.select(LIST, SKIPPED_POSTS)
+    window.posts.setCurrentIndex(window.posts.model_.index(0))
+    MainWindow._update_clipboard_commands(host)
+    assert not host.act_delete.isEnabled()              # Restore is the button
+    MainWindow._edit_focused(host, "delete")
+    assert controller.counts().skipped == 1
+
+
+def test_copy_copies_the_link_of_every_post_an_action_applies_to(window):
+    """S3 of the CP3 fixes review: after Select All, Copy put only the open
+    post's link on the clipboard. As Mail copies every selected message,
+    it copies the link of each post, one per line."""
+    from PySide6.QtWidgets import QApplication
+    from tests.imports_fakes import make_item
+    controller = window._controller
+    key = controller.sources()[0].key
+    controller.inbox.ingest(key, [
+        make_item("Linked one", guid="l1", link="https://journal.example/1"),
+        make_item("Linked two", guid="l2", link="https://journal.example/2")])
+    controller.posts_changed.emit()                     # the window shows them
+    settle()
+    model = window.posts.model_
+    linked = {model.post(r).link: r for r in range(model.rowCount()) if model.post(r).link}
+    assert sorted(linked) == ["https://journal.example/1", "https://journal.example/2"]
+    window.posts.setCurrentIndex(model.index(linked["https://journal.example/1"]))
+    assert window.can_edit("copy")
+    window.edit("copy")
+    assert QApplication.clipboard().text() == "https://journal.example/1"
+    window.edit("select_all")
+    window.edit("copy")
+    assert sorted(QApplication.clipboard().text().split("\n")) == sorted(linked)
+
+
 def test_full_screen_acts_on_the_window_in_front(window):
     """CP2 review L-a: View > Full Screen made the editor window behind
     full screen while the Imports window was in front."""
