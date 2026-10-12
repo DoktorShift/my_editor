@@ -538,7 +538,6 @@ class HtmlEditor(QTextEdit):
         position to viewport coordinates exactly (accounting for scroll offset and
         document margins), so each line of text sits on a rule with no drift. The
         rhythm is then extended above and below the text to fill the whole page."""
-        vp = self.viewport()
         block = self.first_visible_block()
         if not block.isValid():
             return [], 0
