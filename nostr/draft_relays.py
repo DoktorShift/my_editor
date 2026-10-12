@@ -696,7 +696,8 @@ class PrivateDraftRelays(QObject):
         # the event it came from (None: there was none).
         self._known: Optional[List[str]] = None
         self._read_id: Optional[str] = None
-        self.last_failure: Optional[str] = None    # why the last read answered None
+        # Why the last read answered None (None while a read is under way).
+        self.last_failure: Optional[str] = None
         # The list the signer app declined to decrypt: not asked about again
         # until another one is read, or ``ask_again`` (a signer app that
         # could not be reached is asked again next time).
@@ -723,6 +724,7 @@ class PrivateDraftRelays(QObject):
         until another one is read, or ``ask_again``."""
         author = self._profile.user_pubkey.lower()
         relays = lookup_relays(known=self._directory.cached(author), own=True)
+        self.last_failure = None
 
         def answer(read: Optional[List[str]], event: Optional[dict] = None,
                    failure: Optional[str] = None) -> None:
