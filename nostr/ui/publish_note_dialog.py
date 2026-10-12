@@ -320,7 +320,7 @@ class PublishNoteDialog(QDialog):
         menu.clear()
         profiles = self._store.list()
         if not profiles:
-            act = menu.addAction(_("(no profiles)"))
+            act = menu.addAction(_("(no accounts)"))
             act.setEnabled(False)
             return
         for profile in profiles:

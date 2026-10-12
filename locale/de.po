@@ -7,25 +7,25 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: alerts.py:94
+#: alerts.py:96
 #: main_window.py:3717
 msgid "OK"
 msgstr "OK"
 
-#: alerts.py:188
+#: alerts.py:190
 msgid "Details"
 msgstr "Details"
 
-#: alerts.py:193
-#: alerts.py:200
+#: alerts.py:195
+#: alerts.py:202
 msgid "Show Details"
 msgstr "Details einblenden"
 
-#: alerts.py:200
+#: alerts.py:202
 msgid "Hide Details"
 msgstr "Details ausblenden"
 
-#: alerts.py:339
+#: alerts.py:353
 #: link_popover.py:99
 #: main_window.py:2797
 #: main_window.py:6416
@@ -485,7 +485,7 @@ msgstr "Andere Apps haben diese Liste schon."
 
 #: main_window.py:4949
 msgid "Your current list couldn’t be read, so nothing was changed. Try again later."
-msgstr "Deine aktuelle Liste ließ sich nicht lesen, daher wurde nichts geändert. Versuch es später noch einmal."
+msgstr "Deine aktuelle Liste ließ sich nicht lesen, daher wurde nichts geändert. Versuche es später noch einmal."
 
 #: main_window.py:5553
 msgid "Upload this image to your media servers?"
@@ -547,8 +547,8 @@ msgstr "Öffnen …"
 #: main_window.py:249
 #: nostr/ui/draft_relays_sheet.py:299
 #: nostr/ui/profile_window.py:254
-#: nostr/ui/save_destination_dialog.py:225
-#: nostr/ui/save_destination_dialog.py:306
+#: nostr/ui/save_destination_dialog.py:226
+#: nostr/ui/save_destination_dialog.py:307
 msgid "Save"
 msgstr "Speichern"
 
@@ -1203,7 +1203,7 @@ msgstr "Es gibt keinen Medienserver zum Teilen."
 
 #: main_window.py:4954
 msgid "The list wasn’t shared. Try again in a moment."
-msgstr "Die Liste wurde nicht geteilt. Versuch es gleich noch einmal."
+msgstr "Die Liste wurde nicht geteilt. Versuche es gleich noch einmal."
 
 #: main_window.py:5072
 #, python-brace-format
@@ -1748,28 +1748,28 @@ msgstr ""
 "\n"
 "{error}"
 
-#: page_setup_dialog.py:94
-#: page_setup_dialog.py:104
+#: page_setup_dialog.py:95
+#: page_setup_dialog.py:105
 msgid "Page Setup"
 msgstr "Seite einrichten"
 
-#: page_setup_dialog.py:114
+#: page_setup_dialog.py:115
 msgid "Paper size:"
 msgstr "Papierformat:"
 
-#: page_setup_dialog.py:119
+#: page_setup_dialog.py:120
 msgid "Portrait"
 msgstr "Hochformat"
 
-#: page_setup_dialog.py:120
+#: page_setup_dialog.py:121
 msgid "Landscape"
 msgstr "Querformat"
 
-#: page_setup_dialog.py:122
+#: page_setup_dialog.py:123
 msgid "Orientation:"
 msgstr "Ausrichtung:"
 
-#: page_setup_dialog.py:130
+#: page_setup_dialog.py:131
 msgid "Margins:"
 msgstr "Ränder:"
 
@@ -2431,7 +2431,7 @@ msgstr "Versionshinweise"
 #: nostr/ui/account_windows.py:788
 #: nostr/ui/account_windows.py:849
 #: nostr/ui/account_windows.py:1099
-#: nostr/ui/image_review_dialog.py:124
+#: nostr/ui/image_review_dialog.py:125
 #: nostr/ui/media_library_dialog.py:1971
 msgid "Done"
 msgstr "Fertig"
@@ -3392,7 +3392,7 @@ msgstr "Warte auf die Signatur. Bestätige die Anfrage in deiner Signer-App …"
 
 #: nostr/publisher.py:886
 msgid "Encrypting the draft. Approve it in your signer app if it asks…"
-msgstr "Der Entwurf wird verschlüsselt. Bestätige in deiner Signer-App, wenn sie fragt …"
+msgstr "Der Entwurf wird verschlüsselt. Bestätige es in deiner Signer-App, wenn sie fragt …"
 
 #: nostr/publisher.py:1298
 msgid "no relay accepted the deletion"
@@ -3534,7 +3534,7 @@ msgstr "Deine Signer-App hat die Anfrage nicht signiert: {reason}"
 
 #: nostr/blossom/errors.py:58
 msgid "The server redirected this request. For safety it was not sent again. Try a different server."
-msgstr "Der Server hat diese Anfrage umgeleitet. Zur Sicherheit wurde sie nicht erneut gesendet. Versuch es mit einem anderen Server."
+msgstr "Der Server hat diese Anfrage umgeleitet. Zur Sicherheit wurde sie nicht erneut gesendet. Versuche es mit einem anderen Server."
 
 #: nostr/blossom/errors.py:62
 msgid "That address is not allowed. Only regular web links can be used here."
@@ -3554,7 +3554,7 @@ msgstr "Die signierte Freigabe passt nicht zu diesem Server. Es wurde nichts ges
 
 #: nostr/blossom/errors.py:77
 msgid "Your signer app declined the request. Approve it there and try again."
-msgstr "Deine Signer-App hat die Anfrage abgelehnt. Bestätige sie dort und versuch es noch einmal."
+msgstr "Deine Signer-App hat die Anfrage abgelehnt. Bestätige sie dort und versuche es noch einmal."
 
 #: nostr/blossom/errors.py:81
 msgid "The upload did not finish. The image stays in your document and can be retried."
@@ -3574,19 +3574,19 @@ msgstr "Der Server hat eine andere Datei beschrieben als die gesendete. Es wurde
 
 #: nostr/blossom/errors.py:96
 msgid "That server refused the file for being too large. Try another server, or a smaller file."
-msgstr "Dieser Server hat die Datei abgelehnt, weil sie zu groß ist. Versuch es mit einem anderen Server oder einer kleineren Datei."
+msgstr "Dieser Server hat die Datei abgelehnt, weil sie zu groß ist. Versuche es mit einem anderen Server oder einer kleineren Datei."
 
 #: nostr/blossom/errors.py:100
 msgid "That server asks for payment for uploads. The file stays in your document. Try another server."
-msgstr "Dieser Server verlangt eine Bezahlung fürs Hochladen. Die Datei bleibt in deinem Dokument. Versuch es mit einem anderen Server."
+msgstr "Dieser Server verlangt eine Bezahlung fürs Hochladen. Die Datei bleibt in deinem Dokument. Versuche es mit einem anderen Server."
 
 #: nostr/blossom/errors.py:104
 msgid "That server is asking for a slower pace. Wait a moment and try again."
-msgstr "Dieser Server bittet um etwas Geduld. Warte einen Moment und versuch es noch einmal."
+msgstr "Dieser Server bittet um etwas Geduld. Warte einen Moment und versuche es noch einmal."
 
 #: nostr/blossom/errors.py:108
 msgid "That server did not accept the signed authorization. Check that your signer app is connected, then try again."
-msgstr "Dieser Server hat die signierte Berechtigung nicht angenommen. Prüfe, ob deine Signer-App verbunden ist, und versuch es dann noch einmal."
+msgstr "Dieser Server hat die signierte Berechtigung nicht angenommen. Prüfe, ob deine Signer-App verbunden ist, und versuche es dann noch einmal."
 
 #: nostr/blossom/store.py:725
 msgid "File is empty."
@@ -3615,7 +3615,7 @@ msgstr "Kein Medienserver erreichbar. Angezeigt wird der vorherige Stand der Med
 #: nostr/blossom/store.py:778
 #, python-brace-format
 msgid "File is too large for any configured server ({limit} MiB). Try a smaller file or add a server that accepts it."
-msgstr "Die Datei ist für alle eingerichteten Server zu groß ({limit} MiB). Versuch es mit einer kleineren Datei oder füge einen Server hinzu, der sie annimmt."
+msgstr "Die Datei ist für alle eingerichteten Server zu groß ({limit} MiB). Versuche es mit einer kleineren Datei oder füge einen Server hinzu, der sie annimmt."
 
 #: nostr/blossom/store.py:722
 #, python-brace-format
@@ -5308,7 +5308,7 @@ msgstr "Deine gespeicherten privaten Entwürfe"
 #: nostr/ui/drafts_panel.py:1824
 #: nostr/ui/drafts_panel.py:1892
 msgid "Your signer app can’t decrypt drafts"
-msgstr "Deine Signer-App kann Entwürfe nicht entschlüsseln"
+msgstr "Signer-App kann Entwürfe nicht lesen"
 
 #: nostr/ui/drafts_panel.py:1830
 #: nostr/ui/drafts_panel.py:1905
@@ -5478,19 +5478,19 @@ msgstr "Schlagwörter: {tags}"
 msgid "Published {date}"
 msgstr "Veröffentlicht am {date}"
 
-#: nostr/ui/image_review_dialog.py:59
+#: nostr/ui/image_review_dialog.py:60
 msgid "Review Images"
 msgstr "Bilder prüfen"
 
-#: nostr/ui/image_review_dialog.py:77
+#: nostr/ui/image_review_dialog.py:78
 msgid "Checked images are copied to your media server, so the draft keeps working if the website removes them. Uncheck any you'd rather leave where they are."
 msgstr "Markierte Bilder werden auf deinen Medienserver kopiert, damit der Entwurf vollständig bleibt, auch wenn die Website sie entfernt. Entferne das Häkchen bei Bildern, die bleiben sollen, wo sie sind."
 
-#: nostr/ui/image_review_dialog.py:90
+#: nostr/ui/image_review_dialog.py:91
 msgid "Images to copy"
 msgstr "Zu kopierende Bilder"
 
-#: nostr/ui/image_review_dialog.py:147
+#: nostr/ui/image_review_dialog.py:148
 #, python-brace-format
 msgid "{kept} of {total} image will be copied."
 msgid_plural "{kept} of {total} images will be copied."
@@ -6641,10 +6641,10 @@ msgstr "URL von Server kopieren"
 
 #: nostr/ui/media_library_dialog.py:1820
 #, python-brace-format
-msgid "Your Nostr profile also lists {servers} for media. Use it for uploads here too?"
-msgid_plural "Your Nostr profile also lists {servers} for media. Use them for uploads here too?"
-msgstr[0] "Dein Nostr-Profil nennt auch {servers} für Medien. Diesen Server auch hier zum Hochladen verwenden?"
-msgstr[1] "Dein Nostr-Profil nennt auch {servers} für Medien. Diese Server auch hier zum Hochladen verwenden?"
+msgid "Your account also lists {servers} for media. Use it for uploads here too?"
+msgid_plural "Your account also lists {servers} for media. Use them for uploads here too?"
+msgstr[0] "Dein Konto nennt auch {servers} für Medien. Diesen Server auch hier zum Hochladen verwenden?"
+msgstr[1] "Dein Konto nennt auch {servers} für Medien. Diese Server auch hier zum Hochladen verwenden?"
 
 #: nostr/ui/media_library_dialog.py:1964
 msgid "Signing…"
@@ -7342,11 +7342,11 @@ msgstr "Dein Profil wird gelesen …"
 
 #: nostr/ui/profile_window.py:311
 msgid "Your profile wasn’t saved: it couldn’t be read again just before saving, so nothing was changed. Try again in a moment."
-msgstr "Dein Profil wurde nicht gespeichert: Es ließ sich kurz vor dem Speichern nicht noch einmal lesen, daher wurde nichts geändert. Versuch es gleich noch einmal."
+msgstr "Dein Profil wurde nicht gespeichert: Es ließ sich kurz vor dem Speichern nicht noch einmal lesen, daher wurde nichts geändert. Versuche es gleich noch einmal."
 
 #: nostr/ui/profile_window.py:314
 msgid "Your profile wasn’t saved: your signer app didn’t sign it, or too few servers took it. Nothing was changed. Try again in a moment."
-msgstr "Dein Profil wurde nicht gespeichert: Deine Signer-App hat es nicht signiert, oder zu wenige Server haben es angenommen. Es wurde nichts geändert. Versuch es gleich noch einmal."
+msgstr "Dein Profil wurde nicht gespeichert: Deine Signer-App hat es nicht signiert, oder zu wenige Server haben es angenommen. Es wurde nichts geändert. Versuche es gleich noch einmal."
 
 #: nostr/ui/profile_window.py:167
 msgid "MyEditor Couldn’t Read Your Profile"
@@ -7354,7 +7354,7 @@ msgstr "MyEditor konnte dein Profil nicht lesen"
 
 #: nostr/ui/profile_window.py:168
 msgid "Your profile couldn’t be read from the network just now. Editing it without reading it first could replace it, so try again in a moment."
-msgstr "Dein Profil ließ sich gerade nicht aus dem Netzwerk lesen. Es ohne vorheriges Lesen zu bearbeiten, könnte es ersetzen. Versuch es deshalb gleich noch einmal."
+msgstr "Dein Profil ließ sich gerade nicht aus dem Netzwerk lesen. Es ohne vorheriges Lesen zu bearbeiten, könnte es ersetzen. Versuche es deshalb gleich noch einmal."
 
 #: nostr/ui/profile_window.py:188
 msgid "Your Profile"
@@ -7393,7 +7393,7 @@ msgid "Write your article in Markdown…"
 msgstr "Schreib deinen Artikel in Markdown …"
 
 #: nostr/ui/publish_article_dialog.py:509
-#: nostr/ui/stash_kind_dialog.py:402
+#: nostr/ui/stash_kind_dialog.py:403
 msgid "article-slug"
 msgstr "mein-artikel"
 
@@ -7402,7 +7402,7 @@ msgid "comma, separated, hashtags"
 msgstr "durch, Komma, getrennt"
 
 #: nostr/ui/publish_article_dialog.py:567
-#: nostr/ui/publish_note_dialog.py:281
+#: nostr/ui/publish_note_dialog.py:282
 msgid "Publish"
 msgstr "Veröffentlichen"
 
@@ -7436,7 +7436,7 @@ msgid "Hashtags"
 msgstr "Hashtags"
 
 #: nostr/ui/publish_article_dialog.py:552
-#: nostr/ui/publish_note_dialog.py:265
+#: nostr/ui/publish_note_dialog.py:266
 msgid "Publishing as"
 msgstr "Veröffentlichen als"
 
@@ -7461,9 +7461,9 @@ msgid "▸  Advanced  ·  slug, cover image, hashtags"
 msgstr "▸  Erweitert  ·  Kurzname, Titelbild, Hashtags"
 
 #: nostr/ui/publish_article_dialog.py:799
-#: nostr/ui/publish_note_dialog.py:322
-msgid "(no profiles)"
-msgstr "(keine Profile)"
+#: nostr/ui/publish_note_dialog.py:323
+msgid "(no accounts)"
+msgstr "(keine Konten)"
 
 #: nostr/ui/publish_article_dialog.py:908
 msgid "Couldn't check whether this article was published before"
@@ -7493,7 +7493,7 @@ msgstr[0] "{words} Wort · ~{minutes} Min. Lesezeit"
 msgstr[1] "{words} Wörter · ~{minutes} Min. Lesezeit"
 
 #: nostr/ui/publish_article_dialog.py:992
-#: nostr/ui/publish_note_dialog.py:418
+#: nostr/ui/publish_note_dialog.py:419
 #, python-brace-format
 msgid "Publish failed: {reason}"
 msgstr "Veröffentlichen fehlgeschlagen: {reason}"
@@ -7509,7 +7509,7 @@ msgstr "Artikel kann nicht erstellt werden: {reason}"
 
 #: nostr/ui/publish_copy_dialog.py:108
 msgid "This picture has not been checked against your private library, so it was not used. Wait for the library to finish opening, or reconnect your signer app, then try again."
-msgstr "Dieses Bild wurde noch nicht mit deiner privaten Bibliothek abgeglichen und wurde deshalb nicht verwendet. Warte, bis die Bibliothek geöffnet ist, oder verbinde deine Signer-App neu, und versuch es dann noch einmal."
+msgstr "Dieses Bild wurde noch nicht mit deiner privaten Bibliothek abgeglichen und wurde deshalb nicht verwendet. Warte, bis die Bibliothek geöffnet ist, oder verbinde deine Signer-App neu, und versuche es dann noch einmal."
 
 #: nostr/ui/publish_copy_dialog.py:82
 msgid "Waiting"
@@ -7613,8 +7613,8 @@ msgid "Stopping. Nothing new will be uploaded."
 msgstr "Wird angehalten. Es wird nichts Neues hochgeladen."
 
 #: nostr/ui/publish_copy_dialog.py:488
-msgid "This picture is private, and this app cannot make a public copy of it right now. Connect your signer app and try again."
-msgstr "Dieses Bild ist privat, und die App kann gerade keine öffentliche Kopie davon erstellen. Verbinde deine Signer-App und versuch es noch einmal."
+msgid "This picture is private, and MyEditor can’t make a public copy of it right now. Connect your signer app and try again."
+msgstr "Dieses Bild ist privat, und MyEditor kann gerade keine öffentliche Kopie davon erstellen. Verbinde deine Signer-App und versuche es noch einmal."
 
 #: nostr/ui/publish_copy_dialog.py:576
 #, python-brace-format
@@ -7651,30 +7651,30 @@ msgid_plural "Creating {count} public copies…"
 msgstr[0] "Öffentliche Kopie wird erstellt …"
 msgstr[1] "{count} öffentliche Kopien werden erstellt …"
 
-#: nostr/ui/publish_note_dialog.py:180
+#: nostr/ui/publish_note_dialog.py:181
 msgid "Publish as Note"
 msgstr "Als Notiz veröffentlichen"
 
-#: nostr/ui/publish_note_dialog.py:219
+#: nostr/ui/publish_note_dialog.py:220
 msgid "Publish a short note (kind 1) to Nostr."
 msgstr "Eine kurze Notiz auf Nostr veröffentlichen."
 
-#: nostr/ui/publish_note_dialog.py:222
+#: nostr/ui/publish_note_dialog.py:223
 msgid "Formatting is stripped. Short notes are plain text. For richer documents, use Publish as Article."
 msgstr "Die Formatierung wird entfernt, denn kurze Notizen sind reiner Text. Für Dokumente mit Formatierung nimm „Als Artikel veröffentlichen“."
 
-#: nostr/ui/publish_note_dialog.py:350
+#: nostr/ui/publish_note_dialog.py:351
 #, python-brace-format
 msgid "{n} character"
 msgid_plural "{n} characters"
 msgstr[0] "{n} Zeichen"
 msgstr[1] "{n} Zeichen"
 
-#: nostr/ui/publish_note_dialog.py:410
+#: nostr/ui/publish_note_dialog.py:411
 msgid "No relay accepted the note. See log for details."
 msgstr "Kein Relay hat die Notiz angenommen. Details stehen im Protokoll."
 
-#: nostr/ui/publish_note_dialog.py:352
+#: nostr/ui/publish_note_dialog.py:353
 #, python-brace-format
 msgid "{count} · long note, consider Publish as Article instead"
 msgstr "{count} · lange Notiz, veröffentliche sie besser als Artikel"
@@ -7820,84 +7820,84 @@ msgstr "Notizen und Artikel, die du veröffentlichst, erscheinen hier."
 msgid "no answer"
 msgstr "keine Antwort"
 
-#: nostr/ui/save_destination_dialog.py:252
+#: nostr/ui/save_destination_dialog.py:253
 msgid "Where do you want to save?"
 msgstr "Wo möchtest du speichern?"
 
-#: nostr/ui/save_destination_dialog.py:257
+#: nostr/ui/save_destination_dialog.py:258
 msgid "Local files live only on this device. Nostr drafts are encrypted to your key and synced across your other devices."
 msgstr "Lokale Dateien bleiben nur auf diesem Gerät. Nostr-Entwürfe sind mit deinem Schlüssel verschlüsselt und werden mit deinen anderen Geräten abgeglichen."
 
-#: nostr/ui/save_destination_dialog.py:295
+#: nostr/ui/save_destination_dialog.py:296
 msgid "Remember this choice for this tab"
 msgstr "Auswahl für diesen Tab merken"
 
-#: nostr/ui/save_destination_dialog.py:298
+#: nostr/ui/save_destination_dialog.py:299
 msgid "Skip this dialog on the next Ctrl+Shift+S for the current document. You can change it again by closing and reopening the tab."
 msgstr "Beim nächsten Strg+Umschalt+S für dieses Dokument nicht mehr fragen. Du kannst das ändern, indem du den Tab schließt und wieder öffnest."
 
-#: nostr/ui/save_destination_dialog.py:269
+#: nostr/ui/save_destination_dialog.py:270
 msgid "Save to disk"
 msgstr "Als Datei speichern"
 
-#: nostr/ui/save_destination_dialog.py:270
+#: nostr/ui/save_destination_dialog.py:271
 msgid "A regular local file. Same as your usual Save As."
 msgstr "Eine normale lokale Datei, wie bei „Speichern unter“."
 
-#: nostr/ui/save_destination_dialog.py:273
+#: nostr/ui/save_destination_dialog.py:274
 msgid "Save as private Nostr draft"
 msgstr "Als privaten Nostr-Entwurf speichern"
 
-#: nostr/ui/save_destination_dialog.py:274
+#: nostr/ui/save_destination_dialog.py:275
 msgid "End-to-end encrypted to your Nostr key. Only you can decrypt it. Will appear on other devices signed in with the same account."
 msgstr "Ende-zu-Ende mit deinem Nostr-Schlüssel verschlüsselt. Nur du kannst ihn entschlüsseln. Erscheint auf deinen anderen Geräten, die mit demselben Konto angemeldet sind."
 
-#: nostr/ui/stash_kind_dialog.py:299
-#: nostr/ui/stash_kind_dialog.py:340
+#: nostr/ui/stash_kind_dialog.py:300
+#: nostr/ui/stash_kind_dialog.py:341
 msgid "Save as Nostr draft"
 msgstr "Als Nostr-Entwurf speichern"
 
-#: nostr/ui/stash_kind_dialog.py:345
+#: nostr/ui/stash_kind_dialog.py:346
 msgid "Drafts are end-to-end encrypted to your key. Pick the kind so the draft can be promoted to a publish later."
 msgstr "Entwürfe sind Ende-zu-Ende mit deinem Schlüssel verschlüsselt. Wähle die Art, damit du den Entwurf später veröffentlichen kannst."
 
-#: nostr/ui/stash_kind_dialog.py:396
+#: nostr/ui/stash_kind_dialog.py:397
 msgid "Article title (used to derive the slug)"
 msgstr "Artikeltitel (daraus entsteht der Slug)"
 
-#: nostr/ui/stash_kind_dialog.py:409
+#: nostr/ui/stash_kind_dialog.py:410
 msgid "Optional one-sentence summary"
 msgstr "Optionale Zusammenfassung in einem Satz"
 
-#: nostr/ui/stash_kind_dialog.py:418
+#: nostr/ui/stash_kind_dialog.py:419
 msgid "Save draft"
 msgstr "Entwurf speichern"
 
-#: nostr/ui/stash_kind_dialog.py:357
+#: nostr/ui/stash_kind_dialog.py:358
 msgid "Short note"
 msgstr "Kurze Notiz"
 
-#: nostr/ui/stash_kind_dialog.py:358
+#: nostr/ui/stash_kind_dialog.py:359
 msgid "Quick thought, plain text. Kind 1 when published. No slug: the draft is identified by a private UUID."
 msgstr "Ein kurzer Gedanke als reiner Text. Wird als Notiz veröffentlicht. Ohne Slug: Der Entwurf erhält eine private Kennung."
 
-#: nostr/ui/stash_kind_dialog.py:364
+#: nostr/ui/stash_kind_dialog.py:365
 msgid "Long-form article"
 msgstr "Langer Artikel"
 
-#: nostr/ui/stash_kind_dialog.py:365
+#: nostr/ui/stash_kind_dialog.py:366
 msgid "Markdown post with a stable slug. Kind 30023 when published; the slug ties the draft to the eventual article so re-stashing replaces in place."
 msgstr "Ein Markdown-Beitrag mit festem Slug. Wird als Artikel veröffentlicht. Der Slug verbindet den Entwurf mit dem späteren Artikel, sodass erneutes Speichern ihn ersetzt."
 
-#: nostr/ui/stash_kind_dialog.py:399
+#: nostr/ui/stash_kind_dialog.py:400
 msgid "Title"
 msgstr "Titel"
 
-#: nostr/ui/stash_kind_dialog.py:406
+#: nostr/ui/stash_kind_dialog.py:407
 msgid "Slug (the draft's d-tag)"
 msgstr "Slug (Kennung des Entwurfs)"
 
-#: nostr/ui/stash_kind_dialog.py:411
+#: nostr/ui/stash_kind_dialog.py:412
 msgid "Summary (optional)"
 msgstr "Zusammenfassung (optional)"
 

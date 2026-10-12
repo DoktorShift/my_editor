@@ -239,7 +239,7 @@ def test_servers_the_profile_lists_are_offered_not_used(tmp_path, monkeypatch):
     dialog.set_server_suggestions(["https://cdn.example"])
     assert not dialog._suggestion_box.isHidden()
     assert dialog._suggestion_label.text() == (
-        "Your Nostr profile also lists cdn.example for media. Use it for uploads here too?")
+        "Your account also lists cdn.example for media. Use it for uploads here too?")
     assert accepted == []                       # nothing without the click
     dialog._suggestion_use.click()
     assert accepted == [["https://cdn.example"]]
@@ -249,7 +249,7 @@ def test_several_servers_are_offered_together(tmp_path, monkeypatch):
     dialog = build(tmp_path, monkeypatch, ServerStore())
     dialog.set_server_suggestions(["https://a.example", "https://b.example"])
     assert dialog._suggestion_label.text() == (
-        "Your Nostr profile also lists a.example, b.example for media. Use them for "
+        "Your account also lists a.example, b.example for media. Use them for "
         "uploads here too?")
 
 

@@ -7,25 +7,25 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: alerts.py:94
+#: alerts.py:96
 #: main_window.py:3717
 msgid "OK"
 msgstr ""
 
-#: alerts.py:188
+#: alerts.py:190
 msgid "Details"
 msgstr ""
 
-#: alerts.py:193
-#: alerts.py:200
+#: alerts.py:195
+#: alerts.py:202
 msgid "Show Details"
 msgstr ""
 
-#: alerts.py:200
+#: alerts.py:202
 msgid "Hide Details"
 msgstr ""
 
-#: alerts.py:339
+#: alerts.py:353
 #: link_popover.py:99
 #: main_window.py:2797
 #: main_window.py:6416
@@ -547,8 +547,8 @@ msgstr ""
 #: main_window.py:249
 #: nostr/ui/draft_relays_sheet.py:299
 #: nostr/ui/profile_window.py:254
-#: nostr/ui/save_destination_dialog.py:225
-#: nostr/ui/save_destination_dialog.py:306
+#: nostr/ui/save_destination_dialog.py:226
+#: nostr/ui/save_destination_dialog.py:307
 msgid "Save"
 msgstr ""
 
@@ -1735,28 +1735,28 @@ msgid ""
 "{error}"
 msgstr ""
 
-#: page_setup_dialog.py:94
-#: page_setup_dialog.py:104
+#: page_setup_dialog.py:95
+#: page_setup_dialog.py:105
 msgid "Page Setup"
 msgstr ""
 
-#: page_setup_dialog.py:114
+#: page_setup_dialog.py:115
 msgid "Paper size:"
 msgstr ""
 
-#: page_setup_dialog.py:119
+#: page_setup_dialog.py:120
 msgid "Portrait"
 msgstr ""
 
-#: page_setup_dialog.py:120
+#: page_setup_dialog.py:121
 msgid "Landscape"
 msgstr ""
 
-#: page_setup_dialog.py:122
+#: page_setup_dialog.py:123
 msgid "Orientation:"
 msgstr ""
 
-#: page_setup_dialog.py:130
+#: page_setup_dialog.py:131
 msgid "Margins:"
 msgstr ""
 
@@ -2416,7 +2416,7 @@ msgstr ""
 #: nostr/ui/account_windows.py:788
 #: nostr/ui/account_windows.py:849
 #: nostr/ui/account_windows.py:1099
-#: nostr/ui/image_review_dialog.py:124
+#: nostr/ui/image_review_dialog.py:125
 #: nostr/ui/media_library_dialog.py:1971
 msgid "Done"
 msgstr ""
@@ -5463,19 +5463,19 @@ msgstr ""
 msgid "Published {date}"
 msgstr ""
 
-#: nostr/ui/image_review_dialog.py:59
+#: nostr/ui/image_review_dialog.py:60
 msgid "Review Images"
 msgstr ""
 
-#: nostr/ui/image_review_dialog.py:77
+#: nostr/ui/image_review_dialog.py:78
 msgid "Checked images are copied to your media server, so the draft keeps working if the website removes them. Uncheck any you'd rather leave where they are."
 msgstr ""
 
-#: nostr/ui/image_review_dialog.py:90
+#: nostr/ui/image_review_dialog.py:91
 msgid "Images to copy"
 msgstr ""
 
-#: nostr/ui/image_review_dialog.py:147
+#: nostr/ui/image_review_dialog.py:148
 #, python-brace-format
 msgid "{kept} of {total} image will be copied."
 msgid_plural "{kept} of {total} images will be copied."
@@ -6626,8 +6626,8 @@ msgstr ""
 
 #: nostr/ui/media_library_dialog.py:1820
 #, python-brace-format
-msgid "Your Nostr profile also lists {servers} for media. Use it for uploads here too?"
-msgid_plural "Your Nostr profile also lists {servers} for media. Use them for uploads here too?"
+msgid "Your account also lists {servers} for media. Use it for uploads here too?"
+msgid_plural "Your account also lists {servers} for media. Use them for uploads here too?"
 msgstr[0] ""
 msgstr[1] ""
 
@@ -7378,7 +7378,7 @@ msgid "Write your article in Markdown…"
 msgstr ""
 
 #: nostr/ui/publish_article_dialog.py:509
-#: nostr/ui/stash_kind_dialog.py:402
+#: nostr/ui/stash_kind_dialog.py:403
 msgid "article-slug"
 msgstr ""
 
@@ -7387,7 +7387,7 @@ msgid "comma, separated, hashtags"
 msgstr ""
 
 #: nostr/ui/publish_article_dialog.py:567
-#: nostr/ui/publish_note_dialog.py:281
+#: nostr/ui/publish_note_dialog.py:282
 msgid "Publish"
 msgstr ""
 
@@ -7419,7 +7419,7 @@ msgid "Hashtags"
 msgstr ""
 
 #: nostr/ui/publish_article_dialog.py:552
-#: nostr/ui/publish_note_dialog.py:265
+#: nostr/ui/publish_note_dialog.py:266
 msgid "Publishing as"
 msgstr ""
 
@@ -7444,8 +7444,8 @@ msgid "▸  Advanced  ·  slug, cover image, hashtags"
 msgstr ""
 
 #: nostr/ui/publish_article_dialog.py:799
-#: nostr/ui/publish_note_dialog.py:322
-msgid "(no profiles)"
+#: nostr/ui/publish_note_dialog.py:323
+msgid "(no accounts)"
 msgstr ""
 
 #: nostr/ui/publish_article_dialog.py:908
@@ -7474,7 +7474,7 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: nostr/ui/publish_article_dialog.py:992
-#: nostr/ui/publish_note_dialog.py:418
+#: nostr/ui/publish_note_dialog.py:419
 #, python-brace-format
 msgid "Publish failed: {reason}"
 msgstr ""
@@ -7594,7 +7594,7 @@ msgid "Stopping. Nothing new will be uploaded."
 msgstr ""
 
 #: nostr/ui/publish_copy_dialog.py:488
-msgid "This picture is private, and this app cannot make a public copy of it right now. Connect your signer app and try again."
+msgid "This picture is private, and MyEditor can’t make a public copy of it right now. Connect your signer app and try again."
 msgstr ""
 
 #: nostr/ui/publish_copy_dialog.py:576
@@ -7632,30 +7632,30 @@ msgid_plural "Creating {count} public copies…"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/publish_note_dialog.py:180
+#: nostr/ui/publish_note_dialog.py:181
 msgid "Publish as Note"
 msgstr ""
 
-#: nostr/ui/publish_note_dialog.py:219
+#: nostr/ui/publish_note_dialog.py:220
 msgid "Publish a short note (kind 1) to Nostr."
 msgstr ""
 
-#: nostr/ui/publish_note_dialog.py:222
+#: nostr/ui/publish_note_dialog.py:223
 msgid "Formatting is stripped. Short notes are plain text. For richer documents, use Publish as Article."
 msgstr ""
 
-#: nostr/ui/publish_note_dialog.py:350
+#: nostr/ui/publish_note_dialog.py:351
 #, python-brace-format
 msgid "{n} character"
 msgid_plural "{n} characters"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/publish_note_dialog.py:410
+#: nostr/ui/publish_note_dialog.py:411
 msgid "No relay accepted the note. See log for details."
 msgstr ""
 
-#: nostr/ui/publish_note_dialog.py:352
+#: nostr/ui/publish_note_dialog.py:353
 #, python-brace-format
 msgid "{count} · long note, consider Publish as Article instead"
 msgstr ""
@@ -7801,84 +7801,84 @@ msgstr ""
 msgid "no answer"
 msgstr ""
 
-#: nostr/ui/save_destination_dialog.py:252
+#: nostr/ui/save_destination_dialog.py:253
 msgid "Where do you want to save?"
 msgstr ""
 
-#: nostr/ui/save_destination_dialog.py:257
+#: nostr/ui/save_destination_dialog.py:258
 msgid "Local files live only on this device. Nostr drafts are encrypted to your key and synced across your other devices."
 msgstr ""
 
-#: nostr/ui/save_destination_dialog.py:295
+#: nostr/ui/save_destination_dialog.py:296
 msgid "Remember this choice for this tab"
 msgstr ""
 
-#: nostr/ui/save_destination_dialog.py:298
+#: nostr/ui/save_destination_dialog.py:299
 msgid "Skip this dialog on the next Ctrl+Shift+S for the current document. You can change it again by closing and reopening the tab."
 msgstr ""
 
-#: nostr/ui/save_destination_dialog.py:269
+#: nostr/ui/save_destination_dialog.py:270
 msgid "Save to disk"
 msgstr ""
 
-#: nostr/ui/save_destination_dialog.py:270
+#: nostr/ui/save_destination_dialog.py:271
 msgid "A regular local file. Same as your usual Save As."
 msgstr ""
 
-#: nostr/ui/save_destination_dialog.py:273
+#: nostr/ui/save_destination_dialog.py:274
 msgid "Save as private Nostr draft"
 msgstr ""
 
-#: nostr/ui/save_destination_dialog.py:274
+#: nostr/ui/save_destination_dialog.py:275
 msgid "End-to-end encrypted to your Nostr key. Only you can decrypt it. Will appear on other devices signed in with the same account."
 msgstr ""
 
-#: nostr/ui/stash_kind_dialog.py:299
-#: nostr/ui/stash_kind_dialog.py:340
+#: nostr/ui/stash_kind_dialog.py:300
+#: nostr/ui/stash_kind_dialog.py:341
 msgid "Save as Nostr draft"
 msgstr ""
 
-#: nostr/ui/stash_kind_dialog.py:345
+#: nostr/ui/stash_kind_dialog.py:346
 msgid "Drafts are end-to-end encrypted to your key. Pick the kind so the draft can be promoted to a publish later."
 msgstr ""
 
-#: nostr/ui/stash_kind_dialog.py:396
+#: nostr/ui/stash_kind_dialog.py:397
 msgid "Article title (used to derive the slug)"
 msgstr ""
 
-#: nostr/ui/stash_kind_dialog.py:409
+#: nostr/ui/stash_kind_dialog.py:410
 msgid "Optional one-sentence summary"
 msgstr ""
 
-#: nostr/ui/stash_kind_dialog.py:418
+#: nostr/ui/stash_kind_dialog.py:419
 msgid "Save draft"
 msgstr ""
 
-#: nostr/ui/stash_kind_dialog.py:357
+#: nostr/ui/stash_kind_dialog.py:358
 msgid "Short note"
 msgstr ""
 
-#: nostr/ui/stash_kind_dialog.py:358
+#: nostr/ui/stash_kind_dialog.py:359
 msgid "Quick thought, plain text. Kind 1 when published. No slug: the draft is identified by a private UUID."
 msgstr ""
 
-#: nostr/ui/stash_kind_dialog.py:364
+#: nostr/ui/stash_kind_dialog.py:365
 msgid "Long-form article"
 msgstr ""
 
-#: nostr/ui/stash_kind_dialog.py:365
+#: nostr/ui/stash_kind_dialog.py:366
 msgid "Markdown post with a stable slug. Kind 30023 when published; the slug ties the draft to the eventual article so re-stashing replaces in place."
 msgstr ""
 
-#: nostr/ui/stash_kind_dialog.py:399
+#: nostr/ui/stash_kind_dialog.py:400
 msgid "Title"
 msgstr ""
 
-#: nostr/ui/stash_kind_dialog.py:406
+#: nostr/ui/stash_kind_dialog.py:407
 msgid "Slug (the draft's d-tag)"
 msgstr ""
 
-#: nostr/ui/stash_kind_dialog.py:411
+#: nostr/ui/stash_kind_dialog.py:412
 msgid "Summary (optional)"
 msgstr ""
 

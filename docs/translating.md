@@ -42,7 +42,7 @@ A German text is often a third longer than the English one. Every window must st
 
 The German translation should read like a well-made German app, in the everyday language people in Germany, Austria and Switzerland use. It follows Apple's German conventions where they are common usage.
 
-- Address the reader with **du** ("Möchtest du die Änderungen speichern?"), as the EINUNDZWANZIG community does.
+- Address the reader with **du** ("Möchtest du die Änderungen speichern?"), as the EINUNDZWANZIG community does, and in the full imperative: "Versuche es erneut", "Versuche es gleich noch einmal", never "Versuch es".
 - Buttons and menu items use the infinitive: "Speichern", "Abbrechen", "Nicht jetzt", "Weiter", "Zurück". Capitalization follows German grammar (nouns capitalized), not English title case.
 - A menu item or button that opens a window before acting ends in " …" with a space before it, as in macOS: "Speichern unter …", "Öffnen …".
 - Quotation marks: „so“.

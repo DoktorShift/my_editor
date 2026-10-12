@@ -1818,10 +1818,10 @@ class MediaLibraryDialog(QDialog):
         self._suggested_servers = list(servers or [])
         hosts = [url_safety.host_of(s) or s for s in self._suggested_servers]
         text = ngettext(
-            "Your Nostr profile also lists {servers} for media. Use it for "
-            "uploads here too?",
-            "Your Nostr profile also lists {servers} for media. Use them for "
-            "uploads here too?",
+            "Your account also lists {servers} for media. Use it for uploads "
+            "here too?",
+            "Your account also lists {servers} for media. Use them for uploads "
+            "here too?",
             len(hosts),
         ).format(servers=", ".join(hosts))
         self._suggestion_label.setText(text if hosts else "")

@@ -485,7 +485,7 @@ def resolve_pick(
 
     if maker is None:
         return PickResolution(
-            reason=_("This picture is private, and this app cannot make a "
+            reason=_("This picture is private, and MyEditor can’t make a "
                      "public copy of it right now. Connect your signer app "
                      "and try again."),
         )

@@ -262,14 +262,30 @@ def test_a_mac_names_the_settings_command_settings(tmp_path, language, word, qui
 
 # The glossary (docs/translating.md): an account is an account (its profile
 # is the name and picture people see), a signer app is a signer app, and no
-# text names a protocol. Review L7: the publishing flow still said "your
-# signer", "this profile" and "NIP-44".
-_OFF_GLOSSARY = (
-    re.compile(r"\bsigner\b(?!\s+apps?\b)", re.IGNORECASE),
-    re.compile(r"\b(?:same|for this|connect a Nostr) profile\b|\bprofile's\b",
-               re.IGNORECASE),
-    re.compile(r"\bNIP-\d"),
-)
+# text names a protocol, in English and in German. Review L7: the publishing
+# flow still said "your signer", "this profile" and "NIP-44"; review N3:
+# "(no profiles)" for the accounts got through a list of bad phrases. So
+# "profile" is refused everywhere except where it can only mean the profile
+# people see: "your profile", "Edit Profile", "a public profile" and so on.
+_SIGNER = {"en": re.compile(r"\bsigner\b(?!\s+apps?\b)", re.IGNORECASE),
+           "de": re.compile(r"\bSigner\b(?!-App)")}
+_PROFILE = {"en": re.compile(r"\bprofiles?\b", re.IGNORECASE),
+            "de": re.compile(r"Profil", re.IGNORECASE)}
+_PUBLIC_PROFILE = {
+    "en": re.compile(r"\b(?:your|my|public|Nostr|edit|on) profile\b|\bprofile saved\b"
+                     r"|\bhave a profile\b|^This Profile Can’t Be Edited Here$"
+                     r"|bsky\.app/profile/", re.IGNORECASE),
+    "de": re.compile(r"\b(?:dein|deinem|deine|mein|meinem|im|kein|öffentliches)"
+                     r" Profil\b|Nostr-Profil|Profil (?:bearbeiten|gespeichert|wird)"
+                     r"|Profilbild|^Dieses Profil lässt sich hier nicht bearbeiten$"
+                     r"|bsky\.app/profile/", re.IGNORECASE),
+}
+
+
+def _off_glossary(text: str, language: str) -> bool:
+    if _SIGNER[language].search(text) or re.search(r"\bNIP-\d", text):
+        return True
+    return bool(_PROFILE[language].search(_PUBLIC_PROFILE[language].sub("", text)))
 
 
 def test_every_text_speaks_the_glossarys_words():
@@ -282,5 +298,17 @@ def test_every_text_speaks_the_glossarys_words():
     off = sorted({f"{message.references[0]}: {text}"
                   for message in messages.values()
                   for text in (message.msgid, message.plural) if text
-                  if any(rule.search(text) for rule in _OFF_GLOSSARY)})
+                  if _off_glossary(text, "en")})
     assert off == []
+
+
+def test_the_german_texts_speak_the_glossarys_words_too():
+    with open(os.path.join(ROOT, "locale", "de.po"), encoding="utf-8") as f:
+        po = f.read()
+    translations = [
+        "".join(re.findall(r'"(.*)"', block))
+        for block in re.findall(r'^msgstr(?:\[\d\])? ((?:".*"\n?)+)', po, re.MULTILINE)]
+    off = sorted(text for text in translations if text and _off_glossary(text, "de"))
+    assert off == []
+    # One form of address: du, in the full imperative (docs/translating.md).
+    assert [text for text in translations if re.search(r"\b[Vv]ersuch es\b", text)] == []
