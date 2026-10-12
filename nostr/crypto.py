@@ -3,7 +3,7 @@
 """Cryptographic primitives for Nostr (BIP-340 schnorr + NIP-44 v2).
 
 All public functions in this module are pure: they take bytes in and return
-bytes (or str for base64 payloads). State lives nowhere — the caller owns
+bytes (or str for base64 payloads). State lives nowhere: the caller owns
 every key.
 
 References:
@@ -12,7 +12,7 @@ References:
   - NIP-44:  https://github.com/nostr-protocol/nips/blob/master/44.md
 
 Verified against the official NIP-44 v2 vectors at
-https://github.com/paulmillr/nip44/blob/main/nip44.vectors.json — see
+https://github.com/paulmillr/nip44/blob/main/nip44.vectors.json; see
 tests/test_nip44.py.
 """
 
@@ -90,7 +90,7 @@ def verify_schnorr(pubkey_xonly: bytes, sig: bytes, message_32: bytes) -> bool:
 
 
 # --------------------------------------------------------------------------- #
-# ECDH — raw x-coordinate (NOT the libsecp256k1 default SHA256-hashed point)  #
+# ECDH: raw x-coordinate (NOT the libsecp256k1 default SHA256-hashed point)   #
 # --------------------------------------------------------------------------- #
 
 def ecdh_x(sk: bytes, pubkey_xonly: bytes) -> bytes:
@@ -114,11 +114,11 @@ def ecdh_x(sk: bytes, pubkey_xonly: bytes) -> bytes:
 
 
 # --------------------------------------------------------------------------- #
-# NIP-44 v2 — key derivation                                                  #
+# NIP-44 v2: key derivation                                                   #
 # --------------------------------------------------------------------------- #
 
 def _hkdf_extract(salt: bytes, ikm: bytes) -> bytes:
-    """HKDF-Extract (RFC 5869) with SHA-256 — single HMAC call."""
+    """HKDF-Extract (RFC 5869) with SHA-256, a single HMAC call."""
     return hmac.new(salt, ikm, sha256).digest()
 
 
@@ -166,7 +166,7 @@ def message_keys(conv_key: bytes, nonce: bytes) -> Tuple[bytes, bytes, bytes]:
 
 
 # --------------------------------------------------------------------------- #
-# NIP-44 v2 — padding                                                         #
+# NIP-44 v2: padding                                                          #
 # --------------------------------------------------------------------------- #
 
 def calc_padded_len(plaintext_len: int) -> int:
@@ -189,7 +189,7 @@ def calc_padded_len(plaintext_len: int) -> int:
 
 
 def _pad_plaintext(plaintext_bytes: bytes) -> bytes:
-    """u16_be(len) || plaintext || zeros — total length 2 + calc_padded_len(len)."""
+    """u16_be(len) || plaintext || zeros, total length 2 + calc_padded_len(len)."""
     plen = len(plaintext_bytes)
     padded = calc_padded_len(plen)
     return plen.to_bytes(2, "big") + plaintext_bytes + b"\x00" * (padded - plen)
@@ -212,7 +212,7 @@ def _unpad_plaintext(padded: bytes) -> bytes:
 
 
 # --------------------------------------------------------------------------- #
-# NIP-44 v2 — ChaCha20 + HMAC                                                 #
+# NIP-44 v2: ChaCha20 + HMAC                                                  #
 # --------------------------------------------------------------------------- #
 
 def _chacha20(key: bytes, nonce_12: bytes, data: bytes) -> bytes:
@@ -237,14 +237,14 @@ def _hmac_aad(hmac_key: bytes, nonce_32: bytes, ciphertext: bytes) -> bytes:
 
 
 # --------------------------------------------------------------------------- #
-# NIP-44 v2 — public API                                                      #
+# NIP-44 v2: public API                                                       #
 # --------------------------------------------------------------------------- #
 
 def encrypt(plaintext: str, conv_key: bytes, nonce: bytes | None = None) -> str:
     """Encrypt ``plaintext`` (UTF-8) under ``conv_key``. Returns base64 payload.
 
     ``nonce`` is for deterministic test vectors only. In production always
-    let it default to fresh OS randomness — nonce reuse with the same
+    let it default to fresh OS randomness: nonce reuse with the same
     conversation key is catastrophic.
     """
     pt_bytes = plaintext.encode("utf-8")
