@@ -62,12 +62,12 @@ class FakePool(QObject):
         super().__init__()
         self.subs = []
 
-    def subscribe(self, urls, filters, sub_id=None):
+    def subscribe(self, urls, filters, sub_id=None, *, sign_in=None):
         sub = _Sub(filters)
         self.subs.append(sub)
         return sub
 
-    def publish(self, urls, event, timeout_ms=8000):
+    def publish(self, urls, event, timeout_ms=8000, *, sign_in=None):
         for sub in list(self.subs):
             if sub.closed:
                 continue

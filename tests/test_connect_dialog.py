@@ -50,7 +50,7 @@ class FakePool:
     def __init__(self):
         self.subscriptions = []
 
-    def subscribe(self, urls, filters, sub_id=None):
+    def subscribe(self, urls, filters, sub_id=None, *, sign_in=None):
         sub = FakeSubscription()
         self.subscriptions.append(sub)
         return sub

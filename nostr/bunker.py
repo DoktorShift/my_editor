@@ -40,7 +40,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from i18n import _
 
 from . import CLIENT_NAME, crypto, events
-from .relay import RelayPool, Subscription
+from .relay import KeySignIn, RelayPool, Subscription
 
 
 # --------------------------------------------------------------------------- #
@@ -145,6 +145,7 @@ NIP46_RELAYS: tuple = (
 #   nip44_decrypt     decrypting drafts pulled back from relays
 #   get_public_key    required for the post-connect user-pubkey lookup
 #   ping              keepalive
+#   sign_event:22242  signing in to the account's relays that ask (NIP-42)
 #
 # Signers that don't recognise an entry typically ignore it silently;
 # the actual capability check happens lazily when we invoke each method.
@@ -161,6 +162,8 @@ DEFAULT_PERMS = (
     "sign_event:24242,sign_event:10063,"
     # The synced feed list (NIP-78) and where drafts are kept (NIP-37).
     "sign_event:30078,sign_event:10013,"
+    # Signing in to the account's own relays that ask for it (NIP-42).
+    "sign_event:22242,"
     "nip44_encrypt,nip44_decrypt,"
     "ping"
 )
@@ -439,6 +442,7 @@ class BunkerClient(QObject):
         self._subscription = self._pool.subscribe(
             self._relays,
             filters=[{"kinds": [24133], "#p": [self._local_pk_hex]}],
+            sign_in=self._channel_sign_in(),
         )
         self._subscription.event.connect(self._on_nostrconnect_event)
 
@@ -547,7 +551,7 @@ class BunkerClient(QObject):
             tags=[["p", self._bunker_pk_hex]],
             sk=self._local_sk,
         )
-        self._pool.publish(self._relays, event)
+        self._pool.publish(self._relays, event, sign_in=self._channel_sign_in())
 
     # -- high-level: silently re-attach from a saved profile ---------------
 
@@ -852,8 +856,16 @@ class BunkerClient(QObject):
                 "authors": [self._bunker_pk_hex],
                 "#p": [self._local_pk_hex],
             }],
+            sign_in=self._channel_sign_in(),
         )
         self._subscription.event.connect(self._on_response_event)
+
+    def _channel_sign_in(self) -> KeySignIn:
+        """A relay of the channel that asks for a sign-in gets the
+        channel's own key: the one it is asked to deliver messages to,
+        which says nothing about the account."""
+        assert self._local_sk is not None
+        return KeySignIn(self._local_sk)
 
     def _on_connect_acked(
         self,
@@ -924,7 +936,8 @@ class BunkerClient(QObject):
         self._pending[request_id] = _Pending(method, on_success, on_failure, timer)
         timer.start()
 
-        publish_job = self._pool.publish(self._relays, event, timeout_ms=8000)
+        publish_job = self._pool.publish(self._relays, event, timeout_ms=8000,
+                                         sign_in=self._channel_sign_in())
         publish_job.all_done.connect(
             lambda results, rid=request_id: self._on_publish_done(rid, results)
         )
