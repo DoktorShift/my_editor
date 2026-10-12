@@ -221,7 +221,7 @@ class ImportsController(QObject):
         self.checker = None
         self._lock: Optional[QLockFile] = None
         self._exit_hook: Optional[Callable[[], None]] = None
-        self._read_only = False
+        self.read_only = False
         # Read only, the other process's changes are looked for and its
         # lock tried every few seconds (CP1 review L7).
         self._watch = QTimer(self)
@@ -263,18 +263,6 @@ class ImportsController(QObject):
     @property
     def bound(self) -> bool:
         return self.inbox is not None
-
-    @property
-    def read_only(self) -> bool:
-        """Whether another MyEditor on this computer keeps this account's
-        inbox: this one shows it, and leaves checking, importing and the
-        list of sources to the other one."""
-        return self._read_only
-
-    @read_only.setter
-    def read_only(self, value: bool) -> None:
-        self._read_only = value
-        self.subscriptions.read_only = value
 
     def account_changed(self, profile) -> None:
         """The account in use changed; None when Nostr is not in use."""
@@ -340,10 +328,14 @@ class ImportsController(QObject):
         if self.read_only and self._lock.error() == QLockFile.LockError.PermissionError:
             # Not another process: the lock file cannot be made at all.
             self._lock = None
-            self.read_only = False
+            self.read_only = self.subscriptions.read_only = False
             self._cannot_bind(PermissionError(errno.EACCES, "the lock file cannot be made",
                                               str(path.with_suffix(".lock"))), path)
             return
+        # The list of sources follows the lock: while another MyEditor keeps
+        # it, that one writes the list, also when this one then cannot open
+        # the inbox (CP3 review M1, and N1 of its fixes).
+        self.subscriptions.read_only = self.read_only
         if self.read_only:
             _log.info("imports inbox in use by another process; showing it read-only")
         else:
@@ -438,7 +430,7 @@ class ImportsController(QObject):
         self._watch.stop()
         path = database_path(self._config_dir, self._profile.user_pubkey)
         self._drop_inbox()
-        self.read_only = False
+        self.read_only = self.subscriptions.read_only = False
         self._hold_lock()
         # The list as the other MyEditor left it: syncing the inbox with
         # the one read when this one started would remove the sources it
@@ -532,6 +524,7 @@ class ImportsController(QObject):
 
     def _unbind(self, reason: str) -> None:
         self.problem = self.notice = ""
+        self.subscriptions.read_only = False    # the next binding asks the lock again
         self._watch.stop()
         self._trim_timer.stop()
         if self.inbox is None:

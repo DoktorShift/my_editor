@@ -513,6 +513,38 @@ class TestTheSecondProcess:
         controller.account_changed(None)
         settle()
 
+    def test_one_that_cannot_open_the_inbox_still_leaves_the_list_alone(self, tmp_path,
+                                                                       monkeypatch):
+        """N1 of the CP3 fixes review: a second MyEditor that could not open
+        the inbox gave up and became the writer of the list, and its next
+        answered read wrote its own copy over the first one's waiting
+        change."""
+        import json
+        import sqlite3
+        from nostr import imports_controller
+        first, second = Harness(tmp_path), Harness(tmp_path)
+        first.controller.account_changed(profile())
+        settle()
+
+        class Damaged(imports_controller.InboxStore):
+            def check(self):
+                raise sqlite3.DatabaseError("database disk image is malformed")
+        monkeypatch.setattr(imports_controller, "InboxStore", Damaged)
+        second.controller.account_changed(profile())
+        monkeypatch.undo()
+        settle()
+        assert not second.controller.bound and second.controller.problem
+        assert second.controller.subscriptions.read_only        # the first keeps the lock
+        first.controller.subscriptions.add_feed(FEED, "Blog")   # waiting to be sent
+        second.controller.subscriptions.refresh()                # answered
+        settle()
+        (copy,) = (tmp_path / "cache").glob("feed_sources_*.json")
+        kept = json.loads(copy.read_text(encoding="utf-8"))
+        assert [f["url"] for f in kept["local"]["feeds"]] == [FEED] and kept["dirty"]
+        first.controller.account_changed(None)
+        second.controller.account_changed(None)
+        settle()
+
     def test_the_window_stays_and_works_again(self, tmp_path):
         from nostr.imports_controller import ELSEWHERE
         from nostr.ui.imports_window import ImportsWindow
