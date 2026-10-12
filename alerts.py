@@ -167,8 +167,9 @@ class Alert(QDialog):
             made.append((spec.role, button))
         self.ordered_buttons = self._lay_out(made, width - 40)
         layout.addWidget(self.button_row)
-        self._follow_in_tab_order([w for w in (self._details_toggle, self.checkbox)
-                                   if w is not None] + self.ordered_buttons)
+        self._follow_in_tab_order(
+            [w for w in (self._details_toggle, self.details_view, self.checkbox)
+             if w is not None] + self.ordered_buttons)
         # Space acts on the button with the focus, so it starts on the
         # default, the choice Return makes. Where Tab skips buttons (a Mac
         # without keyboard navigation) nothing has the focus, as in a
@@ -189,6 +190,7 @@ class Alert(QDialog):
 
     def _details(self, details: str) -> QPushButton:
         self.details_view = QPlainTextEdit(details)
+        self.details_view.setAccessibleName(_("Details"))
         self.details_view.setReadOnly(True)
         self.details_view.setFont(monospace_font(10))
         self.details_view.setMaximumHeight(140)

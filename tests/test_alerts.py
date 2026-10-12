@@ -198,6 +198,22 @@ def test_tab_follows_the_order_and_starts_on_the_default():
                      alert.buttons["Save"]]
 
 
+def test_tab_reaches_the_details_where_they_are_shown():
+    # Review L1: the details text came last, after the buttons.
+    alert = Alert(None, title="t", buttons=save_changes_buttons(), checkbox="Remember",
+                  details="What went wrong, in full.")
+    alert._details_toggle.click()
+    chain, widget = [], alert._details_toggle
+    for _ in range(6):
+        chain.append(widget)
+        widget = widget.nextInFocusChain()
+        while widget.focusPolicy() & Qt.TabFocus == 0 or widget is alert:
+            widget = widget.nextInFocusChain()
+    assert chain == [alert._details_toggle, alert.details_view, alert.checkbox,
+                     alert.buttons["Don't Save"], alert.buttons["Cancel"],
+                     alert.buttons["Save"]]
+
+
 def test_space_on_the_focused_button_chooses_the_default():
     from PySide6.QtTest import QTest
     alert = Alert(None, title="t", buttons=save_changes_buttons())

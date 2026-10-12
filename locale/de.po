@@ -12,16 +12,20 @@ msgstr ""
 msgid "OK"
 msgstr "OK"
 
-#: alerts.py:196
-#: alerts.py:203
+#: alerts.py:193
+msgid "Details"
+msgstr "Details"
+
+#: alerts.py:198
+#: alerts.py:205
 msgid "Show Details"
 msgstr "Details einblenden"
 
-#: alerts.py:203
+#: alerts.py:205
 msgid "Hide Details"
 msgstr "Details ausblenden"
 
-#: alerts.py:331
+#: alerts.py:333
 #: link_popover.py:99
 #: main_window.py:2797
 #: main_window.py:6397
@@ -66,12 +70,12 @@ msgstr[1] "{count} Bilder konnten nicht mit dem Text eingesetzt werden. Kopiere 
 msgid "Document"
 msgstr "Dokument"
 
-#: editor.py:793
+#: editor.py:801
 #: main_window.py:1309
 msgid "Cut"
 msgstr "Ausschneiden"
 
-#: editor.py:794
+#: editor.py:802
 #: main_window.py:1311
 #: update_dialog.py:193
 #: update_dialog.py:199
@@ -79,16 +83,16 @@ msgstr "Ausschneiden"
 msgid "Copy"
 msgstr "Kopieren"
 
-#: editor.py:795
+#: editor.py:803
 #: main_window.py:1313
 msgid "Paste"
 msgstr "Einsetzen"
 
-#: editor.py:731
+#: editor.py:739
 msgid "Command-click to open"
 msgstr "Zum Öffnen bei gedrückter Befehlstaste klicken"
 
-#: editor.py:732
+#: editor.py:740
 msgid "Ctrl+click to open"
 msgstr "Zum Öffnen bei gedrückter Strg-Taste klicken"
 
@@ -132,7 +136,7 @@ msgid "Body"
 msgstr "Text"
 
 #: format_toolbar.py:43
-#: pdf_viewer.py:166
+#: pdf_viewer.py:178
 #, python-brace-format
 msgid "{command} ({keys})"
 msgstr "{command} ({keys})"
@@ -163,10 +167,15 @@ msgctxt "format button"
 msgid "S"
 msgstr "S"
 
-#: i18n.py:404
+#: i18n.py:433
 #, python-brace-format
 msgid "{date} at {time}"
 msgstr "{date} um {time}"
+
+#: i18n.py:382
+#: main_window.py:1329
+msgid "Settings…"
+msgstr "Einstellungen …"
 
 #: link_popover.py:68
 msgid "Same as the address"
@@ -488,9 +497,9 @@ msgstr "Neuer Versuch. Bestätige die Anfrage in deiner Signer-App …"
 
 #: main_window.py:5740
 #: main_window.py:1322
-#: nostr/ui/media_library_dialog.py:1245
-#: nostr/ui/media_library_dialog.py:1676
-#: nostr/ui/media_library_dialog.py:1611
+#: nostr/ui/media_library_dialog.py:1247
+#: nostr/ui/media_library_dialog.py:1678
+#: nostr/ui/media_library_dialog.py:1613
 #: nostr/ui/published_view.py:597
 msgid "Delete"
 msgstr "Löschen"
@@ -587,10 +596,6 @@ msgstr "Einsetzen und Stil anpassen"
 #: nostr/ui/imports_window.py:839
 msgid "Select All"
 msgstr "Alles auswählen"
-
-#: main_window.py:1329
-msgid "Settings…"
-msgstr "Einstellungen …"
 
 #: main_window.py:1336
 msgid "Bold"
@@ -863,7 +868,7 @@ msgstr "R Markdown ist mit einem Fehler abgebrochen. Die Details zeigen, was es 
 #: main_window.py:3626
 #: main_window.py:3983
 #: main_window.py:4019
-#: pdf_viewer.py:989
+#: pdf_viewer.py:1001
 msgid "No matches"
 msgstr "Keine Treffer"
 
@@ -1405,7 +1410,7 @@ msgstr "Lokal behalten"
 #: main_window.py:2430
 #: main_window.py:5552
 #: settings_window.py:55
-#: nostr/ui/media_library_dialog.py:1038
+#: nostr/ui/media_library_dialog.py:1040
 msgid "Upload"
 msgstr "Hochladen"
 
@@ -1527,7 +1532,7 @@ msgid "Wrapped · {matches}"
 msgstr "Von vorn · {matches}"
 
 #: main_window.py:4024
-#: pdf_viewer.py:992
+#: pdf_viewer.py:1004
 #, python-brace-format
 msgid "{count} match"
 msgid_plural "{count} matches"
@@ -1767,89 +1772,89 @@ msgstr "Ausrichtung:"
 msgid "Margins:"
 msgstr "Ränder:"
 
-#: pdf_viewer.py:535
-#: pdf_viewer.py:592
+#: pdf_viewer.py:547
+#: pdf_viewer.py:604
 msgid "Table of contents"
 msgstr "Inhaltsverzeichnis"
 
-#: pdf_viewer.py:591
+#: pdf_viewer.py:603
 msgid "Contents"
 msgstr "Inhalt"
 
-#: pdf_viewer.py:599
-#: pdf_viewer.py:603
+#: pdf_viewer.py:611
+#: pdf_viewer.py:615
 msgid "Page"
 msgstr "Seite"
 
-#: pdf_viewer.py:619
+#: pdf_viewer.py:631
 msgid "Zoom Out"
 msgstr "Verkleinern"
 
-#: pdf_viewer.py:625
-#: pdf_viewer.py:928
+#: pdf_viewer.py:637
+#: pdf_viewer.py:940
 msgid "Fit"
 msgstr "Angepasst"
 
-#: pdf_viewer.py:632
+#: pdf_viewer.py:644
 msgid "Zoom In"
 msgstr "Vergrößern"
 
-#: pdf_viewer.py:641
+#: pdf_viewer.py:653
 msgid "Fit Width"
 msgstr "Seitenbreite"
 
-#: pdf_viewer.py:649
+#: pdf_viewer.py:661
 msgid "Fit Page"
 msgstr "Ganze Seite"
 
-#: pdf_viewer.py:620
+#: pdf_viewer.py:632
 msgid "Zoom out"
 msgstr "Verkleinern"
 
-#: pdf_viewer.py:633
+#: pdf_viewer.py:645
 msgid "Zoom in"
 msgstr "Vergrößern"
 
-#: pdf_viewer.py:642
+#: pdf_viewer.py:654
 #: shortcuts_dialog.py:100
 msgid "Fit page width"
 msgstr "An Seitenbreite anpassen"
 
-#: pdf_viewer.py:650
+#: pdf_viewer.py:662
 #: shortcuts_dialog.py:102
 msgid "Fit whole page"
 msgstr "Ganze Seite einpassen"
 
-#: pdf_viewer.py:700
+#: pdf_viewer.py:712
 msgid "Password required"
 msgstr "Passwort erforderlich"
 
-#: pdf_viewer.py:706
+#: pdf_viewer.py:718
 msgid "The document is password protected."
 msgstr "Das Dokument ist durch ein Passwort geschützt."
 
-#: pdf_viewer.py:714
+#: pdf_viewer.py:726
 msgid "The file could not be found."
 msgstr "Die Datei wurde nicht gefunden."
 
-#: pdf_viewer.py:715
+#: pdf_viewer.py:727
 msgid "The file is not a valid PDF."
 msgstr "Die Datei ist kein gültiges PDF."
 
-#: pdf_viewer.py:717
+#: pdf_viewer.py:729
 msgid "The document uses an unsupported security scheme."
 msgstr "Das Dokument verwendet ein nicht unterstütztes Sicherheitsverfahren."
 
-#: pdf_viewer.py:719
+#: pdf_viewer.py:731
 msgid "The document could not be opened."
 msgstr "Das Dokument konnte nicht geöffnet werden."
 
-#: pdf_viewer.py:820
+#: pdf_viewer.py:832
 #, python-brace-format
 msgid "Page {page} / {total}"
 msgstr "Seite {page} / {total}"
 
-#: pdf_viewer.py:701
+#: pdf_viewer.py:713
 #, python-brace-format
 msgid ""
 "'{name}' is password protected.\n"
@@ -1858,7 +1863,7 @@ msgstr ""
 "„{name}“ ist durch ein Passwort geschützt.\n"
 "Gib das Passwort ein, um es zu öffnen:"
 
-#: pdf_viewer.py:925
+#: pdf_viewer.py:937
 #, python-brace-format
 msgid "{percent}%"
 msgstr "{percent} %"
@@ -1943,11 +1948,11 @@ msgid "Install"
 msgstr "Installieren"
 
 #: rmd_setup_dialog.py:222
-#: widgets.py:477
-#: widgets.py:500
+#: widgets.py:476
+#: widgets.py:499
 #: nostr/ui/account_windows.py:754
 #: nostr/ui/account_windows.py:1090
-#: nostr/ui/media_library_dialog.py:1249
+#: nostr/ui/media_library_dialog.py:1251
 #: nostr/ui/membership_window.py:752
 #: nostr/ui/membership_window.py:826
 msgid "Close"
@@ -2127,35 +2132,35 @@ msgstr "Starte das heruntergeladene Installationsprogramm von Hand:"
 msgid "Ask Every Time"
 msgstr "Jedes Mal fragen"
 
-#: settings_window.py:126
+#: settings_window.py:127
 msgid "Use a monospace font for writing"
 msgstr "Beim Schreiben eine dicktengleiche Schrift verwenden"
 
-#: settings_window.py:148
+#: settings_window.py:149
 msgid "Pasted images:"
 msgstr "Eingefügte Bilder:"
 
-#: settings_window.py:105
+#: settings_window.py:106
 msgid "Automatic follows your computer’s light or dark appearance as it changes."
 msgstr "„Automatisch“ folgt dem hellen oder dunklen Erscheinungsbild deines Computers, auch wenn es wechselt."
 
-#: settings_window.py:107
+#: settings_window.py:108
 msgid "Appearance:"
 msgstr "Erscheinungsbild:"
 
-#: settings_window.py:122
+#: settings_window.py:123
 msgid "MyEditor uses a new language the next time it opens."
 msgstr "Eine neue Sprache gilt ab dem nächsten Start von MyEditor."
 
-#: settings_window.py:123
+#: settings_window.py:124
 msgid "Language:"
 msgstr "Sprache:"
 
-#: settings_window.py:131
+#: settings_window.py:132
 msgid "Writing:"
 msgstr "Schreiben:"
 
-#: settings_window.py:146
+#: settings_window.py:147
 msgid "Upload puts a pasted image on your media server right away. Keep Local leaves it in the document; publishing asks before it goes up."
 msgstr "„Hochladen“ legt ein eingefügtes Bild sofort auf deinen Medienserver. „Lokal behalten“ lässt es im Dokument; beim Veröffentlichen wirst du gefragt, bevor es hochgeladen wird."
 
@@ -2410,7 +2415,7 @@ msgid "Release Notes"
 msgstr "Versionshinweise"
 
 #: update_dialog.py:353
-#: widgets.py:499
+#: widgets.py:498
 msgid "What’s New"
 msgstr "Neuerungen"
 
@@ -2420,13 +2425,13 @@ msgid "Release notes"
 msgstr "Versionshinweise"
 
 #: update_dialog.py:620
-#: widgets.py:143
+#: widgets.py:142
 #: nostr/ui/account_windows.py:383
 #: nostr/ui/account_windows.py:788
 #: nostr/ui/account_windows.py:849
 #: nostr/ui/account_windows.py:1099
 #: nostr/ui/image_review_dialog.py:124
-#: nostr/ui/media_library_dialog.py:1969
+#: nostr/ui/media_library_dialog.py:1971
 msgid "Done"
 msgstr "Fertig"
 
@@ -2440,8 +2445,8 @@ msgid "Skip This Version"
 msgstr "Diese Version überspringen"
 
 #: update_dialog.py:280
-#: widgets.py:476
-#: widgets.py:492
+#: widgets.py:475
+#: widgets.py:491
 msgid "Later"
 msgstr "Später"
 
@@ -2506,8 +2511,8 @@ msgstr "Auf dem Mac braucht ein Update dieselben Schritte wie die Installation. 
 #: update_flow.py:158
 #: update_flow.py:168
 #: update_flow.py:176
-#: nostr/ui/media_library_dialog.py:651
-#: nostr/ui/media_library_dialog.py:1239
+#: nostr/ui/media_library_dialog.py:653
+#: nostr/ui/media_library_dialog.py:1241
 msgid "Download"
 msgstr "Herunterladen"
 
@@ -2551,7 +2556,7 @@ msgstr "Lade das neue Disk-Image über die Update-Anleitung herunter."
 
 #: update_flow.py:138
 #: update_flow.py:169
-#: widgets.py:188
+#: widgets.py:187
 msgid "Replace"
 msgstr "Ersetzen"
 
@@ -2790,105 +2795,105 @@ msgstr "Hilfe > Tastaturkurzbefehle: die vollständige Liste"
 msgid "Welcome to {app}"
 msgstr "Willkommen bei {app}"
 
+#: widgets.py:128
 #: widgets.py:129
-#: widgets.py:130
 msgctxt "find field"
 msgid "Find"
 msgstr "Suchen"
 
+#: widgets.py:132
 #: widgets.py:133
-#: widgets.py:134
 msgid "Previous Match"
 msgstr "Vorheriger Treffer"
 
+#: widgets.py:135
 #: widgets.py:136
-#: widgets.py:137
 msgid "Next Match"
 msgstr "Nächster Treffer"
 
-#: widgets.py:145
+#: widgets.py:144
 msgid "Close the find bar (Esc)"
 msgstr "Suchleiste schließen (Esc)"
 
-#: widgets.py:349
-#: widgets.py:368
+#: widgets.py:348
+#: widgets.py:367
 #: nostr/ui/draft_conflict_banner.py:196
 msgid "Reload"
 msgstr "Neu laden"
 
-#: widgets.py:355
+#: widgets.py:354
 #: nostr/ui/draft_conflict_banner.py:217
 #: nostr/ui/draft_conflict_banner.py:219
 msgid "Dismiss"
 msgstr "Ausblenden"
 
-#: widgets.py:366
+#: widgets.py:365
 msgid "File was changed externally."
 msgstr "Die Datei wurde außerhalb von MyEditor geändert."
 
-#: widgets.py:373
+#: widgets.py:372
 msgid "File was deleted - save to recreate it."
 msgstr "Die Datei wurde gelöscht. Speichere, um sie neu anzulegen."
 
-#: widgets.py:378
+#: widgets.py:377
 msgid "This file is already open in this tab."
 msgstr "Diese Datei ist bereits in diesem Tab geöffnet."
 
-#: widgets.py:384
+#: widgets.py:383
 msgid "File type not supported."
 msgstr "Dieser Dateityp wird nicht unterstützt."
 
-#: widgets.py:469
-#: widgets.py:491
+#: widgets.py:468
+#: widgets.py:490
 msgid "Update…"
 msgstr "Aktualisieren …"
 
-#: widgets.py:165
-#: widgets.py:226
+#: widgets.py:164
+#: widgets.py:225
 msgid "Options"
 msgstr "Optionen"
 
-#: widgets.py:166
+#: widgets.py:165
 msgid "Find Options"
 msgstr "Suchoptionen"
 
-#: widgets.py:169
+#: widgets.py:168
 msgid "Match Case"
 msgstr "Groß-/Kleinschreibung beachten"
 
-#: widgets.py:170
+#: widgets.py:169
 msgid "Whole Words"
 msgstr "Nur ganze Wörter"
 
+#: widgets.py:184
 #: widgets.py:185
-#: widgets.py:186
 msgid "Replace With"
 msgstr "Ersetzen durch"
 
-#: widgets.py:189
+#: widgets.py:188
 msgid "Replace All"
 msgstr "Alle ersetzen"
 
-#: widgets.py:367
+#: widgets.py:366
 msgid "Discard my changes and reload"
 msgstr "Meine Änderungen verwerfen und neu laden"
 
-#: widgets.py:383
+#: widgets.py:382
 #, python-brace-format
 msgid "File type not supported: {names}"
 msgstr "Dateityp wird nicht unterstützt: {names}"
 
-#: widgets.py:490
+#: widgets.py:489
 #, python-brace-format
 msgid "MyEditor {version} is available."
 msgstr "MyEditor {version} ist verfügbar."
 
-#: widgets.py:498
+#: widgets.py:497
 #, python-brace-format
 msgid "You’re now using MyEditor {version}."
 msgstr "Du verwendest jetzt MyEditor {version}."
 
-#: widgets.py:226
+#: widgets.py:225
 #, python-brace-format
 msgid "Options ({count})"
 msgstr "Optionen ({count})"
@@ -3029,7 +3034,7 @@ msgid "Other Nostr apps use a relay list to find your notes and articles, and th
 msgstr "Andere Nostr-Apps finden deine Notizen und Artikel über eine Relay-Liste, und dieses Konto hat noch keine. MyEditor kann seine empfohlenen Relays veröffentlichen: {hosts}."
 
 #: nostr/account_controller.py:348
-#: nostr/ui/media_library_dialog.py:1083
+#: nostr/ui/media_library_dialog.py:1085
 #: nostr/ui/membership_window.py:279
 #: nostr/ui/membership_window.py:283
 #: nostr/ui/membership_window.py:286
@@ -3332,8 +3337,8 @@ msgid "The password is wrong."
 msgstr "Das Passwort ist falsch."
 
 #: nostr/preview.py:429
-#: nostr/ui/media_library_dialog.py:601
-#: nostr/ui/media_library_dialog.py:1657
+#: nostr/ui/media_library_dialog.py:603
+#: nostr/ui/media_library_dialog.py:1659
 msgid "Preview"
 msgstr "Vorschau"
 
@@ -4101,7 +4106,7 @@ msgid "Skipped"
 msgstr "Übersprungen"
 
 #: nostr/imports/workspace.py:52
-#: nostr/ui/media_library_dialog.py:1971
+#: nostr/ui/media_library_dialog.py:1973
 #: nostr/ui/publish_copy_dialog.py:91
 msgid "Failed"
 msgstr "Fehlgeschlagen"
@@ -6331,501 +6336,501 @@ msgstr[1] "{count} Beiträge wiederhergestellt."
 msgid "Reading {source}…"
 msgstr "{source} wird gelesen …"
 
-#: nostr/ui/media_library_dialog.py:456
+#: nostr/ui/media_library_dialog.py:458
 msgid "This picture is private. Using it in something you publish creates a separate public copy that anyone can open. The original stays private, and you can confirm or cancel before anything is uploaded."
 msgstr "Dieses Bild ist privat. Wenn du es in etwas verwendest, das du veröffentlichst, entsteht eine separate öffentliche Kopie, die alle öffnen können. Das Original bleibt privat, und du kannst bestätigen oder abbrechen, bevor etwas hochgeladen wird."
 
-#: nostr/ui/media_library_dialog.py:461
+#: nostr/ui/media_library_dialog.py:463
 msgid "This picture is private and already has a public copy. Using it here reuses that copy, so nothing new is uploaded."
 msgstr "Dieses Bild ist privat und hat schon eine öffentliche Kopie. Hier wird diese Kopie wiederverwendet, es wird also nichts Neues hochgeladen."
 
-#: nostr/ui/media_library_dialog.py:469
+#: nostr/ui/media_library_dialog.py:471
 msgid "This picture has not been checked against your private library, so it cannot be used yet. Publishing it while it is unchecked could expose a file you keep private."
 msgstr "Dieses Bild wurde noch nicht mit deiner privaten Bibliothek abgeglichen und kann deshalb noch nicht verwendet werden. Wenn du es ungeprüft veröffentlichst, könnte eine Datei öffentlich werden, die du privat hältst."
 
-#: nostr/ui/media_library_dialog.py:478
+#: nostr/ui/media_library_dialog.py:480
 msgid "Your private library has not been read yet, so this app cannot tell which of these files are private."
 msgstr "Deine private Bibliothek wurde noch nicht gelesen. Daher kann die App nicht erkennen, welche dieser Dateien privat sind."
 
-#: nostr/ui/media_library_dialog.py:487
+#: nostr/ui/media_library_dialog.py:489
 msgid "Checking which of your files are private…"
 msgstr "Es wird geprüft, welche deiner Dateien privat sind …"
 
-#: nostr/ui/media_library_dialog.py:493
+#: nostr/ui/media_library_dialog.py:495
 msgid "Checking whether this picture is private. This takes a moment the first time."
 msgstr "Es wird geprüft, ob dieses Bild privat ist. Beim ersten Mal dauert das einen Moment."
 
-#: nostr/ui/media_library_dialog.py:377
-#: nostr/ui/media_library_dialog.py:378
+#: nostr/ui/media_library_dialog.py:379
+#: nostr/ui/media_library_dialog.py:380
 msgid "PRIVATE"
 msgstr "PRIVAT"
 
-#: nostr/ui/media_library_dialog.py:379
+#: nostr/ui/media_library_dialog.py:381
 msgid "NOT CHECKED"
 msgstr "NICHT GEPRÜFT"
 
-#: nostr/ui/media_library_dialog.py:434
+#: nostr/ui/media_library_dialog.py:436
 msgid "Private"
 msgstr "Privat"
 
-#: nostr/ui/media_library_dialog.py:435
+#: nostr/ui/media_library_dialog.py:437
 msgid "Private · copy published"
 msgstr "Privat · Kopie veröffentlicht"
 
-#: nostr/ui/media_library_dialog.py:436
+#: nostr/ui/media_library_dialog.py:438
 msgid "Not checked"
 msgstr "Nicht geprüft"
 
-#: nostr/ui/media_library_dialog.py:442
+#: nostr/ui/media_library_dialog.py:444
 msgid "private, stored encrypted and readable only by you"
 msgstr "privat, verschlüsselt gespeichert und nur für dich lesbar"
 
-#: nostr/ui/media_library_dialog.py:443
+#: nostr/ui/media_library_dialog.py:445
 msgid "private, and a public copy of it exists"
 msgstr "privat, aber es gibt eine öffentliche Kopie davon"
 
-#: nostr/ui/media_library_dialog.py:444
+#: nostr/ui/media_library_dialog.py:446
 msgid "not checked, because your private library could not be read, so this app cannot say whether this file is private"
 msgstr "nicht geprüft, weil deine private Bibliothek nicht gelesen werden konnte, daher kann die App nicht sagen, ob diese Datei privat ist"
 
-#: nostr/ui/media_library_dialog.py:2271
+#: nostr/ui/media_library_dialog.py:2273
 msgid "Some of these may be private files from another app. Deleting them here removes them there too. This can't be undone."
 msgstr "Einige davon sind vielleicht private Dateien aus einer anderen App. Wenn du sie hier löschst, verschwinden sie auch dort. Das lässt sich nicht rückgängig machen."
 
-#: nostr/ui/media_library_dialog.py:2047
+#: nostr/ui/media_library_dialog.py:2049
 msgid "File"
 msgstr "Datei"
 
-#: nostr/ui/media_library_dialog.py:2112
+#: nostr/ui/media_library_dialog.py:2114
 msgid "Double-click to preview · Right-click for actions"
 msgstr "Doppelklick für Vorschau · Rechtsklick für Aktionen"
 
-#: nostr/ui/media_library_dialog.py:2144
+#: nostr/ui/media_library_dialog.py:2146
 msgid "downloaded, but the bytes are not a readable image"
 msgstr "heruntergeladen, aber die Daten sind kein lesbares Bild"
 
-#: nostr/ui/media_library_dialog.py:2264
+#: nostr/ui/media_library_dialog.py:2266
 msgid "This can't be undone."
 msgstr "Das lässt sich nicht rückgängig machen."
 
-#: nostr/ui/media_library_dialog.py:2266
+#: nostr/ui/media_library_dialog.py:2268
 msgid "This may be a private file from another app. Deleting it here removes it there too. This can't be undone."
 msgstr "Das ist vielleicht eine private Datei aus einer anderen App. Wenn du sie hier löschst, verschwindet sie auch dort. Das lässt sich nicht rückgängig machen."
 
-#: nostr/ui/media_library_dialog.py:2269
+#: nostr/ui/media_library_dialog.py:2271
 msgid "These may be private files from another app. Deleting them here removes them there too. This can't be undone."
 msgstr "Das sind vielleicht private Dateien aus einer anderen App. Wenn du sie hier löschst, verschwinden sie auch dort. Das lässt sich nicht rückgängig machen."
 
-#: nostr/ui/media_library_dialog.py:2288
+#: nostr/ui/media_library_dialog.py:2290
 #, python-brace-format
 msgid "At least {used} of {quota} used"
 msgstr "Mindestens {used} von {quota} belegt"
 
-#: nostr/ui/media_library_dialog.py:538
+#: nostr/ui/media_library_dialog.py:540
 msgid "Drop files here to upload, or use the Upload button."
 msgstr "Zieh Dateien hierher, um sie hochzuladen, oder klicke auf „Hochladen“."
 
-#: nostr/ui/media_library_dialog.py:646
-#: nostr/ui/media_library_dialog.py:1659
-#: nostr/ui/media_library_dialog.py:1236
+#: nostr/ui/media_library_dialog.py:648
+#: nostr/ui/media_library_dialog.py:1661
+#: nostr/ui/media_library_dialog.py:1238
 msgid "Copy URL"
 msgstr "URL kopieren"
 
-#: nostr/ui/media_library_dialog.py:656
-#: nostr/ui/media_library_dialog.py:1660
-#: nostr/ui/media_library_dialog.py:1242
+#: nostr/ui/media_library_dialog.py:658
+#: nostr/ui/media_library_dialog.py:1662
+#: nostr/ui/media_library_dialog.py:1244
 #: nostr/ui/published_view.py:641
 msgid "Open in Browser"
 msgstr "Im Browser öffnen"
 
-#: nostr/ui/media_library_dialog.py:666
+#: nostr/ui/media_library_dialog.py:668
 msgid "◀ Previous"
 msgstr "◀ Vorheriges"
 
-#: nostr/ui/media_library_dialog.py:670
+#: nostr/ui/media_library_dialog.py:672
 msgid "Next ▶"
 msgstr "Nächstes ▶"
 
-#: nostr/ui/media_library_dialog.py:1011
+#: nostr/ui/media_library_dialog.py:1013
 msgid "Show"
 msgstr "Anzeigen"
 
-#: nostr/ui/media_library_dialog.py:1012
+#: nostr/ui/media_library_dialog.py:1014
 msgid "All files"
 msgstr "Alle Dateien"
 
-#: nostr/ui/media_library_dialog.py:1013
+#: nostr/ui/media_library_dialog.py:1015
 msgid "Images"
 msgstr "Bilder"
 
-#: nostr/ui/media_library_dialog.py:1014
+#: nostr/ui/media_library_dialog.py:1016
 msgid "Videos"
 msgstr "Videos"
 
-#: nostr/ui/media_library_dialog.py:1015
+#: nostr/ui/media_library_dialog.py:1017
 msgid "Audio"
 msgstr "Audio"
 
-#: nostr/ui/media_library_dialog.py:1020
+#: nostr/ui/media_library_dialog.py:1022
 msgid "Sort"
 msgstr "Sortieren"
 
-#: nostr/ui/media_library_dialog.py:1021
+#: nostr/ui/media_library_dialog.py:1023
 msgid "Newest first"
 msgstr "Neueste zuerst"
 
-#: nostr/ui/media_library_dialog.py:1022
+#: nostr/ui/media_library_dialog.py:1024
 msgid "Oldest first"
 msgstr "Älteste zuerst"
 
-#: nostr/ui/media_library_dialog.py:1023
+#: nostr/ui/media_library_dialog.py:1025
 msgid "Largest first"
 msgstr "Größte zuerst"
 
-#: nostr/ui/media_library_dialog.py:1024
+#: nostr/ui/media_library_dialog.py:1026
 msgid "Smallest first"
 msgstr "Kleinste zuerst"
 
-#: nostr/ui/media_library_dialog.py:1031
+#: nostr/ui/media_library_dialog.py:1033
 msgid "Show files from"
 msgstr "Dateien anzeigen von"
 
-#: nostr/ui/media_library_dialog.py:1032
-#: nostr/ui/media_library_dialog.py:1794
+#: nostr/ui/media_library_dialog.py:1034
+#: nostr/ui/media_library_dialog.py:1796
 msgid "All servers"
 msgstr "Alle Server"
 
-#: nostr/ui/media_library_dialog.py:1043
+#: nostr/ui/media_library_dialog.py:1045
 msgid "Refresh"
 msgstr "Aktualisieren"
 
-#: nostr/ui/media_library_dialog.py:1086
+#: nostr/ui/media_library_dialog.py:1088
 msgid "Use for Uploads"
 msgstr "Zum Hochladen verwenden"
 
-#: nostr/ui/media_library_dialog.py:1098
+#: nostr/ui/media_library_dialog.py:1100
 msgid "Share Server List…"
 msgstr "Serverliste teilen …"
 
-#: nostr/ui/media_library_dialog.py:1102
+#: nostr/ui/media_library_dialog.py:1104
 msgid "Tell other Nostr apps which servers hold your media."
 msgstr "Sag anderen Nostr-Apps, auf welchen Servern deine Medien liegen."
 
-#: nostr/ui/media_library_dialog.py:1132
+#: nostr/ui/media_library_dialog.py:1134
 msgid "Files"
 msgstr "Dateien"
 
-#: nostr/ui/media_library_dialog.py:1151
-#: nostr/ui/media_library_dialog.py:1352
+#: nostr/ui/media_library_dialog.py:1153
+#: nostr/ui/media_library_dialog.py:1354
 msgid "No media yet. Drop a file above or hit Upload."
 msgstr "Noch keine Medien. Zieh oben eine Datei hinein oder klicke auf „Hochladen“."
 
-#: nostr/ui/media_library_dialog.py:1163
+#: nostr/ui/media_library_dialog.py:1165
 msgid "Double-click a tile to preview · Right-click for actions · Paste an image to upload"
 msgstr "Doppelklick auf eine Kachel für Vorschau · Rechtsklick für Aktionen · Bild einfügen, um es hochzuladen"
 
-#: nostr/ui/media_library_dialog.py:1168
+#: nostr/ui/media_library_dialog.py:1170
 msgid "Double-click a tile to preview · Right-click for actions · Paste an image to upload · Del to remove selected"
 msgstr "Doppelklick auf eine Kachel für Vorschau · Rechtsklick für Aktionen · Bild einfügen, um es hochzuladen · Entf löscht die Auswahl"
 
-#: nostr/ui/media_library_dialog.py:1561
+#: nostr/ui/media_library_dialog.py:1563
 msgid "Choose Files to Upload"
 msgstr "Dateien zum Hochladen auswählen"
 
-#: nostr/ui/media_library_dialog.py:1661
+#: nostr/ui/media_library_dialog.py:1663
 msgid "Download…"
 msgstr "Herunterladen …"
 
-#: nostr/ui/media_library_dialog.py:1709
+#: nostr/ui/media_library_dialog.py:1711
 msgid "Save media"
 msgstr "Datei speichern"
 
-#: nostr/ui/media_library_dialog.py:1711
-#: nostr/ui/media_library_dialog.py:1563
+#: nostr/ui/media_library_dialog.py:1713
+#: nostr/ui/media_library_dialog.py:1565
 msgid "All files (*)"
 msgstr "Alle Dateien (*)"
 
-#: nostr/ui/media_library_dialog.py:1744
+#: nostr/ui/media_library_dialog.py:1746
 msgid "not an image"
 msgstr "kein Bild"
 
-#: nostr/ui/media_library_dialog.py:1780
+#: nostr/ui/media_library_dialog.py:1782
 msgid "Refreshing library…"
 msgstr "Mediathek wird aktualisiert …"
 
-#: nostr/ui/media_library_dialog.py:2022
+#: nostr/ui/media_library_dialog.py:2024
 #, python-brace-format
 msgid "mirrored on {count} server"
 msgid_plural "mirrored on {count} servers"
 msgstr[0] "auf {count} Server gespeichert"
 msgstr[1] "auf {count} Servern gespeichert"
 
-#: nostr/ui/media_library_dialog.py:2141
+#: nostr/ui/media_library_dialog.py:2143
 msgid "unknown type"
 msgstr "unbekannter Typ"
 
-#: nostr/ui/media_library_dialog.py:2249
+#: nostr/ui/media_library_dialog.py:2251
 #, python-brace-format
 msgid "Couldn’t reach {servers}. Showing the files it had last time."
 msgid_plural "Couldn’t reach {servers}. Showing the files they had last time."
 msgstr[0] "Keine Verbindung zu {servers}. Angezeigt werden die Dateien vom letzten Mal."
 msgstr[1] "Keine Verbindung zu {servers}. Angezeigt werden die Dateien vom letzten Mal."
 
-#: nostr/ui/media_library_dialog.py:2283
+#: nostr/ui/media_library_dialog.py:2285
 #: nostr/ui/membership_window.py:787
 msgid "Checking…"
 msgstr "Wird geprüft …"
 
-#: nostr/ui/media_library_dialog.py:2285
+#: nostr/ui/media_library_dialog.py:2287
 msgid "Usage unavailable right now."
 msgstr "Belegung gerade nicht verfügbar."
 
-#: nostr/ui/media_library_dialog.py:2290
+#: nostr/ui/media_library_dialog.py:2292
 #, python-brace-format
 msgid "Full: {used} of {quota} used"
 msgstr "Voll: {used} von {quota} belegt"
 
-#: nostr/ui/media_library_dialog.py:705
+#: nostr/ui/media_library_dialog.py:707
 #: nostr/ui/published_view.py:127
 msgid "Loading…"
 msgstr "Wird geladen …"
 
-#: nostr/ui/media_library_dialog.py:793
+#: nostr/ui/media_library_dialog.py:795
 msgid "Media Library"
 msgstr "Mediathek"
 
-#: nostr/ui/media_library_dialog.py:793
+#: nostr/ui/media_library_dialog.py:795
 msgid "Insert Image"
 msgstr "Bild einfügen"
 
-#: nostr/ui/media_library_dialog.py:1196
+#: nostr/ui/media_library_dialog.py:1198
 msgid "Alt text (optional):"
 msgstr "Alternativtext (optional):"
 
-#: nostr/ui/media_library_dialog.py:1200
+#: nostr/ui/media_library_dialog.py:1202
 msgid "Alt text"
 msgstr "Alternativtext"
 
-#: nostr/ui/media_library_dialog.py:1201
+#: nostr/ui/media_library_dialog.py:1203
 msgid "Describe the image for screen readers"
 msgstr "Beschreibe das Bild für Screenreader"
 
-#: nostr/ui/media_library_dialog.py:1230
+#: nostr/ui/media_library_dialog.py:1232
 msgid "Insert"
 msgstr "Einfügen"
 
-#: nostr/ui/media_library_dialog.py:1288
+#: nostr/ui/media_library_dialog.py:1290
 msgid "Clipboard has no image to upload."
 msgstr "In der Zwischenablage ist kein Bild zum Hochladen."
 
-#: nostr/ui/media_library_dialog.py:1292
+#: nostr/ui/media_library_dialog.py:1294
 msgid "Clipboard image could not be read."
 msgstr "Das Bild in der Zwischenablage konnte nicht gelesen werden."
 
-#: nostr/ui/media_library_dialog.py:1297
+#: nostr/ui/media_library_dialog.py:1299
 msgid "Could not encode clipboard image as PNG."
 msgstr "Das Bild in der Zwischenablage konnte nicht in PNG umgewandelt werden."
 
-#: nostr/ui/media_library_dialog.py:1457
+#: nostr/ui/media_library_dialog.py:1459
 msgid "the downloaded bytes could not be read back"
 msgstr "die heruntergeladenen Daten konnten nicht wieder gelesen werden"
 
-#: nostr/ui/media_library_dialog.py:1577
-#: nostr/ui/media_library_dialog.py:1585
-#: nostr/ui/media_library_dialog.py:1592
+#: nostr/ui/media_library_dialog.py:1579
+#: nostr/ui/media_library_dialog.py:1587
+#: nostr/ui/media_library_dialog.py:1594
 msgid "Select a file first."
 msgstr "Wähle zuerst eine Datei aus."
 
-#: nostr/ui/media_library_dialog.py:1665
+#: nostr/ui/media_library_dialog.py:1667
 msgid "Copy URL from Server"
 msgstr "URL von Server kopieren"
 
-#: nostr/ui/media_library_dialog.py:1818
+#: nostr/ui/media_library_dialog.py:1820
 #, python-brace-format
 msgid "Your Nostr profile also lists {servers} for media. Use it for uploads here too?"
 msgid_plural "Your Nostr profile also lists {servers} for media. Use them for uploads here too?"
 msgstr[0] "Dein Nostr-Profil nennt auch {servers} für Medien. Diesen Server auch hier zum Hochladen verwenden?"
 msgstr[1] "Dein Nostr-Profil nennt auch {servers} für Medien. Diese Server auch hier zum Hochladen verwenden?"
 
-#: nostr/ui/media_library_dialog.py:1962
+#: nostr/ui/media_library_dialog.py:1964
 msgid "Signing…"
 msgstr "Wird signiert …"
 
-#: nostr/ui/media_library_dialog.py:2000
+#: nostr/ui/media_library_dialog.py:2002
 msgid "Removed the public copy. That picture is private again."
 msgstr "Die öffentliche Kopie wurde entfernt. Das Bild ist wieder privat."
 
-#: nostr/ui/media_library_dialog.py:2081
+#: nostr/ui/media_library_dialog.py:2083
 #, python-brace-format
 msgid "type:   {type}"
 msgstr "Typ:   {type}"
 
-#: nostr/ui/media_library_dialog.py:2082
+#: nostr/ui/media_library_dialog.py:2084
 #, python-brace-format
 msgid "size:   {size}"
 msgstr "Größe:   {size}"
 
-#: nostr/ui/media_library_dialog.py:2107
+#: nostr/ui/media_library_dialog.py:2109
 #, python-brace-format
 msgid "on {count} server:"
 msgid_plural "on {count} servers:"
 msgstr[0] "auf {count} Server:"
 msgstr[1] "auf {count} Servern:"
 
-#: nostr/ui/media_library_dialog.py:2142
+#: nostr/ui/media_library_dialog.py:2144
 #, python-brace-format
 msgid "none, {type} is not an image"
 msgstr "keine, {type} ist kein Bild"
 
-#: nostr/ui/media_library_dialog.py:2245
+#: nostr/ui/media_library_dialog.py:2247
 #, python-brace-format
 msgid "Couldn’t reach {servers}."
 msgstr "Keine Verbindung zu {servers}."
 
-#: nostr/ui/media_library_dialog.py:2247
+#: nostr/ui/media_library_dialog.py:2249
 #, python-brace-format
 msgid "Couldn’t reach {servers}. Showing the files {kept} had last time."
 msgstr "Keine Verbindung zu {servers}. Von {kept} werden die Dateien vom letzten Mal angezeigt."
 
-#: nostr/ui/media_library_dialog.py:2292
+#: nostr/ui/media_library_dialog.py:2294
 #, python-brace-format
 msgid "Almost full: {used} of {quota} used"
 msgstr "Fast voll: {used} von {quota} belegt"
 
-#: nostr/ui/media_library_dialog.py:2294
+#: nostr/ui/media_library_dialog.py:2296
 #, python-brace-format
 msgid "{used} of {quota} used"
 msgstr "{used} von {quota} belegt"
 
-#: nostr/ui/media_library_dialog.py:1580
-#: nostr/ui/media_library_dialog.py:1687
-#: nostr/ui/media_library_dialog.py:1699
+#: nostr/ui/media_library_dialog.py:1582
+#: nostr/ui/media_library_dialog.py:1689
+#: nostr/ui/media_library_dialog.py:1701
 #, python-brace-format
 msgid "Copied URL: {url}"
 msgstr "URL kopiert: {url}"
 
-#: nostr/ui/media_library_dialog.py:1671
+#: nostr/ui/media_library_dialog.py:1673
 msgid "(unknown)"
 msgstr "(unbekannt)"
 
-#: nostr/ui/media_library_dialog.py:1729
+#: nostr/ui/media_library_dialog.py:1731
 #, python-brace-format
 msgid "Downloading {url}…"
 msgstr "{url} wird heruntergeladen …"
 
-#: nostr/ui/media_library_dialog.py:1745
+#: nostr/ui/media_library_dialog.py:1747
 #, python-brace-format
 msgid "Download failed: {reason}"
 msgstr "Herunterladen fehlgeschlagen: {reason}"
 
-#: nostr/ui/media_library_dialog.py:1756
+#: nostr/ui/media_library_dialog.py:1758
 #, python-brace-format
 msgid "Saved to {path}"
 msgstr "Gespeichert unter {path}"
 
-#: nostr/ui/media_library_dialog.py:1871
+#: nostr/ui/media_library_dialog.py:1873
 #, python-brace-format
 msgid "{server} storage"
 msgstr "Speicher auf {server}"
 
-#: nostr/ui/media_library_dialog.py:1899
+#: nostr/ui/media_library_dialog.py:1901
 #, python-brace-format
 msgid "{name}: not stored on {server}, there isn’t enough space left there."
 msgstr "{name}: nicht auf {server} gespeichert, dort ist nicht mehr genug Platz frei."
 
-#: nostr/ui/media_library_dialog.py:1905
+#: nostr/ui/media_library_dialog.py:1907
 #, python-brace-format
 msgid "{name} is saved, but {server} didn’t take a copy."
 msgstr "{name} ist gespeichert, aber {server} hat keine Kopie übernommen."
 
-#: nostr/ui/media_library_dialog.py:1952
+#: nostr/ui/media_library_dialog.py:1954
 #, python-brace-format
 msgid "Uploading {name}…"
 msgstr "{name} wird hochgeladen …"
 
-#: nostr/ui/media_library_dialog.py:1975
+#: nostr/ui/media_library_dialog.py:1977
 #, python-brace-format
 msgid "Uploaded {name}."
 msgstr "{name} hochgeladen."
 
-#: nostr/ui/media_library_dialog.py:1980
+#: nostr/ui/media_library_dialog.py:1982
 #, python-brace-format
 msgid "Upload of {name} failed: {reason}"
 msgstr "{name} konnte nicht hochgeladen werden: {reason}"
 
-#: nostr/ui/media_library_dialog.py:1985
+#: nostr/ui/media_library_dialog.py:1987
 #, python-brace-format
 msgid "{from_host} can't take this file, routing {name} to {to_host} instead."
 msgstr "{from_host} kann diese Datei nicht annehmen, {name} geht stattdessen an {to_host}."
 
-#: nostr/ui/media_library_dialog.py:2009
+#: nostr/ui/media_library_dialog.py:2011
 #, python-brace-format
 msgid "Removed {hash}… locally · {reason}"
 msgstr "{hash}… lokal entfernt · {reason}"
 
-#: nostr/ui/media_library_dialog.py:2085
+#: nostr/ui/media_library_dialog.py:2087
 #, python-brace-format
 msgid "dim:    {width} × {height}"
 msgstr "Maße:   {width} × {height}"
 
-#: nostr/ui/media_library_dialog.py:2092
+#: nostr/ui/media_library_dialog.py:2094
 #, python-brace-format
 msgid "library: {reason}"
 msgstr "Bibliothek: {reason}"
 
-#: nostr/ui/media_library_dialog.py:2098
+#: nostr/ui/media_library_dialog.py:2100
 #, python-brace-format
 msgid "access: {access}"
 msgstr "Zugriff: {access}"
 
-#: nostr/ui/media_library_dialog.py:2100
+#: nostr/ui/media_library_dialog.py:2102
 #, python-brace-format
 msgid "copy:   {url}"
 msgstr "Kopie:   {url}"
 
-#: nostr/ui/media_library_dialog.py:2106
+#: nostr/ui/media_library_dialog.py:2108
 #, python-brace-format
 msgid "preview: {reason}"
 msgstr "Vorschau: {reason}"
 
-#: nostr/ui/media_library_dialog.py:708
+#: nostr/ui/media_library_dialog.py:710
 #, python-brace-format
 msgid "[{type}, open in browser to inspect]"
 msgstr "[{type}, zum Ansehen im Browser öffnen]"
 
-#: nostr/ui/media_library_dialog.py:973
+#: nostr/ui/media_library_dialog.py:975
 #, python-brace-format
 msgid "{count} item in your private library could not be opened, so files marked NOT CHECKED cannot be used in published work. Refresh to try again."
 msgid_plural "{count} items in your private library could not be opened, so files marked NOT CHECKED cannot be used in published work. Refresh to try again."
 msgstr[0] "{count} Eintrag in deiner privaten Bibliothek ließ sich nicht öffnen. Daher können Dateien mit „NICHT GEPRÜFT“ nicht in Veröffentlichungen verwendet werden. Aktualisiere, um es noch einmal zu versuchen."
 msgstr[1] "{count} Einträge in deiner privaten Bibliothek ließen sich nicht öffnen. Daher können Dateien mit „NICHT GEPRÜFT“ nicht in Veröffentlichungen verwendet werden. Aktualisiere, um es noch einmal zu versuchen."
 
-#: nostr/ui/media_library_dialog.py:1966
+#: nostr/ui/media_library_dialog.py:1968
 msgid "Mirroring…"
 msgstr "Wird verteilt …"
 
-#: nostr/ui/media_library_dialog.py:709
+#: nostr/ui/media_library_dialog.py:711
 msgid "binary"
 msgstr "Binärdaten"
 
-#: nostr/ui/media_library_dialog.py:1349
+#: nostr/ui/media_library_dialog.py:1351
 #, python-brace-format
 msgid "Nothing on {server} yet. Files you upload go there too."
 msgstr "Auf {server} ist noch nichts. Was du hochlädst, landet auch dort."
 
-#: nostr/ui/media_library_dialog.py:1563
+#: nostr/ui/media_library_dialog.py:1565
 #, python-brace-format
 msgid "Media files ({patterns})"
 msgstr "Mediendateien ({patterns})"
 
-#: nostr/ui/media_library_dialog.py:1605
+#: nostr/ui/media_library_dialog.py:1607
 #, python-brace-format
 msgid "Delete {count} file from your media servers?"
 msgid_plural "Delete {count} files from your media servers?"
 msgstr[0] "{count} Datei von deinen Medienservern löschen?"
 msgstr[1] "{count} Dateien von deinen Medienservern löschen?"
 
-#: nostr/ui/media_library_dialog.py:1754
+#: nostr/ui/media_library_dialog.py:1756
 #, python-brace-format
 msgid "Could not save: {error}"
 msgstr "Speichern fehlgeschlagen: {error}"
