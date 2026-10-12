@@ -191,8 +191,10 @@ class FeedSubscriptionStore(QObject):
         self._base_mark: Optional[Tuple[int, str]] = None
         # True while local edits haven't reached relays.
         self._dirty = False
-        # Tries since a change could not be shared (the pause grows).
+        # Tries since a change could not be shared (the pause grows), and
+        # whether the timer that runs is such a pause.
         self._retries = 0
+        self._retry_waiting = False
         # The next publish also sends read times (a manual source opened).
         self._send_read_times = False
         self._legacy_merged = False
@@ -494,7 +496,11 @@ class FeedSubscriptionStore(QObject):
     # -- internals: mutation plumbing --------------------------------------
 
     def _send_waiting(self) -> None:
-        if self._dirty and self._cancel_timer is None and not self.is_busy:
+        """The relays answered a read: a change waiting here goes out now,
+        also while the pause after a try that failed runs (CP3 review L3:
+        it waited up to half an hour)."""
+        if (self._dirty and not any(self._runs.values())
+                and (self._cancel_timer is None or self._retry_waiting)):
             self._schedule_publish()
 
     def _retry_later(self) -> None:
@@ -506,6 +512,7 @@ class FeedSubscriptionStore(QObject):
         delay = RETRY_DELAYS_MS[min(self._retries, len(RETRY_DELAYS_MS) - 1)]
         self._retries += 1
         self._cancel_timer = self._scheduler(delay, self._on_debounce_fired)
+        self._retry_waiting = True
 
     def _after_mutation(self) -> None:
         if self._read_only:
@@ -525,9 +532,11 @@ class FeedSubscriptionStore(QObject):
 
     def _on_debounce_fired(self) -> None:
         self._cancel_timer = None
+        self._retry_waiting = False
         self._publish_now()
 
     def _cancel_pending_timer(self) -> None:
+        self._retry_waiting = False
         if self._cancel_timer is not None:
             try:
                 self._cancel_timer()

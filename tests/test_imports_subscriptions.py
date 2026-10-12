@@ -626,6 +626,25 @@ class TestSaysWhatHappens:
         publish(again, scheduler2)
         assert [f["url"] for f in relay.payload()["feeds"]] == [FEED_URL]
 
+    def test_an_answered_read_does_not_wait_out_the_pause(self, tmp_path):
+        """CP3 review L3: after a few tries that failed, the change waited
+        out a pause of up to half an hour although the relays answered."""
+        from nostr.imports.subscriptions import RETRY_DELAYS_MS
+        relay = FakeRelay(accepted=False)
+        store, _, scheduler = bound(tmp_path, relay=relay)
+        store.add_feed(FEED_URL, "Blog")
+        for _ in range(4):
+            publish(store, scheduler)
+        live = lambda: [e[0] for e in scheduler.scheduled if e[2]]  # noqa: E731
+        assert live() == [RETRY_DELAYS_MS[-1]]
+        relay.accepted = True
+        store.refresh()                         # answered
+        settle()
+        assert live() and live()[-1] < RETRY_DELAYS_MS[0]
+        publish(store, scheduler)
+        assert [f["url"] for f in relay.payload()["feeds"]] == [FEED_URL]
+        assert not store._dirty
+
     def test_a_list_that_cannot_be_read_online_says_the_copy_here_is_shown(self, tmp_path):
         from nostr.imports.subscriptions import NOT_READ
         store, _, _ = make_store(tmp_path, relay=Offline())
