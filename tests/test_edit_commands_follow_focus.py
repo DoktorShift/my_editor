@@ -54,6 +54,36 @@ w._undo()
 r["field_after_undo"] = field.text()
 r["document_after_undo"] = ed.toPlainText()
 
+# A multi-line field in a window of its own (Edit Profile's About):
+# Undo and Redo are its own, never the document's behind (T1 of the CP3
+# fixes review).
+from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QPlainTextEdit
+ed.setFocus()
+ed.insertPlainText("!")                    # the document has a step to undo
+about_window = QPlainTextEdit(w)
+about_window.setWindowFlag(Qt.WindowType.Window)
+about_window.show()
+about_window.activateWindow()
+about_window.setFocus()
+app.processEvents()
+QTest.keyClicks(about_window, "about me")
+app.processEvents()
+r["about_undo_enabled"] = w.act_undo.isEnabled()
+document_before = ed.toPlainText()
+w.act_undo.trigger()
+r["about_after_undo"] = about_window.toPlainText()
+r["document_unchanged_by_undo"] = ed.toPlainText() == document_before
+w.act_redo.trigger()
+r["about_after_redo"] = about_window.toPlainText()
+about_window.setReadOnly(True)
+w._update_undo_redo_buttons()
+r["read_only_undo_enabled"] = w.act_undo.isEnabled()
+about_window.close()
+ed.setFocus()
+app.processEvents()
+
 # A right-click leaves no menu behind.
 from PySide6.QtCore import QTimer
 
@@ -86,3 +116,8 @@ def test_edit_commands_follow_the_focus_and_the_selection(tmp_path):
     assert r["field_after_undo"] == "abc"                # review L4 (early range)
     assert r["document_after_undo"] == "document words"
     assert r["menus_left"] == 0                          # review L2 (early range)
+    # T1 of the CP3 fixes review: a dialog's multi-line field.
+    assert r["about_undo_enabled"]
+    assert r["about_after_undo"] != "about me" and r["document_unchanged_by_undo"]
+    assert r["about_after_redo"] == "about me"
+    assert not r["read_only_undo_enabled"]

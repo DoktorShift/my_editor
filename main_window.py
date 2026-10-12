@@ -259,6 +259,25 @@ def _ask_save_changes(parent, title: str, *, save_label: str = "",
 QUIT_SYNC_WAIT_MS = 5_000
 
 
+def _text_field(widget):
+    """``widget`` when it is a text field other than a document (a find
+    field, a sheet's or a dialog's field, the Imports window's article):
+    while it has the focus, the Edit menu acts on it. Else None."""
+    if isinstance(widget, (QLineEdit, QTextEdit, QPlainTextEdit)) and not isinstance(
+            widget, HtmlEditor):
+        return widget
+    return None
+
+
+def _field_history(field) -> tuple:
+    """Whether ``field`` has something to undo, and to redo."""
+    if isinstance(field, QLineEdit):
+        return field.isUndoAvailable(), field.isRedoAvailable()
+    if field.isReadOnly():
+        return False, False
+    return field.document().isUndoAvailable(), field.document().isRedoAvailable()
+
+
 def _field_signals(field) -> list:
     """What changes in a text field that the Edit menu shows: its text
     (what Undo undoes), its selection (what Cut and Copy act on)."""
@@ -1125,28 +1144,23 @@ class MainWindow(QMainWindow):
 
     def _update_undo_redo_buttons(self, *_args):
         """Undo and Redo for what has the focus: the Imports window when it
-        is in front (Undo Skip there), a text field (the find field), or
-        the document."""
+        is in front (Undo Skip there), a text field (the find field, a
+        dialog's field), or the document."""
         if not hasattr(self, "act_undo"):
             return
         imports = self._imports_in_front()
+        field = _text_field(QApplication.focusWidget())
         if imports is not None:
             # What Undo undoes in the window in front (Undo Skip there).
             self.act_undo.setText(imports.undo_text())
             self.act_undo.setEnabled(imports.can_undo())
-            focus = QApplication.focusWidget()
-            if isinstance(focus, QLineEdit):
-                can_redo = focus.isRedoAvailable()
-            elif isinstance(focus, (QTextEdit, QPlainTextEdit)):
-                can_redo = not focus.isReadOnly() and focus.document().isRedoAvailable()
-            else:
-                can_redo = False
-            self.act_redo.setEnabled(can_redo)
+            self.act_redo.setEnabled(field is not None and _field_history(field)[1])
             return
         self.act_undo.setText(_("Undo"))
-        focus = QApplication.focusWidget()
-        if isinstance(focus, QLineEdit):
-            can_undo, can_redo = focus.isUndoAvailable(), focus.isRedoAvailable()
+        if field is not None:
+            # Never the document behind (T1 of the CP3 fixes review: Undo
+            # with a dialog's About field focused undid the document).
+            can_undo, can_redo = _field_history(field)
         else:
             ed = self.current_editor()
             can_undo = ed.document().isUndoAvailable() if ed else False
@@ -1203,8 +1217,7 @@ class MainWindow(QMainWindow):
             for signal in _field_signals(old):
                 signal.disconnect(self._on_field_changed)
         self._followed_field = None
-        if isinstance(widget, (QLineEdit, QTextEdit, QPlainTextEdit)) and not isinstance(
-                widget, HtmlEditor):
+        if _text_field(widget) is not None:
             for signal in _field_signals(widget):
                 signal.connect(self._on_field_changed)
             self._followed_field = widget
@@ -4109,33 +4122,28 @@ class MainWindow(QMainWindow):
 
     def _undo(self):
         """Edit > Undo, for what has the focus: the Imports window when it
-        is in front (Undo Skip there), a text field (the find field takes
-        its own, as its keys do), or the document."""
+        is in front (Undo Skip there), a text field (the find field, a
+        dialog's About field: each takes its own, as its keys do), or the
+        document."""
         imports = self._imports_in_front()
         if imports is not None:
             imports.undo()
             return
-        focus = QApplication.focusWidget()
-        if isinstance(focus, QLineEdit):
-            focus.undo()
+        field = _text_field(QApplication.focusWidget())
+        if field is not None:
+            field.undo()
             return
         ed = self.current_editor()
         if ed:
             ed.undo()
 
     def _redo(self):
-        imports = self._imports_in_front()
-        if imports is not None:
-            focus = QApplication.focusWidget()
-            if isinstance(focus, (QLineEdit, QTextEdit, QPlainTextEdit)):
-                focus.redo()
-            return
-        focus = QApplication.focusWidget()
-        if isinstance(focus, QLineEdit):
-            focus.redo()
+        field = _text_field(QApplication.focusWidget())
+        if field is not None:
+            field.redo()
             return
         ed = self.current_editor()
-        if ed:
+        if ed and self._imports_in_front() is None:
             ed.redo()
 
     def _editor_call(self, name: str) -> None:
@@ -4218,9 +4226,8 @@ class MainWindow(QMainWindow):
         keyboard focus, the way a Mac app sends them to its first
         responder: a text field (the find field), the PDF reader, or the
         document."""
-        focus = QApplication.focusWidget()
-        if isinstance(focus, (QLineEdit, QTextEdit, QPlainTextEdit)) and not isinstance(
-                focus, HtmlEditor):
+        focus = _text_field(QApplication.focusWidget())
+        if focus is not None:
             if name == "delete":
                 if isinstance(focus, QLineEdit):
                     focus.del_()
