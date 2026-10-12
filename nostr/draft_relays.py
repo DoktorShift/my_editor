@@ -679,12 +679,21 @@ class PrivateDraftRelays(QObject):
     ``entitled_relays`` (a list, or a callable answering one) are the
     relays the account has standing on beyond its own list, a
     membership's: drafts go there too, so a move reads and writes them
-    the way saving a draft does."""
+    the way saving a draft does.
+
+    Signals:
+      left_behind_changed()   the relays still read for drafts left behind
+                              changed (``drafts_left_behind``), a move in
+                              the background having cleared one, say
+    """
+
+    left_behind_changed = Signal()
 
     def __init__(self, *, profile, pool, session_pool, directory, entitled_relays=(),
                  query=fetch_replaceable, clock: Callable[[], float] = time.time,
                  parent=None) -> None:
         super().__init__(parent)
+        directory.changed.connect(self._on_directory_changed)
         self._profile = profile
         self._pool = pool
         self._session_pool = session_pool
@@ -766,6 +775,10 @@ class PrivateDraftRelays(QObject):
         """Relays no longer among the draft relays that may still hold
         drafts, read until each answers (RelayDirectory.leave_drafts_behind)."""
         return sorted(self._directory.drafts_left_behind(self.author))
+
+    def _on_directory_changed(self, author: str) -> None:
+        if author == self.author:
+            self.left_behind_changed.emit()
 
     def stop_reading(self, relay: str) -> None:
         """Let the drafts left on ``relay`` go: it is no longer read."""

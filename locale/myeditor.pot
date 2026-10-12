@@ -532,7 +532,7 @@ msgstr ""
 
 #: main_window.py:1244
 #: main_window.py:254
-#: nostr/ui/draft_relays_sheet.py:543
+#: nostr/ui/draft_relays_sheet.py:565
 #: nostr/ui/profile_window.py:250
 #: nostr/ui/save_destination_dialog.py:225
 #: nostr/ui/save_destination_dialog.py:306
@@ -2428,7 +2428,7 @@ msgstr ""
 #: nostr/ui/account_windows.py:793
 #: nostr/ui/account_windows.py:854
 #: nostr/ui/account_windows.py:1104
-#: nostr/ui/draft_relays_sheet.py:534
+#: nostr/ui/draft_relays_sheet.py:556
 #: nostr/ui/image_review_dialog.py:124
 msgid "Done"
 msgstr ""
@@ -2456,7 +2456,7 @@ msgstr ""
 #: update_dialog.py:279
 #: nostr/ui/account_windows.py:769
 #: nostr/ui/connect_dialog.py:360
-#: nostr/ui/draft_relays_sheet.py:532
+#: nostr/ui/draft_relays_sheet.py:554
 #: nostr/ui/drafts_panel.py:1138
 #: nostr/ui/imports_activity.py:288
 #: nostr/ui/imports_window.py:1092
@@ -3084,23 +3084,23 @@ msgstr ""
 msgid "Your key stays in your signer. MyEditor only forgets this connection."
 msgstr ""
 
-#: nostr/bunker.py:98
+#: nostr/bunker.py:120
 msgid "Your signer did not answer. Open your signer app, make sure it is running, and try again."
 msgstr ""
 
-#: nostr/bunker.py:170
+#: nostr/bunker.py:192
 msgid "expected a bunker:// URI"
 msgstr ""
 
-#: nostr/bunker.py:175
+#: nostr/bunker.py:197
 msgid "bunker URI must contain a 32-byte hex pubkey"
 msgstr ""
 
-#: nostr/bunker.py:180
+#: nostr/bunker.py:202
 msgid "bunker URI must specify at least one relay"
 msgstr ""
 
-#: nostr/bunker.py:183
+#: nostr/bunker.py:205
 #, python-brace-format
 msgid "relay must be ws:// or wss://, got {relay}"
 msgstr ""
@@ -3118,7 +3118,7 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: nostr/draft_store.py:302
-#: nostr/draft_sync.py:731
+#: nostr/draft_sync.py:734
 #: nostr/ui/drafts_panel.py:503
 #: nostr/ui/drafts_panel.py:550
 msgid "Could not decrypt"
@@ -3150,41 +3150,41 @@ msgstr ""
 msgid "Connecting to your signer app…"
 msgstr ""
 
-#: nostr/draft_sync.py:765
+#: nostr/draft_sync.py:768
 msgid "Your signer app can’t decrypt drafts, so they can’t be shown for this account."
 msgstr ""
 
-#: nostr/draft_sync.py:454
+#: nostr/draft_sync.py:457
 msgid "No relays available to fetch drafts."
 msgstr ""
 
-#: nostr/draft_sync.py:547
+#: nostr/draft_sync.py:550
 msgid "Your draft relays show drafts only after you sign in to them, which MyEditor can’t do yet. New drafts are saved on your usual relays."
 msgstr ""
 
-#: nostr/draft_sync.py:693
+#: nostr/draft_sync.py:696
 msgid "Saved by another account"
 msgstr ""
 
-#: nostr/draft_sync.py:438
+#: nostr/draft_sync.py:441
 #, python-brace-format
 msgid "Signer app unavailable: {reason}"
 msgstr ""
 
-#: nostr/draft_sync.py:531
+#: nostr/draft_sync.py:534
 #, python-brace-format
 msgid "Loaded {n} draft."
 msgid_plural "Loaded {n} drafts."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/draft_sync.py:774
+#: nostr/draft_sync.py:777
 #: nostr/ui/drafts_panel.py:1954
 #: nostr/ui/drafts_panel.py:2023
 msgid "Your signer app can’t decrypt drafts"
 msgstr ""
 
-#: nostr/draft_sync.py:677
+#: nostr/draft_sync.py:680
 #, python-brace-format
 msgid "The draft is damaged: {error}"
 msgstr ""
@@ -5095,191 +5095,190 @@ msgstr ""
 msgid "Dismiss and let the next save from this tab win."
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:468
+#: nostr/ui/draft_relays_sheet.py:490
 msgid "Couldn’t save the change. Try again."
 msgstr ""
 
 #: nostr/ui/draft_relays_sheet.py:108
-#: nostr/ui/draft_relays_sheet.py:138
+#: nostr/ui/draft_relays_sheet.py:140
 msgid "Draft Relays"
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:147
+#: nostr/ui/draft_relays_sheet.py:149
 msgid "Draft relays"
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:156
+#: nostr/ui/draft_relays_sheet.py:158
 msgid "Remove"
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:164
+#: nostr/ui/draft_relays_sheet.py:166
 msgid "Add a relay:"
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:170
+#: nostr/ui/draft_relays_sheet.py:172
 #: nostr/ui/imports_window.py:340
 msgid "Add"
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:193
+#: nostr/ui/draft_relays_sheet.py:195
 msgid "Relays still looked at for drafts"
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:200
+#: nostr/ui/draft_relays_sheet.py:207
 msgid "Stop Looking…"
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:449
+#: nostr/ui/draft_relays_sheet.py:471
 msgid "The relays your drafts would move to turned some of them down, so nothing was changed. Choose other relays, then try again."
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:452
+#: nostr/ui/draft_relays_sheet.py:474
 msgid "Some drafts couldn’t be moved, so nothing was changed. Check your internet connection, then try again."
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:455
+#: nostr/ui/draft_relays_sheet.py:477
 msgid "Couldn’t read the current setting, so nothing was changed. Check your internet connection, then try again."
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:459
+#: nostr/ui/draft_relays_sheet.py:481
 msgid "The current setting is dated ahead of this computer’s clock, so nothing was changed. Check the date and time on this computer, then try again."
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:463
+#: nostr/ui/draft_relays_sheet.py:485
 msgid "Too few relays took the change. Check your internet connection, then try again."
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:466
+#: nostr/ui/draft_relays_sheet.py:488
 msgid "Your signer app didn’t approve the change. Try again, and approve it when your signer app asks."
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:140
+#: nostr/ui/draft_relays_sheet.py:142
 msgid "Drafts are encrypted wherever they are kept. With relays chosen here, drafts are saved only there. When you change this, your drafts move with it. Apps that don’t read this setting won’t see the drafts saved there."
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:186
+#: nostr/ui/draft_relays_sheet.py:188
 msgid "Still looking for drafts on:"
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:188
+#: nostr/ui/draft_relays_sheet.py:190
 msgid "These relays are no longer in the setting, but may still hold drafts saved there before it changed. MyEditor moves them to where drafts are kept now once each relay answers."
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:222
+#: nostr/ui/draft_relays_sheet.py:229
 msgid "The setting is saved."
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:234
+#: nostr/ui/draft_relays_sheet.py:241
 msgid "Reading where your drafts are kept…"
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:242
+#: nostr/ui/draft_relays_sheet.py:249
 msgid "Couldn’t decrypt where your drafts are kept. Make sure your signer app is running, then try again."
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:245
+#: nostr/ui/draft_relays_sheet.py:252
 msgid "Couldn’t read where your drafts are kept. Check your internet connection, then try again."
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:271
+#: nostr/ui/draft_relays_sheet.py:278
 msgid "Enter a relay’s address. It starts with wss://."
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:274
+#: nostr/ui/draft_relays_sheet.py:281
 msgid "That relay is already in the list."
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:317
+#: nostr/ui/draft_relays_sheet.py:336
+msgid "Stop looking for drafts on this relay?"
+msgstr ""
+
+#: nostr/ui/draft_relays_sheet.py:339
 msgid "Stop Looking"
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:342
-#: nostr/ui/draft_relays_sheet.py:366
+#: nostr/ui/draft_relays_sheet.py:364
+#: nostr/ui/draft_relays_sheet.py:388
 msgid "Reading your drafts…"
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:537
+#: nostr/ui/draft_relays_sheet.py:559
 msgid "Save Anyway"
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:539
+#: nostr/ui/draft_relays_sheet.py:561
 msgid "Use My Usual Relays"
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:361
+#: nostr/ui/draft_relays_sheet.py:383
 msgid "Moving your drafts…"
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:386
+#: nostr/ui/draft_relays_sheet.py:408
 msgid "The setting was changed on another device while this was open, so nothing was changed here. This is the setting as it is now."
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:401
+#: nostr/ui/draft_relays_sheet.py:423
 #, python-brace-format
 msgid "Drafts saved during the change may still be only on {relays}, which didn’t answer. MyEditor keeps looking for them there and moves them once it answers."
 msgid_plural "Drafts saved during the change may still be only on {relays}, which didn’t answer. MyEditor keeps looking for them there and moves them once they answer."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/draft_relays_sheet.py:420
+#: nostr/ui/draft_relays_sheet.py:442
 #, python-brace-format
 msgid "Couldn’t read the drafts on {relays}, so nothing was changed. Check your internet connection, then try again. If that relay is gone for good, choose Save Anyway: the drafts kept only there won’t be shown any more."
 msgid_plural "Couldn’t read the drafts on {relays}, so nothing was changed. Check your internet connection, then try again. If those relays are gone for good, choose Save Anyway: the drafts kept only there won’t be shown any more."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/draft_relays_sheet.py:429
+#: nostr/ui/draft_relays_sheet.py:451
 #, python-brace-format
 msgid "{relays} sends only its newest drafts, whichever part MyEditor asks for, so the older ones there can’t be moved, and nothing was changed. If you can do without the drafts kept only there, choose Save Anyway: they won’t be shown any more."
 msgid_plural "{relays} send only their newest drafts, whichever part MyEditor asks for, so the older ones there can’t be moved, and nothing was changed. If you can do without the drafts kept only there, choose Save Anyway: they won’t be shown any more."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/draft_relays_sheet.py:440
+#: nostr/ui/draft_relays_sheet.py:462
 #, python-brace-format
 msgid "{relays} didn’t give your drafts back when MyEditor asked, so nothing was changed. Some relays show drafts only after you sign in to them, which MyEditor can’t do yet. Choose another relay, then try again."
 msgid_plural "{relays} didn’t give your drafts back when MyEditor asked, so nothing was changed. Some relays show drafts only after you sign in to them, which MyEditor can’t do yet. Choose other relays, then try again."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/draft_relays_sheet.py:508
+#: nostr/ui/draft_relays_sheet.py:530
 msgid "Drafts will be saved only on these relays:"
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:510
+#: nostr/ui/draft_relays_sheet.py:532
 msgid "Drafts will be kept on your usual relays."
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:512
+#: nostr/ui/draft_relays_sheet.py:534
 msgid "Drafts are saved only on these relays:"
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:514
+#: nostr/ui/draft_relays_sheet.py:536
 msgid "Drafts are kept on your usual relays."
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:277
+#: nostr/ui/draft_relays_sheet.py:284
 #, python-brace-format
 msgid "Drafts can be kept on at most {count} relay."
 msgid_plural "Drafts can be kept on at most {count} relays."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/draft_relays_sheet.py:314
-#, python-brace-format
-msgid "Stop looking for drafts on {relay}?"
-msgstr ""
-
-#: nostr/ui/draft_relays_sheet.py:315
+#: nostr/ui/draft_relays_sheet.py:337
 #, python-brace-format
 msgid "Drafts kept only on {relay} won’t be shown any more."
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:367
+#: nostr/ui/draft_relays_sheet.py:389
 msgid "Saving. Approve the request in your signer app if it asks…"
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:360
+#: nostr/ui/draft_relays_sheet.py:382
 #, python-brace-format
 msgid "Moving {count} draft…"
 msgid_plural "Moving {count} drafts…"

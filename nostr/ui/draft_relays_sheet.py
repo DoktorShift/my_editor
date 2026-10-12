@@ -108,6 +108,8 @@ class DraftRelaysSheet(AssistantWindow):
         super().__init__(_("Draft Relays"), is_dark=is_dark, min_width=480, parent=parent)
         self.setWindowModality(Qt.WindowModality.WindowModal)
         self._relays = relays
+        # A move in the background may clear a relay still looked at.
+        relays.left_behind_changed.connect(self._show_relays_left_behind)
         self._read: List[str] = []        # the account's list, as last read
         self._state = READING
         self._list_saving = False     # the save reached the list's own change
@@ -305,6 +307,8 @@ class DraftRelaysSheet(AssistantWindow):
     # -- relays left behind ----------------------------------------------------
 
     def _show_relays_left_behind(self) -> None:
+        if not hasattr(self, "_left_list"):
+            return                      # still being built
         self._left_list.clear()
         for relay in self._relays.drafts_left_behind():
             item = QListWidgetItem(relay)
@@ -326,8 +330,10 @@ class DraftRelaysSheet(AssistantWindow):
         if self._state != EDITING or item is None or not item.isSelected():
             return
         relay = item.text()
+        # The address in the message, where it wraps as a whole; the title
+        # stays a short question.
         if confirm_destructive(
-                self, title=_("Stop looking for drafts on {relay}?").format(relay=relay),
+                self, title=_("Stop looking for drafts on this relay?"),
                 message=_("Drafts kept only on {relay} won’t be shown any more.").format(
                     relay=relay),
                 action=_("Stop Looking"), is_dark=self._is_dark):

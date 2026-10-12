@@ -23,7 +23,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtCore import QObject, Qt, Signal  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
@@ -65,13 +65,16 @@ def list_failed(status, cause, event=None):
     return SaveOutcome(MoveOutcome(), WriteOutcome(status, event=event, cause=cause))
 
 
-class Lists:
+class Lists(QObject):
     """Stands in for PrivateDraftRelays: answers reads, and answers saves
     at once, or with ``answer=None`` keeps one under way until ``finish``
     (``step`` reports its progress). It holds the sheet's callbacks only
     while a save is under way, as the real one does."""
 
+    left_behind_changed = Signal()
+
     def __init__(self, relays=(), *, readable=True, answer=SAVED, failure=UNREACHABLE):
+        super().__init__()
         self.relays = list(relays)
         self.readable = readable
         self.failure = failure
@@ -460,7 +463,7 @@ def test_relays_still_looked_at_are_listed_and_one_can_be_let_go(monkeypatch):
     assert unnamed_controls(sheet) == []
     sheet._left_list.setCurrentRow(0)
     sheet._stop_looking.click()                                 # Cancel, the default
-    assert asked == [(f"Stop looking for drafts on {gone}?",
+    assert asked == [("Stop looking for drafts on this relay?",
                       f"Drafts kept only on {gone} won’t be shown any more.", "Stop Looking")]
     assert lists.left_behind == [gone]
     sheet._left_list.setCurrentRow(0)
@@ -500,3 +503,15 @@ def test_a_long_address_still_looked_at_is_shortened_in_the_middle_not_hidden():
     assert view.viewport().height() >= view.sizeHintForRow(0)        # the row whole
     item = view.item(0)
     assert item.toolTip() == long and item.data(Qt.ItemDataRole.AccessibleTextRole) == long
+
+
+def test_the_relays_still_looked_at_follow_a_move_in_the_background():
+    # Review round 3, note: a relay cleared by a background move stayed listed.
+    lists = Lists([MINE])
+    lists.left_behind = ["wss://old.example"]
+    sheet, _saved = open_sheet(lists)
+    assert sheet._left_list.count() == 1
+    lists.left_behind = []
+    lists.left_behind_changed.emit()                        # its drafts moved
+    assert sheet._left_list.count() == 0 and not sheet._left.isVisibleTo(sheet)
+

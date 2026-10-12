@@ -28,7 +28,7 @@ SCRIPT = r"""
 import json, os, sys
 sys.path.insert(0, sys.argv[1])
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import QApplication
 from shiboken6 import isValid
 app = QApplication(sys.argv[:1])
@@ -44,11 +44,13 @@ from nostr.ui.draft_relays_sheet import DraftRelaysSheet
 from tests.accessibility import unnamed_controls
 
 
-class Lists:
+class Lists(QObject):
     # Stands in for PrivateDraftRelays: no relay is asked.
     made = []
+    left_behind_changed = Signal()
 
     def __init__(self, **deps):
+        super().__init__()
         Lists.made.append(deps)
         self.last_failure = None
 
@@ -61,8 +63,6 @@ class Lists:
     def drafts_left_behind(self):
         return []
 
-    def setParent(self, parent):
-        self.parent = parent
 
 
 main_window.PrivateDraftRelays = Lists
