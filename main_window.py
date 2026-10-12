@@ -5542,9 +5542,10 @@ class MainWindow(QMainWindow):
         words are never hidden behind the published ones."""
         if not item.is_article:
             return
+        author = str(item.event.get("pubkey") or "").lower()
         for i in range(self.tabs.count()):
             ed = self._editor_from_widget(self.tabs.widget(i))
-            if ed is not None and self._edits_article(ed, item.identifier):
+            if ed is not None and self._edits_article(ed, item.identifier, author):
                 self.tabs.setCurrentIndex(i)
                 return
         draft = self._draft_of_published(item)
@@ -5584,16 +5585,21 @@ class MainWindow(QMainWindow):
         record = self._draft_store.get(item.identifier)
         return record if record is not None and record.is_article else None
 
-    def _edits_article(self, ed, identifier: str) -> bool:
-        """Whether a tab holds the article ``identifier``: a draft of it,
-        or, with no draft, opened from the Published view. A draft decides
-        when there is one (saved under another identifier, the tab is that
-        other article now), as it does for the tab's details and name."""
+    def _edits_article(self, ed, identifier: str, author: str) -> bool:
+        """Whether a tab holds ``author``'s article ``identifier``: a draft
+        of it, or, with no draft, opened from the Published view. A draft
+        decides when there is one (saved under another identifier, the tab
+        is that other article now), as it does for the tab's details and
+        name. Another account's article of the same identifier is another
+        article."""
         binding = getattr(ed, "_draft_binding", None)
         if binding is not None:
-            return binding.inner_kind == INNER_KIND_LONG_FORM and binding.identifier == identifier
+            return (binding.inner_kind == INNER_KIND_LONG_FORM
+                    and binding.identifier == identifier
+                    and binding.profile_pubkey.lower() in ("", author))
         article = getattr(ed, "_published_article", None)
-        return article is not None and article.identifier == identifier
+        return (article is not None and article.identifier == identifier
+                and getattr(ed, "_published_author", "") == author)
 
     def _open_draft_relays(self) -> None:
         """Draft Relays…: where the account in use keeps its drafts, in a

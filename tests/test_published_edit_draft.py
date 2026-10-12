@@ -226,3 +226,74 @@ def test_a_tab_recovered_after_a_crash_keeps_its_draft_and_its_article(tmp_path)
     assert r["draft"] == ["my-draft", 30023, "My Draft", "a" * 64]
     assert r["article"] == ["my-post", 1700000000, "b" * 64]
     assert r["text"] == "Words typed before the crash."
+
+
+ACCOUNTS_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+from nostr import crypto, events
+from nostr.drafts import DraftWrapMeta
+from nostr.profiles import Profile
+from nostr.published import PublishedItem
+
+asked, answers = [], []
+
+
+def ask(parent, *, title, message="", buttons, **_kw):
+    asked.append({"title": title, "buttons": [(b.label, b.role) for b in buttons]})
+    return answers.pop(0)
+
+
+main_window.ask = ask
+w = main_window.MainWindow()
+w.show()
+app.processEvents()
+
+
+def account(name):
+    sk = crypto.generate_secret_key()
+    pk = events.sign_event({"kind": 1, "content": "", "tags": [], "created_at": 1}, sk)["pubkey"]
+    w._profile_store.upsert(Profile(user_pubkey=pk, bunker_pubkey="b" * 64, bunker_relays=[],
+                                    local_secret_hex="c" * 64, display_name=name))
+    return sk, pk
+
+
+def article(sk, text):
+    return PublishedItem(event=events.sign_event({
+        "kind": 30023, "created_at": 1_800_000_000, "content": text,
+        "tags": [["d", "my-post"], ["title", "My Post"]]}, sk), found_on=("wss://r.example",))
+
+
+def edit(item):
+    before = w.tabs.count()
+    w._published_view.open_requested.emit(item)
+    app.processEvents()
+    return {"tabs": w.tabs.count() - before, "text": w.current_editor().toPlainText()}
+
+
+alice_sk, alice = account("Alice")
+bob_sk, bob = account("Bob")
+r = {}
+# Review L3: Alice's tab is not Bob's article of the same identifier.
+w._profile_store.set_default(alice)
+r["alice"] = edit(article(alice_sk, "Alice's words."))
+w._profile_store.set_default(bob)
+r["bob"] = edit(article(bob_sk, "Bob's words."))
+
+for i in range(w.tabs.count()):
+    e = w._editor_from_widget(w.tabs.widget(i))
+    if e is not None:
+        e.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_edit_tells_accounts_apart(tmp_path):
+    r = run_window_script(ACCOUNTS_SCRIPT, tmp_path)
+    assert r["alice"] == {"tabs": 1, "text": "Alice's words."}
+    assert r["bob"] == {"tabs": 1, "text": "Bob's words."}           # his own, in a tab of its own
