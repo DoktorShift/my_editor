@@ -69,5 +69,5 @@ def test_the_window_refreshes_it_at_every_account_change():
 
 def test_the_shortcut_list_follows_it():
     from main_window import MainWindow
-    source = inspect.getsource(MainWindow._show_shortcuts)
-    assert "nostr=self.nostr_state.active" in source
+    assert "_shortcut_groups()" in inspect.getsource(MainWindow._show_shortcuts)
+    assert "nostr=self.nostr_state.active" in inspect.getsource(MainWindow._shortcut_groups)

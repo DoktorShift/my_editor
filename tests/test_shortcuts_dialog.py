@@ -85,9 +85,46 @@ def test_the_window_is_a_reference_beside_the_document_not_modal(qt_app):
     win.nostr_state = SimpleNamespace(active=False)
     win.is_dark_theme = False
     win._shortcuts_window = None
+    win._shortcut_groups = lambda: MainWindow._shortcut_groups(win)
     MainWindow._show_shortcuts(win)
     first = win._shortcuts_window
     assert first is not None and first.isVisible() and not first.isModal()
     MainWindow._show_shortcuts(win)
     assert win._shortcuts_window is first
     first.close()
+
+
+def test_an_open_window_follows_an_account_coming_and_going(qt_app):
+    # Review L4: the window kept listing the Nostr keys after Sign Out
+    # (and lacked them when opened before signing in).
+    from types import SimpleNamespace
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from test_commands import StandIn
+    from main_window import MainWindow
+    win = StandIn()
+    MainWindow._build_actions(win)
+    win.nostr_state = SimpleNamespace(active=True)
+    win.is_dark_theme = False
+    win._settings_window = None
+    win._shortcuts_window = None
+    win._shortcut_groups = lambda: MainWindow._shortcut_groups(win)
+
+    def listed():
+        return {item.action for group in win._shortcuts_window._groups
+                for item in group.items}
+
+    MainWindow._show_shortcuts(win)
+    window = win._shortcuts_window
+    window._search.setText("e")
+    with_nostr = listed()
+    win.nostr_state.active = False
+    MainWindow._on_nostr_in_use_changed(win, False)
+    without_nostr = listed()
+    assert without_nostr < with_nostr
+    assert without_nostr == {item.action for group in MainWindow._shortcut_groups(win)
+                             for item in group.items}
+    assert window._search.text() == "e"            # what was typed stays
+    win.nostr_state.active = True
+    MainWindow._on_nostr_in_use_changed(win, True)
+    assert listed() == with_nostr
+    window.close()

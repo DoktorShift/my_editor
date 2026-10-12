@@ -499,9 +499,7 @@ class ShortcutsDialog(QDialog):
         # Build every card up front; ``_reflow_cards`` decides where
         # each one sits in the two-column grid. Reflow runs on every
         # filter change so hidden cards don't leave holes in the layout.
-        for group in self._groups:
-            self._cards.append(_ShortcutCard(group))
-        self._reflow_cards()
+        self._make_cards()
 
         scroll.setWidget(inner)
         root.addWidget(scroll, 1)
@@ -540,6 +538,21 @@ class ShortcutsDialog(QDialog):
     def apply_theme(self, is_dark: bool) -> None:
         self._is_dark = is_dark
         self.setStyleSheet(_DARK_CSS if is_dark else _LIGHT_CSS)
+
+    def set_groups(self, groups) -> None:
+        """List ``groups`` instead, keeping the filter typed: the window
+        stays open while Nostr comes into use or goes out of it, and lists
+        only the keys that work."""
+        for card in self._cards:
+            self._cards_grid.removeWidget(card)
+            card.deleteLater()
+        self._groups = tuple(groups)
+        self._make_cards()
+        self._on_filter_changed(self._search.text())
+
+    def _make_cards(self) -> None:
+        self._cards = [_ShortcutCard(group) for group in self._groups]
+        self._reflow_cards()
 
     def _on_filter_changed(self, text: str) -> None:
         total_visible = 0

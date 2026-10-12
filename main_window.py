@@ -3690,18 +3690,23 @@ class MainWindow(QMainWindow):
         window, brought to the front when it is already open."""
         window = getattr(self, "_shortcuts_window", None)
         if window is None:
-            from shortcuts_dialog import OTHER_KEYS, ShortcutsDialog, groups_from
-            # Nostr shortcuts are listed once Nostr is in use; before that
-            # the editor shows nothing of it beyond the Nostr menu.
-            groups = groups_from(self.commands.shortcut_groups(
-                OTHER_KEYS, nostr=self.nostr_state.active))
-            window = ShortcutsDialog(groups, is_dark=self.is_dark_theme, parent=self)
+            from shortcuts_dialog import ShortcutsDialog
+            window = ShortcutsDialog(self._shortcut_groups(), is_dark=self.is_dark_theme,
+                                     parent=self)
             window.setAttribute(Qt.WA_DeleteOnClose, True)
             window.destroyed.connect(lambda _obj=None: setattr(self, "_shortcuts_window", None))
             self._shortcuts_window = window
         window.show()
         window.raise_()
         window.activateWindow()
+
+    def _shortcut_groups(self):
+        """The keys Help > Keyboard Shortcuts lists. Nostr shortcuts are
+        listed while an account is in use; before that the editor shows
+        nothing of it beyond the Nostr menu."""
+        from shortcuts_dialog import OTHER_KEYS, groups_from
+        return groups_from(self.commands.shortcut_groups(
+            OTHER_KEYS, nostr=self.nostr_state.active))
 
     def _show_about(self):
         answer = ask(
@@ -4789,6 +4794,8 @@ class MainWindow(QMainWindow):
             self._hide_drafts_panel()
         if getattr(self, "_settings_window", None) is not None:
             self._settings_window.refresh()
+        if getattr(self, "_shortcuts_window", None) is not None:
+            self._shortcuts_window.set_groups(self._shortcut_groups())
 
     def _say_an_account_is_needed(self) -> None:
         """For a Nostr command reached without an account in use (its menu
