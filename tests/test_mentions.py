@@ -184,7 +184,9 @@ def test_a_name_shows_on_one_line_without_hidden_characters():
     assert rich_text.mention_words("\U0001F468\u200d\U0001F469") == "@\U0001F468\u200d\U0001F469"
 
 
-@pytest.mark.parametrize("written", [f"Xnostr:{NPUB} y\n", f"see {HREF}s\n"])
+@pytest.mark.parametrize("written", [f"Xnostr:{NPUB} y\n", f"see {HREF}s\n",
+                                     f"See https://example.com/{HREF} there\n",
+                                     f"See https://example.com/?u={HREF} there\n"])
 def test_an_address_touching_a_word_or_damaged_stays_as_written(written):
     from main_window import MainWindow
     ed = editor()

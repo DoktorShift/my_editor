@@ -870,8 +870,9 @@ def remove_divider(block) -> None:
 # (NIP-27); read back, link_references gives it its name again.
 
 MENTION_HREF = re.compile(r"nostr:(?:npub|nprofile)1[02-9ac-hj-np-z]+")
-# A bare address in written text: on its own, not the end of a word.
-_REFERENCE_TEXT = re.compile(r"(?<!\w)nostr:((?:npub|nprofile)1[02-9ac-hj-np-z]+)")
+# A bare address in written text: on its own, not the end of a word or a
+# part of a web address.
+_REFERENCE_TEXT = re.compile(r"(?<![\w/=?#&:])nostr:((?:npub|nprofile)1[02-9ac-hj-np-z]+)")
 _MENTION_NAME_MAX = 64
 # The two invisible characters a name may keep: they join emoji and letters.
 _JOINERS = "\u200c\u200d"
