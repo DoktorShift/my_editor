@@ -293,6 +293,8 @@ class _EntryWindow:
     _handle_dropped_images = MainWindow._handle_dropped_images
     _handle_dropped_urls = MainWindow._handle_dropped_urls
     _confirm_paste_upload = MainWindow._confirm_paste_upload
+    _paste_choice = MainWindow._paste_choice
+    _store_paste_choice = MainWindow._store_paste_choice
     _insert_asset = MainWindow._insert_asset
 
     def __init__(self, cache_dir, *, profile=None):
@@ -443,6 +445,26 @@ def test_ask_uploads_when_the_prompt_is_answered_with_upload(tmp_path,
     assert len(win._uploader.calls) == 1
     assert remembered == [], "the box was never ticked"
     assert shown[0].checkbox == "Remember this choice"
+
+
+def test_remember_this_choice_shows_at_once_in_an_open_settings_window(tmp_path,
+                                                                      monkeypatch):
+    # Review L5: Settings stays open beside the document, and kept saying
+    # Ask Every Time after the alert had stored the answer.
+    settings = {"upload_pasted_images": "ask"}
+    monkeypatch.setattr(main_window_module, "load_settings", lambda: dict(settings))
+    monkeypatch.setattr(main_window_module, "save_setting", settings.__setitem__)
+    monkeypatch.setattr(main_window_module, "ask_with_checkbox",
+                        lambda *args, **kwargs: (True, True))     # Upload, remembered
+    win = _EntryWindow(tmp_path / "cache", profile=object())
+    win._media_store = types.SimpleNamespace(target_servers=lambda: ["https://cdn.example"])
+    shown = []
+    win._settings_window = types.SimpleNamespace(refresh=lambda: shown.append(win._paste_choice()))
+
+    win._handle_pasted_image(win.editor, _clipboard_image())
+
+    assert settings["upload_pasted_images"] == "always"
+    assert shown == ["always"]
 
 
 def test_a_failed_upload_leaves_the_image_in_the_document(tmp_path,

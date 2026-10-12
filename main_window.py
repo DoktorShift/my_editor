@@ -3673,8 +3673,8 @@ class MainWindow(QMainWindow):
                 languages=list(zip(self._language_codes, self.act_languages)),
                 choose_language=lambda code: self._choose_language(code, tell=False),
                 monospace=self.act_monospace_writing,
-                paste_choice=lambda: load_settings().get(_PASTE_UPLOAD_SETTING, "ask"),
-                choose_paste=lambda value: save_setting(_PASTE_UPLOAD_SETTING, value),
+                paste_choice=self._paste_choice,
+                choose_paste=self._store_paste_choice,
                 nostr_in_use=lambda: self.nostr_state.active,
                 is_dark=self.is_dark_theme, parent=self)
             window.setAttribute(Qt.WA_DeleteOnClose, True)
@@ -5528,7 +5528,7 @@ class MainWindow(QMainWindow):
         if asset.is_uploaded or self._profile_store.default() is None:
             return          # nothing of Nostr without an account
 
-        choice = load_settings().get(_PASTE_UPLOAD_SETTING, "ask")
+        choice = self._paste_choice()
         if choice == "never":
             return
         if choice != "always" and not self._confirm_paste_upload():
@@ -5559,8 +5559,20 @@ class MainWindow(QMainWindow):
             buttons=(Button(_("Upload"), True, NORMAL), Button(_("Keep Local"), False, DEFAULT)),
             checkbox=_("Remember this choice"))
         if remember:
-            save_setting(_PASTE_UPLOAD_SETTING, "always" if upload else "never")
+            self._store_paste_choice("always" if upload else "never")
         return upload
+
+    def _paste_choice(self) -> str:
+        """What a pasted image does while an account is in use: "ask",
+        "always" (upload) or "never"."""
+        return load_settings().get(_PASTE_UPLOAD_SETTING, "ask")
+
+    def _store_paste_choice(self, value: str) -> None:
+        """The one place the choice is stored, from Settings or from the
+        alert's Remember This Choice; an open Settings window shows it."""
+        save_setting(_PASTE_UPLOAD_SETTING, value)
+        if getattr(self, "_settings_window", None) is not None:
+            self._settings_window.refresh()
 
     # ----------------------------------------------------------------------
     # NOSTR - drafts panel toggling
