@@ -244,7 +244,8 @@ asked, answers = [], []
 
 
 def ask(parent, *, title, message="", buttons, **_kw):
-    asked.append({"title": title, "buttons": [(b.label, b.role) for b in buttons]})
+    asked.append({"title": title, "message": message,
+                  "buttons": [(b.label, b.role) for b in buttons]})
     return answers.pop(0)
 
 
@@ -300,6 +301,16 @@ r["not_ready_cancel"] = edit(article(bob_sk, "Bob's words."))["tabs"]
 r["not_ready_question"] = asked[-1]
 answers.append("published")
 r["not_ready_published"] = edit(article(bob_sk, "Bob's words."))
+# One that failed to decrypt: waiting changes nothing, a retry does (L12).
+for i in range(w.tabs.count() - 1, -1, -1):
+    e = w._editor_from_widget(w.tabs.widget(i))
+    if e is not None and getattr(e, "_published_author", "") == bob:
+        e.document().setModified(False)
+        w.tabs.removeTab(i)
+store.set_failed("my-post", "declined")
+answers.append(None)
+edit(article(bob_sk, "Bob's words."))
+r["failed_question"] = asked[-1]
 
 for i in range(w.tabs.count()):
     e = w._editor_from_widget(w.tabs.widget(i))
@@ -316,6 +327,12 @@ def test_edit_tells_accounts_apart_and_waits_for_a_draft_not_decrypted_yet(tmp_p
     assert r["bob"] == {"tabs": 1, "text": "Bob's words."}           # his own, in a tab of its own
     assert r["not_ready_question"] == {
         "title": "This article has a draft that can’t be shown yet.",
+        "message": "The draft is still being decrypted. Choose Edit again once its title "
+                   "shows in the Drafts panel, or open the version that is published now.",
         "buttons": [["Open Published Version", "normal"], ["Cancel", "default"]]}
+    assert r["failed_question"]["message"] == (
+        "The draft couldn’t be decrypted. Double-click it in the Drafts panel to try again, "
+        "or open the version that is published now.")
+    assert r["failed_question"]["buttons"] == r["not_ready_question"]["buttons"]
     assert r["not_ready_cancel"] == 0
     assert r["not_ready_published"] == {"tabs": 1, "text": "Bob's words."}

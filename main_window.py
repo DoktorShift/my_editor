@@ -5584,8 +5584,11 @@ class MainWindow(QMainWindow):
                 # nothing to open as the draft.
                 choice = ask(
                     self, title=_("This article has a draft that can’t be shown yet."),
-                    message=_("Choose Edit again once the draft appears in the Drafts panel, "
-                              "or open the version that is published now."),
+                    message=_("The draft couldn’t be decrypted. Double-click it in the Drafts "
+                              "panel to try again, or open the version that is published now.")
+                    if draft.state is DraftState.FAILED else
+                    _("The draft is still being decrypted. Choose Edit again once its title "
+                      "shows in the Drafts panel, or open the version that is published now."),
                     buttons=(Button(_("Open Published Version"), "published", NORMAL),
                              Button(_("Cancel"), None, DEFAULT)))
             elif draft.content == str(item.event.get("content") or ""):
