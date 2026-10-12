@@ -24,7 +24,7 @@ msgstr ""
 #: alerts.py:275
 #: link_popover.py:100
 #: main_window.py:3104
-#: main_window.py:7135
+#: main_window.py:7164
 #: main_window.py:263
 #: main_window.py:2977
 #: main_window.py:5563
@@ -571,21 +571,15 @@ msgstr ""
 msgid "Delete"
 msgstr ""
 
-#: main_window.py:6475
-msgid "A blank-content replacement will be published to your relays. Other clients (and your other devices) will treat the draft as removed. This action can't be undone."
-msgid_plural "A blank-content replacement will be published to your relays. Other clients (and your other devices) will treat them as removed. This action can't be undone."
-msgstr[0] ""
-msgstr[1] ""
-
-#: main_window.py:6615
+#: main_window.py:6644
 msgid "No drafts were deleted"
 msgstr ""
 
-#: main_window.py:7060
+#: main_window.py:7089
 msgid "Already saving this draft - wait for it to finish."
 msgstr ""
 
-#: main_window.py:7123
+#: main_window.py:7152
 msgid "(unknown profile)"
 msgstr ""
 
@@ -1159,23 +1153,35 @@ msgstr ""
 msgid "Delete “this draft” from your Nostr drafts?"
 msgstr ""
 
-#: main_window.py:6543
+#: main_window.py:6481
+msgid "A blank-content replacement will be published to your relays. Other clients (and your other devices) will treat the draft as removed. This action can't be undone."
+msgid_plural "A blank-content replacement will be published to your relays. Other clients (and your other devices) will treat them as removed. This action can't be undone."
+msgstr[0] ""
+msgstr[1] ""
+
+#: main_window.py:6489
+msgid "A draft whose slug holds a secret key is deleted by a request instead, which doesn't send the key again. Your other devices, and apps that follow such requests, will treat it as removed. This action can't be undone."
+msgid_plural "Drafts whose slugs hold a secret key are deleted by a request each instead, which doesn't send the keys again. Your other devices, and apps that follow such requests, will treat them as removed. This action can't be undone."
+msgstr[0] ""
+msgstr[1] ""
+
+#: main_window.py:6561
 msgid "Deleting drafts…"
 msgstr ""
 
-#: main_window.py:6543
+#: main_window.py:6561
 msgid "Stop"
 msgstr ""
 
-#: main_window.py:6544
+#: main_window.py:6562
 msgid "Deleting drafts"
 msgstr ""
 
-#: main_window.py:6638
+#: main_window.py:6667
 msgid "Your signer is not responding. Open your signer app and make sure it is running."
 msgstr ""
 
-#: main_window.py:7141
+#: main_window.py:7170
 msgid "Saving under the current profile would create a separate draft. How would you like to handle it?"
 msgstr ""
 
@@ -1471,28 +1477,28 @@ msgid_plural "Delete {count} Drafts"
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:6498
+#: main_window.py:6516
 msgid "An imported draft takes a second request, which tells other apps it is gone."
 msgid_plural "Imported drafts take a second request each, which tells other apps they are gone."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:6611
+#: main_window.py:6640
 #, python-brace-format
 msgid "{deleted} of {total} draft deleted"
 msgid_plural "{deleted} of {total} drafts deleted"
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:6850
+#: main_window.py:6879
 msgid "Nothing to save as a draft"
 msgstr ""
 
-#: main_window.py:6851
+#: main_window.py:6880
 msgid "The current document is empty. Add some content first."
 msgstr ""
 
-#: main_window.py:6863
+#: main_window.py:6892
 msgid "This draft is too large"
 msgstr ""
 
@@ -1968,51 +1974,51 @@ msgstr[1] ""
 msgid "Delete “{name}” from your Nostr drafts?"
 msgstr ""
 
-#: main_window.py:6491
+#: main_window.py:6509
 #, python-brace-format
 msgid "Your signer will ask you to approve each one, so expect {count} request. You can stop partway through."
 msgid_plural "Your signer will ask you to approve each one, so expect {count} requests. You can stop partway through."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:6505
+#: main_window.py:6523
 #, python-brace-format
 msgid "{count} draft from another Nostr client is not included, and will be left alone."
 msgid_plural "{count} drafts from another Nostr client are not included, and will be left alone."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:6531
+#: main_window.py:6549
 msgid "Couldn't start the deletion"
 msgstr ""
 
-#: main_window.py:6602
+#: main_window.py:6631
 msgid "Draft deleted."
 msgid_plural "{count} drafts deleted."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:6619
+#: main_window.py:6648
 #, python-brace-format
 msgid "{count} could not be removed and is still on your relays. You can try again."
 msgid_plural "{count} could not be removed and are still on your relays. You can try again."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:6859
-#: main_window.py:6990
+#: main_window.py:6888
+#: main_window.py:7019
 msgid "Couldn't prepare the draft"
 msgstr ""
 
-#: main_window.py:6860
+#: main_window.py:6889
 msgid "Its contents could not be prepared for encryption."
 msgstr ""
 
-#: main_window.py:6887
+#: main_window.py:6916
 msgid "Couldn't save the draft"
 msgstr ""
 
-#: main_window.py:7138
+#: main_window.py:7167
 #, python-brace-format
 msgid "This draft was last saved as {original}, but you're signed in as {active}"
 msgstr ""
@@ -2043,36 +2049,36 @@ msgstr ""
 msgid "Couldn't open “{name}”"
 msgstr ""
 
-#: main_window.py:6514
+#: main_window.py:6532
 msgid "Not included:"
 msgstr ""
 
-#: main_window.py:6554
+#: main_window.py:6572
 #, python-brace-format
 msgid "Deleting draft {current} of {total}…"
 msgstr ""
 
-#: main_window.py:6698
+#: main_window.py:6727
 #: main_window.py:3141
 msgid "That profile isn't connected anymore"
 msgstr ""
 
-#: main_window.py:6699
+#: main_window.py:6728
 #: main_window.py:3142
 msgid "Pair it again from Nostr > Connect Signer to save here."
 msgstr ""
 
-#: main_window.py:6864
+#: main_window.py:6893
 #, python-brace-format
 msgid "It has {size} bytes, and NIP-44 encryption allows {limit}. Split it into smaller drafts or publish it directly."
 msgstr ""
 
-#: main_window.py:7130
+#: main_window.py:7159
 #, python-brace-format
 msgid "Switch to {name} and Save"
 msgstr ""
 
-#: main_window.py:7133
+#: main_window.py:7162
 #, python-brace-format
 msgid "Save a Copy as {name}"
 msgstr ""
@@ -2111,7 +2117,7 @@ msgstr ""
 msgid "{error} Check that it's turned on and connected, then try again."
 msgstr ""
 
-#: main_window.py:6532
+#: main_window.py:6550
 #, python-brace-format
 msgid ""
 "These drafts can't be removed from here.\n"
@@ -3860,23 +3866,23 @@ msgstr ""
 msgid "Could not encrypt draft: {reason}"
 msgstr ""
 
-#: nostr/refs.py:259
+#: nostr/refs.py:260
 msgid "It contains a secret key, and MyEditor never signs anything with a secret key in it. Remove the key and try again."
 msgstr ""
 
-#: nostr/refs.py:109
+#: nostr/refs.py:110
 msgid "Paste a link to a note or an article."
 msgstr ""
 
-#: nostr/refs.py:112
+#: nostr/refs.py:113
 msgid "That is not a link to a note or an article on Nostr."
 msgstr ""
 
-#: nostr/refs.py:115
+#: nostr/refs.py:116
 msgid "That link is damaged: a part of it is missing or mistyped."
 msgstr ""
 
-#: nostr/refs.py:117
+#: nostr/refs.py:118
 msgid "That is a link to a person. To mention someone, type @ and their name."
 msgstr ""
 

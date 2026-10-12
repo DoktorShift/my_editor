@@ -133,6 +133,14 @@ class DraftDeletions(QObject):
         if self._profile is None:
             return
         event_id = str(event.get("id", ""))
-        for identifier, when in deleted_identifiers(event, self._profile.user_pubkey).items():
+        deleted = deleted_identifiers(event, self._profile.user_pubkey)
+        # A draft whose slug holds a secret key is deleted by a request that
+        # names its wrap's id alone (DraftDeleteJob): known by that id here.
+        request = read_deletion(event, self._profile.user_pubkey)
+        if request is not None and request.event_ids:
+            for record in self._store.all():
+                if record.event_id in request.event_ids:
+                    deleted.setdefault(record.identifier, request.created_at)
+        for identifier, when in deleted.items():
             if self._store.apply_deletion(identifier, when, event_id, request=True):
                 self.removed.emit(identifier)

@@ -24,7 +24,7 @@ msgstr "Details ausblenden"
 #: alerts.py:275
 #: link_popover.py:100
 #: main_window.py:3104
-#: main_window.py:7135
+#: main_window.py:7164
 #: main_window.py:263
 #: main_window.py:2977
 #: main_window.py:5563
@@ -571,21 +571,15 @@ msgstr "Neuer Versuch zum Entschlüsseln. Bestätige ihn in deiner Signer-App �
 msgid "Delete"
 msgstr "Löschen"
 
-#: main_window.py:6475
-msgid "A blank-content replacement will be published to your relays. Other clients (and your other devices) will treat the draft as removed. This action can't be undone."
-msgid_plural "A blank-content replacement will be published to your relays. Other clients (and your other devices) will treat them as removed. This action can't be undone."
-msgstr[0] "Auf deinen Relays wird ein leerer Ersatz veröffentlicht. Andere Apps (und deine anderen Geräte) behandeln den Entwurf dann als gelöscht. Das lässt sich nicht rückgängig machen."
-msgstr[1] "Auf deinen Relays wird ein leerer Ersatz veröffentlicht. Andere Apps (und deine anderen Geräte) behandeln die Entwürfe dann als gelöscht. Das lässt sich nicht rückgängig machen."
-
-#: main_window.py:6615
+#: main_window.py:6644
 msgid "No drafts were deleted"
 msgstr "Es wurden keine Entwürfe gelöscht"
 
-#: main_window.py:7060
+#: main_window.py:7089
 msgid "Already saving this draft - wait for it to finish."
 msgstr "Dieser Entwurf wird schon gespeichert. Warte, bis das fertig ist."
 
-#: main_window.py:7123
+#: main_window.py:7152
 msgid "(unknown profile)"
 msgstr "(unbekanntes Profil)"
 
@@ -1164,23 +1158,35 @@ msgstr ""
 msgid "Delete “this draft” from your Nostr drafts?"
 msgstr "Diesen Entwurf aus deinen Nostr-Entwürfen löschen?"
 
-#: main_window.py:6543
+#: main_window.py:6481
+msgid "A blank-content replacement will be published to your relays. Other clients (and your other devices) will treat the draft as removed. This action can't be undone."
+msgid_plural "A blank-content replacement will be published to your relays. Other clients (and your other devices) will treat them as removed. This action can't be undone."
+msgstr[0] "Auf deinen Relays wird ein leerer Ersatz veröffentlicht. Andere Apps (und deine anderen Geräte) behandeln den Entwurf dann als gelöscht. Das lässt sich nicht rückgängig machen."
+msgstr[1] "Auf deinen Relays wird ein leerer Ersatz veröffentlicht. Andere Apps (und deine anderen Geräte) behandeln die Entwürfe dann als gelöscht. Das lässt sich nicht rückgängig machen."
+
+#: main_window.py:6489
+msgid "A draft whose slug holds a secret key is deleted by a request instead, which doesn't send the key again. Your other devices, and apps that follow such requests, will treat it as removed. This action can't be undone."
+msgid_plural "Drafts whose slugs hold a secret key are deleted by a request each instead, which doesn't send the keys again. Your other devices, and apps that follow such requests, will treat them as removed. This action can't be undone."
+msgstr[0] "Ein Entwurf, in dessen Slug ein geheimer Schlüssel steht, wird stattdessen mit einer Anfrage gelöscht, die den Schlüssel nicht noch einmal sendet. Deine anderen Geräte und Apps, die solche Anfragen beachten, behandeln ihn dann als gelöscht. Das lässt sich nicht rückgängig machen."
+msgstr[1] "Entwürfe, in deren Slug ein geheimer Schlüssel steht, werden stattdessen mit je einer Anfrage gelöscht, die die Schlüssel nicht noch einmal sendet. Deine anderen Geräte und Apps, die solche Anfragen beachten, behandeln sie dann als gelöscht. Das lässt sich nicht rückgängig machen."
+
+#: main_window.py:6561
 msgid "Deleting drafts…"
 msgstr "Entwürfe werden gelöscht …"
 
-#: main_window.py:6543
+#: main_window.py:6561
 msgid "Stop"
 msgstr "Stoppen"
 
-#: main_window.py:6544
+#: main_window.py:6562
 msgid "Deleting drafts"
 msgstr "Entwürfe werden gelöscht"
 
-#: main_window.py:6638
+#: main_window.py:6667
 msgid "Your signer is not responding. Open your signer app and make sure it is running."
 msgstr "Dein Signer antwortet nicht. Öffne deine Signer-App und prüfe, ob sie läuft."
 
-#: main_window.py:7141
+#: main_window.py:7170
 msgid "Saving under the current profile would create a separate draft. How would you like to handle it?"
 msgstr "Wenn du unter dem aktuellen Profil speicherst, entsteht ein eigener Entwurf. Wie möchtest du vorgehen?"
 
@@ -1478,28 +1484,28 @@ msgid_plural "Delete {count} Drafts"
 msgstr[0] "{count} Entwurf löschen"
 msgstr[1] "{count} Entwürfe löschen"
 
-#: main_window.py:6498
+#: main_window.py:6516
 msgid "An imported draft takes a second request, which tells other apps it is gone."
 msgid_plural "Imported drafts take a second request each, which tells other apps they are gone."
 msgstr[0] "Ein importierter Entwurf braucht eine zweite Anfrage, die anderen Apps sagt, dass er gelöscht ist."
 msgstr[1] "Importierte Entwürfe brauchen je eine zweite Anfrage, die anderen Apps sagt, dass sie gelöscht sind."
 
-#: main_window.py:6611
+#: main_window.py:6640
 #, python-brace-format
 msgid "{deleted} of {total} draft deleted"
 msgid_plural "{deleted} of {total} drafts deleted"
 msgstr[0] "{deleted} von {total} Entwurf gelöscht"
 msgstr[1] "{deleted} von {total} Entwürfen gelöscht"
 
-#: main_window.py:6850
+#: main_window.py:6879
 msgid "Nothing to save as a draft"
 msgstr "Nichts als Entwurf zu speichern"
 
-#: main_window.py:6851
+#: main_window.py:6880
 msgid "The current document is empty. Add some content first."
 msgstr "Das aktuelle Dokument ist leer. Füge zuerst Inhalt hinzu."
 
-#: main_window.py:6863
+#: main_window.py:6892
 msgid "This draft is too large"
 msgstr "Dieser Entwurf ist zu groß"
 
@@ -1978,51 +1984,51 @@ msgstr[1] "Diese {count} Entwürfe wurden mit anderen Nostr-Apps erstellt"
 msgid "Delete “{name}” from your Nostr drafts?"
 msgstr "„{name}“ aus deinen Nostr-Entwürfen löschen?"
 
-#: main_window.py:6491
+#: main_window.py:6509
 #, python-brace-format
 msgid "Your signer will ask you to approve each one, so expect {count} request. You can stop partway through."
 msgid_plural "Your signer will ask you to approve each one, so expect {count} requests. You can stop partway through."
 msgstr[0] "Deine Signer-App fragt bei jedem einzeln nach, rechne also mit {count} Anfrage. Du kannst zwischendurch aufhören."
 msgstr[1] "Deine Signer-App fragt bei jedem einzeln nach, rechne also mit {count} Anfragen. Du kannst zwischendurch aufhören."
 
-#: main_window.py:6505
+#: main_window.py:6523
 #, python-brace-format
 msgid "{count} draft from another Nostr client is not included, and will be left alone."
 msgid_plural "{count} drafts from another Nostr client are not included, and will be left alone."
 msgstr[0] "{count} Entwurf aus einer anderen Nostr-App ist nicht dabei und bleibt unverändert."
 msgstr[1] "{count} Entwürfe aus einer anderen Nostr-App sind nicht dabei und bleiben unverändert."
 
-#: main_window.py:6531
+#: main_window.py:6549
 msgid "Couldn't start the deletion"
 msgstr "Das Löschen konnte nicht gestartet werden"
 
-#: main_window.py:6602
+#: main_window.py:6631
 msgid "Draft deleted."
 msgid_plural "{count} drafts deleted."
 msgstr[0] "Entwurf gelöscht."
 msgstr[1] "{count} Entwürfe gelöscht."
 
-#: main_window.py:6619
+#: main_window.py:6648
 #, python-brace-format
 msgid "{count} could not be removed and is still on your relays. You can try again."
 msgid_plural "{count} could not be removed and are still on your relays. You can try again."
 msgstr[0] "{count} konnte nicht entfernt werden und ist noch auf deinen Relays. Du kannst es erneut versuchen."
 msgstr[1] "{count} konnten nicht entfernt werden und sind noch auf deinen Relays. Du kannst es erneut versuchen."
 
-#: main_window.py:6859
-#: main_window.py:6990
+#: main_window.py:6888
+#: main_window.py:7019
 msgid "Couldn't prepare the draft"
 msgstr "Der Entwurf konnte nicht vorbereitet werden"
 
-#: main_window.py:6860
+#: main_window.py:6889
 msgid "Its contents could not be prepared for encryption."
 msgstr "Sein Inhalt konnte nicht für die Verschlüsselung vorbereitet werden."
 
-#: main_window.py:6887
+#: main_window.py:6916
 msgid "Couldn't save the draft"
 msgstr "Der Entwurf konnte nicht gespeichert werden"
 
-#: main_window.py:7138
+#: main_window.py:7167
 #, python-brace-format
 msgid "This draft was last saved as {original}, but you're signed in as {active}"
 msgstr "Dieser Entwurf wurde zuletzt als {original} gespeichert, aber du bist als {active} angemeldet"
@@ -2053,36 +2059,36 @@ msgstr "„{name}“ gibt es bereits"
 msgid "Couldn't open “{name}”"
 msgstr "„{name}“ konnte nicht geöffnet werden"
 
-#: main_window.py:6514
+#: main_window.py:6532
 msgid "Not included:"
 msgstr "Nicht dabei:"
 
-#: main_window.py:6554
+#: main_window.py:6572
 #, python-brace-format
 msgid "Deleting draft {current} of {total}…"
 msgstr "Entwurf {current} von {total} wird gelöscht …"
 
-#: main_window.py:6698
+#: main_window.py:6727
 #: main_window.py:3141
 msgid "That profile isn't connected anymore"
 msgstr "Dieses Profil ist nicht mehr verbunden"
 
-#: main_window.py:6699
+#: main_window.py:6728
 #: main_window.py:3142
 msgid "Pair it again from Nostr > Connect Signer to save here."
 msgstr "Verbinde es erneut unter Nostr > Signer verbinden, um hier zu speichern."
 
-#: main_window.py:6864
+#: main_window.py:6893
 #, python-brace-format
 msgid "It has {size} bytes, and NIP-44 encryption allows {limit}. Split it into smaller drafts or publish it directly."
 msgstr "Er hat {size} Bytes, die Verschlüsselung erlaubt höchstens {limit}. Teile ihn in kleinere Entwürfe auf oder veröffentliche ihn direkt."
 
-#: main_window.py:7130
+#: main_window.py:7159
 #, python-brace-format
 msgid "Switch to {name} and Save"
 msgstr "Zu {name} wechseln und speichern"
 
-#: main_window.py:7133
+#: main_window.py:7162
 #, python-brace-format
 msgid "Save a Copy as {name}"
 msgstr "Kopie als {name} speichern"
@@ -2121,7 +2127,7 @@ msgstr "„{name}“ konnte nicht neu geladen werden"
 msgid "{error} Check that it's turned on and connected, then try again."
 msgstr "{error} Prüfe, ob der Drucker eingeschaltet und verbunden ist, und versuche es dann erneut."
 
-#: main_window.py:6532
+#: main_window.py:6550
 #, python-brace-format
 msgid ""
 "These drafts can't be removed from here.\n"
@@ -3875,23 +3881,23 @@ msgstr "Der Entwurf konnte nicht verpackt werden: {reason}"
 msgid "Could not encrypt draft: {reason}"
 msgstr "Der Entwurf konnte nicht verschlüsselt werden: {reason}"
 
-#: nostr/refs.py:259
+#: nostr/refs.py:260
 msgid "It contains a secret key, and MyEditor never signs anything with a secret key in it. Remove the key and try again."
 msgstr "Darin steht ein geheimer Schlüssel, und MyEditor signiert nie etwas, in dem ein geheimer Schlüssel steht. Entferne den Schlüssel und versuche es noch einmal."
 
-#: nostr/refs.py:109
+#: nostr/refs.py:110
 msgid "Paste a link to a note or an article."
 msgstr "Füge einen Link zu einer Notiz oder einem Artikel ein."
 
-#: nostr/refs.py:112
+#: nostr/refs.py:113
 msgid "That is not a link to a note or an article on Nostr."
 msgstr "Das ist kein Link zu einer Notiz oder einem Artikel auf Nostr."
 
-#: nostr/refs.py:115
+#: nostr/refs.py:116
 msgid "That link is damaged: a part of it is missing or mistyped."
 msgstr "Dieser Link ist beschädigt: Ein Teil fehlt oder ist falsch geschrieben."
 
-#: nostr/refs.py:117
+#: nostr/refs.py:118
 msgid "That is a link to a person. To mention someone, type @ and their name."
 msgstr "Das ist ein Link zu einer Person. Um jemanden zu erwähnen, tippe @ und den Namen."
 

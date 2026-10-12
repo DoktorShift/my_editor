@@ -6472,18 +6472,36 @@ class MainWindow(QMainWindow):
             action = ngettext("Delete {count} Draft", "Delete {count} Drafts",
                               count).format(count=count)
 
-        lines = [ngettext(
-            "A blank-content replacement will be published to your relays. "
-            "Other clients (and your other devices) will treat the draft as removed. "
-            "This action can't be undone.",
-            "A blank-content replacement will be published to your relays. "
-            "Other clients (and your other devices) will treat them as removed. "
-            "This action can't be undone.", count)]
+        # A draft whose slug holds a secret key is deleted by a request, not
+        # by a replacement (DraftDeleteJob), so the key isn't sent again.
+        keyed = sum(1 for identifier, _kind in deletable if refs.secret_keys_in(identifier))
+        replaced = count - keyed
+        lines = []
+        if replaced:
+            lines.append(ngettext(
+                "A blank-content replacement will be published to your relays. "
+                "Other clients (and your other devices) will treat the draft as removed. "
+                "This action can't be undone.",
+                "A blank-content replacement will be published to your relays. "
+                "Other clients (and your other devices) will treat them as removed. "
+                "This action can't be undone.", replaced))
+        if keyed:
+            lines.append(ngettext(
+                "A draft whose slug holds a secret key is deleted by a request instead, "
+                "which doesn't send the key again. Your other devices, and apps that "
+                "follow such requests, will treat it as removed. This action can't be "
+                "undone.",
+                "Drafts whose slugs hold a secret key are deleted by a request each "
+                "instead, which doesn't send the keys again. Your other devices, and apps "
+                "that follow such requests, will treat them as removed. This action can't "
+                "be undone.", keyed))
         # Said before the first prompt appears rather than discovered at
         # the fourth: each deletion is separately signed, and an imported
         # draft's takes a second request that tells other apps it is gone
         # (engine review M7), so this is a row of approvals on the phone.
-        imported = len(self._imported_draft_wraps(deletable))
+        # (A keyed draft's one request is its deletion: no second one.)
+        imported = sum(1 for identifier in self._imported_draft_wraps(deletable)
+                       if not refs.secret_keys_in(identifier))
         requests = count + imported
         profile = self._profile_store.default()
         signs_here = profile is not None and getattr(profile, "is_local", False)
@@ -6556,7 +6574,7 @@ class MainWindow(QMainWindow):
                 progress.setValue(done)
 
         job.progress.connect(on_progress)
-        job.tombstoned.connect(lambda d, _eid: self._draft_store.remove(d))
+        job.tombstoned.connect(self._draft_deleted_here)
         job.finished.connect(
             lambda deleted, failures: self._on_draft_deletion_finished(
                 deleted, failures, total, progress,
@@ -6579,6 +6597,17 @@ class MainWindow(QMainWindow):
                     tag and tag[0] == IMPORT_SOURCE_TAG for tag in record.inner_tags):
                 found[identifier] = record.event_id
         return found
+
+    def _draft_deleted_here(self, identifier: str, event_id: str) -> None:
+        """A draft this device deleted leaves the list. One whose slug holds
+        a secret key was deleted by a request naming its wrap, with no
+        replacement a relay's old copy would lose to: its deletion is
+        remembered as a request's, so that copy can't bring it back."""
+        if refs.secret_keys_in(identifier):
+            self._draft_store.apply_deletion(identifier, int(time.time()), event_id,
+                                             request=True)
+        else:
+            self._draft_store.remove(identifier)
 
     def _draft_wraps_to_name(self, deletable: List[Tuple[str, int]]) -> dict:
         """``{d: wrap id}`` for the drafts whose deletion names their wrap:
