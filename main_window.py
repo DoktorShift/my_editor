@@ -1563,6 +1563,13 @@ class MainWindow(QMainWindow):
             Command("nostr.drafts", _("Drafts…"), NOSTR, "Ctrl+Shift+D", checkable=True,
                     nostr=True, listed_as=_("Toggle Drafts panel")),
             triggered=self._on_toggle_drafts_panel)
+        # Where the account keeps its drafts: a sheet on this window. In the
+        # menu bar, where every command of the app is listed, and in the
+        # Drafts panel's action menu.
+        self.act_draft_relays = add(
+            Command("nostr.draft_relays", _("Draft Relays…"), NOSTR, nostr=True,
+                    keywords=("drafts", "private", "relays")),
+            triggered=self._open_draft_relays)
         # Imports: the window of sources, their posts and the open one. No
         # shortcut: no platform has a convention for it.
         self.act_nostr_imports = add(
@@ -1735,6 +1742,7 @@ class MainWindow(QMainWindow):
         m_nostr.addAction(self.act_nostr_insert_image)
         m_nostr.addSeparator()
         m_nostr.addAction(self.act_nostr_drafts)
+        m_nostr.addAction(self.act_draft_relays)
         m_nostr.addAction(self.act_nostr_imports)
         m_nostr.addSeparator()
         m_nostr.addAction(self.act_membership)
@@ -4672,6 +4680,10 @@ class MainWindow(QMainWindow):
             action = getattr(self, name, None)
             if action is not None:
                 action.setEnabled(current is not None and current.is_local)
+        draft_relays = getattr(self, "act_draft_relays", None)
+        if draft_relays is not None:
+            # Where drafts are kept is the account's: nothing to set without one.
+            draft_relays.setEnabled(current is not None)
 
     # -- creating, restoring and backing up accounts ---------------------------
     # The windows and the network work behind them are the account

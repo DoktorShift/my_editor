@@ -191,12 +191,12 @@ def test_panel_carries_no_second_profile_control():
     assert not hasattr(panel, "_refresh_profile_chip")
     assert not hasattr(DraftsPanel, "switch_profile_requested")
     assert not hasattr(panel, "set_avatar_store")
-    # Only the refresh and close buttons remain in the header.
+    # Only the action menu and the close button remain in the header.
     buttons = [
         b for b in panel._top_band.findChildren(QToolButton)
         if b.objectName() == "drafts_panel_icon_btn"
     ]
-    assert {b.toolTip() for b in buttons} == {"Refresh drafts", "Close drafts panel"}
+    assert {b.toolTip() for b in buttons} == {"Actions", "Close drafts panel"}
 
 
 def test_status_line_names_the_bound_account():
@@ -606,7 +606,7 @@ def test_the_selected_row_carries_a_shape_cue_not_only_a_fill():
             panel.hide()
 
 
-@pytest.mark.parametrize("control_name", ["_launcher", "_close_btn", "_refresh_btn",
+@pytest.mark.parametrize("control_name", ["_launcher", "_close_btn", "_actions_btn",
                                           "_search_edit"])
 def test_focus_is_visible_on_every_keyboard_reachable_control(control_name):
     """Measured before this change: focusing changed zero pixels.
@@ -673,7 +673,7 @@ def test_every_chrome_control_is_reachable_by_keyboard():
     panel = DraftsPanel(is_dark=True)
     panel.add_view("published", "Published", "", QWidget())
     for control in (
-        *panel._view_switch.segments, panel._view_switch.popup, panel._refresh_btn,
+        *panel._view_switch.segments, panel._view_switch.popup, panel._actions_btn,
         panel._close_btn, panel._imports_row.button, panel._imports_row.action,
         panel._search_edit, panel._list,
     ):
@@ -820,7 +820,7 @@ def test_every_icon_only_control_has_an_accessible_name():
     panel.add_view("published", "Published", "", QWidget())
     segments = panel._view_switch.segments
     names = {
-        panel._refresh_btn: "Refresh drafts",
+        panel._actions_btn: "Actions",
         panel._close_btn: "Close drafts panel",
         panel._search_edit: "Search drafts",
         segments[0]: "Drafts",
@@ -832,7 +832,7 @@ def test_every_icon_only_control_has_an_accessible_name():
         assert widget.accessibleName() == expected
     # The two icon buttons carry one string for both channels, so the
     # spoken label and the hovered label cannot drift apart.
-    for button in (panel._refresh_btn, panel._close_btn):
+    for button in (panel._actions_btn, panel._close_btn):
         assert button.accessibleName() == button.toolTip()
 
 
@@ -1041,7 +1041,7 @@ def test_the_chrome_fits_at_the_minimum_width():
         assert panel._title.isVisibleTo(panel)
         assert not panel._view_switch.isVisibleTo(panel)
         # accessibility.md: macOS default control size is 28x28 pt.
-        for control in (panel._refresh_btn, panel._close_btn):
+        for control in (panel._actions_btn, panel._close_btn):
             assert control.height() >= 28
             assert control.width() >= 28
         assert panel._imports_row.button.height() >= 28
@@ -1182,7 +1182,7 @@ def test_the_band_stays_on_one_line_at_the_default_font(labels):
             assert not panel._top_band.is_stacked()
             leading = (panel._view_switch if panel._view_switch.has_choice()
                        else panel._title)
-            assert (corner_in_panel(panel, panel._refresh_btn).y()
+            assert (corner_in_panel(panel, panel._actions_btn).y()
                     == corner_in_panel(panel, leading).y())
         finally:
             panel.hide()
@@ -1201,7 +1201,7 @@ def test_the_band_stacks_only_when_the_popup_cannot_sit_beside_the_buttons(sized
             switch = panel._view_switch
             if panel._top_band.is_stacked():
                 assert switch.is_popup()
-                assert (corner_in_panel(panel, panel._refresh_btn).y()
+                assert (corner_in_panel(panel, panel._actions_btn).y()
                         > corner_in_panel(panel, switch).y())
                 stacked = scale
                 break

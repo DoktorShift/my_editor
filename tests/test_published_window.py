@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The Published view and Draft Relays in the document window.
 
-What must hold: the Drafts panel has Drafts and Published; the Published
+What must hold: the Drafts panel has Drafts and Published; Nostr > Draft
+Relays… is in the menu bar, enabled while an account is in use; the Published
 view reads the relays only once it is shown, for the account in use;
 Draft Relays… in the drafts' action menu opens the sheet on the window
 for that account (with the relays a membership adds), and a save says
@@ -66,6 +67,10 @@ w.show()
 app.processEvents()
 panel, view = w._drafts_panel, w._published_view
 r = {"views": panel.views()}
+from PySide6.QtWidgets import QMenu
+r["menu_bar_has_draft_relays"] = [m.title() for m in w.menuBar().findChildren(QMenu)
+                                  if w.act_draft_relays in m.actions()] == ["&Nostr"]
+r["draft_relays_without_account"] = w.act_draft_relays.isEnabled()
 read_for = []
 view.model.set_account = lambda profile: read_for.append(
     profile.user_pubkey if profile is not None else None)
@@ -77,6 +82,8 @@ alice = Profile(user_pubkey=pk, bunker_pubkey="b" * 64, bunker_relays=[],
 w._profile_store.upsert(alice)
 w._profile_store.set_default(pk)
 panel.set_active_profile(alice)
+w._update_account_actions()
+r["draft_relays_with_account"] = w.act_draft_relays.isEnabled()
 w._follow_account_in_published()
 r["read_while_hidden"] = list(read_for)
 w._show_drafts_panel()
@@ -172,6 +179,9 @@ print("RESULT " + json.dumps(r))
 def test_the_published_view_and_draft_relays_in_the_window(tmp_path):
     r = run_window_script(SCRIPT, tmp_path)
     assert r["views"] == ["drafts", "published"]
+    # Nostr > Draft Relays…, enabled while an account is in use (review N9).
+    assert r["menu_bar_has_draft_relays"]
+    assert not r["draft_relays_without_account"] and r["draft_relays_with_account"]
     # The Published view reads the relays once it is shown, not before.
     assert r["read_while_hidden"] == [] and r["read_with_drafts_shown"] == []
     assert len(r["read_once_shown"]) == 1 and r["read_once_shown"][0]

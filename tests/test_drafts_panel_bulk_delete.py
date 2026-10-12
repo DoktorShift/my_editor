@@ -265,3 +265,24 @@ def test_a_panel_without_a_parent_is_freed_without_the_collector():
     finally:
         if collecting:
             gc.enable()
+
+
+# --------------------------------------------------------------------- #
+# The panel's action menu (review N9)                                   #
+# --------------------------------------------------------------------- #
+
+def test_select_all_and_delete_from_the_action_menu(panel):
+    out = emitted(panel)
+    select(panel)                                         # nothing selected
+    panel._update_actions_menu()
+    assert panel._select_all_action.isEnabled()
+    assert not panel._delete_selected_action.isEnabled()
+    panel._select_all_action.trigger()
+    assert panel.selected_identifiers() == rows_of(panel)
+    panel._update_actions_menu()
+    assert panel._delete_selected_action.text() == "Delete 5 Drafts"
+    panel._delete_selected_action.trigger()
+    assert out == [rows_of(panel)]
+    select(panel, 1)
+    panel._update_actions_menu()
+    assert panel._delete_selected_action.text() == "Delete Draft"

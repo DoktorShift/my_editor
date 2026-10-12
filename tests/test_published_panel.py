@@ -11,9 +11,10 @@ interface font of many Linux systems (bundled for the test,
 tests/fonts/). At the systems' own size band 1 stays on one line and
 the panel keeps its narrowest width; larger, the panel asks for no more
 than the room a view's name needs; the buttons stay inside it. The
-drafts' action menu offers Draft Relays… only with an account, and asks
-the host for it; the refresh button reads the view shown again and is
-named for it; every control has a name.
+panel's action menu sits in band 1, opens on Return and Enter too, and
+holds Refresh (the view shown reads again, named for it), Draft Relays…
+(only with an account, asking the host for it) and, in the Drafts view,
+Select All and Delete; every control has a name.
 """
 
 import os
@@ -182,8 +183,26 @@ def test_the_views_are_named_in_german(language):
 
 
 # --------------------------------------------------------------------------- #
-# The drafts' action menu                                                     #
+# The panel's action menu (review N9, N11)                                    #
 # --------------------------------------------------------------------------- #
+
+def test_the_action_menu_holds_refresh_draft_relays_and_the_bulk_actions():
+    panel, _view = panel_with_published(DEFAULT_PANEL_WIDTH)
+    try:
+        panel._update_actions_menu()
+        shown = [a.text() for a in panel._actions_btn.menu().actions()
+                 if a.isVisible() and not a.isSeparator()]
+        assert shown == ["Refresh Drafts", "Draft Relays…", "Select All Drafts",
+                         "Delete Draft"]
+        assert not panel._select_all_action.isEnabled()          # no drafts listed
+        assert not panel._delete_selected_action.isEnabled()     # none selected
+        panel.show_view(PANEL_VIEW)                              # drafts' own: not here
+        shown = [a.text() for a in panel._actions_btn.menu().actions()
+                 if a.isVisible() and not a.isSeparator()]
+        assert shown == ["Refresh Published Notes and Articles", "Draft Relays…"]
+    finally:
+        panel.hide()
+
 
 def test_draft_relays_is_offered_only_with_an_account():
     panel, _view = panel_with_published(DEFAULT_PANEL_WIDTH)
@@ -191,7 +210,7 @@ def test_draft_relays_is_offered_only_with_an_account():
         asked = []
         panel.draft_relays_requested.connect(lambda: asked.append(True))
         action = panel._draft_relays_action
-        assert panel._actions_btn.menu().actions() == [action]
+        assert action in panel._actions_btn.menu().actions()
         assert action.text() == "Draft Relays…" and not action.isEnabled()
         panel.set_active_profile(alice())
         assert action.isEnabled()
@@ -203,15 +222,30 @@ def test_draft_relays_is_offered_only_with_an_account():
         panel.hide()
 
 
-def test_the_action_menu_sits_with_the_drafts_not_in_band_1():
+def test_the_action_menu_sits_with_the_panel_wide_controls_in_band_1():
+    # Beside the search field it read as a search option (review N9).
     panel, _view = panel_with_published(MIN_PANEL_WIDTH)
     try:
-        assert panel._actions_btn.accessibleName() == "Actions for drafts"
-        assert panel._top_band.isAncestorOf(panel._refresh_btn)
-        assert not panel._top_band.isAncestorOf(panel._actions_btn)
-        search = panel._search_edit.mapTo(panel, panel._search_edit.rect().topRight())
-        actions = panel._actions_btn.mapTo(panel, panel._actions_btn.rect().topLeft())
-        assert actions.x() > search.x() and actions.y() == search.y()   # at the field's end
+        assert panel._actions_btn.accessibleName() == "Actions"
+        assert panel._top_band.isAncestorOf(panel._actions_btn)
+        assert not panel._top_band.is_stacked()                  # band 1 on one line
+        actions = panel._actions_btn.mapTo(panel, panel._actions_btn.rect().topRight())
+        close = panel._close_btn.mapTo(panel, panel._close_btn.rect().topLeft())
+        assert actions.x() <= close.x() and actions.y() == close.y()
+    finally:
+        panel.hide()
+
+
+def test_return_and_enter_open_the_action_menu():
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    panel, _view = panel_with_published(DEFAULT_PANEL_WIDTH)
+    opened = []
+    panel._actions_btn.showMenu = lambda: opened.append(True)   # no modal loop in a test
+    try:
+        for key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            QTest.keyClick(panel._actions_btn, key)
+        assert opened == [True, True]
     finally:
         panel.hide()
 
@@ -226,16 +260,16 @@ def test_refresh_reads_the_view_shown_again_and_is_named_for_it():
         drafts_refreshed, published_refreshed = [], []
         panel.refresh_requested.connect(lambda: drafts_refreshed.append(True))
         view.model.refresh = lambda: published_refreshed.append(True)
-        assert panel._refresh_btn.accessibleName() == "Refresh drafts"
-        panel._refresh_btn.click()
+        refresh = panel._refresh_action
+        assert refresh.text() == "Refresh Drafts"
+        refresh.trigger()
         assert (drafts_refreshed, published_refreshed) == ([True], [])
         panel.show_view(PANEL_VIEW)
-        assert panel._refresh_btn.accessibleName() == "Refresh published notes and articles"
-        assert panel._refresh_btn.toolTip() == panel._refresh_btn.accessibleName()
-        panel._refresh_btn.click()
+        assert refresh.text() == "Refresh Published Notes and Articles"
+        refresh.trigger()
         assert (drafts_refreshed, published_refreshed) == ([True], [True])
         panel.show_view("drafts")
-        assert panel._refresh_btn.accessibleName() == "Refresh drafts"
+        assert refresh.text() == "Refresh Drafts"
     finally:
         panel.hide()
 

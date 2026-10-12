@@ -392,7 +392,7 @@ def add_to_panel(panel, view: "PublishedView") -> None:
     while it is shown."""
     panel.add_view(PANEL_VIEW, _("Published"), _("Your published notes and articles"), view,
                    refresh=view.refresh,
-                   refresh_name=_("Refresh published notes and articles"))
+                   refresh_name=_("Refresh Published Notes and Articles"))
 
 
 class PublishedView(QWidget):

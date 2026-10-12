@@ -5,9 +5,9 @@
 Layout, top to bottom:
 
   ┌──────────────────────────────────────────┐
-  │  Drafts                          ⟲    ×  │  chrome band 1
+  │  Drafts                          ⋯    ×  │  chrome band 1
   │  [▢] Imports                    14 new › │  the Imports row
-  │  [ Search drafts…                 ]   ⋯  │  chrome band 2
+  │  [ Search drafts…                     ]  │  chrome band 2
   │  Drafts for Alice                        │  status line
   ├──────────────────────────────────────────┤
   │  Article title                      2h   │  list rows
@@ -24,9 +24,14 @@ state and both row lines.
 
 Band 1 names the panel's view. With one view (Drafts) it is a title;
 when another view is added (``add_view``), a segmented switch takes its
-place, and where the segments do not fit beside the refresh and close
-buttons it becomes a pop-up button naming the current view, as Apple's
-guidelines ask for tight spaces. Refresh reads the view shown again.
+place, and where the segments do not fit beside the action menu and
+the close button it becomes a pop-up button naming the current view, as
+Apple's guidelines ask for tight spaces.
+
+The action menu (⋯) holds what concerns the panel as a whole, where
+panel-wide actions go: Refresh (the view shown reads again), Draft
+Relays… (where the account keeps its drafts, also in the Nostr menu),
+and in the Drafts view Select All and Delete for the drafts selected.
 
 Words are never cut to fit: the band first changes control, then moves
 the two buttons to a second line. Up to the platform's own text size
@@ -40,11 +45,7 @@ The Imports row (the owner's decision D-2: one place for imports, the
 Imports window) says how many new posts wait and opens the window; while
 an import has posts to do, it says how far it is, with Pause or Resume.
 
-Band 2 is the search field and, at its end, the drafts' action menu (⋯):
-what concerns the account's drafts as a whole, Draft Relays… (where they
-are kept). It sits there and not in band 1, because a third button there
-would take the switch's room and put band 1 on two lines at the
-narrowest width at the platform's own text size.
+Band 2 is the search field.
 
 Each row is two stacked lines with exactly one inline item, the age.
 ``typography.md`` warns that in a horizontally constrained context
@@ -1301,9 +1302,9 @@ class DraftsPanel(QFrame):
       publish_draft(str)         , identifier to promote draft → real publish
       delete_drafts(list)        , identifiers to tombstone, one or many
       copy_event_id(str)         , copy outer wrap event id to clipboard
-      refresh_requested()        , manual refresh tap on the header (the
-                                   Drafts view; a view added with a
-                                   ``refresh`` of its own reads again itself)
+      refresh_requested()        , Refresh in the action menu (the Drafts
+                                   view; a view added with a ``refresh``
+                                   of its own reads again itself)
       draft_relays_requested()   , Draft Relays… in the action menu
       close_requested()          , × on the header
       view_changed(str)          , another view was chosen (its key)
@@ -1381,7 +1382,7 @@ class DraftsPanel(QFrame):
         # How each view reads again, and what the refresh button is
         # called while it is shown. Drafts: refresh_requested, to the host.
         self._view_refresh: dict = {}
-        self._refresh_names: dict = {self.DRAFTS_VIEW: _("Refresh drafts")}
+        self._refresh_names: dict = {self.DRAFTS_VIEW: _("Refresh Drafts")}
 
         self._status_timer = QTimer(self)
         self._status_timer.setSingleShot(True)
@@ -1406,6 +1407,9 @@ class DraftsPanel(QFrame):
 
         outer.addWidget(self._build_top_band())
         outer.addWidget(self._build_mode_stack(), 1)
+        # Return and Enter open the action menu (``eventFilter``), once the
+        # list it filters for too is there.
+        self._actions_btn.installEventFilter(self)
 
     def _build_mode_stack(self) -> QWidget:
         """The views, one page each: Drafts, and whatever ``add_view``
@@ -1431,7 +1435,8 @@ class DraftsPanel(QFrame):
 
     def _build_top_band(self) -> QWidget:
         """Band 1: the view's title (or the switch between views) on the
-        leading edge, refresh and close on the trailing one.
+        leading edge, the panel's action menu and close on the trailing
+        one.
 
         ``_TopBand`` chooses between the title, the segments and the
         pop-up button, and takes the two buttons to a second line only
@@ -1447,7 +1452,7 @@ class DraftsPanel(QFrame):
         self._view_switch.view_chosen.connect(self.show_view)
 
         # Icon-only, so the accessible name is the only string that
-        # announces them; the glyph alone reads as "⟲" and "×".
+        # announces them; the glyph alone reads as "⋯" and "×".
         # accessibility.md: "To ensure a smooth experience, label
         # interface elements appropriately."
         icons = QWidget()
@@ -1458,10 +1463,7 @@ class DraftsPanel(QFrame):
         # this holder spans the whole width. It costs nothing on one
         # line, where the holder is only ever as wide as its buttons.
         icons_layout.addStretch(1)
-        self._refresh_btn = self._make_icon_button(
-            "⟲", _("Refresh drafts"), self._on_refresh, control_h,
-        )
-        icons_layout.addWidget(self._refresh_btn)
+        icons_layout.addWidget(self._build_actions_button(control_h))
         self._close_btn = self._make_icon_button(
             "×", _("Close drafts panel"), self.close_requested.emit, control_h,
         )
@@ -1494,23 +1496,72 @@ class DraftsPanel(QFrame):
         else:
             refresh()
 
+    def _build_actions_button(self, control_h: int) -> QToolButton:
+        """The panel's action menu: a pull-down button, as Apple's
+        guidelines have for a menu of actions on a view, where panel-wide
+        actions go (the trailing edge of band 1), not beside the search
+        field, where it read as a search option. It opens on a click,
+        Space, Return or Enter.
+
+        Refresh (the view shown reads again), Draft Relays… (also in the
+        Nostr menu), and, in the Drafts view, Select All and Delete for
+        the drafts selected. ``pull-down-buttons.md``: "listing a minimum
+        of three items can help the interaction feel worthwhile".
+        """
+        self._actions_btn = self._make_icon_button("⋯", _("Actions"), None, control_h)
+        self._actions_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        menu = QMenu(self._actions_btn)
+        self._actions_menu = menu
+        # Bound methods, no closures: the menu then keeps nothing alive.
+        menu.aboutToShow.connect(self._update_actions_menu)
+        self._refresh_action = menu.addAction(self._refresh_names[self.DRAFTS_VIEW])
+        self._refresh_action.triggered.connect(self._on_refresh)
+        self._draft_relays_action = menu.addAction(_("Draft Relays…"))
+        self._draft_relays_action.setEnabled(False)       # until there is an account
+        self._draft_relays_action.triggered.connect(self._ask_for_draft_relays)
+        self._bulk_separator = menu.addSeparator()
+        self._select_all_action = menu.addAction(_("Select All Drafts"))
+        self._select_all_action.triggered.connect(self._select_all_drafts)
+        self._delete_selected_action = menu.addAction(_("Delete Draft"))
+        self._delete_selected_action.triggered.connect(self._delete_selected)
+        self._actions_btn.setMenu(menu)
+        return self._actions_btn
+
+    def _update_actions_menu(self) -> None:
+        """Bring the action menu up to date for the view shown and the
+        drafts selected (before it opens, and when the view changes)."""
+        view = self.current_view()
+        self._refresh_action.setText(self._refresh_names.get(view, _("Refresh")))
+        drafts = view == self.DRAFTS_VIEW
+        for action in (self._bulk_separator, self._select_all_action,
+                       self._delete_selected_action):
+            action.setVisible(drafts)
+        listed = hasattr(self, "_list") and self._list.count() > 0
+        self._select_all_action.setEnabled(drafts and listed)
+        selected = self.selected_identifiers() if listed else []
+        self._delete_selected_action.setText(
+            ngettext("Delete {n} Draft", "Delete {n} Drafts", len(selected)).format(
+                n=len(selected)) if len(selected) > 1 else _("Delete Draft"))
+        self._delete_selected_action.setEnabled(drafts and bool(selected))
+
+    def _select_all_drafts(self) -> None:
+        self._list.selectAll()
+        self._list.setFocus()
+
+    def _delete_selected(self) -> None:
+        selected = self.selected_identifiers()
+        if selected:
+            self._request_delete(selected)
+
     def _ask_for_draft_relays(self) -> None:
         self.draft_relays_requested.emit()
 
-    def _name_refresh_button(self) -> None:
-        name = self._refresh_names.get(self.current_view(), _("Refresh"))
-        self._refresh_btn.setToolTip(name)
-        self._refresh_btn.setAccessibleName(name)
-
     def _build_search_band(self) -> QWidget:
-        """Band 2: the search field, which is the panel's only filter, and
-        the drafts' action menu at its end.
+        """Band 2: the search field, which is the panel's only filter.
 
         ``searching.md``: "If search is important, give it a primary
         position in your app or view." It is the only filter left, so it
-        gets the band, but for the action menu: a pull-down button, as
-        Apple's guidelines have for a menu of actions on a view, that
-        opens on a click, Space or Return.
+        gets the band to itself.
 
         There used to be an All / Notes / Articles chip row under it. It
         filtered on ``record.inner_kind``, which comes from the outer
@@ -1540,21 +1591,7 @@ class DraftsPanel(QFrame):
         self._search_edit.setClearButtonEnabled(True)
         self._search_edit.setMinimumHeight(_control_height())
         self._search_edit.textChanged.connect(self._on_search_changed)
-        field_row = QHBoxLayout()
-        field_row.setContentsMargins(0, 0, 0, 0)
-        field_row.setSpacing(6)
-        field_row.addWidget(self._search_edit, 1)
-        self._actions_btn = self._make_icon_button(
-            "⋯", _("Actions for drafts"), None, _control_height())
-        self._actions_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self._actions_menu = QMenu(self._actions_btn)
-        self._draft_relays_action = self._actions_menu.addAction(_("Draft Relays…"))
-        self._draft_relays_action.setEnabled(False)       # until there is an account
-        # A bound method, no closure: the menu then keeps nothing alive.
-        self._draft_relays_action.triggered.connect(self._ask_for_draft_relays)
-        self._actions_btn.setMenu(self._actions_menu)
-        field_row.addWidget(self._actions_btn)
-        layout.addLayout(field_row)
+        layout.addWidget(self._search_edit)
 
         # Eliding, for the same reason the row title is: a long display
         # name would otherwise be clipped from the right with no sign it
@@ -1637,9 +1674,9 @@ class DraftsPanel(QFrame):
         """Add a view beside Drafts (another page of the panel). From the
         second view on, band 1 offers the switch between them.
 
-        ``refresh`` is how the view reads again when the refresh button is
-        pressed while it is shown, and ``refresh_name`` what the button is
-        called then (a screen reader and the tooltip say it)."""
+        ``refresh`` is how the view reads again when Refresh in the action
+        menu is chosen while it is shown, and ``refresh_name`` what that
+        command is called then (title case, as menus write it)."""
         if key in self._view_pages:
             raise ValueError(f"the panel already has a view {key!r}")
         self._views.append((key, title, hint))
@@ -1668,7 +1705,7 @@ class DraftsPanel(QFrame):
             return
         self._mode_stack.setCurrentWidget(page)
         self._view_switch.set_current(key)
-        self._name_refresh_button()
+        self._update_actions_menu()
         self._top_band.reflow()
         # Another view is other data and other rows, so the drafts
         # preview has nothing to describe there.
@@ -2331,6 +2368,15 @@ class DraftsPanel(QFrame):
         reach for in a list, and having only one of the two work reads as
         the panel being half-wired.
         """
+        if (
+            obj is self._actions_btn
+            and event.type() == QEvent.KeyPress
+            and event.key() in (Qt.Key_Return, Qt.Key_Enter)
+        ):
+            # Space opens it by itself; on Windows and Linux people press
+            # Enter on a focused button.
+            self._actions_btn.showMenu()
+            return True
         if (
             obj is self._list
             and event.type() == QEvent.KeyPress

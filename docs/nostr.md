@@ -121,7 +121,7 @@ In-progress work is saved as a **NIP-37 draft**: a kind 31234 event whose body i
 
 ### Where drafts are kept
 
-Drafts are encrypted wherever they are kept. To keep them on relays of your choice only, for example a relay of your own, choose **Draft Relays…** in the drafts' action menu (the ⋯ button at the end of the search field in the Drafts panel), add the relays and click **Save**. The status bar then says where drafts are saved. An address starts with `wss://`; a relay running on this computer may also use `ws://`. You can choose up to ten.
+Drafts are encrypted wherever they are kept. To keep them on relays of your choice only, for example a relay of your own, choose **Nostr > Draft Relays…** (or **Draft Relays…** in the Drafts panel's action menu, the ⋯ button at its top), add the relays and click **Save**. The status bar then says where drafts are saved. An address starts with `wss://`; a relay running on this computer may also use `ws://`. You can choose up to ten.
 
 From then on new drafts are saved only there. Drafts are still looked for on your usual relays too, so drafts saved earlier, or by an app that doesn't know this setting, are found. The choice itself is kept on your relays, encrypted to your own key (NIP-37), so your other devices and apps that read it (Amethyst does) keep drafts in the same place. Apps that don't read it won't see the drafts saved there.
 
