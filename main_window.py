@@ -5550,15 +5550,27 @@ class MainWindow(QMainWindow):
                 return
         draft = self._draft_of_published(item)
         if draft is not None:
-            same = (draft.state is DraftState.READY
-                    and draft.content == str(item.event.get("content") or ""))
-            choice = "draft" if same else ask(
-                self, title=_("This article has a draft with changes you haven’t published."),
-                message=_("Open the draft to go on with it, or open the version that "
-                          "is published."),
-                buttons=(Button(_("Cancel"), None, CANCEL),
-                         Button(_("Open Published Version"), "published", NORMAL),
-                         Button(_("Open Draft"), "draft", DEFAULT)))
+            if draft.state is not DraftState.READY:
+                # Its words are not known yet (still being decrypted, or
+                # the signer app did not answer): nothing to compare, and
+                # nothing to open as the draft.
+                choice = ask(
+                    self, title=_("This article has a draft that can’t be shown yet."),
+                    message=_("Choose Edit again once the draft appears in the Drafts panel, "
+                              "or open the version that is published now."),
+                    buttons=(Button(_("Open Published Version"), "published", NORMAL),
+                             Button(_("Cancel"), None, DEFAULT)))
+            elif draft.content == str(item.event.get("content") or ""):
+                choice = "draft"
+            else:
+                choice = ask(
+                    self, title=_("This article has a draft with changes you haven’t "
+                                  "published."),
+                    message=_("Open the draft to go on with it, or open the version that "
+                              "is published."),
+                    buttons=(Button(_("Cancel"), None, CANCEL),
+                             Button(_("Open Published Version"), "published", NORMAL),
+                             Button(_("Open Draft"), "draft", DEFAULT)))
             if choice == "draft":
                 self._on_panel_open_draft(item.identifier)
             if choice != "published":

@@ -284,6 +284,23 @@ r["alice"] = edit(article(alice_sk, "Alice's words."))
 w._profile_store.set_default(bob)
 r["bob"] = edit(article(bob_sk, "Bob's words."))
 
+# Review L4: a draft not decrypted yet has no words to compare or open.
+store = w._draft_store
+store.bind_profile(bob)
+store.upsert_skeleton(DraftWrapMeta(identifier="my-post", inner_kind=30023, event_id="e" * 64,
+                                    pubkey=bob, created_at=1_800_000_500, expiration=None,
+                                    ciphertext="x"))
+for i in range(w.tabs.count() - 1, -1, -1):
+    e = w._editor_from_widget(w.tabs.widget(i))
+    if e is not None and getattr(e, "_published_author", "") == bob:
+        e.document().setModified(False)
+        w.tabs.removeTab(i)
+answers.append(None)                                  # Cancel, the default
+r["not_ready_cancel"] = edit(article(bob_sk, "Bob's words."))["tabs"]
+r["not_ready_question"] = asked[-1]
+answers.append("published")
+r["not_ready_published"] = edit(article(bob_sk, "Bob's words."))
+
 for i in range(w.tabs.count()):
     e = w._editor_from_widget(w.tabs.widget(i))
     if e is not None:
@@ -293,7 +310,12 @@ print("RESULT " + json.dumps(r))
 """
 
 
-def test_edit_tells_accounts_apart(tmp_path):
+def test_edit_tells_accounts_apart_and_waits_for_a_draft_not_decrypted_yet(tmp_path):
     r = run_window_script(ACCOUNTS_SCRIPT, tmp_path)
     assert r["alice"] == {"tabs": 1, "text": "Alice's words."}
     assert r["bob"] == {"tabs": 1, "text": "Bob's words."}           # his own, in a tab of its own
+    assert r["not_ready_question"] == {
+        "title": "This article has a draft that can’t be shown yet.",
+        "buttons": [["Open Published Version", "normal"], ["Cancel", "default"]]}
+    assert r["not_ready_cancel"] == 0
+    assert r["not_ready_published"] == {"tabs": 1, "text": "Bob's words."}

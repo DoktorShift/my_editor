@@ -24,11 +24,11 @@ msgstr "Details ausblenden"
 #: alerts.py:275
 #: link_popover.py:99
 #: main_window.py:2784
-#: main_window.py:6454
+#: main_window.py:6472
 #: main_window.py:253
 #: main_window.py:2657
 #: main_window.py:4816
-#: main_window.py:5558
+#: main_window.py:5562
 msgid "Cancel"
 msgstr "Abbrechen"
 
@@ -474,15 +474,15 @@ msgstr "Deine aktuelle Liste ließ sich nicht lesen, daher wurde nichts geänder
 msgid "Upload this image to your Blossom servers?"
 msgstr "Dieses Bild auf deine Medienserver hochladen?"
 
-#: main_window.py:5619
+#: main_window.py:5637
 msgid "Drafts are saved on your usual relays again."
 msgstr "Entwürfe werden wieder auf deinen üblichen Relays gespeichert."
 
-#: main_window.py:5699
+#: main_window.py:5717
 msgid "Retrying decryption - approve on your signer…"
 msgstr "Neuer Versuch zum Entschlüsseln. Bestätige ihn in deiner Signer-App …"
 
-#: main_window.py:5758
+#: main_window.py:5776
 #: main_window.py:1299
 #: nostr/ui/media_library_dialog.py:1237
 #: nostr/ui/media_library_dialog.py:1654
@@ -491,21 +491,21 @@ msgstr "Neuer Versuch zum Entschlüsseln. Bestätige ihn in deiner Signer-App �
 msgid "Delete"
 msgstr "Löschen"
 
-#: main_window.py:5766
+#: main_window.py:5784
 msgid "A blank-content replacement will be published to your relays. Other clients (and your other devices) will treat the draft as removed. This action can't be undone."
 msgid_plural "A blank-content replacement will be published to your relays. Other clients (and your other devices) will treat them as removed. This action can't be undone."
 msgstr[0] "Auf deinen Relays wird ein leerer Ersatz veröffentlicht. Andere Apps (und deine anderen Geräte) behandeln den Entwurf dann als gelöscht. Das lässt sich nicht rückgängig machen."
 msgstr[1] "Auf deinen Relays wird ein leerer Ersatz veröffentlicht. Andere Apps (und deine anderen Geräte) behandeln die Entwürfe dann als gelöscht. Das lässt sich nicht rückgängig machen."
 
-#: main_window.py:5894
+#: main_window.py:5912
 msgid "No drafts were deleted"
 msgstr "Es wurden keine Entwürfe gelöscht"
 
-#: main_window.py:6379
+#: main_window.py:6397
 msgid "Already saving this draft - wait for it to finish."
 msgstr "Dieser Entwurf wird schon gespeichert. Warte, bis das fertig ist."
 
-#: main_window.py:6442
+#: main_window.py:6460
 msgid "(unknown profile)"
 msgstr "(unbekanntes Profil)"
 
@@ -532,7 +532,7 @@ msgstr "Öffnen …"
 
 #: main_window.py:1244
 #: main_window.py:254
-#: nostr/ui/draft_relays_sheet.py:457
+#: nostr/ui/draft_relays_sheet.py:462
 #: nostr/ui/profile_window.py:250
 #: nostr/ui/save_destination_dialog.py:225
 #: nostr/ui/save_destination_dialog.py:306
@@ -962,11 +962,11 @@ msgstr "Jeder mit dem Link kann es ansehen. Das Bild ist bereits in deinem Dokum
 msgid "Remember this choice"
 msgstr "Diese Auswahl merken"
 
-#: main_window.py:5635
+#: main_window.py:5653
 msgid "Draft isn't ready to open yet - still decrypting."
 msgstr "Der Entwurf lässt sich noch nicht öffnen: Er wird noch entschlüsselt."
 
-#: main_window.py:5741
+#: main_window.py:5759
 msgid ""
 "They use a draft format this editor doesn't recognise, so removing them from here might leave them visible in the other client.\n"
 "\n"
@@ -976,38 +976,38 @@ msgstr ""
 "\n"
 "Um sie sauber zu entfernen, öffne sie in der App, mit der sie erstellt wurden, und lösche sie dort."
 
-#: main_window.py:5757
+#: main_window.py:5775
 msgid "Delete “this draft” from your Nostr drafts?"
 msgstr "Diesen Entwurf aus deinen Nostr-Entwürfen löschen?"
 
-#: main_window.py:5834
+#: main_window.py:5852
 msgid "Deleting drafts…"
 msgstr "Entwürfe werden gelöscht …"
 
-#: main_window.py:5834
+#: main_window.py:5852
 msgid "Stop"
 msgstr "Stoppen"
 
-#: main_window.py:5835
+#: main_window.py:5853
 msgid "Deleting drafts"
 msgstr "Entwürfe werden gelöscht"
 
-#: main_window.py:5917
+#: main_window.py:5935
 msgid "Your signer is not responding. Open your signer app and make sure it is running."
 msgstr "Dein Signer antwortet nicht. Öffne deine Signer-App und prüfe, ob sie läuft."
 
-#: main_window.py:6081
+#: main_window.py:6099
 msgid "Replacing it overwrites its text on all your devices."
 msgstr "Beim Ersetzen wird sein Text auf all deinen Geräten überschrieben."
 
-#: main_window.py:6082
+#: main_window.py:6100
 #: update_flow.py:138
 #: update_flow.py:169
 #: widgets.py:188
 msgid "Replace"
 msgstr "Ersetzen"
 
-#: main_window.py:6460
+#: main_window.py:6478
 msgid "Saving under the current profile would create a separate draft. How would you like to handle it?"
 msgstr "Wenn du unter dem aktuellen Profil speicherst, entsteht ein eigener Entwurf. Wie möchtest du vorgehen?"
 
@@ -1276,48 +1276,48 @@ msgstr "Bild hinzugefügt. Verbinde einen Signer, um es hochzuladen."
 msgid "Upload this image to {hosts}?"
 msgstr "Dieses Bild auf {hosts} hochladen?"
 
-#: main_window.py:5615
+#: main_window.py:5633
 msgid "Drafts are now saved only on the relay you chose."
 msgid_plural "Drafts are now saved only on the {count} relays you chose."
 msgstr[0] "Entwürfe werden jetzt nur auf dem Relay gespeichert, das du gewählt hast."
 msgstr[1] "Entwürfe werden jetzt nur auf den {count} Relays gespeichert, die du gewählt hast."
 
-#: main_window.py:5760
+#: main_window.py:5778
 #, python-brace-format
 msgid "Delete {count} draft from your Nostr drafts?"
 msgid_plural "Delete {count} drafts from your Nostr drafts?"
 msgstr[0] "{count} Entwurf aus deinen Nostr-Entwürfen löschen?"
 msgstr[1] "{count} Entwürfe aus deinen Nostr-Entwürfen löschen?"
 
-#: main_window.py:5763
+#: main_window.py:5781
 #, python-brace-format
 msgid "Delete {count} Draft"
 msgid_plural "Delete {count} Drafts"
 msgstr[0] "{count} Entwurf löschen"
 msgstr[1] "{count} Entwürfe löschen"
 
-#: main_window.py:5789
+#: main_window.py:5807
 msgid "An imported draft takes a second request, which tells other apps it is gone."
 msgid_plural "Imported drafts take a second request each, which tells other apps they are gone."
 msgstr[0] "Ein importierter Entwurf braucht eine zweite Anfrage, die anderen Apps sagt, dass er gelöscht ist."
 msgstr[1] "Importierte Entwürfe brauchen je eine zweite Anfrage, die anderen Apps sagt, dass sie gelöscht sind."
 
-#: main_window.py:5890
+#: main_window.py:5908
 #, python-brace-format
 msgid "{deleted} of {total} draft deleted"
 msgid_plural "{deleted} of {total} drafts deleted"
 msgstr[0] "{deleted} von {total} Entwurf gelöscht"
 msgstr[1] "{deleted} von {total} Entwürfen gelöscht"
 
-#: main_window.py:6149
+#: main_window.py:6167
 msgid "Nothing to save as a draft"
 msgstr "Nichts als Entwurf zu speichern"
 
-#: main_window.py:6150
+#: main_window.py:6168
 msgid "The current document is empty. Add some content first."
 msgstr "Das aktuelle Dokument ist leer. Füge zuerst Inhalt hinzu."
 
-#: main_window.py:6162
+#: main_window.py:6180
 msgid "This draft is too large"
 msgstr "Dieser Entwurf ist zu groß"
 
@@ -1611,80 +1611,80 @@ msgid_plural "{count} images are waiting."
 msgstr[0] "{count} Bild wartet."
 msgstr[1] "{count} Bilder warten."
 
-#: main_window.py:5555
-msgid "This article has a draft with changes you haven’t published."
-msgstr "Zu diesem Artikel gibt es einen Entwurf mit Änderungen, die du noch nicht veröffentlicht hast."
+#: main_window.py:5558
+msgid "This article has a draft that can’t be shown yet."
+msgstr "Zu diesem Artikel gibt es einen Entwurf, der sich noch nicht anzeigen lässt."
 
-#: main_window.py:5556
-msgid "Open the draft to go on with it, or open the version that is published."
-msgstr "Öffne den Entwurf, um daran weiterzuarbeiten, oder öffne die veröffentlichte Fassung."
+#: main_window.py:5559
+msgid "Choose Edit again once the draft appears in the Drafts panel, or open the version that is published now."
+msgstr "Wähle erneut „Bearbeiten“, sobald der Entwurf in der Seitenleiste „Entwürfe“ erscheint, oder öffne jetzt die veröffentlichte Fassung."
 
-#: main_window.py:5624
+#: main_window.py:5642
 #, python-brace-format
 msgid "Copied event id {id}…"
 msgstr "Kennung {id}… kopiert"
 
-#: main_window.py:5738
+#: main_window.py:5756
 msgid "This draft was created by another Nostr client"
 msgid_plural "These {count} drafts were created by other Nostr clients"
 msgstr[0] "Dieser Entwurf wurde mit einer anderen Nostr-App erstellt"
 msgstr[1] "Diese {count} Entwürfe wurden mit anderen Nostr-Apps erstellt"
 
-#: main_window.py:5754
+#: main_window.py:5772
 #, python-brace-format
 msgid "Delete “{name}” from your Nostr drafts?"
 msgstr "„{name}“ aus deinen Nostr-Entwürfen löschen?"
 
-#: main_window.py:5782
+#: main_window.py:5800
 #, python-brace-format
 msgid "Your signer will ask you to approve each one, so expect {count} request. You can stop partway through."
 msgid_plural "Your signer will ask you to approve each one, so expect {count} requests. You can stop partway through."
 msgstr[0] "Deine Signer-App fragt bei jedem einzeln nach, rechne also mit {count} Anfrage. Du kannst zwischendurch aufhören."
 msgstr[1] "Deine Signer-App fragt bei jedem einzeln nach, rechne also mit {count} Anfragen. Du kannst zwischendurch aufhören."
 
-#: main_window.py:5796
+#: main_window.py:5814
 #, python-brace-format
 msgid "{count} draft from another Nostr client is not included, and will be left alone."
 msgid_plural "{count} drafts from another Nostr client are not included, and will be left alone."
 msgstr[0] "{count} Entwurf aus einer anderen Nostr-App ist nicht dabei und bleibt unverändert."
 msgstr[1] "{count} Entwürfe aus einer anderen Nostr-App sind nicht dabei und bleiben unverändert."
 
-#: main_window.py:5822
+#: main_window.py:5840
 msgid "Couldn't start the deletion"
 msgstr "Das Löschen konnte nicht gestartet werden"
 
-#: main_window.py:5881
+#: main_window.py:5899
 msgid "Draft deleted."
 msgid_plural "{count} drafts deleted."
 msgstr[0] "Entwurf gelöscht."
 msgstr[1] "{count} Entwürfe gelöscht."
 
-#: main_window.py:5898
+#: main_window.py:5916
 #, python-brace-format
 msgid "{count} could not be removed and is still on your relays. You can try again."
 msgid_plural "{count} could not be removed and are still on your relays. You can try again."
 msgstr[0] "{count} konnte nicht entfernt werden und ist noch auf deinen Relays. Du kannst es erneut versuchen."
 msgstr[1] "{count} konnten nicht entfernt werden und sind noch auf deinen Relays. Du kannst es erneut versuchen."
 
-#: main_window.py:6079
+#: main_window.py:6097
 #, python-brace-format
 msgid "A draft named “{name}” already exists. Do you want to replace it?"
 msgstr "Es gibt schon einen Entwurf namens „{name}“. Möchtest du ihn ersetzen?"
 
-#: main_window.py:6158
-#: main_window.py:6309
+#: main_window.py:6176
+#: main_window.py:6327
 msgid "Couldn't prepare the draft"
 msgstr "Der Entwurf konnte nicht vorbereitet werden"
 
-#: main_window.py:6159
+#: main_window.py:6177
 msgid "Its contents could not be prepared for encryption."
 msgstr "Sein Inhalt konnte nicht für die Verschlüsselung vorbereitet werden."
 
-#: main_window.py:6186
+#: main_window.py:6204
 msgid "Couldn't save the draft"
 msgstr "Der Entwurf konnte nicht gespeichert werden"
 
-#: main_window.py:6457
+#: main_window.py:6475
 #, python-brace-format
 msgid "This draft was last saved as {original}, but you're signed in as {active}"
 msgstr "Dieser Entwurf wurde zuletzt als {original} gespeichert, aber du bist als {active} angemeldet"
@@ -1712,36 +1712,44 @@ msgstr "„{name}“ gibt es bereits"
 msgid "Couldn't open “{name}”"
 msgstr "„{name}“ konnte nicht geöffnet werden"
 
-#: main_window.py:5805
+#: main_window.py:5567
+msgid "This article has a draft with changes you haven’t published."
+msgstr "Zu diesem Artikel gibt es einen Entwurf mit Änderungen, die du noch nicht veröffentlicht hast."
+
+#: main_window.py:5569
+msgid "Open the draft to go on with it, or open the version that is published."
+msgstr "Öffne den Entwurf, um daran weiterzuarbeiten, oder öffne die veröffentlichte Fassung."
+
+#: main_window.py:5823
 msgid "Not included:"
 msgstr "Nicht dabei:"
 
-#: main_window.py:5845
+#: main_window.py:5863
 #, python-brace-format
 msgid "Deleting draft {current} of {total}…"
 msgstr "Entwurf {current} von {total} wird gelöscht …"
 
-#: main_window.py:5977
+#: main_window.py:5995
 #: main_window.py:2821
 msgid "That profile isn't connected anymore"
 msgstr "Dieses Profil ist nicht mehr verbunden"
 
-#: main_window.py:5978
+#: main_window.py:5996
 #: main_window.py:2822
 msgid "Pair it again from Nostr > Connect Signer to save here."
 msgstr "Verbinde es erneut unter Nostr > Signer verbinden, um hier zu speichern."
 
-#: main_window.py:6163
+#: main_window.py:6181
 #, python-brace-format
 msgid "It has {size} bytes, and NIP-44 encryption allows {limit}. Split it into smaller drafts or publish it directly."
 msgstr "Er hat {size} Bytes, die Verschlüsselung erlaubt höchstens {limit}. Teile ihn in kleinere Entwürfe auf oder veröffentliche ihn direkt."
 
-#: main_window.py:6449
+#: main_window.py:6467
 #, python-brace-format
 msgid "Switch to {name} and Save"
 msgstr "Zu {name} wechseln und speichern"
 
-#: main_window.py:6452
+#: main_window.py:6470
 #, python-brace-format
 msgid "Save a Copy as {name}"
 msgstr "Kopie als {name} speichern"
@@ -1767,15 +1775,12 @@ msgstr "„{name}“ konnte nicht neu geladen werden"
 msgid "{error} Check that it's turned on and connected, then try again."
 msgstr "{error} Prüfe, ob der Drucker eingeschaltet und verbunden ist, und versuche es dann erneut."
 
-#: main_window.py:5559
+#: main_window.py:5561
+#: main_window.py:5572
 msgid "Open Published Version"
 msgstr "Veröffentlichte Fassung öffnen"
 
-#: main_window.py:5560
-msgid "Open Draft"
-msgstr "Entwurf öffnen"
-
-#: main_window.py:5823
+#: main_window.py:5841
 #, python-brace-format
 msgid ""
 "These drafts can't be removed from here.\n"
@@ -1785,6 +1790,10 @@ msgstr ""
 "Diese Entwürfe lassen sich hier nicht entfernen.\n"
 "\n"
 "{error}"
+
+#: main_window.py:5573
+msgid "Open Draft"
+msgstr "Entwurf öffnen"
 
 #: page_setup_dialog.py:94
 #: page_setup_dialog.py:104
@@ -2421,7 +2430,7 @@ msgstr "Versionshinweise"
 #: nostr/ui/account_windows.py:793
 #: nostr/ui/account_windows.py:854
 #: nostr/ui/account_windows.py:1104
-#: nostr/ui/draft_relays_sheet.py:448
+#: nostr/ui/draft_relays_sheet.py:453
 #: nostr/ui/image_review_dialog.py:124
 msgid "Done"
 msgstr "Fertig"
@@ -2449,7 +2458,7 @@ msgstr "Update-Anleitung öffnen"
 #: update_dialog.py:279
 #: nostr/ui/account_windows.py:769
 #: nostr/ui/connect_dialog.py:360
-#: nostr/ui/draft_relays_sheet.py:446
+#: nostr/ui/draft_relays_sheet.py:451
 #: nostr/ui/drafts_panel.py:1138
 #: nostr/ui/imports_activity.py:288
 #: nostr/ui/imports_window.py:1092
@@ -5088,154 +5097,154 @@ msgstr "Meine behalten"
 msgid "Dismiss and let the next save from this tab win."
 msgstr "Schließen. Beim nächsten Speichern aus diesem Tab gilt deine Version."
 
-#: nostr/ui/draft_relays_sheet.py:386
+#: nostr/ui/draft_relays_sheet.py:390
 msgid "Couldn’t save the change. Try again."
 msgstr "Die Änderung konnte nicht gespeichert werden. Versuche es erneut."
 
 #: nostr/ui/draft_relays_sheet.py:91
-#: nostr/ui/draft_relays_sheet.py:119
+#: nostr/ui/draft_relays_sheet.py:121
 msgid "Draft Relays"
 msgstr "Relays für Entwürfe"
 
-#: nostr/ui/draft_relays_sheet.py:128
+#: nostr/ui/draft_relays_sheet.py:130
 msgid "Draft relays"
 msgstr "Relays für Entwürfe"
 
-#: nostr/ui/draft_relays_sheet.py:137
+#: nostr/ui/draft_relays_sheet.py:139
 msgid "Remove"
 msgstr "Entfernen"
 
-#: nostr/ui/draft_relays_sheet.py:145
+#: nostr/ui/draft_relays_sheet.py:147
 msgid "Add a relay:"
 msgstr "Relay hinzufügen:"
 
-#: nostr/ui/draft_relays_sheet.py:151
+#: nostr/ui/draft_relays_sheet.py:153
 #: nostr/ui/imports_window.py:340
 msgid "Add"
 msgstr "Hinzufügen"
 
-#: nostr/ui/draft_relays_sheet.py:367
+#: nostr/ui/draft_relays_sheet.py:371
 msgid "The relays your drafts would move to turned some of them down, so nothing was changed. Choose other relays, then try again."
 msgstr "Die Relays, auf die deine Entwürfe umziehen sollten, haben einige davon abgelehnt, daher wurde nichts geändert. Wähle andere Relays und versuche es dann erneut."
 
-#: nostr/ui/draft_relays_sheet.py:370
+#: nostr/ui/draft_relays_sheet.py:374
 msgid "Some drafts couldn’t be moved, so nothing was changed. Check your internet connection, then try again."
 msgstr "Einige Entwürfe konnten nicht umziehen, daher wurde nichts geändert. Prüfe deine Internetverbindung und versuche es dann erneut."
 
-#: nostr/ui/draft_relays_sheet.py:373
+#: nostr/ui/draft_relays_sheet.py:377
 msgid "Couldn’t read the current setting, so nothing was changed. Check your internet connection, then try again."
 msgstr "Die aktuelle Einstellung konnte nicht gelesen werden, daher wurde nichts geändert. Prüfe deine Internetverbindung und versuche es dann erneut."
 
-#: nostr/ui/draft_relays_sheet.py:377
+#: nostr/ui/draft_relays_sheet.py:381
 msgid "The current setting is dated ahead of this computer’s clock, so nothing was changed. Check the date and time on this computer, then try again."
 msgstr "Die aktuelle Einstellung ist später datiert, als die Uhr dieses Computers zeigt, daher wurde nichts geändert. Prüfe Datum und Uhrzeit dieses Computers und versuche es dann erneut."
 
-#: nostr/ui/draft_relays_sheet.py:381
+#: nostr/ui/draft_relays_sheet.py:385
 msgid "Too few relays took the change. Check your internet connection, then try again."
 msgstr "Zu wenige Relays haben die Änderung angenommen. Prüfe deine Internetverbindung und versuche es dann erneut."
 
-#: nostr/ui/draft_relays_sheet.py:384
+#: nostr/ui/draft_relays_sheet.py:388
 msgid "Your signer app didn’t approve the change. Try again, and approve it when your signer app asks."
 msgstr "Deine Signer-App hat die Änderung nicht bestätigt. Versuche es erneut und bestätige sie, wenn deine Signer-App fragt."
 
-#: nostr/ui/draft_relays_sheet.py:121
+#: nostr/ui/draft_relays_sheet.py:123
 msgid "Drafts are encrypted wherever they are kept. With relays chosen here, drafts are saved only there. When you change this, your drafts move with it. Apps that don’t read this setting won’t see the drafts saved there."
 msgstr "Entwürfe sind verschlüsselt, wo immer sie liegen. Mit hier gewählten Relays werden Entwürfe nur dort gespeichert. Wenn du das änderst, ziehen deine Entwürfe mit um. Apps, die diese Einstellung nicht lesen, sehen die dort gespeicherten Entwürfe nicht."
 
-#: nostr/ui/draft_relays_sheet.py:177
+#: nostr/ui/draft_relays_sheet.py:179
 msgid "The setting is saved."
 msgstr "Die Einstellung ist gespeichert."
 
-#: nostr/ui/draft_relays_sheet.py:189
+#: nostr/ui/draft_relays_sheet.py:191
 msgid "Reading where your drafts are kept…"
 msgstr "Es wird gelesen, wo deine Entwürfe liegen …"
 
-#: nostr/ui/draft_relays_sheet.py:197
+#: nostr/ui/draft_relays_sheet.py:199
 msgid "Couldn’t decrypt where your drafts are kept. Make sure your signer app is running, then try again."
 msgstr "Es konnte nicht entschlüsselt werden, wo deine Entwürfe liegen. Prüfe, ob deine Signer-App läuft, und versuche es dann erneut."
 
-#: nostr/ui/draft_relays_sheet.py:200
+#: nostr/ui/draft_relays_sheet.py:202
 msgid "Couldn’t read where your drafts are kept. Check your internet connection, then try again."
 msgstr "Es konnte nicht gelesen werden, wo deine Entwürfe liegen. Prüfe deine Internetverbindung und versuche es dann erneut."
 
-#: nostr/ui/draft_relays_sheet.py:225
+#: nostr/ui/draft_relays_sheet.py:227
 msgid "Enter a relay’s address. It starts with wss://."
 msgstr "Gib die Adresse eines Relays ein. Sie beginnt mit wss://."
 
-#: nostr/ui/draft_relays_sheet.py:228
+#: nostr/ui/draft_relays_sheet.py:230
 msgid "That relay is already in the list."
 msgstr "Dieses Relay steht schon in der Liste."
 
-#: nostr/ui/draft_relays_sheet.py:275
-#: nostr/ui/draft_relays_sheet.py:299
+#: nostr/ui/draft_relays_sheet.py:277
+#: nostr/ui/draft_relays_sheet.py:301
 msgid "Reading your drafts…"
 msgstr "Deine Entwürfe werden gelesen …"
 
-#: nostr/ui/draft_relays_sheet.py:451
+#: nostr/ui/draft_relays_sheet.py:456
 msgid "Save Anyway"
 msgstr "Trotzdem speichern"
 
-#: nostr/ui/draft_relays_sheet.py:453
+#: nostr/ui/draft_relays_sheet.py:458
 msgid "Use My Usual Relays"
 msgstr "Meine üblichen Relays verwenden"
 
-#: nostr/ui/draft_relays_sheet.py:294
+#: nostr/ui/draft_relays_sheet.py:296
 msgid "Moving your drafts…"
 msgstr "Deine Entwürfe ziehen um …"
 
-#: nostr/ui/draft_relays_sheet.py:319
+#: nostr/ui/draft_relays_sheet.py:321
 msgid "The setting was changed on another device while this was open, so nothing was changed here. This is the setting as it is now."
 msgstr "Die Einstellung wurde auf einem anderen Gerät geändert, während dies hier offen war, daher wurde hier nichts geändert. So ist die Einstellung jetzt."
 
-#: nostr/ui/draft_relays_sheet.py:330
+#: nostr/ui/draft_relays_sheet.py:334
 #, python-brace-format
 msgid "Drafts saved during the change may still be only on {relays}, which didn’t answer. MyEditor keeps looking for them there and moves them once it answers."
 msgid_plural "Drafts saved during the change may still be only on {relays}, which didn’t answer. MyEditor keeps looking for them there and moves them once they answer."
 msgstr[0] "Entwürfe, die während der Änderung gespeichert wurden, liegen vielleicht noch nur auf {relays}, das nicht geantwortet hat. MyEditor sucht dort weiter nach ihnen und verschiebt sie, sobald es antwortet."
 msgstr[1] "Entwürfe, die während der Änderung gespeichert wurden, liegen vielleicht noch nur auf {relays}, die nicht geantwortet haben. MyEditor sucht dort weiter nach ihnen und verschiebt sie, sobald sie antworten."
 
-#: nostr/ui/draft_relays_sheet.py:349
+#: nostr/ui/draft_relays_sheet.py:353
 #, python-brace-format
 msgid "Couldn’t read the drafts on {relays}, so nothing was changed. Check your internet connection, then try again. If that relay is gone for good, choose Save Anyway: the drafts kept only there won’t be shown any more."
 msgid_plural "Couldn’t read the drafts on {relays}, so nothing was changed. Check your internet connection, then try again. If those relays are gone for good, choose Save Anyway: the drafts kept only there won’t be shown any more."
 msgstr[0] "Die Entwürfe auf {relays} konnten nicht gelesen werden, daher wurde nichts geändert. Prüfe deine Internetverbindung und versuche es dann erneut. Wenn es dieses Relay nicht mehr gibt, wähle „Trotzdem speichern“: Die Entwürfe, die nur dort liegen, werden dann nicht mehr angezeigt."
 msgstr[1] "Die Entwürfe auf {relays} konnten nicht gelesen werden, daher wurde nichts geändert. Prüfe deine Internetverbindung und versuche es dann erneut. Wenn es diese Relays nicht mehr gibt, wähle „Trotzdem speichern“: Die Entwürfe, die nur dort liegen, werden dann nicht mehr angezeigt."
 
-#: nostr/ui/draft_relays_sheet.py:358
+#: nostr/ui/draft_relays_sheet.py:362
 #, python-brace-format
 msgid "{relays} didn’t give your drafts back when MyEditor asked, so nothing was changed. Some relays show drafts only after you sign in to them, which MyEditor can’t do yet. Choose another relay, then try again."
 msgid_plural "{relays} didn’t give your drafts back when MyEditor asked, so nothing was changed. Some relays show drafts only after you sign in to them, which MyEditor can’t do yet. Choose other relays, then try again."
 msgstr[0] "{relays} hat deine Entwürfe auf Nachfrage nicht zurückgegeben, daher wurde nichts geändert. Manche Relays zeigen Entwürfe erst, wenn du dich bei ihnen anmeldest, und das kann MyEditor noch nicht. Wähle ein anderes Relay und versuche es dann erneut."
 msgstr[1] "{relays} haben deine Entwürfe auf Nachfrage nicht zurückgegeben, daher wurde nichts geändert. Manche Relays zeigen Entwürfe erst, wenn du dich bei ihnen anmeldest, und das kann MyEditor noch nicht. Wähle andere Relays und versuche es dann erneut."
 
-#: nostr/ui/draft_relays_sheet.py:425
+#: nostr/ui/draft_relays_sheet.py:430
 msgid "Drafts will be saved only on these relays:"
 msgstr "Entwürfe werden dann nur auf diesen Relays gespeichert:"
 
-#: nostr/ui/draft_relays_sheet.py:427
+#: nostr/ui/draft_relays_sheet.py:432
 msgid "Drafts will be kept on your usual relays."
 msgstr "Entwürfe liegen dann auf deinen üblichen Relays."
 
-#: nostr/ui/draft_relays_sheet.py:429
+#: nostr/ui/draft_relays_sheet.py:434
 msgid "Drafts are saved only on these relays:"
 msgstr "Entwürfe werden nur auf diesen Relays gespeichert:"
 
-#: nostr/ui/draft_relays_sheet.py:431
+#: nostr/ui/draft_relays_sheet.py:436
 msgid "Drafts are kept on your usual relays."
 msgstr "Entwürfe liegen auf deinen üblichen Relays."
 
-#: nostr/ui/draft_relays_sheet.py:231
+#: nostr/ui/draft_relays_sheet.py:233
 #, python-brace-format
 msgid "Drafts can be kept on at most {count} relay."
 msgid_plural "Drafts can be kept on at most {count} relays."
 msgstr[0] "Entwürfe können auf höchstens {count} Relay liegen."
 msgstr[1] "Entwürfe können auf höchstens {count} Relays liegen."
 
-#: nostr/ui/draft_relays_sheet.py:300
+#: nostr/ui/draft_relays_sheet.py:302
 msgid "Saving. Approve the request in your signer app if it asks…"
 msgstr "Wird gespeichert. Bestätige die Anfrage in deiner Signer-App, wenn sie fragt …"
 
-#: nostr/ui/draft_relays_sheet.py:293
+#: nostr/ui/draft_relays_sheet.py:295
 #, python-brace-format
 msgid "Moving {count} draft…"
 msgid_plural "Moving {count} drafts…"
