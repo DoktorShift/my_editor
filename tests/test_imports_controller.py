@@ -485,6 +485,34 @@ class TestTheSecondProcess:
         controller.account_changed(None)
         settle()
 
+    def test_reading_never_costs_the_first_one_a_source(self, tmp_path):
+        """CP3 review M1: the second MyEditor wrote its out-of-date list to
+        this computer's copy when it read a source, and took that copy over
+        when the first one quit, so a source the first one followed (its
+        change not on the relays yet) was removed with its posts."""
+        first, second = Harness(tmp_path), Harness(tmp_path)
+        first.controller.account_changed(profile())
+        first.controller.subscriptions.add_feed(NOSTR_AUTHOR, "An author")
+        second.controller.account_changed(profile())
+        settle()
+        assert second.controller.read_only
+        first.controller.subscriptions.add_feed(FEED, "Blog")     # still waiting to be sent
+        first.controller.inbox.ingest(source_key(FEED), [make_item("Post", guid="g-1")])
+        second.controller.subscriptions.mark_fetched(NOSTR_AUTHOR)  # it reads the author
+        assert not second.controller.follow(FEED + "/other")       # it changes nothing
+        first.controller.account_changed(None)                     # quits
+        second.controller._watch_other()
+        settle()
+        controller = second.controller
+        assert not controller.read_only
+        assert sorted(s.key for s in controller.sources()) == sorted(
+            [source_key(NOSTR_AUTHOR), source_key(FEED)])
+        assert len(controller.page(View(OLDER_POSTS))) == 1
+        # Its relays never had the first one's change: this one sends it.
+        assert controller.subscriptions._dirty
+        controller.account_changed(None)
+        settle()
+
     def test_the_window_stays_and_works_again(self, tmp_path):
         from nostr.imports_controller import ELSEWHERE
         from nostr.ui.imports_window import ImportsWindow

@@ -201,6 +201,7 @@ class FeedSubscriptionStore(QObject):
         self._runs: Dict[int, int] = {}
         # Edits made while a publish was on its way go out right after it.
         self._publish_after_run = False
+        self._read_only = False
 
     # -- profile binding ---------------------------------------------------
 
@@ -234,7 +235,8 @@ class FeedSubscriptionStore(QObject):
         another MyEditor may have changed it since it was read here (the one
         that kept the inbox before this one, CP1 review L7). A change still
         waiting here is never dropped: then only the relays are asked, and
-        what they answer is merged as always."""
+        what they answer is merged as always. A process that was read only
+        has none: the copy it reads is the other one's."""
         profile = self._profile
         if profile is None:
             return
@@ -254,6 +256,25 @@ class FeedSubscriptionStore(QObject):
             self.bind_profile(profile)
             return
         self._profile = profile
+
+    @property
+    def read_only(self) -> bool:
+        """Whether another MyEditor on this computer keeps this account's
+        inbox and writes the list, so this one only reads it."""
+        return self._read_only
+
+    @read_only.setter
+    def read_only(self, value: bool) -> None:
+        """Read only, nothing is written to this computer's copy and nothing
+        is published: the copy stays the other one's, a change it could not
+        send yet included, for when this one takes over (``reload``). Read
+        times stay in memory."""
+        self._read_only = value
+        if value:
+            # A change waiting in the copy read at binding is the other
+            # MyEditor's to send.
+            self._cancel_pending_timer()
+            self._dirty = False
 
     # -- read API ----------------------------------------------------------
 
@@ -347,7 +368,7 @@ class FeedSubscriptionStore(QObject):
         stamp = int(when if when is not None else self._clock())
         if not self._local.set_fetched(url, stamp):
             return
-        if publish:
+        if publish and not self._read_only:
             self._send_read_times = True
             self._after_mutation()
         else:
@@ -452,7 +473,8 @@ class FeedSubscriptionStore(QObject):
         self._base = remote
         if event is not None:
             self._base_mark = _mark(event)
-        self._dirty = not merged.same_sources(remote) or self._send_read_times
+        self._dirty = not self._read_only and (
+            not merged.same_sources(remote) or self._send_read_times)
         self._save_cache()
         if changed:
             self.feeds_changed.emit()
@@ -486,6 +508,11 @@ class FeedSubscriptionStore(QObject):
         self._cancel_timer = self._scheduler(delay, self._on_debounce_fired)
 
     def _after_mutation(self) -> None:
+        if self._read_only:
+            # The other MyEditor merges and shares the list (an older list
+            # of this app's included); here it is only shown.
+            self.feeds_changed.emit()
+            return
         self._dirty = True
         self._save_cache()
         self.feeds_changed.emit()
@@ -556,7 +583,7 @@ class FeedSubscriptionStore(QObject):
         self._legacy_merged = bool(cached.get("legacyMerged"))
 
     def _save_cache(self) -> None:
-        if self._profile is None:
+        if self._profile is None or self._read_only:
             return
         self._write_cache(self._profile.user_pubkey, self._local, self._base,
                           self._dirty, self._legacy_merged, self._base_mark)

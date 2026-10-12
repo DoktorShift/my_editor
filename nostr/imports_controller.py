@@ -220,7 +220,7 @@ class ImportsController(QObject):
         self.checker = None
         self._lock: Optional[QLockFile] = None
         self._exit_hook: Optional[Callable[[], None]] = None
-        self.read_only = False
+        self._read_only = False
         # Read only, the other process's changes are looked for and its
         # lock tried every few seconds (CP1 review L7).
         self._watch = QTimer(self)
@@ -262,6 +262,18 @@ class ImportsController(QObject):
     @property
     def bound(self) -> bool:
         return self.inbox is not None
+
+    @property
+    def read_only(self) -> bool:
+        """Whether another MyEditor on this computer keeps this account's
+        inbox: this one shows it, and leaves checking, importing and the
+        list of sources to the other one."""
+        return self._read_only
+
+    @read_only.setter
+    def read_only(self, value: bool) -> None:
+        self._read_only = value
+        self.subscriptions.read_only = value
 
     def account_changed(self, profile) -> None:
         """The account in use changed; None when Nostr is not in use."""
@@ -841,7 +853,7 @@ class ImportsController(QObject):
         there at once: a feed's as a baseline (Older Posts, as the first
         check would make them), another source's as read now. Returns the
         source's key, or "" when it could not be followed."""
-        if not _public(url):
+        if not _public(url) or self.read_only:
             return ""
         added = self.subscriptions.add_feed(url, title)
         key = source_key(url)
