@@ -2755,8 +2755,8 @@ class MainWindow(QMainWindow):
         count = len(pending)
         upload = ask(
             self,
-            title=ngettext("Upload {count} image to your Blossom servers?",
-                           "Upload {count} images to your Blossom servers?",
+            title=ngettext("Upload {count} image to your media servers?",
+                           "Upload {count} images to your media servers?",
                            count).format(count=count),
             message=_("They're already in your document and stay there either way."),
             buttons=(Button(_("Keep Local"), False, CANCEL), Button(_("Upload"), True, DEFAULT)))
@@ -2970,10 +2970,10 @@ class MainWindow(QMainWindow):
             title=ngettext("Upload {count} image before publishing?",
                            "Upload {count} images before publishing?", count).format(count=count),
             message=ngettext(
-                "{count} image in this document is not on Blossom yet. Publishing now "
-                "would break it for readers.",
-                "{count} images in this document are not on Blossom yet. Publishing now "
-                "would break them for readers.", count).format(count=count),
+                "{count} image in this document is not on your media servers yet. "
+                "Publishing now would break it for readers.",
+                "{count} images in this document are not on your media servers yet. "
+                "Publishing now would break them for readers.", count).format(count=count),
             buttons=(Button(_("Cancel"), False, CANCEL), Button(_("Upload Now"), True, DEFAULT)))
         if upload:
             for name in blocked:
@@ -6046,7 +6046,7 @@ class MainWindow(QMainWindow):
         if active is None:
             inform(self, title=_("Connect a signer first"),
                    message=_("Connect a Nostr signer (Nostr > Connect Signer\u2026) "
-                             "before browsing your Blossom media library."))
+                             "before browsing your media library."))
             return
         # Reading the private library is where the signer prompts are, so
         # it happens when the user opens their media and not before.
@@ -6078,7 +6078,7 @@ class MainWindow(QMainWindow):
         if active is None:
             inform(self, title=_("Connect a signer first"),
                    message=_("Connect a Nostr signer (Nostr > Connect Signer\u2026) "
-                             "before inserting Blossom images."))
+                             "before inserting images from your media servers."))
             return
         ed = self.current_editor()
         if ed is None:
@@ -6271,7 +6271,7 @@ class MainWindow(QMainWindow):
         if hosts:
             title = _("Upload this image to {hosts}?").format(hosts=hosts)
         else:
-            title = _("Upload this image to your Blossom servers?")
+            title = _("Upload this image to your media servers?")
         upload, remember = ask_with_checkbox(
             self,
             title=title,

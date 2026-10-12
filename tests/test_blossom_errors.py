@@ -136,7 +136,7 @@ def test_format_err_uses_the_code_and_carries_the_detail():
 
 
 @pytest.mark.parametrize("reason", [
-    "signer rejected the Blossom auth event: user declined",
+    "signer declined the request to the media server: user declined",
     "Connect a Nostr signer first.",
 ])
 def test_signer_strings_pass_through_byte_identical(reason):
