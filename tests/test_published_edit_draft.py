@@ -9,7 +9,8 @@ text; when the draft has changes not published yet, the person chooses
 words are never hidden behind the published ones. Saving a tab as a
 draft under an identifier another draft has asks first, the way Save As
 asks before it replaces a file (Cancel is the default), and a tab bound
-to that draft just saves it again.
+to that draft just saves it again. A tab recovered after a crash keeps
+the draft it was bound to and the article it edited (review N13).
 
 The window is built in a child process with its own home folder
 (tests/app_process.py); no relay is asked.
@@ -167,3 +168,61 @@ def test_edit_opens_the_draft_or_asks_and_saving_never_replaces_a_draft_unasked(
         "action": "Replace"}
     assert r["fired_after_cancel"] == [] and r["fired_after_replace"] == ["my-post"]
     assert r["bound_tab_asked"] == 0 and r["bound_tab_fired"] == "my-post"
+
+
+RECOVERY_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+from nostr.article_details import ArticleDetails
+from recovery import read_backup
+
+w = main_window.MainWindow()
+w.show()
+app.processEvents()
+r = {}
+
+def recovered(setup):
+    ed = w.new_tab()
+    setup(ed)
+    ed.insertPlainText("Words typed before the crash.")
+    assert ed._backup.write_now()
+    again = w._restore_one_backup(read_backup(ed._backup.path))
+    return again
+
+# A tab bound to a draft, and one editing a published article.
+draft_tab = recovered(lambda ed: setattr(ed, "_draft_binding", main_window.DraftBinding(
+    identifier="my-draft", inner_kind=30023, title="My Draft", profile_pubkey="a" * 64)))
+binding = draft_tab._draft_binding
+r["draft"] = [binding.identifier, binding.inner_kind, binding.title, binding.profile_pubkey]
+
+
+def edit_tab(ed):
+    ed._published_article = ArticleDetails(identifier="my-post", title="My Post",
+                                           published_at=1700000000)
+    ed._published_author = "b" * 64
+
+
+article_tab = recovered(edit_tab)
+r["article"] = [article_tab._published_article.identifier,
+                article_tab._published_article.published_at, article_tab._published_author]
+r["text"] = article_tab.toPlainText()
+for i in range(w.tabs.count()):
+    e = w._editor_from_widget(w.tabs.widget(i))
+    if e is not None:
+        e.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_a_tab_recovered_after_a_crash_keeps_its_draft_and_its_article(tmp_path):
+    # Review N13: the backup kept only the text, so the recovered Edit tab,
+    # published, made a second article under a new identifier.
+    r = run_window_script(RECOVERY_SCRIPT, tmp_path)
+    assert r["draft"] == ["my-draft", 30023, "My Draft", "a" * 64]
+    assert r["article"] == ["my-post", 1700000000, "b" * 64]
+    assert r["text"] == "Words typed before the crash."

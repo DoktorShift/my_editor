@@ -33,6 +33,7 @@ from PySide6.QtGui import QTextCursor
 from nostr.article_details import ArticleDetails
 from recovery import (
     classify_backup, document_is_empty, is_restorable, load_backup_content, read_backup,
+    tab_identity,
 )
 from update_check import version_tuple
 from welcome import is_pristine_welcome
@@ -61,8 +62,7 @@ def capture_editor_tab(ed) -> Optional[TabState]:
             # Content exists that is in no file and no backup.
             return None
     cursor = ed.textCursor()
-    binding = getattr(ed, "_draft_binding", None)
-    article = getattr(ed, "_published_article", None)
+    identity = tab_identity(ed)
     return TabState(
         kind=DOCUMENT,
         path=path,
@@ -71,9 +71,9 @@ def capture_editor_tab(ed) -> Optional[TabState]:
         cursor=cursor.position(),
         anchor=cursor.anchor(),
         scroll=ed.verticalScrollBar().value(),
-        draft=dataclasses.asdict(binding) if binding is not None else None,
-        article=article.tags() if article is not None else None,
-        article_author=getattr(ed, "_published_author", "") if article is not None else "",
+        draft=identity.get("draft"),
+        article=identity.get("article"),
+        article_author=identity.get("article_author", ""),
     )
 
 
@@ -215,11 +215,7 @@ def resume_tab(window, tab: TabState, *, draft_type):
     if record is not None:
         load_backup_content(ed, record, modified=tab.modified)
         ed._backup.take_over(record["_backup_file"])
-    if tab.draft:
-        ed._draft_binding = _dataclass_from(draft_type, tab.draft)
-    if tab.article:
-        ed._published_article = ArticleDetails.from_tags(tab.article)
-        ed._published_author = tab.article_author
+    restore_identity(ed, tab.draft, tab.article, tab.article_author, draft_type=draft_type)
     index = _tab_index(window, ed)
     if index >= 0:
         window.tabs.setTabText(index, window._compose_tab_title(ed))
@@ -325,6 +321,20 @@ def _tab_index(window, widget) -> int:
         if page is widget or window._editor_from_widget(page) is widget:
             return i
     return -1
+
+
+def restore_identity(ed, draft, article, article_author, *, draft_type) -> None:
+    """Give a reopened tab back what it was besides its text
+    (recovery.tab_identity): the draft it is bound to, rebuilt as
+    ``draft_type``, and the published article it edits with whose it is.
+    Anything malformed is left out: the tab is then a plain document."""
+    if isinstance(draft, dict):
+        ed._draft_binding = _dataclass_from(draft_type, draft)
+    if isinstance(article, list) and all(
+            isinstance(tag, list) and all(isinstance(part, str) for part in tag)
+            for tag in article):
+        ed._published_article = ArticleDetails.from_tags(article)
+        ed._published_author = article_author if isinstance(article_author, str) else ""
 
 
 def _dataclass_from(cls, data: dict):

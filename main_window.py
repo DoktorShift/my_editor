@@ -1951,6 +1951,11 @@ class MainWindow(QMainWindow):
         # resolve against it.
         ed._file_path = None if freshness == "stale" else original_path
         load_backup_content(ed, backup, modified=True)
+        # The draft it was bound to and the article it edited come back
+        # too, so saving or publishing it goes on under its identifier.
+        workspace_restore.restore_identity(
+            ed, backup.get("draft"), backup.get("article"), backup.get("article_author"),
+            draft_type=DraftBinding)
         self._attach_highlighter(ed, ed._file_path)
 
         container = QWidget()
