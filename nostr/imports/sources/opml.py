@@ -103,9 +103,11 @@ def parse_opml(text: str) -> OpmlDocument:
     )
 
 
-# What XML 1.0 forbids in a document (control characters other than tab,
-# newline and carriage return); in an attribute even those become spaces.
-_NOT_IN_ATTRIBUTES = re.compile(r"[\x00-\x1f\x7f]")
+# What an attribute holds as a space: what XML 1.0 forbids in a document
+# (control characters, U+FFFE and U+FFFF, and lone surrogates, CP3 review
+# L10), tab, newline and carriage return (normalized to spaces anyway),
+# and DEL.
+_NOT_IN_ATTRIBUTES = re.compile("[^\x20-\x7e\x80-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]")
 
 
 def _attribute(value: str) -> str:

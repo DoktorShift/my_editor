@@ -54,6 +54,16 @@ def test_the_file_reads_back_with_the_importer():
     assert [o.getAttribute("type") for o in outlines] == ["rss", "rss", "rss"]
 
 
+def test_names_with_characters_xml_cannot_hold_still_make_a_valid_file():
+    """CP3 review L10: a name holding U+FFFE or U+FFFF (or a lone
+    surrogate) gave a file other readers reject."""
+    import xml.dom.minidom
+    feeds = [OpmlFeed("https://a.example/feed", "A\ufffeB\uffffC\ud800D", None)]
+    text = write_opml(feeds, title="Mine\uffff", created=WHEN)
+    xml.dom.minidom.parseString(text.encode("utf-8"))
+    assert parse_opml(text).feeds[0].title == "A B C D"
+
+
 @pytest.fixture
 def controller(tmp_path):
     controller = controller_for(tmp_path)
