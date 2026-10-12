@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -520,6 +521,8 @@ class ShortcutsDialog(QDialog):
         close_btn.setDefault(True)
         close_btn.clicked.connect(self.accept)
         root.addWidget(buttons)
+        # Command-W (Ctrl+W) closes it, as it does any window.
+        QShortcut(QKeySequence.StandardKey.Close, self).activated.connect(self.close)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)

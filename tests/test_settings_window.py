@@ -177,3 +177,14 @@ def test_choosing_from_settings_says_nothing_more_than_the_window_does(monkeypat
     assert actions["de"].isChecked()
     MainWindow._choose_language(host, "de")
     assert len(told) == 1
+
+
+
+def test_command_w_closes_it_as_any_window():
+    # Review, decision 1: only Escape closed it. Every key the system binds
+    # to Close does (Command-W, Ctrl+W, and Ctrl+F4 on Windows).
+    f = Fixture()
+    f.window.show()
+    QApplication.processEvents()
+    QTest.keyClick(f.window, Qt.Key_W, Qt.ControlModifier)
+    assert not f.window.isVisible()

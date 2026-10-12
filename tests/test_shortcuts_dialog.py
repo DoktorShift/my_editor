@@ -26,7 +26,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 import shortcuts_dialog  # noqa: E402
-from shortcuts_dialog import OTHER_KEYS, ShortcutGroup, Shortcut, _key_names  # noqa: E402
+from shortcuts_dialog import (  # noqa: E402
+    OTHER_KEYS, Shortcut, ShortcutGroup, ShortcutsDialog, _key_names, groups_from,
+)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -128,3 +130,14 @@ def test_an_open_window_follows_an_account_coming_and_going(qt_app):
     MainWindow._on_nostr_in_use_changed(win, True)
     assert listed() == with_nostr
     window.close()
+
+
+
+def test_command_w_closes_it_as_any_window(qt_app):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    dialog = ShortcutsDialog(groups_from([("Editing", [("Ctrl+B", "Bold")])]), is_dark=False)
+    dialog.show()
+    qt_app.processEvents()
+    QTest.keyClick(dialog, Qt.Key_W, Qt.ControlModifier)
+    assert not dialog.isVisible()

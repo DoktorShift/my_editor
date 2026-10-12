@@ -154,8 +154,10 @@ class SettingsWindow(QDialog):
         layout.addLayout(form)
         layout.setSizeConstraint(QVBoxLayout.SizeConstraint.SetFixedSize)
 
-        # Command-W on a Mac, Ctrl+W elsewhere, as for any window.
-        close = QShortcut(QKeySequence(QKeySequence.StandardKey.Close), self)
+        # Command-W on a Mac, Ctrl+W (and Ctrl+F4 on Windows) elsewhere, as
+        # for any window: every key the system binds to Close, not only its
+        # first (a QKeySequence of a standard key holds one).
+        close = QShortcut(QKeySequence.StandardKey.Close, self)
         close.activated.connect(self.close)
         self.apply_theme(is_dark)
         self.refresh()

@@ -206,3 +206,11 @@ def test_the_documents_commands_are_dimmed_while_imports_is_in_front(window):
     MainWindow._update_window_commands(host)
     assert save.isEnabled() and not bold.isEnabled()
     assert not sidebar.isEnabled()
+
+
+
+def test_command_w_closes_the_window(window):
+    # Every key the system binds to Close, Ctrl+W included (a shortcut set
+    # from the standard key alone got only Ctrl+F4 on Windows).
+    QTest.keyClick(window, Qt.Key_W, Qt.ControlModifier)
+    assert not window.isVisible()
