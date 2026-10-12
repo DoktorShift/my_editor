@@ -25,9 +25,10 @@ destructive one at the leading edge, away from the default; in a stack
 (when the titles are too long for a row), the default on top and Cancel at
 the bottom. A QDialogButtonBox has no stack and no leading destructive
 button, so the alert lays them out itself. (Other dialogs' button boxes
-follow the same row order through the app's style, theme.AppStyle, and
-answer Return the same way through return_chooses_the_action.) The keyboard follows the same order, and
-the default button has the focus, so Space and Return both choose it.
+follow the same row order through the app's style, theme.AppStyle.) The
+keyboard follows the same order, and the default button has the focus,
+so Space and Return both choose it; Return on another focused button
+follows the system (answer_return_as_the_system_does).
 
 Every color comes from theme.dialog_stylesheet, so no call site can paint
 light text on a light background again.
@@ -37,6 +38,7 @@ confirm_destructive). They all build the dialog through the module-level
 ``Alert`` name, which is the single seam tests replace.
 """
 
+import sys
 from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF, Qt
@@ -84,6 +86,9 @@ QPushButton#alert_details {
 }
 """
 
+
+# Whether the keyboard follows the Mac (see answer_return_as_the_system_does).
+IS_MAC = sys.platform == "darwin"
 
 @dataclass(frozen=True)
 class Button:
@@ -160,7 +165,7 @@ class Alert(QDialog):
         for spec in buttons:
             button = QPushButton(spec.label, self.button_row)
             button.setToolTip(spec.tooltip)
-            button.setAutoDefault(False)
+            answer_return_as_the_system_does([button])
             button.setDefault(spec.role == DEFAULT)
             if spec.role == DESTRUCTIVE:
                 button.setObjectName("destructive")
@@ -194,7 +199,7 @@ class Alert(QDialog):
         self.details_view.hide()
         toggle = QPushButton(_("Show Details"))
         toggle.setObjectName("alert_details")
-        toggle.setAutoDefault(False)
+        answer_return_as_the_system_does([toggle])
 
         def flip():
             shown = not self.details_view.isVisible()
@@ -280,16 +285,21 @@ def start_on_default(button: QPushButton) -> None:
         button.setFocus()
 
 
-def return_chooses_the_action(box: QDialogButtonBox) -> None:
-    """Let a dialog's button box answer the keyboard as an alert does: Return
-    chooses the action (the box's accept button, which the box makes the
-    default when the dialog is shown) whichever button has the focus, and
-    Space the focused one. Call it once the box has its buttons, and make no
-    button the default by hand: done before the box is in its dialog, that
-    left Qt to choose the first button in the row, Cancel."""
-    for button in box.buttons():
+def answer_return_as_the_system_does(buttons) -> None:
+    """Let a dialog's push buttons answer Return the way the system's own
+    dialogs do. On a Mac, Return chooses the default button whichever button
+    has the focus, and Space the focused one. On Windows and Linux, Return
+    on a focused button presses that button (the default moves with the
+    focus there, and so does the accent that marks it). From any other
+    control, Return chooses the default everywhere.
+
+    For a button box, pass ``box.buttons()`` once it has them, and make no
+    button the default by hand: the box makes its accept button the default
+    when the dialog is shown. (Done before the box was in its dialog, that
+    left Qt to choose the first button in the row, Cancel.)"""
+    for button in buttons:
         if isinstance(button, QPushButton):
-            button.setAutoDefault(False)
+            button.setAutoDefault(not IS_MAC)
 
 
 def _icon_pixmap(caution: bool) -> QPixmap:

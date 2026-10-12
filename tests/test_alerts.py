@@ -224,6 +224,24 @@ def test_space_on_the_focused_button_chooses_the_default():
     assert alert.value == "save"
 
 
+@pytest.mark.parametrize("mac, chosen", [(True, "save"), (False, "cancel")])
+def test_return_on_a_focused_button_follows_the_system(monkeypatch, mac, chosen):
+    # Review R2: on a Mac, Return chooses the default whichever button has
+    # the focus (Space presses the focused one); on Windows and Linux,
+    # Return presses the focused button, as their own dialogs do.
+    from PySide6.QtTest import QTest
+    monkeypatch.setattr(alerts, "IS_MAC", mac)
+    alert = Alert(None, title="t", buttons=save_changes_buttons())
+    alert.show()
+    alert.activateWindow()
+    QApplication.processEvents()
+    cancel = alert.buttons["Cancel"]
+    cancel.setFocus(Qt.TabFocusReason)
+    QApplication.processEvents()
+    QTest.keyClick(cancel, Qt.Key_Return)
+    assert alert.value == chosen
+
+
 @pytest.mark.parametrize("is_dark", [False, True])
 def test_a_destructive_button_is_red_text_on_its_own_theme(is_dark):
     alert = Alert(None, title="t", buttons=save_changes_buttons(), is_dark=is_dark)

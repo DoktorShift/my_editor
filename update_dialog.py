@@ -48,7 +48,7 @@ from PySide6.QtWidgets import (
 )
 
 import theme
-from alerts import start_on_default
+from alerts import answer_return_as_the_system_does, start_on_default
 from i18n import _
 from constants import (
     DARK_BORDER, DARK_FG, DARK_MENU_BG, DARK_MUTED_FG,
@@ -192,7 +192,7 @@ class _StepRow(QWidget):
         field.setObjectName("update_command")
         field.setReadOnly(True)
         copy = QPushButton(_("Copy"))
-        copy.setAutoDefault(False)
+        answer_return_as_the_system_does([copy])
 
         def on_copy():
             QApplication.clipboard().setText(command)
@@ -381,7 +381,7 @@ class UpdateDialog(QDialog):
         for key, button in self._buttons.items():
             button.setVisible(key in visible)
             button.setDefault(False)
-            button.setAutoDefault(False)
+        answer_return_as_the_system_does(self._buttons.values())
         default = _DEFAULT_BUTTON.get(state)
         if default:
             self._buttons[default].setDefault(True)

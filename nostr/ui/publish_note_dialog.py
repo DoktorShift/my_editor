@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from alerts import return_chooses_the_action
+from alerts import answer_return_as_the_system_does
 from i18n import _, ngettext
 
 from ..avatar_store import AvatarStore
@@ -280,7 +280,7 @@ class PublishNoteDialog(QDialog):
         buttons = QDialogButtonBox()
         self._cancel_btn = buttons.addButton(QDialogButtonBox.Cancel)
         self._publish_btn = buttons.addButton(_("Publish"), QDialogButtonBox.AcceptRole)
-        return_chooses_the_action(buttons)
+        answer_return_as_the_system_does(buttons.buttons())
         self._cancel_btn.clicked.connect(self._on_cancel)
         self._publish_btn.clicked.connect(self._on_publish)
         bottom.addWidget(buttons)

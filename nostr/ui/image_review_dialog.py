@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
 )
 
 import theme
-from alerts import return_chooses_the_action
+from alerts import answer_return_as_the_system_does
 from i18n import _, ngettext
 
 from ..imports.images import image_label
@@ -123,7 +123,7 @@ class ImageReviewDialog(QDialog):
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
         buttons.addButton(_("Done"), QDialogButtonBox.ButtonRole.AcceptRole)
-        return_chooses_the_action(buttons)
+        answer_return_as_the_system_does(buttons.buttons())
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)

@@ -540,6 +540,27 @@ def test_software_update_opens_on_its_default_button(qt_app):
             dialog.close()
 
 
+@pytest.mark.parametrize("mac", [True, False])
+def test_return_on_skip_follows_the_system(qt_app, monkeypatch, mac):
+    # Review R2: Return on a focused Skip This Version skips it on Windows
+    # and Linux; on a Mac it chooses the default, Install Update.
+    import alerts
+    from PySide6.QtTest import QTest
+    monkeypatch.setattr(alerts, "IS_MAC", mac)
+    dialog = automatic_dialog(FakeInstaller())
+    skipped = recorder(dialog.skip_requested)
+    dialog.show()
+    qt_app.processEvents()
+    try:
+        skip = dialog._buttons["skip"]
+        skip.setFocus(Qt.TabFocusReason)
+        qt_app.processEvents()
+        QTest.keyClick(skip, Qt.Key_Return)
+        assert bool(skipped) == (not mac)
+    finally:
+        dialog.close()
+
+
 def test_skip_is_explicit_and_says_which_version():
     dialog = automatic_dialog(FakeInstaller())
     skipped = recorder(dialog.skip_requested)

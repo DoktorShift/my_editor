@@ -7,15 +7,21 @@ main.py sets, which puts Cancel first and the default action last on
 every system, as the HIG does):
 
   The action (Save, Save draft, Publish, Done, OK) is the default button,
-  drawn as such at the trailing end of the row, and Return chooses it whichever control has the focus,
-  Cancel included, as in a Mac dialog and in MyEditor's alerts. (Review
-  N1: the action was made the default before its button box was in the
-  dialog, so Qt chose the first button in the row, Cancel, and Return
-  cancelled.)
+  drawn as such at the trailing end of the row, and the dialog opens with
+  the focus where Return chooses it. (Review N1: the action was made the
+  default before its button box was in the dialog, so Qt chose the first
+  button in the row, Cancel, and Return cancelled.)
+
+  Return on a focused Cancel follows the system (review R2): on a Mac it
+  still chooses the action, and Space presses the focused button; on
+  Windows and Linux it presses Cancel, as their own dialogs do, so a key
+  aimed at Cancel never publishes there.
 
   Escape cancels. (Publish as Article is given a title first: without
   one, Publish is dimmed and Return does nothing.)
 """
+
+import pytest
 
 from tests.app_process import run_window_script
 
@@ -29,8 +35,10 @@ from PySide6.QtWidgets import (
     QApplication, QDialog, QDialogButtonBox, QPlainTextEdit, QTextEdit,
 )
 app = QApplication(sys.argv[:1])
+import alerts
 import theme
 app.setStyle(theme.AppStyle("Fusion"))
+alerts.IS_MAC = sys.argv[2] == "mac"
 
 from nostr.ui.image_review_dialog import ImageReviewDialog
 from nostr.ui.publish_article_dialog import PublishArticleDialog
@@ -78,9 +86,10 @@ def press(make, key, focus_cancel):
         app.processEvents()
     target = dialog.focusWidget() or dialog
     if key == Qt.Key_Return and isinstance(target, (QTextEdit, QPlainTextEdit)):
-        cancel.setFocus(Qt.TabFocusReason)     # Return in the note's text is a new line
+        # Return in the note's text is a new line: Tab on to Publish.
+        action.setFocus(Qt.TabFocusReason)
         app.processEvents()
-        target = cancel
+        target = action
     default = action.isDefault() and not cancel.isDefault()
     trailing = action.mapTo(dialog, action.rect().topLeft()).x() \
         > cancel.mapTo(dialog, cancel.rect().topLeft()).x()
@@ -100,9 +109,11 @@ print("RESULT " + json.dumps(r))
 """
 
 
-def test_return_chooses_the_action_and_escape_cancels(tmp_path):
-    r = run_window_script(SCRIPT, tmp_path)
+@pytest.mark.parametrize("system", ["mac", "other"])
+def test_return_chooses_the_action_and_escape_cancels(tmp_path, system):
+    r = run_window_script(SCRIPT, tmp_path, system)
     for name, keys in r.items():
         assert keys["return"] == {"default": True, "trailing": True, "accepted": True}, name
-        assert keys["return on cancel"]["accepted"], name
+        # On Cancel: the Mac's default, the focused button elsewhere.
+        assert keys["return on cancel"]["accepted"] == (system == "mac"), name
         assert not keys["escape"]["accepted"], name

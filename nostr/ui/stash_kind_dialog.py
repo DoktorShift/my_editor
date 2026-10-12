@@ -42,7 +42,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from alerts import return_chooses_the_action
+from alerts import answer_return_as_the_system_does, start_on_default
 from i18n import _
 
 from ..drafts import (
@@ -417,10 +417,12 @@ class StashKindDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
         self._save_btn = buttons.button(QDialogButtonBox.Ok)
         self._save_btn.setText(_("Save draft"))
-        return_chooses_the_action(buttons)
+        answer_return_as_the_system_does(buttons.buttons())
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
+        # It opens on its action, so Return saves and Space does too.
+        start_on_default(self._save_btn)
 
         self._refresh_save_enabled()
 

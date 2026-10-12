@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from export_pdf import PAGE_SIZES, load_page_setup, save_page_setup
-from alerts import return_chooses_the_action
+from alerts import answer_return_as_the_system_does
 from i18n import _
 
 _DARK_CSS = """
@@ -133,7 +133,7 @@ class PageSetupDialog(QDialog):
         root.addLayout(form)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        return_chooses_the_action(buttons)
+        answer_return_as_the_system_does(buttons.buttons())
         buttons.accepted.connect(self._save_and_accept)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
