@@ -26,7 +26,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtCore import QEvent, Qt  # noqa: E402
 from PySide6.QtGui import QAction, QActionGroup  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QPushButton  # noqa: E402
@@ -91,6 +91,21 @@ def test_a_choice_in_the_menu_shows_in_the_window():
     assert f.window.monospace.isChecked()
     f.languages[2][1].setChecked(True)
     assert f.window.language.currentData() == "de"
+
+
+def test_a_closed_window_leaves_nothing_behind_on_the_menu(monkeypatch):
+    # Review M2: the appearance row's connection outlived the window, and
+    # every later appearance change raised on its deleted buttons.
+    errors = []
+    monkeypatch.setattr(sys, "excepthook", lambda *exc: errors.append(exc))
+    f = Fixture()
+    f.window.setAttribute(Qt.WA_DeleteOnClose, True)
+    f.window.show()
+    f.window.close()
+    QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    f.appearance["dark"].trigger()
+    f.appearance["light"].trigger()
+    assert errors == []
 
 
 def test_the_language_shown_is_the_one_chosen_and_choosing_remembers_it():

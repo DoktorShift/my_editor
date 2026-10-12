@@ -76,6 +76,7 @@ class SettingsWindow(QDialog):
                  is_dark: bool = True, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(_("Settings"))
+        self._appearance = appearance
         self._languages = languages
         self._choose_language = choose_language
         self._paste_choice = paste_choice
@@ -99,7 +100,7 @@ class SettingsWindow(QDialog):
             button = QRadioButton(action.text())
             button.setChecked(action.isChecked())
             button.toggled.connect(lambda on, a=action: on and not a.isChecked() and a.trigger())
-            action.toggled.connect(lambda on, b=button: on and b.setChecked(True))
+            action.toggled.connect(self._show_appearance)
             self.appearance_buttons[mode] = button
             column.addWidget(button)
         column.addWidget(self._help(_("Automatic follows your computer’s light or dark "
@@ -191,6 +192,11 @@ class SettingsWindow(QDialog):
         return label
 
     # -- state ------------------------------------------------------------------
+
+    def _show_appearance(self, *_args) -> None:
+        for mode, action in self._appearance.items():
+            if action.isChecked():
+                self.appearance_buttons[mode].setChecked(True)
 
     def _show_chosen_language(self, *_args) -> None:
         for index, (_code, action) in enumerate(self._languages):
