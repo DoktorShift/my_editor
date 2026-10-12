@@ -371,11 +371,17 @@ class _ShownPageStack(QStackedWidget):
 
     QStackedWidget asks for the room of its largest page, so a narrow page
     would be laid out as wide as the widest one and cut off at the side of
-    a window sized for it."""
+    a window sized for it. The same holds for the height its wrapped
+    text needs at a width: a short page after a long one (a last page
+    after a form) would otherwise scroll in a window with room to spare."""
 
     def sizeHint(self) -> QSize:
         page = self.currentWidget()
         return page.sizeHint() if page is not None else super().sizeHint()
+
+    def heightForWidth(self, width: int) -> int:
+        page = self.currentWidget()
+        return page.heightForWidth(width) if page is not None else super().heightForWidth(width)
 
     def minimumSizeHint(self) -> QSize:
         page = self.currentWidget()

@@ -307,6 +307,9 @@ def test_drafts_left_on_a_relay_that_went_quiet_are_said_once_saved():
         f"Drafts saved during the change may still be only on {MINE}, which didn’t answer.")
     assert words(sheet) == ["Done"] and sheet.focusWidget() is sheet.buttons["done"]
     assert unnamed_controls(sheet) == []
+    QApplication.processEvents()
+    # A short page after the form: nothing to scroll in a window that tall.
+    assert not sheet._scroll.verticalScrollBar().isVisible()
     sheet.buttons["done"].click()
     assert not sheet.isVisible()
 
