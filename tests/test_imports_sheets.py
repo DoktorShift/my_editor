@@ -30,7 +30,7 @@ from nostr.ui.imports_sheets import (
     dropped_file,
 )
 from tests.accessibility import unnamed_controls
-from tests.imports_fakes import TWO_ITEM_FEED, FakeFetcher
+from tests.imports_fakes import TWO_ITEM_FEED, FakeFetcher, rss_feed
 from tests.outbox_fakes import settle
 from tests.test_imports_controller import Harness, profile
 from tests.test_imports_files import OPML, WXR
@@ -428,6 +428,19 @@ class TestOneArticle:
         (post,) = out["collection"].posts()
         assert post.title == "An old one"
         assert "long enough to read" in links.item(post).content_html
+
+    def test_a_one_post_feed_is_no_shortcut_to_another_post(self, links):
+        """CP3 review L1: with one post in the site's feed, that post opened
+        whatever article the link named."""
+        newest = "https://example.com/2026/the-newest"
+        links._fetcher.responses[newest] = ("ok", self.PAGE)
+        links._fetcher.responses["https://example.com/feed.xml"] = ("ok", rss_feed([
+            {"title": "The newest", "link": newest, "guid": "n1",
+             "pubdate": "Mon, 05 Oct 2026 00:00:00 GMT"}]))
+        (post,) = self.open(links, self.ELSEWHERE)["collection"].posts()
+        assert post.title == "An old one"
+        (post,) = self.open(links, newest)["collection"].posts()
+        assert post.title == "The newest"
 
     def test_a_feed_or_a_start_page_opens_whole(self, links):
         assert len(self.open(links, "https://example.com/feed.xml")["collection"].posts()) == 2

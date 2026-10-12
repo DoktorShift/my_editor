@@ -921,7 +921,7 @@ class ImportsController(QObject):
             items = list(result.feed.items)
             article = (kind_of(address) == FEED and not is_whole_source(address)
                        and not same_page(result.url or "", address))
-            if not article or len(items) == 1:
+            if not article:
                 on_done(self.open_posts(kind="link", label=result.feed.title or address,
                                         items=items, source_url=result.url or address), "")
                 return
