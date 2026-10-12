@@ -260,7 +260,7 @@ class ProfileWindow(AssistantWindow):
             edit.blockSignals(False)
             self._errors[field.key].hide()
         if self._removing:
-            names = ", ".join(f"“{key}”" for key in self._removing)
+            names = ", ".join(_("“{part}”").format(part=key) for key in self._removing)
             self._set_form_note(ngettext(
                 "Your profile has a secret key in {names}, a part this window doesn’t show. "
                 "Saving leaves that part out, which takes the key out of your profile.",

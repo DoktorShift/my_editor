@@ -7837,6 +7837,11 @@ msgid_plural "Your profile has a secret key in {names}, parts this window doesn�
 msgstr[0] ""
 msgstr[1] ""
 
+#: nostr/ui/profile_window.py:263
+#, python-brace-format
+msgid "“{part}”"
+msgstr ""
+
 #: nostr/ui/publish_article_dialog.py:356
 msgid "Publish as Article"
 msgstr ""
@@ -7866,100 +7871,100 @@ msgstr ""
 msgid "Slug (article ID)"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:577
+#: nostr/ui/publish_article_dialog.py:579
 #: nostr/ui/publish_note_dialog.py:282
 msgid "Publish"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:637
-#: nostr/ui/publish_article_dialog.py:738
+#: nostr/ui/publish_article_dialog.py:639
+#: nostr/ui/publish_article_dialog.py:740
 msgid ""
 "No cover\n"
 "selected"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:649
+#: nostr/ui/publish_article_dialog.py:651
 msgid "Cover image"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:701
+#: nostr/ui/publish_article_dialog.py:703
 msgid "Choose hero image"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:896
+#: nostr/ui/publish_article_dialog.py:898
 msgid "Checking whether this article was published before…"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:537
+#: nostr/ui/publish_article_dialog.py:538
 msgid "Hashtags"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:562
+#: nostr/ui/publish_article_dialog.py:564
 #: nostr/ui/publish_note_dialog.py:266
 msgid "Publishing as"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:658
+#: nostr/ui/publish_article_dialog.py:660
 msgid "Choose or upload…"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:669
+#: nostr/ui/publish_article_dialog.py:671
 msgid "Pictures you pick are uploaded to your media servers."
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:671
+#: nostr/ui/publish_article_dialog.py:673
 msgid "Paste an image URL hosted anywhere on the public web."
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:772
+#: nostr/ui/publish_article_dialog.py:774
 msgid "▾  Advanced"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:774
+#: nostr/ui/publish_article_dialog.py:776
 msgid "▸  Advanced  ·  slug, cover image, hashtags"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:811
+#: nostr/ui/publish_article_dialog.py:813
 #: nostr/ui/publish_note_dialog.py:323
 msgid "(no profiles)"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:928
+#: nostr/ui/publish_article_dialog.py:930
 msgid "Couldn't check whether this article was published before"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:929
+#: nostr/ui/publish_article_dialog.py:931
 msgid "None of the relays you publish to answered. If the article went out before, publishing it as new gives it today's date, and readers see it as a new article."
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:993
+#: nostr/ui/publish_article_dialog.py:995
 msgid "The article was not published: no relay took it. Check your internet connection and try again."
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:742
+#: nostr/ui/publish_article_dialog.py:744
 msgid ""
 "Preview shown\n"
 "for library picks"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:784
+#: nostr/ui/publish_article_dialog.py:786
 #, python-brace-format
 msgid "{words} word · ~{minutes} min read"
 msgid_plural "{words} words · ~{minutes} min read"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/publish_article_dialog.py:1016
+#: nostr/ui/publish_article_dialog.py:1018
 #: nostr/ui/publish_note_dialog.py:421
 #, python-brace-format
 msgid "Publish failed: {reason}"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:932
+#: nostr/ui/publish_article_dialog.py:934
 msgid "Publish as New"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:960
+#: nostr/ui/publish_article_dialog.py:962
 #, python-brace-format
 msgid "Cannot build article: {reason}"
 msgstr ""

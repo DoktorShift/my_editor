@@ -533,8 +533,10 @@ class PublishArticleDialog(QDialog):
         self._slug_problem.setWordWrap(True)
         self._slug_problem.hide()
         slug_field.layout().addWidget(self._slug_problem)
-        compact_row.addWidget(slug_field, 1)
-        compact_row.addWidget(_make_field(_("Hashtags"), self._tags_edit), 1)
+        # Top-aligned: a message under the slug must not push Hashtags down.
+        compact_row.addWidget(slug_field, 1, Qt.AlignmentFlag.AlignTop)
+        compact_row.addWidget(_make_field(_("Hashtags"), self._tags_edit), 1,
+                              Qt.AlignmentFlag.AlignTop)
         adv.addLayout(compact_row)
 
         adv.addWidget(self._build_cover_field())
