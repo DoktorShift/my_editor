@@ -4,9 +4,14 @@
 
 A long-form article (NIP-23, kind 30023) keeps its details in tags: its
 identifier (``d``), title, summary, cover image, hashtags (``t``) and the
-time it was first published (``published_at``), and a few tags MyEditor
-carries without editing them: where an imported article came from
-(``source``) and what is known about its pictures (``imeta``, NIP-92).
+time it was first published (``published_at``). Every other tag is
+carried as it is, without editing it: where an imported article came
+from (``source``), what is known about its pictures (``imeta``, NIP-92),
+and whatever another app gave an article MyEditor edits now (zap splits,
+a content warning, alt text, labels). Only the tags MyEditor writes
+itself are not carried: the details, the app's name (``client``), and the
+people (``p``) and posts (``q``) the text mentions, which are made again
+from the text.
 
 An article draft holds them in its inner event. Saving the draft again,
 publishing it, and the Article Details inspector all read and write them
@@ -23,8 +28,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Iterable, List, Optional, Sequence, Tuple
 
-# Tags carried as they are: nothing in MyEditor edits them.
-CARRIED = ("source", "imeta")
+# Tags MyEditor writes itself; every other tag is carried as it is.
+DETAILS = ("d", "title", "summary", "image", "published_at", "t")
+REBUILT = ("client", "p", "q")
 
 
 @dataclass(frozen=True)
@@ -54,11 +60,10 @@ class ArticleDetails:
             if name == "t":
                 if value.strip() and value.strip().lower() not in hashtags:
                     hashtags.append(value.strip().lower())
-            elif name in CARRIED:
+            elif name in DETAILS:
+                found.setdefault(name, value)
+            elif name not in REBUILT:
                 carried.append(tuple(tag))
-            elif name in ("d", "title", "summary", "image", "published_at") \
-                    and name not in found:
-                found[name] = value
         published_at = None
         try:
             published_at = int(found.get("published_at", "").strip()) or None

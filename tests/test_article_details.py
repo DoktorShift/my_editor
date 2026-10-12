@@ -17,6 +17,10 @@ What must hold:
 
   The publish dialog offers the draft's details and publishes them,
   with the source; the identifier stays when the title is changed.
+
+  Tags another app gave an article (zap splits, a content warning, alt
+  text, labels) are carried when it is edited and published here; only
+  the tags MyEditor writes itself are made again.
 """
 
 import os
@@ -192,3 +196,28 @@ def test_the_publish_dialog_offers_and_publishes_the_drafts_details(tmp_path, mo
     assert tag_values(tags, "t") == ["bitcoin", "nostr"]
     assert tag_values(tags, "source") == ["https://blog.example/feed.xml"]
     assert tag_values(tags, "imeta") == [f"url {PICTURE}"]
+
+
+def test_tags_another_app_gave_an_article_survive_editing_it_here():
+    # Review N7: Edit, then Publish, used to drop zap splits, a content
+    # warning, alt text and labels; the new version replaced the old one.
+    from nostr.publisher import CLIENT_NAME, build_article
+    pk = "a" * 64
+    theirs = [["d", "my-post"], ["title", "My Post"], ["published_at", "1700000000"],
+              ["zap", pk, "wss://r.example", "1"], ["zap", "b" * 64, "", "2"],
+              ["content-warning", "spoilers"], ["alt", "An article"], ["L", "ugc"],
+              ["l", "review", "ugc"], ["client", "OtherApp"], ["p", "c" * 64],
+              ["q", "d" * 64]]
+    details = ArticleDetails.from_tags(theirs)
+    assert [list(tag) for tag in details.carried] == [
+        ["zap", pk, "wss://r.example", "1"], ["zap", "b" * 64, "", "2"],
+        ["content-warning", "spoilers"], ["alt", "An article"], ["L", "ugc"],
+        ["l", "review", "ugc"]]
+    event = build_article(content="The body.", pubkey_hex=pk, slug=details.identifier,
+                          title=details.title, published_at=details.published_at,
+                          extra_tags=details.carried_tags("The body."))
+    tags = event["tags"]
+    for tag in theirs[3:9]:
+        assert tag in tags
+    assert [tag for tag in tags if tag[0] == "client"] == [["client", CLIENT_NAME]]
+    assert ["p", "c" * 64] not in tags                   # made again from the text
