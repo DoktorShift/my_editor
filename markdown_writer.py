@@ -496,8 +496,12 @@ def _inline_markdown(spans: List[_Span], hard_break: str = "  \n") -> str:
                 i += 1
             following = spans[i] if i < len(spans) else None
             if _is_nostr_reference(span.href) and not span.literal:
-                # Bare, for readers; a copy keeps the words it shows.
-                out.append(_apart(span.href, "".join(out), following))
+                # Bare, for readers, in the styles all its words have; a
+                # copy keeps the words it shows.
+                bare = _styled(_Span(text=span.href, bold=all(s.bold for s in group),
+                                     italic=all(s.italic for s in group),
+                                     strike=all(s.strike for s in group)))
+                out.append(_apart(bare, "".join(out), following))
                 continue
             words = "".join(s.text for s in group).replace(LINE_SEPARATOR, " ")
             address = _own_address(words.strip(), span.href)

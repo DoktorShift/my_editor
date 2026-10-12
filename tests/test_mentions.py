@@ -195,6 +195,16 @@ def test_an_address_touching_a_word_or_damaged_stays_as_written(written):
     assert document_to_markdown(ed.document()) == written
 
 
+@pytest.mark.parametrize("style", ["*", "**", "~~"])
+def test_a_styled_mention_keeps_its_style(style):
+    from main_window import MainWindow
+    written = f"Hi {style}{HREF}{style} there\n"
+    ed = editor()
+    MainWindow._load_markdown(ed, written)
+    assert ed.toPlainText().startswith("Hi @")                 # a mention
+    assert document_to_markdown(ed.document()) == written
+
+
 def test_without_an_account_an_address_stays_as_written():
     from main_window import MainWindow
     ed = editor(nostr=False)
