@@ -175,16 +175,24 @@ def _short_pk(pubkey_hex: str) -> str:
 # --------------------------------------------------------------------------- #
 
 class _SearchEdit(QLineEdit):
-    """LineEdit that re-targets ↑/↓/Enter to a list widget while still
-    accepting normal typing input."""
+    """LineEdit that moves through a list widget with ↑/↓ and picks its
+    current row with Return or Enter, while still taking typing."""
 
     def __init__(self, list_widget: QListWidget, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._list = list_widget
 
     def keyPressEvent(self, event) -> None:  # type: ignore[override]
-        if event.key() in (Qt.Key_Up, Qt.Key_Down, Qt.Key_Return, Qt.Key_Enter):
+        if event.key() in (Qt.Key_Up, Qt.Key_Down):
             QApplication.sendEvent(self._list, event)
+            return
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            # Picked here, as Mail's address completion does: a list view
+            # activates on Return only on some systems (on a Mac it means
+            # "edit the row").
+            item = self._list.currentItem()
+            if item is not None:
+                self._list.itemActivated.emit(item)
             return
         super().keyPressEvent(event)
 

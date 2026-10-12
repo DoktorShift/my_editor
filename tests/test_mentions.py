@@ -175,6 +175,22 @@ def test_the_picker_shows_an_address_only_once_confirmed(tmp_path):
     picker.hide()
 
 
+@pytest.mark.parametrize("key", [Qt.Key.Key_Return, Qt.Key.Key_Enter])
+def test_return_in_the_picker_picks_the_person_on_every_system(tmp_path, key):
+    from PySide6.QtTest import QTest
+    from nostr.ui.mention_picker import MentionPicker
+    people = KnownPeople(tmp_path / "people.json")
+    people.upsert(Person(pubkey=ALICE, display_name="Alice", source="contact"))
+    picker = MentionPicker(people, FakeSearch(), is_dark=False)
+    picked = []
+    picker.picked.connect(picked.append)
+    picker.open_at(picker.pos())
+    QTest.keyClicks(picker._search_edit, "Ali")
+    QTest.keyClick(picker._search_edit, key)
+    assert [person.display_name for person in picked] == ["Alice"]
+    assert not picker.isVisible()
+
+
 # -- in the window ----------------------------------------------------------------------------
 
 SCRIPT = r"""
