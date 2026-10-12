@@ -38,7 +38,7 @@ from PySide6.QtCore import QObject, Signal
 
 from i18n import _, ngettext
 
-from . import events
+from . import events, refs
 from .outbox.policy import created_at_of, dedupe_relays, relays_from
 from .outbox.writer import signed_matches
 
@@ -107,8 +107,12 @@ def build_deletion(pubkey_hex: str, *, addresses: Iterable[str] = (),
                    event_ids: Iterable[str] = (), kinds: Iterable[int] = (),
                    created_at: Optional[int] = None) -> dict:
     """An unsigned request to delete the events at ``addresses`` and with
-    ``event_ids``, of ``kinds``. Raises ValueError when it names nothing."""
-    named_addresses = list(dict.fromkeys(addresses))
+    ``event_ids``, of ``kinds``. An address holding a Nostr secret key (a
+    slug made from a title with one) is never named: the request would
+    send the key again, so such an event is named by its id alone. Raises
+    ValueError when it names nothing."""
+    named_addresses = [address for address in dict.fromkeys(addresses)
+                       if not refs.secret_keys_in(address)]
     named_ids = list(dict.fromkeys(event_ids))
     if not named_addresses and not named_ids:
         raise ValueError("a deletion request names at least one event")

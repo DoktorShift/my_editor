@@ -6524,7 +6524,7 @@ class MainWindow(QMainWindow):
                 entitled_relays=self._entitled_relays(),
                 profile=profile,
                 targets=deletable,
-                announce=self._imported_draft_wraps(deletable),
+                announce=self._draft_wraps_to_name(deletable),
                 parent=self,
             )
         except ValueError as exc:
@@ -6577,6 +6577,18 @@ class MainWindow(QMainWindow):
                 continue
             if identifier.startswith(IMPORT_IDENTIFIER_PREFIX) or any(
                     tag and tag[0] == IMPORT_SOURCE_TAG for tag in record.inner_tags):
+                found[identifier] = record.event_id
+        return found
+
+    def _draft_wraps_to_name(self, deletable: List[Tuple[str, int]]) -> dict:
+        """``{d: wrap id}`` for the drafts whose deletion names their wrap:
+        the imported ones, and those whose slug holds a secret key, which
+        are deleted by their wrap's id alone (DraftDeleteJob), so that the
+        deletion does not send the key again."""
+        found = self._imported_draft_wraps(deletable)
+        for identifier, _kind in deletable:
+            record = self._draft_store.get(identifier)
+            if record is not None and refs.secret_keys_in(identifier):
                 found[identifier] = record.event_id
         return found
 

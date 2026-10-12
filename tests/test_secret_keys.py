@@ -219,6 +219,49 @@ def test_an_encrypted_draft_is_signed():
     assert "signed" in outcome and outcome["signed"]["content"] == sealed
 
 
+def test_an_article_whose_address_holds_a_key_is_deleted_by_its_id_alone():
+    from nostr.deletion import build_deletion
+    me = get_public_key(bytes.fromhex(SECRET)).hex()
+    request = build_deletion(me, addresses=[f"30023:{me}:backup-{NSEC}"],
+                             event_ids=["ab" * 32], kinds=[30023],
+                             created_at=1_800_000_000)
+    assert request["tags"] == [["e", "ab" * 32], ["k", "30023"]]
+    assert "signed" in _sign_locally(request)
+
+
+def _delete_draft(identifier, wrap_id):
+    from unittest.mock import MagicMock
+    from nostr.local_signer import LocalSigner
+    from nostr.publisher import DraftDeleteJob
+    from tests.outbox_fakes import FakePool, FakeRelayDirectory
+    signer = LocalSigner(bytes.fromhex(SECRET))
+    session = MagicMock()
+    session.get.side_effect = lambda profile, on_ready, on_error: on_ready(signer)
+    pool = FakePool()
+    job = DraftDeleteJob(relay_pool=pool, relay_directory=FakeRelayDirectory(),
+                         session_pool=session,
+                         profile=MagicMock(user_pubkey=signer.user_pubkey),
+                         identifier=identifier, inner_kind=30023, replaced_wrap_id=wrap_id)
+    failed = []
+    job.failed.connect(failed.append)
+    job.start()
+    settle()
+    return [event for _urls, event in pool.published], failed
+
+
+def test_a_draft_whose_slug_holds_a_key_is_deleted_by_its_wrap_id_alone():
+    """A tombstone would send the key again as its d tag: the wrap is
+    deleted by its id, with a request that names no address."""
+    sent, failed = _delete_draft(f"backup-{NSEC}", "cd" * 32)
+    assert failed == [] and len(sent) == 1
+    assert sent[0]["kind"] == 5 and sent[0]["tags"] == [["e", "cd" * 32], ["k", "31234"]]
+    assert refs.secret_keys_in_event(sent[0]) == []
+    sent, failed = _delete_draft(f"backup-{NSEC}", "")           # its wrap unknown here
+    assert sent == [] and failed and "secret key" in failed[0]
+    sent, failed = _delete_draft("backup", "")                   # an ordinary draft: tombstone
+    assert failed == [] and [event["kind"] for event in sent] == [31234]
+
+
 def test_a_signer_app_is_never_asked_to_sign_a_key():
     from nostr.bunker import BunkerClient
     from tests.outbox_fakes import FakePool

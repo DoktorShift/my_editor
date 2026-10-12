@@ -60,6 +60,15 @@ def test_imported_drafts_are_known_by_their_name_or_their_source():
     assert found == {"rss-1234": "rss-1234-wrap", "kept-name": "kept-name-wrap"}
 
 
+def test_a_draft_whose_slug_holds_a_key_is_named_by_its_wrap():
+    from nostr import bech32
+    keyed = "backup-" + bech32.encode_nsec("11" * 32)
+    host = host_for(store_with((keyed, []), ("rss-1", []), ("mine", [])))
+    found = MainWindow._draft_wraps_to_name(
+        host, [(keyed, 30023), ("rss-1", 30023), ("mine", 30023)])
+    assert found == {keyed: keyed + "-wrap", "rss-1": "rss-1-wrap"}
+
+
 @pytest.fixture
 def asked(monkeypatch):
     told = []

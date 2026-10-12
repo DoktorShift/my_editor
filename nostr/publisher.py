@@ -1094,6 +1094,9 @@ class DraftDeleteJob(QObject):
     def _on_bunker_ready(self, client: BunkerClient, publish_relays: List[str]) -> None:
         if self._cancelled:
             return
+        if refs.secret_keys_in(self._identifier):
+            self._delete_by_wrap_id(client, publish_relays)
+            return
         unsigned = build_tombstone_wrap(
             identifier=self._identifier,
             inner_kind=self._inner_kind,
@@ -1133,6 +1136,23 @@ class DraftDeleteJob(QObject):
                 on_failure=lambda _reason: self._send(signed_event, publish_relays))
             return
         self._send(signed_event, publish_relays)
+
+    def _delete_by_wrap_id(self, client: BunkerClient, publish_relays: List[str]) -> None:
+        """A draft whose slug holds a secret key: a tombstone would carry
+        the key again (as its d tag), so the draft's wrap is deleted by its
+        id alone, with a NIP-09 request that names no address."""
+        if not self._replaced_wrap_id:
+            self._emit_failed(_("This draft can’t be deleted: its slug holds a secret key, "
+                                "and the version on your relays isn’t known here. Refresh "
+                                "your drafts and try again."))
+            return
+        request = build_deletion_request(pubkey_hex=self._profile.user_pubkey,
+                                         identifier=self._identifier,
+                                         wrap_id=self._replaced_wrap_id)
+        self._emit_status(_("Waiting for signature. Approve the deletion on your signer…"))
+        client.sign_event(request,
+                          on_success=lambda signed: self._send(signed, publish_relays),
+                          on_failure=self._emit_failed)
 
     def _send(self, signed_event: dict, publish_relays: List[str],
               deletion_request: Optional[dict] = None) -> None:

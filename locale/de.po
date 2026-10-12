@@ -24,7 +24,7 @@ msgstr "Details ausblenden"
 #: alerts.py:275
 #: link_popover.py:100
 #: main_window.py:3104
-#: main_window.py:7123
+#: main_window.py:7135
 #: main_window.py:263
 #: main_window.py:2977
 #: main_window.py:5563
@@ -577,15 +577,15 @@ msgid_plural "A blank-content replacement will be published to your relays. Othe
 msgstr[0] "Auf deinen Relays wird ein leerer Ersatz veröffentlicht. Andere Apps (und deine anderen Geräte) behandeln den Entwurf dann als gelöscht. Das lässt sich nicht rückgängig machen."
 msgstr[1] "Auf deinen Relays wird ein leerer Ersatz veröffentlicht. Andere Apps (und deine anderen Geräte) behandeln die Entwürfe dann als gelöscht. Das lässt sich nicht rückgängig machen."
 
-#: main_window.py:6603
+#: main_window.py:6615
 msgid "No drafts were deleted"
 msgstr "Es wurden keine Entwürfe gelöscht"
 
-#: main_window.py:7048
+#: main_window.py:7060
 msgid "Already saving this draft - wait for it to finish."
 msgstr "Dieser Entwurf wird schon gespeichert. Warte, bis das fertig ist."
 
-#: main_window.py:7111
+#: main_window.py:7123
 msgid "(unknown profile)"
 msgstr "(unbekanntes Profil)"
 
@@ -1176,11 +1176,11 @@ msgstr "Stoppen"
 msgid "Deleting drafts"
 msgstr "Entwürfe werden gelöscht"
 
-#: main_window.py:6626
+#: main_window.py:6638
 msgid "Your signer is not responding. Open your signer app and make sure it is running."
 msgstr "Dein Signer antwortet nicht. Öffne deine Signer-App und prüfe, ob sie läuft."
 
-#: main_window.py:7129
+#: main_window.py:7141
 msgid "Saving under the current profile would create a separate draft. How would you like to handle it?"
 msgstr "Wenn du unter dem aktuellen Profil speicherst, entsteht ein eigener Entwurf. Wie möchtest du vorgehen?"
 
@@ -1484,22 +1484,22 @@ msgid_plural "Imported drafts take a second request each, which tells other apps
 msgstr[0] "Ein importierter Entwurf braucht eine zweite Anfrage, die anderen Apps sagt, dass er gelöscht ist."
 msgstr[1] "Importierte Entwürfe brauchen je eine zweite Anfrage, die anderen Apps sagt, dass sie gelöscht sind."
 
-#: main_window.py:6599
+#: main_window.py:6611
 #, python-brace-format
 msgid "{deleted} of {total} draft deleted"
 msgid_plural "{deleted} of {total} drafts deleted"
 msgstr[0] "{deleted} von {total} Entwurf gelöscht"
 msgstr[1] "{deleted} von {total} Entwürfen gelöscht"
 
-#: main_window.py:6838
+#: main_window.py:6850
 msgid "Nothing to save as a draft"
 msgstr "Nichts als Entwurf zu speichern"
 
-#: main_window.py:6839
+#: main_window.py:6851
 msgid "The current document is empty. Add some content first."
 msgstr "Das aktuelle Dokument ist leer. Füge zuerst Inhalt hinzu."
 
-#: main_window.py:6851
+#: main_window.py:6863
 msgid "This draft is too large"
 msgstr "Dieser Entwurf ist zu groß"
 
@@ -1996,33 +1996,33 @@ msgstr[1] "{count} Entwürfe aus einer anderen Nostr-App sind nicht dabei und bl
 msgid "Couldn't start the deletion"
 msgstr "Das Löschen konnte nicht gestartet werden"
 
-#: main_window.py:6590
+#: main_window.py:6602
 msgid "Draft deleted."
 msgid_plural "{count} drafts deleted."
 msgstr[0] "Entwurf gelöscht."
 msgstr[1] "{count} Entwürfe gelöscht."
 
-#: main_window.py:6607
+#: main_window.py:6619
 #, python-brace-format
 msgid "{count} could not be removed and is still on your relays. You can try again."
 msgid_plural "{count} could not be removed and are still on your relays. You can try again."
 msgstr[0] "{count} konnte nicht entfernt werden und ist noch auf deinen Relays. Du kannst es erneut versuchen."
 msgstr[1] "{count} konnten nicht entfernt werden und sind noch auf deinen Relays. Du kannst es erneut versuchen."
 
-#: main_window.py:6847
-#: main_window.py:6978
+#: main_window.py:6859
+#: main_window.py:6990
 msgid "Couldn't prepare the draft"
 msgstr "Der Entwurf konnte nicht vorbereitet werden"
 
-#: main_window.py:6848
+#: main_window.py:6860
 msgid "Its contents could not be prepared for encryption."
 msgstr "Sein Inhalt konnte nicht für die Verschlüsselung vorbereitet werden."
 
-#: main_window.py:6875
+#: main_window.py:6887
 msgid "Couldn't save the draft"
 msgstr "Der Entwurf konnte nicht gespeichert werden"
 
-#: main_window.py:7126
+#: main_window.py:7138
 #, python-brace-format
 msgid "This draft was last saved as {original}, but you're signed in as {active}"
 msgstr "Dieser Entwurf wurde zuletzt als {original} gespeichert, aber du bist als {active} angemeldet"
@@ -2062,27 +2062,27 @@ msgstr "Nicht dabei:"
 msgid "Deleting draft {current} of {total}…"
 msgstr "Entwurf {current} von {total} wird gelöscht …"
 
-#: main_window.py:6686
+#: main_window.py:6698
 #: main_window.py:3141
 msgid "That profile isn't connected anymore"
 msgstr "Dieses Profil ist nicht mehr verbunden"
 
-#: main_window.py:6687
+#: main_window.py:6699
 #: main_window.py:3142
 msgid "Pair it again from Nostr > Connect Signer to save here."
 msgstr "Verbinde es erneut unter Nostr > Signer verbinden, um hier zu speichern."
 
-#: main_window.py:6852
+#: main_window.py:6864
 #, python-brace-format
 msgid "It has {size} bytes, and NIP-44 encryption allows {limit}. Split it into smaller drafts or publish it directly."
 msgstr "Er hat {size} Bytes, die Verschlüsselung erlaubt höchstens {limit}. Teile ihn in kleinere Entwürfe auf oder veröffentliche ihn direkt."
 
-#: main_window.py:7118
+#: main_window.py:7130
 #, python-brace-format
 msgid "Switch to {name} and Save"
 msgstr "Zu {name} wechseln und speichern"
 
-#: main_window.py:7121
+#: main_window.py:7133
 #, python-brace-format
 msgid "Save a Copy as {name}"
 msgstr "Kopie als {name} speichern"
@@ -3522,7 +3522,7 @@ msgstr "Der bunker-Link muss mindestens ein Relay nennen"
 msgid "relay must be ws:// or wss://, got {relay}"
 msgstr "Ein Relay muss mit ws:// oder wss:// beginnen (erhalten: {relay})"
 
-#: nostr/deletion.py:263
+#: nostr/deletion.py:267
 #: nostr/draft_sync.py:358
 #: nostr/draft_sync.py:318
 #: nostr/publisher.py:646
@@ -3530,20 +3530,21 @@ msgstr "Ein Relay muss mit ws:// oder wss:// beginnen (erhalten: {relay})"
 msgid "Connecting to your signer…"
 msgstr "Verbindung zu deinem Signer wird hergestellt …"
 
-#: nostr/deletion.py:299
-#: nostr/publisher.py:1104
+#: nostr/deletion.py:303
+#: nostr/publisher.py:1107
+#: nostr/publisher.py:1152
 msgid "Waiting for signature. Approve the deletion on your signer…"
 msgstr "Warte auf die Signatur. Bestätige das Löschen in deinem Signer …"
 
-#: nostr/deletion.py:350
+#: nostr/deletion.py:354
 msgid "The signer didn’t sign the request."
 msgstr "Der Signer hat die Anfrage nicht signiert."
 
-#: nostr/deletion.py:303
+#: nostr/deletion.py:307
 msgid "The signer returned a different event."
 msgstr "Der Signer hat etwas anderes zurückgegeben als angefragt."
 
-#: nostr/deletion.py:326
+#: nostr/deletion.py:330
 #, python-brace-format
 msgid "Asking {n} relay to delete it…"
 msgid_plural "Asking {n} relays to delete it…"
@@ -3790,13 +3791,17 @@ msgstr "Warte auf die Signatur. Bestätige die Anfrage in deinem Signer …"
 msgid "Encrypting draft. Approve on your signer if prompted…"
 msgstr "Der Entwurf wird verschlüsselt. Bestätige in deinem Signer, wenn er fragt …"
 
-#: nostr/publisher.py:1333
+#: nostr/publisher.py:1353
 msgid "no relay accepted the deletion"
 msgstr "kein Relay hat das Löschen angenommen"
 
 #: nostr/publisher.py:687
 msgid "Finding your relays…"
 msgstr "Deine Relays werden gesucht …"
+
+#: nostr/publisher.py:1145
+msgid "This draft can’t be deleted: its slug holds a secret key, and the version on your relays isn’t known here. Refresh your drafts and try again."
+msgstr "Dieser Entwurf lässt sich nicht löschen: In seinem Slug steht ein geheimer Schlüssel, und die Fassung auf deinen Relays ist hier nicht bekannt. Lade deine Entwürfe neu und versuche es noch einmal."
 
 #: nostr/publisher.py:696
 #, python-brace-format
@@ -3831,21 +3836,21 @@ msgid_plural "Draft saved to {accepted}/{total} relays."
 msgstr[0] "Entwurf auf {accepted}/{total} Relay gespeichert."
 msgstr[1] "Entwurf auf {accepted}/{total} Relays gespeichert."
 
-#: nostr/publisher.py:1142
+#: nostr/publisher.py:1162
 #, python-brace-format
 msgid "Removing draft from {n} relay…"
 msgid_plural "Removing draft from {n} relays…"
 msgstr[0] "Der Entwurf wird von {n} Relay entfernt …"
 msgstr[1] "Der Entwurf wird von {n} Relays entfernt …"
 
-#: nostr/publisher.py:1156
+#: nostr/publisher.py:1176
 #, python-brace-format
 msgid "Draft removed on {accepted}/{total} relay."
 msgid_plural "Draft removed on {accepted}/{total} relays."
 msgstr[0] "Entwurf auf {accepted}/{total} Relay entfernt."
 msgstr[1] "Entwurf auf {accepted}/{total} Relays entfernt."
 
-#: nostr/publisher.py:1331
+#: nostr/publisher.py:1351
 #, python-brace-format
 msgid "no relay accepted the deletion ({reasons})"
 msgstr "kein Relay hat das Löschen angenommen ({reasons})"
