@@ -293,6 +293,33 @@ def test_a_key_in_the_slug_is_refused_never_rewritten(tmp_path, answers):
     assert ["d", f"backup-{NSEC}"] in without_secret_keys(unsigned)["tags"]   # never changed
 
 
+@pytest.mark.parametrize("language", ["en", "pseudo"])
+@pytest.mark.parametrize("typed", [False, True])
+def test_the_slug_message_has_the_room_it_needs(language, typed):
+    """Opened with the message, or with it appearing while the title is
+    typed, in English and in the longer test language: every line shows,
+    and the slug field keeps its height."""
+    import i18n
+    from PySide6.QtTest import QTest
+    from nostr.ui.stash_kind_dialog import StashKind, StashKindDialog
+    i18n.install(language)
+    try:
+        dialog = StashKindDialog(default=StashKind.ARTICLE, is_dark=False,
+                                 suggested_title="" if typed else f"Backup {NSEC}")
+        dialog.show()
+        QApplication.processEvents()
+        if typed:
+            QTest.keyClicks(dialog._title_edit, f"Backup {NSEC}")
+            QApplication.processEvents()
+        label, field = dialog._slug_problem, dialog._slug_edit
+        assert not label.isHidden()
+        assert label.height() >= label.heightForWidth(label.width())
+        assert field.height() >= field.minimumSizeHint().height()
+        dialog.close()
+    finally:
+        i18n.install(i18n.ENGLISH)
+
+
 def test_save_as_draft_refuses_a_key_in_the_slug(monkeypatch):
     import announce
     from nostr.ui.stash_kind_dialog import StashKind, StashKindDialog

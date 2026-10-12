@@ -447,10 +447,23 @@ class StashKindDialog(QDialog):
         self._note_card.set_selected(is_note)
         self._article_card.set_selected(not is_note)
         self._article_panel.setVisible(not is_note)
-        # Resize the dialog to its sizeHint when the panel collapses or
-        # expands: Qt won't shrink the dialog otherwise on macOS.
-        self.adjustSize()
         self._refresh_save_enabled()
+        self._fit()
+
+    def _fit(self) -> None:
+        """Fit the dialog to what it shows. The size hint makes it shrink
+        when the article panel collapses (Qt won't shrink it otherwise on
+        macOS); a wrapped message under the slug needs the height its
+        lines take at this width, which a size hint does not count (and a
+        translation can add lines)."""
+        self.adjustSize()
+        needed = self.layout().totalHeightForWidth(self.width())
+        if needed > self.height():
+            self.resize(self.width(), needed)
+
+    def showEvent(self, event) -> None:  # type: ignore[override]
+        super().showEvent(event)
+        self._fit()                  # opened with a message under the slug
 
     def _on_title_changed(self, text: str) -> None:
         if self._slug_is_auto:
@@ -471,9 +484,12 @@ class StashKindDialog(QDialog):
         # Articles need a non-empty slug to be addressable. Title is
         # nice-to-have but not strictly required by the protocol.
         slug = self._slug_edit.text().strip()
-        problem = slug_problem(slug)
-        announce.field_problem(self._slug_edit, self._slug_problem, problem or "")
+        problem = slug_problem(slug) or ""
+        said = self._slug_problem.text() if not self._slug_problem.isHidden() else ""
+        announce.field_problem(self._slug_edit, self._slug_problem, problem)
         self._save_btn.setEnabled(bool(slug) and not problem)
+        if problem != said and self.isVisible():
+            self._fit()
 
     def _on_accept(self) -> None:
         if self._kind is StashKind.NOTE:
