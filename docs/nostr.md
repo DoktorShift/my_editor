@@ -131,7 +131,7 @@ If a draft can't be copied, nothing changes: your drafts stay where they are, an
 
 **Use My Usual Relays** empties the list; after **Save**, your drafts move back to your usual relays and are saved there again.
 
-Another device that is running while you change this follows the new setting within a few minutes, when it next looks for drafts. Drafts it saved in the meantime on a relay you left are not lost: MyEditor keeps looking for drafts on that relay and moves them to where drafts go now, the same way **Save** does. The same holds for a relay you are leaving that stops answering while the change is saved: the sheet names it, and its drafts are moved once it answers again (MyEditor stops asking a relay after 30 days).
+Another device that is running while you change this follows the new setting within a few minutes, when it next looks for drafts. Drafts it saved in the meantime on a relay you left are not lost: MyEditor keeps looking for drafts on that relay and moves them to where drafts go now, the same way **Save** does. The same holds for a relay you are leaving that stops answering while the change is saved: the sheet names it, and its drafts are moved once it answers again. Each such relay is looked at on its own, so one that is gone for good holds back no other, and it keeps being asked until it answers: no draft is given up without a word.
 
 ### Recovery
 

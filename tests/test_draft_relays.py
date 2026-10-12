@@ -653,7 +653,7 @@ def test_a_relay_left_that_goes_quiet_after_the_list_went_out_is_read_on():
     assert ([OTHER], late) not in sent(relays, 31234)
     assert directory.draft_relays_of(PK) == [OTHER]
     left = directory.drafts_left_behind(PK)
-    assert left.relays == (MINE,) and left.since is not None and left.since < NOW
+    assert list(left) == [MINE] and left[MINE] is not None and left[MINE] < NOW
     assert MINE in reading_relays(directory)
 
 
@@ -666,8 +666,7 @@ def test_a_list_changed_on_another_device_leaves_the_old_draft_relays_read():
     drafts.read(read.append)
     assert read == [["wss://else.example"]]
     assert directory.draft_relays_of(PK) == ["wss://else.example"]   # followed at once
-    left = directory.drafts_left_behind(PK)
-    assert left.relays == (MINE,) and left.since is None
+    assert directory.drafts_left_behind(PK) == {MINE: None}
     assert MINE in reading_relays(directory)
 
 
@@ -700,12 +699,12 @@ def test_drafts_left_behind_are_moved_and_then_no_longer_read():
     relays.down = {MINE}
     sync._move_drafts_left_behind()                        # MINE is quiet: tried again later
     relays.run(rounds=10)
-    assert sent(relays, 31234) == [] and directory.drafts_left_behind(PK) is not None
+    assert sent(relays, 31234) == [] and directory.drafts_left_behind(PK) == {MINE: None}
     relays.down = set()
     sync._move_drafts_left_behind()
     relays.run(rounds=10)
     assert sent(relays, 31234) == [([OTHER], draft)]
-    assert directory.drafts_left_behind(PK) is None and MINE not in reading_relays(directory)
+    assert directory.drafts_left_behind(PK) == {} and MINE not in reading_relays(directory)
     sync.stop()
     sync.deleteLater()
     settle()
@@ -799,7 +798,7 @@ def test_a_late_answer_with_an_older_list_does_not_undo_a_save():
     held[0](LIST_ON_MINE)                                   # ... answered after it
     settle()
     assert out[0].ok and directory.draft_relays_of(PK) == [OTHER]
-    assert directory.drafts_left_behind(PK) is None
+    assert directory.drafts_left_behind(PK) == {}
 
 
 def test_a_list_the_signer_declined_is_not_asked_about_on_every_refresh():
@@ -825,3 +824,50 @@ def test_a_list_the_signer_declined_is_not_asked_about_on_every_refresh():
     sync.stop()
     sync.deleteLater()
     settle()
+
+
+def test_a_relay_left_behind_that_is_gone_does_not_hold_back_the_others():
+    # Review M1 (a): the list [K1, K2] was changed elsewhere to [K3]; K1 is
+    # gone for good, K2 holds a draft this device saved there meanwhile.
+    from nostr.draft_store import DraftStore
+    from nostr.draft_sync import DraftSync
+    k1, k2, k3 = "wss://k1.example", "wss://k2.example", "wss://k3.example"
+    late = wrap("draft-9")
+    on_both = found(signed(KIND_PRIVATE_RELAYS, [], f'sealed:[["relay","{k1}"],["relay","{k2}"]]'))
+    _lists, relays, directory, client = moving(on_both, drafts_on={k2: [late]})
+    directory.follow_draft_relays(
+        PK, [k3], event=signed(KIND_PRIVATE_RELAYS, [], "sealed:", created_at=NOW - 10))
+    relays.down = {k1}
+    sync = DraftSync(relay_pool=relays, relay_directory=directory,
+                     session_pool=FakeSessionPool(client), store=DraftStore(),
+                     read_draft_list=lambda _profile, on_done: on_done([k3]))
+    sync._profile = Profile()
+    sync._move_drafts_left_behind()
+    relays.run(rounds=10)
+    assert ([k3], late) in sent(relays, 31234)
+    assert directory.drafts_left_behind(PK) == {k1: None}        # still read, still asked
+    assert k1 in reading_relays(directory) and k2 not in reading_relays(directory)
+    sync.stop()
+    sync.deleteLater()
+    settle()
+
+
+def test_a_relay_left_behind_is_read_until_it_answers_however_long(monkeypatch):
+    # Review M1 (b): after 30 days it was dropped without a word, drafts and all.
+    import time
+    _lists, relays, directory, _client = moving(LIST_ON_MINE)
+    directory.leave_drafts_behind(PK, [MINE], since=None)
+    real = time.time
+    monkeypatch.setattr(time, "time", lambda: real() + 400 * 86_400)
+    assert directory.drafts_left_behind(PK) == {MINE: None} and MINE in reading_relays(directory)
+
+
+def test_each_relay_left_behind_keeps_its_own_date():
+    # Review M1 (c): one shared record gave a relay left on day 29 the date
+    # of one left on day 0.
+    k1, k2 = "wss://k1.example", "wss://k2.example"
+    _lists, _relays, directory, _client = moving(LIST_ON_MINE)
+    directory.leave_drafts_behind(PK, [k1], since=NOW - 900)
+    directory.leave_drafts_behind(PK, [k2], since=NOW - 100)
+    directory.leave_drafts_behind(PK, [k1], since=NOW - 50)        # the earlier date stays
+    assert directory.drafts_left_behind(PK) == {k1: NOW - 900, k2: NOW - 100}

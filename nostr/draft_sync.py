@@ -21,7 +21,9 @@
   - Moving drafts left behind: when the draft relays changed and a relay
     no longer among them may still hold drafts saved there meanwhile
     (RelayDirectory.drafts_left_behind), each reading ends by moving
-    them to where drafts go now (DraftMove), until one move succeeds.
+    them to where drafts go now (DraftMove), relay by relay, so one that
+    is gone does not hold back the others. Each is asked again after
+    every reading until its move succeeds.
 
 Cancellation model:
   Each ``start_for`` / ``stop`` cycle increments a monotonic
@@ -127,7 +129,7 @@ class DraftSync(QObject):
         # for tests.
         self._read_draft_list = read_draft_list or self._read_draft_list_from_relays
         self._draft_list_reader: Optional[PrivateDraftRelays] = None
-        self._left_move: Optional[DraftMove] = None
+        self._left_moves: Dict[str, DraftMove] = {}     # relay left behind -> its move
         # For NIP-40: expired wraps are ignored, whichever relay sends them.
         self._clock = clock
         self._relay_pool = relay_pool
@@ -242,10 +244,10 @@ class DraftSync(QObject):
         # without touching the next profile's state.
         self._generation += 1
         self._refresh_timer.stop()
-        if self._left_move is not None:
-            self._left_move.stop()
-            self._left_move.deleteLater()
-            self._left_move = None
+        for mover in self._left_moves.values():
+            mover.stop()
+            mover.deleteLater()
+        self._left_moves.clear()
         if self._subscription is not None:
             self._subscription.close()
             self._subscription = None
@@ -536,37 +538,43 @@ class DraftSync(QObject):
     # -- internal: drafts left on relays no longer used --------------------
 
     def _move_drafts_left_behind(self) -> None:
-        if self._profile is None or self._left_move is not None:
+        if self._profile is None:
             return
-        left = self._relay_directory.drafts_left_behind(self._profile.user_pubkey)
-        if left is None:
+        left = {relay: since for relay, since
+                in self._relay_directory.drafts_left_behind(self._profile.user_pubkey).items()
+                if relay not in self._left_moves}
+        if not left:
             return
         gen = self._generation
         ask_draft_relays(self._relay_directory, self._profile,
-                         lambda destination, g=gen: self._start_left_move(g, left, destination),
+                         lambda destination, g=gen: self._start_left_moves(g, left, destination),
                          entitled=self._entitled_relays)
 
-    def _start_left_move(self, gen: int, left, destination: List[str]) -> None:
-        if not self._is_current(gen) or self._left_move is not None:
-            return
-        # Signed events, sent as they are: no signer prompt. Every relay
-        # left behind must answer, or it is tried again after the next
-        # reading.
-        mover = DraftMove(pool=self._relay_pool, author=self._profile.user_pubkey,
-                          source=left.relays, destination=destination,
-                          must_read=left.relays, since=left.since, clock=self._clock,
-                          parent=self)
-        self._left_move = mover
-        mover.finished.connect(lambda outcome, g=gen: self._left_moved(g, left, outcome))
-        mover.start()
-
-    def _left_moved(self, gen: int, left, outcome: MoveOutcome) -> None:
+    def _start_left_moves(self, gen: int, left: Dict[str, Optional[int]],
+                          destination: List[str]) -> None:
         if not self._is_current(gen):
             return
-        self._left_move.deleteLater()
-        self._left_move = None
+        for relay, since in left.items():
+            if relay in self._left_moves:
+                continue
+            # Signed events, sent as they are: no signer prompt. A relay
+            # that does not answer is asked again after the next reading.
+            mover = DraftMove(pool=self._relay_pool, author=self._profile.user_pubkey,
+                              source=[relay], destination=destination, must_read=[relay],
+                              since=since, clock=self._clock, parent=self)
+            self._left_moves[relay] = mover
+            mover.finished.connect(
+                lambda outcome, g=gen, r=relay: self._left_moved(g, r, outcome))
+            mover.start()
+
+    def _left_moved(self, gen: int, relay: str, outcome: MoveOutcome) -> None:
+        if not self._is_current(gen):
+            return
+        mover = self._left_moves.pop(relay, None)
+        if mover is not None:
+            mover.deleteLater()
         if outcome.ok:
-            self._relay_directory.drafts_moved_from(self._profile.user_pubkey, left.relays)
+            self._relay_directory.drafts_moved_from(self._profile.user_pubkey, [relay])
 
     # -- internal: bunker decryption queue --------------------------------
 

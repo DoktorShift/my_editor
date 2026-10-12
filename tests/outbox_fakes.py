@@ -305,7 +305,7 @@ class FakeRelayDirectory(QObject):
         self.calls.append(("leave_drafts_behind", author, tuple(relays), since))
 
     def drafts_left_behind(self, author):
-        return None
+        return {}
 
     def set_draft_relays_locked(self, author, locked):
         self.calls.append(("set_draft_relays_locked", author, locked))
