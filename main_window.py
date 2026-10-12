@@ -5845,9 +5845,6 @@ class MainWindow(QMainWindow):
         if not self._confirm_images_uploaded(ed):
             return
         content = self._publish_text(ed, "note").strip() if ed is not None else ""
-        if content and not self._no_secret_keys(ed, content):
-            return
-        content = self._publish_text(ed, "note").strip() if ed is not None else ""
         if not content:
             inform(self, title=_("Nothing to publish"),
                    message=_("The current document is empty."))
@@ -5929,7 +5926,8 @@ class MainWindow(QMainWindow):
         ed.insert_mention(at, href, person.display_name or refs.short_key(
             encode_npub(person.pubkey)))
 
-    # -- secret keys: never pasted where Nostr is written, never published ---
+    # -- secret keys: never pasted where Nostr is written ---------------------
+    # (nor published: nostr/ui/secret_key_check.py, at the publish dialogs)
 
     def _guard_paste(self, ed, text: str):
         """A paste with a Nostr secret key in it, into prose while a Nostr
@@ -5949,39 +5947,6 @@ class MainWindow(QMainWindow):
                              "private messages, and once published it can never be taken "
                              "back. MyEditor did not paste it. Keep it in a password "
                              "manager or a signer app."))
-
-    def _no_secret_keys(self, ed, text: str) -> bool:
-        """Whether ``text`` may be published: never with a Nostr secret key
-        in it. The person may replace each one with the link to its owner,
-        in the document, and publish then; else nothing goes out."""
-        if not refs.secret_keys_in(text):
-            return True
-        public = refs.without_secret_keys(text)
-        if public is None:
-            inform(self, title=_("This text contains a secret key"), caution=True,
-                   message=_("Anyone who has it can publish as its owner, and once "
-                             "published it can never be taken back. Remove it before "
-                             "publishing."))
-            return False
-        choice = ask(self, title=_("This text contains a secret key"), caution=True,
-                     message=_("Anyone who has it can publish as its owner, and once "
-                               "published it can never be taken back. Replace it with the "
-                               "public key, which only says who it belongs to?"),
-                     buttons=(Button(_("Replace with Public Key"), True, NORMAL),
-                              Button(_("Cancel"), False, DEFAULT)))
-        if choice is not True:
-            return False
-        doc = ed.document()
-        step = QTextCursor(doc)
-        step.beginEditBlock()
-        for key in refs.secret_keys_in(doc.toPlainText()):
-            replacement = refs.public_reference_for(key) or ""
-            found = doc.find(key)
-            while not found.isNull():
-                found.insertText(replacement)
-                found = doc.find(key, found)
-        step.endEditBlock()
-        return True
 
     def _on_nostr_note_published(self, event_id_hex: str, results):
         accepted = sum(1 for _relay, ok, _message in results if ok)
@@ -6004,9 +5969,6 @@ class MainWindow(QMainWindow):
 
         ed = self.current_editor()
         if not self._confirm_images_uploaded(ed):
-            return
-        body = self._publish_text(ed, "markdown").rstrip() if ed is not None else ""
-        if body and not self._no_secret_keys(ed, body):
             return
         body = self._publish_text(ed, "markdown").rstrip() if ed is not None else ""
         if not body:

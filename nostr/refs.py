@@ -226,13 +226,14 @@ def public_reference_for(secret: str) -> Optional[str]:
 
 def without_secret_keys(text: str) -> Optional[str]:
     """``text`` with every plain secret key replaced by the link to its
-    person, or None when one cannot be (an encrypted key)."""
+    person (a ``nostr:`` before the key is the link's own), or None when
+    one cannot be (an encrypted key)."""
     out = text
     for key in secret_keys_in(text):
         public = public_reference_for(key)
         if public is None:
             return None
-        out = out.replace(key, public)
+        out = re.sub("(?i:nostr:)?" + re.escape(key), lambda _match: public, out)
     return out
 
 
@@ -245,3 +246,12 @@ def secret_keys_in(text: str) -> List[str]:
         if key not in found:
             found.append(key)
     return found
+
+
+def secret_keys_in_event(event: dict) -> List[str]:
+    """The Nostr secret keys in what ``event`` makes public: its content
+    and every value of every tag, each once, in order."""
+    values = [event.get("content") or ""]
+    values += [value for tag in event.get("tags") or () for value in tag
+               if isinstance(value, str)]
+    return secret_keys_in("\n".join(values))

@@ -61,6 +61,7 @@ from ..media.publish_copy import PublicCopyMaker
 from .media_library_dialog import MediaLibraryDialog
 from .publish_copy_dialog import resolve_pick
 from .mention_chips import MentionChipRow
+from .secret_key_check import publishable
 from .thumbnail_loader import ThumbnailLoader
 
 
@@ -938,6 +939,9 @@ class PublishArticleDialog(QDialog):
             if not self._advanced_open:
                 self._toggle_advanced()
             self._set_status(_("Cannot build article: {reason}").format(reason=exc), error=True)
+            return
+        unsigned = publishable(self, unsigned, is_dark=self._is_dark)
+        if unsigned is None:
             return
 
         self._set_busy(True)

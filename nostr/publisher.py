@@ -452,6 +452,18 @@ def build_article(
     )
 
 
+def without_secret_keys(unsigned: dict) -> Optional[dict]:
+    """``unsigned`` with every plain Nostr secret key in its content and
+    tags replaced by the link to the key's owner, built again so its id
+    fits; None when one cannot be (an encrypted key names no owner)."""
+    content = refs.without_secret_keys(unsigned.get("content") or "")
+    tags = [[refs.without_secret_keys(value) for value in tag] for tag in unsigned["tags"]]
+    if content is None or any(value is None for tag in tags for value in tag):
+        return None
+    return build_event(kind=unsigned["kind"], content=content, tags=tags,
+                       pubkey_hex=unsigned["pubkey"], created_at=unsigned["created_at"])
+
+
 # --------------------------------------------------------------------------- #
 # When an article was first published                                         #
 # --------------------------------------------------------------------------- #
@@ -603,6 +615,10 @@ class PublishJob(QObject):
             raise ValueError(
                 "unsigned event pubkey does not match the publishing profile"
             )
+        # Nothing public is signed with a secret key in it; the dialogs ask
+        # first (nostr/ui/secret_key_check.py), so this never happens.
+        if refs.secret_keys_in_event(unsigned_event):
+            raise ValueError("an event with a secret key in it is never signed")
         self._relay_pool = relay_pool
         self._relay_directory = relay_directory
         self._session_pool = session_pool
