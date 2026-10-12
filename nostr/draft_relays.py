@@ -176,6 +176,16 @@ def _expired(event: dict, now: int) -> bool:
         return False
 
 
+def _given_back(event: dict, given: Sequence[dict]) -> bool:
+    """Whether a relay's answer holds ``event``: a draft wrap as itself or
+    a newer version of the same draft (same ``d``), anything else by id."""
+    if event["kind"] != DRAFT_WRAP_KIND:
+        return any(other["id"] == event["id"] for other in given)
+    identifier = _tag(event, "d")
+    return any(other["kind"] == DRAFT_WRAP_KIND and _tag(other, "d") == identifier
+               and int(other["created_at"]) >= int(event["created_at"]) for other in given)
+
+
 @dataclass(frozen=True)
 class MoveOutcome:
     """What moving the drafts did."""
@@ -218,7 +228,10 @@ class DraftMove(QObject):
     chose for drafts) is asked, once all is sent, for the drafts it took;
     one that refuses to answer, or answers and leaves one out, is
     ``unreadable``, and drafts are not to be kept there. One that can't be
-    reached says nothing either way, as when drafts are sent there.
+    reached says nothing either way, as when drafts are sent there. A
+    draft is asked for by its address (its ``d``), so a relay that kept a
+    newer version of it (answering "OK" to the older one, as some relays
+    do) still gives it back; a deletion request, by its id.
 
     Signals:
       progress(int, int, int)  events settled, events to send, and of
@@ -252,6 +265,7 @@ class DraftMove(QObject):
         self._deleted: Dict[str, int] = {}           # d -> when a request deleted it
         self._seen_on: Dict[str, Set[str]] = {}      # id -> relays that sent it
         self._held: Dict[str, Set[str]] = {}         # relay -> ids it holds now
+        self._by_id: Dict[str, dict] = {}            # id -> an event to move
         self._pages_to_check: List[List[str]] = []   # ids still to read back
         self._unreadable: Set[str] = set()
         self._queue: List[dict] = []
@@ -352,6 +366,7 @@ class DraftMove(QObject):
                  and self._deleted.get(identifier, -1) < int(wrap["created_at"])]
         self._queue = [event for event in [*self._requests.values(), *wraps]
                        if event["id"] not in self._skip]
+        self._by_id = {str(event["id"]): event for event in self._queue}
         self._total = len(self._queue)
         self._drafts = sum(1 for event in self._queue
                            if event["kind"] == DRAFT_WRAP_KIND and event.get("content"))
@@ -418,7 +433,15 @@ class DraftMove(QObject):
 
     def _check_page(self, *, first: bool = False) -> None:
         chunk = self._pages_to_check.pop(0) if self._pages_to_check else []
-        filters: List[dict] = [{"ids": chunk, "authors": [self._author]}] if chunk else []
+        addresses = sorted({_tag(self._by_id[i], "d") or "" for i in chunk
+                            if self._by_id[i]["kind"] == DRAFT_WRAP_KIND})
+        requests = [i for i in chunk if self._by_id[i]["kind"] != DRAFT_WRAP_KIND]
+        filters: List[dict] = []
+        if addresses:
+            filters.append({"kinds": [DRAFT_WRAP_KIND], "authors": [self._author],
+                            "#d": addresses})
+        if requests:
+            filters.append({"ids": requests, "authors": [self._author]})
         if first:
             filters.append({"kinds": [DRAFT_WRAP_KIND], "authors": [self._author], "limit": 1})
         if not filters:
@@ -433,10 +456,10 @@ class DraftMove(QObject):
         if self._done:
             return
         for url in self._verify:
-            given = {event["id"] for event in fetched.events if url in fetched.relays_of(
-                event["id"])}
+            given = [event for event in fetched.events if url in fetched.relays_of(event["id"])]
             refused = url in fetched.closed
-            left_out = url in fetched.answered and (self._held.get(url, set()) & asked) - given
+            left_out = url in fetched.answered and any(
+                not _given_back(self._by_id[i], given) for i in self._held.get(url, set()) & asked)
             if refused or left_out:
                 self._unreadable.add(url)
         if self._pages_to_check:

@@ -536,6 +536,18 @@ def test_a_relay_that_cannot_be_reached_is_not_judged_by_the_read_back():
     assert outcome.ok and directory.draft_relays_of(PK) == [MINE, gone]
 
 
+def test_a_relay_holding_a_newer_version_of_a_draft_gives_it_back():
+    # Review L1: nostr-rs-relay, obelisk and khatru answer OK to an older
+    # version of a draft they hold a newer one of, and keep only the newer.
+    older, newer = wrap("draft-1", at=NOW - 500), wrap("draft-1", "newer", at=NOW - 50)
+    drafts, relays, directory, _client = moving(LIST_ON_MINE,
+                                                drafts_on={MINE: [older], OTHER: [newer]})
+    relays.keeps_nothing = {OTHER}
+    outcome, _steps = save(drafts, relays, [OTHER])
+    assert outcome.ok and outcome.move.unreadable == ()
+    assert directory.draft_relays_of(PK) == [OTHER]
+
+
 def test_only_the_relay_that_does_not_give_them_back_is_named():
     drafts, relays, _directory, _client = moving(LIST_ON_MINE,
                                                  drafts_on={MINE: [wrap("draft-1")]})
