@@ -914,6 +914,34 @@ def mention_at(cursor: QTextCursor) -> Optional[Tuple[int, int]]:
     return found[0], found[1]
 
 
+def plain_text_of(fragment: QTextDocumentFragment) -> str:
+    """The plain text of ``fragment`` as another app should get it: each
+    mention as its ``nostr:`` address, which every Nostr app reads as the
+    person ("@Name" alone names nobody there)."""
+    doc = QTextDocument()
+    QTextCursor(doc).insertFragment(fragment)
+    mentions = []
+    for block in iter_blocks(doc):
+        it = block.begin()
+        while not it.atEnd():
+            piece = it.fragment()
+            if piece.isValid() and is_mention(piece.charFormat().anchorHref()):
+                inside = QTextCursor(doc)
+                inside.setPosition(piece.position() + 1)
+                found = link_range(inside)
+                if found is not None and found not in mentions:
+                    mentions.append(found)
+            it += 1
+    if not mentions:
+        return fragment.toPlainText()
+    for start, end, href in reversed(mentions):
+        cursor = QTextCursor(doc)
+        cursor.setPosition(start)
+        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+        cursor.insertText(href)
+    return doc.toPlainText()
+
+
 def link_references(doc, label_for) -> int:
     """Each bare mention in ``doc`` (``nostr:npub1…`` written as text, as
     Markdown keeps a mention) made a mention again: a link whose words are

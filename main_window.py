@@ -7193,9 +7193,12 @@ class MainWindow(QMainWindow):
         written."""
         if holds_faithfully(content):
             read_markdown(ed.document(), content)
-            # Mentions, kept as bare addresses, read back as names.
-            rich_text.link_references(
-                ed.document(), getattr(ed, "_mention_label", None) or refs.person_name)
+            # Mentions, kept as bare addresses, read back as names; only
+            # while a Nostr account is in use (without one the editor shows
+            # nothing of Nostr, so an address stays as it is written).
+            if ed.nostr_in_use():
+                rich_text.link_references(
+                    ed.document(), getattr(ed, "_mention_label", None) or refs.person_name)
             ed._loaded_as_markdown = True
             ed._markdown_source = False
         else:

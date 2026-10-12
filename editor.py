@@ -1042,6 +1042,9 @@ class HtmlEditor(QTextEdit):
         """Install ``check()``: whether a Nostr account is in use."""
         self._nostr_active = check
 
+    def nostr_in_use(self) -> bool:
+        return bool(self._nostr_active())
+
     def set_link_opener(self, opener) -> None:
         """Install ``opener(href)``, which opens a Command-clicked link."""
         self._link_opener = opener
@@ -1889,7 +1892,7 @@ class HtmlEditor(QTextEdit):
         cursor = self.textCursor()
         fragment = cursor.selection()
         mime = QMimeData()
-        mime.setText(fragment.toPlainText())
+        mime.setText(rich_text.plain_text_of(fragment))
         mime.setHtml(fragment.toHtml())
         mime.setData(paste.MARKDOWN_MIME, paste.selection_markdown(cursor).encode("utf-8"))
         # What a paste here reads: the words as they are, the structure as

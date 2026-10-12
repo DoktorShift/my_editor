@@ -140,15 +140,35 @@ def test_a_mention_is_one_unit_for_typing_delete_and_paste():
 
 def test_a_mention_read_back_from_markdown_has_its_name_again():
     from main_window import MainWindow
-    ed = HtmlEditor()
+    ed = editor()
     ed._mention_label = lambda entity: "Alice" if entity == NPUB else "?"
     MainWindow._load_markdown(ed, f"Hello {HREF} there, `{HREF}` stays code.\n")
     assert ed.toPlainText() == f"Hello @Alice there, {HREF} stays code."
     assert document_to_markdown(ed.document()) == (
         f"Hello {HREF} there, `{HREF}` stays code.\n")
-    unknown = HtmlEditor()
+    unknown = editor()
     MainWindow._load_markdown(unknown, f"Hello {HREF}\n")
     assert unknown.toPlainText() == f"Hello @{NPUB[:9]}…{NPUB[-4:]}"
+
+
+def test_without_an_account_an_address_stays_as_written():
+    from main_window import MainWindow
+    ed = editor(nostr=False)
+    MainWindow._load_markdown(ed, f"Alice's key: {HREF}\n")
+    assert ed.toPlainText() == f"Alice's key: {HREF}"
+    assert "href=" not in ed.document().toHtml()                 # no link, no name
+    assert document_to_markdown(ed.document()) == f"Alice's key: {HREF}\n"
+
+
+def test_a_copied_mention_gives_other_apps_its_address():
+    ed = editor()
+    type_text(ed, "Hi @")
+    ed.insert_mention(ed.asked[0], HREF, "Alice")
+    type_text(ed, "and you")
+    ed.selectAll()
+    copied = ed.createMimeDataFromSelection()
+    assert copied.text() == f"Hi {HREF} and you"
+    assert f'href="{HREF}"' in copied.html()
 
 
 def test_a_mention_looks_like_a_name():
