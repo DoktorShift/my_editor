@@ -220,6 +220,7 @@ def _field(label_text: str, edit: QLineEdit) -> QWidget:
     layout.setSpacing(4)
     label = QLabel(label_text)
     label.setObjectName("stash_kind_field_label")
+    label.setBuddy(edit)            # a screen reader names the field by it
     layout.addWidget(label)
     layout.addWidget(edit)
     return container
@@ -250,8 +251,10 @@ class _KindCard(QFrame):
         head = QHBoxLayout()
         head.setContentsMargins(0, 0, 0, 0)
         head.setSpacing(8)
+        # The card's radio takes the focus, so the kinds are reached with
+        # Tab and chosen with the arrow keys, as in any radio group.
         self.radio = QRadioButton()
-        self.radio.setFocusPolicy(Qt.NoFocus)
+        self.radio.setAccessibleName(title)
         head.addWidget(self.radio, 0, Qt.AlignVCenter)
         self.title_label = QLabel(title)
         self.title_label.setObjectName("stash_kind_option")
