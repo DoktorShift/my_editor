@@ -193,6 +193,9 @@ class TestThePlainWords:
                      CANNOT_OPEN):
             assert "Nostr > Imports" in text
             assert "sign in" not in text and "{reason}" not in text
+            # CP3 review L6: one word per concept, and no promise about
+            # relays a change still waiting here would break.
+            assert "relay" not in text.lower()
 
 
 class TestTheCommand:

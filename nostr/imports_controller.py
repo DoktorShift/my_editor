@@ -107,12 +107,13 @@ ELSEWHERE = _("Imports are checked in another MyEditor window. This one only sho
 ARTICLE_FAILED = _("Couldn't show this post.")
 # Why imports cannot be kept here, in plain words, each with what to do
 # (CP2 review N1: a damaged inbox was told to check that the user folder
-# can be written to). The error itself goes to the log.
+# can be written to). The error itself goes to the log. The list of
+# sources is not in the inbox, so it is kept whatever happens to it.
 CANNOT_WRITE = _("MyEditor can't write to the folder where it keeps imports ({folder}). Check "
                  "that you can write to it, then choose Nostr > Imports again. Your sources are "
-                 "safe on your relays.")
+                 "kept.")
 DISK_FULL = _("The disk is full, so MyEditor can't keep imports on this computer. Free some "
-              "space, then choose Nostr > Imports again. Your sources are safe on your relays.")
+              "space, then choose Nostr > Imports again. Your sources are kept.")
 IN_USE = _("Another program is using the imports kept on this computer. Choose Nostr > Imports "
            "again in a moment.")
 DAMAGED_ELSEWHERE = _("The file that keeps imports on this computer is damaged, and MyEditor is "
@@ -122,7 +123,7 @@ DAMAGED_HELD = _("The file that keeps imports on this computer is damaged, and a
                  "is using it, so MyEditor can't set it aside. Quit programs that might use "
                  "it, such as a backup or sync app, then choose Nostr > Imports again.")
 CANNOT_OPEN = _("MyEditor can't open the imports kept on this computer. Choose Nostr > Imports "
-                "again to try once more. Your sources are safe on your relays.")
+                "again to try once more. Your sources are kept.")
 SET_ASIDE = _("The file that keeps imports on this computer was damaged, so MyEditor set it "
               "aside and started a new one. Your sources are kept; posts you had skipped show "
               "again.")

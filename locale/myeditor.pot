@@ -3224,56 +3224,56 @@ msgstr ""
 msgid "Couldn't show this post."
 msgstr ""
 
-#: nostr/imports_controller.py:111
+#: nostr/imports_controller.py:112
 #, python-brace-format
-msgid "MyEditor can't write to the folder where it keeps imports ({folder}). Check that you can write to it, then choose Nostr > Imports again. Your sources are safe on your relays."
+msgid "MyEditor can't write to the folder where it keeps imports ({folder}). Check that you can write to it, then choose Nostr > Imports again. Your sources are kept."
 msgstr ""
 
-#: nostr/imports_controller.py:114
-msgid "The disk is full, so MyEditor can't keep imports on this computer. Free some space, then choose Nostr > Imports again. Your sources are safe on your relays."
+#: nostr/imports_controller.py:115
+msgid "The disk is full, so MyEditor can't keep imports on this computer. Free some space, then choose Nostr > Imports again. Your sources are kept."
 msgstr ""
 
-#: nostr/imports_controller.py:116
+#: nostr/imports_controller.py:117
 msgid "Another program is using the imports kept on this computer. Choose Nostr > Imports again in a moment."
 msgstr ""
 
-#: nostr/imports_controller.py:118
+#: nostr/imports_controller.py:119
 msgid "The file that keeps imports on this computer is damaged, and MyEditor is open a second time. Quit the other MyEditor, then choose Nostr > Imports again."
 msgstr ""
 
-#: nostr/imports_controller.py:121
+#: nostr/imports_controller.py:122
 msgid "The file that keeps imports on this computer is damaged, and another program is using it, so MyEditor can't set it aside. Quit programs that might use it, such as a backup or sync app, then choose Nostr > Imports again."
 msgstr ""
 
-#: nostr/imports_controller.py:124
-msgid "MyEditor can't open the imports kept on this computer. Choose Nostr > Imports again to try once more. Your sources are safe on your relays."
+#: nostr/imports_controller.py:125
+msgid "MyEditor can't open the imports kept on this computer. Choose Nostr > Imports again to try once more. Your sources are kept."
 msgstr ""
 
-#: nostr/imports_controller.py:126
+#: nostr/imports_controller.py:127
 msgid "The file that keeps imports on this computer was damaged, so MyEditor set it aside and started a new one. Your sources are kept; posts you had skipped show again."
 msgstr ""
 
-#: nostr/imports_controller.py:129
+#: nostr/imports_controller.py:130
 msgid "No sources were found in that list. Is it a subscription export from a feed reader?"
 msgstr ""
 
-#: nostr/imports_controller.py:131
+#: nostr/imports_controller.py:132
 msgid "Nothing to import was found at that address."
 msgstr ""
 
-#: nostr/imports_controller.py:132
+#: nostr/imports_controller.py:133
 msgid "This post is longer than MyEditor keeps here. Open Original reads all of it, and a draft made of it gets the whole post from its page."
 msgstr ""
 
-#: nostr/imports_controller.py:134
+#: nostr/imports_controller.py:135
 msgid "MyEditor no longer keeps the text of this post here. Open Original reads it, and a draft made of it gets the post from its page."
 msgstr ""
 
-#: nostr/imports_controller.py:136
+#: nostr/imports_controller.py:137
 msgid "Couldn't read the images of these posts."
 msgstr ""
 
-#: nostr/imports_controller.py:626
+#: nostr/imports_controller.py:627
 msgid "MyEditor Sources"
 msgstr ""
 
