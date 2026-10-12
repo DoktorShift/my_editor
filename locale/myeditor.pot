@@ -532,7 +532,7 @@ msgstr ""
 
 #: main_window.py:1244
 #: main_window.py:254
-#: nostr/ui/draft_relays_sheet.py:473
+#: nostr/ui/draft_relays_sheet.py:475
 #: nostr/ui/profile_window.py:250
 #: nostr/ui/save_destination_dialog.py:225
 #: nostr/ui/save_destination_dialog.py:306
@@ -2428,7 +2428,7 @@ msgstr ""
 #: nostr/ui/account_windows.py:793
 #: nostr/ui/account_windows.py:854
 #: nostr/ui/account_windows.py:1104
-#: nostr/ui/draft_relays_sheet.py:464
+#: nostr/ui/draft_relays_sheet.py:466
 #: nostr/ui/image_review_dialog.py:124
 msgid "Done"
 msgstr ""
@@ -2456,7 +2456,7 @@ msgstr ""
 #: update_dialog.py:279
 #: nostr/ui/account_windows.py:769
 #: nostr/ui/connect_dialog.py:360
-#: nostr/ui/draft_relays_sheet.py:462
+#: nostr/ui/draft_relays_sheet.py:464
 #: nostr/ui/drafts_panel.py:1138
 #: nostr/ui/imports_activity.py:288
 #: nostr/ui/imports_window.py:1092
@@ -5095,7 +5095,7 @@ msgstr ""
 msgid "Dismiss and let the next save from this tab win."
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:401
+#: nostr/ui/draft_relays_sheet.py:403
 msgid "Couldn’t save the change. Try again."
 msgstr ""
 
@@ -5121,27 +5121,27 @@ msgstr ""
 msgid "Add"
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:382
+#: nostr/ui/draft_relays_sheet.py:384
 msgid "The relays your drafts would move to turned some of them down, so nothing was changed. Choose other relays, then try again."
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:385
+#: nostr/ui/draft_relays_sheet.py:387
 msgid "Some drafts couldn’t be moved, so nothing was changed. Check your internet connection, then try again."
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:388
+#: nostr/ui/draft_relays_sheet.py:390
 msgid "Couldn’t read the current setting, so nothing was changed. Check your internet connection, then try again."
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:392
+#: nostr/ui/draft_relays_sheet.py:394
 msgid "The current setting is dated ahead of this computer’s clock, so nothing was changed. Check the date and time on this computer, then try again."
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:396
+#: nostr/ui/draft_relays_sheet.py:398
 msgid "Too few relays took the change. Check your internet connection, then try again."
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:399
+#: nostr/ui/draft_relays_sheet.py:401
 msgid "Your signer app didn’t approve the change. Try again, and approve it when your signer app asks."
 msgstr ""
 
@@ -5178,11 +5178,11 @@ msgstr ""
 msgid "Reading your drafts…"
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:467
+#: nostr/ui/draft_relays_sheet.py:469
 msgid "Save Anyway"
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:469
+#: nostr/ui/draft_relays_sheet.py:471
 msgid "Use My Usual Relays"
 msgstr ""
 
@@ -5210,31 +5210,31 @@ msgstr[1] ""
 
 #: nostr/ui/draft_relays_sheet.py:364
 #, python-brace-format
-msgid "{relays} sends only its newest drafts, however MyEditor asks, so the older ones there can’t be moved, and nothing was changed. If the drafts kept only there can stay behind, choose Save Anyway: they won’t be shown any more."
-msgid_plural "{relays} send only their newest drafts, however MyEditor asks, so the older ones there can’t be moved, and nothing was changed. If the drafts kept only there can stay behind, choose Save Anyway: they won’t be shown any more."
+msgid "{relays} sends only its newest drafts, whichever part MyEditor asks for, so the older ones there can’t be moved, and nothing was changed. If you can do without the drafts kept only there, choose Save Anyway: they won’t be shown any more."
+msgid_plural "{relays} send only their newest drafts, whichever part MyEditor asks for, so the older ones there can’t be moved, and nothing was changed. If you can do without the drafts kept only there, choose Save Anyway: they won’t be shown any more."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/draft_relays_sheet.py:373
+#: nostr/ui/draft_relays_sheet.py:375
 #, python-brace-format
 msgid "{relays} didn’t give your drafts back when MyEditor asked, so nothing was changed. Some relays show drafts only after you sign in to them, which MyEditor can’t do yet. Choose another relay, then try again."
 msgid_plural "{relays} didn’t give your drafts back when MyEditor asked, so nothing was changed. Some relays show drafts only after you sign in to them, which MyEditor can’t do yet. Choose other relays, then try again."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/draft_relays_sheet.py:441
+#: nostr/ui/draft_relays_sheet.py:443
 msgid "Drafts will be saved only on these relays:"
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:443
+#: nostr/ui/draft_relays_sheet.py:445
 msgid "Drafts will be kept on your usual relays."
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:445
+#: nostr/ui/draft_relays_sheet.py:447
 msgid "Drafts are saved only on these relays:"
 msgstr ""
 
-#: nostr/ui/draft_relays_sheet.py:447
+#: nostr/ui/draft_relays_sheet.py:449
 msgid "Drafts are kept on your usual relays."
 msgstr ""
 

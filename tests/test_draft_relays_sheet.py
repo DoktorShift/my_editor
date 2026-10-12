@@ -289,7 +289,9 @@ def test_a_relay_that_sends_only_its_newest_drafts_is_named_for_that_and_can_be_
     sheet, saved = open_sheet(lists)
     sheet.buttons["usual"].click()
     sheet.buttons["save"].click()
-    assert sheet._error.text().startswith(f"{MINE} sends only its newest drafts")
+    assert sheet._error.text().startswith(
+        f"{MINE} sends only its newest drafts, whichever part MyEditor asks for")
+    assert "If you can do without the drafts kept only there" in sheet._error.text()
     assert "internet connection" not in sheet._error.text()
     assert words(sheet) == ["Save Anyway", "Cancel", "Save"]
     lists.answer = SAVED

@@ -110,9 +110,10 @@ The **`View`** menu holds the appearance options: theme, line numbers, syntax hi
 | `Ctrl+Shift+M` | Open the Media Library (Blossom) |
 | `Ctrl+Shift+I` | Insert image from the Media Library at the cursor |
 | `Ctrl+Shift+D` | Open or close the Drafts panel |
+| `Ctrl+R` (Command-R) on macOS, `F5` elsewhere | Refresh the Drafts panel's view (Nostr > Refresh Drafts, named for the view shown) |
 | `Ctrl+Shift+S` | Save current document (chooser: local file or private Nostr draft) |
 
-The **`Nostr`** menu also exposes `Drafts…`, `Connect Signer…`, and `Sign Out Active Profile` for managing identities. While an account is in use, its avatar sits at the right end of the tab row: a one-click profile switcher. See the [Nostr guide](nostr.md) for the full workflow.
+The **`Nostr`** menu also exposes `Drafts…`, `Refresh Drafts`, `Draft Relays…`, `Connect Signer…`, and `Sign Out Active Profile` for managing identities. While an account is in use, its avatar sits at the right end of the tab row: a one-click profile switcher. See the [Nostr guide](nostr.md) for the full workflow.
 
 ---
 

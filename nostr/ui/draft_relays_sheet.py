@@ -362,12 +362,14 @@ class DraftRelaysSheet(AssistantWindow):
                 len(move.unread)).format(relays=", ".join(move.unread))
         if move.unpaged:
             return ngettext(
-                "{relays} sends only its newest drafts, however MyEditor asks, so the older "
-                "ones there can’t be moved, and nothing was changed. If the drafts kept only "
-                "there can stay behind, choose Save Anyway: they won’t be shown any more.",
-                "{relays} send only their newest drafts, however MyEditor asks, so the older "
-                "ones there can’t be moved, and nothing was changed. If the drafts kept only "
-                "there can stay behind, choose Save Anyway: they won’t be shown any more.",
+                "{relays} sends only its newest drafts, whichever part MyEditor asks for, so "
+                "the older ones there can’t be moved, and nothing was changed. If you can do "
+                "without the drafts kept only there, choose Save Anyway: they won’t be shown "
+                "any more.",
+                "{relays} send only their newest drafts, whichever part MyEditor asks for, so "
+                "the older ones there can’t be moved, and nothing was changed. If you can do "
+                "without the drafts kept only there, choose Save Anyway: they won’t be shown "
+                "any more.",
                 len(move.unpaged)).format(relays=", ".join(move.unpaged))
         if move.unreadable:
             return ngettext(

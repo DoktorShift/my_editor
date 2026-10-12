@@ -222,3 +222,14 @@ def test_the_published_view_and_draft_relays_in_the_window(tmp_path):
     assert r["note_tabs"] == 0
     assert r["status_from_view"] == "Asked 3 relays to delete it."
     assert r["view_follows_theme"]
+
+
+def test_the_guides_name_how_to_refresh_the_drafts_panel():
+    # Review L13: the shortcut was undocumented, and the Nostr guide still
+    # pointed at a refresh button that is gone.
+    import pathlib
+    docs = pathlib.Path(__file__).resolve().parent.parent / "docs"
+    usage = (docs / "usage.md").read_text(encoding="utf-8")
+    nostr = (docs / "nostr.md").read_text(encoding="utf-8")
+    assert "| `Ctrl+R` (Command-R) on macOS, `F5` elsewhere | Refresh the Drafts panel" in usage
+    assert "⟲" not in nostr and "Nostr > Refresh Drafts" in nostr
