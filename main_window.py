@@ -5555,6 +5555,7 @@ class MainWindow(QMainWindow):
         ed._published_article = details.with_changes(
             identifier=item.identifier, title=details.title or item.title,
             published_at=item.first_published)
+        ed._published_author = str(item.event.get("pubkey") or "").lower()
         self._update_tab_title()
 
     def _draft_of_published(self, item):
@@ -6010,7 +6011,7 @@ class MainWindow(QMainWindow):
             return
 
         prior: Optional[DraftBinding] = getattr(ed, "_draft_binding", None)
-        published = getattr(ed, "_published_article", None)
+        published = self._published_article_of(ed)
         default_kind = (
             StashKind.ARTICLE
             if (prior is not None and prior.inner_kind == INNER_KIND_LONG_FORM)
@@ -6172,6 +6173,20 @@ class MainWindow(QMainWindow):
         self._attach_active_stash(ed, job)
         job.start()
 
+    def _published_article_of(self, ed) -> Optional[ArticleDetails]:
+        """The published article a tab edits (from the Published view),
+        while its author is the account in use; None otherwise. Under
+        another account the tab is a plain document: publishing it must
+        not take the other account's identifier or first date."""
+        article = getattr(ed, "_published_article", None) if ed is not None else None
+        if article is None:
+            return None
+        profile = self._profile_store.default()
+        author = getattr(ed, "_published_author", "")
+        if profile is None or author != profile.user_pubkey.lower():
+            return None
+        return article
+
     def _article_details_of(self, ed) -> ArticleDetails:
         """The details of the article in a tab: those its draft holds (an
         imported article's cover, hashtags, first publication date and
@@ -6185,7 +6200,7 @@ class MainWindow(QMainWindow):
         binding = getattr(ed, "_draft_binding", None) if ed is not None else None
         if binding is None or binding.inner_kind != INNER_KIND_LONG_FORM:
             # An article opened from the Published view carries its own.
-            return getattr(ed, "_published_article", None) or ArticleDetails()
+            return self._published_article_of(ed) or ArticleDetails()
         record = self._draft_store.get(binding.identifier)
         details = (ArticleDetails.from_tags(record.inner_tags) if record is not None
                    else ArticleDetails())
@@ -6228,7 +6243,7 @@ class MainWindow(QMainWindow):
                     if len(tag) >= 2 and tag[0] == "summary" and not summary:
                         summary = tag[1]
 
-        published = getattr(ed, "_published_article", None)
+        published = self._published_article_of(ed)
         if prior is None and published is not None:
             # An article opened from the Published view: the same article.
             title, slug, summary = published.title, published.identifier, published.summary

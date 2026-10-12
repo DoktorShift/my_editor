@@ -73,6 +73,7 @@ def capture_editor_tab(ed) -> Optional[TabState]:
         scroll=ed.verticalScrollBar().value(),
         draft=dataclasses.asdict(binding) if binding is not None else None,
         article=article.tags() if article is not None else None,
+        article_author=getattr(ed, "_published_author", "") if article is not None else "",
     )
 
 
@@ -218,6 +219,7 @@ def resume_tab(window, tab: TabState, *, draft_type):
         ed._draft_binding = _dataclass_from(draft_type, tab.draft)
     if tab.article:
         ed._published_article = ArticleDetails.from_tags(tab.article)
+        ed._published_author = tab.article_author
     index = _tab_index(window, ed)
     if index >= 0:
         window.tabs.setTabText(index, window._compose_tab_title(ed))

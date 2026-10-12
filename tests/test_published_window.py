@@ -11,7 +11,8 @@ tab bound to it (its text, title, summary, cover, hashtags and the date
 it first went out, so publishing it again replaces it, and saving it as
 a draft offers the same article), once (a second Edit brings that tab
 forward, unless it was saved as a draft of another article since), and
-the tab keeps that through a restart for an update; a note opens no tab; the view's status sentences reach the status bar; the
+the tab keeps that, with whose article it is, through a restart for an
+update; under another account the tab is a plain document; a note opens no tab; the view's status sentences reach the status bar; the
 view follows the theme; every control of the panel has a name.
 
 The window is built in a child process with its own home folder
@@ -122,8 +123,21 @@ r["details"] = [details.identifier, details.title, details.summary, details.imag
                 list(details.hashtags), details.published_at]
 r["markdown"] = w._publish_text(ed, "markdown")
 r["stash_defaults"] = list(w._stash_defaults_for(ed, None)[:3])
-r["kept_for_restart"] = ArticleDetails.from_tags(
-    workspace_restore.capture_editor_tab(ed).article) == details
+captured = workspace_restore.capture_editor_tab(ed)
+r["kept_for_restart"] = (ArticleDetails.from_tags(captured.article) == details
+                         and captured.article_author == pk)
+# Another account in use: the tab is a plain document for it (review N8).
+bob_sk = crypto.generate_secret_key()
+bob_pk = events.sign_event({"kind": 1, "content": "", "tags": [], "created_at": 1},
+                           bob_sk)["pubkey"]
+w._profile_store.upsert(Profile(user_pubkey=bob_pk, bunker_pubkey="b" * 64,
+                                bunker_relays=[], local_secret_hex="d" * 64,
+                                display_name="Bob"))
+w._profile_store.set_default(bob_pk)
+other = w._article_details_of(ed)
+r["for_another_account"] = [other.identifier, other.published_at,
+                            list(w._stash_defaults_for(ed, None)[1:2])]
+w._profile_store.set_default(pk)
 index = w.tabs.currentIndex()
 w.tabs.setCurrentIndex(0)
 view.open_requested.emit(item)
@@ -174,6 +188,8 @@ def test_the_published_view_and_draft_relays_in_the_window(tmp_path):
     assert r["markdown"].startswith("# Hello") and "The body." in r["markdown"]
     assert r["stash_defaults"] == ["My Post", "my-post", "In short"]
     assert r["kept_for_restart"]
+    assert r["for_another_account"][:2] == ["", None]          # no identifier, no date
+    assert r["for_another_account"][2] != ["my-post"]
     assert r["second_edit"] == [1, True]
     assert r["after_saved_as_another"] == 2
     assert r["note_tabs"] == 0
