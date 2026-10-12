@@ -98,31 +98,41 @@ _NOSTR_URI_RE = re.compile(
 )
 
 
-def extract_inline_mentions(content: str) -> List[Mention]:
+def extract_inline_mentions(content: str, *, markdown: bool = False) -> List[Mention]:
     """Find ``nostr:npub|nprofile`` URIs in ``content`` and decode them.
 
     Returns ``(pubkey_hex, relay_hint)`` tuples in document order; any URI
     that fails bech32 decoding is silently skipped (e.g. a near-miss that
-    looks like a URI but isn't valid bech32).
+    looks like a URI but isn't valid bech32). In ``markdown`` (an
+    article), a URI in code is shown as written and mentions nobody, as a
+    quote there quotes nothing (refs.find_references).
     """
     found: List[Mention] = []
-    for match in _NOSTR_URI_RE.finditer(content):
-        bech = match.group(1)
-        try:
-            if bech.startswith("npub1"):
-                pk = decode_npub(bech)
-                hint = ""
-            else:  # nprofile1
-                pk, relays = decode_nprofile(bech)
-                hint = relays[0] if relays else ""
-        except ValueError:
-            continue
-        found.append((pk, hint))
+
+    def collect(text: str) -> str:
+        for match in _NOSTR_URI_RE.finditer(text):
+            bech = match.group(1)
+            try:
+                if bech.startswith("npub1"):
+                    pk = decode_npub(bech)
+                    hint = ""
+                else:  # nprofile1
+                    pk, relays = decode_nprofile(bech)
+                    hint = relays[0] if relays else ""
+            except ValueError:
+                continue
+            found.append((pk, hint))
+        return text
+
+    if markdown:
+        refs.outside_code(content, collect)
+    else:
+        collect(content)
     return found
 
 
 def _resolve_mentions(
-    content: str, chip_mentions: Sequence[Mention]
+    content: str, chip_mentions: Sequence[Mention], *, markdown: bool
 ) -> Tuple[str, List[List[str]]]:
     """Merge inline + chip mentions into (final_content, p_tags).
 
@@ -134,7 +144,7 @@ def _resolve_mentions(
       - The resulting p-tag list deduplicates by pubkey, preserving the
         first-seen relay hint (inline URIs are seen first).
     """
-    inline = extract_inline_mentions(content)
+    inline = extract_inline_mentions(content, markdown=markdown)
     inline_pks = {pk for pk, _ in inline}
 
     appended_uris: List[str] = []
@@ -362,7 +372,7 @@ def build_note(
     Always attaches ``["client", CLIENT_NAME]`` so readers that honour the
     NIP-89 client tag display "Published from MyEditor" under the note.
     """
-    final_content, p_tags = _resolve_mentions(content, mentions or [])
+    final_content, p_tags = _resolve_mentions(content, mentions or [], markdown=False)
     tags: List[List[str]] = [["client", CLIENT_NAME]]
     tags.extend(p_tags)
     # Quoted notes and articles (NIP-18 q tags) and their authors.
@@ -419,7 +429,7 @@ def build_article(
     """
     if not slug.strip():
         raise ValueError("article slug (d-tag) must not be empty")
-    final_content, p_tags = _resolve_mentions(content, mentions or [])
+    final_content, p_tags = _resolve_mentions(content, mentions or [], markdown=True)
     tags: List[List[str]] = [
         ["client", CLIENT_NAME],
         ["d", slug.strip()],

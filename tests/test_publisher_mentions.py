@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Mention handling in build_note / build_article — pure-function tests."""
+"""Mention handling in build_note / build_article: pure-function tests."""
 
 from __future__ import annotations
 
@@ -50,6 +50,17 @@ def test_extract_preserves_document_order():
     assert found == [(BOB_PK, ""), (ALICE_PK, "")]
 
 
+def test_a_person_written_in_an_articles_code_is_not_mentioned():
+    """Code shows an address as an example; the person is not tagged, and
+    so not notified, as a quote in code quotes nothing. A note has no
+    code: there it is a mention."""
+    npub = encode_npub(ALICE_PK)
+    body = f"Write `nostr:{npub}` in a note.\n\n```\nnostr:{npub}\n```\n"
+    assert _p_tags(build_article(body, AUTHOR_PK, "how-to")) == []
+    assert extract_inline_mentions(body, markdown=True) == []
+    assert _p_tags(build_note(body, AUTHOR_PK)) == [["p", ALICE_PK]]
+
+
 def test_extract_silently_skips_garbage():
     """A near-miss URI (bad checksum) is left alone, not raised."""
     bad = "nostr:npub1invalidcharacters00000000000000000000000"
@@ -97,14 +108,14 @@ def test_build_note_dedupes_inline_vs_chip():
         AUTHOR_PK,
         mentions=[(ALICE_PK, "wss://chip.example")],
     )
-    # Body is unchanged — no duplicate URI appended.
+    # Body is unchanged: no duplicate URI appended.
     assert event["content"] == body
     # Exactly one p-tag for Alice; inline relay hint wins (first seen).
     assert _p_tags(event) == [["p", ALICE_PK, "wss://inline.example"]]
 
 
 def test_build_note_inline_only_still_emits_p_tag():
-    """Manual paste of a URI in the body must also produce a p-tag — even
+    """Manual paste of a URI in the body must also produce a p-tag, even
     with no chip mentions at all."""
     npub = encode_npub(BOB_PK)
     event = build_note(f"shout-out to nostr:{npub}", AUTHOR_PK)
@@ -125,7 +136,7 @@ def test_build_note_dedupes_duplicate_chip_picks():
         AUTHOR_PK,
         mentions=[(ALICE_PK, "wss://a"), (ALICE_PK, "wss://b")],
     )
-    # Only one URI appended, only one p-tag — first-seen hint wins.
+    # Only one URI appended, only one p-tag; the first-seen hint wins.
     nprofile_count = event["content"].count("nostr:nprofile1")
     assert nprofile_count == 1
     assert _p_tags(event) == [["p", ALICE_PK, "wss://a"]]
