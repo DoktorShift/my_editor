@@ -791,13 +791,16 @@ class MediaLibraryDialog(QDialog):
             targets = [(files[0], target)] if target else []
         else:
             folder = QFileDialog.getExistingDirectory(self, _("Choose a Folder"))
-            targets = [(tile, _unique_path(folder, _save_name(tile))) for tile in files] \
+            targets = [(tile, os.path.join(folder, _save_name(tile))) for tile in files] \
                 if folder else []
         for tile, target in targets:
             sha, visibility = tile.key, self._visibility
             opener = ((lambda data: visibility.open_private(sha, data))
                       if visibility.is_private(sha) else None)
-            self._saver.save(tile.media, target, opener=opener)
+            # The person named one file, and was asked before it replaced
+            # anything; a folder's names are the library's, and replace
+            # nothing.
+            self._saver.save(tile.media, target, opener=opener, keep_existing=len(files) > 1)
 
     def _show_saving(self, target: str) -> None:
         self._show_status(_("Saving “{name}”…").format(name=os.path.basename(target)), "")
@@ -1234,15 +1237,6 @@ def _save_name(tile: Tile) -> str:
     if not os.path.splitext(name)[1]:
         name += media_files.extension_for(tile.media.mime_type or "")
     return name
-
-
-def _unique_path(folder: str, name: str) -> str:
-    stem, ext = os.path.splitext(name)
-    path, number = os.path.join(folder, name), 2
-    while os.path.exists(path):
-        path = os.path.join(folder, f"{stem} {number}{ext}")
-        number += 1
-    return path
 
 
 def _local_preview(*, mime: str, path: str = "", data: bytes = b"") -> Optional[QPixmap]:

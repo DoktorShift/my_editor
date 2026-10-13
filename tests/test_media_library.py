@@ -175,10 +175,10 @@ class FakeDownload(QObject):
     progress = Signal(int, int)
     finished = Signal(str)
 
-    def __init__(self, url, sha, target, size, transform):
+    def __init__(self, url, sha, target, size, transform, keep_existing):
         super().__init__()
         self.url, self.sha, self.target, self.size = url, sha, target, size
-        self.transform = transform
+        self.transform, self.keep_existing = transform, keep_existing
         self.cancelled = False
 
     def cancel(self):
@@ -198,8 +198,8 @@ class FakeLoader(QObject):
         self.loads = []
         self.downloads = []
 
-    def download_to(self, url, sha, target, *, size, transform=None):
-        job = FakeDownload(url, sha, target, size, transform)
+    def download_to(self, url, sha, target, *, size, transform=None, keep_existing=False):
+        job = FakeDownload(url, sha, target, size, transform, keep_existing)
         self.downloads.append(job)
         return job
 

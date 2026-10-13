@@ -354,3 +354,62 @@ def test_a_window_saving_on_its_own_stops_the_save_when_it_closes_and_leaves_not
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     wait_for(lambda: False, 0.3)
     assert folder(out) == []
+
+
+# --------------------------------------------------------------------------- #
+# Files of the same name
+# --------------------------------------------------------------------------- #
+
+def save_to_folder(monkeypatch, world, path) -> None:
+    monkeypatch.setattr(dialog_module.QFileDialog, "getExistingDirectory",
+                        lambda *a, **k: str(path))
+    world.grid.selectAll()
+    world.dialog._save_as()
+
+
+def test_save_to_folder_keeps_every_file_of_the_same_name(tmp_path, monkeypatch, server):
+    """Files with no remembered name, added the same day, share the day as
+    their name: each is kept, numbered as the Finder numbers a copy."""
+    first, second = blob(server, b"first" * 100), blob(server, b"second" * 100)
+    world = library(tmp_path, monkeypatch, [first, second])
+    assert [tile.name for tile in world.model.tiles] == ["May 28, 2026", "May 28, 2026"]
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "May 28, 2026.mp4").write_bytes(b"already here")
+    save_to_folder(monkeypatch, world, out)
+    assert wait_for(lambda: len(folder(out)) == 3 and not saving(world), 5)
+    assert folder(out) == ["May 28, 2026 2.mp4", "May 28, 2026 3.mp4", "May 28, 2026.mp4"]
+    assert (out / "May 28, 2026.mp4").read_bytes() == b"already here"
+    assert {(out / name).read_bytes() for name in ("May 28, 2026 2.mp4", "May 28, 2026 3.mp4")} \
+        == {b"first" * 100, b"second" * 100}
+
+
+def test_save_to_folder_keeps_a_file_that_took_the_name_meanwhile(tmp_path, monkeypatch, server):
+    _Blobs.delay = 0.02
+    body = os.urandom(1024 * 1024)
+    big = blob(server, body)
+    other = blob(server, b"other", day=1)
+    world = library(tmp_path, monkeypatch, [big, other], names={big.hash: "Big.mp4"})
+    out = tmp_path / "out"
+    out.mkdir()
+    save_to_folder(monkeypatch, world, out)
+    assert wait_for(lambda: world.dialog._save_bar.value() > 0, 10)
+    (out / "Big.mp4").write_bytes(b"made meanwhile")
+    assert wait_for(lambda: not saving(world) and len(folder(out)) == 3, 15)
+    assert (out / "Big.mp4").read_bytes() == b"made meanwhile"
+    assert (out / "Big 2.mp4").read_bytes() == body
+
+
+def test_two_save_as_to_one_name_keep_both(tmp_path, monkeypatch, server):
+    """The second Save As was not asked to replace the first: that file was
+    not there yet."""
+    _Blobs.delay = 0.02
+    one, two = blob(server, os.urandom(512 * 1024)), blob(server, os.urandom(512 * 1024), day=1)
+    world = library(tmp_path, monkeypatch, [one, two])
+    out = tmp_path / "out"
+    out.mkdir()
+    save_as(monkeypatch, world, one, out / "Talk.mp4")
+    save_as(monkeypatch, world, two, out / "Talk.mp4")
+    assert wait_for(lambda: not saving(world) and len(folder(out)) == 2, 15)
+    assert (out / "Talk.mp4").read_bytes() == _Blobs.files[one.hash]
+    assert (out / "Talk 2.mp4").read_bytes() == _Blobs.files[two.hash]

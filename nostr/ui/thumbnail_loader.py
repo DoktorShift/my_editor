@@ -30,7 +30,7 @@ from PySide6.QtGui import QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
 import url_safety
-from atomic_file import write_bytes
+from atomic_file import free_path, write_bytes
 from i18n import _
 from image_safety import decode_image_bytes
 
@@ -237,15 +237,17 @@ class ThumbnailLoader(QObject):
         reply.finished.connect(_done)
 
     def download_to(self, url: str, sha256: str, target, *, size: int,
-                    transform=None) -> "FileDownload":
+                    transform=None, keep_existing: bool = False) -> "FileDownload":
         """Save As: stream the file at ``url`` into ``target``, bounded by
         its own ``size`` rather than the thumbnail cap, and checked against
         ``sha256`` before it takes the target's name. ``transform`` turns
         the downloaded bytes into what is written (a private file's
-        envelope into the file). Same policy, redirect rules and final-URL
-        check as every other download here."""
+        envelope into the file). ``keep_existing``: a file at the target
+        when the download ends stays, and this one takes the next free
+        name. Same policy, redirect rules and final-URL check as every
+        other download here."""
         job = FileDownload(self._nam, url, sha256, Path(target), size=size,
-                           transform=transform, parent=self)
+                           transform=transform, keep_existing=keep_existing, parent=self)
         job.start()
         return job
 
@@ -395,10 +397,11 @@ class FileDownload(QObject):
     finished = Signal(str)
 
     def __init__(self, nam, url: str, sha256: str, target: Path, *, size: int,
-                 transform=None, parent=None) -> None:
+                 transform=None, keep_existing: bool = False, parent=None) -> None:
         super().__init__(parent)
         self._nam, self._url, self._sha = nam, url, (sha256 or "").lower()
         self._target = Path(target)
+        self._keep_existing = keep_existing
         self._part = self._target.with_name(f".{self._target.name}.part")
         self._limit = size if size > 0 else _UNKNOWN_SIZE_LIMIT
         self._transform = transform
@@ -435,6 +438,12 @@ class FileDownload(QObject):
             reply.readyRead.connect(self._read)
         reply.downloadProgress.connect(self._on_progress)
         reply.finished.connect(self._on_finished)
+
+    @property
+    def target(self) -> Path:
+        """Where the file is saved: the target asked for, or the free name
+        it took beside a file that is kept."""
+        return self._target
 
     def cancel(self) -> None:
         if self._ended or self._why:
@@ -526,6 +535,8 @@ class FileDownload(QObject):
 
     def _place(self) -> str:
         """Put the downloaded file at the target. Raises OSError."""
+        if self._keep_existing:
+            self._target = Path(free_path(self._target))
         if self._transform is None:
             os.replace(self._part, self._target)
             return ""

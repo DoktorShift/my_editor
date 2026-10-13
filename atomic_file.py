@@ -148,6 +148,18 @@ def save_document(path: PathLike, data: bytes) -> None:
     _sync_folder(folder)
 
 
+def free_path(path: PathLike, taken=()) -> str:
+    """``path``, or the first of "name 2.ext", "name 3.ext" and on (as the
+    Finder numbers a copy) that is neither on the disk nor in ``taken``:
+    where a new file goes without replacing one."""
+    path = os.fspath(path)
+    stem, ext = os.path.splitext(path)
+    candidate, number = path, 2
+    while candidate in taken or os.path.lexists(candidate):
+        candidate, number = f"{stem} {number}{ext}", number + 1
+    return candidate
+
+
 def read_text_document(path: PathLike, *, encoding: str = "utf-8") -> Tuple[str, str]:
     """A text file's content with every line ending as ``"\n"``, and the
     line ending the file uses (``"\r\n"`` or ``"\n"``; this system's

@@ -22,7 +22,7 @@ from typing import Callable, List, Optional
 
 from PySide6.QtCore import QObject, Signal
 
-from atomic_file import save_document
+from atomic_file import free_path, save_document
 from i18n import _
 
 from ..blossom.store import MediaFile
@@ -40,6 +40,8 @@ class _Save:
     urls: List[str]
     # A private file's envelope to the file; None for a public one.
     opener: Optional[Callable[[bytes], Optional[bytes]]]
+    # A file found at the target stays, and this one takes a free name.
+    keep_existing: bool
 
 
 class MediaSaver(QObject):
@@ -68,10 +70,21 @@ class MediaSaver(QObject):
         return self._percent
 
     def save(self, media: MediaFile, target: str, *,
-             opener: Optional[Callable[[bytes], Optional[bytes]]] = None) -> None:
-        """Save ``media`` at ``target``, after the saves before it."""
+             opener: Optional[Callable[[bytes], Optional[bytes]]] = None,
+             keep_existing: bool = False) -> None:
+        """Save ``media`` at ``target``, after the saves before it.
+
+        ``keep_existing`` (Save to Folder, where the names are the
+        library's): a file of that name stays, now or when this one is
+        written, and this one is numbered as the Finder numbers a copy.
+        Either way a name an earlier save is still going to is never
+        taken: the person was not asked to replace a file not there yet.
+        """
+        taken = {save.target for save in self._queue}
+        if keep_existing or target in taken:
+            target, keep_existing = free_path(target, taken), True
         urls = [u.get("url") for u in media.urls if u.get("url")] or [media.url]
-        self._queue.append(_Save(media.hash, media.size, target, urls, opener))
+        self._queue.append(_Save(media.hash, media.size, target, urls, opener, keep_existing))
         self._next()
 
     def cancel(self) -> None:
@@ -89,11 +102,13 @@ class MediaSaver(QObject):
             if cached.is_file():
                 self._queue.pop(0)
                 self.started.emit(save.target)
-                self.finished.emit(save.target, self._save_cached(save, cached))
+                why = self._save_cached(save, cached)
+                self.finished.emit(save.target, why)
                 continue
             self._percent = 0
-            self._download = self._loader.download_to(save.urls[0], save.sha, save.target,
-                                                      size=save.size, transform=save.opener)
+            self._download = self._loader.download_to(
+                save.urls[0], save.sha, save.target, size=save.size, transform=save.opener,
+                keep_existing=save.keep_existing)
             self._download.progress.connect(self._on_progress)
             self._download.finished.connect(self._on_finished)
             self.started.emit(save.target)
@@ -110,6 +125,8 @@ class MediaSaver(QObject):
             data = save.opener(data) or b""
         if not data:
             return "unreadable"
+        if save.keep_existing:
+            save.target = free_path(save.target)
         try:
             save_document(save.target, data)
         except OSError as exc:
@@ -123,6 +140,7 @@ class MediaSaver(QObject):
 
     def _on_finished(self, why: str) -> None:
         save = self._queue[0]
+        save.target = os.fspath(self._download.target)
         self._download.deleteLater()
         self._download = None
         if why in _NEXT_SERVER and len(save.urls) > 1:
