@@ -549,8 +549,8 @@ def test_a_file_a_server_still_has_is_never_called_gone(tmp_path, monkeypatch):
     world = build(tmp_path, monkeypatch, FakeStore([one], names={one.hash: "Garden.jpg"}))
     world.store.delete_failed.emit(one.hash, "NETWORK_UNAVAILABLE")
     assert world.dialog._status.text() == (
-        "“Garden.jpg” is still on one of your media servers. Couldn’t reach your media "
-        "server. Check your internet connection.")
+        "“Garden.jpg” wasn’t deleted. Couldn’t reach your media server. Check your "
+        "internet connection.")
 
 
 def test_copy_link_copies_every_selected_address(tmp_path, monkeypatch):
@@ -1065,3 +1065,20 @@ def test_a_picture_the_system_cannot_draw_shows_its_kind(tmp_path, monkeypatch):
     world = build(tmp_path, monkeypatch, FakeStore([heic]))
     world.loader.failed.emit(heic.hash, "not an image")
     assert world.model.tile(heic.hash).no_picture
+
+
+def test_a_delete_no_server_took_says_it_was_not_deleted(tmp_path, monkeypatch):
+    one = media(1)
+    one.urls = [{"server": SERVER, "url": one.url}, {"server": MEMBERS, "url": one.url}]
+    world = build(tmp_path, monkeypatch, FakeStore([one], names={one.hash: "Garden.jpg"}))
+    monkeypatch.setattr(alerts, "Alert", fake_alert(click="Delete")[0])
+    select(world, one.hash)
+    world.dialog._delete()
+    world.store.delete_failed.emit(one.hash, "NETWORK_UNAVAILABLE")    # both servers kept it
+    assert world.dialog._status.text().startswith("“Garden.jpg” wasn’t deleted.")
+
+    world.dialog._delete()
+    one.urls = one.urls[1:]                                             # one server took it
+    world.store.delete_failed.emit(one.hash, "NETWORK_UNAVAILABLE")
+    assert world.dialog._status.text().startswith(
+        "“Garden.jpg” is still on one of your media servers.")

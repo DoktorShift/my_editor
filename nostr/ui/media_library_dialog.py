@@ -187,6 +187,7 @@ class MediaLibraryDialog(QDialog):
         # original's name, and whether it stays (Stop Sharing) or goes
         # with them (Delete).
         self._unsharing: Dict[str, tuple] = {}
+        self._deleting: Dict[str, int] = {}
         # Save As, one file at a time: (tile, target, addresses left to
         # try), and the download running.
         self._saves: List[tuple] = []
@@ -892,6 +893,8 @@ class MediaLibraryDialog(QDialog):
         # public with no tile left to reach it.
         self._delete_copies(files, stays=False)
         for tile in files:
+            # How many servers had it, to tell a partial delete from none.
+            self._deleting[tile.key] = len(tile.media.urls)
             self._store.delete_file(tile.key)
 
     def _shared_copies(self, files: List[Tile]) -> list:
@@ -946,10 +949,13 @@ class MediaLibraryDialog(QDialog):
                 name=name, reason=friendly_message(code)), error=True)
             return
         name = self._name_of(sha)
-        if sha in self._store.files:
+        before = self._deleting.pop(sha, 0)
+        media = self._store.files.get(sha)
+        if media is not None and len(media.urls) < before:
+            # Some servers deleted it, and one still has it.
             text = _("“{name}” is still on one of your media servers. {reason}")
         else:
-            text = _("“{name}” couldn’t be deleted. {reason}")
+            text = _("“{name}” wasn’t deleted. {reason}")
         self._say(text.format(name=name, reason=friendly_message(code)), error=True)
 
     def _name_of(self, sha: str) -> str:
