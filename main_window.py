@@ -122,11 +122,6 @@ _SUPPORTED_EXTS = {'.md', '.html', '.htm', '.txt', '.rmd', '.pdf'}
 # ordinary "unsupported" bar message instead of a silent nothing.
 _IMAGE_EXTS = image_safety.IMAGE_FILE_SUFFIXES
 
-# A web address in published text, and the hash a media server's address
-# carries (BUD-01: https://<server>/<sha256>[.ext]).
-_MEDIA_ADDRESS = re.compile(r"https?://[^\s<>()\[\]\"']+")
-_SHA256 = re.compile(r"(?<![0-9a-fA-F])[0-9a-fA-F]{64}(?![0-9a-fA-F])")
-
 # Audio and video that go into an article or a note through the media
 # servers (Insert > Audio or Video, or dropped while an account is in use).
 _AUDIO_VIDEO_EXTS = (".mp3", ".m4a", ".aac", ".ogg", ".oga", ".opus", ".wav", ".flac",
@@ -217,6 +212,7 @@ from nostr.publisher import (
     DraftBulkDeleteJob,
     DraftPublishJob,
     PublishedMedia,
+    library_audio_video_in,
 )
 from nostr.relay import RelayPool
 from nostr.search import Nip50SearchClient
@@ -3349,28 +3345,13 @@ class MainWindow(QMainWindow):
             content = serialize_plain_with_images(ed.document(), target).rstrip("\n")
         else:
             content = document_to(ed.document(), flavor, target).rstrip("\n")
-        for media in self._library_audio_video_in(content):
-            records.setdefault(media.url, media)
+        # Audio and video of the account's media library, described from
+        # what its media servers confirmed.
+        store = getattr(self, "_media_store", None)
+        if store is not None:
+            for media in library_audio_video_in(store.files, content):
+                records.setdefault(media.url, media)
         return content, list(records.values())
-
-    def _library_audio_video_in(self, content: str) -> List[PublishedMedia]:
-        """The audio and video of the account's media library that
-        ``content`` holds, described from what the media servers confirmed
-        when it was uploaded (its type, its hash, its size): found by the
-        hash every media server address carries, at the address as it is
-        written in the text."""
-        files = self._media_store.files
-        found = []
-        for url in _MEDIA_ADDRESS.findall(content):
-            sha = next(iter(_SHA256.findall(url.rsplit("/", 1)[-1])), "").lower()
-            media = files.get(sha)
-            if media is None or not media.mime_type.startswith(("audio/", "video/")):
-                continue
-            servers = tuple(entry.get("server", "") for entry in media.urls
-                            if entry.get("server"))
-            found.append(PublishedMedia(url=url, sha256=sha, mime=media.mime_type,
-                                        size=media.size, servers=servers))
-        return found
 
     def _publish_text(self, ed, flavor: str) -> str:
         """The content half of :meth:`_publish_payload`."""
@@ -5906,7 +5887,9 @@ class MainWindow(QMainWindow):
         """Nothing of Nostr stays on screen once no account is in use."""
         if not active:
             self._hide_drafts_panel()
-            self.act_article_details.setChecked(False)
+            details = getattr(self, "act_article_details", None)
+            if details is not None:
+                details.setChecked(False)
         if getattr(self, "_settings_window", None) is not None:
             self._settings_window.refresh()
         if getattr(self, "_shortcuts_window", None) is not None:

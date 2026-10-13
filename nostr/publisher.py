@@ -267,6 +267,29 @@ def _fallbacks_for(record: PublishedMedia) -> List[str]:
     return out
 
 
+# A web address in published text, and the hash a media server's address
+# carries (BUD-01: https://<server>/<sha256>[.ext]).
+_MEDIA_ADDRESS = re.compile(r"https?://[^\s<>()\[\]\"']+")
+_SHA256 = re.compile(r"(?<![0-9a-fA-F])[0-9a-fA-F]{64}(?![0-9a-fA-F])")
+
+
+def library_audio_video_in(files, content: str) -> List[PublishedMedia]:
+    """The audio and video of the account's media library (``files``,
+    sha256 -> MediaFile) that ``content`` holds, at the address written
+    there, described from what the media servers confirmed when it was
+    uploaded (type, hash, size): found by the hash its address carries."""
+    found: List[PublishedMedia] = []
+    for url in _MEDIA_ADDRESS.findall(content or ""):
+        hashes = _SHA256.findall(url.rsplit("/", 1)[-1])
+        media = files.get(hashes[0].lower()) if hashes else None
+        if media is None or not media.mime_type.startswith(("audio/", "video/")):
+            continue
+        servers = tuple(entry.get("server", "") for entry in media.urls if entry.get("server"))
+        found.append(PublishedMedia(url=url, sha256=media.hash, mime=media.mime_type,
+                                    size=media.size, servers=servers))
+    return found
+
+
 def build_imeta_tags(
     media: Sequence[PublishedMedia], content: str
 ) -> List[List[str]]:

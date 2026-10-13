@@ -41,6 +41,9 @@ class SaveWindow(_Window):
     _save_to = MainWindow._save_to
     _to_rmd_content = MainWindow._to_rmd_content
     _export_title_for = MainWindow._export_title_for
+    _with_front_matter = MainWindow._with_front_matter
+    _article_details_of = MainWindow._article_details_of
+    _published_article_of = MainWindow._published_article_of
 
     def __init__(self, cache_dir):
         super().__init__(cache_dir)
