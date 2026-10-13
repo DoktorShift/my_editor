@@ -612,10 +612,11 @@ class MediaLibraryDialog(QDialog):
             menu.addAction(_("Insert"), self._insert).setEnabled(self._can_insert())
         menu.addAction(_("Quick Look"), self._toggle_quick_look)
         menu.addSeparator()
+        linked = [tile for tile in files if self._link_of(tile)]
         menu.addAction(_("Copy Link") if len(files) == 1 else _("Copy Links"),
-                       self._copy_links)
+                       self._copy_links).setEnabled(bool(linked))
         if len(files) == 1:
-            menu.addAction(_("Open in Browser"), self._open_in_browser)
+            menu.addAction(_("Open in Browser"), self._open_in_browser).setEnabled(bool(linked))
         menu.addAction(_("Save As…") if len(files) == 1 else _("Save to Folder…"),
                        self._save_as)
         if not self._pick_mode:
@@ -696,7 +697,7 @@ class MediaLibraryDialog(QDialog):
             if picture is None:
                 self._loader.load(tile.key, tile.media.url)
         self._quick_look.show_file(name=tile.name, detail=_quick_look_detail(tile),
-                                   url=tile.media.url, glyph=glyph, picture=picture)
+                                   url=self._link_of(tile), glyph=glyph, picture=picture)
 
     def _full_picture(self, sha: str) -> Optional[QPixmap]:
         if not self._loader.cache_path(sha).is_file():
@@ -708,15 +709,27 @@ class MediaLibraryDialog(QDialog):
 
     # -- copy, open, save ---------------------------------------------------
 
+    def _link_of(self, tile: Tile) -> str:
+        """The address that shows someone this file, or "": a shared
+        original's is its public copy's (its own serves sealed bytes), and
+        a private file has none."""
+        copy = self._visibility.public_copy_of(tile.key)
+        if copy is not None:
+            return copy.url
+        if self._visibility.is_private(tile.key):
+            return ""
+        return tile.media.url
+
     def _copy_links(self) -> None:
-        files = self._selected_files()
-        if files:
-            QApplication.clipboard().setText("\n".join(tile.media.url for tile in files))
+        links = [link for link in map(self._link_of, self._selected_files()) if link]
+        if links:
+            QApplication.clipboard().setText("\n".join(links))
 
     def _open_in_browser(self) -> None:
         files = self._selected_files()
-        if files and url_safety.is_safe_media_url(files[0].media.url):
-            QDesktopServices.openUrl(QUrl(files[0].media.url))
+        link = self._link_of(files[0]) if files else ""
+        if link and url_safety.is_safe_media_url(link):
+            QDesktopServices.openUrl(QUrl(link))
 
     def _save_as(self) -> None:
         files = self._selected_files()

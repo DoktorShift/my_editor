@@ -962,3 +962,32 @@ def test_a_picker_does_not_offer_media_servers(tmp_path, monkeypatch):
     world.dialog._fill_actions_menu()
     texts = [a.text() for a in world.dialog._actions_menu.actions() if a.text()]
     assert "Media Servers…" not in texts and "Refresh" in texts
+
+
+def _menu_action(world, text):
+    world.dialog._fill_actions_menu()
+    return next(a for a in world.dialog._actions_menu.actions() if a.text() == text)
+
+
+def test_a_shared_originals_link_is_its_public_copys(tmp_path, monkeypatch):
+    """The original's own address serves sealed bytes: a link to it shows
+    nobody the picture. The public copy's does."""
+    world, original, copy_sha, _ledger = _shared_original(tmp_path, monkeypatch)
+    QApplication.clipboard().setText("")
+    select(world, original.hash)
+    _menu_action(world, "Copy Link").trigger()
+    assert QApplication.clipboard().text() == f"{MEMBERS}/{copy_sha}.png"
+
+
+def test_a_private_file_has_no_link_to_hand_out(tmp_path, monkeypatch):
+    envelope = sealed()
+    private = MediaFile(hash=sha_of(envelope), url=f"{SERVER}/{sha_of(envelope)}", size=10)
+    blob = PrivateBlob(sha256=private.hash, key_hex=KEY, mime="image/png", name="Secret.png")
+    world = build(tmp_path, monkeypatch, FakeStore([private]),
+                  visibility=MediaVisibility(library=FakeLibrary([blob])))
+    QApplication.clipboard().setText("before")
+    select(world, private.hash)
+    assert not _menu_action(world, "Copy Link").isEnabled()
+    assert not _menu_action(world, "Open in Browser").isEnabled()
+    press(world.grid, Qt.Key.Key_C, Qt.KeyboardModifier.ControlModifier)
+    assert QApplication.clipboard().text() == "before"
