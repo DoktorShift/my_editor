@@ -38,7 +38,7 @@ from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QBoxLayout, QDialog, QDialogButtonBox, QFrame, QHBoxLayout, QLabel, QMenu, QPushButton,
-    QStyle, QToolButton, QToolTip, QWidget,
+    QScrollArea, QStyle, QToolButton, QToolTip, QWidget,
 )
 
 import announce
@@ -92,6 +92,35 @@ def fit_to_window(dialog: QDialog, wanted: QSize) -> None:
     dialog.setMinimumSize(QSize(min(least.width(), size.width()),
                                 min(least.height(), size.height())))
     dialog.resize(size)
+
+
+# The sheet's margins, and in a window too low for them (the smallest
+# window is 189 points tall) the narrower ones it keeps then.
+_MARGINS = (20, 18, 20, 14)
+_TIGHT_MARGINS = (12, 8, 12, 8)
+_TIGHT_HEIGHT = 240
+
+
+def fit_margins(dialog: QDialog) -> None:
+    """The sheet's margins for its height: narrower in a low window, where
+    every line counts."""
+    margins = _TIGHT_MARGINS if dialog.height() < _TIGHT_HEIGHT else _MARGINS
+    layout = dialog.layout()
+    if layout is not None and layout.contentsMargins().top() != margins[1]:
+        layout.setContentsMargins(*margins)
+
+
+def scroll_area(page: QWidget) -> QScrollArea:
+    """What a sheet holds but its account and buttons: it scrolls, down to
+    one line in the smallest window, so they always show whole."""
+    scroll = QScrollArea()
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QFrame.Shape.NoFrame)
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+    scroll.setMinimumHeight(scroll.fontMetrics().lineSpacing() + 4)
+    scroll.setWidget(page)
+    return scroll
 
 
 def sheet_stylesheet(is_dark: bool) -> str:

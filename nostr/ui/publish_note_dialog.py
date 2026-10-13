@@ -50,8 +50,8 @@ from ..relay import RelayPool
 from ..search import Nip50SearchClient
 from .mention_picker import MentionPicker
 from .publish_sheet import (
-    AccountRow, BottomRow, PeopleRow, StatusLine, fit_to_window, make_sheet, people_tagged,
-    sheet_stylesheet,
+    AccountRow, BottomRow, PeopleRow, StatusLine, fit_margins, fit_to_window, make_sheet,
+    people_tagged, scroll_area, sheet_stylesheet,
 )
 from .secret_key_check import publishable
 
@@ -232,9 +232,16 @@ class PublishNoteDialog(QDialog):
 
     def _build(self, profile: Profile, store: ProfileStore) -> None:
         self.setStyleSheet(sheet_stylesheet(self._is_dark))
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 18, 20, 14)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(20, 18, 20, 14)
+        outer.setSpacing(8)
+        # Everything but the account and the buttons scrolls: in the
+        # smallest window there is room for little more.
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
+        outer.addWidget(scroll_area(page), 1)
 
         heading = QLabel(_("Publish as Note"))
         heading.setObjectName("title")
@@ -254,6 +261,8 @@ class PublishNoteDialog(QDialog):
         self._text_edit = NoteText(label_for, is_dark=self._is_dark)
         self._text_edit.setAccessibleName(_("Note"))
         self._text_edit.mention_requested.connect(self._ask_mention)
+        # A few lines at least, the room there is when there is more.
+        self._text_edit.setMinimumHeight(self._text_edit.fontMetrics().lineSpacing() * 3 + 16)
         layout.addWidget(self._text_edit, 1)
 
         self._char_count = QLabel("")
@@ -275,7 +284,7 @@ class PublishNoteDialog(QDialog):
         layout.addWidget(self._people_line)
 
         self._status = StatusLine(self._is_dark)
-        layout.addWidget(self._status)
+        outer.addWidget(self._status)
 
         self._account = AccountRow(profile, store, self._avatars, is_dark=self._is_dark)
         self._account.switched.connect(lambda _profile: self._refresh())
@@ -285,7 +294,7 @@ class PublishNoteDialog(QDialog):
                                               QDialogButtonBox.ButtonRole.AcceptRole)
         self._cancel_btn.clicked.connect(self._on_cancel)
         self._publish_btn.clicked.connect(self._on_publish)
-        layout.addWidget(BottomRow(self._account, buttons))
+        outer.addWidget(BottomRow(self._account, buttons))
         QWidget.setTabOrder(self._text_edit, self._account.button)
         answer_return_as_the_system_does(self.findChildren(QPushButton))
 
@@ -299,6 +308,10 @@ class PublishNoteDialog(QDialog):
         self._status.set_dark(is_dark)
         if self._picker is not None:
             self._picker.set_dark(is_dark)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802, Qt's name
+        super().resizeEvent(event)
+        fit_margins(self)
 
     # -- mentions -----------------------------------------------------------------
 

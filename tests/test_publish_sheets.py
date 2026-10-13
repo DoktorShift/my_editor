@@ -643,3 +643,37 @@ def test_the_window_asks_about_a_files_own_name_when_it_has_no_link_name():
     source = inspect.getsource(MainWindow._on_nostr_publish_article)
     assert "file_name=" in source
     assert "def _file_name(" in inspect.getsource(MainWindow) or "_file_name" in source
+
+
+@pytest.mark.parametrize("make", [article, note])
+@pytest.mark.parametrize("language", ["en", "de"])
+def test_a_sheet_on_the_smallest_window_scrolls_and_keeps_its_buttons(
+        tmp_path, make, language):
+    """Review round 2: at the main window's smallest size (325x189 on a
+    Mac) Publish as Note was smaller than it could be drawn: its words
+    and "Publishing as" were cut, and Cancel and Publish lost their
+    labels. What the sheet holds scrolls; the account and the buttons
+    always show whole."""
+    import i18n
+    from PySide6.QtWidgets import QMainWindow, QScrollArea
+    i18n.install(language)
+    try:
+        window = QMainWindow()
+        window.setMinimumSize(1, 1)
+        window.resize(325, 189)
+        window.show()
+        sheet = make(tmp_path, parent=window)
+        sheet.show()
+        QApplication.processEvents()
+        assert sheet.height() <= window.height() and sheet.width() <= window.width()
+        for control in (sheet._cancel_btn, sheet._publish_btn, sheet._account):
+            assert control.isVisible()
+            assert control.height() >= control.minimumSizeHint().height()
+            assert control.width() >= control.minimumSizeHint().width()
+        scroll = sheet.findChild(QScrollArea)
+        assert scroll is not None and scroll.isAncestorOf(
+            sheet._title_edit if make is article else sheet._text_edit)
+        sheet.close()
+        window.close()
+    finally:
+        i18n.install(i18n.ENGLISH)

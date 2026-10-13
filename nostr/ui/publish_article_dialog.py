@@ -51,7 +51,7 @@ from PySide6.QtCore import QDateTime, QSize, Qt, Signal
 from PySide6.QtGui import QFontMetrics, QPixmap
 from PySide6.QtWidgets import (
     QBoxLayout, QDialog, QDialogButtonBox, QFormLayout, QFrame, QLabel,
-    QLineEdit, QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget,
+    QLineEdit, QPushButton, QToolButton, QVBoxLayout, QWidget,
 )
 
 import announce
@@ -85,8 +85,8 @@ from .coauthors import Coauthors
 from .cover_field import CoverImageField
 from .mention_picker import MentionPicker
 from .publish_sheet import (
-    AccountRow, BottomRow, PeopleRow, StatusLine, fit_to_window, make_sheet, people_tagged,
-    sheet_stylesheet,
+    AccountRow, BottomRow, PeopleRow, StatusLine, fit_margins, fit_to_window, make_sheet,
+    people_tagged, scroll_area, sheet_stylesheet,
 )
 from .secret_key_check import publishable, slug_problem
 from .tag_field import TagField
@@ -353,17 +353,18 @@ class PublishArticleDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(20, 18, 20, 14)
         root.setSpacing(10)
+
+        # Everything but the account and the buttons scrolls, the heading
+        # too: in the smallest window there is room for little more.
+        content = QWidget()
+        page = QVBoxLayout(content)
+        page.setContentsMargins(0, 0, 0, 0)
+        page.setSpacing(10)
         heading = QLabel(_("Publish as Article"))
         heading.setObjectName("title")
-        root.addWidget(heading)
-
-        self._scroll = QScrollArea()
-        self._scroll.setWidgetResizable(True)
-        self._scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        content = QWidget()
-        self._columns = QBoxLayout(QBoxLayout.Direction.LeftToRight, content)
+        page.addWidget(heading)
+        self._columns = QBoxLayout(QBoxLayout.Direction.LeftToRight)
+        page.addLayout(self._columns, 1)
         self._columns.setContentsMargins(0, 0, 4, 0)
         self._columns.setSpacing(20)
         self._card = _ArticleCard(self._is_dark)
@@ -374,7 +375,7 @@ class PublishArticleDialog(QDialog):
                                    is_dark=self._is_dark)
         self._account.switched.connect(self._on_account_switched)
         self._columns.addLayout(self._build_form(default_title, default_slug), 1)
-        self._scroll.setWidget(content)
+        self._scroll = scroll_area(content)
         root.addWidget(self._scroll, 1)
 
         self._status = StatusLine(self._is_dark)
@@ -565,6 +566,7 @@ class PublishArticleDialog(QDialog):
 
     def resizeEvent(self, event) -> None:  # noqa: N802, Qt's name
         super().resizeEvent(event)
+        fit_margins(self)
         # The card beside the fields while they have their room (longer
         # words take more of it), else under them; narrower still, each
         # label above its field.
