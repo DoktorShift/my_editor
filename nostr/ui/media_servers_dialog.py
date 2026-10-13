@@ -89,14 +89,43 @@ def server_address(text: str) -> Tuple[Optional[str], str]:
     return (origin, "") if url_safety.is_safe_media_url(origin) else (None, "https")
 
 
+# Letters of other scripts that pass for Latin ones in a host name.
+_LATIN_LOOKALIKES = frozenset("аеорсухіјѕԁԛԝһӏүɡ" "οανικρτυχ")
+# Scripts that are written together: Japanese, Korean and Chinese
+# names mix their own with Latin and Han.
+_WRITTEN_TOGETHER = (frozenset({"LATIN", "CJK", "HIRAGANA", "KATAKANA"}),
+                     frozenset({"LATIN", "CJK", "HANGUL"}),
+                     frozenset({"LATIN", "CJK", "BOPOMOFO"}))
+
+
 def _display_host(host: str) -> str:
     """``host`` as a person reads it. An IP address is shown as it is
     written. A host in another script is kept in its ASCII form, and
-    shown as it is written where Qt (as a browser) trusts its domain not
-    to mix lookalike letters."""
+    shown as it is written only when it can't pass for another: where
+    Qt (as a browser) trusts its domain, and no label mixes scripts or
+    is made only of letters that pass for Latin ones."""
     if not host or ":" in host:
         return host
-    return QUrl.fromAce(host.encode("ascii", "replace")) or host
+    written = QUrl.fromAce(host.encode("ascii", "replace")) or host
+    if written != host and any(_lookalike(label) for label in written.split(".")):
+        return host
+    return written
+
+
+def _lookalike(label: str) -> bool:
+    letters = [ch for ch in label if ch.isalpha()]
+    scripts = {_script(ch) for ch in letters}
+    if len(scripts) > 1 and not any(scripts <= together for together in _WRITTEN_TOGETHER):
+        return True
+    return bool(letters) and scripts != {"LATIN"} and all(
+        ch in _LATIN_LOOKALIKES for ch in letters)
+
+
+def _script(ch: str) -> str:
+    """The script a letter is written in, as its Unicode name begins."""
+    name = unicodedata.name(ch, "")
+    first = name.split(" ")[0] if name else "UNKNOWN"
+    return "KATAKANA" if first == "KATAKANA-HIRAGANA" else first
 
 
 def _address_problem(problem: str) -> str:

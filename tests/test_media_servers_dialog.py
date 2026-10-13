@@ -294,3 +294,21 @@ def test_a_server_at_an_ip_address_is_listed_by_it(tmp_path, address, row):
     dialog.add_button.click()
     assert settings.configured_servers[-1] == address
     assert rows(dialog)[-1] == row
+
+
+@pytest.mark.parametrize("address, row", [
+    ("https://exаmple.com", "xn--exmple-4nf.com"),          # a Cyrillic а among Latin letters
+    ("https://xn--exmple-4nf.com", "xn--exmple-4nf.com"),
+    ("https://раураӏ.com", "xn--80aa0cbo65f.com"),           # Cyrillic letters that all look Latin
+    ("https://bücher.de", "bücher.de"),
+    ("https://例え.jp", "例え.jp"),
+    ("https://ドメイン名例.jp", "ドメイン名例.jp"),
+    ("https://пример.рф", "пример.рф"),                       # Cyrillic that doesn't pass for Latin
+])
+def test_a_lookalike_host_is_never_shown_as_the_real_one(tmp_path, address, row):
+    """Whatever the domain: a label that mixes scripts, or is made only of
+    letters that pass for Latin ones, is shown in its ASCII form."""
+    dialog, _settings, _changes = sheet(tmp_path)
+    dialog.address.setText(address)
+    dialog.add_button.click()
+    assert rows(dialog)[-1] == row
