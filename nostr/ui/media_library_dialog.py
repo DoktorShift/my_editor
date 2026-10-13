@@ -1253,12 +1253,6 @@ def _quick_look_detail(tile: Tile) -> str:
     return "  ·  ".join(parts)
 
 
-# What a file name may not hold on some system a file may be saved to
-# (Windows, or a disk formatted for it): these characters, and these
-# device names, whatever the extension.
-_UNSAVEABLE = re.compile(r'[<>:"/\\|?*\x00-\x1f\x7f]')
-_DEVICE_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{n}" for n in range(1, 10)),
-                 *(f"LPT{n}" for n in range(1, 10))}
 def _delete_reason(code: str) -> str:
     """Why a server didn't delete a file. A refused account is the server
     the file is on refusing: choosing another server, the remedy when
@@ -1268,6 +1262,12 @@ def _delete_reason(code: str) -> str:
     return friendly_message(code)
 
 
+# What a file name may not hold on some system a file may be saved to
+# (Windows, or a disk formatted for it): these characters, and these
+# device names as the part before the first dot, in any case.
+_UNSAVEABLE = re.compile(r'[<>:"/\\|?*\x00-\x1f\x7f]')
+_DEVICE_NAMES = {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$",
+                 *(f"{port}{n}" for port in ("COM", "LPT") for n in "123456789¹²³")}
 # Most folders hold names of up to 255 bytes; this leaves room for the
 # hidden part file a download is written to and a number after a copy.
 _NAME_BYTES = 240
@@ -1285,8 +1285,9 @@ def _save_name(tile: Tile) -> str:
         stem, ext = name, ""
     ext = ext or media_files.extension_for(tile.media.mime_type or "")
     stem = stem.rstrip(". ") or kind_word_title(tile.kind)
-    if stem.split(".")[0].upper() in _DEVICE_NAMES:
-        stem += "-"
+    first, dot, rest = stem.partition(".")
+    if first.rstrip(" ").upper() in _DEVICE_NAMES:     # "CON.tar.gz" is CON too
+        stem = first.rstrip(" ") + "-" + dot + rest
     while len((stem + ext).encode("utf-8")) > _NAME_BYTES:
         stem = stem[:-1].rstrip(". ")
     return stem + ext

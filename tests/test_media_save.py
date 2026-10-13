@@ -439,6 +439,14 @@ def test_two_save_as_to_one_name_keep_both(tmp_path, monkeypatch, server):
     ("trailing. .png", "trailing.png"),
     ("CON.png", "CON-.png"),
     ("lpt1", "lpt1-.mp4"),
+    ("CON.tar.gz", "CON-.tar.gz"),
+    ("Nul.backup.png", "Nul-.backup.png"),
+    ("COM¹.png", "COM¹-.png"),
+    ("lpt³.png", "lpt³-.png"),
+    ("CONIN$.png", "CONIN$-.png"),
+    ("conout$", "conout$-.mp4"),
+    ("AUX .png", "AUX-.png"),
+    ("CONSOLE.png", "CONSOLE.png"),
     ("...", "Video.mp4"),
 ])
 def test_a_name_is_one_every_system_can_save(tmp_path, monkeypatch, server, name, saved):
