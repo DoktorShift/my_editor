@@ -317,10 +317,11 @@ def build_imeta_tags(
             continue
         if not url_safety.is_safe_media_url(url):
             continue
-        # NIP-92: each tag SHOULD match a URL in the event content. The
-        # user can still edit the body in the publish dialog, so an
-        # image described here may no longer be there.
-        if url not in content:
+        # NIP-92: each tag SHOULD match a URL in the event content: the
+        # address itself, not one that only holds it (in its query, or as
+        # the start of a longer one). A note's text can still be changed
+        # in its publish sheet, so a picture described here may be gone.
+        if not refs.address_in(url, content):
             continue
 
         entries: List[str] = []

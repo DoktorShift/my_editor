@@ -158,6 +158,33 @@ def outside_code(markdown: str, change: Callable[[str], str]) -> str:
     return "\n".join(out)
 
 
+# What may stand right before and after an address written in a note or an
+# article: the start or end, a space, or Markdown's and HTML's brackets and
+# quotes. A sentence's full stop or comma may follow it, before a space.
+_BEFORE_ADDRESS = set(" \t\r\n(<[\"'")
+_AFTER_ADDRESS = set(" \t\r\n)>]\"'")
+_SENTENCE_MARKS = set(".,;:!?")
+
+
+def address_in(address: str, text: str) -> bool:
+    """Whether ``address`` (a web address) is written in ``text`` as an
+    address of its own: not only inside a longer one (in its path or its
+    query) or as the start of one that goes on ("….png.bak", "….pngx")."""
+    if not address:
+        return False
+    start = text.find(address)
+    while start >= 0:
+        end = start + len(address)
+        before = text[start - 1] if start else " "
+        after = text[end] if end < len(text) else " "
+        if after in _SENTENCE_MARKS:
+            after = text[end + 1] if end + 1 < len(text) else " "
+        if before in _BEFORE_ADDRESS and after in _AFTER_ADDRESS:
+            return True
+        start = text.find(address, start + 1)
+    return False
+
+
 def find_references(content: str, *, markdown: bool = True) -> List[Reference]:
     """Every reference in ``content``, in order, each once: outside code
     in Markdown (an article), anywhere in plain text (a note)."""

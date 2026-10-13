@@ -170,7 +170,7 @@ class ArticleDetails:
         for tag in self.carried:
             if tag[0] == "imeta":
                 url = next((part[4:] for part in tag[1:] if part.startswith("url ")), "")
-                if not url or url not in content:
+                if not url or not refs.address_in(url, content):
                     continue
             kept.append(list(tag))
         return kept

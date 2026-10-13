@@ -281,3 +281,13 @@ def test_the_window_offers_and_previews_the_same_default_title():
     for method in (MainWindow._on_nostr_publish_article, MainWindow._preview_content):
         source = inspect.getsource(method)
         assert "default_title(" in source and 'lstrip("# ")' not in source
+
+
+def test_a_carried_picture_description_needs_the_address_itself_in_the_text():
+    """NIP-92, as for the pictures described here: a description another
+    app gave is carried only while its address is in the text, not when
+    the text only holds a longer address that contains it."""
+    details = ArticleDetails.from_tags(IMPORTED_TAGS)
+    assert details.carried_tags(f"![x]({PICTURE})")[-1][1] == f"url {PICTURE}"
+    assert not any(tag[0] == "imeta" for tag in
+                   details.carried_tags(f"See https://proxy.example/?u={PICTURE} now."))

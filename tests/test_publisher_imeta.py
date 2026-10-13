@@ -88,7 +88,31 @@ def test_a_complete_record_emits_every_field_in_a_fixed_order():
 
 def test_the_primary_origin_is_not_repeated_as_a_fallback():
     tags = build_imeta_tags([full_record()], body_with(URL))
-    assert f"fallback {OURS}/{SHA}" not in tags[0]
+    assert not any(entry.startswith(f"fallback {OURS}/") for entry in tags[0])
+
+
+@pytest.mark.parametrize("content", [
+    f"See https://evil.example/?u={URL} for it.",                    # inside another address
+    f"See {URL}.bak, a backup.",                                     # a longer address
+    f"See {URL}x and {OURS}/{SHA}.pngs.",                           # one that goes on
+    f"See https://other.example/{URL}",                              # in another's path
+])
+def test_only_the_address_itself_in_the_text_is_described(content):
+    """NIP-92: an imeta tag SHOULD match a URL in the event content; one
+    that only holds this address inside a longer one is another URL."""
+    assert build_imeta_tags([full_record()], content) == []
+
+
+@pytest.mark.parametrize("content", [
+    f"![A kitten]({URL})",
+    f'![A kitten]({URL} "A title")',
+    f"<{URL}>",
+    f"Look: {URL}.",
+    f"{URL}\nNext line",
+    f"Look ({URL}), then on.",
+])
+def test_the_address_is_found_however_the_text_writes_it(content):
+    assert len(build_imeta_tags([full_record()], content)) == 1
 
 
 def test_unknown_values_are_omitted_rather_than_defaulted():
