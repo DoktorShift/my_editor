@@ -46,6 +46,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtGui import QTextCursor, QTextDocument, QTextFormat
 
 import front_matter
+import tab_details
 import rich_text
 from atomic_file import write_text
 from doc_walk import iter_blocks, iter_image_names
@@ -125,7 +126,7 @@ def tab_identity(editor) -> dict:
     if article is not None:
         identity["article"] = article.tags()
         identity["article_author"] = getattr(editor, "_published_author", "")
-    details = getattr(editor, "_article_details", None)
+    details = tab_details.set_in_tab(editor)
     if details is not None:
         identity["details"] = details.tags()
     front = getattr(editor, "_front_matter", None)

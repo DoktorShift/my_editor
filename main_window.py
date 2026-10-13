@@ -57,6 +57,7 @@ from commands import (
     all_key_texts, platform_keys, redo_words, undo_words,
 )
 import front_matter
+import tab_details
 import media_files
 import slash_menu
 from slash_menu import SlashItem
@@ -189,7 +190,7 @@ from nostr.ui.imports_window import ImportsWindow
 from nostr.imports.constants import IDENTIFIER_PREFIX as IMPORT_IDENTIFIER_PREFIX
 from nostr.imports.constants import SOURCE_TAG as IMPORT_SOURCE_TAG
 from nostr.article_details import (
-    ArticleDetails, from_front_matter, front_matter_with, kept_in_file)
+    ArticleDetails, front_matter_with)
 from nostr.first_publications import FirstPublications
 from nostr.drafts import (
     INNER_KIND_LONG_FORM,
@@ -3125,8 +3126,7 @@ class MainWindow(QMainWindow):
             # Read when something asks for them (_article_details_of), never
             # on opening: a file nobody publishes pays nothing for them.
             ed._front_matter = front
-            ed._article_details = None
-            ed._details_unread = front is not None
+            tab_details.hold(ed, None)
             self._load_markdown(ed, content)
         elif ext.endswith('.rmd'):
             # R Markdown is edited as source, the way RStudio does it.
@@ -3588,9 +3588,9 @@ class MainWindow(QMainWindow):
                     content = document_to_markdown(ed.document(), reference)
                 # Its front matter (Q-F): as written but for the details
                 # changed here; none when there are none and it had none.
-                # Details nothing asked for are the file's: it stays as is.
+                # Details nothing set or read are the file's: it stays as is.
                 front = getattr(ed, "_front_matter", None)
-                if not getattr(ed, "_details_unread", False):
+                if not tab_details.untouched(ed):
                     front = front_matter_with(self._article_details_of(ed), front)
                 if not self._saving_without(ed, front, path):
                     return False
@@ -3611,8 +3611,7 @@ class MainWindow(QMainWindow):
             if ext.endswith('.md'):
                 ed._front_matter = front
                 ed._details_not_saved = front.refused if front is not None else frozenset()
-                if getattr(ed, "_article_details", None) is not None:
-                    ed._article_details = ed._article_details.keeping(kept_in_file(front))
+                tab_details.file_changed(ed)
             ed._recovered_title = ""
             ed.document().setModified(False)
             self._update_tab_title()
@@ -8185,9 +8184,7 @@ class MainWindow(QMainWindow):
         saved gets its first publication date from this computer's record,
         so the next save puts it into the draft, and every device that
         opens the draft keeps the date."""
-        if ed is not None and getattr(ed, "_details_unread", False):
-            self._read_details_of(ed)
-        own = getattr(ed, "_article_details", None) if ed is not None else None
+        own = tab_details.details_of(ed) if ed is not None else None
         if own is not None:
             return own
         binding = getattr(ed, "_draft_binding", None) if ed is not None else None
@@ -8220,17 +8217,6 @@ class MainWindow(QMainWindow):
         return (profile.user_pubkey,
                 directory.relay_hint(profile.user_pubkey) if directory is not None else "")
 
-    @staticmethod
-    def _read_details_of(ed) -> None:
-        """The details of the file in ``ed`` read from its front matter, as
-        the first thing asks for them: those set in the tab before (a
-        restored tab's), else the file's, with those it keeps as written."""
-        ed._details_unread = False
-        front = getattr(ed, "_front_matter", None)
-        details = (getattr(ed, "_article_details", None) or from_front_matter(front)).keeping(
-            kept_in_file(front))
-        ed._article_details = details if details != ArticleDetails() or details.kept else None
-
     def _set_article_details(self, ed, details: ArticleDetails) -> None:
         """The details of the article in ``ed``, as set in Article Details or
         the publish window: kept with the tab (its next draft save, its
@@ -8242,7 +8228,7 @@ class MainWindow(QMainWindow):
         details = self._article_details_of(ed).with_details_of(details)
         if details == self._article_details_of(ed):
             return
-        ed._article_details = details
+        tab_details.hold(ed, details)
         ed.document().setModified(True)
         if ed is self.current_editor():
             self._fill_article_details_panel()
@@ -8280,7 +8266,7 @@ class MainWindow(QMainWindow):
         if prior is None and published is not None:
             # An article opened from the Published view: the same article.
             title, slug, summary = published.title, published.identifier, published.summary
-        own = getattr(ed, "_article_details", None)
+        own = tab_details.details_of(ed)
         if own is not None:
             # As set in Article Details (or a file's front matter).
             title = own.title or title
@@ -8368,10 +8354,10 @@ class MainWindow(QMainWindow):
         # tab's own details as typed (hashtags in their case, which the
         # draft's tags are not), else those the draft holds.
         if choice.kind is StashKind.ARTICLE:
-            own = getattr(ed, "_article_details", None)
-            ed._article_details = _details_saved_as(
+            own = tab_details.details_of(ed)
+            tab_details.hold(ed, _details_saved_as(
                 own if own is not None else ArticleDetails.from_tags(
-                    inner.get("tags") or [], signer=str(inner.get("pubkey") or "")), choice)
+                    inner.get("tags") or [], signer=str(inner.get("pubkey") or "")), choice))
         # A successful stash clears the modified flag - the tab's
         # contents now match the latest draft snapshot on the network.
         ed._recovered_title = ""

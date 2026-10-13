@@ -31,6 +31,7 @@ from PySide6.QtCore import QEvent, QObject, QTimer
 from PySide6.QtGui import QTextCursor
 
 import front_matter
+import tab_details
 from nostr.article_details import ArticleDetails
 from recovery import (
     classify_backup, document_is_empty, is_restorable, load_backup_content, read_backup,
@@ -345,11 +346,12 @@ def restore_identity(ed, draft, article, article_author, details=None,
         ed._published_author = article_author if isinstance(article_author, str) else ""
     if isinstance(matter, str):
         ed._front_matter = front_matter.split(matter)[0]
+    # Details restored are details set in the tab, known: a save writes
+    # them. Else its file's, read when something asks, as on opening it.
     if are_tags(details):
-        ed._article_details = ArticleDetails.from_tags(details)
-    # Those its file keeps as written stay so (ArticleDetails.kept): read
-    # when something asks for the details, as on opening the file.
-    ed._details_unread = getattr(ed, "_front_matter", None) is not None
+        tab_details.hold(ed, ArticleDetails.from_tags(details))
+    elif getattr(ed, "_front_matter", None) is not None:
+        tab_details.hold(ed, None)
 
 
 def _dataclass_from(cls, data: dict):

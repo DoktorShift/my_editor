@@ -35,6 +35,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import recovery  # noqa: E402
+import tab_details  # noqa: E402
 import workspace  # noqa: E402
 import workspace_restore  # noqa: E402
 from editor import HtmlEditor  # noqa: E402
@@ -85,7 +86,7 @@ def test_details_set_in_the_tab_win_over_the_drafts():
 def test_setting_what_the_tab_has_changes_nothing():
     window, ed = window_with_draft(), bound_editor()
     window._set_article_details(ed, window._article_details_of(ed))
-    assert getattr(ed, "_article_details", None) is None
+    assert tab_details.set_in_tab(ed) is None
     assert not ed.document().isModified()
 
 
@@ -195,7 +196,7 @@ def test_the_publish_window_hands_back_only_what_changed_in_it(monkeypatch):
 
 def test_a_restart_and_a_crash_keep_them():
     ed = HtmlEditor()
-    ed._article_details = OWN
+    tab_details.hold(ed, OWN)
     identity = recovery.tab_identity(ed)
     assert identity["details"] == OWN.tags()
     raw = {"kind": workspace.DOCUMENT, "details": identity["details"]}
@@ -204,10 +205,10 @@ def test_a_restart_and_a_crash_keep_them():
     again = HtmlEditor()
     workspace_restore.restore_identity(again, None, None, "", identity["details"],
                                        draft_type=dict)
-    assert again._article_details == OWN
+    assert tab_details.details_of(again) == OWN
     broken = HtmlEditor()
     workspace_restore.restore_identity(broken, None, None, "", [["d", 1]], draft_type=dict)
-    assert getattr(broken, "_article_details", None) is None
+    assert tab_details.details_of(broken) is None
 
 
 def test_hashtags_are_lowercase_without_the_hash_each_once():
