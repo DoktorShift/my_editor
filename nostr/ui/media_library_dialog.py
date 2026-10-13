@@ -142,10 +142,13 @@ class MediaLibraryDialog(QDialog):
         # Files added from this window, by job name, until they land.
         self._jobs: Dict[str, Tile] = {}
         # What a finished upload has to say (a copy a server did not
-        # keep), said once it is added; and failures that arrived before
-        # their tile, by job name.
+        # keep), said once it is added.
         self._job_notes: Dict[str, str] = {}
-        self._early_failures: Dict[str, str] = {}
+        # What the store said about a job before its tile was made (a
+        # small file starts, or is refused, inside upload_file): the
+        # tile's state, and for a failure its reason, by job name.
+        self._early: Dict[str, tuple] = {}
+        self._adding = False
         # Shared copies being deleted, by the copy's sha256: the
         # original's name, and whether it stays (Stop Sharing) or goes
         # with them (Delete).
@@ -828,7 +831,11 @@ class MediaLibraryDialog(QDialog):
             if not mime or not os.path.isfile(path):
                 refused.append(os.path.basename(path))
                 continue
-            name = self._store.upload_file(path)
+            self._adding = True
+            try:
+                name = self._store.upload_file(path)
+            finally:
+                self._adding = False
             self._add_job(name, mime, _local_preview(mime=mime, path=path))
         if refused:
             self._say(ngettext(
@@ -849,19 +856,25 @@ class MediaLibraryDialog(QDialog):
             self._say(_("The pasted image couldn’t be read."), error=True)
             return
         body = bytes(buffer.data())
-        name = self._store.add_bytes(body, label=_("Pasted Image") + ".png",
-                                     mime_type="image/png")
+        self._adding = True
+        try:
+            name = self._store.add_bytes(body, label=_("Pasted Image") + ".png",
+                                         mime_type="image/png")
+        finally:
+            self._adding = False
         self._add_job(name, "image/png", _local_preview(mime="image/png", data=body))
 
     def _add_job(self, name: str, mime: str, preview: Optional[QPixmap]) -> None:
-        tile = Tile(key=name, name=name, detail=_("Waiting…"), kind=kind_of_mime(mime),
-                    state=WAITING, pixmap=preview)
-        early = self._early_failures.pop(name, "")
-        if early:
-            # Refused before it started (no signer, too large, no room).
-            tile.state, tile.detail = FAILED, early
-        self._jobs[name] = tile
+        state, detail = self._early.pop(name, (WAITING, _("Waiting…")))
+        if state == "cancelled":
+            return
+        self._jobs[name] = Tile(key=name, name=name, detail=detail, kind=kind_of_mime(mime),
+                                state=state, progress=0 if state == SENDING else -1,
+                                pixmap=preview)
         self._rebuild()
+        if state == FAILED:
+            self._say(_("“{name}” wasn’t added. {reason}").format(name=name, reason=detail),
+                      error=True)
 
     def _cancel_upload(self, name: str) -> None:
         self._store.cancel_upload(name)
@@ -886,6 +899,8 @@ class MediaLibraryDialog(QDialog):
         if tile is not None:
             tile.state, tile.detail, tile.progress = SENDING, _("Uploading…"), 0
             self._model.changed(name)
+        elif self._adding:
+            self._early[name] = (SENDING, _("Uploading…"))
 
     def _on_upload_progress(self, name: str, sent: int, total: int) -> None:
         tile = self._jobs.get(name)
@@ -916,8 +931,9 @@ class MediaLibraryDialog(QDialog):
     def _on_upload_failed(self, name: str, reason: str) -> None:
         tile = self._jobs.get(name)
         if tile is None:
-            # Refused inside upload_file, before its tile was made.
-            self._early_failures[name] = reason
+            if self._adding:
+                # Refused inside upload_file, before its tile was made.
+                self._early[name] = (FAILED, reason)
             return
         self._job_notes.pop(name, None)
         tile.state, tile.detail = FAILED, reason
@@ -930,6 +946,8 @@ class MediaLibraryDialog(QDialog):
         if self._jobs.pop(name, None) is not None:
             self._job_notes.pop(name, None)
             self._rebuild()
+        elif self._adding:
+            self._early[name] = ("cancelled", "")
 
     def _on_copy_missing(self, name: str, _host: str, _why: str) -> None:
         """A server did not take a copy, or was full. The file is on the

@@ -780,3 +780,22 @@ def test_deleting_a_shared_original_deletes_its_copy_too(tmp_path, monkeypatch):
     world.dialog._delete()
     deleted = [call[1] for call in world.store.calls if call[0] == "delete"]
     assert deleted == [copy_sha, original.hash]
+
+
+def test_a_start_or_cancel_before_the_tile_exists_is_kept(tmp_path, monkeypatch):
+    """A small file can start (and be cancelled) inside upload_file,
+    before the window has made its tile."""
+    path = tmp_path / "Quick.png"
+    path.write_bytes(PNG_BYTES)
+    store = FakeStore()
+    world = build(tmp_path, monkeypatch, store)
+    store.upload_file = lambda p: (store.upload_started.emit("Quick.png"), "Quick.png")[1]
+    world.dialog._add_paths([str(path)])
+    assert world.model.tile("Quick.png").state == SENDING
+
+    other = tmp_path / "Gone.png"
+    other.write_bytes(PNG_BYTES)
+    store.upload_file = lambda p: (store.upload_started.emit("Gone.png"),
+                                   store.upload_cancelled.emit("Gone.png"), "Gone.png")[2]
+    world.dialog._add_paths([str(other)])
+    assert world.model.tile("Gone.png") is None
