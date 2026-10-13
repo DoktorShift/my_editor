@@ -413,3 +413,36 @@ def test_two_save_as_to_one_name_keep_both(tmp_path, monkeypatch, server):
     assert wait_for(lambda: not saving(world) and len(folder(out)) == 2, 15)
     assert (out / "Talk.mp4").read_bytes() == _Blobs.files[one.hash]
     assert (out / "Talk 2.mp4").read_bytes() == _Blobs.files[two.hash]
+
+
+# --------------------------------------------------------------------------- #
+# The name a file is saved under
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("name, saved", [
+    ("Report: Q3?.pdf", "Report- Q3-.pdf"),
+    ('a<b>"c|d*e.png', "a-b--c-d-e.png"),
+    ("back\\slash/and.png", "back-slash-and.png"),
+    ("tab\there\x7f.png", "tab-here-.png"),
+    (".hidden.png", "hidden.png"),
+    ("trailing. .png", "trailing.png"),
+    ("CON.png", "CON-.png"),
+    ("lpt1", "lpt1-.mp4"),
+    ("...", "Video.mp4"),
+])
+def test_a_name_is_one_every_system_can_save(tmp_path, monkeypatch, server, name, saved):
+    """As a system save dialog would have it: no character Windows refuses,
+    nothing hidden, no device name, nothing a folder can't hold."""
+    media = blob(server, name.encode())
+    world = library(tmp_path, monkeypatch, [media], names={media.hash: name})
+    assert dialog_module._save_name(world.model.tiles[0]) == saved
+
+
+def test_a_long_name_is_cut_to_what_a_folder_holds_keeping_its_extension(
+        tmp_path, monkeypatch, server):
+    media = blob(server, b"long")
+    world = library(tmp_path, monkeypatch, [media], names={media.hash: "ü" * 300 + ".mp4"})
+    saved = dialog_module._save_name(world.model.tiles[0])
+    assert saved.endswith("ü.mp4")
+    # With room for the hidden part file it is downloaded to, and a number.
+    assert len(f".{saved} 99.part".encode()) <= 255

@@ -41,6 +41,7 @@ to the shared blob cache, because that cache is what an export walks.
 from __future__ import annotations
 
 import os
+import re
 from typing import Dict, List, Optional
 
 from PySide6.QtCore import (
@@ -1230,13 +1231,34 @@ def _quick_look_detail(tile: Tile) -> str:
     return "  ·  ".join(parts)
 
 
+# What a file name may not hold on some system a file may be saved to
+# (Windows, or a disk formatted for it): these characters, and these
+# device names, whatever the extension.
+_UNSAVEABLE = re.compile(r'[<>:"/\\|?*\x00-\x1f\x7f]')
+_DEVICE_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{n}" for n in range(1, 10)),
+                 *(f"LPT{n}" for n in range(1, 10))}
+# Most folders hold names of up to 255 bytes; this leaves room for the
+# hidden part file a download is written to and a number after a copy.
+_NAME_BYTES = 240
+
+
 def _save_name(tile: Tile) -> str:
     """The name a file is saved under: its own, with the extension of
-    its kind when it has none."""
-    name = tile.name.replace("/", "-").replace("\\", "-").strip() or kind_word_title(tile.kind)
-    if not os.path.splitext(name)[1]:
-        name += media_files.extension_for(tile.media.mime_type or "")
-    return name
+    its kind when it has none, made one every system can save, as a
+    system save dialog would: no character Windows refuses, nothing
+    hidden (a leading dot), no device name, not too long."""
+    name = _UNSAVEABLE.sub("-", tile.name).strip().lstrip(".")
+    stem, ext = os.path.splitext(name)
+    ext = ext.rstrip(". ")
+    if len(ext) > 16:                        # not an extension, a long name with a dot
+        stem, ext = name, ""
+    ext = ext or media_files.extension_for(tile.media.mime_type or "")
+    stem = stem.rstrip(". ") or kind_word_title(tile.kind)
+    if stem.split(".")[0].upper() in _DEVICE_NAMES:
+        stem += "-"
+    while len((stem + ext).encode("utf-8")) > _NAME_BYTES:
+        stem = stem[:-1].rstrip(". ")
+    return stem + ext
 
 
 def _local_preview(*, mime: str, path: str = "", data: bytes = b"") -> Optional[QPixmap]:
