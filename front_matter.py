@@ -39,9 +39,9 @@ import functools
 import json
 import re
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime
-from typing import Any, List, Optional, Sequence, Tuple, Union
+from typing import AbstractSet, Any, FrozenSet, List, Optional, Sequence, Tuple, Union
 
 import yaml
 
@@ -153,11 +153,17 @@ class FrontMatter:
     newline: str = "\n"
     changed: bool = field(default=False, compare=False)
     syntax: str = YAML
+    # The names of the details a change to was refused here, as a parser
+    # would have read it otherwise (article_details): kept as written.
+    kept: FrozenSet[str] = field(default=frozenset(), compare=False)
 
     def with_entries(self, entries: Sequence[Entry]) -> "FrontMatter":
         return FrontMatter(tuple(entries), self.opening, self.closing, self.gap, self.newline,
                            changed=tuple(entries) != self.entries or self.changed,
-                           syntax=self.syntax)
+                           syntax=self.syntax, kept=self.kept)
+
+    def with_kept(self, names: AbstractSet[str]) -> "FrontMatter":
+        return replace(self, kept=self.kept | frozenset(names))
 
     def where_new_entries_go(self, entries: Sequence[Entry]) -> int:
         """Where an entry added to ``entries`` goes: at the end, or in TOML
@@ -202,8 +208,10 @@ def parsed(front: Optional[FrontMatter]) -> Optional[dict]:
     never changed by its reader."""
     if front is None:
         return {}
-    return _parsed_text(front.syntax, "\n".join(line for entry in front.entries
-                                                for line in entry.lines))
+    # Each line ends in a line break, the last one too, as in the file: a
+    # block text at the end ("|+") keeps its own.
+    return _parsed_text(front.syntax, "".join(line + "\n" for entry in front.entries
+                                              for line in entry.lines))
 
 
 # The most values a front matter is held against: far more than any holds,

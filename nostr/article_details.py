@@ -39,7 +39,7 @@ import json
 import re
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timezone
-from typing import Any, FrozenSet, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import AbstractSet, Any, FrozenSet, Iterable, List, Optional, Sequence, Tuple, Union
 
 import front_matter
 
@@ -259,18 +259,69 @@ def _string_tags(written: str) -> Tuple[str, ...]:
 
 def kept_in_file(front: Optional[front_matter.FrontMatter]) -> FrozenSet[str]:
     """The details ``front`` writes in a way this app can't read safely (a
-    mapping, an anchor, a tag), with no entry for them it can: they stay as
-    written, whatever is set here. Named as in _FRONT_KEYS."""
+    mapping, an anchor, a tag), with no entry for them it can, or can't
+    change safely (a change tried, _trials, or one made before, a parser
+    would read otherwise): they stay as written, whatever is set here.
+    Named as in _FRONT_KEYS."""
     mapping = front_matter.parsed(front)
     if mapping is None:
         return frozenset(dict(_FRONT_KEYS))  # no parser reads it: nothing is changed
-    kept = set()
+    kept = set(front.kept if front is not None else ())
     for key, _others in _FRONT_KEYS:
         found = list(_candidates(front, key))
         if found and not any(_readable(key, entry, read) for _at, _inner, entry, read in found) \
                 or _unseen(key, found, mapping):
             kept.add(key)
+    details = from_front_matter(front)
+    for key, _others in _FRONT_KEYS:
+        if key not in kept and any(key in _refused(details.with_changes(**trial), front, kept)
+                                   for trial in _trials(key, details)):
+            kept.add(key)
     return frozenset(kept)
+
+
+def as_in_file(details: ArticleDetails, front: Optional[front_matter.FrontMatter],
+               names: AbstractSet[str]) -> ArticleDetails:
+    """``details`` with the details ``names`` (as in _FRONT_KEYS) as
+    ``front`` holds them: what a change refused there leaves."""
+    held = from_front_matter(front)
+    return details.with_changes(**{_FIELDS[name]: getattr(held, _FIELDS[name])
+                                   for name in names})
+
+
+def _refused(details: ArticleDetails, front: Optional[front_matter.FrontMatter],
+             kept: AbstractSet[str]) -> FrozenSet[str]:
+    """The details a change to ``details`` would be refused for in ``front``."""
+    written = _written(details, front, frozenset(kept))
+    return written.kept if written is not None else frozenset()
+
+
+# The field of ArticleDetails each detail is.
+_FIELDS = {"title": "title", "summary": "summary", "image": "image", "tags": "hashtags",
+           "slug": "identifier", "date": "published_at", "coauthors": "coauthors",
+           "zap_split": "zaps"}
+# Someone a co-author or a zap share is tried with (_trials): the public
+# key of secp256k1's generator, a key no one writes as theirs.
+_SOMEONE = "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+
+
+def _trials(key: str, details: ArticleDetails) -> List[dict]:
+    """The changes a detail is tried with before it can be changed
+    (kept_in_file): to a value YAML needs quoted, of several lines for the
+    summary, or one more item; and to none."""
+    if key == "tags":
+        values = (details.hashtags + ('trial, "#2"',), ())
+    elif key == "date":
+        values = ((details.published_at or 0) + 86400, None)
+    elif key == "coauthors":
+        values = (details.coauthors + ((_SOMEONE, ""),), ())
+    elif key == "zap_split":
+        values = (details.zaps + (("zap", _SOMEONE, "", "1"),), ())
+    elif key == "summary":
+        values = ('Trial: "1" #2\nand a second line', "")
+    else:
+        values = ('Trial: "1" #2', "")
+    return [{_FIELDS[key]: value} for value in values]
 
 
 # What a parser reads for an entry it does not find (_candidates).
@@ -365,67 +416,124 @@ def front_matter_with(details: ArticleDetails, front: Optional[front_matter.Fron
     this app does not know, or can't read fully, stay as written, and so
     does a detail only such an entry holds (kept_in_file): never a second
     entry beside it. None when there are no details and there was no front
-    matter."""
-    was = from_front_matter(front)
-    entries = list(front.entries) if front is not None else []
-    old = _front_values(was)
+    matter.
+
+    Each change is made only when a parser reads the front matter after it
+    as before, but for that detail, which it reads as set; else the detail
+    stays as written and is kept from then on (FrontMatter.kept)."""
+    return _written(details, front, kept_in_file(front))
+
+
+def _written(details: ArticleDetails, front: Optional[front_matter.FrontMatter],
+             kept: FrozenSet[str]) -> Optional[front_matter.FrontMatter]:
+    """front_matter_with, the details ``kept`` left as written."""
+    old = _front_values(from_front_matter(front))
     new = _front_values(details)
-    kept = kept_in_file(front)
     changed = [key for key, _others in _FRONT_KEYS
                if new[key] != old[key] and key not in kept]
     if not changed:
         return front
+    syntax = front.syntax if front is not None else front_matter.YAML
+    entries = list(front.entries) if front is not None else []
+    refused = set()
     for key in changed:
-        found = _found(front_matter.FrontMatter(tuple(entries), syntax=front.syntax)
-                       if front is not None else None, key)
-        at, inner, current = found if found is not None else (None, None, None)
-        if not new[key]:
-            if inner is not None:
-                rest = entries[at].inner_entries()
-                del rest[inner]
-                entries[at] = entries[at].with_inner(rest)
-            elif at is not None:
-                del entries[at]
-            continue
-        value = new[key]
-        syntax = front.syntax if front is not None else front_matter.YAML
-        bare = False
-        if key == "date":
-            original = current.written if current is not None else ""
-            value = _date_like(details.published_at, original.strip("\"'"))
-            # A date YAML and TOML read as one (a timestamp), not a text;
-            # in quotes only when the file had it so.
-            bare = not original.startswith(("\"", "'"))
-        if key == "tags" and current is not None and isinstance(current.value, str) \
-                and len(_string_tags(current.value)) > 1:
-            # Written as a string of tags ("ruby jekyll", "a, b"): a string
-            # again, in its way, while it can hold each tag whole. A string
-            # of one tag, or none, is no such way: Hugo and Eleventy read
-            # "idea draft" as one tag, so it becomes a list.
-            separator = ", " if "," in current.value else " "
-            mark = separator.strip() or " "
-            if not any(mark in tag for tag in value):
-                value = separator.join(value)
-        elif key == "tags" and current is not None and isinstance(current.value, list):
-            # A hashtag the file has keeps its spelling there ("#idea").
-            spelled = {tag.lower(): item for item in current.value
-                       for tag in _hashtags([item])}
-            value = [spelled.get(tag.lower(), tag) for tag in value]
-        written = (front_matter.rewritten(current, value, bare=bare) if current is not None
-                   else front_matter.entry(key, value, syntax=syntax, bare=bare))
+        after, place, meant = _with_detail(entries, syntax, key, new[key], details)
+        if _holds(front_matter.FrontMatter(tuple(entries), syntax=syntax),
+                  front_matter.FrontMatter(tuple(after), syntax=syntax), key, place, meant):
+            entries = after
+        else:
+            refused.add(key)
+    if front is None:
+        return front_matter.FrontMatter(tuple(entries), changed=True, kept=frozenset(refused))
+    return front.with_entries(entries).with_kept(refused)
+
+
+def _with_detail(entries: List[front_matter.Entry], syntax: str, key: str, value,
+                 details: ArticleDetails):
+    """``(entries, place, meant)``: ``entries`` with the detail ``key`` set
+    to ``value`` (as _front_values gives it; emptied, left out), the key it
+    is at (a table's name and its key for one in a table), and the detail
+    as the parser should then read it there (_detail; None when left out)."""
+    entries = list(entries)
+    found = _found(front_matter.FrontMatter(tuple(entries), syntax=syntax), key)
+    at, inner, current = found if found is not None else (None, None, None)
+    place = (key,) if current is None else (current.key,) if inner is None \
+        else (entries[at].table, current.key)
+    if not value:
         if inner is not None:
             rest = entries[at].inner_entries()
-            rest[inner] = written
+            del rest[inner]
             entries[at] = entries[at].with_inner(rest)
         elif at is not None:
-            entries[at] = written
-        elif front is not None:
-            entries.insert(front.where_new_entries_go(entries), written)
-        else:
-            entries.append(written)
-    if front is None:
-        return front_matter.FrontMatter(tuple(entries), changed=True)
-    return front.with_entries(entries)
+            del entries[at]
+        return entries, place, None
+    bare = False
+    if key == "date":
+        original = current.written if current is not None else ""
+        value = _date_like(details.published_at, original.strip("\"'"))
+        # A date YAML and TOML read as one (a timestamp), not a text;
+        # in quotes only when the file had it so.
+        bare = not original.startswith(("\"", "'"))
+    if key == "tags" and current is not None and isinstance(current.value, str) \
+            and len(_string_tags(current.value)) > 1:
+        # Written as a string of tags ("ruby jekyll", "a, b"): a string
+        # again, in its way, while it can hold each tag whole. A string
+        # of one tag, or none, is no such way: Hugo and Eleventy read
+        # "idea draft" as one tag, so it becomes a list.
+        separator = ", " if "," in current.value else " "
+        mark = separator.strip() or " "
+        if not any(mark in tag for tag in value):
+            value = separator.join(value)
+    elif key == "tags" and current is not None and isinstance(current.value, list):
+        # A hashtag the file has keeps its spelling there ("#idea").
+        spelled = {tag.lower(): item for item in current.value
+                   for tag in _hashtags([item])}
+        value = [spelled.get(tag.lower(), tag) for tag in value]
+    written = (front_matter.rewritten(current, value, bare=bare) if current is not None
+               else front_matter.entry(key, value, syntax=syntax, bare=bare))
+    if inner is not None:
+        rest = entries[at].inner_entries()
+        rest[inner] = written
+        entries[at] = entries[at].with_inner(rest)
+    elif at is not None:
+        entries[at] = written
+    else:
+        entries.insert(front_matter.FrontMatter(tuple(entries), syntax=syntax)
+                       .where_new_entries_go(entries), written)
+    return entries, place, _detail(key, value)
+
+
+def _holds(before: front_matter.FrontMatter, after: front_matter.FrontMatter, key: str,
+           place: Tuple[str, ...], meant: Any) -> bool:
+    """Whether a parser reads ``after`` as ``before`` but at ``place``,
+    where it reads the detail ``key`` as ``meant`` (nothing for None), and
+    reads it so with this app's reader."""
+    old, new = front_matter.parsed(before), front_matter.parsed(after)
+    if old is None or new is None or _without(old, place) != _without(new, place):
+        return False
+    if meant is None:
+        return _at(new, place) is _ABSENT
+    found = _found(after, key)
+    return found is not None and _detail(key, found[2].value) == meant
+
+
+def _at(mapping: dict, place: Tuple[str, ...]) -> Any:
+    """What ``mapping`` holds at ``place`` (a key, or a table and its key)."""
+    for name in place:
+        if not isinstance(mapping, dict) or name not in mapping:
+            return _ABSENT
+        mapping = mapping[name]
+    return mapping
+
+
+def _without(mapping: dict, place: Tuple[str, ...]) -> dict:
+    """``mapping`` without what it holds at ``place``, unchanged itself."""
+    mapping = dict(mapping)
+    if len(place) == 1:
+        mapping.pop(place[0], None)
+    elif isinstance(mapping.get(place[0]), dict):
+        mapping[place[0]] = _without(mapping[place[0]], place[1:])
+    return mapping
 
 
 def _front_values(details: ArticleDetails) -> dict:

@@ -706,10 +706,11 @@ def test_a_detail_read_otherwise_by_a_parser_is_kept_as_written(text, kept):
 
 
 def test_a_key_written_twice_is_read_as_a_parser_reads_it():
-    """PyYAML keeps the last of two "title" keys; so does this reader."""
+    """PyYAML keeps the last of two "title" keys; so does this reader. It
+    stays as written: emptied, the first would be the title."""
     text = "---\ntitle: First\ntitle: Last\n---\nB\n"
     front, _ = front_matter.split(text)
-    assert from_front_matter(front).title == "Last" and kept_in_file(front) == frozenset()
+    assert from_front_matter(front).title == "Last" and kept_in_file(front) == {"title"}
 
 
 @pytest.mark.parametrize("style", [">", ">-", ">+"])

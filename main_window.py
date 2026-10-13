@@ -188,7 +188,7 @@ from nostr.ui.imports_window import ImportsWindow
 from nostr.imports.constants import IDENTIFIER_PREFIX as IMPORT_IDENTIFIER_PREFIX
 from nostr.imports.constants import SOURCE_TAG as IMPORT_SOURCE_TAG
 from nostr.article_details import (
-    ArticleDetails, from_front_matter, front_matter_with, kept_in_file)
+    ArticleDetails, as_in_file, from_front_matter, front_matter_with, kept_in_file)
 from nostr.first_publications import FirstPublications
 from nostr.drafts import (
     INNER_KIND_LONG_FORM,
@@ -3601,6 +3601,10 @@ class MainWindow(QMainWindow):
         waiting = (self._media_not_uploaded(ed.document())
                    if path.lower().endswith((".md", ".html", ".htm", ".pdf")) else [])
         ed._media_left_out = {asset.sha256 for asset in waiting}
+        if getattr(ed, "_details_kept_on_save", None) and path.lower().endswith(".md"):
+            self.status.showMessage(_("Saved. Some article details stay as written in the "
+                                      "file: MyEditor can’t change them there safely."))
+            return
         if not waiting:
             self.status.showMessage(_("Saved: {path}").format(path=path))
             return
@@ -3628,10 +3632,20 @@ class MainWindow(QMainWindow):
     def _with_front_matter(self, ed, body: str) -> str:
         """A Markdown file's text: ``body`` under its front matter (Q-F), as
         written but for the details changed here; none when there are no
-        details and it had none."""
-        front = front_matter_with(self._article_details_of(ed),
-                                  getattr(ed, "_front_matter", None))
+        details and it had none. A change a YAML reader would read
+        otherwise is not written (front_matter_with): the tab takes that
+        detail back as the file holds it, Article Details shows it
+        read-only from then on, and the save says so (_say_saved)."""
+        old = getattr(ed, "_front_matter", None)
+        details = self._article_details_of(ed)
+        front = front_matter_with(details, old)
         ed._front_matter = front
+        ed._details_kept_on_save = (front.kept if front is not None else frozenset()) - (
+            old.kept if old is not None else frozenset())
+        if ed._details_kept_on_save:
+            ed._article_details = as_in_file(details, front, ed._details_kept_on_save)
+            if ed is self.current_editor():
+                self._fill_article_details_panel()
         return front_matter.join(front, body)
 
     def _on_file_changed(self, path: str):
