@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The Media Library: the person's images, videos and audio.
+"""The Media Library: the person's images, videos, audio and PDFs.
 
 One window for both uses: browsing (non-modal, from Nostr > Media
 Library…) and picking (modal: Insert Image, an article's cover). It is
@@ -320,7 +320,7 @@ class MediaLibraryDialog(QDialog):
         bar.setContentsMargins(14, 12, 14, 10)
         bar.setSpacing(8)
         self._add_button = QPushButton(_("Add…"))
-        self._add_button.setToolTip(_("Add images, videos or audio from your computer"))
+        self._add_button.setToolTip(_("Add images, videos, audio or PDFs from your computer"))
         self._add_button.setAutoDefault(False)
         self._add_button.clicked.connect(self._choose_files)
         self._add_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -529,8 +529,8 @@ class MediaLibraryDialog(QDialog):
         elif self._fetching:
             message = _("Loading…")
         else:
-            message = _("Images, videos and audio you add appear here. Anyone with the "
-                        "link can see them.")
+            message = _("Images, videos, audio and PDFs you add appear here. Anyone with "
+                        "the link can see them.")
             button = _("Add…")
         self._empty_text.setText(message)
         self._empty_button.setText(button)

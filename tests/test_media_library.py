@@ -344,7 +344,7 @@ def test_the_window_says_once_who_can_see_its_files(tmp_path, monkeypatch):
     line = "Anyone with the link can see the files you add here."
     assert world.dialog._status.text() == line
     assert world.dialog._empty_text.text() == (
-        "Images, videos and audio you add appear here. Anyone with the link can see them.")
+        "Images, videos, audio and PDFs you add appear here. Anyone with the link can see them.")
     world.dialog._say("“Garden.jpg” is no longer shared.")
     assert world.dialog._status.text() == "“Garden.jpg” is no longer shared."
     world.dialog._status_timer.timeout.emit()
@@ -397,7 +397,7 @@ def test_search_and_name_order(tmp_path, monkeypatch):
 def test_an_empty_library_says_one_sentence_and_offers_add(tmp_path, monkeypatch):
     world = build(tmp_path, monkeypatch)
     assert world.dialog._empty_text.text() == (
-        "Images, videos and audio you add appear here. Anyone with the link can see them.")
+        "Images, videos, audio and PDFs you add appear here. Anyone with the link can see them.")
     assert world.dialog._empty_button.text() == "Add…"
 
 
@@ -1065,6 +1065,12 @@ def test_an_iphone_photo_is_an_image_the_library_takes(tmp_path, monkeypatch):
     world = build(tmp_path, monkeypatch)
     world.dialog._add_paths([str(path)])
     assert ("upload_file", "IMG_0001.HEIC") in world.store.calls
+
+
+def test_the_add_button_names_every_kind_the_library_takes(tmp_path, monkeypatch):
+    world = build(tmp_path, monkeypatch)
+    assert world.dialog._add_button.toolTip() == (
+        "Add images, videos, audio or PDFs from your computer")
 
 
 def test_the_add_dialog_names_every_kind_the_library_takes(tmp_path, monkeypatch):

@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 import alerts  # noqa: E402
 from nostr.blossom.settings import BlossomSettings  # noqa: E402
@@ -277,3 +277,10 @@ def test_a_full_address_is_added_as_its_server(tmp_path, text, origin):
     dialog.address.setText(text)
     dialog.add_button.click()
     assert settings.configured_servers == [A, B, origin]
+
+
+def test_the_sheet_names_every_kind_the_library_keeps(tmp_path):
+    dialog, _settings, _ = sheet(tmp_path)
+    texts = [label.text() for label in dialog.findChildren(QLabel)]
+    assert ("Images, videos, audio and PDFs you add are kept on these servers. New files go "
+            "to the first one, and the others keep copies.") in texts

@@ -139,7 +139,7 @@ class MediaServersDialog(QDialog):
         layout.setContentsMargins(20, 18, 20, 16)
         layout.setSpacing(10)
 
-        intro = QLabel(_("Images, videos and audio you add are kept on these servers. "
+        intro = QLabel(_("Images, videos, audio and PDFs you add are kept on these servers. "
                          "New files go to the first one, and the others keep copies."))
         intro.setWordWrap(True)
         layout.addWidget(intro)

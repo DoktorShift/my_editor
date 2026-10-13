@@ -7492,7 +7492,7 @@ msgid "Add…"
 msgstr ""
 
 #: nostr/ui/media_library_dialog.py:323
-msgid "Add images, videos or audio from your computer"
+msgid "Add images, videos, audio or PDFs from your computer"
 msgstr ""
 
 #: nostr/ui/media_library_dialog.py:337
@@ -7675,7 +7675,7 @@ msgid "Loading…"
 msgstr ""
 
 #: nostr/ui/media_library_dialog.py:532
-msgid "Images, videos and audio you add appear here. Anyone with the link can see them."
+msgid "Images, videos, audio and PDFs you add appear here. Anyone with the link can see them."
 msgstr ""
 
 #: nostr/ui/media_library_dialog.py:716
@@ -7817,7 +7817,7 @@ msgid "Media Servers"
 msgstr ""
 
 #: nostr/ui/media_servers_dialog.py:142
-msgid "Images, videos and audio you add are kept on these servers. New files go to the first one, and the others keep copies."
+msgid "Images, videos, audio and PDFs you add are kept on these servers. New files go to the first one, and the others keep copies."
 msgstr ""
 
 #: nostr/ui/media_servers_dialog.py:148
