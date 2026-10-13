@@ -380,18 +380,9 @@ def _flow_list(written: str, more: Sequence[str]) -> Optional[Tuple[str, str, Tu
         while at < len(row):
             char = row[at]
             if quote:
-                out.append(char)
-                if quote == '"' and char == "\\":
-                    out.append(row[at + 1:at + 2])
-                    at += 2
-                    continue
-                if char == quote:
-                    if quote == "'" and row[at + 1:at + 2] == "'":
-                        out.append("'")
-                        at += 2
-                        continue
-                    quote = ""
-                at += 1
+                taken, quote = _in_quote(quote, row, at)
+                out.append(taken)
+                at += len(taken)
                 continue
             if char == "#" and (at == 0 or row[at - 1] in " \t"):
                 inside.append(row[at:].strip())
@@ -640,13 +631,15 @@ def _split_inline(inside: str, quotes: str = "\"'") -> List[str]:
     """The items of an inline list, commas inside quotes kept. A quote
     opens only as an item's first character, as YAML and TOML read it: the
     apostrophe of "don't" is a letter."""
-    items, current, quote = [], "", ""
-    for char in inside:
+    items, current, quote, at = [], "", "", 0
+    while at < len(inside):
+        char = inside[at]
         if quote:
-            current += char
-            if char == quote:
-                quote = ""
-        elif char in quotes and not current.strip():
+            taken, quote = _in_quote(quote, inside, at)
+            current += taken
+            at += len(taken)
+            continue
+        if char in quotes and not current.strip():
             quote = char
             current += char
         elif char == ",":
@@ -654,5 +647,19 @@ def _split_inline(inside: str, quotes: str = "\"'") -> List[str]:
             current = ""
         else:
             current += char
+        at += 1
     items.append(current)
     return items
+
+
+def _in_quote(quote: str, text: str, at: int) -> Tuple[str, str]:
+    """Inside a quoted text opened with ``quote``, what is read at ``at`` of
+    ``text``, and the quote still open after it ("" once it closes): an
+    escaped character in "..." ("\\""), and '' in '...', are read whole and
+    close nothing. Every reader of quoted items reads them with this."""
+    char = text[at]
+    if quote == '"' and char == "\\":
+        return text[at:at + 2], quote
+    if char == quote and quote == "'" and text[at + 1:at + 2] == "'":
+        return "''", quote
+    return char, "" if char == quote else quote

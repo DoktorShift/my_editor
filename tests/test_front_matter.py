@@ -647,3 +647,26 @@ def test_a_quoted_key_is_its_key(text, expected):
     front, _ = front_matter.split(text)
     assert from_front_matter(front).hashtags == ("a", "b")
     assert changed(text, hashtags=("a", "b", "Extra")) == expected
+
+
+# -- an escaped quote inside a quoted hashtag (round 7, H1) --------------------
+
+@pytest.mark.parametrize("text, tags", [
+    ("---\ntags: ['it''s, ok', b]\n---\nB\n", ("it's, ok", "b")),
+    ('---\ntags: ["say \\"hi\\", there", b]\n---\nB\n', ('say "hi", there', "b")),
+    ('---\ntags: ["a\\\\", b]\n---\nB\n', ("a\\", "b")),
+])
+def test_an_escaped_quote_stays_inside_its_hashtag(text, tags):
+    yaml = pytest.importorskip("yaml")
+    front, _ = front_matter.split(text)
+    assert from_front_matter(front).hashtags == tags
+    for wanted in (tags[1:], tags + ("Extra",)):
+        out = changed(text, hashtags=wanted)
+        assert yaml.safe_load(out.split("---\n")[1])["tags"] == list(wanted)
+
+
+@pytest.mark.parametrize("tags", [
+    ('a "b", c', "d"), ('a\\", b', "c"), ("it's, ok", "x"), ('say "hi"',),
+])
+def test_a_hashtag_with_quotes_and_commas_comes_back_from_the_field(tags):
+    assert hashtags_from(hashtags_text(tags)) == tags
