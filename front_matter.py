@@ -49,7 +49,8 @@ _TOML_BLOCK = re.compile(r"\A(﻿?\+\+\+[ \t]*)\r?\n(.*?)(?:\r?\n)?^(\+\+\+[ \t]
                          re.DOTALL | re.MULTILINE)
 # A TOML key line (a bare, quoted or dotted key, then "="), and a table.
 _TOML_KEY = re.compile(r"^([^\s#\[=][^=]*?)[ \t]*=")
-_KEY = re.compile(r"^([A-Za-z0-9_][A-Za-z0-9_.-]*)[ \t]*:(?:[ \t]+(.*?))?[ \t]*$")
+# A YAML key line: a key, plain or quoted ("tags", 'tags'), then ":".
+_KEY = re.compile(r"""^("[^"\n]*"|'[^'\n]*'|[A-Za-z0-9_][A-Za-z0-9_.-]*)[ \t]*:(?:[ \t]+(.*?))?[ \t]*$""")
 _BLOCK_SCALAR = re.compile(r"^([|>])([+-]?)(\d?)[ \t]*(?:#.*)?$")
 # A plain value YAML reads as text again, as written: no indicator first,
 # no ": " or " #" inside, and not a word or form YAML reads as another type.
@@ -192,7 +193,7 @@ def _yaml_entries(lines: Sequence[str]) -> List[Entry]:
     for line in lines:
         key = _KEY.match(line)
         if key is not None and not line[:1].isspace():
-            entries.append(Entry(key.group(1), (line,)))
+            entries.append(Entry(_unquote(key.group(1)), (line,)))
         elif entries:
             entries[-1] = Entry(entries[-1].key, entries[-1].lines + (line,))
         else:
@@ -215,7 +216,7 @@ def _toml_entries(lines: Sequence[str]) -> List[Entry]:
         elif line.startswith("["):
             entries.append(Entry(line.strip(), (line,), TOML))
         elif key is not None:
-            entries.append(Entry(key.group(1).strip(), (line,), TOML))
+            entries.append(Entry(_unquote(key.group(1).strip()), (line,), TOML))
         elif last is not None:
             entries[-1] = Entry(last.key, last.lines + (line,), TOML)
         else:

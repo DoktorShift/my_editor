@@ -635,3 +635,15 @@ def test_a_list_nested_in_the_tags_keeps_them_as_written(text):
     front, _ = front_matter.split(text)
     assert from_front_matter(front).hashtags == () and "tags" in kept_in_file(front)
     assert changed(text, hashtags=("x",)) == text
+
+
+@pytest.mark.parametrize("text, expected", [
+    ('---\n"tags": [a, b]\n---\nB\n', '---\n"tags": [a, b, Extra]\n---\nB\n'),
+    ("---\n'tags': [a, b]\n---\nB\n", "---\n'tags': [a, b, Extra]\n---\nB\n"),
+    ('+++\n"tags" = ["a", "b"]\n+++\nB\n', '+++\n"tags" = ["a", "b", "Extra"]\n+++\nB\n'),
+])
+def test_a_quoted_key_is_its_key(text, expected):
+    """Round 6, L4: a second "tags" was written beside a quoted one."""
+    front, _ = front_matter.split(text)
+    assert from_front_matter(front).hashtags == ("a", "b")
+    assert changed(text, hashtags=("a", "b", "Extra")) == expected
