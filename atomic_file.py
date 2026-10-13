@@ -448,6 +448,31 @@ def _copy_attributes_macos(source: str, target: str) -> None:
     if _copyfile(os.fsencode(source), os.fsencode(target), None,
                  _COPYFILE_ACL | _COPYFILE_XATTR) != 0:
         _log.debug("attributes of %s not kept (errno %s)", source, ctypes.get_errno())
+    _carry_quarantine(source, target)
+
+
+_QUARANTINE = b"com.apple.quarantine"
+
+
+def _carry_quarantine(source: str, target: str) -> None:
+    """copyfile(3) rewrites the quarantine mark it copies (its flags, its
+    time, the app that made it); where the file came from, as the system
+    recorded it, is carried over unchanged instead."""
+    libc = _libc()
+    if libc is None:
+        return
+    getxattr, setxattr = libc.getxattr, libc.setxattr
+    getxattr.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_void_p, ctypes.c_size_t,
+                         ctypes.c_uint32, ctypes.c_int]
+    getxattr.restype = ctypes.c_ssize_t
+    setxattr.argtypes = getxattr.argtypes
+    setxattr.restype = ctypes.c_int
+    value = ctypes.create_string_buffer(4096)
+    size = getxattr(os.fsencode(source), _QUARANTINE, value, len(value), 0, 0)
+    if size < 0:
+        return                                       # none, or none readable
+    if setxattr(os.fsencode(target), _QUARANTINE, value, size, 0, 0) != 0:
+        _log.debug("quarantine mark of %s not kept (errno %s)", source, ctypes.get_errno())
 
 
 def _sync_folder(folder: str) -> None:

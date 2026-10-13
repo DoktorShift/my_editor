@@ -480,6 +480,21 @@ def test_on_macos_a_document_keeps_its_creation_date(tmp_path):
     assert path.read_bytes() == b"new"
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="the quarantine attribute is macOS's")
+def test_on_macos_the_quarantine_mark_is_kept_as_it_was(tmp_path):
+    """Where the file came from, as the system recorded it: carried over
+    unchanged, not rewritten."""
+    import subprocess
+    path = tmp_path / "downloaded.md"
+    path.write_bytes(b"old")
+    mark = "0081;5f5e1000;Safari;2C6E1F2A-1111-2222-3333-444455556666"
+    subprocess.run(["xattr", "-w", "com.apple.quarantine", mark, str(path)], check=True)
+    save_document(path, b"new")
+    shown = subprocess.run(["xattr", "-p", "com.apple.quarantine", str(path)],
+                           capture_output=True, text=True, check=True).stdout.strip()
+    assert shown == mark
+
+
 @pytest.mark.skipif(sys.platform != "darwin", reason="Finder tags exist on macOS only")
 def test_on_macos_finder_tags_and_attributes_are_kept(tmp_path):
     import subprocess
