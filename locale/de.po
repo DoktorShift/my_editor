@@ -4510,15 +4510,7 @@ msgstr "Dein Medienserver ist ausgelastet. Warte einen Moment und versuche es er
 msgid "Your media server refused the request. Check your signer app and try again."
 msgstr "Dein Medienserver hat die Anfrage abgelehnt. Prüfe deine Signer-App und versuche es erneut."
 
-#: nostr/blossom/store.py:492
-msgid "Couldn’t reach any media server. Check your internet connection and your media servers."
-msgstr "Kein Medienserver erreichbar. Prüfe deine Internetverbindung und deine Medienserver."
-
-#: nostr/blossom/store.py:498
-msgid "Couldn’t reach any media server. Showing what the library had before."
-msgstr "Kein Medienserver erreichbar. Angezeigt wird der vorherige Stand der Mediathek."
-
-#: nostr/blossom/store.py:919
+#: nostr/blossom/store.py:913
 #, python-brace-format
 msgid "This file is larger than your media servers take ({size})."
 msgstr "Diese Datei ist größer, als deine Medienserver annehmen ({size})."

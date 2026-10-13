@@ -207,10 +207,11 @@ class MediaStore(QObject):
     # Background fetch started (UI can show a spinner).
     fetch_started = Signal()
     # All servers responded (or all failed). ``fetch_error`` is also
-    # emitted alongside this when every server failed, so the UI can
-    # surface a clear message.
+    # emitted alongside this when every server failed, with the code of
+    # why (the signer, a refusal, or no connection), so the UI can say
+    # the real reason.
     fetch_finished = Signal()
-    fetch_error = Signal(str)
+    fetch_error = Signal(str)                          # code
 
     # Upload lifecycle.
     upload_started = Signal(str)                       # name
@@ -488,17 +489,9 @@ class MediaStore(QObject):
             for listing in listings.values():
                 listing.fetched_at = now
             self._listings = listings
-            if remaining["errors"] >= len(servers) and not previous:
-                self.fetch_error.emit(_(
-                    "Couldn\u2019t reach any media server. Check your internet "
-                    "connection and your media servers."
-                ))
-            else:
-                if remaining["errors"] >= len(servers):
-                    self.fetch_error.emit(_(
-                        "Couldn\u2019t reach any media server. Showing what the "
-                        "library had before."
-                    ))
+            if remaining["errors"] >= len(servers):
+                self.fetch_error.emit(_listing_failure_code(listings.values()))
+            if remaining["errors"] < len(servers) or previous:
                 failed = {o for o, l in listings.items() if not l.ok}
                 carry_over(failed)
                 for sha, media in self._files.items():
@@ -573,8 +566,9 @@ class MediaStore(QObject):
                 unsigned,
                 on_signed=do_list,
                 on_failure=lambda reason: handle_list_error(
-                    server, origin, BlossomError(reason), page=1, signed=True,
-                    retried=retried,
+                    server, origin,
+                    BlossomError(str(reason), code=ERROR_CODES.SIGNER_REJECTED),
+                    page=1, signed=True, retried=retried,
                 ),
             )
 
@@ -1594,6 +1588,16 @@ def _error_code(err) -> str:
         return err.code or ERROR_CODES.UPLOAD_FAILED
     # Everything else reaching here came from the signing step.
     return ERROR_CODES.SIGNER_REJECTED
+
+
+def _listing_failure_code(listings) -> str:
+    """Why no server could be listed, as one code: the signer, a server
+    that refused, or (anything else) no connection."""
+    codes = {listing.error_code for listing in listings}
+    for wanted in (ERROR_CODES.SIGNER_REJECTED, ERROR_CODES.AUTH_REJECTED):
+        if wanted in codes:
+            return wanted
+    return ERROR_CODES.NETWORK_UNAVAILABLE
 
 
 def _delete_failure_code(failures) -> str:

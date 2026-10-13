@@ -4495,15 +4495,7 @@ msgstr ""
 msgid "Your media server refused the request. Check your signer app and try again."
 msgstr ""
 
-#: nostr/blossom/store.py:492
-msgid "Couldn’t reach any media server. Check your internet connection and your media servers."
-msgstr ""
-
-#: nostr/blossom/store.py:498
-msgid "Couldn’t reach any media server. Showing what the library had before."
-msgstr ""
-
-#: nostr/blossom/store.py:919
+#: nostr/blossom/store.py:913
 #, python-brace-format
 msgid "This file is larger than your media servers take ({size})."
 msgstr ""

@@ -458,3 +458,37 @@ def test_storage_text_is_honest_about_what_it_does_not_know():
     assert storage_text(0, 5 * GB, down)[0] == "Usage unavailable right now."
     cut = ServerListing(origin=E21, ok=True, truncated=True)
     assert storage_text(GB, 5 * GB, cut)[0].startswith("At least")
+
+
+# --------------------------------------------------------------------------- #
+# When the library cannot be listed, the reason it says is the real one
+# --------------------------------------------------------------------------- #
+
+def _unlistable(tmp_path, *, pool_error=None, signer_failure=None, down=False):
+    router = Router(FakeBlossomServer(SERVER, blobs=[descriptor(A)]))
+    if down:
+        router.down.add("good.example")
+    settings = BlossomSettings(tmp_path / "blossom_servers.json")
+    settings.set_custom_servers([SERVER])
+    nam = FakeNam(None, responder=router)
+    signer = FakeSigner(failure=signer_failure)
+    store = MediaStore(session_pool=FakeSessionPool(signer, error=pool_error),
+                       profile_provider=lambda: FakeProfile(), settings=settings,
+                       client=BlossomClient(nam=nam))
+    errors = []
+    store.fetch_error.connect(errors.append)
+    store.fetch()
+    nam.settle()
+    return errors
+
+
+def test_a_signer_that_declines_listing_is_named_as_the_reason(tmp_path):
+    assert _unlistable(tmp_path, signer_failure="user declined") == ["SIGNER_REJECTED"]
+
+
+def test_a_signer_that_cannot_be_reached_is_named_too(tmp_path):
+    assert _unlistable(tmp_path, pool_error="no answer") == ["SIGNER_REJECTED"]
+
+
+def test_servers_that_cannot_be_reached_are_named_as_the_reason(tmp_path):
+    assert _unlistable(tmp_path, down=True) == ["NETWORK_UNAVAILABLE"]

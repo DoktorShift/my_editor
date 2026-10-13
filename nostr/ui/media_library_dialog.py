@@ -1776,8 +1776,8 @@ class MediaLibraryDialog(QDialog):
     def _on_fetch_finished(self) -> None:
         self._set_status("")
 
-    def _on_fetch_error(self, reason: str) -> None:
-        self._set_status(reason, error=True)
+    def _on_fetch_error(self, code: str) -> None:
+        self._set_status(friendly_message(code), error=True)
 
     def _refresh_servers(self) -> None:
         """Rebuild the Source menu and the per-server notes and meters."""
