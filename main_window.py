@@ -1225,6 +1225,7 @@ class MainWindow(QMainWindow):
         ed.set_context_menu_filler(self._fill_editor_context_menu)
         ed.set_structure_check(lambda e=ed: self._editor_kind(e) == "rich")
         ed.set_local_formats_check(lambda e=ed: self._keeps_underline(e))
+        ed.set_pictures_check(lambda e=ed: self._keeps_pictures(e))
         ed.set_paste_guard(lambda text, e=ed: self._guard_paste(e, text))
         ed.mention_requested.connect(lambda at, e=ed: self._ask_mention(e, at))
         # Mentions read back from Markdown get their names (rich_text.link_references).
@@ -3115,6 +3116,15 @@ class MainWindow(QMainWindow):
             self.new_tab()
             ed = self.current_editor()
         if ed is None:
+            return
+        if not self._keeps_pictures(ed):
+            # A plain-text or code file saves its text only: the file goes
+            # in as its path, as TextEdit puts it in plain text, never as a
+            # picture that saving would leave out.
+            cursor = ed.textCursor()
+            with ed.undo_step(step):
+                cursor.insertText("\n".join(paths))
+            ed.setTextCursor(cursor)
             return
 
         adopted = []
@@ -5287,6 +5297,16 @@ class MainWindow(QMainWindow):
         self._update_clipboard_commands()
         if kind:
             self._update_undo_redo_buttons()
+
+    def _keeps_pictures(self, ed) -> bool:
+        """Whether ``ed``'s document keeps a picture when it is saved:
+        Markdown (shown formatted or as its text), HTML, R Markdown and new
+        documents do; plain text and code save their text only."""
+        if self._editor_kind(ed) == "rich" or getattr(ed, "_markdown_source", False) \
+                or getattr(ed, "_loaded_as_rmd_source", False):
+            return True
+        path = (getattr(ed, "_file_path", None) or "").lower()
+        return path.endswith((".md", ".markdown", ".rmd"))
 
     @staticmethod
     def _keeps_underline(ed) -> bool:

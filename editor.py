@@ -187,6 +187,8 @@ class HtmlEditor(QTextEdit):
         self._holds_structure = lambda: True
         # Whether this document's file keeps underline and colors (HTML).
         self._keeps_local_formats = lambda: False
+        # Whether this document's file keeps a picture (set_pictures_check).
+        self._keeps_pictures = lambda: True
         # What a paste may bring in (set_paste_guard); everything by default.
         self._paste_guard = None
         # Whether typed Markdown turns into what it means
@@ -1266,6 +1268,12 @@ class HtmlEditor(QTextEdit):
         made in this editor then pastes back with them."""
         self._keeps_local_formats = check
 
+    def set_pictures_check(self, check) -> None:
+        """Install ``check()``: whether this document's file keeps a
+        picture. Where it does not (plain text, code), a picture on the
+        clipboard is not taken, as a plain-text editor takes none."""
+        self._keeps_pictures = check
+
     def set_structure_check(self, check) -> None:
         """Install ``check()``: whether this document holds Markdown
         structure. Where it does not (a .txt file, code, Markdown opened
@@ -2304,7 +2312,7 @@ class HtmlEditor(QTextEdit):
         Command-V pasted it)."""
         return (source.hasFormat(paste.LITERAL_MIME) or source.hasFormat(paste.MARKDOWN_MIME)
                 or super().canInsertFromMimeData(source)
-                or (source.hasImage() and self.isSignalConnected(
+                or (source.hasImage() and self._keeps_pictures() and self.isSignalConnected(
                     QMetaMethod.fromSignal(self.image_pasted))))
 
     def createMimeDataFromSelection(self):
@@ -2503,8 +2511,8 @@ class HtmlEditor(QTextEdit):
                 # a Nostr account is in use, audio and video, as a drop.
                 self.urls_dropped.emit(urls)
                 return True
-        if source.hasImage() and not text.strip() and self.isSignalConnected(
-                QMetaMethod.fromSignal(self.image_pasted)):
+        if source.hasImage() and not text.strip() and self._keeps_pictures() and \
+                self.isSignalConnected(QMetaMethod.fromSignal(self.image_pasted)):
             image = source.imageData()
             if isinstance(image, QPixmap):
                 image = image.toImage()

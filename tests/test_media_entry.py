@@ -318,6 +318,9 @@ class _EntryWindow:
     def current_editor(self):
         return self.editor
 
+    def _keeps_pictures(self, ed):
+        return True                  # a document that keeps pictures (Markdown)
+
     def new_tab(self):
         return None
 

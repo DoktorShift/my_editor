@@ -133,3 +133,85 @@ def test_insert_image_is_dimmed_where_a_picture_cannot_be_kept(r):
     assert r["doc.md"] and r["doc.html"]
     assert not r["doc.txt"] and not r["doc.Rmd"] and not r["doc.py"]
     assert not r["code_block"]
+
+
+PLAIN_SCRIPT = r"""
+import json, os, sys, types
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtCore import QMimeData, QUrl
+from PySide6.QtGui import QColor, QImage, QTextCursor
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+asked = []
+main_window.ask = lambda parent, **kw: (asked.append(kw.get("title")), False)[1]
+main_window.ask_with_checkbox = lambda parent, **kw: (
+    asked.append(kw.get("title")), (False, False))[1]
+home = os.environ["HOME"]
+picture = os.path.join(home, "holiday.png")
+image = QImage(4, 4, QImage.Format.Format_RGB32)
+image.fill(QColor("red"))
+image.save(picture)
+w = main_window.MainWindow()
+w.show()
+w.nostr_state._active = True
+w._update_nostr_commands()
+w._profile_store.default = lambda: types.SimpleNamespace(
+    user_pubkey="ab" * 32, display_name="Me", npub_short=lambda: "npub1me")
+r = {}
+for name, body in (("doc.txt", "Words\n"), ("code.py", "x = 1\n"),
+                   ("doc.md", "Words\n"), ("doc.Rmd", "Words\n"),
+                   ("raw.md", "<div>raw</div>\n")):
+    path = os.path.join(home, name)
+    open(path, "w").write(body)
+    w.open_path(path)
+    app.processEvents()
+    ed = w.current_editor()
+    cursor = ed.textCursor()
+    cursor.movePosition(QTextCursor.MoveOperation.End)
+    ed.setTextCursor(cursor)
+    asked.clear()
+    ed.urls_dropped.emit([QUrl.fromLocalFile(picture)])
+    dropped = [ed.toPlainText(), ed.undo_name(), asked[:]]
+    ed.undo()
+    data = QMimeData()
+    data.setUrls([QUrl.fromLocalFile(picture)])
+    ed.insertFromMimeData(data)
+    pasted = [ed.toPlainText(), ed.undo_name()]
+    ed.undo()
+    bitmap = QMimeData()
+    bitmap.setImageData(image)
+    can = ed.canInsertFromMimeData(bitmap)
+    ed.insertFromMimeData(bitmap)
+    r[name] = {"drop": dropped, "paste": pasted, "bitmap": [can, "￼" in ed.toPlainText()],
+               "picture": picture}
+    ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+@pytest.fixture(scope="module")
+def plain(tmp_path_factory):
+    return run_window_script(PLAIN_SCRIPT, tmp_path_factory.mktemp("plain"))
+
+
+@pytest.mark.parametrize("name", ["doc.txt", "code.py"])
+def test_a_picture_in_plain_text_is_its_path_as_text(plain, name):
+    """A plain-text or code file cannot keep a picture: dropped or pasted,
+    a picture file goes in as its path, as in TextEdit's plain text, and a
+    bitmap on the clipboard is not taken. Nothing is asked about uploading."""
+    r = plain[name]
+    text = r["picture"]
+    assert r["drop"][0].endswith(text) and "￼" not in r["drop"][0]
+    assert r["drop"][1:] == ["Drag", []]
+    assert r["paste"][0].endswith(text) and r["paste"][1] == "Paste"
+    assert r["bitmap"] == [False, False]
+
+
+@pytest.mark.parametrize("name", ["doc.md", "doc.Rmd", "raw.md"])
+def test_where_a_picture_is_kept_it_goes_in_as_one(plain, name):
+    r = plain[name]
+    assert "￼" in r["drop"][0] and r["drop"][1] == "Drag"
+    assert r["bitmap"][0] is True
