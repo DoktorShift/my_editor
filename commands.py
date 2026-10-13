@@ -22,6 +22,7 @@ that should only show them once Nostr is in use asks
 
 from __future__ import annotations
 
+import re
 import sys
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
@@ -63,6 +64,9 @@ class Command:
     # menu; every other command stays where it was put, whatever its title
     # says in any language (Qt would otherwise guess from the words).
     role: QAction.MenuRole = QAction.MenuRole.NoRole
+    # The slash menu's group it is offered in (slash_menu.SECTIONS); ""
+    # keeps it out of the slash menu.
+    slash_section: str = ""
 
 
 def platform_keys(mac: ShortcutSpec, other: ShortcutSpec, *,
@@ -197,6 +201,33 @@ class CommandRegistry(QObject):
             if all(word in haystack for word in words):
                 found.append(command)
         return found
+
+    def rank(self, query: str, *, nostr: bool,
+             sections: Tuple[str, ...] = ("text", "lists", "blocks", "insert")
+             ) -> List[Command]:
+        """What the slash menu offers for ``query`` (the words typed after
+        the slash), best first: commands in a slash section, enabled,
+        Nostr ones only while Nostr is in use. A command whose title or
+        keywords have a word starting with each word of the query comes
+        before one that only contains them; otherwise the menu's order
+        (group by group, then the order the commands were made) stays."""
+        order = {section: i for i, section in enumerate(sections)}
+        offered = [c for c in self.available(nostr=nostr)
+                   if c.slash_section in order and self.action(c.id).isEnabled()]
+        offered.sort(key=lambda c: order[c.slash_section])
+        words = query.lower().split()
+        if not words:
+            return offered
+        scored = []
+        for command in offered:
+            text = " ".join((command.title, command.listed_as, *command.keywords)).lower()
+            tokens = re.split(r"[^\w]+", text)
+            if all(any(t.startswith(w) for t in tokens) for w in words):
+                scored.append((2, command))
+            elif all(w in text for w in words):
+                scored.append((1, command))
+        scored.sort(key=lambda pair: -pair[0])
+        return [command for _score, command in scored]
 
     def shortcut_groups(self, extra: Iterable[Tuple[str, Iterable[Tuple[str, str]]]] = (),
                         *, nostr: bool = True) -> List[Tuple[str, List[Tuple[str, str]]]]:

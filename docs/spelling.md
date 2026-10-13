@@ -13,7 +13,7 @@ MyEditor checks spelling with each system's own spell checker: the one on macOS 
 
 ## Using it in the editor
 
-Make one `SpellChecker` for the app, on the main thread, and one `DocumentSpelling` for each document while Check Spelling While Typing is on:
+Make one `SpellChecker` for the app, on the main thread, and one `DocumentSpelling` for each document while Check Spelling While Typing is on. The editor does this in `HtmlEditor.set_spelling` (underlines for the blocks on screen, as extra selections of the "spelling" layer) and `MainWindow._attach_spelling` (which tabs are checked, the menu, the context menu):
 
 ```python
 from spelling import DocumentSpelling, SpellChecker
@@ -33,7 +33,7 @@ spelling.set_visible_blocks(first, last)                  # on scroll and resize
 - Dim Edit > Spelling > Check Spelling While Typing when `checker.is_available()` is False. `checker.availabilityChanged` says when a system checker stops working; its underlines are already gone then.
 - `spelling.close()` when spell checking is turned off. A `DocumentSpelling` is a child of its document and goes with it; a reference the editor keeps afterwards is harmless, its methods then do nothing.
 - `checker.find_misspellings(text)` checks a short plain text at once (a title, a summary), with offsets from the start of the text.
-- `spelling.set_language(tag)` checks a document in another language; `checker.languages()` lists those the system has. There is no language menu yet: macOS tells languages apart by itself, Windows and Linux use the system language.
+- `spelling.set_language(tag)` checks a document in another language; `checker.languages()` lists those the system has. On Windows and Linux, Edit > Spelling > Language offers them (the system's language first, then each by its own name, "Deutsch (Deutschland)"), remembered for every document; macOS tells languages apart by itself and has no such menu.
 
 Only prose documents should get a `DocumentSpelling`, not source code.
 
@@ -53,10 +53,11 @@ Everything runs on the thread that made it, without worker threads: the system c
 
 A system checker that fails does not raise into the app. It logs one warning (with the trace, in the log file Help > Show Log Files opens), says why in `backend.problem`, and from then on is unavailable and answers neutrally: every word is right, so a broken checker never underlines the whole document. A missing one (no Enchant, no dictionary) says so once, without a trace.
 
-## Learn and Ignore
+## Learn, Ignore and Unlearn
 
 - Learn adds the word to the person's own dictionary for good: on macOS the one every app shares, on Windows the person's dictionary, on Linux Enchant's word list in `~/.config/enchant`, shared with the other apps that use Enchant.
 - Ignore accepts the word in every document until MyEditor quits (on Windows and Linux, in the language it was ignored in).
+- Unlearn takes a learned word out of the person's dictionary again (`checker.unlearn`): NSSpellChecker's `unlearnWord:`, Enchant's `enchant_dict_remove`, Windows 10's `ISpellChecker2::Remove`. `checker.has_learned` says whether a word was learned (`hasLearnedWord:`, `enchant_dict_is_added`); Windows cannot tell, so there it knows the words learned since the app started. The editor offers Unlearn Spelling (Remove from Dictionary off the Mac) in the context menu of such a word; `wordRejected` makes every document check the blocks that hold it again.
 
 Both check again only the blocks where the word was, in every open document.
 

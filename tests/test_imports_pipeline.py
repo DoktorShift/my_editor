@@ -606,6 +606,61 @@ class TestFullTextRecovery:
         settle()
         assert pages.calls == []
 
+    def test_a_post_kept_only_in_part_is_read_from_its_page(self):
+        """A post the inbox kept only in part (too long) is read from its
+        page whatever the option, and any more text is adopted."""
+        factory, created = make_factory()
+        pages = FakeFetcher({ARTICLE_URL: ("ok", ARTICLE_PAGE)})
+        item = make_item("Long", guid="t1", link=ARTICLE_URL, content_html=THIN_HTML,
+                         partial=True)
+        job = make_job([item], factory=factory, page_fetcher=pages, fetch_full_text=False)
+        job.start()
+        settle()
+        assert pages.calls == [ARTICLE_URL]
+        assert "Paragraph 3" in created[0].inner_event["content"]
+
+    @pytest.mark.parametrize("page", [("err", "HTTP 503"),
+                                      ("ok", "<html><body><p>hi</p></body></html>")])
+    def test_a_post_kept_only_in_part_is_no_draft_without_its_page(self, page):
+        """CP3 review L2: when the page of a post kept only in part (or
+        whose text was let go, Q-9) could not be read, the part became a
+        cut or empty draft, and the post was done for good. It fails now,
+        to be tried again."""
+        factory, created = make_factory()
+        item = make_item("Long", guid="t1", link=ARTICLE_URL, content_html=THIN_HTML,
+                         partial=True)
+        job = make_job([item], factory=factory, page_fetcher=FakeFetcher({ARTICLE_URL: page}))
+        rec = Recorder(job)
+        job.start()
+        settle()
+        assert created == []
+        assert [e[1] for e in rec.of("item_failed")] == [0]
+        assert rec.of("completed") == [("completed", 0, 1)]
+
+    def test_a_post_kept_only_in_part_without_a_page_is_no_draft(self):
+        factory, created = make_factory()
+        item = make_item("Long", guid="t1", link="", content_html=THIN_HTML, partial=True)
+        job = make_job([item], factory=factory)
+        job.start()
+        settle()
+        assert created == []
+
+    def test_the_pages_relative_links_are_made_whole(self):
+        """CP1 review O3, for a body read from the post's page."""
+        factory, created = make_factory()
+        page = ARTICLE_PAGE.replace(
+            "<p>Paragraph 3 ", "<p>Paragraph 3 <a href='/about'>about</a> "
+                               "<img src='media/pic.jpg' alt='A picture'> ")
+        pages = FakeFetcher({ARTICLE_URL: ("ok", page)})
+        item = make_item("Teaser", guid="t1", link=ARTICLE_URL, content_html=THIN_HTML)
+        job = make_job([item], factory=factory, page_fetcher=pages)
+        job.start()
+        settle()
+        content = created[0].inner_event["content"]
+        from urllib.parse import urljoin
+        assert f"]({urljoin(ARTICLE_URL, '/about')})" in content
+        assert f"]({urljoin(ARTICLE_URL, 'media/pic.jpg')})" in content
+
     def test_page_fetch_failure_keeps_feed_body(self):
         factory, created = make_factory()
         pages = FakeFetcher({ARTICLE_URL: ("err", "HTTP 503")})

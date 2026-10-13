@@ -443,12 +443,12 @@ class MediaStore(QObject):
             self._listings = listings
             if remaining["errors"] >= len(servers) and not previous:
                 self.fetch_error.emit(_(
-                    "Could not reach any Blossom server. Check your network or server list."
+                    "Could not reach any media server. Check your network or server list."
                 ))
             else:
                 if remaining["errors"] >= len(servers):
                     self.fetch_error.emit(_(
-                        "Could not reach any Blossom server. Showing what the "
+                        "Could not reach any media server. Showing what the "
                         "library had before."
                     ))
                 failed = {o for o, l in listings.items() if not l.ok}
@@ -762,7 +762,7 @@ class MediaStore(QObject):
 
         servers = self._target_servers()
         if not servers:
-            self.upload_failed.emit(name, _("No Blossom servers configured."))
+            self.upload_failed.emit(name, _("No media servers are set up."))
             return
 
         # The size plan runs before any dedup probe, so an oversized file

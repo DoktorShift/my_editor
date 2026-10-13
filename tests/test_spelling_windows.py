@@ -8,6 +8,7 @@ import sys
 import pytest
 
 from spelling.backends import create_backend
+from spelling import windows
 from spelling.windows import WindowsBackend
 from tests.spelling_com_fakes import FakeOle
 
@@ -21,6 +22,28 @@ def backend_with(words=WORDS, **options):
 
 
 # -- the COM calls, through stand-ins ------------------------------------------
+
+def test_every_function_the_backend_calls_sits_in_its_slot_in_spellcheck_h():
+    """The slots as spellcheck.h numbers them (IUnknown's three first, an
+    interface's own functions after its base's): the stand-ins are laid
+    out by the backend's own lists, so only this pins those lists."""
+    slots = {
+        (windows.UNKNOWN, "QueryInterface"): 0, (windows.UNKNOWN, "Release"): 2,
+        (windows.ENUM_STRING, "Next"): 3,
+        (windows.SPELL_CHECKER_FACTORY, "SupportedLanguages"): 3,
+        (windows.SPELL_CHECKER_FACTORY, "IsSupported"): 4,
+        (windows.SPELL_CHECKER_FACTORY, "CreateSpellChecker"): 5,
+        (windows.SPELL_CHECKER, "Check"): 4, (windows.SPELL_CHECKER, "Suggest"): 5,
+        (windows.SPELL_CHECKER, "Add"): 6, (windows.SPELL_CHECKER, "Ignore"): 7,
+        (windows.SPELL_CHECKER, "ComprehensiveCheck"): 16,
+        (windows.SPELL_CHECKER_2, "Remove"): 17,
+        (windows.ENUM_SPELLING_ERROR, "Next"): 3,
+        (windows.SPELLING_ERROR, "StartIndex"): 3, (windows.SPELLING_ERROR, "Length"): 4,
+        (windows.SPELLING_ERROR, "CorrectiveAction"): 5,
+    }
+    assert {key: key[0].index(key[1]) for key in slots} == slots
+    assert windows.SPELL_CHECKER_2[:len(windows.SPELL_CHECKER)] == windows.SPELL_CHECKER
+
 
 def test_languages_are_read_and_every_string_freed():
     backend, ole = backend_with()
@@ -58,6 +81,19 @@ def test_learning_and_ignoring_reach_windows():
     checker = ole.factory.checkers["en-US"]
     assert checker.added == ["Nostr"] and checker.ignored == ["zap"]
     assert backend.check("Nostr", "en-US") and backend.check("zap", "en-US")
+
+
+def test_a_learned_word_is_taken_out_again_on_windows_10():
+    backend, ole = backend_with()
+    assert backend.learn("Nostrr", "en-US") is True
+    assert backend.has_learned("Nostrr", "en-US") is None        # Windows cannot tell
+    assert backend.unlearn("Nostrr", "en-US") is True
+    checker = ole.factory.checkers["en-US"]
+    assert checker.removed == ["Nostrr"] and checker.added == []
+    assert checker.comprehensive_checks == []                      # not the slot before Remove
+    assert checker.second.references == 0                         # released
+    checker.windows_8 = True
+    assert backend.unlearn("Nostrr", "en-US") is False             # no Remove there
 
 
 def test_one_checker_per_language_made_once():

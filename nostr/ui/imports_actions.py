@@ -5,8 +5,8 @@ under the list and its Options popover.
 
     [Skip]  [Options...]  [Create 3 Drafts]
     Imported drafts you don't change are removed after 90 days. Your
-    signer may ask up to 6 times, once per draft and image. Keep it open
-    until this finishes.
+    signer app may ask up to 6 times, twice for each draft and once for
+    each image. Keep it open until this finishes.
 
 The actions apply to the checked posts, or to the open one when none is
 checked (Mail's rule, workspace.targets). Create is the prominent button
@@ -57,9 +57,11 @@ def create_label(count: int) -> str:
 def signer_note(prompts: int) -> str:
     if prompts <= 0:
         return ""
-    return ngettext("Your signer may ask once. Keep it open until this finishes.",
-                    "Your signer may ask up to {count} times, once per draft and image. "
-                    "Keep it open until this finishes.", prompts).format(count=prompts)
+    # The glossary's words (docs/translating.md): a signer app.
+    return ngettext("Your signer app may ask once. Keep it open until this finishes.",
+                    "Your signer app may ask up to {count} times, twice for each draft and "
+                    "once for each image. Keep it open until this finishes.",
+                    prompts).format(count=prompts)
 
 
 class _Note(QLabel):

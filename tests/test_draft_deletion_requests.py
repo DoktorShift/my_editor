@@ -60,12 +60,45 @@ def test_imported_drafts_are_known_by_their_name_or_their_source():
     assert found == {"rss-1234": "rss-1234-wrap", "kept-name": "kept-name-wrap"}
 
 
+def test_a_draft_whose_slug_holds_a_key_is_named_by_its_wrap():
+    from nostr import bech32
+    keyed = "backup-" + bech32.encode_nsec("11" * 32)
+    host = host_for(store_with((keyed, []), ("rss-1", []), ("mine", [])))
+    found = MainWindow._draft_wraps_to_name(
+        host, [(keyed, 30023), ("rss-1", 30023), ("mine", 30023)])
+    assert found == {keyed: keyed + "-wrap", "rss-1": "rss-1-wrap"}
+
+
+def test_a_draft_this_device_deleted_by_request_stays_gone():
+    from nostr import bech32
+    keyed = "backup-" + bech32.encode_nsec("11" * 32)
+    store = store_with((keyed, []), ("mine", []))
+    host = host_for(store)
+    MainWindow._on_draft_tombstoned(host, keyed, "e" * 64)
+    MainWindow._on_draft_tombstoned(host, "mine", "f" * 64)
+    assert store.get(keyed) is None and store.get("mine") is None
+    store.upsert_skeleton(DraftWrapMeta(keyed, 30023, keyed + "-wrap", PK, 100, None, "ct"))
+    assert store.get(keyed) is None                       # a relay's old copy: still gone
+
+
 @pytest.fixture
 def asked(monkeypatch):
     told = []
     monkeypatch.setattr(main_window, "confirm_destructive",
                         lambda parent, **kw: told.append(kw) or False)
     return told
+
+
+def test_a_draft_whose_slug_holds_a_key_is_said_to_go_by_one_request(asked):
+    from nostr import bech32
+    keyed = "rss-" + bech32.encode_nsec("11" * 32)        # imported and keyed
+    host = host_for(store_with((keyed, []), ("mine", [])))
+    MainWindow._confirm_draft_deletion(host, [(keyed, 30023), ("mine", 30023)], [])
+    message = asked[0]["message"]
+    assert "A blank-content replacement" in message       # for "mine"
+    assert "deleted by a request instead" in message      # for the keyed one
+    assert "expect 2 requests" in message                 # one each, no second request
+    assert "second request" not in message
 
 
 def test_one_imported_draft_means_two_requests(asked):

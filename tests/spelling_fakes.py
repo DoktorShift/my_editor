@@ -97,6 +97,21 @@ class FakeBackend(SpellBackend):
         self._boom("ignore")
         self.ignored.append(word)
 
+    # A system that says what it learned (macOS, Enchant), or None for one
+    # that cannot tell (Windows).
+    tells_learned = True
+
+    def _unlearn(self, word: str, language: str):
+        self.calls.append(("unlearn", word, language))
+        self._boom("unlearn")
+        if word not in self.learned:
+            return False
+        self.learned.remove(word)
+        return True
+
+    def _has_learned(self, word: str, language: str):
+        return (word in self.learned) if self.tells_learned else None
+
     def checked_words(self) -> List[str]:
         return [call[1] for call in self.calls if call[0] == "check"]
 

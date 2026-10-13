@@ -38,9 +38,14 @@ be written to) leaves imports unbound with ``problem`` saying why.
 
 from __future__ import annotations
 
+import atexit
+import errno
 import logging
+import os
 import sqlite3
 import time
+import weakref
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
 
@@ -54,8 +59,13 @@ from .imports import snapshots, workers
 from .imports.catalogue import ExistingCatalogue
 from .imports.checker import FeedChecker, checks_automatically
 from .imports.constants import IDENTIFIER_PREFIX
-from .imports.errors import SourceError, friendly_message
+from .imports.errors import LOCAL_NETWORK_MESSAGE, SourceError, friendly_message
 from .imports.feed_list import source_key
+from .imports.fulltext import extract_readable_content
+from .rss.parser import FeedItem
+from .imports.intake import FEED, is_whole_source, kind_of, post_at, same_page
+from .imports.sources.opml import OpmlFeed, write_opml
+from .imports.subscriptions import SYNCING
 from .imports.fetch import SourceFetcher
 from .imports.inbox_store import (
     DRAFTED,
@@ -95,14 +105,36 @@ ACCOUNT_CHANGED = _("The account changed. Resume when you're signed in to that a
 QUIT_PAUSED = _("MyEditor was closed during the import. Resume it to go on.")
 ELSEWHERE = _("Imports are checked in another MyEditor window. This one only shows them.")
 ARTICLE_FAILED = _("Couldn't show this post.")
-CANNOT_KEEP = _("MyEditor can't keep imports on this computer: {reason}. Your sources are safe "
-                "on your relays; check that your user folder can be written to, then sign in "
-                "again.")
+# Why imports cannot be kept here, in plain words, each with what to do
+# (CP2 review N1: a damaged inbox was told to check that the user folder
+# can be written to). The error itself goes to the log. The list of
+# sources is not in the inbox, so it is kept whatever happens to it.
+CANNOT_WRITE = _("MyEditor can't write to the folder where it keeps imports ({folder}). Check "
+                 "that you can write to it, then choose Nostr > Imports again. Your sources are "
+                 "kept.")
+DISK_FULL = _("The disk is full, so MyEditor can't keep imports on this computer. Free some "
+              "space, then choose Nostr > Imports again. Your sources are kept.")
+IN_USE = _("Another program is using the imports kept on this computer. Choose Nostr > Imports "
+           "again in a moment.")
+DAMAGED_ELSEWHERE = _("The file that keeps imports on this computer is damaged, and MyEditor is "
+                      "open a second time. Quit the other MyEditor, then choose Nostr > Imports "
+                      "again.")
+DAMAGED_HELD = _("The file that keeps imports on this computer is damaged, and another program "
+                 "is using it, so MyEditor can't set it aside. Quit programs that might use "
+                 "it, such as a backup or sync app, then choose Nostr > Imports again.")
+CANNOT_OPEN = _("MyEditor can't open the imports kept on this computer. Choose Nostr > Imports "
+                "again to try once more. Your sources are kept.")
 SET_ASIDE = _("The file that keeps imports on this computer was damaged, so MyEditor set it "
               "aside and started a new one. Your sources are kept; posts you had skipped show "
               "again.")
 NO_SOURCES_IN_LIST = _("No sources were found in that list. Is it a subscription export "
                        "from a feed reader?")
+NOTHING_FOUND = _("Nothing to import was found at that address.")
+PARTIAL_POST = _("This post is longer than MyEditor keeps here. Open Original reads all of "
+                 "it, and a draft made of it gets the whole post from its page.")
+TRIMMED_POST = _("MyEditor no longer keeps the text of this post here. Open Original reads "
+                 "it, and a draft made of it gets the post from its page.")
+IMAGES_UNREADABLE = _("Couldn't read the images of these posts.")
 
 
 class ImportsController(QObject):
@@ -117,6 +149,7 @@ class ImportsController(QObject):
       new_posts(str, int)        a check put posts in the Inbox (source, count)
       import_finished(str)       an import went through all its posts (its id;
                                  some may have failed)
+      icon_ready(str)            a site's icon is known now (C12)
     """
 
     bound_changed = Signal(bool)
@@ -126,13 +159,15 @@ class ImportsController(QObject):
     activity_changed = Signal()
     new_posts = Signal(str, int)
     import_finished = Signal(str)
+    sync_changed = Signal()
+    icon_ready = Signal(str)
 
     def __init__(self, *, relay_pool, relay_directory, session_pool, draft_store=None,
                  entitled_relays: Optional[Callable[[], Sequence[str]]] = None,
                  blossom_primary: Callable[[], str] = lambda: "",
                  config_dir: Optional[Path] = None,
                  subscription_store: Optional[FeedSubscriptionStore] = None,
-                 fetcher=None, images: Optional[RemoteImages] = None,
+                 fetcher=None, images: Optional[RemoteImages] = None, icons=None,
                  item_job_factory=None, resend_factory=None,
                  checker_factory=None, catalogue_factory=None,
                  run_blocking=None, window_factory=None,
@@ -166,7 +201,18 @@ class ImportsController(QObject):
             relay_directory=relay_directory, entitled_relays=entitled_relays,
             parent=self)
         self.subscriptions.feeds_changed.connect(self._sync_sources)
+        # What the list of sources says about being read and shared, for
+        # the window (CP2 review N3); a read under way says nothing.
+        self.sync_message = ""
+        self.subscriptions.sync_status.connect(self._on_sync_status)
         self.images = images or RemoteImages(parent=self)
+        # Site icons (C12): none unless the app gives a cache, so nothing
+        # is fetched for a controller a test makes.
+        self.icons = icons
+        if icons is not None:
+            icons.ready.connect(self.icon_ready)
+        self._sites: Dict[str, str] = {}
+        self.sources_changed.connect(self._forget_sites)
 
         self._profile = None
         self.inbox: Optional[InboxStore] = None
@@ -174,7 +220,19 @@ class ImportsController(QObject):
         self.runner: Optional[ImportRunner] = None
         self.checker = None
         self._lock: Optional[QLockFile] = None
+        self._exit_hook: Optional[Callable[[], None]] = None
         self.read_only = False
+        # Read only, the other process's changes are looked for and its
+        # lock tried every few seconds (CP1 review L7).
+        self._watch = QTimer(self)
+        self._watch.setInterval(self.WATCH_MS)
+        self._watch.timeout.connect(self._watch_other)
+        self._seen_version = None
+        # Posts let go of their text when they have been kept long enough
+        # (Q-9): at binding, then a few times a day.
+        self._trim_timer = QTimer(self)
+        self._trim_timer.setInterval(self.TRIM_MS)
+        self._trim_timer.timeout.connect(self._trim_text)
         # Why imports could not be bound (a folder that cannot be written
         # to), and a one-time word for the window (a damaged file set aside).
         self.problem = ""
@@ -222,9 +280,20 @@ class ImportsController(QObject):
         self._unbind(ACCOUNT_CHANGED)
         self._generation += 1
         self._profile = profile
+        if self.sync_message:
+            self.sync_message = ""      # the previous account's
+            self.sync_changed.emit()
         self.subscriptions.bind_profile(profile)
         if profile is not None:
             self._bind()
+
+    def _on_sync_status(self, text: str) -> None:
+        if text == SYNCING or text == self.sync_message:
+            return
+        if text:
+            _log.warning("list of sources: %s", text)
+        self.sync_message = text
+        self.sync_changed.emit()
 
     def flush(self) -> None:
         """Quitting: send pending changes to the list of sources, pause a
@@ -237,29 +306,158 @@ class ImportsController(QObject):
             self.checker.stop()
         self.close_window()
 
+    def shutdown(self) -> None:
+        """Quitting, after :meth:`flush` and the wait for the list of
+        sources: close the inbox and give its lock back, so the next start
+        (or another MyEditor) finds it free."""
+        self._unbind(QUIT_PAUSED)
+
     def _bind(self) -> None:
         self.problem = self.notice = ""
         path = database_path(self._config_dir, self._profile.user_pubkey)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
-            self._cannot_bind(exc)
+            self._cannot_bind(exc, path)
             return
+        # A lock this process kept after the inbox could not be opened is
+        # still its own: trying again (``retry``) goes on with it.
+        if (self._lock is None or not self._lock.isLocked()) and not self._take_lock(path):
+            return
+        self._open(path)
+
+    def _take_lock(self, path: Path) -> bool:
+        """Take the inbox's lock, or learn that another MyEditor keeps it
+        (``read_only``). False when no lock can be made at all."""
         self._lock = QLockFile(str(path.with_suffix(".lock")))
-        # Held for the whole session: stale only when its process is gone.
+        # Held for the whole session: stale only when its process is gone,
+        # so a lock left by a crash is taken over at the next start.
         self._lock.setStaleLockTime(0)
         self.read_only = not self._lock.tryLock(0)
+        if self.read_only and self._lock.error() == QLockFile.LockError.PermissionError:
+            # Not another process: the lock file cannot be made at all.
+            self._lock = None
+            self.read_only = self.subscriptions.read_only = False
+            self._cannot_bind(PermissionError(errno.EACCES, "the lock file cannot be made",
+                                              str(path.with_suffix(".lock"))), path)
+            return False
+        # The list of sources follows the lock: while another MyEditor keeps
+        # it, that one writes the list, also when this one then cannot open
+        # the inbox (CP3 review M1, and N1 of its fixes).
+        self.subscriptions.read_only = self.read_only
         if self.read_only:
             _log.info("imports inbox in use by another process; showing it read-only")
+        else:
+            self._hold_lock()
+        return True
+
+    def _hold_lock(self) -> None:
+        """The lock is this process's for the session. Given back at quit
+        (shutdown); a process that ends without closing its window still
+        gives it back before Python tears down: left to the lock's
+        destructor, it went after other exit handlers, when its folder
+        could already be gone."""
+        self._exit_hook = _release_at_exit(weakref.ref(self))
+        atexit.register(self._exit_hook)
+
+    def _open(self, path: Path) -> None:
+        """Open the inbox at ``path`` as the lock decided (``read_only``),
+        a damaged one set aside once."""
         try:
-            self.inbox = self._open_inbox(path)
+            self._bind_inbox(path)
         except (sqlite3.Error, OSError) as exc:
-            self._release_lock()
-            self._cannot_bind(exc)
+            if not _is_damage(exc):
+                self._give_up(exc, path)
+                return
+            if self.read_only:
+                # The other process's file is left alone.
+                self._give_up(exc, path, problem=DAMAGED_ELSEWHERE)
+                return
+            # Damaged: set aside (never deleted) and start a new inbox, once.
+            self._drop_inbox()
+            try:
+                self._set_aside(path, exc)
+            except OSError as held:
+                self._give_up(held, path, problem=DAMAGED_HELD)
+                return
+            try:
+                self.notice = SET_ASIDE
+                self._bind_inbox(path)
+            except (sqlite3.Error, OSError) as again:
+                self._give_up(again, path)
+                return
+        if self.read_only:
+            self._seen_version = self._data_version()
+            self._watch.start()
+        else:
+            self._trim_timer.start()
+        self.bound_changed.emit(True)
+        self._announce()
+
+    WATCH_MS = 3000
+    TRIM_MS = 6 * 3600 * 1000
+
+    def _trim_text(self) -> None:
+        if self.inbox is None or self.read_only:
+            self._trim_timer.stop()
             return
+        try:
+            trimmed = self.inbox.trim_text()
+        except sqlite3.Error:
+            _log.warning("could not let go of the text of old posts", exc_info=True)
+            return
+        if trimmed:
+            self._announce()
+
+    def _data_version(self):
+        try:
+            return self.inbox.data_version() if self.inbox is not None else None
+        except sqlite3.Error:
+            _log.warning("could not tell whether the other MyEditor changed the imports",
+                         exc_info=True)
+            return None
+
+    def _watch_other(self) -> None:
+        """Read only: show what the process that checks has changed, and
+        keep the inbox when that process has quit (CP1 review L7: this one
+        never refreshed, and stayed read only until it was restarted)."""
+        if self.inbox is None or not self.read_only or self._lock is None:
+            self._watch.stop()
+            return
+        if self._lock.tryLock(0):
+            self._take_over()
+            return
+        version = self._data_version()
+        if version is not None and version != self._seen_version:
+            self._seen_version = version
+            self._announce()
+
+    def _take_over(self) -> None:
+        """The other MyEditor quit: this one checks and imports now, with
+        the lock it just took. The window stays open."""
+        _log.info("the other MyEditor quit; this one keeps the imports inbox now")
+        self._watch.stop()
+        path = database_path(self._config_dir, self._profile.user_pubkey)
+        self._drop_inbox()
+        self.read_only = self.subscriptions.read_only = False
+        self._hold_lock()
+        # The list as the other MyEditor left it: syncing the inbox with
+        # the one read when this one started would remove the sources it
+        # followed since, and their posts with them.
+        self.subscriptions.reload()
+        self._open(path)
+
+    def _bind_inbox(self, path: Path) -> None:
+        """Everything binding does with the database, so a damaged file
+        raises here and nowhere later in the binding (CP2 review N1: only
+        the open was guarded, and a file with damaged pages raised out of
+        the next step, and out of MainWindow.__init__ with it)."""
+        self.inbox = InboxStore(path)
+        self.inbox.check()
         if not self.read_only:
             self.inbox.recover_jobs()
             self.inbox.prune_jobs()
+            self.inbox.trim_text()
         self.catalogue = self._catalogue_factory(self.inbox)
         self.runner = ImportRunner(
             store=self.inbox, catalogue=self.catalogue, profile=self._profile,
@@ -271,49 +469,79 @@ class ImportsController(QObject):
         self.checker = self._checker_factory(self.inbox)
         self.checker.source_checked.connect(self._on_source_checked)
         self.checker.checking.connect(lambda *_args: self.sources_changed.emit())
-        self._sync_sources()
+        self._sync_sources(announce=False)
         self._reconcile_from_drafts()
+        self.counts()       # the lists' numbers read once, here, where it is guarded
         if not self.read_only:
             self.checker.start()
-        self.bound_changed.emit(True)
-        self._announce()
 
-    def _open_inbox(self, path: Path) -> InboxStore:
-        """The account's inbox. A file that is not a database (damaged) is
-        set aside and a new inbox started; one that cannot be opened at
-        all raises."""
-        try:
-            return InboxStore(path)
-        except sqlite3.OperationalError:
-            raise
-        except sqlite3.DatabaseError as exc:
-            if self.read_only:
-                raise       # the other process holds it: leave it alone
-            aside = path.with_name(f"{path.name}.damaged-{int(time.time())}")
-            _log.warning("imports inbox %s is damaged (%s); set aside as %s",
-                         path, exc, aside.name)
-            for suffix in ("", "-wal", "-shm"):
-                part = Path(f"{path}{suffix}")
-                if part.exists():
-                    part.replace(Path(f"{aside}{suffix}"))
-            self.notice = SET_ASIDE
-            return InboxStore(path)
+    def _drop_inbox(self) -> None:
+        """Undo what a binding that failed had made, the database closed."""
+        if self.checker is not None:
+            self.checker.stop()
+        for owned in (self.checker, self.runner, self.catalogue):
+            if isinstance(owned, QObject):
+                owned.deleteLater()
+        if self.inbox is not None:
+            try:
+                self.inbox.close()
+            except sqlite3.Error:
+                _log.warning("could not close the imports inbox", exc_info=True)
+        self.inbox = self.catalogue = self.runner = self.checker = None
 
-    def _cannot_bind(self, exc: BaseException) -> None:
+    def _set_aside(self, path: Path, exc: BaseException) -> None:
+        """Rename a damaged inbox (and its journal) so a new one starts; the
+        connection is closed already (_drop_inbox), as Windows requires."""
+        aside = path.with_name(f"{path.name}.damaged-{int(time.time())}")
+        _log.warning("imports inbox %s is damaged (%s); set aside as %s",
+                     path, exc, aside.name)
+        for suffix in ("", "-wal", "-shm"):
+            part = Path(f"{path}{suffix}")
+            if part.exists():
+                part.replace(Path(f"{aside}{suffix}"))
+
+    def _give_up(self, exc: BaseException, path: Path, *, problem: str = "") -> None:
+        self._watch.stop()
+        self._trim_timer.stop()
+        self._drop_inbox()
+        if self.read_only:
+            self._release_lock()    # only tried: nothing of it is this one's
+        # A lock this process holds stays its own until it unbinds: given
+        # back here, a second MyEditor took it and wrote the list too, while
+        # this one still did (S1 of the CP3 fixes review).
+        self._cannot_bind(exc, path, problem=problem)
+
+    def _cannot_bind(self, exc: BaseException, path: Path, *, problem: str = "") -> None:
         _log.warning("imports cannot be kept on this computer: %s", exc)
         self.inbox = None
         self.read_only = False
-        self.problem = CANNOT_KEEP.format(reason=getattr(exc, "strerror", None) or str(exc))
+        self.notice = ""
+        self.problem = problem or plain_problem(exc, path.parent)
         self.bound_changed.emit(False)
 
+    def retry(self) -> bool:
+        """Try once more to open the inbox after it could not be opened
+        (Nostr > Imports, once the folder can be written to again or the
+        program holding the file has quit). True when it is open now."""
+        if self._profile is not None and self.inbox is None and self.problem:
+            self._bind()
+        return self.bound
+
     def _release_lock(self) -> None:
+        if self._exit_hook is not None:
+            atexit.unregister(self._exit_hook)
+            self._exit_hook = None
         if self._lock is not None and not self.read_only:
             self._lock.unlock()
         self._lock = None
 
     def _unbind(self, reason: str) -> None:
         self.problem = self.notice = ""
+        self.subscriptions.read_only = False    # the next binding asks the lock again
+        self._watch.stop()
+        self._trim_timer.stop()
         if self.inbox is None:
+            self._release_lock()    # one kept after the inbox could not be opened
             return
         self.close_window()
         if self.runner is not None and self.runner.busy():
@@ -340,12 +568,13 @@ class ImportsController(QObject):
     # Sources                                                              #
     # ------------------------------------------------------------------ #
 
-    def _sync_sources(self) -> None:
+    def _sync_sources(self, *, announce: bool = True) -> None:
         if self.inbox is None:
             return
         if self.read_only:
             # The process that checks keeps the inbox in step.
-            self._announce()
+            if announce:
+                self._announce()
             return
         # Until the list is known (this computer's copy read, or the
         # relays answered), a source missing from it is not removed: a
@@ -358,13 +587,80 @@ class ImportsController(QObject):
                               if c.kind == "manual"
                               and not self.subscriptions.has_feed(c.source_url)]:
             del self._collections[collection_id]
-        self._announce()
+        if announce:
+            self._announce()
 
     def sources(self) -> List[SourceRow]:
         return self.inbox.sources() if self.inbox is not None else []
 
     def source(self, key: str) -> Optional[SourceRow]:
         return self.inbox.source(key) if self.inbox is not None else None
+
+    def site_icon(self, source_key: str = "", url: str = ""):
+        """The site icon of a source (or of the site ``url`` is on) when it
+        is known; the first ask looks it up in the background, and
+        ``icon_ready`` says when it is there. None without one."""
+        if self.icons is None:
+            return None
+        if source_key:
+            if not self._sites and self.inbox is not None:
+                self._sites = {s.key: s.site_url or s.url for s in self.inbox.sources()}
+            url = self._sites.get(source_key) or url
+        return self.icons.icon(url) if url else None
+
+    def _forget_sites(self) -> None:
+        self._sites = {}
+
+    def website_of(self, key: str) -> str:
+        """A source's website: the one its feed names, else its address's
+        start page (review L4: not the feed's own address)."""
+        source = self.source(key)
+        if source is None:
+            return ""
+        if source.site_url:
+            return source.site_url
+        return url_safety.origin_of(source.url) or source.url
+
+    def sources_as_opml(self) -> str:
+        """Every source as an OPML file (Export Sources): what other feed
+        readers import, and EINUNDZWANZIG STANDUP too. Sources that are
+        not feeds go along, so the file brings back the whole list."""
+        feeds = []
+        for source in self.sources():
+            site = self.website_of(source.key)
+            feeds.append(OpmlFeed(
+                xml_url=source.url, title=source.display_title,
+                html_url=site if url_safety.is_safe_external_url(site) else None))
+        return write_opml(feeds, title=_("MyEditor Sources"))
+
+    def settings_of(self, key: str) -> Optional["SourceSettings"]:
+        """What Source Settings shows for ``key``."""
+        source = self.source(key)
+        if source is None:
+            return None
+        followed = self.subscriptions.get(source.url)
+        copy_images, full_text = self._source_defaults(key)
+        return SourceSettings(
+            key=key, url=source.url, name=followed.title if followed else source.title,
+            own_title=source.feed_title, website=self.website_of(key),
+            automatic=source.automatic, checking=not source.paused,
+            copy_images=copy_images, full_text=full_text)
+
+    def save_settings(self, key: str, *, name: str, checking: bool, copy_images: bool,
+                      full_text: bool) -> None:
+        """Keep what Source Settings says. The name and the defaults for new
+        drafts go with the list of sources (the other devices, and
+        EINUNDZWANZIG STANDUP, use them too); whether the source is
+        checked automatically stays on this computer."""
+        source = self.source(key)
+        if source is None or self.read_only:
+            return
+        self.subscriptions.update_title(source.url, name.strip())
+        self.subscriptions.set_source_options(source.url, rehost_images=copy_images,
+                                              fetch_full_text=full_text)
+        if source.automatic and source.paused == checking:
+            self.inbox.set_paused(key, not checking)
+            self._announce()
 
     def check_now(self, key: str) -> bool:
         """The person asked to check a source now (once a minute at most)."""
@@ -493,8 +789,12 @@ class ImportsController(QObject):
             collection.states.update(existing.states)
             self.posts_changed.emit()
 
+        # Unavailable, the posts simply show no state; Create checks again
+        # and fails closed. Said in the log, never silent (review L8).
         self.catalogue.look_up(self._profile, tags, on_ready=found,
-                               on_unavailable=lambda _reason: None)
+                               on_unavailable=lambda reason: _log.warning(
+                                   "could not ask which posts of %s exist already: %s",
+                                   collection.label[:80], reason))
 
     # ------------------------------------------------------------------ #
     # Following, files and links                                           #
@@ -551,12 +851,17 @@ class ImportsController(QObject):
     def is_followed(self, url: str) -> bool:
         return self.subscriptions.has_feed(url)
 
+    def why_not_followed(self, url: str) -> str:
+        """Why ``url`` cannot be followed, in the words the person reads:
+        an address on this computer or its network (Q-6), else none."""
+        return LOCAL_NETWORK_MESSAGE if not _public(url) else ""
+
     def follow(self, url: str, title: str = "", *, result=None) -> str:
         """Follow ``url``. With the ``result`` its lookup gave, its posts are
         there at once: a feed's as a baseline (Older Posts, as the first
         check would make them), another source's as read now. Returns the
         source's key, or "" when it could not be followed."""
-        if not _public(url):
+        if not _public(url) or self.read_only:
             return ""
         added = self.subscriptions.add_feed(url, title)
         key = source_key(url)
@@ -592,9 +897,12 @@ class ImportsController(QObject):
         now, were followed already, and could not be followed (not a
         source, or an address on this computer or its network)."""
         followed = known = refused = 0
-        for feed in document.feeds:
-            added = (self.subscriptions.add_feed(feed.xml_url, feed.title)
-                     if _public(feed.xml_url) else {})
+        public = [feed for feed in document.feeds if _public(feed.xml_url)]
+        refused = len(document.feeds) - len(public)
+        # One change of the list for all of them (CP2 review L-d: one sync
+        # of the whole list per source, 3.8 s for 400 on the UI thread).
+        for added in self.subscriptions.add_feeds(
+                [(feed.xml_url, feed.title) for feed in public]):
             if added.get("added"):
                 followed += 1
             elif added.get("duplicate"):
@@ -602,6 +910,66 @@ class ImportsController(QObject):
             else:
                 refused += 1
         return followed, known, refused
+
+    def open_link(self, address: str, *,
+                  on_done: Callable[[Optional[Collection], str], None]) -> None:
+        """Import a Link: the posts at ``address``, held to import once.
+        An article's page is one post (CP2 review N5: the site's whole
+        feed opened, every post checked): the post of the site's feed
+        whose page it is, else the page itself, read as one post. A feed,
+        a site's start page or a thread opens whole."""
+        generation = self._generation
+
+        def found(result, error: str) -> None:
+            if generation != self._generation:
+                return
+            if result is None or not result.feed.items:
+                on_done(None, error or NOTHING_FOUND)
+                return
+            items = list(result.feed.items)
+            article = (kind_of(address) == FEED and not is_whole_source(address)
+                       and not same_page(result.url or "", address))
+            if not article:
+                on_done(self.open_posts(kind="link", label=result.feed.title or address,
+                                        items=items, source_url=result.url or address), "")
+                return
+            post = post_at(items, address)
+            if post is not None:
+                on_done(self.open_posts(kind="link", label=post.title or address,
+                                        items=[post], source_url=address), "")
+                return
+            self._read_page(address, generation, on_done)
+
+        self.look_up(address, on_done=found)
+
+    def _read_page(self, address: str, generation: int,
+                   on_done: Callable[[Optional[Collection], str], None]) -> None:
+        """A page that is in no feed, read as one post (its main text, as
+        Fetch the Full Article reads one)."""
+        def read(html: str) -> None:
+            self._run_blocking(
+                lambda: extract_readable_content(html, url=address),
+                lambda content: made(content),
+                lambda exc: failed(str(exc)))
+
+        def made(content) -> None:
+            if generation != self._generation:
+                return
+            if content is None:
+                on_done(None, NOTHING_FOUND)
+                return
+            post = FeedItem(guid=address, title=content.title or address, link=address,
+                            summary=None, content_html=content.html, published_at=None,
+                            categories=(), image=None, author=None)
+            on_done(self.open_posts(kind="link", label=post.title, items=[post],
+                                    source_url=address), "")
+
+        def failed(reason) -> None:
+            if generation == self._generation:
+                on_done(None, friendly_message(reason) if isinstance(reason, SourceError)
+                        else str(reason) or NOTHING_FOUND)
+
+        self._fetcher.fetch(address, on_success=read, on_failure=failed)
 
     def open_posts(self, *, kind: str, label: str, items, source_url: str = "") -> Collection:
         """Posts of a file or a link, held while shown, to import once."""
@@ -700,7 +1068,7 @@ class ImportsController(QObject):
 
         self.catalogue.look_up(
             self._profile, tags, on_ready=found,
-            on_unavailable=lambda reason: _log.info(
+            on_unavailable=lambda reason: _log.warning(
                 "could not ask which posts exist already: %s", reason))
 
     # ------------------------------------------------------------------ #
@@ -724,7 +1092,14 @@ class ImportsController(QObject):
         def made(template) -> None:
             if generation != self._generation:
                 return
-            on_ready(template.content, Article(
+            content = template.content
+            if post.trimmed:
+                # Nothing of the body is left: the word first, where the
+                # body would be, then where the post is.
+                content = "*" + TRIMMED_POST + "*\n\n" + content
+            elif item.partial:
+                content += "\n\n*" + PARTIAL_POST + "*"
+            on_ready(content, Article(
                 title=template.title, summary=template.summary,
                 image=template.image or snapshots.cover(item), tags=template.hashtags,
                 author=author, published_at=template.published_at or 0))
@@ -742,12 +1117,26 @@ class ImportsController(QObject):
 
     def defaults_for(self, posts: Sequence[Post]) -> Tuple[Optional[bool], Optional[bool]]:
         """What the sources of ``posts`` choose for new drafts: copy images,
-        fetch the full article. Each is None when the sources differ."""
-        found = {(self._source_defaults(post.source_key)) for post in posts} or {(True, True)}
+        fetch the full article. Each is None when the sources differ.
+
+        Asked on every change of the checks, so each source is read once,
+        from the list of sources in memory (CP2 review N2: two database
+        queries a checked post made one key press 312 ms at 2,000 checked
+        posts)."""
+        sources = {(post.source_key, post.source_url) for post in posts}
+        found = {self._defaults_of(key, url) for key, url in sources} or {(True, True)}
         copy = {pair[0] for pair in found}
         full = {pair[1] for pair in found}
         return (copy.pop() if len(copy) == 1 else None,
                 full.pop() if len(full) == 1 else None)
+
+    def _defaults_of(self, key: str, url: str) -> Tuple[bool, bool]:
+        """A followed source's defaults for new drafts; a post of no followed
+        source (a file, a link) gets both."""
+        if not key or not url or not self.subscriptions.has_feed(url):
+            return True, True
+        options = self.subscriptions.options_for(url)
+        return options.rehost_images, options.fetch_full_text
 
     def _source_defaults(self, key: str) -> Tuple[bool, bool]:
         source = self.source(key) if key else None
@@ -757,12 +1146,14 @@ class ImportsController(QObject):
         return options.rehost_images, options.fetch_full_text
 
     def signer_prompts(self, posts: Sequence[Post], *, copy_images: bool) -> int:
-        """How often a signer app may ask while ``posts`` become drafts: once
-        a draft, and once an image copied. 0 when the key is kept here."""
+        """At most how often a signer app asks while ``posts`` become drafts:
+        twice a draft (it encrypts the draft, then signs it: CP2 review N7,
+        once was half the truth), and once an image copied, the cover
+        included. 0 when the key is kept here."""
         if self._profile is None or getattr(self._profile, "signer", "remote") == "local":
             return 0
-        images = sum(max(post.image_count, 1 if post.image else 0) for post in posts)
-        return len(posts) + (images if copy_images else 0)
+        images = sum(post.image_count + (1 if post.image else 0) for post in posts)
+        return 2 * len(posts) + (images if copy_images else 0)
 
     def can_create(self) -> bool:
         """Whether drafts can be created now (one import at a time)."""
@@ -803,9 +1194,11 @@ class ImportsController(QObject):
         return job.id
 
     def images_of(self, posts: Sequence[Post], *,
-                  on_ready: Callable[[List[str]], None]) -> None:
+                  on_ready: Callable[[List[str]], None],
+                  on_failed: Optional[Callable[[str], None]] = None) -> None:
         """Every image an import of ``posts`` would copy, for the review
-        (found off the UI thread: it converts each post)."""
+        (found off the UI thread: it converts each post). A failure says
+        so (review L8: it read as "no image to copy")."""
         items = [item for item in map(self.item, posts) if item is not None]
         generation = self._generation
 
@@ -813,8 +1206,12 @@ class ImportsController(QObject):
             if generation == self._generation:
                 on_ready(list(images))
 
-        self._run_blocking(lambda: snapshots.images_to_copy(items), found,
-                           lambda _exc: found([]))
+        def failed(exc) -> None:
+            _log.warning("could not find the images of %d posts: %s", len(items), exc)
+            if generation == self._generation and on_failed is not None:
+                on_failed(IMAGES_UNREADABLE)
+
+        self._run_blocking(lambda: snapshots.images_to_copy(items), found, failed)
 
     # ------------------------------------------------------------------ #
     # Imports                                                              #
@@ -837,7 +1234,7 @@ class ImportsController(QObject):
             return None
         if self.runner.running is not None:
             return self.runner.running
-        waiting = unfinished(self.inbox.jobs())
+        waiting = unfinished(self.inbox.jobs(statuses=UNFINISHED, payloads=False))
         return waiting[0] if waiting else None
 
     def job(self, job_id: str) -> Optional[Job]:
@@ -853,7 +1250,7 @@ class ImportsController(QObject):
         failed: Set[str] = set()
         if self.inbox is None:
             return busy, failed
-        jobs = unfinished(self.inbox.jobs())
+        jobs = unfinished(self.inbox.jobs(statuses=UNFINISHED, payloads=False))
         running = self.runner.running if self.runner is not None else None
         if running is not None:
             jobs = [running] + [job for job in jobs if job.id != running.id]
@@ -986,6 +1383,61 @@ class ImportsController(QObject):
         if window is not None:
             window.close()
             window.deleteLater()
+
+
+@dataclass(frozen=True)
+class SourceSettings:
+    """One source as Source Settings shows it."""
+
+    key: str
+    url: str
+    name: str               # the name the person gave it ("" = the source's own)
+    own_title: str          # what the source calls itself
+    website: str
+    automatic: bool         # a feed this app checks while it runs
+    checking: bool          # automatic checks are on
+    copy_images: bool       # defaults for new drafts (synced)
+    full_text: bool
+
+
+def plain_problem(exc: BaseException, folder: Path) -> str:
+    """What to tell the person when the inbox cannot be opened: the cause
+    in plain words and what to do about it."""
+    name = getattr(exc, "sqlite_errorname", "") or ""
+    number = getattr(exc, "errno", None)
+    if name.startswith("SQLITE_FULL") or number in (errno.ENOSPC, getattr(errno, "EDQUOT", -1)):
+        return DISK_FULL
+    if (name.startswith(("SQLITE_READONLY", "SQLITE_CANTOPEN", "SQLITE_PERM"))
+            or isinstance(exc, PermissionError) or number in (errno.EACCES, errno.EPERM,
+                                                              errno.EROFS)):
+        return CANNOT_WRITE.format(folder=os.fspath(folder))
+    if name.startswith(("SQLITE_BUSY", "SQLITE_LOCKED")):
+        return IN_USE
+    return CANNOT_OPEN
+
+
+def _is_damage(exc: BaseException) -> bool:
+    """Whether a database error means the file is damaged (not a database
+    any more, unreadable pages, missing tables), as opposed to one that
+    cannot be opened or written (the folder, the disk, another process)."""
+    name = getattr(exc, "sqlite_errorname", "") or ""
+    if name.startswith(("SQLITE_CORRUPT", "SQLITE_NOTADB")):
+        return True
+    return type(exc) is sqlite3.DatabaseError and not name   # InboxStore.check
+
+
+# The statuses of imports that still have posts to do (jobs.unfinished).
+UNFINISHED = ("paused", "running", "pausing", "stopping", "partial")
+
+
+def _release_at_exit(controller_ref) -> Callable[[], None]:
+    """An exit handler that gives the inbox's lock back if the controller
+    still holds it (one per lock taken, unregistered when it is given back)."""
+    def release() -> None:
+        controller = controller_ref()
+        if controller is not None and shiboken6.isValid(controller):
+            controller._release_lock()
+    return release
 
 
 def _public(url: str) -> bool:

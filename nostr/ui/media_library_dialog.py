@@ -996,7 +996,7 @@ class MediaLibraryDialog(QDialog):
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(10)
 
-        header = QLabel(_("Your Nostr media (Blossom)"))
+        header = QLabel(_("Your Nostr media"))
         font = header.font()
         font.setPointSize(font.pointSize() + 1)
         font.setBold(True)
@@ -1536,7 +1536,7 @@ class MediaLibraryDialog(QDialog):
                     "*.mp3 *.wav *.ogg *.pdf")
         paths, _filter = QFileDialog.getOpenFileNames(
             self,
-            _("Upload to Blossom"),
+            _("Upload to Media Servers"),
             "",
             _("Media files ({patterns})").format(patterns=patterns) + ";;" + _("All files (*)"),
         )
@@ -1581,8 +1581,8 @@ class MediaLibraryDialog(QDialog):
         if not confirm_destructive(
                 self,
                 title=ngettext(
-                    "Delete {count} file from your Blossom servers?",
-                    "Delete {count} files from your Blossom servers?",
+                    "Delete {count} file from your media servers?",
+                    "Delete {count} files from your media servers?",
                     count,
                 ).format(count=count),
                 message=message,

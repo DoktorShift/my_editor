@@ -128,6 +128,7 @@ from PySide6.QtWidgets import (
 from i18n import _, ngettext
 
 from ..draft_store import DraftRecord, DraftState, DraftStore
+from ..imports.constants import IDENTIFIER_PREFIX
 from ..profiles import Profile
 # Colour, type and record-to-words live in ``drafts_common`` because the
 # preview popover needs the same three things and cannot import this
@@ -507,13 +508,24 @@ def _display_meta(record: DraftRecord) -> str:
             return _("{reason}. Double-click to retry.").format(reason=reason)
         return reason
     host = _source_host(record)
-    # A draft that still carries an end date (saved before drafts stopped
-    # expiring, or imported and not changed since) says so where it is
-    # seen, with the way to keep it (engine review M6).
-    preview = expiry_note(record.expiration) or record.snippet or ""
+    # One of the person's own drafts that still carries an end date (saved
+    # before drafts stopped expiring) says so where it is seen, with the
+    # way to keep it (engine review M6). An imported draft keeps its
+    # preview: its 90 days are said once, where drafts are created (Q-11),
+    # not on every row (CP2 review N6); its tooltip and its spoken text
+    # say it.
+    preview = record.snippet or ""
+    if not is_imported(record):
+        preview = expiry_note(record.expiration) or preview
     if host and preview:
         return f"{host} · {preview}"
     return host or preview
+
+
+def is_imported(record: DraftRecord) -> bool:
+    """Whether a draft came from Imports (its identifier, or the source it
+    names inside)."""
+    return record.identifier.startswith(IDENTIFIER_PREFIX) or bool(_source_host(record))
 
 
 def expiry_note(expiration: Optional[int]) -> str:
@@ -568,7 +580,8 @@ def _accessible_row_text(record: DraftRecord, *, now: Optional[int] = None) -> s
 
 
 def _row_tooltip(record: DraftRecord) -> str:
-    """The whole row, unelided, plus the exact save time."""
+    """The whole row, unelided, plus the exact save time and, for a draft
+    that still carries an end date, when it is removed."""
     lines = [_display_title(record)]
     meta = _display_meta(record)
     if meta:
@@ -576,6 +589,9 @@ def _row_tooltip(record: DraftRecord) -> str:
     saved = _format_absolute_time(record.created_at)
     if saved:
         lines.append(_("Saved {time}").format(time=saved))
+    note = expiry_note(record.expiration) if record.state is DraftState.READY else ""
+    if note and note not in meta:
+        lines.append(note)
     return "\n".join(lines)
 
 

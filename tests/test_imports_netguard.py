@@ -11,7 +11,6 @@ faked, so nothing here asks the network anything.
 from __future__ import annotations
 
 import pytest
-from PySide6.QtCore import QUrl
 
 from nostr.imports.errors import ERROR_CODES, friendly_message
 from nostr.imports.fetch import SourceFetcher
@@ -115,30 +114,31 @@ class TestSourceFetcher:
         assert out["error"].code == ERROR_CODES.LOCAL_NETWORK
         assert friendly_message(out["error"]) == REFUSED_MESSAGE
 
-    def test_redirects_wait_for_the_guard(self):
-        reply = FakeReply(body=b"<rss></rss>")
-        nam = FakeNam([reply])
+    def test_a_redirect_is_checked_and_asked_anew(self):
+        """Qt follows no redirect by itself: the guard checks the new
+        address, resolves and pins it, and asks it (R-6)."""
+        moved = FakeReply(status=301, raw_headers={"Location": b"https://www.blog.example/feed"})
+        final = FakeReply(body=b"<rss></rss>")
+        nam = FakeNam([moved, final])
         fetcher = SourceFetcher(guard=guard(), nam=nam)
         out = self.fetch(fetcher, "https://blog.example/feed")
-        request = nam.calls[0][1]
         from PySide6.QtNetwork import QNetworkRequest
+        request = nam.calls[0][1]
         assert request.attribute(QNetworkRequest.Attribute.RedirectPolicyAttribute) == \
-            QNetworkRequest.RedirectPolicy.UserVerifiedRedirectPolicy
-        assert request.maximumRedirectsAllowed() == 5
-        allowed = []
-        reply.redirectAllowed.connect(lambda: allowed.append(True))
-        reply.redirected.emit(QUrl("https://www.blog.example/feed"))
-        assert allowed == [True]
-        reply.finish()
+            QNetworkRequest.RedirectPolicy.ManualRedirectPolicy
+        moved.finish()
+        second = nam.calls[1][1]
+        assert bytes(second.rawHeader("Host")) == b"www.blog.example"
+        final.finish()
         assert out["body"] == "<rss></rss>"
 
     def test_a_redirect_into_the_local_network_fails_the_fetch(self):
-        reply = FakeReply(body=b"secret")
-        nam = FakeNam([reply])
+        moved = FakeReply(status=302,
+                          raw_headers={"Location": b"http://169.254.169.254/latest/meta-data/"})
+        nam = FakeNam([moved])
         fetcher = SourceFetcher(guard=guard(), nam=nam)
         out = self.fetch(fetcher, "https://blog.example/feed")
-        reply.redirected.emit(QUrl("http://169.254.169.254/latest/meta-data/"))
-        assert reply.aborted
-        reply.finish()
+        moved.finish()
+        assert len(nam.calls) == 1          # never asked
         assert out["error"].code == ERROR_CODES.LOCAL_NETWORK
         assert "body" not in out

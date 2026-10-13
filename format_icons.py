@@ -50,10 +50,11 @@ def _icon(draw, color: QColor) -> QIcon:
 
 def letter(text: str, color: QColor, *, bold: bool = False, italic: bool = False,
            strike: bool = False) -> QIcon:
-    """A letter in the style it stands for."""
+    """A letter in the style it stands for (two letters, such as "H1",
+    a little smaller, so they fit)."""
     def draw(painter: QPainter, ink: QColor) -> None:
         font = QFont()
-        font.setPixelSize(15)
+        font.setPixelSize(15 if len(text) < 2 else 11)
         font.setBold(bold)
         font.setItalic(italic)
         font.setStrikeOut(strike)
@@ -118,4 +119,74 @@ def link(color: QColor) -> QIcon:
             path = QPainterPath()
             path.addRoundedRect(QRectF(x - 4.6, -2.6, 9.2, 5.2), 2.6, 2.6)
             painter.drawPath(path)
+    return _icon(draw, color)
+
+
+def divider(color: QColor) -> QIcon:
+    """A rule across, between two faint lines of text."""
+    def draw(painter: QPainter, ink: QColor) -> None:
+        painter.setPen(_pen(ink, 1.8))
+        painter.drawLine(QPointF(2, 9), QPointF(16, 9))
+        faint = QColor(ink)
+        faint.setAlphaF(ink.alphaF() * 0.45)
+        painter.setPen(_pen(faint, 1.2))
+        painter.drawLine(QPointF(4, 4), QPointF(14, 4))
+        painter.drawLine(QPointF(4, 14), QPointF(14, 14))
+    return _icon(draw, color)
+
+
+def checklist(color: QColor) -> QIcon:
+    """Boxes, one ticked, each with a line beside it."""
+    def draw(painter: QPainter, ink: QColor) -> None:
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        for y, ticked in ((5.0, True), (13.0, False)):
+            painter.setPen(_pen(ink, 1.3))
+            painter.drawRoundedRect(QRectF(1.5, y - 3, 6, 6), 1.2, 1.2)
+            if ticked:
+                painter.setPen(_pen(ink, 1.4))
+                path = QPainterPath()
+                path.moveTo(QPointF(2.8, y))
+                path.lineTo(QPointF(4.2, y + 1.5))
+                path.lineTo(QPointF(6.4, y - 1.6))
+                painter.drawPath(path)
+            painter.setPen(_pen(ink))
+            painter.drawLine(QPointF(10, y), QPointF(16.5, y))
+    return _icon(draw, color)
+
+
+def table(color: QColor) -> QIcon:
+    """A grid of three columns and three rows, the header row filled."""
+    def draw(painter: QPainter, ink: QColor) -> None:
+        frame = QRectF(1.5, 2.5, 15, 13)
+        painter.setPen(Qt.PenStyle.NoPen)
+        faint = QColor(ink)
+        faint.setAlphaF(ink.alphaF() * 0.35)
+        painter.setBrush(faint)
+        painter.drawRect(QRectF(frame.left(), frame.top(), frame.width(), 4.3))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(_pen(ink, 1.3))
+        painter.drawRoundedRect(frame, 1.5, 1.5)
+        for x in (6.5, 11.5):
+            painter.drawLine(QPointF(x, frame.top()), QPointF(x, frame.bottom()))
+        for y in (6.8, 11.2):
+            painter.drawLine(QPointF(frame.left(), y), QPointF(frame.right(), y))
+    return _icon(draw, color)
+
+
+def code_block(color: QColor) -> QIcon:
+    """Angle brackets around a slash: code."""
+    def draw(painter: QPainter, ink: QColor) -> None:
+        painter.setPen(_pen(ink, 1.6))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        left = QPainterPath()
+        left.moveTo(QPointF(6, 4.5))
+        left.lineTo(QPointF(1.8, 9))
+        left.lineTo(QPointF(6, 13.5))
+        painter.drawPath(left)
+        right = QPainterPath()
+        right.moveTo(QPointF(12, 4.5))
+        right.lineTo(QPointF(16.2, 9))
+        right.lineTo(QPointF(12, 13.5))
+        painter.drawPath(right)
+        painter.drawLine(QPointF(10.2, 3.5), QPointF(7.8, 14.5))
     return _icon(draw, color)

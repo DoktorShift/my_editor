@@ -1,11 +1,12 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""OPML subscription-list parsing (bulk feed import).
+"""OPML subscription lists: read (bulk feed import) and written (export).
 
 OPML is the universal "list of feeds" format every RSS reader imports
 and exports. Unlike a single feed it yields *subscriptions*, not
 articles, so it drives the bulk-subscribe flow rather than the resolver
-pipeline.
+pipeline. :func:`write_opml` writes the OPML 2.0 a person's sources are
+exported as; :func:`parse_opml` reads it back.
 
 A feed is any ``<outline>`` element carrying an ``xmlUrl`` (the feed
 URL) at any nesting depth; category outlines omit it and only group
@@ -20,7 +21,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from datetime import datetime, timezone
+from email.utils import format_datetime
+from typing import List, Optional, Sequence, Tuple
 
 
 _OUTLINE_RE = re.compile(r"<outline\b([^>]*)>", re.IGNORECASE | re.DOTALL)
@@ -98,3 +101,42 @@ def parse_opml(text: str) -> OpmlDocument:
         if title_match else "",
         feeds=tuple(feeds),
     )
+
+
+# What an attribute holds as a space: what XML 1.0 forbids in a document
+# (control characters, U+FFFE and U+FFFF, and lone surrogates, CP3 review
+# L10), tab, newline and carriage return (normalized to spaces anyway),
+# and DEL.
+_NOT_IN_ATTRIBUTES = re.compile("[^\x20-\x7e\x80-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]")
+
+
+def _attribute(value: str) -> str:
+    """``value`` for a double-quoted attribute, escaped the way
+    :func:`_decode_entities` reads it back."""
+    text = _NOT_IN_ATTRIBUTES.sub(" ", str(value or ""))
+    return (text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            .replace('"', "&quot;"))
+
+
+def write_opml(feeds: Sequence[OpmlFeed], *, title: str,
+               created: Optional[datetime] = None) -> str:
+    """An OPML 2.0 document listing ``feeds``: one ``rss`` outline each
+    with its name (``text`` and ``title``), its address (``xmlUrl``) and
+    its website (``htmlUrl``) when known."""
+    created = created or datetime.now(timezone.utc)
+    lines = ['<?xml version="1.0" encoding="UTF-8"?>',
+             '<opml version="2.0">',
+             "  <head>",
+             f"    <title>{_attribute(title)}</title>",
+             f"    <dateCreated>{format_datetime(created, usegmt=True)}</dateCreated>",
+             "  </head>",
+             "  <body>"]
+    for feed in feeds:
+        name = _attribute(feed.title or feed.xml_url)
+        parts = [f'type="rss" text="{name}" title="{name}"',
+                 f'xmlUrl="{_attribute(feed.xml_url)}"']
+        if feed.html_url:
+            parts.append(f'htmlUrl="{_attribute(feed.html_url)}"')
+        lines.append(f"    <outline {' '.join(parts)}/>")
+    lines += ["  </body>", "</opml>", ""]
+    return "\n".join(lines)

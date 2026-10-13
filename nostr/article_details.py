@@ -8,10 +8,11 @@ time it was first published (``published_at``). Every other tag is
 carried as it is, without editing it: where an imported article came
 from (``source``), what is known about its pictures (``imeta``, NIP-92),
 and whatever another app gave an article MyEditor edits now (zap splits,
-a content warning, alt text, labels, the posts it quotes). Only the tags
-MyEditor writes itself are not carried: the details, the app's name
-(``client``), and the people the text mentions (``p``), made again from
-the text.
+a content warning, alt text, labels). Only the tags MyEditor writes
+itself are not carried: the details, the app's name (``client``), and
+the people the text mentions (``p``) and the notes and articles it
+quotes (``q``), both made again from the text, so a quote taken out of
+the text is no longer tagged and none is tagged twice.
 
 An article draft holds them in its inner event. Saving the draft again,
 publishing it, and the Article Details inspector all read and write them
@@ -30,7 +31,7 @@ from typing import Iterable, List, Optional, Sequence, Tuple
 
 # Tags MyEditor writes itself; every other tag is carried as it is.
 DETAILS = ("d", "title", "summary", "image", "published_at", "t")
-REBUILT = ("client", "p")
+REBUILT = ("client", "p", "q")
 
 
 @dataclass(frozen=True)

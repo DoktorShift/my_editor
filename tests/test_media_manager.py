@@ -548,7 +548,7 @@ def test_single_flight_uploads_run_strictly_in_order(tmp_path):
 
 
 def test_signer_failures_are_classified(tmp_path):
-    for reason in ("signer rejected the Blossom auth event: user said no",
+    for reason in ("signer declined the request to the media server: user said no",
                    "Connect a Nostr signer first."):
         ctx = make_manager(tmp_path)
         asset = ctx.manager.adopt_bytes(PNG_BYTES)

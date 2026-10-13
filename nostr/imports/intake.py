@@ -28,7 +28,8 @@ import hashlib
 import os
 import re
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
+from urllib.parse import urlsplit
 
 from i18n import _
 
@@ -54,6 +55,10 @@ NOT_AN_EXPORT = _("That ZIP doesn't look like a Medium or Substack export, or it
 _GITHUB_FOLDER = re.compile(r"^https?://github\.com/[^/]+/[^/]+/tree/", re.IGNORECASE)
 _FIRST_HEADING = re.compile(r"\A#[ \t]+(.+?)[ \t#]*(?:\n|\Z)")
 _OPML_ADDRESS = re.compile(r"\.opml(?:$|[?#])", re.IGNORECASE)
+# A path that names a feed rather than a page: /feed, /rss/, /atom,
+# /feeds/... (Blogger, YouTube), Medium's /feed/@name, or a feed file.
+_FEED_PATH = re.compile(r"(?:^|/)(?:feed|feeds|rss|atom)(?:/|$)|\.(?:xml|rss|atom|rdf|json)$",
+                        re.IGNORECASE)
 
 
 def kind_of(url: str, feed_format: str = "") -> str:
@@ -80,6 +85,38 @@ def kind_of(url: str, feed_format: str = "") -> str:
             return COLLECTION
         return FEED
     return SINGLE
+
+
+def is_whole_source(url: str) -> bool:
+    """Whether an address names a whole source (a feed, a site's start
+    page, a Nostr author, a collection) rather than one post. Any web
+    address may lead to a feed, so a page is judged by its shape: an
+    article's address is one post (CP2 review N5)."""
+    kind = kind_of(url)
+    if kind in (AUTHOR, COLLECTION):
+        return True
+    if kind != FEED:
+        return False
+    path = urlsplit(url.strip()).path
+    return path in ("", "/") or bool(_FEED_PATH.search(path))
+
+
+def same_page(first: str, second: str) -> bool:
+    """Whether two web addresses name the same page: the same host
+    (without "www."), path (without a trailing slash) and query, whatever
+    the scheme and the part after "#"."""
+    def key(url: str) -> Tuple[str, str, str]:
+        parts = urlsplit((url or "").strip())
+        host = (parts.hostname or "").lower()
+        if host.startswith("www."):
+            host = host[4:]
+        return host, parts.path.rstrip("/") or "/", parts.query
+    return bool(first) and bool(second) and key(first) == key(second)
+
+
+def post_at(items: Sequence[FeedItem], url: str) -> Optional[FeedItem]:
+    """The post among ``items`` whose own page is ``url``, if one is."""
+    return next((item for item in items if same_page(item.link or "", url)), None)
 
 
 def kind_word(kind: str) -> str:

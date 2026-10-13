@@ -30,7 +30,7 @@ from nostr.ui.imports_sheets import (
     dropped_file,
 )
 from tests.accessibility import unnamed_controls
-from tests.imports_fakes import TWO_ITEM_FEED, FakeFetcher
+from tests.imports_fakes import TWO_ITEM_FEED, FakeFetcher, rss_feed
 from tests.outbox_fakes import settle
 from tests.test_imports_controller import Harness, profile
 from tests.test_imports_files import OPML, WXR
@@ -193,6 +193,19 @@ class TestFollow:
         assert controller.is_followed("https://blocked.example/feed")
         # Its posts are there at once, though the site turns readers away.
         assert controller.source(source_key("https://blocked.example/feed")).older_count == 2
+
+    def test_a_pasted_feed_on_this_computer_says_why(self, follow):
+        """CP2 review L-e: it said only "This address can't be followed."
+        without Q-6's reason, which the lookup path gives."""
+        from nostr.imports.errors import LOCAL_NETWORK_MESSAGE
+        follow.use_paste()
+        follow.address.setText("http://192.168.1.10/feed")
+        follow.paste.setPlainText(TWO_ITEM_FEED)
+        follow.look_up()
+        settle()
+        assert follow.state == FOUND            # pasted: nothing was fetched
+        follow.buttons["follow"].click()
+        assert follow.error.text() == LOCAL_NETWORK_MESSAGE
 
     def test_a_pasted_list_of_sources(self, follow):
         follow.use_paste()
@@ -370,3 +383,89 @@ def test_every_state_of_follow_keeps_its_names(follow):
     assert unnamed_controls(follow) == []
     follow.use_paste()
     assert unnamed_controls(follow) == []
+
+
+class TestOneArticle:
+    """CP2 review N5: a link to one article opened the site's whole feed,
+    every post checked ("Create 25 Drafts", 50 signer requests)."""
+
+    ARTICLE = "https://example.com/b/"          # the feed names it without "/"
+    ELSEWHERE = "https://example.com/2019/an-old-one"
+    PAGE = ("<!doctype html><html><head><title>An old one</title>"
+            "<link rel=\"alternate\" type=\"application/rss+xml\" href=\"/feed.xml\">"
+            "</head><body><nav>menu</nav><article><h1>An old one</h1>"
+            + "<p>Paragraph of the article that is long enough to read. </p>" * 12
+            + "</article><footer>footer</footer></body></html>")
+
+    @pytest.fixture
+    def links(self, tmp_path):
+        fetcher = FakeFetcher({self.ARTICLE: ("ok", self.PAGE),
+                               self.ELSEWHERE: ("ok", self.PAGE),
+                               "https://example.com/feed.xml": ("ok", TWO_ITEM_FEED),
+                               "https://example.com/": ("ok", self.PAGE)})
+        h = Harness(tmp_path, fetcher=fetcher)
+        h.controller.account_changed(profile())
+        settle()
+        yield h.controller
+        h.controller.account_changed(None)
+        settle()
+
+    def open(self, controller, address):
+        out = {}
+        controller.open_link(address, on_done=lambda collection, error: out.update(
+            collection=collection, error=error))
+        settle()
+        return out
+
+    def test_the_article_is_the_one_post(self, links):
+        out = self.open(links, self.ARTICLE)
+        posts = out["collection"].posts()
+        assert [p.title for p in posts] == ["Second"]
+        assert out["collection"].label == "Second"
+
+    def test_an_article_the_feed_no_longer_holds_is_read_from_its_page(self, links):
+        out = self.open(links, self.ELSEWHERE)
+        (post,) = out["collection"].posts()
+        assert post.title == "An old one"
+        assert "long enough to read" in links.item(post).content_html
+
+    def test_a_one_post_feed_is_no_shortcut_to_another_post(self, links):
+        """CP3 review L1: with one post in the site's feed, that post opened
+        whatever article the link named."""
+        newest = "https://example.com/2026/the-newest"
+        links._fetcher.responses[newest] = ("ok", self.PAGE)
+        links._fetcher.responses["https://example.com/feed.xml"] = ("ok", rss_feed([
+            {"title": "The newest", "link": newest, "guid": "n1",
+             "pubdate": "Mon, 05 Oct 2026 00:00:00 GMT"}]))
+        (post,) = self.open(links, self.ELSEWHERE)["collection"].posts()
+        assert post.title == "An old one"
+        (post,) = self.open(links, newest)["collection"].posts()
+        assert post.title == "The newest"
+
+    def test_a_feed_or_a_start_page_opens_whole(self, links):
+        assert len(self.open(links, "https://example.com/feed.xml")["collection"].posts()) == 2
+        assert len(self.open(links, "https://example.com/")["collection"].posts()) == 2
+
+    def test_the_sheet_calls_only_whole_sources_whole(self, links):
+        sheet = LinkSheet(links)
+        sheet.show()
+        sheet.address.setText(self.ARTICLE)
+        assert sheet.source_note.isHidden()
+        for whole in ("https://example.com/", "https://example.com/feed.xml",
+                      "https://medium.com/feed/@someone", "https://example.com/rss/"):
+            sheet.address.setText(whole)
+            assert not sheet.source_note.isHidden(), whole
+        sheet.close()
+
+    def test_in_the_window_only_that_post_is_there_to_create(self, links):
+        from nostr.ui.imports_window import ImportsWindow
+        window = ImportsWindow(links)
+        window.show()
+        window.import_link()
+        sheet = window.sheet()
+        sheet.address.setText(self.ARTICLE)
+        sheet.open_link()
+        settle()
+        assert window.posts.model_.rowCount() == 1
+        assert window.action_bar.create.text() == "Create Draft"
+        window.close()

@@ -74,12 +74,13 @@ class Images(QObject):
         pass
 
 
-def controller_for(tmp_path, *, manual=()):
-    relay = FakeRelay()
+def controller_for(tmp_path, *, manual=(), relay=None, scheduler=None):
+    relay = relay if relay is not None else FakeRelay()
     store = FeedSubscriptionStore(
         session_pool=FakeSessionPool(), relay_pool=None,
         relay_directory=FakeRelayDirectory(), cache_dir=tmp_path / "cache",
-        query=relay, publisher=relay, scheduler=FakeScheduler(), clock=lambda: NOW)
+        query=relay, publisher=relay, scheduler=scheduler or FakeScheduler(),
+        clock=lambda: NOW)
     fetcher = FakeFetcher({AUTHOR: ("ok", TWO_ITEM_FEED)})
     controller = ImportsController(
         relay_pool=None, relay_directory=FakeRelayDirectory(), session_pool=None,
@@ -312,24 +313,35 @@ class TestLayout:
 
 
 def test_freshness_words():
-    source = SimpleNamespace(automatic=True, error="", last_checked=NOW - 120, next_check=0)
+    source = SimpleNamespace(automatic=True, paused=False, error="", last_checked=NOW - 120,
+                             next_check=0)
     assert freshness(source, now=NOW) == "Checked 2 min ago"
     source.last_checked = NOW - 10
     assert freshness(source, now=NOW) == "Checked just now"
+    source.last_checked = NOW - 30 * 3600
+    assert freshness(source, now=NOW) == "Checked yesterday"     # inside a sentence
     source.last_checked = 0
     assert freshness(source, now=NOW) == "Not checked yet."
-    failed = SimpleNamespace(automatic=True, error="Boom.", last_checked=0,
+    failed = SimpleNamespace(automatic=True, paused=False, error="Boom.", last_checked=0,
                              next_check=NOW + 7200)
     assert freshness(failed, now=NOW) == "Boom. Next try in 2 hours."
-    manual = SimpleNamespace(automatic=False, error="", last_checked=0, next_check=0)
+    manual = SimpleNamespace(automatic=False, paused=False, error="", last_checked=0,
+                             next_check=0)
     assert freshness(manual, now=NOW) == "MyEditor reads this source when you open it."
+    # Automatic checks turned off in Source Settings: said so, an old
+    # error no longer is.
+    off = SimpleNamespace(automatic=True, paused=True, error="Boom.", last_checked=NOW - 120,
+                          next_check=0)
+    assert freshness(off, now=NOW) == "Not checked automatically \u00b7 Checked 2 min ago"
+    off.last_checked = 0
+    assert freshness(off, now=NOW) == "Not checked automatically"
 
 
 class TestAdding:
     """Add: Follow a Website, Import a File, Import a Link."""
 
     def test_the_add_menu(self, window):
-        actions = window.add_button.menu().actions()
+        actions = window.add_button.menu().actions()[:3]
         assert [a.text() for a in actions] == ["Follow a Website…", "Import a File…",
                                                "Import a Link…"]
         assert all(a.isEnabled() for a in actions)
@@ -339,7 +351,8 @@ class TestAdding:
         controller = controller_for(tmp_path)
         controller.read_only = True
         win = ImportsWindow(controller)
-        assert not any(a.isEnabled() for a in win.add_button.menu().actions())
+        assert not any(a.isEnabled() for a in (win.act_follow, win.act_import_file,
+                                               win.act_import_link))
         win.follow_website()
         assert win.sheet() is None
         assert win.placeholder_button is None
@@ -358,6 +371,10 @@ class TestAdding:
         assert window.sidebar.chosen() == next(e for e in entries(window)
                                                if e.key == source_key(AUTHOR))
         assert window.sheet() is None
+        # Review N4: on Older, where the posts the card promised are (a
+        # first check is a baseline), not on an empty New.
+        assert window.segment_older.isChecked()
+        assert sorted(titles(window)) == ["First", "Second"]
 
     def test_an_empty_inbox_offers_to_follow(self, tmp_path):
         controller = controller_for(tmp_path)
@@ -427,7 +444,7 @@ class TestScreenReaders:
         assert unnamed_controls(window) == []
 
     def test_also_with_a_message_and_an_empty_list(self, window):
-        window.banner.say("Skipped 2 posts.", "Undo", lambda: None)
+        window.banner.say("Skipped 2 posts.", "Undo", "undo")
         window.sidebar.select(LIST, SKIPPED_POSTS)
         assert unnamed_controls(window) == []
 
@@ -571,6 +588,10 @@ def test_a_closed_window_is_freed_without_the_collector(tmp_path):
         win.sheet().reject()
         settle()
     win._show_job_card()
+    win.show_view(LIST, INBOX)
+    win.posts.setCurrentIndex(win.posts.model_.index(0))
+    win.skip_or_restore()           # the Undo banner holds no callback of the window
+    assert win.banner.action is not None
     win.close()
     settle()
     ref = weakref.ref(win)
@@ -586,3 +607,44 @@ def test_a_closed_window_is_freed_without_the_collector(tmp_path):
             gc.enable()
         controller.account_changed(None)
         settle()
+
+
+def test_the_list_of_sources_says_when_a_change_is_not_shared(tmp_path):
+    """CP2 review N3: the list's messages reached no one since the Feeds
+    page went; a change that could not be shared waited without a word."""
+    from nostr.imports.subscriptions import NOT_SHARED
+    from tests.test_imports_subscriptions import Offline
+    relay, scheduler = Offline(), FakeScheduler()
+    controller = controller_for(tmp_path, relay=relay, scheduler=scheduler)
+    win = ImportsWindow(controller, load_settings=lambda: {},
+                        save_settings=lambda value: None)
+    win.show()
+    settle()
+    controller.subscriptions.add_feed(JOURNAL, "A journal")
+    scheduler.fire()
+    settle()
+    assert win.notice.text() == NOT_SHARED and not win.notice.isHidden()
+    relay.online = True
+    scheduler.fire()            # the next try, now answered
+    settle()
+    assert win.notice.text() == "" and win.notice.isHidden()
+    win.close()
+    controller.account_changed(None)
+    settle()
+
+
+def test_show_sidebar_is_reachable_with_the_keyboard(window):
+    """CP2 review N9: on Windows and Linux this window has no menu bar of
+    its own, and the toolbar's sidebar button took no focus, so a folded
+    sidebar (a narrow window) could not be brought back from the keyboard."""
+    button = window.sidebar_button
+    assert button.focusPolicy() & Qt.FocusPolicy.TabFocus
+    window.act_sidebar.setChecked(False)
+    assert not window.act_sidebar.isChecked()
+    button.setFocus(Qt.FocusReason.TabFocusReason)
+    QTest.keyClick(button, Qt.Key.Key_Space)
+    assert window.act_sidebar.isChecked()
+    # In the Tab chain: Shift+Tab from the Add button reaches it.
+    window.add_button.setFocus(Qt.FocusReason.TabFocusReason)
+    assert window.add_button.previousInFocusChain() is button or \
+        button.nextInFocusChain() is window.add_button

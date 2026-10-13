@@ -130,11 +130,21 @@ class TestIngest:
         source = store.source(KEY)
         assert (source.etag, source.last_modified) == ("old", "old")
 
-    def test_a_post_too_long_to_keep_is_counted(self, store, monkeypatch):
+    def test_a_post_too_long_to_keep_is_kept_cut_and_marked(self, store, monkeypatch):
+        """Engine review L7, CP2 review: a post past the limit was dropped
+        without a word. It is kept with its text cut, as STANDUP keeps one,
+        and marked, so importing it reads its own page."""
         monkeypatch.setattr("nostr.imports.inbox_store.MAX_BODY_BYTES", 100)
         long = make_item("long", guid="g-long", content_html="<p>" + "x" * 70_000 + "</p>")
-        result = store.ingest(KEY, [long])
-        assert result.too_long == 1
+        short = make_item("short", guid="g-short", content_html="<p>x</p>")
+        result = store.ingest(KEY, [long, short])
+        assert result.too_long == 1 and not result.error
+        assert sorted(view_titles(store, View(OLDER_POSTS))) == ["long", "short"]
+        kept = store.item(KEY, next(p.d_tag for p in store.page(View(OLDER_POSTS))
+                                    if p.title == "long"))
+        assert kept.partial and len(kept.content_html.encode("utf-8")) <= 100
+        assert not store.item(KEY, next(p.d_tag for p in store.page(View(OLDER_POSTS))
+                                        if p.title == "short")).partial
 
     def test_counts_per_source_and_stats(self, store, clock):
         store.ingest(KEY, items("a"))
@@ -426,3 +436,84 @@ def test_search_ignores_case_beyond_ascii(query, found):
                        make_item("Straße und Öl", guid="g2")])
     rows = store.page(View(OLDER_POSTS), query=query)
     assert sorted(row.title for row in rows) == found
+
+
+DAY = 24 * 3600
+
+
+class TestHowLongTextIsKept:
+    """The owner's decision Q-9: a post waiting in the inbox keeps its text
+    90 days at most; skipped or imported, it keeps only its title, link and
+    state after 30 days, which is enough to know it again."""
+
+    BODY = "<p>" + "Words of a post. " * 40 + "</p>"
+
+    def one(self, store, state_view=OLDER_POSTS):
+        (post,) = store.page(View(state_view))
+        return post
+
+    def test_a_waiting_post_keeps_its_text_ninety_days(self, store, clock):
+        store.ingest(KEY, [make_item("Kept", guid="g-kept", link="https://blog.example/kept",
+                                     content_html=self.BODY, author="Ann")])
+        before = self.one(store)
+        clock.now += 89 * DAY
+        assert store.trim_text() == 0
+        assert store.item(KEY, before.d_tag).content_html == self.BODY
+        clock.now += 2 * DAY
+        assert store.trim_text() == 1
+        after = self.one(store)
+        assert after.trimmed and after.state == before.state and after.d_tag == before.d_tag
+        assert (after.title, after.link) == ("Kept", "https://blog.example/kept")
+        assert (after.excerpt, after.image, after.author) == ("", "", "")
+        item = store.item(KEY, after.d_tag)
+        assert item.content_html == "" and item.partial
+        assert snapshots.identifier_of(item) == after.d_tag      # known again
+        assert store.trim_text() == 0                            # once
+
+    def test_a_skipped_post_keeps_it_thirty_days_after_the_skip(self, store, clock):
+        store.ingest(KEY, [make_item("Skipped", guid="g-s", content_html=self.BODY)])
+        post = self.one(store)
+        clock.now += 80 * DAY
+        store.skip(KEY, post.d_tag, post.revision)
+        clock.now += 20 * DAY            # 100 days here, 20 skipped
+        assert store.trim_text() == 0
+        clock.now += 11 * DAY
+        assert store.trim_text() == 1
+        skipped = self.one(store, SKIPPED_POSTS)
+        assert skipped.trimmed
+        # Restored, it waits again with its title and link: a draft made
+        # of it reads its page.
+        store.restore(KEY, skipped.d_tag, skipped.revision)
+        restored = self.one(store)
+        assert restored.trimmed and store.item(KEY, restored.d_tag).partial
+
+    def test_an_imported_post_keeps_it_thirty_days(self, store, clock):
+        store.ingest(KEY, [make_item("Imported", guid="g-i", content_html=self.BODY)])
+        post = self.one(store)
+        store.reconcile(drafted=[post.d_tag])
+        clock.now += 29 * DAY
+        assert store.trim_text() == 0
+        clock.now += 2 * DAY
+        assert store.trim_text() == 1
+        imported = self.one(store, IMPORTED)
+        assert imported.trimmed and imported.state == "drafted"
+
+    def test_an_inbox_from_before_counts_its_settled_posts_from_now(self, tmp_path, clock):
+        import sqlite3
+        path = tmp_path / "v2.sqlite3"
+        old = InboxStore(path, clock=clock)
+        old.sync_sources([(KEY, FEED, "Field notes", True)])
+        old.ingest(KEY, [make_item("Old", guid="g-o", content_html=self.BODY)])
+        post = old.page(View(OLDER_POSTS))[0]
+        old.skip(KEY, post.d_tag, post.revision)
+        old.close()
+        db = sqlite3.connect(str(path))
+        db.executescript("ALTER TABLE items DROP COLUMN changed_at; "
+                         "ALTER TABLE items DROP COLUMN trimmed; PRAGMA user_version = 2;")
+        db.close()
+        clock.now += 200 * DAY
+        upgraded = InboxStore(path, clock=clock)
+        assert upgraded.trim_text() == 0          # skipped long ago, counted from now
+        clock.now += 31 * DAY
+        assert upgraded.trim_text() == 1
+        upgraded.close()

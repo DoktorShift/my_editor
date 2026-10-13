@@ -57,6 +57,7 @@ from constants import (
     LIGHT_BORDER, LIGHT_MENU_BG, LIGHT_MUTED_FG, LIGHT_SELECTION,
 )
 from i18n import _
+from popup_placement import available_area
 
 # Button placement.
 LEADING = "leading"     # Go Back: the leading edge
@@ -504,16 +505,13 @@ class AssistantWindow(QDialog):
     def _tallest_page(self) -> int:
         """The most page height the screen has room for, with the window's
         title bar, margins and buttons around it."""
-        # A window not shown yet has no screen of its own to ask.
-        handle = self.windowHandle()
-        screen = (handle.screen() if handle is not None else None) \
-            or QGuiApplication.primaryScreen()
-        if screen is None:
+        area = available_area(self)
+        if area is None:
             return 10_000
         margins = self.layout().contentsMargins()
         around = (margins.top() + margins.bottom() + self.layout().spacing()
                   + self._button_row.sizeHint().height() + 60)
-        return max(200, screen.availableGeometry().height() - around)
+        return max(200, area.height() - around)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

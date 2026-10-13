@@ -302,12 +302,12 @@ def test_this_computer_remembers_its_own_first_publications(tmp_path, captured):
     assert asked == [] and _published_at(captured[1]) == when
 
 
-@pytest.mark.parametrize("case", ["the article's relay is down, another answers",
-                                  "the relay list moved to relays that never had it"])
-def test_the_publishing_computer_keeps_the_date_in_the_reviewers_cases(tmp_path, captured,
-                                                                       case):
-    # Both cases make the relays look as if the article were new; the
-    # computer that published it answers from its record, unasked.
+def test_the_publishing_computer_keeps_the_date_in_the_reviewers_cases(tmp_path, captured):
+    # The reviewer's two cases (the article's relay is down while another
+    # answers; the relay list moved to relays that never had it) both make
+    # the relays look as if the article were new. The computer that
+    # published it answers from its record, before any relay is asked, so
+    # one test covers both: the lookup is never called.
     from nostr.first_publications import FirstPublications
     record = FirstPublications(tmp_path / "first.json")
     record.remember(PK, "my-post", FIRST)

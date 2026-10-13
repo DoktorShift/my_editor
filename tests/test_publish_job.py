@@ -311,6 +311,19 @@ def _dialog(kind, tmp_path, job):
     return dialog
 
 
+def test_publish_article_opens_no_taller_than_a_small_screen(tmp_path, monkeypatch):
+    """1024x640 (a 13-inch MacBook Air at its larger text setting): the
+    whole window, title bar included, fits, so Publish is on screen."""
+    from PySide6.QtCore import QRect
+    import popup_placement
+    monkeypatch.setattr(popup_placement, "available_area", lambda widget: QRect(0, 25, 1024, 615))
+    dialog = _dialog("article", tmp_path, None)
+    assert dialog.height() + popup_placement.TITLE_BAR <= 615
+    assert dialog.width() <= 1024 and dialog.height() >= dialog.minimumHeight()
+    monkeypatch.setattr(popup_placement, "available_area", lambda widget: QRect(0, 0, 1920, 1080))
+    assert _dialog("article", tmp_path, None).size().toTuple() == (760, 680)
+
+
 class StubJob:
     def __init__(self):
         self.cancelled = False

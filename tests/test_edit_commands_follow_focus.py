@@ -15,6 +15,8 @@ What must hold:
   A right-click leaves no menu behind.
 """
 
+import pytest
+
 from tests.app_process import run_window_script
 
 SCRIPT = r"""
@@ -54,6 +56,46 @@ w._undo()
 r["field_after_undo"] = field.text()
 r["document_after_undo"] = ed.toPlainText()
 
+# Paste follows the clipboard and the focus (T2 of the CP3 fixes review).
+ed.setFocus()
+app.processEvents()
+QApplication.clipboard().clear()
+app.processEvents()
+r["paste_empty_clipboard"] = [w.act_paste.isEnabled(), w.act_paste_plain.isEnabled()]
+QApplication.clipboard().setText("PASTED")
+app.processEvents()
+r["paste_with_text"] = [w.act_paste.isEnabled(), w.act_paste_plain.isEnabled()]
+
+# A multi-line field in a window of its own (Edit Profile's About):
+# Undo and Redo are its own, never the document's behind (T1 of the CP3
+# fixes review).
+from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QPlainTextEdit
+ed.setFocus()
+ed.insertPlainText("!")                    # the document has a step to undo
+about_window = QPlainTextEdit(w)
+about_window.setWindowFlag(Qt.WindowType.Window)
+about_window.show()
+about_window.activateWindow()
+about_window.setFocus()
+app.processEvents()
+QTest.keyClicks(about_window, "about me")
+app.processEvents()
+r["about_undo_enabled"] = w.act_undo.isEnabled()
+document_before = ed.toPlainText()
+w.act_undo.trigger()
+r["about_after_undo"] = about_window.toPlainText()
+r["document_unchanged_by_undo"] = ed.toPlainText() == document_before
+w.act_redo.trigger()
+r["about_after_redo"] = about_window.toPlainText()
+about_window.setReadOnly(True)
+w._update_undo_redo_buttons()
+r["read_only_undo_enabled"] = w.act_undo.isEnabled()
+about_window.close()
+ed.setFocus()
+app.processEvents()
+
 # A right-click leaves no menu behind.
 from PySide6.QtCore import QTimer
 
@@ -86,3 +128,84 @@ def test_edit_commands_follow_the_focus_and_the_selection(tmp_path):
     assert r["field_after_undo"] == "abc"                # review L4 (early range)
     assert r["document_after_undo"] == "document words"
     assert r["menus_left"] == 0                          # review L2 (early range)
+    # T1 of the CP3 fixes review: a dialog's multi-line field.
+    assert r["about_undo_enabled"]
+    assert r["about_after_undo"] != "about me" and r["document_unchanged_by_undo"]
+    assert r["about_after_redo"] == "about me"
+    assert not r["read_only_undo_enabled"]
+    # T2: nothing to paste dims Paste, text on the clipboard enables it.
+    assert r["paste_empty_clipboard"] == [False, False]
+    assert r["paste_with_text"] == [True, True]
+
+
+def test_paste_in_a_pdf_tabs_find_field(monkeypatch):
+    """T2 of the CP3 fixes review: on a PDF tab, Paste was dimmed while
+    the find field had the focus and would take it."""
+    import main_window
+    from PySide6.QtCore import QObject
+    from PySide6.QtGui import QAction
+    from PySide6.QtWidgets import QApplication, QLineEdit
+    from main_window import MainWindow
+
+    class Host(QObject):
+        _update_clipboard_commands = MainWindow._update_clipboard_commands
+
+    host = Host()
+    host._imports_in_front, host.current_editor = lambda: None, lambda: None
+    host.current_pdf_viewer = lambda: object()
+    for name in ("cut", "copy", "delete", "paste", "paste_plain"):
+        setattr(host, f"act_{name}", QAction(name))
+    field = QLineEdit()
+    QApplication.clipboard().setText("12")
+    focus = {"widget": field}
+    monkeypatch.setattr(main_window.QApplication, "focusWidget",
+                        staticmethod(lambda: focus["widget"]))
+    host._update_clipboard_commands()
+    assert host.act_paste.isEnabled()
+    focus["widget"] = None                       # the reader: it copies, takes no paste
+    host._update_clipboard_commands()
+    assert not host.act_paste.isEnabled() and host.act_copy.isEnabled()
+    field.deleteLater()
+
+
+@pytest.mark.parametrize("name", ["a.txt", "b.md", "c.html"])
+def test_a_picture_on_the_clipboard_pastes_from_the_menu(name, monkeypatch):
+    """U1 of the CP3 fixes review: with only a picture on the clipboard,
+    Edit > Paste was dimmed in every document while Command-V pasted it.
+    What the editor takes, the menu offers, and Paste pastes it; Paste and
+    Match Style, which pastes words, stays dimmed."""
+    import main_window
+    from PySide6.QtCore import QMimeData, QObject
+    from PySide6.QtGui import QAction, QColor, QImage
+    from PySide6.QtWidgets import QApplication
+    from editor import HtmlEditor
+    from main_window import MainWindow
+
+    class Host(QObject):
+        _update_clipboard_commands = MainWindow._update_clipboard_commands
+        _edit_focused = MainWindow._edit_focused
+
+    document = HtmlEditor()
+    document._file_path = f"/notes/{name}"
+    pasted = []
+    document.image_pasted.connect(pasted.append)      # as MainWindow handles media
+    host = Host()
+    host._imports_in_front, host.current_pdf_viewer = lambda: None, lambda: None
+    host.current_editor = lambda: document
+    for action in ("cut", "copy", "delete", "paste", "paste_plain"):
+        setattr(host, f"act_{action}", QAction(action))
+    monkeypatch.setattr(main_window.QApplication, "focusWidget", staticmethod(lambda: document))
+    picture = QImage(16, 16, QImage.Format.Format_ARGB32)
+    picture.fill(QColor("#2a9d8f"))
+    mime = QMimeData()
+    mime.setImageData(picture)
+    QApplication.clipboard().setMimeData(mime)
+    host._update_clipboard_commands()
+    assert host.act_paste.isEnabled() and not host.act_paste_plain.isEnabled()
+    host._edit_focused("paste")
+    assert len(pasted) == 1
+    unhandled = HtmlEditor()                          # nobody takes media: nothing to paste
+    assert not unhandled.canPaste()
+    for editor in (document, unhandled):
+        editor.document().setModified(False)
+        editor.deleteLater()
