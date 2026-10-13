@@ -6715,7 +6715,7 @@ class MainWindow(QMainWindow):
         for read in getattr(ed, "_media_reads", []) if ed is not None else []:
             sha = read.drop()
             if sha is not None:
-                self._asset_manager.discard_stored(sha)
+                self._asset_manager.release_stored(sha)
 
     def _say_cannot_add(self, name: str) -> None:
         inform(self, title=_("Couldn’t add “{name}”").format(name=name),
@@ -6733,10 +6733,12 @@ class MainWindow(QMainWindow):
         if self._editor_widget_index(ed) < 0 or not read.take_over():
             # The document was closed, or the app quit, while the file was
             # read: it goes nowhere, nothing is uploaded, nothing is kept.
-            read.drop()
-            self._asset_manager.discard_stored(sha)
+            dropped = read.drop()
+            if dropped is not None:
+                self._asset_manager.release_stored(dropped)
             return
         asset = self._asset_manager.adopt_stored_media(sha, size=size, mime=mime, name=name)
+        self._asset_manager.release_stored(sha, taken=asset is not None)
         if asset is None:
             self._say_cannot_add(name)
             return
@@ -8603,7 +8605,8 @@ class _MediaRead:
             self.dropped = True
         self._written.wait(self.WRITE_WAIT_S)
         with self._lock:
-            return None if self.handled else self._stored
+            stored, self._stored = self._stored, None       # answered once
+            return None if self.handled else stored
 
 
 def _is_media(assets, name: str) -> bool:

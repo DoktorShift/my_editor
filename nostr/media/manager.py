@@ -20,6 +20,7 @@ import base64
 import binascii
 import hashlib
 import re
+import threading
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -161,6 +162,10 @@ class AssetManager(QObject):
 
         self._queue: Deque[str] = deque()
         self._inflight: Optional[str] = None
+        # Copies of audio and video kept by reads still going on, by sha256
+        # (store_media_file, release_stored), and the lock that keeps them.
+        self._keeping = threading.Lock()
+        self._kept_for: Dict[str, int] = {}
         self._jobs: Dict[str, Tuple[str, int]] = {}   # job name -> (sha, attempts)
         self._fetching: set = set()
         self._recovery: Dict[str, List[str]] = {}    # sha -> candidates left
@@ -352,20 +357,33 @@ class AssetManager(QObject):
             return None
         sha = None
         try:
-            sha = self._blob_store.put_bytes(data)
+            # Kept and counted at once (release_stored): a copy another read
+            # is taking out is never the one this read just kept.
+            with self._keeping:
+                sha = self._blob_store.put_bytes(data)
+                self._kept_for[sha] = self._kept_for.get(sha, 0) + 1
         finally:
             kept(sha)
         return sha, len(data)
 
-    def discard_stored(self, sha: str) -> None:
-        """Take a file stored for a document that is gone out of the local
-        store again, unless an asset or the media library has it too."""
-        if self._index.get(sha) is not None or sha in getattr(self._uploader, "files", {}):
-            return
-        try:
-            self._blob_store.cache_path(sha).unlink(missing_ok=True)
-        except OSError:
-            pass
+    def release_stored(self, sha: str, *, taken: bool = False) -> None:
+        """A read that kept a copy (store_media_file) is done with it:
+        ``taken`` by its document (adopted), else dropped. The copy goes out
+        of the local store again only when no other read still holds it,
+        and no asset or the media library has it."""
+        with self._keeping:
+            left = self._kept_for.get(sha, 0) - 1
+            if left > 0:
+                self._kept_for[sha] = left
+                return
+            self._kept_for.pop(sha, None)
+            if taken or self._index.get(sha) is not None \
+                    or sha in getattr(self._uploader, "files", {}):
+                return
+            try:
+                self._blob_store.cache_path(sha).unlink(missing_ok=True)
+            except OSError:
+                pass
 
     def adopt_stored_media(self, sha: str, *, size: int, mime: str,
                            name: str) -> Optional[DocumentAsset]:

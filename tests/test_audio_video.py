@@ -1161,3 +1161,61 @@ def test_quitting_whatever_point_a_read_has_reached_leaves_no_copy(tmp_path, sta
     song.write_bytes(BODY)
     r = run_window_script(QUIT_WRITING_SCRIPT, tmp_path, str(song), SHA, stage)
     assert r == {"kept": False}
+
+
+SHARED_READ_SCRIPT = r"""
+import json, os, sys, threading
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+from nostr.imports import workers
+workers.BACKGROUND_FROM_BYTES = 0
+import main_window
+
+song, sha = sys.argv[2], sys.argv[3]
+told = []
+main_window.inform = lambda parent, **kw: told.append(kw.get("title", ""))
+main_window._ask_save_changes = lambda parent, title, **kw: "discard"
+w = main_window.MainWindow()
+w.show()
+w._media_store.upload_bytes = lambda body, *, name, mime_type: None
+w.nostr_state._active = True
+w._update_nostr_commands()
+w._upload_limit = lambda: 10**9
+store = w._asset_manager._blob_store
+real_put = store.put_bytes
+puts = threading.Semaphore(0)
+
+def counted_put(data):
+    answer = real_put(data)
+    puts.release()
+    return answer
+
+store.put_bytes = counted_put
+first = w.new_tab()
+w._upload_into(first, song)
+second = w.new_tab()
+w._upload_into(second, song)
+puts.acquire(timeout=10)                  # both reads have kept their copy
+puts.acquire(timeout=10)
+w.close_tab(w._editor_widget_index(first))
+for _ in range(100):
+    app.processEvents()
+    threading.Event().wait(0.01)
+print("RESULT " + json.dumps({
+    "told": told,
+    "second has it": "￼" in second.toPlainText(),
+    "kept": store.cache_path(sha).exists()}))
+second.document().setModified(False)
+w._media_not_uploaded = lambda doc: []
+"""
+
+
+def test_closing_one_of_two_documents_reading_the_same_file_spares_the_other(tmp_path):
+    """Round 5, L1: the closed document's read took the shared copy away,
+    and the other document then refused the file."""
+    song = tmp_path / "song.mp3"
+    song.write_bytes(BODY)
+    r = run_window_script(SHARED_READ_SCRIPT, tmp_path, str(song), SHA)
+    assert r == {"told": [], "second has it": True, "kept": True}
