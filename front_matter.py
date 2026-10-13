@@ -747,9 +747,10 @@ def _block_list_like(lines: Sequence[str], items: Sequence[str]) -> Tuple[str, .
 
 
 # One item on a line of a TOML array over several lines: its indent, the
-# item ("..." or '...'), a comma after it or not, and a comment.
+# item ("..." or '...', or a number, true or a date as written), a comma
+# after it or not, and a comment.
 _TOML_ITEM_LINE = re.compile(
-    r"""^(\s*)("(?:[^"\\]|\\.)*"|'[^']*')(\s*,)?(\s*#.*)?$""")
+    r"""^(\s*)("(?:[^"\\]|\\.)*"|'[^']*'|[^\s,#"'\[\]{}]+)(\s*,)?(\s*#.*)?$""")
 
 
 def _multi_line_list_like(lines: Sequence[str],

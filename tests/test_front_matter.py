@@ -1256,3 +1256,15 @@ def test_a_lone_cr_ends_no_line_of_toml():
     front, _ = front_matter.split(text)
     assert from_front_matter(front).title == "T" and kept_in_file(front) == ALL_DETAILS
     assert unchanged_save(text) == text and changed(text, title="New") == text
+
+
+def test_a_toml_list_over_lines_holding_numbers_keeps_its_lines_and_comments():
+    """Round 10, L2: written on one line, every item quoted, its comments
+    gone, when a hashtag changed."""
+    text = ('+++\ntitle = "T"\ntags = [\n  "python", # a\n  3.10,     # b\n  1e3,\n  0x1F,\n'
+            '  true,\n]\n+++\n\nBody.\n')
+    front, _ = front_matter.split(text)
+    tags = from_front_matter(front).hashtags
+    assert changed(text, hashtags=tags + ("added",)) == text.replace(
+        "  true,\n]", '  true,\n  "added",\n]')
+    assert changed(text, hashtags=tags[1:]) == text.replace('  "python", # a\n', "")
