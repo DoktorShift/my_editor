@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""HTTP layer for Blossom: upload, mirror, probe, list, delete.
+"""HTTP layer for Blossom: upload, mirror, list, delete.
 
 Built on ``QNetworkAccessManager`` so all I/O stays on the Qt event
 loop without manual threading, the same pattern as ``AvatarLoader`` and
@@ -61,10 +61,6 @@ _UPLOAD_TIMEOUT_MS = 5 * 60 * 1000     # five minutes of *idle* time
 _LIST_TIMEOUT_MS = 30 * 1000
 _DELETE_TIMEOUT_MS = 30 * 1000
 _MIRROR_TIMEOUT_MS = 60 * 1000
-# A dedup probe runs before an upload the user is waiting on, so it gets
-# a short leash: a server that does not answer quickly is treated as not
-# having the blob and the upload proceeds.
-_HEAD_TIMEOUT_MS = 15 * 1000
 
 _USER_AGENT = b"my-editor-blossom/1"
 
@@ -755,67 +751,6 @@ class BlossomClient(QObject):
             expected_sha=(sha256 or "").lower() or None,
         )
         self._inflight[id(reply)] = wrapper
-
-    # -- has-blob probe ----------------------------------------------------
-
-    def head_blob(
-        self,
-        server: str,
-        sha256: str,
-        on_present: Callable[[], None],
-        on_absent: Callable[[], None],
-    ) -> None:
-        """Ask ``server`` whether it already holds ``sha256``.
-
-        BUD-06: "Clients that want to check whether a blob already exists
-        on the server SHOULD use ``HEAD /<sha256>`` from BUD-01", where
-        BUD-01 gives ``200 OK`` as "the blob exists and the server returns
-        the same metadata headers as ``GET /<sha256>`` without a response
-        body".
-
-        No authorization event is built or sent. BUD-11 makes auth
-        optional on this endpoint, and an unauthenticated probe cannot
-        leak a credential to a redirect target, so the feature cannot
-        weaken the boundary it is asking about.
-
-        Only ``200`` answers present. A 3xx says the blob lives at
-        another URL, and following it would defeat the redirect policy,
-        so it is reported absent; the cost of being wrong is one upload
-        the server answers with ``200`` and an existing descriptor. A
-        404, a transport failure, a timeout and every other status also
-        answer absent: BUD-06 warns the probe "is not a guarantee of the
-        eventual ``PUT /upload`` outcome", so an inconclusive result must
-        degrade to uploading, never to skipping.
-        """
-        sha = (sha256 or "").lower()
-        if not looks_like_sha256(sha):
-            on_absent()
-            return
-        request = self._prepare(
-            f"{server.rstrip('/')}/{sha}",
-            auth_event=None,
-            timeout_ms=_HEAD_TIMEOUT_MS,
-        )
-        reply = self._nam.head(request)
-        key = id(reply)
-        oversize = _guard_response_size(reply, _MAX_RESPONSE_BYTES)
-
-        def _finished() -> None:
-            try:
-                status = int(
-                    reply.attribute(QNetworkRequest.HttpStatusCodeAttribute) or 0
-                )
-                present = (
-                    reply.error() == QNetworkReply.NoError
-                    and status == 200
-                    and not oversize["hit"]
-                )
-                self._finish(key, on_present if present else on_absent)
-            finally:
-                reply.deleteLater()
-
-        reply.finished.connect(_finished)
-        self._inflight[key] = reply
 
     # -- list --------------------------------------------------------------
 

@@ -8,18 +8,18 @@ This is the layer the UI talks to. It owns:
     and the editor can all call ``fetch()`` on mount without fanning
     out N x M requests
   - the upload pipeline: hash, keep the bytes in the local cache, plan,
-    ask each server whether it already has the blob, sign auth and PUT
-    /upload only for the servers that do not, then replicate to the rest
-    one at a time and merge URLs back into the map
+    skip the servers the person's own listing says hold the blob, sign
+    auth and PUT /upload to the first of the rest, then replicate to the
+    others one at a time and merge URLs back into the map
   - the delete pipeline: sign auth, DELETE, remove from map
 
 Signing happens via the existing ``BunkerSessionPool``. The store keeps
 no key material of its own. Every signature costs the user a prompt in
 their signer app, which is what shapes the whole upload path: the paged
-/list walk reuses one token per server, the dedup probe is unsigned so
-asking a question is free, replication is sequential rather than a
-parallel prompt flood, and an upload failover is capped rather than
-exhaustive.
+/list walk reuses one token per server, a file the library already
+lists on a server is not sent there again, replication is sequential
+rather than a parallel prompt flood, and an upload failover is capped
+rather than exhaustive.
 
 State changes are surfaced through Qt signals so the dialogs can stay
 declarative.
@@ -277,7 +277,7 @@ class MediaStore(QObject):
         # Hashes this process committed itself during this session. Their
         # library records were written from a server's own confirmation
         # rather than from a /list response of unknown age, which is what
-        # makes them safe to dedup against without a probe.
+        # makes them safe to dedup against without listing again.
         self._committed: Set[str] = set()
 
         # Track active upload jobs by display name so the UI can render
@@ -780,12 +780,9 @@ class MediaStore(QObject):
         The bytes are put in the local cache first, so nothing that
         happens next decides whether they can still be displayed.
 
-        Nothing is signed until the store knows which servers actually
-        need the bytes. Every eligible server that the library cannot
-        vouch for is asked ``HEAD /<sha256>`` first, unsigned and in
-        parallel, and the ones that already hold the blob are dropped
-        from the plan. A file that is already everywhere finishes here:
-        no signature, no PUT, no prompt.
+        Servers the person's own, fresh listing says already hold the
+        blob are left out (see ``_servers_holding``). A file already on
+        every server finishes here: no signature, no PUT, no prompt.
 
         When the first eligible server fails in a way another server
         might not, the upload walks to the next one. It only ever walks
@@ -805,8 +802,8 @@ class MediaStore(QObject):
             self.upload_failed.emit(name, _("No media server is set up."))
             return
 
-        # The size plan runs before any dedup probe, so an oversized file
-        # is refused without a single request leaving the process.
+        # The size plan runs first, so an oversized file is refused
+        # without a single request leaving the process.
         plan: UploadPlan = plan_upload(len(body), servers)
         if plan.primary is None:
             # The number the user needs is the largest cap any configured
@@ -840,21 +837,15 @@ class MediaStore(QObject):
         self.upload_started.emit(name)
         self.upload_status.emit(name, state.status)
 
-        configured_primary = servers[0]
-
-        self._resolve_coverage(
-            sha,
-            eligible,
-            on_ready=lambda present: self._upload_missing(
-                name=name,
-                body=body,
-                mime_type=mime_type,
-                profile=profile,
-                sha=sha,
-                eligible=eligible,
-                present=present,
-                configured_primary=configured_primary,
-            ),
+        self._upload_missing(
+            name=name,
+            body=body,
+            mime_type=mime_type,
+            profile=profile,
+            sha=sha,
+            eligible=eligible,
+            present=self._servers_holding(sha, eligible),
+            configured_primary=servers[0],
         )
 
     def _has_room(self, server: str, sha: str, size: int, name: str) -> bool:
@@ -916,63 +907,28 @@ class MediaStore(QObject):
         return servers
 
     # ------------------------------------------------------------------
-    # Dedup: find out who already has the blob before signing anything
+    # Dedup: servers the person's own library says already hold the blob
     # ------------------------------------------------------------------
 
-    def _resolve_coverage(
-        self,
-        sha: str,
-        eligible: List[str],
-        *,
-        on_ready: Callable[[List[str]], None],
-    ) -> None:
-        """Report which of ``eligible`` already hold ``sha``.
+    def _servers_holding(self, sha: str, eligible: List[str]) -> List[str]:
+        """Which of ``eligible`` already hold ``sha`` for this person.
 
-        Two sources, in trust order. The library map answers for free,
-        but only when the record can be believed: one this process wrote
-        itself this session, or one from a ``/list`` inside the freshness
-        window. ``self._files`` is filled by ``/list`` alone, which only
-        runs when the media library is opened, so in a typical session it
-        is empty or arbitrarily old and a stale hit would be the reason
-        an upload silently did not happen.
+        Only the library map answers, and only when its record can be
+        believed: one this process wrote itself this session, or one from
+        a ``/list`` inside the freshness window. A listing is the person's
+        own files, so a hit there means the file is theirs on that server.
 
-        Everything the map cannot vouch for is asked directly. The probe
-        carries no authorization, so it costs no prompt, and an
-        inconclusive answer counts as absent: dedup may never be the
-        reason a blob failed to reach a server.
+        A server is never skipped because it merely has the bytes (an
+        unsigned ``HEAD``): someone else may have uploaded them, and then
+        the file is not the person's there, not in their listing, not
+        theirs to delete, and gone when the other owner deletes it. Such
+        a server gets the upload, which BUD-02 answers with a cheap 200.
         """
-        present: List[str] = []
-        if self._record_is_trustworthy(sha):
-            present = [s for s in eligible
-                       if s in servers_holding(self._files.get(sha), eligible)]
-        to_probe = [s for s in eligible if s not in present]
-        if not to_probe:
-            on_ready(present)
-            return
-
-        remaining = {"count": len(to_probe)}
-
-        def one_done() -> None:
-            remaining["count"] -= 1
-            if remaining["count"] > 0:
-                return
-            on_ready([s for s in eligible if s in present])
-
-        for server in to_probe:
-            def found(target=server) -> None:
-                present.append(target)
-                one_done()
-
-            self._client.head_blob(
-                server_origin(server), sha,
-                on_present=found,
-                on_absent=one_done,
-            )
-
-    def _record_is_trustworthy(self, sha: str) -> bool:
-        if sha in self._committed:
-            return True
-        return (time.monotonic() - self._last_fetch_at) < _FETCH_FRESHNESS_SECONDS
+        if sha not in self._committed and \
+                (time.monotonic() - self._last_fetch_at) >= _FETCH_FRESHNESS_SECONDS:
+            return []
+        held = servers_holding(self._files.get(sha), eligible)
+        return [s for s in eligible if s in held]
 
     def _upload_missing(
         self,
@@ -1282,7 +1238,7 @@ class MediaStore(QObject):
         # was already there, prefer the new URL list, which is freshest.
         self._files[media.hash] = media
         # Written from confirmations this process collected, so the next
-        # upload of the same bytes can trust it without a probe.
+        # upload of the same bytes can trust it without listing again.
         self._committed.add(media.hash)
         state = self._uploads.pop(name, None)
         if state is not None:

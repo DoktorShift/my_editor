@@ -84,15 +84,6 @@ class Ctx:
     def settle(self) -> None:
         self.nam.settle()
 
-    def probe(self) -> None:
-        """Answer the dedup probes and stop before whatever they cause.
-
-        Every upload now asks each planned server whether it already has
-        the blob, so a test that wants to drive the upload itself has to
-        get past that first.
-        """
-        self.nam.settle_verb("head")
-
     def verbs(self):
         return [verb for verb, _r, _b in self.nam.calls]
 
@@ -131,13 +122,8 @@ def tag(event, name):
 def test_upload_signs_once_then_puts_once(tmp_path):
     ctx = make_store(tmp_path, responder=FakeBlossomServer(SERVER))
     ctx.store.upload_bytes(BODY, name="a.png", mime_type="image/png")
-    # Nothing is signed until the server has said it does not have the
-    # blob: asking is free, signing costs the user a prompt.
-    assert ctx.verbs() == ["head"]
-    assert ctx.pool.calls == 0
-    ctx.probe()
     assert ctx.pool.calls == 1
-    assert ctx.verbs() == ["head", "put"]
+    assert ctx.verbs() == ["put"]
     ctx.settle()
     assert ctx.failures == []
     name, media = ctx.finished[0]
@@ -145,6 +131,20 @@ def test_upload_signs_once_then_puts_once(tmp_path):
     assert media.hash == SHA
     assert media.url == f"{SERVER}/{SHA}.png"
     assert ctx.store.files[SHA] is media
+
+
+def test_a_server_holding_the_blob_by_hearsay_still_gets_the_upload(tmp_path):
+    """A server can hold the bytes because someone else uploaded them.
+    Unless this person uploaded them there too, the file is not theirs
+    on that server: not in their listing, not theirs to delete, and gone
+    when the other owner deletes it, with every link they published.
+    BUD-02: a PUT of a blob the server has is answered 200, cheaply."""
+    server = FakeBlossomServer(SERVER, blobs=[descriptor()])
+    ctx = make_store(tmp_path, responder=server)
+    ctx.store.upload_bytes(BODY, name="a.png")
+    ctx.settle()
+    assert server.uploads == [BODY]
+    assert ctx.finished and ctx.finished[0][1].hash == SHA
 
 
 def test_upload_without_a_profile_never_touches_the_network(tmp_path):
@@ -167,8 +167,7 @@ def test_a_signer_refusal_keeps_its_exact_wording(tmp_path):
     this prefix. Rewording it silently reclassifies every one of them."""
     ctx = make_store(tmp_path, signer=FakeSigner(failure="user declined"))
     ctx.store.upload_bytes(BODY, name="a.png")
-    ctx.probe()
-    assert ctx.verbs() == ["head"]        # refused before the PUT
+    assert ctx.verbs() == []               # refused before the PUT
     assert ctx.failures[0][1] == (
         "Your signer app declined the request to the media server: user declined"
     )
@@ -338,10 +337,9 @@ def test_a_transport_failure_reaches_the_second_server(tmp_path):
                                             status=201)],
     )
     ctx.store.upload_bytes(BODY, name="a.png")
-    ctx.probe()
     ctx.nam.settle_one()                     # the primary's PUT fails
-    assert ctx.verbs() == ["head", "head", "put", "put"]
-    assert ctx.nam.calls[3][1].url().host() == "mirror.example"
+    assert ctx.verbs() == ["put", "put"]
+    assert ctx.nam.calls[1][1].url().host() == "mirror.example"
     # Each attempt signs a fresh token, scoped to the server it goes to.
     assert tag(ctx.tokens()[1], "server") == ["mirror.example"]
     ctx.nam.settle_one()
@@ -355,9 +353,8 @@ def test_a_403_produces_no_second_attempt(tmp_path):
     ctx = make_store(tmp_path, servers=(SERVER, MIRROR),
                      replies=[error_reply(403)])
     ctx.store.upload_bytes(BODY, name="a.png")
-    ctx.probe()
     ctx.nam.settle_one()
-    assert ctx.verbs() == ["head", "head", "put"]
+    assert ctx.verbs() == ["put"]
     assert ctx.pool.calls == 1
     assert ctx.failure_codes == [("a.png", ERROR_CODES.AUTH_REJECTED)]
 
@@ -371,9 +368,8 @@ def test_a_413_does_fail_over(tmp_path):
                                               status=201)],
     )
     ctx.store.upload_bytes(BODY, name="a.png")
-    ctx.probe()
     ctx.nam.settle_one()
-    assert ctx.verbs() == ["head", "head", "put", "put"]
+    assert ctx.verbs() == ["put", "put"]
     ctx.nam.settle_one()
     assert ctx.failures == []
 
@@ -384,7 +380,6 @@ def test_failover_stops_at_the_attempt_cap(tmp_path):
         replies=[error_reply(0), error_reply(0), json_reply(descriptor())],
     )
     ctx.store.upload_bytes(BODY, name="a.png")
-    ctx.probe()
     ctx.nam.settle_one()
     ctx.nam.settle_one()
     assert ctx.verbs().count("put") == 2
@@ -414,11 +409,9 @@ def test_failover_never_contacts_a_server_the_planner_skipped(tmp_path, monkeypa
                      replies=[error_reply(0)])
     ctx.store.upload_bytes(body, name="big.png")
     ctx.settle()
-    # Not even a dedup probe: a server that cannot take the file has no
-    # business being asked whether it already has it.
-    assert [r.url().host() for _v, r, _b in ctx.nam.calls] == [
-        "good.example", "good.example",
-    ]
+    # The one PUT to the server that can take it, and nothing to the
+    # other one, not even after that PUT failed.
+    assert [r.url().host() for _v, r, _b in ctx.nam.calls] == ["good.example"]
     assert len(ctx.failures) == 1
 
 
@@ -635,7 +628,6 @@ def test_an_upload_committed_during_a_fetch_survives_the_merge(tmp_path):
     assert len(ctx.nam.calls) == 1
 
     ctx.store.upload_bytes(BODY, name="a.png")
-    ctx.probe()
     ctx.nam.issued[-1].finish()                          # upload commits first
     assert SHA in ctx.store.files
 
@@ -680,7 +672,6 @@ def test_an_uploaded_blob_resolves_from_the_cache_with_no_network(tmp_path):
     sha = hashlib.sha256(PNG_BYTES).hexdigest()
 
     ctx.store.upload_bytes(PNG_BYTES, name="a.png", mime_type="image/png")
-    ctx.probe()
     ctx.settle()
     assert ctx.failures == []
 
@@ -702,7 +693,7 @@ def test_the_bytes_are_cached_before_anything_leaves_the_process(tmp_path):
 
     ctx.store.upload_bytes(PNG_BYTES, name="a.png", mime_type="image/png")
     assert cache.has(sha)
-    assert ctx.verbs() == ["head"]
+    assert ctx.verbs() == ["put"]
 
 
 def test_an_upload_refused_for_its_size_is_never_cached(tmp_path):
@@ -734,7 +725,6 @@ def test_a_cache_that_cannot_be_written_does_not_fail_the_upload(tmp_path):
     ctx = make_store(tmp_path, responder=FakeBlossomServer(SERVER),
                      blob_cache=Broken())
     ctx.store.upload_bytes(BODY, name="a.png")
-    ctx.probe()
     ctx.settle()
     assert ctx.failures == []
     assert ctx.finished[0][1].hash == SHA
@@ -743,7 +733,6 @@ def test_a_cache_that_cannot_be_written_does_not_fail_the_upload(tmp_path):
 def test_a_store_without_a_cache_still_uploads(tmp_path):
     ctx = make_store(tmp_path, responder=FakeBlossomServer(SERVER))
     ctx.store.upload_bytes(BODY, name="a.png")
-    ctx.probe()
     ctx.settle()
     assert ctx.failures == []
     assert ctx.finished[0][1].hash == SHA
