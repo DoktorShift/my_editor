@@ -35,6 +35,7 @@ detail they read otherwise is never read or changed by this app.
 
 from __future__ import annotations
 
+import difflib
 import functools
 import json
 import re
@@ -176,11 +177,15 @@ class FrontMatter:
     # as they were, as no way of writing them read back as set
     # (article_details); for whoever asked for it to be told.
     refused: FrozenSet[str] = field(default=frozenset(), compare=False)
+    # Every line of the block as the file writes it, from the opening line
+    # to the closing one, each with its own line ending ("\r\n", "\n", or
+    # none at the end of a file): a front matter mixing them is written
+    # back with each line's own (join). None for one MyEditor writes anew.
+    as_written: Tuple[Tuple[str, str], ...] = field(default=(), compare=False)
 
     def with_entries(self, entries: Sequence[Entry]) -> "FrontMatter":
-        return FrontMatter(tuple(entries), self.opening, self.closing, self.gap, self.newline,
-                           changed=tuple(entries) != self.entries or self.changed,
-                           syntax=self.syntax)
+        return replace(self, entries=tuple(entries), refused=frozenset(),
+                       changed=tuple(entries) != self.entries or self.changed)
 
     def with_refused(self, names: AbstractSet[str]) -> "FrontMatter":
         return replace(self, refused=frozenset(names))
@@ -216,11 +221,22 @@ def split(text: str) -> Tuple[Optional[FrontMatter], str]:
     if lines and not any(entry.key for entry in entries):
         return None, text                   # a divider, some text, a divider: text
     entries = _with_trailers_apart(entries)
-    newline = "\r\n" if "\r\n" in found.group(0) else "\n"
+    as_written = _lines_as_written(found.group(0))
+    endings = [ending for _line, ending in as_written]
+    newline = "\r\n" if endings.count("\r\n") > endings.count("\n") else "\n"
     rest = text[found.end():]
     body = rest.lstrip("\r\n")
     return (FrontMatter(tuple(entries), found.group(1), found.group(3),
-                        rest[:len(rest) - len(body)], newline, syntax=syntax), body)
+                        rest[:len(rest) - len(body)], newline, syntax=syntax,
+                        as_written=as_written), body)
+
+
+def _lines_as_written(text: str) -> Tuple[Tuple[str, str], ...]:
+    """``(line, its line ending)`` of each line of ``text``: "\r\n", "\n",
+    or "" for a last line without one."""
+    parts = re.split(r"(\r?\n)", text)
+    lines = tuple(zip(parts[0::2], parts[1::2] + [""]))
+    return lines[:-1] if lines[-1] == ("", "") else lines
 
 
 def parsed(front: Optional[FrontMatter]) -> Optional[dict]:
@@ -412,12 +428,37 @@ def join(front: Optional[FrontMatter], body: str) -> str:
     if front is None or front.changed and not any(
             line.strip() for entry in front.entries for line in entry.lines):
         return body                         # none, or none left (an empty one stays)
-    nl = front.newline
-    lines = [line for entry in front.entries for line in entry.lines]
-    # The blank lines after it as they were: none when the text began
-    # right under it.
-    return (front.opening + nl + nl.join(lines) + (nl if lines else "") + front.closing
-            + nl + front.gap.replace("\r\n", "\n").replace("\n", nl) + body.lstrip("\n"))
+    if not front.changed and front.as_written:
+        written = "".join(line + ending for line, ending in front.as_written)
+    else:
+        lines = [front.opening, *(line for entry in front.entries for line in entry.lines),
+                 front.closing]
+        written = "".join(line + ending for line, ending in zip(lines, _endings(front, lines)))
+    # The blank lines after it as they were (none when the text began
+    # right under it); in the file's line ending for one written anew.
+    gap = front.gap if front.as_written else \
+        front.gap.replace("\r\n", "\n").replace("\n", front.newline)
+    return written + gap + body.lstrip("\n")
+
+
+def _endings(front: FrontMatter, lines: Sequence[str]) -> List[str]:
+    """The line ending of each of ``lines`` (the block's, opening and
+    closing ones too), as ``front`` was written: a line kept, its own; one
+    written in place of another, that one's; a new one, the ending of the
+    line it follows. A front matter written anew: the file's line ending."""
+    old = front.as_written
+    if not old:
+        return [front.newline] * len(lines)
+    endings: List[str] = []
+    matcher = difflib.SequenceMatcher(None, [line for line, _ending in old], list(lines),
+                                      autojunk=False)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        for k in range(j2 - j1):
+            if tag == "equal" or tag == "replace" and i1 + k < i2:
+                endings.append(old[i1 + k][1])
+            else:
+                endings.append(endings[-1] if endings else front.newline)
+    return endings
 
 
 def entry(key: str, value: Union[str, Sequence[str]], *, syntax: str = YAML,

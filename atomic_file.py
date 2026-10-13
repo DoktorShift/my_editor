@@ -154,9 +154,23 @@ def read_text_document(path: PathLike, *, encoding: str = "utf-8") -> Tuple[str,
     when the file has no line break), so that saving writes the file
     back the way it was. Raises OSError, and ValueError for text that is
     not in ``encoding``."""
+    text, newline = read_text_as_written(path, encoding=encoding)
+    return with_newlines(text), newline
+
+
+def read_text_as_written(path: PathLike, *, encoding: str = "utf-8") -> Tuple[str, str]:
+    """A text file's content with each line ending as the file writes it,
+    and the line ending most of its lines use (``newline_of``), for a part
+    of it written back as it was (a Markdown file's front matter: see
+    ``save_text_document``'s ``head``). Raises as ``read_text_document``."""
     with open(path, "rb") as f:
         text = f.read().decode(encoding)
-    return text.replace("\r\n", "\n").replace("\r", "\n"), newline_of(text)
+    return text, newline_of(text)
+
+
+def with_newlines(text: str) -> str:
+    """``text`` with every line ending as ``"\n"``."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def newline_of(text: str) -> str:
@@ -171,12 +185,13 @@ def newline_of(text: str) -> str:
 
 
 def save_text_document(path: PathLike, text: str, *, encoding: str = "utf-8",
-                       newline: Optional[str] = None) -> None:
+                       newline: Optional[str] = None, head: str = "") -> None:
     """``save_document`` for text. Lines end in ``newline``, the ending the
     file had when it was read (see ``read_text_document``); a new file gets
-    this system's."""
+    this system's. ``head`` goes before them as it is, each of its lines
+    with the ending it has (a front matter as it was written)."""
     text = text.replace("\r\n", "\n")
-    save_document(path, text.replace("\n", newline or os.linesep).encode(encoding))
+    save_document(path, (head + text.replace("\n", newline or os.linesep)).encode(encoding))
 
 
 def read_json(path: PathLike, kind: Type[T]) -> T:

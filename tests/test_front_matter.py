@@ -961,3 +961,44 @@ def test_a_toml_list_over_lines_holding_numbers_can_be_changed():
     assert from_front_matter(front).hashtags == ("1", "b") and kept_in_file(front) == frozenset()
     out = changed(text, hashtags=("1", "b", "c"))
     assert from_front_matter(front_matter.split(out)[0]).hashtags == ("1", "b", "c")
+
+
+# -- line endings as each line has them -----------------------------------------
+
+@pytest.mark.parametrize("text", [
+    "---\ntitle: x\r\ntags: [a]\n---\n\nB\n",
+    "---\r\ntitle: x\ntags: [a]\r\n---\r\n\n\r\nB\n",
+    '+++\ntitle = "x"\r\n[taxonomies]\ntags = ["a"]\r\n+++\n\nB\n',
+    "﻿---\r\ntitle: x\n---\nB",
+    "---\ntitle: x\n---",
+    "---\n\n---\nB\n",
+])
+def test_a_save_with_no_change_keeps_every_line_ending_as_written(text):
+    """A front matter mixing CRLF and LF was saved with one of them on every
+    line: a file changed that no one asked to change."""
+    assert unchanged_save(text) == text
+
+
+def test_a_changed_front_matter_keeps_the_endings_of_the_lines_it_keeps():
+    text = "---\r\ntitle: x\nlayout: post\r\n---\n\nB\n"
+    assert changed(text, title="New") == text.replace("title: x", "title: New")
+    # A new line takes the ending of the line it follows.
+    assert changed(text, summary="S") == text.replace("layout: post\r\n",
+                                                      "layout: post\r\nsummary: S\r\n")
+    assert changed(text, title="") == text.replace("title: x\n", "")
+
+
+def test_the_window_saves_a_front_matter_with_its_own_line_endings(tmp_path):
+    """The file is read and saved with its line endings made one; its
+    front matter keeps each line's own, its text the file's own."""
+    paths = []
+    for name, text in (("mixed.md", "---\r\ntitle: x\nlayout: post\r\n---\n\nBody text.\n"),
+                       ("lone.md", "---\ntitle: a\rb\nlayout: post\n---\n\nBody text.\n"),
+                       ("crlf.md", "---\r\ntitle: x\r\n---\r\n\r\nBody text.\r\n")):
+        path = tmp_path / name
+        path.write_bytes(text.encode("utf-8"))
+        paths.append((str(path), text))
+    r = run_window_script(SCRIPT, tmp_path, *[path for path, _text in paths])
+    for path, text in paths:
+        assert r[os.path.basename(path) + " saved"] == text.replace(
+            "Body text.", "Body text. More."), path

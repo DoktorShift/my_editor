@@ -45,7 +45,8 @@ from constants import (
 from widgets import ElidedLabel, FindBar, LineNumberGutter, FileChangedBar, UpdateBar
 from format_toolbar import FormatToolbar
 from atomic_file import (
-    read_json, read_text_document, save_document, save_text_document, write_json,
+    read_json, read_text_as_written, save_document, save_text_document, with_newlines,
+    write_json,
 )
 import diagnostics
 import file_paths
@@ -3098,9 +3099,15 @@ class MainWindow(QMainWindow):
         """Load file content into an editor with per-format handling.
 
         Shared by open_path and _reload_from_disk so both agree on the
-        dispatch and on post-load normalization.
+        dispatch and on post-load normalization. ``content`` is as the file
+        writes it: its line endings become "\n" here, but for a Markdown
+        file's front matter, which keeps each line's own (saved so again).
         """
         ext = path.lower()
+        front = None
+        if ext.endswith('.md'):
+            front, content = front_matter.split(content)
+        content = with_newlines(content)
         if ext.endswith(('.html', '.htm')):
             ed.setHtml(content)
             # Lists stay real lists (the editor edits them as such); what
@@ -3110,12 +3117,11 @@ class MainWindow(QMainWindow):
         elif ext.endswith('.md'):
             # The article's details are the file's front matter (Q-F): shown
             # in Article Details, never in the text, never published as it.
-            front, body = front_matter.split(content)
             ed._front_matter = front
             details = from_front_matter(front).keeping(kept_in_file(front))
             ed._article_details = details if details != ArticleDetails() or details.kept \
                 else None
-            self._load_markdown(ed, body)
+            self._load_markdown(ed, content)
         elif ext.endswith('.rmd'):
             # R Markdown is edited as source, the way RStudio does it.
             ed.setPlainText(content)
@@ -3148,7 +3154,7 @@ class MainWindow(QMainWindow):
             return self._open_pdf_tab(path)
 
         try:
-            content, newline = read_text_document(path)
+            content, newline = read_text_as_written(path)
         except (OSError, ValueError) as e:
             inform(self, title=_("Couldn't open \u201c{name}\u201d").format(
                        name=os.path.basename(path)),
@@ -3549,6 +3555,7 @@ class MainWindow(QMainWindow):
 
         ext = path.lower()
         front = None
+        head = ""                   # a Markdown file's front matter, as written
         try:
             if ext.endswith('.pdf'):
                 return self._save_as_pdf(ed, path)
@@ -3579,14 +3586,20 @@ class MainWindow(QMainWindow):
                                           getattr(ed, "_front_matter", None))
                 if not self._saving_without(ed, front, path):
                     return False
-                content = front_matter.join(front, content)
+                head = front_matter.join(front, "")
+                if head:
+                    content = content.lstrip("\n")
+                if front is not None and getattr(ed, "_front_matter", None) is None:
+                    # One written anew: in the file's line ending.
+                    head = head.replace("\n", getattr(ed, "_newline", None) or os.linesep)
             else:
                 # .txt and anything unknown: images cannot be carried, so
                 # they are omitted rather than left as the raw U+FFFC
                 # placeholder the old toPlainText call wrote out.
                 content = serialize_plain_with_images(ed.document(), lambda fmt: None)
 
-            save_text_document(path, content, newline=getattr(ed, "_newline", None))
+            save_text_document(path, content, newline=getattr(ed, "_newline", None),
+                               head=head)
             if ext.endswith('.md'):
                 ed._front_matter = front
                 ed._details_not_saved = front.refused if front is not None else frozenset()
@@ -3724,7 +3737,7 @@ class MainWindow(QMainWindow):
         if not path or not os.path.exists(path):
             return
         try:
-            content, newline = read_text_document(path)
+            content, newline = read_text_as_written(path)
         except (OSError, ValueError) as e:
             inform(self, title=_("Couldn't reload \u201c{name}\u201d").format(
                        name=os.path.basename(path)),
