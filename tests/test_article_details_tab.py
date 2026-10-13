@@ -128,7 +128,7 @@ ed = w.new_tab()
 ed.textCursor().insertText("Body of the article.")
 w.act_article_details.setChecked(True)
 mine = ArticleDetails(title="My Title", summary="My summary", image="https://cdn.example/c.jpg",
-                      hashtags=("bitcoin",), coauthors=(("b2" * 32, "wss://r.example"),),
+                      hashtags=("Bitcoin",), coauthors=(("b2" * 32, "wss://r.example"),),
                       zaps=(("zap", PK, "", "1"), ("zap", "b2" * 32, "wss://r.example", "1")))
 w._set_article_details(ed, mine)
 choice = StashChoice(kind=StashKind.ARTICLE, identifier="my-title", title="My Title",
@@ -152,11 +152,12 @@ print("RESULT " + json.dumps(r))
 def test_after_save_as_draft_article_details_shows_and_keeps_what_was_saved(tmp_path):
     from tests.app_process import run_window_script
     r = run_window_script(STASH_SCRIPT, tmp_path)
+    # As typed: the hashtags keep their case (the draft's t tags are lower case).
     assert (r["summary"], r["cover"], r["tags"]) == (
-        "My summary", "https://cdn.example/c.jpg", "bitcoin")
+        "My summary", "https://cdn.example/c.jpg", "Bitcoin")
     assert r["rows"] == 1 and r["zaps"] is True and r["fixed"] is True
     assert r["after"] == ["My Title!", "My summary", "https://cdn.example/c.jpg",
-                          ["bitcoin"], 1, 2]
+                          ["Bitcoin"], 1, 2]
 
 
 def test_the_publish_window_hands_back_only_what_changed_in_it(monkeypatch):

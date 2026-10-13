@@ -8025,11 +8025,7 @@ class MainWindow(QMainWindow):
         """
         tags: list[list[str]] = []
         if choice.kind is StashKind.ARTICLE:
-            base = details or ArticleDetails()
-            if base.identifier and base.identifier != choice.identifier:
-                base = base.with_changes(published_at=None)
-            tags = base.with_changes(identifier=choice.identifier, title=choice.title,
-                                     summary=choice.summary).draft_tags(
+            tags = _details_saved_as(details, choice).draft_tags(
                 content, author=self._author_of(profile))
         try:
             return build_inner_event(
@@ -8078,11 +8074,14 @@ class MainWindow(QMainWindow):
         )
         # The tab's article is what was just saved: its model holds exactly
         # that (title, summary, cover, hashtags, co-authors, zaps), so
-        # Article Details goes on showing it, never an older draft.
+        # Article Details goes on showing it, never an older draft. The
+        # tab's own details as typed (hashtags in their case, which the
+        # draft's tags are not), else those the draft holds.
         if choice.kind is StashKind.ARTICLE:
-            ed._article_details = ArticleDetails.from_tags(
-                inner.get("tags") or [], signer=str(inner.get("pubkey") or "")).with_changes(
-                identifier=choice.identifier, title=choice.title)
+            own = getattr(ed, "_article_details", None)
+            ed._article_details = _details_saved_as(
+                own if own is not None else ArticleDetails.from_tags(
+                    inner.get("tags") or [], signer=str(inner.get("pubkey") or "")), choice)
         # A successful stash clears the modified flag - the tab's
         # contents now match the latest draft snapshot on the network.
         ed._recovered_title = ""
@@ -8354,6 +8353,17 @@ class MainWindow(QMainWindow):
             binding.title = record.title
         self._update_tab_title()
         self._dismiss_conflict_banner(ed)
+
+
+def _details_saved_as(details: Optional[ArticleDetails], choice: StashChoice) -> ArticleDetails:
+    """An article's details as a draft is saved with them: the identifier,
+    title and summary chosen in Save as Draft win; under another identifier
+    it is another article, with a first publication of its own."""
+    base = details or ArticleDetails()
+    if base.identifier and base.identifier != choice.identifier:
+        base = base.with_changes(published_at=None)
+    return base.with_changes(identifier=choice.identifier, title=choice.title,
+                             summary=choice.summary)
 
 
 def _is_media(assets, name: str) -> bool:
