@@ -139,8 +139,8 @@ class HtmlEditor(QTextEdit):
         # Injected by the window so the editor carries no knowledge of
         # what an asset is or where its bytes live.
         self._resource_resolver = None
-        # What other apps get for an audio or video object (set_media_lookup).
-        self._media_text = None
+        # The app's own objects as other apps get them (set_object_lookup).
+        self._outside = None
         # Undo counts at which the document holds only a paragraph made for
         # typing at a file: Undo and Redo pass over them, so the paragraph
         # and the words typed into it are one step (_pass_over_this_step).
@@ -1085,19 +1085,23 @@ class HtmlEditor(QTextEdit):
             self._indent_typed_bullet(line, start, spaces, has_bullet, delta)
 
     # -------- Audio and video --------
-    def set_media_lookup(self, lookup) -> None:
-        """Install ``lookup(name)``: None unless the object named ``name`` is
-        audio or video (a paragraph of its own, kept that way); for one that
-        is, the text another app gets for it when it is copied (its
-        address, or its name while it uploads)."""
-        self._media_text = lookup
+    def set_object_lookup(self, lookup) -> None:
+        """Install ``lookup(name)``: for one of the app's own objects (a
+        picture, audio or video) a paste.Outside, how other apps get it on
+        the clipboard, and whether it is audio or video (a paragraph of its
+        own, kept that way); None for anything else."""
+        self._outside = lookup
+
+    def _outside_of(self, name: str):
+        return self._outside(name) if self._outside is not None else None
 
     def _is_media(self, name: str) -> bool:
-        return self._media_text is not None and self._media_text(name) is not None
+        found = self._outside_of(name)
+        return found is not None and found.media
 
     def is_media_block(self, block) -> bool:
         """Whether ``block`` holds an audio or video object and nothing else."""
-        if self._media_text is None or not block.isValid() or block.text() != "\ufffc":
+        if self._outside is None or not block.isValid() or block.text() != "\ufffc":
             return False
         fmt = block.begin().fragment().charFormat()
         return fmt.isImageFormat() and self._is_media(fmt.toImageFormat().name())
@@ -2035,28 +2039,31 @@ class HtmlEditor(QTextEdit):
         Markdown, so a paste here keeps every structure exactly. (Qt's own
         copy would offer Qt's Markdown, which reads a heading's weight as
         bold, and builds an OpenDocument copy of every selection.)"""
-        if not self._holds_structure():
-            mime = super().createMimeDataFromSelection()
-            mime.setText(rich_text.plain_text_of(self._outside_copy()))
-            return mime
         cursor = self.textCursor()
         fragment = cursor.selection()
         mime = QMimeData()
-        mime.setText(rich_text.plain_text_of(self._outside_copy()))
-        mime.setHtml(fragment.toHtml())
+        # What other apps read: the app's own objects as their address (or
+        # name), never their internal name.
+        mime.setText(rich_text.plain_text_of(self._outside_copy(html=False)))
+        mime.setHtml(self._outside_copy(html=True).toHtml())
+        # What a paste here reads (private): the objects themselves.
+        mime.setData(paste.LITERAL_HTML_MIME, fragment.toHtml().encode("utf-8"))
+        if not self._holds_structure():
+            return mime
         mime.setData(paste.MARKDOWN_MIME, paste.selection_markdown(
-            cursor, outside=self._media_text).encode("utf-8"))
-        # What a paste here reads: the words as they are, the structure as
-        # Markdown.
+            cursor, outside=self._outside_of).encode("utf-8"))
+        # The words as they are, the structure as Markdown.
         mime.setData(paste.LITERAL_MIME,
                      paste.selection_markdown(cursor, literal=True).encode("utf-8"))
         return mime
 
-    def _outside_copy(self):
-        """The selection as other apps get it: audio and video as their
-        address (or name), never the object's stand-in character."""
+    def _outside_copy(self, *, html: bool):
+        """The selection as other apps get it: each of the app's own objects
+        as its Outside. In ``html``, audio and video as a link to it and a
+        picture as its address or its bytes; in text, each as its address
+        or its name, never the object's stand-in character."""
         fragment = self.textCursor().selection()
-        if self._media_text is None:
+        if self._outside is None:
             return fragment
         doc = QTextDocument()
         QTextCursor(doc).insertFragment(fragment)
@@ -2066,16 +2073,25 @@ class HtmlEditor(QTextEdit):
             while not it.atEnd():
                 piece = it.fragment()
                 fmt = piece.charFormat()
-                text = (self._media_text(fmt.toImageFormat().name())
-                        if piece.isValid() and fmt.isImageFormat() else None)
-                if text is not None:
-                    found.append((piece.position(), piece.length(), text))
+                outside = (self._outside_of(fmt.toImageFormat().name())
+                           if piece.isValid() and fmt.isImageFormat() else None)
+                if outside is not None:
+                    found.append((piece.position(), piece.length(), outside,
+                                  fmt.toImageFormat()))
                 it += 1
-        for position, length, text in reversed(found):
+        for position, length, outside, image in reversed(found):
             cursor = QTextCursor(doc)
             cursor.setPosition(position)
             cursor.setPosition(position + length, QTextCursor.MoveMode.KeepAnchor)
-            cursor.insertText(text, QTextCharFormat())
+            if html and not outside.media and outside.src:
+                image.setName(outside.src)
+                cursor.insertImage(image)
+                continue
+            words = QTextCharFormat()
+            if html and outside.href:
+                words.setAnchor(True)
+                words.setAnchorHref(outside.href)
+            cursor.insertText(outside.text, words)
         return QTextDocumentFragment(doc)
 
     def insertFromMimeData(self, source):
@@ -2091,7 +2107,7 @@ class HtmlEditor(QTextEdit):
         with words get one of their own: the paragraph is split before and
         after it, the words on each side keeping their paragraph's format.
         Part of the same step of Undo as what brought it there."""
-        if self._media_text is None:
+        if self._outside is None:
             return
         doc = self.document()
         found = []
@@ -2164,12 +2180,12 @@ class HtmlEditor(QTextEdit):
             return
         if self._pasted_media(source, text):
             return
-        if (self._keeps_local_formats() and source.hasFormat(paste.LITERAL_MIME)
-                and source.hasHtml() and not rich_text.is_code_block(cursor.block())):
+        if (self._keeps_local_formats() and source.hasFormat(paste.LITERAL_HTML_MIME)
+                and not rich_text.is_code_block(cursor.block())):
             # Copied here, pasted into a file that keeps underline and
-            # colors: Qt's own copy of it, with them.
+            # colors: Qt's own copy of it, with them (and its objects).
             own = QTextDocument()
-            own.setHtml(source.html())
+            own.setHtml(bytes(source.data(paste.LITERAL_HTML_MIME)).decode("utf-8"))
             rich_text.insert_document(cursor, own)
             self.setTextCursor(cursor)
             self.ensureCursorVisible()

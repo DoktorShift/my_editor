@@ -73,6 +73,7 @@ from markdown_writer import (
 )
 from editor import HtmlEditor
 import link_url
+import paste
 import rich_text
 import image_safety
 import url_safety
@@ -95,7 +96,8 @@ from update_dialog import UpdateDialog, WhatsNewDialog
 from settings_window import SettingsWindow
 from update_flow import AUTOMATIC, guide_url, plan_for
 import theme
-from export_html import document_to_html, normalize_after_set_html, sniff_image_ext
+from export_html import (
+    document_to_html, image_data_uri, normalize_after_set_html, sniff_image_ext)
 from find_replace import find_all, replace_all, replace_match, visible_matches
 from word_count import count_words, reading_minutes
 from export_pdf import export_pdf, load_page_setup
@@ -1209,7 +1211,7 @@ class MainWindow(QMainWindow):
         self._update_editor_theme(ed)
         self._apply_view_prefs_to_editor(ed)
         ed.set_resource_resolver(self._resolve_asset_image, ASSET_SCHEME)
-        ed.set_media_lookup(self._media_text)
+        ed.set_object_lookup(self._outside_of)
         ed.set_local_image_resolver(lambda name, e=ed: self._resolve_local_image(e, name))
         ed.image_pasted.connect(lambda img, e=ed: self._handle_pasted_image(e, img))
         ed.notice.connect(lambda text: self.status.showMessage(text, 8000))
@@ -6746,14 +6748,20 @@ class MainWindow(QMainWindow):
         asset = self._asset_manager.get(sha) if sha else None
         return asset.alt if asset is not None and asset.is_media and asset.alt else None
 
-    def _media_text(self, name: str) -> Optional[str]:
-        """For an audio or video object of the text, what another app gets
-        for it: its address once uploaded, its name until then; None for
-        any other object."""
-        media = _media_asset(self._asset_manager, name)
-        if media is None:
+    def _outside_of(self, name: str) -> Optional[paste.Outside]:
+        """How one of this app's objects (an asset) goes to another app on
+        the clipboard: by its address once uploaded, else audio or video by
+        its name and a picture by its bytes; None for any other object."""
+        sha = parse_asset_key(name)
+        asset = self._asset_manager.get(sha) if sha else None
+        if asset is None:
             return None
-        return _published_address(media) if media.is_uploaded else media.alt
+        address = _published_address(asset) if asset.is_uploaded else ""
+        if asset.is_media:
+            return paste.Outside(True, address or asset.alt, address)
+        data = None if address else self._asset_manager.resolve_bytes(asset.key)
+        return paste.Outside(False, address or asset.alt, address,
+                             address or (image_data_uri(data) or "" if data else ""))
 
     def _media_not_uploaded(self, doc) -> list:
         """The audio and video in ``doc`` not on a media server yet."""

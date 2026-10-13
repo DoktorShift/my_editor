@@ -894,3 +894,85 @@ def test_typing_at_a_file_is_one_step_of_undo(tmp_path):
         assert r[where + " one redo"] == r[where + " typed"]
         assert r[where + " undone again"] == start
         assert r[where + " word undone"] == start
+
+
+CLIPBOARD_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+from PySide6.QtGui import QImage, QColor, QTextCursor
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window, paste
+from nostr.blossom.store import MediaFile
+
+song, sha = sys.argv[2], sys.argv[3]
+w = main_window.MainWindow()
+w.show()
+w._media_store.upload_bytes = lambda body, *, name, mime_type: None
+w.nostr_state._active = True
+w._update_nostr_commands()
+w._upload_limit = lambda: 10**9
+ed = w.new_tab()
+ed.setFocus()
+QTest.keyClicks(ed, "Words")
+w._upload_into(ed, song)
+url = f"https://cdn.example/{sha}"
+w._media_store.upload_status.emit(f"myeditor-asset:{sha}", "uploading")
+w._media_store.upload_finished.emit(f"myeditor-asset:{sha}", MediaFile(
+    hash=sha, url=url, mime_type="audio/mpeg", size=1,
+    urls=[{"server": "https://cdn.example", "url": url}]))
+app.processEvents()
+picture = QImage(4, 4, QImage.Format.Format_RGB32)
+picture.fill(QColor("red"))
+buffer = QBuffer()
+buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+picture.save(buffer, "PNG")
+asset = w._asset_manager.adopt_bytes(bytes(buffer.data()), alt="red")
+c = ed.textCursor()
+c.movePosition(QTextCursor.MoveOperation.End)
+ed.setTextCursor(c)
+w._insert_asset(ed, asset, alt="red")
+ed.selectAll()
+copied = ed.createMimeDataFromSelection()
+private = (paste.LITERAL_MIME, paste.LITERAL_HTML_MIME)
+r = {"formats": copied.formats(),
+     "outside": {kind: bytes(copied.data(kind)).decode("utf-8", "replace")
+                 for kind in copied.formats() if kind not in private},
+     "private": {kind: bytes(copied.data(kind)).decode("utf-8", "replace")
+                 for kind in private if copied.hasFormat(kind)}}
+# Back into MyEditor, in a file that keeps its own formats (HTML): the
+# objects themselves.
+html_tab = w.new_tab()
+html_tab._keeps_local_formats = lambda: True
+html_tab.insertFromMimeData(copied)
+doc = html_tab.document()
+r["pasted back"] = sorted(set(main_window.iter_image_names(doc)))
+for i in range(w.tabs.count()):
+    e = w._editor_from_widget(w.tabs.widget(i))
+    if e is not None:
+        e.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_no_internal_name_ever_leaves_the_app_on_the_clipboard(tmp_path):
+    """Other apps get the real address in every format (a picture not
+    uploaded yet: its bytes in HTML, its name in text); MyEditor's own
+    private formats carry the objects, so a paste here brings them back."""
+    song = tmp_path / "song.mp3"
+    song.write_bytes(BODY)
+    r = run_window_script(CLIPBOARD_SCRIPT, tmp_path, str(song), SHA)
+    for kind, data in r["outside"].items():
+        assert "myeditor-asset" not in data, kind
+        assert "￼" not in data, kind
+    assert f"{URL}.mp3" in r["outside"]["text/plain"]
+    assert f'href="{URL}.mp3"' in r["outside"]["text/html"]
+    assert "data:image/png;base64," in r["outside"]["text/html"]
+    assert all("myeditor-asset" in data for data in r["private"].values())
+    assert len(r["private"]) == 2
+    assert len(r["pasted back"]) == 2 and all(n.startswith("myeditor-asset:")
+                                              for n in r["pasted back"])

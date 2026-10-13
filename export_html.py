@@ -69,7 +69,7 @@ _OBJ = "\ufffc"
 _LINE_SEP = "\u2028"
 
 
-def _data_uri(data: bytes) -> str | None:
+def image_data_uri(data: bytes) -> str | None:
     """Base64 data URI for image bytes, or None when unrecognized."""
     mime = sniff_image_mime(data)
     if mime is None:
@@ -162,7 +162,7 @@ def _render_image(img_fmt, source_url_for, policy, asset_resolver) -> str:
     if data is None:
         data = policy.read(name)
 
-    uri = _data_uri(data) if data else None
+    uri = image_data_uri(data) if data else None
     if uri is not None:
         return f'<img src="{uri}"{attrs}>'
     if is_portable_image_source(name):

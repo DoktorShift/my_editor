@@ -52,7 +52,7 @@ import json
 import re
 from dataclasses import dataclass
 from html import unescape
-from typing import List, Optional, Tuple
+from typing import List, NamedTuple, Optional, Tuple
 
 from PySide6.QtCore import QMimeData
 from PySide6.QtGui import (
@@ -67,8 +67,22 @@ import rich_text
 
 MARKDOWN_MIME = "text/markdown"
 # The editor's own copy, written literally: only its structure is Markdown.
+# Like the HTML one beside it, it is private: it names the app's own
+# objects (pictures, audio and video) by their internal names, so a paste
+# here brings them back; what other apps read names none of them (Outside).
 LITERAL_MIME = "application/x-myeditor-markdown"
+LITERAL_HTML_MIME = "application/x-myeditor-html"
 VSCODE_MIME = "vscode-editor-data"
+
+
+class Outside(NamedTuple):
+    """How one of the app's own objects goes to another app on the
+    clipboard: never by its internal name."""
+
+    media: bool         # audio or video, a paragraph of its own
+    text: str           # in text and Markdown: its address, else its name
+    href: str = ""      # where it is, once on a media server
+    src: str = ""       # a picture's source in HTML: its address, else its bytes
 
 # --------------------------------------------------------------------------- #
 # Plain text that is Markdown                                                  #
@@ -467,8 +481,8 @@ def selection_markdown(cursor: QTextCursor, *, literal: bool = False,
     """The selection as Markdown, for the clipboard: pictures keep their
     names, so they are found again when pasted into this document.
     ``literal``: its text written to read back as the same text.
-    ``outside(name)``: for Markdown other apps read, the text an object
-    stands as there (audio or video: its address), or None to keep it."""
+    ``outside(name)``: for Markdown other apps read, the Outside of one of
+    the app's own objects (None for any other picture, kept as it is)."""
     doc = QTextDocument()
     QTextCursor(doc).insertFragment(cursor.selection())
     started_in = cursor.document().findBlock(cursor.selectionStart())
@@ -478,10 +492,12 @@ def selection_markdown(cursor: QTextCursor, *, literal: bool = False,
         rich_text.set_heading(QTextCursor(doc.begin()), rich_text.BODY)
 
     def keep_pictures(fmt: QTextImageFormat) -> str:
-        text = outside(fmt.name()) if outside is not None else None
-        if text is not None:
-            return text
-        return image_markdown(str(fmt.property(QTextImageFormat.Property.ImageAltText) or ""),
-                              fmt.name())
+        alt = str(fmt.property(QTextImageFormat.Property.ImageAltText) or "")
+        found = outside(fmt.name()) if outside is not None else None
+        if found is None:
+            return image_markdown(alt, fmt.name())
+        if found.media or not found.href:
+            return found.text
+        return image_markdown(alt, found.href)
 
     return document_to_markdown(doc, keep_pictures, literal=literal)
