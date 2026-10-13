@@ -429,7 +429,8 @@ def _saving_host(window_open=False):
                                currentMessage=lambda: shown[-1][0] if shown else ""),
         _media_save_said="",
     )
-    for name in ("_on_media_save_started", "_on_media_save_finished", "_say_media_save_running"):
+    for name in ("_on_media_save_started", "_on_media_save_finished", "_say_media_save_running",
+                 "_media_save_announced"):
         setattr(host, name, getattr(MainWindow, name).__get__(host))
     return host, shown
 
@@ -466,6 +467,8 @@ def test_the_library_windows_share_the_windows_saver():
     init = textwrap.dedent(inspect.getsource(MainWindow.__init__))
     assert "self._media_saver.started.connect(self._on_media_save_started)" in init
     assert "self._media_saver.finished.connect(self._on_media_save_finished)" in init
+    assert "self._media_saver.batch_finished.connect(self._on_media_saves_finished)" in init
+    assert "self.status.messageChanged.connect(self._drop_status_tip)" in init
 
 
 def test_quitting_stops_a_save_and_its_part_file_goes(monkeypatch):
@@ -554,7 +557,8 @@ def _status_host():
     host = SimpleNamespace(window_open=False, _media_saver=SimpleNamespace(current=""),
                            status=QStatusBar(), _media_save_said="")
     host._media_window_open = lambda: host.window_open
-    for name in ("_on_media_save_started", "_on_media_save_finished", "_say_media_save_running"):
+    for name in ("_on_media_save_started", "_on_media_save_finished", "_say_media_save_running",
+                 "_media_save_announced"):
         setattr(host, name, getattr(MainWindow, name).__get__(host))
     return host
 

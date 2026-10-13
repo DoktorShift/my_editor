@@ -232,7 +232,7 @@ from nostr.membership_controller import MembershipController
 from nostr.key_vault import KeyVault
 from nostr.account_controller import AccountController
 from nostr.ui.media_library_dialog import MediaLibraryDialog, format_size
-from nostr.ui.media_saver import MediaSaver, save_failure
+from nostr.ui.media_saver import MediaSaver, save_failure, saves_failure
 from nostr.ui.media_servers_dialog import MediaServersDialog
 from nostr.ui.publish_article_dialog import PublishArticleDialog
 from nostr.ui.publish_copy_dialog import resolve_pick
@@ -622,8 +622,12 @@ class MainWindow(QMainWindow):
         # Save As from either: it goes on when the window that asked
         # closes, and is said in the status bar then.
         self._media_saver = MediaSaver(self._media_image_loader, parent=self)
-        # "Saving “x”…" while this bar says it, to be followed by its end.
+        # What this bar last said about a save ("Saving “x”…" to be followed
+        # by its end), and the message its tooltip of reasons belongs to.
         self._media_save_said = ""
+        self._status_tip = ""
+        self.status.messageChanged.connect(self._drop_status_tip)
+        self._media_saver.batch_finished.connect(self._on_media_saves_finished)
         self._media_saver.started.connect(self._on_media_save_started)
         self._media_saver.finished.connect(self._on_media_save_finished)
         # The Media Servers sheet while it is open (it is modal).
@@ -6326,16 +6330,37 @@ class MainWindow(QMainWindow):
         or when this bar still says it is saving (a library window opened
         meanwhile): kept until the next message, as a saved document's
         is."""
-        announced = bool(self._media_save_said) and \
-            self.status.currentMessage() == self._media_save_said
+        announced = self._media_save_announced()
         self._media_save_said = ""
         if why == "cancelled":
             if announced:
                 self.status.clearMessage()
             return
         if announced or not self._media_window_open():
-            self.status.showMessage(save_failure(why, target) if why
-                                    else _("Saved: {path}").format(path=target), 0)
+            self._media_save_said = (save_failure(why, target) if why
+                                     else _("Saved: {path}").format(path=target))
+            self.status.showMessage(self._media_save_said, 0)
+
+    def _on_media_saves_finished(self, total: int, failures: list) -> None:
+        """A Save to Folder ended without every file: said at its end, where
+        its saves were said, with every reason in the tooltip."""
+        if not failures or not (self._media_save_announced() or not self._media_window_open()):
+            return
+        self._media_save_said, tip = saves_failure(total, failures)
+        self.status.showMessage(self._media_save_said, 0)
+        self._status_tip = self._media_save_said
+        self.status.setToolTip(tip)
+
+    def _media_save_announced(self) -> bool:
+        """Whether the status bar still shows what it last said about a save."""
+        return bool(self._media_save_said) and \
+            self.status.currentMessage() == self._media_save_said
+
+    def _drop_status_tip(self, message: str) -> None:
+        """The reasons in the tooltip belong to the message they explain."""
+        if message != self._status_tip:
+            self._status_tip = ""
+            self.status.setToolTip("")
 
     def _open_membership_window(self) -> None:
         """Nostr > EINUNDZWANZIG Membership."""

@@ -716,3 +716,63 @@ def test_save_as_onto_a_file_that_was_there_replaces_it(tmp_path, monkeypatch, s
     save_as(monkeypatch, world, media, out / "Clip.mp4")
     assert wait_for(lambda: (out / "Clip.mp4").read_bytes() == body and not saving(world), 5)
     assert folder(out) == ["Clip.mp4"]
+
+
+# --------------------------------------------------------------------------- #
+# Save to Folder: what wasn't saved, at the end
+# --------------------------------------------------------------------------- #
+
+def _three_with_one_gone(server):
+    one, three = blob(server, b"one" * 100), blob(server, b"three" * 100, day=2)
+    gone = blob(server, b"two" * 100, day=1)
+    del _Blobs.files[gone.hash]                        # no longer on any server
+    names = {one.hash: "One.mp4", gone.hash: "Two.mp4", three.hash: "Three.mp4"}
+    return [one, gone, three], names
+
+
+SUMMARY = ("2 of 3 files were saved. “Two.mp4” isn’t on your media servers anymore, so it "
+           "couldn’t be saved.")
+
+
+def test_save_to_folder_says_at_the_end_what_wasnt_saved(tmp_path, monkeypatch, server):
+    files, names = _three_with_one_gone(server)
+    world = library(tmp_path, monkeypatch, files, names=names)
+    out = tmp_path / "out"
+    out.mkdir()
+    save_to_folder(monkeypatch, world, out)
+    assert wait_for(lambda: len(folder(out)) == 2 and not saving(world), 5)
+    assert world.dialog._status.text() == SUMMARY
+    assert world.dialog._status.toolTip() == (
+        "“Two.mp4” isn’t on your media servers anymore, so it couldn’t be saved.")
+
+
+def test_save_to_folder_says_what_wasnt_saved_after_its_window_closed(
+        tmp_path, monkeypatch, server):
+    from PySide6.QtWidgets import QStatusBar
+    files, names = _three_with_one_gone(server)
+    keeper, saver = _keeper(tmp_path)
+    bar = QStatusBar()
+    class Host:                                    # the main window's part of it
+        status, _media_save_said, _status_tip = bar, "", ""
+
+        @staticmethod
+        def _media_window_open():
+            return False
+
+    host = Host()
+    import main_window
+    for name in ("_on_media_save_started", "_on_media_save_finished", "_on_media_saves_finished",
+                 "_media_save_announced", "_drop_status_tip"):
+        setattr(host, name, getattr(main_window.MainWindow, name).__get__(host))
+    bar.messageChanged.connect(host._drop_status_tip)
+    saver.started.connect(host._on_media_save_started)
+    saver.finished.connect(host._on_media_save_finished)
+    saver.batch_finished.connect(host._on_media_saves_finished)
+    out = tmp_path / "out"
+    out.mkdir()
+    saver.save_all([(media, str(out / names[media.hash]), None) for media in files])
+    assert wait_for(lambda: len(folder(out)) == 2 and bar.currentMessage() == SUMMARY, 5)
+    assert bar.toolTip() == (
+        "“Two.mp4” isn’t on your media servers anymore, so it couldn’t be saved.")
+    bar.showMessage("Saved: /Users/me/Essay.md")
+    assert bar.toolTip() == ""

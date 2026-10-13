@@ -91,7 +91,7 @@ from .media_grid import (
     Tile,
 )
 from .media_preview import QuickLook
-from .media_saver import MediaSaver, save_failure
+from .media_saver import MediaSaver, save_failure, saves_failure
 from .thumbnail_loader import ThumbnailLoader
 
 _PREFIXES = {"image": "image/", "video": "video/", "audio": "audio/"}
@@ -301,6 +301,7 @@ class MediaLibraryDialog(QDialog):
         self._saver.started.connect(self._on_save_started)
         self._saver.progress.connect(self._save_bar.setValue)
         self._saver.finished.connect(self._on_save_finished)
+        self._saver.batch_finished.connect(self._on_saves_finished)
         footer.addWidget(self._storage, 0,
                          Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         layout.addLayout(footer)
@@ -797,14 +798,21 @@ class MediaLibraryDialog(QDialog):
             folder = QFileDialog.getExistingDirectory(self, _("Choose a Folder"))
             targets = [(tile, os.path.join(folder, _save_name(tile))) for tile in files] \
                 if folder else []
-        for tile, target in targets:
-            sha, visibility = tile.key, self._visibility
-            opener = ((lambda data: visibility.open_private(sha, data))
-                      if visibility.is_private(sha) else None)
-            # The person named one file, and was asked before it replaced
-            # anything; a folder's names are the library's, and replace
-            # nothing.
-            self._saver.save(tile.media, target, opener=opener, keep_existing=len(files) > 1)
+        saves = [(tile.media, target, self._opener(tile.key)) for tile, target in targets]
+        if len(files) == 1:
+            # The person named it, and was asked before it replaced a file.
+            for media, target, opener in saves:
+                self._saver.save(media, target, opener=opener)
+        elif saves:
+            # A folder's names are the library's, and replace nothing.
+            self._saver.save_all(saves)
+
+    def _opener(self, sha: str):
+        """What opens a private file's envelope into the file; None for a
+        public one."""
+        visibility = self._visibility
+        return ((lambda data: visibility.open_private(sha, data))
+                if visibility.is_private(sha) else None)
 
     def _show_saving(self, target: str) -> None:
         self._show_status(_("Saving “{name}”…").format(name=os.path.basename(target)), "")
@@ -823,6 +831,14 @@ class MediaLibraryDialog(QDialog):
             self._say(save_failure(why, target), error=True)
         else:
             self._rest_status()
+
+    def _on_saves_finished(self, total: int, failures: list) -> None:
+        """A Save to Folder ended without every file: said at its end, each
+        reason in the tooltip."""
+        if failures:
+            text, tip = saves_failure(total, failures)
+            self._say(text, error=True)
+            self._status.setToolTip(tip)
 
     def _cancel_save(self) -> None:
         self._saver.cancel()
@@ -1150,6 +1166,7 @@ class MediaLibraryDialog(QDialog):
 
     def _show_status(self, text: str, tone: str) -> None:
         self._status.setText(text)
+        self._status.setToolTip("")
         self._status.setProperty("tone", tone)
         self._status.style().unpolish(self._status)
         self._status.style().polish(self._status)

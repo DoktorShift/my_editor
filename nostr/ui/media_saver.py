@@ -17,19 +17,27 @@ from __future__ import annotations
 
 import hashlib
 import os
-from dataclasses import dataclass
-from typing import Callable, List, Optional
+from dataclasses import dataclass, field
+from typing import Callable, List, Optional, Tuple
 
 from PySide6.QtCore import QObject, Signal
 
 from atomic_file import free_path, save_document
-from i18n import _
+from i18n import _, ngettext
 
 from ..blossom.store import MediaFile
 from .thumbnail_loader import write_problem
 
 # Reasons another server may still have the right file.
 _NEXT_SERVER = ("network", "missing", "server", "wrong_file")
+
+
+@dataclass
+class _Batch:
+    """The files of one Save to Folder, and the ones that weren't saved."""
+    total: int
+    left: int
+    failures: List[Tuple[str, str]] = field(default_factory=list)   # (path, why)
 
 
 @dataclass
@@ -42,6 +50,7 @@ class _Save:
     opener: Optional[Callable[[bytes], Optional[bytes]]]
     # A file found at the target stays, and this one takes a free name.
     keep_existing: bool
+    batch: Optional[_Batch] = None
 
 
 class MediaSaver(QObject):
@@ -56,6 +65,9 @@ class MediaSaver(QObject):
     # the next one; a private file's wrong key ("key") is the same
     # wherever the file comes from.
     finished = Signal(str, str)
+    # A Save to Folder ended (not stopped): how many files it had, and
+    # the (path, why) of each that wasn't saved; saves_failure says it.
+    batch_finished = Signal(int, list)
 
     def __init__(self, loader, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -93,14 +105,28 @@ class MediaSaver(QObject):
         stays too. Either way a name an earlier save is still going to
         is never taken.
         """
+        self._enqueue(media, target, opener, keep_existing)
+        self._next()
+
+    def save_all(self, files) -> None:
+        """Save to Folder: each ``(media, target, opener)`` of ``files``,
+        replacing nothing, and say at the end (``batch_finished``) what
+        wasn't saved."""
+        batch = _Batch(total=len(files), left=len(files))
+        for media, target, opener in files:
+            self._enqueue(media, target, opener, True, batch)
+        self._next()
+
+    def _enqueue(self, media: MediaFile, target: str, opener, keep_existing: bool,
+                 batch: Optional[_Batch] = None) -> None:
         taken = {save.target for save in self._queue}
         if keep_existing or target in taken:
             target, keep_existing = free_path(target, taken), True
         elif not os.path.lexists(target):
             keep_existing = True
         urls = [u.get("url") for u in media.urls if u.get("url")] or [media.url]
-        self._queue.append(_Save(media.hash, media.size, target, urls, opener, keep_existing))
-        self._next()
+        self._queue.append(_Save(media.hash, media.size, target, urls, opener, keep_existing,
+                                 batch))
 
     def cancel(self) -> None:
         """Stop the save running and drop the ones waiting."""
@@ -117,8 +143,7 @@ class MediaSaver(QObject):
             if cached.is_file():
                 self._queue.pop(0)
                 self.started.emit(save.target)
-                why = self._save_cached(save, cached)
-                self.finished.emit(save.target, why)
+                self._done(save, self._save_cached(save, cached))
                 continue
             self._percent = 0
             self._download = self._loader.download_to(
@@ -163,8 +188,19 @@ class MediaSaver(QObject):
             self._next()
             return
         self._queue.pop(0)
-        self.finished.emit(save.target, why)
+        self._done(save, why)
         self._next()
+
+    def _done(self, save: _Save, why: str) -> None:
+        self.finished.emit(save.target, why)
+        batch = save.batch
+        if batch is None:
+            return
+        batch.left -= 1
+        if why and why != "cancelled":
+            batch.failures.append((save.target, why))
+        if batch.left == 0 and why != "cancelled":
+            self.batch_finished.emit(batch.total, list(batch.failures))
 
 
 def save_failure(why: str, path: str) -> str:
@@ -187,3 +223,13 @@ def save_failure(why: str, path: str) -> str:
         "name": _("“{name}” couldn’t be saved: its name is too long. Choose a shorter one."),
     }.get(why) or _("“{name}” couldn’t be saved there. Choose another folder.")
     return said.format(name=os.path.basename(path))
+
+
+def saves_failure(total: int, failures: list) -> Tuple[str, str]:
+    """What a Save to Folder that didn't save every file says at its end,
+    and every reason, one per line, for its tooltip."""
+    reasons = [save_failure(why, path) for path, why in failures]
+    saved = total - len(failures)
+    head = ngettext("{saved} of {total} file was saved.", "{saved} of {total} files were saved.",
+                    total).format(saved=saved, total=total)
+    return f"{head} {reasons[0]}", "\n".join(reasons)
