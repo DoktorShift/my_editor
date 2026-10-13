@@ -22,7 +22,7 @@ from typing import Dict, Optional
 
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QAction, QColor, QKeySequence
-from PySide6.QtWidgets import QMenu, QPushButton, QToolBar, QToolButton, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QMenu, QPushButton, QToolBar, QToolButton, QWidget
 
 import format_icons
 from constants import (
@@ -32,7 +32,8 @@ from constants import (
 from i18n import _, pgettext
 
 # The buttons, in order; None is a separator.
-LAYOUT = ("bold", "italic", "strike", None, "link", None, "bullets", "numbers", "quote")
+LAYOUT = ("bold", "italic", "strike", None, "link", None, "bullets", "numbers", "checklist",
+          "quote")
 
 
 def tooltip_for(action: QAction) -> str:
@@ -92,6 +93,31 @@ class FormatToolbar(QToolBar):
         self.set_style_name(_("Body"))
         self.set_dark(dark)
 
+    def add_trailing(self, widget: QWidget) -> QWidget:
+        """A holder for ``widget`` (the Write, Preview and Split switch), to
+        go right of the toolbar, outside it, looking like its far end. A
+        narrow window then moves the toolbar's own buttons into its
+        chevron, never the switch (a narrow Split needs it, Q-N). Showing
+        or hiding the holder shows or hides the switch."""
+        holder = QWidget()
+        holder.setObjectName("FormatBarTrailing")
+        holder.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        row = QHBoxLayout(holder)
+        row.setContentsMargins(6, 3, 8, 3)
+        row.addWidget(widget)
+        self._trailing = holder
+        self._style_trailing()
+        return holder
+
+    def _style_trailing(self) -> None:
+        holder = getattr(self, "_trailing", None)
+        if holder is None:
+            return
+        background, border = ((DARK_MENU_BG, DARK_BORDER) if self._dark
+                              else (LIGHT_MENU_BG, LIGHT_BORDER))
+        holder.setStyleSheet(f"#FormatBarTrailing {{ background: {background};"
+                             f" border: none; border-bottom: 1px solid {border}; }}")
+
     # -- what the window tells it ------------------------------------------------
 
     def set_style_name(self, name: str) -> None:
@@ -110,6 +136,7 @@ class FormatToolbar(QToolBar):
             "link": format_icons.link(ink),
             "bullets": format_icons.bulleted_list(ink),
             "numbers": format_icons.numbered_list(ink),
+            "checklist": format_icons.checklist(ink),
             "quote": format_icons.quote(ink),
         }
         for name, icon in icons.items():
@@ -153,6 +180,7 @@ class FormatToolbar(QToolBar):
             }}
         """)
         self._style_style_button(text, border, hover, selection)
+        self._style_trailing()
 
     def _style_style_button(self, text: str, border: str, hover: str, selection: str) -> None:
         dim = format_icons.dimmed(QColor(text))

@@ -39,7 +39,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 
 from i18n import _
 
-from . import CLIENT_NAME, crypto, events
+from . import CLIENT_NAME, crypto, events, refs
 from .relay import RelayPool, Subscription
 
 
@@ -635,6 +635,10 @@ class BunkerClient(QObject):
         """
         if not self._is_connected:
             on_failure("not connected")
+            return
+        refusal = refs.signing_refusal(unsigned_event)
+        if refusal:
+            on_failure(refusal)
             return
 
         payload = {

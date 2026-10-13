@@ -122,6 +122,21 @@ class EnchantBackend(SpellBackend):
         self._lib.enchant_dict_add_to_session(dictionary, data, len(data))
         return None
 
+    def _unlearn(self, word: str, language: str) -> Optional[bool]:
+        dictionary = self._dict(language)
+        if not dictionary or not hasattr(self._lib, "enchant_dict_remove"):
+            return False
+        data = word.encode("utf-8")
+        self._lib.enchant_dict_remove(dictionary, data, len(data))
+        return True
+
+    def _has_learned(self, word: str, language: str) -> Optional[bool]:
+        dictionary = self._dict(language)
+        if not dictionary or not hasattr(self._lib, "enchant_dict_is_added"):
+            return None
+        data = word.encode("utf-8")
+        return self._lib.enchant_dict_is_added(dictionary, data, len(data)) == 1
+
     def _dict(self, language: str) -> Optional[int]:
         """The dictionary of one language, asked for once; None when
         Enchant has none for it (its words then all count as right)."""
@@ -179,6 +194,14 @@ def _declare(lib) -> None:
     lib.enchant_broker_request_dict.restype = c_void_p
     lib.enchant_broker_free_dict.argtypes = [c_void_p, c_void_p]
     lib.enchant_broker_free_dict.restype = None
+    # Enchant 2 also takes a word out of the person's list again.
+    for name, restype in (("enchant_dict_remove", None), ("enchant_dict_is_added", c_int)):
+        try:
+            function = getattr(lib, name)
+        except AttributeError:
+            continue
+        function.argtypes = [c_void_p, c_char_p, c_ssize_t]
+        function.restype = restype
     for name in ("enchant_dict_add", "enchant_dict_add_to_session"):
         function = getattr(lib, name)
         function.argtypes = [c_void_p, c_char_p, c_ssize_t]

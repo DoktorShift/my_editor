@@ -30,9 +30,16 @@ Tidying what Qt read:
 - A picture inside the clipboard or on a disk cannot come along; it is
   counted, so the person can be told.
 
-Text copied in this editor carries its Markdown (``text/markdown``), so
-copying and pasting here keeps everything exactly. VS Code says which
+What a page shows as text stays text: the Markdown written in between
+escapes it (``literal``), so "[x](y)", "**stars**" or "<div>" on a page
+arrive as those characters. Text copied in this editor carries its
+Markdown twice: as it would be saved (``text/markdown``, for Markdown
+opened as its text and for other apps) and written literally
+(``LITERAL_MIME``), which a paste here reads, so copying and pasting
+keeps every word and every structure exactly. VS Code says which
 language it copied: Markdown is read as Markdown, code becomes code.
+
+Markdown is read without HTML (``PASTE_FEATURES``): a tag in it is text.
 
 Plain text is read as Markdown only when it clearly is Markdown (two
 signs of it, such as a "# " heading and a "- " list); otherwise the
@@ -49,16 +56,18 @@ from typing import List, Optional, Tuple
 
 from PySide6.QtCore import QMimeData
 from PySide6.QtGui import (
-    QFontDatabase, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextDocument, QTextFormat,
+    QFontDatabase, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextDocument,
     QTextImageFormat,
 )
 
 from doc_walk import iter_blocks
 from link_url import normalize_link_input
-from markdown_writer import document_to_markdown, image_markdown, read_markdown
+from markdown_writer import PASTE_FEATURES, document_to_markdown, image_markdown, read_markdown
 import rich_text
 
 MARKDOWN_MIME = "text/markdown"
+# The editor's own copy, written literally: only its structure is Markdown.
+LITERAL_MIME = "application/x-myeditor-markdown"
 VSCODE_MIME = "vscode-editor-data"
 
 # --------------------------------------------------------------------------- #
@@ -223,10 +232,8 @@ def _make_code_blocks(doc, language: str) -> None:
         while blocks and not blocks[-1].text().strip():
             blocks.pop()
         for block in blocks:
-            fmt = block.blockFormat()
-            fmt.setProperty(QTextFormat.Property.BlockCodeFence, "`")
-            fmt.setProperty(QTextFormat.Property.BlockCodeLanguage, run_language or language)
-            QTextCursor(block).setBlockFormat(fmt)
+            QTextCursor(block).setBlockFormat(
+                rich_text.code_line_format(block.blockFormat(), run_language or language))
 
 
 def _make_checklists(doc) -> None:
@@ -269,12 +276,37 @@ def _kept_href(href: str) -> Optional[str]:
     return address
 
 
+# Raised and lowered digits and signs, as the characters every reader
+# shows ("10<sup>6</sup>" is 10⁶, not 106; "H<sub>2</sub>O" is H₂O).
+_RAISED = str.maketrans("0123456789+-=()ni", "\u2070\u00b9\u00b2\u00b3\u2074\u2075\u2076"
+                        "\u2077\u2078\u2079\u207a\u207b\u207c\u207d\u207e\u207f\u2071")
+_LOWERED = str.maketrans("0123456789+-=()", "\u2080\u2081\u2082\u2083\u2084\u2085\u2086"
+                         "\u2087\u2088\u2089\u208a\u208b\u208c\u208d\u208e")
+
+
+def _script_text(fmt: QTextCharFormat, words: str) -> Optional[str]:
+    """``words`` written raised or lowered with their own characters, when
+    the page raised or lowered them and every one has such a form."""
+    alignment = fmt.verticalAlignment()
+    table = (_RAISED if alignment == QTextCharFormat.VerticalAlignment.AlignSuperScript
+             else _LOWERED if alignment == QTextCharFormat.VerticalAlignment.AlignSubScript
+             else None)
+    if table is None or not words:
+        return None
+    shown = words.translate(table)
+    if any(ch == plain for ch, plain in zip(shown, words) if not ch.isspace()):
+        return None
+    return shown
+
+
 def _tidy_text(doc) -> None:
     """Inline code where the page used a monospace font (the words, not the
     spaces around them); links that cannot work where the article is read
-    lose their link, never their words."""
+    lose their link, never their words; raised and lowered digits keep
+    their meaning."""
     edits = []
     code = []
+    scripts = []
     for block in iter_blocks(doc):
         if block.blockFormat().nonBreakableLines():
             continue
@@ -289,6 +321,9 @@ def _tidy_text(doc) -> None:
                 continue
             changed = QTextCharFormat(fmt)
             words = fragment.text()
+            shown = _script_text(fmt, words)
+            if shown is not None:
+                scripts.append((fragment.position(), fragment.length(), shown))
             if _is_monospace(fmt) and words.strip():
                 lead = len(words) - len(words.lstrip())
                 code.append((fragment.position() + lead, len(words.strip())))
@@ -310,6 +345,13 @@ def _tidy_text(doc) -> None:
         cursor.setPosition(position)
         cursor.setPosition(position + length, QTextCursor.MoveMode.KeepAnchor)
         cursor.mergeCharFormat(rich_text.style_format(rich_text.CODE, True))
+    for position, length, shown in reversed(scripts):    # same lengths: places hold
+        cursor = QTextCursor(doc)
+        cursor.setPosition(position)
+        cursor.setPosition(position + length, QTextCursor.MoveMode.KeepAnchor)
+        fmt = cursor.charFormat()
+        fmt.setVerticalAlignment(QTextCharFormat.VerticalAlignment.AlignNormal)
+        cursor.insertText(shown, fmt)
 
 
 def markdown_from_html(html: str, *, language: str = "") -> Tuple[str, int]:
@@ -333,7 +375,8 @@ def markdown_from_html(html: str, *, language: str = "") -> Tuple[str, int]:
         return image_markdown(str(fmt.property(QTextImageFormat.Property.ImageAltText) or ""),
                               name)
 
-    markdown = document_to_markdown(doc, web_pictures_only)
+    # Literally: what the page showed as text stays text.
+    markdown = document_to_markdown(doc, web_pictures_only, literal=True)
     return _MARKS.sub("", markdown), left_out
 
 
@@ -350,9 +393,9 @@ class Pasted:
 
 
 def document_from_markdown(markdown: str) -> QTextDocument:
-    """Markdown read the way a .md file is opened."""
+    """Markdown read the way a .md file is opened, a tag in it as text."""
     doc = QTextDocument()
-    read_markdown(doc, markdown)
+    read_markdown(doc, markdown, PASTE_FEATURES)
     return doc
 
 
@@ -396,9 +439,10 @@ def plain_text(source: QMimeData) -> str:
 def from_mime(source: QMimeData) -> Optional[Pasted]:
     """What a paste brings in, or None when it is plain text to insert as
     it is."""
-    if source.hasFormat(MARKDOWN_MIME):
-        markdown = bytes(source.data(MARKDOWN_MIME)).decode("utf-8", "replace")
-        return Pasted(document_from_markdown(markdown))
+    for kind in (LITERAL_MIME, MARKDOWN_MIME):
+        if source.hasFormat(kind):
+            markdown = bytes(source.data(kind)).decode("utf-8", "replace")
+            return Pasted(document_from_markdown(markdown))
     text = source.text() if source.hasText() else ""
     language = _vscode_language(source)
     if language is not None and text.strip():
@@ -418,9 +462,10 @@ def from_mime(source: QMimeData) -> Optional[Pasted]:
     return None
 
 
-def selection_markdown(cursor: QTextCursor) -> str:
+def selection_markdown(cursor: QTextCursor, *, literal: bool = False) -> str:
     """The selection as Markdown, for the clipboard: pictures keep their
-    names, so they are found again when pasted into this document."""
+    names, so they are found again when pasted into this document.
+    ``literal``: its text written to read back as the same text."""
     doc = QTextDocument()
     QTextCursor(doc).insertFragment(cursor.selection())
     started_in = cursor.document().findBlock(cursor.selectionStart())
@@ -433,4 +478,4 @@ def selection_markdown(cursor: QTextCursor) -> str:
         return image_markdown(str(fmt.property(QTextImageFormat.Property.ImageAltText) or ""),
                               fmt.name())
 
-    return document_to_markdown(doc, keep_pictures)
+    return document_to_markdown(doc, keep_pictures, literal=literal)

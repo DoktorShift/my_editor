@@ -321,6 +321,7 @@ def test_the_edit_menu_follows_the_focused_field(window, monkeypatch):
     class Host(QObject):
         """The menu bar's part of MainWindow, with its own updaters."""
         _follow_field = MainWindow._follow_field
+        _note_side_in_use = MainWindow._note_side_in_use
         _on_field_changed = MainWindow._on_field_changed
         _update_clipboard_commands = MainWindow._update_clipboard_commands
         _update_undo_redo_buttons = MainWindow._update_undo_redo_buttons

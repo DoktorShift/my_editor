@@ -137,6 +137,20 @@ class SpellBackend:
             return False
         return self._call(lambda: self._ignore(word, self._resolve(language)) is not False, False)
 
+    def unlearn(self, word: str, language: str) -> bool:
+        """Take ``word`` out of the person's own dictionary again (Unlearn
+        Spelling). Returns whether the system did."""
+        if not valid_word(word):
+            return False
+        return self._call(lambda: self._unlearn(word, self._resolve(language)) is True, False)
+
+    def has_learned(self, word: str, language: str) -> Optional[bool]:
+        """Whether ``word`` is in the person's own dictionary: None where the
+        system cannot tell."""
+        if not valid_word(word):
+            return False
+        return self._call(lambda: self._has_learned(word, self._resolve(language)), None)
+
     def check_text(self, text: str, language: str) -> Optional[TextCheck]:
         """Check a whole paragraph in one pass, for systems that can
         (macOS, Windows). None when this backend checks word by word;
@@ -181,6 +195,12 @@ class SpellBackend:
 
     def _ignore(self, word: str, language: str) -> Optional[bool]:
         raise NotImplementedError
+
+    def _unlearn(self, word: str, language: str) -> Optional[bool]:
+        return False          # the system cannot
+
+    def _has_learned(self, word: str, language: str) -> Optional[bool]:
+        return None           # the system cannot tell
 
     def _check_text(self, text: str, language: str) -> Optional[TextCheck]:
         return None

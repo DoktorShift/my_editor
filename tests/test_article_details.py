@@ -212,12 +212,28 @@ def test_tags_another_app_gave_an_article_survive_editing_it_here():
     assert [list(tag) for tag in details.carried] == [
         ["zap", pk, "wss://r.example", "1"], ["zap", "b" * 64, "", "2"],
         ["content-warning", "spoilers"], ["alt", "An article"], ["L", "ugc"],
-        ["l", "review", "ugc"], ["q", "d" * 64]]          # nothing makes q again (L2)
+        ["l", "review", "ugc"]]                           # q is made from the text
     event = build_article(content="The body.", pubkey_hex=pk, slug=details.identifier,
                           title=details.title, published_at=details.published_at,
                           extra_tags=details.carried_tags("The body."))
     tags = event["tags"]
-    for tag in theirs[3:9] + [["q", "d" * 64]]:
+    for tag in theirs[3:9]:
         assert tag in tags
+    assert not [tag for tag in tags if tag[0] == "q"]   # "The body." quotes nothing
     assert [tag for tag in tags if tag[0] == "client"] == [["client", CLIENT_NAME]]
     assert ["p", "c" * 64] not in tags                   # made again from the text
+
+
+def test_an_edited_article_tags_each_quote_in_its_text_once():
+    # Published carries the tags another app gave an article; the quote
+    # tags are made from the text instead, so a quote kept in the text is
+    # tagged once and a quote taken out of it is tagged no more.
+    from nostr import bech32
+    from nostr.publisher import build_article
+    pk, kept, removed = "a" * 64, "d" * 64, "e" * 64
+    theirs = [["d", "my-post"], ["title", "My Post"], ["q", kept], ["q", removed]]
+    details = ArticleDetails.from_tags(theirs)
+    body = "As said in nostr:" + bech32.encode_note(kept) + " before."
+    event = build_article(content=body, pubkey_hex=pk, slug=details.identifier,
+                          title=details.title, extra_tags=details.carried_tags(body))
+    assert [tag[1] for tag in event["tags"] if tag[0] == "q"] == [kept]

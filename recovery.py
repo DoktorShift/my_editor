@@ -54,6 +54,11 @@ from nostr.media.assets import ASSET_SCHEME
 
 
 BACKUP_DIR = os.path.join(os.path.expanduser("~"), ".cache", "my_editor", "backups")
+
+# How a document's backup stands (EditorBackup.problem): kept, or why not.
+KEPT = ""
+WRITE_FAILED = "write failed"      # the disk refused it (full, read-only, gone)
+TOO_LARGE = "too large"            # bigger than MAX_BACKUP_BYTES
 # A backup is written two seconds after the last change, and at least every
 # fifteen seconds while the typing goes on.
 _DEBOUNCE_MS = 2_000
@@ -297,6 +302,10 @@ class EditorBackup:
         self._last_hash = ""
         self._written_revision = None
         self._oversize_until = 0.0
+        # Silent while backups succeed; whoever shows the document hears of
+        # a failure, and of the end of one (set_status_listener).
+        self._problem = KEPT
+        self._listener = None
 
         self._timer = QTimer()
         self._timer.setSingleShot(True)
@@ -309,6 +318,23 @@ class EditorBackup:
         self._max_timer.start()
 
         self._editor.document().contentsChanged.connect(self._schedule)
+
+    @property
+    def problem(self) -> str:
+        """KEPT while the backup is kept, else why it is not
+        (WRITE_FAILED, TOO_LARGE)."""
+        return self._problem
+
+    def set_status_listener(self, listener) -> None:
+        """Install ``listener(problem)``, called when the backup stops being
+        kept and when it is kept again."""
+        self._listener = listener
+
+    def _report(self, problem: str) -> None:
+        if problem != self._problem:
+            self._problem = problem
+            if self._listener is not None:
+                self._listener(problem)
 
     @property
     def path(self) -> str:
@@ -412,6 +438,7 @@ class EditorBackup:
         """Write the snapshot. False means nothing usable is on disk yet."""
         doc = self._editor.document()
         if document_is_empty(doc):
+            self._report(KEPT)                    # nothing there to lose
             return False
         # Nothing changed since the last write that is still on disk: an
         # idle tab costs nothing on the timer's ticks.
@@ -455,6 +482,7 @@ class EditorBackup:
         payload = json.dumps(record, ensure_ascii=False)
         if len(payload.encode("utf-8")) > MAX_BACKUP_BYTES:
             self._oversize_until = time.monotonic() + _OVERSIZE_RETRY_S
+            self._report(TOO_LARGE)
             return False
 
         # In one step: a crash while writing must leave the previous
@@ -463,9 +491,12 @@ class EditorBackup:
             _ensure_backup_dir()
             write_text(self.path, payload)
         except OSError:
-            return False  # backup is best-effort; never raise to the user
+            # Never raised to the person: the status bar says it, quietly.
+            self._report(WRITE_FAILED)
+            return False
         self._last_hash = fingerprint
         self._written_revision = (revision, identity)
+        self._report(KEPT)
         return True
 
 

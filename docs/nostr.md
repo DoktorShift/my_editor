@@ -22,8 +22,8 @@ Write in the editor, hit publish, approve on your phone. The document goes out a
 
 ### What you can publish
 
-- **Short notes** (kind 1, `Ctrl+Shift+P`): the editor's content as plain text, since that is what apps show for a note. Bold and italic are left out; list markers and link addresses stay.
-- **Long-form articles** (NIP-23 kind 30023, `Ctrl+Shift+A`): the body is the same Markdown a `.md` save writes (`markdown_writer.py`): bold, italic, strikethrough, inline code, links, headings, lists, quotes, code blocks, tables and task lists reach Nostr. Underline and colors have no Markdown and stay in local files. Lines typed one under the other become paragraphs of their own (NIP-23 asks for no hard line breaks), and Markdown typed by hand (`## Heading`, `[label](url)`, a code fence) is published as typed. An article draft or `.md` file that holds something the editor cannot show (footnotes, raw HTML, an image without alt text) opens as its Markdown text and is published exactly as written, so nothing is lost. Title, summary, slug (the `d`-tag identifier), cover image, and hashtags come with it. Re-publishing with the same slug replaces the previous version, so an article stays addressable as one `naddr1…` link across edits.
+- **Short notes** (kind 1, `Nostr > Publish as Note…`): the editor's content as plain text, since that is what apps show for a note. Bold and italic are left out; list markers and link addresses stay.
+- **Long-form articles** (NIP-23 kind 30023, `Nostr > Publish as Article…`): the body is the same Markdown a `.md` save writes (`markdown_writer.py`): bold, italic, strikethrough, inline code, links, headings, lists, quotes, code blocks, tables and task lists reach Nostr. Underline and colors have no Markdown and stay in local files. Lines typed one under the other become paragraphs of their own (NIP-23 asks for no hard line breaks), and Markdown typed by hand (`## Heading`, `[label](url)`, a code fence) is published as typed. Footnotes are kept as the text Markdown writes for them (`[^1]` and `[^1]: the note`) and published as such; the preview draws them as most reading apps do and says which apps show them as typed. An article draft or `.md` file that holds something the editor cannot show (raw HTML, an image without alt text, a footnote of two paragraphs, a tab in code, code inside a list item, aligned table columns) opens as its Markdown text and is published exactly as written, so nothing is lost. Title, summary, slug (the `d`-tag identifier), cover image, and hashtags come with it. Re-publishing with the same slug replaces the previous version, so an article stays addressable as one `naddr1…` link across edits.
 - **The date an article first went out** stays with it through every edit: readers date the article by it. MyEditor takes it from the article's draft, or from what this computer remembers of its own publications (`~/.config/my_editor/article_first_published.json`), or asks the relays you publish to, the ones you read from and the indexers. An article none of them holds is new and dated today, as long as at least one of the relays you publish to (and an indexer) answered: one relay that is down does not hold up a new article. When none of the relays you publish to answers, nobody can tell whether the article went out before, so MyEditor asks you: **Try Again**, **Publish as New** (today's date) or **Cancel**. A draft saved after publishing keeps the date, so another device that opens the draft keeps it too.
 
 Both flows display a `Published from MyEditor` client tag so readers that honour NIP-89 can show which app produced the note.
@@ -59,12 +59,16 @@ Avatars and display names are pulled from each profile's kind 0 metadata in the 
 
 ### Tagging people (mentions)
 
-Inside both publish dialogs there's a **Mentions** chip row. Clicking **+ add person** opens a picker that searches:
+While a Nostr account is in use, type `@` at the start of a word in a document (or choose `Insert > Mention…`, also in the Nostr menu and the slash menu) to mention someone: a short list opens at the caret with the people you follow first ("Following"), then everyone a search finds. Type a name or a Nostr address to narrow it, and choose one: "@Name" takes the place of the `@`, as a link to the person; `Escape` keeps the `@`. `Backspace` right after a mention takes it away whole. A mention is published as the person's Nostr link (`nostr:npub1…`, or `nostr:nprofile1…` with a relay where they can be found), which every reader shows as their name, and gets a `p` tag so they hear about it (NIP-27); opened again, it shows the name. A person's Nostr address shows in the list only once their domain has confirmed it (`nostr/nip05_check.py`): anyone can write any address into a profile. An `@` inside a word (an email address) or in code stays an `@`.
+
+Inside both publish dialogs there's also a **Mentions** chip row. Clicking **+ add person** opens a picker that searches:
 
 - your **NIP-02 contact list** first (instant, offline after the first fetch), and
 - **NIP-50 search relays** (`relay.ditto.pub`, `search.nos.today`) for anyone you don't already follow.
 
 Picked profiles become inline pills and are emitted on publish as `["p", <pubkey>, <relay-hint>]` tags plus a `nostr:nprofile1…` URI appended to the body, so mention rendering works in every client. Inline `nostr:n…` URIs you paste yourself are also picked up and deduplicated automatically.
+
+A note or article that quotes another one (a `nostr:` link to a note or an article in its text) carries a `q` tag for each (NIP-18: the note's id, a relay hint and its author; the article's address), and a `p` tag for each quoted author, once, also when mentioned. A link inside code is text and quotes nothing.
 
 ### Relays and routing
 
@@ -84,6 +88,7 @@ The publisher uses eager-first-accept semantics: as soon as one relay acknowledg
 
 - **With a signer, no private key in the editor.** All signing goes through NIP-46 over NIP-44 v2 encryption. Every `sign_event` call surfaces an approval prompt in your signer.
 - **An account kept on this computer** has its key in `~/.config/my_editor/nostr_keys.json` (`chmod 600`, folder `chmod 700`), separate from the profiles. It is never shown on screen, and Sign Out deletes it, after an alert that says what a missing backup costs. A damaged key file is set aside, never overwritten.
+- **No secret key goes out by mistake.** While a Nostr account is in use, a paste or drop of a Nostr secret key (`nsec1…`, or an encrypted `ncryptsec1…`) into a document is stopped with a warning; you may paste its public key instead (the link to the key's owner). Nothing is published with a secret key in it. When you choose Publish, MyEditor looks at the note or article as it would go out (its text and link addresses, the title, summary and tags, whatever was typed into the publish window) and offers to publish it with each key replaced by its public key, or, for an encrypted key, asks you to remove it. A key in an article's or a draft's slug is shown under the slug before anything is sent, with Publish or Save dimmed (the slug is published as it is, and is never rewritten), and Edit Profile shows a key in a field under that field, with Save dimmed. Underneath all of these, nothing with a secret key in its text or tags is signed at all, by a key kept on this computer or by a signer app, so no other way can get one out; a draft's encrypted text is never affected. Plain-text and code files, and documents without an account, paste as they are.
 - **Connection spoof protection.** The `nostrconnect://` flow generates a one-time secret that the editor verifies against the signer's response before completing the handshake.
 - **Profile file permissions.** The on-disk profile store is restricted to the owner. The local channel keypair stored there only authorizes the existing bunker session; it cannot sign anything itself.
 
@@ -112,7 +117,7 @@ In-progress work is saved as a **NIP-37 draft**: a kind 31234 event whose body i
 
 ### How to use it
 
-- **`Ctrl+Shift+D`** opens the Drafts panel on the right.
+- **`Nostr > Drafts…`** opens the Drafts panel on the right.
 - **`Ctrl+Shift+S`** asks where to save the current tab: local file or private Nostr draft. The choice can be remembered per tab.
 - **`Ctrl+S`** on a draft-bound tab silently re-saves the draft. Same shortcut, no questions, exactly like saving a local file.
 - Double-click a row to open the draft in a new tab. Right-click for Publish, Copy event id, or Delete.
@@ -152,9 +157,9 @@ Upload images, video, and audio to your own Blossom servers, browse them in a bu
 
 ### Capabilities
 
-- **Library dialog** (`Ctrl+Shift+M`): sortable, filterable grid of every blob your pubkey hosts on the configured servers. Per-file: preview, copy URL, download, open in browser, delete (across all mirrors).
+- **Library dialog** (`Nostr > Media Library…`): sortable, filterable grid of every blob your pubkey hosts on the configured servers. Per-file: preview, copy URL, download, open in browser, delete (across all mirrors).
 - **Upload** four ways: the **Upload** button, drag a file onto the drop zone, **paste** an image with `Ctrl+V` while the grid has focus, or drag an image onto the editor itself.
-- **Insert into notes** (`Ctrl+Shift+I`): pick from the library; alt text is offered inline. Markdown tabs get `![alt](url)`; rich-text tabs embed the cached image. Pasted screenshots auto-upload and auto-insert at the cursor.
+- **Insert into notes** (`Nostr > Insert Image…`, also in the Insert menu while an account is in use): pick from the library; alt text is offered inline. Markdown tabs get `![alt](url)`; rich-text tabs embed the cached image. Pasted screenshots auto-upload and auto-insert at the cursor.
 - **Hero image for articles**: the Publish Article dialog has a *Cover image* row with a built-in picker; selected images upload to Blossom in the same flow.
 - **Mirroring by default**: every upload is mirrored to all configured servers in parallel. Deletes fan out across every server the blob lives on; success on one is treated as success.
 - **Dedupe by sha256**: the same file across N servers shows up as one entry; the tile shows a *Nx* badge so you know how widely it's mirrored.

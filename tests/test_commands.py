@@ -209,8 +209,12 @@ def test_the_shortcut_window_lists_every_command_shortcut(main_window_commands):
     for command in win.commands.commands():
         if command.shortcut is not None:
             assert any(keys == key_text(command.shortcut) for keys, _w in listed), command.id
-    # The Media Library's shortcut was missing from the old hand-kept list.
-    assert ("Ctrl+Shift+M", "Media library") in listed
+    # The UI audit: no invented keys for Nostr commands (Q-A). A key the
+    # system itself names (Refresh: Command-R, F5) is the platform's own.
+    nostr_keys = [c.id for c in win.commands.commands()
+                  if c.id.startswith("nostr.") and c.shortcut is not None
+                  and not isinstance(c.shortcut, QKeySequence.StandardKey)]
+    assert nostr_keys == []
 
 
 def test_the_nostr_commands_that_need_an_account_are_marked(main_window_commands):
@@ -310,6 +314,20 @@ class _Editor:
 def test_what_a_tab_can_hold(editor, kind):
     from main_window import MainWindow
     assert MainWindow._editor_kind(None, editor) == kind
+
+
+def test_syntax_highlighting_is_dimmed_in_documents(fresh_window):
+    # Review L2 (CP3): a document's code blocks are always colored, so
+    # View > Syntax Highlighting does nothing there.
+    from main_window import MainWindow
+    win = fresh_window
+    win._editor_kind = lambda ed: MainWindow._editor_kind(win, ed)
+    win.current_editor = lambda: _Editor("/notes/a.md")
+    MainWindow._update_editor_commands(win)
+    assert not win.act_toggle_syntax_hl.isEnabled()
+    win.current_editor = lambda: _Editor("/code/tool.py")
+    MainWindow._update_editor_commands(win)
+    assert win.act_toggle_syntax_hl.isEnabled()
 
 
 def test_editing_commands_follow_the_tab(fresh_window):

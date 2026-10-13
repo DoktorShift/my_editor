@@ -57,6 +57,7 @@ from .drafts import (
 from .draft_deletions import build_deletion_request
 from .events import build_event, verify_event
 from .outbox import RelayDirectory, ask_draft_relays, normalize_relay_url
+from . import refs
 from .outbox import defaults as outbox_defaults
 from .outbox.lookup import fetch_replaceable
 from .outbox.policy import dedupe_relays
@@ -94,31 +95,41 @@ _NOSTR_URI_RE = re.compile(
 )
 
 
-def extract_inline_mentions(content: str) -> List[Mention]:
+def extract_inline_mentions(content: str, *, markdown: bool = False) -> List[Mention]:
     """Find ``nostr:npub|nprofile`` URIs in ``content`` and decode them.
 
     Returns ``(pubkey_hex, relay_hint)`` tuples in document order; any URI
     that fails bech32 decoding is silently skipped (e.g. a near-miss that
-    looks like a URI but isn't valid bech32).
+    looks like a URI but isn't valid bech32). In ``markdown`` (an
+    article), a URI in code is shown as written and mentions nobody, as a
+    quote there quotes nothing (refs.find_references).
     """
     found: List[Mention] = []
-    for match in _NOSTR_URI_RE.finditer(content):
-        bech = match.group(1)
-        try:
-            if bech.startswith("npub1"):
-                pk = decode_npub(bech)
-                hint = ""
-            else:  # nprofile1
-                pk, relays = decode_nprofile(bech)
-                hint = relays[0] if relays else ""
-        except ValueError:
-            continue
-        found.append((pk, hint))
+
+    def collect(text: str) -> str:
+        for match in _NOSTR_URI_RE.finditer(text):
+            bech = match.group(1)
+            try:
+                if bech.startswith("npub1"):
+                    pk = decode_npub(bech)
+                    hint = ""
+                else:  # nprofile1
+                    pk, relays = decode_nprofile(bech)
+                    hint = relays[0] if relays else ""
+            except ValueError:
+                continue
+            found.append((pk, hint))
+        return text
+
+    if markdown:
+        refs.outside_code(content, collect)
+    else:
+        collect(content)
     return found
 
 
 def _resolve_mentions(
-    content: str, chip_mentions: Sequence[Mention]
+    content: str, chip_mentions: Sequence[Mention], *, markdown: bool
 ) -> Tuple[str, List[List[str]]]:
     """Merge inline + chip mentions into (final_content, p_tags).
 
@@ -130,7 +141,7 @@ def _resolve_mentions(
       - The resulting p-tag list deduplicates by pubkey, preserving the
         first-seen relay hint (inline URIs are seen first).
     """
-    inline = extract_inline_mentions(content)
+    inline = extract_inline_mentions(content, markdown=markdown)
     inline_pks = {pk for pk, _ in inline}
 
     appended_uris: List[str] = []
@@ -352,12 +363,18 @@ def build_note(
     through ``extra_tags`` because only this function holds the final
     content, and the "URL is in the content" check has to run against it.
 
+    Every note or article the content quotes (a ``nostr:`` link to it)
+    gets a ``q`` tag, and its author a ``p`` tag (refs.quote_tags).
+
     Always attaches ``["client", CLIENT_NAME]`` so readers that honour the
     NIP-89 client tag display "Published from MyEditor" under the note.
     """
-    final_content, p_tags = _resolve_mentions(content, mentions or [])
+    final_content, p_tags = _resolve_mentions(content, mentions or [], markdown=False)
     tags: List[List[str]] = [["client", CLIENT_NAME]]
     tags.extend(p_tags)
+    # Quoted notes and articles (NIP-18 q tags) and their authors.
+    tags.extend(refs.quote_tags(refs.find_references(final_content, markdown=False),
+                                [tag[1] for tag in p_tags]))
     tags.extend(build_imeta_tags(media, final_content))
     if extra_tags:
         tags.extend(extra_tags)
@@ -409,12 +426,15 @@ def build_article(
     """
     if not slug.strip():
         raise ValueError("article slug (d-tag) must not be empty")
-    final_content, p_tags = _resolve_mentions(content, mentions or [])
+    final_content, p_tags = _resolve_mentions(content, mentions or [], markdown=True)
     tags: List[List[str]] = [
         ["client", CLIENT_NAME],
         ["d", slug.strip()],
     ]
     tags.extend(p_tags)
+    # Quoted notes and articles (NIP-18 q tags) and their authors.
+    tags.extend(refs.quote_tags(refs.find_references(final_content),
+                                [tag[1] for tag in p_tags]))
     if title.strip():
         tags.append(["title", title.strip()])
     if summary.strip():
@@ -437,6 +457,21 @@ def build_article(
         tags=tags,
         pubkey_hex=pubkey_hex,
     )
+
+
+def without_secret_keys(unsigned: dict) -> Optional[dict]:
+    """``unsigned`` with every plain Nostr secret key in its content and
+    tags replaced by the link to the key's owner, built again so its id
+    fits; None when one cannot be (an encrypted key names no owner). The
+    ``d`` tag is never rewritten: it is the address the event is kept
+    under, and a key there is for the caller to refuse."""
+    content = refs.without_secret_keys(unsigned.get("content") or "")
+    tags = [list(tag) if tag[:1] == ["d"] else
+            [refs.without_secret_keys(value) for value in tag] for tag in unsigned["tags"]]
+    if content is None or any(value is None for tag in tags for value in tag):
+        return None
+    return build_event(kind=unsigned["kind"], content=content, tags=tags,
+                       pubkey_hex=unsigned["pubkey"], created_at=unsigned["created_at"])
 
 
 # --------------------------------------------------------------------------- #
@@ -941,6 +976,9 @@ class DraftDeleteJob(QObject):
     def _on_bunker_ready(self, client: BunkerClient, publish_relays: List[str]) -> None:
         if self._cancelled:
             return
+        if refs.secret_keys_in(self._identifier):
+            self._delete_by_wrap_id(client, publish_relays)
+            return
         unsigned = build_tombstone_wrap(
             identifier=self._identifier,
             inner_kind=self._inner_kind,
@@ -980,6 +1018,23 @@ class DraftDeleteJob(QObject):
                 on_failure=lambda _reason: self._send(signed_event, publish_relays))
             return
         self._send(signed_event, publish_relays)
+
+    def _delete_by_wrap_id(self, client: BunkerClient, publish_relays: List[str]) -> None:
+        """A draft whose slug holds a secret key: a tombstone would carry
+        the key again (as its d tag), so the draft's wrap is deleted by its
+        id alone, with a NIP-09 request that names no address."""
+        if not self._replaced_wrap_id:
+            self._emit_failed(_("This draft can’t be deleted: its slug holds a secret key, "
+                                "and the version on your relays isn’t known here. Refresh "
+                                "your drafts and try again."))
+            return
+        request = build_deletion_request(pubkey_hex=self._profile.user_pubkey,
+                                         identifier=self._identifier,
+                                         wrap_id=self._replaced_wrap_id)
+        self._emit_status(_("Waiting for signature. Approve the deletion on your signer…"))
+        client.sign_event(request,
+                          on_success=lambda signed: self._send(signed, publish_relays),
+                          on_failure=self._emit_failed)
 
     def _send(self, signed_event: dict, publish_relays: List[str],
               deletion_request: Optional[dict] = None) -> None:

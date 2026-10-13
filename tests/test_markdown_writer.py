@@ -457,13 +457,15 @@ from markdown_writer import holds_faithfully  # noqa: E402
     "# Imported\n\nSome **bold** and a [link](https://x.example).\n\n- one\n- two\n",
     "* star bullets\n* are fine\n",
     "Setext heading\n==============\n\nText.\n",
+    # Footnotes, kept as their text (D5).
+    "Footnote[^1] and[^source].\n\n[^1]: The note.\n\n[^source]: https://x.example\n",
 ])
 def test_markdown_the_editor_can_hold(source):
     assert holds_faithfully(source)
 
 
 @pytest.mark.parametrize("source", [
-    "Footnote[^1].\n\n[^1]: The note.\n",
+    "Footnote[^1].\n\n[^1]: The note,\n\n    and its second paragraph.\n",
     "<div>raw</div>\n",
     "An image ![](https://x.example/a.png) without alt text.\n",
     'A [link](https://x.example "with a title").\n',
@@ -471,6 +473,12 @@ def test_markdown_the_editor_can_hold(source):
     "> # a heading in a quote\n",
     "- item\n\n  second paragraph of the item\n- two\n",
     "Line one\nLine two of the same paragraph\n",
+    # Review M6 (CP3): what the editor's own reader changes.
+    "```make\nall:\n\tcc main.c\n```\n",                      # a tab in code
+    "| a | b |\n| :--- | ---: |\n| 1 | 2 |\n",                    # alignment
+    "| **a** | b |\n| --- | --- |\n| 1 | 2 |\n",                 # emphasis in a header
+    "1. Run this:\n\n   ```sh\n   make\n   ```\n",            # code in a list item
+    "Escaped \\[^1\\] stays literal.\n\n[^1]: A note.\n",    # an escaped mark (L3)
 ])
 def test_markdown_the_editor_would_lose(source):
     assert not holds_faithfully(source)

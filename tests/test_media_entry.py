@@ -479,7 +479,7 @@ def test_a_drop_uploads_only_when_the_prompt_is_accepted(tmp_path, monkeypatch):
 
     win._handle_dropped_images([_png_file(tmp_path)])
 
-    assert [d.title for d in shown] == ["Upload 1 image to your Blossom servers?"]
+    assert [d.title for d in shown] == ["Upload 1 image to your media servers?"]
     assert shown[0].default.label == "Upload", "dropping is a deliberate act"
     assert win._uploader.calls == []
     assert len(win.image_names()) == 1

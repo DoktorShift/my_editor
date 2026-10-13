@@ -125,6 +125,34 @@ def test_the_old_wrap_coming_back_is_removed_again():
     assert store.get(D) is None
 
 
+def test_a_request_naming_only_the_wrap_removes_the_draft_and_keeps_it_gone():
+    """A draft whose slug holds a secret key is deleted by a request with
+    its wrap's id alone (no address): another device knows it by that id,
+    and a relay's old copy coming back does not bring it back."""
+    from nostr import bech32
+    keyed = "backup-" + bech32.encode_nsec("11" * 32)
+    deletions, store, pool = watcher()
+    store.upsert_skeleton(skeleton(100, identifier=keyed))
+    removed = []
+    deletions.removed.connect(removed.append)
+    by_id = events.sign_event(build_deletion_request(
+        pubkey_hex=PK, identifier=keyed, wrap_id="w100", created_at=200), SK)
+    assert [tag[0] for tag in by_id["tags"]] == ["e", "k"]            # no address
+    pool.subscription.event.emit(by_id)
+    assert store.get(keyed) is None and removed == [keyed]
+    store.upsert_skeleton(skeleton(100, identifier=keyed))             # the old copy
+    assert store.get(keyed) is None
+
+
+def test_a_request_naming_an_unknown_wrap_changes_nothing():
+    deletions, store, pool = watcher()
+    store.upsert_skeleton(skeleton(100))
+    other = events.sign_event({"kind": 5, "content": "", "created_at": 200,
+                               "tags": [["e", "9" * 64], ["k", "31234"]]}, SK)
+    pool.subscription.event.emit(other)
+    assert store.get(D) is not None
+
+
 def test_a_forged_request_changes_nothing():
     deletions, store, pool = watcher()
     store.upsert_skeleton(skeleton(100))
