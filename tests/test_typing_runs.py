@@ -215,3 +215,45 @@ def test_edit_menu_names_undo_and_redo(tmp_path):
     assert r["typed"] == [undo("Typing"), redo()]
     assert r["pasted"] == [undo("Paste"), redo()]
     assert r["undone"] == [undo("Typing"), redo("Paste")]
+
+
+def commit(ed, text, preedit=""):
+    """What an input method (a dead key, a CJK input) sends."""
+    from PySide6.QtGui import QInputMethodEvent
+    event = QInputMethodEvent(preedit, [])
+    event.setCommitString(text)
+    QApplication.sendEvent(ed, event)
+
+
+def chord(ed, text, modifiers):
+    """A character typed with Option (a Mac) or AltGr (Windows, Linux)."""
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QKeyEvent
+    for kind in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
+        QApplication.sendEvent(ed, QKeyEvent(kind, Qt.Key.Key_unknown, modifiers, text))
+
+
+def test_composed_and_option_characters_stay_in_the_run(clock):
+    ed = typed("caf")
+    commit(ed, "", preedit="´")                # a dead key, shown while composing
+    commit(ed, "é")
+    QTest.keyClicks(ed, " au lait")
+    assert ed.toPlainText() == "café au lait" and ed.undo_name() == "Typing"
+    ed.undo()
+    assert ed.toPlainText() == ""
+
+    ed = typed("")
+    commit(ed, "日本")
+    commit(ed, "語")
+    ed.undo()
+    assert ed.toPlainText() == ""
+
+    ed = typed("mail")
+    chord(ed, "@", Qt.KeyboardModifier.AltModifier)                     # Option on a Mac
+    QTest.keyClicks(ed, "b.de ")
+    chord(ed, "€", Qt.KeyboardModifier.ControlModifier
+          | Qt.KeyboardModifier.AltModifier)                           # AltGr
+    assert ed.toPlainText() == "mail@b.de €" and ed.undo_name() == "Typing"
+    ed.undo()
+    assert ed.toPlainText() == ""
+

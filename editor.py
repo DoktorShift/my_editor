@@ -287,7 +287,9 @@ class HtmlEditor(QTextEdit):
     def _typing(self, kind: str, cursor: Optional[QTextCursor] = None):
         """A cursor at the caret to type (``kind`` TYPED) or delete
         (BACKWARD, FORWARD) with: in the run going on, when this goes on
-        with it, else in a new one."""
+        with it, else in a new one. What changes the text meanwhile, by
+        this cursor or by Qt's own handling of a key or of an input
+        method, is in the run."""
         doc = self.document()
         cursor = cursor or self.textCursor()
         run = self._run
@@ -935,7 +937,12 @@ class HtmlEditor(QTextEdit):
         # after it, as typed letters do (composing starts there too).
         if event.commitString() or event.preeditString():
             self._step_out_of_mention()
-        super().inputMethodEvent(event)
+        if event.commitString():
+            # What they compose is typed: in the run of typing going on.
+            with self._typing(TYPED):
+                super().inputMethodEvent(event)
+        else:
+            super().inputMethodEvent(event)
         self._after_typed(event.commitString())
 
     # -------- The slash menu --------
@@ -1805,10 +1812,14 @@ class HtmlEditor(QTextEdit):
             self.ensureCursorVisible()
             return
 
-        super().keyPressEvent(e)
         if e.text() and e.text().isprintable():
-            # Typed with Option or AltGr (a tilde on many keyboards).
+            # Typed with Option or AltGr ("@", "€", "[" on many keyboards):
+            # in the run of typing going on.
+            with self._typing(TYPED):
+                super().keyPressEvent(e)
             self._after_typed(e.text())
+        else:
+            super().keyPressEvent(e)
         self.ensureCursorVisible()
 
     # -------- Keys inside Markdown structure --------
