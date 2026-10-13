@@ -3016,8 +3016,10 @@ class MainWindow(QMainWindow):
             if bar:
                 bar.show_unsupported(", ".join(unsupported))
 
-    def _handle_dropped_images(self, paths):
-        """Images were dropped on the window: adopt and insert them now.
+    def _handle_dropped_images(self, paths, step: str = N_("Drag")):
+        """Images were dropped on the window: adopt and insert them now, as
+        one step of Undo called ``step`` (an N_ word; a paste's own
+        name stays the paste's).
 
         The insert never waits for a signer or a server. Uploading is
         offered afterwards, and declining costs nothing: the image is
@@ -3032,14 +3034,15 @@ class MainWindow(QMainWindow):
 
         adopted = []
         refused = []
-        for path in paths:
-            alt = os.path.splitext(os.path.basename(path))[0] or "image"
-            asset = self._asset_manager.adopt_file(path, alt=alt)
-            if asset is None:
-                refused.append(os.path.basename(path))
-                continue
-            self._insert_asset(ed, asset, alt=alt)
-            adopted.append(asset)
+        with ed.undo_step(step):
+            for path in paths:
+                alt = os.path.splitext(os.path.basename(path))[0] or "image"
+                asset = self._asset_manager.adopt_file(path, alt=alt)
+                if asset is None:
+                    refused.append(os.path.basename(path))
+                    continue
+                self._insert_asset(ed, asset, alt=alt)
+                adopted.append(asset)
 
         if refused:
             self.status.showMessage(
@@ -3078,7 +3081,8 @@ class MainWindow(QMainWindow):
         fmt.setFontItalic(False)
         fmt.setFontUnderline(False)
         fmt.clearForeground()
-        cursor.insertText(text, fmt)
+        with ed.undo_step(N_("Drag")):
+            cursor.insertText(text, fmt)
         ed.setTextCursor(cursor)
 
     def open_dialog(self):
@@ -5095,9 +5099,8 @@ class MainWindow(QMainWindow):
         elif name == "delete":
             cursor = ed.textCursor()
             if cursor.hasSelection():
-                cursor.beginEditBlock()
-                cursor.removeSelectedText()
-                cursor.endEditBlock()
+                with ed.undo_step(N_("Delete")):
+                    cursor.removeSelectedText()
                 ed.setTextCursor(cursor)
         ed.setFocus()
 
@@ -6750,7 +6753,8 @@ class MainWindow(QMainWindow):
         caret_there = ed.textCursor().position() == at.position()
         cursor = QTextCursor(ed.document())
         cursor.setPosition(at.position())
-        rich_text.insert_own_paragraph(cursor, image=image)
+        with ed.undo_step(N_("Audio or Video")):
+            rich_text.insert_own_paragraph(cursor, image=image)
         if caret_there:
             ed.setTextCursor(cursor)
         self._asset_manager.request_upload(asset.sha256)
@@ -7083,21 +7087,23 @@ class MainWindow(QMainWindow):
                 self.status.showMessage(picked.reason, 8000)
             return
 
-        if not (picked.mime or "").startswith("image/"):
-            self._insert_url_as_text(editor, picked.url)
-            return
+        # One step of Undo, called what was asked for.
+        with editor.undo_step(N_("Image")):
+            if not (picked.mime or "").startswith("image/"):
+                self._insert_url_as_text(editor, picked.url)
+                return
 
-        asset = self._asset_manager.adopt_library_file(
-            sha256=picked.sha256,
-            remote_url=picked.url,
-            mime=picked.mime,
-            size=picked.size,
-            alt=alt_text,
-        )
-        if asset is None:
-            self._insert_url_as_text(editor, picked.url)
-            return
-        self._insert_asset(editor, asset, alt=alt_text or "image")
+            asset = self._asset_manager.adopt_library_file(
+                sha256=picked.sha256,
+                remote_url=picked.url,
+                mime=picked.mime,
+                size=picked.size,
+                alt=alt_text,
+            )
+            if asset is None:
+                self._insert_url_as_text(editor, picked.url)
+                return
+            self._insert_asset(editor, asset, alt=alt_text or "image")
 
     def _insert_url_as_text(self, editor, url: str) -> None:
         """Fallback for media that cannot be an inline image."""
