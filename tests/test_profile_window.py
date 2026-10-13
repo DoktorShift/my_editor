@@ -308,3 +308,43 @@ def test_the_form_reads_like_every_other_form_in_the_app(qt_app):
     assert win._edits["lud16"].accessibleName() == "Lightning address"
     assert unnamed_controls(win) == []
     win.close()
+
+
+OVERLAP_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+import i18n
+i18n.install(sys.argv[2])
+from PySide6.QtCore import QPoint
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+from nostr.bech32 import encode_nsec
+from nostr.outbox.lookup import Lookup
+from nostr.outbox.policy import LookupState
+from nostr.ui import profile_window as pw
+reads = []
+win = pw.ProfileWindow(read=reads.append, save=lambda c, d: None, is_dark=False)
+win.show()
+reads[0](Lookup(LookupState.FOUND, event={"content": json.dumps({"name": "alice"})}))
+app.processEvents()
+win._edits["about"].setPlainText("My key: " + encode_nsec("11" * 32))
+for _ in range(3):
+    app.processEvents()
+last, save = win._edits["nip05"], win.buttons["save"]
+r = {"last_bottom": last.mapTo(win, QPoint(0, last.height())).y(),
+     "save_top": save.mapTo(win, QPoint(0, 0)).y()}
+win.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+@pytest.mark.parametrize("language", ["en", "de", "pseudo"])
+def test_a_field_problem_never_lays_the_form_over_the_buttons(tmp_path, language):
+    # Review of the merge: in the 40 percent longer test language, a secret
+    # key in About widened the page and added the problem's lines at once;
+    # the window kept its height, and the last field ran under Save. (In a
+    # process of its own: the language is chosen before any window is made.)
+    from tests.app_process import run_window_script
+    r = run_window_script(OVERLAP_SCRIPT, tmp_path, language)
+    assert r["last_bottom"] <= r["save_top"], r

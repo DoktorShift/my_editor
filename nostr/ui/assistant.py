@@ -548,6 +548,14 @@ class AssistantWindow(QDialog):
         window = max(self._base_width, wide + sides, narrowest + sides, buttons + sides)
         if window != self.minimumWidth():
             self.setMinimumWidth(window)
+        # A window on screen keeps its size when what it holds needs more
+        # (a field problem that widens the page and adds lines at once): it
+        # grows to its layout's minimum, or the page runs under the buttons.
+        if self.isVisible():
+            self.layout().invalidate()
+            least = self.layout().totalMinimumSize()
+            if self.width() < least.width() or self.height() < least.height():
+                self.resize(max(self.width(), least.width()), max(self.height(), least.height()))
 
     def _tallest_page(self) -> int:
         """The most page height the screen has room for, with the window's
