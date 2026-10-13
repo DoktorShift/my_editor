@@ -217,11 +217,13 @@ _FRONT_KEYS = (("title", ()), ("summary", ("description",)),
 def from_front_matter(front: Optional[front_matter.FrontMatter]) -> ArticleDetails:
     """The details a file's front matter holds (empty for none). Each is
     read from the first entry under its key or another app's name for it
-    that can be read fully; one that can't (a mapping) is left alone."""
+    that this reader reads as a parser does; else as the parser reads it
+    (_held), kept as written then (kept_in_file), but never read as empty
+    while the file holds it."""
     values = {}
     for key, _others in _FRONT_KEYS:
         found = _found(front, key)
-        values[key] = _detail(key, found[2].value if found is not None else None)
+        values[key] = _detail(key, found[2].value if found is not None else _held(front, key))
     coauthors = []
     for written in values["coauthors"]:
         person = _person(written)
@@ -382,28 +384,64 @@ def _readable(key: str, entry: front_matter.Entry, read: Any) -> bool:
     (Eleventy's "date: Last Modified" is not)."""
     value = entry.value
     if value is None or read is _ABSENT or read is not _UNREAD \
-            and _detail(key, value) != _detail(key, _as_value(read)):
+            and _detail(key, value) != _detail(key, _as_value(read, value, entry.syntax)):
         return False
     if key == "date":
         return isinstance(value, str) and (not value.strip() or _moment(value) is not None)
     return True
 
 
-def _as_value(read: Any) -> Union[str, List[str], None]:
+def _as_value(read: Any, written: Union[str, List[str], None] = None,
+              syntax: str = front_matter.YAML) -> Union[str, List[str], None]:
     """What a parser read for an entry as this app's reader gives a value
-    (front_matter.Entry.value): a text, a number or a date written as one,
-    or a list of them; None for anything else (true, a mapping)."""
-    if read is None:
-        return ""
+    (front_matter.Entry.value): a text, or a list of texts. A number, true
+    or a date is the text ``written`` for it ("1.10" for 1.1, "yes" for
+    true) when that is what the parser reads there, else as YAML writes
+    it; a list or a mapping inside a list is left out. None for a mapping."""
+    if isinstance(read, list):
+        items = written if isinstance(written, list) and len(written) == len(read) \
+            else [None] * len(read)
+        return [_as_value(item, text, syntax) for item, text in zip(read, items)
+                if not isinstance(item, (list, dict))]
+    if isinstance(read, dict):
+        return None
     if isinstance(read, str):
         return read
-    if isinstance(read, (int, float)) and not isinstance(read, bool):
-        return str(read)
+    if isinstance(written, str) and front_matter.reads_as(written, read, syntax):
+        return written
+    if read is None:
+        return ""
+    if isinstance(read, bool):
+        return "true" if read else "false"
     if isinstance(read, (date, datetime)):
         return read.isoformat()
-    if isinstance(read, list):
-        items = [_as_value(item) for item in read]
-        return items if all(isinstance(item, str) for item in items) else None
+    return str(read)
+
+
+def _held(front: Optional[front_matter.FrontMatter], key: str) -> Union[str, List[str], None]:
+    """The detail ``key`` as a parser reads it where no entry of it reads
+    so with this reader (an anchor, an escape it does not know, a key it
+    does not see): the first place the parser holds it, as text; for the
+    cover a mapping's own image ("cover:" with "image:" under it). None
+    where it holds no text there, or nothing."""
+    mapping = front_matter.parsed(front)
+    if mapping is None:
+        return None
+    syntax = front.syntax if front is not None else front_matter.YAML
+    places = [(read, entry.value) for _at, _inner, entry, read in _candidates(front, key)
+              if read is not _ABSENT]
+    names = _names(key)
+    tables = [mapping] + [table for name, table in mapping.items() if key == "tags"
+                          and isinstance(name, str) and name.lower() == "taxonomies"]
+    places += [(read, None) for table in tables if isinstance(table, dict)
+               for name, read in table.items() if isinstance(name, str) and name.lower() in names]
+    for read, written in places:
+        if key == "image" and isinstance(read, dict):
+            read = next((read[name] for name in ("image", "src", "path", "url")
+                         if isinstance(read.get(name), str)), None)
+        value = _as_value(read, written, syntax)
+        if value is not None:
+            return value
     return None
 
 

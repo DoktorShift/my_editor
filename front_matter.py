@@ -250,6 +250,17 @@ def _yaml_load(text: str) -> Any:
     return yaml.load(spaced, Loader=yaml.SafeLoader)
 
 
+def reads_as(written: str, value: Any, syntax: str = YAML) -> bool:
+    """Whether ``written``, a value as a file writes it bare ("1.10",
+    "yes", "12:30"), is what a parser reads as ``value`` (1.1, True, 750)."""
+    try:
+        read = tomllib.loads(f"v = {written}")["v"] if syntax == TOML \
+            else yaml.load(written, Loader=yaml.SafeLoader)
+    except (yaml.YAMLError, ValueError, TypeError, KeyError):
+        return False
+    return type(read) is type(value) and (read == value or read != read and value != value)
+
+
 def _within(value: Any, left: List[int]) -> bool:
     """Whether ``value`` holds no more values than ``left[0]`` (counted
     down as they are met, each alias again)."""
@@ -318,8 +329,9 @@ def _open_multiline(written: str) -> bool:
 
 
 def _toml_value(entry: Entry) -> Union[str, List[str], None]:
-    """A TOML entry's value as text (a date or a time as ISO 8601), or a
-    list of texts; None for a table or any other kind of value."""
+    """A TOML entry's value as text (a date or a time as ISO 8601, a number
+    or true as written), or a list of texts; None for a table or any other
+    kind of value."""
     if not entry.key or entry.key.startswith("["):
         return None
     try:
@@ -333,8 +345,14 @@ def _toml_value(entry: Entry) -> Union[str, List[str], None]:
         return value.isoformat()
     if isinstance(value, str):
         return value
+    if isinstance(value, (bool, int, float)):
+        return entry.written
     if isinstance(value, list) and all(isinstance(item, str) for item in value):
         return value
+    if isinstance(value, list) and entry.written.startswith("[") and entry.written.endswith("]"):
+        # Numbers among texts ("python", 3.10): each item as written.
+        items = [_unquote(part) for part in _split_inline(entry.written[1:-1]) if part.strip()]
+        return items if len(items) == len(value) else None
     return None
 
 

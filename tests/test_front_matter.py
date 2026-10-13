@@ -89,11 +89,11 @@ def test_a_block_without_a_key_is_text():
 def test_values_are_read_as_written_in_the_wild():
     hugo = from_front_matter(front_matter.split(HUGO)[0])
     assert hugo.title == "My post" and hugo.hashtags == ("Go", "Hugo")     # case kept
-    assert hugo.image == ""                                  # the cover: mapping is not read
+    assert hugo.image == "images/hero.jpg"                   # the cover: mapping's image
     assert hugo.published_at == moment(2024, 3, 1, 0, 30, offset=1)
     jekyll = from_front_matter(front_matter.split(JEKYLL)[0])
     assert jekyll.summary == "A long description over two lines."
-    assert jekyll.image == ""                                 # image: path/alt mapping
+    assert jekyll.image == "/assets/a.png"                    # image: path/alt mapping
     entries, _ = front_matter.split("---\na: 'it''s'\nb: [x, \"y, z\"]\nc: |\n  one\n  two\n"
                                     "d: plain # comment\ne: \"My \\\"post\\\"\"   # on the site\n"
                                     "f: 'it''s' # too\ng: [Go, \"a # b\"]  # tags\n---\n")
@@ -626,14 +626,15 @@ def test_a_comment_line_after_a_flow_list_stays_after_it(text):
     assert yaml.safe_load(out.split("---\n")[1])["tags"] == ["a", "b", "new"]
 
 
-@pytest.mark.parametrize("text", [
-    "---\ntags: [a, [b, c], d]\n---\nB\n",
-    "---\ntags: [a, {b: c}]\n---\nB\n",
+@pytest.mark.parametrize("text, tags", [
+    ("---\ntags: [a, [b, c], d]\n---\nB\n", ("a", "d")),
+    ("---\ntags: [a, {b: c}]\n---\nB\n", ("a",)),
 ])
-def test_a_list_nested_in_the_tags_keeps_them_as_written(text):
-    """Round 6, L3: "[b" and "c]" were read, and would be published, as tags."""
+def test_a_list_nested_in_the_tags_keeps_them_as_written(text, tags):
+    """Round 6, L3: "[b" and "c]" were read, and would be published, as
+    tags. The tags around them are tags (round 8)."""
     front, _ = front_matter.split(text)
-    assert from_front_matter(front).hashtags == () and "tags" in kept_in_file(front)
+    assert from_front_matter(front).hashtags == tags and "tags" in kept_in_file(front)
     assert changed(text, hashtags=("x",)) == text
 
 
@@ -678,29 +679,68 @@ ALL_DETAILS = frozenset({"title", "summary", "image", "tags", "slug", "date",
                          "coauthors", "zap_split"})
 
 
-@pytest.mark.parametrize("text, kept", [
-    # A mapping in the list, as YAML reads "a: b" there (L2).
-    ("---\ntags: [a: b, c]\n---\nB\n", {"tags"}),
+@pytest.mark.parametrize("text, kept, shown", [
+    # A mapping in the list, as YAML reads "a: b" there (L2): no hashtag.
+    ("---\ntags: [a: b, c]\n---\nB\n", {"tags"}, {"hashtags": ("c",)}),
     # A key written the explicit way, and a dotted TOML key (L1).
     # ("? tags" is no key to this reader: the title's entry goes on there.)
-    ("---\ntitle: T\n? tags\n: [a]\n---\nB\n", {"title", "tags"}),
-    ('+++\ntitle = "T"\n"tags".x = "a"\n+++\nB\n', {"tags"}),
-    ("+++\ntitle = \"T\"\ntaxonomies.tags = [\"a\"]\n+++\nB\n", {"tags"}),
-    # YAML reads these as true and as a text with a letter "A" in it.
-    ("---\ntitle: yes\n---\nB\n", {"title"}),
-    ('---\nsummary: "\\x41"\n---\nB\n', {"summary"}),
+    ("---\ntitle: T\n? tags\n: [a]\n---\nB\n", {"title", "tags"},
+     {"title": "T", "hashtags": ("a",)}),
+    ('+++\ntitle = "T"\n"tags".x = "a"\n+++\nB\n', {"tags"}, {"title": "T", "hashtags": ()}),
+    ("+++\ntitle = \"T\"\ntaxonomies.tags = [\"a\"]\n+++\nB\n", {"tags"},
+     {"title": "T", "hashtags": ("a",)}),
+    # An anchor, and an escape this reader does not know: as YAML reads them.
+    ("---\ntitle: &t Hello\n---\nB\n", {"title"}, {"title": "Hello"}),
+    ('---\nsummary: "\\x41"\n---\nB\n', {"summary"}, {"summary": "A"}),
 ])
-def test_a_detail_read_otherwise_by_a_parser_is_kept_as_written(text, kept):
+def test_a_detail_read_otherwise_by_a_parser_is_shown_as_it_reads_it_and_kept(
+        text, kept, shown):
+    """Kept as written means MyEditor does not change it there: it is still
+    shown, and published, as a parser reads it (round 8)."""
     front, _ = front_matter.split(text)
     assert kept_in_file(front) == frozenset(kept)
     read = from_front_matter(front)
-    titled = "title" not in kept and ("title: T" in text or 'title = "T"' in text)
-    assert read.title == ("T" if titled else "")
-    assert read.summary == "" and read.hashtags == ()
+    for field, value in shown.items():
+        assert getattr(read, field) == value
     for detail in kept:
         change = {"title": {"title": "New"}, "summary": {"summary": "New"},
                   "tags": {"hashtags": ("new",)}}.get(detail)
         assert change is None or changed(text, **change) == text
+
+
+@pytest.mark.parametrize("line, field, shown", [
+    ("title: yes", "title", "yes"), ("title: No", "title", "No"), ("title: True", "title", "True"),
+    ("title: 12:30", "title", "12:30"), ("title: 1.10", "title", "1.10"), ("title: .5", "title", ".5"),
+    ("title: 0x1F", "title", "0x1F"), ("title: 010", "title", "010"),
+    ("title: 1_000", "title", "1_000"), ("title: .inf", "title", ".inf"),
+    ("title: 1984", "title", "1984"), ("slug: yes", "identifier", "yes"),
+    ("slug: 1.10", "identifier", "1.10"),
+    ("tags: [python, 3.10]", "hashtags", ("python", "3.10")),
+    ("tags: [on, off]", "hashtags", ("on", "off")), ("tags: [yes, no]", "hashtags", ("yes", "no")),
+    ("tags: [null, a]", "hashtags", ("null", "a")), ("tags: 1.10", "hashtags", ("1.10",)),
+])
+def test_a_value_yaml_reads_as_another_type_is_shown_as_written(line, field, shown):
+    """Round 8, H2: these read as empty, read-only. Shown and published as
+    the file writes them, and a change is written quoted, as text."""
+    yaml = pytest.importorskip("yaml")
+    text = f"---\n{line}\nlayout: post\n---\nB\n"
+    front, _ = front_matter.split(text)
+    assert getattr(from_front_matter(front), field) == shown
+    assert kept_in_file(front) == frozenset()
+    new = ("python", "3.11") if field == "hashtags" else "1985"
+    out = changed(text, **{field: new})
+    read = yaml.safe_load(out.split("---\n")[1])
+    key = {"title": "title", "identifier": "slug", "hashtags": "tags"}[field]
+    assert read[key] == (list(new) if field == "hashtags" else new) and read["layout"] == "post"
+
+
+def test_a_toml_number_is_shown_as_written():
+    text = '+++\ntitle = 2024\ntags = ["python", 3.10]\n+++\nB\n'
+    front, _ = front_matter.split(text)
+    read = from_front_matter(front)
+    assert (read.title, read.hashtags) == ("2024", ("python", "3.10"))
+    assert kept_in_file(front) == frozenset()
+    assert changed(text, title="1985") == text.replace("title = 2024", 'title = "1985"')
 
 
 def test_a_key_written_twice_is_read_as_a_parser_reads_it():
