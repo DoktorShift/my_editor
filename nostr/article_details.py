@@ -338,7 +338,14 @@ def front_matter_with(details: ArticleDetails, front: Optional[front_matter.Fron
             # A date YAML and TOML read as one (a timestamp), not a text;
             # in quotes only when the file had it so.
             bare = not original.startswith(("\"", "'"))
-        if key == "tags" and current is not None and isinstance(current.value, list):
+        if key == "tags" and current is not None and isinstance(current.value, str):
+            # Written as a string ("ruby jekyll", "a, b"): a string again, in
+            # its way, while it can hold each tag whole.
+            separator = ", " if "," in current.value else " "
+            mark = separator.strip() or " "
+            if not any(mark in tag for tag in value):
+                value = separator.join(value)
+        elif key == "tags" and current is not None and isinstance(current.value, list):
             # A hashtag the file has keeps its spelling there ("#idea").
             spelled = {tag.lower(): item for item in current.value
                        for tag in _hashtags([item])}

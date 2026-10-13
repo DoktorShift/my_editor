@@ -481,3 +481,13 @@ def test_a_date_that_is_no_date_is_kept_as_written():
     front, _ = front_matter.split(text)
     assert from_front_matter(front).published_at is None and "date" in kept_in_file(front)
     assert changed(text, published_at=1791876318) == text
+
+
+def test_tags_written_as_a_string_stay_a_string():
+    assert changed("---\ntags: ruby jekyll\n---\nB\n", hashtags=("ruby", "jekyll", "web")) == \
+        "---\ntags: ruby jekyll web\n---\nB\n"
+    assert changed('---\ntags: "a, b"\n---\nB\n', hashtags=("a", "b", "c")) == \
+        '---\ntags: "a, b, c"\n---\nB\n'
+    # A tag the string can't hold whole: a list then.
+    assert changed("---\ntags: ruby jekyll\n---\nB\n", hashtags=("ruby", "two words")) == \
+        "---\ntags: [ruby, two words]\n---\nB\n"
