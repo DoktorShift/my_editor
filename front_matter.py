@@ -89,6 +89,23 @@ class Entry:
         found = re.match(r"^\[\s*([^\[\]]+?)\s*\]\s*(?:#.*)?$", self.key)
         return found.group(1).strip("\"'") if found else ""
 
+    @property
+    def path(self) -> Tuple[str, ...]:
+        """The keys this entry is written under: its key, or for a TOML key
+        written dotted ("taxonomies.tags", Zola's) each of its parts, as
+        tomllib reads them."""
+        if self.syntax != TOML or "." not in self.key or self.key.startswith("["):
+            return (self.key,)
+        try:
+            read = tomllib.loads("\n".join(self.lines))
+        except tomllib.TOMLDecodeError:
+            return (self.key,)
+        path = []
+        while isinstance(read, dict) and len(read) == 1:
+            name, read = next(iter(read.items()))
+            path.append(name)
+        return tuple(path) or (self.key,)
+
     def inner_entries(self) -> List["Entry"]:
         """A TOML table's own entries ("[taxonomies]" and the keys under it);
         none for any other entry."""
@@ -345,7 +362,11 @@ def _toml_value(entry: Entry) -> Union[str, List[str], None]:
         return None
     if len(values) != 1:
         return None
-    value = next(iter(values.values()))
+    value = values
+    for name in entry.path:                 # a dotted key's own value
+        if not isinstance(value, dict) or name not in value:
+            return None
+        value = value[name]
     if isinstance(value, (datetime, date)):
         return value.isoformat()
     if isinstance(value, str):

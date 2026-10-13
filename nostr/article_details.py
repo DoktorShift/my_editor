@@ -371,6 +371,11 @@ def _candidates(front: Optional[front_matter.FrontMatter], key: str):
             yield at, None, entry, read(mapping, entry.key)
     if key == "tags":
         for at, entry in enumerate(entries):
+            path = entry.path
+            if len(path) == 2 and path[0].lower() == "taxonomies" and path[1].lower() in names:
+                # Zola's, written dotted: "taxonomies.tags = [...]".
+                yield at, None, entry, read(mapping.get(path[0]) if mapping is not None
+                                            else None, path[1])
             if entry.table.lower() == "taxonomies":
                 table = mapping.get(entry.table) if mapping is not None else None
                 for inner, sub in enumerate(entry.inner_entries()):
@@ -392,7 +397,9 @@ def _unseen(key: str, found, mapping: dict) -> bool:
         return {name for name in table if isinstance(name, str) and name.lower() in names} \
             if isinstance(table, dict) else set()
     seen = {entry.key for _at, inner, entry, _read in found if inner is None}
-    seen_inner = {entry.key for _at, inner, entry, _read in found if inner is not None}
+    seen_inner = {entry.key if inner is not None else entry.path[-1]
+                  for _at, inner, entry, _read in found
+                  if inner is not None or len(entry.path) == 2}
     taxonomies = [table for name, table in mapping.items()
                   if key == "tags" and isinstance(name, str) and name.lower() == "taxonomies"]
     return bool(under(mapping) - seen) or any(under(table) - seen_inner for table in taxonomies)
@@ -530,7 +537,7 @@ def _with_detail(entries: List[front_matter.Entry], syntax: str, key: str, value
         return _without_detail(entries, syntax, key, quoted)
     found = _found(front_matter.FrontMatter(tuple(entries), syntax=syntax), key)
     at, inner, current = found if found is not None else (None, None, None)
-    place = (key,) if current is None else (current.key,) if inner is None \
+    place = (key,) if current is None else current.path if inner is None \
         else (entries[at].table, current.key)
     bare = False
     if key == "date":
@@ -577,7 +584,7 @@ def _without_detail(entries: List[front_matter.Entry], syntax: str, key: str, qu
     from left out, or ``quoted``, written empty (where only a comment
     would be left, which reads as text)."""
     found = list(_candidates(front_matter.FrontMatter(tuple(entries), syntax=syntax), key))
-    places = tuple((entry.key,) if inner is None else (entries[at].table, entry.key)
+    places = tuple(entry.path if inner is None else (entries[at].table, entry.key)
                    for at, inner, entry, _read in found)
     if quoted:
         for at, inner, entry, _read in found:
@@ -640,7 +647,12 @@ def _without(mapping: dict, places: Sequence[Tuple[str, ...]]) -> dict:
         if len(place) == 1:
             mapping.pop(place[0], None)
         elif isinstance(mapping.get(place[0]), dict):
-            mapping[place[0]] = _without(mapping[place[0]], [place[1:]])
+            # A table left empty is no table (a dotted key was all it held).
+            inner = _without(mapping[place[0]], [place[1:]])
+            if inner:
+                mapping[place[0]] = inner
+            else:
+                mapping.pop(place[0])
     return mapping
 
 

@@ -687,8 +687,6 @@ ALL_DETAILS = frozenset({"title", "summary", "image", "tags", "slug", "date",
     ("---\ntitle: T\n? tags\n: [a]\n---\nB\n", {"title", "tags"},
      {"title": "T", "hashtags": ("a",)}),
     ('+++\ntitle = "T"\n"tags".x = "a"\n+++\nB\n', {"tags"}, {"title": "T", "hashtags": ()}),
-    ("+++\ntitle = \"T\"\ntaxonomies.tags = [\"a\"]\n+++\nB\n", {"tags"},
-     {"title": "T", "hashtags": ("a",)}),
     # An anchor, and an escape this reader does not know: as YAML reads them.
     ("---\ntitle: &t Hello\n---\nB\n", {"title"}, {"title": "Hello"}),
     ('---\nsummary: "\\x41"\n---\nB\n', {"summary"}, {"summary": "A"}),
@@ -924,3 +922,23 @@ def test_a_kept_detail_changed_in_another_window_stays_as_in_the_file(tmp_path):
     r = run_window_script(KEPT_CHANGED_SCRIPT, tmp_path, str(path))
     assert (r["title"], r["shown"], r["read-only"]) == ("Hello", "Hello", True)
     assert r["saved"] == text.replace("summary: S", "summary: New")
+
+
+ZOLA_DOTTED = '+++\ntitle = "Z"\ntaxonomies.tags = ["a"]\n+++\n\nBody.\n'
+ZOLA_INLINE = '+++\ntitle = "Z"\ntaxonomies = { tags = ["a"] }\n+++\n\nBody.\n'
+
+
+def test_zolas_tags_written_as_a_dotted_key_are_read_and_changed():
+    """Round 8, L6."""
+    front, _ = front_matter.split(ZOLA_DOTTED)
+    assert from_front_matter(front).hashtags == ("a",) and kept_in_file(front) == frozenset()
+    assert changed(ZOLA_DOTTED, hashtags=("a", "b")) == ZOLA_DOTTED.replace(
+        '["a"]', '["a", "b"]')
+    assert changed(ZOLA_DOTTED, hashtags=()) == ZOLA_DOTTED.replace(
+        'taxonomies.tags = ["a"]\n', "")
+
+
+def test_zolas_tags_in_an_inline_table_are_shown_and_kept_as_written():
+    front, _ = front_matter.split(ZOLA_INLINE)
+    assert from_front_matter(front).hashtags == ("a",) and kept_in_file(front) == {"tags"}
+    assert changed(ZOLA_INLINE, hashtags=("b",)) == ZOLA_INLINE
