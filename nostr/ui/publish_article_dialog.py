@@ -374,24 +374,38 @@ class PublishArticleDialog(QDialog):
         QWidget.setTabOrder(self._image_edit, self._account.button)
         answer_return_as_the_system_does(self.findChildren(QPushButton))
 
+    def _add_row(self, label: str, buddy: Optional[QWidget], field: QWidget) -> None:
+        """A row of the form: ``label`` (none when empty) beside ``field``.
+        The labels and fields are kept here, so the form's own items are
+        never wrapped (Python would hold items the form deletes)."""
+        if label:
+            words = _label(label, buddy)
+            self._labels.append(words)
+            self._form.addRow(words, field)
+        else:
+            self._form.addRow("", field)
+        self._fields.append(field)
+
     def _build_form(self, default_title: str, default_slug: str) -> QFormLayout:
         form = self._form = _form()
+        self._labels: List[QLabel] = []
+        self._fields: List[QWidget] = []
 
         self._title_edit = QLineEdit(default_title)
         self._title_edit.setPlaceholderText(_("Article title"))
         self._title_edit.setAccessibleName(_("Title"))
         self._title_edit.textChanged.connect(self._on_title_changed)
-        form.addRow(_label(_("Title:"), self._title_edit), self._title_edit)
+        self._add_row(_("Title:"), self._title_edit, self._title_edit)
 
         self._summary_edit = QLineEdit()
         self._summary_edit.setPlaceholderText(_("Short summary (one sentence)"))
         self._summary_edit.setAccessibleName(_("Summary"))
         self._summary_edit.textChanged.connect(self._refresh_card)
-        form.addRow(_label(_("Summary:"), self._summary_edit), self._summary_edit)
+        self._add_row(_("Summary:"), self._summary_edit, self._summary_edit)
 
         self._hashtags = TagField(is_dark=self._is_dark)
         self._hashtags.setAccessibleName(_("Hashtags"))
-        form.addRow(_label(_("Hashtags:"), self._hashtags), self._hashtags)
+        self._add_row(_("Hashtags:"), self._hashtags, self._hashtags)
 
         # The cover, chosen the same way as in Article Details; its web
         # address is under Show Details.
@@ -410,8 +424,7 @@ class PublishArticleDialog(QDialog):
         cover_column.addWidget(self._cover_problem)
         self._cover.problem.connect(self._say_cover_problem)
         self._cover.changed.connect(lambda _text: self._cover_problem.hide())
-        form.addRow(_label(_("Cover image:"), self._cover.pick_button or self._cover.preview),
-                    cover)
+        self._add_row(_("Cover image:"), self._cover.pick_button or self._cover.preview, cover)
 
         self._add_coauthor = QPushButton(_("Add Co-Author…"))
         self._add_coauthor.clicked.connect(self._ask_coauthor)
@@ -419,14 +432,14 @@ class PublishArticleDialog(QDialog):
                                  add_button=self._add_coauthor)
         self._people.setAccessibleName(_("People"))
         self._people.remove_requested.connect(self._remove_coauthor)
-        form.addRow(_label(_("People:"), self._add_coauthor), self._people)
+        self._add_row(_("People:"), self._add_coauthor, self._people)
 
         self._details_toggle = QToolButton()
         self._details_toggle.setObjectName("disclosure")
         self._details_toggle.setCheckable(True)
         self._details_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self._details_toggle.toggled.connect(self._show_details)
-        form.addRow("", self._details_toggle)
+        self._add_row("", None, self._details_toggle)
 
         # Show Details: the link name, the cover's address, the first date.
         self._slug_edit = QLineEdit()
@@ -456,11 +469,11 @@ class PublishArticleDialog(QDialog):
         kept.setVisible(bool(self._details.identifier))
         link_column.addWidget(kept)
         self._link_row = form.rowCount()
-        form.addRow(_label(_("Link name:"), self._slug_edit), link)
+        self._add_row(_("Link name:"), self._slug_edit, link)
 
         self._image_edit.setAccessibleName(_("Cover image address"))
         self._image_edit.show()
-        form.addRow(_label(_("Cover image address:"), self._image_edit), self._image_edit)
+        self._add_row(_("Cover image address:"), self._image_edit, self._image_edit)
 
         when = self._details.published_at
         first = QLabel(_("First published {moment}").format(
@@ -468,11 +481,8 @@ class PublishArticleDialog(QDialog):
             if when else _("Not published yet."))
         first.setObjectName("help")
         first.setWordWrap(True)
-        form.addRow("", first)
+        self._add_row("", None, first)
         # The fields stay where they are when Show Details adds its rows.
-        self._labels = [form.itemAt(row, QFormLayout.ItemRole.LabelRole).widget()
-                        for row in range(form.rowCount())
-                        if form.itemAt(row, QFormLayout.ItemRole.LabelRole) is not None]
         widest = max(label.sizeHint().width() for label in self._labels)
         for label in self._labels:
             label.setMinimumWidth(widest)
@@ -527,8 +537,7 @@ class PublishArticleDialog(QDialog):
         room = (self.width() - margins.left() - margins.right()
                 - self._scroll.verticalScrollBar().sizeHint().width()
                 - self._columns.contentsMargins().right())
-        fields = max(self._form.itemAt(row, QFormLayout.ItemRole.FieldRole).widget()
-                     .minimumSizeHint().width() for row in range(self._form.rowCount()))
+        fields = max(field.minimumSizeHint().width() for field in self._fields)
         form = self._labels[0].minimumWidth() + self._form.horizontalSpacing() + fields
         beside = room >= self._card.width() + self._columns.spacing() + form
         self._columns.setDirection(QBoxLayout.Direction.LeftToRight if beside

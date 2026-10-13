@@ -405,3 +405,14 @@ def test_an_articles_identifier_is_its_link_name_wherever_it_is_named():
     assert named == []
     from nostr.ui.secret_key_check import SLUG_HOLDS_A_KEY
     assert "link name" in SLUG_HOLDS_A_KEY
+
+
+def test_the_sheets_never_wrap_the_items_of_a_layout_qt_owns():
+    """Asking a QDialogButtonBox's or a QFormLayout's layout for its items
+    (itemAt) gives Python wrappers of items Qt deletes on its own: one sheet
+    in a few hundred then crashed the app at a later allocation. The
+    sheets keep their own lists, and ask the buttons where they are."""
+    import inspect
+    from nostr.ui import publish_sheet
+    for module in (publish_sheet, article_module, note_module):
+        assert ".itemAt(" not in inspect.getsource(module), module.__name__

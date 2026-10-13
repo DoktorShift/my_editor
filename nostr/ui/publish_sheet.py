@@ -34,7 +34,7 @@ from __future__ import annotations
 import sys
 from typing import Iterable, List, Optional, Tuple
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QPoint, QSize, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QBoxLayout, QDialog, QDialogButtonBox, QFrame, QHBoxLayout, QLabel, QMenu, QPushButton,
@@ -375,20 +375,17 @@ class BottomRow(QWidget):
         self._row.addWidget(account, 0, Qt.AlignmentFlag.AlignLeft)
         self._row.addStretch(1)
         self._row.addWidget(buttons, 0, Qt.AlignmentFlag.AlignRight)
-        # Tab goes left to right: the account, then the buttons as the
-        # platform orders them (Cancel first on a Mac).
-        box = buttons.layout()
-        placed = [box.itemAt(at).widget() for at in range(box.count())]
-        if box.direction() == QBoxLayout.Direction.RightToLeft:
-            placed.reverse()
-        previous = account.button
-        for button in placed:
-            if isinstance(button, QPushButton):
-                QWidget.setTabOrder(previous, button)
-                previous = button
 
     def resizeEvent(self, event) -> None:  # noqa: N802, Qt's name
         super().resizeEvent(event)
+        # Tab goes left to right: the account, then the buttons as the
+        # platform placed them (Cancel first on a Mac). (Asked of the
+        # buttons, never of the box's own layout items: wrapping those
+        # leaves Python holding items the box deletes.)
+        previous = self._account.button
+        for button in sorted(self._buttons.buttons(), key=lambda b: b.mapTo(self, QPoint()).x()):
+            QWidget.setTabOrder(previous, button)
+            previous = button
         beside = (self._account.sizeHint().width() + self._row.spacing()
                   + self._buttons.sizeHint().width())
         direction = (QBoxLayout.Direction.LeftToRight if self.width() >= beside
