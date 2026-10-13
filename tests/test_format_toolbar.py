@@ -353,3 +353,45 @@ def test_undo_and_redo_stay_in_sight_in_the_narrowest_window(tmp_path, language)
     # (a pop-up button's room for its arrow once hid it).
     r = run_window_script(NARROWEST, tmp_path, language)
     assert r == {"undo": True, "redo": True, "more": True, "switch": True}
+
+
+OVERFLOW = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtWidgets import QApplication, QToolButton
+app = QApplication(sys.argv[:1])
+import main_window
+
+w = main_window.MainWindow()
+w.show()
+ed = w.new_tab()
+w.resize(w.minimumSizeHint())
+app.processEvents()
+tb = w.format_toolbar
+menu = tb.findChild(QToolButton, "qt_toolbar_ext_button").menu()
+r = {}
+for _ in range(2):                                   # opened twice: no item twice
+    menu.aboutToShow.emit()
+    app.processEvents()
+    entries = [a for a in menu.actions() if not a.isSeparator()]
+    r.setdefault("menus", []).append([a.menu() is w.m_style for a in entries].count(True))
+    r["insert"] = [a.menu() is w.m_insert for a in entries].count(True)
+    r["first"] = entries[0].menu() is w.m_style
+    r["last"] = entries[-1].menu() is w.m_insert
+    r["bold"] = w.act_bold in entries
+w.resize(1200, 600)
+app.processEvents()
+menu.aboutToShow.emit()
+app.processEvents()
+r["wide"] = [a.menu() is not None for a in menu.actions()].count(True)
+ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_the_chevron_holds_the_style_and_insert_popups_it_hides(tmp_path):
+    r = run_window_script(OVERFLOW, tmp_path)
+    assert r == {"menus": [1, 1], "insert": 1, "first": True, "last": True, "bold": True,
+                 "wide": 0}

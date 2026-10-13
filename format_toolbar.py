@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from typing import Dict, Optional
 
-from PySide6.QtCore import QEvent, QSize, Qt
+from PySide6.QtCore import QEvent, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QKeySequence
 from PySide6.QtWidgets import QHBoxLayout, QMenu, QPushButton, QToolBar, QToolButton, QWidget
 
@@ -213,10 +213,16 @@ class FormatToolbar(QToolBar):
         self.addWidget(self.insert_button)
         # The chevron that holds the buttons a narrow window has no room
         # for: Qt gives it no name, so a screen reader would say "button".
+        self._insert_menu = insert_menu
+        self._popup_entries: list = []
         more = self.findChild(QToolButton, "qt_toolbar_ext_button")
         if more is not None:
             more.setAccessibleName(_("More Formatting"))
             more.setToolTip(_("More Formatting"))
+            if more.menu() is not None:
+                # Once Qt has filled it again, which it does as it opens.
+                more.menu().aboutToShow.connect(lambda m=more.menu(): QTimer.singleShot(
+                    0, lambda: self._hold_hidden_popups(m)))
         self.set_style_name(_("Body"))
         self.set_dark(dark)
 
@@ -227,6 +233,19 @@ class FormatToolbar(QToolBar):
         hint = super().minimumSizeHint()
         redo = self.buttons["redo"].sizeHint().width() + self.layout().spacing()
         return QSize(hint.width() + redo, hint.height())
+
+    def _hold_hidden_popups(self, menu: QMenu) -> None:
+        """The chevron's ``menu``, as it opens: the style pop-up and Insert
+        too when they have no room, as submenus (Qt lists the hidden
+        buttons only, not the pop-ups)."""
+        for entry in self._popup_entries:
+            menu.removeAction(entry)
+        self._popup_entries = []
+        first = next((a for a in menu.actions() if not a.isSeparator()), None)
+        if not self.style_button.isVisible():
+            self._popup_entries.append(menu.insertMenu(first, self._style_menu))
+        if not self.insert_button.isVisible():
+            self._popup_entries.append(menu.addMenu(self._insert_menu))
 
     def add_trailing(self, widget: QWidget) -> QWidget:
         """A holder for ``widget`` (the Write, Preview and Split switch), to
