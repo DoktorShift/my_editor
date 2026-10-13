@@ -511,7 +511,7 @@ class MediaStore(QObject):
                     return
                 seen: Set[str] = set()
                 request_page(origin, auth_event, cursor=None, page=1, seen=seen,
-                             signed=signed, retried=retried, server=server)
+                             largest=0, signed=signed, retried=retried, server=server)
 
             if not signed:
                 # No bunker round-trip: a public listing, or the fallback
@@ -539,6 +539,7 @@ class MediaStore(QObject):
             cursor: Optional[str],
             page: int,
             seen: Set[str],
+            largest: int,
             signed: bool,
             retried: bool,
             server: str,
@@ -549,7 +550,7 @@ class MediaStore(QObject):
                 auth_event,
                 on_success=lambda items: handle_page(
                     server, origin, auth_event, items, cursor=cursor, page=page,
-                    seen=seen, signed=signed, retried=retried,
+                    seen=seen, largest=largest, signed=signed, retried=retried,
                 ),
                 on_failure=lambda err: handle_list_error(
                     server, origin, err, page=page, signed=signed, retried=retried,
@@ -567,6 +568,7 @@ class MediaStore(QObject):
             cursor: Optional[str],
             page: int,
             seen: Set[str],
+            largest: int,
             signed: bool,
             retried: bool,
         ) -> None:
@@ -595,11 +597,15 @@ class MediaStore(QObject):
             # Stop conditions. Together they mean a server that ignores
             # the cursor and re-sends the same page forever is caught on
             # page two: it merges once and the walk ends, with no error
-            # and no loop.
-            if not items or len(items) < _LIST_PAGE_SIZE:
+            # and no loop. A page shorter than asked for is not the end
+            # by itself: BUD-12's ``limit`` is a maximum, and a server
+            # may page smaller. It is the end when the server has already
+            # sent a longer page; otherwise one more request (same token,
+            # no prompt) tells, and an empty answer ends the walk.
+            if not items or novel == 0 or echoed_cursor or not last_sha:
                 finish_one()
                 return
-            if novel == 0 or echoed_cursor or not last_sha:
+            if len(items) < largest:
                 finish_one()
                 return
             if page >= _MAX_LIST_PAGES:
@@ -607,7 +613,8 @@ class MediaStore(QObject):
                 finish_one()
                 return
             request_page(origin, auth_event, cursor=last_sha, page=page + 1,
-                         seen=seen, signed=signed, retried=retried, server=server)
+                         seen=seen, largest=max(largest, len(items)),
+                         signed=signed, retried=retried, server=server)
 
         def merge_entry(origin: str, sha: str, entry: dict) -> None:
             url = entry.get("url") or f"{origin}/{sha}"

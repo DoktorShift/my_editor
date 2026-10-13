@@ -506,12 +506,27 @@ def _cursors(nam):
     return out
 
 
-def test_a_short_first_page_ends_the_walk(tmp_path):
+def test_a_short_first_page_is_followed_by_one_empty_one(tmp_path):
+    """BUD-12's ``limit`` is a maximum, so a page shorter than asked for
+    does not say the list is over: the server may page smaller. One more
+    request (same token, no prompt) answers it."""
     ctx = make_store(tmp_path, responder=FakeBlossomServer(SERVER, blobs=_many(5)))
     ctx.store.fetch()
     ctx.settle()
-    assert len(ctx.nam.calls) == 1
+    assert len(ctx.nam.calls) == 2
     assert len(ctx.store.files) == 5
+    assert ctx.pool.calls == 1
+
+
+def test_a_server_with_smaller_pages_is_listed_to_the_end(tmp_path):
+    server = FakeBlossomServer(SERVER, blobs=_many(120), page_size=50)
+    ctx = make_store(tmp_path, responder=server)
+    ctx.store.fetch()
+    ctx.settle()
+    assert len(ctx.store.files) == 120
+    assert not ctx.store.server_listings()[SERVER].truncated
+    # Three pages of 50, 50 and 20: the short one after full ones ends it.
+    assert len(server.list_queries) == 3
 
 
 def test_a_full_page_asks_for_the_next_one_with_a_cursor(tmp_path):
@@ -633,13 +648,15 @@ def test_a_blob_the_server_dropped_is_still_removed_by_a_fetch(tmp_path):
     written after the walk began, so a real deletion elsewhere still
     disappears from the library."""
     stale = descriptor(OTHER_SHA)
-    ctx = make_store(tmp_path, replies=[json_reply([stale]), json_reply([])])
+    # The first walk is a page and the empty page that ends it.
+    ctx = make_store(tmp_path, replies=[json_reply([stale]), json_reply([]),
+                                        json_reply([])])
     ctx.store.fetch()
     ctx.settle()
     assert OTHER_SHA in ctx.store.files
 
     ctx.store.fetch(force=True)
-    ctx.nam.issued[1].finish()
+    ctx.settle()
     assert OTHER_SHA not in ctx.store.files
 
 
