@@ -152,7 +152,7 @@ The **`View`** menu holds the appearance options: `View > Appearance` (Automatic
 
 ### Nostr
 
-The Nostr commands have no shortcuts of their own: no platform has a convention for them. They are in the `Nostr` menu (and in Help > Keyboard Shortcuts' search): Publish as Note…, Publish as Article…, Media Library…, Insert Image…, Drafts…. Refresh Drafts is the one exception: it answers the system's own Refresh key.
+The Nostr commands have no shortcuts of their own: no platform has a convention for them. They are in the `Nostr` menu (and in Help > Keyboard Shortcuts' search): Publish as Note…, Publish as Article…, Media Library…, Insert Image…, Drafts. Refresh Drafts is the one exception: it answers the system's own Refresh key.
 
 | Shortcut | Action |
 |---|---|

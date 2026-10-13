@@ -118,7 +118,7 @@ In-progress work is saved as a **NIP-37 draft**: a kind 31234 event whose body i
 
 ### How to use it
 
-- **`Nostr > Drafts…`** opens the Drafts panel on the right.
+- **`Nostr > Drafts`** shows the Drafts panel on the right, and hides it again.
 - **`Ctrl+Shift+S`** asks where to save the current tab: local file or private Nostr draft. The choice can be remembered per tab.
 - **`Ctrl+S`** on a draft-bound tab silently re-saves the draft. Same shortcut, no questions, exactly like saving a local file.
 - Double-click a row to open the draft in a new tab. Right-click for Publish, Copy event id, or Delete.
