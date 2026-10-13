@@ -28,7 +28,7 @@ from PySide6.QtGui import (
     QTextTable, QTextTableFormat,
 )
 
-from doc_walk import doc_length, doc_offset, iter_blocks
+from doc_walk import doc_length, doc_offset, iter_blocks, text_index
 
 # Inline styles, by name. Underline has no Markdown; it stays in local
 # files only (markdown_writer.has_local_only_formatting).
@@ -1054,9 +1054,10 @@ def _prose_blocks(doc) -> Iterator:
             yield block
 
 
-def _in_code_words(block, offset: int) -> bool:
+def _in_code_words(block, index: int) -> bool:
+    """Whether the character at ``index`` of ``block``'s text is code."""
     cursor = QTextCursor(block)
-    cursor.setPosition(block.position() + offset + 1)
+    cursor.setPosition(block.position() + doc_offset(block.text(), index) + 1)
     return has_style(cursor.charFormat(), CODE)
 
 
@@ -1081,7 +1082,8 @@ def footnote_marks(doc, label: Optional[str] = None) -> List[Tuple[int, str]]:
         for found in FOOTNOTE_MARK.finditer(text, start):
             if (label is None or found.group(1) == label) \
                     and not _in_code_words(block, found.start()):
-                marks.append((block.position() + found.start(), found.group(1)))
+                marks.append((block.position() + doc_offset(text, found.start()),
+                              found.group(1)))
     return marks
 
 
@@ -1141,7 +1143,7 @@ def footnote_jump(cursor: QTextCursor) -> Optional[int]:
         return None
     doc = cursor.document()
     text = block.text()
-    offset = cursor.positionInBlock()
+    offset = text_index(text, cursor.positionInBlock())
     definition = FOOTNOTE_DEFINITION.match(text)
     for found in FOOTNOTE_MARK.finditer(text, definition.end() if definition else 0):
         if found.start() <= offset <= found.end() \
@@ -1149,9 +1151,11 @@ def footnote_jump(cursor: QTextCursor) -> Optional[int]:
             target = footnote_definition(doc, found.group(1))
             if target is None:
                 return None
-            words = FOOTNOTE_DEFINITION.match(target.text())
-            rest = target.text()[words.end():]
-            return target.position() + words.end() + (len(rest) - len(rest.lstrip(" ")))
+            note = target.text()
+            words = FOOTNOTE_DEFINITION.match(note)
+            rest = note[words.end():]
+            return target.position() + doc_offset(
+                note, words.end() + len(rest) - len(rest.lstrip(" ")))
     if definition is not None:
         marks = footnote_marks(doc, definition.group(1))
         return marks[0][0] if marks else None

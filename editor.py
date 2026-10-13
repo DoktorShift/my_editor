@@ -1549,8 +1549,9 @@ class HtmlEditor(QTextEdit):
         block = cursor.block()
         if rich_text.is_code_block(block):
             return ""
-        offset = cursor.positionInBlock()
-        for found in rich_text.FOOTNOTE_MARK.finditer(block.text()):
+        text = block.text()
+        offset = text_index(text, cursor.positionInBlock())
+        for found in rich_text.FOOTNOTE_MARK.finditer(text):
             if found.start() <= offset <= found.end():
                 return rich_text.footnote_text(self.document(), found.group(1))
         return ""

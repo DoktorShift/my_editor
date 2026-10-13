@@ -153,3 +153,47 @@ def test_markdown_shortcuts_after_emoji_style_the_words_typed(text, markdown):
     from tests.test_markdown_shortcuts import typed
     ed = typed(text)
     assert assert_round_trip(ed.document()) == markdown
+
+
+FOOTNOTED = "🌸 A claim[^1] 👨‍👩‍👧 and[^1] again.\n\n[^1]: 🇩🇪 The source.\n"
+
+
+def test_footnote_marks_and_jumps_after_emoji_land_on_the_marks():
+    from PySide6.QtGui import QTextCursor
+    import rich_text
+    from editor import HtmlEditor
+    from markdown_writer import read_markdown
+    ed = HtmlEditor()
+    read_markdown(ed.document(), FOOTNOTED)
+    doc = ed.document()
+    for position, label in rich_text.footnote_marks(doc):
+        probe = QTextCursor(doc)
+        probe.setPosition(position)
+        probe.setPosition(position + 4, QTextCursor.MoveMode.KeepAnchor)
+        assert probe.selectedText() == "[^1]" and label == "1"
+    first = rich_text.footnote_marks(doc)[0][0]
+    mark = QTextCursor(doc)
+    mark.setPosition(first + 2)
+    to = rich_text.footnote_jump(mark)
+    words = QTextCursor(doc)
+    words.setPosition(to)
+    words.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
+    assert words.selectedText() == "🇩🇪 The source."
+    back = QTextCursor(doc)
+    back.setPosition(to + 3)
+    assert rich_text.footnote_jump(back) == first
+    ed.resize(600, 200)
+    ed.show()
+    QApplication.processEvents()
+    second = QTextCursor(doc)
+    second.setPosition(rich_text.footnote_marks(doc)[1][0] + 2)
+    rect = ed.cursorRect(second)
+    assert ed._footnote_tip(rect.center()) == "🇩🇪 The source."
+    ed.close()
+
+
+def test_the_preview_raises_footnote_marks_after_emoji_in_their_place():
+    import nostr.preview as pv
+    doc = pv.article_document(FOOTNOTED, pv.Article(title="T"))
+    assert "🌸 A claim1 👨‍👩‍👧 and1 again." in doc.toPlainText()
+    assert "🇩🇪 The source." in doc.toPlainText()

@@ -63,7 +63,7 @@ import i18n
 import media_files
 import rich_text
 import word_count
-from doc_walk import iter_blocks
+from doc_walk import doc_length, doc_offset, iter_blocks
 from i18n import _, ngettext
 from markdown_writer import READ_FEATURES, read_markdown
 from nostr import bech32
@@ -344,9 +344,11 @@ def _render_footnotes(doc: QTextDocument) -> List[int]:
             continue
         defining.append(block)
         if found.group(1) not in notes:
-            rest = block.text()[found.end():]
+            text = block.text()
+            rest = text[found.end():]
             words = QTextCursor(block)
-            words.setPosition(block.position() + found.end() + len(rest) - len(rest.lstrip()))
+            words.setPosition(block.position() + doc_offset(
+                text, found.end() + len(rest) - len(rest.lstrip())))
             words.movePosition(QTextCursor.MoveOperation.EndOfBlock,
                                QTextCursor.MoveMode.KeepAnchor)
             notes[found.group(1)] = words.selection()
@@ -357,15 +359,17 @@ def _render_footnotes(doc: QTextDocument) -> List[int]:
     for block in iter_blocks(doc):
         if rich_text.is_code_block(block) or block in defining:
             continue
-        for found in rich_text.FOOTNOTE_MARK.finditer(block.text()):
+        text = block.text()
+        for found in rich_text.FOOTNOTE_MARK.finditer(text):
             label = found.group(1)
+            # (Places in the text, as places in the document.)
+            start = block.position() + doc_offset(text, found.start())
             probe = QTextCursor(block)
-            probe.setPosition(block.position() + found.start() + 1)
+            probe.setPosition(start + 1)
             if label in notes and not probe.charFormat().fontFixedPitch():
                 first = label not in numbers
                 numbers.setdefault(label, len(numbers) + 1)
-                marks.append((block.position() + found.start(), found.end() - found.start(),
-                              numbers[label], first))
+                marks.append((start, doc_length(found.group(0)), numbers[label], first))
     cursor = QTextCursor(doc)
     cursor.beginEditBlock()
     for position, length, number, first in reversed(marks):
