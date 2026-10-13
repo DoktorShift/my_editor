@@ -1062,8 +1062,10 @@ class MediaStore(QObject):
 
         # Servers this upload already tried and lost. They are not
         # offered the blob a second time as a mirror target: the request
-        # would be new but the problem would be the same one.
+        # would be new but the problem would be the same one. Once the
+        # file lands elsewhere they are reported as copies not kept.
         exhausted: List[str] = []
+        missed: List[tuple] = []
         # This upload's job. Every answer below asks whether it is still
         # the job of that name: after a Cancel it is not, and a signer or
         # a server answering late sends and reports nothing.
@@ -1133,6 +1135,7 @@ class MediaStore(QObject):
                 primary_result=result,
                 mirror_servers=mirrors,
                 configured_primary=configured_primary,
+                missed=missed,
             )
 
         def on_attempt_failed(index: int, err: BlossomError) -> None:
@@ -1141,6 +1144,7 @@ class MediaStore(QObject):
             if job is not None:
                 job.sending = None
             exhausted.append(missing[index])
+            missed.append((_hostname(missing[index]), _error_code(err)))
             next_index = index + 1
             if (
                 next_index < _MAX_UPLOAD_ATTEMPTS
@@ -1234,6 +1238,7 @@ class MediaStore(QObject):
         primary_result: UploadResult,
         mirror_servers: List[str],
         configured_primary: str = "",
+        missed: Sequence[tuple] = (),
     ) -> None:
         sha = primary_result["hash"]
         primary_server = primary_result["server"]
@@ -1259,6 +1264,7 @@ class MediaStore(QObject):
             mirror_servers=mirror_servers,
             configured_primary=configured_primary,
             body=body,
+            missed=missed,
         )
 
     def _replicate(
@@ -1271,6 +1277,7 @@ class MediaStore(QObject):
         mirror_servers: List[str],
         configured_primary: str = "",
         body: Optional[bytes] = None,
+        missed: Sequence[tuple] = (),
     ) -> None:
         """Copy a blob one server already holds onto the rest, in turn.
 
@@ -1287,7 +1294,12 @@ class MediaStore(QObject):
         replication problem would take an image out of a document to
         punish a server the user does not control.
         """
+        # (host, code) of every server that ends up without a copy: the
+        # ones the upload itself could not reach, then refused mirrors.
+        failures: List[tuple] = list(missed)
         if not mirror_servers:
+            for host, code in failures:
+                self.mirror_failed.emit(name, host, code)
             self._commit_upload(name, media, configured_primary=configured_primary)
             return
 
@@ -1295,8 +1307,6 @@ class MediaStore(QObject):
         if state is not None:
             state.status = "mirroring"
             self.upload_status.emit(name, state.status)
-
-        failures: List[tuple] = []
 
         def step(index: int) -> None:
             if index >= len(mirror_servers):

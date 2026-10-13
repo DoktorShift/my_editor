@@ -344,6 +344,9 @@ def test_a_transport_failure_reaches_the_second_server(tmp_path):
     ctx.nam.settle_one()
     assert ctx.failures == []
     assert ctx.finished[0][1].hash == SHA
+    # The server that failed holds no copy, and that is reported the way
+    # a copy a server refused is: the file is on the others.
+    assert ctx.mirror_failures == [("a.png", "good.example", ERROR_CODES.NETWORK_UNAVAILABLE)]
 
 
 def test_a_403_produces_no_second_attempt(tmp_path):
