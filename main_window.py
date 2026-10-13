@@ -622,6 +622,8 @@ class MainWindow(QMainWindow):
         # Save As from either: it goes on when the window that asked
         # closes, and is said in the status bar then.
         self._media_saver = MediaSaver(self._media_image_loader, parent=self)
+        # "Saving “x”…" while this bar says it, to be followed by its end.
+        self._media_save_said = ""
         self._media_saver.started.connect(self._on_media_save_started)
         self._media_saver.finished.connect(self._on_media_save_finished)
         # The Media Servers sheet while it is open (it is modal).
@@ -6316,16 +6318,24 @@ class MainWindow(QMainWindow):
 
     def _on_media_save_started(self, target: str) -> None:
         if not self._media_window_open():
-            self.status.showMessage(
-                _("Saving “{name}”…").format(name=os.path.basename(target)), 0)
+            self._media_save_said = _("Saving “{name}”…").format(name=os.path.basename(target))
+            self.status.showMessage(self._media_save_said, 0)
 
     def _on_media_save_finished(self, target: str, why: str) -> None:
-        """How a Save As went, when no library window is open to say it:
-        kept until the next message, as a saved document's is."""
-        if self._media_window_open() or why == "cancelled":
+        """How a Save As went, when no library window is open to say it,
+        or when this bar still says it is saving (a library window opened
+        meanwhile): kept until the next message, as a saved document's
+        is."""
+        announced = bool(self._media_save_said) and \
+            self.status.currentMessage() == self._media_save_said
+        self._media_save_said = ""
+        if why == "cancelled":
+            if announced:
+                self.status.clearMessage()
             return
-        self.status.showMessage(save_failure(why, target) if why
-                                else _("Saved: {path}").format(path=target), 0)
+        if announced or not self._media_window_open():
+            self.status.showMessage(save_failure(why, target) if why
+                                    else _("Saved: {path}").format(path=target), 0)
 
     def _open_membership_window(self) -> None:
         """Nostr > EINUNDZWANZIG Membership."""

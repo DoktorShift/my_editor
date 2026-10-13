@@ -425,7 +425,9 @@ def _saving_host(window_open=False):
     host = SimpleNamespace(
         _media_window_open=lambda: window_open,
         _media_saver=SimpleNamespace(current=""),
-        status=SimpleNamespace(showMessage=lambda text, ms=0: shown.append((text, ms))),
+        status=SimpleNamespace(showMessage=lambda text, ms=0: shown.append((text, ms)),
+                               currentMessage=lambda: shown[-1][0] if shown else ""),
+        _media_save_said="",
     )
     for name in ("_on_media_save_started", "_on_media_save_finished", "_say_media_save_running"):
         setattr(host, name, getattr(MainWindow, name).__get__(host))
@@ -541,3 +543,44 @@ def test_closing_a_document_while_a_save_runs_asks_nothing(monkeypatch):
     """The save goes on: only quitting stops it."""
     host = _quitting_host([], ["/out/Talk.mp4"])
     assert host._may_leave_uploads([], quitting=False) is True
+
+
+def _status_host():
+    """A host with a real status bar, and a library window that opens
+    and closes."""
+    from types import SimpleNamespace
+    from PySide6.QtWidgets import QApplication, QStatusBar
+    QApplication.instance() or QApplication([])
+    host = SimpleNamespace(window_open=False, _media_saver=SimpleNamespace(current=""),
+                           status=QStatusBar(), _media_save_said="")
+    host._media_window_open = lambda: host.window_open
+    for name in ("_on_media_save_started", "_on_media_save_finished", "_say_media_save_running"):
+        setattr(host, name, getattr(MainWindow, name).__get__(host))
+    return host
+
+
+@pytest.mark.parametrize("why, said", [
+    ("", "Saved: /out/Big.mp4"),
+    ("missing", "“Big.mp4” isn’t on your media servers anymore, so it couldn’t be saved."),
+    ("cancelled", ""),
+])
+def test_the_status_bar_says_how_a_save_it_announced_ended_whoever_is_open(why, said):
+    """It said "Saving…" when the library closed; the library was opened
+    again and the save ended there. The status bar doesn't go on saying
+    it is saving."""
+    host = _status_host()
+    host._media_saver.current = "/out/Big.mp4"
+    host._say_media_save_running()                     # the library closed
+    assert host.status.currentMessage() == "Saving “Big.mp4”…"
+    host.window_open = True                            # and was opened again
+    host._on_media_save_finished("/out/Big.mp4", why)
+    assert host.status.currentMessage() == said
+
+
+def test_an_open_library_leaves_another_status_message_alone():
+    host = _status_host()
+    host.status.showMessage("Saved: /Users/me/Essay.md")
+    host.window_open = True
+    host._on_media_save_started("/out/Big.mp4")
+    host._on_media_save_finished("/out/Big.mp4", "")
+    assert host.status.currentMessage() == "Saved: /Users/me/Essay.md"
