@@ -4,7 +4,9 @@
 
 What must hold: a relay a subscription needs reopens its socket after it
 drops, waiting longer after each failed attempt (up to a minute) and
-starting over once it connects; a relay nobody needs, or one closed on
+starting over once a connection stayed up a while (a relay that drops
+every connection at once, one that drops anyone not signed in, say, is
+not asked again every second); a relay nobody needs, or one closed on
 purpose, is not reopened.
 """
 
@@ -60,16 +62,29 @@ def test_a_needed_relay_reconnects_with_growing_waits():
     assert relay._retry.interval() == RECONNECT_LONGEST_MS
 
 
-def test_connecting_starts_the_waits_over():
+def test_a_connection_that_stays_up_starts_the_waits_over():
     relay = Recorder()
     relay.hold()
     drop(relay)
     relay._retry.stop()
     relay._on_error(None)
     relay._on_connected()
+    relay._stable.timeout.emit()             # it stayed up a while
     relay._retry.stop()
     drop(relay)
     assert relay._retry.interval() == RECONNECT_FIRST_MS
+
+
+def test_a_connection_dropped_at_once_keeps_the_waits_growing():
+    relay = Recorder()
+    relay.hold()
+    waits = []
+    for _ in range(4):
+        drop(relay)
+        waits.append(relay._retry.interval())
+        relay._retry.stop()
+        relay._on_connected()                # taken, and dropped again at once
+    assert waits == [RECONNECT_FIRST_MS * 2 ** n for n in range(4)]
 
 
 def test_a_relay_nobody_needs_is_not_reopened():

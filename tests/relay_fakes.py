@@ -37,6 +37,9 @@ class FakeRelay(Relay):
     def drop(self):
         self._on_disconnected()
 
+    def reconnect(self):
+        self.drop()                   # as the real socket reports its close
+
 
 def fake_relay_pool(monkeypatch) -> RelayPool:
     """A real RelayPool whose relays are FakeRelays (``monkeypatch``, the

@@ -124,6 +124,28 @@ def test_a_signer_app_that_does_not_answer_did_not_say_no(pool):
     assert failed == [(MINE, "timed out waiting for signer", False)]
 
 
+def test_a_challenge_shaped_like_a_secret_key_is_no_decline(pool):
+    from nostr import bech32
+    key_shaped = bech32.encode_nsec("6e" * 32)
+    pool.sign_in, sessions = account()
+    failed = failures(pool)
+    sub, relay, seen = refused_read(pool, MINE, challenge=key_shaped)
+    settle()
+    assert sessions.client.requests == [] and relay.sent_of("AUTH") == []
+    assert len(failed) == 1 and failed[0][1] != DECLINED
+    again = pool.subscribe([MINE], [{"kinds": [1]}])
+    relay.says("CLOSED", again.sub_id, "auth-required: sign in")
+    settle()
+    assert len(failed) == 1                      # refused for good on this connection
+
+
+def test_only_the_signer_apps_answer_is_final():
+    sign_in, _ = account()
+    assert sign_in.is_final(DECLINED)
+    assert not sign_in.is_final("timed out waiting for signer")
+    assert not sign_in.is_final("not connected")
+
+
 def test_a_key_kept_here_never_declines(pool):
     local = Profile()
     local.signer = LOCAL
@@ -162,5 +184,28 @@ def test_the_window_says_what_happened(qt_app):
         f"Signing in to {MINE}…",
         f"{MINE} asks you to sign in, and your signer app declined.",
         f"{MINE} didn’t accept your sign-in.",
-        f"Couldn’t sign in to {MINE}. Try again in a moment.",
+        f"Couldn’t sign in to {MINE}.",
     ]
+
+
+def test_every_change_of_account_ends_the_other_accounts_sign_ins(qt_app):
+    from main_window import MainWindow
+    kept = []
+
+    class Pool:
+        def end_sign_ins(self, keep):
+            kept.append(keep)
+
+    class Store:
+        current = Profile()
+
+        def default(self):
+            return self.current
+
+    window = MainWindow.__new__(MainWindow)
+    window._relay_pool, window._profile_store = Pool(), Store()
+    window._update_refresh_command = lambda: None
+    MainWindow._update_account_actions(window)
+    Store.current = None                         # signed out
+    MainWindow._update_account_actions(window)
+    assert kept == [PK, ""]

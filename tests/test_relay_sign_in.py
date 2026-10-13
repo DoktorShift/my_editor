@@ -10,11 +10,23 @@ What must hold:
 - A relay the signer may not sign in to is told nothing.
 - One sign-in per key and connection, however many requests asked; a
   new connection asks again.
-- A publish waits for a sign-in the person still has to approve.
+- A sign-in refused for good (the person said no, the relay said no) is
+  not asked again on that connection; one that only went unanswered is.
+- While a signer is still asked, nothing asks it again, however often
+  the relay drops the connection: the person sees one question.
+- The account in use is checked again when the signer is asked, and
+  when it answers.
+- A publish waits for a sign-in the person still has to approve, then
+  gets a full wait for the answer.
+- A challenge too long to be one gets no sign-in.
+- The pool speaks only of its own signer's sign-ins, and says "didn't
+  accept" only when the relay answered so.
+- When the account changes, connections signed in as another one close.
 """
 
 import os
 import sys
+import time
 
 import pytest
 
@@ -45,21 +57,36 @@ def pool(monkeypatch):
 
 
 class Signer(KeySignIn):
-    """Signs with KEY where it may; counts what it was asked, and can fail."""
+    """Signs with KEY where it may; counts what it was asked, and can fail
+    (``final``: for good) or, ``waits``, not answer until ``answer()``."""
 
-    def __init__(self, *, may=True, fail=None):
-        super().__init__(KEY)
-        self.may, self.fail, self.asked = may, fail, []
+    def __init__(self, *, may=True, fail=None, final=True, waits=False, key=KEY):
+        super().__init__(key)
+        self.may, self.fail, self.final, self.waits = may, fail, final, waits
+        self.asked, self.waiting = [], []
 
     def may_sign_in(self, url):
         return self.may
 
+    def is_final(self, reason):
+        return self.final
+
     def sign(self, url, challenge, on_signed, on_failed):
         self.asked.append((url, challenge))
-        if self.fail:
+        if self.waits:
+            self.waiting.append((url, challenge, on_signed, on_failed))
+        elif self.fail:
             on_failed(self.fail)
         else:
             super().sign(url, challenge, on_signed, on_failed)
+
+    def answer(self, *, fail=None):
+        """The person answers the oldest question still open."""
+        url, challenge, on_signed, on_failed = self.waiting.pop(0)
+        if fail:
+            on_failed(fail)
+        else:
+            KeySignIn.sign(self, url, challenge, on_signed, on_failed)
 
 
 def failures(pool):
@@ -246,3 +273,173 @@ def test_a_connection_lost_mid_sign_in_is_a_lost_relay_not_a_refusal(pool):
     relay.drop()
     assert relay._sign_ins == {}
     assert lost == [MINE] and seen["closed"] == []
+
+
+# -- not asking the person again --------------------------------------------------
+
+def test_a_sign_in_refused_for_good_is_not_asked_again_on_that_connection(pool):
+    pool.sign_in = signer = Signer(fail="user rejected")
+    failed = failures(pool)
+    sub, relay, seen = refused_read(pool, MINE)
+    for kinds in ([1], [7]):
+        again = pool.subscribe([MINE], [{"kinds": kinds}])
+        relay.says("CLOSED", again.sub_id, "auth-required: sign in")
+    event = signed(31234, [["d", "x"]])
+    pool.publish([MINE], event)
+    relay.says("OK", event["id"], False, "auth-required: sign in to write")
+    settle()
+    assert len(signer.asked) == 1 and len(failed) == 1
+    relay.drop()
+    relay.open()                                 # a new connection may ask once more
+    relay.says("AUTH", "fresh")
+    relay.says("CLOSED", sub.sub_id, "auth-required: sign in")
+    assert len(signer.asked) == 2
+
+
+def test_a_relay_that_refused_the_sign_in_is_not_asked_again_on_that_connection(pool):
+    pool.sign_in = signer = Signer()
+    sub, relay, seen = refused_read(pool, MINE)
+    accept_sign_in(relay, ok=False, message="restricted: not a member")
+    again = pool.subscribe([MINE], [{"kinds": [1]}])
+    relay.says("CLOSED", again.sub_id, "auth-required: sign in")
+    assert len(signer.asked) == 1 and len(relay.sent_of("AUTH")) == 1
+
+
+def test_a_sign_in_that_only_went_unanswered_is_asked_again(pool):
+    pool.sign_in = signer = Signer(fail="timed out waiting for signer", final=False)
+    sub, relay, seen = refused_read(pool, MINE)
+    again = pool.subscribe([MINE], [{"kinds": [1]}])
+    relay.says("CLOSED", again.sub_id, "auth-required: sign in")
+    assert len(signer.asked) == 2
+
+
+def test_a_relay_that_drops_the_connection_asks_the_person_once(pool):
+    pool.sign_in = signer = Signer(waits=True)
+    started = []
+    pool.signing_in.connect(started.append)
+    failed = failures(pool)
+    sub, relay, seen = refused_read(pool, MINE)
+    for n in range(5):                           # dropped and opened again, five times
+        relay.drop()
+        relay.open()
+        relay.says("AUTH", f"challenge-{n}")
+        relay.says("CLOSED", sub.sub_id, "auth-required: sign in")
+    assert len(signer.asked) == 1 and len(started) == 1 and failed == []
+    signer.answer()                              # yes, for a connection since lost
+    assert len(signer.asked) == 2 and signer.asked[1][1] == "challenge-4"
+    signer.answer()                              # the app signs the newer one
+    accept_sign_in(relay)
+    assert relay.sent_of("REQ")[-1][1] == sub.sub_id
+
+
+def test_a_late_no_for_a_lost_connection_counts_on_the_new_one(pool):
+    pool.sign_in = signer = Signer(waits=True)
+    sub, relay, seen = refused_read(pool, MINE)
+    relay.drop()
+    relay.open()
+    relay.says("AUTH", "fresh")
+    relay.says("CLOSED", sub.sub_id, "auth-required: sign in")
+    signer.answer(fail="user rejected")
+    again = pool.subscribe([MINE], [{"kinds": [1]}])
+    closed = []
+    again.relay_closed.connect(lambda url, why: closed.append(why))
+    relay.says("CLOSED", again.sub_id, "auth-required: sign in")
+    assert len(signer.asked) == 1 and closed == ["auth-required: sign in"]
+
+
+def test_a_late_yes_nobody_waits_for_any_more_is_let_go(pool):
+    pool.sign_in = signer = Signer(waits=True)
+    sub, relay, seen = refused_read(pool, MINE)
+    relay.drop()
+    signer.answer()
+    assert relay.sent_of("AUTH") == [] and relay._sign_ins == {}
+
+
+# -- the account in use -----------------------------------------------------------
+
+def test_the_account_is_checked_again_when_the_signer_is_asked(pool):
+    pool.sign_in = signer = Signer()
+    sub, relay, seen = refused_read(pool, MINE, challenge=None)
+    signer.may = False                           # another account is in use by now
+    relay.says("AUTH", CHALLENGE)
+    assert signer.asked == [] and relay.sent_of("AUTH") == []
+    assert seen["closed"]
+
+
+def test_the_account_is_checked_again_when_the_signer_answers(pool):
+    pool.sign_in = signer = Signer(waits=True)
+    sub, relay, seen = refused_read(pool, MINE)
+    signer.pubkey = "f" * 64                     # the account changed meanwhile
+    signer.answer()
+    assert relay.sent_of("AUTH") == [] and seen["closed"]
+
+
+def test_connections_signed_in_as_another_account_close(pool):
+    pool.sign_in = Signer()
+    sub, relay, seen = refused_read(pool, MINE)
+    accept_sign_in(relay)
+    other = pool.get_or_create("wss://other.example")
+    closed = []
+    relay.disconnected.connect(lambda: closed.append(MINE))
+    other.disconnected.connect(lambda: closed.append("other"))
+    pool.end_sign_ins(keep=pool.sign_in.pubkey)
+    assert closed == []                          # still the same account
+    pool.end_sign_ins(keep="")                   # signed out
+    assert closed == [MINE] and relay.signed_in_with(pool.sign_in) == set()
+
+
+def test_a_channel_sign_in_stays_when_the_account_changes(pool):
+    pool.sign_in = Signer()
+    channel = Signer(key=bytes.fromhex("5d" * 32))
+    sub = pool.subscribe([MINE], [{"kinds": [24133]}], sign_in=channel)
+    relay = pool.get_or_create(MINE)
+    relay.says("AUTH", CHALLENGE)
+    relay.says("CLOSED", sub.sub_id, "auth-required: messages are for their owner")
+    accept_sign_in(relay)
+    closed = []
+    relay.disconnected.connect(lambda: closed.append(MINE))
+    pool.end_sign_ins(keep="")
+    assert closed == []
+
+
+# -- the rest ---------------------------------------------------------------------
+
+def test_a_publish_sent_again_after_a_slow_sign_in_gets_its_full_wait(pool):
+    pool.sign_in = signer = Signer(waits=True)
+    event = signed(31234, [["d", "x"]])
+    job = pool.publish([MINE, "wss://quick.example"], event, timeout_ms=1000)
+    relay = pool.get_or_create(MINE)
+    relay.says("AUTH", CHALLENGE)
+    relay.says("OK", event["id"], False, "auth-required: sign in to write")
+    time.sleep(0.4)                              # the person takes a while
+    signer.answer()
+    accept_sign_in(relay)
+    assert job._timer.remainingTime() > 900
+
+
+def test_a_challenge_too_long_to_be_one_gets_no_sign_in(pool):
+    pool.sign_in = signer = Signer()
+    sub, relay, seen = refused_read(pool, MINE, challenge="x" * 1025)
+    assert signer.asked == [] and relay.sent_of("AUTH") == [] and seen["closed"]
+
+
+def test_the_pool_speaks_only_of_its_own_signers_sign_ins(pool):
+    pool.sign_in = Signer(may=False)
+    started, failed = [], failures(pool)
+    pool.signing_in.connect(started.append)
+    channel = Signer(key=bytes.fromhex("5d" * 32))
+    sub = pool.subscribe([MINE], [{"kinds": [24133]}], sign_in=channel)
+    relay = pool.get_or_create(MINE)
+    relay.says("AUTH", CHALLENGE)
+    relay.says("CLOSED", sub.sub_id, "auth-required: messages are for their owner")
+    accept_sign_in(relay, ok=False, message="restricted")
+    assert channel.asked and started == [] and failed == []
+
+
+def test_a_relay_that_never_answers_the_sign_in_did_not_refuse_it(pool):
+    pool.sign_in = signer = Signer()
+    failed = failures(pool)
+    sub, relay, seen = refused_read(pool, MINE)
+    relay._sign_ins[signer.pubkey].timer.timeout.emit()
+    assert failed == [(MINE, "the relay did not answer the sign-in", False)]
+

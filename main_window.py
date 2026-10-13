@@ -5589,6 +5589,12 @@ class MainWindow(QMainWindow):
         Every change of the active account passes through here (connect,
         switch, sign out, create, restore), so this is also where the one
         "Nostr in use" signal is brought up to date."""
+        pool = getattr(self, "_relay_pool", None)
+        if pool is not None:
+            # One connection never carries two accounts (NIP-42): those
+            # signed in as anyone but the account in use now open anew.
+            active = self._profile_store.default()
+            pool.end_sign_ins(keep=active.user_pubkey.lower() if active else "")
         state = getattr(self, "nostr_state", None)
         if state is not None:
             state.refresh()
@@ -5702,15 +5708,15 @@ class MainWindow(QMainWindow):
     def _on_relay_signing_in(self, relay: str) -> None:
         self.status.showMessage(_("Signing in to {relay}…").format(relay=relay), 5000)
 
-    def _on_relay_sign_in_failed(self, relay: str, reason: str, sent: bool) -> None:
+    def _on_relay_sign_in_failed(self, relay: str, reason: str, answered: bool) -> None:
         if reason == NOT_CHOSEN:
             return
-        if sent:
+        if answered:
             text = _("{relay} didn’t accept your sign-in.")
         elif reason == DECLINED:
             text = _("{relay} asks you to sign in, and your signer app declined.")
         else:
-            text = _("Couldn’t sign in to {relay}. Try again in a moment.")
+            text = _("Couldn’t sign in to {relay}.")
         self.status.showMessage(text.format(relay=relay), 8000)
 
     # -- association membership --------------------------------------------

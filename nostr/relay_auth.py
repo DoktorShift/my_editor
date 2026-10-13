@@ -24,11 +24,11 @@ from __future__ import annotations
 
 from typing import Callable, Optional, Sequence
 
+from . import refs
 from .bunker import is_signer_answer
 from .local_signer import LOCAL
-from .outbox.policy import normalize_relay_url
 from .outbox.writer import signed_matches
-from .relay import sign_in_event
+from .relay import _normalize, sign_in_event
 
 # Why a sign-in did not happen, when the signer app was asked and said no.
 DECLINED = "the signer app declined the sign-in"
@@ -40,7 +40,9 @@ class AccountSignIn:
 
     ``profile()`` is the account in use (None: none); ``entitled()`` the
     relays a membership gives it. A failure is the signer's own reason,
-    or DECLINED when a signer app answered no."""
+    or DECLINED when a signer app answered no. Only the signer's answer
+    is final (``is_final``): silence, or a session to the signer app that
+    is not there, may go otherwise next time."""
 
     def __init__(self, *, profile: Callable[[], Optional[object]], session_pool, directory,
                  entitled: Callable[[], Sequence[str]] = lambda: ()) -> None:
@@ -59,7 +61,10 @@ class AccountSignIn:
         if not author:
             return False
         chosen = self._directory.own_relays(author) + list(self._entitled() or ())
-        return _spelt(url) in {_spelt(relay) for relay in chosen if relay}
+        return _normalize(url) in {_normalize(relay) for relay in chosen if relay}
+
+    def is_final(self, reason: str) -> bool:
+        return is_signer_answer(reason)
 
     def sign(self, url: str, challenge: str, on_signed: Callable[[dict], None],
              on_failed: Callable[[str], None]) -> None:
@@ -68,6 +73,13 @@ class AccountSignIn:
             on_failed("no account in use")
             return
         unsigned = sign_in_event(url, challenge)
+        # What every signer refuses to sign (a relay's challenge shaped like
+        # a secret key, say) is not asked of it, so it can't read as the
+        # person's "no".
+        refusal = refs.signing_refusal(unsigned)
+        if refusal:
+            on_failed(refusal)
+            return
         author = profile.user_pubkey.lower()
         with_app = getattr(profile, "signer", "remote") != LOCAL
 
@@ -86,7 +98,3 @@ class AccountSignIn:
             profile, lambda client: client.sign_event(unsigned, on_success=signed,
                                                       on_failure=refused),
             on_failed)
-
-
-def _spelt(url: str) -> str:
-    return normalize_relay_url(url) or url

@@ -236,6 +236,7 @@ class FakeRelayDirectory(QObject):
         self.remembered: List[dict] = []
         # pubkey -> the account's own draft relays ([] for none).
         self.draft_lists: Dict[str, List[str]] = {}
+        self.chosen_for_drafts: Dict[str, List[str]] = {}
 
     def set(self, pubkey: str, value) -> None:
         if not isinstance(value, RelayList):
@@ -311,11 +312,18 @@ class FakeRelayDirectory(QObject):
         self.calls.append(("set_draft_relays_locked", author, locked))
 
     def own_relays(self, author):
-        mine = self.cached(author)
-        return list(mine.write) + list(mine.read) + list(self.draft_lists.get(author.lower(), ()))
+        key = author.lower()
+        mine = self.cached(key)
+        return policy.dedupe_relays(
+            list(mine.write) + list(mine.read) + list(self.draft_lists.get(key, ()))
+            + list(self.drafts_left_behind(key)) + list(self.chosen_for_drafts.get(key, ())))
 
     def choosing_draft_relays(self, author, relays):
         self.calls.append(("choosing_draft_relays", author, tuple(relays)))
+        if relays:
+            self.chosen_for_drafts[author.lower()] = list(relays)
+        else:
+            self.chosen_for_drafts.pop(author.lower(), None)
 
     def stop_reading_drafts_on(self, author, relays):
         self.calls.append(("stop_reading_drafts_on", author, tuple(relays)))
