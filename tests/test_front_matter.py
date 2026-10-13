@@ -624,3 +624,14 @@ def test_a_comment_line_after_a_flow_list_stays_after_it(text):
     out = changed(text, hashtags=("a", "b", "new"))
     assert out == "---\ntags: [a, b, new]\n  # a note on the tags\nlayout: post\n---\nB\n"
     assert yaml.safe_load(out.split("---\n")[1])["tags"] == ["a", "b", "new"]
+
+
+@pytest.mark.parametrize("text", [
+    "---\ntags: [a, [b, c], d]\n---\nB\n",
+    "---\ntags: [a, {b: c}]\n---\nB\n",
+])
+def test_a_list_nested_in_the_tags_keeps_them_as_written(text):
+    """Round 6, L3: "[b" and "c]" were read, and would be published, as tags."""
+    front, _ = front_matter.split(text)
+    assert from_front_matter(front).hashtags == () and "tags" in kept_in_file(front)
+    assert changed(text, hashtags=("x",)) == text

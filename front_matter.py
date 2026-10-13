@@ -400,6 +400,8 @@ def _flow_list(written: str, more: Sequence[str]) -> Optional[Tuple[str, str, Tu
                 quote = char
             elif char in "[{":
                 depth += 1
+                if depth > 1:
+                    return None             # a list or a mapping in it: unread
             elif char in "]}":
                 depth -= 1
                 if depth == 0:
