@@ -8,6 +8,11 @@ HTML Editor widget with bullet and format logic.
 import os
 import re
 import sys
+import functools
+import time
+from contextlib import contextmanager
+from dataclasses import dataclass
+from typing import Optional
 
 from PySide6.QtCore import (
     Qt, QTimer, QRect, QRectF, QPoint, QMetaMethod, QEvent, QMimeData, QUrl, Signal,
@@ -23,7 +28,7 @@ from constants import (
     DARK_GUIDE, LIGHT_GUIDE, DARK_CURRENT_LINE, LIGHT_CURRENT_LINE, DARK_PAPER, LIGHT_PAPER,
 )
 from fonts import code_font, writing_font
-from i18n import _, ngettext
+from i18n import N_, _, ngettext
 import announce
 from doc_walk import iter_blocks
 import image_safety
@@ -74,6 +79,49 @@ def _is_document_relative(url) -> bool:
 LINE_BREAK = "\u2028"
 
 
+# The kinds of run of typing (HtmlEditor._typing), and the pause that ends
+# one: as long as a person takes between words while typing on.
+TYPED = "typed"
+BACKWARD = "backward"
+FORWARD = "forward"
+TYPING_PAUSE_S = 2.0
+
+
+@dataclass(frozen=True)
+class _Run:
+    """A run of typing: its kind, where the caret ends it, the Undo count
+    after it and when it last went on."""
+
+    kind: str
+    end: int
+    steps: int
+    at: float
+
+
+def _named_step(name: str):
+    """A command as its own step of Undo, called ``name`` (HtmlEditor.undo_step)."""
+    def wrap(method):
+        @functools.wraps(method)
+        def run(self, *args, **kwargs):
+            with self.undo_step(name):
+                return method(self, *args, **kwargs)
+        return run
+    return wrap
+
+
+# What Edit > Undo calls a change of each inline style.
+_STYLE_STEPS = {"bold": N_("Bold"), "italic": N_("Italic"), "underline": N_("Underline"),
+                "strike": N_("Strikethrough"), "code": N_("Code")}
+
+
+def _open_paragraph_above(cursor: QTextCursor) -> None:
+    """A clean paragraph above the one ``cursor`` starts, the cursor in it."""
+    cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
+    cursor.movePosition(QTextCursor.MoveOperation.PreviousBlock)
+    cursor.setBlockFormat(QTextBlockFormat())
+    cursor.setBlockCharFormat(QTextCharFormat())
+
+
 class HtmlEditor(QTextEdit):
     """QTextEdit with bullet and format logic."""
 
@@ -92,6 +140,8 @@ class HtmlEditor(QTextEdit):
     visible_area_changed = Signal()
     # "@" typed at the start of a word, where a mention can go: its position.
     mention_requested = Signal(int)
+    # What Undo and Redo are called may have changed (undo_name).
+    undo_named = Signal()
 
     # Kinds of highlights shown over the text, bottom to top: each kind
     # keeps its own (set_highlights), the editor shows them together.
@@ -141,11 +191,17 @@ class HtmlEditor(QTextEdit):
         self._resource_resolver = None
         # The app's own objects as other apps get them (set_object_lookup).
         self._outside = None
-        # Undo counts at which the document holds only a paragraph made for
-        # typing at a file: Undo and Redo pass over them, so the paragraph
-        # and the words typed into it are one step (_pass_over_this_step).
-        self._passed_steps: set = set()
-        self.document().undoCommandAdded.connect(self._forget_passed_steps)
+        # The typing run going on (one step of Undo, _typing), and what each
+        # step of Undo is called (by the Undo count after it, undo_step).
+        self._run: Optional[_Run] = None
+        self._undo_names: dict = {}
+        # What a paste or a drop is called in Edit > Undo (insertFromMimeData).
+        self._mime_step = N_("Paste")
+        self.document().undoCommandAdded.connect(self._forget_redone_names)
+        self.document().modificationChanged.connect(
+            lambda modified: modified or self.end_typing_run())
+        self.cursorPositionChanged.connect(self._caret_moved)
+        self.selectionChanged.connect(self._caret_moved)
         self._asset_scheme = None
         self._asset_placeholder = None
         self._local_image_resolver = None
@@ -211,28 +267,87 @@ class HtmlEditor(QTextEdit):
         self.viewport().setAutoFillBackground(False)
 
     def undo(self):
-        doc = self.document()
-        doc.undo()
-        if doc.availableUndoSteps() in self._passed_steps and doc.isUndoAvailable():
-            doc.undo()
+        self.end_typing_run()
+        self.document().undo()
 
     def redo(self):
+        self.end_typing_run()
+        self.document().redo()
+
+    # -------- Steps of Undo --------
+    # A run of typing is one step of Undo, as in TextEdit and Pages: the
+    # characters typed one after another where the caret is, Return among
+    # them, and a run of Backspace (or of Delete) is one too. A run ends
+    # when the caret or the selection moves, when anything else changes the
+    # text (a command, a paste, a format, Markdown Shortcuts, Undo), when
+    # the person pauses for TYPING_PAUSE_S, when the document is saved, and
+    # when typing turns into deleting or back.
+
+    @contextmanager
+    def _typing(self, kind: str, cursor: Optional[QTextCursor] = None):
+        """A cursor at the caret to type (``kind`` TYPED) or delete
+        (BACKWARD, FORWARD) with: in the run going on, when this goes on
+        with it, else in a new one."""
         doc = self.document()
-        doc.redo()
-        if doc.availableUndoSteps() in self._passed_steps and doc.isRedoAvailable():
-            doc.redo()
+        cursor = cursor or self.textCursor()
+        run = self._run
+        goes_on = (run is not None and run.kind == kind and not cursor.hasSelection()
+                   and run.end == cursor.position()
+                   and run.steps == doc.availableUndoSteps()
+                   and time.monotonic() - run.at < TYPING_PAUSE_S)
+        if goes_on:
+            cursor.joinPreviousEditBlock()
+        else:
+            cursor.beginEditBlock()
+        try:
+            yield cursor
+        finally:
+            cursor.endEditBlock()
+            self._run = _Run(kind, cursor.position(), doc.availableUndoSteps(),
+                             time.monotonic())
+            self._undo_names[doc.availableUndoSteps()] = N_("Typing")
+            self.setTextCursor(cursor)
+            self.undo_named.emit()
 
-    def _pass_over_this_step(self) -> None:
-        """Undo and Redo don't stop at the document as it is now: what comes
-        next belongs to the same step (a paragraph made for typing at a
-        file, and the words typed into it)."""
-        self._passed_steps.add(self.document().availableUndoSteps())
+    def end_typing_run(self) -> None:
+        """What is typed next is a step of Undo of its own."""
+        self._run = None
 
-    def _forget_passed_steps(self) -> None:
-        """A new change drops what could be redone, and with it the marks
-        beyond the change before it."""
+    def _caret_moved(self) -> None:
+        run = self._run
+        cursor = self.textCursor()
+        if run is not None and (cursor.position() != run.end or cursor.hasSelection()):
+            self._run = None
+
+    @contextmanager
+    def undo_step(self, name: str):
+        """A command's change as its own step of Undo, called ``name`` (an
+        N_ word: "Paste", "Bold"), which Edit > Undo shows where the
+        platform names it."""
+        self.end_typing_run()
+        before = self.document().availableUndoSteps()
+        try:
+            yield
+        finally:
+            after = self.document().availableUndoSteps()
+            if after > before and name:
+                self._undo_names[after] = name
+            self.end_typing_run()
+            self.undo_named.emit()
+
+    def undo_name(self) -> str:
+        """What Undo would take back (an N_ word, "" when not known)."""
+        return self._undo_names.get(self.document().availableUndoSteps(), "")
+
+    def redo_name(self) -> str:
+        """What Redo would bring back (an N_ word, "" when not known)."""
+        return self._undo_names.get(self.document().availableUndoSteps() + 1, "")
+
+    def _forget_redone_names(self) -> None:
+        """A new change drops what could be redone, and with it its names."""
         now = self.document().availableUndoSteps()
-        self._passed_steps = {steps for steps in self._passed_steps if steps < now}
+        self._undo_names = {steps: name for steps, name in self._undo_names.items()
+                            if steps < now}
 
     # -------- Resource resolution --------
     def set_resource_resolver(self, resolver, scheme: str) -> None:
@@ -297,6 +412,7 @@ class HtmlEditor(QTextEdit):
     def toggle_underline(self):
         self.active_format['underline'] = self.toggle_style(rich_text.UNDERLINE)
 
+    @_named_step(N_("Color"))
     def apply_color(self, qcolor: QColor | None):
         cursor = self.textCursor()
         if qcolor is None:
@@ -331,6 +447,10 @@ class HtmlEditor(QTextEdit):
     def toggle_style(self, style: str) -> bool:
         """Turn an inline style (rich_text.INLINE) on or off: over the
         whole selection, or for what is typed next. Returns the new state."""
+        with self.undo_step(_STYLE_STEPS.get(style, "")):
+            return self._toggle_style(style)
+
+    def _toggle_style(self, style: str) -> bool:
         cursor = self.textCursor()
         if cursor.hasSelection():
             on = rich_text.toggle_style(cursor, style)
@@ -347,6 +467,7 @@ class HtmlEditor(QTextEdit):
             self.setCurrentCharFormat(fmt)
         return on
 
+    @_named_step(N_("Paragraph Style"))
     def set_heading(self, level: int) -> None:
         """Body (0) or Heading 1 to 3 for the paragraphs under the cursor;
         the style they already have turns them back into Body."""
@@ -363,6 +484,7 @@ class HtmlEditor(QTextEdit):
     def toggle_code(self):
         return self.toggle_style(rich_text.CODE)
 
+    @_named_step(N_("Clear Formatting"))
     def reset_to_default(self):
         """Clear Formatting: no bold, italic, underline, strikethrough,
         inline code or color, over the selection or for what is typed
@@ -861,6 +983,7 @@ class HtmlEditor(QTextEdit):
             return
         self._spoken_place = None
 
+    @_named_step(N_("Checklist"))
     def toggle_ticks(self) -> None:
         """Format > Mark as Checked: tick the checklist items under the
         caret, or untick them when all are ticked, and say which."""
@@ -887,6 +1010,7 @@ class HtmlEditor(QTextEdit):
             return
         self.mention_requested.emit(cursor.position() - 1)
 
+    @_named_step(N_("Mention"))
     def insert_mention(self, at: int, href: str, name: str) -> None:
         """The mention of ``name`` (``href``, a person's nostr: link) in place
         of the "@" typed at ``at`` (when it is still there), else at the
@@ -1058,6 +1182,7 @@ class HtmlEditor(QTextEdit):
         self._holds_structure = check
 
     # -------- Lists --------
+    @_named_step(N_("Checklist"))
     def toggle_checklist(self) -> None:
         """Checklist for the paragraphs under the cursor; again, the boxes
         go and they are plain list items."""
@@ -1065,6 +1190,7 @@ class HtmlEditor(QTextEdit):
         rich_text.toggle_checklist(cursor)
         self.setTextCursor(cursor)
 
+    @_named_step(N_("List"))
     def toggle_list(self, kind: str) -> None:
         """Bulleted (rich_text.BULLET) or Numbered List (rich_text.NUMBER)
         for the paragraphs under the cursor; again, it is taken away."""
@@ -1109,7 +1235,7 @@ class HtmlEditor(QTextEdit):
     def _keep_media_apart(self, e) -> bool:
         """Audio or video stays a paragraph of its own: typing in its
         paragraph goes into a new one after it (before it, with the caret
-        before it), as one step of Undo with the words; Return there starts
+        before it), as one run of typing with the words; Return there starts
         a clean paragraph; and Backspace from the paragraph below (or Delete
         from the one above) takes it away whole, as one step, rather than
         joining text to it. True when the key was answered here."""
@@ -1122,16 +1248,14 @@ class HtmlEditor(QTextEdit):
                 and self.is_media_block(block) and cursor.atBlockStart():
             # Before it, as with any block: a clean paragraph above it, the
             # caret staying before it on Return and going into it to type.
-            cursor.beginEditBlock()
-            cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
-            cursor.movePosition(QTextCursor.MoveOperation.PreviousBlock)
-            cursor.setBlockFormat(QTextBlockFormat())
-            cursor.setBlockCharFormat(QTextCharFormat())
-            cursor.endEditBlock()
             if typing:
-                self.setTextCursor(cursor)
-                self._pass_over_this_step()
+                # The paragraph and the words typed into it: one run.
+                with self._typing(TYPED, cursor):
+                    _open_paragraph_above(cursor)
                 return False                   # the character is typed there
+            cursor.beginEditBlock()
+            _open_paragraph_above(cursor)
+            cursor.endEditBlock()
             cursor.movePosition(QTextCursor.MoveOperation.NextBlock)
             self.setTextCursor(cursor)
             return True
@@ -1143,9 +1267,10 @@ class HtmlEditor(QTextEdit):
             return True
         if e.text() and e.text().isprintable() and self.is_media_block(block):
             cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
-            cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
             self.setTextCursor(cursor)
-            self._pass_over_this_step()
+            # The paragraph and the words typed into it: one run.
+            with self._typing(TYPED, cursor):
+                cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
             return False                       # the character is typed there
         if e.key() == Qt.Key_Backspace and cursor.atBlockStart() \
                 and self.is_media_block(block.previous()):
@@ -1248,6 +1373,7 @@ class HtmlEditor(QTextEdit):
         cursor.setPosition(cursor.selectionStart())
         return cursor
 
+    @_named_step(N_("Link"))
     def apply_link(self, text: str, href: str) -> None:
         """Link the selection to ``href``: its words as they are, or
         ``text`` in their place when the person retyped them. With nothing
@@ -1344,6 +1470,7 @@ class HtmlEditor(QTextEdit):
         self.ensureCursorVisible()
         return True
 
+    @_named_step(N_("Footnote"))
     def insert_footnote(self) -> None:
         """Insert > Footnote: the next number's mark at the caret, and its
         note at the end of the document, where the caret goes."""
@@ -1386,6 +1513,7 @@ class HtmlEditor(QTextEdit):
         return super().viewportEvent(event)
 
     # -------- Quotes and dividers --------
+    @_named_step(N_("Quote"))
     def toggle_quote(self) -> None:
         """Quote the paragraphs under the cursor, or take the quote away."""
         cursor = self.textCursor()
@@ -1393,6 +1521,7 @@ class HtmlEditor(QTextEdit):
         self.setTextCursor(cursor)
         self.viewport().update()
 
+    @_named_step(N_("Divider"))
     def insert_divider(self) -> None:
         """A divider after the paragraph at the cursor; typing goes on below it."""
         cursor = self.textCursor()
@@ -1601,7 +1730,12 @@ class HtmlEditor(QTextEdit):
                     self.setCurrentCharFormat(c.block().charFormat())
                     self.ensureCursorVisible()
                     return
-                super().keyPressEvent(e)
+                if e.modifiers() in (Qt.NoModifier, Qt.KeypadModifier):
+                    # A new paragraph in the run of typing it belongs to.
+                    with self._typing(TYPED) as cursor:
+                        cursor.insertBlock()
+                else:
+                    super().keyPressEvent(e)       # Shift-Return: a line break
                 self._apply_active_format_to_cursor()
                 self.ensureCursorVisible()
                 return
@@ -1635,15 +1769,12 @@ class HtmlEditor(QTextEdit):
                 self.ensureCursorVisible()
                 return
             else:
-                # Regular backspace: one character per undo step
-                cursor = self.textCursor()
-                cursor.beginEditBlock()
-                if cursor.hasSelection():
-                    cursor.removeSelectedText()
-                else:
-                    cursor.deletePreviousChar()
-                cursor.endEditBlock()
-                self.setTextCursor(cursor)
+                # A run of Backspace is one step of Undo (_typing).
+                with self._typing(BACKWARD) as cursor:
+                    if cursor.hasSelection():
+                        cursor.removeSelectedText()
+                    else:
+                        cursor.deletePreviousChar()
                 self.ensureCursorVisible()
                 return
 
@@ -1653,29 +1784,23 @@ class HtmlEditor(QTextEdit):
                     and e.modifiers() in (Qt.NoModifier, Qt.KeypadModifier)):
                 self._remove_mention(*mention)
                 return
-            # Delete key: one character per undo step
-            cursor = self.textCursor()
-            cursor.beginEditBlock()
-            if cursor.hasSelection():
-                cursor.removeSelectedText()
-            else:
-                cursor.deleteChar()
-            cursor.endEditBlock()
-            self.setTextCursor(cursor)
+            # A run of Delete is one step of Undo (_typing).
+            with self._typing(FORWARD) as cursor:
+                if cursor.hasSelection():
+                    cursor.removeSelectedText()
+                else:
+                    cursor.deleteChar()
             self.ensureCursorVisible()
             return
 
-        # Regular printable character: one character per undo step.
-        # Using beginEditBlock/endEditBlock prevents Qt from merging consecutive insertions.
+        # A typed character: in the run of typing going on, one step of
+        # Undo with it (_typing).
         if e.text() and not e.modifiers() & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier):
-            cursor = self.textCursor()
             fmt = self.currentCharFormat()
-            cursor.beginEditBlock()
-            if cursor.hasSelection():
-                cursor.removeSelectedText()
-            cursor.insertText(e.text(), fmt)
-            cursor.endEditBlock()
-            self.setTextCursor(cursor)
+            with self._typing(TYPED) as cursor:
+                if cursor.hasSelection():
+                    cursor.removeSelectedText()
+                cursor.insertText(e.text(), fmt)
             self._after_typed(e.text())
             self.ensureCursorVisible()
             return
@@ -1807,6 +1932,7 @@ class HtmlEditor(QTextEdit):
             self.setTextCursor(cursor)
         return moved
 
+    @_named_step(N_("Table"))
     def insert_table(self, rows: int, columns: int) -> None:
         """Insert > Table: a table of ``rows`` (the header included) and
         ``columns``, the caret in its first cell."""
@@ -1945,6 +2071,7 @@ class HtmlEditor(QTextEdit):
     def _outdent_code(self, cursor) -> None:
         self._indent_code_lines(cursor, -1)
 
+    @_named_step(N_("Code Block"))
     def make_code_block(self, language: str = "") -> None:
         """Code Block: the paragraphs under the cursor become one."""
         cursor = self.textCursor()
@@ -2009,7 +2136,15 @@ class HtmlEditor(QTextEdit):
         else:
             # Text goes where it was dropped, the way a paste would put it
             # there (insertFromMimeData), as one step on the undo stack.
-            super().dropEvent(event)
+            self._mime_step = ""                   # no name of its own: "Undo"
+            try:
+                super().dropEvent(event)
+            finally:
+                self._mime_step = N_("Paste")
+
+    @_named_step(N_("Cut"))
+    def cut(self):
+        super().cut()
 
     # -------- Paste --------
     def paste_from_clipboard(self):
@@ -2017,6 +2152,7 @@ class HtmlEditor(QTextEdit):
         keyboard's paste, which Qt sends to insertFromMimeData."""
         self.insertFromMimeData(QApplication.clipboard().mimeData())
 
+    @_named_step(N_("Paste"))
     def paste_normalized(self):
         """Paste and Match Style: the clipboard's text, in the style of the
         text where it goes."""
@@ -2099,8 +2235,9 @@ class HtmlEditor(QTextEdit):
         audio or video in what came in then stands in a paragraph of its
         own, wherever it landed (_set_media_apart)."""
         start = self.textCursor().selectionStart()
-        self._insert_mime(source)
-        self._set_media_apart(start, self.textCursor().position())
+        with self.undo_step(self._mime_step):
+            self._insert_mime(source)
+            self._set_media_apart(start, self.textCursor().position())
 
     def _set_media_apart(self, start: int, end: int) -> None:
         """Audio and video between ``start`` and ``end`` sharing a paragraph

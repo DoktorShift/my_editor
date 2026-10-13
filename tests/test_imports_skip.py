@@ -18,6 +18,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence
 from PySide6.QtTest import QTest
 
+from commands import undo_words
 from main_window import MainWindow
 from nostr.imports.inbox_store import SKIPPED_POSTS
 from nostr.ui.imports_sidebar import FILE, LIST
@@ -89,7 +90,8 @@ class TestSkip:
         before = titles(window)
         window.posts.setFocus()
         QTest.keyClick(window.posts, Qt.Key.Key_Backspace)
-        assert window.can_undo() and window.undo_text() == "Undo Skip"
+        # Named where the platform names it (commands.undo_words).
+        assert window.can_undo() and window.undo_text() == undo_words("Skip")
         undo_action(window).trigger()
         assert titles(window) == before
         assert not window.can_undo()
@@ -181,7 +183,7 @@ class TestTheMenuBar:
         window.posts.setFocus()
         QTest.keyClick(window.posts, Qt.Key.Key_Delete)
         MainWindow._update_undo_redo_buttons(stand_in)
-        assert stand_in.act_undo.text() == "Undo Skip"
+        assert stand_in.act_undo.text() == undo_words("Skip")
         assert stand_in.act_undo.isEnabled()
         window.undo_skip()
         MainWindow._update_undo_redo_buttons(stand_in)

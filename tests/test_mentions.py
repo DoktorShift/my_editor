@@ -88,9 +88,8 @@ def test_a_picked_person_takes_the_place_of_the_at_sign():
     assert ed.toPlainText() == "Hi @Alice and you"
     assert document_to_markdown(ed.document()) == f"Hi {HREF} and you\n"
     assert extract_inline_mentions(document_to_markdown(ed.document())) == [(ALICE, "")]
-    for _letter in "and you":
-        ed.document().undo()
-    ed.document().undo()                              # the mention, as one step
+    ed.undo()                                         # the run of typing after it
+    ed.undo()                                         # the mention, as one step
     assert ed.toPlainText() == "Hi @"
 
 

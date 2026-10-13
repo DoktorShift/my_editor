@@ -876,7 +876,7 @@ for where, offset in (("before", 0), ("after", 1)):
     c = ed.textCursor()
     c.setPosition(object_at() + offset)
     ed.setTextCursor(c)
-    QTest.keyClicks(ed, "W")
+    QTest.keyClicks(ed, "Words")
     r[where + " typed"] = blocks()
     QTest.keyClick(ed, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
     r[where + " one undo"] = blocks()
@@ -884,15 +884,6 @@ for where, offset in (("before", 0), ("after", 1)):
     r[where + " one redo"] = blocks()
     w.act_undo.trigger()
     r[where + " undone again"] = blocks()
-    # A word: each character is a step in this editor; none of them leaves
-    # an empty paragraph behind.
-    c = ed.textCursor()
-    c.setPosition(object_at() + offset)
-    ed.setTextCursor(c)
-    QTest.keyClicks(ed, "Words")
-    for _ in "Words":
-        ed.undo()
-    r[where + " word undone"] = blocks()
 ed.document().setModified(False)
 w._media_not_uploaded = lambda doc: []
 w.close()
@@ -901,21 +892,19 @@ print("RESULT " + json.dumps(r))
 
 
 def test_typing_at_a_file_is_one_step_of_undo(tmp_path):
-    """The paragraph made for typing at a file is no step of its own: it is
-    one step with what is typed into it (each character is a step in this
-    editor), so Undo never leaves an empty paragraph behind and leaves the
-    document exactly as it was; Redo brings both back."""
+    """As in Pages: the paragraph made for typing at a file and the words
+    typed into it are one run of typing, one step of Undo; one Undo leaves
+    the document exactly as it was, one Redo brings both back."""
     song = tmp_path / "song.mp3"
     song.write_bytes(BODY)
     r = run_window_script(UNDO_SCRIPT, tmp_path, str(song))
     start = r["start"]
-    assert r["before typed"] == ["Top", "W", "\ufffc", ""]
-    assert r["after typed"] == ["Top", "\ufffc", "W", ""]
+    assert r["before typed"] == ["Top", "Words", "\ufffc", ""]
+    assert r["after typed"] == ["Top", "\ufffc", "Words", ""]
     for where in ("before", "after"):
         assert r[where + " one undo"] == start
         assert r[where + " one redo"] == r[where + " typed"]
         assert r[where + " undone again"] == start
-        assert r[where + " word undone"] == start
 
 
 CLIPBOARD_SCRIPT = r"""

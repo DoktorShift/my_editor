@@ -96,7 +96,8 @@ from PySide6.QtWidgets import (
 import alerts
 import atomic_file
 import url_safety
-from i18n import _, ngettext
+from commands import undo_words
+from i18n import N_, _, ngettext
 
 from ..imports.inbox_store import (
     IMPORTED,
@@ -1061,8 +1062,8 @@ class ImportsWindow(QMainWindow):
     def undo_text(self) -> str:
         """Edit > Undo's words while this window is in front."""
         if self._undo_skip_available() and not _is_text_field(QApplication.focusWidget()):
-            return _("Undo Skip")
-        return _("Undo")
+            return undo_words(N_("Skip"))
+        return undo_words()
 
     def undo(self) -> None:
         """Edit > Undo: the text being typed, or else the last skip."""

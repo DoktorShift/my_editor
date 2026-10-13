@@ -138,9 +138,8 @@ def test_markdown_shortcuts_make_checklist_items():
     other.set_markdown_shortcuts_check(lambda: True)
     type_text(other, "- [x] typed")
     assert document_to_markdown(other.document()) == "- [x] typed\n"
-    for _letter in "typed":                       # one step per letter typed
-        other.document().undo()
-    other.document().undo()                       # the box, as typed
+    other.undo()                                  # the run of typing
+    other.undo()                                  # the box, as typed
     assert other.toPlainText() == "[x] "
     assert not rich_text.is_task(other.document().begin())
 

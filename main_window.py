@@ -52,7 +52,7 @@ import i18n
 from i18n import _, ngettext, pgettext
 from commands import (
     EDIT, FILE, FORMAT, HELP, INSERT, NOSTR, SEARCH, VIEW, WINDOW, Command, CommandRegistry,
-    all_key_texts, platform_keys,
+    all_key_texts, platform_keys, redo_words, undo_words,
 )
 import front_matter
 import media_files
@@ -1199,6 +1199,9 @@ class MainWindow(QMainWindow):
         ed.document().modificationChanged.connect(self._update_window_title)
         ed.document().undoAvailable.connect(self._update_undo_redo_buttons)
         ed.document().redoAvailable.connect(self._update_undo_redo_buttons)
+        # What Undo and Redo are called changes with every step.
+        ed.document().contentsChanged.connect(self._update_undo_redo_buttons)
+        ed.undo_named.connect(self._update_undo_redo_buttons)
         ed.cursorPositionChanged.connect(self._update_status_bar)
         ed.document().contentsChanged.connect(
             lambda e=ed: self._on_document_changed_for_find(e))
@@ -1448,10 +1451,11 @@ class MainWindow(QMainWindow):
         if imports is not None:
             # What Undo undoes in the window in front (Undo Skip there).
             self.act_undo.setText(imports.undo_text())
+            self.act_redo.setText(redo_words())
             self.act_undo.setEnabled(imports.can_undo())
             self.act_redo.setEnabled(field is not None and _field_history(field)[1])
             return
-        self.act_undo.setText(_("Undo"))
+        undo_name = redo_name = ""
         if field is not None:
             # Never the document behind (T1 of the CP3 fixes review: Undo
             # with a dialog's About field focused undid the document).
@@ -1461,6 +1465,12 @@ class MainWindow(QMainWindow):
             editing = ed is not None and not self._shows_preview_only(ed)
             can_undo = editing and ed.document().isUndoAvailable()
             can_redo = editing and ed.document().isRedoAvailable()
+            if editing:
+                # What it takes back, named where the platform names it
+                # ("Undo Typing", "Undo Paste").
+                undo_name, redo_name = ed.undo_name(), ed.redo_name()
+        self.act_undo.setText(undo_words(undo_name if can_undo else ""))
+        self.act_redo.setText(redo_words(redo_name if can_redo else ""))
         self.act_undo.setEnabled(can_undo)
         self.act_redo.setEnabled(can_redo)
 

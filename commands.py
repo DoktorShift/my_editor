@@ -30,8 +30,27 @@ from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 from PySide6.QtCore import QObject
 from PySide6.QtGui import QAction, QKeySequence
 
+from i18n import _
+
 # A tuple holds several keys, the one menus show first ("Ctrl+W", "Ctrl+F4").
 ShortcutSpec = Union[None, str, QKeySequence, QKeySequence.StandardKey, Tuple[str, ...]]
+
+
+def undo_words(action: str = "") -> str:
+    """Edit > Undo's words for taking back ``action`` (an N_ word:
+    "Typing", "Paste", "Skip"): "Undo Typing" where the platform's own
+    apps name what Undo takes back (macOS), else "Undo", as Notepad and
+    GNOME's Text Editor say."""
+    if action and sys.platform == "darwin":
+        return _("Undo {action}").format(action=_(action))
+    return _("Undo")
+
+
+def redo_words(action: str = "") -> str:
+    """Edit > Redo's words, by the same rule as undo_words."""
+    if action and sys.platform == "darwin":
+        return _("Redo {action}").format(action=_(action))
+    return _("Redo")
 
 # The groups, in the order the Keyboard Shortcuts window lists them. They
 # are keys, so they stay English; the window translates them where it
