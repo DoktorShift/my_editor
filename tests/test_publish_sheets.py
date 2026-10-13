@@ -545,3 +545,21 @@ def test_a_link_name_this_computer_published_under_stays_as_the_title_changes(tm
                     first_publications=record)
     fresh._title_edit.setText("Newer")
     assert fresh._slug_edit.text() == "newer"                # never published: it follows
+
+
+def test_the_card_asks_for_the_height_it_has_at_its_own_width(tmp_path):
+    """Review low 7: under the fields (a 640x480 window) the card was
+    measured as if as wide as the sheet, its words on fewer lines, and
+    the fields above it lost the difference: the cover's well was cut."""
+    sheet = article(tmp_path, default_title="A title long enough to take two lines or three "
+                                             "in the card at its width")
+    sheet._summary_edit.setText("A summary long enough to wrap onto several lines in the "
+                                "preview card, as summaries do")
+    card = sheet._card
+    sheet.resize(560, 500)
+    sheet.show()
+    QApplication.processEvents()
+    assert sheet._columns.direction() != sheet._columns.Direction.LeftToRight
+    assert card.height() == card.layout().totalHeightForWidth(card.WIDTH)
+    assert sheet._cover.height() >= sheet._cover.minimumSizeHint().height()
+    sheet.close()

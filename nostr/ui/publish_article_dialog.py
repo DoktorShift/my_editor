@@ -166,6 +166,10 @@ class _ArticleCard(QFrame):
                                              size.width(), size.height()))
         self.setAccessibleDescription(". ".join(part for part in (
             title or _("Untitled"), summary, byline) if part))
+        # As tall as its words take at its own width: a layout would ask
+        # its height at the width it offers (under the fields, the sheet's),
+        # where the words take fewer lines, and the fields would lose the rest.
+        self.setFixedHeight(self.layout().totalHeightForWidth(self.WIDTH))
 
 
 def _elided(label: QLabel, text: str, width: int, lines: int) -> str:
