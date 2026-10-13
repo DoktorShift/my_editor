@@ -11,8 +11,9 @@
   └──────────────────────────────────────────┘
 
 The view owns its list, its states and its actions, and fits in any
-container (the Drafts panel shows it as its second view). Its host gives
-it an account and hears from it through two signals:
+container; the Drafts panel shows it as its second view, Published
+(:func:`add_to_panel`). Its host gives it an account and hears from it
+through two signals:
 
     set_account(profile)     whose items to show (None: nobody's)
     refresh()                read again (the panel's refresh button)
@@ -60,6 +61,7 @@ import theme
 from i18n import _, ngettext
 
 from ..bunker import humanize_failure, is_signer_silent
+from ..publish_pipeline import refused_by_relay
 from ..published import (
     DELETING, LOADING, READY, SIGNED_OUT, UNREACHABLE, PublishedItem, PublishedList,
 )
@@ -162,7 +164,7 @@ class _Rows(QAbstractListModel):
 
     def reload(self) -> None:
         items = self._model.items() if self._model.state == READY else []
-        more = self._model.state == READY and bool(items) and (
+        more = self._model.state == READY and (
             self._model.has_more or self._model.loading_more or self._model.more_failed)
         old_keys = self.keys()
         new_keys = [item.id for item in items] + ([self._MORE] if more else [])
@@ -281,11 +283,10 @@ class _RowDelegate(QStyledItemDelegate):
                            QFontMetrics(secondary).height())
             painter.setFont(secondary)
             painter.setPen(QColor(meta_colour))
-            meta = index.data(META_ROLE) or ""
-            if painter.fontMetrics().horizontalAdvance(meta) > line_2.width():
-                # Large text on a narrow panel: the date in digits keeps
-                # the whole date in view where the month's name would not.
-                meta = index.data(SHORT_META_ROLE) or meta
+            # Large text on a narrow panel: the date in digits keeps the
+            # whole date in view where the month's name would not, and
+            # every row then writes it so (PublishedView.digit_dates).
+            meta = index.data(SHORT_META_ROLE if self._view.digit_dates else META_ROLE) or ""
             painter.drawText(line_2, int(leading | Qt.AlignmentFlag.AlignVCenter),
                              painter.fontMetrics().elidedText(
                                  meta, Qt.TextElideMode.ElideRight, line_2.width()))
@@ -381,6 +382,19 @@ QProgressBar#published_busy::chunk {{ background: {t["accent"]}; border-radius: 
 """
 
 
+# The view's key among the Drafts panel's views.
+PANEL_VIEW = "published"
+
+
+def add_to_panel(panel, view: "PublishedView") -> None:
+    """Make ``view`` the Drafts panel's second view, Published: the
+    switch names it beside Drafts, and the refresh button reads it again
+    while it is shown."""
+    panel.add_view(PANEL_VIEW, _("Published"), _("Your published notes and articles"), view,
+                   refresh=view.refresh,
+                   refresh_name=_("Refresh Published Notes and Articles"))
+
+
 class PublishedView(QWidget):
     """The account's published notes and articles (see the module's text).
 
@@ -401,6 +415,7 @@ class PublishedView(QWidget):
         self._is_dark = bool(is_dark)
         self._rows = _Rows(model, self)
         self._last = (model.state, model.refreshing, model.more_failed)
+        self._digit_dates = False
         self._build()
         # Bound methods, not lambdas: they go with the view if it goes first.
         model.changed.connect(self._on_changed)
@@ -420,6 +435,27 @@ class PublishedView(QWidget):
     @property
     def model(self) -> PublishedList:
         return self._model
+
+    @property
+    def digit_dates(self) -> bool:
+        """Whether the rows write their dates in digits: when any row's
+        date in words does not fit its line, all of them do, so the dates
+        read and line up alike."""
+        return self._digit_dates
+
+    def _choose_date_style(self) -> None:
+        room = self._list.viewport().width() - 2 * LIST_GUTTER
+        metrics = QFontMetrics(secondary_font())
+        digits = room > 0 and any(
+            metrics.horizontalAdvance(meta_text(item)) > room for item in self._model.items())
+        if digits != self._digit_dates:
+            self._digit_dates = digits
+            self._list.viewport().update()
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.FontChange:
+            self._choose_date_style()
 
     def set_account(self, profile) -> None:
         self._model.set_account(profile)
@@ -453,8 +489,10 @@ class PublishedView(QWidget):
         self._list.activated.connect(self._on_activated)
         self._list.clicked.connect(self._on_clicked)
         self._list.menu_requested.connect(self._show_menu)
-        # Return and Delete belong to the list, see ``eventFilter``.
+        # Return and Delete belong to the list, see ``eventFilter``; the
+        # viewport's width decides how the dates are written.
         self._list.installEventFilter(self)
+        self._list.viewport().installEventFilter(self)
         self._stack.addWidget(self._list)
 
         self._placeholder = QWidget()
@@ -493,6 +531,7 @@ class PublishedView(QWidget):
         current = self._list.currentIndex()
         row = current.row() if current.isValid() else -1
         self._rows.reload()
+        self._choose_date_style()
         if row >= 0 and not self._list.currentIndex().isValid() and self._rows.rowCount():
             # The row went (deleted): the keyboard stays where it was.
             nearest = self._rows.index(min(row, self._rows.rowCount() - 1))
@@ -513,7 +552,12 @@ class PublishedView(QWidget):
             self._show_placeholder(_("Couldn’t load what you published"),
                                    _("Check your internet connection, then try again."),
                                    action=True)
-        elif not self._model.items():
+        elif not self._model.items() and self._model.loading_more:
+            # Reading on past pages that showed nothing (all deleted):
+            # still the first read, as far as the person can tell.
+            self._show_placeholder("", _("Looking for your notes and articles…"), busy=True)
+        elif not self._model.items() and not (self._model.has_more
+                                              or self._model.more_failed):
             self._show_placeholder(_("Nothing published yet"),
                                    _("Notes and articles you publish appear here."))
         else:
@@ -611,19 +655,31 @@ class PublishedView(QWidget):
         if self._rows.is_more(index.row()):
             self._load_more()
 
+    def _selected_row(self) -> int:
+        """The row the keys act on: the current one, when it is selected.
+        A row the keyboard merely rests on, with nothing selected (as when
+        the list appears), is not acted on, as in Mail and Finder."""
+        index = self._list.currentIndex()
+        if not index.isValid() or not self._list.selectionModel().isSelected(index):
+            return -1
+        return index.row()
+
     def eventFilter(self, watched, event) -> bool:
+        if watched is self._list.viewport() and event.type() == QEvent.Type.Resize:
+            self._choose_date_style()
         if watched is self._list and event.type() == QEvent.Type.KeyPress:
             key = event.key()
-            row = self._list.currentIndex().row()
+            row = self._selected_row()
+            item = self._rows.item_at(row)
             if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
                 if self._rows.is_more(row):
                     self._load_more()
-                elif self.current_item() is not None:
-                    self._open(self.current_item())
+                elif item is not None:
+                    self._open(item)
                 return True
             if key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
-                if self.current_item() is not None:
-                    self._ask_to_delete(self.current_item())
+                if item is not None:
+                    self._ask_to_delete(item)
                 return True
         return super().eventFilter(watched, event)
 
@@ -676,15 +732,21 @@ class PublishedView(QWidget):
     def _on_not_taken(self, item: PublishedItem, results: list) -> None:
         details = "\n".join(f"{url}: {message or _('no answer')}"
                             for url, _ok, message in results)
-        self._offer_try_again(item, _("No relay accepted the request. Check your internet "
-                                      "connection, then try again."), details)
+        if any(refused_by_relay(message) for _url, _ok, message in results):
+            message = _("The relays turned the request down. Show Details says why; you can "
+                        "try again later.")
+        else:
+            message = _("No relay accepted the request. Check your internet connection, "
+                        "then try again.")
+        self._offer_try_again(item, message, details)
 
     def _on_refused(self, item: PublishedItem, reason: str) -> None:
         if is_signer_silent(reason):
             self._offer_try_again(item, humanize_failure(reason), "")
         else:
-            self._offer_try_again(item, _("Your signer app didn’t approve the request. "
-                                          "Try again, and approve it there."), reason)
+            self._offer_try_again(item, _("Your signer app didn’t approve the request. Try "
+                                          "again, and approve it when your signer app "
+                                          "asks."), reason)
 
     def _offer_try_again(self, item: PublishedItem, message: str, details: str) -> None:
         again = alerts.ask(

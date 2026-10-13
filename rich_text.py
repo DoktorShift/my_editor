@@ -18,12 +18,14 @@ test can call it without a window.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
-from typing import Iterator, List, Tuple
+from typing import Iterator, List, Optional, Tuple
 
 from PySide6.QtGui import (
-    QFont, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextDocument, QTextDocumentFragment,
-    QTextFormat, QTextListFormat,
+    QFont, QFontDatabase, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextDocument,
+    QTextDocumentFragment, QTextFormat, QTextLength, QTextListFormat, QTextTable,
+    QTextTableFormat,
 )
 
 from doc_walk import iter_blocks
@@ -51,9 +53,9 @@ def normalize_after_markdown_load(doc) -> None:
     block outside a list loses it; list items keep theirs.
 
     Headings get the room above and below them that the editor gives
-    the ones typed here, and bulleted lists the shape of their depth
-    (disc, circle, square), as lists made here have: Qt's reader gives
-    every depth a disc.
+    the ones typed here, bulleted lists the shape of their depth (disc,
+    circle, square), as lists made here have: Qt's reader gives every
+    depth a disc, and tables the grid of the ones inserted here.
 
     Call after every ``setMarkdown`` whose result the person edits.
     """
@@ -69,10 +71,18 @@ def normalize_after_markdown_load(doc) -> None:
     reshaped = [text_list for text_list in bullets.values()
                 if text_list.format().style()
                 != list_format(BULLET, max(1, text_list.format().indent())).style()]
-    if not stray and not headings and not reshaped:
+    tables = [table for table in tables_of(doc)
+              if table.format().cellPadding() != table_format().cellPadding()]
+    if tables_of(doc):
+        unescape_cell_code(doc)
+    if not stray and not headings and not reshaped and not tables:
         return
     cursor = QTextCursor(doc)
     cursor.beginEditBlock()
+    for table in tables:
+        fmt = table.format()
+        fmt.merge(table_format())
+        table.setFormat(fmt)
     for block in stray:
         fmt = block.blockFormat()
         fmt.clearProperty(marker)
@@ -152,6 +162,15 @@ def _iter_text_runs(cursor: QTextCursor) -> Iterator[Tuple[int, int, QTextCharFo
 def _text_runs(cursor: QTextCursor) -> List[Tuple[int, int, QTextCharFormat]]:
     """Every piece of text in the selection (see _iter_text_runs)."""
     return list(_iter_text_runs(cursor))
+
+
+def holds_link_or_code(cursor: QTextCursor) -> bool:
+    """Whether the selection holds any part of a link, inline code or a
+    picture: words a typed style must not run across."""
+    if "\ufffc" in cursor.selectedText():
+        return True
+    return any(fmt.isAnchor() or fmt.fontFixedPitch()
+               for _start, _end, fmt in _iter_text_runs(cursor))
 
 
 def selection_has(cursor: QTextCursor, style: str) -> bool:
@@ -382,6 +401,9 @@ def set_heading(cursor: QTextCursor, level: int) -> None:
     edit = QTextCursor(doc)
     edit.beginEditBlock()
     for block in _blocks_of(cursor):
+        if is_code_block(block):
+            # A paragraph style chosen on a line of code: it is text again.
+            leave_code(block)
         if level:
             if block.textList() is not None:
                 leave_list(block)
@@ -547,12 +569,16 @@ def toggle_list(cursor: QTextCursor, kind: str) -> None:
     """Bulleted List or Numbered List over the paragraphs under the
     cursor, as one step on the undo stack:
 
+    - all of them checklist items, and Bulleted List: their boxes go, and
+      they are bulleted items (a checklist is not shown as a bulleted
+      list, so the command makes it one);
     - all of them in lists of this kind: they leave the list;
     - all of them in lists, some of another kind: those lists change
       kind in place, nesting kept;
     - otherwise they become one list of this kind (a heading becomes
       Body first: a list item is not a heading)."""
-    blocks = _blocks_of(cursor)
+    # Code is code: its lines are no list items.
+    blocks = [b for b in _blocks_of(cursor) if not is_code_block(b)]
     if not blocks:
         return
     doc = cursor.document()
@@ -560,7 +586,10 @@ def toggle_list(cursor: QTextCursor, kind: str) -> None:
     edit.beginEditBlock()
     current = list_kind(cursor)
     all_items = all(b.textList() is not None for b in blocks)
-    if current == kind:
+    if kind == BULLET and all(is_task(b) for b in blocks):
+        for block in blocks:
+            set_tick(block, QTextBlockFormat.MarkerType.NoMarker)
+    elif current == kind:
         for block in blocks:
             leave_list(block)
     elif all_items:
@@ -583,6 +612,78 @@ def toggle_list(cursor: QTextCursor, kind: str) -> None:
                 new_list.add(block)
             _no_own_indent(block)
     _tidy_lists(doc, [blocks[0].previous(), *blocks, blocks[-1].next()])
+    edit.endEditBlock()
+
+
+# --------------------------------------------------------------------------- #
+# Checklists                                                                   #
+# --------------------------------------------------------------------------- #
+
+UNTICKED = QTextBlockFormat.MarkerType.Unchecked
+TICKED = QTextBlockFormat.MarkerType.Checked
+
+
+def is_task(block) -> bool:
+    """Whether a paragraph is a checklist item: a list item with a box,
+    ticked or not (Markdown's "- [ ]" and "- [x]")."""
+    return block.textList() is not None and block.blockFormat().marker() in (UNTICKED, TICKED)
+
+
+def set_tick(block, marker) -> None:
+    """Give a list item a box (UNTICKED or TICKED), or none
+    (QTextBlockFormat.MarkerType.NoMarker)."""
+    fmt = block.blockFormat()
+    fmt.setMarker(marker)
+    QTextCursor(block).setBlockFormat(fmt)
+
+
+def task_blocks(cursor: QTextCursor) -> list:
+    """The checklist items under the cursor."""
+    return [b for b in _blocks_of(cursor) if is_task(b)]
+
+
+def toggle_ticks(cursor: QTextCursor) -> Optional[bool]:
+    """Mark as Checked: tick the checklist items under the cursor, or, all
+    ticked already, untick them. One undo step; the new state, or None
+    when no checklist item is there."""
+    tasks = task_blocks(cursor)
+    if not tasks:
+        return None
+    ticked = not all(b.blockFormat().marker() == TICKED for b in tasks)
+    edit = QTextCursor(cursor.document())
+    edit.beginEditBlock()
+    for block in tasks:
+        set_tick(block, TICKED if ticked else UNTICKED)
+    edit.endEditBlock()
+    return ticked
+
+
+def toggle_checklist(cursor: QTextCursor) -> None:
+    """Checklist over the paragraphs under the cursor, as one step on the
+    undo stack: when all of them are checklist items, they become plain
+    list items again; otherwise each becomes one, unticked unless it was
+    ticked, and a paragraph outside a list joins a bulleted list first (a
+    heading becomes Body: a list item is not a heading). Code, dividers
+    and table cells are left as they are."""
+    blocks = [b for b in _blocks_of(cursor) if not is_code_block(b) and not is_divider(b)
+              and QTextCursor(b).currentTable() is None]
+    if not blocks:
+        return
+    doc = cursor.document()
+    edit = QTextCursor(doc)
+    edit.beginEditBlock()
+    if all(is_task(b) for b in blocks):
+        for block in blocks:
+            set_tick(block, QTextBlockFormat.MarkerType.NoMarker)
+    else:
+        for block in blocks:
+            if block.textList() is None:
+                if block.blockFormat().headingLevel():
+                    set_heading(QTextCursor(block), BODY)
+                _move_to_depth(block, 1, BULLET)
+            if not is_task(block):
+                set_tick(block, UNTICKED)
+        _tidy_lists(doc, [blocks[0].previous(), *blocks, blocks[-1].next()])
     edit.endEditBlock()
 
 
@@ -654,6 +755,8 @@ class ParagraphState:
     heading: int = -1
     list_kind: str = ""
     quoted: bool = False
+    tasks: bool = False         # all of them checklist items
+    code: Optional[str] = None  # all code: their language ("" none, "mixed"); else None
 
 
 def paragraph_state(cursor: QTextCursor, *, budget: int = STATE_BUDGET) -> ParagraphState:
@@ -663,21 +766,31 @@ def paragraph_state(cursor: QTextCursor, *, budget: int = STATE_BUDGET) -> Parag
     level = None
     kind = None
     quoted = True
+    tasks = True
+    code = ...
     seen = 0
     for block in _iter_blocks_of(cursor):
         seen += 1
         if seen > budget:
-            return ParagraphState(-1, "mixed", False)
+            return ParagraphState(-1, "mixed", False, False, None)
         this_level = block.blockFormat().headingLevel()
         this_kind = list_kind_of(block.textList()) if block.textList() is not None else ""
         level = this_level if level is None or level == this_level else -1
         kind = this_kind if kind is None or kind == this_kind else "mixed"
         quoted = quoted and bool(quote_depth(block))
-        if level == -1 and kind == "mixed" and not quoted:
+        tasks = tasks and is_task(block)
+        language = code_language(block)
+        if language is None:
+            code = None
+        elif code is ...:
+            code = language
+        elif code is not None and code != language:
+            code = "mixed"
+        if level == -1 and kind == "mixed" and not quoted and not tasks and code is None:
             break
     if not seen:
         return ParagraphState()
-    return ParagraphState(level, kind, quoted)
+    return ParagraphState(level, kind, quoted, tasks, None if code is ... else code)
 
 
 def toggle_quote(cursor: QTextCursor) -> None:
@@ -738,6 +851,568 @@ def insert_divider(cursor: QTextCursor) -> None:
 def remove_divider(block) -> None:
     """The divider becomes an empty paragraph again."""
     QTextCursor(block).setBlockFormat(QTextBlockFormat())
+
+
+# --------------------------------------------------------------------------- #
+# Tables                                                                       #
+# --------------------------------------------------------------------------- #
+# A table is Markdown's: one header row (its words bold, by the header's
+# own format, which the writer leaves out), cells of one line each (a
+# Return in a cell is a line separator, written as a space), no merged
+# cells and no alignment.
+
+# --------------------------------------------------------------------------- #
+# Mentions                                                                     #
+# --------------------------------------------------------------------------- #
+# A mention is a link to a person's Nostr address (``nostr:npub1…`` or
+# ``nostr:nprofile1…``) whose words are "@" and their name. Markdown writes
+# it as the bare address, which every Nostr reader turns into the name
+# (NIP-27); read back, link_references gives it its name again.
+
+MENTION_HREF = re.compile(r"nostr:(?:npub|nprofile)1[02-9ac-hj-np-z]+")
+# A bare address in written text: on its own, not the end of a word or a
+# part of a web address.
+_REFERENCE_TEXT = re.compile(r"(?<![\w/=?#&:])nostr:((?:npub|nprofile)1[02-9ac-hj-np-z]+)")
+_MENTION_NAME_MAX = 64
+# The two invisible characters a name may keep: they join emoji and letters.
+_JOINERS = "\u200c\u200d"
+
+
+def is_mention(href: str) -> bool:
+    return bool(MENTION_HREF.fullmatch(href or ""))
+
+
+def mention_format(href: str) -> QTextCharFormat:
+    fmt = QTextCharFormat()
+    fmt.setAnchor(True)
+    fmt.setAnchorHref(href)
+    return fmt
+
+
+def mention_words(name: str) -> str:
+    """What a mention of ``name`` shows: "@" and the name on one line (a
+    line break or a run of spaces is one space), at most 64 characters of
+    it, without the invisible characters that could turn the text around
+    it or hide in it (a profile's name is anyone's text)."""
+    kept = "".join(" " if char.isspace() else char for char in name
+                   if char.isspace() or char.isprintable() or char in _JOINERS)
+    words = " ".join(kept.split()).lstrip("@")
+    if len(words) > _MENTION_NAME_MAX:
+        words = words[:_MENTION_NAME_MAX - 1].rstrip() + "\u2026"
+    return "@" + words
+
+
+def insert_mention(cursor: QTextCursor, href: str, name: str) -> None:
+    """The mention of ``name`` (its link ``href``) at the cursor, in place
+    of the selection, then a space unless one follows. One undo step; the
+    cursor ends after it, outside the link."""
+    edit = QTextCursor(cursor.document())
+    edit.beginEditBlock()
+    if cursor.hasSelection():
+        cursor.removeSelectedText()
+    plain = without_link(cursor.charFormat())
+    cursor.insertText(mention_words(name), mention_format(href))
+    # (The end of a paragraph reads as a separator, not as a space.)
+    following = cursor.document().characterAt(cursor.position())
+    if following not in (" ", "\t", "\u00a0"):
+        cursor.insertText(" ", plain)
+    else:
+        cursor.movePosition(QTextCursor.MoveOperation.NextCharacter)
+    edit.endEditBlock()
+
+
+def mention_at(cursor: QTextCursor) -> Optional[Tuple[int, int]]:
+    """(start, end) of the mention the caret is in or touches from either
+    side, or None (also with a selection)."""
+    if cursor.hasSelection():
+        return None
+    found = link_range(cursor)
+    if found is None or not is_mention(found[2]):
+        return None
+    return found[0], found[1]
+
+
+def plain_text_of(fragment: QTextDocumentFragment) -> str:
+    """The plain text of ``fragment`` as another app should get it: each
+    mention as its ``nostr:`` address, which every Nostr app reads as the
+    person ("@Name" alone names nobody there)."""
+    doc = QTextDocument()
+    QTextCursor(doc).insertFragment(fragment)
+    mentions = []
+    for block in iter_blocks(doc):
+        it = block.begin()
+        while not it.atEnd():
+            piece = it.fragment()
+            if piece.isValid() and is_mention(piece.charFormat().anchorHref()):
+                inside = QTextCursor(doc)
+                inside.setPosition(piece.position() + 1)
+                found = link_range(inside)
+                if found is not None and found not in mentions:
+                    mentions.append(found)
+            it += 1
+    if not mentions:
+        return fragment.toPlainText()
+    for start, end, href in reversed(mentions):
+        cursor = QTextCursor(doc)
+        cursor.setPosition(start)
+        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+        cursor.insertText(href)
+    return doc.toPlainText()
+
+
+def link_references(doc, label_for) -> int:
+    """Each bare mention in ``doc`` (``nostr:npub1…`` written as text, as
+    Markdown keeps a mention) made a mention again: a link whose words are
+    "@" and ``label_for(entity)``. Not in code, not in a link already, not
+    touching a word before it, and not where ``label_for`` gives None (the
+    address names no person: it does not decode). Returns how many."""
+    found = []
+    for block in iter_blocks(doc):
+        if is_code_block(block):
+            continue
+        for match in _REFERENCE_TEXT.finditer(block.text()):
+            probe = QTextCursor(block)
+            probe.setPosition(block.position() + match.start() + 1)
+            fmt = probe.charFormat()
+            if fmt.isAnchor() or has_style(fmt, CODE):
+                continue
+            label = label_for(match.group(1))
+            if label is None:
+                continue
+            found.append((block.position() + match.start(), match.end() - match.start(),
+                          match.group(0), label))
+    if not found:
+        return 0
+    edit = QTextCursor(doc)
+    edit.beginEditBlock()
+    for position, length, href, label in reversed(found):
+        cursor = QTextCursor(doc)
+        cursor.setPosition(position)
+        cursor.setPosition(position + length, QTextCursor.MoveMode.KeepAnchor)
+        fmt = QTextCharFormat(cursor.charFormat())
+        fmt.merge(mention_format(href))
+        cursor.insertText(mention_words(label), fmt)
+    edit.endEditBlock()
+    return len(found)
+
+
+# --------------------------------------------------------------------------- #
+# Footnotes                                                                    #
+# --------------------------------------------------------------------------- #
+# Footnotes are kept as the text Markdown writes for them: a mark ("[^1]")
+# where the note belongs, and a paragraph that defines it ("[^1]: The
+# source.") at the end. Qt has no footnotes, and text survives every way
+# a document travels (files, drafts, backups, the clipboard); the
+# highlighter gives them their look, and the preview draws them the way
+# the reading apps do.
+
+# A mark, and a paragraph that is a definition, as Markdown readers find them.
+FOOTNOTE_MARK = re.compile(r"\[\^([^\]\s]+)\]")
+FOOTNOTE_DEFINITION = re.compile(r"\s{0,3}\[\^([^\]\s]+)\]:")
+
+
+def _prose_blocks(doc) -> Iterator:
+    """The paragraphs of ``doc`` that are text, not code."""
+    for block in iter_blocks(doc):
+        if not is_code_block(block):
+            yield block
+
+
+def _in_code_words(block, offset: int) -> bool:
+    cursor = QTextCursor(block)
+    cursor.setPosition(block.position() + offset + 1)
+    return has_style(cursor.charFormat(), CODE)
+
+
+def footnote_definition(doc, label: str):
+    """The paragraph that defines footnote ``label``, or None."""
+    for block in _prose_blocks(doc):
+        found = FOOTNOTE_DEFINITION.match(block.text())
+        if found is not None and found.group(1) == label:
+            return block
+    return None
+
+
+def footnote_marks(doc, label: Optional[str] = None) -> List[Tuple[int, str]]:
+    """(position, label) of every footnote mark in ``doc`` (only those of
+    ``label`` when given), in order: not the label of a definition, not
+    in code."""
+    marks = []
+    for block in _prose_blocks(doc):
+        text = block.text()
+        definition = FOOTNOTE_DEFINITION.match(text)
+        start = definition.end() if definition is not None else 0
+        for found in FOOTNOTE_MARK.finditer(text, start):
+            if (label is None or found.group(1) == label) \
+                    and not _in_code_words(block, found.start()):
+                marks.append((block.position() + found.start(), found.group(1)))
+    return marks
+
+
+def next_footnote_label(doc) -> str:
+    """The label of a new footnote: one more than the highest number used."""
+    numbers = [int(label) for _position, label in footnote_marks(doc) if label.isdigit()]
+    for block in _prose_blocks(doc):
+        found = FOOTNOTE_DEFINITION.match(block.text())
+        if found is not None and found.group(1).isdigit():
+            numbers.append(int(found.group(1)))
+    return str(max(numbers, default=0) + 1)
+
+
+def insert_footnote(cursor: QTextCursor) -> bool:
+    """A footnote: its mark ("[^2]", the next number) at the cursor, and a
+    paragraph that defines it at the end of the document (after an empty
+    one, unless the last paragraph defines a footnote already), where the
+    cursor goes to write the note. One step on the undo stack. False
+    where a mark would be code or cannot stand (a code block)."""
+    if is_code_block(cursor.block()) or is_divider(cursor.block()):
+        return False
+    doc = cursor.document()
+    label = next_footnote_label(doc)
+    edit = QTextCursor(doc)
+    edit.beginEditBlock()
+    if cursor.hasSelection():
+        cursor.setPosition(cursor.selectionEnd())
+    words = without_link(cursor.charFormat())
+    words.clearProperty(QTextFormat.Property.FontFixedPitch)
+    words.clearProperty(QTextFormat.Property.FontFamilies)
+    words.clearProperty(QTextFormat.Property.FontFamily)
+    cursor.insertText(f"[^{label}]", words)
+    end = QTextCursor(doc)
+    end.movePosition(QTextCursor.MoveOperation.End)
+    last = end.block()
+    if QTextCursor(last).currentTable() is not None:
+        end.insertBlock(QTextBlockFormat(), QTextCharFormat())
+    elif last.text() and not FOOTNOTE_DEFINITION.match(last.text()):
+        end.insertBlock(QTextBlockFormat(), QTextCharFormat())
+        end.insertBlock(QTextBlockFormat(), QTextCharFormat())
+    elif last.text():
+        end.insertBlock(QTextBlockFormat(), QTextCharFormat())
+    else:
+        end.setBlockFormat(QTextBlockFormat())
+    end.insertText(f"[^{label}]: ", QTextCharFormat())
+    edit.endEditBlock()
+    cursor.setPosition(end.position())
+    return True
+
+
+def footnote_jump(cursor: QTextCursor) -> Optional[int]:
+    """Where Go to Note (or a Command-click) leads: from a mark to the
+    words of its note, from anywhere in a note (but a mark in it) back to
+    the first mark of that note. None when the cursor is on neither."""
+    block = cursor.block()
+    if is_code_block(block):
+        return None
+    doc = cursor.document()
+    text = block.text()
+    offset = cursor.positionInBlock()
+    definition = FOOTNOTE_DEFINITION.match(text)
+    for found in FOOTNOTE_MARK.finditer(text, definition.end() if definition else 0):
+        if found.start() <= offset <= found.end() \
+                and not _in_code_words(block, found.start()):
+            target = footnote_definition(doc, found.group(1))
+            if target is None:
+                return None
+            words = FOOTNOTE_DEFINITION.match(target.text())
+            rest = target.text()[words.end():]
+            return target.position() + words.end() + (len(rest) - len(rest.lstrip(" ")))
+    if definition is not None:
+        marks = footnote_marks(doc, definition.group(1))
+        return marks[0][0] if marks else None
+    return None
+
+
+def orphan_notes(doc) -> List[str]:
+    """The labels of notes no mark in ``doc`` refers to."""
+    marked = {label for _position, label in footnote_marks(doc)}
+    orphans = []
+    for block in _prose_blocks(doc):
+        found = FOOTNOTE_DEFINITION.match(block.text())
+        if found is not None and found.group(1) not in marked \
+                and found.group(1) not in orphans:
+            orphans.append(found.group(1))
+    return orphans
+
+
+def footnote_text(doc, label: str) -> str:
+    """The words of footnote ``label``'s definition ("" for none)."""
+    block = footnote_definition(doc, label)
+    if block is None:
+        return ""
+    return block.text()[FOOTNOTE_DEFINITION.match(block.text()).end():].strip()
+
+
+def table_format() -> QTextTableFormat:
+    """How a table looks in the editor: a thin grid across the column."""
+    fmt = QTextTableFormat()
+    fmt.setBorder(1)
+    fmt.setCellPadding(6)
+    fmt.setCellSpacing(0)
+    fmt.setBorderCollapse(True)
+    fmt.setWidth(QTextLength(QTextLength.Type.PercentageLength, 100))
+    return fmt
+
+
+def _header_format(header: bool) -> QTextCharFormat:
+    fmt = QTextCharFormat()
+    fmt.setFontWeight(QFont.Weight.Bold if header else QFont.Weight.Normal)
+    return fmt
+
+
+def _style_row(table, row: int) -> None:
+    """The cells of ``row`` in the header's style (row 0) or the body's:
+    their words, and what is typed into them."""
+    header = row == 0
+    weight = _header_format(header)
+    for column in range(table.columns()):
+        cell = table.cellAt(row, column)
+        first = cell.firstCursorPosition()
+        first.setBlockCharFormat(weight)
+        words = QTextCursor(first)
+        words.setPosition(cell.lastPosition(), QTextCursor.MoveMode.KeepAnchor)
+        if words.hasSelection():
+            words.mergeCharFormat(weight)
+
+
+def cell_text(cell) -> str:
+    """The words of a table cell."""
+    cursor = QTextCursor(cell.firstCursorPosition())
+    cursor.setPosition(cell.lastPosition(), QTextCursor.MoveMode.KeepAnchor)
+    return cursor.selectedText().replace("\u2029", " ").replace("\u2028", " ").strip()
+
+
+def tables_of(doc) -> List[QTextTable]:
+    """Every table in ``doc``, in order."""
+    found: List[QTextTable] = []
+
+    def walk(frame) -> None:
+        for child in frame.childFrames():
+            if isinstance(child, QTextTable):
+                found.append(child)
+            walk(child)
+    walk(doc.rootFrame())
+    return found
+
+
+def insert_table(cursor: QTextCursor, rows: int, columns: int) -> Optional[QTextTable]:
+    """A table of ``rows`` (the header row included) and ``columns``, as a
+    block of its own: in place of an empty paragraph, else after the
+    paragraph at the cursor, never inside code, a divider or another
+    table. The cursor goes into its first cell. One step on the undo
+    stack; None when there is no place for one."""
+    rows, columns = max(1, rows), max(1, columns)
+    block = cursor.block()
+    if cursor.currentTable() is not None or is_code_block(block) or is_divider(block):
+        return None
+    doc = cursor.document()
+    edit = QTextCursor(doc)
+    edit.beginEditBlock()
+    at = QTextCursor(block)
+    at.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+    table = at.insertTable(rows, columns, table_format())
+    previous = block.previous()
+    if not block.text() and previous.isValid() and QTextCursor(previous).currentTable() is None:
+        # In an empty paragraph, Qt keeps the paragraph before the table:
+        # it goes, so the table takes its place.
+        joint = QTextCursor(previous)
+        joint.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+        joint.setPosition(block.position(), QTextCursor.MoveMode.KeepAnchor)
+        joint.removeSelectedText()
+    _style_row(table, 0)
+    after = QTextCursor(doc)
+    after.setPosition(table.lastPosition() + 1)
+    if not after.block().text():
+        # What follows the table is a Body paragraph, whatever the
+        # paragraph it was split from was.
+        after.setBlockFormat(QTextBlockFormat())
+        after.setBlockCharFormat(QTextCharFormat())
+    edit.endEditBlock()
+    cursor.setPosition(table.cellAt(0, 0).firstPosition())
+    return table
+
+
+def _place(cursor: QTextCursor, table, row: int, column: int) -> None:
+    row = max(0, min(row, table.rows() - 1))
+    column = max(0, min(column, table.columns() - 1))
+    cursor.setPosition(table.cellAt(row, column).firstPosition())
+
+
+def add_table_row(cursor: QTextCursor, *, below: bool) -> bool:
+    """A row above or below the one at the cursor, which goes to its first
+    cell, ready to be filled. A row added above the header is the new
+    header. One undo step."""
+    table = cursor.currentTable()
+    if table is None:
+        return False
+    cell = table.cellAt(cursor)
+    row = cell.row() + (1 if below else 0)
+    edit = QTextCursor(cursor.document())
+    edit.beginEditBlock()
+    table.insertRows(row, 1)
+    _style_row(table, row)
+    if row == 0:
+        _style_row(table, 1)              # the old header is a row now
+    edit.endEditBlock()
+    _place(cursor, table, row, 0)
+    return True
+
+
+def add_table_column(cursor: QTextCursor, *, after: bool) -> bool:
+    """A column before or after the one at the cursor, which goes into
+    it. One undo step."""
+    table = cursor.currentTable()
+    if table is None:
+        return False
+    cell = table.cellAt(cursor)
+    column = cell.column() + (1 if after else 0)
+    edit = QTextCursor(cursor.document())
+    edit.beginEditBlock()
+    table.insertColumns(column, 1)
+    header = table.cellAt(0, column).firstCursorPosition()
+    header.setBlockCharFormat(_header_format(True))
+    for row in range(1, table.rows()):
+        table.cellAt(row, column).firstCursorPosition().setBlockCharFormat(
+            _header_format(False))
+    edit.endEditBlock()
+    _place(cursor, table, cell.row(), column)
+    return True
+
+
+def delete_table(cursor: QTextCursor) -> bool:
+    """The table at the cursor goes; the cursor goes where it stood."""
+    table = cursor.currentTable()
+    if table is None:
+        return False
+    start = table.firstPosition() - 1
+    edit = QTextCursor(cursor.document())
+    edit.beginEditBlock()
+    table.removeRows(0, table.rows())
+    edit.endEditBlock()
+    cursor.setPosition(min(max(0, start), cursor.document().characterCount() - 1))
+    return True
+
+
+def delete_table_row(cursor: QTextCursor) -> bool:
+    """The row at the cursor goes (the last one takes the table with it).
+    The header's row gone, the next row is the header. One undo step."""
+    table = cursor.currentTable()
+    if table is None:
+        return False
+    if table.rows() == 1:
+        return delete_table(cursor)
+    cell = table.cellAt(cursor)
+    edit = QTextCursor(cursor.document())
+    edit.beginEditBlock()
+    table.removeRows(cell.row(), 1)
+    if cell.row() == 0:
+        _style_row(table, 0)
+    edit.endEditBlock()
+    _place(cursor, table, cell.row(), cell.column())
+    return True
+
+
+def delete_table_column(cursor: QTextCursor) -> bool:
+    """The column at the cursor goes (the last one takes the table with
+    it). One undo step."""
+    table = cursor.currentTable()
+    if table is None:
+        return False
+    if table.columns() == 1:
+        return delete_table(cursor)
+    cell = table.cellAt(cursor)
+    edit = QTextCursor(cursor.document())
+    edit.beginEditBlock()
+    table.removeColumns(cell.column(), 1)
+    edit.endEditBlock()
+    _place(cursor, table, cell.row(), cell.column())
+    return True
+
+
+def next_table_cell(cursor: QTextCursor, step: int) -> bool:
+    """Into the next cell (step 1, adding a row after the last cell, one
+    undo step) or the previous one (-1). False outside a table."""
+    table = cursor.currentTable()
+    if table is None:
+        return False
+    cell = table.cellAt(cursor)
+    index = cell.row() * table.columns() + cell.column() + step
+    if index < 0:
+        index = 0
+    elif index >= table.rows() * table.columns():
+        edit = QTextCursor(cursor.document())
+        edit.beginEditBlock()
+        table.appendRows(1)
+        _style_row(table, table.rows() - 1)
+        edit.endEditBlock()
+    _place(cursor, table, index // table.columns(), index % table.columns())
+    return True
+
+
+def next_table_row(cursor: QTextCursor) -> bool:
+    """Into the cell below (a new row after the last one, one undo step).
+    False outside a table."""
+    table = cursor.currentTable()
+    if table is None:
+        return False
+    cell = table.cellAt(cursor)
+    if cell.row() + 1 >= table.rows():
+        edit = QTextCursor(cursor.document())
+        edit.beginEditBlock()
+        table.appendRows(1)
+        _style_row(table, table.rows() - 1)
+        edit.endEditBlock()
+    _place(cursor, table, cell.row() + 1, cell.column())
+    return True
+
+
+def unescape_cell_code(doc) -> None:
+    """A pipe in code in a table cell, as Qt's reader leaves it: with the
+    backslash GFM asks for there (the writer writes `a\\|b`), which GFM
+    readers drop. Dropped here too, so the code reads as written."""
+    edits = []
+    for table in tables_of(doc):
+        for row in range(table.rows()):
+            for column in range(table.columns()):
+                cell = table.cellAt(row, column)
+                it = cell.begin()
+                while not it.atEnd():
+                    block = it.currentBlock()
+                    if block.isValid():
+                        frag = block.begin()
+                        while not frag.atEnd():
+                            fragment = frag.fragment()
+                            if (fragment.isValid() and fragment.charFormat().fontFixedPitch()
+                                    and "\\|" in fragment.text()):
+                                edits.append((fragment.position(), fragment.length(),
+                                              fragment.text().replace("\\|", "|"),
+                                              QTextCharFormat(fragment.charFormat())))
+                            frag += 1
+                    it += 1
+    for position, length, text, fmt in reversed(edits):
+        cursor = QTextCursor(doc)
+        cursor.setPosition(position)
+        cursor.setPosition(position + length, QTextCursor.MoveMode.KeepAnchor)
+        cursor.insertText(text, fmt)
+
+
+def leave_table(cursor: QTextCursor) -> bool:
+    """Out of the table, into a new paragraph right below it (or the empty
+    one already there). False outside a table."""
+    table = cursor.currentTable()
+    if table is None:
+        return False
+    doc = cursor.document()
+    after = QTextCursor(doc)
+    after.setPosition(table.lastPosition() + 1)
+    block = after.block()
+    if block.text() or QTextCursor(block).currentTable() is not None \
+            or block.textList() is not None or block.blockFormat().headingLevel():
+        after.beginEditBlock()
+        after.insertBlock(QTextBlockFormat(), QTextCharFormat())
+        after.movePosition(QTextCursor.MoveOperation.PreviousBlock)
+        after.endEditBlock()
+    cursor.setPosition(after.position())
+    return True
 
 
 # --------------------------------------------------------------------------- #
@@ -853,6 +1528,166 @@ def is_code_block(block) -> bool:
     fmt = block.blockFormat()
     return bool(fmt.property(QTextFormat.Property.BlockCodeFence)) or fmt.hasProperty(
         QTextFormat.Property.BlockCodeLanguage)
+
+
+CODE_FENCE = "`"
+
+
+def code_language(block) -> Optional[str]:
+    """The language a code line's block names ("" for none), or None for a
+    paragraph that is no code."""
+    if not is_code_block(block):
+        return None
+    return str(block.blockFormat().property(QTextFormat.Property.BlockCodeLanguage) or "")
+
+
+def _code_key(block):
+    """What makes lines one code block to the Markdown writer: the same
+    fence, language and quote; None for a paragraph that is no code."""
+    language = code_language(block)
+    if language is None:
+        return None
+    fence = block.blockFormat().property(QTextFormat.Property.BlockCodeFence)
+    return str(fence or CODE_FENCE), language, quote_depth(block)
+
+
+def same_code_block(one, other) -> bool:
+    """Whether two lines are lines of one code block (given they are next
+    to each other)."""
+    key = _code_key(one)
+    return key is not None and key == _code_key(other)
+
+
+def code_run(block):
+    """The first and last line of the code block ``block`` is a line of:
+    the lines next to it with the same fence, language and quote, which
+    Markdown writes as one fenced block."""
+    key = _code_key(block)
+    first = last = block
+    while first.previous().isValid() and _code_key(first.previous()) == key:
+        first = first.previous()
+    while last.next().isValid() and _code_key(last.next()) == key:
+        last = last.next()
+    return first, last
+
+
+def _code_text_format() -> QTextCharFormat:
+    """The text format of a code line, as Qt's Markdown reader gives it
+    (the system's fixed font); the editor shows it in its code font."""
+    fmt = QTextCharFormat()
+    fmt.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+    return fmt
+
+
+def _restyle_runs(block, fmt: QTextCharFormat) -> None:
+    """Every piece of text in ``block`` in exactly ``fmt`` (pictures stay)."""
+    whole = QTextCursor(block)
+    whole.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
+    if whole.hasSelection():
+        for start, end, _fmt in _text_runs(whole):
+            piece = QTextCursor(block.document())
+            piece.setPosition(start)
+            piece.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+            piece.setCharFormat(fmt)
+    QTextCursor(block).setBlockCharFormat(fmt)
+
+
+def code_line_format(fmt: QTextBlockFormat, language: str) -> QTextBlockFormat:
+    """``fmt`` made the format of a line of a fenced code block in
+    ``language``, as Qt's Markdown reader makes it (so the writer fences
+    it and names the language)."""
+    fmt.setProperty(QTextFormat.Property.BlockCodeFence, CODE_FENCE)
+    fmt.setProperty(QTextFormat.Property.BlockCodeLanguage, language)
+    fmt.setNonBreakableLines(True)
+    fmt.clearProperty(QTextFormat.Property.BlockMarker)
+    fmt.setTopMargin(0)
+    fmt.setBottomMargin(0)
+    return fmt
+
+
+def _links_as_markdown(block) -> None:
+    """Each link in ``block`` written out as its Markdown (``[words](address)``),
+    so code made of the paragraph keeps where the link went."""
+    found = []
+    it = block.begin()
+    while not it.atEnd():
+        fragment = it.fragment()
+        if fragment.isValid() and fragment.charFormat().isAnchor() \
+                and fragment.charFormat().anchorHref():
+            found.append((fragment.position(), fragment.length(), fragment.text(),
+                          fragment.charFormat().anchorHref()))
+        it += 1
+    # Pieces of one link, one after the other, are one link.
+    merged = []
+    for position, length, words, href in found:
+        if merged and merged[-1][3] == href and merged[-1][0] + merged[-1][1] == position:
+            start, size, before, _href = merged[-1]
+            merged[-1] = (start, size + length, before + words, href)
+        else:
+            merged.append((position, length, words, href))
+    for position, length, words, href in reversed(merged):
+        cursor = QTextCursor(block.document())
+        cursor.setPosition(position)
+        cursor.setPosition(position + length, QTextCursor.MoveMode.KeepAnchor)
+        cursor.insertText(f"[{words}]({href})", without_link(cursor.charFormat()))
+
+
+def make_code_block(cursor: QTextCursor, language: str = "") -> None:
+    """The paragraphs under the cursor become the lines of one code block
+    in ``language`` (as a fence names it; "" for none), as one step on the
+    undo stack. A heading becomes Body and a list item leaves its list
+    first; the words lose their styles, since a code block holds plain
+    text and is written as it is. Dividers and table cells stay."""
+    blocks = [b for b in _blocks_of(cursor) if not is_divider(b)
+              and QTextCursor(b).currentTable() is None]
+    if not blocks:
+        return
+    edit = QTextCursor(cursor.document())
+    edit.beginEditBlock()
+    text = _code_text_format()
+    for block in blocks:
+        if block.blockFormat().headingLevel():
+            set_heading(QTextCursor(block), BODY)
+        if block.textList() is not None:
+            leave_list(block)
+        QTextCursor(block).setBlockFormat(code_line_format(block.blockFormat(), language))
+        _links_as_markdown(block)
+        _restyle_runs(block, text)
+    edit.endEditBlock()
+
+
+def set_code_language(cursor: QTextCursor, language: str) -> None:
+    """The code blocks under the cursor, each whole, in ``language``
+    ("" for none), as one step on the undo stack."""
+    lines = []
+    for block in _blocks_of(cursor):
+        if is_code_block(block) and block not in lines:
+            first, last = code_run(block)
+            line = first
+            while line.isValid():
+                lines.append(line)
+                if line == last:
+                    break
+                line = line.next()
+    if not lines:
+        return
+    edit = QTextCursor(cursor.document())
+    edit.beginEditBlock()
+    for line in lines:
+        fmt = line.blockFormat()
+        fmt.setProperty(QTextFormat.Property.BlockCodeLanguage, language)
+        QTextCursor(line).setBlockFormat(fmt)
+    edit.endEditBlock()
+
+
+def leave_code(block) -> None:
+    """A line of code becomes a Body paragraph; its words stay, plain."""
+    fmt = block.blockFormat()
+    fmt.clearProperty(QTextFormat.Property.BlockCodeFence)
+    fmt.clearProperty(QTextFormat.Property.BlockCodeLanguage)
+    fmt.setNonBreakableLines(False)
+    QTextCursor(block).setBlockFormat(fmt)
+    _restyle_runs(block, QTextCharFormat())
 
 
 def _has_own_style(block) -> bool:

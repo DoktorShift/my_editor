@@ -52,11 +52,13 @@ from PySide6.QtWidgets import (
 )
 
 import theme
+from alerts import answer_return_as_the_system_does
 from constants import (
     DARK_BORDER, DARK_MENU_BG, DARK_MUTED_FG,
     LIGHT_BORDER, LIGHT_MENU_BG, LIGHT_MUTED_FG, LIGHT_SELECTION,
 )
 from i18n import _
+from popup_placement import available_area
 
 # Button placement.
 LEADING = "leading"     # Go Back: the leading edge
@@ -130,7 +132,7 @@ def link_button(text: str, handler: Callable[[], None]) -> QPushButton:
     with the page's buttons."""
     button = QPushButton(text)
     button.setObjectName("link")
-    button.setAutoDefault(False)
+    answer_return_as_the_system_does([button])
     button.setCursor(Qt.PointingHandCursor)
     button.clicked.connect(handler)
     return button
@@ -374,10 +376,11 @@ class _ShownPageStack(QStackedWidget):
 
     QStackedWidget asks for the room of its largest page, so a narrow page
     would be laid out as wide as the widest one and cut off at the side of
-    a window sized for it. The same goes for the height a page needs at a
-    given width, which the scroll area asks for: answered for the tallest
-    page, a short one scrolled (a waiting page showed only a scroll bar,
-    its words far below, out of sight)."""
+    a window sized for it. The same holds for the height its wrapped
+    text needs at a width, which the scroll area asks for: answered for
+    the tallest page, a short one scrolled (a waiting page showed only a
+    scroll bar), and a short page after a long one would scroll in a
+    window with room to spare."""
 
     def sizeHint(self) -> QSize:
         page = self.currentWidget()
@@ -415,6 +418,9 @@ class AssistantWindow(QDialog):
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QFrame.Shape.NoFrame)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # It shows nothing of its own: no Tab stop that would look like
+        # the focus went nowhere (a child it scrolls to still gets it).
+        self._scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._scroll.viewport().setAutoFillBackground(False)
         self._scroll.setWidget(self._stack)
         # QScrollArea paints its widget's background by default; the page
@@ -464,7 +470,8 @@ class AssistantWindow(QDialog):
         changes, so text that arrives later fits too.
 
         A page that cannot get narrower than the window (a row of longer
-        words) widens the window the same way."""
+        words) widens the window the same way, and so does a row of buttons
+        whose words need more room."""
         page = self._stack.currentWidget()
         layout = page.layout() if page is not None else None
         if layout is None:
@@ -494,23 +501,23 @@ class AssistantWindow(QDialog):
         wide = self._stack.minimumSizeHint().width() + bar
         if wide != self._scroll.minimumWidth():
             self._scroll.setMinimumWidth(wide)
-        window = max(self._base_width, wide + sides, narrowest + sides)
+        # The buttons keep their words whole too: a longer translation of
+        # them widens the window rather than cutting them.
+        buttons = self._button_row.sizeHint().width()
+        window = max(self._base_width, wide + sides, narrowest + sides, buttons + sides)
         if window != self.minimumWidth():
             self.setMinimumWidth(window)
 
     def _tallest_page(self) -> int:
         """The most page height the screen has room for, with the window's
         title bar, margins and buttons around it."""
-        # A window not shown yet has no screen of its own to ask.
-        handle = self.windowHandle()
-        screen = (handle.screen() if handle is not None else None) \
-            or QGuiApplication.primaryScreen()
-        if screen is None:
+        area = available_area(self)
+        if area is None:
             return 10_000
         margins = self.layout().contentsMargins()
         around = (margins.top() + margins.bottom() + self.layout().spacing()
                   + self._button_row.sizeHint().height() + 60)
-        return max(200, screen.availableGeometry().height() - around)
+        return max(200, area.height() - around)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -534,7 +541,8 @@ class AssistantWindow(QDialog):
 
         def make(key, label, placement, handler):
             button = QPushButton(label)
-            button.setAutoDefault(False)
+            # Return as the system's own dialogs answer it (alerts.py).
+            answer_return_as_the_system_does([button])
             button.setDefault(placement == DEFAULT)
             button.clicked.connect(handler)
             self.buttons[key] = button
@@ -549,3 +557,4 @@ class AssistantWindow(QDialog):
             for spec in specs:
                 if spec[2] == placement:
                     self._button_row.addWidget(make(*spec))
+        self.fit_page()             # the new buttons may need a wider window

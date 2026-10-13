@@ -136,7 +136,7 @@ def test_format_err_uses_the_code_and_carries_the_detail():
 
 
 @pytest.mark.parametrize("reason", [
-    "Your signer app didn’t sign the request: user declined",
+    "Your signer app declined the request to the media server: user declined",
     "Connect your signer app first.",
 ])
 def test_signer_strings_pass_through_byte_identical(reason):

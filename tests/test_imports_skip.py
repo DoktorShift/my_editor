@@ -113,6 +113,22 @@ class TestSkip:
         assert window._controller.counts().skipped == 0
         assert window.banner.label.text() == "Restored 1 post."
 
+    def test_the_keys_restore_nothing_in_skipped(self, window):
+        """CP2 review L-b: Delete or Backspace restored posts in Skipped,
+        the opposite of what they mean, with no Undo; and Undo Skip then
+        stood for an older skip."""
+        window.action_bar.skip.click()
+        assert window.can_undo()
+        window.sidebar.select(LIST, SKIPPED_POSTS)
+        window.posts.setFocus()
+        window.posts.setCurrentIndex(window.posts.model_.index(0))
+        QTest.keyClick(window.posts, Qt.Key.Key_Delete)
+        QTest.keyClick(window.posts, Qt.Key.Key_Backspace)
+        assert window._controller.counts().skipped == 1
+        window.action_bar.skip.click()          # Restore, the button
+        assert window._controller.counts().skipped == 0
+        assert not window.can_undo()
+
     def test_files_are_not_skipped(self, window):
         from tests.imports_fakes import make_item
         collection = window._controller.open_posts(kind="file", label="blog.xml",
@@ -173,7 +189,7 @@ class TestTheMenuBar:
         assert not stand_in.act_undo.isEnabled()
 
 
-def test_the_documents_commands_are_dimmed_while_imports_is_in_front(window):
+def test_the_documents_commands_are_dimmed_while_imports_is_in_front(window, monkeypatch):
     """Review M9: the menu bar is the app's while the Imports window is
     in front; what it cannot do there is dimmed, and View > Show Sidebar
     works for it."""
@@ -186,8 +202,12 @@ def test_the_documents_commands_are_dimmed_while_imports_is_in_front(window):
     copy = registry.add(Command("edit.copy", "Copy", EDIT))
     sidebar = registry.add(Command("view.sidebar", "Show Sidebar", VIEW), enabled=False)
     front = {"window": window}
+    from PySide6.QtGui import QAction
+    fullscreen = QAction("Full Screen")
+    fullscreen.setCheckable(True)
     host = SimpleNamespace(
         commands=registry, act_window_sidebar=sidebar, _m_background=QMenu(),
+        act_fullscreen=fullscreen, isFullScreen=lambda: False, act_close_tab=QAction("Close"),
         _imports_in_front=lambda: front["window"], _update_knit_actions=lambda: None,
         _update_format_buttons=lambda: None,
         _DOCUMENT_COMMANDS=MainWindow._DOCUMENT_COMMANDS,
@@ -199,6 +219,18 @@ def test_the_documents_commands_are_dimmed_while_imports_is_in_front(window):
     assert not save.isEnabled() and not bold.isEnabled()
     assert copy.isEnabled()          # acts on the window in front
     assert sidebar.isEnabled() and sidebar.text() == "Hide Sidebar"
+    assert host.act_close_tab.isEnabled()       # File > Close closes it
+    assert host.act_close_tab.text() == "Close Window"      # S5: it has no tabs
+    import main_window
+    window.follow_website()
+    sheet = window.sheet()
+    monkeypatch.setattr(main_window.QApplication, "activeWindow", staticmethod(lambda: sheet))
+    MainWindow._update_window_commands(host)
+    assert not host.act_close_tab.isEnabled()   # but not under its sheet (CP3 review M2)
+    sheet.reject()
+    monkeypatch.setattr(main_window.QApplication, "activeWindow", staticmethod(lambda: None))
+    MainWindow._update_window_commands(host)
+    assert host.act_close_tab.isEnabled()
     MainWindow._toggle_window_sidebar(host)
     assert not window.act_sidebar.isChecked()
     assert sidebar.text() == "Show Sidebar"
@@ -206,6 +238,208 @@ def test_the_documents_commands_are_dimmed_while_imports_is_in_front(window):
     MainWindow._update_window_commands(host)
     assert save.isEnabled() and not bold.isEnabled()
     assert not sidebar.isEnabled()
+    assert host.act_close_tab.text() == "Close Tab"
+
+
+def test_a_sheet_of_imports_in_front_counts_as_imports_in_front(window, monkeypatch):
+    """CP2 review L-a: with a sheet of the Imports window up, the window
+    itself is not the active one, so the document's commands came back
+    and Edit > Undo undid text in the document behind."""
+    import main_window
+    window.follow_website()
+    sheet = window.sheet()
+    host = SimpleNamespace(_imports=SimpleNamespace(window=lambda: window))
+    monkeypatch.setattr(main_window.QApplication, "activeWindow", staticmethod(lambda: sheet))
+    assert MainWindow._imports_in_front(host) is window
+    monkeypatch.setattr(main_window.QApplication, "activeWindow", staticmethod(lambda: None))
+    assert MainWindow._imports_in_front(host) is None
+    sheet.reject()
+
+
+def test_a_sheet_takes_the_edit_commands_and_keeps_its_window(window, monkeypatch):
+    """CP3 review M2: with Source Settings up, Edit > Undo undid the skip
+    behind the sheet instead of the typing in it, Edit > Delete skipped a
+    post behind it, and File > Close closed the window under it. As in
+    Mail, a sheet takes the Edit commands for its text field, does nothing
+    else with them, and its window is not closed under it."""
+    import main_window
+    from PySide6.QtGui import QAction
+    window.posts.setFocus()
+    QTest.keyClick(window.posts, Qt.Key.Key_Delete)
+    controller = window._controller
+    assert controller.counts().skipped == 1
+    window.source_settings(controller.sources()[0].key)
+    sheet = window.sheet()
+    monkeypatch.setattr(main_window.QApplication, "activeWindow", staticmethod(lambda: sheet))
+    sheet.name.setFocus()
+    monkeypatch.setattr(main_window.QApplication, "focusWidget",
+                        staticmethod(lambda: sheet.name))
+    QTest.keyClicks(sheet.name, " renamed")
+    typed = sheet.name.text()
+    closed = []
+    window.close = lambda: closed.append(True)
+    host = SimpleNamespace(
+        _imports_in_front=lambda: window, _front_window=lambda: sheet,
+        current_editor=lambda: None, current_pdf_viewer=lambda: None,
+        act_undo=QAction("Undo"), act_redo=QAction("Redo"))
+    MainWindow._update_undo_redo_buttons(host)
+    assert host.act_undo.text() == "Undo" and host.act_undo.isEnabled()
+    MainWindow._undo(host)
+    assert sheet.name.text() != typed                 # the typing is undone
+    assert controller.counts().skipped == 1           # the skip behind stays
+    monkeypatch.setattr(main_window.QApplication, "focusWidget",
+                        staticmethod(lambda: sheet.copy_images))
+    inbox = controller.counts().inbox
+    for name in ("delete", "select_all"):
+        MainWindow._edit_focused(host, name)
+    assert controller.counts().inbox == inbox and not window.posts.model_.checked()
+    MainWindow._update_undo_redo_buttons(host)
+    assert not host.act_undo.isEnabled()              # nothing of the window behind
+    MainWindow._undo(host)
+    assert controller.counts().skipped == 1
+    MainWindow._close_current_tab(host)
+    assert closed == [] and sheet.isVisible()
+    sheet.reject()
+
+
+def test_the_edit_menu_follows_the_focused_field(window, monkeypatch):
+    """N2, S4 and T2 of the CP3 fixes reviews: with a sheet up, the Edit menu
+    kept the state it had when the sheet opened (Undo dimmed after typing
+    in it), with a check box focused Cut, Copy and Delete followed the
+    document in the other window, and a selection in the article did not
+    enable Copy, and Paste stayed enabled where nothing takes a paste. As
+    in Mail, they follow the field with the focus as it
+    changes, through the one place that follows focused fields."""
+    import main_window
+    from PySide6.QtCore import QObject
+    from PySide6.QtGui import QAction
+    from PySide6.QtWidgets import QWidget
+    from editor import HtmlEditor
+    document = HtmlEditor()
+    document.setPlainText("Text in the document")
+    document.selectAll()
+
+    class Host(QObject):
+        """The menu bar's part of MainWindow, with its own updaters."""
+        _follow_field = MainWindow._follow_field
+        _note_side_in_use = MainWindow._note_side_in_use
+        _on_field_changed = MainWindow._on_field_changed
+        _update_clipboard_commands = MainWindow._update_clipboard_commands
+        _update_undo_redo_buttons = MainWindow._update_undo_redo_buttons
+
+    host = Host()
+    host.tabs, host.current_editor = QWidget(), lambda: document
+    host._imports_in_front, host.current_pdf_viewer = lambda: window, lambda: None
+    host.act_undo, host.act_redo = QAction("Undo"), QAction("Redo")
+    host.act_cut, host.act_copy = QAction("Cut"), QAction("Copy")
+    host.act_delete, host.act_paste = QAction("Delete"), QAction("Paste")
+    host.act_paste_plain = QAction("Paste and Match Style")
+    focus = {"widget": None}
+    monkeypatch.setattr(main_window.QApplication, "focusWidget",
+                        staticmethod(lambda: focus["widget"]))
+
+    def focus_on(widget):
+        focus["widget"] = widget
+        MainWindow._on_focus_changed(host, None, widget)
+
+    from PySide6.QtWidgets import QApplication
+    QApplication.clipboard().setText("PASTED")
+    focus_on(window.posts)                              # T2: nothing here takes a paste
+    assert not (host.act_paste.isEnabled() or host.act_paste_plain.isEnabled())
+    window.source_settings(window._controller.sources()[0].key)
+    sheet = window.sheet()
+    monkeypatch.setattr(main_window.QApplication, "activeWindow", staticmethod(lambda: sheet))
+    focus_on(sheet.name)
+    assert host.act_paste.isEnabled() and host.act_paste_plain.isEnabled()
+    sheet.name.end(False)
+    QTest.keyClicks(sheet.name, "!")                    # the menu hears it at once
+    assert host.act_undo.isEnabled()
+    assert not (host.act_cut.isEnabled() or host.act_copy.isEnabled()
+                or host.act_delete.isEnabled())         # nothing selected in Name
+    sheet.name.selectAll()
+    assert host.act_cut.isEnabled() and host.act_copy.isEnabled()
+    focus_on(sheet.copy_images)                         # a check box of the sheet
+    assert not (host.act_undo.isEnabled() or host.act_cut.isEnabled()
+                or host.act_copy.isEnabled() or host.act_delete.isEnabled()
+                or host.act_paste.isEnabled())
+    sheet.reject()
+    monkeypatch.setattr(main_window.QApplication, "activeWindow", staticmethod(lambda: window))
+    pane = window.article._preview
+    focus_on(pane)
+    assert not host.act_copy.isEnabled()
+    pane.selectAll()                                    # text selected in the article
+    assert host.act_copy.isEnabled() and not host.act_cut.isEnabled()
+    assert not host.act_paste.isEnabled()               # it is read only
+    focus_on(None)
+    document.deleteLater()
+
+
+def test_edit_delete_skips_only_where_the_key_does(window, monkeypatch):
+    """S2 of the CP3 fixes review: Edit > Delete restored posts in Skipped,
+    with no Undo, and skipped the open post with the sidebar focused. It
+    does what the Delete key does in the post list, and nothing else."""
+    import main_window
+    from PySide6.QtGui import QAction
+    focus = {"widget": window.posts}
+    monkeypatch.setattr(main_window.QApplication, "focusWidget",
+                        staticmethod(lambda: focus["widget"]))
+    host = SimpleNamespace(
+        _imports_in_front=lambda: window, current_editor=lambda: None,
+        current_pdf_viewer=lambda: None, act_cut=QAction("Cut"), act_copy=QAction("Copy"),
+        act_delete=QAction("Delete"), act_paste=QAction("Paste"),
+        act_paste_plain=QAction("Paste and Match Style"))
+    controller = window._controller
+    MainWindow._update_clipboard_commands(host)
+    assert host.act_delete.isEnabled()                  # the post list: Skip
+    focus["widget"] = window.sidebar
+    MainWindow._update_clipboard_commands(host)
+    assert not host.act_delete.isEnabled()
+    MainWindow._edit_focused(host, "delete")
+    assert controller.counts().skipped == 0
+    focus["widget"] = window.posts
+    MainWindow._edit_focused(host, "delete")
+    assert controller.counts().skipped == 1
+    window.sidebar.select(LIST, SKIPPED_POSTS)
+    window.posts.setCurrentIndex(window.posts.model_.index(0))
+    MainWindow._update_clipboard_commands(host)
+    assert not host.act_delete.isEnabled()              # Restore is the button
+    MainWindow._edit_focused(host, "delete")
+    assert controller.counts().skipped == 1
+
+
+def test_copy_copies_the_link_of_every_post_an_action_applies_to(window):
+    """S3 of the CP3 fixes review: after Select All, Copy put only the open
+    post's link on the clipboard. As Mail copies every selected message,
+    it copies the link of each post, one per line."""
+    from PySide6.QtWidgets import QApplication
+    from tests.imports_fakes import make_item
+    controller = window._controller
+    key = controller.sources()[0].key
+    controller.inbox.ingest(key, [
+        make_item("Linked one", guid="l1", link="https://journal.example/1"),
+        make_item("Linked two", guid="l2", link="https://journal.example/2")])
+    controller.posts_changed.emit()                     # the window shows them
+    settle()
+    model = window.posts.model_
+    linked = {model.post(r).link: r for r in range(model.rowCount()) if model.post(r).link}
+    assert sorted(linked) == ["https://journal.example/1", "https://journal.example/2"]
+    window.posts.setCurrentIndex(model.index(linked["https://journal.example/1"]))
+    assert window.can_edit("copy")
+    window.edit("copy")
+    assert QApplication.clipboard().text() == "https://journal.example/1"
+    window.edit("select_all")
+    window.edit("copy")
+    assert sorted(QApplication.clipboard().text().split("\n")) == sorted(linked)
+
+
+def test_full_screen_acts_on_the_window_in_front(window):
+    """CP2 review L-a: View > Full Screen made the editor window behind
+    full screen while the Imports window was in front."""
+    host = SimpleNamespace(_imports_in_front=lambda: window, _name_full_screen=lambda: None)
+    MainWindow._toggle_fullscreen(host)
+    assert window.isFullScreen()
+    MainWindow._toggle_fullscreen(host)
+    assert not window.isFullScreen()
 
 
 

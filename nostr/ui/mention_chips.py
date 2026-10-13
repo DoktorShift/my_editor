@@ -245,8 +245,7 @@ class MentionChipRow(QWidget):
                 is_dark=self._is_dark,
             )
             self._picker.picked.connect(self._on_picked)
-        global_pos = self._add_btn.mapToGlobal(self._add_btn.rect().bottomLeft())
-        self._picker.open_at(global_pos)
+        self._picker.open_at(self._add_btn.rect(), self._add_btn)
 
     def _on_picked(self, person: Person) -> None:
         if any(p.pubkey == person.pubkey for p in self._picked):

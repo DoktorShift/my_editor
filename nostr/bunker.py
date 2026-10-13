@@ -39,7 +39,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 
 from i18n import _
 
-from . import CLIENT_NAME, crypto, events
+from . import CLIENT_NAME, crypto, events, refs
 from .relay import RelayPool, Subscription
 
 
@@ -79,10 +79,32 @@ SIGNER_SILENT_NEEDLES: Tuple[str, ...] = (
 )
 
 
+# The failure reasons this client gives itself when its session to the
+# signer app is not there (not connected yet, closed, reopened, dropped):
+# the signer app was never asked, so nothing it would say is known.
+SESSION_ERROR_NEEDLES: Tuple[str, ...] = (
+    "not connected",
+    "user pubkey not yet known",
+    "closed by client",
+    "reopening channel",
+    "dropped from session pool",
+    "application shutdown",
+)
+
+
 def is_signer_silent(reason: str) -> bool:
     """True if ``reason`` means the signer never answered."""
     lowered = (reason or "").lower()
     return any(needle in lowered for needle in SIGNER_SILENT_NEEDLES)
+
+
+def is_signer_answer(reason: str) -> bool:
+    """True if ``reason`` is the signer app's own answer (a refusal, an
+    error it sent), rather than silence or this client's session not being
+    there: asking again would be answered the same way."""
+    lowered = (reason or "").lower()
+    return not is_signer_silent(lowered) and not any(
+        needle in lowered for needle in SESSION_ERROR_NEEDLES)
 
 
 def humanize_failure(reason: str) -> str:
@@ -121,6 +143,7 @@ NIP46_RELAYS: tuple = (
 #   sign_event:31234  NIP-37 draft wraps (private encrypted drafts)
 #   nip44_encrypt     encrypting draft payloads to the user's own pubkey
 #   nip44_decrypt     decrypting drafts pulled back from relays
+#   nip04_decrypt     reading a list of sources an older app saved
 #   get_public_key    required for the post-connect user-pubkey lookup
 #   ping              keepalive
 #
@@ -140,6 +163,9 @@ DEFAULT_PERMS = (
     # The synced feed list (NIP-78) and where drafts are kept (NIP-37).
     "sign_event:30078,sign_event:10013,"
     "nip44_encrypt,nip44_decrypt,"
+    # Reading a list of sources an older app saved with NIP-04 (never
+    # used to encrypt anything).
+    "nip04_decrypt,"
     "ping"
 )
 
@@ -610,6 +636,10 @@ class BunkerClient(QObject):
         if not self._is_connected:
             on_failure("not connected")
             return
+        refusal = refs.signing_refusal(unsigned_event)
+        if refusal:
+            on_failure(refusal)
+            return
 
         payload = {
             "kind": unsigned_event["kind"],
@@ -728,6 +758,58 @@ class BunkerClient(QObject):
             on_failure=on_failure,
             timeout_ms=timeout_ms,
         )
+
+    def nip04_decrypt(
+        self,
+        peer_pubkey_hex: str,
+        content: str,
+        on_success: Callable[[str], None],
+        on_failure: Callable[[str], None],
+        *,
+        timeout_ms: int = DEFAULT_RPC_TIMEOUT_MS,
+    ) -> None:
+        """Ask the signer to read a NIP-04 message from ``peer_pubkey_hex``
+        (NIP-46 ``nip04_decrypt``): what an older app saved. Nothing is ever
+        encrypted with NIP-04 here."""
+        if not self._is_connected:
+            on_failure("not connected")
+            return
+        peer = peer_pubkey_hex.strip().lower()
+        if len(peer) != 64 or not all(c in "0123456789abcdef" for c in peer):
+            on_failure(f"invalid peer pubkey: {peer_pubkey_hex!r}")
+            return
+        if not content:
+            on_failure("ciphertext is empty")
+            return
+
+        def _ok(result: str) -> None:
+            if not result:
+                on_failure("signer returned empty plaintext")
+                return
+            on_success(result)
+
+        self._send_request(
+            method="nip04_decrypt",
+            params=[peer, content],
+            on_success=_ok,
+            on_failure=on_failure,
+            timeout_ms=timeout_ms,
+        )
+
+    def nip04_decrypt_self(
+        self,
+        content: str,
+        on_success: Callable[[str], None],
+        on_failure: Callable[[str], None],
+        *,
+        timeout_ms: int = DEFAULT_RPC_TIMEOUT_MS,
+    ) -> None:
+        """Read a NIP-04 message the account sent to itself."""
+        if self._user_pubkey is None:
+            on_failure("user pubkey not yet known")
+            return
+        self.nip04_decrypt(self._user_pubkey, content, on_success, on_failure,
+                           timeout_ms=timeout_ms)
 
     def nip44_encrypt_self(
         self,

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QPoint, QRect, Qt, Signal
+from PySide6.QtCore import QRect, Qt, Signal
 from PySide6.QtGui import QAccessible, QAccessibleEvent, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import (
     QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget,
@@ -32,6 +32,7 @@ from constants import (
 )
 from i18n import _
 from link_url import is_bare_http_url, normalize_link_input
+from popup_placement import place_below
 
 
 class LinkPopover(QFrame):
@@ -175,14 +176,7 @@ class LinkPopover(QFrame):
     def show_below(self, anchor: QRect, parent: QWidget) -> None:
         """Open under ``anchor`` (the linked words, in ``parent``'s
         coordinates), or above them when there is no room below."""
-        self.adjustSize()
-        below = parent.mapToGlobal(anchor.bottomLeft()) + QPoint(0, 6)
-        above = parent.mapToGlobal(anchor.topLeft()) - QPoint(0, self.height() + 6)
-        screen = QGuiApplication.screenAt(below) or QGuiApplication.primaryScreen()
-        area = screen.availableGeometry() if screen is not None else QRect(below, self.size())
-        point = below if below.y() + self.height() <= area.bottom() else above
-        point.setX(max(area.left(), min(point.x(), area.right() - self.width())))
-        self.move(point)
+        place_below(self, anchor, parent)
         self.show()
         self.address_edit.setFocus()
         self.address_edit.selectAll()

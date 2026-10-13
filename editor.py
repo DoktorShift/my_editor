@@ -10,7 +10,7 @@ import re
 import sys
 
 from PySide6.QtCore import (
-    Qt, QTimer, QRect, QPoint, QMetaMethod, QEvent, QMimeData, QUrl, Signal,
+    Qt, QTimer, QRect, QRectF, QPoint, QMetaMethod, QEvent, QMimeData, QUrl, Signal,
 )
 from PySide6.QtGui import (
     QPainter, QTextBlockFormat, QTextCursor, QTextCharFormat, QColor, QClipboard, QPen,
@@ -23,10 +23,13 @@ from constants import (
 )
 from fonts import code_font, writing_font
 from i18n import _, ngettext
+import announce
 import image_safety
 import link_url
+import markdown_shortcuts
 import paste
 import rich_text
+from slash_menu import SlashMenu
 import url_safety
 from link_popover import LinkPopover, clipboard_address
 
@@ -63,6 +66,11 @@ def _is_document_relative(url) -> bool:
     return bool(name) and not name.startswith(("/", "\\")) and not os.path.isabs(name)
 
 
+# A line break inside a paragraph (Shift+Return), and inside a table cell
+# (Return), which Markdown writes in a cell as a space.
+LINE_BREAK = "\u2028"
+
+
 class HtmlEditor(QTextEdit):
     """QTextEdit with bullet and format logic."""
 
@@ -79,6 +87,8 @@ class HtmlEditor(QTextEdit):
     # whoever paints only what is visible (find highlights, spelling)
     # paints again.
     visible_area_changed = Signal()
+    # "@" typed at the start of a word, where a mention can go: its position.
+    mention_requested = Signal(int)
 
     # Kinds of highlights shown over the text, bottom to top: each kind
     # keeps its own (set_highlights), the editor shows them together.
@@ -99,6 +109,22 @@ class HtmlEditor(QTextEdit):
         # Whether the document can hold Markdown structure (lists,
         # headings): the window answers per tab; on its own, it can.
         self._holds_structure = lambda: True
+        # Whether this document's file keeps underline and colors (HTML).
+        self._keeps_local_formats = lambda: False
+        # What a paste may bring in (set_paste_guard); everything by default.
+        self._paste_guard = None
+        # Whether typed Markdown turns into what it means
+        # (markdown_shortcuts.py): the person's choice, off until made.
+        self._markdown_shortcuts = lambda: False
+        # The slash menu (slash_menu.py): what it offers for the words after
+        # the slash, from the window; where the slash is while it is open.
+        self._slash_items = None
+        self._slash_menu = None
+        self._slash_at = -1
+        self._slash_moved = False        # an item chosen with Up or Down
+        self._slash_shown = None         # the words the list was made for
+        self._slash_said = ""            # the choice screen readers heard last
+        self.cursorPositionChanged.connect(self._slash_follow_caret)
         # Who opens a link Command-clicked (Ctrl-clicked elsewhere): the
         # window, which knows where each kind of link goes.
         self._link_opener = None
@@ -137,6 +163,10 @@ class HtmlEditor(QTextEdit):
         self._writing_measure_chars = None
         self._highlights = {layer: [] for layer in self.HIGHLIGHT_LAYERS}
         self.verticalScrollBar().valueChanged.connect(self.visible_area_changed)
+        # Spelling (spelling.DocumentSpelling), while it is checked here.
+        self._spelling = None
+        self.visible_area_changed.connect(self._spelling_follow_view)
+        self.cursorPositionChanged.connect(self._spelling_follow_caret)
 
         # Track active formatting state for persistent formatting
         self.active_format = {
@@ -148,8 +178,14 @@ class HtmlEditor(QTextEdit):
 
         # Connect to cursor position changes to update active format
         self.cursorPositionChanged.connect(self._update_active_format)
+        # Where the caret is, for a screen reader: a checklist item's state,
+        # a table cell's place (announce.py).
+        self._spoken_place = None
+        self.cursorPositionChanged.connect(self._announce_place)
 
-        # Block cursor (terminal-style): hide Qt's thin cursor, draw our own
+        # Block cursor (terminal-style) for code and plain text: hide Qt's
+        # thin cursor, draw our own. Writing gets the insertion point every
+        # word processor has (set_writing_font).
         self.setCursorWidth(0)
         self._cursor_visible = True
         self._blink_timer = QTimer(self)
@@ -326,6 +362,14 @@ class HtmlEditor(QTextEdit):
         self.active_format['color'] = fmt.foreground().color() if fmt.hasProperty(QTextCharFormat.ForegroundBrush) else None
 
     # -------- Block cursor --------
+    WRITING_CARET_WIDTH = 2
+
+    def block_caret_shown(self) -> bool:
+        """Whether the terminal-style block caret is drawn now: in code and
+        plain text, while the text has the focus and nothing is selected."""
+        return (self._writing_measure_chars is None and self.hasFocus()
+                and self._cursor_visible and not self.textCursor().hasSelection())
+
     def _block_cursor_rect(self):
         """Return the rect the block cursor occupies (used for painting and invalidation)."""
         rect = self.cursorRect()
@@ -356,6 +400,10 @@ class HtmlEditor(QTextEdit):
         plain text): the monospace font across the whole width."""
         self.setFont(writing_font() if writing else code_font())
         self._writing_measure_chars = WRITING_MEASURE if writing else None
+        # In a proportional font a block would cover the letter after the
+        # caret: writing gets the thin insertion point of Pages, TextEdit
+        # and Word, code and plain text keep the block.
+        self.setCursorWidth(self.WRITING_CARET_WIDTH if writing else 0)
         self._update_paper_margins()
         self.viewport().update()
 
@@ -410,6 +458,90 @@ class HtmlEditor(QTextEdit):
         """The paragraph at the top of the viewport."""
         return self.block_at(QPoint(0, 0))
 
+    # -------- Spelling --------
+    def set_spelling(self, spelling) -> None:
+        """Check this document's spelling with ``spelling`` (a
+        spelling.DocumentSpelling of its document), or stop (None): the
+        misspelled words on screen are underlined the platform's way."""
+        old = self._spelling
+        if old is spelling:
+            return
+        if old is not None:
+            try:
+                old.misspellingsChanged.disconnect(self._spelling_changed)
+            except (RuntimeError, TypeError):
+                pass
+        self._spelling = spelling
+        if spelling is None:
+            self.set_highlights("spelling", [])
+            return
+        spelling.misspellingsChanged.connect(self._spelling_changed)
+        spelling.set_cursor_position(self.textCursor().position())
+        self._spelling_follow_view()
+
+    def spelling(self):
+        """The document's spelling while it is checked, else None."""
+        return self._spelling
+
+    def visible_blocks(self) -> tuple:
+        """(first, last): the numbers of the blocks on screen."""
+        first, last = self.visible_range()
+        doc = self.document()
+        return (doc.findBlock(first).blockNumber(),
+                doc.findBlock(max(first, last - 1)).blockNumber())
+
+    def _spelling_follow_caret(self) -> None:
+        if self._spelling is not None:
+            self._spelling.set_cursor_position(self.textCursor().position())
+
+    def _spelling_follow_view(self) -> None:
+        if self._spelling is None:
+            return
+        first, last = self.visible_blocks()
+        self._spelling.set_visible_blocks(first, last)
+        self._draw_spelling()
+
+    def _spelling_changed(self, first: int, last: int) -> None:
+        shown_first, shown_last = self.visible_blocks()
+        if last >= shown_first and first <= shown_last:
+            self._draw_spelling()
+
+    def _draw_spelling(self) -> None:
+        """Underline the misspelled words of the blocks on screen."""
+        spelling = self._spelling
+        if spelling is None:
+            return
+        underline = QTextCharFormat()
+        underline.setUnderlineStyle(QTextCharFormat.UnderlineStyle.SpellCheckUnderline)
+        underline.setUnderlineColor(QColor("#E5484D"))
+        first, last = self.visible_blocks()
+        doc = self.document()
+        selections = []
+        block = doc.findBlockByNumber(first)
+        while block.isValid() and block.blockNumber() <= last:
+            for word in spelling.misspellings(block):
+                mark = QTextEdit.ExtraSelection()
+                mark.cursor = QTextCursor(doc)
+                mark.cursor.setPosition(block.position() + word.start)
+                mark.cursor.setPosition(block.position() + word.end,
+                                        QTextCursor.MoveMode.KeepAnchor)
+                mark.format = underline
+                selections.append(mark)
+            block = block.next()
+        self.set_highlights("spelling", selections)
+
+    def replace_misspelling(self, misspelling, block_position: int, words: str) -> None:
+        """A suggestion for a misspelled word, in its place and in its
+        format, as one step to undo."""
+        cursor = QTextCursor(self.document())
+        cursor.setPosition(block_position + misspelling.start)
+        cursor.setPosition(block_position + misspelling.end, QTextCursor.MoveMode.KeepAnchor)
+        fmt = cursor.charFormat()
+        cursor.beginEditBlock()
+        cursor.insertText(words, fmt)
+        cursor.endEditBlock()
+        self.setTextCursor(cursor)
+
     def visible_range(self):
         """``(first, last)``: the document positions from the start of the
         first paragraph on screen to the end of the last."""
@@ -444,20 +576,51 @@ class HtmlEditor(QTextEdit):
         if self._bg_pattern != "none" or self._paper_mode:
             self._paint_guides(painter)
 
+        self._paint_code_boxes(painter)
         self._paint_quote_bars(painter)
         painter.end()
 
         super().paintEvent(event)
 
-        # Block cursor on top of the text (unchanged behavior).
-        cursor = self.textCursor()
-        if not self.hasFocus() or not self._cursor_visible or cursor.hasSelection():
+        # Block cursor on top of the text, in code and plain text.
+        if not self.block_caret_shown():
             return
         rect = self._block_cursor_rect()
         color = QColor(212, 212, 212, 210) if self._is_dark() else QColor(51, 51, 51, 210)
         p2 = QPainter(vp)
         p2.fillRect(rect, color)
         p2.end()
+
+    def _paint_code_boxes(self, painter):
+        """A box behind each code block, as every reader draws one. Only
+        painted: nothing of it is in the document."""
+        vp = self.viewport()
+        block = self.cursorForPosition(QPoint(0, 0)).block()
+        if rich_text.is_code_block(block):
+            block = rich_text.code_run(block)[0]
+        layout = self.document().documentLayout()
+        dx = self.horizontalScrollBar().value()
+        dy = self.verticalScrollBar().value()
+        color = QColor("#2D2F33") if self._is_dark() else QColor("#F1F3F5")
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(color)
+        while block.isValid():
+            rect = layout.blockBoundingRect(block)
+            if rect.top() - dy > vp.height():
+                break
+            if not rich_text.is_code_block(block):
+                block = block.next()
+                continue
+            first, last = rich_text.code_run(block)
+            top = layout.blockBoundingRect(first).top() - dy
+            bottom = layout.blockBoundingRect(last).bottom() - dy
+            left = rect.left() - dx - 6
+            painter.drawRoundedRect(QRectF(left, top - 3, vp.width() - left - 2,
+                                           bottom - top + 6), 6, 6)
+            block = last.next()
+        painter.restore()
 
     def _paint_quote_bars(self, painter):
         """A bar beside each level of a quote, as every reader draws one.
@@ -577,9 +740,288 @@ class HtmlEditor(QTextEdit):
 
     def focusOutEvent(self, event):
         super().focusOutEvent(event)
+        menu = self._slash_menu
+        if menu is not None and not menu.underMouse():
+            # A click on the menu itself picks; anything else closes it.
+            self._close_slash()
         self._cursor_visible = False
         self._blink_timer.stop()
         self.viewport().update(self._block_cursor_rect())
+
+    def set_markdown_shortcuts_check(self, check) -> None:
+        """Install ``check()``: whether Markdown Shortcuts are on."""
+        self._markdown_shortcuts = check
+
+    def _shortcuts_apply(self) -> bool:
+        return bool(self._markdown_shortcuts()) and self._holds_structure()
+
+    def _after_typed(self, text: str) -> None:
+        """After ``text`` was typed at the caret: the slash menu for a "/"
+        at the start of a word, a mention for an "@" there while a Nostr
+        account is in use, and Markdown Shortcuts: the structure or style
+        the text completes, as an undo step of its own."""
+        if text == "/":
+            self._maybe_open_slash()
+        if text == "@":
+            self._maybe_ask_mention()
+        if not text or not self._shortcuts_apply():
+            return
+        cursor = self.textCursor()
+        if text == " " and markdown_shortcuts.after_space(cursor):
+            self.setTextCursor(cursor)
+            level = cursor.block().blockFormat().headingLevel()
+            self.setCurrentCharFormat(rich_text.restyled(self.currentCharFormat(), level))
+            self._update_active_format()
+        elif not text[-1].isalnum() and markdown_shortcuts.after_mark(cursor):
+            # What is typed next is in the style the opening mark was
+            # typed in, which the cursor carries.
+            self.setTextCursor(cursor)
+            self._update_active_format()
+
+    def inputMethodEvent(self, event):
+        # Characters some keyboards compose (a backtick or a tilde after a
+        # dead key, the accent menu, Chinese, Japanese or Korean input)
+        # arrive here rather than as key presses: inside a mention, they go
+        # after it, as typed letters do (composing starts there too).
+        if event.commitString() or event.preeditString():
+            self._step_out_of_mention()
+        super().inputMethodEvent(event)
+        self._after_typed(event.commitString())
+
+    # -------- The slash menu --------
+    def set_slash_items(self, provider) -> None:
+        """Install ``provider(query) -> [slash_menu.SlashItem]``: what the
+        slash menu offers for the words typed after the slash. Without
+        one, "/" is only a character."""
+        self._slash_items = provider
+
+    def slash_menu(self):
+        """The slash menu while it is open, else None."""
+        menu = self._slash_menu
+        return menu if self._slash_at >= 0 and menu is not None and menu.isVisible() else None
+
+    def _announce_place(self) -> None:
+        """Tell a screen reader what the caret has entered that its words
+        do not say: a checklist item ticked or not, a table cell's row,
+        column and header. Once per item or cell."""
+        if not self._holds_structure():
+            return
+        cursor = self.textCursor()
+        block = cursor.block()
+        table = cursor.currentTable()
+        if table is not None:
+            cell = table.cellAt(cursor)
+            place = ("cell", table.firstPosition(), cell.row(), cell.column())
+            if place != self._spoken_place:
+                self._spoken_place = place
+                header = ""
+                if cell.row() > 0:
+                    header = rich_text.cell_text(table.cellAt(0, cell.column()))
+                said = _("Row {row} of {rows}, column {column}").format(
+                    row=cell.row() + 1, rows=table.rows(), column=cell.column() + 1)
+                if header:
+                    said = _("{place}, {header}").format(place=said, header=header)
+                announce.announce(self, said)
+            return
+        if rich_text.is_task(block):
+            place = ("task", block.blockNumber(), block.blockFormat().marker())
+            if place != self._spoken_place:
+                self._spoken_place = place
+                announce.announce(self, _("checked")
+                                  if block.blockFormat().marker() == rich_text.TICKED
+                                  else _("not checked"))
+            return
+        self._spoken_place = None
+
+    def toggle_ticks(self) -> None:
+        """Format > Mark as Checked: tick the checklist items under the
+        caret, or untick them when all are ticked, and say which."""
+        cursor = self.textCursor()
+        ticked = rich_text.toggle_ticks(cursor)
+        if ticked is None:
+            return
+        self._spoken_place = None
+        announce.announce(self, _("checked") if ticked else _("not checked"))
+        self.viewport().update()
+
+    def _maybe_ask_mention(self) -> None:
+        """An "@" was just typed: ask for a person to mention when it starts
+        a word (not in an email address), in a document that holds Markdown
+        structure, outside code, while a Nostr account is in use."""
+        if not self._nostr_active() or not self._holds_structure():
+            return
+        cursor = self.textCursor()
+        block = cursor.block()
+        if rich_text.is_code_block(block) or rich_text.holds_link_or_code(cursor):
+            return
+        before = block.text()[:cursor.positionInBlock() - 1]
+        if before and not (before[-1].isspace() or before[-1] in "([{\"'\u201c\u2018"):
+            return
+        self.mention_requested.emit(cursor.position() - 1)
+
+    def insert_mention(self, at: int, href: str, name: str) -> None:
+        """The mention of ``name`` (``href``, a person's nostr: link) in place
+        of the "@" typed at ``at`` (when it is still there), else at the
+        caret. One undo step."""
+        cursor = self.textCursor()
+        doc = self.document()
+        if 0 <= at < doc.characterCount() and doc.characterAt(at) == "@":
+            cursor.setPosition(at)
+            cursor.setPosition(at + 1, QTextCursor.MoveMode.KeepAnchor)
+        rich_text.insert_mention(cursor, href, name)
+        self.setTextCursor(cursor)
+        self.setCurrentCharFormat(rich_text.without_link(self.currentCharFormat()))
+
+    def _maybe_open_slash(self) -> None:
+        """A "/" was just typed: the slash menu, at the start of a word in a
+        paragraph that can take structure (not in code or a table)."""
+        if self._slash_items is None or not self._holds_structure():
+            return
+        cursor = self.textCursor()
+        block = cursor.block()
+        if rich_text.is_code_block(block) or cursor.currentTable() is not None:
+            return
+        before = block.text()[:cursor.positionInBlock() - 1]
+        if before and not before[-1].isspace():
+            return
+        self._slash_at = cursor.position() - 1
+        self._refresh_slash()
+
+    def _slash_query(self):
+        """The words typed after the slash, or None when the caret has
+        left them or the slash is gone."""
+        at = self._slash_at
+        cursor = self.textCursor()
+        doc = self.document()
+        if (at < 0 or cursor.hasSelection() or cursor.position() <= at
+                or doc.findBlock(at).position() != cursor.block().position()
+                or doc.characterAt(at) != "/"):
+            return None
+        words = QTextCursor(doc)
+        words.setPosition(at + 1)
+        words.setPosition(cursor.position(), QTextCursor.MoveMode.KeepAnchor)
+        return words.selectedText()
+
+    def _refresh_slash(self) -> None:
+        query = self._slash_query()
+        if query is None or query[:1].isspace():
+            # Gone, or a space right after the slash: a slash in a sentence
+            # ("either / or", "km / h"), not a command.
+            self._close_slash()
+            return
+        items = self._slash_items(query)
+        if not items and (len(query) >= 3 or query.endswith(" ")):
+            self._close_slash()
+            return
+        if self._slash_menu is None:
+            self._slash_menu = SlashMenu(self)
+            self._slash_menu.picked.connect(self._pick_slash)
+        menu = self._slash_menu
+        opening = not menu.isVisible()
+        if opening or query != self._slash_shown:
+            menu.show_items(items, headers=not query, dark=self._is_dark())
+            self._slash_shown = query
+            self._slash_moved = False
+        if not menu.has_choices():
+            # Nothing matches yet: out of the way, while the words may
+            # still change into something that does.
+            menu.hide()
+            return
+        menu.open_at(self.cursorRect(), self.viewport())
+        self._announce_slash_choice(opening=opening)
+
+    def _slash_follow_caret(self) -> None:
+        if self._slash_at >= 0:
+            self._refresh_slash()
+
+    def _close_slash(self) -> None:
+        self._slash_at = -1
+        self._slash_shown = None
+        self._slash_said = ""
+        if self._slash_menu is not None:
+            self._slash_menu.hide()
+        if self.accessibleDescription():
+            self.setAccessibleDescription("")
+
+    def _announce_slash_choice(self, *, opening: bool = False) -> None:
+        """Screen readers hear the chosen item, and that the menu opened:
+        the menu never has the focus, so the editor announces it (and
+        describes it, for a reader that asks)."""
+        menu = self._slash_menu
+        title = menu.chosen_title() if menu is not None else ""
+        self.setAccessibleDescription(title)
+        if not title:
+            return
+        position, count = menu.choice_position()
+        choice = _("{title}, {position} of {count}").format(
+            title=title.rstrip("\u2026"), position=position, count=count)
+        if choice == self._slash_said and not opening:
+            return                            # heard already
+        self._slash_said = choice
+        announce.announce(self, _("Insert menu. {choice}").format(choice=choice)
+                          if opening else choice)
+
+    def _pick_slash(self, action) -> None:
+        """Take "/words" away and run ``action`` where the slash was, as one
+        step to undo."""
+        start = self._slash_at
+        end = self.textCursor().position()
+        self._close_slash()
+        if start < 0:
+            return
+        announce.announce(self, _("{title} applied").format(
+            title=action.text().replace("&", "").rstrip("\u2026")))
+        doc = self.document()
+        step = QTextCursor(doc)
+        step.beginEditBlock()
+        words = QTextCursor(doc)
+        words.setPosition(start)
+        words.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+        words.removeSelectedText()
+        self.setTextCursor(words)
+        # The text has the focus all along (the menu never takes it); a
+        # command may give it to a panel of its own (Add Link's).
+        action.trigger()
+        step.endEditBlock()
+
+    def _slash_key(self, e) -> bool:
+        """The keys of the open slash menu. True when one was handled."""
+        menu = self.slash_menu()
+        if menu is None:
+            return False
+        key = e.key()
+        plain = e.modifiers() in (Qt.KeyboardModifier.NoModifier,
+                                  Qt.KeyboardModifier.KeypadModifier)
+        if key in (Qt.Key.Key_Up, Qt.Key.Key_Down) and plain:
+            menu.move_choice(-1 if key == Qt.Key.Key_Up else 1)
+            self._slash_moved = True
+            self._announce_slash_choice()
+            return True
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Tab) and plain:
+            action = menu.chosen()
+            if action is not None and (self._slash_query() or self._slash_moved):
+                self._pick_slash(action)
+                return True
+            # A bare slash ("the root is /"): the key does what it does.
+            self._close_slash()
+            return False
+        if key == Qt.Key.Key_Escape:
+            self._close_slash()
+            return True
+        return False
+
+    def set_paste_guard(self, guard) -> None:
+        """Install ``guard(text) -> text, other text or None``, asked with
+        the words of every paste and drop: the same text pastes as it
+        came, other text is pasted in its place (as plain text), None
+        pastes nothing (a secret key, see MainWindow._guard_paste)."""
+        self._paste_guard = guard
+
+    def set_local_formats_check(self, check) -> None:
+        """Install ``check()``: whether this document's file keeps what
+        Markdown has no words for (underline, colors), as HTML does. A copy
+        made in this editor then pastes back with them."""
+        self._keeps_local_formats = check
 
     def set_structure_check(self, check) -> None:
         """Install ``check()``: whether this document holds Markdown
@@ -588,6 +1030,13 @@ class HtmlEditor(QTextEdit):
         self._holds_structure = check
 
     # -------- Lists --------
+    def toggle_checklist(self) -> None:
+        """Checklist for the paragraphs under the cursor; again, the boxes
+        go and they are plain list items."""
+        cursor = self.textCursor()
+        rich_text.toggle_checklist(cursor)
+        self.setTextCursor(cursor)
+
     def toggle_list(self, kind: str) -> None:
         """Bulleted (rich_text.BULLET) or Numbered List (rich_text.NUMBER)
         for the paragraphs under the cursor; again, it is taken away."""
@@ -611,6 +1060,9 @@ class HtmlEditor(QTextEdit):
     def set_nostr_check(self, check) -> None:
         """Install ``check()``: whether a Nostr account is in use."""
         self._nostr_active = check
+
+    def nostr_in_use(self) -> bool:
+        return bool(self._nostr_active())
 
     def set_link_opener(self, opener) -> None:
         """Install ``opener(href)``, which opens a Command-clicked link."""
@@ -703,6 +1155,28 @@ class HtmlEditor(QTextEdit):
         elif mail:
             QDesktopServices.openUrl(QUrl(mail))
 
+    def _step_out_of_mention(self) -> None:
+        """A mention is one name: what is typed or pasted with the caret
+        inside it goes after it, as in Slack and Notion. (Words inside it
+        would be part of the link, which is written as the bare address.)"""
+        cursor = self.textCursor()
+        mention = rich_text.mention_at(cursor) if self._holds_structure() else None
+        if mention is not None and mention[0] < cursor.position() < mention[1]:
+            cursor.setPosition(mention[1])
+            self.setTextCursor(cursor)
+
+    def _remove_mention(self, start: int, end: int) -> None:
+        """A mention goes as a whole (Backspace, Delete): half a name links
+        to nobody."""
+        cursor = self.textCursor()
+        cursor.beginEditBlock()
+        cursor.setPosition(start)
+        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+        cursor.removeSelectedText()
+        cursor.endEditBlock()
+        self.setTextCursor(cursor)
+        self.ensureCursorVisible()
+
     def _leave_link_at_end(self) -> None:
         """Typing right before or right after a link is not part of it
         (links are not "sticky", as in every word processor); typing
@@ -721,7 +1195,8 @@ class HtmlEditor(QTextEdit):
         self.setCurrentCharFormat(rich_text.without_link(fmt))
 
     def mousePressEvent(self, event):
-        # Command-click (Ctrl-click on Windows and Linux) opens a link.
+        # Command-click (Ctrl-click on Windows and Linux) opens a link, and
+        # goes from a footnote's mark to its note and back.
         if (event.button() == Qt.MouseButton.LeftButton
                 and event.modifiers() & Qt.KeyboardModifier.ControlModifier):
             href = self.anchorAt(event.position().toPoint())
@@ -729,16 +1204,60 @@ class HtmlEditor(QTextEdit):
                 self._open_link(href)
                 event.accept()
                 return
+            if self._holds_structure() and self.jump_to_footnote(
+                    self.cursorForPosition(event.position().toPoint())):
+                event.accept()
+                return
         super().mousePressEvent(event)
+
+    def jump_to_footnote(self, at: QTextCursor) -> bool:
+        """From a footnote's mark to the words of its note, or from a
+        note's label to where it is marked first. True when it went."""
+        target = rich_text.footnote_jump(at)
+        if target is None:
+            return False
+        cursor = self.textCursor()
+        cursor.setPosition(target)
+        self.setTextCursor(cursor)
+        self.ensureCursorVisible()
+        return True
+
+    def insert_footnote(self) -> None:
+        """Insert > Footnote: the next number's mark at the caret, and its
+        note at the end of the document, where the caret goes."""
+        cursor = self.textCursor()
+        if rich_text.insert_footnote(cursor):
+            self.setTextCursor(cursor)
+            self.setCurrentCharFormat(QTextCharFormat())
+            self.ensureCursorVisible()
+
+    def _footnote_tip(self, point) -> str:
+        """The note of the footnote mark at ``point`` ("" for none)."""
+        if not self._holds_structure():
+            return ""
+        cursor = self.cursorForPosition(point)
+        block = cursor.block()
+        if rich_text.is_code_block(block):
+            return ""
+        offset = cursor.positionInBlock()
+        for found in rich_text.FOOTNOTE_MARK.finditer(block.text()):
+            if found.start() <= offset <= found.end():
+                return rich_text.footnote_text(self.document(), found.group(1))
+        return ""
 
     def viewportEvent(self, event):
         if event.type() == QEvent.Type.ToolTip:
             href = self.anchorAt(event.pos())
+            note = "" if href else self._footnote_tip(event.pos())
             if href:
                 how = (_("Command-click to open") if sys.platform == "darwin"
                        else _("Ctrl+click to open"))
                 QToolTip.showText(event.globalPos(),
                                   link_url.display_href(href) + "\n" + how, self)
+            elif note:
+                how = (_("Command-click to go to the note") if sys.platform == "darwin"
+                       else _("Ctrl+click to go to the note"))
+                QToolTip.showText(event.globalPos(), note + "\n" + how, self)
             else:
                 QToolTip.hideText()
             return True
@@ -861,6 +1380,14 @@ class HtmlEditor(QTextEdit):
             self._apply_active_format_to_cursor()
 
     def keyPressEvent(self, e):
+        if self._slash_key(e):
+            return
+        self._key_press(e)
+        if self._slash_at >= 0:
+            # The words after the slash changed (or the caret left them).
+            self._refresh_slash()
+
+    def _key_press(self, e):
         # Keep cursor solid immediately after a keypress; blink restarts from now
         old_cursor_rect = self._block_cursor_rect()
         self._cursor_visible = True
@@ -877,6 +1404,7 @@ class HtmlEditor(QTextEdit):
             return
 
         if e.text() and e.text().isprintable():
+            self._step_out_of_mention()
             # The caret may have arrived at a link's edge without moving
             # (a document loaded around it): what is typed is not the link.
             self._leave_link_at_end()
@@ -940,12 +1468,24 @@ class HtmlEditor(QTextEdit):
                     self.ensureCursorVisible()
                     return
             else:
+                if self._shortcuts_apply() and markdown_shortcuts.on_return(c):
+                    # "---" and Return: a divider; "```python": a code block
+                    # (Markdown Shortcuts).
+                    self.setTextCursor(c)
+                    self.setCurrentCharFormat(c.block().charFormat())
+                    self.ensureCursorVisible()
+                    return
                 super().keyPressEvent(e)
                 self._apply_active_format_to_cursor()
                 self.ensureCursorVisible()
                 return
 
         elif e.key() == Qt.Key_Backspace:
+            mention = rich_text.mention_at(c) if self._holds_structure() else None
+            if (mention is not None and mention[0] < c.position() <= mention[1]
+                    and e.modifiers() in (Qt.NoModifier, Qt.KeypadModifier)):
+                self._remove_mention(*mention)
+                return
             if not c.hasSelection() and c.positionInBlock() <= spaces + (2 if has_bullet else 0) and (spaces > 0 or has_bullet):
                 if has_bullet:
                     if spaces == 0 and c.blockNumber() > 0:
@@ -982,6 +1522,11 @@ class HtmlEditor(QTextEdit):
                 return
 
         elif e.key() == Qt.Key_Delete:
+            mention = rich_text.mention_at(c) if self._holds_structure() else None
+            if (mention is not None and mention[0] <= c.position() < mention[1]
+                    and e.modifiers() in (Qt.NoModifier, Qt.KeypadModifier)):
+                self._remove_mention(*mention)
+                return
             # Delete key: one character per undo step
             cursor = self.textCursor()
             cursor.beginEditBlock()
@@ -1005,10 +1550,14 @@ class HtmlEditor(QTextEdit):
             cursor.insertText(e.text(), fmt)
             cursor.endEditBlock()
             self.setTextCursor(cursor)
+            self._after_typed(e.text())
             self.ensureCursorVisible()
             return
 
         super().keyPressEvent(e)
+        if e.text() and e.text().isprintable():
+            # Typed with Option or AltGr (a tilde on many keyboards).
+            self._after_typed(e.text())
         self.ensureCursorVisible()
 
     # -------- Keys inside Markdown structure --------
@@ -1019,6 +1568,11 @@ class HtmlEditor(QTextEdit):
         block = cursor.block()
         plain = e.modifiers() in (Qt.NoModifier, Qt.KeypadModifier)
         key = e.key()
+        if rich_text.is_code_block(block) and self._holds_structure():
+            return self._code_key(e, cursor, block)
+        if cursor.currentTable() is not None and self._holds_structure() \
+                and self._table_key(e, cursor):
+            return True
         if key in (Qt.Key_Tab, Qt.Key_Backtab) and e.modifiers() in (
                 Qt.NoModifier, Qt.ShiftModifier):
             delta = -1 if key == Qt.Key_Backtab or e.modifiers() == Qt.ShiftModifier else 1
@@ -1062,6 +1616,22 @@ class HtmlEditor(QTextEdit):
             rich_text.change_indent(cursor, -1)
             self.setTextCursor(cursor)
             return True
+        if rich_text.is_task(block) and plain and key in (Qt.Key_Return, Qt.Key_Enter):
+            # The new item of a checklist starts unticked, as in Notes, and
+            # the item the caret was in keeps its tick: at its start, the
+            # new item is the empty one above it.
+            at_start = cursor.atBlockStart() and bool(block.text())
+            cursor.beginEditBlock()
+            tick = block.blockFormat().marker()
+            cursor.insertBlock()
+            if at_start:
+                rich_text.set_tick(cursor.block().previous(), rich_text.UNTICKED)
+                rich_text.set_tick(cursor.block(), tick)
+            else:
+                rich_text.set_tick(cursor.block(), rich_text.UNTICKED)
+            cursor.endEditBlock()
+            self.setTextCursor(cursor)
+            return True
         heading = block.blockFormat().headingLevel()
         if heading and e.key() in (Qt.Key_Return, Qt.Key_Enter) and plain:
             # Return at the end of a heading starts a Body paragraph, the
@@ -1085,6 +1655,181 @@ class HtmlEditor(QTextEdit):
             self.set_heading(0)
             return True
         return False
+
+    def _table_key(self, e, cursor) -> bool:
+        """The keys of a table. Tab goes to the next cell (after the last
+        one it adds a row), Shift+Tab to the one before; Return goes to the
+        cell below (a new row after the last), since a Markdown cell holds
+        one line; Command-Return on a Mac and Ctrl+Return elsewhere leave
+        the table, into a paragraph below it. True when the key was
+        handled."""
+        key = e.key()
+        modifiers = e.modifiers() & ~Qt.KeypadModifier
+        moved = False
+        if key == Qt.Key_Tab and modifiers == Qt.NoModifier:
+            moved = rich_text.next_table_cell(cursor, 1)
+        elif key == Qt.Key_Backtab or (key == Qt.Key_Tab and modifiers == Qt.ShiftModifier):
+            moved = rich_text.next_table_cell(cursor, -1)
+        elif key in (Qt.Key_Return, Qt.Key_Enter) and modifiers == Qt.ControlModifier:
+            moved = rich_text.leave_table(cursor)
+        elif key in (Qt.Key_Return, Qt.Key_Enter) and modifiers in (Qt.NoModifier,
+                                                                    Qt.ShiftModifier):
+            # A Markdown cell holds one line: Return goes to the cell below,
+            # as in a spreadsheet (a new row after the last one).
+            moved = rich_text.next_table_row(cursor)
+        if moved:
+            self.setTextCursor(cursor)
+        return moved
+
+    def insert_table(self, rows: int, columns: int) -> None:
+        """Insert > Table: a table of ``rows`` (the header included) and
+        ``columns``, the caret in its first cell."""
+        cursor = self.textCursor()
+        if rich_text.insert_table(cursor, rows, columns) is not None:
+            self.setTextCursor(cursor)
+            self.setCurrentCharFormat(cursor.block().charFormat())
+
+    TABLE_COMMANDS = {
+        "add_row_above": lambda c: rich_text.add_table_row(c, below=False),
+        "add_row_below": lambda c: rich_text.add_table_row(c, below=True),
+        "add_column_before": lambda c: rich_text.add_table_column(c, after=False),
+        "add_column_after": lambda c: rich_text.add_table_column(c, after=True),
+        "delete_row": rich_text.delete_table_row,
+        "delete_column": rich_text.delete_table_column,
+        "delete_table": rich_text.delete_table,
+    }
+
+    def table_command(self, name: str) -> None:
+        """Format > Table: a row or a column added or deleted, or the
+        table deleted, at the caret."""
+        cursor = self.textCursor()
+        if self.TABLE_COMMANDS[name](cursor):
+            self.setTextCursor(cursor)
+            self.setCurrentCharFormat(cursor.charFormat())
+
+    CODE_INDENT = 4
+
+    def _code_key(self, e, cursor, block) -> bool:
+        """The keys of a code block. Tab indents by four spaces and
+        Shift+Tab outdents; Return (and Shift+Return) always starts the
+        next line, as far in as the caret's line, so blank lines between
+        functions stay code (ProseMirror's base keymap, as in Notion and
+        Google Docs). The ways out: Command-Return (Ctrl+Return) from any
+        line, as in a table, Down on the document's last line, Backspace
+        at the start of the block, or Body from the Style pop-up. True when
+        the key was handled."""
+        key = e.key()
+        plain = e.modifiers() in (Qt.NoModifier, Qt.KeypadModifier)
+        shift = e.modifiers() == Qt.ShiftModifier
+        if key in (Qt.Key_Return, Qt.Key_Enter) and (
+                e.modifiers() & ~Qt.KeypadModifier) == Qt.ControlModifier:
+            self._leave_code_block(cursor, block)
+            return True
+        if key == Qt.Key_Backtab or (key == Qt.Key_Tab and shift):
+            self._outdent_code(cursor)
+            return True
+        if key == Qt.Key_Tab and plain:
+            if cursor.hasSelection() and "\u2029" in cursor.selectedText():
+                self._indent_code_lines(cursor, +1)
+            else:
+                column = cursor.positionInBlock()
+                cursor.insertText(" " * (self.CODE_INDENT - column % self.CODE_INDENT))
+                self.setTextCursor(cursor)
+            return True
+        if cursor.hasSelection():
+            return False
+        _first, last = rich_text.code_run(block)
+        if key in (Qt.Key_Return, Qt.Key_Enter) and (plain or shift):
+            # The new line starts as far in as the caret's line (after any
+            # line break in the block), no further than the caret.
+            before = block.text()[:cursor.positionInBlock()]
+            line = before[before.rfind(LINE_BREAK) + 1:]
+            indent = line[:len(line) - len(line.lstrip(" \t"))]
+            cursor.beginEditBlock()
+            cursor.insertBlock()
+            if indent:
+                cursor.insertText(indent)
+            cursor.endEditBlock()
+            self.setTextCursor(cursor)
+            return True
+        if key == Qt.Key_Down and plain and not block.next().isValid():
+            cursor.beginEditBlock()
+            cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+            cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
+            cursor.endEditBlock()
+            self.setTextCursor(cursor)
+            self.setCurrentCharFormat(QTextCharFormat())
+            return True
+        column = cursor.positionInBlock()
+        lead = len(block.text()) - len(block.text().lstrip(" "))
+        if key == Qt.Key_Backspace and plain and 0 < column <= lead:
+            # In the indent, back to the last stop of four, as Tab went.
+            cursor.beginEditBlock()
+            cursor.setPosition(block.position() + (column - 1) // self.CODE_INDENT
+                               * self.CODE_INDENT, QTextCursor.MoveMode.KeepAnchor)
+            cursor.removeSelectedText()
+            cursor.endEditBlock()
+            self.setTextCursor(cursor)
+            return True
+        if key == Qt.Key_Backspace and plain and cursor.atBlockStart() and block == _first:
+            cursor.beginEditBlock()
+            rich_text.leave_code(block)
+            cursor.endEditBlock()
+            self.setCurrentCharFormat(QTextCharFormat())
+            return True
+        return False
+
+    def _leave_code_block(self, cursor, block) -> None:
+        """Out of the code block, into a new Body paragraph right after it."""
+        _first, last = rich_text.code_run(block)
+        cursor.beginEditBlock()
+        cursor.setPosition(last.position() + last.length() - 1)
+        cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
+        cursor.endEditBlock()
+        self.setTextCursor(cursor)
+        self.setCurrentCharFormat(QTextCharFormat())
+
+    def _indent_code_lines(self, cursor, delta: int) -> None:
+        """Four spaces more (+1) or less (-1) at the start of every line of
+        code under the cursor, as one step on the undo stack."""
+        doc = self.document()
+        lines = []
+        block = doc.findBlock(cursor.selectionStart())
+        last = doc.findBlock(cursor.selectionEnd())
+        while block.isValid():
+            if rich_text.is_code_block(block):
+                lines.append(block)
+            if block == last:
+                break
+            block = block.next()
+        edit = QTextCursor(doc)
+        edit.beginEditBlock()
+        for line in lines:
+            start = QTextCursor(line)
+            if delta > 0:
+                start.insertText(" " * self.CODE_INDENT)
+            else:
+                text = line.text()
+                spaces = len(text) - len(text.lstrip(" "))
+                start.setPosition(line.position() + min(spaces, self.CODE_INDENT),
+                                  QTextCursor.MoveMode.KeepAnchor)
+                start.removeSelectedText()
+        edit.endEditBlock()
+
+    def _outdent_code(self, cursor) -> None:
+        self._indent_code_lines(cursor, -1)
+
+    def make_code_block(self, language: str = "") -> None:
+        """Code Block: the paragraphs under the cursor become one."""
+        cursor = self.textCursor()
+        rich_text.make_code_block(cursor, language)
+        self.setTextCursor(cursor)
+        self.setCurrentCharFormat(cursor.block().charFormat())
+
+    def set_code_language(self, language: str) -> None:
+        cursor = self.textCursor()
+        rich_text.set_code_language(cursor, language)
+        self.setTextCursor(cursor)
 
     def _divider_key(self, e, cursor, block) -> bool:
         """A divider holds no text: typing on it goes into the paragraph
@@ -1152,7 +1897,15 @@ class HtmlEditor(QTextEdit):
         self._insert_plain(paste.plain_text(QApplication.clipboard().mimeData()))
 
     def canInsertFromMimeData(self, source):
-        return source.hasFormat(paste.MARKDOWN_MIME) or super().canInsertFromMimeData(source)
+        """What a paste or a drop can bring here: what insertFromMimeData
+        takes, a picture on its own included while someone handles media
+        (``_pasted_media``). Edit > Paste, a drop and the keys then agree
+        (U1 of the CP3 fixes review: a screenshot dimmed Paste while
+        Command-V pasted it)."""
+        return (source.hasFormat(paste.LITERAL_MIME) or source.hasFormat(paste.MARKDOWN_MIME)
+                or super().canInsertFromMimeData(source)
+                or (source.hasImage() and self.isSignalConnected(
+                    QMetaMethod.fromSignal(self.image_pasted))))
 
     def createMimeDataFromSelection(self):
         """Copy: the text and HTML other apps read, and, where the document
@@ -1165,9 +1918,13 @@ class HtmlEditor(QTextEdit):
         cursor = self.textCursor()
         fragment = cursor.selection()
         mime = QMimeData()
-        mime.setText(fragment.toPlainText())
+        mime.setText(rich_text.plain_text_of(fragment))
         mime.setHtml(fragment.toHtml())
         mime.setData(paste.MARKDOWN_MIME, paste.selection_markdown(cursor).encode("utf-8"))
+        # What a paste here reads: the words as they are, the structure as
+        # Markdown.
+        mime.setData(paste.LITERAL_MIME,
+                     paste.selection_markdown(cursor, literal=True).encode("utf-8"))
         return mime
 
     def insertFromMimeData(self, source):
@@ -1184,11 +1941,21 @@ class HtmlEditor(QTextEdit):
           plain text in the style of the text where it goes."""
         if source is None:
             return
+        self._step_out_of_mention()
+        if self._paste_guard is not None:
+            words = paste.plain_text(source)
+            allowed = self._paste_guard(words) if words else words
+            if allowed is None:
+                return
+            if allowed != words:
+                self._insert_plain(allowed)
+                return
         cursor = self.textCursor()
         text = source.text() if source.hasText() else ""
         address = text.strip()
         if (cursor.hasSelection() and link_url.is_bare_http_url(address)
-                and self._holds_structure() and "\u2029" not in cursor.selectedText()
+                and self._holds_structure() and not rich_text.is_code_block(cursor.block())
+                and "\u2029" not in cursor.selectedText()
                 and not link_url.is_an_address(cursor.selectedText())):
             rich_text.set_link(cursor, "", address)
             cursor.setPosition(cursor.selectionEnd())
@@ -1196,6 +1963,16 @@ class HtmlEditor(QTextEdit):
             self._leave_link_at_end()
             return
         if self._pasted_media(source, text):
+            return
+        if (self._keeps_local_formats() and source.hasFormat(paste.LITERAL_MIME)
+                and source.hasHtml() and not rich_text.is_code_block(cursor.block())):
+            # Copied here, pasted into a file that keeps underline and
+            # colors: Qt's own copy of it, with them.
+            own = QTextDocument()
+            own.setHtml(source.html())
+            rich_text.insert_document(cursor, own)
+            self.setTextCursor(cursor)
+            self.ensureCursorVisible()
             return
         if self._holds_structure() and not rich_text.is_code_block(cursor.block()):
             pasted = paste.from_mime(source)

@@ -4,7 +4,8 @@
 
 It answers the same calls as the remote signer client (nostr/bunker.py):
 ``sign_event``, ``nip44_encrypt`` / ``nip44_decrypt`` and their ``_self``
-forms, with the same callbacks. So drafts, publishing, media and
+forms, and ``nip04_decrypt`` (to read what older apps saved; nothing is
+encrypted with NIP-04 here), with the same callbacks. So drafts, publishing, media and
 membership work the same whether the key is in a phone app or here, and
 none of them needs to know which.
 
@@ -23,7 +24,7 @@ from typing import Callable, List, Optional
 
 from PySide6.QtCore import QObject, QTimer
 
-from nostr import crypto, events
+from nostr import crypto, events, refs
 
 LOCAL = "local"     # Profile.signer for accounts whose key is kept here
 
@@ -56,6 +57,9 @@ class LocalSigner(QObject):
     def sign_event(self, unsigned_event: dict, on_success: Callable[[dict], None],
                    on_failure: Callable[[str], None], *, timeout_ms: int = 0) -> None:
         def work():
+            refusal = refs.signing_refusal(unsigned_event)
+            if refusal:
+                raise ValueError(refusal)
             payload = {
                 "kind": unsigned_event["kind"],
                 "content": unsigned_event.get("content", ""),
@@ -78,6 +82,18 @@ class LocalSigner(QObject):
         self._answer(lambda: crypto.decrypt_from(ciphertext_b64, bytes(self._sk),
                                                  bytes.fromhex(peer_pubkey_hex)),
                      on_success, on_failure)
+
+    def nip04_decrypt(self, peer_pubkey_hex: str, content: str,
+                      on_success: Callable[[str], None], on_failure: Callable[[str], None],
+                      *, timeout_ms: int = 0) -> None:
+        """Read a NIP-04 message (an older app's); never used to write."""
+        self._answer(lambda: crypto.nip04_decrypt(content, bytes(self._sk),
+                                                  bytes.fromhex(peer_pubkey_hex)),
+                     on_success, on_failure)
+
+    def nip04_decrypt_self(self, content: str, on_success, on_failure, *,
+                           timeout_ms: int = 0) -> None:
+        self.nip04_decrypt(self._pubkey, content, on_success, on_failure)
 
     def nip44_encrypt_self(self, plaintext: str, on_success, on_failure, *,
                            timeout_ms: int = 0) -> None:

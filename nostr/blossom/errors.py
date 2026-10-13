@@ -119,7 +119,7 @@ _FALLBACK = _("Something went wrong with that media request. Nothing was lost.")
 # in the language they are shown in. Temporary until the store reports
 # structured codes for every failure.
 NO_SIGNER = _("Connect your signer app first.")
-_SIGNER_REJECTED = N_("Your signer app didn\u2019t sign the request: {reason}")
+_SIGNER_REJECTED = N_("Your signer app declined the request to the media server: {reason}")
 
 
 def signer_rejected(reason) -> str:

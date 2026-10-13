@@ -88,6 +88,7 @@ def closing_host(monkeypatch, order):
             return True
 
     host._imports = types.SimpleNamespace(flush=lambda: order.append("flush"),
+                                          shutdown=lambda: order.append("inbox closed"),
                                           subscriptions=Subscriptions())
     host._resolve_unsaved_before_closing = lambda: True
     host._asset_manager = types.SimpleNamespace(flush=lambda: None)
@@ -108,6 +109,9 @@ def test_quitting_waits_before_closing_the_signer(monkeypatch):
     MainWindow.closeEvent(closing_host(monkeypatch, order), QCloseEvent())
     steps = [step if isinstance(step, str) else step[0] for step in order]
     assert steps.index("flush") < steps.index("wait") < steps.index("signer closed")
+    # The inbox closes, and its lock goes, once the list is sent (CP2 live
+    # run: the lock was left to its destructor, after the exit handlers).
+    assert steps.index("wait") < steps.index("inbox closed")
 
 
 def test_nothing_can_be_typed_while_quitting_waits(monkeypatch):

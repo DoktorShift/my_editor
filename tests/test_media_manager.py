@@ -548,7 +548,7 @@ def test_single_flight_uploads_run_strictly_in_order(tmp_path):
 
 
 def test_signer_failures_are_classified(tmp_path):
-    for reason in ("Your signer app didn’t sign the request: user said no",
+    for reason in ("Your signer app declined the request to the media server: user said no",
                    "Connect your signer app first."):
         ctx = make_manager(tmp_path)
         asset = ctx.manager.adopt_bytes(PNG_BYTES)

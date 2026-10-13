@@ -185,6 +185,21 @@ def test_the_relay_query_says_which_relays_answered():
     assert out == [([article], {"wss://b.example"})]
 
 
+def test_an_answer_cut_off_by_a_flooding_relay_is_no_answer(monkeypatch):
+    """Review F4: past the query's bound the rest of a relay's events is
+    left unread, and what was left could be the draft or the deletion that
+    decides; such an answer must not count as one."""
+    from nostr import queries
+    monkeypatch.setattr(queries, "MAX_COPIES", 1)
+    pool = HandPool()
+    cat = ExistingCatalogue(relay_pool=pool, relay_directory=FakeRelayDirectory())
+    out = []
+    cat._relay_query(["wss://a.example"], [{}],
+                     lambda events_, answered: out.append(answered))
+    pool.subs[0].answer("wss://a.example", signed(30023, D1), signed(31234, D2))
+    assert out == [set()]
+
+
 def test_a_deletion_newer_than_the_draft_reports_removed():
     """Review L2: rnostr and nostr-rs-relay keep a draft an address request
     deleted, and the catalogue said "drafted" for a draft that is gone.

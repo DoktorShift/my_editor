@@ -140,16 +140,17 @@ class FakeSubscription(QObject):
 class FakePool:
     """Relays that accept (or refuse) publishes and remember what they kept."""
 
-    def __init__(self, *, refuse=(), keep=True):
+    def __init__(self, *, refuse=(), keep=True, reason="blocked"):
         self.refuse = set(refuse)
         self.keep = keep
+        self.reason = reason            # what a refusing relay says
         self.published: List[tuple] = []
         self.stored: Dict[str, dict] = {}
         self.subscriptions: List[tuple] = []
 
     def publish(self, urls, event):
         self.published.append((list(urls), event))
-        results = [(u, u not in self.refuse, "" if u not in self.refuse else "blocked")
+        results = [(u, u not in self.refuse, "" if u not in self.refuse else self.reason)
                    for u in urls]
         if self.keep and any(ok for _u, ok, _m in results):
             self.stored[event["id"]] = event
@@ -288,15 +289,40 @@ class FakeRelayDirectory(QObject):
             self.draft_lists[author.lower()] = list(relays)
             self.changed.emit(author.lower())
 
+    def draft_list_known(self, author):
+        return None
+
+    def remember_draft_list(self, author, event, relays):
+        self.calls.append(("remember_draft_list", author, event.get("id"), tuple(relays)))
+
+    def follow_draft_relays(self, author, relays, *, event=None):
+        self.calls.append(("follow_draft_relays", author,
+                           None if relays is None else tuple(relays)))
+        self.set_draft_relays(author, relays)
+        return True
+
+    def leave_drafts_behind(self, author, relays, *, since):
+        self.calls.append(("leave_drafts_behind", author, tuple(relays), since))
+
+    def drafts_left_behind(self, author):
+        return {}
+
+    def set_draft_relays_locked(self, author, locked):
+        self.calls.append(("set_draft_relays_locked", author, locked))
+
+    def stop_reading_drafts_on(self, author, relays):
+        self.calls.append(("stop_reading_drafts_on", author, tuple(relays)))
+
     def draft_relays_of(self, author):
         known = self.draft_lists.get((author or "").lower())
         return list(known) if known is not None else None
 
-    def draft_relays(self, author, on_done, *, entitled=(), legacy=(), reading=False):
+    def draft_relays(self, author, on_done, *, entitled=(), legacy=(), reading=False,
+                     chosen=None):
         self.calls.append(("draft_relays", author, tuple(entitled), tuple(legacy), reading))
+        mine = self.draft_lists.get(author.lower(), ()) if chosen is None else chosen
         self._later(on_done, policy.draft_relays(
-            self.cached(author), self.draft_lists.get(author.lower(), ()),
-            entitled=entitled, legacy=legacy, reading=reading))
+            self.cached(author), mine, entitled=entitled, legacy=legacy, reading=reading))
 
     def outbox_of(self, author, on_done, *, hints=()):
         self.calls.append(("outbox_of", author, tuple(hints)))

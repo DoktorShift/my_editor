@@ -414,7 +414,8 @@ class ImportItemsJob(QObject):
                 lambda: build_podcast_markdown(
                     episode,
                     chapters=chapters,
-                    notes=html_to_markdown(item.content_html or "").strip(),
+                    notes=html_to_markdown(item.content_html or "",
+                                           base_url=item.link).strip(),
                 ),
                 lambda markdown: self._publish_template_as_draft(
                     replace(template, content=self._with_footer(markdown, item))),
@@ -513,16 +514,18 @@ class ImportItemsJob(QObject):
 
         Runs only when enabled, the feed body is a teaser, and the link
         is an ordinary web page. Best-effort at every step: any failure
-        publishes the feed-provided template unchanged.
+        publishes the feed-provided template unchanged, except for a post
+        kept only in part (``_without_page_text``).
         """
         if self._cancelled:
             return
+        # A post kept only in part (too long for the inbox) is read from its
+        # page whatever the option: the part alone would be a cut draft.
         if not (
-            self._fetch_full_text
-            and self._body_is_thin(template, item)
+            (item.partial or (self._fetch_full_text and self._body_is_thin(template, item)))
             and _is_http_url(item.link)
         ):
-            self._publish_template_as_draft(template)
+            self._without_page_text(item, template)
             return
         self.item_extracting.emit(self._index, title_for_ui)
         self._emit_status(_("Fetching full text for '{title}'…").format(title=title_for_ui))
@@ -531,10 +534,22 @@ class ImportItemsJob(QObject):
             on_success=lambda body, i=item, t=template: (
                 self._on_article_page(body, i, t)
             ),
-            on_failure=lambda _err, t=template: (
-                self._publish_template_as_draft(t)
+            on_failure=lambda _err, i=item, t=template: (
+                self._without_page_text(i, t)
             ),
         )
+
+    def _without_page_text(self, item: FeedItem, template: ArticleTemplate) -> None:
+        """The page gave nothing better than the feed's text: the draft is
+        made of that, unless the post is kept here only in part (too long
+        for the inbox, or its text let go after a while, Q-9). Its draft
+        would be cut or empty and the post done for good, so it fails and
+        can be tried again (CP3 review L2)."""
+        if item.partial:
+            self._record_failure(_("Couldn't read this post's page, and its full text "
+                                   "isn't kept here."))
+        else:
+            self._publish_template_as_draft(template)
 
     def _on_article_page(
         self,
@@ -550,7 +565,9 @@ class ImportItemsJob(QObject):
             content = extract_readable_content(body, url=item.link)
             if content is None:
                 return None
-            markdown = html_to_markdown(content.html).strip()
+            # The page's own relative links and images, made whole
+            # against the page (CP1 review O3).
+            markdown = html_to_markdown(content.html, base_url=item.link).strip()
             return (markdown, content.title) if markdown else None
 
         def _done(result) -> None:
@@ -560,19 +577,22 @@ class ImportItemsJob(QObject):
                 markdown, page_title = result
                 # Adopt only on a clear win over the summary we already
                 # have; a bad extraction is usually shorter, not longer.
-                if len(markdown) > max(THIN_CONTENT_CHARS, feed_body_len * 2):
+                # For a post kept only in part, any more text is a win.
+                needed = feed_body_len if item.partial else max(THIN_CONTENT_CHARS,
+                                                                 feed_body_len * 2)
+                if len(markdown) > needed:
                     updated = replace(
                         template, content=self._with_footer(markdown, item))
                     if item.title_from_url and page_title:
                         updated = replace(updated, title=page_title)
                     self._publish_template_as_draft(updated)
                     return
-            self._publish_template_as_draft(template)
+            self._without_page_text(item, template)
 
         self._run_blocking(
             _extract,
             _done,
-            lambda _exc, t=template: self._publish_template_as_draft(t),
+            lambda _exc, i=item, t=template: self._without_page_text(i, t),
         )
 
     # -- image rehosting ---------------------------------------------------

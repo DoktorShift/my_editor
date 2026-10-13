@@ -162,16 +162,18 @@ class FeedList:
         return True
 
     def set_options(self, url: str, **values: bool) -> bool:
+        """Change a source's options. Only a value that differs from what
+        the source has now (its own, or the default) is a change: Done in
+        Source Settings with nothing changed sends nothing (CP3 review L4)."""
         key = source_key(url)
         if not key or len(key) > MAX_URL_LENGTH:
             return False
-        entry = dict(self.options.get(key, {}))
-        for name, value in values.items():
-            if name in OPTION_KEYS and isinstance(value, bool):
-                entry[name] = value
-        if entry == self.options.get(key, {}):
+        given = {name: value for name, value in values.items()
+                 if name in OPTION_KEYS and isinstance(value, bool)}
+        stored = self.options.get(key, {})
+        if all(value == {**DEFAULT_OPTIONS, **stored}[name] for name, value in given.items()):
             return False
-        self.options[key] = entry
+        self.options[key] = {**stored, **given}
         return True
 
 

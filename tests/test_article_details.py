@@ -17,6 +17,10 @@ What must hold:
 
   The publish dialog offers the draft's details and publishes them,
   with the source; the identifier stays when the title is changed.
+
+  Tags another app gave an article (zap splits, a content warning, alt
+  text, labels) are carried when it is edited and published here; only
+  the tags MyEditor writes itself are made again.
 """
 
 import os
@@ -71,6 +75,15 @@ def test_a_draft_keeps_every_detail_and_only_pictures_still_in_it():
     assert tag_values(tags, "t") == ["bitcoin", "nostr"]
     assert tag_values(tags, "source") == ["https://blog.example/feed.xml"]
     assert tag_values(tags, "imeta") == [f"url {PICTURE}"]          # the removed one is gone
+
+
+def test_kept_as_tags_the_details_come_back_whole():
+    # A tab written down for a restart keeps them this way: every carried
+    # tag too, whether or not the text still shows its picture.
+    details = ArticleDetails.from_tags(IMPORTED_TAGS)
+    assert ArticleDetails.from_tags(details.tags()) == details
+    assert tag_values(details.tags(), "imeta") == [
+        f"url {PICTURE}", "url https://cdn.example/removed.png"]
 
 
 @pytest.mark.parametrize("tags", [None, [], [["d"]], [["published_at", "soon"]], [[1, 2]]])
@@ -183,3 +196,44 @@ def test_the_publish_dialog_offers_and_publishes_the_drafts_details(tmp_path, mo
     assert tag_values(tags, "t") == ["bitcoin", "nostr"]
     assert tag_values(tags, "source") == ["https://blog.example/feed.xml"]
     assert tag_values(tags, "imeta") == [f"url {PICTURE}"]
+
+
+def test_tags_another_app_gave_an_article_survive_editing_it_here():
+    # Review N7: Edit, then Publish, used to drop zap splits, a content
+    # warning, alt text and labels; the new version replaced the old one.
+    from nostr.publisher import CLIENT_NAME, build_article
+    pk = "a" * 64
+    theirs = [["d", "my-post"], ["title", "My Post"], ["published_at", "1700000000"],
+              ["zap", pk, "wss://r.example", "1"], ["zap", "b" * 64, "", "2"],
+              ["content-warning", "spoilers"], ["alt", "An article"], ["L", "ugc"],
+              ["l", "review", "ugc"], ["client", "OtherApp"], ["p", "c" * 64],
+              ["q", "d" * 64]]
+    details = ArticleDetails.from_tags(theirs)
+    assert [list(tag) for tag in details.carried] == [
+        ["zap", pk, "wss://r.example", "1"], ["zap", "b" * 64, "", "2"],
+        ["content-warning", "spoilers"], ["alt", "An article"], ["L", "ugc"],
+        ["l", "review", "ugc"]]                           # q is made from the text
+    event = build_article(content="The body.", pubkey_hex=pk, slug=details.identifier,
+                          title=details.title, published_at=details.published_at,
+                          extra_tags=details.carried_tags("The body."))
+    tags = event["tags"]
+    for tag in theirs[3:9]:
+        assert tag in tags
+    assert not [tag for tag in tags if tag[0] == "q"]   # "The body." quotes nothing
+    assert [tag for tag in tags if tag[0] == "client"] == [["client", CLIENT_NAME]]
+    assert ["p", "c" * 64] not in tags                   # made again from the text
+
+
+def test_an_edited_article_tags_each_quote_in_its_text_once():
+    # Published carries the tags another app gave an article; the quote
+    # tags are made from the text instead, so a quote kept in the text is
+    # tagged once and a quote taken out of it is tagged no more.
+    from nostr import bech32
+    from nostr.publisher import build_article
+    pk, kept, removed = "a" * 64, "d" * 64, "e" * 64
+    theirs = [["d", "my-post"], ["title", "My Post"], ["q", kept], ["q", removed]]
+    details = ArticleDetails.from_tags(theirs)
+    body = "As said in nostr:" + bech32.encode_note(kept) + " before."
+    event = build_article(content=body, pubkey_hex=pk, slug=details.identifier,
+                          title=details.title, extra_tags=details.carried_tags(body))
+    assert [tag[1] for tag in event["tags"] if tag[0] == "q"] == [kept]

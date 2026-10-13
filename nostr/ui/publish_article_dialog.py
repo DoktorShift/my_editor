@@ -30,8 +30,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import announce
 import theme
 import word_count
+from popup_placement import fitting_size
 from alerts import CANCEL, DEFAULT, NORMAL, Button, ask, answer_return_as_the_system_does
 from i18n import _, display_locale, ngettext
 
@@ -62,6 +64,7 @@ from ..media.publish_copy import PublicCopyMaker
 from .media_library_dialog import MediaLibraryDialog
 from .publish_copy_dialog import resolve_pick
 from .mention_chips import MentionChipRow
+from .secret_key_check import publishable, slug_problem
 from .thumbnail_loader import ThumbnailLoader
 
 
@@ -353,8 +356,9 @@ class PublishArticleDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(_("Publish as Article"))
         self.setModal(True)
-        self.resize(760, 680)
         self.setMinimumSize(640, 520)
+        # Never taller than the screen it opens on: Publish stays on it.
+        self.resize(fitting_size(self, QSize(760, 680)))
 
         self._store = store
         self._relay_pool = relay_pool
@@ -524,8 +528,17 @@ class PublishArticleDialog(QDialog):
         compact_row = QHBoxLayout()
         compact_row.setContentsMargins(0, 0, 0, 0)
         compact_row.setSpacing(12)
-        compact_row.addWidget(_make_field(_("Slug (article ID)"), self._slug_edit), 1)
-        compact_row.addWidget(_make_field(_("Hashtags"), self._tags_edit), 1)
+        slug_field = _make_field(_("Slug (article ID)"), self._slug_edit)
+        # Why the slug can't be published, under it.
+        self._slug_problem = QLabel()
+        self._slug_problem.setObjectName("article_field_error")
+        self._slug_problem.setWordWrap(True)
+        self._slug_problem.hide()
+        slug_field.layout().addWidget(self._slug_problem)
+        # Top-aligned: a message under the slug must not push Hashtags down.
+        compact_row.addWidget(slug_field, 1, Qt.AlignmentFlag.AlignTop)
+        compact_row.addWidget(_make_field(_("Hashtags"), self._tags_edit), 1,
+                              Qt.AlignmentFlag.AlignTop)
         adv.addLayout(compact_row)
 
         adv.addWidget(self._build_cover_field())
@@ -576,11 +589,19 @@ class PublishArticleDialog(QDialog):
         self._refresh_advanced_toggle_label()
 
     def _apply_theme(self) -> None:
+        error = theme.error_text_color(self._is_dark)
         self.setStyleSheet((_DARK_CSS if self._is_dark else _LIGHT_CSS)
+                           + f"QLabel#article_field_error {{ color: {error}; font-size: 11px; }}"
                            + theme.default_and_focus_css(self._is_dark))
         self._switch_menu.setStyleSheet(
             _DARK_MENU_CSS if self._is_dark else _LIGHT_MENU_CSS
         )
+
+    def showEvent(self, event) -> None:  # type: ignore[override]
+        super().showEvent(event)
+        if not self._slug_problem.isHidden():
+            # Said before the window was there to say it from: again now.
+            announce.announce(self._slug_edit, self._slug_problem.text())
 
     # -- title ↔ slug coupling --------------------------------------------
 
@@ -656,7 +677,7 @@ class PublishArticleDialog(QDialog):
         # similar so users know where the asset comes from without us
         # having to write docs.
         hint = QLabel(
-            _("Picked images upload to your Blossom servers automatically.")
+            _("Pictures you pick are uploaded to your media servers.")
             if self._media_store is not None
             else _("Paste an image URL hosted anywhere on the public web.")
         )
@@ -825,9 +846,16 @@ class PublishArticleDialog(QDialog):
     def _refresh_publish_enabled(self) -> None:
         slug = self._slug_edit.text().strip()
         body = self._body_edit.toPlainText().strip()
+        # A key in the slug is said under it, before anything is sent (not
+        # even the question whether the article went out before), with the
+        # slug's section open so the field it names can be seen.
+        problem = slug_problem(slug) or ""
+        announce.field_problem(self._slug_edit, self._slug_problem, problem)
+        if problem and not self._advanced_open:
+            self._toggle_advanced()
         # NIP-23 requires the d-tag; body without anything to say isn't useful.
         self._publish_btn.setEnabled(self._job is None and not self._looking_up
-                                     and bool(slug) and bool(body))
+                                     and bool(slug) and bool(body) and not problem)
 
     def _set_status(self, text: str, *, error: bool = False) -> None:
         self._status.setText(text)
@@ -864,7 +892,8 @@ class PublishArticleDialog(QDialog):
     def _on_publish(self) -> None:
         slug = self._slug_edit.text().strip()
         body = self._body_edit.toPlainText().strip()
-        if not slug or not body or self._job is not None or self._looking_up:
+        if (not slug or not body or self._job is not None or self._looking_up
+                or slug_problem(slug)):
             return
         known = self._first_published.get(slug) or (
             self._first_publications.get(self._current_profile.user_pubkey, slug)
@@ -941,6 +970,9 @@ class PublishArticleDialog(QDialog):
                 self._toggle_advanced()
             self._set_status(_("Cannot build article: {reason}").format(reason=exc), error=True)
             return
+        unsigned = publishable(self, unsigned, is_dark=self._is_dark)
+        if unsigned is None:
+            return
 
         self._set_busy(True)
         self._set_status("")
@@ -969,7 +1001,8 @@ class PublishArticleDialog(QDialog):
         accepted = sum(1 for _url, ok, _message in results if ok)
         if accepted == 0:
             self._set_status(
-                _("No relay accepted the article. See log for details."), error=True
+                _("The article was not published: no relay took it. Check your internet "
+                  "connection and try again."), error=True
             )
             self._set_busy(False)
             return

@@ -178,6 +178,7 @@ def test_panel_builds_with_no_profile_and_no_store():
     panel = DraftsPanel(is_dark=True)
     panel.set_active_profile(None)
     assert panel._body_stack.currentIndex() == 1
+    assert panel._empty_title.text() == "No Nostr account in use"
     assert "connect your signer app" in panel._empty_body.text()
     assert panel._status_label.full_text() == ""
     # An empty line collapses instead of leaving a blank strip of chrome.
@@ -190,12 +191,12 @@ def test_panel_carries_no_second_profile_control():
     assert not hasattr(panel, "_refresh_profile_chip")
     assert not hasattr(DraftsPanel, "switch_profile_requested")
     assert not hasattr(panel, "set_avatar_store")
-    # Only the refresh and close buttons remain in the header.
+    # Only the action menu and the close button remain in the header.
     buttons = [
-        b for b in panel.findChildren(QToolButton)
+        b for b in panel._top_band.findChildren(QToolButton)
         if b.objectName() == "drafts_panel_icon_btn"
     ]
-    assert {b.toolTip() for b in buttons} == {"Refresh drafts", "Close drafts panel"}
+    assert {b.toolTip() for b in buttons} == {"Actions", "Close drafts panel"}
 
 
 def test_status_line_names_the_bound_account():
@@ -605,7 +606,7 @@ def test_the_selected_row_carries_a_shape_cue_not_only_a_fill():
             panel.hide()
 
 
-@pytest.mark.parametrize("control_name", ["_launcher", "_close_btn", "_refresh_btn",
+@pytest.mark.parametrize("control_name", ["_launcher", "_close_btn", "_actions_btn",
                                           "_search_edit"])
 def test_focus_is_visible_on_every_keyboard_reachable_control(control_name):
     """Measured before this change: focusing changed zero pixels.
@@ -672,7 +673,7 @@ def test_every_chrome_control_is_reachable_by_keyboard():
     panel = DraftsPanel(is_dark=True)
     panel.add_view("published", "Published", "", QWidget())
     for control in (
-        *panel._view_switch.segments, panel._view_switch.popup, panel._refresh_btn,
+        *panel._view_switch.segments, panel._view_switch.popup, panel._actions_btn,
         panel._close_btn, panel._imports_row.button, panel._imports_row.action,
         panel._search_edit, panel._list,
     ):
@@ -743,6 +744,7 @@ def test_an_unsupported_signer_outranks_everything_else():
     assert panel._status_label.full_text() == "Your signer app can’t decrypt drafts"
     assert panel._status_label.property("error") == "true"
     assert panel._empty_title.text() == "Your signer app can’t decrypt drafts"
+    assert "NIP" not in panel._empty_body.text()          # no protocol terms
 
 
 def test_failed_drafts_are_counted_on_the_status_line():
@@ -818,7 +820,7 @@ def test_every_icon_only_control_has_an_accessible_name():
     panel.add_view("published", "Published", "", QWidget())
     segments = panel._view_switch.segments
     names = {
-        panel._refresh_btn: "Refresh drafts",
+        panel._actions_btn: "Actions",
         panel._close_btn: "Close drafts panel",
         panel._search_edit: "Search drafts",
         segments[0]: "Drafts",
@@ -830,7 +832,7 @@ def test_every_icon_only_control_has_an_accessible_name():
         assert widget.accessibleName() == expected
     # The two icon buttons carry one string for both channels, so the
     # spoken label and the hovered label cannot drift apart.
-    for button in (panel._refresh_btn, panel._close_btn):
+    for button in (panel._actions_btn, panel._close_btn):
         assert button.accessibleName() == button.toolTip()
 
 
@@ -1043,7 +1045,7 @@ def test_the_chrome_fits_at_the_minimum_width():
         assert panel._title.isVisibleTo(panel)
         assert not panel._view_switch.isVisibleTo(panel)
         # accessibility.md: macOS default control size is 28x28 pt.
-        for control in (panel._refresh_btn, panel._close_btn):
+        for control in (panel._actions_btn, panel._close_btn):
             assert control.height() >= 28
             assert control.width() >= 28
         assert panel._imports_row.button.height() >= 28
@@ -1184,7 +1186,7 @@ def test_the_band_stays_on_one_line_at_the_default_font(labels):
             assert not panel._top_band.is_stacked()
             leading = (panel._view_switch if panel._view_switch.has_choice()
                        else panel._title)
-            assert (corner_in_panel(panel, panel._refresh_btn).y()
+            assert (corner_in_panel(panel, panel._actions_btn).y()
                     == corner_in_panel(panel, leading).y())
         finally:
             panel.hide()
@@ -1203,7 +1205,7 @@ def test_the_band_stacks_only_when_the_popup_cannot_sit_beside_the_buttons(sized
             switch = panel._view_switch
             if panel._top_band.is_stacked():
                 assert switch.is_popup()
-                assert (corner_in_panel(panel, panel._refresh_btn).y()
+                assert (corner_in_panel(panel, panel._actions_btn).y()
                         > corner_in_panel(panel, switch).y())
                 stacked = scale
                 break
@@ -1219,12 +1221,16 @@ def test_the_band_stacks_only_when_the_popup_cannot_sit_beside_the_buttons(sized
 def test_past_every_size_the_popup_elides_and_keeps_its_name(app_font):
     """Far beyond 200 percent no control fits: the pop-up button then
     paints an ellipsis, and the whole name stays in its tooltip and its
-    accessible name. Pins the pixels, not just ``painted_text``."""
+    accessible name. Pins the pixels, not just ``painted_text``.
+
+    (Before that the panel asks for the room the name needs, up to
+    MAX_PANEL_WIDTH: at this size it has asked for all of it.)"""
     font = QFont(app_font.font())
-    font.setPointSizeF(64)
+    font.setPointSizeF(96)
     app_font.setFont(font)
     panel = with_views(GERMAN, MIN_PANEL_WIDTH)
     try:
+        assert panel.minimumWidth() == dp.MAX_PANEL_WIDTH
         popup = panel._view_switch.popup
         assert panel._view_switch.is_popup()
         painted = popup.painted_text()
@@ -1343,3 +1349,19 @@ def test_every_control_has_a_name():
         assert unnamed_controls(two) == []
     finally:
         two.hide()
+
+
+# --------------------------------------------------------------------------- #
+# One row geometry (review F14)                                                #
+# --------------------------------------------------------------------------- #
+
+def test_the_panel_keeps_no_copy_of_the_row_geometry():
+    """The panel's lists read alike because their rows come from one
+    place, drafts_common; the panel keeps no copy of it."""
+    from nostr.ui import drafts_common
+    source = pathlib.Path(dp.__file__).read_text(encoding="utf-8")
+    for name in ("GUTTER", "_ROW_PAD_V", "_ROW_LINE_GAP", "_SELECTION_BAR_W"):
+        assert not re.search(rf"^{name}\s*[:=]", source, re.MULTILINE), name
+    assert (dp.GUTTER, dp._ROW_PAD_V, dp._ROW_LINE_GAP, dp._SELECTION_BAR_W) == (
+        drafts_common.LIST_GUTTER, drafts_common.ROW_PAD_V, drafts_common.ROW_LINE_GAP,
+        drafts_common.SELECTION_BAR_W)

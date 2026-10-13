@@ -81,8 +81,14 @@ def shortcuts(tmp_path):
     return ShortcutsDialog(groups_from([("Editing", [("Ctrl+B", "Bold")])]), is_dark=False)
 
 
+def draft_relays(tmp_path):
+    from nostr.ui.draft_relays_sheet import DraftRelaysSheet
+    from tests.test_draft_relays_sheet import Lists
+    return DraftRelaysSheet(Lists(["wss://drafts.example"]), is_dark=False)
+
+
 WINDOWS = [membership, profile, backup, create, restore, move_to_signer, connect, update,
-           alert, alert_with_details, shortcuts]
+           alert, alert_with_details, shortcuts, draft_relays]
 
 
 @pytest.mark.parametrize("make", WINDOWS, ids=[w.__name__ for w in WINDOWS])

@@ -530,6 +530,34 @@ def test_learning_a_word_checks_again_only_where_it_was():
     assert sorted(changes) == [(0, 0), (2, 2)]      # and not named either
 
 
+def test_an_unlearned_word_is_misspelled_again_where_it_is():
+    # Review M9 (CP3): Learn Spelling could not be taken back.
+    doc = document("the Nostr", "a wrld", "Nostr here")
+    spelling, checker, backend, changes = follow(doc)
+    spelling.check_all()
+    checker.learn("Nostr", "en-US")
+    spelling.check_all()
+    assert checker.has_learned("Nostr", "en-US") is True
+    assert wrong(spelling, doc) == [[], ["wrld"], []]
+    changes.clear()
+    assert checker.unlearn("Nostr", "en-US") is True
+    spelling.check_all()
+    assert checker.has_learned("Nostr", "en-US") is False
+    assert wrong(spelling, doc) == [["Nostr"], ["wrld"], ["Nostr"]]
+    assert sorted(changes) == [(0, 0), (2, 2)]
+
+
+def test_a_system_that_cannot_tell_knows_what_was_learned_here():
+    backend = FakeBackend()
+    backend.tells_learned = False
+    checker = SpellChecker(backend)
+    assert checker.has_learned("Zork", "en-US") is False
+    checker.learn("Zork", "en-US")
+    assert checker.has_learned("Zork", "en-US") is True
+    checker.unlearn("Zork", "en-US")
+    assert checker.has_learned("Zork", "en-US") is False
+
+
 def test_a_word_with_a_typographic_apostrophe_is_learned_as_typed():
     doc = document("the Ku\u2019damm", "Ku'damm")
     spelling, checker, backend, _changes = follow(doc)

@@ -49,10 +49,28 @@ class GUID(ctypes.Structure):
 
 CLSID_SpellCheckerFactory = GUID.of("7AB36653-1796-484B-BDFA-E74F1DB7C1DC")
 IID_ISpellCheckerFactory = GUID.of("8E018A9D-2415-4677-BF08-794EA61F94BB")
+# Windows 10 adds Remove (taking a word out of the person's dictionary).
+IID_ISpellChecker2 = GUID.of("E7ED1C71-87F7-4378-A840-C9200DACEE47")
 
 
-def _method(index: int, *argtypes):
-    """Call the ``index``-th function of a COM object's table."""
+# Each interface's functions in the order spellcheck.h (and objidl.h for
+# IEnumString) declares them: a function's place in its interface is its
+# slot in the object's table, so the slots are counted here, never written.
+UNKNOWN = ("QueryInterface", "AddRef", "Release")
+ENUM_STRING = UNKNOWN + ("Next", "Skip", "Reset", "Clone")
+SPELL_CHECKER_FACTORY = UNKNOWN + ("SupportedLanguages", "IsSupported", "CreateSpellChecker")
+SPELL_CHECKER = UNKNOWN + (
+    "LanguageTag", "Check", "Suggest", "Add", "Ignore", "AutoCorrect", "GetOptionValue",
+    "OptionIds", "Id", "LocalizedName", "add_SpellCheckerChanged",
+    "remove_SpellCheckerChanged", "GetOptionDescription", "ComprehensiveCheck")
+SPELL_CHECKER_2 = SPELL_CHECKER + ("Remove",)
+ENUM_SPELLING_ERROR = UNKNOWN + ("Next",)
+SPELLING_ERROR = UNKNOWN + ("StartIndex", "Length", "CorrectiveAction", "Replacement")
+
+
+def _method(interface: Sequence[str], name: str, *argtypes):
+    """Call the function ``name`` of a COM object with ``interface``."""
+    index = interface.index(name)
     prototype = _FUNCTYPE(c_long, c_void_p, *argtypes)
 
     def call(this, *args) -> int:
@@ -62,19 +80,22 @@ def _method(index: int, *argtypes):
     return call
 
 
-_release = _method(2)                                                     # IUnknown::Release
-_enum_string_next = _method(3, c_ulong, POINTER(c_void_p), POINTER(c_ulong))  # IEnumString::Next
-_supported_languages = _method(3, POINTER(c_void_p))                   # ISpellCheckerFactory
-_is_supported = _method(4, c_wchar_p, POINTER(c_int))
-_create_spell_checker = _method(5, c_wchar_p, POINTER(c_void_p))
-_check = _method(4, c_wchar_p, POINTER(c_void_p))                      # ISpellChecker
-_suggest = _method(5, c_wchar_p, POINTER(c_void_p))
-_add = _method(6, c_wchar_p)
-_ignore = _method(7, c_wchar_p)
-_next_error = _method(3, POINTER(c_void_p))                            # IEnumSpellingError
-_start_index = _method(3, POINTER(c_ulong))                            # ISpellingError
-_length = _method(4, POINTER(c_ulong))
-_corrective_action = _method(5, POINTER(c_int))
+_query_interface = _method(UNKNOWN, "QueryInterface", POINTER(GUID), POINTER(c_void_p))
+_release = _method(UNKNOWN, "Release")
+_enum_string_next = _method(ENUM_STRING, "Next", c_ulong, POINTER(c_void_p), POINTER(c_ulong))
+_supported_languages = _method(SPELL_CHECKER_FACTORY, "SupportedLanguages", POINTER(c_void_p))
+_is_supported = _method(SPELL_CHECKER_FACTORY, "IsSupported", c_wchar_p, POINTER(c_int))
+_create_spell_checker = _method(SPELL_CHECKER_FACTORY, "CreateSpellChecker", c_wchar_p,
+                                POINTER(c_void_p))
+_check = _method(SPELL_CHECKER, "Check", c_wchar_p, POINTER(c_void_p))
+_suggest = _method(SPELL_CHECKER, "Suggest", c_wchar_p, POINTER(c_void_p))
+_add = _method(SPELL_CHECKER, "Add", c_wchar_p)
+_ignore = _method(SPELL_CHECKER, "Ignore", c_wchar_p)
+_remove = _method(SPELL_CHECKER_2, "Remove", c_wchar_p)
+_next_error = _method(ENUM_SPELLING_ERROR, "Next", POINTER(c_void_p))
+_start_index = _method(SPELLING_ERROR, "StartIndex", POINTER(c_ulong))
+_length = _method(SPELLING_ERROR, "Length", POINTER(c_ulong))
+_corrective_action = _method(SPELLING_ERROR, "CorrectiveAction", POINTER(c_int))
 
 
 def _ok(result: int) -> int:
@@ -207,6 +228,20 @@ class WindowsBackend(SpellBackend):
             return False
         _ok(_ignore(checker, word))
         return None
+
+    def _unlearn(self, word: str, language: str) -> Optional[bool]:
+        checker = self._checker(language)
+        if not checker:
+            return False
+        second = c_void_p()
+        if _query_interface(checker, byref(IID_ISpellChecker2), byref(second)) < 0 \
+                or not second.value:
+            return False          # Windows 8: no way to take a word out
+        try:
+            _ok(_remove(second, word))
+        finally:
+            _release(second)
+        return True
 
     # -- inside ---------------------------------------------------------------
 

@@ -58,10 +58,24 @@ UNKNOWN_BASE = "unknown_base"   # could not read the current one; nothing sent
 REFUSED = "refused"             # nothing to change from (no list exists); nothing sent
 FAILED = "failed"               # the signer said no, or too few relays took it
 
+# Why a change was not made (WriteOutcome.cause), so it can be said in words.
+CAUSE_RELAYS = "relays"         # the current one couldn't be read, or too few relays took it
+CAUSE_SIGNER = "signer"         # the signer didn't sign, or signed something else
+CAUSE_CLOCK = "clock"           # the current one is dated far ahead of this computer's clock
+CAUSE_CHANGED = "changed"       # the current one is not the one the change was made to
+CAUSE_INVALID = "invalid"       # the change can't be made to the current one
+
 MIN_ACCEPTED = 2
 
-# base event (or None) -> (content, tags), or None for "nothing to change"
+# base event (or None) -> (content, tags), or None for "nothing to change".
+# It raises ValueError when the change can't be made to that base, and
+# BaseChanged when the base is not the one the person changed.
 Mutation = Callable[[Optional[dict]], Optional[Tuple[str, list]]]
+
+
+class BaseChanged(ValueError):
+    """The current event is not the one the change was made to: it was
+    changed elsewhere in the meantime, so it is not written over."""
 
 
 @dataclass(frozen=True)
@@ -71,6 +85,7 @@ class WriteOutcome:
     accepted: tuple = ()     # relays that accepted it
     refused: tuple = ()      # (relay, what it said) for the others
     reason: str = ""
+    cause: str = ""          # why it failed (CAUSE_*), "" when it did not
 
     @property
     def ok(self) -> bool:
@@ -134,7 +149,8 @@ class ReplaceableWriter(QObject):
 
     def _on_lookup(self, result: Lookup) -> None:
         if result.state is LookupState.UNKNOWN:
-            self._finish(WriteOutcome(UNKNOWN_BASE, reason="The current one couldn’t be read."))
+            self._finish(WriteOutcome(UNKNOWN_BASE, reason="The current one couldn’t be read.",
+                                      cause=CAUSE_RELAYS))
             return
         if result.state is LookupState.ABSENT:
             remembered = (self._directory.cached(self._author)
@@ -165,7 +181,9 @@ class ReplaceableWriter(QObject):
         try:
             change = self._mutate(base)
         except ValueError as exc:
-            self._finish(WriteOutcome(FAILED, reason=str(exc)))
+            self._finish(WriteOutcome(
+                FAILED, reason=str(exc),
+                cause=CAUSE_CHANGED if isinstance(exc, BaseChanged) else CAUSE_INVALID))
             return
         if change is None:
             self._finish(WriteOutcome(UNCHANGED, event=base))
@@ -177,7 +195,8 @@ class ReplaceableWriter(QObject):
                 FAILED, event=base,
                 reason=(f"The current one is dated about {days} day{'s' if days != 1 else ''} "
                         "ahead of this computer’s clock, and a change would have to be "
-                        "dated after it. Check the clock first.")))
+                        "dated after it. Check the clock first."),
+                cause=CAUSE_CLOCK))
             return
         content, tags = change
         unsigned = {"kind": self._kind, "content": content, "tags": tags,
@@ -185,13 +204,15 @@ class ReplaceableWriter(QObject):
 
         def signed(event: dict) -> None:
             if not signed_matches(event, unsigned, self._author):
-                self._finish(WriteOutcome(FAILED, reason="The signer returned a different event."))
+                self._finish(WriteOutcome(FAILED, reason="The signer returned a different event.",
+                                          cause=CAUSE_SIGNER))
                 return
             self.signed = event
             self._publish(event, base)
 
         def refused(reason: str) -> None:
-            self._finish(WriteOutcome(FAILED, reason=reason or "The signer didn’t sign."))
+            self._finish(WriteOutcome(FAILED, reason=reason or "The signer didn’t sign.",
+                                      cause=CAUSE_SIGNER))
 
         self._session_pool.get(self._profile,
                                lambda client: client.sign_event(unsigned, signed, refused),
@@ -213,7 +234,8 @@ class ReplaceableWriter(QObject):
                 said = "; ".join(f"{url}: {message}" for url, message in refused[:4])
                 self._finish(WriteOutcome(
                     FAILED, event=event, accepted=accepted, refused=refused,
-                    reason="Too few relays accepted it." + (f" ({said})" if said else "")))
+                    reason="Too few relays accepted it." + (f" ({said})" if said else ""),
+                    cause=CAUSE_RELAYS))
                 return
             if self._kind == KIND_RELAY_LIST:
                 self._directory.remember(event)

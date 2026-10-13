@@ -19,6 +19,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QObject  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from nostr import queries  # noqa: E402
@@ -70,6 +71,7 @@ def test_it_ends_when_every_relay_ended_one_way_or_another():
     sub.answer(C)
     assert out[0].answered == (C,)
     assert set(out[0].refused) == {A, B}
+    assert out[0].closed == (B,)              # it answered "no"; A was not reached
 
 
 def test_a_relay_that_never_ends_is_neither_answered_nor_refused():
@@ -114,7 +116,7 @@ def test_events_after_the_end_are_not_added():
     assert out[0].events == ()
 
 
-def test_a_flooding_relay_costs_a_bounded_number_of_checks():
+def test_a_flooding_relay_costs_a_bounded_number_of_checks_and_the_answer_says_so():
     pool = HandPool()
     out = []
     _ALIVE.append(queries._EventsQuery(pool, [A], [{"kinds": [1]}], out.append, None,
@@ -123,3 +125,20 @@ def test_a_flooding_relay_costs_a_bounded_number_of_checks():
     first, second, third = (signed(1, content=str(n)) for n in range(3))
     sub.answer(A, first, second, third)
     assert [e["id"] for e in out[0].events] == [first["id"], second["id"]]
+    assert out[0].complete is False                 # a caller can fail closed
+
+
+def test_an_answer_within_bounds_is_complete():
+    pool, out = ask([A])
+    pool.subs[0].answer(A, signed(1))
+    assert out[0].complete is True
+
+
+def test_the_subscription_closes_when_the_object_that_asked_goes():
+    owner = QObject()
+    pool = HandPool()
+    fetch_events(pool, [A, B], [{"kinds": [1]}], lambda _fetched: None, parent=owner)
+    sub = pool.subs[0]
+    assert not sub.is_closed
+    del owner                                       # gone before any relay answered
+    assert sub.is_closed

@@ -192,7 +192,7 @@ def test_the_review_sheet_goes_when_it_closes(tmp_path):
     original = ImageReviewDialog.open
     ImageReviewDialog.open = lambda dialog: opened.append(dialog)
     try:
-        controller.images_of = lambda posts, on_ready: on_ready(["https://x.example/a.png"])
+        controller.images_of = lambda posts, on_ready, **_kw: on_ready(["https://x.example/a.png"])
         window._review_images()
     finally:
         ImageReviewDialog.open = original

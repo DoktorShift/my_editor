@@ -34,9 +34,17 @@ from tests.outbox_fakes import (  # noqa: E402
     NOW, FakeClient, FakeRelayDirectory, FakeSessionPool, PK, Profile, signed,
 )
 from tests.published_fakes import Relays  # noqa: E402
+from tests.widget_lifetime import delete_new_windows  # noqa: E402
 
 R1, R2 = "wss://one.example", "wss://two.example"
 REAL_ALERT = alerts.Alert          # kept before the tests stand in for it
+
+
+@pytest.fixture(autouse=True)
+def _windows_deleted():
+    """Every view and window a test makes is deleted after it (see
+    tests/widget_lifetime.py)."""
+    yield from delete_new_windows()
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -170,6 +178,22 @@ def test_an_untitled_item_still_has_a_name():
     assert shown(view) == ["Untitled"]
 
 
+def test_nothing_shown_yet_while_older_notes_may_be_there_is_not_nothing_published():
+    """Review F6: when the pages read so far were all deleted, the view
+    offers Load More instead of "Nothing published yet"."""
+    from nostr import events
+    from nostr.deletion import build_deletion
+    from tests.outbox_fakes import SK
+    many = [note(f"note {n}", at=NOW - 10 * n) for n in range(PAGE_SIZE * 6)]
+    request = events.sign_event(build_deletion(PK, event_ids=[n["id"] for n in many],
+                                               kinds=[1], created_at=NOW), SK)
+    view, model, relays, _said, _edited = make(*many, request)
+    view.set_account(Profile())
+    relays.run()
+    assert model.items() == [] and model.has_more
+    assert shown(view) == ["Load More Notes"]
+
+
 def test_load_more_is_the_last_row_and_return_on_it_loads_more():
     notes = [note(f"note {n}", at=NOW - 10 * n) for n in range(PAGE_SIZE + 3)]
     view, model, relays, _said, _edited = make(*notes)
@@ -229,6 +253,31 @@ def test_return_opens_an_article_for_editing_and_a_note_in_the_browser(opened):
     select(view, 0)
     QTest.keyClick(view._list, Qt.Key.Key_Enter)
     assert len(opened) == 1 and opened[0].startswith("https://njump.me/nevent1")
+
+
+def test_an_article_without_a_link_still_has_its_menu():
+    """Review F17: an identifier over 255 bytes has no address; the menu
+    opens all the same, with Open in Browser and Copy Link dimmed."""
+    view, _model, relays, _said, _edited = make(article("ü" * 130, "Long"))
+    view.set_account(Profile())
+    relays.run()
+    menu = view.menu_for(view._rows.index(0))
+    enabled = {a.text(): a.isEnabled() for a in menu.actions() if not a.isSeparator()}
+    assert enabled == {"Edit": True, "Open in Browser": False, "Copy Link": False,
+                       "Delete from Nostr…": True}
+
+
+def test_a_row_and_its_confirmation_name_a_markdown_note_in_words(answered_alerts):
+    """Review F7: no Markdown in a row or in the confirmation's title."""
+    view, _model, relays, _said, _edited = make(
+        note("![cover](https://example.com/c.png)\nHello **world**"))
+    view.set_account(Profile())
+    relays.run()
+    assert shown(view) == ["Hello world"]
+    select(view, 0)
+    answered_alerts.answers = [False]
+    QTest.keyClick(view._list, Qt.Key.Key_Delete)
+    assert answered_alerts.asked[0]["title"] == "Delete “Hello world” from Nostr?"
 
 
 def test_the_menu_of_an_article_and_of_a_note():
@@ -314,6 +363,56 @@ def test_a_deletion_no_relay_took_offers_try_again(answered_alerts):
     relays.run()
     assert shown(view) == ("Nothing published yet",
                            "Notes and articles you publish appear here.", False, False)
+
+
+def test_relays_that_refused_are_not_blamed_on_the_connection(answered_alerts):
+    """Review F9: a relay that answered with a refusal was reached; the
+    advice to check the connection is for relays that never answered."""
+    view, model, relays, _said, _edited = make(note("hello"), refuse_publish={R1, R2})
+    relays.publisher.reason = "rate-limited: slow down"
+    view.set_account(Profile())
+    relays.run()
+    select(view, 0)
+    answered_alerts.answers = [True, False]         # Delete, then Cancel
+    QTest.keyClick(view._list, Qt.Key.Key_Delete)
+    relays.run()
+    failure = answered_alerts.asked[1]
+    assert failure["message"].startswith("The relays turned the request down.")
+    assert "rate-limited: slow down" in failure["details"]
+
+
+def test_keys_act_on_the_selected_row_only(answered_alerts, opened):
+    """Review F8: when the list appears its first row is where the
+    keyboard rests, not a selection; Delete and Return do nothing until
+    a row is selected."""
+    view, _model, relays, _said, _edited = make(note("only note"))
+    view.set_account(Profile())
+    relays.run()
+    assert view._list.currentIndex().row() == 0
+    assert view._list.selectionModel().selectedIndexes() == []
+    QTest.keyClick(view._list, Qt.Key.Key_Delete)
+    QTest.keyClick(view._list, Qt.Key.Key_Return)
+    assert answered_alerts.asked == [] and opened == []
+    select(view, 0)
+    answered_alerts.answers = [False]
+    QTest.keyClick(view._list, Qt.Key.Key_Delete)
+    assert answered_alerts.asked[0]["title"] == "Delete “only note” from Nostr?"
+
+
+def test_one_date_style_for_the_whole_list():
+    """Review F11: when one row's date in words does not fit, every row
+    writes its date in digits, so the column reads and lines up alike."""
+    view, model, relays, _said, _edited = make(note("a"), article("essay", "Essay"))
+    view.set_account(Profile())
+    relays.run()
+    view.show()
+    assert not view.digit_dates
+    view.resize(110, 480)                           # too narrow for "Article · 10 January 2027"
+    QApplication.processEvents()
+    assert view.digit_dates
+    view.resize(320, 480)
+    QApplication.processEvents()
+    assert not view.digit_dates
 
 
 def test_a_deletion_left_as_it_is_keeps_the_row(answered_alerts):

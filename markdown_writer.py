@@ -35,6 +35,14 @@ What is written follows what the editor shows ("Markdown first"):
   video whose address stands alone on its line plays in the apps that
   look for one.
 
+The clipboard needs the other reading of typed text: what the document
+shows, letter for letter. ``document_to_markdown(doc, literal=True)``
+escapes every character of the text that a reader would take for
+Markdown (emphasis, code, a link, a tag, an entity, a heading or list
+at the start of a line, an address it would link by itself), so the
+text reads back as the same text and only the document's structure is
+Markdown. The editor's own copy and a pasted web page are written so.
+
 Images are written by the caller's ``image_target(QTextImageFormat)``,
 which returns the text to put in the image's place (``![alt](url)`` or a
 bare URL) or None to leave it out. The caller decides where an image
@@ -74,6 +82,12 @@ ImageTarget = Callable[[object], Optional[str]]
 _MD_FLAG_UNDERLINE = 0x4000
 READ_FEATURES = QTextDocument.MarkdownFeature(
     QTextDocument.MarkdownFeature.MarkdownDialectGitHub.value & ~_MD_FLAG_UNDERLINE)
+
+# How a paste is read: the same, but a tag is text. Text that shows a tag
+# ("<div>", "ssh <user>@<host>") is about one, and HTML is no structure a
+# document here can hold.
+PASTE_FEATURES = QTextDocument.MarkdownFeature(
+    READ_FEATURES.value | QTextDocument.MarkdownFeature.MarkdownNoHTML.value)
 
 MARKDOWN = "markdown"
 NOTE = "note"
@@ -132,6 +146,7 @@ class _Span:
     code: bool = False
     href: str = ""
     raw: bool = False          # an image's text from the caller, written as is
+    literal: bool = False      # text to be read back as text (see literal_text)
 
 
 @dataclass
@@ -151,6 +166,7 @@ class _Block:
     bullet_text: str = ""      # a typed bullet line, exactly as typed
     group: int = -1            # which list an item belongs to
     quote: int = 0             # how deep in block quotes it sits
+    literal: bool = False      # text to be read back as text (see literal_text)
 
 
 def _is_bold(fmt) -> bool:
@@ -353,6 +369,27 @@ def _protect_addresses(text: str) -> str:
     return _WEB_ADDRESS.sub(protect, text)
 
 
+# What a reader takes for Markdown in text: anywhere, the characters of
+# emphasis, code, links, strikethrough, tags and entities, the colon of
+# an address ("https://") and the @ of an email, which it would link by
+# itself, and the dot of "www."; at the start of a line, a heading, a
+# list item, a divider or an underline that makes a heading.
+_MARKUP_ANYWHERE = re.compile(r"[\\`*_~\[\]<>&@]|:(?=//)|(?<=\b[wW][wW][wW])\.")
+_MARKUP_AT_LINE_START = re.compile(r"^(\s*)(?:([#+=-])|(\d+)([.)]))")
+
+
+def literal_text(text: str) -> str:
+    """``text`` written so a Markdown reader reads it back as the same
+    text: every character it would take for Markdown escaped."""
+    text = _MARKUP_ANYWHERE.sub(lambda m: "\\" + m.group(0), text)
+    found = _MARKUP_AT_LINE_START.match(text)
+    if found is not None:
+        lead, mark, digits, closer = found.groups()
+        marker = "\\" + mark if mark else digits + "\\" + closer
+        text = lead + marker + text[found.end():]
+    return text
+
+
 def _destination(href: str) -> str:
     """A link's address as Markdown accepts it: in ``<…>`` when it holds
     a space or a parenthesis, so it is never cut short or changed."""
@@ -458,8 +495,13 @@ def _inline_markdown(spans: List[_Span], hard_break: str = "  \n") -> str:
                 group.append(spans[i])
                 i += 1
             following = spans[i] if i < len(spans) else None
-            if _is_nostr_reference(span.href):
-                out.append(_apart(span.href, "".join(out), following))
+            if _is_nostr_reference(span.href) and not span.literal:
+                # Bare, for readers, in the styles all its words have; a
+                # copy keeps the words it shows.
+                bare = _styled(_Span(text=span.href, bold=all(s.bold for s in group),
+                                     italic=all(s.italic for s in group),
+                                     strike=all(s.strike for s in group)))
+                out.append(_apart(bare, "".join(out), following))
                 continue
             words = "".join(s.text for s in group).replace(LINE_SEPARATOR, " ")
             address = _own_address(words.strip(), span.href)
@@ -467,7 +509,9 @@ def _inline_markdown(spans: List[_Span], hard_break: str = "  \n") -> str:
                 out.append(_autolink(address, span.href, "".join(out), following))
                 continue
             inner = "".join(_styled(s) for s in group)
-            label = inner.replace(LINE_SEPARATOR, " ").replace("]", "\\]")
+            label = inner.replace(LINE_SEPARATOR, " ")
+            if not span.literal:               # escaped already when literal
+                label = label.replace("]", "\\]")
             out.append(f"[{label}]({_destination(span.href)})")
             continue
         out.append(_styled(span))
@@ -484,7 +528,7 @@ def _styled(span: _Span) -> str:
         return LINE_SEPARATOR.join(_code_span(p) for p in parts if p)
     pieces = []
     for part in span.text.split(LINE_SEPARATOR):
-        text = _protect_addresses(part)
+        text = literal_text(part) if span.literal else _protect_addresses(part)
         if span.strike:
             text = _wrap(text, "~~")
         if span.italic:
@@ -549,12 +593,22 @@ def _block_markdown(block: _Block) -> str:
         return "\n".join([f"{pad}{marker} {lines[0]}".rstrip()]
                          + [cont + line for line in lines[1:]])
     # paragraph, as typed
-    return block.indent + _inline_markdown(block.spans)
+    indent = block.indent
+    if block.literal:
+        # Spaces a reader would drop, or read as code, kept as spaces that
+        # do not break. (Qt's reader drops a "&#32;".)
+        indent = "&nbsp;" * len(indent)
+    return indent + _inline_markdown(block.spans)
 
 
-def document_to_markdown(doc, image_target: Optional[ImageTarget] = None) -> str:
-    """The document as Markdown, for a .md file, an article or a draft."""
+def document_to_markdown(doc, image_target: Optional[ImageTarget] = None, *,
+                         literal: bool = False) -> str:
+    """The document as Markdown, for a .md file, an article or a draft.
+    ``literal``: its text is written to be read back as text (the
+    clipboard), not as the Markdown typed into it."""
     blocks = document_blocks(doc, image_target)
+    if literal:
+        _make_literal(blocks)
     out: List[str] = []
     previous: Optional[_Block] = None
     for block in blocks:
@@ -567,6 +621,17 @@ def document_to_markdown(doc, image_target: Optional[ImageTarget] = None) -> str
         out.append(text)
         previous = block
     return "".join(out).rstrip("\n") + ("\n" if out else "")
+
+
+def _make_literal(blocks: List[_Block]) -> None:
+    for block in blocks:
+        block.literal = True
+        for span in block.spans:
+            span.literal = True
+        for row in block.rows:
+            for cell in row:
+                for span in cell:
+                    span.literal = True
 
 
 def _new_list(previous: _Block, block: _Block) -> bool:
@@ -686,12 +751,21 @@ def has_local_only_formatting(doc) -> bool:
 
 
 # Markdown the editor's document cannot hold, so reading it in would lose
-# something: footnotes, raw HTML, an image without alt text (Qt drops it),
-# a link title, a link around an image, a heading inside a quote,
-# a paragraph continued inside a list item, and lines that wrap inside a
-# paragraph (a draft saved as plain text by an earlier version).
+# something: a footnote whose note goes on in a second paragraph (the
+# editor keeps footnotes as their text, one paragraph each), a tab where a
+# line starts (lists and code are indented with spaces), code inside a
+# list item (it moves out of the item), an escaped footnote mark, raw
+# HTML, an image without alt text (Qt drops it), a link title, a link
+# around an image, a heading inside a quote, a paragraph continued inside
+# a list item, and lines that wrap inside a paragraph (a draft saved as
+# plain text by an earlier version). Also (below): a tab inside fenced
+# code, a column's alignment, emphasis in a table's header row.
 _LOSSY = [
-    re.compile(r"\[\^[^\]]+\]"),                         # footnote
+    re.compile(r"^ {0,3}\[\^[^\]]+\]:.*\n(?:[ \t]*\n)+(?: {4}|\t)\S",
+               re.MULTILINE),                              # a note of two paragraphs
+    re.compile(r"^\t", re.MULTILINE),                     # a tab where a line starts
+    re.compile(r"^ {2,}(?:```|~~~)", re.MULTILINE),        # code inside a list item
+    re.compile(r"\\\[\^"),                                 # an escaped footnote mark
     re.compile(r"<(?:[A-Za-z][\w-]*[\s/>]|/[A-Za-z]|!--)"),  # raw HTML
     re.compile(r"!\[\]\("),                                # image without alt text
     re.compile(r"\]\((?!<)[^)\s]+\s+[\"'(]"),              # link title
@@ -785,15 +859,51 @@ def read_markdown(doc: QTextDocument, markdown: str, features=READ_FEATURES) -> 
     normalize_after_markdown_load(doc)
 
 
+def _tab_in_fence(markdown: str) -> bool:
+    """Whether a fenced code block holds a tab (Qt's reader makes it spaces,
+    and a Makefile stops working)."""
+    fence = ""
+    for line in markdown.split("\n"):
+        found = _FENCE_LINE.match(line)
+        if fence:
+            if found and found.group(1)[0] == fence[0] and len(found.group(1)) >= len(fence) \
+                    and not found.group(2).strip():
+                fence = ""
+            elif "\t" in line:
+                return True
+        elif found:
+            fence = found.group(1)
+    return False
+
+
+_DELIMITER_ROW = re.compile(r"^[ \t]*\|?(?:[ \t]*:?-+:?[ \t]*\|)+[ \t]*(?::?-+:?)?[ \t]*$")
+_HEADER_EMPHASIS = re.compile(r"\*|~~|(?<![\w\\])_|_(?!\w)")
+
+
+def _table_loses(markdown: str) -> bool:
+    """Whether a table says what the editor's tables cannot keep: a
+    column's alignment, or emphasis in its header row (the header is bold
+    by its own format there)."""
+    lines = markdown.split("\n")
+    for index in range(1, len(lines)):
+        if _DELIMITER_ROW.match(lines[index]) and "|" in lines[index - 1]:
+            if ":" in lines[index] or _HEADER_EMPHASIS.search(lines[index - 1]):
+                return True
+    return False
+
+
 def holds_faithfully(markdown: str) -> bool:
     """Whether the editor can hold this Markdown and write it back without
     losing anything. When it cannot, open it as its Markdown text."""
-    if any(pattern.search(markdown) for pattern in _LOSSY) or _soft_wrapped(markdown):
+    if (any(pattern.search(markdown) for pattern in _LOSSY) or _soft_wrapped(markdown)
+            or _tab_in_fence(markdown) or _table_loses(markdown)):
         return False
+    # Read as the editor reads it (footnotes as their text, code in cells
+    # without the escape of its pipes).
     first = QTextDocument()
-    first.setMarkdown(markdown, READ_FEATURES)
+    read_markdown(first, markdown)
     second = QTextDocument()
-    second.setMarkdown(document_to_markdown(first), READ_FEATURES)
+    read_markdown(second, document_to_markdown(first))
     return _fingerprint(first) == _fingerprint(second)
 
 
@@ -813,5 +923,6 @@ def document_to(doc, flavor: str, image_target: Optional[ImageTarget] = None) ->
 __all__: Tuple[str, ...] = (
     "MARKDOWN", "NOTE", "document_blocks", "document_to", "document_to_markdown",
     "document_to_note_text", "has_local_only_formatting", "holds_faithfully",
-    "image_markdown", "literal_footnotes", "read_markdown", "READ_FEATURES",
+    "image_markdown", "literal_footnotes", "literal_text", "read_markdown", "READ_FEATURES",
+    "PASTE_FEATURES",
 )

@@ -170,7 +170,7 @@ def test_a_signer_refusal_keeps_its_exact_wording(tmp_path):
     ctx.probe()
     assert ctx.verbs() == ["head"]        # refused before the PUT
     assert ctx.failures[0][1] == (
-        "Your signer app didn’t sign the request: user declined"
+        "Your signer app declined the request to the media server: user declined"
     )
     assert ctx.failure_codes == [("a.png", ERROR_CODES.SIGNER_REJECTED)]
 

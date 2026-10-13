@@ -44,7 +44,7 @@ from ..imports.images import scan_markdown_images
 from ..imports.workspace import Post, date_text
 from ..preview import COLUMN_WIDTH, Article, NostrPreview
 from .eliding_label import ElidingLabel
-from .imports_glyphs import is_dark, letter_avatar
+from .imports_glyphs import is_dark, source_avatar
 
 _EMPTY, _ARTICLE, _MESSAGE = 0, 1, 2
 
@@ -138,6 +138,20 @@ class ArticlePane(QWidget):
     def post(self) -> Optional[Post]:
         return self._post
 
+    # (source key, address) -> the source's site icon or None (C12).
+    icon_for = None
+
+    def show_icon(self) -> None:
+        """The open post's source: its site icon once known, its letter."""
+        post = self._post
+        if post is None:
+            return
+        image = (self.icon_for(post.source_key, post.source_url)
+                 if self.icon_for is not None else None)
+        self._avatar.setPixmap(source_avatar(post.source_title, post.source_url or
+                                             post.source_key, 18, dark=is_dark(self.palette()),
+                                             dpr=self.devicePixelRatioF(), image=image))
+
     def show_post(self, post: Optional[Post]) -> None:
         self._generation += 1
         self._post = post
@@ -148,9 +162,7 @@ class ArticlePane(QWidget):
         when = date_text(post.published_at or post.found_at)
         self._origin.setText(post.source_title)
         self._date.setText(f"\u00b7  {when}" if when and post.source_title else when)
-        self._avatar.setPixmap(letter_avatar(post.source_title, post.source_url or
-                                             post.source_key, 18, dark=is_dark(self.palette()),
-                                             dpr=self.devicePixelRatioF()))
+        self.show_icon()
         self._open.setEnabled(url_safety.is_safe_external_url(post.link))
         # Never the previous post's body under this post's header while
         # this one is prepared (review L1).

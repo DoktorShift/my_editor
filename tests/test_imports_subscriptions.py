@@ -571,3 +571,188 @@ class TestQuitting:
 def _settled():
     yield
     settle()
+
+
+class Offline(FakeRelay):
+    """Relays that answer nothing until ``online`` is set."""
+
+    def __init__(self):
+        super().__init__()
+        self.online = False
+
+    def events(self, relays, filters, on_done):
+        if self.online:
+            super().events(relays, filters, on_done)
+        else:
+            self.queries.append((list(relays), filters))
+            on_done([], set())
+
+
+class TestSaysWhatHappens:
+    """CP2 review N3: nothing heard the list's messages since the Feeds
+    page went, and a change that could not be shared waited silently."""
+
+    def test_a_change_that_cannot_be_shared_says_so_and_tries_again(self, tmp_path):
+        from nostr.imports.subscriptions import NOT_SHARED, RETRY_DELAYS_MS
+        relay = Offline()
+        store, _, scheduler = bound(tmp_path, relay=relay)
+        said = []
+        store.sync_status.connect(said.append)
+        store.add_feed(FEED_URL, "My Blog")
+        publish(store, scheduler)
+        assert said[-1] == NOT_SHARED
+        assert relay.published == []
+        # Tried again after a pause; nothing to sign while nothing answers.
+        assert [e[0] for e in scheduler.scheduled if e[2]] == [RETRY_DELAYS_MS[0]]
+        publish(store, scheduler)
+        assert [e[0] for e in scheduler.scheduled if e[2]] == [RETRY_DELAYS_MS[1]]
+        relay.online = True
+        publish(store, scheduler)
+        assert [f["url"] for f in relay.payload()["feeds"]] == [FEED_URL]
+        assert said[-1] == ""                   # nothing left to say
+        assert not [e for e in scheduler.scheduled if e[2]]
+
+    def test_a_read_that_is_answered_sends_what_waits(self, tmp_path):
+        relay = Offline()
+        store, _, scheduler = bound(tmp_path, relay=relay)
+        store.add_feed(FEED_URL, "My Blog")
+        publish(store, scheduler)               # not shared: kept, dirty
+        store.bind_profile(None)
+        relay.online = True
+        again, _, scheduler2 = make_store(tmp_path, relay=relay)
+        again.bind_profile(PROFILE)             # the next launch
+        settle()
+        assert [e for e in scheduler2.scheduled if e[2]], "nothing was sent"
+        publish(again, scheduler2)
+        assert [f["url"] for f in relay.payload()["feeds"]] == [FEED_URL]
+
+    def test_an_answered_read_does_not_wait_out_the_pause(self, tmp_path):
+        """CP3 review L3: after a few tries that failed, the change waited
+        out a pause of up to half an hour although the relays answered."""
+        from nostr.imports.subscriptions import RETRY_DELAYS_MS
+        relay = FakeRelay(accepted=False)
+        store, _, scheduler = bound(tmp_path, relay=relay)
+        store.add_feed(FEED_URL, "Blog")
+        for _ in range(4):
+            publish(store, scheduler)
+        live = lambda: [e[0] for e in scheduler.scheduled if e[2]]  # noqa: E731
+        assert live() == [RETRY_DELAYS_MS[-1]]
+        relay.accepted = True
+        store.refresh()                         # answered
+        settle()
+        assert live() and live()[-1] < RETRY_DELAYS_MS[0]
+        publish(store, scheduler)
+        assert [f["url"] for f in relay.payload()["feeds"]] == [FEED_URL]
+        assert not store._dirty
+
+    def test_a_list_that_cannot_be_read_online_says_the_copy_here_is_shown(self, tmp_path):
+        from nostr.imports.subscriptions import NOT_READ
+        store, _, _ = make_store(tmp_path, relay=Offline())
+        said = []
+        store.sync_status.connect(said.append)
+        store.bind_profile(PROFILE)
+        settle()
+        assert said[-1] == NOT_READ
+
+
+class TestOldEncryption:
+    """A list an older app saved with NIP-04 is read; what MyEditor writes
+    back is NIP-44, never NIP-04."""
+
+    def test_it_is_read_and_written_back_with_nip44(self, tmp_path):
+        from nostr import crypto
+        from nostr.local_signer import LocalSigner
+        from tests.test_nip04 import PK1, SK1, TO_SELF
+        account = SimpleNamespace(user_pubkey=PK1, bunker_relays=["wss://bunker.example"])
+        relay = FakeRelay()
+        relay.stored[FEED_LIST_DTAG] = events.sign_event(
+            {"kind": SUBSCRIPTIONS_KIND, "content": TO_SELF, "created_at": NOW - 100,
+             "tags": [["d", FEED_LIST_DTAG], ["encrypted", "nip04"]]}, bytes.fromhex(SK1))
+        signer = LocalSigner(bytes.fromhex(SK1))
+        store, _, scheduler = make_store(tmp_path, relay=relay,
+                                         session_pool=FakeSessionPool(client=signer))
+        store.bind_profile(account)
+        settle()
+        assert [(f.url, f.title) for f in store.feeds] == [
+            ("https://blog.example/feed", "Ein Blog über Bäume")]
+        store.add_feed("https://other.example/feed")
+        publish(store, scheduler)
+        settle()
+        (_relays, written), = relay.published
+        assert ["encrypted", "nip44"] in written["tags"]
+        assert not any(t[:2] == ["encrypted", "nip04"] for t in written["tags"])
+        sk = bytes.fromhex(SK1)
+        payload = json.loads(crypto.decrypt_from(written["content"], sk, bytes.fromhex(PK1)))
+        assert {f["url"] for f in payload["feeds"]} == {
+            "https://blog.example/feed", "https://other.example/feed"}
+        signer.close()
+
+    def test_a_signer_app_that_does_not_read_it_says_what_to_do(self, tmp_path):
+        relay = FakeRelay()
+        relay.put(FEED_LIST_DTAG, {"feeds": [{"url": "https://standup.example/feed"}]},
+                  tag=("encrypted", "nip04"))
+        signer = FakeSigner()
+        signer.nip04_decrypt_self = (
+            lambda ct, on_success, on_failure, **_kw: on_failure("permission denied"))
+        statuses = []
+        store, _, _ = make_store(tmp_path, relay=relay,
+                                 session_pool=FakeSessionPool(client=signer))
+        store.sync_status.connect(statuses.append)
+        store.bind_profile(PROFILE)
+        settle()
+        assert store.feeds == []
+        assert any("older kind of encryption" in s for s in statuses)
+        assert not any("permission denied" in s for s in statuses)
+
+    @pytest.mark.parametrize("algorithm", ["nip44", "nip04"])
+    @pytest.mark.parametrize("reason,said", [
+        ("invalid MAC", "UNREADABLE"),
+        ("timed out waiting for signer", "SIGNER_SILENT"),
+        ("not connected", "SIGNER_SILENT")])
+    def test_why_it_could_not_be_read_is_said_in_plain_words(self, tmp_path, algorithm,
+                                                              reason, said):
+        """CP3 review L5: the signer's own English reason stood inside the
+        sentence (in German too). L9: a signer app that did not answer got
+        the advice for a list saved with the older encryption."""
+        from nostr.imports import subscriptions
+        relay = FakeRelay()
+        relay.put(FEED_LIST_DTAG, {"feeds": [{"url": FEED_URL}]}, tag=("encrypted", algorithm))
+        signer = FakeSigner(nip04=True)
+        fail = lambda ct, on_success, on_failure, **_kw: on_failure(reason)  # noqa: E731
+        signer.nip04_decrypt_self = signer.nip44_decrypt_self = fail
+        statuses = []
+        store, _, _ = make_store(tmp_path, relay=relay,
+                                 session_pool=FakeSessionPool(client=signer))
+        store.sync_status.connect(statuses.append)
+        store.bind_profile(PROFILE)
+        settle()
+        expected = getattr(subscriptions, said)
+        if algorithm == "nip04" and said == "UNREADABLE":
+            expected = subscriptions._OLD_ENCRYPTION      # a refusal: what to do
+        assert statuses[-1] == expected
+        assert not any(reason in s for s in statuses)
+
+
+class TestReadingAgain:
+    """``reload``: the list as another MyEditor on this computer left it
+    (CP1 review L7), never dropping a change still waiting here."""
+
+    def test_it_reads_what_the_other_one_saved(self, tmp_path):
+        relay = FakeRelay()
+        other, _, other_scheduler = bound(tmp_path, relay=relay)
+        this, _, _ = bound(tmp_path, relay=relay)
+        other.add_feed(FEED_URL, "Blog")          # saved to this computer's copy
+        assert not this.has_feed(FEED_URL)
+        this.reload()
+        settle()
+        assert this.has_feed(FEED_URL) and this.known
+
+    def test_a_change_waiting_here_stays(self, tmp_path):
+        relay = FakeRelay(accepted=False)
+        store, _, scheduler = bound(tmp_path, relay=relay)
+        store.add_feed(FEED_URL, "Blog")
+        publish(store, scheduler)                 # refused: still waiting
+        assert store._dirty
+        store.reload()
+        settle()
+        assert store.has_feed(FEED_URL) and store._dirty

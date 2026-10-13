@@ -26,9 +26,9 @@ from nostr import bech32, events, published  # noqa: E402
 from nostr.deletion import address, build_deletion  # noqa: E402
 from nostr.published import (  # noqa: E402
     DELETING, LOADING, NOT_DELETED, PAGE_SIZE, READY, SIGNED_OUT, UNREACHABLE,
-    PublishedItem, PublishedList, deletion_requests, first_line, notes_horizon,
+    PublishedItem, PublishedList, deletion_requests,
 )
-from nostr.queries import Fetched  # noqa: E402
+from nostr.queries import Fetched, page_horizon  # noqa: E402
 from tests.outbox_fakes import (  # noqa: E402
     NOW, OTHER_PK, OTHER_SK, PK, SK, FakeClient, FakeRelayDirectory, FakeSessionPool,
     Profile, settle, signed,
@@ -208,10 +208,11 @@ def test_a_page_full_of_one_second_does_not_ask_forever():
     assert model.has_more
     model.load_more()
     relays.run()
-    assert model.has_more                          # stepped past the full second
-    model.load_more()
-    relays.run()
+    # The same second again, then a page from the second before it (the
+    # list goes on by itself after a page that showed nothing new).
     assert not model.has_more
+    asked = [flt["until"] for sub in relays.subs for flt in sub.filters if "until" in flt]
+    assert asked == [NOW - 10, NOW - 11]
 
 
 def test_load_more_that_reaches_no_relay_keeps_the_list_and_says_so():
@@ -223,6 +224,91 @@ def test_load_more_that_reaches_no_relay_keeps_the_list_and_says_so():
     model.load_more()
     relays.run()
     assert model.more_failed and model.has_more and len(model.items()) == PAGE_SIZE
+
+
+def test_a_relay_with_older_notes_that_does_not_answer_load_more_is_not_nothing_older():
+    """Review F1: R1 sent a full page, so it has older notes; when it does
+    not answer Load More, the list must not decide there is nothing older."""
+    model, relays, _seen = setup()
+    many = [note(f"note {n}", at=NOW - 10 * n) for n in range(120)]
+    relays.keep(R1, *many)
+    relays.keep(R2, *many[:10])
+    model.set_account(Profile())
+    relays.run()
+    assert len(model.items()) == PAGE_SIZE and model.has_more
+    relays.down = {R1}                              # R2 answers, R1 does not
+    model.load_more()
+    relays.run()
+    assert model.has_more and model.more_failed and len(model.items()) == PAGE_SIZE
+    relays.down = set()
+    model.load_more()                               # Try Again
+    relays.run()
+    # A page starts at the horizon itself, so pages share one note.
+    assert not model.more_failed and len(model.items()) == 2 * PAGE_SIZE - 1
+    model.load_more()
+    relays.run()
+    assert len(model.items()) == 120 and not model.has_more
+
+
+def test_a_relay_that_never_answered_does_not_block_load_more():
+    model, relays, _seen = setup()
+    relays.keep(R1, *[note(f"note {n}", at=NOW - n) for n in range(PAGE_SIZE + 5)])
+    relays.down = {R2}                              # down from the start
+    model.set_account(Profile())
+    relays.run()
+    assert model.partial and model.has_more
+    model.load_more()
+    relays.run()
+    assert len(model.items()) == PAGE_SIZE + 5 and not model.more_failed
+
+
+def test_a_first_page_whose_notes_were_all_deleted_reads_on_by_itself():
+    """Review F6: a relay keeping deleted notes made the first page all
+    deleted, and the list said "Nothing published yet" while older notes
+    were there."""
+    model, relays, _seen = setup()
+    many = [note(f"note {n}", at=NOW - 10 * n) for n in range(60)]
+    relays.keep(R1, *many,
+                deletion(ids=[n["id"] for n in many[:PAGE_SIZE]], kinds=(1,)))
+    model.set_account(Profile())
+    relays.run()
+    assert [i.id for i in model.items()] == [n["id"] for n in many[PAGE_SIZE:]]
+    assert not model.has_more
+
+
+def test_reading_on_by_itself_stops_after_a_few_pages():
+    model, relays, _seen = setup()
+    many = [note(f"note {n}", at=NOW - 10 * n) for n in range(PAGE_SIZE * 6)]
+    relays.keep(R1, *many, deletion(ids=[n["id"] for n in many], kinds=(1,)))
+    model.set_account(Profile())
+    relays.run()
+    paged = [flt for sub in relays.subs for flt in sub.filters if "until" in flt]
+    assert len(paged) == published.AUTO_PAGES
+    assert model.items() == [] and model.has_more         # Load More stays on offer
+
+
+def test_a_relay_that_did_not_answer_about_deletions_means_something_may_be_missing():
+    """Review F2: R2 keeps only the request and does not answer the
+    deletion question; R1 ignores deletions and still has the note."""
+    model, relays, _seen = setup()
+    taken_back = note("taken back elsewhere", at=NOW - 500)
+    relays.keep(R1, taken_back)
+    relays.keep(R2, deletion(ids=[taken_back["id"]], at=NOW - 100))
+    relays.unreachable_for = {R2: {5}}              # R2 answers the items only
+    model.set_account(Profile())
+    relays.run()
+    assert model.state == READY and [i.id for i in model.items()] == [taken_back["id"]]
+    assert model.partial                            # "something may be missing" is said
+
+
+def test_an_answer_cut_off_by_a_flooding_relay_means_something_may_be_missing(monkeypatch):
+    from nostr import queries
+    monkeypatch.setattr(queries, "MAX_COPIES", 1)
+    model, relays, _seen = setup()
+    relays.keep(R1, note("one", at=NOW - 2), note("two", at=NOW - 1))
+    model.set_account(Profile())
+    relays.run()
+    assert model.state == READY and model.partial
 
 
 def test_a_refresh_keeps_what_is_shown_until_its_answers_are_in():
@@ -381,13 +467,30 @@ def test_a_job_let_go_of_is_deleted_once_even_when_the_list_goes_with_it(monkeyp
 
 # -- items and rules ----------------------------------------------------------------------
 
-def test_titles_and_first_lines():
+@pytest.mark.parametrize("body, title", [
+    ("![cover](https://example.com/c.png)\nHello **world**", "Hello world"),
+    ("> a quote I liked\nmy thoughts", "a quote I liked"),
+    ("**Bold opener** and [a link](https://example.com)", "Bold opener and a link"),
+    ("- first point\n- second point", "first point"),
+    ("## Heading of a note\ntext", "Heading of a note"),
+    ("  \n  first   words \nsecond", "first words"),
+    ("", ""),
+])
+def test_a_title_is_words_never_markdown(body, title):
+    """Review F7: the app's one rule for a body without a title
+    (drafts.derive_title_from_markdown), for notes and for articles
+    without a title of their own."""
+    assert PublishedItem(note(body)).title == title
+    assert PublishedItem(signed(30023, [["d", "x"]], body)).title == title
+
+
+def test_an_articles_own_title_comes_first():
     assert PublishedItem(article("d", "  A   title ")).title == "A title"
-    untitled = signed(30023, [["d", "x"]], "\n\n# Heading of the body\nmore")
-    assert PublishedItem(untitled).title == "Heading of the body"
-    assert PublishedItem(note("  \n  first   words \nsecond")).title == "first words"
-    assert PublishedItem(note("")).title == ""
-    assert first_line("x" * 300) == "x" * 200
+
+
+def test_a_long_first_line_is_cut_at_a_word():
+    title = PublishedItem(note("word " * 60)).title
+    assert len(title) <= 90 and title.endswith("…")
 
 
 def test_links_lead_to_the_item_and_name_where_it_is():
@@ -400,10 +503,25 @@ def test_links_lead_to_the_item_and_name_where_it_is():
     assert (event_id, hints, author, kind) == (hello.id, [R1], PK, 1)
 
 
+def test_an_identifier_too_long_for_a_link_has_no_link():
+    """Review F17: NIP-19 holds 255 bytes per value; such an article has
+    no address to open or copy, and asking for one must not raise."""
+    long_d = PublishedItem(article("ü" * 130, "Long"), found_on=(R1,))
+    assert long_d.nostr_address() is None and long_d.web_link() is None
+
+
 def test_the_first_publication_of_an_article_survives_edits():
     edited = PublishedItem(article("d", "T", at=NOW, published=NOW - 9000))
     assert edited.first_published == NOW - 9000
     assert PublishedItem(article("d", "T", at=NOW)).first_published == NOW
+
+
+def test_a_first_publication_after_the_version_itself_gives_way_to_its_time():
+    """Review F10: a version cannot have gone out first after it was made;
+    a published_at in milliseconds sorted the article above everything
+    with a date thousands of years ahead."""
+    milliseconds = PublishedItem(article("d", "T", at=NOW, published=NOW * 1000))
+    assert milliseconds.first_published == NOW
 
 
 def test_the_horizon_is_where_every_relay_is_complete():
@@ -411,9 +529,9 @@ def test_the_horizon_is_where_every_relay_is_complete():
     b = [{"id": f"b{n}", "created_at": 100 - 10 * n} for n in range(3)]
     fetched = Fetched(seen_on={**{e["id"]: ("wss://a",) for e in a},
                                **{e["id"]: ("wss://b",) for e in b}})
-    assert notes_horizon(fetched, a + b, page_size=3) == 98
-    assert notes_horizon(fetched, a + b[:2], page_size=3) == 98
-    assert notes_horizon(fetched, a[:2] + b[:2], page_size=3) is None
+    assert page_horizon(fetched, a + b, 3) == 98
+    assert page_horizon(fetched, a + b[:2], 3) == 98
+    assert page_horizon(fetched, a[:2] + b[:2], 3) is None
 
 
 def test_deletion_requests_are_asked_in_bounded_pieces():

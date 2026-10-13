@@ -299,7 +299,7 @@ class DraftStore(QObject):
         if record is None:
             return
         record.state = DraftState.FAILED
-        record.failure_reason = reason or _("decryption failed")
+        record.failure_reason = reason or _("Could not decrypt")
         self.record_changed.emit(identifier)
 
     def apply_deletion(self, identifier: str, created_at: int, event_id: str, *,

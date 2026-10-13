@@ -224,7 +224,7 @@ def test_a_closed_library_leaves_nothing_connected_to_the_store(tmp_path, monkey
     assert not shiboken6.isValid(dialog)
     store.fetch_started.emit()
     store.fetch_finished.emit()
-    store.fetch_error.emit("Could not reach any Blossom server.")
+    store.fetch_error.emit("Could not reach any media server.")
     store.listings_changed.emit()
     store.library_changed.emit()
     assert errors == []

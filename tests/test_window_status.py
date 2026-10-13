@@ -61,7 +61,9 @@ close = w.tabs.tabBar().tabButton(index, QTabBar.RightSide)
 r["close_name"] = close.accessibleName()
 r["close_object"] = close.objectName()
 r["red_in_window_css"] = "#A84444" in w.styleSheet() or "#A84444" in close.styleSheet()
-r["status_buttons"] = [b.text() for b in w.statusBar().findChildren(QToolButton)]
+# What the status bar shows: the backup's Try Again only while a backup fails.
+r["status_buttons"] = [b.text() for b in w.statusBar().findChildren(QToolButton)
+                      if b.isVisibleTo(w)]
 source = w.open_path(code)
 app.processEvents()
 r["source_line_label"] = w._line_label.text()

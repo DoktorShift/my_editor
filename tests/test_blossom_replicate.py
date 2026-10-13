@@ -166,7 +166,7 @@ def test_upload_signer_refusal_keeps_its_exact_wording():
     ctx.upload()
     assert ctx.nam.calls == []
     assert str(ctx.failures[0]) == (
-        "Your signer app didn’t sign the request: user declined"
+        "Your signer app declined the request to the media server: user declined"
     )
     assert ctx.failures[0].code == ERROR_CODES.SIGNER_REJECTED
 

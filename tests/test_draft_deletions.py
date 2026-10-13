@@ -96,7 +96,8 @@ def test_it_subscribes_to_the_accounts_draft_deletions():
     _deletions, _store, pool = watcher()
     relays, filters = pool.filters[0]
     assert relays
-    assert filters == [{"kinds": [5], "authors": [PK], "#k": ["31234"]}]
+    assert filters == [{"kinds": [5], "authors": [PK], "#k": ["31234"]},
+                       {"kinds": [5], "authors": [PK], "limit": 500}]
 
 
 def test_a_request_removes_an_older_draft():
@@ -122,6 +123,34 @@ def test_the_old_wrap_coming_back_is_removed_again():
     pool.subscription.event.emit(request(created_at=200))
     store.upsert_skeleton(skeleton(100))
     assert store.get(D) is None
+
+
+def test_a_request_naming_only_the_wrap_removes_the_draft_and_keeps_it_gone():
+    """A draft whose slug holds a secret key is deleted by a request with
+    its wrap's id alone (no address): another device knows it by that id,
+    and a relay's old copy coming back does not bring it back."""
+    from nostr import bech32
+    keyed = "backup-" + bech32.encode_nsec("11" * 32)
+    deletions, store, pool = watcher()
+    store.upsert_skeleton(skeleton(100, identifier=keyed))
+    removed = []
+    deletions.removed.connect(removed.append)
+    by_id = events.sign_event(build_deletion_request(
+        pubkey_hex=PK, identifier=keyed, wrap_id="w100", created_at=200), SK)
+    assert [tag[0] for tag in by_id["tags"]] == ["e", "k"]            # no address
+    pool.subscription.event.emit(by_id)
+    assert store.get(keyed) is None and removed == [keyed]
+    store.upsert_skeleton(skeleton(100, identifier=keyed))             # the old copy
+    assert store.get(keyed) is None
+
+
+def test_a_request_naming_an_unknown_wrap_changes_nothing():
+    deletions, store, pool = watcher()
+    store.upsert_skeleton(skeleton(100))
+    other = events.sign_event({"kind": 5, "content": "", "created_at": 200,
+                               "tags": [["e", "9" * 64], ["k", "31234"]]}, SK)
+    pool.subscription.event.emit(other)
+    assert store.get(D) is not None
 
 
 def test_a_forged_request_changes_nothing():
@@ -191,3 +220,130 @@ def test_a_request_in_the_same_second_deletes_the_draft(request_id):
     assert store.get("d1") is None
     store.upsert_skeleton(DraftWrapMeta("d1", 30023, "a" * 64, PK, 1001, None, "ct"))
     assert store.get("d1") is not None
+
+
+# --------------------------------------------------------------------- #
+# Where the requests are followed, and which (engine review L13)         #
+# --------------------------------------------------------------------- #
+
+class ClosingSubscription(FakeSubscription):
+    def __init__(self):
+        super().__init__()
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+class RoutingPool:
+    def __init__(self):
+        self.opened = []        # (relays, filters, subscription)
+
+    def subscribe(self, relays, filters):
+        subscription = ClosingSubscription()
+        self.opened.append((list(relays), filters, subscription))
+        return subscription
+
+
+def routed(entitled=None):
+    store = DraftStore()
+    store.bind_profile(PK)
+    pool = RoutingPool()
+    directory = FakeRelayDirectory()
+    directory.draft_lists[PK] = ["wss://drafts-one.example"]
+    deletions = DraftDeletions(relay_pool=pool, relay_directory=directory, store=store,
+                               entitled_relays=entitled)
+    deletions.start_for(Profile())
+    settle()
+    return deletions, store, pool, directory
+
+
+def test_a_request_without_the_k_tag_counts_too():
+    from nostr.deletion import build_deletion
+    deletions, store, pool = watcher()
+    store.upsert_skeleton(skeleton(100))
+    unsigned = build_deletion(PK, addresses=[draft_address(PK, D)], created_at=200)
+    assert not any(tag[0] == "k" for tag in unsigned["tags"])
+    pool.subscription.event.emit(events.sign_event(unsigned, SK))
+    assert store.get(D) is None
+
+
+def test_a_changed_relay_list_moves_the_requests():
+    deletions, _store, pool, directory = routed()
+    (relays, _filters, first), = pool.opened
+    assert "wss://drafts-one.example" in relays
+    directory.draft_lists[PK] = ["wss://drafts-two.example"]
+    directory.changed.emit(PK)
+    settle()
+    assert first.closed
+    moved = pool.opened[-1][0]
+    assert "wss://drafts-two.example" in moved and "wss://drafts-one.example" not in moved
+    # Another account's list changing moves nothing.
+    directory.changed.emit("b" * 64)
+    settle()
+    assert len(pool.opened) == 2
+
+
+def test_the_same_relays_are_not_asked_again():
+    deletions, _store, pool, directory = routed()
+    directory.changed.emit(PK)
+    deletions.reroute()
+    settle()
+    assert len(pool.opened) == 1 and not pool.opened[0][2].closed
+
+
+def test_a_membership_relay_is_followed_when_it_comes():
+    entitled = []
+    deletions, _store, pool, _directory = routed(entitled=lambda: list(entitled))
+    entitled.append("wss://members.example")
+    deletions.reroute()
+    settle()
+    assert "wss://members.example" in pool.opened[-1][0]
+
+
+def test_refresh_asks_again():
+    deletions, _store, pool, _directory = routed()
+    deletions.refresh()
+    settle()
+    assert len(pool.opened) == 2 and pool.opened[0][2].closed
+
+
+def test_a_draft_deleted_here_stays_deleted_until_saved_again(monkeypatch):
+    """The app's own deletion only removed the draft: an older copy a
+    slower relay still sent brought it back until the blanked wrap came
+    round (L13)."""
+    import main_window
+    from types import SimpleNamespace
+    store = DraftStore()
+    store.bind_profile(PK)
+    store.upsert_skeleton(skeleton(1_000))
+    monkeypatch.setattr(main_window.time, "time", lambda: 2_000.4)
+    host = SimpleNamespace(_draft_store=store)
+    main_window.MainWindow._on_draft_tombstoned(host, D, "t" * 64)
+    assert store.get(D) is None
+    store.upsert_skeleton(skeleton(1_000))       # the older copy, from a slow relay
+    assert store.get(D) is None
+    store.upsert_skeleton(skeleton(2_000))       # the same second: still that version
+    assert store.get(D) is None
+    store.upsert_skeleton(skeleton(2_500))       # saved again later, on another device
+    assert store.get(D) is not None
+
+
+def test_the_drafts_refresh_asks_for_the_requests_too():
+    """MainWindow cannot be built in a test (see tests/test_membership_
+    wiring.py): what the drafts panel's Refresh is connected to is read
+    from its code. The requests other apps send came with the drafts at
+    the start only (L13)."""
+    import ast
+    import inspect
+
+    import main_window
+    tree = ast.parse(inspect.getsource(main_window.MainWindow))
+    targets = set()
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "connect"
+                and isinstance(node.func.value, ast.Attribute)
+                and node.func.value.attr == "refresh_requested" and node.args):
+            targets.add(ast.unparse(node.args[0]))
+    assert {"self._draft_sync.refresh_by_hand", "self._draft_deletions.refresh"} <= targets

@@ -130,7 +130,7 @@ def test_an_incapable_signer_still_wins_because_no_retry_can_help():
     p = panel(locked_store(2))
     p.set_signer_unreachable(True)
     p.set_signer_unsupported(True)
-    assert "can’t decrypt drafts" in status_of(p)[0]
+    assert status_of(p)[0] == "Your signer app can’t decrypt drafts"
 
 
 def test_clearing_it_returns_the_line_to_normal():

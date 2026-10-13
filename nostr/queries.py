@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QObject, QTimer
 
@@ -50,10 +50,39 @@ class Fetched:
     seen_on: Mapping[str, Tuple[str, ...]] = field(default_factory=dict)  # id -> relays
     answered: Tuple[str, ...] = ()      # relays that ended their stored events (EOSE)
     refused: Tuple[str, ...] = ()       # relays that closed the request or were not reached
+    closed: Tuple[str, ...] = ()        # of them, those that closed it: they answered "no"
+    complete: bool = True               # False: events were left unread (MAX_COPIES), so
+                                        # what came back is not all there is
 
     def relays_of(self, event_id: str) -> Tuple[str, ...]:
         """The relays that sent the event with this id."""
         return self.seen_on.get(event_id, ())
+
+
+def full_pages(fetched: Fetched, events: Iterable[dict], page_size: int) -> Dict[str, int]:
+    """relay -> the oldest of the events it sent, for each relay that sent
+    a full page (``page_size`` or more, newest first): it may have older
+    ones."""
+    times: Dict[str, List[int]] = {}
+    for event in events:
+        for relay in fetched.relays_of(event["id"]):
+            times.setdefault(relay, []).append(int(event["created_at"]))
+    return {relay: min(found) for relay, found in times.items() if len(found) >= page_size}
+
+
+def page_horizon(fetched: Fetched, events: Iterable[dict], page_size: int) -> Optional[int]:
+    """How far back a page of newest-first events is complete; None when
+    it is all there is.
+
+    Each relay answers with its own newest ``page_size`` events. One that
+    sent fewer has nothing older; one that sent a full page may have,
+    from before its oldest event. So the page is complete down to the
+    oldest event of the relay that sent a full page and went least far
+    back, and the next page asks from there (``until``, which includes
+    that second).
+    """
+    full = full_pages(fetched, events, page_size)
+    return max(full.values()) if full else None
 
 
 def fetch_events(
@@ -76,7 +105,9 @@ def fetch_events(
     Only validly signed events count, and of them only those ``accept``
     takes (the author and kinds the caller asked for). Each copy is
     checked once, so a relay sending a forged copy of a real event
-    cannot hide the real one, and sending it again costs nothing.
+    cannot hide the real one, and sending it again costs nothing. A relay
+    flooding the query is cut off at MAX_COPIES, and the answer then says
+    it is not complete, so a caller can fail closed.
 
     The question lives as long as ``parent`` (or the returned object,
     when there is no parent) and lets go of itself once answered.
@@ -91,18 +122,19 @@ class _EventsQuery(QObject):
     def __init__(self, pool: RelayPool, relays: List[str], filters: List[Dict[str, Any]],
                  on_done: Callable[[Fetched], None],
                  accept: Optional[Callable[[dict], bool]], timeout_ms: int,
-                 parent: Optional[QObject], *, max_copies: int = MAX_COPIES) -> None:
+                 parent: Optional[QObject], *, max_copies: Optional[int] = None) -> None:
         super().__init__(parent)
         self._relays = relays
         self._on_done = on_done
         self._accept = accept
-        self._max_copies = max_copies
+        self._max_copies = MAX_COPIES if max_copies is None else max_copies
         self._events: Dict[str, dict] = {}
         self._seen_on: Dict[str, List[str]] = {}
         self._verdicts: Dict[str, bool] = {}     # fingerprint -> whether it counts
         self._flooded = False
         self._answered: List[str] = []
         self._refused: List[str] = []
+        self._closed: List[str] = []
         self._finished = False
         self._sub: Optional[Subscription] = None
         self._timer: Optional[QTimer] = None
@@ -110,9 +142,14 @@ class _EventsQuery(QObject):
             QTimer.singleShot(0, self._finish)
             return
         self._sub = pool.subscribe(relays, list(filters))
+        # However this query goes (answered, or with the object that asked),
+        # its subscription goes too: left open, the relays would go on
+        # sending what matches, and a dropped socket would be reopened for it.
+        self.destroyed.connect(self._sub.close)
+        self.destroyed.connect(self._sub.deleteLater)
         self._sub.relay_event.connect(self._on_event)
         self._sub.relay_eose.connect(self._on_relay_eose)
-        self._sub.relay_closed.connect(self._on_relay_refused)
+        self._sub.relay_closed.connect(self._on_relay_closed)
         self._sub.relay_failed.connect(self._on_relay_refused)
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
@@ -149,6 +186,11 @@ class _EventsQuery(QObject):
             self._answered.append(url)
         self._finish_when_settled()
 
+    def _on_relay_closed(self, url: str, reason: str = "") -> None:
+        if url not in self._answered and url not in self._refused:
+            self._closed.append(url)
+        self._on_relay_refused(url, reason)
+
     def _on_relay_refused(self, url: str, _reason: str = "") -> None:
         if url not in self._answered and url not in self._refused:
             self._refused.append(url)
@@ -169,7 +211,8 @@ class _EventsQuery(QObject):
             self._sub.deleteLater()
         result = Fetched(events=tuple(self._events.values()),
                          seen_on={k: tuple(v) for k, v in self._seen_on.items()},
-                         answered=tuple(self._answered), refused=tuple(self._refused))
+                         answered=tuple(self._answered), refused=tuple(self._refused),
+                         closed=tuple(self._closed), complete=not self._flooded)
         try:
             self._on_done(result)
         finally:
@@ -216,6 +259,11 @@ class _LatestEventQuery(QObject):
         self._finished = False
 
         self._sub = pool.subscribe(relays, filters)
+        # However this query goes (answered, or with the object that asked),
+        # its subscription goes too: left open, the relays would go on
+        # sending what matches, and a dropped socket would be reopened for it.
+        self.destroyed.connect(self._sub.close)
+        self.destroyed.connect(self._sub.deleteLater)
         self._sub.event.connect(self._on_event)
         self._sub.eose.connect(self._finish)
 
@@ -299,6 +347,11 @@ class _AddressableEventsQuery(QObject):
         self._finished = False
 
         self._sub = pool.subscribe(relays, filters)
+        # However this query goes (answered, or with the object that asked),
+        # its subscription goes too: left open, the relays would go on
+        # sending what matches, and a dropped socket would be reopened for it.
+        self.destroyed.connect(self._sub.close)
+        self.destroyed.connect(self._sub.deleteLater)
         self._sub.event.connect(self._on_event)
         self._sub.eose.connect(self._finish)
 

@@ -27,7 +27,7 @@ learns about that deletion too and never imports the post again.
 
 from __future__ import annotations
 
-from typing import Callable, Dict, Iterable, Optional, Sequence
+from typing import Callable, Dict, Iterable, List, Optional, Sequence
 
 from PySide6.QtCore import QObject, Signal
 
@@ -66,11 +66,22 @@ def deleted_identifiers(event: dict, pubkey_hex: str) -> Dict[str, int]:
             for identifier in request.identifiers(DRAFT_WRAP_KIND) if identifier}
 
 
+# Requests without the optional ``k`` tag are found by their author only:
+# the newest this many of the account's requests (engine review L13).
+UNTAGGED_LIMIT = 500
+
+
 class DraftDeletions(QObject):
     """The account's deletion requests for its drafts, applied to a store.
 
     ``removed(str)`` fires for each draft a request took away, so other
     views (the imports inbox) can show the post as removed.
+
+    The requests are followed where the drafts are read, and follow them
+    when they move: the account's relay list changing, a membership's
+    relay coming or going (:meth:`reroute`), the drafts list refreshed
+    (:meth:`refresh`). Engine review L13: they were followed on the relays
+    known at the start only.
     """
 
     removed = Signal(str)
@@ -85,7 +96,9 @@ class DraftDeletions(QObject):
         self._entitled_relays = entitled_relays
         self._profile: Optional[Profile] = None
         self._subscription = None
+        self._relays: List[str] = []
         self._generation = 0
+        relay_directory.changed.connect(self._on_relay_list_changed)
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -102,10 +115,31 @@ class DraftDeletions(QObject):
 
     def stop(self) -> None:
         self._generation += 1
-        if self._subscription is not None:
-            self._subscription.close()
-            self._subscription = None
+        self._close()
         self._profile = None
+
+    def reroute(self) -> None:
+        """The relays the drafts are read from may have changed (a
+        membership's relay came or went): follow the requests there,
+        asking again only when the set changed."""
+        profile = self._profile
+        if profile is None:
+            return
+        generation = self._generation
+        ask_draft_relays(self._relay_directory, profile,
+                         lambda relays: self._rerouted(generation, relays),
+                         entitled=self._entitled_relays, reading=True)
+
+    def _on_relay_list_changed(self, pubkey: str) -> None:
+        if self._profile is not None and pubkey.lower() == self._profile.user_pubkey.lower():
+            self.reroute()
+
+    def _rerouted(self, generation: int, relays: Iterable[str]) -> None:
+        relays = list(relays)
+        if (generation != self._generation or self._profile is None
+                or sorted(relays) == sorted(self._relays)):
+            return
+        self._subscribe(generation, relays)
 
     def refresh(self) -> None:
         """Ask again (the drafts list was refreshed, or the relays moved)."""
@@ -116,23 +150,41 @@ class DraftDeletions(QObject):
 
     # -- internals -----------------------------------------------------------
 
+    def _close(self) -> None:
+        if self._subscription is not None:
+            self._subscription.close()
+            self._subscription = None
+        self._relays = []
+
     def _subscribe(self, generation: int, relays: Iterable[str]) -> None:
         if generation != self._generation or self._profile is None:
             return
         relays = list(relays)
+        self._close()
         if not relays:
             return
-        self._subscription = self._relay_pool.subscribe(relays, [{
-            "kinds": [DELETION_KIND],
-            "authors": [self._profile.user_pubkey],
-            "#k": [str(DRAFT_WRAP_KIND)],
-        }])
+        self._relays = relays
+        author = self._profile.user_pubkey
+        self._subscription = self._relay_pool.subscribe(relays, [
+            {"kinds": [DELETION_KIND], "authors": [author], "#k": [str(DRAFT_WRAP_KIND)]},
+            # The k tag is optional (NIP-09): a request naming a draft's
+            # address without it is one of these.
+            {"kinds": [DELETION_KIND], "authors": [author], "limit": UNTAGGED_LIMIT},
+        ])
         self._subscription.event.connect(self.handle_event)
 
     def handle_event(self, event: dict) -> None:
         if self._profile is None:
             return
         event_id = str(event.get("id", ""))
-        for identifier, when in deleted_identifiers(event, self._profile.user_pubkey).items():
+        deleted = deleted_identifiers(event, self._profile.user_pubkey)
+        # A draft whose slug holds a secret key is deleted by a request that
+        # names its wrap's id alone (DraftDeleteJob): known by that id here.
+        request = read_deletion(event, self._profile.user_pubkey)
+        if request is not None and request.event_ids:
+            for record in self._store.all():
+                if record.event_id in request.event_ids:
+                    deleted.setdefault(record.identifier, request.created_at)
+        for identifier, when in deleted.items():
             if self._store.apply_deletion(identifier, when, event_id, request=True):
                 self.removed.emit(identifier)

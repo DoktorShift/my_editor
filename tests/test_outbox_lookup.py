@@ -148,6 +148,16 @@ def test_the_subscription_is_let_go_of():
 
 
 
+def test_the_subscription_closes_when_the_object_that_asked_goes_first():
+    owner = QObject()
+    pool, results = HandPool(), []
+    lookup.fetch_replaceable(pool, [A], kind=10002, author=PK, on_done=results.append,
+                             parent=owner)
+    sub = pool.subs[0]
+    del owner                                  # before the relay answered
+    assert sub.is_closed and results == []
+
+
 def test_a_finished_query_is_let_go_of_by_its_parent_and_goes_once():
     owner = QObject()
     pool, results = HandPool(), []

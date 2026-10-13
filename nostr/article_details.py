@@ -4,9 +4,15 @@
 
 A long-form article (NIP-23, kind 30023) keeps its details in tags: its
 identifier (``d``), title, summary, cover image, hashtags (``t``) and the
-time it was first published (``published_at``), and a few tags MyEditor
-carries without editing them: where an imported article came from
-(``source``) and what is known about its pictures (``imeta``, NIP-92).
+time it was first published (``published_at``). Every other tag is
+carried as it is, without editing it: where an imported article came
+from (``source``), what is known about its pictures (``imeta``, NIP-92),
+and whatever another app gave an article MyEditor edits now (zap splits,
+a content warning, alt text, labels). Only the tags MyEditor writes
+itself are not carried: the details, the app's name (``client``), and
+the people the text mentions (``p``) and the notes and articles it
+quotes (``q``), both made again from the text, so a quote taken out of
+the text is no longer tagged and none is tagged twice.
 
 An article draft holds them in its inner event. Saving the draft again,
 publishing it, and the Article Details inspector all read and write them
@@ -23,8 +29,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Iterable, List, Optional, Sequence, Tuple
 
-# Tags carried as they are: nothing in MyEditor edits them.
-CARRIED = ("source", "imeta")
+# Tags MyEditor writes itself; every other tag is carried as it is.
+DETAILS = ("d", "title", "summary", "image", "published_at", "t")
+REBUILT = ("client", "p", "q")
 
 
 @dataclass(frozen=True)
@@ -54,11 +61,10 @@ class ArticleDetails:
             if name == "t":
                 if value.strip() and value.strip().lower() not in hashtags:
                     hashtags.append(value.strip().lower())
-            elif name in CARRIED:
+            elif name in DETAILS:
+                found.setdefault(name, value)
+            elif name not in REBUILT:
                 carried.append(tuple(tag))
-            elif name in ("d", "title", "summary", "image", "published_at") \
-                    and name not in found:
-                found[name] = value
         published_at = None
         try:
             published_at = int(found.get("published_at", "").strip()) or None
@@ -86,6 +92,15 @@ class ArticleDetails:
 
     def draft_tags(self, content: str) -> List[List[str]]:
         """The tags of an article draft's inner event with ``content``."""
+        return self._detail_tags() + self.carried_tags(content)
+
+    def tags(self) -> List[List[str]]:
+        """Every detail as a tag, the carried ones all as they are:
+        ``from_tags`` makes the same details of them again (for keeping
+        them somewhere, such as a tab written down for a restart)."""
+        return self._detail_tags() + [list(tag) for tag in self.carried]
+
+    def _detail_tags(self) -> List[List[str]]:
         tags: List[List[str]] = [["d", self.identifier]]
         if self.title.strip():
             tags.append(["title", self.title.strip()])
@@ -96,5 +111,4 @@ class ArticleDetails:
         if self.published_at:
             tags.append(["published_at", str(int(self.published_at))])
         tags.extend(["t", tag] for tag in self.hashtags)
-        tags.extend(self.carried_tags(content))
         return tags

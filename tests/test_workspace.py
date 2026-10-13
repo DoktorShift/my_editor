@@ -33,7 +33,9 @@ def sample():
                      modified=True, cursor=12, anchor=8, scroll=300,
                      draft={"identifier": "abc", "inner_kind": 30023}),
             TabState(kind=PDF, path="/papers/x.pdf"),
-            TabState(kind=DOCUMENT, backup_file="/b/2.autosave", modified=True),
+            TabState(kind=DOCUMENT, backup_file="/b/2.autosave", modified=True,
+                     article=[["d", "my-post"], ["title", "My Post"],
+                              ["published_at", "1700000000"]]),
         ),
         active=1,
         from_version="3.3",
@@ -53,6 +55,15 @@ def test_a_written_workspace_comes_back_exactly(tmp_path):
     assert (restored.from_version, restored.to_version) == ("3.3", "3.4")
     assert restored.release_notes == original.release_notes
     assert restored.release_url == original.release_url
+
+
+def test_an_article_that_is_not_a_list_of_tags_is_dropped_not_the_tab(tmp_path):
+    path = tmp_path / "workspace.json"
+    for junk in ("text", [["d", 1]], [{"d": "x"}], {"d": "x"}):
+        path.write_text(json.dumps({"tabs": [{"kind": "document", "backup_file": "/b/1",
+                                              "article": junk}]}), encoding="utf-8")
+        (tab,) = workspace.take_workspace(str(path)).tabs
+        assert tab.article is None and tab.backup_file == "/b/1"
 
 
 def test_taking_the_workspace_deletes_it(tmp_path):

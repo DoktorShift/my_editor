@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import announce
 import theme
 from alerts import answer_return_as_the_system_does, start_on_default
 from i18n import _
@@ -52,6 +53,7 @@ from ..drafts import (
     new_note_identifier,
 )
 from ..publisher import slugify
+from .secret_key_check import slug_problem
 
 
 class StashKind(Enum):
@@ -405,7 +407,15 @@ class StashKindDialog(QDialog):
         seed_slug = suggested_slug or (slugify(suggested_title) if suggested_title else "")
         self._slug_edit.setText(seed_slug)
         self._slug_edit.textEdited.connect(self._on_slug_edited)
-        article_layout.addWidget(_field(_("Slug (the draft's d-tag)"), self._slug_edit))
+        slug_field = _field(_("Slug (the draft's d-tag)"), self._slug_edit)
+        # Why the slug can't be saved, under it (the draft's slug is not
+        # encrypted: relays and readers see it).
+        self._slug_problem = QLabel()
+        self._slug_problem.setObjectName("stash_kind_error")
+        self._slug_problem.setWordWrap(True)
+        self._slug_problem.hide()
+        slug_field.layout().addWidget(self._slug_problem)
+        article_layout.addWidget(slug_field)
 
         self._summary_edit = QLineEdit()
         self._summary_edit.setPlaceholderText(_("Optional one-sentence summary"))
@@ -430,7 +440,9 @@ class StashKindDialog(QDialog):
     def _apply_theme(self) -> None:
         # The default button, its focus ring and its dimmed state from the
         # one place every dialog takes them (theme.py).
+        error = theme.error_text_color(self._is_dark)
         self.setStyleSheet((_DARK_CSS if self._is_dark else _LIGHT_CSS)
+                           + f"QLabel#stash_kind_error {{ color: {error}; font-size: 11px; }}"
                            + theme.default_and_focus_css(self._is_dark))
 
     # -- behaviour ---------------------------------------------------------
@@ -441,10 +453,26 @@ class StashKindDialog(QDialog):
         self._note_card.set_selected(is_note)
         self._article_card.set_selected(not is_note)
         self._article_panel.setVisible(not is_note)
-        # Resize the dialog to its sizeHint when the panel collapses or
-        # expands: Qt won't shrink the dialog otherwise on macOS.
-        self.adjustSize()
         self._refresh_save_enabled()
+        self._fit()
+
+    def _fit(self) -> None:
+        """Fit the dialog to what it shows. The size hint makes it shrink
+        when the article panel collapses (Qt won't shrink it otherwise on
+        macOS); a wrapped message under the slug needs the height its
+        lines take at this width, which a size hint does not count (and a
+        translation can add lines)."""
+        self.adjustSize()
+        needed = self.layout().totalHeightForWidth(self.width())
+        if needed > self.height():
+            self.resize(self.width(), needed)
+
+    def showEvent(self, event) -> None:  # type: ignore[override]
+        super().showEvent(event)
+        self._fit()                  # opened with a message under the slug
+        if not self._slug_problem.isHidden():
+            # Said before the window was there to say it from: again now.
+            announce.announce(self._slug_edit, self._slug_problem.text())
 
     def _on_title_changed(self, text: str) -> None:
         if self._slug_is_auto:
@@ -464,8 +492,13 @@ class StashKindDialog(QDialog):
             return
         # Articles need a non-empty slug to be addressable. Title is
         # nice-to-have but not strictly required by the protocol.
-        slug_ok = bool(self._slug_edit.text().strip())
-        self._save_btn.setEnabled(slug_ok)
+        slug = self._slug_edit.text().strip()
+        problem = slug_problem(slug) or ""
+        said = self._slug_problem.text() if not self._slug_problem.isHidden() else ""
+        announce.field_problem(self._slug_edit, self._slug_problem, problem)
+        self._save_btn.setEnabled(bool(slug) and not problem)
+        if problem != said and self.isVisible():
+            self._fit()
 
     def _on_accept(self) -> None:
         if self._kind is StashKind.NOTE:
@@ -480,7 +513,7 @@ class StashKindDialog(QDialog):
             )
         else:
             slug = self._slug_edit.text().strip()
-            if not slug:
+            if not slug or slug_problem(slug):
                 # Defensive: the OK button shouldn't have been enabled.
                 return
             self._choice = StashChoice(

@@ -47,6 +47,7 @@ from .avatar import (
     pixmap_for_profile,
 )
 from .mention_chips import MentionChipRow
+from .secret_key_check import publishable
 
 
 # Length above which we softly suggest using long-form (kind 30023) instead.
@@ -380,14 +381,15 @@ class PublishNoteDialog(QDialog):
         if self._job is not None:
             return  # already running
 
-        self._set_busy(True)
-        self._set_status("")
-
-        unsigned = build_note(
+        unsigned = publishable(self, build_note(
             content,
             self._current_profile.user_pubkey,
             mentions=self._mention_row.mentions(),
-        )
+        ), is_dark=self._is_dark)
+        if unsigned is None:
+            return
+        self._set_busy(True)
+        self._set_status("")
         self._job = PublishJob(
             relay_pool=self._relay_pool,
             relay_directory=self._relay_directory,
@@ -410,7 +412,8 @@ class PublishNoteDialog(QDialog):
         self._job = None
         accepted = sum(1 for _url, ok, _message in results if ok)
         if accepted == 0:
-            self._set_status(_("No relay accepted the note. See log for details."), error=True)
+            self._set_status(_("The note was not published: no relay took it. Check your "
+                               "internet connection and try again."), error=True)
             self._set_busy(False)
             return
         self.published.emit(self._signed_event_id or "", results)

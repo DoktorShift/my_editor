@@ -90,6 +90,15 @@ def test_a_learned_word_goes_into_the_persons_word_list(backend, tmp_path):
     assert any(word in open(path, encoding="utf-8").read() for path in lists)
 
 
+def test_a_learned_word_can_be_taken_out_of_the_word_list_again(backend, tmp_path):
+    word = "Zxqvunlearn" + uuid.uuid4().hex[:6]
+    assert backend.learn(word, "en-US") is True
+    assert backend.has_learned(word, "en-US") is True
+    assert backend.unlearn(word, "en-US") is True
+    assert backend.has_learned(word, "en-US") is False
+    assert backend.check(word, "en-US") is False
+
+
 def test_an_ignored_word_counts_only_for_this_session(backend):
     word = "Qwrtzq" + uuid.uuid4().hex[:6]
     assert backend.ignore(word, "en-US") is True

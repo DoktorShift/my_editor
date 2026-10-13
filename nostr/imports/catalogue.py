@@ -213,8 +213,12 @@ class ExistingCatalogue(QObject):
     def _relay_query(self, relays, filters, on_done) -> None:
         # Which relays answered, not how many: only an answer from the
         # relays drafts are written to counts (see the module docstring).
+        # An answer cut off by a flooding relay is no answer: what it left
+        # out could be the draft or the deletion that decides.
         fetch_events(self._relay_pool, relays, filters,
-                     lambda fetched: on_done(list(fetched.events), set(fetched.answered)),
+                     lambda fetched: on_done(list(fetched.events),
+                                             set(fetched.answered) if fetched.complete
+                                             else set()),
                      timeout_ms=QUERY_TIMEOUT_MS, parent=self)
 
 

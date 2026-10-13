@@ -87,3 +87,40 @@ def test_a_waiting_page_shows_what_it_waits_for():
         assert shows_all_of(window, window._reading_label)
     finally:
         window.close()
+
+
+@pytest.mark.parametrize("mac, chosen", [(True, "done"), (False, "cancel")])
+def test_return_on_a_focused_button_follows_the_system(monkeypatch, mac, chosen):
+    # The sheets and windows built on this one (Draft Relays, Source
+    # Settings, Edit Profile, the account windows) answer Return as the
+    # alerts and dialogs do: on a Mac the default, whichever button has the
+    # focus; on Windows and Linux the focused button. From a field, Return
+    # chooses the default everywhere.
+    import alerts
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QLineEdit
+    from nostr.ui.assistant import NORMAL
+    monkeypatch.setattr(alerts, "IS_MAC", mac)
+    pressed = []
+    window = AssistantWindow("Test", is_dark=False)
+    form, column = page()
+    field = QLineEdit()
+    column.addWidget(field)
+    window.add_page("form", form)
+    window.show_page("form", [("cancel", "Cancel", NORMAL, lambda: pressed.append("cancel")),
+                              ("done", "Done", DEFAULT, lambda: pressed.append("done"))])
+    window.show()
+    settle()
+    try:
+        field.setFocus(Qt.FocusReason.TabFocusReason)
+        QTest.keyClick(field, Qt.Key.Key_Return)
+        assert pressed == ["done"]
+        pressed.clear()
+        cancel = window.buttons["cancel"]
+        cancel.setFocus(Qt.FocusReason.TabFocusReason)
+        settle()
+        QTest.keyClick(cancel, Qt.Key.Key_Return)
+        assert pressed == [chosen]
+    finally:
+        window.close()

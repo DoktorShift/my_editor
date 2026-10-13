@@ -53,7 +53,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from alerts import DEFAULT as ALERT_DEFAULT, DESTRUCTIVE, Button, ask
+from alerts import DEFAULT as ALERT_DEFAULT, DESTRUCTIVE, Button, answer_return_as_the_system_does, ask
 from i18n import _
 from nostr import bech32, crypto, nip49
 from nostr.outbox.defaults import STARTER_LIST
@@ -240,7 +240,7 @@ class BackupForm(QWidget):
 
         actions = QHBoxLayout()
         self.save_button = QPushButton(_("Save Backup File…"))
-        self.save_button.setAutoDefault(False)
+        answer_return_as_the_system_does([self.save_button])
         self.save_button.clicked.connect(self.save_protected)
         actions.addWidget(self.save_button)
         actions.addStretch(1)

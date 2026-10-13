@@ -12,7 +12,7 @@ from __future__ import annotations
 import textwrap
 import unittest
 
-from nostr.rss.parser import RssError, parse_feed
+from nostr.rss.parser import RssError, parse_feed, with_whole_links
 
 
 def _wp_rss() -> str:
@@ -224,6 +224,31 @@ class AutoDetectTests(unittest.TestCase):
     def test_leading_whitespace_does_not_confuse_detection(self) -> None:
         feed = parse_feed("\n\n  " + _json_feed())
         self.assertEqual(feed.format, "jsonfeed")
+
+
+class WholeLinkTests(unittest.TestCase):
+    """CP3 review L8: an item whose own link was relative kept its body's
+    relative links and images, and its footer, pointing nowhere."""
+
+    FEED = textwrap.dedent("""\
+        <?xml version="1.0"?><rss version="2.0"><channel><title>T</title>
+        <link>https://blog.example/</link>
+        <item><title>Post</title><link>/2026/10/post</link></item>
+        <item><title>Whole</title><link>https://other.example/p</link></item>
+        <item><title>Place</title><link>#top</link></item>
+        </channel></rss>""")
+
+    def test_a_relative_link_is_made_whole_against_where_the_feed_was_read(self) -> None:
+        feed = with_whole_links(parse_feed(self.FEED), "https://feeds.example/blog.xml")
+        post, whole, place = feed.items
+        self.assertEqual(post.link, "https://feeds.example/2026/10/post")
+        self.assertEqual(post.guid, "/2026/10/post")    # the identifier's seed, as written
+        self.assertEqual(whole.link, "https://other.example/p")
+        self.assertEqual(place.link, "#top")
+
+    def test_without_an_address_the_site_the_feed_names(self) -> None:
+        feed = with_whole_links(parse_feed(self.FEED), "")
+        self.assertEqual(feed.items[0].link, "https://blog.example/2026/10/post")
 
 
 if __name__ == "__main__":

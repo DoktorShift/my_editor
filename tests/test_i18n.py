@@ -281,11 +281,14 @@ _PUBLIC_PROFILE_PHRASES = {
         r"\bon profile",                     # Show on Profile
         r"\bprofile saved",                  # Profile saved.
         r"\bhave a profile",                 # You don't have a profile yet.
+        r"\binto a profile",                 # (a secret key) never goes into a profile
+        r"\btheir profile",                  # a link to their profile (an author's)
         r"^this profile can’t be edited here$",
         r"bsky\.app/profile/",               # an address someone pastes
     ),
     "de": (
-        r"\b(?:dein|deinem|deine|mein|meinem|im|kein|öffentliches) Profil",
+        r"\b(?:dein|deinem|deine|mein|meinem|im|kein|öffentliches|seinem|ihrem) Profil",
+        r"\bin ein Profil",                  # kommt nie in ein Profil (a secret key)
         r"Nostr-Profil",
         r"\bProfil (?:bearbeiten|gespeichert|wird)",
         r"\bProfilbild",

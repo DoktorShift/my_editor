@@ -26,8 +26,14 @@ Restoring from Markdown instead would read typed text as Markdown: a
 typed <br> would cut the document there. An older build ignores the list
 and restores the HTML; a record from a build that kept Markdown instead
 is restored from that only when it gives back exactly the HTML's text.
+
+The record also keeps what the tab is besides its text (tab_identity):
+the Nostr draft it is bound to and the published article it edits, so a
+recovered tab saves that draft again and publishes that article again,
+rather than starting a new one under another identifier.
 """
 
+import dataclasses
 import hashlib
 import json
 import os
@@ -48,6 +54,11 @@ from nostr.media.assets import ASSET_SCHEME
 
 
 BACKUP_DIR = os.path.join(os.path.expanduser("~"), ".cache", "my_editor", "backups")
+
+# How a document's backup stands (EditorBackup.problem): kept, or why not.
+KEPT = ""
+WRITE_FAILED = "write failed"      # the disk refused it (full, read-only, gone)
+TOO_LARGE = "too large"            # bigger than MAX_BACKUP_BYTES
 # A backup is written two seconds after the last change, and at least every
 # fifteen seconds while the typing goes on.
 _DEBOUNCE_MS = 2_000
@@ -94,6 +105,22 @@ def _source_mtime_ns(file_path: str | None) -> int | None:
         return os.stat(file_path).st_mtime_ns
     except OSError:
         return None
+
+
+def tab_identity(editor) -> dict:
+    """What a tab is besides its text, for its backup and its restart
+    record: the Nostr draft it is bound to (``draft``, the binding's
+    fields) and the published article it edits (``article``, its tags,
+    and ``article_author``, whose it is). Empty for a plain document."""
+    identity: dict = {}
+    binding = getattr(editor, "_draft_binding", None)
+    if binding is not None:
+        identity["draft"] = dataclasses.asdict(binding)
+    article = getattr(editor, "_published_article", None)
+    if article is not None:
+        identity["article"] = article.tags()
+        identity["article_author"] = getattr(editor, "_published_author", "")
+    return identity
 
 
 def document_is_empty(doc) -> bool:
@@ -275,6 +302,10 @@ class EditorBackup:
         self._last_hash = ""
         self._written_revision = None
         self._oversize_until = 0.0
+        # Silent while backups succeed; whoever shows the document hears of
+        # a failure, and of the end of one (set_status_listener).
+        self._problem = KEPT
+        self._listener = None
 
         self._timer = QTimer()
         self._timer.setSingleShot(True)
@@ -287,6 +318,23 @@ class EditorBackup:
         self._max_timer.start()
 
         self._editor.document().contentsChanged.connect(self._schedule)
+
+    @property
+    def problem(self) -> str:
+        """KEPT while the backup is kept, else why it is not
+        (WRITE_FAILED, TOO_LARGE)."""
+        return self._problem
+
+    def set_status_listener(self, listener) -> None:
+        """Install ``listener(problem)``, called when the backup stops being
+        kept and when it is kept again."""
+        self._listener = listener
+
+    def _report(self, problem: str) -> None:
+        if problem != self._problem:
+            self._problem = problem
+            if self._listener is not None:
+                self._listener(problem)
 
     @property
     def path(self) -> str:
@@ -390,18 +438,22 @@ class EditorBackup:
         """Write the snapshot. False means nothing usable is on disk yet."""
         doc = self._editor.document()
         if document_is_empty(doc):
+            self._report(KEPT)                    # nothing there to lose
             return False
         # Nothing changed since the last write that is still on disk: an
         # idle tab costs nothing on the timer's ticks.
         revision = doc.revision()
-        if revision == self._written_revision and os.path.exists(self.path):
+        identity = tab_identity(self._editor)
+        if (revision, identity) == self._written_revision and os.path.exists(self.path):
             return True
 
         content = self._snapshot()
         structure = structure_of(doc)
-        # The fingerprint covers the structure too: a change only it shows
-        # (a paragraph turned into a quote) is still written.
-        content_key = content + "\n" + json.dumps(structure, sort_keys=True)
+        # The fingerprint covers the structure and the tab's identity too:
+        # a change only they show (a paragraph turned into a quote, a draft
+        # saved under another identifier) is still written.
+        content_key = (content + "\n" + json.dumps(structure, sort_keys=True)
+                       + "\n" + json.dumps(identity, sort_keys=True))
         fingerprint = hashlib.sha256(
             f"{self._file_path or ''}\n{content_key}".encode("utf-8")
         ).hexdigest()
@@ -410,7 +462,7 @@ class EditorBackup:
         # removed it, and skipping the write then would leave the
         # document unprotected until the next keystroke.
         if fingerprint == self._last_hash and os.path.exists(self.path):
-            self._written_revision = revision
+            self._written_revision = (revision, identity)
             return True  # already on disk, byte for byte
 
         record = {
@@ -426,9 +478,11 @@ class EditorBackup:
             record["structure"] = structure
         if getattr(self._editor, "_markdown_source", False):
             record["markdown_source"] = True
+        record.update(identity)
         payload = json.dumps(record, ensure_ascii=False)
         if len(payload.encode("utf-8")) > MAX_BACKUP_BYTES:
             self._oversize_until = time.monotonic() + _OVERSIZE_RETRY_S
+            self._report(TOO_LARGE)
             return False
 
         # In one step: a crash while writing must leave the previous
@@ -437,9 +491,12 @@ class EditorBackup:
             _ensure_backup_dir()
             write_text(self.path, payload)
         except OSError:
-            return False  # backup is best-effort; never raise to the user
+            # Never raised to the person: the status bar says it, quietly.
+            self._report(WRITE_FAILED)
+            return False
         self._last_hash = fingerprint
-        self._written_revision = revision
+        self._written_revision = (revision, identity)
+        self._report(KEPT)
         return True
 
 

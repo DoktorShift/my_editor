@@ -32,10 +32,12 @@ w.show()
 app.processEvents()
 r = {}
 r["header"] = hasattr(w, "header_widget")
-column = w.format_toolbar.parentWidget().layout()
+# The toolbar's row: the toolbar and, beside it, the Write/Preview/Split switch.
+bar = w.format_bar
+column = bar.parentWidget().layout()
 order = [column.itemAt(i).widget() for i in range(column.count())]
-r["toolbar_first"] = order.index(w.format_toolbar) == 0
-r["tabs_after"] = order.index(w.tabs) > order.index(w.format_toolbar)
+r["toolbar_first"] = order.index(bar) == 0 and w.format_toolbar.parentWidget() is bar
+r["tabs_after"] = order.index(w.tabs) > order.index(bar)
 view = [a.objectName() for a in w.m_view.actions()]
 r["view"] = view
 r["appearance"] = [a.objectName() for a in w.m_appearance.actions()]

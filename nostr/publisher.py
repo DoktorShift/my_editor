@@ -57,10 +57,12 @@ from .drafts import (
 from .draft_deletions import build_deletion_request
 from .events import build_event, verify_event
 from .outbox import RelayDirectory, ask_draft_relays, normalize_relay_url
+from . import refs
 from .outbox import defaults as outbox_defaults
 from .outbox.lookup import fetch_replaceable
 from .outbox.policy import dedupe_relays
 from .profiles import Profile
+from .publish_pipeline import Mention, PublishPipeline, PublishResult
 from .relay import RelayPool
 
 
@@ -83,10 +85,6 @@ def _safe_reason(reason: str) -> str:
     return reason[:_MAX_REASON_CHARS - 1].rstrip() + "…"
 
 
-PublishResult = Tuple[str, bool, str]  # (relay_url, ok, message)
-Mention = Tuple[str, str]              # (pubkey_hex, relay_hint), hint may be empty
-
-
 # --------------------------------------------------------------------------- #
 # Mention handling                                                            #
 # --------------------------------------------------------------------------- #
@@ -97,31 +95,41 @@ _NOSTR_URI_RE = re.compile(
 )
 
 
-def extract_inline_mentions(content: str) -> List[Mention]:
+def extract_inline_mentions(content: str, *, markdown: bool = False) -> List[Mention]:
     """Find ``nostr:npub|nprofile`` URIs in ``content`` and decode them.
 
     Returns ``(pubkey_hex, relay_hint)`` tuples in document order; any URI
     that fails bech32 decoding is silently skipped (e.g. a near-miss that
-    looks like a URI but isn't valid bech32).
+    looks like a URI but isn't valid bech32). In ``markdown`` (an
+    article), a URI in code is shown as written and mentions nobody, as a
+    quote there quotes nothing (refs.find_references).
     """
     found: List[Mention] = []
-    for match in _NOSTR_URI_RE.finditer(content):
-        bech = match.group(1)
-        try:
-            if bech.startswith("npub1"):
-                pk = decode_npub(bech)
-                hint = ""
-            else:  # nprofile1
-                pk, relays = decode_nprofile(bech)
-                hint = relays[0] if relays else ""
-        except ValueError:
-            continue
-        found.append((pk, hint))
+
+    def collect(text: str) -> str:
+        for match in _NOSTR_URI_RE.finditer(text):
+            bech = match.group(1)
+            try:
+                if bech.startswith("npub1"):
+                    pk = decode_npub(bech)
+                    hint = ""
+                else:  # nprofile1
+                    pk, relays = decode_nprofile(bech)
+                    hint = relays[0] if relays else ""
+            except ValueError:
+                continue
+            found.append((pk, hint))
+        return text
+
+    if markdown:
+        refs.outside_code(content, collect)
+    else:
+        collect(content)
     return found
 
 
 def _resolve_mentions(
-    content: str, chip_mentions: Sequence[Mention]
+    content: str, chip_mentions: Sequence[Mention], *, markdown: bool
 ) -> Tuple[str, List[List[str]]]:
     """Merge inline + chip mentions into (final_content, p_tags).
 
@@ -133,7 +141,7 @@ def _resolve_mentions(
       - The resulting p-tag list deduplicates by pubkey, preserving the
         first-seen relay hint (inline URIs are seen first).
     """
-    inline = extract_inline_mentions(content)
+    inline = extract_inline_mentions(content, markdown=markdown)
     inline_pks = {pk for pk, _ in inline}
 
     appended_uris: List[str] = []
@@ -355,12 +363,18 @@ def build_note(
     through ``extra_tags`` because only this function holds the final
     content, and the "URL is in the content" check has to run against it.
 
+    Every note or article the content quotes (a ``nostr:`` link to it)
+    gets a ``q`` tag, and its author a ``p`` tag (refs.quote_tags).
+
     Always attaches ``["client", CLIENT_NAME]`` so readers that honour the
     NIP-89 client tag display "Published from MyEditor" under the note.
     """
-    final_content, p_tags = _resolve_mentions(content, mentions or [])
+    final_content, p_tags = _resolve_mentions(content, mentions or [], markdown=False)
     tags: List[List[str]] = [["client", CLIENT_NAME]]
     tags.extend(p_tags)
+    # Quoted notes and articles (NIP-18 q tags) and their authors.
+    tags.extend(refs.quote_tags(refs.find_references(final_content, markdown=False),
+                                [tag[1] for tag in p_tags]))
     tags.extend(build_imeta_tags(media, final_content))
     if extra_tags:
         tags.extend(extra_tags)
@@ -412,12 +426,15 @@ def build_article(
     """
     if not slug.strip():
         raise ValueError("article slug (d-tag) must not be empty")
-    final_content, p_tags = _resolve_mentions(content, mentions or [])
+    final_content, p_tags = _resolve_mentions(content, mentions or [], markdown=True)
     tags: List[List[str]] = [
         ["client", CLIENT_NAME],
         ["d", slug.strip()],
     ]
     tags.extend(p_tags)
+    # Quoted notes and articles (NIP-18 q tags) and their authors.
+    tags.extend(refs.quote_tags(refs.find_references(final_content),
+                                [tag[1] for tag in p_tags]))
     if title.strip():
         tags.append(["title", title.strip()])
     if summary.strip():
@@ -440,6 +457,21 @@ def build_article(
         tags=tags,
         pubkey_hex=pubkey_hex,
     )
+
+
+def without_secret_keys(unsigned: dict) -> Optional[dict]:
+    """``unsigned`` with every plain Nostr secret key in its content and
+    tags replaced by the link to the key's owner, built again so its id
+    fits; None when one cannot be (an encrypted key names no owner). The
+    ``d`` tag is never rewritten: it is the address the event is kept
+    under, and a key there is for the caller to refuse."""
+    content = refs.without_secret_keys(unsigned.get("content") or "")
+    tags = [list(tag) if tag[:1] == ["d"] else
+            [refs.without_secret_keys(value) for value in tag] for tag in unsigned["tags"]]
+    if content is None or any(value is None for tag in tags for value in tag):
+        return None
+    return build_event(kind=unsigned["kind"], content=content, tags=tags,
+                       pubkey_hex=unsigned["pubkey"], created_at=unsigned["created_at"])
 
 
 # --------------------------------------------------------------------------- #
@@ -550,16 +582,19 @@ def slugify(text: str, *, fallback: str = "untitled") -> str:
 # PublishJob: outbox, sign, publish                                           #
 # --------------------------------------------------------------------------- #
 
-class PublishJob(QObject):
-    """One end-to-end publish of any unsigned event.
+class PublishJob(PublishPipeline):
+    """One end-to-end publish of a note, an article or any other public event.
 
-    The relay plan and the signature are fetched at the same time, and
-    the event goes out once both are in. Where it goes is the relay
-    directory's decision (RelayDirectory.publish_plan), never this job's.
+    The shared pipeline (publish_pipeline.PublishPipeline): the routing and
+    the signature at the same time, the signed event checked to be exactly
+    the one asked for, then out to the relays the relay directory chose
+    (RelayDirectory.publish_plan), never to relays of this job's choosing.
 
     Signals (fired in this order on the happy path):
       status_changed(str)     human-readable progress text
       signed(str)             event id (hex) of the signed event
+      relay_result(str, bool, str)
+      first_accept(str)
       completed(list)         final list of PublishResult tuples
                               [(url, ok, message), …], fired even when
                               zero relays accepted
@@ -572,148 +607,30 @@ class PublishJob(QObject):
     event has gone to the relays, cancelling only silences the job.
     """
 
-    status_changed = Signal(str)
     signed = Signal(str)
-    completed = Signal(list)
-    failed = Signal(str)
 
-    def __init__(
-        self,
-        *,
-        relay_pool: RelayPool,
-        relay_directory: RelayDirectory,
-        session_pool: BunkerSessionPool,
-        profile: Profile,
-        unsigned_event: dict,
-        entitled_relays: Sequence[str] = (),
-        parent: Optional[QObject] = None,
-    ) -> None:
-        super().__init__(parent)
-        if unsigned_event.get("pubkey") != profile.user_pubkey:
-            raise ValueError(
-                "unsigned event pubkey does not match the publishing profile"
-            )
-        self._relay_pool = relay_pool
-        self._relay_directory = relay_directory
-        self._session_pool = session_pool
-        # Relays this account has standing on beyond its own list.
-        self._entitled_relays = list(entitled_relays)
-        self._profile = profile
-        self._unsigned = unsigned_event
-        self._plan = None
-        self._signed_event: Optional[dict] = None
-        self._sent = False
-        self._failed = False
-        self._cancelled = False
+    def _signed(self, event: dict) -> None:
+        self.signed.emit(event["id"])
 
-    def start(self) -> None:
-        """Kick off the publish. Safe to call once per instance."""
-        self.status_changed.emit(_("Connecting to your signer app…"))
-        self._relay_directory.publish_plan(
-            self._profile.user_pubkey,
-            self._on_plan_ready,
-            mentioned=mentioned_pubkeys(self._unsigned),
-            entitled=self._entitled_relays,
-        )
-        self._session_pool.get(
-            self._profile,
-            on_ready=self._on_bunker_ready,
-            on_error=self._fail,
-        )
-
-    def cancel(self) -> None:
-        """Stop: publish nothing more and emit nothing more."""
-        self._cancelled = True
-
-    # -- pipeline ----------------------------------------------------------
-
-    def _on_plan_ready(self, plan) -> None:
-        self._plan = plan
-        self._publish_when_ready()
-
-    def _on_bunker_ready(self, client) -> None:
-        if self._failed or self._cancelled:
-            return
-        self.status_changed.emit(
-            _("Waiting for signature. Approve the request in your signer app…")
-        )
-        client.sign_event(
-            self._unsigned,
-            on_success=self._on_signed,
-            on_failure=self._fail,
-        )
-
-    def _on_signed(self, signed_event: dict) -> None:
-        if self._failed or self._cancelled:
-            return
-        self._signed_event = signed_event
-        self.signed.emit(signed_event["id"])
-        if self._plan is None:
-            self.status_changed.emit(_("Finding your relays…"))
-        self._publish_when_ready()
-
-    def _publish_when_ready(self) -> None:
-        if (self._sent or self._failed or self._cancelled or self._plan is None
-                or self._signed_event is None):
-            return
-        self._sent = True
-        relays = self._plan.targets
-        self.status_changed.emit(ngettext(
-            "Publishing to {n} relay…", "Publishing to {n} relays…", len(relays),
-        ).format(n=len(relays)))
-        job = self._relay_pool.publish(relays, self._signed_event)
-        job.first_accept.connect(self._on_first_accept)
-        job.all_done.connect(self._on_publish_done)
-
-    def _fail(self, reason: str) -> None:
-        if self._failed or self._sent or self._cancelled:
-            return
-        self._failed = True
-        self.failed.emit(reason)
-
-    def _on_first_accept(self, url: str) -> None:
-        if self._cancelled:
-            return
+    def _accepted_words(self, url: str) -> str:
         # Surface the win immediately so the dialog can flip to a success
         # state even before the slower relays finish reporting.
-        self.status_changed.emit(_("Accepted by {url}. Waiting for the rest…").format(url=url))
+        return _("Accepted by {url}. Waiting for the rest…").format(url=url)
 
-    def _on_publish_done(self, results: List[PublishResult]) -> None:
-        accepted = sum(1 for _url, ok, _message in results if ok)
+    def _done_words(self, accepted: int, total: int) -> str:
+        return ngettext(
+            "Published. {accepted}/{total} relay accepted.",
+            "Published. {accepted}/{total} relays accepted.", total,
+        ).format(accepted=accepted, total=total)
+
+    def _answered(self, results: List[PublishResult]) -> None:
         # NIP-65: the mentioned people's relays that now hold this event
         # also get the author's relay list, so whoever reads it there can
         # find the rest of what the author writes.
         took_it = {normalize_relay_url(url) for url, ok, _message in results if ok}
-        reached = [url for url in self._plan.inbox if url in took_it]
+        reached = [url for url in self.plan.inbox if url in took_it]
         if reached:
             self._relay_directory.share_relay_list(self._profile.user_pubkey, reached)
-        if self._cancelled:
-            return
-        self.status_changed.emit(ngettext(
-            "Published. {accepted}/{total} relay accepted.",
-            "Published. {accepted}/{total} relays accepted.", len(results),
-        ).format(accepted=accepted, total=len(results)))
-        self.completed.emit(results)
-
-
-_PUBKEY_HEX = re.compile(r"[0-9a-f]{64}")
-
-
-def mentioned_pubkeys(event: dict) -> List[Tuple[str, str]]:
-    """``(pubkey, relay hint)`` for everyone an event mentions (its ``p``
-    tags), in tag order, once each; the hint is "" when the tag has none."""
-    out: List[Tuple[str, str]] = []
-    seen: set = set()
-    for tag in event.get("tags", []):
-        if not isinstance(tag, list) or len(tag) < 2 or tag[0] != "p":
-            continue
-        pubkey = str(tag[1]).lower()
-        if pubkey in seen or not _PUBKEY_HEX.fullmatch(pubkey):
-            continue
-        seen.add(pubkey)
-        hint = tag[2] if len(tag) >= 3 and isinstance(tag[2], str) else ""
-        out.append((pubkey, hint))
-    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -883,7 +800,7 @@ class DraftPublishJob(QObject):
                      limit=numbers.toString(MAX_INNER_PAYLOAD_BYTES)))
             return
         self._emit_status(
-            _("Encrypting the draft. Approve it in your signer app if it asks…")
+            _("Encrypting the draft. Approve the request in your signer app if it asks…")
         )
         client.nip44_encrypt_self(
             plaintext,
@@ -912,11 +829,11 @@ class DraftPublishJob(QObject):
                 extra_tags=self._extra_wrap_tags,
             )
         except ValueError as exc:
-            self._emit_failed(_("Could not build draft wrap: {reason}").format(reason=exc))
+            self._emit_failed(_("Couldn’t prepare the draft: {reason}").format(reason=exc))
             return
 
         self._emit_status(
-            _("Waiting for signature. Approve the request in your signer app…")
+            _("Waiting for your signer app. Approve the request there…")
         )
         client.sign_event(
             self._wrap_unsigned,
@@ -1059,6 +976,9 @@ class DraftDeleteJob(QObject):
     def _on_bunker_ready(self, client: BunkerClient, publish_relays: List[str]) -> None:
         if self._cancelled:
             return
+        if refs.secret_keys_in(self._identifier):
+            self._delete_by_wrap_id(client, publish_relays)
+            return
         unsigned = build_tombstone_wrap(
             identifier=self._identifier,
             inner_kind=self._inner_kind,
@@ -1066,7 +986,7 @@ class DraftDeleteJob(QObject):
             client_name=CLIENT_NAME,
         )
         self._emit_status(
-            _("Waiting for signature. Approve the deletion in your signer app…")
+            _("Waiting for your signer app. Approve the deletion there…")
         )
         client.sign_event(
             unsigned,
@@ -1098,6 +1018,23 @@ class DraftDeleteJob(QObject):
                 on_failure=lambda _reason: self._send(signed_event, publish_relays))
             return
         self._send(signed_event, publish_relays)
+
+    def _delete_by_wrap_id(self, client: BunkerClient, publish_relays: List[str]) -> None:
+        """A draft whose slug holds a secret key: a tombstone would carry
+        the key again (as its d tag), so the draft's wrap is deleted by its
+        id alone, with a NIP-09 request that names no address."""
+        if not self._replaced_wrap_id:
+            self._emit_failed(_("This draft can’t be deleted: its slug holds a secret key, "
+                                "and the version on your relays isn’t known here. Refresh "
+                                "your drafts and try again."))
+            return
+        request = build_deletion_request(pubkey_hex=self._profile.user_pubkey,
+                                         identifier=self._identifier,
+                                         wrap_id=self._replaced_wrap_id)
+        self._emit_status(_("Waiting for your signer app. Approve the deletion there…"))
+        client.sign_event(request,
+                          on_success=lambda signed: self._send(signed, publish_relays),
+                          on_failure=self._emit_failed)
 
     def _send(self, signed_event: dict, publish_relays: List[str],
               deletion_request: Optional[dict] = None) -> None:

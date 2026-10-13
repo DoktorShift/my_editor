@@ -5,13 +5,13 @@ to Nostr as a short note or a long-form article, signed by your own NIP-46 signe
 so your private key never enters the app, or by a key MyEditor keeps for you on
 this computer. You can create a new account in the app, back it up and restore
 it. You also get private encrypted drafts that sync across your devices, a media
-library on your own Blossom servers, one-way import of any blog via RSS, and
-EINUNDZWANZIG membership.
+library on your own Blossom servers, imports of posts from websites, files and
+links, and EINUNDZWANZIG membership.
 
 - [Publishing](#publishing)
 - [Private encrypted drafts](#private-encrypted-drafts)
 - [Media library (Blossom)](#media-library-blossom)
-- [Import from RSS, Atom, and JSON feeds](#import-from-rss-atom-and-json-feeds)
+- [Imports: follow websites, import files and links](#imports-follow-websites-import-files-and-links)
 - [Joining EINUNDZWANZIG in the app](#joining-einundzwanzig-in-the-app)
 
 ---
@@ -22,8 +22,8 @@ Write in the editor, hit publish, approve on your phone. The document goes out a
 
 ### What you can publish
 
-- **Short notes** (kind 1, `Ctrl+Shift+P`): the editor's content as plain text, since that is what apps show for a note. Bold and italic are left out; list markers and link addresses stay.
-- **Long-form articles** (NIP-23 kind 30023, `Ctrl+Shift+A`): the body is the same Markdown a `.md` save writes (`markdown_writer.py`): bold, italic, strikethrough, inline code, links, headings, lists, quotes, code blocks, tables and task lists reach Nostr. Underline and colors have no Markdown and stay in local files. Lines typed one under the other become paragraphs of their own (NIP-23 asks for no hard line breaks), and Markdown typed by hand (`## Heading`, `[label](url)`, a code fence) is published as typed. An article draft or `.md` file that holds something the editor cannot show (footnotes, raw HTML, an image without alt text) opens as its Markdown text and is published exactly as written, so nothing is lost. Title, summary, slug (the `d`-tag identifier), cover image, and hashtags come with it. Re-publishing with the same slug replaces the previous version, so an article stays addressable as one `naddr1…` link across edits.
+- **Short notes** (kind 1, `Nostr > Publish as Note…`): the editor's content as plain text, since that is what apps show for a note. Bold and italic are left out; list markers and link addresses stay.
+- **Long-form articles** (NIP-23 kind 30023, `Nostr > Publish as Article…`): the body is the same Markdown a `.md` save writes (`markdown_writer.py`): bold, italic, strikethrough, inline code, links, headings, lists, quotes, code blocks, tables and task lists reach Nostr. Underline and colors have no Markdown and stay in local files. Lines typed one under the other become paragraphs of their own (NIP-23 asks for no hard line breaks), and Markdown typed by hand (`## Heading`, `[label](url)`, a code fence) is published as typed. Footnotes are kept as the text Markdown writes for them (`[^1]` and `[^1]: the note`) and published as such; the preview draws them as most reading apps do and says which apps show them as typed. An article draft or `.md` file that holds something the editor cannot show (raw HTML, an image without alt text, a footnote of two paragraphs, a tab in code, code inside a list item, aligned table columns) opens as its Markdown text and is published exactly as written, so nothing is lost. Title, summary, slug (the `d`-tag identifier), cover image, and hashtags come with it. Re-publishing with the same slug replaces the previous version, so an article stays addressable as one `naddr1…` link across edits.
 - **The date an article first went out** stays with it through every edit: readers date the article by it. MyEditor takes it from the article's draft, or from what this computer remembers of its own publications (`~/.config/my_editor/article_first_published.json`), or asks the relays you publish to, the ones you read from and the indexers. An article none of them holds is new and dated today, as long as at least one of the relays you publish to (and an indexer) answered: one relay that is down does not hold up a new article. When none of the relays you publish to answers, nobody can tell whether the article went out before, so MyEditor asks you: **Try Again**, **Publish as New** (today's date) or **Cancel**. A draft saved after publishing keeps the date, so another device that opens the draft keeps it too.
 
 Both flows display a `Published from MyEditor` client tag so readers that honour NIP-89 can show which app produced the note.
@@ -60,12 +60,16 @@ Avatars and display names are pulled from each profile's kind 0 metadata in the 
 
 ### Tagging people (mentions)
 
-Inside both publish dialogs there's a **Mentions** chip row. Clicking **+ add person** opens a picker that searches:
+While a Nostr account is in use, type `@` at the start of a word in a document (or choose `Insert > Mention…`, also in the Nostr menu and the slash menu) to mention someone: a short list opens at the caret with the people you follow first ("Following"), then everyone a search finds. Type a name or a Nostr address to narrow it, and choose one: "@Name" takes the place of the `@`, as a link to the person; `Escape` keeps the `@`. `Backspace` right after a mention takes it away whole. A mention is published as the person's Nostr link (`nostr:npub1…`, or `nostr:nprofile1…` with a relay where they can be found), which every reader shows as their name, and gets a `p` tag so they hear about it (NIP-27); opened again, it shows the name. A person's Nostr address shows in the list only once their domain has confirmed it (`nostr/nip05_check.py`): anyone can write any address into a profile. An `@` inside a word (an email address) or in code stays an `@`.
+
+Inside both publish dialogs there's also a **Mentions** chip row. Clicking **+ add person** opens a picker that searches:
 
 - your **NIP-02 contact list** first (instant, offline after the first fetch), and
 - **NIP-50 search relays** (`relay.ditto.pub`, `search.nos.today`) for anyone you don't already follow.
 
 Picked profiles become inline pills and are emitted on publish as `["p", <pubkey>, <relay-hint>]` tags plus a `nostr:nprofile1…` URI appended to the body, so mention rendering works in every client. Inline `nostr:n…` URIs you paste yourself are also picked up and deduplicated automatically.
+
+A note or article that quotes another one (a `nostr:` link to a note or an article in its text) carries a `q` tag for each (NIP-18: the note's id, a relay hint and its author; the article's address), and a `p` tag for each quoted author, once, also when mentioned. A link inside code is text and quotes nothing.
 
 ### Relays and routing
 
@@ -85,21 +89,22 @@ The publisher uses eager-first-accept semantics: as soon as one relay acknowledg
 
 - **With a signer, no private key in the editor.** All signing goes through NIP-46 over NIP-44 v2 encryption. Every `sign_event` call surfaces an approval prompt in your signer.
 - **An account kept on this computer** has its key in `~/.config/my_editor/nostr_keys.json` (`chmod 600`, folder `chmod 700`), separate from the profiles. It is never shown on screen, and Sign Out deletes it, after an alert that says what a missing backup costs. A damaged key file is set aside, never overwritten.
+- **No secret key goes out by mistake.** While a Nostr account is in use, a paste or drop of a Nostr secret key (`nsec1…`, or an encrypted `ncryptsec1…`) into a document is stopped with a warning; you may paste its public key instead (the link to the key's owner). Nothing is published with a secret key in it. When you choose Publish, MyEditor looks at the note or article as it would go out (its text and link addresses, the title, summary and tags, whatever was typed into the publish window) and offers to publish it with each key replaced by its public key, or, for an encrypted key, asks you to remove it. A key in an article's or a draft's slug is shown under the slug before anything is sent, with Publish or Save dimmed (the slug is published as it is, and is never rewritten), and Edit Profile shows a key in a field under that field, with Save dimmed. Underneath all of these, nothing with a secret key in its text or tags is signed at all, by a key kept on this computer or by a signer app, so no other way can get one out; a draft's encrypted text is never affected. Plain-text and code files, and documents without an account, paste as they are.
 - **Connection spoof protection.** The `nostrconnect://` flow generates a one-time secret that the editor verifies against the signer's response before completing the handshake.
 - **Profile file permissions.** The on-disk profile store is restricted to the owner. The local channel keypair stored there only authorizes the existing bunker session; it cannot sign anything itself.
 
 ### What you published, and taking it back
 
-The Drafts panel has a second view, **Published**, beside **Drafts**. It lists the notes and articles the account in use has published, newest first by the day each one first went out. An article shows its title, a note its first line, and each row says Article or Note and the date. Editing an article later keeps its first date. Every article is listed; notes come fifty at a time, and **Load More Notes** at the end of the list brings older ones.
+The Drafts panel has a second view, **Published**, beside **Drafts**: the switch at the top of the panel moves between them (where the panel is narrow, or the text large, it is a pop-up button naming the view shown). Published lists the notes and articles the account in use has published, newest first by the day each one first went out. An article shows its title, a note its first line, and each row says Article or Note and the date. Editing an article later keeps its first date. Notes come fifty at a time, and **Load More Notes** at the end of the list brings older ones. Articles are read in one go, up to the newest 500; a relay may send fewer by its own rule (strfry sends at most 500), so an account with more articles than that sees its newest ones.
 
-The list is read from the relays you publish to. Anything you asked to delete is left out, also when one relay still has a copy and another one has your request. When no relay answers, the view says so and offers **Try Again**; it never looks empty just because nobody answered.
+The list is read from the relays you publish to. Anything you asked to delete is left out, also when one relay still has a copy and another one has your request. The list is read when you first show the view, and again with **Refresh** in the panel's action menu (the ⋯ button at its top) or **Nostr > Refresh Drafts** (Command-R on a Mac, F5 elsewhere), which is named for the view shown. When no relay answers, the view says so and offers **Try Again**; it never looks empty just because nobody answered.
 
 Right-click a row, or press the Menu key, for:
 
-- **Edit** (articles): opens the article in a tab. Publishing it again replaces it, keeps its address and keeps the date it first went out.
+- **Edit** (articles): opens the article in a tab, with its title, summary, cover and hashtags. Publishing it again replaces it, keeps its address and keeps the date it first went out; saving it as a draft offers the same article. If the article (or a draft of it) is open already, its tab comes forward.
 - **Open in Browser**: shows it on njump.me, a page any browser can open.
 - **Copy Link**: copies that same address, to share.
-- **Delete from Nostr…** (also the Delete key): asks first. Then MyEditor asks the relays to remove it with a deletion request signed by your account (NIP-09). The request goes to every relay the item was found on and to every relay you publish to. The row goes as soon as one relay accepts, and the status line says how many did. If none accepts, an alert says so and offers **Try Again**, which sends the same request again without asking your signer. People and apps that already saved a copy may still have it, and a draft of the item stays.
+- **Delete from Nostr…** (also the Delete key): asks first. Then MyEditor asks the relays to remove it with a deletion request signed by your account (NIP-09). The request goes to every relay the item was found on and to every relay you publish to. The row goes as soon as one relay accepts, and the status line says how many did. If none accepts, an alert says so and offers **Try Again**, which sends the same request again without asking your signer app. People and apps that already saved a copy may still have it, and a draft of the item stays.
 
 Return opens a row: an article for editing, a note in the browser.
 
@@ -113,7 +118,7 @@ In-progress work is saved as a **NIP-37 draft**: a kind 31234 event whose body i
 
 ### How to use it
 
-- **`Ctrl+Shift+D`** opens the Drafts panel on the right.
+- **`Nostr > Drafts…`** opens the Drafts panel on the right.
 - **`Ctrl+Shift+S`** asks where to save the current tab: local file or private Nostr draft. The choice can be remembered per tab.
 - **`Ctrl+S`** on a draft-bound tab silently re-saves the draft. Same shortcut, no questions, exactly like saving a local file.
 - Double-click a row to open the draft in a new tab. Right-click for Publish, Copy event id, or Delete.
@@ -122,11 +127,17 @@ In-progress work is saved as a **NIP-37 draft**: a kind 31234 event whose body i
 
 ### Where drafts are kept
 
-Drafts are encrypted wherever they are kept. To keep them on relays of your choice only, for example a relay of your own that lets nobody else read your events, choose **Draft Relays…** in the Drafts panel's menu, add the relays and click **Save**. An address starts with `wss://`; a relay running on this computer may also use `ws://`. You can choose up to ten.
+Drafts are encrypted wherever they are kept. To keep them on relays of your choice only, for example a relay of your own, choose **Nostr > Draft Relays…** (or **Draft Relays…** in the Drafts panel's action menu, the ⋯ button at its top), add the relays and click **Save**. The status bar then says where drafts are saved. An address starts with `wss://`; a relay running on this computer may also use `ws://`. You can choose up to ten.
 
 From then on new drafts are saved only there. Drafts are still looked for on your usual relays too, so drafts saved earlier, or by an app that doesn't know this setting, are found. The choice itself is kept on your relays, encrypted to your own key (NIP-37), so your other devices and apps that read it (Amethyst does) keep drafts in the same place. Apps that don't read it won't see the drafts saved there.
 
-**Use My Usual Relays** empties the list; after **Save**, drafts go where they went before you chose.
+Your drafts move with the setting. When you click **Save**, MyEditor first copies every draft from where drafts are kept now to where they go next, as it is: the drafts are already signed, so your signer app is not asked about them, and drafts you deleted stay deleted. The sheet counts them ("Moving 12 drafts…"). Before the new choice goes out, MyEditor asks the relays you chose for the drafts it just copied there: a relay that takes drafts but doesn't give them back is no place for them, and the sheet names it. Some relays show your drafts only after you sign in to them (NIP-42), which MyEditor can't do yet; choose another relay for now. Only when every draft is there and can be read back does the new choice go out (your signer app asks for that one), and from then on drafts are saved by it. If another app set relays for your drafts that all ask for a sign-in, MyEditor saves new drafts on your usual relays instead, and the Drafts panel says so. The copies left on relays you no longer use stay there, encrypted; nothing asks those relays to delete them.
+
+If a draft can't be copied, nothing changes: your drafts stay where they are, and the sheet says what to do. When a relay you are leaving doesn't answer, check your internet connection and try again; if that relay is gone for good, **Save Anyway** changes the setting all the same, and the drafts kept only there are no longer shown. If the setting was changed on another device while the sheet was open, nothing is written over it: the sheet shows the setting as it is now.
+
+**Use My Usual Relays** empties the list; after **Save**, your drafts move back to your usual relays and are saved there again.
+
+Another device that is running while you change this follows the new setting within a few minutes, when it next looks for drafts. Drafts it saved in the meantime on a relay you left are not lost: MyEditor keeps looking for drafts on that relay and moves them to where drafts go now, the same way **Save** does. The same holds for a relay you are leaving that stops answering while the change is saved: the sheet names it, and its drafts are moved once it answers again. Each such relay is looked at on its own, so one that is gone for good holds back no other, and it keeps being asked until it answers, in the background: no draft is given up without a word. The Draft Relays sheet lists these relays under **Still looking for drafts on**; if one is gone for good, select it and choose **Stop Looking…**. MyEditor asks first, as the drafts kept only there won't be shown any more.
 
 ### Recovery
 
@@ -147,9 +158,9 @@ Upload images, video, and audio to your own Blossom servers, browse them in a bu
 
 ### Capabilities
 
-- **Library dialog** (`Ctrl+Shift+M`): sortable, filterable grid of every blob your pubkey hosts on the configured servers. Per-file: preview, copy URL, download, open in browser, delete (across all mirrors).
+- **Library dialog** (`Nostr > Media Library…`): sortable, filterable grid of every blob your pubkey hosts on the configured servers. Per-file: preview, copy URL, download, open in browser, delete (across all mirrors).
 - **Upload** four ways: the **Upload** button, drag a file onto the drop zone, **paste** an image with `Ctrl+V` while the grid has focus, or drag an image onto the editor itself.
-- **Insert into notes** (`Ctrl+Shift+I`): pick from the library; alt text is offered inline. Markdown tabs get `![alt](url)`; rich-text tabs embed the cached image. Pasted screenshots auto-upload and auto-insert at the cursor.
+- **Insert into notes** (`Nostr > Insert Image…`, also in the Insert menu while an account is in use): pick from the library; alt text is offered inline. Markdown tabs get `![alt](url)`; rich-text tabs embed the cached image. Pasted screenshots auto-upload and auto-insert at the cursor.
 - **Hero image for articles**: the Publish Article dialog has a *Cover image* row with a built-in picker; selected images upload to Blossom in the same flow.
 - **Mirroring by default**: every upload is mirrored to all configured servers in parallel. Deletes fan out across every server the blob lives on; success on one is treated as success.
 - **Dedupe by sha256**: the same file across N servers shows up as one entry; the tile shows a *Nx* badge so you know how widely it's mirrored.
@@ -190,8 +201,35 @@ Mirror your own blog, or a website you follow, into private Nostr drafts. Choose
 - Check the posts you want, or just open one, and choose **Create Drafts** (Command-Return or Ctrl+Return). **Options…** chooses whether images are copied to your media server and whether the whole article is fetched when a feed has only a summary. Imported drafts you don't change are removed after 90 days; once you change and save one, it stays like any draft you wrote.
 - **Skip** (or Delete) sets posts aside on this computer; Undo, in the message or in Edit > Undo, brings them back, and so does Restore in the Skipped list.
 - The toolbar shows how an import is going. Its card pauses, resumes, stops, and tries posts that failed again; the Drafts panel's Imports row shows the same line.
+- **Add > Export Sources…** writes every source to an OPML file, which other feed readers (and EINUNDZWANZIG STANDUP) import.
 
 Each draft keeps the post's title, summary, cover image, hashtags and original date.
+
+### Each source's settings
+
+Choose **Source Settings…** in a source's menu (the button beside it in the sidebar, or a right-click):
+
+- Its name as MyEditor shows it, and its address. Under the name it says when it was last checked ("Checked 4 min ago").
+- **Check for new posts automatically.** When it is off, the source is read only when you open it or choose **Check Now**, and the sidebar shows a pause mark beside it.
+- Its defaults for new drafts: copy images to your media server, and fetch the whole article when the feed has only a summary. They travel with your list of sources, so EINUNDZWANZIG STANDUP uses them too.
+- **Check Now** asks the source at once (once a minute at most).
+- **Unsubscribe…** removes the source from your list on your relays, and its posts from this computer. Drafts made of them stay.
+
+While MyEditor is open, each source that is checked automatically has its own schedule. Above 50 sources the time between checks stretches, so that no more than about 200 checks run in an hour, two at a time. Each check asks only for what changed since the last one: a feed that did not change costs no download. A source that fails is asked again later, a little later each time, and its sidebar row shows a red dot with the reason.
+
+Sources show their website's icon once MyEditor has found it (the icon the home page names, or its `/favicon.ico`), and their first letter until then. Icons are kept in `~/.cache/my_editor/favicons` and looked for again after 30 days.
+
+### New posts on the app icon
+
+**Nostr > Show New Posts on the App Icon** puts the number of posts waiting in the Inbox on MyEditor's icon: in the Dock on macOS, on the taskbar on Windows, in the launcher where a Linux desktop has one. It is off until you turn it on; the Imports window offers it once, the first time new posts arrive there. There are no other notifications.
+
+### What is kept on this computer, and for how long
+
+The inbox (each source's checks, the posts, what you skipped, imports under way) is kept for your account in `~/.config/my_editor/imports/`, and never shared. A post keeps its text while it waits in the Inbox, 90 days at most; a post you skipped or imported keeps it 30 days. After that it keeps its title, link and state, which is enough to recognise it again: it is never offered as new again, and opening it says that its text is no longer kept here. **Open Original** reads it, and a draft made of it gets the post from its page.
+
+A damaged inbox file is set aside (renamed, never deleted) and a new one started; the window says so once. When the inbox cannot be opened at all, **Nostr > Imports…** says why in plain words and what to do (a folder that cannot be written to, a full disk, a program that holds the file), and tries again the next time you choose it.
+
+With MyEditor open twice, the second one shows Imports read only and says so above the list, while the first checks and imports. When the first quits, the second takes over within a few seconds.
 
 ### Addresses that work
 
@@ -205,7 +243,7 @@ Auto-discovery reads `<link rel="alternate" type="application/rss+xml">` from th
 
 Supports RSS 2.0, Atom, and JSON Feed (WordPress, Ghost, Hugo, Jekyll, Substack, Bear, Mataroa, and friends).
 
-Nothing an import reads may point into your own network: feeds, pages, podcast chapters and images on `localhost`, local-only names (`router`, `nas.local`, `.lan`), private or link-local addresses, or names that resolve to one are refused, and every redirect is checked the same way before it is followed (five at most).
+Nothing an import reads may point into your own network: feeds, pages, podcast chapters, site icons and images on `localhost`, local-only names (`router`, `nas.local`, `.lan`), private or link-local addresses, or names that resolve to one are refused, and every redirect is checked the same way before it is followed (five at most). Each connection then goes to the very address that was checked, so a name whose answer changes after the check cannot lead into your network either (DNS rebinding). Behind a proxy the address is still checked, and the proxy makes the connection.
 
 ### Nostr-native publishers
 
@@ -217,7 +255,8 @@ The sources you subscribe to are one private list on your relays, the same list 
 
 - Both apps' edits are kept: before saving, MyEditor reads the list again and merges (sources added in either app stay, sources removed in either app go, a title or a default changed here wins over the other app's unchanged one).
 - Whatever MyEditor does not understand (sources only STANDUP reads, keys it does not know) is written back unchanged.
-- A list MyEditor cannot read (one saved with an older kind of encryption, or while the signer is unreachable) is never written over; your changes stay on this computer until it can be read.
+- A list saved with the older encryption, NIP-04, is read too: with a key kept on this computer, or through your signer app when it offers that (MyEditor asks for it when it pairs). MyEditor writes the list back with NIP-44 only.
+- A list MyEditor cannot read (while your signer app does not answer, or one it cannot decrypt) is never written over; your changes stay on this computer until it can be read, and the Imports window says so above the list.
 - The list MyEditor kept before (`d` = `myeditor:feed-sources`) is merged in once and not written again.
 - Quitting waits a few seconds for changes that are still on their way. Changes that could not be sent yet are kept with the list on this computer and sent at the next start.
 

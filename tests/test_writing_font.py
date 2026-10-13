@@ -11,6 +11,10 @@ What must hold:
 
   View > Use Monospace Font for Writing sets all writing in monospace,
   and is remembered.
+
+  Writing has the thin insertion point of a word processor (a block
+  would cover the next letter of a proportional font); code and plain
+  text keep the block caret.
 """
 
 from tests.app_process import run_window_script
@@ -49,8 +53,22 @@ r["md"] = fixed(md_ed)
 txt_ed = w.open_path(txt)
 r["txt"] = fixed(txt_ed)
 r["txt_margin"] = txt_ed.viewportMargins().left()
+for ed in (new, txt_ed):
+    w.tabs.setCurrentIndex(w._editor_widget_index(ed))
+    ed.setFocus()
+    app.processEvents()
+r["caret_width"] = [new.cursorWidth(), md_ed.cursorWidth(), txt_ed.cursorWidth()]
+w.tabs.setCurrentIndex(w._editor_widget_index(new))
+new.setFocus()
+app.processEvents()
+r["block_writing"] = new.block_caret_shown()
+w.tabs.setCurrentIndex(w._editor_widget_index(txt_ed))
+txt_ed.setFocus()
+app.processEvents()
+r["block_text"] = txt_ed.block_caret_shown()
 w.act_monospace_writing.trigger()
 r["md_mono"] = fixed(md_ed)
+r["md_mono_caret"] = md_ed.cursorWidth()
 r["remembered"] = settings.load_settings().get("monospace_writing")
 w.act_monospace_writing.trigger()
 r["md_back"] = fixed(md_ed)
@@ -67,4 +85,7 @@ def test_each_document_gets_its_font(tmp_path):
     assert r["new_margin"] > 0                              # in a readable column
     assert r["txt"] is True and r["txt_margin"] == 0        # plain text: monospace, full width
     assert r["md_mono"] is True and r["remembered"] is True
+    assert r["caret_width"][0] > 0 and r["caret_width"][1] > 0   # writing: the thin caret
+    assert r["caret_width"][2] == 0 and r["md_mono_caret"] == 0   # monospace: the block
+    assert r["block_writing"] is False and r["block_text"] is True
     assert r["md_back"] is False
