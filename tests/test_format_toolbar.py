@@ -316,3 +316,35 @@ def test_a_button_that_is_on_has_a_visible_edge(dark):
     bar = FormatToolbar(actions, QMenu(), QMenu(), dark=dark, parent=window)
     edge = DARK_MUTED_FG if dark else LIGHT_MUTED_FG
     assert "QToolButton:checked" in bar.styleSheet() and edge in bar.styleSheet()
+
+
+NARROWEST = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+import i18n
+i18n.install(sys.argv[2])
+from PySide6.QtWidgets import QApplication, QToolButton
+app = QApplication(sys.argv[:1])
+import main_window
+
+w = main_window.MainWindow()
+w.show()
+ed = w.new_tab()
+w.resize(w.minimumSizeHint())
+app.processEvents()
+tb = w.format_toolbar
+more = tb.findChild(QToolButton, "qt_toolbar_ext_button")
+r = {"undo": tb.buttons["undo"].isVisible(), "redo": tb.buttons["redo"].isVisible(),
+     "more": more.isVisible(), "switch": w.view_switch.isVisible()}
+ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+@pytest.mark.parametrize("language", ["en", "de"])
+def test_undo_and_redo_stay_in_sight_in_the_narrowest_window(tmp_path, language):
+    # The rest of the buttons go into the chevron first.
+    r = run_window_script(NARROWEST, tmp_path, language)
+    assert r == {"undo": True, "redo": True, "more": True, "switch": True}

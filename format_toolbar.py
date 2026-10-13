@@ -220,6 +220,14 @@ class FormatToolbar(QToolBar):
         self.set_style_name(_("Body"))
         self.set_dark(dark)
 
+    def minimumSizeHint(self) -> QSize:  # noqa: N802, Qt's name
+        """Room for Undo and Redo both, before the chevron: the narrowest
+        window keeps them in sight, every other button going into the
+        chevron first (Qt's own minimum holds the first button only)."""
+        hint = super().minimumSizeHint()
+        redo = self.buttons["redo"].sizeHint().width() + self.layout().spacing()
+        return QSize(hint.width() + redo, hint.height())
+
     def add_trailing(self, widget: QWidget) -> QWidget:
         """A holder for ``widget`` (the Write, Preview and Split switch), to
         go right of the toolbar, outside it, looking like its far end. A
