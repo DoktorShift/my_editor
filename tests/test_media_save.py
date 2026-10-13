@@ -23,6 +23,7 @@ import os
 import sys
 import threading
 import time
+import unicodedata
 from types import SimpleNamespace
 
 try:
@@ -677,3 +678,41 @@ def test_a_saved_private_file_has_a_new_files_permissions(tmp_path, monkeypatch,
     assert (out / "Beach.png").read_bytes() == b"the real picture" * 100
     if sys.platform != "win32":
         assert oct(os.stat(out / "Beach.png").st_mode & 0o777) == oct(_new_file_mode())
+
+
+# --------------------------------------------------------------------------- #
+# One file under two spellings
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("first_name, second_name", [
+    ("A.mp4", "a.mp4"),                                       # one name where case is ignored
+    (unicodedata.normalize("NFC", "Café.mp4"), unicodedata.normalize("NFD", "Café.mp4")),
+])
+def test_two_save_as_to_one_file_by_two_spellings_keep_both(tmp_path, monkeypatch, server,
+                                                             first_name, second_name):
+    """Neither file was there when it was asked for, so the person was
+    asked to replace nothing: where the folder takes the two spellings
+    for one name, the second is numbered, not put over the first."""
+    _Blobs.delay = 0.02
+    one, two = blob(server, os.urandom(512 * 1024)), blob(server, os.urandom(512 * 1024), day=1)
+    world = library(tmp_path, monkeypatch, [one, two])
+    out = tmp_path / "out"
+    out.mkdir()
+    save_as(monkeypatch, world, one, out / first_name)
+    save_as(monkeypatch, world, two, out / second_name)
+    assert wait_for(lambda: not saving(world) and len(folder(out)) == 2, 15)
+    kept = {(out / name).read_bytes() for name in folder(out)}
+    assert kept == {_Blobs.files[one.hash], _Blobs.files[two.hash]}
+
+
+def test_save_as_onto_a_file_that_was_there_replaces_it(tmp_path, monkeypatch, server):
+    """The system's save dialog asked about that one: it is replaced."""
+    body = b"new" * 100
+    media = blob(server, body)
+    world = library(tmp_path, monkeypatch, [media])
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "Clip.mp4").write_bytes(b"old")
+    save_as(monkeypatch, world, media, out / "Clip.mp4")
+    assert wait_for(lambda: (out / "Clip.mp4").read_bytes() == body and not saving(world), 5)
+    assert folder(out) == ["Clip.mp4"]

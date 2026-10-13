@@ -86,12 +86,18 @@ class MediaSaver(QObject):
         ``keep_existing`` (Save to Folder, where the names are the
         library's): a file of that name stays, now or when this one is
         written, and this one is numbered as the Finder numbers a copy.
-        Either way a name an earlier save is still going to is never
-        taken: the person was not asked to replace a file not there yet.
+        A Save As replaces only the file the system's save dialog asked
+        about, one there now: a file that appears under that name before
+        this one is written (another save's, under another spelling the
+        folder takes for the same name, such as "a.mp4" for "A.mp4")
+        stays too. Either way a name an earlier save is still going to
+        is never taken.
         """
         taken = {save.target for save in self._queue}
         if keep_existing or target in taken:
             target, keep_existing = free_path(target, taken), True
+        elif not os.path.lexists(target):
+            keep_existing = True
         urls = [u.get("url") for u in media.urls if u.get("url")] or [media.url]
         self._queue.append(_Save(media.hash, media.size, target, urls, opener, keep_existing))
         self._next()
