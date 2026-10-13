@@ -113,6 +113,7 @@ class CoverImageField(QWidget):
         hint.setObjectName("article_field_hint")
         hint.setWordWrap(True)
         controls.addWidget(hint)
+        self._hint = hint
         controls.addStretch(1)
         row.addLayout(controls, 1)
 
@@ -126,6 +127,7 @@ class CoverImageField(QWidget):
         self.url_edit.setReadOnly(read_only)
         if self.pick_button is not None:
             self.pick_button.setEnabled(not read_only)
+        self._hint.setVisible(not read_only)    # how to pick one: nothing to pick
 
     def set_dark(self, is_dark: bool) -> None:
         self._is_dark = is_dark

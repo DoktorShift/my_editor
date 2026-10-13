@@ -759,7 +759,6 @@ class PublishArticleDialog(QDialog):
 
     def _set_busy(self, busy: bool) -> None:
         kept = self._kept_edits()
-        self._cover.setReadOnly(busy or self._image_edit in kept)
         for w in (
             self._title_edit,
             self._summary_edit,

@@ -170,6 +170,14 @@ class ArticleDetailsPanel(QFrame):
         form.setContentsMargins(16, 4, 16, 16)
         form.setSpacing(6)
 
+        # When the file keeps every detail as written: said once, here.
+        self._all_kept_note = QLabel(_("Every detail is kept as written in the file: "
+                                       "MyEditor can’t read its front matter in full."))
+        self._all_kept_note.setObjectName("article_details_hint")
+        self._all_kept_note.setWordWrap(True)
+        self._all_kept_note.hide()
+        form.addWidget(self._all_kept_note)
+
         self.title_edit = QLineEdit()
         self.title_edit.setPlaceholderText(_("Article title"))
         self._add_labeled(form, _("Title"), self.title_edit)
@@ -355,10 +363,12 @@ class ArticleDetailsPanel(QFrame):
     def _show_kept(self, kept: frozenset) -> None:
         """The details kept as written in the file: read-only, saying so."""
         self._kept = frozenset(kept)
+        every = set(self._kept_notes) | {"date", "zap_split"} <= self._kept
+        self._all_kept_note.setVisible(every)
         for detail, note in self._kept_notes.items():
             # One line for the co-authors and how zaps are shared.
-            note.setVisible(detail in self._kept or detail == "coauthors"
-                            and "zap_split" in self._kept)
+            note.setVisible(not every and (detail in self._kept or detail == "coauthors"
+                                           and "zap_split" in self._kept))
         self.title_edit.setReadOnly("title" in self._kept)
         self.summary_edit.setReadOnly("summary" in self._kept)
         self.cover.setReadOnly("image" in self._kept)
@@ -371,10 +381,9 @@ class ArticleDetailsPanel(QFrame):
         self._set_text(self.title_edit, details.title)
         if self.summary_edit.toPlainText() != details.summary:
             self.summary_edit.setPlainText(details.summary)
-        if self.cover.text() != details.image:
-            self.cover.setText(details.image)
+        self._set_text(self.cover.url_edit, details.image)
         if hashtags_from(self.tags_edit.text()) != details.hashtags:
-            self.tags_edit.setText(hashtags_text(details.hashtags))
+            self._set_text(self.tags_edit, hashtags_text(details.hashtags))
         self._set_text(self.identifier_edit, details.identifier)
         self._show_people(details)
 
@@ -387,6 +396,8 @@ class ArticleDetailsPanel(QFrame):
     def _set_text(edit: QLineEdit, text: str) -> None:
         if edit.text() != text:
             edit.setText(text)
+            if edit.isReadOnly():
+                edit.setCursorPosition(0)       # shown from its start
 
     def _show_first_published(self, when: Optional[int]) -> None:
         if when:

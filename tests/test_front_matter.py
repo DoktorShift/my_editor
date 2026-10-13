@@ -1204,3 +1204,43 @@ def test_a_huge_front_matter_is_not_tried_change_by_change(monkeypatch):
     monkeypatch.setattr(module, "_written", lambda *args: tried.append(1) or real(*args))
     assert kept_in_file(front) == frozenset() and tried == []
     assert from_front_matter(front).title == "Big"
+
+
+ALL_KEPT_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtWidgets import QApplication, QLabel
+app = QApplication(sys.argv[:1])
+import main_window
+
+w = main_window.MainWindow()
+w.resize(700, 640)
+w.show()
+w.nostr_state._active = True               # Article Details is a Nostr feature
+w._update_nostr_commands()
+w.open_path(sys.argv[2])
+w.act_article_details.setChecked(True)
+app.processEvents()
+panel = w._article_details_panel
+r = {"notes": [label.text() for label in panel.findChildren(QLabel)
+               if label.isVisibleTo(panel) and "kept as written" in label.text().lower()],
+     "title": panel.title_edit.text(), "title from": panel.title_edit.cursorPosition(),
+     "cover hint": [label.text() for label in panel.cover.findChildren(QLabel)
+                    if label.isVisibleTo(panel) and "media servers" in label.text()]}
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_a_front_matter_no_parser_reads_says_so_once_in_article_details(tmp_path):
+    """Round 9, L4: the note stood under each of six fields, and a long
+    read-only title showed its end."""
+    title = "A Long Title That Does Not Fit In The Field Of The Smallest Window"
+    path = tmp_path / "unread.md"
+    path.write_text(f"---\ntitle: {title}\nimage: /a.png\nnotes: [unclosed\n---\n\nB\n",
+                    encoding="utf-8")
+    r = run_window_script(ALL_KEPT_SCRIPT, tmp_path, str(path))
+    assert r["notes"] == ["Every detail is kept as written in the file: MyEditor can’t read "
+                          "its front matter in full."]
+    assert r["title"] == title and r["title from"] == 0 and r["cover hint"] == []
