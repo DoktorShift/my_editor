@@ -2196,6 +2196,9 @@ class HtmlEditor(QTextEdit):
     def dropEvent(self, event):
         if (event.mimeData().hasUrls()
                 and self.isSignalConnected(QMetaMethod.fromSignal(self.urls_dropped))):
+            # What is dropped goes where it is dropped, as in Pages and
+            # TextEdit: the caret moves there, and the listener inserts at it.
+            self.setTextCursor(self.cursorForPosition(event.position().toPoint()))
             self.urls_dropped.emit(list(event.mimeData().urls()))
             event.acceptProposedAction()
         else:

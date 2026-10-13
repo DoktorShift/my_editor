@@ -651,3 +651,24 @@ def test_the_prompt_says_who_can_see_the_image_not_which_hosts(
 
     assert shown[0].title == "Upload this image to your media servers?"
     assert "cdn.example" not in shown[0].title + shown[0].message
+
+def test_a_drop_goes_where_it_is_dropped_not_at_the_caret(qt_app):
+    """As in Pages and TextEdit: the caret moves to the drop point, and
+    whoever takes the urls inserts there."""
+    ed = HtmlEditor()
+    ed.resize(400, 200)
+    ed.show()
+    ed.setPlainText("first line\nsecond line\nthird line")
+    cursor = ed.textCursor()
+    cursor.setPosition(0)
+    ed.setTextCursor(cursor)
+    from PySide6.QtGui import QTextCursor
+    third = ed.document().findBlockByNumber(2)
+    point = ed.cursorRect(QTextCursor(third)).center()
+    at_drop = []
+    ed.urls_dropped.connect(lambda urls: at_drop.append(ed.textCursor().position()))
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile("/tmp/a.png")])
+    ed.dropEvent(QDropEvent(QPointF(point), Qt.CopyAction, mime,
+                            Qt.LeftButton, Qt.NoModifier))
+    assert at_drop and ed.document().findBlock(at_drop[0]).blockNumber() == 2
