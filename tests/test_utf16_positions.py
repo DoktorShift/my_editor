@@ -316,3 +316,10 @@ def test_a_link_whose_words_hold_an_emoji_ends_selected_whole():
     cursor.movePosition(QTextCursor.MoveOperation.End)
     rich_text.set_link(cursor, "🌸 the 👨‍👩‍👧 post", "https://example.com/p")
     assert cursor.selectedText() == "🌸 the 👨‍👩‍👧 post"
+
+
+def test_pasted_code_holding_an_emoji_stays_code_whole():
+    from paste import markdown_from_html
+    markdown, _count = markdown_from_html(
+        '<p>Run <span style="font-family: monospace">  🌸 ls -l 👨‍👩‍👧 </span> now</p>')
+    assert "`🌸 ls -l 👨‍👩‍👧`" in markdown

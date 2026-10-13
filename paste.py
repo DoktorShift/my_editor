@@ -60,7 +60,7 @@ from PySide6.QtGui import (
     QTextImageFormat,
 )
 
-from doc_walk import iter_blocks
+from doc_walk import doc_length, iter_blocks
 from link_url import normalize_link_input
 from markdown_writer import PASTE_FEATURES, document_to_markdown, image_markdown, read_markdown
 import rich_text
@@ -340,7 +340,8 @@ def _tidy_text(doc) -> None:
                 scripts.append((fragment.position(), fragment.length(), shown))
             if _is_monospace(fmt) and words.strip():
                 lead = len(words) - len(words.lstrip())
-                code.append((fragment.position() + lead, len(words.strip())))
+                # (Its length in the document: an emoji takes two places.)
+                code.append((fragment.position() + lead, doc_length(words.strip())))
             if fmt.isAnchor():
                 href = _kept_href(fmt.anchorHref())
                 if href is None:
