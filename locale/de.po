@@ -3885,6 +3885,10 @@ msgstr "Der Entwurf konnte nicht verschlüsselt werden: {reason}"
 msgid "It contains a secret key, and MyEditor never signs anything with a secret key in it. Remove the key and try again."
 msgstr "Darin steht ein geheimer Schlüssel, und MyEditor signiert nie etwas, in dem ein geheimer Schlüssel steht. Entferne den Schlüssel und versuche es noch einmal."
 
+#: nostr/refs.py:262
+msgid "Its text is too long or too deeply nested to check for a secret key, so MyEditor doesn't sign it."
+msgstr "Der Text ist zu lang oder zu tief verschachtelt, um ihn auf einen geheimen Schlüssel zu prüfen, deshalb signiert MyEditor ihn nicht."
+
 #: nostr/refs.py:110
 msgid "Paste a link to a note or an article."
 msgstr "Füge einen Link zu einer Notiz oder einem Artikel ein."
@@ -5342,26 +5346,26 @@ msgstr "Sicherung speichern"
 msgid "The password is wrong. Try again."
 msgstr "Das Passwort ist falsch. Versuche es erneut."
 
-#: nostr/ui/assistant.py:141
+#: nostr/ui/assistant.py:142
 msgid "Working"
 msgstr "In Arbeit"
 
-#: nostr/ui/assistant.py:356
+#: nostr/ui/assistant.py:357
 #, python-brace-format
 msgid "Step {number}, not started"
 msgstr "Schritt {number}, nicht begonnen"
 
-#: nostr/ui/assistant.py:357
+#: nostr/ui/assistant.py:358
 #, python-brace-format
 msgid "Step {number}, in progress"
 msgstr "Schritt {number}, läuft"
 
-#: nostr/ui/assistant.py:358
+#: nostr/ui/assistant.py:359
 #, python-brace-format
 msgid "Step {number}, done"
 msgstr "Schritt {number}, erledigt"
 
-#: nostr/ui/assistant.py:359
+#: nostr/ui/assistant.py:360
 #, python-brace-format
 msgid "Step {number}, failed"
 msgstr "Schritt {number}, fehlgeschlagen"
@@ -7871,42 +7875,42 @@ msgstr[1] "In deinem Profil steht ein geheimer Schlüssel in {names}, Teilen, di
 msgid "“{part}”"
 msgstr "„{part}“"
 
-#: nostr/ui/publish_article_dialog.py:356
+#: nostr/ui/publish_article_dialog.py:357
 msgid "Publish as Article"
 msgstr "Als Artikel veröffentlichen"
 
-#: nostr/ui/publish_article_dialog.py:455
+#: nostr/ui/publish_article_dialog.py:457
 msgid "Article title"
 msgstr "Titel des Artikels"
 
-#: nostr/ui/publish_article_dialog.py:463
+#: nostr/ui/publish_article_dialog.py:465
 msgid "Short summary (one sentence)"
 msgstr "Kurze Zusammenfassung (ein Satz)"
 
-#: nostr/ui/publish_article_dialog.py:474
+#: nostr/ui/publish_article_dialog.py:476
 msgid "Write your article in Markdown…"
 msgstr "Schreib deinen Artikel in Markdown …"
 
-#: nostr/ui/publish_article_dialog.py:512
+#: nostr/ui/publish_article_dialog.py:514
 #: nostr/ui/stash_kind_dialog.py:405
 msgid "article-slug"
 msgstr "mein-artikel"
 
-#: nostr/ui/publish_article_dialog.py:524
+#: nostr/ui/publish_article_dialog.py:526
 msgid "comma, separated, hashtags"
 msgstr "durch, Komma, getrennt"
 
-#: nostr/ui/publish_article_dialog.py:529
+#: nostr/ui/publish_article_dialog.py:531
 msgid "Slug (article ID)"
 msgstr "Slug (Artikel-ID)"
 
-#: nostr/ui/publish_article_dialog.py:579
+#: nostr/ui/publish_article_dialog.py:581
 #: nostr/ui/publish_note_dialog.py:282
 msgid "Publish"
 msgstr "Veröffentlichen"
 
-#: nostr/ui/publish_article_dialog.py:645
-#: nostr/ui/publish_article_dialog.py:746
+#: nostr/ui/publish_article_dialog.py:647
+#: nostr/ui/publish_article_dialog.py:748
 msgid ""
 "No cover\n"
 "selected"
@@ -7914,65 +7918,65 @@ msgstr ""
 "Kein Titelbild\n"
 "ausgewählt"
 
-#: nostr/ui/publish_article_dialog.py:657
+#: nostr/ui/publish_article_dialog.py:659
 msgid "Cover image"
 msgstr "Titelbild"
 
-#: nostr/ui/publish_article_dialog.py:709
+#: nostr/ui/publish_article_dialog.py:711
 msgid "Choose hero image"
 msgstr "Titelbild auswählen"
 
-#: nostr/ui/publish_article_dialog.py:904
+#: nostr/ui/publish_article_dialog.py:906
 msgid "Checking whether this article was published before…"
 msgstr "Prüfe, ob dieser Artikel schon veröffentlicht wurde …"
 
-#: nostr/ui/publish_article_dialog.py:538
+#: nostr/ui/publish_article_dialog.py:540
 msgid "Hashtags"
 msgstr "Hashtags"
 
-#: nostr/ui/publish_article_dialog.py:564
+#: nostr/ui/publish_article_dialog.py:566
 #: nostr/ui/publish_note_dialog.py:266
 msgid "Publishing as"
 msgstr "Veröffentlichen als"
 
-#: nostr/ui/publish_article_dialog.py:666
+#: nostr/ui/publish_article_dialog.py:668
 msgid "Choose or upload…"
 msgstr "Auswählen oder hochladen …"
 
-#: nostr/ui/publish_article_dialog.py:677
+#: nostr/ui/publish_article_dialog.py:679
 msgid "Pictures you pick are uploaded to your media servers."
 msgstr "Bilder, die du auswählst, werden auf deine Medienserver hochgeladen."
 
-#: nostr/ui/publish_article_dialog.py:679
+#: nostr/ui/publish_article_dialog.py:681
 msgid "Paste an image URL hosted anywhere on the public web."
 msgstr "Füge die Adresse eines Bildes ein, das öffentlich im Web liegt."
 
-#: nostr/ui/publish_article_dialog.py:780
+#: nostr/ui/publish_article_dialog.py:782
 msgid "▾  Advanced"
 msgstr "▾  Erweitert"
 
-#: nostr/ui/publish_article_dialog.py:782
+#: nostr/ui/publish_article_dialog.py:784
 msgid "▸  Advanced  ·  slug, cover image, hashtags"
 msgstr "▸  Erweitert  ·  Slug, Titelbild, Hashtags"
 
-#: nostr/ui/publish_article_dialog.py:819
+#: nostr/ui/publish_article_dialog.py:821
 #: nostr/ui/publish_note_dialog.py:323
 msgid "(no profiles)"
 msgstr "(keine Profile)"
 
-#: nostr/ui/publish_article_dialog.py:936
+#: nostr/ui/publish_article_dialog.py:938
 msgid "Couldn't check whether this article was published before"
 msgstr "Es konnte nicht geprüft werden, ob dieser Artikel schon veröffentlicht wurde"
 
-#: nostr/ui/publish_article_dialog.py:937
+#: nostr/ui/publish_article_dialog.py:939
 msgid "None of the relays you publish to answered. If the article went out before, publishing it as new gives it today's date, and readers see it as a new article."
 msgstr "Keines der Relays, auf denen du veröffentlichst, hat geantwortet. Wenn der Artikel schon einmal erschienen ist, bekommt er als neu veröffentlicht das heutige Datum, und Leser sehen ihn als neuen Artikel."
 
-#: nostr/ui/publish_article_dialog.py:1001
+#: nostr/ui/publish_article_dialog.py:1003
 msgid "The article was not published: no relay took it. Check your internet connection and try again."
 msgstr "Der Artikel wurde nicht veröffentlicht: Kein Relay hat ihn angenommen. Prüfe deine Internetverbindung und versuche es erneut."
 
-#: nostr/ui/publish_article_dialog.py:750
+#: nostr/ui/publish_article_dialog.py:752
 msgid ""
 "Preview shown\n"
 "for library picks"
@@ -7980,24 +7984,24 @@ msgstr ""
 "Vorschau nur für\n"
 "Bilder der Mediathek"
 
-#: nostr/ui/publish_article_dialog.py:792
+#: nostr/ui/publish_article_dialog.py:794
 #, python-brace-format
 msgid "{words} word · ~{minutes} min read"
 msgid_plural "{words} words · ~{minutes} min read"
 msgstr[0] "{words} Wort · ~{minutes} Min. Lesezeit"
 msgstr[1] "{words} Wörter · ~{minutes} Min. Lesezeit"
 
-#: nostr/ui/publish_article_dialog.py:1024
+#: nostr/ui/publish_article_dialog.py:1026
 #: nostr/ui/publish_note_dialog.py:421
 #, python-brace-format
 msgid "Publish failed: {reason}"
 msgstr "Veröffentlichen fehlgeschlagen: {reason}"
 
-#: nostr/ui/publish_article_dialog.py:940
+#: nostr/ui/publish_article_dialog.py:942
 msgid "Publish as New"
 msgstr "Als neu veröffentlichen"
 
-#: nostr/ui/publish_article_dialog.py:968
+#: nostr/ui/publish_article_dialog.py:970
 #, python-brace-format
 msgid "Cannot build article: {reason}"
 msgstr "Artikel kann nicht erstellt werden: {reason}"
@@ -8351,21 +8355,25 @@ msgstr "Ende-zu-Ende mit deinem Nostr-Schlüssel verschlüsselt. Nur du kannst i
 msgid "A secret key can’t be part of the slug, which is published as it is. Change the title or the slug."
 msgstr "Ein geheimer Schlüssel darf nicht im Slug stehen, denn der Slug wird so veröffentlicht, wie er ist. Ändere den Titel oder den Slug."
 
-#: nostr/ui/secret_key_check.py:57
-#: nostr/ui/secret_key_check.py:46
+#: nostr/ui/secret_key_check.py:62
 #: nostr/ui/secret_key_check.py:51
+#: nostr/ui/secret_key_check.py:56
 msgid "This text contains a secret key"
 msgstr "Dieser Text enthält einen geheimen Schlüssel"
 
-#: nostr/ui/secret_key_check.py:59
+#: nostr/ui/secret_key_check.py:64
 msgid "Anyone who has it can publish as its owner, and once published it can never be taken back. Replace it with the public key, which only says who it belongs to?"
 msgstr "Wer ihn hat, kann im Namen seines Besitzers veröffentlichen, und einmal veröffentlicht, lässt er sich nie mehr zurückholen. Durch den öffentlichen Schlüssel ersetzen, der nur sagt, wem er gehört?"
 
-#: nostr/ui/secret_key_check.py:53
+#: nostr/ui/secret_key_check.py:43
+msgid "This text can’t be checked for a secret key"
+msgstr "Dieser Text lässt sich nicht auf einen geheimen Schlüssel prüfen"
+
+#: nostr/ui/secret_key_check.py:58
 msgid "Anyone who has it can publish as its owner, and once published it can never be taken back. Remove it before publishing."
 msgstr "Wer ihn hat, kann im Namen seines Besitzers veröffentlichen, und einmal veröffentlicht, lässt er sich nie mehr zurückholen. Entferne ihn vor dem Veröffentlichen."
 
-#: nostr/ui/secret_key_check.py:63
+#: nostr/ui/secret_key_check.py:68
 msgid "Replace with Public Key"
 msgstr "Durch öffentlichen Schlüssel ersetzen"
 

@@ -27,7 +27,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from typing import Callable, Iterable, Iterator, List, Optional, Sequence, Tuple
+from typing import Callable, Iterable, List, Optional, Sequence, Tuple
 
 from i18n import N_, _
 
@@ -259,32 +259,59 @@ def secret_keys_in(text: str) -> List[str]:
 # cannot hold one in plain text, so it never trips this.
 SECRET_KEY_REFUSED = N_("It contains a secret key, and MyEditor never signs anything with a "
                         "secret key in it. Remove the key and try again.")
+UNREADABLE_REFUSED = N_("Its text is too long or too deeply nested to check for a secret key, "
+                        "so MyEditor doesn't sign it.")
+
+# JSON content longer than this is not read: more than relays take, and
+# reading it would hold up signing (it is refused instead).
+_JSON_LIMIT = 256 * 1024
 
 
-def secret_keys_in_event(event: dict) -> List[str]:
+def secret_keys_in_event(event: dict) -> Optional[List[str]]:
     """The Nostr secret keys in what ``event`` makes public: its content
     (and, when it is JSON, as a profile is, every string in it as read, so
     an escape such as ``\n`` before a key hides nothing) and every value of
-    every tag, each once, in order."""
+    every tag, each once. None when the content is JSON too long or too
+    deeply nested to read in full: what can't be read can't be cleared."""
     content = event.get("content") or ""
-    values = [content]
-    try:
-        values += list(_strings_in(json.loads(content)))
-    except (ValueError, RecursionError):
-        pass                        # not JSON (or absurdly deep): the text is all there is
+    values = _content_strings(content)
+    if values is None:
+        return None
     values += [value for tag in event.get("tags") or () for value in tag
                if isinstance(value, str)]
     return secret_keys_in("\n".join(values))
 
 
-def _strings_in(value) -> Iterator[str]:
-    """Every string in a value read from JSON, keys too, at any depth."""
-    if isinstance(value, str):
-        yield value
-    elif isinstance(value, dict):
-        for key, item in value.items():
-            yield key
-            yield from _strings_in(item)
-    elif isinstance(value, list):
-        for item in value:
-            yield from _strings_in(item)
+def signing_refusal(event: dict) -> Optional[str]:
+    """Why a signer must not sign ``event``, in words to show, or None."""
+    keys = secret_keys_in_event(event)
+    if keys is None:
+        return _(UNREADABLE_REFUSED)
+    return _(SECRET_KEY_REFUSED) if keys else None
+
+
+def _content_strings(content: str) -> Optional[List[str]]:
+    """The text to look at in ``content``: itself, and when it is JSON
+    every string in it, keys too, at any depth (walked with a list, not
+    by recursion). None when it is JSON that can't be read in full."""
+    strings = [content]
+    if content.lstrip()[:1] not in ("{", "[", '"'):
+        return strings                       # not JSON that can hold text
+    if len(content) > _JSON_LIMIT:
+        return None
+    try:
+        pending = [json.loads(content)]
+    except RecursionError:
+        return None
+    except ValueError:
+        return strings                       # it only looked like JSON
+    while pending:
+        value = pending.pop()
+        if isinstance(value, str):
+            strings.append(value)
+        elif isinstance(value, dict):
+            pending.extend(value.keys())
+            pending.extend(value.values())
+        elif isinstance(value, list):
+            pending.extend(value)
+    return strings

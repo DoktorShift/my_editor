@@ -610,8 +610,9 @@ class BunkerClient(QObject):
         if not self._is_connected:
             on_failure("not connected")
             return
-        if refs.secret_keys_in_event(unsigned_event):
-            on_failure(_(refs.SECRET_KEY_REFUSED))
+        refusal = refs.signing_refusal(unsigned_event)
+        if refusal:
+            on_failure(refusal)
             return
 
         payload = {

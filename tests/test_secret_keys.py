@@ -222,6 +222,37 @@ def test_a_key_behind_a_json_escape_is_found(about):
         assert _sign_locally(event) == {"refused": refs.SECRET_KEY_REFUSED}
 
 
+@pytest.mark.parametrize("content", [
+    "[" * 100_000 + json.dumps(f"My key:\n{NSEC}") + "]" * 100_000,   # deeper than JSON reads
+    json.dumps({"about": "x" * (300 * 1024)}),                         # longer than is read
+])
+def test_json_that_cant_be_read_in_full_is_never_signed(content):
+    """No falling back to the raw text, where an escape could hide a key:
+    what can't be read can't be cleared, so it is refused, in words."""
+    event = {"kind": 0, "created_at": 1_800_000_000, "tags": [], "content": content}
+    assert refs.secret_keys_in_event(event) is None
+    assert _sign_locally(event) == {"refused": refs.UNREADABLE_REFUSED}
+
+
+def test_a_key_deep_in_json_that_can_be_read_is_found():
+    event = {"kind": 0, "created_at": 1_800_000_000, "tags": [],
+             "content": "[" * 900 + json.dumps(f"My key:\n{NSEC}") + "]" * 900}
+    assert refs.secret_keys_in_event(event) == [NSEC]
+    assert _sign_locally(event) == {"refused": refs.SECRET_KEY_REFUSED}
+
+
+def test_plain_text_of_any_length_and_wide_json_are_read_quickly():
+    import time
+    long_article = {"kind": 30023, "created_at": 1, "tags": [["d", "x"]],
+                    "content": "Words. " * 60_000}                 # 420 KB, not JSON
+    assert refs.secret_keys_in_event(long_article) == []
+    wide = {"kind": 0, "created_at": 1, "tags": [],
+            "content": "[" * 900 + ",".join(['"a"'] * 25_000) + "]" * 900}
+    started = time.perf_counter()
+    assert refs.secret_keys_in_event(wide) == []
+    assert time.perf_counter() - started < 0.5                    # no walk by recursion
+
+
 def test_an_encrypted_draft_is_signed():
     from nostr import crypto
     secret = bytes.fromhex(SECRET)

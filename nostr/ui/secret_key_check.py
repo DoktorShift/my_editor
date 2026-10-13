@@ -38,7 +38,12 @@ def publishable(parent, unsigned: dict, *, is_dark: Optional[bool] = None) -> Op
     it; with each one replaced by the link to its owner once the person
     agrees; None when nothing may go out (they cancelled, or a key is
     encrypted and has no owner to name)."""
-    if not refs.secret_keys_in_event(unsigned):
+    keys = refs.secret_keys_in_event(unsigned)
+    if keys is None:
+        inform(parent, title=_("This text can’t be checked for a secret key"), caution=True,
+               is_dark=is_dark, message=_(refs.UNREADABLE_REFUSED))
+        return None
+    if not keys:
         return unsigned
     slug = next((tag[1] for tag in unsigned["tags"] if tag[:1] == ["d"] and len(tag) > 1), "")
     problem = slug_problem(slug)

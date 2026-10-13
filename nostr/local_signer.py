@@ -23,7 +23,6 @@ from typing import Callable, List, Optional
 
 from PySide6.QtCore import QObject, QTimer
 
-from i18n import _
 from nostr import crypto, events, refs
 
 LOCAL = "local"     # Profile.signer for accounts whose key is kept here
@@ -57,8 +56,9 @@ class LocalSigner(QObject):
     def sign_event(self, unsigned_event: dict, on_success: Callable[[dict], None],
                    on_failure: Callable[[str], None], *, timeout_ms: int = 0) -> None:
         def work():
-            if refs.secret_keys_in_event(unsigned_event):
-                raise ValueError(_(refs.SECRET_KEY_REFUSED))
+            refusal = refs.signing_refusal(unsigned_event)
+            if refusal:
+                raise ValueError(refusal)
             payload = {
                 "kind": unsigned_event["kind"],
                 "content": unsigned_event.get("content", ""),
