@@ -14,7 +14,7 @@ import time
 from typing import Callable, List, Optional, Sequence
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QColor, QPixmap
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -23,7 +23,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMenu,
-    QPushButton,
     QTextEdit,
     QToolButton,
     QVBoxLayout,
@@ -41,7 +40,7 @@ from ..article_details import ArticleDetails, hashtags_from
 from ..first_publications import FirstPublications
 from ..avatar_store import AvatarStore
 from ..bech32 import encode_naddr
-from ..blossom.store import MediaFile, MediaStore
+from ..blossom.store import MediaStore
 from ..bunker import BunkerSessionPool, humanize_failure
 from ..known_people import KnownPeople
 from ..outbox import RelayDirectory, relays_from
@@ -61,11 +60,9 @@ from .avatar import (
 from ..media.media_visibility import MediaVisibility
 from ..media.private_library import PrivateLibrary
 from ..media.publish_copy import PublicCopyMaker
-from .media_library_dialog import MediaLibraryDialog
-from .publish_copy_dialog import resolve_pick
+from .cover_field import CoverImageField
 from .mention_chips import MentionChipRow
 from .secret_key_check import publishable, slug_problem
-from .thumbnail_loader import ThumbnailLoader
 
 
 
@@ -409,13 +406,6 @@ class PublishArticleDialog(QDialog):
         # publish another article.
         self._slug_is_auto = not self._details.identifier
         self._advanced_open = False
-        # Cover-image preview state.
-        self._cover_thumb_hash: str = ""
-        self._cover_loader: Optional[ThumbnailLoader] = (
-            ThumbnailLoader(parent=self) if media_store is not None else None
-        )
-        if self._cover_loader is not None:
-            self._cover_loader.ready.connect(self._on_cover_thumb_ready)
 
         self._build_ui(
             body_markdown=body_markdown,
@@ -518,11 +508,13 @@ class PublishArticleDialog(QDialog):
         self._slug_edit.setText(seed_slug)
         self._slug_edit.textEdited.connect(self._on_slug_edited)
 
-        self._image_edit = QLineEdit()
-        self._image_edit.setObjectName("article_advanced_field")
-        self._image_edit.setPlaceholderText("https://example.com/cover.png")
-        self._image_edit.setClearButtonEnabled(True)
-        self._image_edit.textChanged.connect(self._on_cover_url_changed)
+        # The cover, chosen the same way as in Article Details.
+        self._cover = CoverImageField(
+            media_store=self._media_store, media_visibility=self._media_visibility,
+            copy_maker=self._copy_maker, private_library=self._private_library,
+            profile=lambda: self._current_profile, is_dark=self._is_dark)
+        self._cover.problem.connect(lambda reason: self._set_status(reason, error=True))
+        self._image_edit = self._cover.url_edit
 
         self._tags_edit = QLineEdit()
         self._tags_edit.setPlaceholderText(_("comma, separated, hashtags"))
@@ -543,7 +535,7 @@ class PublishArticleDialog(QDialog):
                               Qt.AlignmentFlag.AlignTop)
         adv.addLayout(compact_row)
 
-        adv.addWidget(self._build_cover_field())
+        adv.addWidget(self._cover)
 
         self._advanced_panel.setVisible(False)
         root.addWidget(self._advanced_panel)
@@ -622,156 +614,6 @@ class PublishArticleDialog(QDialog):
     def _on_body_changed(self) -> None:
         self._refresh_meta()
         self._refresh_publish_enabled()
-
-    # -- cover image -------------------------------------------------------
-
-    # Compact landscape thumb, large enough to read at a glance, small
-    # enough that the cover block sits at the same visual weight as the
-    # slug + hashtags row above it.
-    _COVER_THUMB_WIDTH = 144
-    _COVER_THUMB_HEIGHT = 84
-
-    def _build_cover_field(self) -> QWidget:
-        """Compose the Cover-image field as one tidy horizontal block:
-
-            [thumbnail]   COVER IMAGE
-                          [URL field________________] [Choose or upload…]
-
-        The thumbnail is on the left so the user's eye lands on the
-        actual image first; the controls cluster on the right. Alt
-        text is intentionally absent: NIP-23's ``image`` tag has no
-        alt sibling.
-        """
-        container = QWidget()
-        row = QHBoxLayout(container)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(12)
-
-        self._cover_preview = QLabel(_("No cover\nselected"))
-        self._cover_preview.setObjectName("article_cover_preview")
-        self._cover_preview.setFixedSize(
-            self._COVER_THUMB_WIDTH, self._COVER_THUMB_HEIGHT
-        )
-        self._cover_preview.setAlignment(Qt.AlignCenter)
-        row.addWidget(self._cover_preview, 0, Qt.AlignTop)
-
-        controls = QVBoxLayout()
-        controls.setContentsMargins(0, 0, 0, 0)
-        controls.setSpacing(4)
-
-        label = QLabel(_("Cover image"))
-        label.setObjectName("article_field_label")
-        controls.addWidget(label)
-
-        input_row = QHBoxLayout()
-        input_row.setContentsMargins(0, 0, 0, 0)
-        input_row.setSpacing(6)
-        input_row.addWidget(self._image_edit, 1)
-        if self._media_store is not None:
-            self._image_pick_btn = QPushButton(_("Choose or upload…"))
-            self._image_pick_btn.setCursor(Qt.PointingHandCursor)
-            self._image_pick_btn.clicked.connect(self._on_choose_cover_image)
-            input_row.addWidget(self._image_pick_btn)
-        else:
-            self._image_pick_btn = None
-        controls.addLayout(input_row)
-        # Subtle help line under the input, since Notion / Medium do something
-        # similar so users know where the asset comes from without us
-        # having to write docs.
-        hint = QLabel(
-            _("Pictures you pick are uploaded to your media servers.")
-            if self._media_store is not None
-            else _("Paste an image URL hosted anywhere on the public web.")
-        )
-        hint.setObjectName("article_field_hint")
-        controls.addWidget(hint)
-        controls.addStretch(1)
-
-        row.addLayout(controls, 1)
-        return container
-
-    def _on_choose_cover_image(self) -> None:
-        """Open the Media Library picker scoped to images, with the alt
-        row hidden (cover URL has no alt sibling on Nostr)."""
-        if self._media_store is None:
-            return
-        # Reading the private library is what lets this picker tell a
-        # private file from a public one. Without it every file reads as
-        # unchecked and no cover can be chosen at all, which is the
-        # honest failure but a useless one, so the read starts here.
-        if self._private_library is not None:
-            self._private_library.bind_profile(self._current_profile)
-        picker = MediaLibraryDialog(
-            store=self._media_store,
-            is_dark=self._is_dark,
-            pick_mode=True,
-            pick_alt_text=False,
-            visibility=self._media_visibility,
-            parent=self,
-        )
-        if self._private_library is not None:
-            picker.bind_private_library(self._private_library)
-        picker.setWindowTitle(_("Choose hero image"))
-        # Pre-filter to images: videos / audio can't be a NIP-23 cover.
-        picker._filter_combo.setCurrentIndex(1)
-        picker.file_picked.connect(self._on_cover_image_picked)
-        picker.exec()
-
-    def _on_cover_image_picked(self, media: MediaFile, _alt: str) -> None:
-        # A private pick cannot become a cover as it stands: the bytes at
-        # that address are ciphertext, so a reader would get a broken
-        # image and the user would have advertised a file they meant to
-        # keep. The gate turns it into a public copy first, or leaves the
-        # field alone.
-        picked = resolve_pick(
-            media,
-            visibility=self._media_visibility,
-            maker=self._copy_maker,
-            is_dark=self._is_dark,
-            parent=self,
-        )
-        if not picked.ok:
-            if picked.reason:
-                self._set_status(picked.reason, error=True)
-            return
-        # Setting .text() triggers ``_on_cover_url_changed``, which
-        # clears any prior thumbnail. We then kick off the load by hash
-        # so the preview reflects the new pick.
-        self._image_edit.setText(picked.url)
-        self._cover_thumb_hash = picked.sha256
-        if self._cover_loader is not None and (picked.mime or "").startswith("image/"):
-            self._cover_loader.load(picked.sha256, picked.url)
-
-    def _on_cover_url_changed(self, text: str) -> None:
-        """Reset the preview whenever the URL field changes. A typed URL
-        we don't have a hash for stays as text-only: the user already
-        committed to it by typing the URL; downloading + previewing
-        arbitrary remote URLs from a publish dialog would be a surprise."""
-        if not text.strip():
-            self._clear_cover_preview(_("No cover\nselected"))
-        elif not self._cover_thumb_hash:
-            # Manual entry, so we have no hash, so no thumbnail. Make the
-            # preview state honest rather than misleading.
-            self._clear_cover_preview(_("Preview shown\nfor library picks"))
-
-    def _clear_cover_preview(self, placeholder: str) -> None:
-        self._cover_thumb_hash = ""
-        self._cover_preview.setPixmap(QPixmap())
-        # Wrap text onto two lines so a short caption sits centered in
-        # the thumbnail box without overflowing its fixed width.
-        self._cover_preview.setText(placeholder)
-
-    def _on_cover_thumb_ready(self, sha: str, _path: str, pix: QPixmap) -> None:
-        if sha != self._cover_thumb_hash or pix.isNull():
-            return
-        scaled = pix.scaled(
-            self._COVER_THUMB_WIDTH - 2,
-            self._COVER_THUMB_HEIGHT - 2,
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation,
-        )
-        self._cover_preview.setPixmap(scaled)
-        self._cover_preview.setText("")
 
     # -- advanced panel ----------------------------------------------------
 

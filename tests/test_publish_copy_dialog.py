@@ -712,55 +712,55 @@ def test_a_non_image_copy_falls_back_to_a_link(gated):
     assert window.adopted == []
 
 
-class _CoverDialog:
-    """PublishArticleDialog's cover-pick path over a stub."""
+class _CoverField:
+    """The article's Cover Image field (nostr/ui/cover_field.py), the one
+    the publish window and Article Details share, with its complaints
+    kept."""
 
-    from nostr.ui.publish_article_dialog import PublishArticleDialog as _Dialog
-
-    _on_cover_image_picked = _Dialog._on_cover_image_picked
-
-    def __init__(self) -> None:
-        self._is_dark = True
-        self._media_visibility = MediaVisibility()
-        self._copy_maker = object()
-        self._cover_thumb_hash = ""
-        self._cover_loader = None
-        self.text = ""
+    def __init__(self, visibility=None) -> None:
+        from nostr.ui.cover_field import CoverImageField
+        self.field = CoverImageField(media_visibility=visibility or MediaVisibility(),
+                                     copy_maker=object(), is_dark=True)
         self.errors: list = []
-        self._image_edit = SimpleNamespace(setText=self._set_text)
+        self.field.problem.connect(self.errors.append)
 
-    def _set_text(self, value) -> None:
-        self.text = value
+    def pick(self, media) -> None:
+        self.field.picked(media, "")
 
-    def _set_status(self, text, *, error=False) -> None:
-        self.errors.append((text, error))
+    @property
+    def text(self) -> str:
+        return self.field.text()
+
+    @property
+    def thumb_hash(self) -> str:
+        return self.field._thumb_hash
 
 
 def test_the_cover_field_takes_the_copy_not_the_private_address(monkeypatch):
-    import nostr.ui.publish_article_dialog as module
+    import nostr.ui.cover_field as module
 
     monkeypatch.setattr(module, "resolve_pick", lambda media, **kw: PickResolution(
         sha256=SCRUBBED_SHA, url=f"{CDN}/{SCRUBBED_SHA}", mime="image/png", ok=True,
     ))
-    dialog = _CoverDialog()
-    dialog._on_cover_image_picked(make_media(CIPHER_SHA, servers=(SERVER,)), "")
+    cover = _CoverField()
+    cover.pick(make_media(CIPHER_SHA, servers=(SERVER,)))
 
-    assert dialog.text == f"{CDN}/{SCRUBBED_SHA}"
-    assert dialog._cover_thumb_hash == SCRUBBED_SHA
+    assert cover.text == f"{CDN}/{SCRUBBED_SHA}"
+    assert cover.thumb_hash == SCRUBBED_SHA
 
 
 def test_a_refused_cover_leaves_the_field_alone(monkeypatch):
-    import nostr.ui.publish_article_dialog as module
+    import nostr.ui.cover_field as module
 
     monkeypatch.setattr(module, "resolve_pick", lambda media, **kw: PickResolution(
         reason="No public copy was created.",
     ))
-    dialog = _CoverDialog()
-    dialog._on_cover_image_picked(make_media(CIPHER_SHA, servers=(SERVER,)), "")
+    cover = _CoverField()
+    cover.pick(make_media(CIPHER_SHA, servers=(SERVER,)))
 
-    assert dialog.text == ""
-    assert dialog._cover_thumb_hash == ""
-    assert dialog.errors == [("No public copy was created.", True)]
+    assert cover.text == ""
+    assert cover.thumb_hash == ""
+    assert cover.errors == ["No public copy was created."]
 
 
 def test_a_pick_that_is_already_public_asks_nothing(tmp_path):
@@ -1052,28 +1052,18 @@ def test_a_public_file_still_inserts_while_the_library_is_unreadable(tmp_path):
 # The article's cover picker is the second way into the same choice      #
 # --------------------------------------------------------------------- #
 
-class _Chooser:
-    """PublishArticleDialog's cover-picker path over a stub.
+def _chooser(library):
+    """The Cover Image field's picker path, over the Media Library stub.
 
     This picker's library is bound nowhere else in the app, so before
     this it was never read at all and every private file in it looked
-    like an ordinary public blob for the life of the dialog.
-    """
-
-    from nostr.ui.publish_article_dialog import PublishArticleDialog as _Dialog
-
-    _on_choose_cover_image = _Dialog._on_choose_cover_image
-
-    def __init__(self, library) -> None:
-        self._is_dark = True
-        self._media_store = object()
-        self._media_visibility = MediaVisibility()
-        self._private_library = library
-        self._current_profile = SimpleNamespace(
-            user_pubkey="ab" * 32, bunker_relays=["wss://bunker.example"])
-
-    def _on_cover_image_picked(self, media, alt) -> None:
-        pass
+    like an ordinary public blob for the life of the window."""
+    from nostr.ui.cover_field import CoverImageField
+    profile = SimpleNamespace(user_pubkey="ab" * 32, bunker_relays=["wss://bunker.example"])
+    field = CoverImageField(media_store=object(), media_visibility=MediaVisibility(),
+                            private_library=library, profile=lambda: profile, is_dark=True)
+    field.profile_used = profile
+    return field
 
 
 class _StubPicker:
@@ -1096,7 +1086,7 @@ class _StubPicker:
 
 
 def test_the_cover_picker_opens_the_private_library_and_follows_it(monkeypatch):
-    import nostr.ui.publish_article_dialog as module
+    import nostr.ui.cover_field as module
 
     class Library:
         def __init__(self) -> None:
@@ -1112,37 +1102,36 @@ def test_the_cover_picker_opens_the_private_library_and_follows_it(monkeypatch):
         lambda **kw: (made.append(_StubPicker(**kw)) or made[-1]),
     )
 
-    chooser = _Chooser(library)
-    chooser._on_choose_cover_image()
+    chooser = _chooser(library)
+    chooser.choose()
 
-    # The read is started here rather than on the way into the dialog,
+    # The read is started here rather than on the way into the window,
     # so an article published without a cover costs no signer prompts.
-    assert library.bound == [chooser._current_profile]
+    assert library.bound == [chooser.profile_used]
     assert made[0].bound == [library]
     assert made[0].executed == 1
 
 
 def test_a_cover_picker_with_no_library_still_opens(monkeypatch):
-    import nostr.ui.publish_article_dialog as module
+    import nostr.ui.cover_field as module
 
     made: list = []
     monkeypatch.setattr(
         module, "MediaLibraryDialog",
         lambda **kw: (made.append(_StubPicker(**kw)) or made[-1]),
     )
-    chooser = _Chooser(None)
-    chooser._on_choose_cover_image()
+    chooser = _chooser(None)
+    chooser.choose()
 
     assert made[0].executed == 1
     assert made[0].bound == []
 
 
 def test_an_unchecked_cover_pick_leaves_the_field_alone():
-    dialog = _CoverDialog()
-    dialog._media_visibility = MediaVisibility(library=_UncheckedLibrary())
+    cover = _CoverField(MediaVisibility(library=_UncheckedLibrary()))
 
-    dialog._on_cover_image_picked(make_media(CIPHER_SHA, servers=(SERVER,)), "")
+    cover.pick(make_media(CIPHER_SHA, servers=(SERVER,)))
 
-    assert dialog.text == ""
-    assert dialog._cover_thumb_hash == ""
-    assert "not been checked" in dialog.errors[0][0]
+    assert cover.text == ""
+    assert cover.thumb_hash == ""
+    assert "not been checked" in cover.errors[0]
