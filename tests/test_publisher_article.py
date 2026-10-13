@@ -209,3 +209,23 @@ def test_build_article_signs_and_verifies():
     event = build_article("hello", PK, slug="hi", title="Hi", published_at=1_000_000)
     event["sig"] = crypto.sign_schnorr(sk, bytes.fromhex(event["id"])).hex()
     assert verify_event(event)
+
+
+@pytest.mark.parametrize("title, slug", [
+    ("I ❤️ Nostr", "i-nostr"),
+    ("Hot ☕️ takes", "hot-takes"),
+    ("1️⃣ first", "1-first"),
+    ("Café au lait", "cafe-au-lait"),
+    ("नमस्ते", "नमस्ते"),                                        # its marks follow its letters
+    ("a‍b", "a-b"),
+])
+def test_a_mark_stays_only_with_the_letter_it_belongs_to(title, slug):
+    """Review round 2, M2: an emoji's variation selector (U+FE0F), a
+    keycap or a joiner was kept as a word of its own: "❤️" and "☀️" both
+    became an invisible link name and replaced each other."""
+    assert slugify(title) == slug
+
+
+def test_titles_of_emoji_only_get_names_of_their_own():
+    names = {slugify(title) for title in ("❤️", "☀️", "⭐️⭐️⭐️")}
+    assert len(names) == 3 and all(name.startswith("article-") for name in names)

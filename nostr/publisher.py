@@ -586,6 +586,9 @@ _SLUG_LETTERS = str.maketrans({"\u0142": "l", "\u00f8": "o", "\u0111": "d", "\u0
                                "\u0153": "oe", "\u00df": "ss", "\u1e9e": "ss",
                                "\u00fe": "th", "\u00f0": "d", "\u0131": "i",
                                "\u0127": "h", "\u0167": "t", "\u0140": "l"})
+# Variation selectors (an emoji's text or picture presentation) and the
+# keycap: never part of a word.
+_SLUG_DROPPED = re.compile("[\ufe00-\ufe0f\U000e0100-\U000e01ef\u20e3]")
 SLUG_MAX = 48
 
 
@@ -595,6 +598,13 @@ def _is_entity(word: str) -> bool:
     except ValueError:
         return False
     return hrp in _SLUG_ENTITY_KINDS
+
+
+def link_name(typed: str) -> str:
+    """A link name as typed or pasted by hand, in the one form slugify
+    writes too (NFC: "é" one character, as a title typed anywhere gives),
+    so the same name is the same d tag wherever it was typed."""
+    return unicodedata.normalize("NFC", (typed or "").strip())
 
 
 def slugify(text: str) -> str:
@@ -607,7 +617,9 @@ def slugify(text: str) -> str:
     as Hugo and WordPress keep such slugs), so articles titled in
     Cyrillic or Japanese never share one name. A Nostr key, mention or
     quote in the title is left out (only one whose checksum holds; a word
-    like "Note10" stays), and so is a hex key. At most ``SLUG_MAX``
+    like "Note10" stays), and so is a hex key. A mark stays only with the
+    letter or digit it follows; an emoji's variation selector, a keycap
+    and a joiner are no words. At most ``SLUG_MAX``
     characters, cut after a word where one ends. A title with no words
     left (emoji only) gets a short name of its own from the title, never
     one shared by every such title; no title gives none.
@@ -626,9 +638,14 @@ def slugify(text: str) -> str:
     cleaned = unicodedata.normalize("NFC", "".join(kept))
     words, word = [], []
     for char in cleaned + " ":
-        if unicodedata.category(char)[0] in "LNM":
+        kind = unicodedata.category(char)[0]
+        if _SLUG_DROPPED.match(char):
+            continue                       # an emoji's presentation, a keycap
+        if kind in "LN" or (kind == "M" and word):
+            # A mark belongs to the letter or digit it follows, and to
+            # nothing else.
             word.append(char)
-        elif word:
+        elif kind != "M" and word:
             words.append("".join(word))
             word = []
     words = [w for w in words if not _SLUG_HEX.fullmatch(w)]

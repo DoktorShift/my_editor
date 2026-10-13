@@ -47,7 +47,7 @@ from ..media.media_visibility import MediaVisibility
 from ..media.private_library import PrivateLibrary
 from ..media.publish_copy import PublicCopyMaker
 from ..profiles import Profile
-from ..publisher import slugify
+from ..publisher import link_name, slugify
 from .coauthors import Coauthors
 from .cover_field import CoverImageField
 from .eliding_label import ElidingLabel
@@ -503,7 +503,7 @@ class ArticleDetailsPanel(QFrame):
             summary=self.summary_edit.toPlainText().strip(),
             image=self.cover.text().strip(),
             hashtags=self.hashtags.tags(),
-            identifier=self.identifier_edit.text().strip())
+            identifier=link_name(self.identifier_edit.text()))
 
     def _edited(self, *_args) -> None:
         self._check_identifier()
@@ -518,7 +518,7 @@ class ArticleDetailsPanel(QFrame):
 
     def _check_identifier(self) -> None:
         announce.field_problem(self.identifier_edit, self.identifier_problem,
-                               slug_problem(self.identifier_edit.text()) or "")
+                               slug_problem(link_name(self.identifier_edit.text())) or "")
         if not self.identifier_problem.isHidden():
             self.advanced_toggle.setChecked(True)
 

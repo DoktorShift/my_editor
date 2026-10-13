@@ -77,7 +77,7 @@ from ..preview import reading_minutes
 from ..profiles import Profile, ProfileStore
 from ..publisher import (
     FOUND, NEVER, FirstPublication, PublishedMedia, PublishJob, PublishResult, build_article,
-    find_first_publication, slugify,
+    find_first_publication, link_name, slugify,
 )
 from ..relay import RelayPool
 from ..search import Nip50SearchClient
@@ -611,8 +611,12 @@ class PublishArticleDialog(QDialog):
         self._slug_is_auto = False
         self._refresh_publish_enabled()
 
+    def _slug(self) -> str:
+        """The link name in the field, as it is published (link_name)."""
+        return link_name(self._slug_edit.text())
+
     def _show_link(self, *_args) -> None:
-        slug = self._slug_edit.text().strip()
+        slug = self._slug()
         self._slug_hint.setText("…/" + slug if slug else "")
         self._slug_hint.setVisible(bool(slug))
 
@@ -622,7 +626,7 @@ class PublishArticleDialog(QDialog):
         """Everyone the article will tag, from the event it would be."""
         author = self._account.profile().user_pubkey
         event = build_article(
-            self._body, author, self._slug_edit.text().strip() or "-",
+            self._body, author, self._slug() or "-",
             extra_tags=self._details.published_tags(self._body, author=(
                 author, self._relay_directory.relay_hint(author))) or None)
         self._people.show_people(people_tagged(event, self._body, markdown=True))
@@ -665,7 +669,7 @@ class PublishArticleDialog(QDialog):
         Article Details shows too): what it was given, with what was
         changed here, and the first publication date it published with."""
         return self._details.with_changes(
-            identifier=self._slug_edit.text().strip(),
+            identifier=self._slug(),
             title=self._title_edit.text().strip(),
             summary=self._summary_edit.text().strip(),
             image=self._image_edit.text().strip(),
@@ -678,7 +682,7 @@ class PublishArticleDialog(QDialog):
         return self.details() != self._details_shown
 
     def _refresh_publish_enabled(self) -> None:
-        slug = self._slug_edit.text().strip()
+        slug = self._slug()
         # A key in the link name is said under it, before anything is sent
         # (not even the question whether the article went out before),
         # with Show Details open so the field it names can be seen.
@@ -717,7 +721,7 @@ class PublishArticleDialog(QDialog):
                                on_done, parent=self)
 
     def _on_publish(self) -> None:
-        slug = self._slug_edit.text().strip()
+        slug = self._slug()
         if (not slug or not self._body or self._job is not None or self._looking_up
                 or slug_problem(slug) or self._cover.uploading()):
             return
@@ -740,7 +744,7 @@ class PublishArticleDialog(QDialog):
             return                                     # the sheet was closed meanwhile
         self._looking_up = False
         if (author != self._account.profile().user_pubkey
-                or slug != self._slug_edit.text().strip()):
+                or slug != self._slug()):
             # Changed while asking (another account, another link name).
             self._set_busy(False)
             self._set_status("")
@@ -834,11 +838,11 @@ class PublishArticleDialog(QDialog):
         author = self._account.profile().user_pubkey
         if self._first_publications is not None and self._published_at_used:
             # This computer remembers it, for when the relays cannot tell.
-            self._first_publications.remember(author, self._slug_edit.text().strip(),
+            self._first_publications.remember(author, self._slug(),
                                               self._published_at_used)
         hint_relays = [url for url, ok, _message in results if ok][:2]
         naddr = encode_naddr(
-            identifier=self._slug_edit.text().strip(),
+            identifier=self._slug(),
             author_pubkey_hex=author,
             kind=30023,
             relays=hint_relays,

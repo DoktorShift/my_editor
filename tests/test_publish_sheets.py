@@ -575,3 +575,28 @@ def test_typing_in_a_note_keeps_its_people_as_they_are(tmp_path):
     assert sheet._people.findChildren(_Person) == before and len(before) == 1
     sheet._text_edit.setPlainText(f"Now nostr:{bech32.encode_npub(CAROL)} too")
     assert [name for _p, name in sheet._people.people()] == ["Carol, mentioned"]
+
+
+def test_a_link_name_typed_by_hand_is_written_in_one_form(tmp_path, captured):
+    """Review round 2, M2: a link name typed or pasted by hand was used as
+    it came; "école" typed with a combining accent (as macOS file names
+    hold it) made another d tag than the same word composed."""
+    import unicodedata
+    from nostr.publisher import link_name
+    decomposed = unicodedata.normalize("NFD", "école-été")
+    assert link_name(f"  {decomposed} ") == "école-été"
+    sheet = article(tmp_path, default_title="T")
+    sheet._slug_edit.setText(decomposed)
+    sheet._on_slug_edited(decomposed)
+    assert sheet.details().identifier == "école-été"
+    sheet._publish(link_name(sheet._slug_edit.text()), sheet._body, 1_800_000_000)
+    assert ["d", "école-été"] in captured[0]["tags"]
+    from nostr.ui.article_details_panel import ArticleDetailsPanel
+    from nostr.ui.stash_kind_dialog import StashKind, StashKindDialog
+    panel = ArticleDetailsPanel()
+    panel.show_article(ArticleDetails(title="T"), fixed_identifier=False)
+    panel.identifier_edit.setText(decomposed)
+    assert panel.details().identifier == "école-été"
+    stash = StashKindDialog(default=StashKind.ARTICLE, suggested_slug=decomposed)
+    stash._on_accept()
+    assert stash.choice.identifier == "école-été"

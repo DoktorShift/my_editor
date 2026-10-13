@@ -52,7 +52,7 @@ from ..drafts import (
     INNER_KIND_SHORT_NOTE,
     new_note_identifier,
 )
-from ..publisher import slugify
+from ..publisher import link_name, slugify
 from .secret_key_check import slug_problem
 
 
@@ -497,7 +497,7 @@ class StashKindDialog(QDialog):
             return
         # Articles need a non-empty slug to be addressable. Title is
         # nice-to-have but not strictly required by the protocol.
-        slug = self._slug_edit.text().strip()
+        slug = link_name(self._slug_edit.text())
         problem = slug_problem(slug) or ""
         said = self._slug_problem.text() if not self._slug_problem.isHidden() else ""
         announce.field_problem(self._slug_edit, self._slug_problem, problem)
@@ -517,7 +517,7 @@ class StashKindDialog(QDialog):
                 summary="",
             )
         else:
-            slug = self._slug_edit.text().strip()
+            slug = link_name(self._slug_edit.text())
             if not slug or slug_problem(slug):
                 # Defensive: the OK button shouldn't have been enabled.
                 return
