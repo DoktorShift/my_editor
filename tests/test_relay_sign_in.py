@@ -443,3 +443,13 @@ def test_a_relay_that_never_answers_the_sign_in_did_not_refuse_it(pool):
     relay._sign_ins[signer.pubkey].timer.timeout.emit()
     assert failed == [(MINE, "the relay did not answer the sign-in", False)]
 
+
+def test_a_sign_in_taken_for_an_account_no_longer_in_use_closes_the_connection(pool):
+    pool.sign_in = signer = Signer()
+    sub, relay, seen = refused_read(pool, MINE)
+    closed = []
+    relay.disconnected.connect(lambda: closed.append(MINE))
+    answer = relay.sent_of("AUTH")[-1][1]
+    signer.pubkey = "f" * 64                     # the person switched before the relay's OK
+    relay.says("OK", answer["id"], True, "")
+    assert closed == [MINE] and relay.signed_in_with(signer) == set()

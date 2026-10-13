@@ -406,7 +406,13 @@ class Relay(QObject):
         for key, pending in list(self._sign_ins.items()):
             if pending.event_id is not None and msg[1] == pending.event_id:
                 ok, why = bool(msg[2]), str(msg[3]) if len(msg) >= 4 else ""
-                self._end_sign_in(key, ok, why, final=not ok, answered=not ok)
+                if ok and not self._still_theirs(key, pending.signer):
+                    # Taken for an account no longer in use: this connection
+                    # now carries it, so it goes, and a new one opens.
+                    self._end_sign_in(key, False, NOT_CHOSEN, quiet=True)
+                    self.reconnect()
+                else:
+                    self._end_sign_in(key, ok, why, final=not ok, answered=not ok)
                 return
 
     def _sign_in_ran_out(self, key: str) -> None:
