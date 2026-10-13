@@ -12,7 +12,9 @@ What must hold:
 
   Zaps are shared only when chosen: then equally between the author and
   the co-authors, a zap tag of four parts each, as every reader of zap
-  splits reads them. Zaps another app shared stay as it set them until
+  splits reads them, the author's with their relay. A co-author whose
+  profile has no lightning address can't receive zaps: they get no share,
+  and one plain line under the option says so (review M6). Zaps another app shared stay as it set them until
   they are changed here. The author is never their own co-author, and
   nobody is added twice.
 
@@ -90,9 +92,19 @@ class Profile:
     user_pubkey = ME
 
 
-def panel_with(details):
+def panel_with(details, zappable=None, checks=None):
     asked = []
+    zappable = zappable or {}
+
+    def can_receive_zaps(pubkey, hint, answer):
+        if checks is not None:
+            checks.append((pubkey, answer))     # answered later, as a relay would
+        else:
+            answer(zappable.get(pubkey, True))
+
     panel = ArticleDetailsPanel(profile=lambda: Profile(),
+                                can_receive_zaps=can_receive_zaps,
+                                relay_hint=lambda pubkey: {ME: "wss://mine.example"}.get(pubkey, ""),
                                 pick_person=lambda anchor, chosen: asked.append(chosen),
                                 name_of=lambda pubkey: {BOB: "Bob", CAROL: "Carol"}[pubkey])
     sent = []
@@ -121,7 +133,7 @@ def test_a_co_author_is_added_and_removed_in_article_details():
 def test_shared_zaps_follow_the_co_authors_equally():
     panel, sent, asked = panel_with(ArticleDetails(title="T", coauthors=((BOB, RELAY),)))
     panel.share_zaps.setChecked(True)
-    assert sent[-1].zaps == (("zap", ME, "", "1"), ("zap", BOB, RELAY, "1"))
+    assert sent[-1].zaps == (("zap", ME, "wss://mine.example", "1"), ("zap", BOB, RELAY, "1"))
     panel.add_coauthor_button.click()
     asked[-1](Person(pubkey=CAROL))
     assert [tag[1] for tag in sent[-1].zaps] == [ME, BOB, CAROL]
@@ -130,7 +142,7 @@ def test_shared_zaps_follow_the_co_authors_equally():
 
 
 def test_zaps_another_app_shared_stay_until_changed_here():
-    foreign = (("zap", ME, "", "3"), ("zap", BOB, "", "1"))
+    foreign = (("zap", ME, "wss://mine.example", "3"), ("zap", BOB, "", "1"))
     panel, sent, asked = panel_with(ArticleDetails(title="T", coauthors=((BOB, ""),),
                                                    zaps=foreign))
     assert panel.share_zaps.isChecked() and not panel.zaps_note.isHidden()
@@ -139,6 +151,60 @@ def test_zaps_another_app_shared_stay_until_changed_here():
     assert sent[-1].zaps == foreign                          # left as the other app set them
     panel.share_zaps.setChecked(False)
     assert sent[-1].zaps == ()
+
+
+def test_a_co_author_who_cant_receive_zaps_gets_no_share():
+    panel, sent, asked = panel_with(ArticleDetails(title="T", coauthors=((BOB, RELAY),)),
+                                    zappable={CAROL: False})
+    panel.share_zaps.setChecked(True)
+    panel.add_coauthor_button.click()
+    asked[-1](Person(pubkey=CAROL))
+    assert [tag[1] for tag in sent[-1].zaps] == [ME, BOB]
+    assert not panel.zaps_note.isHidden()
+    assert panel.zaps_note.text() == ("Carol can’t receive zaps: their profile has no "
+                                      "lightning address. They get no share.")
+    panel.share_zaps.setChecked(False)
+    panel.share_zaps.setChecked(True)
+    assert [tag[1] for tag in sent[-1].zaps] == [ME, BOB]
+
+
+def test_an_answer_that_comes_later_takes_the_share_back():
+    checks = []
+    panel, sent, asked = panel_with(ArticleDetails(title="T", coauthors=((BOB, RELAY),)),
+                                    checks=checks)
+    panel.share_zaps.setChecked(True)
+    assert [tag[1] for tag in sent[-1].zaps] == [ME, BOB]     # not known yet: shared
+    [(pubkey, answer)] = checks
+    answer(False)
+    assert sent[-1].zaps == () and panel.zaps_note.text().startswith("Bob can’t")
+    assert not panel.share_zaps.isEnabled()                    # nobody left to share with
+
+
+@pytest.mark.parametrize("content, able", [
+    ('{"name": "Bob", "lud16": "bob@wallet.example"}', True),
+    ('{"name": "Bob", "lud06": "lnurl1dp68gurn8ghj7"}', True),
+    ('{"name": "Bob", "lud16": "  "}', False),
+    ('{"name": "Bob"}', False),
+    ("not json", False),
+    (None, False),                                       # the relays have no profile
+    ("unreachable", None),                               # no relay answered: not known
+])
+def test_a_lightning_address_in_the_profile_is_what_receives_zaps(content, able):
+    from nostr.metadata import can_receive_zaps
+    from nostr.outbox.lookup import Lookup, LookupState
+    from tests.outbox_fakes import FakeRelayDirectory
+    asked, answers = [], []
+
+    def query(pool, relays, *, kind, author, on_done, **_rest):
+        asked.append((relays, kind, author))
+        if content == "unreachable":
+            return on_done(Lookup(LookupState.UNKNOWN))
+        event = None if content is None else {"content": content, "created_at": 1}
+        on_done(Lookup(LookupState.FOUND if event else LookupState.ABSENT, event))
+
+    can_receive_zaps(None, FakeRelayDirectory(), BOB, RELAY, answers.append, query=query)
+    assert answers == [able]
+    assert asked[0][1:] == (0, BOB) and asked[0][0][0] == RELAY
 
 
 def standup_author(tags, signer):

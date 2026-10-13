@@ -43,7 +43,7 @@ from atomic_file import write_bytes
 from image_safety import decode_image_bytes
 
 from .outbox.directory import RelayDirectory
-from .outbox.lookup import Lookup, fetch_replaceable
+from .outbox.lookup import Lookup, LookupState, fetch_replaceable
 from .outbox.policy import KIND_PROFILE, lookup_relays
 from .profiles import Profile, ProfileStore
 from .relay import RelayPool
@@ -65,6 +65,32 @@ _MAX_AVATAR_REDIRECTS: int = 4
 # --------------------------------------------------------------------------- #
 # Metadata (kind 0) fetcher                                                   #
 # --------------------------------------------------------------------------- #
+
+def can_receive_zaps(pool: RelayPool, directory: RelayDirectory, pubkey: str, hint: str,
+                     answer, *, parent: Optional[QObject] = None,
+                     query=fetch_replaceable, timeout_ms: int = 8_000) -> None:
+    """``answer(True)`` when ``pubkey``'s profile names a lightning address
+    (lud16, or lud06: where a zap to them is paid, NIP-57), ``answer(False)``
+    when it names none or the relays have no profile of theirs, and
+    ``answer(None)`` when that couldn't be found out (no relay answered).
+    Read where their profile is (the relay hint, their write relays, the
+    indexers)."""
+    def done(result: Lookup) -> None:
+        event = result.event
+        if event is None and result.state is LookupState.UNKNOWN:
+            answer(None)
+            return
+        try:
+            fields = json.loads((event or {}).get("content", "") or "{}")
+        except json.JSONDecodeError:
+            fields = {}
+        if not isinstance(fields, dict):
+            fields = {}
+        answer(any(isinstance(fields.get(key), str) and fields[key].strip()
+                   for key in ("lud16", "lud06")))
+
+    query(pool, lookup_relays(hints=[hint] if hint else [], known=directory.cached(pubkey)),
+          kind=KIND_PROFILE, author=pubkey, on_done=done, timeout_ms=timeout_ms, parent=parent)
 
 class ProfileMetadataFetcher(QObject):
     """Background loader for a profile's kind 0 event.

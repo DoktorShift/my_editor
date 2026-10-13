@@ -201,7 +201,7 @@ from nostr.media.media_visibility import MediaVisibility
 from nostr.media.private_library import PrivateLibrary
 from nostr.media.publish_copy import PublicCopyMaker
 from nostr.media.visibility import PublicLedger
-from nostr.metadata import AvatarLoader, ProfileMetadataFetcher
+from nostr.metadata import AvatarLoader, ProfileMetadataFetcher, can_receive_zaps
 from nostr.outbox.directory import RelayDirectory
 from nostr.profiles import Profile, ProfileStore, short_npub
 from nostr.publisher import (
@@ -2565,7 +2565,8 @@ class MainWindow(QMainWindow):
             media_store=self._media_store, media_visibility=self._media_visibility,
             copy_maker=self._copy_maker, private_library=self._private_library,
             profile=self._profile_store.default, pick_person=self._pick_coauthor,
-            name_of=self._person_name, is_dark=self.is_dark_theme)
+            name_of=self._person_name, can_receive_zaps=self._ask_can_receive_zaps,
+            relay_hint=self._relay_directory.relay_hint, is_dark=self.is_dark_theme)
         self._article_details_panel.changed.connect(
             lambda details: self._set_article_details(self.current_editor(), details))
         self._article_details_panel.close_requested.connect(
@@ -7931,6 +7932,11 @@ class MainWindow(QMainWindow):
             details = details.with_changes(published_at=first_publications.get(
                 profile.user_pubkey, binding.identifier))
         return details
+
+    def _ask_can_receive_zaps(self, pubkey: str, hint: str, answer) -> None:
+        """Whether a co-author's profile names a lightning address."""
+        can_receive_zaps(self._relay_pool, self._relay_directory, pubkey, hint, answer,
+                         parent=self._article_details_panel)
 
     def _author_of(self, profile) -> Tuple[str, str]:
         """(pubkey, relay hint) of the account ``profile`` writes as: how
