@@ -38,17 +38,25 @@ def _text_view():
     return _view
 
 
-def deleted_range(text: str, position: int, forward: bool) -> Optional[Tuple[int, int]]:
-    """The range (start, end), in UTF-16 units of ``text`` (as Qt counts
-    a paragraph), that Option-Delete (or, ``forward``, Fn-Option-Delete)
-    at ``position`` deletes in a Mac text view; None without AppKit."""
+_UTF16_LITTLE_ENDIAN = 0x94000100      # NSUTF16LittleEndianStringEncoding
+
+
+def deleted_range(units: bytes, position: int, forward: bool) -> Optional[Tuple[int, int]]:
+    """The range (start, end), in UTF-16 units of the paragraph ``units``
+    (its UTF-16 little-endian bytes, exactly as Qt holds it, a lone
+    surrogate included), that Option-Delete (or, ``forward``,
+    Fn-Option-Delete) at ``position`` deletes in a Mac text view; None
+    without AppKit."""
     view = _text_view()
     if view is None:
         return None
-    from rubicon.objc import NSRange
+    from rubicon.objc import NSRange, ObjCClass
     from rubicon.objc.runtime import autoreleasepool
     with autoreleasepool():
-        view.string = text
+        # The text view is given the very units, not a Python str (which
+        # could not hold a lone surrogate on the way to AppKit).
+        view.string = ObjCClass("NSString").alloc().initWithBytes(
+            units, length=len(units), encoding=_UTF16_LITTLE_ENDIAN)
         before = int(view.string.length)
         view.setSelectedRange(NSRange(position, 0))
         if forward:

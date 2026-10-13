@@ -243,3 +243,21 @@ def test_a_mac_deletes_as_its_own_text_view_does(text, at, op, after, caret_afte
     # (Qt's plain text writes a no-break space as a space.)
     assert (ed.toPlainText(), ed.textCursor().position()) == (after.replace("\xa0", " "),
                                                               caret_after)
+
+
+def units(ed):
+    """The document's text in UTF-16 units, a lone surrogate included
+    (PySide leaves those out of a block's text)."""
+    doc = ed.document()
+    return "".join(doc.characterAt(p) for p in range(doc.characterCount() - 1))
+
+
+def test_a_lone_surrogate_does_not_shift_the_word_deleted():
+    """Review 2, L4: a paragraph holding a lone UTF-16 surrogate (broken
+    data from another app) had its word found one unit off: Option-Delete
+    after "cd" deleted " c"."""
+    ed = editor(structure=False)
+    ed.textCursor().insertText("ab \ud83d cd")
+    caret(ed, 7)
+    QTest.keyClick(ed, BACK, WORD)
+    assert units(ed) == "ab \ud83d " and ed.textCursor().position() == 5
