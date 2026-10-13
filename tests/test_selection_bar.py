@@ -615,3 +615,57 @@ def test_over_right_to_left_words_it_is_centred_on_them():
     assert window.bar.isVisible()
     assert abs(window.bar.geometry().center().x() - centre) <= 2
     window.close()
+
+
+def test_where_none_of_its_buttons_can_act_it_does_not_show(w):
+    """Review L4: over a code block every button was dimmed."""
+    for action in w.actions.values():
+        action.setEnabled(False)
+    w.double_click(word_at(TEXT, "Another", 5) + 2)
+    assert w.editor.textCursor().hasSelection() and not w.bar.isVisible()
+    w.actions["link"].setEnabled(True)
+    w.double_click(word_at(TEXT, "Another", 5) + 2)
+    assert w.bar.isVisible()
+
+
+CODE_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QTextCursor
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+w = main_window.MainWindow()
+w.resize(900, 600)
+w.show()
+w.activateWindow()
+ed = w.new_tab()
+ed.setFocus()
+QTest.qWait(50)
+QTest.keyClicks(ed, "print(value)")
+ed.make_code_block("python")
+app.processEvents()
+
+def double_click(at):
+    cursor = QTextCursor(ed.document())
+    cursor.setPosition(at)
+    point = ed.cursorRect(cursor).center()
+    for send in (QTest.mouseClick, QTest.mouseDClick, QTest.mouseRelease):
+        send(ed.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
+    QTest.qWait(30)
+    return [ed.textCursor().hasSelection(), ed.selection_bar.isVisible()]
+
+r = {"code": double_click(8)}
+ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_over_a_code_block_it_does_not_show(tmp_path):
+    from tests.app_process import run_window_script
+    r = run_window_script(CODE_SCRIPT, tmp_path)
+    assert r == {"code": [True, False]}

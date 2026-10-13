@@ -23,8 +23,9 @@ a resize, when the focus or the window goes elsewhere or the text is
 hidden (another tab), and when the words change under it. A change of
 format (its own buttons', a key's) keeps it, placed again. It never shows
 while a pop-up (a menu, the link popover, a mention), the slash menu or an
-input method's composition is up, nor where the window does not want it
-(``wanted``: a plain-text file, Settings' choice off).
+input method's composition is up, nor where none of its buttons can act (a
+code block), nor where the window does not want it (``wanted``: a
+plain-text file, Settings' choice off).
 
 Screen readers and the keyboard have every one of these commands in the
 menus and the toolbar; the bar's buttons are named for them too.
@@ -172,7 +173,9 @@ class SelectionBar(QFrame):
         if (not cursor.hasSelection() or not self._wanted() or not editor.hasFocus()
                 or QApplication.activePopupWidget() is not None
                 or QApplication.mouseButtons() != Qt.MouseButton.NoButton
-                or editor.slash_menu() is not None or self._composing()):
+                or editor.slash_menu() is not None or self._composing()
+                # Over a code block every button would be dimmed: no bar.
+                or not any(action.isEnabled() for action in self._actions.values())):
             return
         if self._shown_dark != self._dark():
             self.set_dark(self._dark())
