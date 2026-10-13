@@ -152,7 +152,15 @@ The **`View`** menu holds the appearance options: `View > Appearance` (Automatic
 
 ### Nostr
 
-The Nostr commands have no shortcuts of their own: no platform has a convention for them. They are in the `Nostr` menu (and in Help > Keyboard Shortcuts' search): Publish as Note…, Publish as Article…, Media Library…, Insert Image…, Drafts. Refresh Drafts is the one exception: it answers the system's own Refresh key.
+The Nostr commands have no shortcuts of their own: no platform has a convention for them. They are in the `Nostr` menu (and in Help > Keyboard Shortcuts' search): Publish as Note…, Publish as Article…, Media Library…, Insert Image…, Insert Mention…, Insert Note or Article…, Insert Audio or Video…, Article Details, Drafts. Two answer a key of the system's or of the app it follows: Refresh Drafts the system's own Refresh key, and Article Details Option-Command-I on a Mac, the key Pages, Numbers and Keynote give their inspector.
+
+While a Nostr account is in use, the editor offers Nostr where you write, and nowhere else:
+
+- **Insert > Note or Article…** (also in the slash menu): paste a link to a note or an article (a `nostr:` link, a bare `nevent1…` or `naddr1…`, or the address a reader shows it at, such as njump.me, primal.net or yakihonne.com) into the small panel at the caret. Why a link can't be used is said under the field. It goes into the text as written, in a paragraph of its own, where readers show it as a card.
+- **Insert > Audio or Video…** (also in the slash menu), or an audio or video file dropped on the window: the file goes to your media servers, the Media Library's own way, and "Uploading name…" stands in a paragraph of its own until it is there; then its address takes the place, where readers show a player (the preview shows "▶ Audio: name"). Undo takes the placeholder back; the file still ends up in your media library. If the upload fails, you choose Try Again or Remove. A file larger than your media servers take is refused at once, saying the limit. Nothing is published or saved as a draft while a file is still uploading.
+- **View > Article Details** (Option-Command-I on a Mac): an inspector beside the document, as Pages has, for the article in the tab in front: its title, summary, cover image (an address, or Choose or Upload… from the Media Library), hashtags (separated by commas), co-authors, and under Advanced its slug and when it first went out. What you type there is the article's at once; the publish window shows and changes the same details. A saved draft's or a published article's slug is shown, not edited: another slug would make another article. **Add Co-Author…** chooses a person the way a mention does; **Share zaps equally with co-authors** splits zaps to the article evenly between you and them. A note has no article details, and says so.
+
+A Markdown file keeps its article's details in its front matter, the `---` block at its top that Jekyll, Hugo, Obsidian and iA Writer use: `title`, `summary` (or `description`), `image` (or `cover`), `tags`, `slug`, `date`, and `coauthors` and `zap_split`. They show in Article Details, never in the text, and are never published as text. MyEditor writes front matter only when the article has details or the file had front matter, and keeps every entry it does not know exactly as written.
 
 | Shortcut | Action |
 |---|---|

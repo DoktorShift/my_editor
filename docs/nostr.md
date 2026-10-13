@@ -69,7 +69,15 @@ Inside both publish dialogs there's also a **Mentions** chip row. Clicking **+ a
 
 Picked profiles become inline pills and are emitted on publish as `["p", <pubkey>, <relay-hint>]` tags plus a `nostr:nprofile1…` URI appended to the body, so mention rendering works in every client. Inline `nostr:n…` URIs you paste yourself are also picked up and deduplicated automatically.
 
-A note or article that quotes another one (a `nostr:` link to a note or an article in its text) carries a `q` tag for each (NIP-18: the note's id, a relay hint and its author; the article's address), and a `p` tag for each quoted author, once, also when mentioned. A link inside code is text and quotes nothing.
+A note or article that quotes another one (a `nostr:` link to a note or an article in its text) carries a `q` tag for each (NIP-18: the note's id, a relay hint and its author; the article's address), and a `p` tag for each quoted author, once, also when mentioned. A link inside code is text and quotes nothing. `Insert > Note or Article…` puts such a link into the text as a paragraph of its own (NIP-27), where readers show the note or article as a card.
+
+### Article details, co-authors and zaps
+
+An article's details (title, summary, cover, hashtags, slug, the date it first went out) are one model for each tab (`nostr/article_details.py`), shown and changed in **Article Details** (`View > Article Details`) and in the publish window alike. A draft holds them in its inner event; a Markdown file in its front matter. A co-author is tagged `["p", <pubkey>, <relay>, "author"]`, the marker standup writes and reads back for "this person wrote it"; a co-author also mentioned in the text keeps one `p` tag, the one with the marker. Zaps are shared only when you choose to: then each person, you included, gets a NIP-57 `["zap", <pubkey>, <relay>, "1"]` tag of four parts, as readers of zap splits read them. Zaps another app shared keep the weights it gave them until you change them in Article Details.
+
+### Audio and video
+
+`Insert > Audio or Video…` uploads the file to your media servers the Media Library's own way (`MediaStore.upload_bytes`) and puts its address into the text when it is there, with its extension so readers can tell audio from video. Published, the file is described by an `imeta` tag (NIP-92: its type, hash and size) from what the media servers confirmed for it; the text never carries a placeholder of an upload still going, and nothing is published while one is in it.
 
 ### Relays and routing
 
