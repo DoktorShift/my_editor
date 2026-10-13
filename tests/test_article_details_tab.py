@@ -138,7 +138,7 @@ inner = build_inner_event(kind=30023, content="Body of the article.", pubkey_hex
 w._on_draft_stashed(ed, choice, "e" * 64, 1_800_000_000, inner)
 panel = w._article_details_panel
 r = {"summary": panel.summary_edit.toPlainText(), "cover": panel.cover.text(),
-     "tags": panel.tags_edit.text(), "rows": panel.coauthor_rows.count(),
+     "tags": list(panel.hashtags.tags()), "rows": panel.coauthor_rows.count(),
      "zaps": panel.share_zaps.isChecked(), "fixed": panel.identifier_edit.isReadOnly()}
 panel.title_edit.setText("My Title!")
 d = w._article_details_of(ed)
@@ -154,7 +154,7 @@ def test_after_save_as_draft_article_details_shows_and_keeps_what_was_saved(tmp_
     r = run_window_script(STASH_SCRIPT, tmp_path)
     # As typed: the hashtags keep their case (the draft's t tags are lower case).
     assert (r["summary"], r["cover"], r["tags"]) == (
-        "My summary", "https://cdn.example/c.jpg", "Bitcoin")
+        "My summary", "https://cdn.example/c.jpg", ["Bitcoin"])
     assert r["rows"] == 1 and r["zaps"] is True and r["fixed"] is True
     assert r["after"] == ["My Title!", "My summary", "https://cdn.example/c.jpg",
                           ["Bitcoin"], 1, 2]

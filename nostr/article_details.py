@@ -264,7 +264,7 @@ def from_front_matter(front: Optional[front_matter.FrontMatter]) -> ArticleDetai
         value = values.get(key, [])
         return value if isinstance(value, list) else [part for part in value.split(",")]
     tags = values.get("tags", [])
-    hashtags = _hashtags(tags) if isinstance(tags, list) else _string_tags(tags)
+    hashtags = _hashtags(tags) if isinstance(tags, list) else hashtags_written(tags)
     coauthors = []
     for written in items("coauthors"):
         person = _person(written)
@@ -282,9 +282,10 @@ def from_front_matter(front: Optional[front_matter.FrontMatter]) -> ArticleDetai
                           coauthors=tuple(coauthors), zaps=tuple(zaps))
 
 
-def _string_tags(written: str) -> Tuple[str, ...]:
+def hashtags_written(written: str) -> Tuple[str, ...]:
     """The hashtags a string of them holds: separated by commas, else by
-    spaces, as Jekyll reads "tags: ruby jekyll"."""
+    spaces, as Jekyll reads "tags: ruby jekyll" (a front matter's string,
+    or what is typed or pasted into the hashtags field)."""
     return hashtags_from(written) if "," in written else _hashtags(written.split())
 
 
@@ -376,7 +377,7 @@ def front_matter_with(details: ArticleDetails, front: Optional[front_matter.Fron
             # in quotes only when the file had it so.
             bare = not original.startswith(("\"", "'"))
         if key == "tags" and current is not None and isinstance(current.value, str) \
-                and len(_string_tags(current.value)) > 1:
+                and len(hashtags_written(current.value)) > 1:
             # Written as a string of tags ("ruby jekyll", "a, b"): a string
             # again, in its way, while it can hold each tag whole. A string
             # of one tag, or none, is no such way: Hugo and Eleventy read

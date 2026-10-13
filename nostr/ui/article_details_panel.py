@@ -41,7 +41,7 @@ from constants import (
 )
 from i18n import _, format_moment, ngettext
 
-from ..article_details import ArticleDetails, equal_zaps, hashtags_from, hashtags_text
+from ..article_details import ArticleDetails, equal_zaps
 from ..blossom.store import MediaStore
 from ..media.media_visibility import MediaVisibility
 from ..media.private_library import PrivateLibrary
@@ -51,6 +51,7 @@ from ..publisher import slugify
 from .cover_field import CoverImageField
 from .eliding_label import ElidingLabel
 from .secret_key_check import slug_problem
+from .tag_field import TagField
 
 MIN_WIDTH = 260
 DEFAULT_WIDTH = 300
@@ -195,9 +196,8 @@ class ArticleDetailsPanel(QFrame):
         form.addWidget(self.cover_problem)
         self._add_kept_note(form, "image")
 
-        self.tags_edit = QLineEdit()
-        self.tags_edit.setPlaceholderText(_("comma, separated, hashtags"))
-        self._add_labeled(form, _("Hashtags"), self.tags_edit)
+        self.hashtags = TagField(is_dark=self._is_dark)
+        self._add_labeled(form, _("Hashtags"), self.hashtags)
         self._add_kept_note(form, "tags")
 
         form.addSpacing(6)
@@ -255,8 +255,9 @@ class ArticleDetailsPanel(QFrame):
         form.addStretch(1)
         scroll.setWidget(body)
 
-        for edit in (self.title_edit, self.tags_edit, self.identifier_edit):
+        for edit in (self.title_edit, self.identifier_edit):
             edit.textChanged.connect(self._edited)
+        self.hashtags.changed.connect(self._edited)
         self.summary_edit.textChanged.connect(self._edited)
         self.cover.changed.connect(self._edited)
         return scroll
@@ -317,6 +318,7 @@ class ArticleDetailsPanel(QFrame):
     def set_dark(self, is_dark: bool) -> None:
         self._is_dark = is_dark
         self.cover.set_dark(is_dark)
+        self.hashtags.set_dark(is_dark)
         self._apply_theme()
 
     # -- showing a tab's article ------------------------------------------------
@@ -362,7 +364,7 @@ class ArticleDetailsPanel(QFrame):
         self.title_edit.setReadOnly("title" in self._kept)
         self.summary_edit.setReadOnly("summary" in self._kept)
         self.cover.setReadOnly("image" in self._kept)
-        self.tags_edit.setReadOnly("tags" in self._kept)
+        self.hashtags.setReadOnly("tags" in self._kept)
         # The read-only look comes from a property the style sheet reads.
         self.summary_edit.style().unpolish(self.summary_edit)
         self.summary_edit.style().polish(self.summary_edit)
@@ -373,8 +375,8 @@ class ArticleDetailsPanel(QFrame):
             self.summary_edit.setPlainText(details.summary)
         if self.cover.text() != details.image:
             self.cover.setText(details.image)
-        if hashtags_from(self.tags_edit.text()) != details.hashtags:
-            self.tags_edit.setText(hashtags_text(details.hashtags))
+        if self.hashtags.tags() != details.hashtags:
+            self.hashtags.set_tags(details.hashtags)
         self._set_text(self.identifier_edit, details.identifier)
         self._show_people(details)
 
@@ -408,7 +410,7 @@ class ArticleDetailsPanel(QFrame):
                 item.widget().deleteLater()
         # Tab reaches each Remove in turn, between the hashtags and Add
         # Co-Author, where they are seen (rows made later would come last).
-        previous = self.tags_edit
+        previous = self.hashtags.entry
         for pubkey, _hint in details.coauthors:
             row, remove = self._coauthor_row(pubkey)
             remove.setEnabled("coauthors" not in self._kept)
@@ -538,7 +540,7 @@ class ArticleDetailsPanel(QFrame):
             title=self.title_edit.text().strip(),
             summary=self.summary_edit.toPlainText().strip(),
             image=self.cover.text().strip(),
-            hashtags=hashtags_from(self.tags_edit.text()),
+            hashtags=self.hashtags.tags(),
             identifier=self.identifier_edit.text().strip())
 
     def _edited(self, *_args) -> None:
