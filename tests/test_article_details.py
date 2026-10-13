@@ -100,6 +100,7 @@ def _window_with_draft(tags):
     record = types.SimpleNamespace(inner_tags=tags)
     stand_in = types.SimpleNamespace(_draft_store=types.SimpleNamespace(get=lambda _d: record))
     stand_in._article_details_of = lambda ed: MainWindow._article_details_of(stand_in, ed)
+    stand_in._author_of = lambda profile: MainWindow._author_of(stand_in, profile)
     return MainWindow, stand_in
 
 

@@ -7159,7 +7159,8 @@ class MainWindow(QMainWindow):
             return
         self._load_markdown(ed, str(item.event.get("content") or ""))
         ed.document().setModified(False)
-        details = ArticleDetails.from_tags(item.event.get("tags") or [])
+        details = ArticleDetails.from_tags(item.event.get("tags") or [],
+                                           signer=str(item.event.get("pubkey") or ""))
         ed._published_article = details.with_changes(
             identifier=item.identifier, title=details.title or item.title,
             published_at=item.first_published)
@@ -7861,7 +7862,8 @@ class MainWindow(QMainWindow):
             # An article opened from the Published view carries its own.
             return self._published_article_of(ed) or ArticleDetails()
         record = self._draft_store.get(binding.identifier)
-        details = (ArticleDetails.from_tags(record.inner_tags) if record is not None
+        details = (ArticleDetails.from_tags(record.inner_tags, signer=binding.profile_pubkey)
+                   if record is not None
                    else ArticleDetails())
         details = details.with_changes(identifier=binding.identifier,
                                        title=binding.title or details.title)
@@ -7872,6 +7874,13 @@ class MainWindow(QMainWindow):
             details = details.with_changes(published_at=first_publications.get(
                 profile.user_pubkey, binding.identifier))
         return details
+
+    def _author_of(self, profile) -> Tuple[str, str]:
+        """(pubkey, relay hint) of the account ``profile`` writes as: how
+        an article names its author and where they can be found."""
+        directory = getattr(self, "_relay_directory", None)
+        return (profile.user_pubkey,
+                directory.relay_hint(profile.user_pubkey) if directory is not None else "")
 
     def _set_article_details(self, ed, details: ArticleDetails) -> None:
         """The details of the article in ``ed``, as set in Article Details or
@@ -7957,7 +7966,8 @@ class MainWindow(QMainWindow):
             if base.identifier and base.identifier != choice.identifier:
                 base = base.with_changes(published_at=None)
             tags = base.with_changes(identifier=choice.identifier, title=choice.title,
-                                     summary=choice.summary).draft_tags(content)
+                                     summary=choice.summary).draft_tags(
+                content, author=self._author_of(profile))
         try:
             return build_inner_event(
                 kind=choice.kind.value,
@@ -8007,7 +8017,8 @@ class MainWindow(QMainWindow):
         # that (title, summary, cover, hashtags, co-authors, zaps), so
         # Article Details goes on showing it, never an older draft.
         if choice.kind is StashKind.ARTICLE:
-            ed._article_details = ArticleDetails.from_tags(inner.get("tags") or []).with_changes(
+            ed._article_details = ArticleDetails.from_tags(
+                inner.get("tags") or [], signer=str(inner.get("pubkey") or "")).with_changes(
                 identifier=choice.identifier, title=choice.title)
         # A successful stash clears the modified flag - the tab's
         # contents now match the latest draft snapshot on the network.

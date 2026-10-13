@@ -247,6 +247,10 @@ class FakeRelayDirectory(QObject):
             value = RelayList(write=list(value), read=list(value), state=LookupState.FOUND)
         self.lists[pubkey.lower()] = value
 
+    def relay_hint(self, pubkey: str) -> str:
+        written = self.cached(pubkey).write
+        return written[0] if written else ""
+
     def cached(self, pubkey: str) -> RelayList:
         return copy.deepcopy(self.lists.get((pubkey or "").lower()) or RelayList())
 

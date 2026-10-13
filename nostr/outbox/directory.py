@@ -139,6 +139,12 @@ class RelayDirectory(QObject):
         entry = self._entries.get((pubkey or "").lower())
         return _copy(entry) if entry is not None else RelayList()
 
+    def relay_hint(self, pubkey: str) -> str:
+        """Where ``pubkey`` can be found, as far as is known now: the first
+        of their write relays; "" when none is known."""
+        written = self.cached(pubkey).write
+        return written[0] if written else ""
+
     def lookup(self, pubkey: str, on_done: Callable[[RelayList], None], *,
                hints: Sequence[str] = (), fresh: bool = False,
                timeout_ms: int = 6_000) -> None:

@@ -47,8 +47,10 @@ from .bech32 import encode_nprofile, encode_npub
 # Tags MyEditor writes itself; every other tag is carried as it is.
 DETAILS = ("d", "title", "summary", "image", "published_at", "t")
 REBUILT = ("client", "p", "q")
-# A co-author: ["p", <pubkey>, <relay hint>, "author"] (the marker standup
-# writes and reads back for "this person wrote it").
+# An author: ["p", <pubkey>, <relay hint>, "author"] (NIP-84's role, the
+# marker standup writes and reads back for "this person wrote it"). When an
+# article names co-authors, its signer is written first, as standup takes
+# the first one for the writer; the co-authors follow.
 AUTHOR_MARKER = "author"
 
 
@@ -81,9 +83,10 @@ class ArticleDetails:
     carried: Tuple[Tuple[str, ...], ...] = field(default=())
 
     @classmethod
-    def from_tags(cls, tags: Iterable[Sequence[str]]) -> "ArticleDetails":
+    def from_tags(cls, tags: Iterable[Sequence[str]], signer: str = "") -> "ArticleDetails":
         """The details an event's tags hold (the first of each kind wins;
-        every hashtag counts)."""
+        every hashtag counts). ``signer``, the event's author, is no
+        co-author of their own article."""
         found = {}
         hashtags: List[str] = []
         coauthors: List[Tuple[str, str]] = []
@@ -100,7 +103,7 @@ class ArticleDetails:
             elif name in DETAILS:
                 found.setdefault(name, value)
             elif name == "p" and len(tag) >= 4 and tag[3] == AUTHOR_MARKER:
-                if value not in (pubkey for pubkey, _hint in coauthors):
+                if value != signer and value not in (pubkey for pubkey, _hint in coauthors):
                     coauthors.append((value, tag[2]))
             elif name == "zap":
                 zaps.append(tuple(tag))
@@ -131,16 +134,19 @@ class ArticleDetails:
             kept.append(list(tag))
         return kept
 
-    def draft_tags(self, content: str) -> List[List[str]]:
-        """The tags of an article draft's inner event with ``content``."""
-        return self._detail_tags() + self.carried_tags(content)
+    def draft_tags(self, content: str, author: Tuple[str, str] = ("", "")) -> List[List[str]]:
+        """The tags of an article draft's inner event with ``content``, by
+        ``author`` (pubkey, relay hint)."""
+        return (self._detail_tags(with_people=False) + self._people_tags(author)
+                + self.carried_tags(content))
 
-    def published_tags(self, content: str) -> List[List[str]]:
-        """The tags an article with ``content`` is published with besides
-        those its publisher makes of the details it is given (title,
-        summary, cover, hashtags, first date): co-authors, zap shares and
-        the carried tags."""
-        return self._people_tags() + self.carried_tags(content)
+    def published_tags(self, content: str,
+                       author: Tuple[str, str] = ("", "")) -> List[List[str]]:
+        """The tags an article with ``content`` is published with by
+        ``author`` (pubkey, relay hint) besides those its publisher makes of
+        the details it is given (title, summary, cover, hashtags, first
+        date): its authors, zap shares and the carried tags."""
+        return self._people_tags(author) + self.carried_tags(content)
 
     def tags(self) -> List[List[str]]:
         """Every detail as a tag, the carried ones all as they are:
@@ -148,7 +154,7 @@ class ArticleDetails:
         them somewhere, such as a tab written down for a restart)."""
         return self._detail_tags() + [list(tag) for tag in self.carried]
 
-    def _detail_tags(self) -> List[List[str]]:
+    def _detail_tags(self, with_people: bool = True) -> List[List[str]]:
         tags: List[List[str]] = [["d", self.identifier]]
         if self.title.strip():
             tags.append(["title", self.title.strip()])
@@ -159,10 +165,16 @@ class ArticleDetails:
         if self.published_at:
             tags.append(["published_at", str(int(self.published_at))])
         tags.extend(["t", tag.lower()] for tag in self.hashtags)
-        return tags + self._people_tags()
+        return tags + (self._people_tags() if with_people else [])
 
-    def _people_tags(self) -> List[List[str]]:
-        return ([["p", pubkey, hint, AUTHOR_MARKER] for pubkey, hint in self.coauthors]
+    def _people_tags(self, author: Tuple[str, str] = ("", "")) -> List[List[str]]:
+        """The authors, the signer first when co-authors are named and the
+        signer is known, then the co-authors; then the zap shares."""
+        pubkey, hint = author
+        writers = [(pk, relay) for pk, relay in self.coauthors if pk != pubkey]
+        if pubkey and writers:
+            writers.insert(0, (pubkey, hint))
+        return ([["p", pk, relay, AUTHOR_MARKER] for pk, relay in writers]
                 + [list(tag) for tag in self.zaps])
 
 

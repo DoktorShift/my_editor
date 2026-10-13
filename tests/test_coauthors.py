@@ -139,3 +139,28 @@ def test_zaps_another_app_shared_stay_until_changed_here():
     assert sent[-1].zaps == foreign                          # left as the other app set them
     panel.share_zaps.setChecked(False)
     assert sent[-1].zaps == ()
+
+
+def standup_author(tags, signer):
+    """standup's own rule (event_parser._get_author_pubkey): the first
+    ["p", x, _, "author"] tag is the writer; else the signer."""
+    for tag in tags:
+        if tag[0] == "p" and len(tag) >= 4 and tag[3] == "author":
+            return tag[1]
+    return signer
+
+
+def test_the_signer_is_written_first_so_standup_credits_the_writer():
+    details = ArticleDetails(identifier="x", coauthors=((BOB, RELAY),))
+    event = build_article(content="Body", pubkey_hex=ME, slug="x", title="T",
+                          extra_tags=details.published_tags("Body", author=(ME, RELAY)))
+    authors = [tag for tag in event["tags"] if tag[0] == "p"]
+    assert authors == [["p", ME, RELAY, "author"], ["p", BOB, RELAY, "author"]]
+    assert standup_author(event["tags"], ME) == ME
+    draft = details.draft_tags("Body", author=(ME, RELAY))
+    assert standup_author(draft, ME) == ME
+    # Read back, the signer is no co-author of their own article.
+    assert ArticleDetails.from_tags(event["tags"], signer=ME).coauthors == ((BOB, RELAY),)
+    # Without co-authors, no author tag at all.
+    alone = ArticleDetails(identifier="x").published_tags("Body", author=(ME, RELAY))
+    assert not [tag for tag in alone if tag[0] == "p"]
