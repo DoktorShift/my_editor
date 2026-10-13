@@ -381,6 +381,58 @@ if rep.check("the article publishes", published_m.fired, dm._status.text()):
                   repr(ev["content"][:120]))
 
 # --------------------------------------------------------------------------- #
+rep.section("A file's article that version 3.3 published under the file's own name")
+
+from nostr.first_publications import FirstPublications  # noqa: E402
+from nostr.publisher import slugify  # noqa: E402
+
+own_name = f"My Post {uuid.uuid4().hex[:6]}"
+old_at = int(time.time()) - 86_400 * 30
+# As version 3.3 published "My Post ….md": the file's name as it is, no record kept.
+nd.nak_publish(alice_sk.hex(), [RNOSTR, NRS], kind=30023, content="Written in 3.3.",
+               tags=[["d", own_name], ["title", "My Post"], ["published_at", str(old_at)]])
+record = FirstPublications(nd.HOME / "first_publications_ndak.json")
+
+
+def file_sheet(name):
+    return PublishArticleDialog(
+        body_markdown="Edited later.", active_profile=alice, store=stack.store,
+        relay_pool=stack.pool, relay_directory=stack.directory, session_pool=stack.sessions,
+        entitled_relays=lambda: [], known_people=known, search_client=search, avatars=avatars,
+        default_title="My Post", default_slug=slugify(name), file_name=name,
+        first_publications=record, is_dark=False)
+
+
+df = file_sheet(own_name)
+nd.wait_until(lambda: not df._checking_file_name, 30_000)
+rep.check("the relays are asked first, and the file's own name is kept",
+          df._slug_edit.text() == own_name, df._slug_edit.text())
+rep.check("and recorded on this computer, with its first date",
+          record.get(alice.user_pubkey, own_name) == old_at,
+          str(record.get(alice.user_pubkey, own_name)))
+published_f = nd.Catch(df.published)
+df._on_publish()
+nd.wait_until(lambda: published_f.fired or (df._job is None and not df._looking_up
+                                             and "not published" in df._status.text()), 40_000)
+if rep.check("republishing it publishes", published_f.fired, df._status.text()):
+    nd.spin(500)
+    under = nd.nak_req([RNOSTR], kinds=[30023], authors=[alice.user_pubkey],
+                       tags={"d": [own_name]})
+    made = nd.nak_req([RNOSTR], kinds=[30023], authors=[alice.user_pubkey],
+                      tags={"d": [slugify(own_name)]})
+    rep.check("it replaced the article under the file's name, and made no second one",
+              len(under) == 1 and under[0]["content"] == "Edited later." and made == [],
+              f"under the name {len(under)}, under {slugify(own_name)} {len(made)}")
+    rep.check("it keeps its first publication date",
+              under and nd.tag_values(under[0], "published_at") == [str(old_at)],
+              json.dumps(nd.tag_values(under[0], "published_at") if under else None))
+fresh_name = f"Fresh Post {uuid.uuid4().hex[:6]}"
+dn = file_sheet(fresh_name)
+nd.wait_until(lambda: not dn._checking_file_name, 30_000)
+rep.check("a file never published under its name gets the made link name",
+          dn._slug_edit.text() == slugify(fresh_name), dn._slug_edit.text())
+
+# --------------------------------------------------------------------------- #
 rep.section("Deleting published notes and articles (NIP-09 kind 5)")
 rep.skip("delete a published note or article", "MyEditor has no NIP-09 deletion: nothing "
          "in nostr/ builds a kind 5 event. Only private drafts are deleted, by NIP-37 "

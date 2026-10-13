@@ -6939,8 +6939,12 @@ class MainWindow(QMainWindow):
         title = details.title or default_title(body, self._preview_name)
         default_slug = details.identifier
         first_published = details.published_at
+        file_name = ""
         if not default_slug:
             default_slug = self._link_name_for_file(self.current_path(), active.user_pubkey)
+            # The file's name as it is, which version 3.3 published files
+            # under: the sheet asks the relays about it first.
+            file_name = self._file_name(self.current_path())
 
         dialog = PublishArticleDialog(
             body_markdown=body,
@@ -6961,6 +6965,7 @@ class MainWindow(QMainWindow):
             private_library=self._private_library,
             default_title=title,
             default_slug=default_slug,
+            file_name=file_name,
             first_published=first_published,
             details=details,
             first_publications=self._first_publications,
@@ -6974,15 +6979,21 @@ class MainWindow(QMainWindow):
         self._publish_sheet = dialog
         dialog.open()
 
+    @staticmethod
+    def _file_name(path: str) -> str:
+        """A file's name without its extension ("My Post" for My Post.md)."""
+        return os.path.splitext(os.path.basename(path))[0] if path else ""
+
     def _link_name_for_file(self, path: str, author: str) -> str:
         """The link name a file-backed article starts with: made from the
         file's name as a title's is ("Grüße an alle.md" is
         "grusse-an-alle"), unless this computer published it under the
         name as it is, which it then keeps (another would be another
-        article)."""
-        if not path:
+        article). Published elsewhere, or by version 3.3, which kept no
+        record, the sheet finds that out from the relays (file_name)."""
+        name = MainWindow._file_name(path)
+        if not name:
             return ""
-        name = os.path.splitext(os.path.basename(path))[0]
         record = getattr(self, "_first_publications", None)
         if record is not None and record.get(author, name):
             return name

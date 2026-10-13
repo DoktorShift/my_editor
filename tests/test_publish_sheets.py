@@ -600,3 +600,46 @@ def test_a_link_name_typed_by_hand_is_written_in_one_form(tmp_path, captured):
     stash = StashKindDialog(default=StashKind.ARTICLE, suggested_slug=decomposed)
     stash._on_accept()
     assert stash.choice.identifier == "école-été"
+
+
+FIRST = 1_600_000_000
+
+
+@pytest.mark.parametrize("state, kept", [("found", True), ("unknown", True), ("never", False)])
+def test_a_file_published_under_its_own_name_elsewhere_keeps_that_name(
+        tmp_path, captured, state, kept):
+    """Review round 2, M1: version 3.3 published a file's article under
+    the file's name as it is ("My Post"), and recorded nothing; made a
+    link name ("my-post") now, republishing it made a second article.
+    The relays are asked first: an article of the author's under the
+    file's own name keeps it (and is recorded); so does one when no relay
+    can tell (never a second article); otherwise the made name stays."""
+    from nostr.first_publications import FirstPublications
+    from nostr.publisher import FOUND, NEVER, UNKNOWN, FirstPublication
+    answers = {"found": FirstPublication(FOUND, FIRST), "never": FirstPublication(NEVER),
+               "unknown": FirstPublication(UNKNOWN)}
+    asked = []
+    record = FirstPublications(tmp_path / "first.json")
+    sheet = article(tmp_path, default_title="Hello", default_slug="my-post",
+                    file_name="My Post", first_publications=record,
+                    published_at_lookup=lambda author, slug, done: asked.append((slug, done)))
+    assert [slug for slug, _done in asked] == ["My Post"]
+    assert not sheet._publish_btn.isEnabled()                  # asking first
+    asked[0][1](answers[state])
+    assert sheet._slug_edit.text() == ("My Post" if kept else "my-post")
+    assert sheet._publish_btn.isEnabled()
+    if state == "found":
+        assert record.get(PK, "My Post") == FIRST
+        sheet._on_publish()                                   # its date is known: no asking
+        assert ["d", "My Post"] in captured[0]["tags"]
+        assert ["published_at", str(FIRST)] in captured[0]["tags"]
+        sheet._title_edit.setText("Another title")
+        assert sheet._slug_edit.text() == "My Post"
+
+
+def test_the_window_asks_about_a_files_own_name_when_it_has_no_link_name():
+    import inspect
+    from main_window import MainWindow
+    source = inspect.getsource(MainWindow._on_nostr_publish_article)
+    assert "file_name=" in source
+    assert "def _file_name(" in inspect.getsource(MainWindow) or "_file_name" in source

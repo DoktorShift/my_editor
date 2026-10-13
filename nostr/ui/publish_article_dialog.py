@@ -254,6 +254,7 @@ class PublishArticleDialog(QDialog):
         private_library: Optional[PrivateLibrary] = None,
         default_title: str = "",
         default_slug: str = "",
+        file_name: str = "",
         first_published: Optional[int] = None,
         details: Optional[ArticleDetails] = None,
         first_publications: Optional[FirstPublications] = None,
@@ -323,6 +324,12 @@ class PublishArticleDialog(QDialog):
             or (first_publications is not None and default_slug
                 and first_publications.get(active_profile.user_pubkey, default_slug)))
         self._coauthor_picker: Optional[MentionPicker] = None
+        # A file's article with no link name of its own: its file's name as
+        # it is, which an older version published it under (version 3.3
+        # recorded nothing), asked of the relays before the made name is
+        # used (_check_file_name).
+        self._file_name = link_name(file_name) if self._slug_is_auto else ""
+        self._checking_file_name = False
 
         self._build(active_profile, default_title, default_slug)
         self._coauthors = Coauthors(profile=self._account.profile,
@@ -335,6 +342,7 @@ class PublishArticleDialog(QDialog):
         self._details_shown = self.details()
         self._show_people()
         self._refresh_card()
+        self._check_file_name()
         self._refresh_publish_enabled()
         self._fit(_WIDTH)
 
@@ -620,6 +628,37 @@ class PublishArticleDialog(QDialog):
         self._slug_hint.setText("…/" + slug if slug else "")
         self._slug_hint.setVisible(bool(slug))
 
+    def _check_file_name(self) -> None:
+        """Ask whether the author has an article under the file's own name
+        (an older version published files so); the answer comes to
+        _file_name_checked. Publish waits for it."""
+        if not self._file_name or self._file_name == self._slug() or not self._slug_is_auto:
+            return
+        self._checking_file_name = True
+        self._set_status(_("Checking whether this article was published before…"))
+        author = self._account.profile().user_pubkey
+        self._published_at_lookup(
+            author, self._file_name,
+            lambda found, a=author: self._file_name_checked(a, found))
+
+    def _file_name_checked(self, author: str, found: FirstPublication) -> None:
+        if not self._checking_file_name or author != self._account.profile().user_pubkey:
+            return                     # closed meanwhile, or another account now
+        self._checking_file_name = False
+        self._set_status("")
+        if found.state == NEVER:
+            self._refresh_publish_enabled()
+            return                     # no such article: the made name stays
+        # An article under the file's own name, or no relay could tell:
+        # that name stays (another would be a second article).
+        self._slug_is_auto = False
+        self._slug_edit.setText(self._file_name)
+        if found.state == FOUND:
+            self._first_published[self._file_name] = found.published_at
+            if self._first_publications is not None:
+                self._first_publications.remember(author, self._file_name, found.published_at)
+        self._refresh_publish_enabled()
+
     # -- people -----------------------------------------------------------------------
 
     def _show_people(self) -> None:
@@ -661,6 +700,10 @@ class PublishArticleDialog(QDialog):
     def _on_account_switched(self, _profile: Profile) -> None:
         self._show_people()
         self._refresh_card()
+        if self._checking_file_name:
+            self._checking_file_name = False
+            self._check_file_name()       # asked again, for this account
+            self._refresh_publish_enabled()
 
     # -- state ------------------------------------------------------------------------
 
@@ -693,6 +736,7 @@ class PublishArticleDialog(QDialog):
         # NIP-23 requires the d-tag; an empty document has nothing to say;
         # a cover still uploading is waited for.
         self._publish_btn.setEnabled(self._job is None and not self._looking_up
+                                     and not self._checking_file_name
                                      and bool(slug) and bool(self._body) and not problem
                                      and not self._cover.uploading())
 
@@ -723,7 +767,7 @@ class PublishArticleDialog(QDialog):
     def _on_publish(self) -> None:
         slug = self._slug()
         if (not slug or not self._body or self._job is not None or self._looking_up
-                or slug_problem(slug) or self._cover.uploading()):
+                or self._checking_file_name or slug_problem(slug) or self._cover.uploading()):
             return
         author = self._account.profile().user_pubkey
         known = self._first_published.get(slug) or (
@@ -867,4 +911,5 @@ class PublishArticleDialog(QDialog):
             self._job.cancel()
             self._job = None
         self._looking_up = False
+        self._checking_file_name = False
         super().reject()
