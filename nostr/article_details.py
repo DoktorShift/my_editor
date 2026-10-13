@@ -259,13 +259,20 @@ def front_matter_with(details: ArticleDetails, front: Optional[front_matter.Fron
                 del entries[at]
             continue
         value = new[key]
+        syntax = front.syntax if front is not None else front_matter.YAML
+        bare = False
         if key == "date":
-            original = entries[at].value if at is not None else ""
-            value = _date_like(details.published_at, original if isinstance(original, str)
-                               else "")
-        written = front_matter.entry(entries[at].key if at is not None else key, value)
+            original = entries[at].written if at is not None else ""
+            value = _date_like(details.published_at, original.strip("\"'"))
+            # A date TOML reads as one, as TOML writes it; in quotes when
+            # the file had it so.
+            bare = syntax == front_matter.TOML and not original.startswith(("\"", "'"))
+        written = front_matter.entry(entries[at].key if at is not None else key, value,
+                                     syntax=syntax, bare=bare)
         if at is not None:
             entries[at] = written
+        elif front is not None:
+            entries.insert(front.where_new_entries_go(entries), written)
         else:
             entries.append(written)
     if front is None:

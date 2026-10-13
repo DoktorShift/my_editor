@@ -183,7 +183,8 @@ print("RESULT " + json.dumps(r))
 
 def test_markdown_files_in_the_window(tmp_path):
     paths = []
-    for name, text in (("hugo.md", HUGO), ("jekyll.md", JEKYLL), ("divider.md", DIVIDER)):
+    for name, text in (("hugo.md", HUGO), ("jekyll.md", JEKYLL), ("divider.md", DIVIDER),
+                       ("toml.md", TOML), ("pandoc.md", PANDOC)):
         path = tmp_path / name
         path.write_bytes(text.encode("utf-8"))
         paths.append(str(path))
@@ -194,6 +195,10 @@ def test_markdown_files_in_the_window(tmp_path):
     assert r["jekyll.md saved"] == JEKYLL.replace("Body text.\n", "Body text. More.\n")
     assert "The first section of my essay." in r["divider.md shown"]
     assert r["divider.md saved"] == DIVIDER.replace("second section.\n", "second section. More.\n")
+    for name, text in (("toml.md", TOML), ("pandoc.md", PANDOC)):      # review N3
+        assert r[name + " shown"] == "Body text."
+        assert "+++" not in r[name + " published"] and "title" not in r[name + " published"]
+        assert r[name + " saved"] == text.replace("Body text.\n", "Body text. More.\n")
 
 
 
@@ -216,3 +221,42 @@ def test_a_block_value_keeps_its_own_lines():
     front, _ = front_matter.split(text)
     assert from_front_matter(front).summary == "Line one\nLine two"
     assert unchanged_save(text) == text
+
+
+# -- TOML front matter (Hugo's own archetype writes it), and Pandoc's "..." ----
+
+TOML = ('+++\ntitle = "My TOML post"\ndate = 2024-03-01T08:00:00+01:00\n'
+        'tags = ["a", "b"]  # for the site\ndraft = false\n\n[params]\ntoc = true\n+++\n\n'
+        'Body text.\n')
+PANDOC = "---\ntitle: Pandoc\nauthor: [A, B]\n...\n\nBody text.\n"
+
+
+def test_toml_front_matter_is_read_and_kept_as_written():
+    front, body = front_matter.split(TOML)
+    assert body == "Body text.\n" and front.syntax == "toml"
+    details = from_front_matter(front)
+    assert (details.title, details.hashtags) == ("My TOML post", ("a", "b"))
+    assert details.published_at == moment(2024, 3, 1, 8, 0, offset=1)
+    assert unchanged_save(TOML) == TOML
+
+
+def test_a_changed_detail_is_written_into_the_toml_in_place_in_toml():
+    front, body = front_matter.split(TOML)
+    details = from_front_matter(front)
+    changed = details.with_changes(title='A "new" title', hashtags=("a", "b", "Extra"),
+                                   published_at=moment(2024, 3, 2, 8, 0, offset=1),
+                                   summary="Short")
+    out = front_matter.join(front_matter_with(changed, front), body)
+    assert out == TOML.replace('title = "My TOML post"', 'title = "A \\"new\\" title"').replace(
+        'date = 2024-03-01T08:00:00+01:00', "date = 2024-03-02T08:00:00+01:00").replace(
+        'tags = ["a", "b"]  # for the site', 'tags = ["a", "b", "Extra"]').replace(
+        "draft = false\n", 'draft = false\nsummary = "Short"\n')
+    import tomllib
+    assert tomllib.loads(out.split("+++\n")[1])["params"] == {"toc": True}   # still a table
+    assert "---" not in out
+
+
+def test_pandoc_front_matter_closed_by_dots_is_front_matter():
+    front, body = front_matter.split(PANDOC)
+    assert body == "Body text.\n" and from_front_matter(front).title == "Pandoc"
+    assert unchanged_save(PANDOC) == PANDOC
