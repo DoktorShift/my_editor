@@ -422,3 +422,12 @@ def test_the_save_question_writes_typographic_apostrophes(monkeypatch):
     main_window._ask_save_changes(None, "Do you want to save?")
     words = [seen["message"]] + [button.label for button in seen["buttons"]]
     assert all("'" not in text for text in words), words
+
+
+def test_a_line_break_is_in_the_run_too(clock):
+    ed = typed("abc")
+    QTest.keyClick(ed, Qt.Key.Key_Return, Qt.KeyboardModifier.ShiftModifier)
+    QTest.keyClicks(ed, "def")
+    assert ed.toPlainText().replace(" ", "\n") == "abc\ndef"
+    ed.undo()
+    assert ed.toPlainText() == ""

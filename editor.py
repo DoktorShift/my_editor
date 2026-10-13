@@ -1758,7 +1758,9 @@ class HtmlEditor(QTextEdit):
                     with self._typing(TYPED) as cursor:
                         cursor.insertBlock()
                 else:
-                    super().keyPressEvent(e)       # Shift-Return: a line break
+                    # Shift-Return: a line break, in the run of typing too.
+                    with self._typing(TYPED):
+                        super().keyPressEvent(e)
                 self._apply_active_format_to_cursor()
                 self.ensureCursorVisible()
                 return
