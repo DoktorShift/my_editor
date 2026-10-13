@@ -1515,7 +1515,7 @@ def set_link(cursor: QTextCursor, text: str, href: str) -> None:
             style.clearProperty(prop)
         style.merge(anchor)
         cursor.insertText(text, style)
-        cursor.setPosition(cursor.position() - len(text), QTextCursor.MoveMode.KeepAnchor)
+        cursor.setPosition(cursor.position() - doc_length(text), QTextCursor.MoveMode.KeepAnchor)
     elif cursor.hasSelection():
         cursor.mergeCharFormat(anchor)
     cursor.endEditBlock()

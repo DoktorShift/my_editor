@@ -305,3 +305,14 @@ def test_a_replacement_with_emoji_is_where_it_says_it_is():
     assert cursor.selectedText() == "👨‍👩‍👧 dog"
     assert replace_all(doc, "a", "🇩🇪") == 4 and doc.toPlainText() == \
         "🌸 🇩🇪 👨‍👩‍👧 dog 🇩🇪nd 🇩🇪 c🇩🇪t."
+
+
+def test_a_link_whose_words_hold_an_emoji_ends_selected_whole():
+    from PySide6.QtGui import QTextCursor, QTextDocument
+    import rich_text
+    doc = QTextDocument()
+    doc.setPlainText("Read: ")
+    cursor = QTextCursor(doc)
+    cursor.movePosition(QTextCursor.MoveOperation.End)
+    rich_text.set_link(cursor, "🌸 the 👨‍👩‍👧 post", "https://example.com/p")
+    assert cursor.selectedText() == "🌸 the 👨‍👩‍👧 post"
