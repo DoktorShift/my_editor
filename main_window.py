@@ -6707,7 +6707,7 @@ class MainWindow(QMainWindow):
         run_for_size(size, lambda: self._asset_manager.store_media_file(
                          path, read.keeping, read.kept),
                      lambda stored: self._insert_media(ed, at, stored, mime, name, read),
-                     lambda _error: self._say_cannot_add(name), parent=self)
+                     lambda _error: self._media_read_failed(ed, name, read), parent=self)
 
     def _drop_media_reads(self, ed) -> None:
         """The audio and video still being read for ``ed`` go nowhere, and
@@ -6716,6 +6716,14 @@ class MainWindow(QMainWindow):
             sha = read.drop()
             if sha is not None:
                 self._asset_manager.release_stored(sha)
+
+    def _media_read_failed(self, ed, name: str, read: "_MediaRead") -> None:
+        """Say a file couldn't be read, while the document it was for is
+        still open; once it is gone, the read ends quietly, as an operation
+        cancelled does in Mail and the Finder."""
+        if read.dropped or self._editor_widget_index(ed) < 0:
+            return
+        self._say_cannot_add(name)
 
     def _say_cannot_add(self, name: str) -> None:
         inform(self, title=_("Couldn’t add “{name}”").format(name=name),

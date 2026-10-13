@@ -1219,3 +1219,57 @@ def test_closing_one_of_two_documents_reading_the_same_file_spares_the_other(tmp
     song.write_bytes(BODY)
     r = run_window_script(SHARED_READ_SCRIPT, tmp_path, str(song), SHA)
     assert r == {"told": [], "second has it": True, "kept": True}
+
+
+FAILED_READ_SCRIPT = r"""
+import json, os, sys, threading
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+from nostr.imports import workers
+workers.BACKGROUND_FROM_BYTES = 0
+import main_window
+
+song = sys.argv[2]
+told = []
+main_window.inform = lambda parent, **kw: told.append(kw.get("title", ""))
+main_window._ask_save_changes = lambda parent, title, **kw: "discard"
+w = main_window.MainWindow()
+w.show()
+w.nostr_state._active = True
+w._update_nostr_commands()
+w._upload_limit = lambda: 10**9
+closed = threading.Event()
+
+def failing_read(path, keeping=None, kept=None):
+    closed.wait(10)
+    raise OSError("the disk went away")
+
+w._asset_manager.store_media_file = failing_read
+r = {}
+for case in ("closed", "open"):
+    ed = w.new_tab()
+    w._upload_into(ed, song)
+    if case == "closed":
+        w.close_tab(w._editor_widget_index(ed))
+    closed.set()
+    for _ in range(100):
+        app.processEvents()
+        threading.Event().wait(0.01)
+    r[case] = list(told)
+    told.clear()
+    closed.clear()
+    if case == "open":
+        ed.document().setModified(False)
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_a_read_failing_for_a_closed_document_ends_quietly(tmp_path):
+    """Round 5, L3: the document it was for is gone, as in Mail and the
+    Finder after a cancelled operation; for an open one, it is said."""
+    song = tmp_path / "song.mp3"
+    song.write_bytes(BODY)
+    r = run_window_script(FAILED_READ_SCRIPT, tmp_path, str(song))
+    assert r == {"closed": [], "open": ["Couldn’t add “song.mp3”"]}
