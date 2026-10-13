@@ -141,6 +141,11 @@ class HtmlEditor(QTextEdit):
         self._resource_resolver = None
         # What other apps get for an audio or video object (set_media_lookup).
         self._media_text = None
+        # Undo counts at which the document holds only a paragraph made for
+        # typing at a file: Undo and Redo pass over them, so the paragraph
+        # and the words typed into it are one step (_pass_over_this_step).
+        self._passed_steps: set = set()
+        self.document().undoCommandAdded.connect(self._forget_passed_steps)
         self._asset_scheme = None
         self._asset_placeholder = None
         self._local_image_resolver = None
@@ -206,10 +211,28 @@ class HtmlEditor(QTextEdit):
         self.viewport().setAutoFillBackground(False)
 
     def undo(self):
-        self.document().undo()
+        doc = self.document()
+        doc.undo()
+        if doc.availableUndoSteps() in self._passed_steps and doc.isUndoAvailable():
+            doc.undo()
 
     def redo(self):
-        self.document().redo()
+        doc = self.document()
+        doc.redo()
+        if doc.availableUndoSteps() in self._passed_steps and doc.isRedoAvailable():
+            doc.redo()
+
+    def _pass_over_this_step(self) -> None:
+        """Undo and Redo don't stop at the document as it is now: what comes
+        next belongs to the same step (a paragraph made for typing at a
+        file, and the words typed into it)."""
+        self._passed_steps.add(self.document().availableUndoSteps())
+
+    def _forget_passed_steps(self) -> None:
+        """A new change drops what could be redone, and with it the marks
+        beyond the change before it."""
+        now = self.document().availableUndoSteps()
+        self._passed_steps = {steps for steps in self._passed_steps if steps < now}
 
     # -------- Resource resolution --------
     def set_resource_resolver(self, resolver, scheme: str) -> None:
@@ -1082,9 +1105,10 @@ class HtmlEditor(QTextEdit):
     def _keep_media_apart(self, e) -> bool:
         """Audio or video stays a paragraph of its own: typing in its
         paragraph goes into a new one after it (before it, with the caret
-        before it), Return there starts a clean paragraph, and Backspace from the paragraph below (or Delete from
-        the one above) takes it away whole, as one step, rather than joining
-        text to it. True when the key was answered here."""
+        before it), as one step of Undo with the words; Return there starts
+        a clean paragraph; and Backspace from the paragraph below (or Delete
+        from the one above) takes it away whole, as one step, rather than
+        joining text to it. True when the key was answered here."""
         cursor = self.textCursor()
         if cursor.hasSelection():
             return False
@@ -1102,6 +1126,7 @@ class HtmlEditor(QTextEdit):
             cursor.endEditBlock()
             if typing:
                 self.setTextCursor(cursor)
+                self._pass_over_this_step()
                 return False                   # the character is typed there
             cursor.movePosition(QTextCursor.MoveOperation.NextBlock)
             self.setTextCursor(cursor)
@@ -1116,6 +1141,7 @@ class HtmlEditor(QTextEdit):
             cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
             cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
             self.setTextCursor(cursor)
+            self._pass_over_this_step()
             return False                       # the character is typed there
         if e.key() == Qt.Key_Backspace and cursor.atBlockStart() \
                 and self.is_media_block(block.previous()):

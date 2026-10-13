@@ -817,3 +817,80 @@ def test_the_media_library_reads_a_large_file_off_the_ui_thread(tmp_path, monkey
         threading.Event().wait(0.01)
     assert main == [False]
     assert sent == [("talk.m4a", "audio/mp4")]
+
+
+UNDO_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+
+song = sys.argv[2]
+w = main_window.MainWindow()
+w.show()
+w._media_store.upload_bytes = lambda body, *, name, mime_type: None
+w.nostr_state._active = True
+w._update_nostr_commands()
+w._upload_limit = lambda: 10**9
+ed = w.new_tab()
+ed.setFocus()
+QTest.keyClicks(ed, "Top")
+w._upload_into(ed, song)
+doc = ed.document()
+
+def blocks():
+    return [doc.findBlockByNumber(i).text() for i in range(doc.blockCount())]
+
+def object_at():
+    return next(doc.findBlockByNumber(i).position() for i in range(doc.blockCount())
+                if ed.is_media_block(doc.findBlockByNumber(i)))
+
+r = {"start": blocks()}
+for where, offset in (("before", 0), ("after", 1)):
+    c = ed.textCursor()
+    c.setPosition(object_at() + offset)
+    ed.setTextCursor(c)
+    QTest.keyClicks(ed, "W")
+    r[where + " typed"] = blocks()
+    QTest.keyClick(ed, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+    r[where + " one undo"] = blocks()
+    w.act_redo.trigger()
+    r[where + " one redo"] = blocks()
+    w.act_undo.trigger()
+    r[where + " undone again"] = blocks()
+    # A word: each character is a step in this editor; none of them leaves
+    # an empty paragraph behind.
+    c = ed.textCursor()
+    c.setPosition(object_at() + offset)
+    ed.setTextCursor(c)
+    QTest.keyClicks(ed, "Words")
+    for _ in "Words":
+        ed.undo()
+    r[where + " word undone"] = blocks()
+ed.document().setModified(False)
+w._media_not_uploaded = lambda doc: []
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_typing_at_a_file_is_one_step_of_undo(tmp_path):
+    """The paragraph made for typing at a file is no step of its own: it is
+    one step with what is typed into it (each character is a step in this
+    editor), so Undo never leaves an empty paragraph behind and leaves the
+    document exactly as it was; Redo brings both back."""
+    song = tmp_path / "song.mp3"
+    song.write_bytes(BODY)
+    r = run_window_script(UNDO_SCRIPT, tmp_path, str(song))
+    start = r["start"]
+    assert r["before typed"] == ["Top", "W", "\ufffc", ""]
+    assert r["after typed"] == ["Top", "\ufffc", "W", ""]
+    for where in ("before", "after"):
+        assert r[where + " one undo"] == start
+        assert r[where + " one redo"] == r[where + " typed"]
+        assert r[where + " undone again"] == start
+        assert r[where + " word undone"] == start
