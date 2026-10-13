@@ -1267,9 +1267,10 @@ def _delete_reason(code: str) -> str:
 # device names as the part before the first dot, in any case.
 _UNSAVEABLE = re.compile(r'[<>:"/\\|?*\x00-\x1f\x7f]')
 _DEVICE_NAMES = {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$",
-                 *(f"{port}{n}" for port in ("COM", "LPT") for n in "123456789¹²³")}
-# Most folders hold names of up to 255 bytes; this leaves room for the
-# hidden part file a download is written to and a number after a copy.
+                 *(f"{port}{n}" for port in ("COM", "LPT") for n in "0123456789¹²³")}
+
+# Most folders hold names of up to 255 bytes; a library name is kept
+# shorter, so the number a copy gets ("Name 2.png") still fits.
 _NAME_BYTES = 240
 
 

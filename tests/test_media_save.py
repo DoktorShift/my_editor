@@ -447,6 +447,8 @@ def test_two_save_as_to_one_name_keep_both(tmp_path, monkeypatch, server):
     ("conout$", "conout$-.mp4"),
     ("AUX .png", "AUX-.png"),
     ("CONSOLE.png", "CONSOLE.png"),
+    ("com0.png", "com0-.png"),
+    ("LPT0.txt.png", "LPT0-.txt.png"),
     ("...", "Video.mp4"),
 ])
 def test_a_name_is_one_every_system_can_save(tmp_path, monkeypatch, server, name, saved):
