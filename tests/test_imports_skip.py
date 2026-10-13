@@ -454,3 +454,12 @@ def test_command_w_closes_the_window(window):
     # from the standard key alone got only Ctrl+F4 on Windows).
     QTest.keyClick(window, Qt.Key_W, Qt.ControlModifier)
     assert not window.isVisible()
+
+
+@pytest.mark.parametrize("command_id", [
+    "nostr.insert_mention", "edit.footnote_jump", "view.write", "view.preview", "view.split"])
+def test_the_commands_that_act_on_the_document_rest_while_imports_is_in_front(command_id):
+    # Review of the merge: with Imports in front, Insert Mention… stayed
+    # enabled and acted on the document behind, as did the footnote jump
+    # and Write, Preview and Split; Publish and Insert Image were dimmed.
+    assert MainWindow._is_document_command(MainWindow, command_id)

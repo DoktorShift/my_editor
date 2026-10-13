@@ -4576,8 +4576,9 @@ class MainWindow(QMainWindow):
         "file.knit_html", "file.knit_pdf", "search.replace", "search.next",
         "search.previous", "search.use_selection",
         "view.line_numbers", "view.syntax_highlighting", "view.paper_mode", "view.toolbar",
-        "view.highlight_line", "nostr.publish_note", "nostr.publish_article",
-        "nostr.insert_image"})
+        "view.highlight_line", "view.write", "view.preview", "view.split",
+        "edit.footnote_jump", "nostr.publish_note", "nostr.publish_article",
+        "nostr.insert_image", "nostr.insert_mention"})
     _DOCUMENT_PREFIXES = ("format.", "insert.")
 
     def _is_document_command(self, command_id: str) -> bool:
