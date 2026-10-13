@@ -217,3 +217,78 @@ def test_where_a_picture_is_kept_it_goes_in_as_one(plain, name):
     r = plain[name]
     assert "￼" in r["drop"][0] and r["drop"][1] == "Drag"
     assert r["bitmap"][0] is True
+
+
+FILES_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtCore import QMimeData, QPointF, Qt, QUrl
+from PySide6.QtGui import QColor, QDropEvent, QImage, QTextCursor
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+home = os.environ["HOME"]
+picture = os.path.join(home, "holiday.png")
+image = QImage(4, 4, QImage.Format.Format_RGB32)
+image.fill(QColor("red"))
+image.save(picture)
+pdf = os.path.join(home, "paper.pdf")
+open(pdf, "wb").write(b"%PDF-1.4\n")
+w = main_window.MainWindow()
+w.show()
+r = {}
+for name, body in (("doc.txt", "Words\n"), ("code.py", "x = 1\n")):
+    path = os.path.join(home, name)
+    open(path, "w").write(body)
+    w.open_path(path)
+    app.processEvents()
+    ed = w.current_editor()
+
+    def at_end():
+        cursor = ed.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        ed.setTextCursor(cursor)
+        return ed.toPlainText()
+
+    before = at_end()
+    files = QMimeData()
+    files.setUrls([QUrl.fromLocalFile(picture), QUrl.fromLocalFile(picture)])
+    QApplication.clipboard().setMimeData(files)
+    ed.paste_normalized()
+    matched = ed.toPlainText()[len(before):]
+    ed.undo()
+    before = at_end()
+    document = QMimeData()
+    document.setUrls([QUrl.fromLocalFile(pdf)])
+    ed.insertFromMimeData(document)
+    pasted_pdf = ed.toPlainText()[len(before):]
+    ed.undo()
+    before = at_end()
+    web = QMimeData()
+    web.setImageData(image)
+    web.setHtml("<img src='https://example.org/a.png'>")
+    web.setUrls([QUrl("https://example.org/a.png")])
+    at = ed.cursorRect().center()
+    ed.dropEvent(QDropEvent(QPointF(at), Qt.DropAction.CopyAction, web,
+                            Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier))
+    dropped_web = [ed.toPlainText()[len(before):], ed.undo_name()]
+    r[name] = {"matched": matched, "pdf": pasted_pdf, "web": dropped_web,
+               "paths": [picture, pdf]}
+    ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+@pytest.mark.parametrize("name", ["doc.txt", "code.py"])
+def test_files_and_web_pictures_in_plain_text_are_their_paths_and_addresses(tmp_path, name):
+    """Review L5: Paste and Match Style of picture files and a pasted PDF
+    went in as file:// addresses, and a picture dragged from the web
+    brought nothing. In plain text a file is its path, as Paste puts it,
+    and a picture from the web its address, as in TextEdit's plain text."""
+    r = run_window_script(FILES_SCRIPT, tmp_path)[name]
+    picture, pdf = r["paths"]
+    assert r["matched"] == picture + "\n" + picture
+    assert r["pdf"] == pdf
+    assert r["web"] == ["https://example.org/a.png", "Drag"]

@@ -32,6 +32,7 @@ from i18n import N_, _, ngettext
 import announce
 from doc_walk import iter_blocks
 import image_safety
+import file_paths
 import link_url
 import mac_words
 import markdown_shortcuts
@@ -2355,7 +2356,10 @@ class HtmlEditor(QTextEdit):
             super().dragEnterEvent(event)
 
     def dropEvent(self, event):
-        if (event.mimeData().hasUrls()
+        urls = list(event.mimeData().urls()) if event.mimeData().hasUrls() else []
+        # Files go to whoever handles them; addresses from the web dropped
+        # in plain text are text, as in TextEdit's plain text.
+        if (urls and (self._holds_structure() or any(url.isLocalFile() for url in urls))
                 and self.isSignalConnected(QMetaMethod.fromSignal(self.urls_dropped))):
             self.urls_dropped.emit(list(event.mimeData().urls()))
             event.acceptProposedAction()
@@ -2385,8 +2389,21 @@ class HtmlEditor(QTextEdit):
     @_named_step(N_("Paste"))
     def paste_normalized(self):
         """Paste and Match Style: the clipboard's text, in the style of the
-        text where it goes."""
-        self._insert_plain(paste.plain_text(QApplication.clipboard().mimeData()))
+        text where it goes (in plain text, files as their paths, as Paste
+        puts them)."""
+        source = QApplication.clipboard().mimeData()
+        self._insert_plain(self._plain_file_paths(source) or paste.plain_text(source))
+
+    def _plain_file_paths(self, source) -> str:
+        """In a plain-text or code document, the files ``source`` holds as
+        their paths, one a line, as TextEdit puts a file in plain text;
+        else (or for anything else) ""."""
+        if self._holds_structure() or source is None or not source.hasUrls():
+            return ""
+        urls = list(source.urls())
+        if not urls or not all(url.isLocalFile() for url in urls):
+            return ""
+        return "\n".join(file_paths.normalize(url.toLocalFile()) for url in urls)
 
     def canInsertFromMimeData(self, source):
         """What a paste or a drop can bring here: what insertFromMimeData
@@ -2555,6 +2572,10 @@ class HtmlEditor(QTextEdit):
             self._leave_link_at_end()
             return
         if self._pasted_media(source, text):
+            return
+        paths = self._plain_file_paths(source)
+        if paths:
+            self._insert_plain(paths)
             return
         if (self._keeps_local_formats() and source.hasFormat(paste.LITERAL_HTML_MIME)
                 and not rich_text.is_code_block(cursor.block())):
