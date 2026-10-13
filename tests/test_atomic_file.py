@@ -495,6 +495,26 @@ def test_on_macos_the_quarantine_mark_is_kept_as_it_was(tmp_path):
     assert shown == mark
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="access lists as macOS keeps them")
+def test_on_macos_a_document_nobody_may_delete_is_saved_in_place(tmp_path):
+    """Replacing it would delete it, which its access list forbids: it is
+    written in place, keeps its list, and leaves no file behind that
+    nobody could delete either."""
+    import subprocess
+    path = tmp_path / "kept.md"
+    path.write_bytes(b"old")
+    subprocess.run(["chmod", "+a", "everyone deny delete", str(path)], check=True)
+    try:
+        save_document(path, b"new")
+        assert path.read_bytes() == b"new"
+        assert sorted(os.listdir(tmp_path)) == ["kept.md"]
+        listed = subprocess.run(["ls", "-le", str(path)], capture_output=True, text=True,
+                                check=True).stdout
+        assert "deny delete" in listed
+    finally:
+        subprocess.run(["chmod", "-RN", str(tmp_path)], check=False)
+
+
 @pytest.mark.skipif(sys.platform != "darwin", reason="Finder tags exist on macOS only")
 def test_on_macos_finder_tags_and_attributes_are_kept(tmp_path):
     import subprocess

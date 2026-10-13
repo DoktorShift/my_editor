@@ -123,7 +123,7 @@ def save_document(path: PathLike, data: bytes) -> None:
     with several hard links, which a replacement would split), it is
     written in place, as before. Raises OSError."""
     target = os.path.realpath(os.fspath(path))
-    if _hard_linked(target):
+    if _hard_linked(target) or _denies_delete(target):
         _write_in_place(target, data)
         return
     try:
@@ -152,9 +152,10 @@ def place_document(temporary: PathLike, path: PathLike) -> None:
     afterwards, whatever happens. Raises OSError."""
     temporary, target = os.fspath(temporary), os.path.realpath(os.fspath(path))
     try:
-        # Written in place: a file with several names, or one whose folder
-        # couldn't take the temporary file (it was made elsewhere).
-        if _hard_linked(target) or \
+        # Written in place: a file with several names, one nobody may
+        # delete (replacing it would), or one whose folder couldn't take
+        # the temporary file (it was made elsewhere).
+        if _hard_linked(target) or _denies_delete(target) or \
                 os.path.dirname(os.path.realpath(temporary)) != os.path.dirname(target):
             with open(temporary, "rb") as source:
                 _write_in_place(target, source.read())
@@ -242,6 +243,39 @@ def _libc():
         except OSError:
             _libc_handle = False
     return _libc_handle or None
+
+
+_ACL_TYPE_EXTENDED = 0x00000100
+
+
+def _denies_delete(target: str) -> bool:
+    """On macOS, whether the file's access list forbids deleting it, which
+    replacing it does: it is then written in place, and no temporary file
+    that copied the list (and so couldn't be deleted either) is made."""
+    libc = _libc() if sys.platform == "darwin" else None
+    if libc is None:
+        return False
+    libc.acl_get_file.argtypes = [ctypes.c_char_p, ctypes.c_int]
+    libc.acl_get_file.restype = ctypes.c_void_p
+    libc.acl_to_text.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    libc.acl_to_text.restype = ctypes.c_void_p
+    libc.acl_free.argtypes = [ctypes.c_void_p]
+    acl = libc.acl_get_file(os.fsencode(target), _ACL_TYPE_EXTENDED)
+    if not acl:
+        return False                                 # none, or no such file
+    try:
+        text = libc.acl_to_text(acl, None)
+        if not text:
+            return False
+        try:
+            listed = ctypes.string_at(text).decode("utf-8", "replace")
+        finally:
+            libc.acl_free(text)
+    finally:
+        libc.acl_free(acl)
+    # Lines such as "user:FFFFEEEE-…:everyone:12:deny:delete,write".
+    return any(fields[-2:-1] == ["deny"] and "delete" in fields[-1].split(",")
+               for fields in (line.split(":") for line in listed.splitlines()))
 
 
 def _hard_linked(target: str) -> bool:
