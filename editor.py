@@ -30,7 +30,7 @@ from constants import (
 from fonts import code_font, writing_font
 from i18n import N_, _, ngettext
 import announce
-from doc_walk import iter_blocks, text_index
+from doc_walk import doc_length, doc_offset, iter_blocks, text_index
 import image_safety
 import link_url
 import markdown_shortcuts
@@ -1667,7 +1667,7 @@ class HtmlEditor(QTextEdit):
         c.endEditBlock()
 
         if cursor_pos_after is None:
-            cursor_pos_after = start_pos + len(new_text)
+            cursor_pos_after = start_pos + doc_length(new_text)
 
         nc = self.textCursor()
         nc.setPosition(cursor_pos_after)
@@ -1687,7 +1687,9 @@ class HtmlEditor(QTextEdit):
         else:
             new_line = " " * max(0, spaces - tab_width) + line[spaces:]
         bullet_pos = new_line.find("• ")
-        move_to = start + bullet_pos + 2 if bullet_pos >= 0 else start + len(new_line.rstrip())
+        # (Places in the line as places in the document: an emoji takes two.)
+        move_to = (start + doc_offset(new_line, bullet_pos + 2) if bullet_pos >= 0
+                   else start + doc_length(new_line.rstrip()))
         self._set_line_text(start, new_line, move_to)
         if delta > 0:
             self._apply_active_format_to_cursor()

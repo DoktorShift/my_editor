@@ -323,3 +323,22 @@ def test_pasted_code_holding_an_emoji_stays_code_whole():
     markdown, _count = markdown_from_html(
         '<p>Run <span style="font-family: monospace">  🌸 ls -l 👨‍👩‍👧 </span> now</p>')
     assert "`🌸 ls -l 👨‍👩‍👧`" in markdown
+
+
+@pytest.mark.parametrize("line", ["    ß🫠", "    👨‍👩‍👧 family", "    Grüße 🌸 x"])
+def test_shift_tab_after_emoji_puts_the_caret_at_the_lines_end(line):
+    """Review round 2, M3: Shift+Tab put the caret one place inside the
+    line per emoji, between an emoji's two halves or inside a word, and
+    what was typed next cut the emoji."""
+    from PySide6.QtCore import Qt
+    from editor import HtmlEditor
+    from tests.rich_text_helpers import press, type_text
+    ed = HtmlEditor()
+    ed.setPlainText(line)
+    cursor = ed.textCursor()
+    cursor.setPosition(2)
+    ed.setTextCursor(cursor)
+    press(ed, Qt.Key.Key_Backtab, Qt.KeyboardModifier.ShiftModifier)
+    type_text(ed, "Z")
+    assert ed.toPlainText() == line.strip() + "Z"
+
