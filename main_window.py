@@ -2935,6 +2935,9 @@ class MainWindow(QMainWindow):
             viewer.save_view_state()
             self._watcher.removePath(viewer._file_path)
             self.tabs.removeTab(index)
+            # The tab goes with its document, as a document's tab does.
+            viewer.release()
+            viewer.deleteLater()
             return
 
         editor = self._editor_from_widget(w)
