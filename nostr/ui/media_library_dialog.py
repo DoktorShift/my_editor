@@ -557,6 +557,14 @@ class MediaLibraryDialog(QDialog):
             self._quick_look.set_picture(pix)
 
     def _on_thumbnail_failed(self, sha: str, reason: str) -> None:
+        if reason == "not an image" and not self._visibility.is_private(sha):
+            # A picture this system cannot draw (HEIC on most): the tile
+            # shows its kind instead of an empty square.
+            tile = self._model.tile(sha)
+            if tile is not None:
+                tile.no_picture = True
+                self._model.changed(sha)
+            return
         if reason == "not an image":
             # The bytes are in the cache. A private picture is sealed, not
             # broken: it is opened here, in memory.
@@ -958,7 +966,7 @@ class MediaLibraryDialog(QDialog):
         patterns = " ".join("*" + ext for ext in media_files.EXTENSIONS)
         paths, _filter = QFileDialog.getOpenFileNames(
             self, _("Add to Media Library"), "",
-            _("Images, Videos and Audio ({patterns})").format(patterns=patterns))
+            _("Images, Videos, Audio and PDFs ({patterns})").format(patterns=patterns))
         self._add_paths(paths)
 
     def _add_paths(self, paths: List[str]) -> None:
@@ -976,9 +984,10 @@ class MediaLibraryDialog(QDialog):
             self._add_job(name, mime, _local_preview(mime=mime, path=path))
         if refused:
             self._say(ngettext(
-                "“{name}” wasn’t added. The Media Library takes images, videos and audio.",
-                "{count} files weren’t added. The Media Library takes images, videos and "
-                "audio.", len(refused)).format(name=refused[0], count=len(refused)),
+                "“{name}” wasn’t added. The Media Library takes images, videos, audio and "
+                "PDFs.",
+                "{count} files weren’t added. The Media Library takes images, videos, audio "
+                "and PDFs.", len(refused)).format(name=refused[0], count=len(refused)),
                 error=True)
 
     def _paste(self) -> None:

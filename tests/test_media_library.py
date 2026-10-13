@@ -500,7 +500,7 @@ def test_a_file_that_is_no_media_is_not_added_and_it_says_so(tmp_path, monkeypat
     world.dialog._add_paths([str(path)])
     assert world.store.calls == [("fetch", False)]
     assert world.dialog._status.text() == (
-        "“notes.txt” wasn’t added. The Media Library takes images, videos and audio.")
+        "“notes.txt” wasn’t added. The Media Library takes images, videos, audio and PDFs.")
 
 
 def test_a_server_that_did_not_keep_a_copy_is_said_once_when_the_file_lands(
@@ -1029,3 +1029,39 @@ def test_files_dropped_where_the_grid_would_be_are_added(tmp_path, monkeypatch, 
                       Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
     QApplication.sendEvent(target, drop)
     assert ("upload_file", "Garden.png") in world.store.calls
+
+
+def test_an_iphone_photo_is_an_image_the_library_takes(tmp_path, monkeypatch):
+    """HEIC is what an iPhone takes photos in; AVIF and HEIF are images
+    too. They upload like any image (a preview only where the system
+    can draw them, and the kind's own mark where it cannot)."""
+    import media_files
+    assert media_files.type_of("IMG_0001.HEIC") == "image/heic"
+    assert media_files.type_of("a.heif") == "image/heif"
+    assert media_files.type_of("a.avif") == "image/avif"
+    path = tmp_path / "IMG_0001.HEIC"
+    path.write_bytes(b"heic bytes")
+    world = build(tmp_path, monkeypatch)
+    world.dialog._add_paths([str(path)])
+    assert ("upload_file", "IMG_0001.HEIC") in world.store.calls
+
+
+def test_the_add_dialog_names_every_kind_the_library_takes(tmp_path, monkeypatch):
+    seen = {}
+
+    def choose(parent, title, folder, filters):
+        seen["filters"] = filters
+        return [], ""
+
+    monkeypatch.setattr(dialog_module.QFileDialog, "getOpenFileNames", choose)
+    world = build(tmp_path, monkeypatch)
+    world.dialog._choose_files()
+    assert seen["filters"].startswith("Images, Videos, Audio and PDFs (")
+    assert "*.heic" in seen["filters"] and "*.pdf" in seen["filters"]
+
+
+def test_a_picture_the_system_cannot_draw_shows_its_kind(tmp_path, monkeypatch):
+    heic = media(5, mime="image/heic")
+    world = build(tmp_path, monkeypatch, FakeStore([heic]))
+    world.loader.failed.emit(heic.hash, "not an image")
+    assert world.model.tile(heic.hash).no_picture

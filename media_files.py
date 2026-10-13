@@ -28,7 +28,8 @@ VIDEO_TYPES = {".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quickt
                ".m4v": "video/mp4"}
 IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
                ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
-               ".bmp": "image/bmp"}
+               ".bmp": "image/bmp", ".heic": "image/heic", ".heif": "image/heif",
+               ".avif": "image/avif"}
 DOCUMENT_TYPES = {".pdf": "application/pdf"}
 TYPES = {**AUDIO_TYPES, **VIDEO_TYPES, **IMAGE_TYPES, **DOCUMENT_TYPES}
 # What Insert > Audio or Video takes, and what the Media Library does.

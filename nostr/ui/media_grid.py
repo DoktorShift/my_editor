@@ -101,6 +101,8 @@ class Tile:
     progress: int = -1
     media: Optional[MediaFile] = None
     pixmap: Optional[QPixmap] = None
+    # A picture that cannot be drawn here (HEIC on most systems).
+    no_picture: bool = False
 
     @property
     def is_file(self) -> bool:
@@ -283,7 +285,7 @@ class TileDelegate(QStyledItemDelegate):
             source = QRectF(source.center().x() - side / 2, source.center().y() - side / 2,
                             side, side)
             painter.drawPixmap(QRectF(thumb), tile.pixmap, source)
-        elif tile.state == FILE and tile.kind != "image":
+        elif tile.state == FILE and (tile.kind != "image" or tile.no_picture):
             glyph = {"video": "video", "audio": "audio"}.get(tile.kind, "document")
             side = 44
             rect = QRectF(thumb.center().x() - side / 2, thumb.center().y() - side / 2,
