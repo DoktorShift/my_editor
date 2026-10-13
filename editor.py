@@ -259,6 +259,8 @@ class HtmlEditor(QTextEdit):
         # Characters per line when writing; None for code (full width).
         self._writing_measure_chars = None
         self._highlights = {layer: [] for layer in self.HIGHLIGHT_LAYERS}
+        self._highlights_stale = False
+        self.document().contentsChange.connect(self._highlights_moved)
         self.verticalScrollBar().valueChanged.connect(self.visible_area_changed)
         # Spelling (spelling.DocumentSpelling), while it is checked here.
         self._spelling = None
@@ -683,6 +685,39 @@ class HtmlEditor(QTextEdit):
     def highlights(self, layer: str) -> list:
         return list(self._highlights[layer])
 
+    def _highlights_moved(self, *_change) -> None:
+        self._highlights_stale = any(self._highlights.values())
+
+    def _renew_highlights(self) -> None:
+        """Before painting after a change, every highlight gets a new
+        cursor where the change left its own. Qt crashed painting a
+        highlight whose cursor had come through a change of a table's rows
+        or columns (a column added before the caret's, with a word
+        underlined above the table); a cursor made afresh at the same place
+        paints."""
+        self._highlights_stale = False
+        doc = self.document()
+        for layer in self.HIGHLIGHT_LAYERS:
+            renewed = []
+            for old in self._highlights[layer]:
+                # A highlight is words of one paragraph (a misspelling, a
+                # match): Qt can move its end into a table inserted right
+                # after it, so it ends where its paragraph does at most.
+                start = min(old.cursor.anchor(), old.cursor.position())
+                end = max(old.cursor.anchor(), old.cursor.position())
+                block = doc.findBlock(start)
+                end = min(end, block.position() + block.length() - 1)
+                cursor = QTextCursor(doc)
+                cursor.setPosition(start)
+                cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+                fresh = QTextEdit.ExtraSelection()
+                fresh.cursor = cursor
+                fresh.format = old.format
+                renewed.append(fresh)
+            self._highlights[layer] = renewed
+        self.setExtraSelections([s for name in self.HIGHLIGHT_LAYERS
+                                 for s in self._highlights[name]])
+
     def block_at(self, point: QPoint):
         """The paragraph at ``point`` (viewport coordinates).
 
@@ -823,6 +858,8 @@ class HtmlEditor(QTextEdit):
         self._paint_quote_bars(painter)
         painter.end()
 
+        if self._highlights_stale:
+            self._renew_highlights()
         super().paintEvent(event)
 
         # Block cursor on top of the text, in code and plain text.
