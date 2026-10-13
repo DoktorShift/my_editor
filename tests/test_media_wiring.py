@@ -351,20 +351,22 @@ def test_sharing_the_server_list_asks_first_then_publishes_what_uploads_use(monk
 
 def test_a_library_upload_that_fails_with_no_library_open_is_said_in_the_window():
     """The store owns the job, so its failure reaches the person even
-    after the library window that started it was closed: in the status
-    bar, as an editor upload's does. An open library says it itself."""
+    after the library window that started it was closed: counted in the
+    status bar (tests/test_library_failures_status.py). An open library
+    says it itself."""
     from types import SimpleNamespace
     shown = []
     library = None
     host = SimpleNamespace(
         _media_store=SimpleNamespace(can_retry=lambda name: name == "Holiday.png"),
         _visible_media_library=lambda: library,
-        status=SimpleNamespace(showMessage=lambda text, ms=0: shown.append(text)),
+        _library_failures={},
     )
+    host._show_library_failures = lambda: shown.append(dict(host._library_failures))
     reason = "Couldn’t reach your media server. Check your internet connection."
     MainWindow._on_library_upload_failed(host, "Holiday.png", reason)
     MainWindow._on_library_upload_failed(host, f"asset:{'e' * 64}", reason)   # the editor's own
-    assert shown == [f"“Holiday.png” wasn’t added to your Media Library. {reason}"]
+    assert shown == [{"Holiday.png": reason}]
     library = object()
     MainWindow._on_library_upload_failed(host, "Holiday.png", reason)
     assert len(shown) == 1

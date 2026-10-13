@@ -432,6 +432,21 @@ class MainWindow(QMainWindow):
         for widget in (self._backup_problem, self._backup_retry):
             widget.setVisible(False)
             self.status.addPermanentWidget(widget)
+        # Files added in the Media Library that didn't upload once its
+        # window was closed (name -> reason): counted here, as a backup
+        # problem is, until the library, which shows each with Retry, is
+        # opened.
+        self._library_failures: dict = {}
+        self._library_problem = ElidedLabel()
+        self._library_problem.setObjectName("LibraryProblem")
+        self._library_open = QToolButton()
+        self._library_open.setObjectName("LibraryOpen")
+        self._library_open.setText(_("Open Media Library"))
+        self._library_open.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._library_open.clicked.connect(lambda: self._on_nostr_media_library())
+        for widget in (self._library_problem, self._library_open):
+            widget.setVisible(False)
+            self.status.addPermanentWidget(widget)
         # How long the document is, quietly: words and reading time, or
         # the words of the selection while there is one.
         self._words_label = QLabel()
@@ -944,6 +959,7 @@ class MainWindow(QMainWindow):
         muted = DARK_MUTED_FG if self.is_dark_theme else LIGHT_MUTED_FG
         self._words_label.setStyleSheet(f"color: {muted}; font-size: 12px;")
         self._show_backup_status()
+        self._show_library_failures()
         for picker in (self._mention_picker, getattr(self, "_coauthor_picker", None)):
             if picker is not None:
                 picker.set_dark(self.is_dark_theme)
@@ -6963,12 +6979,36 @@ class MainWindow(QMainWindow):
 
     def _on_library_upload_failed(self, name: str, reason: str) -> None:
         """A file added in the Media Library did not upload while no
-        library window is open: said in the status bar. The next library
-        window shows it with Retry."""
+        library window is open: counted in the status bar until the
+        library is opened. The next library window shows it with Retry."""
         if self._media_store.can_retry(name) and self._visible_media_library() is None:
-            self.status.showMessage(
-                _("“{name}” wasn’t added to your Media Library. {reason}").format(
-                    name=name, reason=reason), 10000)
+            self._library_failures[name] = reason
+            self._show_library_failures()
+
+    def _clear_library_failures(self) -> None:
+        """The library is open, and shows each failure itself."""
+        self._library_failures.clear()
+        self._show_library_failures()
+
+    def _show_library_failures(self) -> None:
+        failures = self._library_failures
+        text = ngettext("“{name}” wasn’t added to your Media Library.",
+                        "{count} files weren’t added to your Media Library.",
+                        len(failures)).format(name=next(iter(failures), ""),
+                                              count=len(failures)) if failures else ""
+        self._library_problem.setText(text)
+        self._library_problem.setToolTip("\n".join(
+            _("“{name}” wasn’t added to your Media Library. {reason}").format(
+                name=name, reason=reason) for name, reason in failures.items()))
+        self._library_problem.setStyleSheet(
+            f"color: {theme.error_text_color(self.is_dark_theme)}; padding-right: 4px;")
+        link = theme.dialog_link_color(self.is_dark_theme)
+        self._library_open.setStyleSheet(
+            f"#LibraryOpen {{ color: {link}; border: none; background: transparent; "
+            f"padding: 0 4px; }} #LibraryOpen:hover {{ text-decoration: underline; }}")
+        self._library_open.setAccessibleDescription(text)
+        self._library_problem.setVisible(bool(text))
+        self._library_open.setVisible(bool(text))
 
     def _on_media_upload_progress(self, name: str, sent: int, total: int) -> None:
         sha = parse_asset_key(name)
@@ -7118,6 +7158,7 @@ class MainWindow(QMainWindow):
         )
         dialog.bind_private_library(self._private_library)
         dialog.servers_requested.connect(self._open_media_servers)
+        self._clear_library_failures()
         # The dialog deletes itself on close; forget it then, so nothing
         # later asks a deleted object whether it is visible.
         dialog.destroyed.connect(lambda _obj=None, d=dialog: self._forget_media_library(d))
