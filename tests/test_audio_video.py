@@ -700,17 +700,30 @@ def test_the_preview_shows_the_file_as_readers_do_and_says_while_it_uploads(tmp_
     assert r["document preview"] == f"{URL}.mp3"
 
 
+def library_host(sent):
+    """What the Media Library's upload_file uses of its store, with the
+    upload itself recorded in ``sent``."""
+    import types
+    from PySide6.QtCore import QObject
+    from nostr.blossom.store import MediaStore
+    host = QObject()
+    host._profile_provider = lambda: object()
+    host._blob_cache = None
+    host.upload_failed = types.SimpleNamespace(emit=print)
+    host.upload_bytes = lambda body, *, name, mime_type: sent.append((name, mime_type))
+    host._read_and_keep = lambda path: MediaStore._read_and_keep(host, path)
+    host._hash_and_keep = lambda body: MediaStore._hash_and_keep(host, body)
+    return host
+
+
 def test_the_media_library_takes_types_from_the_same_table(tmp_path, monkeypatch):
     """One table of types for the whole app: the Media Library's own upload
     names a file's type from it too, whatever the computer's table says."""
     import mimetypes
-    import types
     from nostr.blossom.store import MediaStore
     monkeypatch.setattr(mimetypes, "guess_type", lambda *a, **k: ("application/x-wrong", None))
     sent = []
-    host = types.SimpleNamespace(
-        _profile_provider=lambda: object(), upload_failed=types.SimpleNamespace(emit=print),
-        upload_bytes=lambda body, *, name, mime_type: sent.append((name, mime_type)))
+    host = library_host(sent)
     for name in ("talk.m4a", "clip.mov", "photo.webp", "notes.pdf"):
         path = tmp_path / name
         path.write_bytes(b"data")
@@ -720,3 +733,87 @@ def test_the_media_library_takes_types_from_the_same_table(tmp_path, monkeypatch
     assert media_files.type_of("photo.webp") == "image/webp"
     assert not media_files.is_audio_or_video("photo.webp")
     assert preview.player_label("https://cdn.example/a.png") is None
+
+
+LARGE_SCRIPT = r"""
+import json, os, sys, threading, pathlib
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+from nostr.imports import workers
+workers.BACKGROUND_FROM_BYTES = 0                 # every file counts as large here
+import main_window
+
+song, sha = sys.argv[2], sys.argv[3]
+read_on = []
+real_read = pathlib.Path.read_bytes
+def read_bytes(self):
+    read_on.append(threading.current_thread() is threading.main_thread())
+    return real_read(self)
+pathlib.Path.read_bytes = read_bytes
+
+w = main_window.MainWindow()
+w.show()
+sent = []
+w._media_store.upload_bytes = lambda body, *, name, mime_type, **kw: sent.append(name)
+w.nostr_state._active = True
+w._update_nostr_commands()
+w._upload_limit = lambda: 10**9
+ed = w.new_tab()
+ed.setFocus()
+ed.textCursor().insertText("Before.")
+w._upload_into(ed, song)
+r = {"right away": ed.toPlainText()}
+ed.textCursor().insertText(" Typed meanwhile.")          # the window answers meanwhile
+for _ in range(200):
+    app.processEvents()
+    if sent:
+        break
+    threading.Event().wait(0.01)
+r["after"] = [ed.document().findBlockByNumber(i).text()
+              for i in range(ed.document().blockCount())]
+r["sent"] = sent
+r["read on the UI thread"] = [on for on in read_on if on]
+ed.document().setModified(False)
+w._media_not_uploaded = lambda doc: []
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_a_large_file_is_read_and_hashed_off_the_ui_thread(tmp_path):
+    """The window stays responsive with a large video: the file is read and
+    hashed, for the text and for its upload, on a worker thread; it goes in
+    where the caret was."""
+    song = tmp_path / "song.mp3"
+    song.write_bytes(BODY)
+    r = run_window_script(LARGE_SCRIPT, tmp_path, str(song), SHA)
+    assert r["right away"] == "Before."
+    assert r["after"][:2] == ["Before. Typed meanwhile.", "￼"]
+    assert r["sent"] == [f"myeditor-asset:{SHA}"]
+    assert r["read on the UI thread"] == []
+
+
+def test_the_media_library_reads_a_large_file_off_the_ui_thread(tmp_path, monkeypatch):
+    import threading
+    from PySide6.QtCore import QCoreApplication
+    from nostr.blossom.store import MediaStore
+    from nostr.imports import workers
+    monkeypatch.setattr(workers, "BACKGROUND_FROM_BYTES", 0)
+    main = []
+    real = MediaStore._read_and_keep
+    monkeypatch.setattr(MediaStore, "_read_and_keep", lambda self, path: (
+        main.append(threading.current_thread() is threading.main_thread()), real(self, path))[1])
+    sent = []
+    host = library_host(sent)
+    path = tmp_path / "talk.m4a"
+    path.write_bytes(BODY)
+    MediaStore.upload_file(host, str(path))
+    for _ in range(200):
+        QCoreApplication.processEvents()
+        if sent:
+            break
+        threading.Event().wait(0.01)
+    assert main == [False]
+    assert sent == [("talk.m4a", "audio/mp4")]

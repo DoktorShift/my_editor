@@ -41,6 +41,7 @@ from ..blossom.errors import is_signer_failure
 # canonical address BUD-01 guarantees, which is what makes a recovery
 # attempt against a sibling server honest rather than a guess.
 from ..blossom.hashes import blob_url, hash_from_url
+from ..imports.workers import run_for_size
 from .assets import (
     LEGAL_TRANSITIONS,
     AssetIndex,
@@ -329,21 +330,33 @@ class AssetManager(QObject):
         key, and it outlives a crash or a restart. None when refused."""
         if not data or media_files.kind_of(mime) is None or len(data) > MAX_MEDIA_BYTES:
             return None
-        sha = hashlib.sha256(data).hexdigest()
-        existing = self._index.get(sha)
-        if existing is not None:
-            if not self._blob_store.has(sha):
-                try:
-                    self._blob_store.put_bytes(data)
-                except OSError:
-                    pass
-            return existing
         try:
-            self._blob_store.put_bytes(data)
+            sha = self._blob_store.put_bytes(data)
         except OSError:
             return None
+        return self.adopt_stored_media(sha, size=len(data), mime=mime, name=name)
+
+    def store_media_file(self, path: str) -> Tuple[str, int]:
+        """Keep the file at ``path`` in the local store and answer its
+        ``(sha256, size)``, for adopt_stored_media. Files only, so a large
+        one can be read and hashed on a worker thread. Raises OSError."""
+        data = Path(path).read_bytes()
+        if not data:
+            raise OSError("empty file")
+        return self._blob_store.put_bytes(data), len(data)
+
+    def adopt_stored_media(self, sha: str, *, size: int, mime: str,
+                           name: str) -> Optional[DocumentAsset]:
+        """Take ownership of an audio or video file already in the local
+        store (store_media_file). None when refused."""
+        if media_files.kind_of(mime) is None or not 0 < size <= MAX_MEDIA_BYTES \
+                or not self._blob_store.has(sha):
+            return None
+        existing = self._index.get(sha)
+        if existing is not None:
+            return existing
         now = int(time.time())
-        asset = DocumentAsset(sha256=sha, mime=mime, size=len(data), alt=name,
+        asset = DocumentAsset(sha256=sha, mime=mime, size=size, alt=name,
                               upload_state=AssetState.LOCAL, created_at=now, updated_at=now)
         self._index.put(asset)
         self.asset_added.emit(sha)
@@ -539,17 +552,29 @@ class AssetManager(QObject):
             asset = self._index.get(sha)
             if asset is None or asset.upload_state is not AssetState.QUEUED:
                 continue
-            body = self.resolve_bytes(asset.key)
-            if not body:
-                self._fail(asset, AssetErrorCodes.UPLOAD_FAILED, "cached bytes missing")
-                return
             self._inflight = sha
-            self._jobs[asset.key] = (sha, asset.attempts)
-            self._set_state(asset, AssetState.SIGNING)
-            # The uploader may fail synchronously and re-enter the slots
-            # below, so nothing may be touched after this call returns.
-            self._uploader.upload_bytes(body, name=asset.key, mime_type=asset.mime)
+            # A large file is read off the UI thread; the upload goes on
+            # from _send once its bytes are there.
+            run_for_size(asset.size, lambda key=asset.key: self.resolve_bytes(key),
+                         lambda body, sha=sha: self._send(sha, body), parent=self)
             return
+
+    def _send(self, sha: str, body: Optional[bytes]) -> None:
+        asset = self._index.get(sha)
+        if asset is None or self._inflight != sha or asset.upload_state is not AssetState.QUEUED:
+            if self._inflight == sha:
+                self._inflight = None
+                self._pump()
+            return
+        if not body:
+            self._inflight = None
+            self._fail(asset, AssetErrorCodes.UPLOAD_FAILED, "cached bytes missing")
+            return
+        self._jobs[asset.key] = (sha, asset.attempts)
+        self._set_state(asset, AssetState.SIGNING)
+        # The uploader may fail synchronously and re-enter the slots
+        # below, so nothing may be touched after this call returns.
+        self._uploader.upload_bytes(body, name=asset.key, mime_type=asset.mime)
 
     def _job_asset(self, name: str) -> Optional[DocumentAsset]:
         """The asset behind a job name, or None when it is not ours.

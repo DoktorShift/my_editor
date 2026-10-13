@@ -57,6 +57,7 @@ from .errors import ERROR_CODES, NO_SIGNER, friendly_message, signer_rejected
 from .hashes import blob_url, url_agrees_with_hash
 from .plan import get_effective_max_file, lists_publicly, plan_upload, UploadPlan
 from .settings import BlossomSettings
+from ..imports.workers import run_for_size
 
 
 # How long a fetched library stays "fresh". A second call within this
@@ -717,16 +718,47 @@ class MediaStore(QObject):
             self.upload_failed.emit(name, NO_SIGNER)
             return
         try:
-            body = path.read_bytes()
+            size = path.stat().st_size
         except OSError as exc:
             self.upload_failed.emit(name, _("Could not read file: {error}").format(error=exc))
             return
-        if not body:
-            self.upload_failed.emit(name, _("File is empty."))
-            return
-
         mime = media_files.type_of(path.name) or "application/octet-stream"
-        self.upload_bytes(body, name=name, mime_type=mime)
+
+        def read(read_back) -> None:
+            body, _sha = read_back
+            if not body:
+                self.upload_failed.emit(name, _("File is empty."))
+                return
+            self.upload_bytes(body, name=name, mime_type=mime)
+
+        # A large file is read (and kept in the cache) off the UI thread.
+        run_for_size(size, lambda: self._read_and_keep(path), read,
+                     lambda exc: self.upload_failed.emit(
+                         name, _("Could not read file: {error}").format(error=exc)),
+                     parent=self)
+
+    def _read_and_keep(self, path: Path) -> tuple:
+        """``(bytes, sha256)`` of the file at ``path``, kept in the cache
+        too. Safe on a worker thread: files only."""
+        body = path.read_bytes()
+        return body, self._hash_and_keep(body) if body else ""
+
+    def _hash_and_keep(self, body: bytes) -> str:
+        """The sha256 of ``body``, kept in the local cache before it is sent
+        anywhere (the cache's own write hashes it, once). Safe on a worker
+        thread.
+
+        Without this the app downloads its own upload back from a server
+        the moment it wants to show it, and simply fails offline. It
+        happens before the network on purpose: a failed upload the user
+        retries still has something to show. A cache that cannot be
+        written is not an upload failure: the bytes still go to a server."""
+        if self._blob_cache is not None:
+            try:
+                return self._blob_cache.put_bytes(body)
+            except OSError:
+                pass
+        return hashlib.sha256(body).hexdigest()
 
     def upload_bytes(
         self,
@@ -780,7 +812,15 @@ class MediaStore(QObject):
             )
             return
 
-        sha = hashlib.sha256(body).hexdigest()
+        # Hashing a large file, and keeping it in the cache, happens off
+        # the UI thread; the upload goes on from here once it is done.
+        run_for_size(len(body), lambda: self._hash_and_keep(body),
+                     lambda sha: self._upload_hashed(body, name, mime_type, profile, sha,
+                                                     servers, plan),
+                     parent=self)
+
+    def _upload_hashed(self, body: bytes, name: str, mime_type: str, profile, sha: str,
+                       servers, plan: UploadPlan) -> None:
         eligible = [server for server in plan.eligible
                     if self._has_room(server, sha, len(body), name)]
         if not eligible:
@@ -788,7 +828,6 @@ class MediaStore(QObject):
                 name,
                 _("There isn\u2019t enough space left on your media servers for this file."))
             return
-        self._seed_cache(body)
         state = UploadJobState(name=name, status="queued", hash=sha)
         self._uploads[name] = state
         self.upload_started.emit(name)
@@ -868,31 +907,6 @@ class MediaStore(QObject):
                 seen.add(origin)
                 servers.append(origin)
         return servers
-
-    def _seed_cache(self, body: bytes) -> None:
-        """Keep the bytes locally before they are sent anywhere.
-
-        Without this the app downloads its own upload back from a server
-        the moment it wants to show it, which is a round trip for bytes
-        that were in memory a second earlier and simply fails when the
-        machine is offline. The cache is content addressed, so seeding it
-        here is the same write the download would have made.
-
-        It happens before the network rather than after a successful
-        upload on purpose: a failed upload the user retries still has
-        something to show, and the local copy is what makes a Blossom
-        server a place a file is kept rather than the only place.
-
-        A cache that cannot be written is not an upload failure. The
-        bytes are still going to a server, so the upload carries on and
-        the display falls back to fetching them.
-        """
-        if self._blob_cache is None:
-            return
-        try:
-            self._blob_cache.put_bytes(body)
-        except OSError:
-            pass
 
     # ------------------------------------------------------------------
     # Dedup: find out who already has the blob before signing anything

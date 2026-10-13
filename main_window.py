@@ -13,7 +13,6 @@ import re
 import sys
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import List, Optional, Tuple
 
 from send2trash import send2trash
@@ -158,6 +157,7 @@ from nostr.ui.article_details_panel import ArticleDetailsPanel, DEFAULT_WIDTH as
 from nostr import refs
 from nostr.blossom.errors import friendly_message
 from nostr.blossom.hashes import hash_from_url
+from nostr.imports.workers import run_for_size
 from nostr.media_server_list import publish_server_list
 from nostr.outbox import writer as outbox_writer
 from nostr.profile_editing import ProfileEditing
@@ -6660,23 +6660,35 @@ class MainWindow(QMainWindow):
         try:
             size = os.path.getsize(path)
         except OSError:
-            size = -1
+            size = 0
         if size > self._upload_limit():
             inform(self, title=_("“{name}” is too large").format(name=name),
                    message=_("Your media servers take files up to {size}.").format(
                        size=format_size(self._upload_limit())))
             return
-        try:
-            data = Path(path).read_bytes()
-        except OSError:
-            data = b""
-        asset = self._asset_manager.adopt_media(data, mime=mime or "", name=name) \
-            if mime else None
+        if media_files.kind_of(mime or "") is None or size <= 0:
+            self._say_cannot_add(name)
+            return
+        # Where it goes: the caret now, followed through what is typed while
+        # a large file is read and hashed off the UI thread.
+        at = QTextCursor(ed.textCursor())
+        run_for_size(size, lambda: self._asset_manager.store_media_file(path),
+                     lambda stored: self._insert_media(ed, at, stored, mime, name),
+                     lambda _error: self._say_cannot_add(name), parent=ed)
+
+    def _say_cannot_add(self, name: str) -> None:
+        inform(self, title=_("Couldn’t add “{name}”").format(name=name),
+               message=_("MyEditor can read audio and video files of these kinds: "
+                         "{kinds}.").format(kinds=", ".join(media_files.AUDIO_VIDEO_EXTENSIONS)))
+
+    def _insert_media(self, ed, at, stored, mime: str, name: str) -> None:
+        """The file kept in the local store (``stored``: its sha256 and size)
+        as an object of ``ed``'s text, in a paragraph of its own at ``at``,
+        and on its way to the media servers."""
+        sha, size = stored
+        asset = self._asset_manager.adopt_stored_media(sha, size=size, mime=mime, name=name)
         if asset is None:
-            inform(self, title=_("Couldn’t add “{name}”").format(name=name),
-                   message=_("MyEditor can read audio and video files of these kinds: "
-                             "{kinds}.").format(
-                                 kinds=", ".join(media_files.AUDIO_VIDEO_EXTENSIONS)))
+            self._say_cannot_add(name)
             return
         image = QTextImageFormat()
         image.setName(asset.key)
@@ -6685,9 +6697,10 @@ class MainWindow(QMainWindow):
         image.setHeight(media_card.HEIGHT)
         ed.document().addResource(QTextDocument.ImageResource, QUrl(asset.key),
                                   self._media_card(asset))
-        cursor = ed.textCursor()
-        rich_text.insert_own_paragraph(cursor, image=image)
-        ed.setTextCursor(cursor)
+        caret_there = ed.textCursor().position() == at.position()
+        rich_text.insert_own_paragraph(at, image=image)
+        if caret_there:
+            ed.setTextCursor(at)
         self._asset_manager.request_upload(asset.sha256)
 
     def _may_close_with_uploads(self, editor) -> bool:
