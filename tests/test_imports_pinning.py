@@ -310,29 +310,59 @@ def test_a_feed_comes_from_the_checked_address_with_its_name(local_names):
 
 
 def _certificate(tmp_path, name):
+    """A server certificate for ``name``, issued by a test authority that
+    ``trust`` (the returned configuration) trusts.
+
+    The two are kept apart, as real ones are: the authority may sign
+    certificates and nothing else, the server's may serve TLS for its name
+    and nothing else. A self-signed authority used as the server's own
+    certificate passes OpenSSL, but Apple's TLS refuses it ("not trusted
+    for this purpose"), and Qt uses Apple's where OpenSSL is missing."""
     from cryptography import x509
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import ec
-    from cryptography.x509.oid import NameOID
-    key = ec.generate_private_key(ec.SECP256R1())
-    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, name)])
+    from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
     now = datetime.datetime.now(datetime.timezone.utc)
-    certificate = (
-        x509.CertificateBuilder().subject_name(subject).issuer_name(subject)
-        .public_key(key.public_key()).serial_number(x509.random_serial_number())
-        .not_valid_before(now - datetime.timedelta(days=1))
-        .not_valid_after(now + datetime.timedelta(days=1))
-        .add_extension(x509.SubjectAlternativeName([x509.DNSName(name)]), critical=False)
-        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
-        .sign(key, hashes.SHA256()))
-    cert_pem = certificate.public_bytes(serialization.Encoding.PEM)
+
+    def usage(*, sign_certificates):
+        return x509.KeyUsage(
+            digital_signature=not sign_certificates, content_commitment=False,
+            key_encipherment=False, data_encipherment=False, key_agreement=False,
+            key_cert_sign=sign_certificates, crl_sign=sign_certificates,
+            encipher_only=False, decipher_only=False)
+
+    def issued(subject, key, issuer, issuer_key, *extensions):
+        builder = (x509.CertificateBuilder().subject_name(subject).issuer_name(issuer)
+                   .public_key(key.public_key()).serial_number(x509.random_serial_number())
+                   .not_valid_before(now - datetime.timedelta(days=1))
+                   .not_valid_after(now + datetime.timedelta(days=1)))
+        for extension, critical in extensions:
+            builder = builder.add_extension(extension, critical=critical)
+        return builder.sign(issuer_key, hashes.SHA256())
+
+    authority_key = ec.generate_private_key(ec.SECP256R1())
+    authority_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Test authority")])
+    authority = issued(
+        authority_name, authority_key, authority_name, authority_key,
+        (x509.BasicConstraints(ca=True, path_length=0), True),
+        (usage(sign_certificates=True), True),
+        (x509.SubjectKeyIdentifier.from_public_key(authority_key.public_key()), False))
+    key = ec.generate_private_key(ec.SECP256R1())
+    server = issued(
+        x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, name)]), key,
+        authority_name, authority_key,
+        (x509.BasicConstraints(ca=False, path_length=None), True),
+        (usage(sign_certificates=False), True),
+        (x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), False),
+        (x509.SubjectAlternativeName([x509.DNSName(name)]), False),
+        (x509.AuthorityKeyIdentifier.from_issuer_public_key(authority_key.public_key()), False))
     cert_path, key_path = tmp_path / "cert.pem", tmp_path / "key.pem"
-    cert_path.write_bytes(cert_pem)
+    cert_path.write_bytes(server.public_bytes(serialization.Encoding.PEM))
     key_path.write_bytes(key.private_bytes(serialization.Encoding.PEM,
                                            serialization.PrivateFormat.TraditionalOpenSSL,
                                            serialization.NoEncryption()))
     trust = QSslConfiguration.defaultConfiguration()
-    trust.addCaCertificate(QSslCertificate(cert_pem))
+    trust.addCaCertificate(QSslCertificate(authority.public_bytes(serialization.Encoding.PEM)))
     return (str(cert_path), str(key_path)), trust
 
 
