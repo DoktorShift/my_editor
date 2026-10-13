@@ -6,9 +6,10 @@ What must hold:
 
   The grid shows names (the one a file was added with, a private
   file's own, else the day it was added), never a hash, a type or a
-  server. A file anyone with the link can open carries the shared mark;
-  a private one does not, nor does one nobody could check. A public
-  copy of a private original is not a second tile.
+  server. Public files, the normal case, carry no mark; a private one,
+  the exception, carries a lock, and one nobody could check carries
+  none. The window says once, at its foot, who can see its files. A
+  public copy of a private original is not a second tile.
 
   An empty library, a loading one, a search with no match and a
   library that could not be listed each say one plain sentence, with
@@ -281,15 +282,17 @@ def test_no_hash_type_or_server_is_on_a_tile(tmp_path, monkeypatch):
         assert tile.key not in text and "image/png" not in text and "one.example" not in text
 
 
-def test_a_file_anyone_can_open_is_marked_shared(tmp_path, monkeypatch):
+def test_a_public_file_the_normal_case_carries_no_badge(tmp_path, monkeypatch):
+    """Everything MyEditor uploads is public, so a mark on it would be on
+    nearly every tile and say nothing. The exception is marked instead."""
     world = build(tmp_path, monkeypatch, FakeStore([media(1)], names={f"{1:064x}": "Garden.jpg"}))
     tile = tiles(world)[0]
-    assert tile.shared
-    assert tile.accessible_text() == "Garden.jpg, image, shared"
-    assert tile.tooltip() == "Garden.jpg\nAnyone with the link can see this"
+    assert not tile.private
+    assert tile.accessible_text() == "Garden.jpg, image"
+    assert tile.tooltip() == "Garden.jpg"
 
 
-def test_a_private_file_and_an_unchecked_one_carry_no_mark(tmp_path, monkeypatch):
+def test_a_private_file_the_exception_carries_the_lock(tmp_path, monkeypatch):
     envelope = sealed()
     private = MediaFile(hash=sha_of(envelope), url=f"{SERVER}/{sha_of(envelope)}",
                         mime_type="application/octet-stream", size=10)
@@ -297,11 +300,33 @@ def test_a_private_file_and_an_unchecked_one_carry_no_mark(tmp_path, monkeypatch
     visibility = MediaVisibility(library=FakeLibrary([blob]))
     world = build(tmp_path, monkeypatch, FakeStore([private]), visibility=visibility)
     tile = tiles(world)[0]
-    assert (tile.name, tile.kind, tile.shared) == ("Secret.png", "image", False)
+    assert (tile.name, tile.kind, tile.private) == ("Secret.png", "image", True)
+    assert tile.accessible_text() == "Secret.png, image, private"
+    assert tile.tooltip() == "Secret.png\nOnly you can see this"
 
+
+def test_a_file_nobody_could_check_carries_no_badge(tmp_path, monkeypatch):
     unchecked = MediaVisibility(library=FakeLibrary(vouches=False))
     world = build(tmp_path, monkeypatch, FakeStore([media(1)]), visibility=unchecked)
-    assert not tiles(world)[0].shared
+    assert not tiles(world)[0].private
+
+
+def test_the_window_says_once_who_can_see_its_files(tmp_path, monkeypatch):
+    """Truthful about the normal case without marking every tile: one
+    quiet line at the foot, where Finder and Photos say what is true of
+    the whole window, and in the empty state."""
+    world = build(tmp_path, monkeypatch)
+    line = "Anyone with the link can see the files you add here."
+    assert world.dialog._status.text() == line
+    assert world.dialog._empty_text.text() == (
+        "Images, videos and audio you add appear here. Anyone with the link can see them.")
+    world.dialog._say("“Garden.jpg” is no longer shared.")
+    assert world.dialog._status.text() == "“Garden.jpg” is no longer shared."
+    world.dialog._status_timer.timeout.emit()
+    assert world.dialog._status.text() == line
+    # A problem stays until something else is said.
+    world.dialog._say("“Garden.jpg” couldn’t be saved. Try again.", error=True)
+    assert not world.dialog._status_timer.isActive()
 
 
 def test_a_public_copy_of_a_private_original_is_one_tile(tmp_path, monkeypatch):
@@ -315,7 +340,7 @@ def test_a_public_copy_of_a_private_original_is_one_tile(tmp_path, monkeypatch):
     visibility = MediaVisibility(library=FakeLibrary([blob]), ledger=ledger)
     world = build(tmp_path, monkeypatch, FakeStore([original, copy]), visibility=visibility)
     assert names(world) == ["Beach.png"]
-    assert tiles(world)[0].shared                 # its copy is out there
+    assert not tiles(world)[0].private            # its copy is out there
 
 
 # --------------------------------------------------------------------------- #
@@ -346,7 +371,8 @@ def test_search_and_name_order(tmp_path, monkeypatch):
 
 def test_an_empty_library_says_one_sentence_and_offers_add(tmp_path, monkeypatch):
     world = build(tmp_path, monkeypatch)
-    assert world.dialog._empty_text.text() == "Images, videos and audio you add appear here."
+    assert world.dialog._empty_text.text() == (
+        "Images, videos and audio you add appear here. Anyone with the link can see them.")
     assert world.dialog._empty_button.text() == "Add…"
 
 
@@ -459,7 +485,7 @@ def test_a_server_that_did_not_keep_a_copy_is_said_once_when_the_file_lands(
     world = build(tmp_path, monkeypatch)
     world.dialog._add_paths([str(path)])
     world.store.mirror_failed.emit("Garden.png", "members.example", "NETWORK_UNAVAILABLE")
-    assert world.dialog._status.text() == ""
+    assert world.dialog._status.text() == "Anyone with the link can see the files you add here."
     world.store.upload_finished.emit("Garden.png", media(3))
     assert world.dialog._status.text() == (
         "“Garden.png” is added, but one of your media servers didn’t keep a copy.")
@@ -755,7 +781,7 @@ def test_stop_sharing_asks_then_deletes_the_copy_where_it_is(tmp_path, monkeypat
     world.store.file_deleted.emit(copy_sha)
     world.store.library_changed.emit()
     assert ledger.get(copy_sha) is None
-    assert not tiles(world)[0].shared
+    assert tiles(world)[0].private                # only the person again
     assert world.dialog._status.text() == "“Beach.png” is no longer shared."
 
 
@@ -766,7 +792,7 @@ def test_a_copy_a_server_still_has_is_still_shared_and_it_says_so(tmp_path, monk
     world.dialog._stop_sharing()
     world.store.delete_failed.emit(copy_sha, "NETWORK_UNAVAILABLE")
     assert ledger.get(copy_sha) is not None
-    assert tiles(world)[0].shared
+    assert not tiles(world)[0].private
     assert world.dialog._status.text() == (
         "“Beach.png” is still shared. Couldn’t reach your media server. Check your "
         "internet connection.")

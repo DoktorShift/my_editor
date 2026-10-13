@@ -193,18 +193,22 @@ def code_block(color: QColor) -> QIcon:
 
 
 # -- the Media Library's glyphs ----------------------------------------------
-# Drawn at any size with ``paint`` (a tile's kind, the shared mark on a
-# thumbnail), and as toolbar-sized icons like the rest.
+# Drawn at any size with ``paint``: a tile's kind, and the lock on the
+# thumbnail of a private file.
 
-def _draw_globe(painter: QPainter, ink: QColor) -> None:
-    """A globe: anyone with the link can open the file."""
-    painter.setPen(_pen(ink, 1.4))
+def _draw_lock(painter: QPainter, ink: QColor) -> None:
+    """A padlock: only the person can open the file."""
+    painter.setPen(_pen(ink, 1.6))
     painter.setBrush(Qt.BrushStyle.NoBrush)
-    painter.drawEllipse(QRectF(2, 2, 14, 14))
-    painter.drawEllipse(QRectF(6, 2, 6, 14))
-    painter.drawLine(QPointF(2.2, 9), QPointF(15.8, 9))
-    painter.drawLine(QPointF(3.6, 5.4), QPointF(14.4, 5.4))
-    painter.drawLine(QPointF(3.6, 12.6), QPointF(14.4, 12.6))
+    shackle = QPainterPath()
+    shackle.moveTo(QPointF(5.5, 8.5))
+    shackle.lineTo(QPointF(5.5, 6))
+    shackle.arcTo(QRectF(5.5, 2.5, 7, 7), 180, -180)
+    shackle.lineTo(QPointF(12.5, 8.5))
+    painter.drawPath(shackle)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(ink)
+    painter.drawRoundedRect(QRectF(3.5, 8, 11, 8), 1.6, 1.6)
 
 
 def _draw_video(painter: QPainter, ink: QColor) -> None:
@@ -261,12 +265,12 @@ def _draw_alert(painter: QPainter, ink: QColor) -> None:
     painter.drawEllipse(QRectF(8, 11.8, 2, 2))
 
 
-_GLYPHS = {"globe": _draw_globe, "video": _draw_video, "audio": _draw_audio,
+_GLYPHS = {"lock": _draw_lock, "video": _draw_video, "audio": _draw_audio,
            "document": _draw_document, "alert": _draw_alert}
 
 
 def paint(name: str, painter: QPainter, rect: QRectF, color: QColor) -> None:
-    """Draw glyph ``name`` (globe, video, audio, document, alert) to fill
+    """Draw glyph ``name`` (lock, video, audio, document, alert) to fill
     the square ``rect``, sharp at any size."""
     painter.save()
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -274,7 +278,3 @@ def paint(name: str, painter: QPainter, rect: QRectF, color: QColor) -> None:
     painter.scale(rect.width() / SIZE, rect.height() / SIZE)
     _GLYPHS[name](painter, QColor(color))
     painter.restore()
-
-
-def globe(color: QColor) -> QIcon:
-    return _icon(_draw_globe, color)

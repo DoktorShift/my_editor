@@ -4,9 +4,9 @@
 
 A tile is a file in the library or a file being added to it. It shows
 the picture (or the kind of file), the name, and one line under it: the
-day it was added, or, for a file that did not upload, why. A file
-anyone with the link can open has a small globe in the thumbnail's
-corner. A file being added is dimmed under a ring that fills as it
+day it was added, or, for a file that did not upload, why. A private
+file, readable only by the person, has a small lock in the thumbnail's
+corner; the public ones, the normal case, have nothing. A file being added is dimmed under a ring that fills as it
 uploads, with a × in the ring that cancels; one that failed has Retry.
 
 The grid scrolls (no pages) and asks for thumbnails only for the tiles
@@ -97,7 +97,7 @@ class Tile:
     detail: str = ""
     kind: str = "file"
     state: str = FILE
-    shared: bool = False
+    private: bool = False
     progress: int = -1
     media: Optional[MediaFile] = None
     pixmap: Optional[QPixmap] = None
@@ -108,8 +108,8 @@ class Tile:
 
     def accessible_text(self) -> str:
         parts = [self.name, kind_word(self.kind)]
-        if self.shared:
-            parts.append(_("shared"))
+        if self.private:
+            parts.append(_("private"))
         if self.state in (WAITING, SENDING, FINISHING):
             parts.append(_("uploading"))
         elif self.state == FAILED:
@@ -120,8 +120,8 @@ class Tile:
         lines = [self.name]
         if self.state == FAILED:
             lines.append(self.detail)
-        elif self.shared:
-            lines.append(_("Anyone with the link can see this"))
+        elif self.private:
+            lines.append(_("Only you can see this"))
         return "\n".join(lines)
 
 
@@ -308,12 +308,12 @@ class TileDelegate(QStyledItemDelegate):
             painter.drawRoundedRect(pill, pill.height() / 2, pill.height() / 2)
             painter.setPen(_ON_PILL)
             painter.drawText(pill, Qt.AlignmentFlag.AlignCenter, _("Retry"))
-        if tile.shared and tile.state == FILE:
+        if tile.private and tile.state == FILE:
             badge = QRectF(thumb.left() + 6, thumb.bottom() - 6 - 22, 22, 22)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(_BADGE)
             painter.drawEllipse(badge)
-            format_icons.paint("globe", painter, badge.adjusted(4, 4, -4, -4), _ON_SCRIM)
+            format_icons.paint("lock", painter, badge.adjusted(4, 4, -4, -4), _ON_SCRIM)
 
     def _paint_ring(self, painter: QPainter, thumb: QRect, tile: Tile) -> None:
         ring = QRectF(thumb.center().x() - 16, thumb.center().y() - 16, 32, 32)

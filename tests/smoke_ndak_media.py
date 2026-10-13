@@ -287,8 +287,8 @@ try:
               window._status.text() == "“Talk.mp4” is added, but one of your media servers "
                                        "didn’t keep a copy.", window._status.text())
     tile = window._model.tile(tsha)
-    rep.check("the file's tile carries the name it was added with, and the shared mark",
-              tile is not None and tile.name == "Talk.mp4" and tile.shared,
+    rep.check("the file's tile carries the name it was added with, and no mark (it is public)",
+              tile is not None and tile.name == "Talk.mp4" and not tile.private,
               f"{tile.name if tile else None}")
 
     lecture = nd.HOME / "Lecture.mp4"
@@ -447,8 +447,9 @@ try:
             window2 = MediaLibraryDialog(store=store2, is_dark=False, visibility=visibility)
             window2.show()
             original = window2._model.tile(esha)
-            rep.check("the private original and its public copy are one tile, marked shared",
-                      original is not None and original.shared and original.name == "secret.png"
+            rep.check("the private original and its public copy are one tile, with no lock",
+                      original is not None and not original.private
+                      and original.name == "secret.png"
                       and window2._model.tile(public.sha256) is None,
                       str([t.name for t in window2._model.tiles]))
             select(window2, esha)
@@ -464,9 +465,10 @@ try:
                       unshared.last == (public.sha256,)
                       and all(nd.http_status(f"{origin}/{public.sha256}") == 404
                               for origin in (A, B)), str(unshared.last))
-            rep.check("the private original stays, no longer shared, and the record forgets the copy",
+            rep.check("the private original stays, locked again, and the record forgets the copy",
                       nd.http_status(f"{A}/{esha}") == 200 and ledger.copy_of(esha) is None
                       and visibility.state_of(esha) == "private"
+                      and window2._model.tile(esha).private
                       and window2._status.text() == "“secret.png” is no longer shared.",
                       window2._status.text())
             window2.close()

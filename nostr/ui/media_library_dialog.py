@@ -21,11 +21,14 @@ built the way a Finder window or Photos is:
 
 What stays in the background: several servers, copies on each, a server
 taking over when one cannot take a file, a server left out when it is
-full. And privacy is handled rather than explained. A file anyone with
-the link can open has a globe on its thumbnail (MyEditor's own uploads
-all are: a media server serves a file to whoever has its address); a
-private file from another app has none. Choosing a private one to
-insert asks before it is shared (``publish_copy_dialog``). When nobody
+full. And privacy is handled rather than explained. Everything MyEditor
+uploads can be opened by anyone with its link (a media server serves a
+file to whoever has its address), so that is the normal case: it is said
+once, in the quiet line at the foot of the window, and where a file is
+added, and no tile is marked for it. The exception is marked: a private
+file from another app, readable only by the person, has a small lock.
+Choosing a private one to insert asks before it is shared
+(``publish_copy_dialog``). When nobody
 could check whether a file is private, the picker says so under the grid
 and offers Try Again, because using such a file could share something
 private; the library itself says nothing.
@@ -40,7 +43,7 @@ from __future__ import annotations
 import os
 from typing import Dict, List, Optional
 
-from PySide6.QtCore import QBuffer, QDateTime, QIODevice, QSize, Qt, QUrl, Signal
+from PySide6.QtCore import QBuffer, QDateTime, QIODevice, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QCursor, QDesktopServices, QImageReader, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -61,6 +64,7 @@ from PySide6.QtWidgets import (
 
 import i18n
 import media_files
+from constants import DARK_MUTED_FG, LIGHT_MUTED_FG
 import theme
 import url_safety
 from alerts import confirm_destructive
@@ -70,7 +74,7 @@ from media_files import format_size  # noqa: F401, imported from here too
 
 from ..blossom.errors import ERROR_CODES, friendly_message
 from ..blossom.store import MediaFile, MediaStore
-from ..media.media_visibility import PUBLIC, PUBLISHED_COPY, MediaVisibility
+from ..media.media_visibility import PRIVATE, PUBLISHED_COPY, MediaVisibility
 from ..media.private_library import PrivateLibrary
 from .media_grid import (
     FAILED,
@@ -159,6 +163,7 @@ class MediaLibraryDialog(QDialog):
         self._fetch_failed = ""
 
         self._build(pick_alt_text and pick_mode)
+        self._rest_status()
         # No minimum width of its own: the layout's is the smallest window,
         # every control at its own width in every language, and the grid
         # at least two columns.
@@ -224,6 +229,14 @@ class MediaLibraryDialog(QDialog):
         self._status.setWordWrap(True)
         self._status.setTextFormat(Qt.TextFormat.PlainText)
         self._status.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        # What is true of every file here, said once, the way a Finder or
+        # Photos window says it at its foot rather than on each item. A
+        # message about something that just happened takes its place for
+        # a while; a problem stays until something else is said.
+        self._status_timer = QTimer(self)
+        self._status_timer.setSingleShot(True)
+        self._status_timer.setInterval(15_000)
+        self._status_timer.timeout.connect(self._rest_status)
         self._storage = QLabel()
         self._storage.setObjectName("media_hint")
         self._storage.setTextFormat(Qt.TextFormat.PlainText)
@@ -364,8 +377,8 @@ class MediaLibraryDialog(QDialog):
     # ------------------------------------------------------------------
 
     def bind_private_library(self, library: PrivateLibrary) -> None:
-        """Follow the private library: a file that turns out private loses
-        its globe, and the picker learns when the check failed."""
+        """Follow the private library: a file that turns out private gets
+        its lock, and the picker learns when the check failed."""
         self._private_library = library
         library.library_changed.connect(self._on_private_library_changed)
         library.status_changed.connect(self._on_private_library_status)
@@ -421,9 +434,8 @@ class MediaLibraryDialog(QDialog):
         return tiles
 
     def _is_hidden_copy(self, sha: str) -> bool:
-        """A public copy whose private original is in the library shows
-        as the original's globe, not as a tile of its own: one picture,
-        one tile."""
+        """A public copy whose private original is in the library is not
+        a tile of its own: one picture, one tile (and, shared, no lock)."""
         source = self._visibility.copy_source(sha)
         return bool(source) and source in self._store.files \
             and self._visibility.state_of(source) == PUBLISHED_COPY
@@ -437,7 +449,7 @@ class MediaLibraryDialog(QDialog):
         detail = day if name != day else format_size(media.size)
         state = self._visibility.state_of(media.hash)
         return Tile(key=media.hash, name=name, detail=detail, kind=kind,
-                    shared=state in (PUBLIC, PUBLISHED_COPY), media=media,
+                    private=state == PRIVATE, media=media,
                     pixmap=self._thumbs.get(media.hash))
 
     def _show_page(self) -> None:
@@ -454,7 +466,9 @@ class MediaLibraryDialog(QDialog):
         elif self._fetching:
             message = _("Loading…")
         else:
-            message, button = _("Images, videos and audio you add appear here."), _("Add…")
+            message = _("Images, videos and audio you add appear here. Anyone with the "
+                        "link can see them.")
+            button = _("Add…")
         self._empty_text.setText(message)
         self._empty_button.setText(button)
         self._empty_button.setVisible(bool(button))
@@ -1008,8 +1022,18 @@ class MediaLibraryDialog(QDialog):
         self._storage.setVisible(bool(lines))
 
     def _say(self, text: str, *, error: bool = False) -> None:
+        self._show_status(text, "error" if error else "")
+        if error:
+            self._status_timer.stop()
+        else:
+            self._status_timer.start()
+
+    def _rest_status(self) -> None:
+        self._show_status(_("Anyone with the link can see the files you add here."), "rest")
+
+    def _show_status(self, text: str, tone: str) -> None:
         self._status.setText(text)
-        self._status.setProperty("tone", "error" if error else "")
+        self._status.setProperty("tone", tone)
         self._status.style().unpolish(self._status)
         self._status.style().polish(self._status)
 
@@ -1033,7 +1057,9 @@ class MediaLibraryDialog(QDialog):
 # --------------------------------------------------------------------------- #
 
 def _extra_css(is_dark: bool) -> str:
+    muted = DARK_MUTED_FG if is_dark else LIGHT_MUTED_FG
     return (f"QLabel#media_status[tone=\"error\"] {{ color: {theme.attention_color(is_dark)}; }}\n"
+            f"QLabel#media_status[tone=\"rest\"], QLabel#media_hint {{ color: {muted}; }}\n"
             "QLabel#media_hint, QLabel#media_status { font-size: 12px; }\n"
             "QLabel#media_empty { font-size: 14px; }\n"
             "QToolButton#media_actions { font-size: 16px; padding: 0px 8px; }\n"
