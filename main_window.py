@@ -11,6 +11,7 @@ import os
 import platform
 import re
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
@@ -6704,15 +6705,17 @@ class MainWindow(QMainWindow):
         read = _MediaRead()
         ed._media_reads = getattr(ed, "_media_reads", []) + [read]
         run_for_size(size, lambda: self._asset_manager.store_media_file(
-                         path, lambda: read.dropped),
+                         path, read.keeping, read.kept),
                      lambda stored: self._insert_media(ed, at, stored, mime, name, read),
                      lambda _error: self._say_cannot_add(name), parent=self)
 
-    @staticmethod
-    def _drop_media_reads(ed) -> None:
-        """The audio and video still being read for ``ed`` go nowhere."""
+    def _drop_media_reads(self, ed) -> None:
+        """The audio and video still being read for ``ed`` go nowhere, and
+        leave no copy, at whatever point they are (_MediaRead)."""
         for read in getattr(ed, "_media_reads", []) if ed is not None else []:
-            read.dropped = True
+            sha = read.drop()
+            if sha is not None:
+                self._asset_manager.discard_stored(sha)
 
     def _say_cannot_add(self, name: str) -> None:
         inform(self, title=_("Couldn’t add “{name}”").format(name=name),
@@ -6727,9 +6730,10 @@ class MainWindow(QMainWindow):
         if stored is None:
             return                         # dropped before it was kept
         sha, size = stored
-        if read.dropped or self._editor_widget_index(ed) < 0:
+        if self._editor_widget_index(ed) < 0 or not read.take_over():
             # The document was closed, or the app quit, while the file was
             # read: it goes nowhere, nothing is uploaded, nothing is kept.
+            read.drop()
             self._asset_manager.discard_stored(sha)
             return
         asset = self._asset_manager.adopt_stored_media(sha, size=size, mime=mime, name=name)
@@ -8550,11 +8554,56 @@ def _media_asset(assets, name: str):
 
 
 class _MediaRead:
-    """An audio or video file being read for a document, off the UI thread:
-    dropped when the document closes or the app quits."""
+    """An audio or video file being read for a document, off the UI thread,
+    which can be dropped (its document closes, the app quits) at whatever
+    point it has reached. Whether its copy is kept in the local store and
+    whether it is dropped are decided one at a time (the lock): a read
+    dropped before it keeps its copy keeps none; dropped while it keeps it
+    or after, its copy is known (``drop`` answers it) and taken out again,
+    whether or not its result is ever handled."""
+
+    WRITE_WAIT_S = 30.0       # the longest a copy of a file takes to be kept
 
     def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._written = threading.Event()
+        self._written.set()
         self.dropped = False
+        self.handled = False
+        self._stored: Optional[str] = None
+
+    def keeping(self) -> bool:
+        """On the worker, once the file is read: whether to keep its copy."""
+        with self._lock:
+            if self.dropped:
+                return False
+            self._written.clear()
+            return True
+
+    def kept(self, sha: Optional[str]) -> None:
+        """On the worker: the copy is kept (``sha``), or failed (None)."""
+        with self._lock:
+            self._stored = sha
+            self._written.set()
+
+    def take_over(self) -> bool:
+        """On the UI thread, its result handled: the document takes the
+        copy over, unless it was dropped first. True when it did."""
+        with self._lock:
+            if self.dropped:
+                return False
+            self.handled = True
+            return True
+
+    def drop(self) -> Optional[str]:
+        """Drop it: the sha256 of a copy it kept that its result has not
+        taken over, to take out again; None when there is none. Waits for a
+        copy being kept right now."""
+        with self._lock:
+            self.dropped = True
+        self._written.wait(self.WRITE_WAIT_S)
+        with self._lock:
+            return None if self.handled else self._stored
 
 
 def _is_media(assets, name: str) -> bool:

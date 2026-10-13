@@ -336,20 +336,26 @@ class AssetManager(QObject):
             return None
         return self.adopt_stored_media(sha, size=len(data), mime=mime, name=name)
 
-    def store_media_file(self, path: str,
-                         dropped: Callable[[], bool] = lambda: False
+    def store_media_file(self, path: str, keeping: Callable[[], bool] = lambda: True,
+                         kept: Callable[[Optional[str]], None] = lambda sha: None
                          ) -> Optional[Tuple[str, int]]:
         """Keep the file at ``path`` in the local store and answer its
-        ``(sha256, size)``, for adopt_stored_media; None when ``dropped()``
-        says it is not wanted any more by the time it is read. Files only,
-        so a large one can be read and hashed on a worker thread. Raises
-        OSError."""
+        ``(sha256, size)``, for adopt_stored_media. ``keeping()`` is asked
+        once it is read, and None answered when it says it is not wanted
+        any more; ``kept(sha256)`` is told when its copy is kept (None when
+        that failed). Files only, so a large one can be read and hashed on
+        a worker thread. Raises OSError."""
         data = Path(path).read_bytes()
         if not data:
             raise OSError("empty file")
-        if dropped():
+        if not keeping():
             return None
-        return self._blob_store.put_bytes(data), len(data)
+        sha = None
+        try:
+            sha = self._blob_store.put_bytes(data)
+        finally:
+            kept(sha)
+        return sha, len(data)
 
     def discard_stored(self, sha: str) -> None:
         """Take a file stored for a document that is gone out of the local

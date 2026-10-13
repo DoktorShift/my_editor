@@ -1108,3 +1108,56 @@ def test_a_file_still_read_when_the_app_quits_goes_nowhere(tmp_path):
     song.write_bytes(BODY)
     r = run_window_script(QUIT_READ_SCRIPT, tmp_path, str(song), SHA)
     assert r == {"quit": True, "sent": [], "adopted": False, "kept": False}
+
+
+QUIT_WRITING_SCRIPT = r"""
+import json, os, sys, threading
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtGui import QCloseEvent
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+from nostr.imports import workers
+workers.BACKGROUND_FROM_BYTES = 0
+import main_window
+
+song, sha, stage = sys.argv[2], sys.argv[3], sys.argv[4]
+w = main_window.MainWindow()
+w.show()
+w._media_store.upload_bytes = lambda body, *, name, mime_type: None
+w.nostr_state._active = True
+w._update_nostr_commands()
+w._upload_limit = lambda: 10**9
+store = w._asset_manager._blob_store
+real_put = store.put_bytes
+writing, kept = threading.Event(), threading.Event()
+
+def slow_put(data):
+    writing.set()
+    threading.Event().wait(0.5)            # a large file on its way to disk
+    answer = real_put(data)
+    kept.set()
+    return answer
+
+store.put_bytes = slow_put
+ed = w.new_tab()
+w._upload_into(ed, song)
+ed.document().setModified(False)
+# Quit while the copy is being written, or just after it was kept but
+# before its result was handled; no event is handled after that, as when
+# the app goes.
+(writing if stage == "writing" else kept).wait(10)
+w.closeEvent(QCloseEvent())
+threading.Event().wait(1.0)                # the worker ends meanwhile
+print("RESULT " + json.dumps({"kept": store.cache_path(sha).exists()}))
+"""
+
+
+@pytest.mark.parametrize("stage", ["writing", "kept"])
+def test_quitting_whatever_point_a_read_has_reached_leaves_no_copy(tmp_path, stage):
+    """The N5 race: a quit right as a read keeps its copy left the copy,
+    since its result was never handled once the app had gone."""
+    song = tmp_path / "song.mp3"
+    song.write_bytes(BODY)
+    r = run_window_script(QUIT_WRITING_SCRIPT, tmp_path, str(song), SHA, stage)
+    assert r == {"kept": False}
