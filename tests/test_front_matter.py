@@ -491,3 +491,35 @@ def test_tags_written_as_a_string_stay_a_string():
     # A tag the string can't hold whole: a list then.
     assert changed("---\ntags: ruby jekyll\n---\nB\n", hashtags=("ruby", "two words")) == \
         "---\ntags: [ruby, two words]\n---\nB\n"
+
+
+# -- TOML arrays over several lines, as people write them (review N1) ----------
+
+MULTI_LINE_TOML = {
+    "trailing commas": '+++\ntags = [\n  "a",\n  "b",\n]\n+++\nB\n',
+    "no last comma": '+++\ntags = [\n  "a",\n  "b"\n]\n+++\nB\n',
+    "comment on an item": '+++\ntags = [\n  "a",  # first\n  "b",\n]\n+++\nB\n',
+    "single quotes": "+++\ntags = [\n  'a',\n  'b',\n]\n+++\nB\n",
+    "two on a line": '+++\ntags = [\n  "a", "b",\n  "c",\n]\n+++\nB\n',
+    "leading commas": '+++\ntags = [\n  "a"\n  , "b"\n]\n+++\nB\n',
+}
+
+
+@pytest.mark.parametrize("shape", sorted(MULTI_LINE_TOML))
+def test_a_tag_added_to_a_toml_array_over_lines_is_valid_toml(shape):
+    import tomllib
+    text = MULTI_LINE_TOML[shape]
+    front, _ = front_matter.split(text)
+    tags = from_front_matter(front).hashtags
+    out = changed(text, hashtags=tags + ("Extra",))
+    assert tomllib.loads(out.split("+++\n")[1])["tags"] == list(tags) + ["Extra"]
+    assert from_front_matter(front_matter.split(out)[0]).hashtags == tags + ("Extra",)
+    fewer = changed(text, hashtags=tags[1:])
+    assert tomllib.loads(fewer.split("+++\n")[1])["tags"] == list(tags[1:])
+
+
+def test_a_toml_array_over_lines_keeps_its_lines_and_comments():
+    out = changed(MULTI_LINE_TOML["no last comma"], hashtags=("a", "b", "Extra"))
+    assert out == '+++\ntags = [\n  "a",\n  "b",\n  "Extra"\n]\n+++\nB\n'
+    out = changed(MULTI_LINE_TOML["comment on an item"], hashtags=("a", "b", "Extra"))
+    assert out == '+++\ntags = [\n  "a",  # first\n  "b",\n  "Extra",\n]\n+++\nB\n'

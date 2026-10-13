@@ -296,7 +296,13 @@ def rewritten(old: Entry, value: Union[str, Sequence[str]], *, bare: bool = Fals
     quotes of the kind it had, a block list a block list, an inline list
     inline with the items that stay as they were written, a block text a
     block text. A value written in a way this can't follow is written as
-    entry() writes a new one."""
+    entry() writes a new one; and in TOML, anything TOML would not read
+    (never written)."""
+    written = _rewritten(old, value, bare)
+    return _valid(written, value, bare) if old.syntax == TOML else written
+
+
+def _rewritten(old: Entry, value: Union[str, Sequence[str]], bare: bool) -> Entry:
     key_part, rest = _key_and_rest(old)
     if key_part is None:
         return entry(old.key, value, syntax=old.syntax, bare=bare)
@@ -316,8 +322,10 @@ def rewritten(old: Entry, value: Union[str, Sequence[str]], *, bare: bool = Fals
     items = list(value)
     if old.syntax == TOML and written == "[" and len(old.lines) > 2 \
             and old.lines[-1].strip().startswith("]"):
-        return Entry(old.key, (old.lines[0],) + _multi_line_list_like(old.lines[1:-1], items)
-                     + (old.lines[-1],), old.syntax)
+        lines = _multi_line_list_like(old.lines[1:-1], items)
+        if lines is not None:
+            return Entry(old.key, (old.lines[0],) + lines + (old.lines[-1],), old.syntax)
+        return entry(old.key, items, syntax=old.syntax, bare=bare)
     if written.startswith("[") and len(old.lines) == 1:
         return Entry(old.key, (key_part + _inline_list_like(written, items, old.syntax)
                                + comment,), old.syntax)
@@ -325,6 +333,16 @@ def rewritten(old: Entry, value: Union[str, Sequence[str]], *, bare: bool = Fals
         return Entry(old.key, (key_part.rstrip() + comment,)
                      + _block_list_like(old.lines[1:], items), old.syntax)
     return entry(old.key, items, syntax=old.syntax, bare=bare)
+
+
+def _valid(written: Entry, value, bare: bool) -> Entry:
+    """``written``, a TOML entry, when TOML reads it; else the value as
+    entry() writes it, which TOML always does."""
+    try:
+        tomllib.loads("\n".join(written.lines))
+    except tomllib.TOMLDecodeError:
+        return entry(written.key, value, syntax=TOML, bare=bare)
+    return written
 
 
 def _key_and_rest(old: Entry) -> Tuple[Optional[str], str]:
@@ -404,19 +422,49 @@ def _block_list_like(lines: Sequence[str], items: Sequence[str]) -> Tuple[str, .
         + tuple(others)
 
 
-def _multi_line_list_like(lines: Sequence[str], items: Sequence[str]) -> Tuple[str, ...]:
+# One item on a line of a TOML array over several lines: its indent, the
+# item ("..." or '...'), a comma after it or not, and a comment.
+_TOML_ITEM_LINE = re.compile(
+    r"""^(\s*)("(?:[^"\\]|\\.)*"|'[^']*')(\s*,)?(\s*#.*)?$""")
+
+
+def _multi_line_list_like(lines: Sequence[str],
+                          items: Sequence[str]) -> Optional[Tuple[str, ...]]:
     """A TOML array over lines, one item a line, as ``lines`` wrote it:
-    each item that stays as written, a new one indented and closed like
-    the first."""
-    item_lines = [line for line in lines if line.strip() and not line.strip().startswith("#")]
-    first = item_lines[0] if item_lines else '  "",'
-    indent = first[:len(first) - len(first.lstrip())]
-    comma = "," if first.rstrip().endswith(",") else ""
+    each item that stays keeps its line and comment, a new one is indented
+    and quoted like the first, and every item but the last has its comma
+    (the last has one when the file's last item had one). None when the
+    lines are laid out otherwise (two items on a line, leading commas,
+    comment lines): the array is then written on one line."""
+    parsed = []
+    for line in lines:
+        if not line.strip():
+            continue
+        found = _TOML_ITEM_LINE.match(line)
+        if found is None:
+            return None
+        parsed.append(found.groups())
+    if not parsed:
+        return None
+    indent, first, _comma, _comment = parsed[0]
+    trailing = bool(parsed[-1][2])
     kept = {}
-    for line in item_lines:
-        kept.setdefault(_unquote(line.strip().rstrip(",").strip()), line)
-    return tuple(kept.pop(item) if item in kept
-                 else indent + json.dumps(item, ensure_ascii=False) + comma for item in items)
+    for row in parsed:
+        kept.setdefault(_unquote(row[1]), row)
+    rows = []
+    for item in items:
+        if item in kept:
+            rows.append(kept.pop(item))
+        else:
+            token = _like(first, item, TOML, False) if first.startswith("'") \
+                else json.dumps(item, ensure_ascii=False)
+            rows.append((indent, token, None, None))
+    written = []
+    for at, (row_indent, token, comma, comment) in enumerate(rows):
+        wants = at < len(rows) - 1 or trailing
+        written.append(row_indent + token + ((comma or ",") if wants else "")
+                       + (comment or ""))
+    return tuple(written)
 
 
 def _block_lines(lines: Sequence[str], value: str) -> Tuple[str, ...]:
