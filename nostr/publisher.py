@@ -34,6 +34,7 @@ reject the blob it just downloaded, which is worse than an absent one.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Callable, Iterable, List, Optional, Sequence, Tuple
 
@@ -590,15 +591,38 @@ def find_first_publication(relay_pool: RelayPool, relay_directory: RelayDirector
 # --------------------------------------------------------------------------- #
 
 _SLUG_KEEP = re.compile(r"[^a-z0-9]+")
+# A Nostr entity in a title (a mention, a quoted note, a key), whole or
+# shortened as a name it has none ("npub1abcd\u2026wxyz").
+_SLUG_ENTITY = re.compile(
+    r"(?:nostr:)?(?:npub|nprofile|nsec|ncryptsec|note|nevent|naddr)1[0-9a-z]*"
+    r"(?:\u2026[0-9a-z]+)?", re.IGNORECASE)
+# A word of the slug this long with a digit in it is a key or a hash, not
+# a word (the longest German words have no digits).
+_SLUG_KEY_LENGTH = 24
+SLUG_MAX = 48
 
 
 def slugify(text: str, *, fallback: str = "untitled") -> str:
-    """Turn a title (or filename) into a stable d-tag identifier.
+    """Turn a title (or filename) into a stable d-tag identifier: the
+    article's link name.
 
-    Lowercase, ASCII-only, hyphen-separated. Returns ``fallback`` if the
-    cleaned result is empty.
+    Lowercase, ASCII-only, hyphen-separated, a letter with an accent as
+    the letter ("Grüße" is "grusse"). A Nostr entity or key in the title
+    is left out (a mention shows as a name in the title, never as a key in
+    the link), and so is a long run of letters and digits (a hex key). At
+    most ``SLUG_MAX`` characters, cut after a word where one ends.
+    Returns ``fallback`` if the cleaned result is empty.
     """
-    cleaned = _SLUG_KEEP.sub("-", text.strip().lower()).strip("-")
+    text = _SLUG_ENTITY.sub(" ", text or "").replace("\u00df", "ss").replace("\u1e9e", "ss")
+    text = "".join(char for char in unicodedata.normalize("NFKD", text)
+                   if not unicodedata.combining(char))
+    words = [word for word in _SLUG_KEEP.split(text.lower())
+             if word and not (len(word) >= _SLUG_KEY_LENGTH
+                              and any(char.isdigit() for char in word))]
+    cleaned = "-".join(words)
+    if len(cleaned) > SLUG_MAX:
+        cut = cleaned[:SLUG_MAX + 1]
+        cleaned = cut[:cut.rfind("-")] if "-" in cut else cleaned[:SLUG_MAX]
     return cleaned or fallback
 
 

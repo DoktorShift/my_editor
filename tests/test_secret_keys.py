@@ -421,7 +421,7 @@ def test_a_key_in_the_slug_is_refused_never_rewritten(tmp_path, answers):
 @pytest.mark.parametrize("language", ["en", "pseudo"])
 @pytest.mark.parametrize("typed", [False, True])
 def test_the_slug_message_has_the_room_it_needs(language, typed):
-    """Opened with the message, or with it appearing while the title is
+    """Opened with the message, or with it appearing while the slug is
     typed, in English and in the longer test language: every line shows,
     and the slug field keeps its height."""
     import i18n
@@ -430,11 +430,11 @@ def test_the_slug_message_has_the_room_it_needs(language, typed):
     i18n.install(language)
     try:
         dialog = StashKindDialog(default=StashKind.ARTICLE, is_dark=False,
-                                 suggested_title="" if typed else f"Backup {NSEC}")
+                                 suggested_slug="" if typed else f"backup-{NSEC}")
         dialog.show()
         QApplication.processEvents()
         if typed:
-            QTest.keyClicks(dialog._title_edit, f"Backup {NSEC}")
+            QTest.keyClicks(dialog._slug_edit, f"backup-{NSEC}")
             QApplication.processEvents()
         label, field = dialog._slug_problem, dialog._slug_edit
         assert not label.isHidden()
@@ -455,15 +455,20 @@ def test_a_key_in_the_slug_never_leaves_the_computer(tmp_path, monkeypatch):
     dialog._job = None
     asked = []
     dialog._published_at_lookup = lambda *args: asked.append(args)
-    dialog._title_edit.setText(f"Backup {NSEC}")                # the slug follows it
+    dialog._title_edit.setText(f"Backup {NSEC}")                # the slug follows it,
+    assert dialog._slug_edit.text() == "backup"                 # never with a key
+    dialog._slug_edit.setText(f"backup-{NSEC}")
+    dialog._on_slug_edited(dialog._slug_edit.text())
     assert not dialog._slug_problem.isHidden() and "slug" in dialog._slug_problem.text()
     assert dialog._advanced_open and not dialog._advanced_panel.isHidden()
     assert not dialog._publish_btn.isEnabled()
     dialog._on_publish()
     assert asked == [] and dialog._relay_pool.published == []
-    dialog._title_edit.setText("Backup")
+    dialog._slug_edit.setText("backup")
+    dialog._on_slug_edited("backup")
     assert dialog._slug_problem.isHidden() and dialog._publish_btn.isEnabled()
-    dialog._title_edit.setText(f"Backup {NSEC}")
+    dialog._slug_edit.setText(f"backup-{NSEC}")
+    dialog._on_slug_edited(dialog._slug_edit.text())
     heard.clear()
     dialog.show()                              # opened with it: said once shown
     assert heard == [dialog._slug_problem.text()]
@@ -475,7 +480,7 @@ def test_save_as_draft_refuses_a_key_in_the_slug(monkeypatch):
     from nostr.ui.stash_kind_dialog import StashKind, StashKindDialog
     heard = []
     monkeypatch.setattr(announce, "announce", lambda source, text: heard.append(text))
-    dialog = StashKindDialog(default=StashKind.ARTICLE, suggested_title=f"Backup {NSEC}")
+    dialog = StashKindDialog(default=StashKind.ARTICLE, suggested_slug=f"backup-{NSEC}")
     assert not dialog._save_btn.isEnabled()
     assert not dialog._slug_problem.isHidden()
     assert "slug" in dialog._slug_problem.text()

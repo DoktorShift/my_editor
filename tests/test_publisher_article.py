@@ -24,12 +24,37 @@ PK = "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
     ("Hello, World!", "hello-world"),
     ("Already-Hyphenated", "already-hyphenated"),
     ("UPPERCASE", "uppercase"),
-    ("café & croissant", "caf-croissant"),    # non-ASCII collapses; no fancy unicode normalisation
+    ("café & croissant", "cafe-croissant"),   # accents are kept as their letters
+    ("Schöne Grüße aus Zürich", "schone-grusse-aus-zurich"),
     ("multiple   spaces", "multiple-spaces"),
     ("with/slashes/and:colons", "with-slashes-and-colons"),
 ])
 def test_slugify_produces_expected(title, expected):
     assert slugify(title) == expected
+
+
+NPUB = "npub1f2ktq2ycmh9wpmv0s6wqu6r9uvlvp7qr6sdqqk87x3dmh8s2u7tsj8kr6q"
+
+
+def test_a_slug_never_holds_a_key():
+    """A mention or a key in the title leaves the slug readable: a Nostr
+    entity, a shortened one ("npub1abcd…wxyz") and a long run of letters
+    and digits (a hex key) are left out, never written into the link."""
+    assert slugify(f"*Fafuui S s*nostr:{NPUB}") == "fafuui-s-s"
+    assert slugify("Fafuui S s @npub1f2kt\u2026r6q") == "fafuui-s-s"
+    assert slugify(f"Hello {'ab12' * 16} world") == "hello-world"
+    assert slugify(f"Backup nsec1{'q' * 58}") == "backup"
+    assert slugify(f"nostr:{NPUB}") == "untitled"
+    assert slugify("Hello @DrShift") == "hello-drshift"          # a name is a word
+
+
+def test_a_slug_is_cut_at_a_word():
+    title = "One Class, One Purpose: Refactoring the Import Pipeline for Sanity and Speed"
+    slug = slugify(title)
+    assert len(slug) <= 48 and title.lower().replace(",", "").replace(":", "").replace(
+        " ", "-").startswith(slug) and not slug.endswith("-")
+    assert slug == "one-class-one-purpose-refactoring-the-import"
+    assert len(slugify("x" * 90)) == 48                           # one word: cut in it
 
 
 def test_slugify_empty_returns_fallback():
