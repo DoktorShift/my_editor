@@ -29,6 +29,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import front_matter  # noqa: E402
@@ -128,6 +129,40 @@ def test_a_co_author_is_added_and_removed_in_article_details():
     assert remove and unnamed_controls(panel) == []
     remove[0].click()
     assert sent[-1].coauthors == ()
+
+
+def test_remove_is_reached_with_tab_between_hashtags_and_add_co_author():
+    panel, sent, asked = panel_with(ArticleDetails(title="T", coauthors=((BOB, ""), (CAROL, ""))))
+    chain, widget = [], panel.tags_edit
+    for _step in range(4):
+        widget = widget.nextInFocusChain()
+        while not (widget.focusPolicy() & Qt.FocusPolicy.TabFocus
+                   and widget.isVisibleTo(panel)):        # as Tab itself goes
+            widget = widget.nextInFocusChain()
+        chain.append(widget.accessibleName() or widget.text())
+    assert chain == ["Remove Bob", "Remove Carol", "Add Co-Author…",
+                     "Share zaps equally with co-authors"]
+
+
+@pytest.mark.parametrize("dark", [False, True])
+def test_the_share_words_dim_with_the_box(dark):
+    panel, sent, asked = panel_with(ArticleDetails(title="T"))
+    panel.set_dark(dark)
+    panel.show()
+    words = panel._share_row.words
+    assert not words.isEnabled()
+    dimmed = darkest_ink(words)
+    panel.show_article(ArticleDetails(title="T", coauthors=((BOB, ""),)), fixed_identifier=False)
+    assert words.isEnabled()
+    assert abs(darkest_ink(words) - dimmed) > 40      # visibly another ink
+
+
+def darkest_ink(label):
+    """How far the label's text ink is from its background (0 to 255)."""
+    image = label.grab().toImage()
+    background = image.pixelColor(0, 0).lightness()
+    return max(abs(image.pixelColor(x, y).lightness() - background)
+               for x in range(image.width()) for y in range(image.height()))
 
 
 def test_shared_zaps_follow_the_co_authors_equally():

@@ -112,6 +112,7 @@ def dialog_stylesheet(is_dark: bool) -> str:
     return f"""
     QDialog {{ background: {bg}; }}
     QLabel {{ color: {fg}; font-size: 13px; }}
+    QLabel:disabled {{ color: {muted}; }}
     QPushButton {{
         background: {field}; color: {fg}; border: 1px solid {border};
         padding: 6px 14px; border-radius: 5px; min-width: 72px;
