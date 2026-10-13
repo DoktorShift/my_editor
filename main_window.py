@@ -3613,18 +3613,19 @@ class MainWindow(QMainWindow):
         ed._media_left_out = {asset.sha256 for asset in waiting}
         not_saved = getattr(ed, "_details_not_saved", None) if path.lower().endswith(".md") \
             else None
+        said = []
         if not_saved:
-            self.status.showMessage(_("Saved without what you typed for {details}: MyEditor "
-                                      "can’t write it into the file.").format(
-                details=self._detail_names(not_saved)))
-            return
-        if not waiting:
-            self.status.showMessage(_("Saved: {path}").format(path=path))
-            return
-        self.status.showMessage(ngettext(
-            "Saved. “{name}” goes into the file once it is uploaded.",
-            "Saved. {count} files go into the file once they are uploaded.",
-            len(waiting)).format(name=waiting[0].alt, count=len(waiting)))
+            said.append(_("Saved without what you typed for {details}: MyEditor can’t write "
+                          "it into the file.").format(details=self._detail_names(not_saved)))
+        if waiting and said:
+            said.append(ngettext("“{name}” goes into the file once it is uploaded.",
+                                 "{count} files go into the file once they are uploaded.",
+                                 len(waiting)).format(name=waiting[0].alt, count=len(waiting)))
+        elif waiting:
+            said.append(ngettext("Saved. “{name}” goes into the file once it is uploaded.",
+                                 "Saved. {count} files go into the file once they are uploaded.",
+                                 len(waiting)).format(name=waiting[0].alt, count=len(waiting)))
+        self.status.showMessage(" ".join(said) or _("Saved: {path}").format(path=path))
 
     def _on_media_uploaded(self, sha: str) -> None:
         """Audio or video a save had to leave out is uploaded: the documents

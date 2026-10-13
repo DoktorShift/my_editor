@@ -197,3 +197,18 @@ def test_a_saved_file_keeps_the_line_endings_it_was_read_with(win, tmp_path, mon
     ed._newline = None          # a new document: this system's ending
     assert win._save_to(path) is True
     assert b"\r\n" in open(path, "rb").read()
+
+
+def test_a_save_leaving_typed_details_out_says_so_beside_the_media_still_to_go_in():
+    """Round 8, L1: the message about the details replaced the one about
+    audio or video still to be uploaded."""
+    shown = []
+    window = types.SimpleNamespace(
+        status=types.SimpleNamespace(showMessage=shown.append),
+        _media_not_uploaded=lambda document: [types.SimpleNamespace(alt="talk.mp4", sha256="s")])
+    window._detail_names = lambda details: MainWindow._detail_names(window, details)
+    window._detail_label = MainWindow._detail_label
+    ed = types.SimpleNamespace(document=lambda: None, _details_not_saved=frozenset({"tags"}))
+    MainWindow._say_saved(window, ed, "/notes/post.md")
+    assert shown == ["Saved without what you typed for “Hashtags”: MyEditor can’t write it "
+                     "into the file. “talk.mp4” goes into the file once it is uploaded."]
