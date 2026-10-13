@@ -1247,9 +1247,14 @@ def test_a_front_matter_no_parser_reads_says_so_once_in_article_details(tmp_path
 
 def test_a_lone_cr_ends_no_line_of_toml():
     """Round 10, L3: TOML ends a line at LF or CRLF only, and tomllib reads
-    no front matter whose lines end in a lone CR: none is found, as none
-    would be by Hugo."""
-    assert front_matter.split('+++\rtitle = "T"\r+++\r\rBody.\r')[0] is None
+    no front matter whose lines end in a lone CR. Such a front matter is
+    one no parser reads: its details shown as this reader reads them, kept
+    as written, and never a second front matter written above it."""
+    cr_toml = '+++\rtitle = "T"\rtags = ["x", 3.10]\r+++\r\rBody.\r'
+    front, body = front_matter.split(cr_toml)
+    assert front is not None and body == "Body.\r"
+    assert from_front_matter(front).title == "T" and kept_in_file(front) == ALL_DETAILS
+    assert unchanged_save(cr_toml) == cr_toml and changed(cr_toml, title="New") == cr_toml
     # A lone CR inside a TOML text: tomllib reads no front matter there, so
     # every detail stays as written, the title shown as this reader reads it.
     text = '+++\ntitle = "T"\nsummary = """one\rtwo"""\n+++\n\nBody.\n'

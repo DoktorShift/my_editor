@@ -49,16 +49,16 @@ import yaml
 YAML = "yaml"
 TOML = "toml"
 
-# A line ends in CRLF, LF, or a lone CR (classic Mac OS), as YAML ends it;
-# in TOML at CRLF or LF only, as TOML does (a lone CR is no line ending).
+# A line ends in CRLF, LF, or a lone CR (classic Mac OS), as YAML ends it.
+# (TOML ends one at CRLF or LF only: tomllib reads a TOML front matter as
+# written, each line with its ending, and reads none with a lone CR.)
 _EOL = r"(?:\r\n|\r|\n)"
-_TOML_EOL = r"(?:\r?\n)"
 # The block: "---" on the first line (after a byte order mark), then
 # anything, then "---" (or "...") on a line of its own; for TOML "+++" both.
 _BLOCK = re.compile(rf"\A(﻿?---[ \t]*){_EOL}(.*?){_EOL}?(?<=[\r\n])((?:---|\.\.\.)[ \t]*)"
                     rf"(?:{_EOL}|\Z)", re.DOTALL)
-_TOML_BLOCK = re.compile(rf"\A(﻿?\+\+\+[ \t]*){_TOML_EOL}(.*?){_TOML_EOL}?(?<=\n)"
-                         rf"(\+\+\+[ \t]*)(?:{_TOML_EOL}|\Z)", re.DOTALL)
+_TOML_BLOCK = re.compile(rf"\A(﻿?\+\+\+[ \t]*){_EOL}(.*?){_EOL}?(?<=[\r\n])(\+\+\+[ \t]*)"
+                         rf"(?:{_EOL}|\Z)", re.DOTALL)
 # A TOML key line (a bare, quoted or dotted key, then "="), indented or not.
 _TOML_KEY = re.compile(r"^\s*([^\s#\[=][^=]*?)[ \t]*=")
 # A YAML key line: a key, quoted ("tags", 'tags') or plain, spaces inside
@@ -220,13 +220,12 @@ def split(text: str) -> Tuple[Optional[FrontMatter], str]:
         return None, text
     # Lines end at CRLF, LF or a lone CR only, as YAML ends them: a form
     # feed or U+2028 inside a line stays there.
-    eol = _TOML_EOL if syntax == TOML else _EOL
-    lines = re.split(eol, found.group(2)) if found.group(2) else []
+    lines = re.split(_EOL, found.group(2)) if found.group(2) else []
     entries = _toml_entries(lines) if syntax == TOML else _yaml_entries(lines)
     if lines and not any(entry.key for entry in entries):
         return None, text                   # a divider, some text, a divider: text
     entries = _with_trailers_apart(entries)
-    as_written = _lines_as_written(found.group(0), eol)
+    as_written = _lines_as_written(found.group(0))
     endings = [ending for _line, ending in as_written]
     newline = max(("\n", "\r\n", "\r"), key=endings.count)  # the most used, LF first
     rest = text[found.end():]
@@ -236,11 +235,10 @@ def split(text: str) -> Tuple[Optional[FrontMatter], str]:
                         as_written=as_written), body)
 
 
-def _lines_as_written(text: str, eol: str) -> Tuple[Tuple[str, str], ...]:
-    """``(line, its line ending)`` of each line of ``text``, its lines ending
-    at ``eol``: "\r\n", "\n", "\r" (YAML's), or "" for a last line without
-    one."""
-    parts = re.split(f"({eol})", text)
+def _lines_as_written(text: str) -> Tuple[Tuple[str, str], ...]:
+    """``(line, its line ending)`` of each line of ``text``: "\r\n", "\n",
+    "\r", or "" for a last line without one."""
+    parts = re.split(f"({_EOL})", text)
     lines = tuple(zip(parts[0::2], parts[1::2] + [""]))
     return lines[:-1] if lines[-1] == ("", "") else lines
 
@@ -252,10 +250,16 @@ def parsed(front: Optional[FrontMatter]) -> Optional[dict]:
     never changed by its reader."""
     if front is None:
         return {}
+    lines = [line for entry in front.entries for line in entry.lines]
+    if front.syntax == TOML:
+        # As written, each line with its own ending: TOML ends none at a
+        # lone CR, and tomllib reads no front matter holding one.
+        endings = _endings(front, [front.opening, *lines, front.closing])[1:-1]
+        return _parsed_text(TOML, "".join(line + (ending or "\n")
+                                          for line, ending in zip(lines, endings)))
     # Each line ends in a line break, the last one too, as in the file: a
     # block text at the end ("|+") keeps its own.
-    return _parsed_text(front.syntax, "".join(line + "\n" for entry in front.entries
-                                              for line in entry.lines))
+    return _parsed_text(YAML, "".join(line + "\n" for line in lines))
 
 
 # The most values a front matter is held against: far more than any holds,
