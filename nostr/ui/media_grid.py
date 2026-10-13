@@ -429,6 +429,7 @@ class MediaGrid(QListView):
         self.delegate = TileDelegate(self, is_dark=is_dark)
         self.setItemDelegate(self.delegate)
         self.setGridSize(self.delegate.cell_size())
+        self.setMinimumWidth(2 * CELL_WIDTH + self.verticalScrollBar().sizeHint().width() + 8)
         self.doubleClicked.connect(lambda _index: self.open_requested.emit())
         # Thumbnails are asked for as tiles come into view, once the
         # scrolling or resizing has settled.

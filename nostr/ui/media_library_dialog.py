@@ -123,7 +123,6 @@ class MediaLibraryDialog(QDialog):
         self.setWindowTitle(_("Insert Image") if pick_mode else _("Media Library"))
         self.setModal(pick_mode)
         self.resize(860, 560)
-        self.setMinimumSize(540, 400)
         # Deleted on close, so its connections to the store and the
         # loader go with it.
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
@@ -160,6 +159,10 @@ class MediaLibraryDialog(QDialog):
         self._fetch_failed = ""
 
         self._build(pick_alt_text and pick_mode)
+        # No minimum width of its own: the layout's is the smallest window,
+        # every control at its own width in every language, and the grid
+        # at least two columns.
+        self.setMinimumHeight(400)
         self._connect()
         self._rebuild()
         self._refresh_storage()
@@ -247,6 +250,7 @@ class MediaLibraryDialog(QDialog):
         self._add_button.setToolTip(_("Add images, videos or audio from your computer"))
         self._add_button.setAutoDefault(False)
         self._add_button.clicked.connect(self._choose_files)
+        self._add_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         bar.addWidget(self._add_button)
         self._filter_combo = QComboBox()
         self._filter_combo.setAccessibleName(_("Show"))
@@ -254,6 +258,7 @@ class MediaLibraryDialog(QDialog):
                             ("video", _("Videos")), ("audio", _("Audio"))):
             self._filter_combo.addItem(label, kind)
         self._filter_combo.currentIndexChanged.connect(self._rebuild)
+        self._filter_combo.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         bar.addWidget(self._filter_combo)
         self._sort_combo = QComboBox()
         self._sort_combo.setAccessibleName(_("Sort By"))
@@ -262,13 +267,14 @@ class MediaLibraryDialog(QDialog):
                            ("name", _("Name"))):
             self._sort_combo.addItem(label, key)
         self._sort_combo.currentIndexChanged.connect(self._rebuild)
+        self._sort_combo.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         bar.addWidget(self._sort_combo)
         bar.addStretch(1)
         self._search = QLineEdit()
         self._search.setPlaceholderText(_("Search"))
         self._search.setAccessibleName(_("Search Media"))
         self._search.setClearButtonEnabled(True)
-        self._search.setMinimumWidth(110)
+        self._search.setMinimumWidth(90)
         self._search.setMaximumWidth(220)
         self._search.textChanged.connect(self._rebuild)
         bar.addWidget(self._search, 1)
@@ -1006,6 +1012,15 @@ class MediaLibraryDialog(QDialog):
         self._status.setProperty("tone", "error" if error else "")
         self._status.style().unpolish(self._status)
         self._status.style().polish(self._status)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        # The app's button style gives every push button a minimum width,
+        # which a layout then takes as the button's minimum even when its
+        # words need more (a longer translation). Its own width, measured
+        # once styled, is the minimum here.
+        for button in (self._add_button, self._actions_button):
+            button.setMinimumWidth(button.sizeHint().width())
+        super().showEvent(event)
 
     def done(self, result: int) -> None:
         if self._quick_look is not None:

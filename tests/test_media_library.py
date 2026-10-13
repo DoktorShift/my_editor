@@ -799,3 +799,20 @@ def test_a_start_or_cancel_before_the_tile_exists_is_kept(tmp_path, monkeypatch)
                                    store.upload_cancelled.emit("Gone.png"), "Gone.png")[2]
     world.dialog._add_paths([str(other)])
     assert world.model.tile("Gone.png") is None
+
+
+def test_the_smallest_window_cuts_no_toolbar_control(tmp_path, monkeypatch):
+    """A longer translation widens the smallest window instead of
+    cutting a button's or a pop-up's words."""
+    cache = tmp_path / "cache"
+    monkeypatch.setattr(dialog_module, "ThumbnailLoader",
+                        lambda parent=None: FakeLoader(cache, parent=parent))
+    dialog = MediaLibraryDialog(store=FakeStore(), is_dark=False)
+    dialog._add_button.setText("Hinzufügen zur Mediathek …")
+    dialog._sort_combo.setItemText(0, "Neueste Objekte zuerst anzeigen")
+    dialog.show()
+    dialog.resize(100, 100)
+    QCoreApplication.processEvents()
+    for widget in (dialog._add_button, dialog._filter_combo, dialog._sort_combo,
+                   dialog._actions_button):
+        assert widget.width() >= widget.sizeHint().width(), widget
