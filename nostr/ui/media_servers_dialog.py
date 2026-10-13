@@ -209,7 +209,8 @@ class MediaServersDialog(QDialog):
         for origin in self._entitled:
             if origin in configured:
                 continue
-            item = QListWidgetItem(self._name(origin))
+            item = QListWidgetItem(_("{server}, included with your membership").format(
+                server=self._name(origin)))
             item.setData(Qt.ItemDataRole.UserRole, "")
             item.setFlags(Qt.ItemFlag.ItemIsEnabled)
             item.setForeground(self.palette().color(QPalette.ColorGroup.Disabled,

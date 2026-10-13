@@ -72,7 +72,9 @@ def test_servers_are_listed_in_upload_order_with_the_members_server_last(tmp_pat
     dialog, _settings, _ = sheet(
         tmp_path, entitled=[E21],
         label=lambda origin: "EINUNDZWANZIG" if origin == E21 else None)
-    assert rows(dialog) == ["a.example", "b.example", "EINUNDZWANZIG"]
+    # Said on the row itself, not only in a tooltip nobody hovers.
+    assert rows(dialog) == ["a.example", "b.example",
+                            "EINUNDZWANZIG, included with your membership"]
     members = dialog.server_list.item(2)
     assert not members.flags() & Qt.ItemFlag.ItemIsSelectable
     assert members.toolTip() == "Included with your membership"
