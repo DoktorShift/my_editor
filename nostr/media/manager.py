@@ -357,11 +357,17 @@ class AssetManager(QObject):
             return None
         sha = None
         try:
-            # Kept and counted at once (release_stored): a copy another read
-            # is taking out is never the one this read just kept.
+            # Counted before it is written (release_stored): another read's
+            # release then never takes this copy out, and the lock is held
+            # only for the counting, never for a hash or a write.
+            known = hashlib.sha256(data).hexdigest()
             with self._keeping:
+                self._kept_for[known] = self._kept_for.get(known, 0) + 1
+            try:
                 sha = self._blob_store.put_bytes(data)
-                self._kept_for[sha] = self._kept_for.get(sha, 0) + 1
+            except BaseException:
+                self.release_stored(known)
+                raise
         finally:
             kept(sha)
         return sha, len(data)

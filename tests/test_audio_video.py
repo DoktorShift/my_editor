@@ -1273,3 +1273,61 @@ def test_a_read_failing_for_a_closed_document_ends_quietly(tmp_path):
     song.write_bytes(BODY)
     r = run_window_script(FAILED_READ_SCRIPT, tmp_path, str(song))
     assert r == {"closed": [], "open": ["Couldn’t add “song.mp3”"]}
+
+
+def test_keeping_a_large_copy_never_holds_up_another_file(tmp_path):
+    """Round 6, M1: the lock that counts kept copies was held while a whole
+    file was hashed and written, so the UI thread waited for another
+    file's write (releasing its read, or keeping a small file)."""
+    import threading
+    import time
+    from PySide6.QtCore import QObject, Signal
+    from nostr.media.assets import AssetIndex
+    from nostr.media.manager import AssetManager
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    writing = threading.Event()
+
+    class Store(QObject):
+        upload_status = Signal(str, str)
+        upload_finished = Signal(str, object)
+        upload_failed = Signal(str, str)
+        ready = Signal(str, str, object)
+        failed = Signal(str, str)
+        url_ready = Signal(str, str, object)
+        url_failed = Signal(str, str)
+        files = {}
+
+        def cache_path(self, sha):
+            return cache / sha
+
+        def has(self, sha):
+            return (cache / sha).is_file()
+
+        def put_bytes(self, data):
+            sha = hashlib.sha256(data).hexdigest()
+            if len(data) > 1000:                   # the large one writes slowly
+                writing.set()
+                time.sleep(1.5)
+            (cache / sha).write_bytes(data)
+            return sha
+
+        def load(self, sha, url):
+            pass
+
+    store = Store()
+    manager = AssetManager(blob_store=store, uploader=store, profile_provider=lambda: None,
+                           index=AssetIndex(tmp_path / "index.json"))
+    for name, size in (("big.mp4", 5000), ("small.mp3", 500), ("done.mp4", 600)):
+        (tmp_path / name).write_bytes(os.urandom(size))
+    done, _size = manager.store_media_file(str(tmp_path / "done.mp4"))
+    big = threading.Thread(target=manager.store_media_file, args=(str(tmp_path / "big.mp4"),))
+    big.start()
+    writing.wait(5)
+    started = time.monotonic()
+    manager.release_stored(done)
+    manager.store_media_file(str(tmp_path / "small.mp3"))
+    waited = time.monotonic() - started
+    big.join()
+    assert waited < 0.5, waited
+    assert not (cache / done).exists()             # released, nobody else held it
