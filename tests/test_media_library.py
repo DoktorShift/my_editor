@@ -273,8 +273,13 @@ def names(world):
 
 
 def select(world, key):
-    row = world.model.row_of(key)
-    world.grid.setCurrentIndex(world.model.index(row))
+    """That tile alone, as a click selects it. Not setCurrentIndex, which
+    reads the keyboard's modifiers and so adds to the selection when a
+    key event of an earlier test left Cmd down."""
+    from PySide6.QtCore import QItemSelectionModel
+    index = world.model.index(world.model.row_of(key))
+    world.grid.selectionModel().setCurrentIndex(
+        index, QItemSelectionModel.SelectionFlag.ClearAndSelect)
 
 
 def press(widget, key, modifiers=Qt.KeyboardModifier.NoModifier):
