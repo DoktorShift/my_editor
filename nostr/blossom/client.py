@@ -84,6 +84,7 @@ _STATUS_CODES = {
     403: ERROR_CODES.AUTH_REJECTED,      # bud-02.md:62
     409: ERROR_CODES.HASH_MISMATCH,      # bud-02.md:63
     413: ERROR_CODES.SERVER_TOO_LARGE,   # bud-02.md:65
+    415: ERROR_CODES.UNSUPPORTED_TYPE,   # bud-02.md (unsupported media type)
     429: ERROR_CODES.RATE_LIMITED,       # bud-02.md:67
 }
 

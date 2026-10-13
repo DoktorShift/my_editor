@@ -4416,86 +4416,94 @@ msgstr "Deine Relay-Liste ist veröffentlicht, mit dem Mitglieder-Relay darauf."
 msgid "Your account has a relay list after all, so nothing was published. Add the members’ relay to it instead."
 msgstr "Dein Konto hat doch eine Relay-Liste, deshalb wurde nichts veröffentlicht. Füge stattdessen das Mitglieder-Relay hinzu."
 
-#: nostr/blossom/errors.py:64
+#: nostr/blossom/errors.py:71
 msgid "The upload didn’t finish. Try again."
 msgstr "Das Hochladen wurde nicht abgeschlossen. Versuche es erneut."
 
-#: nostr/blossom/errors.py:108
+#: nostr/blossom/errors.py:121
 msgid "Something went wrong with that media request. Nothing was lost."
 msgstr "Bei dieser Medienanfrage ist etwas schiefgelaufen. Es ist nichts verloren gegangen."
 
-#: nostr/blossom/errors.py:112
+#: nostr/blossom/errors.py:125
 #, python-brace-format
 msgid "Your signer app declined the request to the media server: {reason}"
 msgstr "Deine Signer-App hat die Anfrage an den Medienserver abgelehnt: {reason}"
 
-#: nostr/blossom/errors.py:66
+#: nostr/blossom/errors.py:73
 msgid "Your media server answered in a way MyEditor doesn’t trust, so nothing was sent."
 msgstr "Dein Medienserver hat so geantwortet, dass MyEditor ihm nicht vertraut, daher wurde nichts gesendet."
 
-#: nostr/blossom/errors.py:70
+#: nostr/blossom/errors.py:77
 msgid "That address can’t be used."
 msgstr "Diese Adresse kann nicht verwendet werden."
 
-#: nostr/blossom/errors.py:71
+#: nostr/blossom/errors.py:78
 msgid "A media server sent more than MyEditor accepts, so it was stopped."
 msgstr "Ein Medienserver hat mehr gesendet, als MyEditor annimmt, daher wurde die Übertragung gestoppt."
 
-#: nostr/blossom/errors.py:74
+#: nostr/blossom/errors.py:81
 msgid "MyEditor can’t show this kind of file."
 msgstr "MyEditor kann diese Art von Datei nicht anzeigen."
 
-#: nostr/blossom/errors.py:77
+#: nostr/blossom/errors.py:84
 msgid "Your signer app didn’t approve the request. Check it and try again."
 msgstr "Deine Signer-App hat die Anfrage nicht bestätigt. Sieh dort nach und versuche es erneut."
 
-#: nostr/blossom/errors.py:81
+#: nostr/blossom/errors.py:88
 msgid "Couldn’t reach your media server. Check your internet connection."
 msgstr "Dein Medienserver ist nicht erreichbar. Prüfe deine Internetverbindung."
 
-#: nostr/blossom/errors.py:84
+#: nostr/blossom/errors.py:91
 msgid "Your signer app answered for a different account, so nothing was sent."
 msgstr "Deine Signer-App hat für ein anderes Konto geantwortet, daher wurde nichts gesendet."
 
-#: nostr/blossom/errors.py:87
+#: nostr/blossom/errors.py:94
 msgid "Connect your signer app first."
 msgstr "Verbinde zuerst deine Signer-App."
 
-#: nostr/blossom/errors.py:88
+#: nostr/blossom/errors.py:95
 msgid "This file couldn’t be read."
 msgstr "Diese Datei konnte nicht gelesen werden."
 
-#: nostr/blossom/errors.py:89
+#: nostr/blossom/errors.py:96
 msgid "This file is larger than your media servers take."
 msgstr "Diese Datei ist größer, als deine Medienserver annehmen."
 
-#: nostr/blossom/errors.py:90
+#: nostr/blossom/errors.py:97
 msgid "There isn’t enough space left on your media servers for this file."
 msgstr "Auf deinen Medienservern ist nicht mehr genug Platz für diese Datei."
 
-#: nostr/blossom/errors.py:93
+#: nostr/blossom/errors.py:100
 msgid "Add a media server first, in Media Servers."
 msgstr "Füge zuerst unter „Medienserver“ einen Medienserver hinzu."
 
-#: nostr/blossom/errors.py:95
+#: nostr/blossom/errors.py:102
 msgid "A media server returned the wrong file, so it wasn’t used. Try again."
 msgstr "Ein Medienserver hat die falsche Datei geliefert, daher wurde sie nicht verwendet. Versuche es erneut."
 
-#: nostr/blossom/errors.py:98
+#: nostr/blossom/errors.py:105
 msgid "This file is too large for your media server."
 msgstr "Diese Datei ist zu groß für deinen Medienserver."
 
-#: nostr/blossom/errors.py:99
+#: nostr/blossom/errors.py:106
 msgid "Your media server asks for payment. Choose another one in Media Servers."
 msgstr "Dein Medienserver verlangt eine Zahlung. Wähle unter „Medienserver“ einen anderen."
 
-#: nostr/blossom/errors.py:102
-msgid "Your media server is busy. Wait a moment and try again."
-msgstr "Dein Medienserver ist ausgelastet. Warte einen Moment und versuche es erneut."
+#: nostr/blossom/errors.py:109
+msgid "Your media server is busy. Try again later."
+msgstr "Dein Medienserver ist ausgelastet. Versuche es später erneut."
 
-#: nostr/blossom/errors.py:103
-msgid "Your media server refused the request. Check your signer app and try again."
-msgstr "Dein Medienserver hat die Anfrage abgelehnt. Prüfe deine Signer-App und versuche es erneut."
+#: nostr/blossom/errors.py:110
+msgid "This media server doesn’t accept your account. Choose another one in Media Servers."
+msgstr "Dieser Medienserver nimmt dein Konto nicht an. Wähle unter „Medienserver“ einen anderen."
+
+#: nostr/blossom/errors.py:113
+msgid "This media server doesn’t take this kind of file. Choose another one in Media Servers."
+msgstr "Dieser Medienserver nimmt diese Art von Datei nicht an. Wähle unter „Medienserver“ einen anderen."
+
+#: nostr/blossom/errors.py:116
+msgid "Your media servers didn’t list your files. Try again later."
+msgstr "Deine Medienserver haben deine Dateien nicht aufgelistet. Versuche es später erneut."
 
 #: nostr/blossom/store.py:957
 #, python-brace-format

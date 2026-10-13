@@ -488,8 +488,25 @@ def test_a_signer_that_cannot_be_reached_is_named_too(tmp_path):
     assert _unlistable(tmp_path, pool_error="no answer") == ["SIGNER_REJECTED"]
 
 
+def test_a_server_that_answers_but_does_not_list_is_not_the_connection(tmp_path):
+    """503, or a server without /list (BUD-12 makes it optional): the
+    connection works, so the person is not sent to check it."""
+    assert _unlistable(tmp_path, down=True) == ["LIST_FAILED"]
+
+
 def test_servers_that_cannot_be_reached_are_named_as_the_reason(tmp_path):
-    assert _unlistable(tmp_path, down=True) == ["NETWORK_UNAVAILABLE"]
+    router_reply = error_reply(0)
+    settings = BlossomSettings(tmp_path / "blossom_servers.json")
+    settings.set_custom_servers([SERVER])
+    nam = FakeNam(None, responder=lambda *a: router_reply)
+    store = MediaStore(session_pool=FakeSessionPool(FakeSigner()),
+                       profile_provider=lambda: FakeProfile(), settings=settings,
+                       client=BlossomClient(nam=nam))
+    errors = []
+    store.fetch_error.connect(errors.append)
+    store.fetch()
+    nam.settle()
+    assert errors == ["NETWORK_UNAVAILABLE"]
 
 
 def test_a_shared_copy_the_listing_does_not_show_is_still_deleted(tmp_path):

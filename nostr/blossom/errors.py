@@ -19,9 +19,12 @@ Codes are additive. Later work extends this module, never replaces it.
 
 from __future__ import annotations
 
+import logging
 import re
 
 from i18n import N_, _
+
+_log = logging.getLogger(__name__)
 
 
 class ERROR_CODES:
@@ -55,6 +58,10 @@ class ERROR_CODES:
     PAYMENT_REQUIRED = "PAYMENT_REQUIRED"
     RATE_LIMITED = "RATE_LIMITED"
     AUTH_REJECTED = "AUTH_REJECTED"
+    UNSUPPORTED_TYPE = "UNSUPPORTED_TYPE"
+    # No server could list the person's files, for a reason of its own
+    # (not the connection, not the signer, not a refusal of the account).
+    LIST_FAILED = "LIST_FAILED"
 
 
 # One short sentence per code, or two: what happened, and what to do
@@ -99,9 +106,15 @@ _FRIENDLY = {
     ERROR_CODES.PAYMENT_REQUIRED: _(
         "Your media server asks for payment. Choose another one in Media Servers."
     ),
-    ERROR_CODES.RATE_LIMITED: _("Your media server is busy. Wait a moment and try again."),
+    ERROR_CODES.RATE_LIMITED: _("Your media server is busy. Try again later."),
     ERROR_CODES.AUTH_REJECTED: _(
-        "Your media server refused the request. Check your signer app and try again."
+        "This media server doesn’t accept your account. Choose another one in Media Servers."
+    ),
+    ERROR_CODES.UNSUPPORTED_TYPE: _(
+        "This media server doesn’t take this kind of file. Choose another one in Media Servers."
+    ),
+    ERROR_CODES.LIST_FAILED: _(
+        "Your media servers didn’t list your files. Try again later."
     ),
 }
 
@@ -149,18 +162,13 @@ def sanitize_reason(raw) -> str:
 def friendly_message(code: str, raw: str = "", *, detail: str = "") -> str:
     """Copy for ``code``, suitable to show a user directly.
 
-    ``raw`` is the diagnostic string the transport produced. It is
-    accepted so callers can pass it without branching, and deliberately
-    not rendered: Qt error strings are not user copy.
-
-    ``detail`` is the server's own sanitized ``X-Reason``. When present
-    it is appended as its own sentence, so the mapped copy still leads
-    and the operator's wording never replaces it.
+    ``raw`` (the transport's diagnostic) and ``detail`` (the server's
+    own ``X-Reason``) are accepted so callers can pass them without
+    branching, and never rendered: the transport's words are not copy,
+    and the server's are a diagnostic in its own terms and language
+    (BUD-01). ``detail`` goes to the diagnostics log.
     """
-    message = _FRIENDLY.get(code) or _FALLBACK
     reason = sanitize_reason(detail)
-    if not reason:
-        return message
-    if not reason.endswith((".", "!", "?")):
-        reason = f"{reason}."
-    return f"{message} {reason[0].upper()}{reason[1:]}"
+    if reason:
+        _log.info("media server said: %s (%s)", reason, code)
+    return _FRIENDLY.get(code) or _FALLBACK

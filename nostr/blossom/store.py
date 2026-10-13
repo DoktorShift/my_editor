@@ -1663,12 +1663,16 @@ def _error_code(err) -> str:
 
 def _listing_failure_code(listings) -> str:
     """Why no server could be listed, as one code: the signer, a server
-    that refused, or (anything else) no connection."""
+    refusing the account, a server out of reach, or a server that
+    answered but did not list (busy, or without /list, which BUD-12
+    makes optional): not the connection's fault, so not said to be."""
     codes = {listing.error_code for listing in listings}
     for wanted in (ERROR_CODES.SIGNER_REJECTED, ERROR_CODES.AUTH_REJECTED):
         if wanted in codes:
             return wanted
-    return ERROR_CODES.NETWORK_UNAVAILABLE
+    if codes <= {ERROR_CODES.NETWORK_UNAVAILABLE}:
+        return ERROR_CODES.NETWORK_UNAVAILABLE
+    return ERROR_CODES.LIST_FAILED
 
 
 def _delete_failure_code(failures) -> str:
