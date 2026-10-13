@@ -226,3 +226,17 @@ def plus(color: QColor) -> QIcon:
         painter.drawLine(QPointF(9, 3.5), QPointF(9, 14.5))
         painter.drawLine(QPointF(3.5, 9), QPointF(14.5, 9))
     return _icon(draw, color)
+
+
+def more(color: QColor) -> QIcon:
+    """Two chevrons to the right: a toolbar's buttons that have no room."""
+    def draw(painter: QPainter, ink: QColor) -> None:
+        painter.setPen(_pen(ink, 1.7))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        path = QPainterPath()
+        for x in (3.0, 9.5):
+            path.moveTo(QPointF(x, 4))
+            path.lineTo(QPointF(x + 5, 9))
+            path.lineTo(QPointF(x, 14))
+        painter.drawPath(path)
+    return _icon(draw, color)

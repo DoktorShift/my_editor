@@ -335,8 +335,12 @@ w.resize(w.minimumSizeHint())
 app.processEvents()
 tb = w.format_toolbar
 more = tb.findChild(QToolButton, "qt_toolbar_ext_button")
+image = tb.grab(more.geometry()).toImage()
+ground = image.pixelColor(0, 0)
+drawn = sum(1 for x in range(image.width()) for y in range(image.height())
+            if abs(image.pixelColor(x, y).lightness() - ground.lightness()) > 60)
 r = {"undo": tb.buttons["undo"].isVisible(), "redo": tb.buttons["redo"].isVisible(),
-     "more": more.isVisible(), "switch": w.view_switch.isVisible()}
+     "more": more.isVisible() and drawn > 4, "switch": w.view_switch.isVisible()}
 ed.document().setModified(False)
 w.close()
 print("RESULT " + json.dumps(r))
@@ -345,6 +349,7 @@ print("RESULT " + json.dumps(r))
 
 @pytest.mark.parametrize("language", ["en", "de"])
 def test_undo_and_redo_stay_in_sight_in_the_narrowest_window(tmp_path, language):
-    # The rest of the buttons go into the chevron first.
+    # The rest of the buttons go into the chevron first, which shows its »
+    # (a pop-up button's room for its arrow once hid it).
     r = run_window_script(NARROWEST, tmp_path, language)
     assert r == {"undo": True, "redo": True, "more": True, "switch": True}

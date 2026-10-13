@@ -283,7 +283,13 @@ class FormatToolbar(QToolBar):
     def set_dark(self, dark: bool) -> None:
         self._dark = dark
         draw_icons({name: self._actions[name] for name in (*HISTORY, *LAYOUT) if name}, dark)
-        self.insert_button.setIcon(format_icons.plus(QColor(DARK_FG if dark else LIGHT_FG)))
+        ink = QColor(DARK_FG if dark else LIGHT_FG)
+        self.insert_button.setIcon(format_icons.plus(ink))
+        # The chevron in the theme's ink too: the style's own barely shows
+        # on a dark toolbar.
+        more = self.findChild(QToolButton, "qt_toolbar_ext_button")
+        if more is not None:
+            more.setIcon(format_icons.more(ink))
         background, border = (DARK_MENU_BG, DARK_BORDER) if dark else (LIGHT_MENU_BG,
                                                                        LIGHT_BORDER)
         hover = "rgba(255, 255, 255, 0.08)" if dark else "rgba(0, 0, 0, 0.06)"
@@ -297,8 +303,9 @@ class FormatToolbar(QToolBar):
             }}
             {button_rules("#FormatToolbar", dark)}
             #FormatToolbar QToolButton[popupMode="1"],
-            #FormatToolbar QToolButton[popupMode="2"] {{ padding-right: 13px; }}
-            #FormatToolbar QToolButton::menu-indicator {{
+            #FormatToolbar #InsertButton {{ padding-right: 13px; }}
+            #FormatToolbar #qt_toolbar_ext_button {{ padding: 1px; }}
+            #FormatToolbar #InsertButton::menu-indicator {{
                 subcontrol-origin: padding;
                 subcontrol-position: center right;
             }}
