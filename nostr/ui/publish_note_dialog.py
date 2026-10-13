@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 import rich_text
+from doc_walk import text_index
 from alerts import answer_return_as_the_system_does
 from highlighter import RichTextLook
 from i18n import _, ngettext
@@ -142,7 +143,8 @@ class NoteText(QTextEdit):
         """An "@" was just typed: ask whom to mention when it starts a word
         (not in an email address)."""
         cursor = self.textCursor()
-        before = cursor.block().text()[:cursor.positionInBlock() - 1]
+        text = cursor.block().text()
+        before = text[:text_index(text, cursor.positionInBlock()) - 1]
         if before and not (before[-1].isspace() or before[-1] in "([{\"'“‘"):
             return
         self.mention_requested.emit(cursor.position() - 1)

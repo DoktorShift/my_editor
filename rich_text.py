@@ -28,7 +28,7 @@ from PySide6.QtGui import (
     QTextTable, QTextTableFormat,
 )
 
-from doc_walk import iter_blocks
+from doc_walk import doc_length, doc_offset, iter_blocks
 
 # Inline styles, by name. Underline has no Markdown; it stays in local
 # files only (markdown_writer.has_local_only_formatting).
@@ -1003,17 +1003,20 @@ def link_references(doc, label_for) -> int:
     for block in iter_blocks(doc):
         if is_code_block(block):
             continue
-        for match in _REFERENCE_TEXT.finditer(block.text()):
+        text = block.text()
+        for match in _REFERENCE_TEXT.finditer(text):
+            # (A place in the text is converted to one in the document: an
+            # emoji before it takes two positions there.)
+            start = block.position() + doc_offset(text, match.start())
             probe = QTextCursor(block)
-            probe.setPosition(block.position() + match.start() + 1)
+            probe.setPosition(start + 1)
             fmt = probe.charFormat()
             if fmt.isAnchor() or has_style(fmt, CODE):
                 continue
             label = label_for(match.group(1))
             if label is None:
                 continue
-            found.append((block.position() + match.start(), match.end() - match.start(),
-                          match.group(0), label))
+            found.append((start, doc_length(match.group(0)), match.group(0), label))
     if not found:
         return 0
     edit = QTextCursor(doc)

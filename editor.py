@@ -30,7 +30,7 @@ from constants import (
 from fonts import code_font, writing_font
 from i18n import N_, _, ngettext
 import announce
-from doc_walk import iter_blocks
+from doc_walk import iter_blocks, text_index
 import image_safety
 import link_url
 import markdown_shortcuts
@@ -1064,7 +1064,8 @@ class HtmlEditor(QTextEdit):
         block = cursor.block()
         if rich_text.is_code_block(block) or rich_text.holds_link_or_code(cursor):
             return
-        before = block.text()[:cursor.positionInBlock() - 1]
+        text = block.text()
+        before = text[:text_index(text, cursor.positionInBlock()) - 1]
         if before and not (before[-1].isspace() or before[-1] in "([{\"'\u201c\u2018"):
             return
         self.mention_requested.emit(cursor.position() - 1)
@@ -1092,7 +1093,8 @@ class HtmlEditor(QTextEdit):
         block = cursor.block()
         if rich_text.is_code_block(block) or cursor.currentTable() is not None:
             return
-        before = block.text()[:cursor.positionInBlock() - 1]
+        text = block.text()
+        before = text[:text_index(text, cursor.positionInBlock()) - 1]
         if before and not before[-1].isspace():
             return
         self._slash_at = cursor.position() - 1
