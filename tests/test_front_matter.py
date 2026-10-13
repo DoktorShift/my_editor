@@ -817,3 +817,37 @@ def test_a_front_matter_no_parser_reads_shows_its_details_kept_as_written():
     assert (details.title, details.identifier, details.hashtags) == ("T", "my-post", ("a", "b"))
     assert kept_in_file(front) == ALL_DETAILS
     assert changed(UNREAD, title="New", hashtags=("c",)) == UNREAD
+
+
+# -- keys with spaces, and the last detail taken out (round 8, H3) -------------
+
+@pytest.mark.parametrize("text, change, expected", [
+    ("---\ncreated at: 2024-01-01\ntags: [idea]\n---\n\nBody.\n", {"hashtags": ()},
+     "---\ncreated at: 2024-01-01\n---\n\nBody.\n"),
+    ("---\nRelated Notes: x\ntags: [idea]\n---\n\nBody.\n", {"hashtags": ()},
+     "---\nRelated Notes: x\n---\n\nBody.\n"),
+    ("---\ncreated at: 2024-01-01\ntitle: T\n---\n\nBody.\n", {"title": ""},
+     "---\ncreated at: 2024-01-01\n---\n\nBody.\n"),
+    ("---\ntitle: T\nDate Created: 2024-01-01\nsummary: S\n---\nB\n", {"title": "U"},
+     "---\ntitle: U\nDate Created: 2024-01-01\nsummary: S\n---\nB\n"),
+])
+def test_a_key_with_spaces_is_a_key_and_stays(text, change, expected):
+    """Obsidian's properties may hold spaces: such a key went unseen, and
+    taking out the last detail took the whole front matter with it."""
+    yaml = pytest.importorskip("yaml")
+    out = changed(text, **change)
+    assert out == expected
+    front, _ = front_matter.split(text)
+    assert from_front_matter(front).title == ("T" if "title: T" in text else "")
+    assert yaml.safe_load(out.split("---\n")[1]) == {
+        key: value for key, value in yaml.safe_load(text.split("---\n")[1]).items()
+        if key not in ("tags", "title")} | ({"title": "U"} if change.get("title") else {})
+
+
+def test_a_detail_is_never_taken_out_with_the_front_matter_around_it():
+    """Only comments would be left: the block would read as text."""
+    text = "---\n# my notes\ntags: [idea]\n---\n\nBody.\n"
+    front, body = front_matter.split(text)
+    written = front_matter_with(from_front_matter(front).with_changes(hashtags=()), front)
+    again, rest = front_matter.split(front_matter.join(written, body))
+    assert rest == body and again is not None

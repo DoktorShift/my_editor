@@ -478,19 +478,16 @@ def _written(details: ArticleDetails, front: Optional[front_matter.FrontMatter],
                if new[key] != old[key] and key not in kept]
     if not changed:
         return front
-    syntax = front.syntax if front is not None else front_matter.YAML
-    entries = list(front.entries) if front is not None else []
+    base = front if front is not None else front_matter.FrontMatter((), changed=True)
+    entries = list(base.entries)
     refused = set()
     for key in changed:
-        after, place, meant = _with_detail(entries, syntax, key, new[key], details)
-        if _holds(front_matter.FrontMatter(tuple(entries), syntax=syntax),
-                  front_matter.FrontMatter(tuple(after), syntax=syntax), key, place, meant):
+        after, place, meant = _with_detail(entries, base.syntax, key, new[key], details)
+        if _holds(base.with_entries(entries), base.with_entries(after), key, place, meant):
             entries = after
         else:
             refused.add(key)
-    if front is None:
-        return front_matter.FrontMatter(tuple(entries), changed=True, kept=frozenset(refused))
-    return front.with_entries(entries).with_kept(refused)
+    return base.with_entries(entries).with_kept(refused)
 
 
 def _with_detail(entries: List[front_matter.Entry], syntax: str, key: str, value,
@@ -550,15 +547,19 @@ def _with_detail(entries: List[front_matter.Entry], syntax: str, key: str, value
 
 def _holds(before: front_matter.FrontMatter, after: front_matter.FrontMatter, key: str,
            place: Tuple[str, ...], meant: Any) -> bool:
-    """Whether a parser reads ``after`` as ``before`` but at ``place``,
-    where it reads the detail ``key`` as ``meant`` (nothing for None), and
-    reads it so with this app's reader."""
-    old, new = front_matter.parsed(before), front_matter.parsed(after)
+    """Whether ``after``, as it is written into the file and read back
+    from it, is read by a parser as ``before`` but at ``place``, where it
+    reads the detail ``key`` as ``meant`` (nothing for None), and reads it
+    so with this app's reader; the text under it untouched."""
+    again, rest = front_matter.split(front_matter.join(after, ""))
+    if rest:
+        return False                        # some of it would read as text
+    old, new = front_matter.parsed(before), front_matter.parsed(again)
     if old is None or new is None or _without(old, place) != _without(new, place):
         return False
     if meant is None:
         return _at(new, place) is _ABSENT
-    found = _found(after, key)
+    found = _found(again, key)
     return found is not None and _detail(key, found[2].value) == meant
 
 

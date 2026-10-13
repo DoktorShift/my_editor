@@ -56,8 +56,10 @@ _TOML_BLOCK = re.compile(r"\A(﻿?\+\+\+[ \t]*)\r?\n(.*?)(?:\r?\n)?^(\+\+\+[ \t]
                          re.DOTALL | re.MULTILINE)
 # A TOML key line (a bare, quoted or dotted key, then "="), indented or not.
 _TOML_KEY = re.compile(r"^\s*([^\s#\[=][^=]*?)[ \t]*=")
-# A YAML key line: a key, plain or quoted ("tags", 'tags'), then ":".
-_KEY = re.compile(r"""^("[^"\n]*"|'[^'\n]*'|[A-Za-z0-9_][A-Za-z0-9_.-]*)[ \t]*:(?:[ \t]+(.*?))?[ \t]*$""")
+# A YAML key line: a key, quoted ("tags", 'tags') or plain, spaces inside
+# it too (Obsidian's "created at"), then ":".
+_KEY = re.compile(r"""^("[^"\n]*"|'[^'\n]*'|[^\s\-?:,\[\]{}#&*!|>'"%@`](?:[^\s:]|[ \t]+(?=[^\s:#]))*)"""
+                  r"""[ \t]*:(?:[ \t]+(.*?))?[ \t]*$""")
 _BLOCK_SCALAR = re.compile(r"^([|>])([+-]?)(\d?)[ \t]*(?:#.*)?$")
 # A plain value YAML reads as text again, as written: no indicator first,
 # no ": " or " #" inside, and not a word or form YAML reads as another type.
@@ -375,8 +377,9 @@ def _with_trailers_apart(entries: List[Entry]) -> List[Entry]:
 
 def join(front: Optional[FrontMatter], body: str) -> str:
     """``body`` under ``front`` as it was written, or alone when there is
-    none (or no entry is left in it)."""
-    if front is None or front.changed and not any(entry.key for entry in front.entries):
+    none (or nothing but blank lines is left in it)."""
+    if front is None or front.changed and not any(
+            line.strip() for entry in front.entries for line in entry.lines):
         return body                         # none, or none left (an empty one stays)
     nl = front.newline
     lines = [line for entry in front.entries for line in entry.lines]
