@@ -1098,13 +1098,24 @@ class HtmlEditor(QTextEdit):
         # Escape, Cancel or a click elsewhere: the writing goes on here.
         # (A method, not a lambda: Qt drops the connection if the editor
         # goes first, a lambda would call into a deleted editor.)
-        popover.destroyed.connect(self._link_popover_closed)
+        popover.destroyed.connect(self.take_focus_back)
         popover.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         start_rect = self.cursorRect(self._selection_start_cursor())
         popover.show_below(start_rect, self.viewport())
 
-    def _link_popover_closed(self, _popover=None) -> None:
+    def take_focus_back(self, _popover=None) -> None:
+        """A panel at the caret closed: the writing goes on here (its
+        window active again, as the panel had it)."""
+        self.window().activateWindow()
         self.setFocus()
+
+    def insert_reference(self, uri: str) -> None:
+        """The reference ``uri`` (``nostr:nevent1…``, ``nostr:naddr1…``) in
+        a paragraph of its own, as written: readers show it as a card only
+        when it stands alone, and it reads back the same from Markdown."""
+        cursor = self.textCursor()
+        rich_text.insert_own_paragraph(cursor, uri)
+        self.setTextCursor(cursor)
 
     @staticmethod
     def _trimmed_selection(cursor: QTextCursor) -> QTextCursor:

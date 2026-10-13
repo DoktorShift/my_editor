@@ -848,6 +848,34 @@ def insert_divider(cursor: QTextCursor) -> None:
     cursor.endEditBlock()
 
 
+def insert_own_paragraph(cursor: QTextCursor, text: str) -> None:
+    """``text`` as a Body paragraph of its own (a reference to a note or an
+    article, which readers show as a card only when it stands alone): the
+    paragraph at the cursor when it is empty, else a new one after it;
+    after a table or a block of code when the cursor is in one. An empty
+    paragraph follows, where the cursor goes. One step on the undo stack."""
+    cursor.beginEditBlock()
+    if cursor.currentTable() is not None:
+        leave_table(cursor)
+    elif is_code_block(cursor.block()):
+        last = cursor.block()
+        while last.next().isValid() and is_code_block(last.next()):
+            last = last.next()
+        cursor.setPosition(last.position() + last.length() - 1)
+    block = cursor.block()
+    if block.text() or _has_own_style(block):
+        cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+        cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
+    cursor.insertText(text, QTextCharFormat())
+    after = cursor.block().next()
+    if after.isValid() and not after.text() and not _has_own_style(after) \
+            and QTextCursor(after).currentTable() is None:
+        cursor.setPosition(after.position())
+    else:
+        cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
+    cursor.endEditBlock()
+
+
 def remove_divider(block) -> None:
     """The divider becomes an empty paragraph again."""
     QTextCursor(block).setBlockFormat(QTextBlockFormat())

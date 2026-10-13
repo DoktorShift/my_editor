@@ -148,6 +148,7 @@ from nostr.avatar_store import AvatarBatchLoader, AvatarStore
 from nostr.bech32 import encode_nprofile, encode_npub
 from nostr.nip05_check import Nip05Check
 from nostr.ui.mention_picker import MentionPicker
+from nostr.ui.reference_popover import ReferencePopover
 from nostr import refs
 from nostr.blossom.errors import friendly_message
 from nostr.media_server_list import publish_server_list
@@ -2084,6 +2085,12 @@ class MainWindow(QMainWindow):
                     keywords=(_("person"), _("people"), _("tag"), "@"),
                     slash_section=slash_menu.INSERT),
             triggered=lambda: self._ask_mention(self.current_editor(), -1))
+        # A note or an article quoted in the text, as a paragraph of its own.
+        self.act_insert_reference = add(
+            Command("nostr.insert_reference", _("Insert Note or Article…"), NOSTR, nostr=True,
+                    keywords=(_("quote"), _("embed"), _("note"), _("article")),
+                    slash_section=slash_menu.INSERT),
+            triggered=lambda: self._ask_reference(self.current_editor()))
         # Drafts surface - the side-docked panel, toggled from the Nostr
         # menu (no key, as above).
         self.act_nostr_drafts = add(
@@ -2259,7 +2266,8 @@ class MainWindow(QMainWindow):
         # Nostr's own insertions, in the Insert menu only while a Nostr
         # account is in use (decision D-1); always in the Nostr menu.
         self._insert_nostr_separator = self.m_insert.addSeparator()
-        self._insert_nostr_actions = [self.act_insert_mention, self.act_nostr_insert_image]
+        self._insert_nostr_actions = [self.act_insert_mention, self.act_insert_reference,
+                                      self.act_nostr_insert_image]
         self.m_insert.aboutToShow.connect(self._fill_insert_menu)
 
         m_format = self.menuBar().addMenu(_("F&ormat"))
@@ -2344,6 +2352,7 @@ class MainWindow(QMainWindow):
         m_nostr.addAction(self.act_nostr_media)
         m_nostr.addAction(self.act_nostr_insert_image)
         m_nostr.addAction(self.act_insert_mention)
+        m_nostr.addAction(self.act_insert_reference)
         m_nostr.addSeparator()
         m_nostr.addAction(self.act_nostr_drafts)
         m_nostr.addAction(self.act_refresh_drafts)
@@ -4588,7 +4597,7 @@ class MainWindow(QMainWindow):
         "view.line_numbers", "view.syntax_highlighting", "view.paper_mode", "view.toolbar",
         "view.highlight_line", "view.write", "view.preview", "view.split",
         "edit.footnote_jump", "nostr.publish_note", "nostr.publish_article",
-        "nostr.insert_image", "nostr.insert_mention"})
+        "nostr.insert_image", "nostr.insert_mention", "nostr.insert_reference"})
     _DOCUMENT_PREFIXES = ("format.", "insert.")
 
     def _is_document_command(self, command_id: str) -> bool:
@@ -6344,6 +6353,20 @@ class MainWindow(QMainWindow):
             href = "nostr:" + encode_npub(person.pubkey)
         ed.insert_mention(at, href, person.display_name or refs.short_key(
             encode_npub(person.pubkey)))
+
+    def _ask_reference(self, ed) -> None:
+        """Insert > Note or Article: a link to one asked at the caret, the
+        way Add Link asks for an address; it goes in as a paragraph of its
+        own (readers show it as a card)."""
+        if ed is None or not self.nostr_state.active or self._editor_kind(ed) != "rich":
+            return
+        popover = ReferencePopover(ed)
+        popover.chosen.connect(lambda reference: ed.insert_reference(reference.uri))
+        # Escape, Cancel or a click elsewhere: the writing goes on. (A
+        # method: Qt drops the connection if the editor goes first.)
+        popover.destroyed.connect(ed.take_focus_back)
+        popover.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        popover.show_below(ed.cursorRect(), ed.viewport())
 
     # -- secret keys: never pasted where Nostr is written ---------------------
     # (nor published: nostr/ui/secret_key_check.py, at the publish dialogs)
