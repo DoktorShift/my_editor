@@ -73,6 +73,7 @@ from alerts import confirm_destructive
 from atomic_file import save_document
 
 import i18n
+import media_files
 import theme
 import url_safety
 from i18n import _, ngettext
@@ -1556,8 +1557,7 @@ class MediaLibraryDialog(QDialog):
     def _on_upload_clicked(self) -> None:
         # Use a single multi-select dialog so a user can upload several
         # files in one go. The store handles them sequentially.
-        patterns = ("*.png *.jpg *.jpeg *.gif *.webp *.svg *.bmp *.mp4 *.webm *.mov "
-                    "*.mp3 *.wav *.ogg *.pdf")
+        patterns = " ".join("*" + ext for ext in media_files.EXTENSIONS)
         paths, _filter = QFileDialog.getOpenFileNames(
             self,
             _("Choose Files to Upload"),
@@ -2304,18 +2304,7 @@ def _suggested_save_name(media: MediaFile) -> str:
     use the hash prefix + the mime-derived extension so the user gets
     something they can recognize and re-rename if they want.
     """
-    import mimetypes
-    ext = mimetypes.guess_extension(media.mime_type or "") or ""
-    if not ext and media.mime_type:
-        # mimetypes can return None for some common types we still want
-        # to honor, so handle a couple by hand.
-        ext_map = {
-            "image/webp": ".webp",
-            "image/svg+xml": ".svg",
-            "video/quicktime": ".mov",
-        }
-        ext = ext_map.get(media.mime_type, "")
-    return f"{media.hash[:12]}{ext}"
+    return f"{media.hash[:12]}{media_files.extension_for(media.mime_type or '')}"
 
 
 def _hostname_from_url(url: str) -> str:

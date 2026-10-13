@@ -698,3 +698,25 @@ def test_the_preview_shows_the_file_as_readers_do_and_says_while_it_uploads(tmp_
     assert any("still uploading" in check for check in r["checks while uploading"])
     assert r["name"] == "song.mp3"
     assert r["document preview"] == f"{URL}.mp3"
+
+
+def test_the_media_library_takes_types_from_the_same_table(tmp_path, monkeypatch):
+    """One table of types for the whole app: the Media Library's own upload
+    names a file's type from it too, whatever the computer's table says."""
+    import mimetypes
+    import types
+    from nostr.blossom.store import MediaStore
+    monkeypatch.setattr(mimetypes, "guess_type", lambda *a, **k: ("application/x-wrong", None))
+    sent = []
+    host = types.SimpleNamespace(
+        _profile_provider=lambda: object(), upload_failed=types.SimpleNamespace(emit=print),
+        upload_bytes=lambda body, *, name, mime_type: sent.append((name, mime_type)))
+    for name in ("talk.m4a", "clip.mov", "photo.webp", "notes.pdf"):
+        path = tmp_path / name
+        path.write_bytes(b"data")
+        MediaStore.upload_file(host, str(path))
+    assert sent == [("talk.m4a", "audio/mp4"), ("clip.mov", "video/quicktime"),
+                    ("photo.webp", "image/webp"), ("notes.pdf", "application/pdf")]
+    assert media_files.type_of("photo.webp") == "image/webp"
+    assert not media_files.is_audio_or_video("photo.webp")
+    assert preview.player_label("https://cdn.example/a.png") is None

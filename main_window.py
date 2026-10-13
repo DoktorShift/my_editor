@@ -6633,7 +6633,7 @@ class MainWindow(QMainWindow):
         ed = self.current_editor()
         if not self._may_insert_audio_video(ed):
             return
-        patterns = " ".join("*" + ext for ext in media_files.EXTENSIONS)
+        patterns = " ".join("*" + ext for ext in media_files.AUDIO_VIDEO_EXTENSIONS)
         path, _filter = QFileDialog.getOpenFileName(
             self, _("Insert Audio or Video"), "",
             _("Audio and video ({patterns})").format(patterns=patterns))
@@ -6675,7 +6675,8 @@ class MainWindow(QMainWindow):
         if asset is None:
             inform(self, title=_("Couldn’t add “{name}”").format(name=name),
                    message=_("MyEditor can read audio and video files of these kinds: "
-                             "{kinds}.").format(kinds=", ".join(media_files.EXTENSIONS)))
+                             "{kinds}.").format(
+                                 kinds=", ".join(media_files.AUDIO_VIDEO_EXTENSIONS)))
             return
         image = QTextImageFormat()
         image.setName(asset.key)

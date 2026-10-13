@@ -1,12 +1,15 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The audio and video files MyEditor puts into a text, and their types.
+"""The files MyEditor uploads to media servers, and their types: audio
+and video it puts into a text, pictures, and PDF files in the Media
+Library.
 
-One table, whatever the computer's own one says: the platform's MIME
-table differs between systems (".m4a" is "audio/mp4a-latm" on a Mac and
-unknown without a table), and the type a file is uploaded with is what a
-reader goes by. Everything about audio and video in the app reads this
-module: the Insert command's file filter, a dropped or pasted file, the
+One table for the whole app, whatever the computer's own one says: the
+platform's MIME table differs between systems (".m4a" is
+"audio/mp4a-latm" on a Mac and unknown without a table), and the type a
+file is uploaded with is what a reader goes by. Everything that names a
+file's type reads this module: the Insert command's file filter, a
+dropped or pasted file, the Media Library's upload and its Save, the
 media servers' upload, and the preview.
 """
 
@@ -22,7 +25,13 @@ AUDIO_TYPES = {".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac",
                ".wav": "audio/wav", ".flac": "audio/flac"}
 VIDEO_TYPES = {".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime",
                ".m4v": "video/mp4"}
-TYPES = {**AUDIO_TYPES, **VIDEO_TYPES}
+IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+               ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
+               ".bmp": "image/bmp"}
+DOCUMENT_TYPES = {".pdf": "application/pdf"}
+TYPES = {**AUDIO_TYPES, **VIDEO_TYPES, **IMAGE_TYPES, **DOCUMENT_TYPES}
+# What Insert > Audio or Video takes, and what the Media Library does.
+AUDIO_VIDEO_EXTENSIONS = tuple({**AUDIO_TYPES, **VIDEO_TYPES})
 EXTENSIONS = tuple(TYPES)
 
 AUDIO = "audio"
@@ -30,14 +39,14 @@ VIDEO = "video"
 
 
 def type_of(name: str) -> Optional[str]:
-    """The type of an audio or video file named ``name`` (a path or an
-    address), by its extension; None for any other file."""
+    """The type of a file named ``name`` (a path or an address), by its
+    extension; None for a kind of file not in the table."""
     path = (name or "").split("?", 1)[0].split("#", 1)[0]
     return TYPES.get(os.path.splitext(path)[1].lower())
 
 
 def is_audio_or_video(name: str) -> bool:
-    return type_of(name) is not None
+    return kind_of(type_of(name) or "") is not None
 
 
 def kind_of(mime: str) -> Optional[str]:

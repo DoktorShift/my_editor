@@ -149,8 +149,8 @@ def player_label(url: str, media_names: Optional[MediaNames] = None) -> Optional
     video, where readers show a player, named as the file was (else by its
     address); None for any other address."""
     path = QUrl(url).path()
-    mime = media_files.type_of(path)
-    if mime is None:
+    mime = media_files.type_of(path) or ""
+    if media_files.kind_of(mime) is None:
         return None
     name = (media_names(url) if media_names else None) or path.rsplit("/", 1)[-1]
     return media_files.link_words(mime, name)

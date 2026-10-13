@@ -28,7 +28,6 @@ declarative.
 from __future__ import annotations
 
 import hashlib
-import mimetypes
 import os
 import time
 from dataclasses import dataclass, field
@@ -37,6 +36,7 @@ from typing import Callable, Dict, List, Optional, Protocol, Sequence, Set
 
 from PySide6.QtCore import QObject, Signal
 
+import media_files
 import url_safety
 from i18n import _
 
@@ -725,8 +725,8 @@ class MediaStore(QObject):
             self.upload_failed.emit(name, _("File is empty."))
             return
 
-        mime, _encoding = mimetypes.guess_type(str(path))
-        self.upload_bytes(body, name=name, mime_type=mime or "application/octet-stream")
+        mime = media_files.type_of(path.name) or "application/octet-stream"
+        self.upload_bytes(body, name=name, mime_type=mime)
 
     def upload_bytes(
         self,
