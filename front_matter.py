@@ -155,17 +155,18 @@ class FrontMatter:
     newline: str = "\n"
     changed: bool = field(default=False, compare=False)
     syntax: str = YAML
-    # The names of the details a change to was refused here, as a parser
-    # would have read it otherwise (article_details): kept as written.
-    kept: FrozenSet[str] = field(default=frozenset(), compare=False)
+    # The names of the details the write that made this front matter left
+    # as they were, as no way of writing them read back as set
+    # (article_details); for whoever asked for it to be told.
+    refused: FrozenSet[str] = field(default=frozenset(), compare=False)
 
     def with_entries(self, entries: Sequence[Entry]) -> "FrontMatter":
         return FrontMatter(tuple(entries), self.opening, self.closing, self.gap, self.newline,
                            changed=tuple(entries) != self.entries or self.changed,
-                           syntax=self.syntax, kept=self.kept)
+                           syntax=self.syntax)
 
-    def with_kept(self, names: AbstractSet[str]) -> "FrontMatter":
-        return replace(self, kept=self.kept | frozenset(names))
+    def with_refused(self, names: AbstractSet[str]) -> "FrontMatter":
+        return replace(self, refused=frozenset(names))
 
     def where_new_entries_go(self, entries: Sequence[Entry]) -> int:
         """Where an entry added to ``entries`` goes: at the end, or in TOML
@@ -462,6 +463,31 @@ def _rewritten(old: Entry, value: Union[str, Sequence[str]], bare: bool) -> Entr
     return entry(old.key, items, syntax=old.syntax, bare=bare)
 
 
+def quoted(old: Optional[Entry], key: str, value: Union[str, Sequence[str]],
+           syntax: str = YAML) -> Entry:
+    """``value`` written the one way YAML and TOML always read back as it
+    is: in double quotes, with escapes (each item of a list so). In place
+    of ``old``, its key and a comment after its value as written; else as
+    a new entry for ``key``."""
+    text = _double_quoted(value) if isinstance(value, str) else \
+        "[" + ", ".join(_double_quoted(item) for item in value) + "]"
+    key_part, rest = _key_and_rest(old) if old is not None else (None, "")
+    if key_part is None:
+        return Entry(key, (key + (" = " if syntax == TOML else ": ") + text,), syntax)
+    if old.syntax == YAML and not key_part[-1:].isspace():
+        key_part += " "
+    return Entry(old.key, (key_part + text + _value_and_comment(rest)[1],), old.syntax)
+
+
+def _double_quoted(text: str) -> str:
+    """``text`` in double quotes as YAML and TOML both read it back: with
+    JSON's escapes, and any character either would read as a line break or
+    refuse written as it is (U+2028, U+0085, a control) escaped too."""
+    return "".join(char if char.isprintable() else
+                   f"\\u{ord(char):04x}" if ord(char) <= 0xFFFF else f"\\U{ord(char):08x}"
+                   for char in json.dumps(text, ensure_ascii=False))
+
+
 def _valid(written: Entry, value, bare: bool) -> Entry:
     """``written``, a TOML entry, when TOML reads it; else the value as
     entry() writes it, which TOML always does."""
@@ -669,12 +695,12 @@ def _block_lines(lines: Sequence[str], value: str) -> Tuple[str, ...]:
 def _quoted(value: str, *, in_list: bool = False) -> str:
     """``value`` as YAML reads it back as the same text: bare when it can
     be, else in double quotes."""
-    plain = (_PLAIN.match(value) is not None and value == value.strip()
+    plain = (_PLAIN.match(value) is not None and value == value.strip() and value.isprintable()
              and ": " not in value and " #" not in value and not value.endswith(":")
              and value.lower() not in _YAML_WORDS and not _YAML_NUMBER.match(value)
              and not _YAML_DATE.match(value)
              and not (in_list and any(char in value for char in ",[]{}")))
-    return value if plain else json.dumps(value, ensure_ascii=False)
+    return value if plain else _double_quoted(value)
 
 
 def _list_item(line: str) -> str:

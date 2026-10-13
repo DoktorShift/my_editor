@@ -41,7 +41,9 @@ class SaveWindow(_Window):
     _save_to = MainWindow._save_to
     _to_rmd_content = MainWindow._to_rmd_content
     _export_title_for = MainWindow._export_title_for
-    _with_front_matter = MainWindow._with_front_matter
+    _saving_without = MainWindow._saving_without
+    _detail_label = MainWindow._detail_label
+    _detail_names = MainWindow._detail_names
     _article_details_of = MainWindow._article_details_of
     _published_article_of = MainWindow._published_article_of
     _say_saved = MainWindow._say_saved

@@ -273,7 +273,7 @@ def kept_in_file(front: Optional[front_matter.FrontMatter]) -> FrozenSet[str]:
     mapping = front_matter.parsed(front)
     if mapping is None:
         return frozenset(dict(_FRONT_KEYS))  # no parser reads it: nothing is changed
-    kept = set(front.kept if front is not None else ())
+    kept = set()
     for key, _others in _FRONT_KEYS:
         found = list(_candidates(front, key))
         if found and not any(_readable(key, entry, read) for _at, _inner, entry, read in found) \
@@ -287,20 +287,11 @@ def kept_in_file(front: Optional[front_matter.FrontMatter]) -> FrozenSet[str]:
     return frozenset(kept)
 
 
-def as_in_file(details: ArticleDetails, front: Optional[front_matter.FrontMatter],
-               names: AbstractSet[str]) -> ArticleDetails:
-    """``details`` with the details ``names`` (as in _FRONT_KEYS) as
-    ``front`` holds them: what a change refused there leaves."""
-    held = from_front_matter(front)
-    return details.with_changes(**{_FIELDS[name]: getattr(held, _FIELDS[name])
-                                   for name in names})
-
-
 def _refused(details: ArticleDetails, front: Optional[front_matter.FrontMatter],
              kept: AbstractSet[str]) -> FrozenSet[str]:
     """The details a change to ``details`` would be refused for in ``front``."""
     written = _written(details, front, frozenset(kept))
-    return written.kept if written is not None else frozenset()
+    return written.refused if written is not None else frozenset()
 
 
 # The field of ArticleDetails each detail is.
@@ -469,8 +460,10 @@ def front_matter_with(details: ArticleDetails, front: Optional[front_matter.Fron
     matter.
 
     Each change is made only when a parser reads the front matter after it
-    as before, but for that detail, which it reads as set; else the detail
-    stays as written and is kept from then on (FrontMatter.kept)."""
+    as before, but for that detail, which it reads as set: in the file's
+    style, else in double quotes, which hold any text. A detail neither
+    holds stays as written, and the front matter names it
+    (FrontMatter.refused)."""
     return _written(details, front, kept_in_file(front))
 
 
@@ -487,25 +480,30 @@ def _written(details: ArticleDetails, front: Optional[front_matter.FrontMatter],
     entries = list(base.entries)
     refused = set()
     for key in changed:
-        after, places, meant = _with_detail(entries, base.syntax, key, new[key], details)
-        if _holds(base.with_entries(entries), base.with_entries(after), key, places, meant):
-            entries = after
+        for quoted in (False, True):
+            after, places, meant = _with_detail(entries, base.syntax, key, new[key], details,
+                                                quoted)
+            if _holds(base.with_entries(entries), base.with_entries(after), key, places, meant):
+                entries = after
+                break
         else:
             refused.add(key)
-    return base.with_entries(entries).with_kept(refused)
+    return base.with_entries(entries).with_refused(refused)
 
 
 def _with_detail(entries: List[front_matter.Entry], syntax: str, key: str, value,
-                 details: ArticleDetails):
+                 details: ArticleDetails, quoted: bool = False):
     """``(entries, places, meant)``: ``entries`` with the detail ``key`` set
     to ``value`` (as _front_values gives it), the keys it is then at (a
     table's name and its key for one in a table), and the detail as the
     parser should then read it there (_detail). Emptied, it is left out of
     every key it is read from (an alias too: "description" with
-    "summary"), and is then read as empty."""
+    "summary"), and is then read as empty. ``quoted``: written in double
+    quotes (front_matter.quoted), not in the file's style; emptied, each
+    of its keys holds an empty text or list."""
     entries = list(entries)
     if not value:
-        return _without_detail(entries, syntax, key)
+        return _without_detail(entries, syntax, key, quoted)
     found = _found(front_matter.FrontMatter(tuple(entries), syntax=syntax), key)
     at, inner, current = found if found is not None else (None, None, None)
     place = (key,) if current is None else (current.key,) if inner is None \
@@ -532,8 +530,12 @@ def _with_detail(entries: List[front_matter.Entry], syntax: str, key: str, value
         spelled = {tag.lower(): item for item in current.value
                    for tag in _hashtags([item])}
         value = [spelled.get(tag.lower(), tag) for tag in value]
-    written = (front_matter.rewritten(current, value, bare=bare) if current is not None
-               else front_matter.entry(key, value, syntax=syntax, bare=bare))
+    if quoted:
+        written = front_matter.quoted(current, key, value, syntax)
+    elif current is not None:
+        written = front_matter.rewritten(current, value, bare=bare)
+    else:
+        written = front_matter.entry(key, value, syntax=syntax, bare=bare)
     if inner is not None:
         rest = entries[at].inner_entries()
         rest[inner] = written
@@ -546,12 +548,24 @@ def _with_detail(entries: List[front_matter.Entry], syntax: str, key: str, value
     return entries, (place,), _detail(key, value)
 
 
-def _without_detail(entries: List[front_matter.Entry], syntax: str, key: str):
+def _without_detail(entries: List[front_matter.Entry], syntax: str, key: str, quoted: bool):
     """_with_detail for the detail ``key`` emptied: every entry it is read
-    from left out."""
+    from left out, or ``quoted``, written empty (where only a comment
+    would be left, which reads as text)."""
     found = list(_candidates(front_matter.FrontMatter(tuple(entries), syntax=syntax), key))
     places = tuple((entry.key,) if inner is None else (entries[at].table, entry.key)
                    for at, inner, entry, _read in found)
+    if quoted:
+        for at, inner, entry, _read in found:
+            empty = front_matter.quoted(entry, entry.key,
+                                        [] if isinstance(entry.value, list) else "")
+            if inner is None:
+                entries[at] = empty
+            else:
+                rest = entries[at].inner_entries()
+                rest[inner] = empty
+                entries[at] = entries[at].with_inner(rest)
+        return entries, places, _detail(key, None)
     # Inside a table first, then whole entries from the last: the places
     # of those still to go stay where they are.
     for at, inner, _entry, _read in sorted((item for item in found if item[1] is not None),
@@ -577,10 +591,13 @@ def _holds(before: front_matter.FrontMatter, after: front_matter.FrontMatter, ke
     if old is None or new is None or _without(old, places) != _without(new, places):
         return False
     if meant == _detail(key, None):
-        return _reading(again, key) == meant and all(_at(new, place) is _ABSENT
-                                                     for place in places)
+        return _reading(again, key) == meant and all(
+            _at(new, place) is _ABSENT or _at(new, place) in ("", None, []) for place in places)
+    # Read so by this reader, and by the parser as text (12:30 is no
+    # title, 750 is).
     found = _found(again, key)
-    return found is not None and _detail(key, found[2].value) == meant
+    return found is not None and _detail(key, found[2].value) == meant \
+        and _detail(key, _as_value(_at(new, places[0]))) == meant
 
 
 def _at(mapping: dict, place: Tuple[str, ...]) -> Any:

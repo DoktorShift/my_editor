@@ -188,7 +188,7 @@ from nostr.ui.imports_window import ImportsWindow
 from nostr.imports.constants import IDENTIFIER_PREFIX as IMPORT_IDENTIFIER_PREFIX
 from nostr.imports.constants import SOURCE_TAG as IMPORT_SOURCE_TAG
 from nostr.article_details import (
-    ArticleDetails, as_in_file, from_front_matter, front_matter_with, kept_in_file)
+    ArticleDetails, from_front_matter, front_matter_with, kept_in_file)
 from nostr.first_publications import FirstPublications
 from nostr.drafts import (
     INNER_KIND_LONG_FORM,
@@ -3547,6 +3547,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(500, lambda: self._saving_paths.discard(path))
 
         ext = path.lower()
+        front = None
         try:
             if ext.endswith('.pdf'):
                 return self._save_as_pdf(ed, path)
@@ -3571,7 +3572,13 @@ class MainWindow(QMainWindow):
                     content = serialize_plain_with_images(ed.document(), reference)
                 else:
                     content = document_to_markdown(ed.document(), reference)
-                content = self._with_front_matter(ed, content)
+                # Its front matter (Q-F): as written but for the details
+                # changed here; none when there are none and it had none.
+                front = front_matter_with(self._article_details_of(ed),
+                                          getattr(ed, "_front_matter", None))
+                if not self._saving_without(ed, front, path):
+                    return False
+                content = front_matter.join(front, content)
             else:
                 # .txt and anything unknown: images cannot be carried, so
                 # they are omitted rather than left as the raw U+FFFC
@@ -3579,6 +3586,9 @@ class MainWindow(QMainWindow):
                 content = serialize_plain_with_images(ed.document(), lambda fmt: None)
 
             save_text_document(path, content, newline=getattr(ed, "_newline", None))
+            if ext.endswith('.md'):
+                ed._front_matter = front
+                ed._details_not_saved = front.refused if front is not None else frozenset()
             ed._recovered_title = ""
             ed.document().setModified(False)
             self._update_tab_title()
@@ -3601,9 +3611,12 @@ class MainWindow(QMainWindow):
         waiting = (self._media_not_uploaded(ed.document())
                    if path.lower().endswith((".md", ".html", ".htm", ".pdf")) else [])
         ed._media_left_out = {asset.sha256 for asset in waiting}
-        if getattr(ed, "_details_kept_on_save", None) and path.lower().endswith(".md"):
-            self.status.showMessage(_("Saved. Some article details stay as written in the "
-                                      "file: MyEditor can’t change them there safely."))
+        not_saved = getattr(ed, "_details_not_saved", None) if path.lower().endswith(".md") \
+            else None
+        if not_saved:
+            self.status.showMessage(_("Saved without what you typed for {details}: MyEditor "
+                                      "can’t write it into the file.").format(
+                details=self._detail_names(not_saved)))
             return
         if not waiting:
             self.status.showMessage(_("Saved: {path}").format(path=path))
@@ -3629,24 +3642,50 @@ class MainWindow(QMainWindow):
                     _("“{name}” is uploaded. Save the document to put it in.").format(
                         name=asset.alt))
 
-    def _with_front_matter(self, ed, body: str) -> str:
-        """A Markdown file's text: ``body`` under its front matter (Q-F), as
-        written but for the details changed here; none when there are no
-        details and it had none. A change a YAML reader would read
-        otherwise is not written (front_matter_with): the tab takes that
-        detail back as the file holds it, Article Details shows it
-        read-only from then on, and the save says so (_say_saved)."""
-        old = getattr(ed, "_front_matter", None)
+    def _saving_without(self, ed, front, path: str) -> bool:
+        """Whether a save goes on when the front matter it writes leaves
+        out details typed in the tab that no way of writing holds in the
+        file (FrontMatter.refused): asked before anything is written, so
+        Close and Quit with Save stay when the person keeps editing. The
+        tab keeps what was typed either way, and the article still
+        publishes it. Asked once for the same details."""
+        refused = front.refused if front is not None else frozenset()
         details = self._article_details_of(ed)
-        front = front_matter_with(details, old)
-        ed._front_matter = front
-        ed._details_kept_on_save = (front.kept if front is not None else frozenset()) - (
-            old.kept if old is not None else frozenset())
-        if ed._details_kept_on_save:
-            ed._article_details = as_in_file(details, front, ed._details_kept_on_save)
-            if ed is self.current_editor():
-                self._fill_article_details_panel()
-        return front_matter.join(front, body)
+        if not refused or getattr(ed, "_told_not_saved", None) == (refused, details):
+            return True
+        if len(refused) == 1:
+            title = _("“{detail}” can’t be saved in the file").format(
+                detail=self._detail_label(next(iter(refused))))
+        else:
+            title = _("Some article details can’t be saved in the file")
+        choice = ask(self, title=title, caution=True, is_dark=self.is_dark_theme,
+                     message=_("MyEditor can’t write what you typed for {details} into "
+                               "“{name}” so that other apps read it the same way. The file "
+                               "keeps what it had, and the article still publishes what you "
+                               "typed.").format(details=self._detail_names(refused),
+                                                name=os.path.basename(path)),
+                     buttons=(Button(_("Save Without It"), "without", NORMAL),
+                              Button(_("Keep Editing"), "keep", DEFAULT)))
+        if choice != "without":
+            return False
+        ed._told_not_saved = (refused, details)
+        return True
+
+    @staticmethod
+    def _detail_label(detail: str) -> str:
+        """The name Article Details gives a detail of the front matter
+        (article_details._FRONT_KEYS)."""
+        return {"title": _("Title"), "summary": _("Summary"), "image": _("Cover image"),
+                "tags": _("Hashtags"), "slug": _("Slug (article ID)"),
+                "date": _("Date"), "coauthors": _("Co-Authors"),
+                "zap_split": _("Share zaps equally with co-authors")}[detail]
+
+    def _detail_names(self, details) -> str:
+        """``details`` as their names, each in quotes, in the order Article
+        Details shows them."""
+        order = ("title", "summary", "image", "tags", "slug", "date", "coauthors", "zap_split")
+        return ", ".join(_("“{detail}”").format(detail=self._detail_label(detail))
+                         for detail in order if detail in details)
 
     def _on_file_changed(self, path: str):
         if path in self._saving_paths:

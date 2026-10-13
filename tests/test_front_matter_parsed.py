@@ -148,18 +148,19 @@ TEXT = "---\ntitle: T\ntags: [a, b]\nlayout: post\n---\nB\n"
 
 
 def broken_on(monkeypatch, word):
-    """front_matter.rewritten, made to write a tags entry YAML reads
-    otherwise (an unclosed quote, a line taken from the next key) whenever
-    the tags hold ``word``."""
-    real = front_matter.rewritten
-
-    def rewritten(old, value, **kwargs):
-        written = real(old, value, **kwargs)
-        if old.key == "tags" and any(word in item for item in value):
-            return front_matter.Entry(old.key, (written.lines[0].replace("[", '["', 1),
-                                                "layout: page"), old.syntax)
+    """front_matter's writers, both the one in the file's style and the
+    one in double quotes, made to write a tags entry YAML reads otherwise
+    (an unclosed quote) whenever the tags hold ``word``."""
+    def broken(written, value):
+        if written.key == "tags" and any(word in item for item in value):
+            return front_matter.Entry(written.key, (written.lines[0].replace("[", '["', 1),),
+                                      written.syntax)
         return written
-    monkeypatch.setattr(front_matter, "rewritten", rewritten)
+    rewritten, quoted = front_matter.rewritten, front_matter.quoted
+    monkeypatch.setattr(front_matter, "rewritten", lambda old, value, **kwargs: broken(
+        rewritten(old, value, **kwargs), value))
+    monkeypatch.setattr(front_matter, "quoted", lambda old, key, value, *args: broken(
+        quoted(old, key, value, *args), value))
 
 
 def test_a_detail_whose_change_would_be_read_otherwise_is_kept(monkeypatch):
@@ -173,35 +174,87 @@ def test_a_detail_whose_change_would_be_read_otherwise_is_kept(monkeypatch):
         details.with_changes(hashtags=("a", "b", "c")), front), body) == TEXT
 
 
-def test_a_change_read_otherwise_is_not_written_and_its_detail_is_kept_from_then(monkeypatch):
-    """One value written wrong: the file keeps the detail as written, and
-    from then on it is read-only; the other changes are written."""
+def test_a_change_no_way_of_writing_holds_is_not_written_and_said(monkeypatch):
+    """One value written wrong in every way: the file keeps the detail as
+    written, the write names it, and the field stays editable (round 8,
+    M1); the other changes are written."""
     broken_on(monkeypatch, "Bad")
     front, body = front_matter.split(TEXT)
-    assert kept_in_file(front) == frozenset()
     details = from_front_matter(front).with_changes(hashtags=("a", "Bad"), title="New")
     written = front_matter_with(details, front)
     assert front_matter.join(written, body) == TEXT.replace("title: T", "title: New")
-    assert kept_in_file(written) == frozenset({"tags"})
+    assert written.refused == frozenset({"tags"}) and kept_in_file(written) == frozenset()
 
 
+@pytest.mark.parametrize("text, change", [
+    ("---\ndescription: >-\n  Old one.\nlayout: post\n---\nB\n",
+     {"summary": "First line \nsecond line."}),
+    ("---\ndescription: >-\n  Old one.\nlayout: post\n---\nB\n",
+     {"summary": "First\n  indented second"}),
+    ("---\ntitle: Old\nlayout: post\n---\nB\n", {"title": "12:30"}),
+    ("---\ntitle: Old\nlayout: post\n---\nB\n", {"title": "<<"}),
+    ("---\ntitle: Old\nlayout: post\n---\nB\n", {"title": "="}),
+    ("---\ntitle: Old\nlayout: post\n---\nB\n", {"title": "a\tpasted\ttitle"}),
+    ("---\nlayout: post\n---\nB\n", {"title": "12:30"}),
+    ("---\nlayout: post\n---\nB\n", {"title": "odd\u2028inside\x85x"}),
+    ('+++\ntitle = "Old"\ndraft = true\n+++\nB\n', {"title": "a\tb\u2028c"}),
+])
+def test_a_change_the_files_style_cannot_hold_is_written_in_double_quotes(text, change):
+    """Round 8, M1: these were refused at saving, the text typed thrown
+    away and the field locked. Written as a double-quoted text, with its
+    escapes, they read back as typed."""
+    front, body = front_matter.split(text)
+    written = front_matter_with(from_front_matter(front).with_changes(**change), front)
+    assert written.refused == frozenset()
+    out = front_matter.join(written, body)
+    after = parser_read(out)
+    field, value = next(iter(change.items()))
+    assert after[{"title": "title", "summary": "description"}[field]
+                 if field == "summary" and "description" in text else field] == value
+    assert after["layout" if "layout" in text else "draft"] == parser_read(text)[
+        "layout" if "layout" in text else "draft"]
+    assert getattr(from_front_matter(front_matter.split(out)[0]), field) == value.strip()
+
+
+def test_taking_out_the_last_detail_beside_comments_empties_it_instead():
+    """Taken out, only a comment would be left, which reads as text: the
+    detail is written empty in its place."""
+    text = "---\n# my notes\ntags: [idea]\n---\n\nBody.\n"
+    front, body = front_matter.split(text)
+    written = front_matter_with(from_front_matter(front).with_changes(hashtags=()), front)
+    assert written.refused == frozenset()
+    assert front_matter.join(written, body) == "---\n# my notes\ntags: []\n---\n\nBody.\n"
 REFUSED_SCRIPT = r"""
 import json, os, sys
 sys.path.insert(0, sys.argv[1])
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 from PySide6.QtWidgets import QApplication
 app = QApplication(sys.argv[:1])
+import alerts
 import front_matter
 import main_window
 
-real = front_matter.rewritten
-def rewritten(old, value, **kwargs):            # wrong for one value only
-    written = real(old, value, **kwargs)
-    if old.key == "tags" and "Bad" in value:
-        return front_matter.Entry(old.key, (written.lines[0].replace("[", '["', 1),),
-                                  old.syntax)
+def broken(written, value):                  # every way of writing it wrong, for one value
+    if written.key == "tags" and "Bad" in value:
+        return front_matter.Entry(written.key, (written.lines[0].replace("[", '["', 1),),
+                                  written.syntax)
     return written
-front_matter.rewritten = rewritten
+rewritten, quoted = front_matter.rewritten, front_matter.quoted
+front_matter.rewritten = lambda old, value, **kwargs: broken(rewritten(old, value, **kwargs), value)
+front_matter.quoted = lambda old, key, value, *args: broken(quoted(old, key, value, *args), value)
+
+answer, how = sys.argv[3], sys.argv[4]
+asked = []
+class Alert:                                 # answers Save, then ``answer``
+    def __init__(self, parent, *, title, message="", buttons=(), **kwargs):
+        values = [button.value for button in buttons]
+        if "save" not in values:             # not the Save, Don't Save, Cancel one
+            asked.append({"title": title, "message": message,
+                          "buttons": [button.label for button in buttons]})
+        self.value = "save" if "save" in values else answer
+    def run(self):
+        return self.value
+alerts.Alert = Alert
 
 path = sys.argv[2]
 w = main_window.MainWindow()
@@ -213,31 +266,57 @@ ed = w.current_editor()
 w.act_article_details.setChecked(True)
 app.processEvents()
 panel = w._article_details_panel
-r = {"tags read-only before": panel.tags_edit.isReadOnly()}
 w._set_article_details(ed, w._article_details_of(ed).with_changes(
     hashtags=("a", "Bad"), title="New"))
-w._save_to(path)
+r = {}
+if how == "save":
+    r["saved"] = w._save_to(path)
+else:
+    w.close_tab(w.tabs.indexOf(w.tabs.currentWidget()))
+    r["open"] = w.current_editor() is ed
 app.processEvents()
-r["saved"] = open(path, encoding="utf-8").read()
-r["said"] = w.status.currentMessage()
-r["tags read-only"] = panel.tags_edit.isReadOnly()
-r["tags shown"] = panel.tags_edit.text()
-r["hashtags"] = list(w._article_details_of(ed).hashtags)
-r["modified"] = ed.document().isModified()
-ed.document().setModified(False)
+r["asked"] = asked
+r["file"] = open(path, encoding="utf-8").read()
+if w.current_editor() is ed:
+    r["said"] = w.status.currentMessage()
+    r["tags read-only"] = panel.tags_edit.isReadOnly()
+    r["hashtags"] = list(w._article_details_of(ed).hashtags)
+    r["modified"] = ed.document().isModified()
+    ed.document().setModified(False)
 w.close()
 print("RESULT " + json.dumps(r))
 """
 
+UNSAVED_TITLE = "“Hashtags” can’t be saved in the file"
 
-def test_a_change_refused_on_saving_is_said_and_its_detail_shown_as_in_the_file(tmp_path):
+
+def refused_in_window(tmp_path, answer, how):
     from tests.app_process import run_window_script
     path = tmp_path / "post.md"
     path.write_text(TEXT, encoding="utf-8")
-    r = run_window_script(REFUSED_SCRIPT, tmp_path, str(path))
-    assert r["tags read-only before"] is False
-    assert r["saved"] == TEXT.replace("title: T", "title: New")
-    assert r["said"] == ("Saved. Some article details stay as written in the file: "
-                         "MyEditor can’t change them there safely.")
-    assert r["tags read-only"] is True and r["hashtags"] == ["a", "b"]
-    assert r["tags shown"] == "a, b" and r["modified"] is False
+    return run_window_script(REFUSED_SCRIPT, tmp_path, str(path), answer, how)
+
+
+def test_saving_what_cant_be_written_asks_and_keeps_editing(tmp_path):
+    """Round 8, M1: the text typed was thrown away, the field locked, and
+    only the status bar said so. Keep Editing: nothing is written."""
+    r = refused_in_window(tmp_path, "keep", "save")
+    assert [a["title"] for a in r["asked"]] == [UNSAVED_TITLE]
+    assert r["asked"][0]["buttons"] == ["Save Without It", "Keep Editing"]
+    assert "post.md" in r["asked"][0]["message"]
+    assert r["saved"] is False and r["file"] == TEXT and r["modified"] is True
+    assert r["hashtags"] == ["a", "Bad"] and r["tags read-only"] is False
+
+
+def test_saving_without_what_cant_be_written_keeps_it_in_the_tab(tmp_path):
+    r = refused_in_window(tmp_path, "without", "save")
+    assert r["saved"] is True and r["file"] == TEXT.replace("title: T", "title: New")
+    assert r["hashtags"] == ["a", "Bad"] and r["tags read-only"] is False
+    assert r["modified"] is False
+    assert "Hashtags" in r["said"]
+
+
+def test_closing_with_save_asks_before_the_document_closes(tmp_path):
+    r = refused_in_window(tmp_path, "keep", "close")
+    assert [a["title"] for a in r["asked"]] == [UNSAVED_TITLE]
+    assert r["open"] is True and r["file"] == TEXT
