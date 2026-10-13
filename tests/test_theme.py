@@ -202,3 +202,23 @@ def test_a_window_given_a_style_sheet_is_polished_at_once():
     import inspect
     import main
     assert "install_style_sheet_guard(app)" in inspect.getsource(main)
+
+
+def test_a_widget_given_a_style_sheet_under_a_styled_parent_is_polished_too():
+    """Review round 2: Qt sends nothing to a widget given a style sheet
+    while it sits under a styled parent, so the guard's filter missed it;
+    every style sheet set from Python is covered now."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QDialog, QFrame
+    parent = QDialog()
+    parent.setStyleSheet("QLabel { }")
+    child = QFrame(parent)
+    child.setStyleSheet("QPushButton { color: #2D2D30; }")
+    assert child.testAttribute(Qt.WidgetAttribute.WA_WState_Polished)
+
+
+def test_the_live_flows_draw_as_the_app_does():
+    import inspect
+    from tests import smoke_ndak_common
+    source = inspect.getsource(smoke_ndak_common.qt_app)
+    assert "install_style_sheet_guard" in source and "AppStyle" in source

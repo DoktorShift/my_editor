@@ -281,8 +281,23 @@ class _StyleSheetGuard(QObject):
         return False
 
 
+_set_style_sheet = QWidget.setStyleSheet
+
+
+def _set_style_sheet_and_polish(widget: QWidget, sheet: str) -> None:
+    """QWidget.setStyleSheet, then the widget polished (_StyleSheetGuard).
+    Qt sends nothing to a widget given a style sheet while it sits under a
+    styled parent, so the guard's filter cannot see that one: every style
+    sheet the app sets (all from Python) comes through here."""
+    _set_style_sheet(widget, sheet)
+    if sheet and not widget.testAttribute(Qt.WidgetAttribute.WA_WState_Polished):
+        widget.ensurePolished()
+
+
 def install_style_sheet_guard(app: QApplication) -> None:
-    """Install :class:`_StyleSheetGuard` on ``app`` (once)."""
+    """Install :class:`_StyleSheetGuard` on ``app`` (once), and polish every
+    widget a style sheet is set on from Python."""
     if getattr(app, "_style_sheet_guard", None) is None:
         app._style_sheet_guard = _StyleSheetGuard(app)
         app.installEventFilter(app._style_sheet_guard)
+        QWidget.setStyleSheet = _set_style_sheet_and_polish

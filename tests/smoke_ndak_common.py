@@ -493,8 +493,17 @@ def audit_remote_names() -> List[str]:
 # --------------------------------------------------------------------------- #
 
 def qt_app():
+    """The application, set up as main.py sets it up, so the flows draw as
+    the app does: its style, and every widget given a style sheet polished
+    at once (theme.install_style_sheet_guard)."""
     from PySide6.QtWidgets import QApplication
-    return QApplication.instance() or QApplication([sys.argv[0]])
+    import theme
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication([sys.argv[0]])
+        app.setStyle(theme.AppStyle("Fusion"))
+    theme.install_style_sheet_guard(app)
+    return app
 
 
 def spin(ms: int) -> None:
