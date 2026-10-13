@@ -312,3 +312,20 @@ def test_a_title_reads_every_kind_of_reference_never_as_a_key():
     assert default_title(f"Read nostr:{naddr} first", names) == "Read Article first"
     for title in (default_title(f"x nostr:{e}") for e in (NPUB, nprofile, nevent, note, naddr)):
         assert "nostr:" not in title and max(len(word) for word in title.split()) < 20
+
+
+def test_a_files_link_name_is_made_from_its_name_as_a_title_is(tmp_path):
+    """Review low 4: a file-backed tab's link name was the file's name as
+    it is ("Grüße an alle"), spaces and all. It is made the way a title's
+    is now; an article this computer published under the file's own name
+    keeps that name, so republishing it replaces it."""
+    import types
+    from main_window import MainWindow
+    from nostr.first_publications import FirstPublications
+    record = FirstPublications(tmp_path / "first.json")
+    window = types.SimpleNamespace(_first_publications=record)
+    name_of = lambda path: MainWindow._link_name_for_file(window, path, PK)  # noqa: E731
+    assert name_of("/notes/Grüße an alle.md") == "grusse-an-alle"
+    assert name_of("") == ""
+    record.remember(PK, "Old Post", 1_700_000_000)
+    assert name_of("/notes/Old Post.md") == "Old Post"

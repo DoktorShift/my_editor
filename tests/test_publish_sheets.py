@@ -531,3 +531,17 @@ def test_the_bottom_row_orders_tab_by_the_platforms_button_layout_not_by_where_t
             chain.append(after)
         after = after.nextInFocusChain()
     assert chain == ([cancel, publish] if cancel_first else [publish, cancel]) and row
+
+
+def test_a_link_name_this_computer_published_under_stays_as_the_title_changes(tmp_path):
+    from nostr.first_publications import FirstPublications
+    record = FirstPublications(tmp_path / "first.json")
+    record.remember(PK, "Old Post", 1_700_000_000)
+    sheet = article(tmp_path, default_title="Old Post", default_slug="Old Post",
+                    first_publications=record)
+    sheet._title_edit.setText("A better title")
+    assert sheet._slug_edit.text() == "Old Post"
+    fresh = article(tmp_path, default_title="New", default_slug="new",
+                    first_publications=record)
+    fresh._title_edit.setText("Newer")
+    assert fresh._slug_edit.text() == "newer"                # never published: it follows

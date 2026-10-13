@@ -214,6 +214,7 @@ from nostr.publisher import (
     DraftPublishJob,
     PublishedMedia,
     library_audio_video_in,
+    slugify,
 )
 from nostr.relay import RelayPool
 from nostr.search import Nip50SearchClient
@@ -6941,10 +6942,7 @@ class MainWindow(QMainWindow):
         default_slug = details.identifier
         first_published = details.published_at
         if not default_slug:
-            path = self.current_path()
-            default_slug = (
-                os.path.splitext(os.path.basename(path))[0] if path else ""
-            )
+            default_slug = self._link_name_for_file(self.current_path(), active.user_pubkey)
 
         dialog = PublishArticleDialog(
             body_markdown=body,
@@ -6977,6 +6975,20 @@ class MainWindow(QMainWindow):
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self._publish_sheet = dialog
         dialog.open()
+
+    def _link_name_for_file(self, path: str, author: str) -> str:
+        """The link name a file-backed article starts with: made from the
+        file's name as a title's is ("Grüße an alle.md" is
+        "grusse-an-alle"), unless this computer published it under the
+        name as it is, which it then keeps (another would be another
+        article)."""
+        if not path:
+            return ""
+        name = os.path.splitext(os.path.basename(path))[0]
+        record = getattr(self, "_first_publications", None)
+        if record is not None and record.get(author, name):
+            return name
+        return slugify(name)
 
     def _article_sheet_closed(self, dialog, ed) -> None:
         """Publish as Article closed, published or not: what was changed

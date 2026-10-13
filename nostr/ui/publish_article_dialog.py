@@ -311,9 +311,13 @@ class PublishArticleDialog(QDialog):
         # their descriptions (NIP-92 imeta).
         self._media = tuple(media)
         # The link name follows the title until it is typed. An article
-        # that has one already (its draft's) keeps it: another one would
+        # that has one already (its draft's, its file's) keeps it, and so
+        # does one this computer published under it: another one would
         # publish another article.
-        self._slug_is_auto = not self._details.identifier
+        self._slug_is_auto = not (
+            self._details.identifier or self._first_published
+            or (first_publications is not None and default_slug
+                and first_publications.get(active_profile.user_pubkey, default_slug)))
         self._coauthor_picker: Optional[MentionPicker] = None
 
         self._build(active_profile, default_title, default_slug)
