@@ -1074,14 +1074,31 @@ class HtmlEditor(QTextEdit):
 
     def _keep_media_apart(self, e) -> bool:
         """Audio or video stays a paragraph of its own: typing in its
-        paragraph goes into a new one after it, Return there starts a clean
-        paragraph, and Backspace from the paragraph below (or Delete from
+        paragraph goes into a new one after it (before it, with the caret
+        before it), Return there starts a clean paragraph, and Backspace from the paragraph below (or Delete from
         the one above) takes it away whole, as one step, rather than joining
         text to it. True when the key was answered here."""
         cursor = self.textCursor()
         if cursor.hasSelection():
             return False
         block = cursor.block()
+        typing = bool(e.text()) and e.text().isprintable()
+        if (e.key() in (Qt.Key_Return, Qt.Key_Enter) or typing) \
+                and self.is_media_block(block) and cursor.atBlockStart():
+            # Before it, as with any block: a clean paragraph above it, the
+            # caret staying before it on Return and going into it to type.
+            cursor.beginEditBlock()
+            cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
+            cursor.movePosition(QTextCursor.MoveOperation.PreviousBlock)
+            cursor.setBlockFormat(QTextBlockFormat())
+            cursor.setBlockCharFormat(QTextCharFormat())
+            cursor.endEditBlock()
+            if typing:
+                self.setTextCursor(cursor)
+                return False                   # the character is typed there
+            cursor.movePosition(QTextCursor.MoveOperation.NextBlock)
+            self.setTextCursor(cursor)
+            return True
         if e.key() in (Qt.Key_Return, Qt.Key_Enter) and self.is_media_block(block):
             # A clean paragraph: one Qt makes would take the object's format.
             cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
