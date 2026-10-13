@@ -842,3 +842,29 @@ def test_the_smallest_window_cuts_no_toolbar_control(tmp_path, monkeypatch):
     for widget in (dialog._add_button, dialog._filter_combo, dialog._sort_combo,
                    dialog._actions_button):
         assert widget.width() >= widget.sizeHint().width(), widget
+
+
+def test_a_file_the_editor_uploads_appears_in_an_open_library_at_once(tmp_path, monkeypatch):
+    """A picture pasted into a document goes through the same store, so
+    it is in an open library as soon as a server has it, with no
+    listing in between. (Its progress shows in the document, not here.)"""
+    from nostr.blossom.client import BlossomClient
+    from nostr.blossom.settings import BlossomSettings
+    from nostr.blossom.store import MediaStore
+    from tests.blossom_fakes import (SERVER as BLOSSOM, FakeBlossomServer, FakeNam,
+                                     FakeProfile, FakeSessionPool)
+    settings = BlossomSettings(tmp_path / "blossom_servers.json")
+    settings.set_custom_servers([BLOSSOM])
+    nam = FakeNam(None, responder=FakeBlossomServer(BLOSSOM, require_auth=False))
+    store = MediaStore(session_pool=FakeSessionPool(), profile_provider=FakeProfile,
+                       settings=settings, client=BlossomClient(nam=nam))
+    world = build(tmp_path, monkeypatch, store)
+    nam.settle()                                   # the window's own listing: empty
+    assert tiles(world) == []
+
+    sha = sha_of(PNG_BYTES)
+    store.upload_bytes(PNG_BYTES, name=f"asset:{sha}", mime_type="image/png")
+    assert tiles(world) == []                      # its progress is the document's
+    nam.settle()
+    assert [tile.key for tile in tiles(world)] == [sha]
+    assert len([c for c in nam.calls if c[0] == "get"]) == 1      # no second listing
