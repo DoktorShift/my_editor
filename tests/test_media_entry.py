@@ -672,3 +672,69 @@ def test_a_drop_goes_where_it_is_dropped_not_at_the_caret(qt_app):
     ed.dropEvent(QDropEvent(QPointF(point), Qt.CopyAction, mime,
                             Qt.LeftButton, Qt.NoModifier))
     assert at_drop and ed.document().findBlock(at_drop[0]).blockNumber() == 2
+
+
+def test_a_library_audio_file_becomes_the_same_card_insert_audio_makes(tmp_path, monkeypatch):
+    """Whichever way a file arrives (Insert Audio or Video, or a tile from
+    the Media Library), the document holds the same object: a card named
+    by the file's asset, already uploaded, nothing sent again."""
+    from nostr.media.media_visibility import MediaVisibility
+    from nostr.ui import media_card
+    from nostr.ui.publish_copy_dialog import PickResolution
+    sha = "a1" * 32
+    url = f"https://one.example/{sha}.mp3"
+    record = types.SimpleNamespace(hash=sha, url=url, mime_type="audio/mpeg", size=4096,
+                                   urls=[{"server": "https://one.example", "url": url}],
+                                   uploaded_at_ms=0)
+    monkeypatch.setattr(main_window_module, "resolve_pick", lambda media, **kw: PickResolution(
+        sha256=sha, url=url, mime="audio/mpeg", size=4096, ok=True))
+    win = _EntryWindow(tmp_path / "cache", profile=object())
+    win._uploader.files[sha] = record
+    win._media_store = types.SimpleNamespace(files={sha: record},
+                                             name_of=lambda s: "Podcast intro.mp3")
+    win._media_visibility = MediaVisibility()
+    win._copy_maker = None
+    win._media_progress = {}
+    win.is_dark_theme = False
+    win._may_insert_audio_video = lambda ed: True
+    for name in ("_insert_media_at_cursor", "_insert_media_card", "_media_card",
+                 "_library_name", "_insert_url_as_text"):
+        setattr(win, name, getattr(MainWindow, name).__get__(win))
+
+    win._insert_media_at_cursor(record, win.editor)
+
+    [asset] = win.assets()
+    assert asset.is_media and asset.is_uploaded and asset.alt == "Podcast intro.mp3"
+    assert asset.servers == ["https://one.example"]
+    fmt = next(f for f in _image_formats(win.editor) if f.name() == asset.key)
+    assert (fmt.width(), fmt.height()) == (media_card.WIDTH, media_card.HEIGHT)
+    assert win._uploader.calls == []
+
+
+def _image_formats(editor):
+    """Every image format in the editor's text."""
+    from PySide6.QtGui import QTextCharFormat  # noqa: F401
+    found = []
+    block = editor.document().begin()
+    while block.isValid():
+        it = block.begin()
+        while not it.atEnd():
+            fmt = it.fragment().charFormat()
+            if fmt.isImageFormat():
+                found.append(fmt.toImageFormat())
+            it += 1
+        block = block.next()
+    return found
+
+
+def test_a_library_file_with_no_name_is_called_by_its_day():
+    from types import SimpleNamespace
+    from PySide6.QtCore import QDateTime
+    import i18n
+    host = SimpleNamespace(_media_store=SimpleNamespace(name_of=lambda s: ""),
+                           _media_visibility=SimpleNamespace(name_of=lambda s: ""))
+    media = SimpleNamespace(hash="c" * 64, uploaded_at_ms=1_780_000_000_000)
+    expected = i18n.format_day(QDateTime.fromMSecsSinceEpoch(1_780_000_000_000),
+                               short_month=True)
+    assert MainWindow._library_name(host, media) == expected
+    assert MainWindow._library_name(host, SimpleNamespace(hash="d" * 64, uploaded_at_ms=0)) == ""

@@ -20,8 +20,8 @@ from typing import List, Optional, Tuple
 from send2trash import send2trash
 import shiboken6
 from PySide6.QtCore import (
-    QBuffer, QByteArray, QEvent, QIODevice, QObject, Qt, QLocale, QMarginsF, QTimer, QUrl,
-    QFileSystemWatcher,
+    QBuffer, QByteArray, QDateTime, QEvent, QIODevice, QObject, Qt, QLocale, QMarginsF, QTimer,
+    QUrl, QFileSystemWatcher,
 )
 from PySide6.QtNetwork import QLocalServer
 from PySide6.QtGui import (
@@ -6779,9 +6779,16 @@ class MainWindow(QMainWindow):
         if asset is None:
             self._say_cannot_add(name)
             return
+        self._insert_media_card(ed, at, asset)
+        self._asset_manager.request_upload(asset.sha256)
+
+    def _insert_media_card(self, ed, at, asset) -> None:
+        """Audio or video ``asset`` as an object of ``ed``'s text: its card,
+        in a paragraph of its own at ``at``. The one way it goes in, from
+        Insert Audio or Video and from the Media Library alike."""
         image = QTextImageFormat()
         image.setName(asset.key)
-        image.setProperty(QTextImageFormat.ImageAltText, name)
+        image.setProperty(QTextImageFormat.ImageAltText, asset.alt)
         image.setWidth(media_card.WIDTH)
         image.setHeight(media_card.HEIGHT)
         ed.document().addResource(QTextDocument.ImageResource, QUrl(asset.key),
@@ -6792,7 +6799,6 @@ class MainWindow(QMainWindow):
         rich_text.insert_own_paragraph(cursor, image=image)
         if caret_there:
             ed.setTextCursor(cursor)
-        self._asset_manager.request_upload(asset.sha256)
 
     def _uploading(self, *editors) -> list:
         """The audio and video in ``editors`` still on its way to the media
@@ -7141,6 +7147,18 @@ class MainWindow(QMainWindow):
                 self.status.showMessage(picked.reason, 8000)
             return
 
+        if media_files.kind_of(picked.mime) is not None \
+                and self._may_insert_audio_video(editor):
+            # Audio or video already on the servers: the same card as
+            # Insert Audio or Video makes, through the same record, with
+            # nothing downloaded or sent again.
+            asset = self._asset_manager.adopt_library_file(
+                sha256=picked.sha256, remote_url=picked.url, mime=picked.mime,
+                size=picked.size, alt=alt_text or self._library_name(media))
+            if asset is not None:
+                self._insert_media_card(editor, QTextCursor(editor.textCursor()), asset)
+                return
+
         if not (picked.mime or "").startswith("image/"):
             self._insert_url_as_text(editor, picked.url)
             return
@@ -7156,6 +7174,15 @@ class MainWindow(QMainWindow):
             self._insert_url_as_text(editor, picked.url)
             return
         self._insert_asset(editor, asset, alt=alt_text or "image")
+
+    def _library_name(self, media) -> str:
+        """The name a library file goes by: the one it was added with, a
+        private file's own, else the day it was added."""
+        name = self._media_store.name_of(media.hash) or self._media_visibility.name_of(media.hash)
+        uploaded = int(getattr(media, "uploaded_at_ms", 0) or 0)
+        if name or not uploaded:
+            return name
+        return i18n.format_day(QDateTime.fromMSecsSinceEpoch(uploaded), short_month=True)
 
     def _insert_url_as_text(self, editor, url: str) -> None:
         """Fallback for media that cannot be an inline image."""

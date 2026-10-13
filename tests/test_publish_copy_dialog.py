@@ -668,10 +668,14 @@ def test_a_public_pick_still_inserts_the_way_it_always_did(gated):
     assert window.assets[0][1] == "alt words"
 
 
-def test_a_non_image_copy_falls_back_to_a_link(gated):
+def test_a_video_where_no_card_can_go_falls_back_to_a_link(gated):
+    """In a document that holds no audio or video card (plain text, or
+    with no Nostr account in use), a library video is its link; where a
+    card can go, it is the card (test_media_entry)."""
     window = gated(PickResolution(
         sha256="e" * 64, url=f"{CDN}/{'e' * 64}", mime="video/mp4", ok=True,
     ))
+    window._may_insert_audio_video = lambda editor: False
     window._insert_media_at_cursor(make_media("e" * 64), object(), "")
     assert window.urls == [f"{CDN}/{'e' * 64}"]
     assert window.adopted == []
