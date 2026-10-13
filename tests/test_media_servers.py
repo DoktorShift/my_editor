@@ -543,3 +543,65 @@ def test_a_delete_also_reaches_the_servers_its_record_names(tmp_path):
     assert deleted == [C]
     assert router.by_host["good.example"].deletes == [C]
     assert router.by_host["mirror.example"].deletes == [C]
+
+
+def _refuses_unknown_deletes(server):
+    """A server that answers 401 to a delete of a blob it never had."""
+    def respond(verb, request, body):
+        if verb == "delete":
+            server.deletes.append(request.url().path().strip("/"))
+            return error_reply(401, reason="Blob not owned by pubkey")
+        return server(verb, request, body)
+    respond.origin = server.origin
+    return respond
+
+
+@pytest.mark.parametrize("mirror_answers", ["unreachable", "401"])
+def test_a_server_that_never_had_the_copy_does_not_keep_it_shared(tmp_path, mirror_answers):
+    """Stop Sharing also asks every server in use, in case the copy is
+    there unrecorded. One that never had it (not in the copy's record,
+    not in its listing) can't keep it shared by being unreachable today,
+    or by refusing to delete what it doesn't have."""
+    mirror = FakeBlossomServer(MIRROR)
+    router = Router(FakeBlossomServer(SERVER, blobs=[descriptor(C)]),
+                    _refuses_unknown_deletes(mirror) if mirror_answers == "401" else mirror)
+    if mirror_answers == "unreachable":
+        router.unreachable.add("mirror.example")
+    store, nam, _signer, _ = make(tmp_path, router)
+    store.fetch()
+    nam.settle()
+    deleted, failed = [], []
+    store.file_deleted.connect(deleted.append)
+    store.delete_failed.connect(lambda *args: failed.append(args))
+    store.delete_file(C, servers=[SERVER], best_effort=[SERVER, MIRROR])
+    nam.settle()
+    assert (deleted, failed) == ([C], [])
+    assert router.by_host["good.example"].deletes == [C]
+
+
+def test_a_server_the_copy_was_put_on_keeps_it_shared_while_it_cannot_be_reached(tmp_path):
+    router = Router(FakeBlossomServer(SERVER, blobs=[descriptor(C)]),
+                    FakeBlossomServer(MIRROR, blobs=[descriptor(C, server=MIRROR)]))
+    router.unreachable.add("mirror.example")
+    store, nam, _signer, _ = make(tmp_path, router)
+    failed = []
+    store.delete_failed.connect(lambda *args: failed.append(args))
+    store.delete_file(C, servers=[SERVER, MIRROR], best_effort=[SERVER, MIRROR])
+    nam.settle()
+    assert failed == [(C, "NETWORK_UNAVAILABLE")]
+
+
+def test_a_server_whose_listing_shows_the_copy_keeps_it_shared_while_it_refuses(tmp_path):
+    """Not in the copy's record (another device mirrored it), but listed
+    there: it has the copy."""
+    router = Router(FakeBlossomServer(SERVER, blobs=[descriptor(C)]),
+                    _refuses_unknown_deletes(
+                        FakeBlossomServer(MIRROR, blobs=[descriptor(C, server=MIRROR)])))
+    store, nam, _signer, _ = make(tmp_path, router)
+    store.fetch()
+    nam.settle()
+    failed = []
+    store.delete_failed.connect(lambda *args: failed.append(args))
+    store.delete_file(C, servers=[SERVER], best_effort=[SERVER, MIRROR])
+    nam.settle()
+    assert failed == [(C, "AUTH_REJECTED")]

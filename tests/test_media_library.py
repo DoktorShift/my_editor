@@ -809,8 +809,8 @@ def _shared_original(tmp_path, monkeypatch):
     # The copy's record names MEMBERS only; SERVER is configured.
     visibility = MediaVisibility(library=FakeLibrary([blob]), ledger=ledger)
     world = build(tmp_path, monkeypatch, FakeStore([original]), visibility=visibility)
-    world.store.delete_file = lambda sha, servers=(): world.store.calls.append(
-        ("delete", sha, tuple(servers)))
+    world.store.delete_file = lambda sha, servers=(), best_effort=(): world.store.calls.append(
+        ("delete", sha, tuple(servers), tuple(best_effort)))
     return world, original, copy_sha, ledger
 
 
@@ -839,9 +839,13 @@ def test_stop_sharing_asks_then_deletes_the_copy_where_it_is(tmp_path, monkeypat
         "Anyone with the link will no longer see it, and anything you published with it "
         "will no longer show it.")
     assert world.store.calls[-1][:2] == ("delete", copy_sha)
-    # Every server the copy was put on (its record) and every server in
-    # use now: a copy is not "no longer shared" while one of them has it.
-    assert {MEMBERS, SERVER} <= set(world.store.calls[-1][2])
+    # Every server the copy was put on (its record and its address): a
+    # copy is not "no longer shared" while one of them has it. And every
+    # server in use now, in case it is there unrecorded, which only
+    # counts where it is listed.
+    _delete, _sha, servers, best_effort = world.store.calls[-1]
+    assert MEMBERS in servers and SERVER not in servers
+    assert SERVER in best_effort
 
     world.store.file_deleted.emit(copy_sha)
     world.store.library_changed.emit()
@@ -861,6 +865,23 @@ def test_a_copy_a_server_still_has_is_still_shared_and_it_says_so(tmp_path, monk
     assert world.dialog._status.text() == (
         "“Beach.png” is still shared. Couldn’t reach your media server. Check your "
         "internet connection.")
+
+
+@pytest.mark.parametrize("unsharing", [True, False])
+def test_a_server_that_refuses_the_account_is_not_a_reason_to_choose_another(
+        tmp_path, monkeypatch, unsharing):
+    """Choosing another server can't delete a file from the one it is on."""
+    world, original, copy_sha, _ledger = _shared_original(tmp_path, monkeypatch)
+    select(world, original.hash)
+    if unsharing:
+        monkeypatch.setattr(alerts, "Alert", fake_alert(click="Stop Sharing")[0])
+        world.dialog._stop_sharing()
+    world.store.delete_failed.emit(copy_sha if unsharing else original.hash, "AUTH_REJECTED")
+    assert world.dialog._status.text() == (
+        "“Beach.png” is still shared. A media server it’s on didn’t let your account "
+        "delete it." if unsharing else
+        "“Beach.png” wasn’t deleted. A media server it’s on didn’t let your account "
+        "delete it.")
 
 
 def test_deleting_a_shared_original_deletes_its_copy_too(tmp_path, monkeypatch):

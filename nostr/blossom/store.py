@@ -1459,7 +1459,8 @@ class MediaStore(QObject):
     # Delete
     # ------------------------------------------------------------------
 
-    def delete_file(self, file_hash: str, *, servers: Sequence[str] = ()) -> None:
+    def delete_file(self, file_hash: str, *, servers: Sequence[str] = (),
+                    best_effort: Sequence[str] = ()) -> None:
         """Delete a blob from every server it lives on.
 
         Files are deduped by sha256 across servers, so the same hash can
@@ -1475,6 +1476,12 @@ class MediaStore(QObject):
 
         ``servers`` names where else the file was put (a public copy's
         record): it is deleted there too, listed or not.
+
+        ``best_effort`` names servers that may hold it unrecorded (the ones
+        in use, for a public copy): asked too, but one that neither lists
+        it nor is named in ``servers`` never had it as far as anyone
+        knows, so its failure (unreachable today, or refusing to delete
+        what it doesn't have) doesn't keep the file.
         """
         profile = self._profile_provider()
         if profile is None:
@@ -1490,6 +1497,12 @@ class MediaStore(QObject):
             if origin and origin not in listed:
                 urls.append({"server": origin, "url": blob_url(origin, file_hash)})
                 listed.add(origin)
+        unknown: set = set()
+        for origin in dict.fromkeys(_origin_or_empty(s) for s in best_effort):
+            if origin and origin not in listed:
+                urls.append({"server": origin, "url": blob_url(origin, file_hash)})
+                listed.add(origin)
+                unknown.add(origin)
         if not urls:
             if media is None:
                 return
@@ -1507,6 +1520,11 @@ class MediaStore(QObject):
 
         remaining = {"count": len(target_servers)}
         failures: list[tuple[str, str]] = []
+
+        def failed_one(origin: str, code: str) -> None:
+            if origin not in unknown:
+                failures.append((origin, code))
+            finish_one()
 
         def finish_one() -> None:
             remaining["count"] -= 1
@@ -1532,7 +1550,7 @@ class MediaStore(QObject):
                 file_hash=file_hash,
                 origin=origin,
                 on_ok=finish_one,
-                on_err=lambda code, o=origin: (failures.append((o, code)), finish_one()),
+                on_err=lambda code, o=origin: failed_one(o, code),
             )
 
     def _delete_one_server(

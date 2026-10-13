@@ -893,11 +893,13 @@ class MediaLibraryDialog(QDialog):
     def _delete_copies(self, files: List[Tile], *, stays: bool) -> None:
         for tile, copy in self._shared_copies(files):
             self._unsharing[copy.sha256] = (tile.name, stays)
-            # Everywhere it may be: the servers its record names (one
-            # since removed from the list included) and the ones in use
-            # now. A server without it answers that it has none.
-            servers = list(copy.servers) + [copy.url] + self._store.target_servers()
-            self._store.delete_file(copy.sha256, servers=servers)
+            # Everywhere it was put: the servers its record names (one
+            # since removed from the list included) and its address. The
+            # ones in use now are asked too, in case it is there
+            # unrecorded; one that doesn't list it never had it, so it
+            # can't keep the copy shared by being unreachable today.
+            self._store.delete_file(copy.sha256, servers=list(copy.servers) + [copy.url],
+                                    best_effort=self._store.target_servers())
 
     def _on_file_deleted(self, sha: str) -> None:
         # Deleting a public copy is what un-sharing it is, so the record
@@ -911,7 +913,7 @@ class MediaLibraryDialog(QDialog):
         if sha in self._unsharing:
             name, _stays = self._unsharing.pop(sha)
             self._say(_("“{name}” is still shared. {reason}").format(
-                name=name, reason=friendly_message(code)), error=True)
+                name=name, reason=_delete_reason(code)), error=True)
             return
         name = self._name_of(sha)
         before = self._deleting.pop(sha, 0)
@@ -921,7 +923,7 @@ class MediaLibraryDialog(QDialog):
             text = _("“{name}” is still on one of your media servers. {reason}")
         else:
             text = _("“{name}” wasn’t deleted. {reason}")
-        self._say(text.format(name=name, reason=friendly_message(code)), error=True)
+        self._say(text.format(name=name, reason=_delete_reason(code)), error=True)
 
     def _name_of(self, sha: str) -> str:
         tile = self._model.tile(sha)
@@ -1240,6 +1242,15 @@ def _quick_look_detail(tile: Tile) -> str:
 _UNSAVEABLE = re.compile(r'[<>:"/\\|?*\x00-\x1f\x7f]')
 _DEVICE_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{n}" for n in range(1, 10)),
                  *(f"LPT{n}" for n in range(1, 10))}
+def _delete_reason(code: str) -> str:
+    """Why a server didn't delete a file. A refused account is the server
+    the file is on refusing: choosing another server, the remedy when
+    adding, can't delete it there."""
+    if code == ERROR_CODES.AUTH_REJECTED:
+        return _("A media server it’s on didn’t let your account delete it.")
+    return friendly_message(code)
+
+
 # Most folders hold names of up to 255 bytes; this leaves room for the
 # hidden part file a download is written to and a number after a copy.
 _NAME_BYTES = 240
