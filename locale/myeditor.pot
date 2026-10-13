@@ -18,12 +18,12 @@ msgstr ""
 
 #: alerts.py:199
 #: alerts.py:206
-#: nostr/ui/publish_article_dialog.py:520
+#: nostr/ui/publish_article_dialog.py:523
 msgid "Show Details"
 msgstr ""
 
 #: alerts.py:206
-#: nostr/ui/publish_article_dialog.py:520
+#: nostr/ui/publish_article_dialog.py:523
 msgid "Hide Details"
 msgstr ""
 
@@ -90,19 +90,19 @@ msgstr ""
 
 #: editor.py:114
 #: editor.py:115
-#: editor.py:1250
+#: editor.py:1252
 msgid "List"
 msgstr ""
 
 #: editor.py:115
-#: editor.py:1575
+#: editor.py:1578
 #: main_window.py:1820
 msgid "Quote"
 msgstr ""
 
 #: editor.py:115
 #: editor.py:1045
-#: editor.py:1242
+#: editor.py:1244
 #: main_window.py:1796
 msgid "Checklist"
 msgstr ""
@@ -133,9 +133,9 @@ msgid "Code"
 msgstr ""
 
 #: editor.py:221
-#: editor.py:2224
-#: editor.py:1631
-#: editor.py:2211
+#: editor.py:2228
+#: editor.py:1634
+#: editor.py:2215
 #: main_window.py:1707
 msgid "Paste"
 msgstr ""
@@ -154,39 +154,39 @@ msgstr ""
 msgid "Correction"
 msgstr ""
 
-#: editor.py:1072
+#: editor.py:1073
 #: nostr/ui/mention_picker.py:236
 msgid "Mention"
 msgstr ""
 
-#: editor.py:1435
+#: editor.py:1437
 msgid "Link"
 msgstr ""
 
-#: editor.py:1532
+#: editor.py:1534
 #: main_window.py:1859
 msgid "Footnote"
 msgstr ""
 
-#: editor.py:1583
-#: editor.py:1787
+#: editor.py:1586
+#: editor.py:1790
 #: main_window.py:1832
 msgid "Divider"
 msgstr ""
 
-#: editor.py:2000
+#: editor.py:2003
 #: main_window.py:2354
 msgid "Table"
 msgstr ""
 
-#: editor.py:2138
-#: editor.py:1786
+#: editor.py:2142
+#: editor.py:1789
 #: main_window.py:1839
 msgid "Code Block"
 msgstr ""
 
-#: editor.py:2214
-#: editor.py:1629
+#: editor.py:2218
+#: editor.py:1632
 #: main_window.py:1703
 msgid "Cut"
 msgstr ""
@@ -211,12 +211,12 @@ msgstr ""
 msgid "not checked"
 msgstr ""
 
-#: editor.py:1167
+#: editor.py:1169
 #, python-brace-format
 msgid "{title}, {position} of {count}"
 msgstr ""
 
-#: editor.py:1630
+#: editor.py:1633
 #: main_window.py:1705
 #: update_dialog.py:194
 #: update_dialog.py:202
@@ -224,7 +224,7 @@ msgstr ""
 msgid "Copy"
 msgstr ""
 
-#: editor.py:2212
+#: editor.py:2216
 msgid "Drag"
 msgstr ""
 
@@ -232,16 +232,16 @@ msgstr ""
 msgid "Typing"
 msgstr ""
 
-#: editor.py:1184
+#: editor.py:1186
 #, python-brace-format
 msgid "{title} applied"
 msgstr ""
 
-#: editor.py:1561
+#: editor.py:1564
 msgid "Command-click to open"
 msgstr ""
 
-#: editor.py:1562
+#: editor.py:1565
 msgid "Ctrl+click to open"
 msgstr ""
 
@@ -250,16 +250,16 @@ msgstr ""
 msgid "Row {row} of {rows}, column {column}"
 msgstr ""
 
-#: editor.py:1172
+#: editor.py:1174
 #, python-brace-format
 msgid "Insert menu. {choice}"
 msgstr ""
 
-#: editor.py:1566
+#: editor.py:1569
 msgid "Command-click to go to the note"
 msgstr ""
 
-#: editor.py:1567
+#: editor.py:1570
 msgid "Ctrl+click to go to the note"
 msgstr ""
 
@@ -268,7 +268,7 @@ msgstr ""
 msgid "{place}, {header}"
 msgstr ""
 
-#: export_html.py:396
+#: export_html.py:398
 #: main_window.py:1327
 #: main_window.py:2654
 #: main_window.py:3699
@@ -279,7 +279,7 @@ msgstr ""
 msgid "Untitled"
 msgstr ""
 
-#: export_html.py:179
+#: export_html.py:181
 msgid "[image unavailable]"
 msgstr ""
 
@@ -944,7 +944,7 @@ msgid "Write"
 msgstr ""
 
 #: main_window.py:2052
-#: nostr/preview.py:578
+#: nostr/preview.py:582
 #: nostr/ui/media_library_dialog.py:604
 #: nostr/ui/media_library_dialog.py:1659
 #: nostr/ui/publish_article_dialog.py:108
@@ -2259,7 +2259,7 @@ msgid "MyEditor can read audio and video files of these kinds: {kinds}."
 msgstr ""
 
 #: main_window.py:6855
-#: nostr/ui/cover_field.py:280
+#: nostr/ui/cover_field.py:287
 msgid "Uploading…"
 msgstr ""
 
@@ -2493,6 +2493,7 @@ msgid "{error} Check that it's turned on and connected, then try again."
 msgstr ""
 
 #: main_window.py:6854
+#: nostr/ui/cover_field.py:295
 #, python-brace-format
 msgid "Uploading… {percent} %"
 msgstr ""
@@ -2655,7 +2656,7 @@ msgid "Article"
 msgstr ""
 
 #: preview_pane.py:101
-#: nostr/ui/publish_note_dialog.py:250
+#: nostr/ui/publish_note_dialog.py:252
 #: nostr/ui/published_view.py:89
 msgid "Note"
 msgstr ""
@@ -4216,9 +4217,9 @@ msgstr ""
 msgid "Quoted note"
 msgstr ""
 
-#: nostr/preview.py:470
+#: nostr/preview.py:474
 #: nostr/ui/drafts_preview.py:523
-#: nostr/ui/publish_article_dialog.py:565
+#: nostr/ui/publish_article_dialog.py:568
 #, python-brace-format
 msgid "{n} min read"
 msgid_plural "{n} min read"
@@ -4520,7 +4521,7 @@ msgstr ""
 
 #: nostr/blossom/store.py:723
 #: nostr/blossom/store.py:737
-#: nostr/ui/cover_field.py:273
+#: nostr/ui/cover_field.py:280
 #, python-brace-format
 msgid "Could not read file: {error}"
 msgstr ""
@@ -5900,7 +5901,7 @@ msgid "Co-Authors"
 msgstr ""
 
 #: nostr/ui/article_details_panel.py:211
-#: nostr/ui/publish_article_dialog.py:429
+#: nostr/ui/publish_article_dialog.py:432
 msgid "Add Co-Author…"
 msgstr ""
 
@@ -5913,7 +5914,7 @@ msgid "Advanced"
 msgstr ""
 
 #: nostr/ui/article_details_panel.py:241
-#: nostr/ui/publish_article_dialog.py:447
+#: nostr/ui/publish_article_dialog.py:450
 #: nostr/ui/stash_kind_dialog.py:410
 msgid "Link name"
 msgstr ""
@@ -5927,18 +5928,18 @@ msgid "Zaps are shared the way another app set them."
 msgstr ""
 
 #: nostr/ui/article_details_panel.py:468
-#: nostr/ui/cover_field.py:149
+#: nostr/ui/cover_field.py:151
 #: nostr/ui/draft_relays_sheet.py:158
 msgid "Remove"
 msgstr ""
 
 #: nostr/ui/article_details_panel.py:399
-#: nostr/ui/publish_article_dialog.py:481
+#: nostr/ui/publish_article_dialog.py:484
 msgid "Not published yet."
 msgstr ""
 
 #: nostr/ui/article_details_panel.py:529
-#: nostr/ui/publish_article_dialog.py:446
+#: nostr/ui/publish_article_dialog.py:449
 #: nostr/ui/stash_kind_dialog.py:406
 msgid "my-article"
 msgstr ""
@@ -5955,7 +5956,7 @@ msgid "Remove {name}"
 msgstr ""
 
 #: nostr/ui/article_details_panel.py:397
-#: nostr/ui/publish_article_dialog.py:479
+#: nostr/ui/publish_article_dialog.py:482
 #, python-brace-format
 msgid "First published {moment}"
 msgstr ""
@@ -6107,68 +6108,68 @@ msgid_plural "This code works for {seconds} more seconds."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/cover_field.py:129
-#: nostr/ui/cover_field.py:136
-#: nostr/ui/cover_field.py:160
+#: nostr/ui/cover_field.py:131
+#: nostr/ui/cover_field.py:138
+#: nostr/ui/cover_field.py:162
 msgid "Cover image"
 msgstr ""
 
-#: nostr/ui/cover_field.py:150
+#: nostr/ui/cover_field.py:152
 msgid "Remove Cover Image"
 msgstr ""
 
-#: nostr/ui/cover_field.py:192
-#: nostr/ui/cover_field.py:308
+#: nostr/ui/cover_field.py:194
+#: nostr/ui/cover_field.py:323
 msgid ""
 "No cover\n"
 "selected"
 msgstr ""
 
-#: nostr/ui/cover_field.py:234
-#: nostr/ui/cover_field.py:144
+#: nostr/ui/cover_field.py:241
+#: nostr/ui/cover_field.py:146
 msgid "Choose Cover Image"
 msgstr ""
 
-#: nostr/ui/cover_field.py:139
+#: nostr/ui/cover_field.py:141
 msgid "Drop a picture here to upload it as the cover."
 msgstr ""
 
-#: nostr/ui/cover_field.py:143
+#: nostr/ui/cover_field.py:145
 msgid "Choose…"
 msgstr ""
 
-#: nostr/ui/cover_field.py:145
+#: nostr/ui/cover_field.py:147
 msgid "Choose a picture from your Media Library, or upload one."
 msgstr ""
 
-#: nostr/ui/cover_field.py:262
+#: nostr/ui/cover_field.py:269
 msgid "A picture can be uploaded once you use a Nostr account with media servers. Paste its web address instead."
 msgstr ""
 
-#: nostr/ui/cover_field.py:266
+#: nostr/ui/cover_field.py:273
 msgid "Only a picture can be a cover."
 msgstr ""
 
-#: nostr/ui/cover_field.py:172
+#: nostr/ui/cover_field.py:174
 msgid "Pictures you pick are uploaded to your media servers."
 msgstr ""
 
-#: nostr/ui/cover_field.py:174
+#: nostr/ui/cover_field.py:176
 msgid "Paste an image URL hosted anywhere on the public web."
 msgstr ""
 
-#: nostr/ui/cover_field.py:299
+#: nostr/ui/cover_field.py:314
 #, python-brace-format
 msgid "The picture was not uploaded: {reason}"
 msgstr ""
 
-#: nostr/ui/cover_field.py:319
+#: nostr/ui/cover_field.py:334
 msgid ""
 "Preview shown\n"
 "for library picks"
 msgstr ""
 
-#: nostr/ui/cover_field.py:277
+#: nostr/ui/cover_field.py:284
 #, python-brace-format
 msgid "This picture can’t be a cover: {reason}."
 msgstr ""
@@ -8467,8 +8468,8 @@ msgid "Also yours: {services}."
 msgstr ""
 
 #: nostr/ui/mention_picker.py:273
-#: nostr/ui/publish_article_dialog.py:433
-#: nostr/ui/publish_note_dialog.py:268
+#: nostr/ui/publish_article_dialog.py:436
+#: nostr/ui/publish_note_dialog.py:270
 msgid "People"
 msgstr ""
 
@@ -8648,7 +8649,7 @@ msgid "Publish as Article"
 msgstr ""
 
 #: nostr/ui/publish_article_dialog.py:366
-#: nostr/ui/publish_note_dialog.py:279
+#: nostr/ui/publish_note_dialog.py:281
 msgid "Publish"
 msgstr ""
 
@@ -8664,58 +8665,58 @@ msgstr ""
 msgid "Hashtags:"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:427
+#: nostr/ui/publish_article_dialog.py:430
 msgid "Cover image:"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:435
-#: nostr/ui/publish_note_dialog.py:264
+#: nostr/ui/publish_article_dialog.py:438
+#: nostr/ui/publish_note_dialog.py:266
 msgid "People:"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:465
+#: nostr/ui/publish_article_dialog.py:468
 msgid "A saved or published article keeps its link name; publishing it under another one makes another article."
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:472
+#: nostr/ui/publish_article_dialog.py:475
 msgid "Link name:"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:474
+#: nostr/ui/publish_article_dialog.py:477
 msgid "Cover image address"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:476
+#: nostr/ui/publish_article_dialog.py:479
 msgid "Cover image address:"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:705
+#: nostr/ui/publish_article_dialog.py:710
 msgid "Checking whether this article was published before…"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:735
+#: nostr/ui/publish_article_dialog.py:740
 msgid "Couldn't check whether this article was published before"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:736
+#: nostr/ui/publish_article_dialog.py:741
 msgid "None of the relays you publish to answered. If the article went out before, publishing it as new gives it today's date, and readers see it as a new article."
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:800
+#: nostr/ui/publish_article_dialog.py:805
 msgid "The article was not published: no relay took it. Check your internet connection and try again."
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:822
-#: nostr/ui/publish_note_dialog.py:385
+#: nostr/ui/publish_article_dialog.py:827
+#: nostr/ui/publish_note_dialog.py:387
 #, python-brace-format
 msgid "Publish failed: {reason}"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:739
+#: nostr/ui/publish_article_dialog.py:744
 msgid "Publish as New"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:767
+#: nostr/ui/publish_article_dialog.py:772
 #, python-brace-format
 msgid "Cannot build article: {reason}"
 msgstr ""
@@ -8864,27 +8865,27 @@ msgid_plural "Creating {count} public copies…"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/publish_note_dialog.py:197
-#: nostr/ui/publish_note_dialog.py:234
+#: nostr/ui/publish_note_dialog.py:199
+#: nostr/ui/publish_note_dialog.py:236
 msgid "Publish as Note"
 msgstr ""
 
-#: nostr/ui/publish_note_dialog.py:237
+#: nostr/ui/publish_note_dialog.py:239
 msgid "Formatting is stripped. Short notes are plain text. For richer documents, use Publish as Article."
 msgstr ""
 
-#: nostr/ui/publish_note_dialog.py:316
+#: nostr/ui/publish_note_dialog.py:318
 #, python-brace-format
 msgid "{n} character"
 msgid_plural "{n} characters"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/publish_note_dialog.py:376
+#: nostr/ui/publish_note_dialog.py:378
 msgid "The note was not published: no relay took it. Check your internet connection and try again."
 msgstr ""
 
-#: nostr/ui/publish_note_dialog.py:318
+#: nostr/ui/publish_note_dialog.py:320
 #, python-brace-format
 msgid "{count} · long note, consider Publish as Article instead"
 msgstr ""

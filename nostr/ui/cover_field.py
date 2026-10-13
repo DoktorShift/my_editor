@@ -94,6 +94,7 @@ class CoverImageField(QWidget):
     changed = Signal(str)
     problem = Signal(str)
     picture_changed = Signal()
+    uploading_changed = Signal(bool)
 
     def __init__(self, *, media_store: Optional[MediaStore] = None,
                  media_visibility: Optional[MediaVisibility] = None,
@@ -121,6 +122,7 @@ class CoverImageField(QWidget):
         if media_store is not None:
             media_store.upload_finished.connect(self._on_uploaded)
             media_store.upload_failed.connect(self._on_upload_failed)
+            media_store.upload_progress.connect(self._on_upload_progress)
 
         self.url_edit = QLineEdit()
         self.url_edit.setObjectName("article_advanced_field")
@@ -197,6 +199,11 @@ class CoverImageField(QWidget):
 
     def setText(self, text: str) -> None:  # noqa: N802, Qt's name
         self.url_edit.setText(text)
+
+    def uploading(self) -> bool:
+        """Whether a picture dropped on the well is on its way up: the
+        cover it will be is not there yet."""
+        return bool(self._uploading)
 
     def picture(self) -> QPixmap:
         """The cover's picture, as large as it was loaded; null when none
@@ -278,8 +285,14 @@ class CoverImageField(QWidget):
             return
         self._uploading = os.path.basename(path) or "cover"
         self._show_placeholder(_("Uploading…"))
+        self.uploading_changed.emit(True)
         self._media_store.upload_bytes(public.data, name=self._uploading,
                                        mime_type=public.mime)
+
+    def _on_upload_progress(self, name: str, sent: int, total: int) -> None:
+        if self._uploading and name == self._uploading and total > 0:
+            percent = min(100, sent * 100 // total)
+            self.preview.setText(_("Uploading… {percent} %").format(percent=percent))
 
     def _on_uploaded(self, name: str, media: MediaFile) -> None:
         if not self._uploading or name != self._uploading:
@@ -290,12 +303,14 @@ class CoverImageField(QWidget):
         if self._loader is not None:
             self._thumb_hash = media.hash.lower()
             self._loader.load(media.hash, media.url)
+        self.uploading_changed.emit(False)
 
     def _on_upload_failed(self, name: str, reason: str) -> None:
         if not self._uploading or name != self._uploading:
             return
         self._uploading = ""
         self._on_url_changed(self.url_edit.text(), quiet=True)
+        self.uploading_changed.emit(False)
         self.problem.emit(_("The picture was not uploaded: {reason}").format(reason=reason))
 
     # -- the well -------------------------------------------------------------

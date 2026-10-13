@@ -55,6 +55,7 @@ from PySide6.QtWidgets import (  # noqa: E402
 import theme  # noqa: E402
 from nostr import bech32  # noqa: E402
 from nostr.article_details import AUTHOR_MARKER, ArticleDetails  # noqa: E402
+from nostr.blossom.store import MediaFile  # noqa: E402
 from nostr.known_people import KnownPeople, Person  # noqa: E402
 from nostr.ui import publish_article_dialog as article_module  # noqa: E402
 from nostr.ui import publish_note_dialog as note_module  # noqa: E402
@@ -328,7 +329,11 @@ class _Store(QObject):
 
     upload_finished = Signal(str, object)
     upload_failed = Signal(str, str)
+    upload_progress = Signal(str, int, int)
     files: dict = {}
+
+    def upload_bytes(self, body, *, name, mime_type="application/octet-stream"):
+        self.uploaded = name
 
 
 # -- Publish as Note ----------------------------------------------------------------------
@@ -416,3 +421,31 @@ def test_the_sheets_never_wrap_the_items_of_a_layout_qt_owns():
     from nostr.ui import publish_sheet
     for module in (publish_sheet, article_module, note_module):
         assert ".itemAt(" not in inspect.getsource(module), module.__name__
+
+
+def test_publish_waits_for_a_dropped_cover_and_a_failure_is_said_under_it(
+        tmp_path, captured, monkeypatch):
+    """Review M2: an article published while its dropped cover was still
+    uploading went out without it."""
+    from tests.test_cover_field import picture_file
+    from nostr.ui import cover_field
+    from tests.test_cover_field import FakeLoader
+    monkeypatch.setattr(cover_field, "ThumbnailLoader", FakeLoader)
+    store = _Store()
+    sheet = article(tmp_path, default_title="T", media_store=store)
+    sheet._cover.drop(str(picture_file(tmp_path)))
+    assert not sheet._publish_btn.isEnabled()
+    sheet._on_publish()
+    assert captured == []
+    url = f"https://blossom.example/{'ef' * 32}.png"
+    store.upload_finished.emit(store.uploaded, MediaFile(hash="ef" * 32, url=url,
+                                                         mime_type="image/png"))
+    assert sheet._publish_btn.isEnabled()
+    sheet._publish("t", sheet._body, 1_800_000_000)
+    assert ["image", url] in captured[0]["tags"]
+    sheet._on_failed("relay down")
+    sheet._cover.drop(str(picture_file(tmp_path, "b.png")))
+    store.upload_failed.emit(store.uploaded, "the server said no")
+    assert sheet._publish_btn.isEnabled()
+    assert not sheet._cover_problem.isHidden()
+    assert "the server said no" in sheet._cover_problem.text()

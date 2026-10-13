@@ -57,6 +57,7 @@ class FakeLoader(QObject):
 class FakeStore(QObject):
     upload_finished = Signal(str, object)
     upload_failed = Signal(str, str)
+    upload_progress = Signal(str, int, int)
 
     def __init__(self):
         super().__init__()
@@ -176,3 +177,22 @@ def test_the_picker_is_titled_in_title_case_as_its_button_names_it(field, monkey
     monkeypatch.setattr(cover_field, "MediaLibraryDialog", Picker)
     made.choose()
     assert titles == ["Choose Cover Image"] == [made.pick_button.accessibleName()]
+
+
+def test_the_well_shows_how_far_the_upload_is_and_says_when_it_is_done(field, tmp_path):
+    made, store, _problems = field
+    busy = []
+    made.uploading_changed.connect(busy.append)
+    assert not made.uploading()
+    made.drop(str(picture_file(tmp_path)))
+    name = store.uploads[0][1]
+    assert made.uploading() and busy == [True]
+    store.upload_progress.emit("other.png", 50, 100)
+    assert made.preview.text() == "Uploading\u2026"           # another upload
+    store.upload_progress.emit(name, 42, 100)
+    assert made.preview.text() == "Uploading\u2026 42 %"
+    store.upload_finished.emit(name, MediaFile(hash="ef" * 32, url="https://x/" + "ef" * 32))
+    assert not made.uploading() and busy == [True, False]
+    made.drop(str(picture_file(tmp_path, "b.png")))
+    store.upload_failed.emit(store.uploads[1][1], "the server said no")
+    assert not made.uploading() and busy == [True, False, True, False]

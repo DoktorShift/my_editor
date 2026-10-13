@@ -414,6 +414,9 @@ class PublishArticleDialog(QDialog):
             copy_maker=self._copy_maker, private_library=self._private_library,
             profile=self._account.profile, is_dark=self._is_dark)
         self._cover.picture_changed.connect(self._refresh_card)
+        # A cover on its way up is waited for: published now, it would be
+        # missing.
+        self._cover.uploading_changed.connect(lambda _up: self._refresh_publish_enabled())
         self._image_edit = self._cover.url_edit
         cover = QWidget()
         cover_column = QVBoxLayout(cover)
@@ -659,9 +662,11 @@ class PublishArticleDialog(QDialog):
         announce.field_problem(self._slug_edit, self._slug_problem, problem)
         if problem:
             self._show_details(True)
-        # NIP-23 requires the d-tag; an empty document has nothing to say.
+        # NIP-23 requires the d-tag; an empty document has nothing to say;
+        # a cover still uploading is waited for.
         self._publish_btn.setEnabled(self._job is None and not self._looking_up
-                                     and bool(slug) and bool(self._body) and not problem)
+                                     and bool(slug) and bool(self._body) and not problem
+                                     and not self._cover.uploading())
 
     def _set_status(self, text: str, *, error: bool = False) -> None:
         self._status.say(text, error=error)
@@ -690,7 +695,7 @@ class PublishArticleDialog(QDialog):
     def _on_publish(self) -> None:
         slug = self._slug_edit.text().strip()
         if (not slug or not self._body or self._job is not None or self._looking_up
-                or slug_problem(slug)):
+                or slug_problem(slug) or self._cover.uploading()):
             return
         author = self._account.profile().user_pubkey
         known = self._first_published.get(slug) or (

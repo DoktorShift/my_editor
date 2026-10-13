@@ -1071,6 +1071,7 @@ class _Store(QObject):
 
     upload_finished = Signal(str, object)
     upload_failed = Signal(str, str)
+    upload_progress = Signal(str, int, int)
     files: dict = {}
 
 
