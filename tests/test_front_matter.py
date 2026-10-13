@@ -431,3 +431,53 @@ def test_a_value_set_on_a_key_with_only_a_comment_keeps_the_comment():
     details = from_front_matter(front).with_changes(summary="Filled", title="Set")
     assert front_matter.join(front_matter_with(details, front), body) == (
         "---\nsummary:    Filled # to fill\ntitle: Set\n---\nB\n")
+
+
+# -- more shapes from the wild (review L4) -------------------------------------
+
+def changed(text, **change):
+    front, body = front_matter.split(text)
+    details = from_front_matter(front).with_changes(**change)
+    return front_matter.join(front_matter_with(details, front), body)
+
+
+def test_a_toml_multi_line_list_stays_multi_line():
+    text = '+++\ntitle = "T"\ntags = [\n  "go",\n  "hugo",\n]\n+++\n\nB\n'
+    assert changed(text, hashtags=("go", "hugo", "extra")) == text.replace(
+        '  "hugo",\n', '  "hugo",\n  "extra",\n')
+
+
+def test_a_tags_comment_is_never_a_tag():
+    front, _ = front_matter.split('---\ntags:\n  - post\n  - "#idea"   # with a hash\n---\n')
+    assert from_front_matter(front).hashtags == ("post", "idea")
+
+
+def test_jekyll_space_separated_tags_are_read_as_jekyll_reads_them():
+    front, _ = front_matter.split("---\ntags: ruby jekyll\n---\n")
+    assert from_front_matter(front).hashtags == ("ruby", "jekyll")
+    front, _ = front_matter.split('---\ntags: "a, b"\n---\n')
+    assert from_front_matter(front).hashtags == ("a", "b")
+
+
+def test_hugo_capitalised_keys_are_read_and_rewritten_in_place():
+    text = '---\nTitle: "Caps Keys"\nDescription: "Hugo keys"\nTags: ["a"]\n---\n\nB\n'
+    front, _ = front_matter.split(text)
+    details = from_front_matter(front)
+    assert (details.title, details.summary, details.hashtags) == ("Caps Keys", "Hugo keys", ("a",))
+    assert changed(text, title="New") == text.replace('Title: "Caps Keys"', 'Title: "New"')
+
+
+def test_zola_taxonomy_tags_are_read_and_written_in_their_table():
+    text = ('+++\ntitle = "Zola post"\ndate = 2024-03-01\n\n[taxonomies]\n'
+            'tags = ["rust", "ssg"]\n\n[extra]\ncover = "x.png"\n+++\n\nB\n')
+    front, _ = front_matter.split(text)
+    assert from_front_matter(front).hashtags == ("rust", "ssg")
+    assert changed(text, hashtags=("rust", "ssg", "web")) == text.replace(
+        'tags = ["rust", "ssg"]', 'tags = ["rust", "ssg", "web"]')
+
+
+def test_a_date_that_is_no_date_is_kept_as_written():
+    text = "---\ntitle: Eleventy\ndate: Last Modified\n---\n\nB\n"
+    front, _ = front_matter.split(text)
+    assert from_front_matter(front).published_at is None and "date" in kept_in_file(front)
+    assert changed(text, published_at=1791876318) == text

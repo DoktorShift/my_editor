@@ -70,6 +70,18 @@ class Entry:
     lines: Tuple[str, ...]
     syntax: str = YAML
 
+    def inner_entries(self) -> List["Entry"]:
+        """A TOML table's own entries ("[taxonomies]" and the keys under it);
+        none for any other entry."""
+        if self.syntax != TOML or not self.key.startswith("["):
+            return []
+        return _with_trailers_apart(_toml_entries(self.lines[1:]))
+
+    def with_inner(self, inner: Sequence["Entry"]) -> "Entry":
+        """This TOML table with ``inner`` as its entries."""
+        return Entry(self.key, (self.lines[0],) + tuple(
+            line for entry in inner for line in entry.lines), self.syntax)
+
     @property
     def written(self) -> str:
         """The value on the key's line as written, without a comment after
@@ -102,7 +114,7 @@ class Entry:
                         if part.strip()]
         if not written and rest:
             if all(line.lstrip().startswith("- ") or line.strip() == "-" for line in rest):
-                return [_unquote(line.strip()[1:].strip()) for line in rest]
+                return [_list_item(line) for line in rest]
             return None                     # a mapping or something else: unread
         if rest or written.startswith(("{", "&", "*", "!")):
             return None                     # continued over lines, or not plain YAML
@@ -302,6 +314,10 @@ def rewritten(old: Entry, value: Union[str, Sequence[str]], *, bare: bool = Fals
         return Entry(old.key, (key_part + _like(written, value, old.syntax, bare) + comment,)
                      + tuple(old.lines[1:]), old.syntax)
     items = list(value)
+    if old.syntax == TOML and written == "[" and len(old.lines) > 2 \
+            and old.lines[-1].strip().startswith("]"):
+        return Entry(old.key, (old.lines[0],) + _multi_line_list_like(old.lines[1:-1], items)
+                     + (old.lines[-1],), old.syntax)
     if written.startswith("[") and len(old.lines) == 1:
         return Entry(old.key, (key_part + _inline_list_like(written, items, old.syntax)
                                + comment,), old.syntax)
@@ -383,9 +399,24 @@ def _block_list_like(lines: Sequence[str], items: Sequence[str]) -> Tuple[str, .
     lead = re.match(r"^(\s*-\s*)", item_lines[0]).group(1) if item_lines else "  - "
     kept = {}
     for line in item_lines:
-        kept.setdefault(_unquote(line.strip()[1:].strip()), line)
+        kept.setdefault(_list_item(line), line)
     return tuple(kept.pop(item) if item in kept else lead + _quoted(item) for item in items) \
         + tuple(others)
+
+
+def _multi_line_list_like(lines: Sequence[str], items: Sequence[str]) -> Tuple[str, ...]:
+    """A TOML array over lines, one item a line, as ``lines`` wrote it:
+    each item that stays as written, a new one indented and closed like
+    the first."""
+    item_lines = [line for line in lines if line.strip() and not line.strip().startswith("#")]
+    first = item_lines[0] if item_lines else '  "",'
+    indent = first[:len(first) - len(first.lstrip())]
+    comma = "," if first.rstrip().endswith(",") else ""
+    kept = {}
+    for line in item_lines:
+        kept.setdefault(_unquote(line.strip().rstrip(",").strip()), line)
+    return tuple(kept.pop(item) if item in kept
+                 else indent + json.dumps(item, ensure_ascii=False) + comma for item in items)
 
 
 def _block_lines(lines: Sequence[str], value: str) -> Tuple[str, ...]:
@@ -404,6 +435,11 @@ def _quoted(value: str, *, in_list: bool = False) -> str:
              and not _YAML_DATE.match(value)
              and not (in_list and any(char in value for char in ",[]{}")))
     return value if plain else json.dumps(value, ensure_ascii=False)
+
+
+def _list_item(line: str) -> str:
+    """The text of a block list's item line ("  - \"#idea\"   # a note")."""
+    return _unquote(_without_comment(line.strip()[1:].strip()))
 
 
 def _block_text(lines: Sequence[str], style: str, chomping: str) -> str:

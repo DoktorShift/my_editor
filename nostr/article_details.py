@@ -217,12 +217,10 @@ def from_front_matter(front: Optional[front_matter.FrontMatter]) -> ArticleDetai
     read from the first entry under its key or another app's name for it
     that can be read fully; one that can't (a mapping) is left alone."""
     values = {}
-    for entry in front.entries if front is not None else ():
-        value = entry.value
-        for key, others in _FRONT_KEYS:
-            if (entry.key == key or entry.key in others) and key not in values \
-                    and value is not None:
-                values[key] = value
+    for key, _others in _FRONT_KEYS:
+        found = _found(front, key)
+        if found is not None:
+            values[key] = found[2].value
     def text(key: str) -> str:
         value = values.get(key, "")
         return value.strip() if isinstance(value, str) else ""
@@ -230,7 +228,12 @@ def from_front_matter(front: Optional[front_matter.FrontMatter]) -> ArticleDetai
         value = values.get(key, [])
         return value if isinstance(value, list) else [part for part in value.split(",")]
     tags = values.get("tags", [])
-    hashtags = _hashtags(tags) if isinstance(tags, list) else hashtags_from(tags)
+    if isinstance(tags, list):
+        hashtags = _hashtags(tags)
+    elif "," in tags:
+        hashtags = hashtags_from(tags)
+    else:
+        hashtags = _hashtags(tags.split())     # Jekyll's "tags: ruby jekyll"
     coauthors = []
     for written in items("coauthors"):
         person = _person(written)
@@ -253,13 +256,45 @@ def kept_in_file(front: Optional[front_matter.FrontMatter]) -> FrozenSet[str]:
     mapping, an anchor, a tag), with no entry for them it can: they stay as
     written, whatever is set here. Named as in _FRONT_KEYS."""
     kept = set()
-    for key, others in _FRONT_KEYS:
-        names = (key, *others)
-        found = [entry for entry in (front.entries if front is not None else ())
-                 if entry.key in names]
-        if found and all(entry.value is None for entry in found):
+    for key, _others in _FRONT_KEYS:
+        found = [entry for _at, _inner, entry in _candidates(front, key)]
+        if found and not any(_readable(key, entry) for entry in found):
             kept.add(key)
     return frozenset(kept)
+
+
+def _candidates(front: Optional[front_matter.FrontMatter], key: str):
+    """``(index, inner index or None, entry)`` of each entry under the
+    detail ``key``'s names, whatever their case (Hugo's "Title"); for the
+    hashtags in TOML also those in Zola's [taxonomies] table."""
+    names = {name.lower() for name in (key, *dict(_FRONT_KEYS)[key])}
+    entries = front.entries if front is not None else ()
+    for at, entry in enumerate(entries):
+        if entry.key.lower() in names:
+            yield at, None, entry
+    if key == "tags":
+        for at, entry in enumerate(entries):
+            if entry.key.strip().lower() == "[taxonomies]":
+                for inner, sub in enumerate(entry.inner_entries()):
+                    if sub.key.lower() in names:
+                        yield at, inner, sub
+
+
+def _readable(key: str, entry: front_matter.Entry) -> bool:
+    """Whether ``entry`` holds the detail ``key`` in a way read safely: a
+    date only when it is one (Eleventy's "date: Last Modified" is not)."""
+    value = entry.value
+    if value is None:
+        return False
+    if key == "date":
+        return isinstance(value, str) and (not value.strip() or _moment(value) is not None)
+    return True
+
+
+def _found(front, key: str):
+    """The first readable entry of the detail ``key`` (_candidates), or None."""
+    return next(((at, inner, entry) for at, inner, entry in _candidates(front, key)
+                 if _readable(key, entry)), None)
 
 
 def front_matter_with(details: ArticleDetails, front: Optional[front_matter.FrontMatter]
@@ -283,30 +318,38 @@ def front_matter_with(details: ArticleDetails, front: Optional[front_matter.Fron
     if not changed:
         return front
     for key in changed:
-        names = (key, *dict(_FRONT_KEYS)[key])
-        at = next((i for i, entry in enumerate(entries)
-                   if entry.key in names and entry.value is not None), None)
+        found = _found(front_matter.FrontMatter(tuple(entries), syntax=front.syntax)
+                       if front is not None else None, key)
+        at, inner, current = found if found is not None else (None, None, None)
         if not new[key]:
-            if at is not None:
+            if inner is not None:
+                rest = entries[at].inner_entries()
+                del rest[inner]
+                entries[at] = entries[at].with_inner(rest)
+            elif at is not None:
                 del entries[at]
             continue
         value = new[key]
         syntax = front.syntax if front is not None else front_matter.YAML
         bare = False
         if key == "date":
-            original = entries[at].written if at is not None else ""
+            original = current.written if current is not None else ""
             value = _date_like(details.published_at, original.strip("\"'"))
             # A date YAML and TOML read as one (a timestamp), not a text;
             # in quotes only when the file had it so.
             bare = not original.startswith(("\"", "'"))
-        if key == "tags" and at is not None and isinstance(entries[at].value, list):
+        if key == "tags" and current is not None and isinstance(current.value, list):
             # A hashtag the file has keeps its spelling there ("#idea").
-            spelled = {tag.lower(): item for item in entries[at].value
+            spelled = {tag.lower(): item for item in current.value
                        for tag in _hashtags([item])}
             value = [spelled.get(tag.lower(), tag) for tag in value]
-        written = (front_matter.rewritten(entries[at], value, bare=bare) if at is not None
+        written = (front_matter.rewritten(current, value, bare=bare) if current is not None
                    else front_matter.entry(key, value, syntax=syntax, bare=bare))
-        if at is not None:
+        if inner is not None:
+            rest = entries[at].inner_entries()
+            rest[inner] = written
+            entries[at] = entries[at].with_inner(rest)
+        elif at is not None:
             entries[at] = written
         elif front is not None:
             entries.insert(front.where_new_entries_go(entries), written)
