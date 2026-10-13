@@ -50,7 +50,7 @@ import i18n
 from i18n import _, ngettext, pgettext
 from commands import (
     EDIT, FILE, FORMAT, HELP, INSERT, NOSTR, SEARCH, VIEW, WINDOW, Command, CommandRegistry,
-    platform_keys,
+    all_key_texts, platform_keys,
 )
 from doc_walk import iter_blocks, iter_image_names, serialize_plain_with_images
 from markdown_writer import (
@@ -1292,8 +1292,11 @@ class MainWindow(QMainWindow):
         self.act_rmd_toolchain = add(Command("file.rmd_toolchain", _("R Markdown Toolchain…"),
                                              FILE),
                                      triggered=self._on_rmd_toolchain)
-        self.act_close_tab = add(Command("file.close_tab", _("Close Tab"), FILE,
-                                         QKeySequence.StandardKey.Close,
+        # Ctrl+W (Command-W) first, as Notepad, Word and every Mac app show
+        # it; the system's other Close keys (Ctrl+F4 on Windows) answer too.
+        close_keys = ("Ctrl+W",) + tuple(
+            keys for keys in all_key_texts(QKeySequence.StandardKey.Close) if keys != "Ctrl+W")
+        self.act_close_tab = add(Command("file.close_tab", _("Close Tab"), FILE, close_keys,
                                          listed_as=_("Close tab")),
                                  triggered=self._close_current_tab)
         self.act_quit = add(Command("file.quit", _("Quit"), FILE, "Ctrl+Q",

@@ -465,6 +465,14 @@ def test_the_welcome_page_says_where_publishing_lives_and_sells_no_local_colors(
 def test_close_tab_answers_every_key_the_system_binds_to_close(main_window_commands):
     # On Windows, apps with tabs close one with Ctrl+F4 as well as Ctrl+W;
     # Close Tab takes the system's own list, as the other windows' Close does.
-    keys = {k.toString() for k in main_window_commands.act_close_tab.shortcuts()}
+    # Its main key, the one menus and Keyboard Shortcuts show, stays Ctrl+W
+    # (Command-W) on every system, as in Notepad and Word (review S2: Qt's
+    # Windows list starts with Ctrl+F4, which the test platform uses).
+    action = main_window_commands.act_close_tab
+    keys = {k.toString() for k in action.shortcuts()}
     expected = {k.toString() for k in QKeySequence.keyBindings(QKeySequence.StandardKey.Close)}
     assert keys == expected and "Ctrl+W" in keys
+    assert action.shortcut() == QKeySequence("Ctrl+W")
+    listed = dict((words, keys) for _group, rows in main_window_commands.commands.shortcut_groups()
+                  for keys, words in rows)
+    assert listed["Close tab"] == "Ctrl+W"
