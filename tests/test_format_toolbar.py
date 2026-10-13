@@ -395,3 +395,35 @@ def test_the_chevron_holds_the_style_and_insert_popups_it_hides(tmp_path):
     r = run_window_script(OVERFLOW, tmp_path)
     assert r == {"menus": [1, 1], "insert": 1, "first": True, "last": True, "bold": True,
                  "wide": 0}
+
+
+@pytest.mark.parametrize("dark", [True, False])
+def test_every_popup_has_the_same_small_disclosure_arrow(toolbar, dark):
+    """Qt's own arrows drew a dot (the style pop-up) or a heavy chevron
+    (Undo, Redo, Insert) on a Mac: each pop-up shows one drawn arrow
+    instead, of one size, in the theme's quiet ink, dimmed with it."""
+    from format_toolbar import Disclosure, PopupButton
+    toolbar.set_dark(dark)
+    toolbar.window_.setCentralWidget(toolbar)
+    toolbar.window_.resize(900, 60)
+    toolbar.window_.show()
+    QApplication.processEvents()
+    buttons = [toolbar.buttons["undo"], toolbar.buttons["redo"], toolbar.insert_button,
+               toolbar.style_button]
+    sizes = set()
+    for button in buttons:
+        arrows = [c for c in button.children() if isinstance(c, Disclosure)]
+        assert len(arrows) == 1, button
+        arrow = arrows[0]
+        assert arrow.isVisible() and button.rect().contains(arrow.geometry())
+        assert arrow.geometry().right() >= button.width() - 24      # at the end
+        sizes.add(arrow.size().width())
+    assert len(sizes) == 1
+    sheet = toolbar.styleSheet()
+    assert "::menu-arrow { image: none; }" in sheet
+    assert "#InsertButton::menu-indicator { image: none;" in sheet
+    assert isinstance(toolbar.style_button, PopupButton)          # no Qt dot
+    toolbar.actions_["undo"].setEnabled(False)
+    undo_arrow = next(c for c in toolbar.buttons["undo"].children() if isinstance(c, Disclosure))
+    assert undo_arrow.ink().alphaF() < 0.5
+    toolbar.window_.hide()

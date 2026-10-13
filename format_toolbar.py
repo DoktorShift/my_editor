@@ -28,9 +28,12 @@ from __future__ import annotations
 
 from typing import Dict, Optional
 
-from PySide6.QtCore import QEvent, QSize, Qt, QTimer
-from PySide6.QtGui import QAction, QColor, QKeySequence
-from PySide6.QtWidgets import QHBoxLayout, QMenu, QPushButton, QToolBar, QToolButton, QWidget
+from PySide6.QtCore import QEvent, QPointF, QSize, Qt, QTimer
+from PySide6.QtGui import QAction, QColor, QKeySequence, QPainter, QPainterPath, QPen
+from PySide6.QtWidgets import (
+    QHBoxLayout, QMenu, QPushButton, QStyle, QStyleOptionButton, QStylePainter, QToolBar,
+    QToolButton, QWidget,
+)
 
 import format_icons
 from constants import (
@@ -103,10 +106,84 @@ def button_rules(scope: str, dark: bool) -> str:
     """
 
 
+class Disclosure(QWidget):
+    """The small arrow at the end of a button that opens a menu: the style
+    pop-up, Undo's and Redo's lists, Insert. Drawn here, one size and in
+    the theme's quiet ink everywhere, dimmed with its button: the styles'
+    own drew a dot on a Mac for the pop-up and a chevron as heavy as the
+    icons for the others (the sheets hide theirs). It lets every click
+    through to its button."""
+
+    WIDTH = 9          # the arrow's room, as small as a Mac pop-up button's
+    INK = {True: DARK_MUTED_FG, False: LIGHT_MUTED_FG}
+
+    def __init__(self, button: QWidget, *, end: int, dark: bool) -> None:
+        super().__init__(button)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._end = end              # from the button's right edge to the arrow's
+        self._dark = dark
+        button.installEventFilter(self)
+        self._fit()
+        self.show()
+
+    def set_dark(self, dark: bool) -> None:
+        self._dark = dark
+        self.update()
+
+    def ink(self) -> QColor:
+        ink = QColor(self.INK[self._dark])
+        return ink if self.parentWidget().isEnabled() else format_icons.dimmed(ink)
+
+    def _fit(self) -> None:
+        button = self.parentWidget()
+        self.setGeometry(button.width() - self._end - self.WIDTH, 0, self.WIDTH,
+                         button.height())
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802, Qt's name
+        if event.type() == QEvent.Type.Resize:
+            self._fit()
+        elif event.type() == QEvent.Type.EnabledChange:
+            self.update()
+        return False
+
+    def paintEvent(self, _event) -> None:  # noqa: N802, Qt's name
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(self.ink(), 1.4)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        middle = self.height() / 2
+        path = QPainterPath()
+        path.moveTo(QPointF(1.5, middle - 1.5))
+        path.lineTo(QPointF(self.WIDTH / 2, middle + 1.8))
+        path.lineTo(QPointF(self.WIDTH - 1.5, middle - 1.5))
+        painter.drawPath(path)
+        painter.end()
+
+
+class PopupButton(QPushButton):
+    """A pop-up button (the paragraph style's) drawn without Qt's own menu
+    indicator, which is a dot on a Mac: its Disclosure is its arrow."""
+
+    def paintEvent(self, _event) -> None:  # noqa: N802, Qt's name
+        painter = QStylePainter(self)
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        option.features &= ~QStyleOptionButton.ButtonFeature.HasMenu
+        painter.drawControl(QStyle.ControlElement.CE_PushButton, option)
+
+
+# Where the style pop-up's arrow ends, from the button's right edge, in the
+# room its padding keeps (style_popup_rules).
+STYLE_ARROW_END = 9
+
+
 def style_popup_rules(dark: bool) -> str:
     """The paragraph style pop-up's own sheet: it reads left to right, its
-    name first and the arrow at the end, as in TextEdit and Pages. (A
-    ::menu-indicator rule would make Qt drop the padding.)"""
+    name first and the arrow (a Disclosure) at the end, as in TextEdit and
+    Pages. (A ::menu-indicator rule would make Qt drop the padding: the
+    PopupButton leaves Qt's indicator out instead.)"""
     text, border, selection = ((DARK_FG, DARK_BORDER, DARK_SELECTION) if dark
                                else (LIGHT_FG, LIGHT_BORDER, LIGHT_SELECTION))
     hover = "rgba(255, 255, 255, 0.08)" if dark else "rgba(0, 0, 0, 0.06)"
@@ -176,7 +253,7 @@ class FormatToolbar(QToolBar):
         self.addSeparator()
 
         # The paragraph style, as a pop-up button that says which it is.
-        self.style_button = QPushButton(self)
+        self.style_button = PopupButton(self)
         self.style_button.setObjectName("StyleButton")
         self._style_menu = style_menu        # the window's; kept while the bar uses it
         self.style_button.setMenu(style_menu)
@@ -224,6 +301,11 @@ class FormatToolbar(QToolBar):
                 more.menu().aboutToShow.connect(lambda m=more.menu(): QTimer.singleShot(
                     0, lambda: self._hold_hidden_popups(m)))
         self.set_style_name(_("Body"))
+        # Each pop-up's arrow, drawn (Disclosure): in the room the sheet
+        # gives Undo's, Redo's and Insert's menu, and the style pop-up's.
+        self._arrows = [Disclosure(button, end=2, dark=dark) for button in (
+            self.buttons["undo"], self.buttons["redo"], self.insert_button)]
+        self._arrows.append(Disclosure(self.style_button, end=STYLE_ARROW_END, dark=dark))
         self.set_dark(dark)
 
     def minimumSizeHint(self) -> QSize:  # noqa: N802, Qt's name
@@ -324,15 +406,13 @@ class FormatToolbar(QToolBar):
             #FormatToolbar QToolButton[popupMode="1"],
             #FormatToolbar #InsertButton {{ padding-right: 13px; }}
             #FormatToolbar #qt_toolbar_ext_button {{ padding: 1px; }}
-            #FormatToolbar #InsertButton::menu-indicator {{
-                subcontrol-origin: padding;
-                subcontrol-position: center right;
-            }}
+            #FormatToolbar #InsertButton::menu-indicator {{ image: none; width: 0px; }}
             #FormatToolbar QToolButton::menu-button {{
                 background: transparent;
                 border: none;
                 width: 12px;
             }}
+            #FormatToolbar QToolButton::menu-arrow {{ image: none; }}
             #FormatToolbar QToolButton::menu-button:hover {{
                 background: {hover};
                 border-radius: 4px;
@@ -344,6 +424,8 @@ class FormatToolbar(QToolBar):
             }}
         """)
         self.style_button.setStyleSheet(style_popup_rules(dark))
+        for arrow in self._arrows:
+            arrow.set_dark(dark)
         self._style_trailing()
 
     @staticmethod

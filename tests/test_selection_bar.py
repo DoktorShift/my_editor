@@ -481,3 +481,11 @@ def test_the_bar_in_the_window(tmp_path):
     assert r["default"] is True
     assert r["off"] == [False, False] and r["off_shows"] is False
     assert r["remembered"] is False
+
+
+def test_the_style_popup_has_the_toolbar_disclosure_arrow(w):
+    from format_toolbar import Disclosure, PopupButton
+    w.double_click(word_at(TEXT, "Another", 5) + 2)
+    arrows = [c for c in w.bar.style_button.children() if isinstance(c, Disclosure)]
+    assert len(arrows) == 1 and arrows[0].isVisible()
+    assert isinstance(w.bar.style_button, PopupButton)          # no Qt dot

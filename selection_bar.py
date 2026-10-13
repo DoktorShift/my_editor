@@ -37,12 +37,15 @@ from typing import Callable, Dict
 from PySide6.QtCore import QEvent, QRect, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QTextCursor
 from PySide6.QtWidgets import (
-    QApplication, QFrame, QHBoxLayout, QMenu, QPushButton, QToolButton,
+    QApplication, QFrame, QHBoxLayout, QMenu, QToolButton,
 )
 
 import format_icons
 from constants import DARK_BORDER, DARK_MENU_BG, LIGHT_BORDER, LIGHT_MENU_BG
-from format_toolbar import FormatToolbar, button_rules, draw_icons, style_popup_rules
+from format_toolbar import (
+    STYLE_ARROW_END, Disclosure, FormatToolbar, PopupButton, button_rules, draw_icons,
+    style_popup_rules,
+)
 from i18n import _, pgettext
 from popup_placement import place_above
 
@@ -87,7 +90,7 @@ class SelectionBar(QFrame):
         row = QHBoxLayout(self)
         row.setContentsMargins(4, 3, 4, 3)
         row.setSpacing(2)
-        self.style_button = QPushButton(self)
+        self.style_button = PopupButton(self)
         self.style_button.setMenu(style_menu)
         self.style_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.style_button.setAccessibleName(_("Style"))
@@ -96,6 +99,7 @@ class SelectionBar(QFrame):
         width = max(self.fontMetrics().horizontalAdvance(n) for n in names)
         self.style_button.setMinimumWidth(width + 40)
         row.addWidget(self.style_button)
+        self._arrow = Disclosure(self.style_button, end=STYLE_ARROW_END, dark=False)
         self.buttons: Dict[str, QToolButton] = {}
         for name in BUTTONS:
             if name in ("bold", "link"):
@@ -146,6 +150,7 @@ class SelectionBar(QFrame):
             {button_rules("#SelectionBar", dark)}
         """)
         self.style_button.setStyleSheet(style_popup_rules(dark))
+        self._arrow.set_dark(dark)
 
     # -- showing -------------------------------------------------------------------
 

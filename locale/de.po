@@ -37,14 +37,14 @@ msgid "Cancel"
 msgstr "Abbrechen"
 
 #: commands.py:47
-#: format_toolbar.py:170
+#: format_toolbar.py:247
 #: main_window.py:1766
 #: nostr/ui/imports_window.py:1035
 msgid "Undo"
 msgstr "Widerrufen"
 
 #: commands.py:54
-#: format_toolbar.py:170
+#: format_toolbar.py:247
 #: main_window.py:1768
 msgid "Redo"
 msgstr "Wiederholen"
@@ -144,9 +144,9 @@ msgid "Decrease Indent"
 msgstr "Einzug verkleinern"
 
 #: editor.py:227
-#: editor.py:2301
+#: editor.py:2367
 #: editor.py:1684
-#: editor.py:2288
+#: editor.py:2354
 #: main_window.py:1774
 msgid "Paste"
 msgstr "Einsetzen"
@@ -190,63 +190,63 @@ msgid "Footnote"
 msgstr "Fußnote"
 
 #: editor.py:1636
-#: editor.py:1841
+#: editor.py:1856
 #: main_window.py:1899
 msgid "Divider"
 msgstr "Trennlinie"
 
-#: editor.py:2064
+#: editor.py:2130
 #: main_window.py:2434
 msgid "Table"
 msgstr "Tabelle"
 
-#: editor.py:2085
+#: editor.py:2151
 #: main_window.py:1949
 msgid "Add Row Above"
 msgstr "Zeile oberhalb hinzufügen"
 
-#: editor.py:2085
+#: editor.py:2151
 #: main_window.py:1949
 msgid "Add Row Below"
 msgstr "Zeile unterhalb hinzufügen"
 
-#: editor.py:2086
+#: editor.py:2152
 #: main_window.py:1950
 msgid "Add Column Before"
 msgstr "Spalte davor hinzufügen"
 
-#: editor.py:2087
+#: editor.py:2153
 #: main_window.py:1951
 msgid "Add Column After"
 msgstr "Spalte danach hinzufügen"
 
-#: editor.py:2088
+#: editor.py:2154
 #: main_window.py:1952
 msgid "Delete Row"
 msgstr "Zeile löschen"
 
-#: editor.py:2088
+#: editor.py:2154
 #: main_window.py:1952
 msgid "Delete Column"
 msgstr "Spalte löschen"
 
-#: editor.py:2089
+#: editor.py:2155
 #: main_window.py:1953
 msgid "Delete Table"
 msgstr "Tabelle löschen"
 
-#: editor.py:2213
-#: editor.py:1840
+#: editor.py:2279
+#: editor.py:1855
 #: main_window.py:1906
 msgid "Code Block"
 msgstr "Codeblock"
 
-#: editor.py:2221
+#: editor.py:2287
 #: main_window.py:2429
 msgid "Code Language"
 msgstr "Code-Sprache"
 
-#: editor.py:2291
+#: editor.py:2357
 #: editor.py:1682
 #: main_window.py:1770
 msgid "Cut"
@@ -285,15 +285,15 @@ msgstr "{title}, {position} von {count}"
 msgid "Copy"
 msgstr "Kopieren"
 
-#: editor.py:2289
+#: editor.py:2355
 #: main_window.py:3105
 #: main_window.py:3193
 msgid "Drag"
 msgstr "Ziehen"
 
 #: editor.py:348
-#: editor.py:1935
-#: editor.py:1866
+#: editor.py:1950
+#: editor.py:1881
 msgid "Typing"
 msgstr "Tippen"
 
@@ -353,40 +353,40 @@ msgstr "[Bild nicht verfügbar]"
 msgid "Page {number} of {count}"
 msgstr "Seite {number} von {count}"
 
-#: format_toolbar.py:54
+#: format_toolbar.py:57
 msgctxt "format button"
 msgid "B"
 msgstr "F"
 
-#: format_toolbar.py:55
+#: format_toolbar.py:58
 msgctxt "format button"
 msgid "I"
 msgstr "K"
 
-#: format_toolbar.py:59
+#: format_toolbar.py:62
 msgctxt "format button"
 msgid "S"
 msgstr "S"
 
-#: format_toolbar.py:145
-#: format_toolbar.py:147
-#: selection_bar.py:73
+#: format_toolbar.py:222
+#: format_toolbar.py:224
+#: selection_bar.py:76
 msgid "Format"
 msgstr "Format"
 
-#: format_toolbar.py:183
+#: format_toolbar.py:260
 #: main_window.py:2405
-#: selection_bar.py:93
+#: selection_bar.py:96
 msgid "Style"
 msgstr "Stil"
 
-#: format_toolbar.py:184
-#: selection_bar.py:94
+#: format_toolbar.py:261
+#: selection_bar.py:97
 msgid "Paragraph style"
 msgstr "Absatzstil"
 
-#: format_toolbar.py:211
-#: format_toolbar.py:212
+#: format_toolbar.py:288
+#: format_toolbar.py:289
 #: slash_menu.py:164
 #: slash_menu.py:172
 #: nostr/ui/media_library_dialog.py:1233
@@ -394,28 +394,28 @@ msgstr "Absatzstil"
 msgid "Insert"
 msgstr "Einfügen"
 
-#: format_toolbar.py:226
+#: format_toolbar.py:303
 #: main_window.py:1837
-#: selection_bar.py:113
+#: selection_bar.py:117
 msgid "Body"
 msgstr "Text"
 
-#: format_toolbar.py:135
+#: format_toolbar.py:212
 #: pdf_viewer.py:178
 #, python-brace-format
 msgid "{command} ({keys})"
 msgstr "{command} ({keys})"
 
-#: format_toolbar.py:185
+#: format_toolbar.py:262
 #: main_window.py:5083
 #: main_window.py:1684
-#: selection_bar.py:95
+#: selection_bar.py:98
 msgctxt "paragraph style"
 msgid "Mixed"
 msgstr "Gemischt"
 
-#: format_toolbar.py:220
-#: format_toolbar.py:221
+#: format_toolbar.py:297
+#: format_toolbar.py:298
 msgid "More Formatting"
 msgstr "Weitere Formatierungen"
 
