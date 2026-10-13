@@ -677,3 +677,13 @@ def test_a_sheet_on_the_smallest_window_scrolls_and_keeps_its_buttons(
         window.close()
     finally:
         i18n.install(i18n.ENGLISH)
+
+
+def test_the_app_calls_its_publish_windows_sheets():
+    """Review round 2: a few places still spoke of a publish dialog."""
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent
+    named = [str(path.relative_to(root)) for path in root.rglob("*.py")
+             if not {".venv", "tests", "site", ".claude"} & set(path.relative_to(root).parts)
+             and "publish dialog" in path.read_text(encoding="utf-8").lower()]
+    assert named == []

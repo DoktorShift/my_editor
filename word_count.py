@@ -3,7 +3,7 @@
 """How many words a text has, and how long it takes to read.
 
 One rule for every place that counts (the status bar, the preview, the
-publish dialog), so they never disagree: a word is a run of characters
+publish sheet), so they never disagree: a word is a run of characters
 between spaces that holds at least one letter or digit. A web address or
 a Nostr link is one word; Markdown marks standing alone ("-", "#", ">")
 and footnote marks ("[^1]") are none.

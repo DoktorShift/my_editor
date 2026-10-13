@@ -7544,7 +7544,7 @@ class MainWindow(QMainWindow):
     def _on_panel_publish_draft(self, identifier: str) -> None:
         """Promote a draft to a real (signed, public) Nostr publish.
 
-        Routes through the existing publish dialogs. The simplest path:
+        Routes through the existing publish sheets. The simplest path:
         open the draft into a tab (so all current-tab-reading plumbing
         keeps working) then trigger the appropriate publish action.
         """
