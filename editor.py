@@ -20,7 +20,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import (
     QPainter, QTextBlockFormat, QTextCursor, QTextCharFormat, QColor, QClipboard, QPen,
     QTextOption, QImage, QPixmap, QTextDocument, QTextDocumentFragment, QTextFormat,
-    QDesktopServices,
+    QDesktopServices, QKeyEvent,
 )
 from PySide6.QtWidgets import QTextEdit, QMenu, QApplication, QToolTip, QWidget
 from constants import (
@@ -1767,6 +1767,21 @@ class HtmlEditor(QTextEdit):
             self.redo()
             return
 
+        reach = self._deletion_reach(e)
+        if reach is not None:
+            cursor = self.textCursor()
+            backward = e.key() == Qt.Key_Backspace
+            if cursor.hasSelection() or (cursor.atBlockStart() if backward
+                                         else cursor.atBlockEnd()):
+                # With words selected, or at a paragraph's edge, it does
+                # what Backspace or Delete does there (out of a list, a
+                # divider taken away, two paragraphs joined).
+                e = QKeyEvent(e.type(), e.key(), Qt.KeyboardModifier.NoModifier, e.text())
+            else:
+                self._delete_reach(BACKWARD if backward else FORWARD, reach)
+                self.ensureCursorVisible()
+                return
+
         if self._keep_media_apart(e):
             self.ensureCursorVisible()
             return
@@ -1934,6 +1949,57 @@ class HtmlEditor(QTextEdit):
             if self.document().availableUndoSteps() != before:
                 self._name_step(before, N_("Typing"))
         self.ensureCursorVisible()
+
+    # -------- Deleting a word or to the end of the line --------
+    @staticmethod
+    def _deletion_reach(e) -> Optional[str]:
+        """"word" or "line" when ``e`` deletes that far, as the platform's
+        text fields do: Option-Delete and Fn-Option-Delete a word on a Mac,
+        Command-Delete and Fn-Command-Delete to the line's start or end;
+        Ctrl+Backspace and Ctrl+Delete a word on Windows and Linux. Else
+        None."""
+        if e.key() not in (Qt.Key_Backspace, Qt.Key_Delete):
+            return None
+        modifiers = e.modifiers() & ~Qt.KeypadModifier
+        mac = sys.platform == "darwin"
+        if modifiers == (Qt.AltModifier if mac else Qt.ControlModifier):
+            return "word"
+        if mac and modifiers == Qt.ControlModifier:          # Command
+            return "line"
+        return None
+
+    def _delete_reach(self, kind: str, reach: str) -> None:
+        """Delete a word or to the line's edge before the caret (``kind``
+        BACKWARD) or after it (FORWARD), in the run of deleting. A mention
+        it reaches into goes whole."""
+        with self._typing(kind) as cursor:
+            keep = QTextCursor.MoveMode.KeepAnchor
+            if reach == "line":
+                cursor.movePosition(QTextCursor.MoveOperation.StartOfLine if kind == BACKWARD
+                                    else QTextCursor.MoveOperation.EndOfLine, keep)
+            elif kind == BACKWARD:
+                cursor.movePosition(QTextCursor.MoveOperation.PreviousWord, keep)
+            elif sys.platform == "darwin":
+                # To the end of the word, as on a Mac (from a word's end,
+                # the next word's).
+                start = cursor.position()
+                cursor.movePosition(QTextCursor.MoveOperation.EndOfWord, keep)
+                if cursor.position() == start:
+                    cursor.movePosition(QTextCursor.MoveOperation.NextWord, keep)
+                    cursor.movePosition(QTextCursor.MoveOperation.EndOfWord, keep)
+            else:
+                # To the start of the next word, as on Windows and Linux.
+                cursor.movePosition(QTextCursor.MoveOperation.NextWord, keep)
+            low, high = cursor.selectionStart(), cursor.selectionEnd()
+            for at in (low, high):
+                probe = QTextCursor(self.document())
+                probe.setPosition(at)
+                mention = rich_text.mention_at(probe) if self._holds_structure() else None
+                if mention is not None and mention[0] < at < mention[1]:
+                    low, high = min(low, mention[0]), max(high, mention[1])
+            cursor.setPosition(low)
+            cursor.setPosition(high, keep)
+            cursor.removeSelectedText()
 
     # -------- Keys inside Markdown structure --------
     def _structure_key(self, e) -> bool:

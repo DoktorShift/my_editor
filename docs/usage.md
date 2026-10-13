@@ -85,6 +85,8 @@ The `Edit` menu has what every Mac app has there, in the same order:
 | `Ctrl+X` / `Ctrl+C` / `Ctrl+V` | Cut / Copy / Paste |
 | `Ctrl+Alt+Shift+V` (`Ctrl+Shift+V` on Windows and Linux) | Paste and Match Style: paste as plain text in the style around it |
 | `Ctrl+A` | Select All |
+| `Option+Delete` / `Fn+Option+Delete` on macOS (`Ctrl+Backspace` / `Ctrl+Delete` on Windows and Linux) | Delete the word before / after the caret, in lists, quotes, code and tables too; a mention goes whole |
+| `Cmd+Delete` / `Fn+Cmd+Delete` on macOS | Delete to the start / end of the line |
 
 Cut, Copy, Paste and Select All act on whatever has the focus: the document, the find field, or the PDF reader.
 
