@@ -208,13 +208,16 @@ def test_save_as_into_a_folder_that_cannot_be_written_says_so_and_the_next_save_
 # A disk that fills
 # --------------------------------------------------------------------------- #
 
+_REAL_FDOPEN = os.fdopen
+
+
 class _FillingFile:
     """A part file on a disk that fills: the last bytes, written when the
     file is flushed and closed, don't fit."""
 
-    def __init__(self, path, mode):
+    def __init__(self, fd, mode):
         assert mode == "wb"
-        self._file = open(path, "wb")
+        self._file = _REAL_FDOPEN(fd, "wb")
 
     def write(self, data):
         return self._file.write(data)
@@ -240,7 +243,7 @@ def test_a_disk_that_fills_at_the_end_ends_the_save_and_leaves_nothing(
         tmp_path, monkeypatch, server):
     big = blob(server, os.urandom(3 * 1024 * 1024))
     world = library(tmp_path, monkeypatch, [big], names={big.hash: "Big.mp4"})
-    monkeypatch.setattr(thumbnail_loader, "open", _FillingFile, raising=False)
+    monkeypatch.setattr(thumbnail_loader.os, "fdopen", _FillingFile)
     out = tmp_path / "out"
     out.mkdir()
     save_as(monkeypatch, world, big, out / "Big.mp4")
@@ -355,7 +358,8 @@ def test_a_window_saving_on_its_own_stops_the_save_when_it_closes_and_leaves_not
     out.mkdir()
     save_as(monkeypatch, world, big, out / "Big.mp4")
     assert wait_for(lambda: world.dialog._save_bar.value() > 0, 10)
-    assert folder(out) == [".Big.mp4.part"]
+    [part] = folder(out)
+    assert part.startswith(".") and part.endswith(".part")
     world.dialog.close()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     wait_for(lambda: False, 0.3)
@@ -535,3 +539,40 @@ def test_the_saver_names_every_save_quitting_would_stop(tmp_path, monkeypatch, s
     assert saver.pending() == [str(out / "One.mp4"), str(out / "Two.mp4")]
     saver.cancel()
     assert saver.pending() == []
+
+
+# --------------------------------------------------------------------------- #
+# The part file
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.skipif(not hasattr(os, "symlink") or sys.platform == "win32",
+                    reason="links need privileges on Windows")
+def test_the_part_file_never_follows_a_link_already_there(tmp_path, monkeypatch, server):
+    """It is a new file of its own: a link someone left in a shared folder
+    under the name it once had leads nowhere."""
+    body = b"downloaded" * 100
+    media = blob(server, body)
+    world = library(tmp_path, monkeypatch, [media], names={media.hash: "Pic.mp4"})
+    out = tmp_path / "out"
+    out.mkdir()
+    victim = tmp_path / "victim.txt"
+    victim.write_bytes(b"mine")
+    os.symlink(victim, out / ".Pic.mp4.part")
+    save_as(monkeypatch, world, media, out / "Pic.mp4")
+    assert wait_for(lambda: not saving(world), 5)
+    assert victim.read_bytes() == b"mine"
+    assert os.path.islink(out / ".Pic.mp4.part")
+    assert (out / "Pic.mp4").read_bytes() == body
+
+
+def test_the_part_file_leaves_a_file_of_its_old_name_alone(tmp_path, monkeypatch, server):
+    body = b"downloaded" * 100
+    media = blob(server, body)
+    world = library(tmp_path, monkeypatch, [media], names={media.hash: "Pic.mp4"})
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / ".Pic.mp4.part").write_bytes(b"someone else's")
+    save_as(monkeypatch, world, media, out / "Pic.mp4")
+    assert wait_for(lambda: not saving(world), 5)
+    assert (out / ".Pic.mp4.part").read_bytes() == b"someone else's"
+    assert folder(out) == [".Pic.mp4.part", "Pic.mp4"]

@@ -148,6 +148,23 @@ def save_document(path: PathLike, data: bytes) -> None:
     _sync_folder(folder)
 
 
+def new_document_file(path: PathLike, *, suffix: str = ".tmp") -> Tuple[int, str]:
+    """A new, empty hidden file in the folder of ``path``, to write one of
+    the person's files into before it takes its name: ``(fd, path)``.
+
+    Its name is unique and short, so a name of any length the folder
+    holds still has room, and it is created new (never a file or a link
+    already there, whoever left it), with the permissions any new file
+    gets on this system. Raises OSError."""
+    folder = os.path.dirname(os.path.abspath(os.fspath(path)))
+    fd, temporary = tempfile.mkstemp(prefix=".", suffix=suffix, dir=folder)
+    try:
+        os.chmod(temporary, _NEW_FILE_MODE)
+    except OSError:
+        pass
+    return fd, temporary
+
+
 def free_path(path: PathLike, taken=()) -> str:
     """``path``, or the first of "name 2.ext", "name 3.ext" and on (as the
     Finder numbers a copy) that is neither on the disk nor in ``taken``:

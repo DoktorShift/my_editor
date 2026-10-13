@@ -30,7 +30,7 @@ from PySide6.QtGui import QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
 import url_safety
-from atomic_file import free_path, write_bytes
+from atomic_file import free_path, new_document_file, write_bytes
 from i18n import _
 from image_safety import decode_image_bytes
 
@@ -403,7 +403,8 @@ class FileDownload(QObject):
         self._nam, self._url, self._sha = nam, url, (sha256 or "").lower()
         self._target = Path(target)
         self._keep_existing = keep_existing
-        self._part = self._target.with_name(f".{self._target.name}.part")
+        # The hidden file it is written to, beside the target.
+        self._part: Optional[Path] = None
         self._limit = size if size > 0 else _UNKNOWN_SIZE_LIMIT
         self._transform = transform
         self._hash = hashlib.sha256()
@@ -422,7 +423,9 @@ class FileDownload(QObject):
             problem = "unsafe"
         else:
             try:
-                self._file = open(self._part, "wb")
+                fd, part = new_document_file(self._target, suffix=".part")
+                self._part = Path(part)
+                self._file = os.fdopen(fd, "wb")
             except OSError as exc:
                 problem = write_problem(exc)
         if problem:
@@ -513,7 +516,8 @@ class FileDownload(QObject):
             said = write_problem(exc)
         finally:
             try:
-                self._part.unlink()
+                if self._part is not None:
+                    self._part.unlink()
             except OSError:
                 pass
             self.finished.emit(said)
