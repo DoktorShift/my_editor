@@ -128,9 +128,10 @@ def join(front: Optional[FrontMatter], body: str) -> str:
         return body
     nl = front.newline
     lines = [line for entry in front.entries for line in entry.lines]
-    gap = front.gap if front.gap else nl
+    # The blank lines after it as they were: none when the text began
+    # right under it.
     return (front.opening + nl + nl.join(lines) + (nl if lines else "") + front.closing
-            + nl + gap.replace("\r\n", "\n").replace("\n", nl) + body.lstrip("\n"))
+            + nl + front.gap.replace("\r\n", "\n").replace("\n", nl) + body.lstrip("\n"))
 
 
 def entry(key: str, value: Union[str, Sequence[str]]) -> Entry:

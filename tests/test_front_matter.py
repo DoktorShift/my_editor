@@ -45,6 +45,7 @@ HUGO = ('---\ntitle: "My post"\ndate: 2024-03-01T00:30:00+01:00\ncover:\n'
 JEKYLL = ("---\nlayout: post   # Jekyll's\ntitle: Hi\ndescription: >-\n  A long description\n"
           "  over two lines.\nimage:\n  path: /assets/a.png\n  alt: An image\n---\n\nBody text.\n")
 CRLF_BOM = "﻿---\r\ntitle: Hello\r\nlayout: post\r\n---\r\n\r\nBody text.\r\n"
+NO_GAP = "---\ntitle: Hello\n---\nBody text right under it.\n"
 DIVIDER = "---\n\nThe first section of my essay.\n\n---\n\nThe second section.\n"
 
 
@@ -58,7 +59,7 @@ def unchanged_save(text: str) -> str:
     return front_matter.join(front_matter_with(from_front_matter(front), front), body)
 
 
-@pytest.mark.parametrize("text", [HUGO, JEKYLL, CRLF_BOM])
+@pytest.mark.parametrize("text", [HUGO, JEKYLL, CRLF_BOM, NO_GAP])
 def test_a_file_saved_with_no_detail_changed_keeps_its_front_matter_byte_for_byte(text):
     assert unchanged_save(text) == text
 
