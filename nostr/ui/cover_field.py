@@ -24,7 +24,7 @@ from typing import Callable, Optional
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
-    QBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget,
+    QBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget,
 )
 
 from i18n import _
@@ -92,7 +92,10 @@ class CoverImageField(QWidget):
         label.setObjectName("article_field_label")
         label.setBuddy(self.url_edit)
         controls.addWidget(label)
-        input_row = QHBoxLayout()
+        # Beside the address in a dialog; in a narrow inspector under it, as
+        # Pages stacks its controls, so the address keeps the full width.
+        input_row = QBoxLayout(QBoxLayout.Direction.TopToBottom if stacked
+                               else QBoxLayout.Direction.LeftToRight)
         input_row.setContentsMargins(0, 0, 0, 0)
         input_row.setSpacing(6)
         input_row.addWidget(self.url_edit, 1)
@@ -101,7 +104,8 @@ class CoverImageField(QWidget):
             self.pick_button = QPushButton(_("Choose or upload…"))
             self.pick_button.setAutoDefault(False)
             self.pick_button.clicked.connect(self.choose)
-            input_row.addWidget(self.pick_button)
+            input_row.addWidget(self.pick_button, 0,
+                                Qt.AlignmentFlag.AlignLeft if stacked else Qt.AlignmentFlag(0))
         controls.addLayout(input_row)
         hint = QLabel(_("Pictures you pick are uploaded to your media servers.")
                       if media_store is not None

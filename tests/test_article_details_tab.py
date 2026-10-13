@@ -228,3 +228,73 @@ def test_a_restart_and_a_crash_keep_a_files_front_matter_as_written():
     workspace_restore.restore_identity(again, None, None, "", None, identity["front_matter"],
                                        draft_type=dict)
     assert again._front_matter == entries
+
+
+FIT_SCRIPT = r"""
+import json, os, sys, types
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtWidgets import QApplication, QWidget
+app = QApplication(sys.argv[:1])
+import i18n
+i18n.install("de")
+import main_window
+from nostr.known_people import Person
+
+w = main_window.MainWindow()
+w.resize(1024, 640)
+w.show()
+w.nostr_state._active = True
+w._update_nostr_commands()
+w._profile_store.default = lambda: types.SimpleNamespace(
+    user_pubkey="a1" * 32, display_name="Me", npub_short=lambda: "npub1me")
+ed = w.new_tab()
+w.act_article_details.setChecked(True)
+app.processEvents()
+panel = w._article_details_panel
+panel._add_coauthor(Person(pubkey="b2" * 32, display_name="Bob"))
+app.processEvents()
+r = {}
+for width in (260, 300):
+    sizes = w._central_splitter.sizes()
+    index = w._central_splitter.indexOf(panel)
+    sizes[0] += sizes[index] - width
+    sizes[index] = width
+    w._central_splitter.setSizes(sizes)
+    app.processEvents()
+    cover = panel.cover
+    body = panel.findChild(QWidget, "article_details_body")
+    scroll = panel.findChild(QWidget, "article_details_scroll")
+    parts = [child for child in cover.findChildren(QWidget) if child.isVisible()]
+    overlaps = [(a.objectName() or type(a).__name__, b.objectName() or type(b).__name__)
+                for i, a in enumerate(parts) for b in parts[i + 1:]
+                if a.geometry().translated(a.parentWidget().mapTo(cover, a.pos()) - a.pos())
+                   .intersects(b.geometry().translated(b.parentWidget().mapTo(cover, b.pos()) - b.pos()))]
+    r[width] = {
+        "panel": panel.width(),
+        "with store": cover.pick_button is not None,
+        "field": cover.url_edit.width(),
+        "button": cover.pick_button.width() >= cover.pick_button.sizeHint().width(),
+        "cover fits": cover.height() >= cover.heightForWidth(cover.width()),
+        "body fits": body.height() >= body.layout().heightForWidth(body.width()),
+        "scrolls": scroll.verticalScrollBar().isVisible(),
+        "overlaps": overlaps,
+    }
+ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_article_details_fits_in_german_and_scrolls_in_a_small_window(tmp_path):
+    """Review M5: at its narrowest, in German, with the media library (the
+    Choose or upload button), nothing is cut or squeezed over another
+    control; in a window of 1024x640 the details scroll."""
+    from tests.app_process import run_window_script
+    r = run_window_script(FIT_SCRIPT, tmp_path)
+    for width in ("260", "300"):
+        shown = r[width]
+        assert shown["panel"] == int(width) and shown["with store"] is True
+        assert shown["field"] >= 180                      # an address can be read
+        assert shown["button"] and shown["cover fits"] and shown["body fits"]
+        assert shown["scrolls"] is True and shown["overlaps"] == []
