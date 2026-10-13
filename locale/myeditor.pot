@@ -18,12 +18,12 @@ msgstr ""
 
 #: alerts.py:199
 #: alerts.py:206
-#: nostr/ui/publish_article_dialog.py:510
+#: nostr/ui/publish_article_dialog.py:520
 msgid "Show Details"
 msgstr ""
 
 #: alerts.py:206
-#: nostr/ui/publish_article_dialog.py:510
+#: nostr/ui/publish_article_dialog.py:520
 msgid "Hide Details"
 msgstr ""
 
@@ -3949,8 +3949,8 @@ msgid "relay must be ws:// or wss://, got {relay}"
 msgstr ""
 
 #: nostr/deletion.py:242
-#: nostr/publisher.py:1037
-#: nostr/publisher.py:1082
+#: nostr/publisher.py:1053
+#: nostr/publisher.py:1098
 msgid "Waiting for your signer app. Approve the deletion there…"
 msgstr ""
 
@@ -3978,9 +3978,9 @@ msgid "Your signer app did not answer"
 msgstr ""
 
 #: nostr/draft_sync.py:206
-#: nostr/publisher.py:779
-#: nostr/publisher.py:797
-#: nostr/publisher.py:993
+#: nostr/publisher.py:795
+#: nostr/publisher.py:813
+#: nostr/publisher.py:1009
 msgid "Looking up your relay list…"
 msgstr ""
 
@@ -3991,7 +3991,7 @@ msgstr ""
 #: nostr/draft_sync.py:398
 #: nostr/draft_sync.py:358
 #: nostr/publish_pipeline.py:153
-#: nostr/publisher.py:822
+#: nostr/publisher.py:838
 msgid "Connecting to your signer app…"
 msgstr ""
 
@@ -4218,7 +4218,7 @@ msgstr ""
 
 #: nostr/preview.py:470
 #: nostr/ui/drafts_preview.py:523
-#: nostr/ui/publish_article_dialog.py:556
+#: nostr/ui/publish_article_dialog.py:565
 #, python-brace-format
 msgid "{n} min read"
 msgid_plural "{n} min read"
@@ -4246,7 +4246,7 @@ msgid "Your profile wasn’t changed. Try again in a moment."
 msgstr ""
 
 #: nostr/publish_pipeline.py:177
-#: nostr/publisher.py:884
+#: nostr/publisher.py:900
 msgid "Waiting for your signer app. Approve the request there…"
 msgstr ""
 
@@ -4269,92 +4269,92 @@ msgstr ""
 msgid "Your signer app didn’t sign the request."
 msgstr ""
 
-#: nostr/publisher.py:84
+#: nostr/publisher.py:85
 msgid "unknown error"
 msgstr ""
 
-#: nostr/publisher.py:851
+#: nostr/publisher.py:867
 msgid "Encrypting the draft. Approve the request in your signer app if it asks…"
 msgstr ""
 
-#: nostr/publisher.py:1283
+#: nostr/publisher.py:1299
 msgid "no relay accepted the deletion"
 msgstr ""
 
-#: nostr/publisher.py:666
+#: nostr/publisher.py:682
 #, python-brace-format
 msgid "Accepted by {url}. Waiting for the rest…"
 msgstr ""
 
-#: nostr/publisher.py:669
+#: nostr/publisher.py:685
 #, python-brace-format
 msgid "Published. {accepted}/{total} relay accepted."
 msgid_plural "Published. {accepted}/{total} relays accepted."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/publisher.py:1075
+#: nostr/publisher.py:1091
 msgid "This draft can’t be deleted: its link name holds a secret key, and the version on your relays isn’t known here. Refresh your drafts and try again."
 msgstr ""
 
-#: nostr/publisher.py:903
+#: nostr/publisher.py:919
 #, python-brace-format
 msgid "Publishing draft to {n} relay…"
 msgid_plural "Publishing draft to {n} relays…"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/publisher.py:914
+#: nostr/publisher.py:930
 #, python-brace-format
 msgid "Draft saved to {accepted}/{total} relay."
 msgid_plural "Draft saved to {accepted}/{total} relays."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/publisher.py:1092
+#: nostr/publisher.py:1108
 #, python-brace-format
 msgid "Removing draft from {n} relay…"
 msgid_plural "Removing draft from {n} relays…"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/publisher.py:1106
+#: nostr/publisher.py:1122
 #, python-brace-format
 msgid "Draft removed on {accepted}/{total} relay."
 msgid_plural "Draft removed on {accepted}/{total} relays."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/publisher.py:1281
+#: nostr/publisher.py:1297
 #, python-brace-format
 msgid "no relay accepted the deletion ({reasons})"
 msgstr ""
 
-#: nostr/publisher.py:844
+#: nostr/publisher.py:860
 #, python-brace-format
 msgid "Draft is too large to encrypt ({size} of {limit} bytes). Split it across smaller drafts or publish directly."
 msgstr ""
 
-#: nostr/publisher.py:835
+#: nostr/publisher.py:851
 #, python-brace-format
 msgid "Could not serialize draft: {reason}"
 msgstr ""
 
-#: nostr/publisher.py:880
+#: nostr/publisher.py:896
 #, python-brace-format
 msgid "Couldn’t prepare the draft: {reason}"
 msgstr ""
 
-#: nostr/publisher.py:857
+#: nostr/publisher.py:873
 #, python-brace-format
 msgid "Could not encrypt draft: {reason}"
 msgstr ""
 
-#: nostr/refs.py:260
+#: nostr/refs.py:287
 msgid "It contains a secret key, and MyEditor never signs anything with a secret key in it. Remove the key and try again."
 msgstr ""
 
-#: nostr/refs.py:262
+#: nostr/refs.py:289
 msgid "Its text is too long or too deeply nested to check for a secret key, so MyEditor doesn't sign it."
 msgstr ""
 
@@ -5869,29 +5869,29 @@ msgid "Close Article Details"
 msgstr ""
 
 #: nostr/ui/article_details_panel.py:175
-#: nostr/ui/publish_article_dialog.py:381
+#: nostr/ui/publish_article_dialog.py:395
 #: nostr/ui/stash_kind_dialog.py:400
 msgid "Article title"
 msgstr ""
 
 #: nostr/ui/article_details_panel.py:176
-#: nostr/ui/publish_article_dialog.py:382
+#: nostr/ui/publish_article_dialog.py:396
 #: nostr/ui/stash_kind_dialog.py:403
 msgid "Title"
 msgstr ""
 
 #: nostr/ui/article_details_panel.py:180
-#: nostr/ui/publish_article_dialog.py:387
+#: nostr/ui/publish_article_dialog.py:401
 msgid "Short summary (one sentence)"
 msgstr ""
 
 #: nostr/ui/article_details_panel.py:185
-#: nostr/ui/publish_article_dialog.py:388
+#: nostr/ui/publish_article_dialog.py:402
 msgid "Summary"
 msgstr ""
 
 #: nostr/ui/article_details_panel.py:200
-#: nostr/ui/publish_article_dialog.py:393
+#: nostr/ui/publish_article_dialog.py:407
 msgid "Hashtags"
 msgstr ""
 
@@ -5900,7 +5900,7 @@ msgid "Co-Authors"
 msgstr ""
 
 #: nostr/ui/article_details_panel.py:211
-#: nostr/ui/publish_article_dialog.py:416
+#: nostr/ui/publish_article_dialog.py:429
 msgid "Add Co-Author…"
 msgstr ""
 
@@ -5913,7 +5913,7 @@ msgid "Advanced"
 msgstr ""
 
 #: nostr/ui/article_details_panel.py:241
-#: nostr/ui/publish_article_dialog.py:434
+#: nostr/ui/publish_article_dialog.py:447
 #: nostr/ui/stash_kind_dialog.py:410
 msgid "Link name"
 msgstr ""
@@ -5933,12 +5933,12 @@ msgid "Remove"
 msgstr ""
 
 #: nostr/ui/article_details_panel.py:399
-#: nostr/ui/publish_article_dialog.py:468
+#: nostr/ui/publish_article_dialog.py:481
 msgid "Not published yet."
 msgstr ""
 
 #: nostr/ui/article_details_panel.py:529
-#: nostr/ui/publish_article_dialog.py:433
+#: nostr/ui/publish_article_dialog.py:446
 #: nostr/ui/stash_kind_dialog.py:406
 msgid "my-article"
 msgstr ""
@@ -5955,7 +5955,7 @@ msgid "Remove {name}"
 msgstr ""
 
 #: nostr/ui/article_details_panel.py:397
-#: nostr/ui/publish_article_dialog.py:466
+#: nostr/ui/publish_article_dialog.py:479
 #, python-brace-format
 msgid "First published {moment}"
 msgstr ""
@@ -6125,7 +6125,8 @@ msgid ""
 msgstr ""
 
 #: nostr/ui/cover_field.py:234
-msgid "Choose hero image"
+#: nostr/ui/cover_field.py:144
+msgid "Choose Cover Image"
 msgstr ""
 
 #: nostr/ui/cover_field.py:139
@@ -6134,10 +6135,6 @@ msgstr ""
 
 #: nostr/ui/cover_field.py:143
 msgid "Choose…"
-msgstr ""
-
-#: nostr/ui/cover_field.py:144
-msgid "Choose Cover Image"
 msgstr ""
 
 #: nostr/ui/cover_field.py:145
@@ -8470,7 +8467,7 @@ msgid "Also yours: {services}."
 msgstr ""
 
 #: nostr/ui/mention_picker.py:273
-#: nostr/ui/publish_article_dialog.py:420
+#: nostr/ui/publish_article_dialog.py:433
 #: nostr/ui/publish_note_dialog.py:268
 msgid "People"
 msgstr ""
@@ -8655,70 +8652,70 @@ msgstr ""
 msgid "Publish"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:452
-msgid "A saved or published article keeps its link name; publishing it under another one makes another article."
-msgstr ""
-
-#: nostr/ui/publish_article_dialog.py:461
-msgid "Cover image address"
-msgstr ""
-
-#: nostr/ui/publish_article_dialog.py:696
-msgid "Checking whether this article was published before…"
-msgstr ""
-
-#: nostr/ui/publish_article_dialog.py:384
+#: nostr/ui/publish_article_dialog.py:398
 msgid "Title:"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:390
+#: nostr/ui/publish_article_dialog.py:404
 msgid "Summary:"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:394
+#: nostr/ui/publish_article_dialog.py:408
 msgid "Hashtags:"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:413
+#: nostr/ui/publish_article_dialog.py:427
 msgid "Cover image:"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:422
+#: nostr/ui/publish_article_dialog.py:435
 #: nostr/ui/publish_note_dialog.py:264
 msgid "People:"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:459
+#: nostr/ui/publish_article_dialog.py:465
+msgid "A saved or published article keeps its link name; publishing it under another one makes another article."
+msgstr ""
+
+#: nostr/ui/publish_article_dialog.py:472
 msgid "Link name:"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:463
+#: nostr/ui/publish_article_dialog.py:474
+msgid "Cover image address"
+msgstr ""
+
+#: nostr/ui/publish_article_dialog.py:476
 msgid "Cover image address:"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:726
+#: nostr/ui/publish_article_dialog.py:705
+msgid "Checking whether this article was published before…"
+msgstr ""
+
+#: nostr/ui/publish_article_dialog.py:735
 msgid "Couldn't check whether this article was published before"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:727
+#: nostr/ui/publish_article_dialog.py:736
 msgid "None of the relays you publish to answered. If the article went out before, publishing it as new gives it today's date, and readers see it as a new article."
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:791
+#: nostr/ui/publish_article_dialog.py:800
 msgid "The article was not published: no relay took it. Check your internet connection and try again."
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:813
+#: nostr/ui/publish_article_dialog.py:822
 #: nostr/ui/publish_note_dialog.py:385
 #, python-brace-format
 msgid "Publish failed: {reason}"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:730
+#: nostr/ui/publish_article_dialog.py:739
 msgid "Publish as New"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:758
+#: nostr/ui/publish_article_dialog.py:767
 #, python-brace-format
 msgid "Cannot build article: {reason}"
 msgstr ""
@@ -9188,7 +9185,7 @@ msgstr ""
 msgid "Add a hashtag"
 msgstr ""
 
-#: nostr/ui/tag_field.py:193
+#: nostr/ui/tag_field.py:195
 #, python-brace-format
 msgid "Removed {name}"
 msgstr ""

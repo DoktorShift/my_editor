@@ -231,7 +231,7 @@ class CoverImageField(QWidget):
                                     visibility=self._media_visibility, parent=self)
         if self._private_library is not None:
             picker.bind_private_library(self._private_library)
-        picker.setWindowTitle(_("Choose hero image"))
+        picker.setWindowTitle(_("Choose Cover Image"))
         # Pictures only: audio and video can't be a cover.
         picker._filter_combo.setCurrentIndex(1)
         picker.file_picked.connect(self.picked)

@@ -156,3 +156,23 @@ def test_a_read_only_cover_takes_no_drop_and_offers_no_change(field, tmp_path):
     assert store.uploads == []
     assert not made.pick_button.isEnabled() and not made.remove_button.isEnabled()
     assert not made.preview.acceptDrops() or not made.preview.isEnabled()
+
+
+def test_the_picker_is_titled_in_title_case_as_its_button_names_it(field, monkeypatch):
+    made, _store, _problems = field
+    titles = []
+
+    class Picker:
+        def __init__(self, **_kwargs):
+            self._filter_combo = type("Combo", (), {"setCurrentIndex": lambda *_a: None})()
+            self.file_picked = type("Signal", (), {"connect": lambda *_a: None})()
+
+        def setWindowTitle(self, title):
+            titles.append(title)
+
+        def exec(self):
+            return 0
+
+    monkeypatch.setattr(cover_field, "MediaLibraryDialog", Picker)
+    made.choose()
+    assert titles == ["Choose Cover Image"] == [made.pick_button.accessibleName()]
