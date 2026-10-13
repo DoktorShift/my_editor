@@ -46,7 +46,7 @@ from ..known_people import KnownPeople
 from ..outbox import RelayDirectory, relays_from
 from ..profiles import Profile, ProfileStore
 from ..publisher import (
-    FOUND, NEVER, FirstPublication, PublishJob, PublishResult, build_article,
+    FOUND, NEVER, FirstPublication, PublishedMedia, PublishJob, PublishResult, build_article,
     find_first_publication, slugify,
 )
 from ..relay import RelayPool
@@ -347,6 +347,7 @@ class PublishArticleDialog(QDialog):
         first_publications: Optional[FirstPublications] = None,
         published_at_lookup: Optional[
             Callable[[str, str, Callable[[FirstPublication], None]], None]] = None,
+        media: Sequence[PublishedMedia] = (),
         parent=None,
         is_dark: bool = True,
     ) -> None:
@@ -400,6 +401,10 @@ class PublishArticleDialog(QDialog):
         # article's summary, cover, hashtags and source): offered here and
         # published with it.
         self._details = details or ArticleDetails()
+        # What is known of the pictures, audio and video in the text, for
+        # their descriptions (NIP-92 imeta); only those still in the text
+        # when it goes out are described.
+        self._media = tuple(media)
         # Tracks whether the user has manually edited the slug. As long as
         # they haven't, slug stays in sync with title. An article that has
         # an identifier already (its draft's) keeps it: another one would
@@ -822,6 +827,7 @@ class PublishArticleDialog(QDialog):
                 published_at=published_at,
                 hashtags=self._hashtag_list(),
                 mentions=self._mention_row.mentions(),
+                media=self._media,
                 extra_tags=self._details.published_tags(body) or None,
             )
         except ValueError as exc:

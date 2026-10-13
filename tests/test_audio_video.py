@@ -163,6 +163,25 @@ r["text"] = ed.toPlainText()
 r["gate_after"] = w._confirm_images_uploaded(ed)
 content, records = w._publish_payload(ed, "markdown")
 r["imeta"] = build_imeta_tags(records, content)
+# Both publish windows are given what is known of the media, for imeta.
+given = {}
+class Window:
+    def __init__(self, **kw):
+        given[kw.get("body_markdown") is not None and "article" or "note"] = kw.get("media")
+        self.published = type("S", (), {"connect": lambda *a: None})()
+    def exec(self):
+        return 0
+    def details_changed(self):
+        return False
+main_window.PublishNoteDialog = Window
+main_window.PublishArticleDialog = Window
+import types
+real_default = w._profile_store.default
+w._profile_store.default = lambda: types.SimpleNamespace(user_pubkey="a1" * 32)
+w._on_nostr_publish_note()
+w._on_nostr_publish_article()
+w._profile_store.default = real_default
+r["given"] = {kind: [m.url for m in media or ()] for kind, media in given.items()}
 w._upload_into(ed, path)
 name2 = sent[-1][0]
 ed.undo()
@@ -192,3 +211,5 @@ def test_audio_in_the_window(tmp_path):
     assert r["imeta"] == [[f"imeta", f"url https://cdn.example/{SHA}.mp3", "m audio/mpeg",
                            f"x {SHA}", "size 5"]]
     assert r["undone_asked"] == 1                        # undone: nothing asked, nothing put in
+    address = f"https://cdn.example/{SHA}.mp3"
+    assert r["given"] == {"note": [address], "article": [address]}

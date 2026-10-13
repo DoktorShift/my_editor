@@ -37,7 +37,7 @@ from ..bunker import BunkerSessionPool, humanize_failure
 from ..known_people import KnownPeople
 from ..outbox import RelayDirectory, relays_from
 from ..profiles import Profile, ProfileStore
-from ..publisher import PublishJob, PublishResult, build_note
+from ..publisher import PublishedMedia, PublishJob, PublishResult, build_note
 from ..relay import RelayPool
 from ..search import Nip50SearchClient
 from .avatar import (
@@ -176,11 +176,16 @@ class PublishNoteDialog(QDialog):
         known_people: KnownPeople,
         search_client: Nip50SearchClient,
         avatars: AvatarStore,
+        media: Sequence[PublishedMedia] = (),
         parent=None,
         is_dark: bool = True,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(_("Publish as Note"))
+        # What is known of the pictures, audio and video in the text, for
+        # their descriptions (NIP-92 imeta); only those still in the text
+        # when it goes out are described.
+        self._media = tuple(media)
         self.setModal(True)
         self.setMinimumSize(560, 380)
 
@@ -385,6 +390,7 @@ class PublishNoteDialog(QDialog):
             content,
             self._current_profile.user_pubkey,
             mentions=self._mention_row.mentions(),
+            media=self._media,
         ), is_dark=self._is_dark)
         if unsigned is None:
             return

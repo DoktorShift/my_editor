@@ -6367,7 +6367,8 @@ class MainWindow(QMainWindow):
         ed = self.current_editor()
         if not self._confirm_images_uploaded(ed):
             return
-        content = self._publish_text(ed, "note").strip() if ed is not None else ""
+        content, media = self._publish_payload(ed, "note") if ed is not None else ("", [])
+        content = content.strip()
         if not content:
             inform(self, title=_("Nothing to publish"),
                    message=_("The current document is empty."))
@@ -6384,6 +6385,7 @@ class MainWindow(QMainWindow):
             known_people=self._known_people,
             search_client=self._search_client,
             avatars=self._avatars,
+            media=media,
             parent=self,
             is_dark=self.is_dark_theme,
         )
@@ -6674,7 +6676,8 @@ class MainWindow(QMainWindow):
         ed = self.current_editor()
         if not self._confirm_images_uploaded(ed):
             return
-        body = self._publish_text(ed, "markdown").rstrip() if ed is not None else ""
+        body, media = self._publish_payload(ed, "markdown") if ed is not None else ("", [])
+        body = body.rstrip()
         if not body:
             inform(self, title=_("Nothing to publish"),
                    message=_("The current document is empty."))
@@ -6722,6 +6725,7 @@ class MainWindow(QMainWindow):
             first_published=first_published,
             details=details,
             first_publications=self._first_publications,
+            media=media,
             parent=self,
             is_dark=self.is_dark_theme,
         )
