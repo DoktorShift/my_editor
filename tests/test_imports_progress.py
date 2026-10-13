@@ -173,6 +173,29 @@ class TestTheCard:
         assert controller.activity() is None
         assert controller.counts().imported == 1
 
+    def test_a_failed_post_imported_later_is_imported(self, setup):
+        """CP2 review N8: a post that failed in one import and became a
+        draft later (a second Create, or in the other app) still read
+        "Failed", and the import kept saying "1 failed"."""
+        win, controller, jobs, _shown, _stops = setup
+        model = win.posts.model_
+        failing = model.post(0)
+        jobs.script = {failing.title: "fail"}
+        model.set_checked(0, True)
+        win.create_drafts()
+        settle()
+        assert controller.activity().status == "partial"
+        controller.inbox.reconcile(drafted=[failing.d_tag])     # made elsewhere
+        controller._announce()
+        settle()
+        assert controller.activity() is None
+        assert controller.posts_in_progress() == (set(), set())
+        win.sidebar.select("list", "imported")
+        settle()
+        row = next(r for r in range(model.rowCount()) if model.post(r).d_tag == failing.d_tag)
+        assert model.word_for(model.post(row)) == ""            # Imported, said by the list
+        assert win.activity_button.isHidden()
+
     def test_the_card_has_names(self, setup):
         win, _controller, jobs, _shown, _stops = setup
         hold_all(win, jobs)

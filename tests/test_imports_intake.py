@@ -160,3 +160,31 @@ class TestReadingAFile:
         with pytest.raises(ValueError) as failure:
             read_export(str(tmp_path / "missing.xml"))
         assert str(failure.value).startswith("Couldn't read that file")
+
+
+@pytest.mark.parametrize("address, whole", [
+    ("https://blog.example/", True),
+    ("https://blog.example", True),
+    ("https://blog.example/feed", True),
+    ("https://blog.example/feed/", True),
+    ("https://blog.example/rss.xml", True),
+    ("https://www.youtube.com/feeds/videos.xml?channel_id=x", True),
+    ("https://medium.com/feed/@someone", True),
+    ("https://blog.example/index.json", True),
+    ("https://blog.example/2026/10/why-self-custody/", False),
+    ("https://blog.example/posts/hello", False),
+    ("npub1sg6plzptd64u62a878hep2kev88swjh3tw00gjsfl8f237lmu63q0uf63m", True),
+])
+def test_a_whole_source_or_one_post(address, whole):
+    """CP2 review N5: every web address counted as a whole source."""
+    from nostr.imports.intake import is_whole_source
+    assert is_whole_source(address) is whole
+
+
+def test_the_same_page_whatever_the_scheme_slash_or_fragment():
+    from nostr.imports.intake import same_page
+    assert same_page("https://www.blog.example/a/", "http://blog.example/a#top")
+    assert same_page("https://blog.example/a?x=1", "https://blog.example/a/?x=1")
+    assert not same_page("https://blog.example/a", "https://blog.example/b")
+    assert not same_page("https://blog.example/a?x=1", "https://blog.example/a?x=2")
+    assert not same_page("", "")

@@ -53,8 +53,9 @@ person does to it.
 from __future__ import annotations
 
 import base64
+import logging
+import os
 import sys
-import time
 from functools import partial
 from typing import Callable, Dict, List, Optional
 
@@ -73,6 +74,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
     QCheckBox,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -92,6 +94,7 @@ from PySide6.QtWidgets import (
 )
 
 import alerts
+import atomic_file
 import url_safety
 from i18n import _, ngettext
 
@@ -103,14 +106,16 @@ from ..imports.inbox_store import (
     OLDER_POSTS,
     PAGE_SIZE,
     SKIPPED_POSTS,
-    SourceRow,
     View,
 )
 from ..imports_controller import ELSEWHERE
-from ..imports.workspace import Post, Scope, checked_text, date_text, matches, targets
+from .imports_badge import OFFER as BADGE_OFFER
+from .imports_badge import OFFER_ACTION as BADGE_OFFER_ACTION
+from ..imports.workspace import Post, Scope, checked_text, freshness, matches, targets
 from .image_review_dialog import ImageReviewDialog
 from .imports_actions import ActionBar, OptionsPopover
 from .imports_activity import ActivityButton, JobCard, finished_text
+from .imports_source_settings import SourceSettingsSheet, unsubscribe_question
 from .eliding_label import ElidingLabel
 from .imports_article import ArticlePane
 from .imports_glyphs import glyph_icon
@@ -168,6 +173,8 @@ QPushButton#imports_segment[edge="last"] {
 """
 
 # The lists of the sidebar: key, title, glyph.
+_log = logging.getLogger(__name__)
+
 LISTS = (
     (INBOX, _("Inbox"), "inbox"),
     (OLDER_POSTS, _("Older Posts"), "clock"),
@@ -176,31 +183,6 @@ LISTS = (
 )
 _LIST_TITLES = {key: title for key, title, _glyph in LISTS}
 
-
-def freshness(source: SourceRow, *, now: Optional[float] = None) -> str:
-    """When a source was last checked, or why that failed and when the
-    next try is: the words its tooltip and its list header use."""
-    now = time.time() if now is None else now
-    if not source.automatic:
-        return _("MyEditor reads this source when you open it.")
-    if source.error:
-        wait = max(0, source.next_check - int(now))
-        if wait >= 3600:
-            hours = (wait + 1800) // 3600
-            when = ngettext("Next try in {n} hour.", "Next try in {n} hours.", hours).format(
-                n=hours)
-        else:
-            minutes = max(1, (wait + 59) // 60)
-            when = ngettext("Next try in {n} minute.", "Next try in {n} minutes.",
-                            minutes).format(n=minutes)
-        return f"{source.error} {when}"
-    if not source.last_checked:
-        return _("Not checked yet.")
-    # No period after the time: in German it ends in one already
-    # ("vor 2 Min."), and a doubled one reads as a mistake (review L2).
-    if now - source.last_checked < 60:
-        return _("Checked just now")
-    return _("Checked {when}").format(when=date_text(source.last_checked, now=now))
 
 
 class _SearchField(QLineEdit):
@@ -225,10 +207,12 @@ class ImportsWindow(QMainWindow):
     """The Imports window for one account (see the module docstring).
 
     Signals:
-      undo_changed()   what Edit > Undo would undo here changed
+      edit_changed()   what the Edit menu acts on here changed: the last
+                       skip, or the posts an action applies to (a text
+                       field with the focus the menu follows itself)
     """
 
-    undo_changed = Signal()
+    edit_changed = Signal()
 
     def __init__(self, controller, *, dark: bool = False,
                  load_settings: Callable[[], dict] = dict,
@@ -236,9 +220,11 @@ class ImportsWindow(QMainWindow):
                  open_url: Callable[[QUrl], bool] = QDesktopServices.openUrl,
                  show_drafts: Optional[Callable[[], None]] = None,
                  confirm: Optional[Callable[..., bool]] = None,
-                 parent=None) -> None:
+                 badge=None, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("imports_window")
+        # New posts on the app icon (Q-7): offered once, here (C13).
+        self._badge = badge
         self.setWindowTitle(_("Imports"))
         self.setUnifiedTitleAndToolBarOnMac(True)
         self._controller = controller
@@ -286,6 +272,8 @@ class ImportsWindow(QMainWindow):
         controller.sources_changed.connect(self._refresh_sidebar)
         controller.posts_changed.connect(self._on_posts_changed)
         controller.activity_changed.connect(self._update_activity)
+        controller.bound_changed.connect(self._on_access_changed)
+        controller.new_posts.connect(self._offer_badge)
         controller.import_finished.connect(self._import_finished)
         self._refresh_sidebar()
         self._update_activity()
@@ -321,6 +309,12 @@ class ImportsWindow(QMainWindow):
             self.act_sidebar.setShortcut(QKeySequence("Ctrl+Meta+S"))
         self.act_sidebar.toggled.connect(self._on_sidebar_toggled)
         bar.addAction(self.act_sidebar)
+        # Reachable with Tab like the toolbar's other buttons: on Windows
+        # and Linux this window has no menu bar of its own, so Show Sidebar
+        # had no keyboard path, and a narrow window folds the sidebar away
+        # with the lists and sources in it (CP2 review N9).
+        self.sidebar_button = bar.widgetForAction(self.act_sidebar)
+        self.sidebar_button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
 
         self.act_follow = QAction(_("Follow a Website…"), self)
         self.act_follow.setObjectName("imports_follow")
@@ -331,8 +325,18 @@ class ImportsWindow(QMainWindow):
         self.act_import_link = QAction(_("Import a Link…"), self)
         self.act_import_link.setObjectName("imports_import_link")
         self.act_import_link.triggered.connect(self.import_link)
+        # Taking the sources elsewhere: after the ways to add, apart from
+        # them, as the spec's Add menu has it (C11).
+        self.act_export = QAction(_("Export Sources…"), self)
+        self.act_export.setObjectName("imports_export")
+        self.act_export.triggered.connect(self.export_sources)
         add_menu = QMenu(self)
-        for action in (self.act_follow, self.act_import_file, self.act_import_link):
+        add_menu.aboutToShow.connect(self._update_export)
+        for action in (self.act_follow, self.act_import_file, self.act_import_link, None,
+                       self.act_export):
+            if action is None:
+                add_menu.addSeparator()
+                continue
             action.setEnabled(not self._controller.read_only)
             add_menu.addAction(action)
         self.add_button = QToolButton()
@@ -386,6 +390,11 @@ class ImportsWindow(QMainWindow):
         self.article = ArticlePane(prepare=self._controller.prepare_article,
                                    images=self._controller.images, dark=self._dark,
                                    open_url=self._open_url)
+        # Site icons (C12): asked of the controller (which holds no
+        # window), shown when known.
+        for pane in (self.sidebar, self.posts, self.article):
+            pane.icon_for = self._controller.site_icon
+        self._controller.icon_ready.connect(self._on_icon_ready)
         # A link the article cannot open says so (review L9).
         self.article.link_refused.connect(self._link_refused)
         self.article.setMinimumWidth(ARTICLE_MIN)
@@ -398,15 +407,17 @@ class ImportsWindow(QMainWindow):
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(0)
         column.addWidget(self._build_list_header())
-        self.notice = QLabel(ELSEWHERE if self._controller.read_only
-                             else self._controller.notice)
+        self.notice = QLabel()
         self.notice.setObjectName("imports_notice")
         self.notice.setWordWrap(True)
         self.notice.setContentsMargins(16, 6, 16, 6)
-        self.notice.setVisible(bool(self.notice.text()))
+        self.notice.setTextFormat(Qt.TextFormat.PlainText)
         column.addWidget(self.notice)
+        self._update_notice()
+        self._controller.sync_changed.connect(self._update_notice)
         self.banner = _Banner()
         self.banner.hide()
+        self.banner.acted.connect(self._on_banner_action)
         column.addWidget(self.banner)
         self.list_stack = QStackedWidget()
         self.list_stack.addWidget(self.posts)
@@ -416,7 +427,7 @@ class ImportsWindow(QMainWindow):
         self.action_bar.create_clicked.connect(self.create_drafts)
         self.action_bar.options_clicked.connect(self._show_options)
         self.action_bar.skip_clicked.connect(self.skip_or_restore)
-        self.posts.skip_requested.connect(self.skip_or_restore)
+        self.posts.skip_requested.connect(self._skip_by_key)
         column.addWidget(self.action_bar)
         self.options_popover = OptionsPopover(self)
         self.options_popover.changed.connect(self._choose)
@@ -587,7 +598,8 @@ class ImportsWindow(QMainWindow):
             tooltip = "\n".join(p for p in (source.display_title, source.url,
                                              freshness(source)) if p)
             entries.append(Entry(SOURCE, source.key, source.display_title,
-                                 count=source.new_count, failed=failed, tooltip=tooltip,
+                                 count=source.new_count, failed=failed and not source.paused,
+                                 paused=source.automatic and source.paused, tooltip=tooltip,
                                  url=source.url, automatic=source.automatic))
         opened = controller.collections("file", "link")
         if opened:
@@ -669,13 +681,16 @@ class ImportsWindow(QMainWindow):
         check.setData(("check", entry))
         # The website, not the feed's address (review L4): what the feed
         # names as its site, else the address's own start page.
-        site = self._website_of(entry)
+        site = self._controller.website_of(entry.key) or entry.url
         website = menu.addAction(_("Open Website"))
         website.setEnabled(url_safety.is_safe_external_url(site))
         website.setData(("website", site))
         copy = menu.addAction(_("Copy Address"))
         copy.setData(("copy", entry.url))
         menu.addSeparator()
+        settings = menu.addAction(_("Source Settings\u2026"))
+        settings.setEnabled(not self._controller.read_only)
+        settings.setData(("settings", entry))
         unsubscribe = menu.addAction(_("Unsubscribe\u2026"))
         unsubscribe.setEnabled(not self._controller.read_only)
         unsubscribe.setData(("unsubscribe", entry))
@@ -693,23 +708,24 @@ class ImportsWindow(QMainWindow):
             QApplication.clipboard().setText(target)
         elif name == "unsubscribe":
             self.unsubscribe(target)
+        elif name == "settings":
+            self.source_settings(target.key)
         elif name == "remove":
             self._controller.close_collection(target.key)
 
     def unsubscribe(self, entry: Entry) -> None:
         """Stop following a source, after asking: its posts leave the
         lists, the drafts made from them stay."""
-        if self._confirm(
-                title=_("Unsubscribe from \u201c{title}\u201d?").format(title=entry.title),
-                message=_("Its posts leave Imports. Drafts you already created stay."),
-                action=_("Unsubscribe")):
+        if self._confirm(**unsubscribe_question(entry.title)):
             self._controller.unfollow(entry.key)
 
-    def _website_of(self, entry: Entry) -> str:
-        source = self._controller.source(entry.key)
-        if source is not None and source.site_url:
-            return source.site_url
-        return url_safety.origin_of(entry.url) or entry.url
+    def source_settings(self, key: str) -> None:
+        """Source Settings for ``key``, as a sheet on this window."""
+        if self._controller.read_only or self._controller.source(key) is None:
+            return
+        self._open_sheet(SourceSettingsSheet(
+            self._controller, key, dark=self._dark, open_url=self._open_url,
+            confirm=self._confirm_with, parent=self))
 
     def check_now(self, entry: Entry) -> None:
         under_way = self._controller.is_checking(entry.key)
@@ -886,6 +902,7 @@ class ImportsWindow(QMainWindow):
         # Files and links are imported once: nothing there is skipped.
         self.action_bar.skip.setVisible(not self._scope.is_collection)
         self.action_bar.setVisible(model.selectable_count() > 0)
+        self.edit_changed.emit()
 
     def _copy_and_full(self, posts: List[Post]):
         """The options the next drafts get: the sources' defaults, and over
@@ -929,7 +946,7 @@ class ImportsWindow(QMainWindow):
             dialog.finished.connect(self._on_review_finished)
             dialog.open()
 
-        self._controller.images_of(chosen, on_ready=ready)
+        self._controller.images_of(chosen, on_ready=ready, on_failed=self.banner.say)
 
     def _on_review_finished(self, result: int) -> None:
         # A bound slot: a closure over this window on its dialog would
@@ -963,12 +980,47 @@ class ImportsWindow(QMainWindow):
         view = self._scope.view
         return view is not None and view.scope == SKIPPED_POSTS
 
+    def _on_banner_action(self, key: str) -> None:
+        if key == "undo":
+            self.undo_skip()
+        elif key == "drafts":
+            self._show_drafts()
+        elif key == "badge" and self._badge is not None:
+            self._badge.set_on(True)
+
+    def _offer_badge(self, *_args) -> None:
+        """New posts are here: the one time the app icon is offered for
+        them (the owner's decision Q-7), unless the line above the list
+        says something else now."""
+        badge = self._badge
+        if (badge is None or not badge.should_offer() or not self.isVisible()
+                or self.banner.isVisible() or not self._controller.counts().inbox):
+            return
+        badge.mark_offered()
+        self.banner.say(BADGE_OFFER, action=BADGE_OFFER_ACTION, key="badge")
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        # New posts that came while the window was closed count too.
+        QTimer.singleShot(0, self, self._offer_badge)
+
+    def _skip_by_key(self) -> None:
+        """Delete or Backspace skips (Q-12). In Skipped they do nothing: the
+        keys mean "set aside", and bringing back is Restore (CP2 review
+        L-b: they restored there, with no Undo)."""
+        if not self._restoring():
+            self.skip_or_restore()
+
     def skip_or_restore(self) -> None:
-        """Skip (Delete or Backspace), or Restore in the Skipped list."""
+        """Skip, or Restore in the Skipped list."""
         chosen = self.targets()
         if self._restoring():
             restored = self._controller.restore(chosen)
             if restored:
+                # Undo is for the last thing done: a skip before this
+                # restore is not it any more.
+                self._last_skip = []
+                self.edit_changed.emit()
                 self.banner.say(ngettext("Restored {count} post.", "Restored {count} posts.",
                                          len(restored)).format(count=len(restored)))
             return
@@ -979,48 +1031,89 @@ class ImportsWindow(QMainWindow):
         self._last_skip = moved
         self.banner.say(ngettext("Skipped {count} post.", "Skipped {count} posts.",
                                  len(moved)).format(count=len(moved)),
-                        _("Undo"), self.undo_skip)
-        self.undo_changed.emit()
+                        _("Undo"), "undo")
+        self.edit_changed.emit()
 
     def undo_skip(self) -> None:
         moved, self._last_skip = self._last_skip, []
         if moved and self._controller.undo_skip(moved):
             self.banner.hide()
-        self.undo_changed.emit()
+        self.edit_changed.emit()
+
+    def sheet_in_front(self) -> bool:
+        """Whether one of this window's sheets or alerts is in front. It
+        blocks the window (HIG, sheets), so the Edit commands reach only
+        its text field and the window is not closed under it, as in Mail
+        (CP3 review M2)."""
+        active = QApplication.activeWindow()
+        return active is not None and active is not self
+
+    def _undo_skip_available(self) -> bool:
+        return bool(self._last_skip) and not self.sheet_in_front()
 
     def can_undo(self) -> bool:
         """Whether Edit > Undo has something to undo here."""
-        focus = self.focusWidget()
+        focus = QApplication.focusWidget()
         if _is_text_field(focus):
             return _text_can_undo(focus)
-        return bool(self._last_skip)
+        return self._undo_skip_available()
 
     def undo_text(self) -> str:
         """Edit > Undo's words while this window is in front."""
-        if self._last_skip and not _is_text_field(self.focusWidget()):
+        if self._undo_skip_available() and not _is_text_field(QApplication.focusWidget()):
             return _("Undo Skip")
         return _("Undo")
 
     def undo(self) -> None:
         """Edit > Undo: the text being typed, or else the last skip."""
-        focus = self.focusWidget()
+        focus = QApplication.focusWidget()
         if _is_text_field(focus):
             focus.undo()
-            return
-        self.undo_skip()
+        elif self._undo_skip_available():
+            self.undo_skip()
+
+    def can_edit(self, name: str) -> bool:
+        """Whether :meth:`edit` can do ``name`` (copy, cut, delete) now,
+        for the Edit menu to dim what cannot act. Nothing while a sheet is
+        in front."""
+        if self.sheet_in_front():
+            return False
+        if name == "copy":
+            return bool(self._links())
+        if name == "delete":
+            return self._delete_skips()
+        return False
 
     def edit(self, name: str) -> None:
         """The app's Edit commands for this window (copy, select_all,
-        delete) when the focus is not in a text field."""
+        delete) when the focus is not in a text field. With a sheet in
+        front they do nothing here."""
+        if self.sheet_in_front():
+            return
         if name == "select_all":
             self.posts.model_.check_all()
             self._update_selection_band()
         elif name == "delete":
-            self.skip_or_restore()
+            if self._delete_skips():
+                self._skip_by_key()
         elif name == "copy":
-            post = self.posts.current_post()
-            if post is not None and post.link:
-                QApplication.clipboard().setText(post.link)
+            links = self._links()
+            if links:
+                QApplication.clipboard().setText("\n".join(links))
+
+    def _links(self) -> List[str]:
+        """Copy's text: the address of each post an action applies to, one
+        per line, as Mail copies every selected message (S3 of the CP3
+        fixes review: only the open post's)."""
+        return [post.link for post in self.targets() if post.link]
+
+    def _delete_skips(self) -> bool:
+        """Edit > Delete does what the Delete key does in the post list:
+        Skip (Q-12), and nothing in Skipped or with the focus elsewhere
+        (S2 of the CP3 fixes review: it restored there, with no Undo)."""
+        skip = self.action_bar.skip
+        return (QApplication.focusWidget() is self.posts and not self._restoring()
+                and self.action_bar.isVisible() and skip.isVisible() and skip.isEnabled())
 
     # ------------------------------------------------------------------ #
     # How an import is going                                               #
@@ -1049,7 +1142,7 @@ class ImportsWindow(QMainWindow):
         if job is None:
             return
         if self._show_drafts is not None:
-            self.banner.say(finished_text(job), _("Show Drafts"), self._show_drafts)
+            self.banner.say(finished_text(job), _("Show Drafts"), "drafts")
         else:
             self.banner.say(finished_text(job))
 
@@ -1170,6 +1263,38 @@ class ImportsWindow(QMainWindow):
         if path:
             sheet.read(path)
 
+    def _update_export(self) -> None:
+        self.act_export.setEnabled(bool(self._controller.sources()))
+
+    def export_sources(self) -> None:
+        """Add > Export Sources...: every source in an OPML file, through
+        the system's save panel (a sheet of this window)."""
+        if not self._controller.sources():
+            return
+        dialog = QFileDialog(self, _("Export Sources"), _("Sources") + ".opml",
+                             _("Lists of sources (*.opml)"))
+        dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
+        dialog.setDefaultSuffix("opml")
+        dialog.fileSelected.connect(self.write_sources)
+        dialog.finished.connect(dialog.deleteLater)
+        self._export_dialog = dialog
+        dialog.open()
+
+    def write_sources(self, path: str) -> None:
+        """Write the sources to ``path``; a failure says why and what to do."""
+        if not path:
+            return
+        try:
+            atomic_file.save_text_document(path, self._controller.sources_as_opml(),
+                                           newline="\n")
+        except OSError as exc:
+            _log.warning("could not export the sources to %s: %s", path, exc)
+            alerts.inform(self, title=_("Couldn't save \u201c{name}\u201d").format(
+                              name=os.path.basename(path)),
+                          message=(exc.strerror or str(exc)) + "\n\n"
+                          + _("Choose another place and export again."),
+                          caution=True, is_dark=self._dark)
+
     def import_link(self) -> None:
         """Add > Import a Link..."""
         if self._controller.read_only:
@@ -1181,8 +1306,44 @@ class ImportsWindow(QMainWindow):
 
     # Bound slots for the window's own children, not closures over the
     # window: a closure on a child's signal keeps the window alive.
+    def _on_icon_ready(self, _site: str) -> None:
+        self.sidebar.viewport().update()
+        self.posts.viewport().update()
+        self.article.show_icon()
+
+    def _on_access_changed(self, bound: bool) -> None:
+        """The other MyEditor quit and this one keeps the inbox now (CP1
+        review L7): what a read-only view dimmed works again."""
+        if not bound:
+            return
+        writable = not self._controller.read_only
+        for action in (self.act_follow, self.act_import_file, self.act_import_link):
+            action.setEnabled(writable)
+        self._update_notice()
+        self._update_actions()
+
+    def _update_notice(self) -> None:
+        """One quiet line above the list for what the person should know:
+        that another MyEditor checks the sources, that a damaged inbox was
+        set aside, how the list of sources is being read and shared."""
+        controller = self._controller
+        parts = [ELSEWHERE if controller.read_only else controller.notice,
+                 controller.sync_message]
+        self.notice.setText("\n".join(part for part in parts if part))
+        self.notice.setVisible(bool(self.notice.text()))
+
     def _show_source(self, key: str) -> None:
+        """A source just followed, or followed already: where its posts are.
+        Following stores what the lookup found as Older Posts (the first
+        check of a source is a baseline), so a source with nothing New
+        opens on Older, where the posts the sheet promised are (CP2
+        review N4)."""
         self.show_view(SOURCE, key)
+        source = self._controller.source(key)
+        if (source is not None and source.automatic and not source.new_count
+                and source.older_count):
+            self.segment_older.setChecked(True)
+            self._on_segment(OLDER)
 
     def _show_file(self, collection_id: str) -> None:
         self.show_view(FILE, collection_id)
@@ -1372,7 +1533,15 @@ class ImportsWindow(QMainWindow):
 class _Banner(QFrame):
     """A one-line message above the list, with an optional action and a
     close button: what just happened, and the way back where there is
-    one."""
+    one.
+
+    Signals:
+      acted(str)   the action was chosen (its key). A signal, not a
+                   callback kept here: a callback of the window held by
+                   its own child keeps the window alive (CP2 review L-c).
+    """
+
+    acted = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -1395,10 +1564,9 @@ class _Banner(QFrame):
         self.close_button.setToolTip(_("Close Message"))
         self.close_button.clicked.connect(self.hide)
         row.addWidget(self.close_button)
-        self._handler: Optional[Callable[[], None]] = None
+        self._key = ""
 
-    def say(self, text: str, action: str = "",
-            handler: Optional[Callable[[], None]] = None) -> None:
+    def say(self, text: str, action: str = "", key: str = "") -> None:
         self.label.setText(text)
         self.label.setAccessibleName(text)
         if self.action is not None:
@@ -1412,16 +1580,16 @@ class _Banner(QFrame):
             self.action.setAutoDefault(False)
             self.action.clicked.connect(self._act)
             self._row.insertWidget(1, self.action)
-        self._handler = handler
+        self._key = key if action else ""
         color = self.palette().color(QPalette.ColorRole.WindowText)
         self.close_button.setIcon(glyph_icon("close", 14, color))
         self.show()
 
     def _act(self) -> None:
-        handler = self._handler
+        key = self._key
         self.hide()
-        if handler is not None:
-            handler()
+        if key:
+            self.acted.emit(key)
 
 
 class _DropOverlay(QWidget):

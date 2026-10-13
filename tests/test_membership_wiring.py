@@ -622,6 +622,10 @@ class StandIn:
             fetch=lambda **kw: setattr(stand_in, "fetches", stand_in.fetches + 1))
         self._draft_sync = SimpleNamespace(
             reroute=lambda: setattr(stand_in, "reroutes", stand_in.reroutes + 1))
+        self.deletion_reroutes = 0
+        self._draft_deletions = SimpleNamespace(
+            reroute=lambda: setattr(stand_in, "deletion_reroutes",
+                                    stand_in.deletion_reroutes + 1))
 
 
 def closed_library_dialog():
@@ -640,6 +644,7 @@ def test_a_closed_media_library_neither_raises_nor_stops_the_draft_reroute():
     win = StandIn(dialog)
     win._on_membership_benefits_changed()          # used to raise every tick
     assert win.reroutes == 1
+    assert win.deletion_reroutes == 1              # the requests go with the drafts
     assert win._media_library_dialog is None
     assert win.refetches == 0
 

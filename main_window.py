@@ -6,6 +6,7 @@
 import bisect
 import hashlib
 import itertools
+import logging
 import os
 import platform
 import re
@@ -145,6 +146,10 @@ from nostr.contacts import ContactListFetcher
 from nostr.draft_store import DraftState, DraftStore
 from nostr.draft_deletions import DraftDeletions
 from nostr.draft_sync import DraftSync
+from nostr.imports.favicons import FaviconCache
+from nostr.ui.imports_badge import COMMAND_TITLE as IMPORTS_BADGE_TITLE
+from nostr.ui.imports_badge import SETTINGS_KEY as IMPORTS_BADGE_KEY
+from nostr.ui.imports_badge import AppIconBadge
 from nostr.imports_controller import ImportsController
 from nostr.ui.imports_activity import activity_line
 from nostr.ui.imports_window import SETTINGS_KEY as IMPORTS_SETTINGS_KEY
@@ -257,6 +262,34 @@ def _ask_save_changes(parent, title: str, *, save_label: str = "",
 
 # How long quitting waits for unsent changes to the list of sources.
 QUIT_SYNC_WAIT_MS = 5_000
+
+
+def _text_field(widget):
+    """``widget`` when it is a text field other than a document (a find
+    field, a sheet's or a dialog's field, the Imports window's article):
+    while it has the focus, the Edit menu acts on it. Else None."""
+    if isinstance(widget, (QLineEdit, QTextEdit, QPlainTextEdit)) and not isinstance(
+            widget, HtmlEditor):
+        return widget
+    return None
+
+
+def _field_history(field) -> tuple:
+    """Whether ``field`` has something to undo, and to redo."""
+    if isinstance(field, QLineEdit):
+        return field.isUndoAvailable(), field.isRedoAvailable()
+    if field.isReadOnly():
+        return False, False
+    return field.document().isUndoAvailable(), field.document().isRedoAvailable()
+
+
+def _field_signals(field) -> list:
+    """What changes in a text field that the Edit menu shows: its text
+    (what Undo undoes), its selection (what Cut and Copy act on)."""
+    signals = [field.textChanged, field.selectionChanged]
+    if not isinstance(field, QLineEdit):
+        signals += [field.undoAvailable, field.redoAvailable]
+    return signals
 
 
 class MainWindow(QMainWindow):
@@ -448,8 +481,14 @@ class MainWindow(QMainWindow):
             entitled_relays=self._entitled_relays,
             blossom_primary=lambda: self._media_store.settings.primary,
             window_factory=self._make_imports_window,
+            # The sources' site icons, found once and kept (C12).
+            icons=FaviconCache(parent=self),
             parent=self,
         )
+        # The Inbox count on the app icon, when the person wants it (Q-7).
+        self._imports_badge = AppIconBadge(
+            self._imports, load=lambda: load_settings().get(IMPORTS_BADGE_KEY),
+            save=lambda value: save_setting(IMPORTS_BADGE_KEY, value), parent=self)
         # Created lazily inside ``_build_findbar`` so its parent is the
         # central widget rather than ``self`` - keeps Qt's geometry
         # reasoning straightforward.
@@ -576,6 +615,10 @@ class MainWindow(QMainWindow):
 
         self._build_actions()
         self._build_menu()
+        # The app icon setting as kept (not a choice made now), and as
+        # changed where Imports offers it.
+        self._on_imports_badge_changed(self._imports_badge.on)
+        self._imports_badge.changed.connect(self._on_imports_badge_changed)
         self._build_status_bar_view_toggle()
         self._build_findbar()
 
@@ -611,6 +654,8 @@ class MainWindow(QMainWindow):
         # its own Undo Skip), and the document's own commands are dimmed
         # while another window is in front.
         QApplication.instance().focusChanged.connect(self._update_undo_redo_buttons)
+        # Paste follows what is on the clipboard, as it follows the focus.
+        QApplication.clipboard().dataChanged.connect(self._update_clipboard_commands)
         QApplication.instance().focusChanged.connect(self._update_window_commands)
         self._update_status_bar()
         self._start_ipc_server()
@@ -1109,22 +1154,23 @@ class MainWindow(QMainWindow):
 
     def _update_undo_redo_buttons(self, *_args):
         """Undo and Redo for what has the focus: the Imports window when it
-        is in front (Undo Skip there), a text field (the find field), or
-        the document."""
+        is in front (Undo Skip there), a text field (the find field, a
+        dialog's field), or the document."""
         if not hasattr(self, "act_undo"):
             return
         imports = self._imports_in_front()
+        field = _text_field(QApplication.focusWidget())
         if imports is not None:
             # What Undo undoes in the window in front (Undo Skip there).
             self.act_undo.setText(imports.undo_text())
             self.act_undo.setEnabled(imports.can_undo())
-            focus = imports.focusWidget()
-            self.act_redo.setEnabled(isinstance(focus, QLineEdit) and focus.isRedoAvailable())
+            self.act_redo.setEnabled(field is not None and _field_history(field)[1])
             return
         self.act_undo.setText(_("Undo"))
-        focus = QApplication.focusWidget()
-        if isinstance(focus, QLineEdit):
-            can_undo, can_redo = focus.isUndoAvailable(), focus.isRedoAvailable()
+        if field is not None:
+            # Never the document behind (T1 of the CP3 fixes review: Undo
+            # with a dialog's About field focused undid the document).
+            can_undo, can_redo = _field_history(field)
         else:
             ed = self.current_editor()
             can_undo = ed.document().isUndoAvailable() if ed else False
@@ -1132,30 +1178,77 @@ class MainWindow(QMainWindow):
         self.act_undo.setEnabled(can_undo)
         self.act_redo.setEnabled(can_redo)
 
-    def _update_clipboard_commands(self) -> None:
-        """Cut, Copy and Delete act on a selection, and are dimmed without
-        one (as the HIG asks of a command that cannot act), for whatever
-        has the focus: a text field, the PDF reader (Copy) or the
-        document."""
+    def _update_clipboard_commands(self, *_args) -> None:
+        """Cut, Copy, Paste and Delete for whatever has the focus, dimmed
+        where they cannot act (as the HIG asks): a text field (the find
+        field, a sheet's or a dialog's), the Imports window, the PDF reader
+        (Copy) or the document. Cut, Copy and Delete need a selection,
+        Paste a place that takes text and something on the clipboard (T2
+        of the CP3 fixes review: it followed the kind of tab, not the
+        focus). Paste and Match Style needs words on the clipboard."""
         if not hasattr(self, "act_cut"):
             return
-        focus = QApplication.focusWidget()
-        if isinstance(focus, QLineEdit):
-            selected, editable = focus.hasSelectedText(), not focus.isReadOnly()
+        field = _text_field(QApplication.focusWidget())
+        imports = self._imports_in_front()
+        clipboard = QApplication.clipboard().mimeData()
+        has_words = clipboard is not None and (clipboard.hasText() or clipboard.hasHtml())
+        if field is not None:
+            selected = (field.hasSelectedText() if isinstance(field, QLineEdit)
+                        else field.textCursor().hasSelection())
+            editable = not field.isReadOnly()
+            pastes = editable and (clipboard is not None and clipboard.hasText()
+                                   if isinstance(field, QLineEdit) else field.canPaste())
+            plain = pastes
+        elif imports is not None:
+            # Never the document behind (N2 of the CP3 fixes review): Copy
+            # copies the posts' links and Delete skips; nothing takes a
+            # paste, and nothing acts while a sheet is in front.
+            self.act_copy.setEnabled(imports.can_edit("copy"))
+            self.act_cut.setEnabled(imports.can_edit("cut"))
+            self.act_delete.setEnabled(imports.can_edit("delete"))
+            self.act_paste.setEnabled(False)
+            self.act_paste_plain.setEnabled(False)
+            return
         elif self.current_pdf_viewer() is not None:
-            selected, editable = True, False      # the reader answers Copy itself
+            selected, editable, pastes, plain = True, False, False, False   # Copy only
         else:
             ed = self.current_editor()
             selected = ed is not None and ed.textCursor().hasSelection()
             editable = ed is not None and not ed.isReadOnly()
+            # What the editor takes, a picture included; Paste and Match
+            # Style pastes words only.
+            pastes = editable and ed.canPaste()
+            plain = editable and has_words
         self.act_copy.setEnabled(selected)
         self.act_cut.setEnabled(selected and editable)
         self.act_delete.setEnabled(selected and editable)
+        self.act_paste.setEnabled(pastes)
+        self.act_paste_plain.setEnabled(plain)
 
-    def _on_focus_changed(self, _old, _new) -> None:
+    def _on_focus_changed(self, _old, new) -> None:
         tabs = getattr(self, "tabs", None)
         if tabs is None or not shiboken6.isValid(tabs):
             return                                   # the window is closing
+        self._follow_field(new)
+        self._on_field_changed()
+
+    def _follow_field(self, widget) -> None:
+        """Cut, Copy, Delete, Undo and Redo follow the text field with the
+        focus as it changes, as they follow the document: a find field, a
+        sheet's field, the Imports window's article (S4 of the CP3 fixes
+        review). The one place for every field; the document has its own
+        connections."""
+        old = getattr(self, "_followed_field", None)
+        if old is not None and shiboken6.isValid(old):
+            for signal in _field_signals(old):
+                signal.disconnect(self._on_field_changed)
+        self._followed_field = None
+        if _text_field(widget) is not None:
+            for signal in _field_signals(widget):
+                signal.connect(self._on_field_changed)
+            self._followed_field = widget
+
+    def _on_field_changed(self, *_args) -> None:
         self._update_clipboard_commands()
         self._update_undo_redo_buttons()
 
@@ -1584,6 +1677,11 @@ class MainWindow(QMainWindow):
             Command("nostr.imports", _("Imports\u2026"), NOSTR, nostr=True,
                     keywords=("rss", "feed", "import", "sources")),
             triggered=self._open_imports_window)
+        # Q-7: off until turned on here, or where Imports offers it once.
+        self.act_imports_badge = add(
+            Command("nostr.imports_badge", IMPORTS_BADGE_TITLE, NOSTR, checkable=True,
+                    nostr=True, keywords=("dock", "badge", "taskbar", "new posts")),
+            toggled=self._on_imports_badge_toggled)
         self.act_membership = add(
             Command("nostr.membership", _("EINUNDZWANZIG Membership\u2026"), NOSTR,
                     keywords=("einundzwanzig", "21", "join")),
@@ -1753,6 +1851,7 @@ class MainWindow(QMainWindow):
         m_nostr.addAction(self.act_refresh_drafts)
         m_nostr.addAction(self.act_draft_relays)
         m_nostr.addAction(self.act_nostr_imports)
+        m_nostr.addAction(self.act_imports_badge)
         m_nostr.addSeparator()
         m_nostr.addAction(self.act_membership)
         m_nostr.addSeparator()
@@ -1830,11 +1929,6 @@ class MainWindow(QMainWindow):
                                replace=True, options=True)
         self.findbar.setVisible(False)
         self.findbar.edit.textChanged.connect(self._on_search_text_changed)
-        # Cut, Copy, Delete, Undo and Redo follow the field while it has
-        # the focus, as they follow the document otherwise.
-        for field in (self.findbar.edit, self.findbar.replace_edit):
-            field.selectionChanged.connect(self._update_clipboard_commands)
-            field.textChanged.connect(self._update_undo_redo_buttons)
         QApplication.instance().focusChanged.connect(self._on_focus_changed)
         self.findbar.options_changed.connect(self._on_find_options_changed)
         self.findbar.replace_requested.connect(self._replace_current)
@@ -1887,6 +1981,8 @@ class MainWindow(QMainWindow):
         self._drafts_panel.retry_signer.connect(self._draft_sync.retry_signer)
         self._drafts_panel.copy_event_id.connect(self._on_panel_copy_event_id)
         self._drafts_panel.refresh_requested.connect(self._draft_sync.refresh_by_hand)
+        # The deletions other apps announce come with the drafts (L13).
+        self._drafts_panel.refresh_requested.connect(self._draft_deletions.refresh)
         self._drafts_panel.close_requested.connect(self._hide_drafts_panel)
         self._drafts_panel.draft_relays_requested.connect(self._open_draft_relays)
         # The second view: what the account published, to edit, open,
@@ -2270,7 +2366,8 @@ class MainWindow(QMainWindow):
         # Command-W closes the window in front, also from the menu.
         imports = self._imports_in_front()
         if imports is not None:
-            imports.close()
+            if not imports.sheet_in_front():    # never closed under its sheet
+                imports.close()
             return
         idx = self.tabs.currentIndex()
         if idx >= 0:
@@ -4011,7 +4108,7 @@ class MainWindow(QMainWindow):
     _DOCUMENT_COMMANDS = frozenset({
         "file.save", "file.save_as", "file.page_setup", "file.print", "file.print_preview",
         "file.knit_html", "file.knit_pdf", "search.replace", "search.next",
-        "search.previous", "search.use_selection", "edit.paste_plain",
+        "search.previous", "search.use_selection",
         "view.line_numbers", "view.syntax_highlighting", "view.paper_mode", "view.toolbar",
         "view.highlight_line", "nostr.publish_note", "nostr.publish_article",
         "nostr.insert_image"})
@@ -4047,6 +4144,15 @@ class MainWindow(QMainWindow):
                 self._update_knit_actions()
                 self._update_format_buttons()
         self.act_window_sidebar.setEnabled(in_front)
+        # File > Close names what it closes (HIG; Mail's Close Window): the
+        # Imports window has no tabs. A sheet blocks its window: it is not
+        # closed under it.
+        self.act_close_tab.setText(_("Close Window") if in_front else _("Close Tab"))
+        self.act_close_tab.setEnabled(not (in_front and imports.sheet_in_front()))
+        # Full Screen says whether the window in front is.
+        blocked = self.act_fullscreen.blockSignals(True)
+        self.act_fullscreen.setChecked((imports or self).isFullScreen())
+        self.act_fullscreen.blockSignals(blocked)
         if in_front:
             shown = imports.act_sidebar.isChecked()
             self.act_window_sidebar.setText(_("Hide Sidebar") if shown else _("Show Sidebar"))
@@ -4060,42 +4166,46 @@ class MainWindow(QMainWindow):
             self._update_window_commands()
 
     def _imports_in_front(self):
-        """The Imports window while it is the window in front. It has no
-        menu bar of its own: the app's Edit commands act on it then, as a
-        Mac app's menu bar acts on its key window."""
+        """The Imports window while it is the window in front, or one of its
+        sheets or alerts is (CP2 review L-a: with a sheet up, Edit > Undo
+        undid text in the document behind). It has no menu bar of its
+        own: the app's Edit commands act on it then, as a Mac app's menu
+        bar acts on its key window."""
         imports = getattr(self, "_imports", None)
         window = imports.window() if imports is not None else None
-        return window if window is not None and window.isActiveWindow() else None
+        if window is None:
+            return None
+        active = QApplication.activeWindow()
+        while active is not None:
+            if active is window:
+                return window
+            active = active.parentWidget()
+        return None
 
     def _undo(self):
         """Edit > Undo, for what has the focus: the Imports window when it
-        is in front (Undo Skip there), a text field (the find field takes
-        its own, as its keys do), or the document."""
+        is in front (Undo Skip there), a text field (the find field, a
+        dialog's About field: each takes its own, as its keys do), or the
+        document."""
         imports = self._imports_in_front()
         if imports is not None:
             imports.undo()
             return
-        focus = QApplication.focusWidget()
-        if isinstance(focus, QLineEdit):
-            focus.undo()
+        field = _text_field(QApplication.focusWidget())
+        if field is not None:
+            field.undo()
             return
         ed = self.current_editor()
         if ed:
             ed.undo()
 
     def _redo(self):
-        imports = self._imports_in_front()
-        if imports is not None:
-            focus = imports.focusWidget()
-            if isinstance(focus, (QLineEdit, QTextEdit, QPlainTextEdit)):
-                focus.redo()
-            return
-        focus = QApplication.focusWidget()
-        if isinstance(focus, QLineEdit):
-            focus.redo()
+        field = _text_field(QApplication.focusWidget())
+        if field is not None:
+            field.redo()
             return
         ed = self.current_editor()
-        if ed:
+        if ed and self._imports_in_front() is None:
             ed.redo()
 
     def _editor_call(self, name: str) -> None:
@@ -4178,9 +4288,8 @@ class MainWindow(QMainWindow):
         keyboard focus, the way a Mac app sends them to its first
         responder: a text field (the find field), the PDF reader, or the
         document."""
-        focus = QApplication.focusWidget()
-        if isinstance(focus, (QLineEdit, QTextEdit, QPlainTextEdit)) and not isinstance(
-                focus, HtmlEditor):
+        focus = _text_field(QApplication.focusWidget())
+        if focus is not None:
             if name == "delete":
                 if isinstance(focus, QLineEdit):
                     focus.del_()
@@ -4220,13 +4329,16 @@ class MainWindow(QMainWindow):
         ed.setFocus()
 
     def _paste_plain(self) -> None:
-        focus = QApplication.focusWidget()
-        if isinstance(focus, QLineEdit):
-            focus.paste()
-            return
-        ed = self.current_editor()
-        if ed:
-            ed.paste_normalized()
+        field = _text_field(QApplication.focusWidget())
+        if isinstance(field, QLineEdit):
+            field.paste()
+        elif field is not None:
+            if not field.isReadOnly():
+                field.insertPlainText(QApplication.clipboard().text())
+        elif self._imports_in_front() is None:
+            ed = self.current_editor()
+            if ed:
+                ed.paste_normalized()
 
     def _use_selection_for_find(self) -> None:
         """The selected words become what Find looks for (Command-E): Find
@@ -4370,10 +4482,14 @@ class MainWindow(QMainWindow):
         self._set_theme(scheme != Qt.ColorScheme.Light)
 
     def _toggle_fullscreen(self, checked: bool):
+        # The window in front goes full screen, as View > Enter Full Screen
+        # does in every Mac app; with the Imports window in front, that one
+        # (CP2 review L-a: this window behind did).
+        window = self._imports_in_front() or self
         if checked:
-            self.showFullScreen()
+            window.showFullScreen()
         else:
-            self.showNormal()
+            window.showNormal()
 
 
     # ----------------------------------------------------------------------
@@ -4597,6 +4713,9 @@ class MainWindow(QMainWindow):
                 self.setEnabled(False)
                 self.status.showMessage(_("Saving your list of sources…"))
                 imports.subscriptions.wait_until_settled(QUIT_SYNC_WAIT_MS)
+            # The inbox closes and its lock goes, so the next start (or a
+            # second MyEditor) finds it free.
+            imports.shutdown()
         # Close any warm relay sockets and bunker channels so the WebSocket
         # layer can flush close frames before the QApplication tears down.
         if hasattr(self, "_session_pool"):
@@ -4683,8 +4802,12 @@ class MainWindow(QMainWindow):
             state.refresh()
             imports = getattr(self, "_imports", None)
             if imports is not None:
-                imports.account_changed(self._profile_store.default() if state.active
-                                        else None)
+                try:
+                    imports.account_changed(self._profile_store.default() if state.active
+                                            else None)
+                except Exception:  # noqa: BLE001, imports never stop the editor
+                    logging.getLogger(__name__).exception(
+                        "imports could not follow the account")
         current = self._profile_store.default()
         for name in ("_act_backup_account", "act_move_to_signer"):
             action = getattr(self, name, None)
@@ -4704,6 +4827,30 @@ class MainWindow(QMainWindow):
     def _on_create_account(self) -> None:
         self._accounts.create_account()
 
+    def _offer_publishing_account(self) -> None:
+        self._offer_account(
+            title=_("Publishing needs a Nostr account"),
+            message=_("Notes and articles are published from your Nostr account."))
+
+    def _offer_media_account(self) -> None:
+        self._offer_account(
+            title=_("The media library needs a Nostr account"),
+            message=_("Images you upload are kept for your Nostr account."))
+
+    def _offer_account(self, *, title: str, message: str) -> None:
+        """A Nostr command without an account in use: say what it needs and
+        offer the ways in, the Nostr menu's own first two commands (Restore
+        Account is there too). Creating an account is the default: it needs
+        nothing but this app."""
+        choice = ask(self, title=title, message=message, is_dark=self.is_dark_theme,
+                     buttons=(Button(_("Create Account\u2026"), "create", DEFAULT),
+                              Button(_("Connect Signer\u2026"), "connect", NORMAL),
+                              Button(_("Cancel"), None, CANCEL)))
+        if choice == "create":
+            self._on_create_account()
+        elif choice == "connect":
+            self._on_nostr_connect()
+
     def _on_restore_account(self) -> None:
         self._accounts.restore_account()
 
@@ -4718,10 +4865,9 @@ class MainWindow(QMainWindow):
         profile fresh before anything can be changed (nostr/ui/profile_window.py)."""
         active = self._profile_store.default()
         if active is None:
-            inform(self, title=_("Connect a signer first"),
-                   message=_("Connect a Nostr signer (Nostr > Connect Signer\u2026) "
-                             "before editing your profile."),
-                   is_dark=self.is_dark_theme)
+            self._offer_account(
+                title=_("Your profile needs a Nostr account"),
+                message=_("The name and picture people see belong to your Nostr account."))
             return
         editing = ProfileEditing(profile=active, pool=self._relay_pool,
                                  session_pool=self._session_pool,
@@ -4867,8 +5013,10 @@ class MainWindow(QMainWindow):
         if self._visible_media_library() is not None:
             self._media_store.refetch_if_targets_changed()
         # Drafts are written to the members' relay as well, so they are
-        # read there too (a no-op when the set of relays did not change).
+        # read there too (a no-op when the set of relays did not change),
+        # and the deletions other apps announce for them with them.
         self._draft_sync.reroute()
+        self._draft_deletions.reroute()
 
     def _visible_media_library(self):
         """The Media Library dialog while it is open, else None.
@@ -4892,18 +5040,21 @@ class MainWindow(QMainWindow):
 
     def _open_imports_window(self) -> None:
         """Nostr > Imports: sources, their posts, and the open one. Without
-        an account, or when imports cannot be kept here, it says so."""
+        an account, or when imports cannot be kept here, it says so; after
+        such a problem it tries once more first, so whatever the message
+        asked to fix (a folder, a full disk, another program) counts."""
         imports = self._imports
+        if not imports.bound and imports.problem:
+            imports.retry()
         if imports.bound:
             imports.open_window()
         elif imports.problem:
             inform(self, title=_("Imports aren't available"), message=imports.problem,
                    is_dark=self.is_dark_theme)
         else:
-            inform(self, title=_("Connect a signer first"),
-                   message=_("Connect a Nostr signer (Nostr > Connect Signer\u2026) to "
-                             "follow websites and import posts as drafts."),
-                   is_dark=self.is_dark_theme)
+            self._offer_account(
+                title=_("Imports need a Nostr account"),
+                message=_("Imported posts become drafts in your Nostr account."))
 
     def _update_imports_row(self, *_args) -> None:
         """What the Drafts panel's Imports row says."""
@@ -4933,10 +5084,21 @@ class MainWindow(QMainWindow):
             load_settings=lambda: load_settings().get(IMPORTS_SETTINGS_KEY) or {},
             save_settings=lambda value: save_setting(IMPORTS_SETTINGS_KEY, value),
             open_url=lambda url: self._open_external(url.toString()),
-            show_drafts=self._show_drafts_from_imports)
-        # Edit > Undo says what it undoes there (Undo Skip).
-        window.undo_changed.connect(self._update_undo_redo_buttons)
+            show_drafts=self._show_drafts_from_imports, badge=self._imports_badge)
+        # The Edit menu says what it acts on there (Undo Skip, a sheet's field).
+        window.edit_changed.connect(self._update_undo_redo_buttons)
+        window.edit_changed.connect(self._update_clipboard_commands)
         return window
+
+    def _on_imports_badge_toggled(self, on: bool) -> None:
+        """Nostr > Show New Posts on the App Icon, chosen (Q-7)."""
+        self._imports_badge.set_on(on)
+
+    def _on_imports_badge_changed(self, on: bool) -> None:
+        """Turned on where Imports offered it: the menu item follows."""
+        blocked = self.act_imports_badge.blockSignals(True)
+        self.act_imports_badge.setChecked(on)
+        self.act_imports_badge.blockSignals(blocked)
 
     def _show_drafts_from_imports(self) -> None:
         """Show Drafts, after an import: this window and its Drafts panel."""
@@ -5106,9 +5268,7 @@ class MainWindow(QMainWindow):
     def _on_nostr_publish_note(self):
         active = self._profile_store.default()
         if active is None:
-            inform(self, title=_("Connect a signer first"),
-                   message=_("Connect a Nostr signer before publishing. Use the avatar "
-                             "chip in the header or Nostr > Connect Signer\u2026"))
+            self._offer_publishing_account()
             return
 
         ed = self.current_editor()
@@ -5151,9 +5311,7 @@ class MainWindow(QMainWindow):
     def _on_nostr_publish_article(self):
         active = self._profile_store.default()
         if active is None:
-            inform(self, title=_("Connect a signer first"),
-                   message=_("Connect a Nostr signer before publishing. Use the avatar "
-                             "chip in the header or Nostr > Connect Signer\u2026"))
+            self._offer_publishing_account()
             return
 
         ed = self.current_editor()
@@ -5230,9 +5388,7 @@ class MainWindow(QMainWindow):
         editing while uploads run in the background."""
         active = self._profile_store.default()
         if active is None:
-            inform(self, title=_("Connect a signer first"),
-                   message=_("Connect a Nostr signer (Nostr > Connect Signer\u2026) "
-                             "before browsing your Blossom media library."))
+            self._offer_media_account()
             return
         # Reading the private library is where the signer prompts are, so
         # it happens when the user opens their media and not before.
@@ -5262,9 +5418,7 @@ class MainWindow(QMainWindow):
         it at the current cursor in the active editor."""
         active = self._profile_store.default()
         if active is None:
-            inform(self, title=_("Connect a signer first"),
-                   message=_("Connect a Nostr signer (Nostr > Connect Signer\u2026) "
-                             "before inserting Blossom images."))
+            self._offer_media_account()
             return
         ed = self.current_editor()
         if ed is None:
@@ -5896,13 +6050,22 @@ class MainWindow(QMainWindow):
                 progress.setValue(done)
 
         job.progress.connect(on_progress)
-        job.tombstoned.connect(lambda d, _eid: self._draft_store.remove(d))
+        job.tombstoned.connect(self._on_draft_tombstoned)
         job.finished.connect(
             lambda deleted, failures: self._on_draft_deletion_finished(
                 deleted, failures, total, progress,
             )
         )
         job.start()
+
+    def _on_draft_tombstoned(self, identifier: str, event_id: str) -> None:
+        """A draft deleted here: remembered as deleted, as a request from
+        another app would be (engine review L13). Removing it only let an
+        older copy a slower relay still sends bring it back until the
+        blanked wrap came round; every version up to now is gone, and one
+        saved later on another device is a new draft and stays."""
+        self._draft_store.apply_deletion(identifier, int(time.time()), event_id,
+                                         request=True)
 
     def _imported_draft_wraps(self, deletable: List[Tuple[str, int]]) -> dict:
         """``{d: wrap id}`` for the imported drafts among ``deletable``.

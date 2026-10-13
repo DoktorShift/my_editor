@@ -66,6 +66,7 @@ from ..imports.intake import (
     FEED,
     FOLLOWABLE,
     is_list_address,
+    is_whole_source,
     kind_of,
     kind_word,
     looks_like_markup,
@@ -74,7 +75,7 @@ from ..imports.intake import (
 from ..imports.registry import can_resolve_source
 from ..imports.sources.opml import OpmlDocument, is_opml, parse_opml
 from ..imports.workspace import date_text
-from ..imports_controller import NO_SOURCES_IN_LIST
+from ..imports_controller import NO_SOURCES_IN_LIST, NOTHING_FOUND
 from .assistant import (
     DEFAULT,
     LEADING,
@@ -97,7 +98,6 @@ IDLE, LOOKING, FOUND, FOLLOWED, SINGLE_POST, SOURCES = (
 INVALID_ADDRESS = _("That doesn't look like the address of a website, a feed or a Nostr "
                     "author.")
 NEEDS_ADDRESS = _("Add the feed's address above as well, so the links in it work.")
-NOTHING_FOUND = _("Nothing to import was found at that address.")
 CANT_FOLLOW = _("This address can't be followed.")
 
 # The Follow sheet's "What Works Here".
@@ -109,7 +109,7 @@ FOLLOW_EXAMPLES = (
     _("Medium: medium.com/feed/@name"),
     _("Hugo: example.com/index.xml"),
     _("A podcast's or a YouTube channel's feed"),
-    _("A Nostr author: npub… or name@example.com"),
+    _("A Nostr author: name@example.com, or a link to their profile"),
     _("A sitemap: example.com/sitemap.xml"),
     _("A GitHub folder of Markdown files"),
     _("A list of sources: an address ending in .opml"),
@@ -310,7 +310,7 @@ class FollowSheet(_Sheet):
         label = text_label(_("Website, feed or Nostr address"))
         self.address = QLineEdit(address)
         self.address.setObjectName("imports_address")
-        self.address.setPlaceholderText(_("example.com  ·  npub…  ·  "
+        self.address.setPlaceholderText(_("example.com  ·  example.com/feed  ·  "
                                           "name@example.com"))
         self.address.setClearButtonEnabled(True)
         self.address.setAccessibleName(_("Website, feed or Nostr address"))
@@ -530,7 +530,9 @@ class FollowSheet(_Sheet):
             return
         key = self._controller.follow(result.url, result.feed.title or "", result=result)
         if not key:
-            self._fail(CANT_FOLLOW)
+            # Q-6's reason when it is that (CP2 review L-e: a pasted feed
+            # with a local address said only that it cannot be followed).
+            self._fail(self._controller.why_not_followed(result.url) or CANT_FOLLOW)
             return
         self.followed.emit(key)
         self.accept()
@@ -723,8 +725,8 @@ class LinkSheet(_Sheet):
         label = text_label(_("Link to a post, a thread or a file"))
         self.address = QLineEdit()
         self.address.setObjectName("imports_link")
-        self.address.setPlaceholderText(_("bsky.app/profile/…/post/…  ·  "
-                                          "naddr…  ·  a .md file"))
+        self.address.setPlaceholderText(_("example.com/my-post  ·  a Bluesky or Nostr "
+                                          "link  ·  notes.md"))
         self.address.setClearButtonEnabled(True)
         self.address.setAccessibleName(_("Link to a post, a thread or a file"))
         label.setBuddy(self.address)
@@ -762,8 +764,7 @@ class LinkSheet(_Sheet):
             self.busy.hide()
         self.error.hide()
         address = text.strip()
-        whole = bool(address) and (is_list_address(address)
-                                   or kind_of(address) in FOLLOWABLE)
+        whole = bool(address) and (is_list_address(address) or is_whole_source(address))
         self.source_note.setVisible(whole)
         self._update_buttons()
 
@@ -775,21 +776,15 @@ class LinkSheet(_Sheet):
             self._fail(INVALID_ADDRESS)
             return
         generation = self._wait(_("Opening {address}…").format(address=address))
-        self._controller.look_up(address, on_done=lambda result, error: self._opened(
-            generation, address, result, error))
+        self._controller.open_link(address, on_done=lambda collection, error: self._opened(
+            generation, collection, error))
 
-    def _opened(self, generation: int, address: str, result, error: str) -> None:
+    def _opened(self, generation: int, collection, error: str) -> None:
         if not self._current(generation):
             return
-        if result is None:
+        if collection is None:
             self._fail(error or NOTHING_FOUND)
             return
-        if not result.feed.items:
-            self._fail(NOTHING_FOUND)
-            return
-        collection = self._controller.open_posts(
-            kind="link", label=result.feed.title or address, items=result.feed.items,
-            source_url=result.url or address)
         self.opened.emit(collection.id)
         self.accept()
 

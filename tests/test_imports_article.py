@@ -185,6 +185,24 @@ def test_a_long_source_name_elides_and_the_date_stays_whole():
     widget.hide()
 
 
+def test_a_post_kept_only_in_part_says_so(tmp_path):
+    """The reader learns a long post is cut here, and where all of it is."""
+    from nostr.imports_controller import PARTIAL_POST
+    from tests.imports_fakes import make_item
+    from tests.outbox_fakes import settle
+    from tests.test_imports_window import controller_for
+    controller = controller_for(tmp_path)
+    collection = controller.open_posts(kind="link", label="A link", items=[
+        make_item("Long", guid="g", link="https://blog.example/long",
+                  content_html="<p>The start of a long post.</p>", partial=True)])
+    out = {}
+    controller.prepare_article(collection.posts()[0], on_ready=lambda md, art: out.update(md=md),
+                               on_failed=lambda reason: out.update(failed=reason))
+    settle()
+    assert out["md"].rstrip().endswith("*" + PARTIAL_POST + "*")
+    controller.account_changed(None)
+
+
 def test_another_post_never_shows_the_previous_body():
     """Review L1: the header and Open Original switched at once while the
     body still showed the previous post until the new one was ready."""
@@ -208,3 +226,57 @@ def test_an_eliding_label_given_its_hint_shows_its_whole_text(text):
     label = ElidingLabel(text)
     label.resize(label.sizeHint())
     assert label.painted_text() == text
+
+
+def test_a_post_whose_text_is_gone_says_so(tmp_path):
+    """Q-9: kept long enough, a post keeps its title and link; opening it
+    says the text is no longer here and where it is."""
+    from nostr.imports.feed_list import source_key
+    from nostr.imports.inbox_store import OLDER_POSTS, View
+    from nostr.imports_controller import TRIMMED_POST
+    from tests.imports_fakes import make_item
+    from tests.outbox_fakes import settle
+    from tests.test_imports_window import controller_for
+    controller = controller_for(tmp_path)
+    feed = "https://blog.example/feed"
+    controller.subscriptions.add_feed(feed, "Blog")
+    controller.inbox.ingest(source_key(feed), [make_item(
+        "Old", guid="g-old", link="https://blog.example/old",
+        content_html="<p>Text that was here.</p>")])
+    controller.inbox._db.execute("UPDATE items SET found_at = found_at - 100 * 86400")
+    assert controller.inbox.trim_text() == 1
+    (post,) = controller.page(View(OLDER_POSTS))
+    assert post.trimmed
+    out = {}
+    controller.prepare_article(post, on_ready=lambda md, art: out.update(md=md),
+                               on_failed=lambda reason: out.update(failed=reason))
+    settle()
+    assert "Text that was here" not in out["md"]
+    assert out["md"].startswith("*" + TRIMMED_POST + "*")    # where the body would be
+    assert out["md"].rstrip().endswith("(https://blog.example/old)*")    # then where it is
+    controller.account_changed(None)
+
+
+def test_binding_lets_go_of_old_text(tmp_path):
+    from nostr.imports.feed_list import source_key
+    from nostr.imports.inbox_store import OLDER_POSTS, View
+    from tests.imports_fakes import make_item
+    from tests.outbox_fakes import settle
+    from types import SimpleNamespace
+
+    from tests.test_imports_window import PK, controller_for
+    controller = controller_for(tmp_path)
+    feed = "https://blog.example/feed"
+    controller.subscriptions.add_feed(feed, "Blog")
+    controller.inbox.ingest(source_key(feed), [make_item("Old", guid="g-old")])
+    controller.inbox._db.execute("UPDATE items SET found_at = found_at - 100 * 86400")
+    controller.inbox._db.commit()
+    controller.account_changed(None)
+    controller.account_changed(SimpleNamespace(user_pubkey=PK, bunker_relays=[],
+                                               display_name="Ada"))
+    settle()
+    (post,) = controller.page(View(OLDER_POSTS))
+    assert post.trimmed
+    assert controller._trim_timer.isActive()
+    controller.account_changed(None)
+    assert not controller._trim_timer.isActive()

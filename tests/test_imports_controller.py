@@ -428,3 +428,172 @@ def test_a_lost_copy_of_the_list_never_empties_the_inbox(tmp_path):
     assert [s.url for s in controller.sources()] == [FEED]
     assert controller.counts().skipped == 1
     controller.account_changed(None)
+
+
+class TestTheSecondProcess:
+    """CP1 review L7: a second MyEditor showing the inbox read only never
+    refreshed, and stayed read only after the first one quit."""
+
+    def test_it_shows_what_the_first_one_changes(self, tmp_path):
+        first, second = Harness(tmp_path), Harness(tmp_path)
+        first.controller.account_changed(profile())
+        second.controller.account_changed(profile())
+        settle()
+        assert second.controller.read_only and second.controller._watch.isActive()
+        first.controller.subscriptions.add_feed(FEED, "Blog")
+        first.controller.inbox.ingest(source_key(FEED), [make_item("Post", guid="g-1")])
+        changed = []
+        second.controller.posts_changed.connect(lambda: changed.append(1))
+        second.controller._watch_other()
+        assert changed == [1]
+        assert len(second.controller.page(View(OLDER_POSTS))) == 1
+        second.controller._watch_other()            # nothing new: nothing reloaded
+        assert changed == [1]
+        first.controller.account_changed(None)
+        second.controller.account_changed(None)
+        settle()
+
+    def test_it_keeps_the_inbox_when_the_first_one_quits(self, tmp_path):
+        first, second = Harness(tmp_path), Harness(tmp_path)
+        first.controller.account_changed(profile())
+        second.controller.account_changed(profile())
+        settle()
+        first.controller.subscriptions.add_feed(FEED, "Blog")
+        first.controller.inbox.ingest(source_key(FEED), [make_item("Post", guid="g-1")])
+        second.controller._watch_other()
+        assert second.controller.read_only           # the first still runs
+        bound = []
+        second.controller.bound_changed.connect(bound.append)
+        first.controller.account_changed(None)      # quits
+        second.controller._watch_other()
+        controller = second.controller
+        assert not controller.read_only and controller.bound
+        assert bound == [True]
+        assert not controller._watch.isActive()
+        assert second.checkers[-1].started == 1     # it checks now
+        # The source the first one followed after this one started is kept,
+        # with its posts: the list is read again before the inbox follows it.
+        assert [s.key for s in controller.sources()] == [source_key(FEED)]
+        assert len(controller.page(View(OLDER_POSTS))) == 1
+        assert controller.check_now(source_key(FEED))
+        # And it holds the lock: a third one only shows the inbox.
+        third = Harness(tmp_path)
+        third.controller.account_changed(profile())
+        settle()
+        assert third.controller.read_only
+        third.controller.account_changed(None)
+        controller.account_changed(None)
+        settle()
+
+    def test_reading_never_costs_the_first_one_a_source(self, tmp_path):
+        """CP3 review M1: the second MyEditor wrote its out-of-date list to
+        this computer's copy when it read a source, and took that copy over
+        when the first one quit, so a source the first one followed (its
+        change not on the relays yet) was removed with its posts."""
+        first, second = Harness(tmp_path), Harness(tmp_path)
+        first.controller.account_changed(profile())
+        first.controller.subscriptions.add_feed(NOSTR_AUTHOR, "An author")
+        second.controller.account_changed(profile())
+        settle()
+        assert second.controller.read_only
+        first.controller.subscriptions.add_feed(FEED, "Blog")     # still waiting to be sent
+        first.controller.inbox.ingest(source_key(FEED), [make_item("Post", guid="g-1")])
+        second.controller.subscriptions.mark_fetched(NOSTR_AUTHOR)  # it reads the author
+        assert not second.controller.follow(FEED + "/other")       # it changes nothing
+        first.controller.account_changed(None)                     # quits
+        second.controller._watch_other()
+        settle()
+        controller = second.controller
+        assert not controller.read_only
+        assert sorted(s.key for s in controller.sources()) == sorted(
+            [source_key(NOSTR_AUTHOR), source_key(FEED)])
+        assert len(controller.page(View(OLDER_POSTS))) == 1
+        # Its relays never had the first one's change: this one sends it.
+        assert controller.subscriptions._dirty
+        controller.account_changed(None)
+        settle()
+
+    def test_one_that_cannot_open_the_inbox_still_leaves_the_list_alone(self, tmp_path,
+                                                                       monkeypatch):
+        """N1 of the CP3 fixes review: a second MyEditor that could not open
+        the inbox gave up and became the writer of the list, and its next
+        answered read wrote its own copy over the first one's waiting
+        change."""
+        import json
+        import sqlite3
+        from nostr import imports_controller
+        first, second = Harness(tmp_path), Harness(tmp_path)
+        first.controller.account_changed(profile())
+        settle()
+
+        class Damaged(imports_controller.InboxStore):
+            def check(self):
+                raise sqlite3.DatabaseError("database disk image is malformed")
+        monkeypatch.setattr(imports_controller, "InboxStore", Damaged)
+        second.controller.account_changed(profile())
+        monkeypatch.undo()
+        settle()
+        assert not second.controller.bound and second.controller.problem
+        assert second.controller.subscriptions.read_only        # the first keeps the lock
+        first.controller.subscriptions.add_feed(FEED, "Blog")   # waiting to be sent
+        second.controller.subscriptions.refresh()                # answered
+        settle()
+        (copy,) = (tmp_path / "cache").glob("feed_sources_*.json")
+        kept = json.loads(copy.read_text(encoding="utf-8"))
+        assert [f["url"] for f in kept["local"]["feeds"]] == [FEED] and kept["dirty"]
+        first.controller.account_changed(None)
+        second.controller.account_changed(None)
+        settle()
+
+    def test_one_that_cannot_open_the_inbox_keeps_its_lock(self, tmp_path, monkeypatch):
+        """S1 of the CP3 fixes review: the first MyEditor that could not
+        open the inbox gave its lock back but went on writing the list, and
+        a second one took the lock and wrote it too. The lock stays its
+        own until it unbinds, and trying again goes on with it."""
+        import sqlite3
+        from nostr import imports_controller
+        first, second, third = Harness(tmp_path), Harness(tmp_path), Harness(tmp_path)
+
+        class Unreadable(imports_controller.InboxStore):
+            def check(self):
+                raise sqlite3.OperationalError("disk I/O error")
+        monkeypatch.setattr(imports_controller, "InboxStore", Unreadable)
+        first.controller.account_changed(profile())
+        monkeypatch.undo()
+        settle()
+        assert not first.controller.bound and first.controller.problem
+        assert not first.controller.subscriptions.read_only
+        second.controller.account_changed(profile())
+        settle()
+        assert second.controller.read_only and second.controller.subscriptions.read_only
+        assert first.controller.retry()                 # the same lock, the inbox open now
+        assert not first.controller.read_only
+        first.controller.account_changed(None)          # gives the lock back
+        third.controller.account_changed(profile())
+        settle()
+        assert not third.controller.read_only
+        for harness in (second, third):
+            harness.controller.account_changed(None)
+        settle()
+
+    def test_the_window_stays_and_works_again(self, tmp_path):
+        from nostr.imports_controller import ELSEWHERE
+        from nostr.ui.imports_window import ImportsWindow
+        cleanup = delete_new_windows()
+        next(cleanup)
+        try:
+            first, second = Harness(tmp_path), Harness(tmp_path)
+            first.controller.account_changed(profile())
+            second.controller.account_changed(profile())
+            settle()
+            window = ImportsWindow(second.controller)
+            assert not window.act_follow.isEnabled()
+            assert window.notice.text() == ELSEWHERE
+            first.controller.account_changed(None)
+            second.controller._watch_other()
+            assert window.act_follow.isEnabled()
+            assert ELSEWHERE not in window.notice.text()
+            second.controller.account_changed(None)
+            settle()
+        finally:
+            next(cleanup, None)

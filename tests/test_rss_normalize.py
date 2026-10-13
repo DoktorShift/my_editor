@@ -111,5 +111,38 @@ class ItemToArticleTests(unittest.TestCase):
         self.assertIn("Originally published at", template.content)
 
 
+
+class RelativeAddressTests(unittest.TestCase):
+    """CP1 review O3: relative links and images of a feed's body stayed
+    relative, so they pointed nowhere in a draft or an article."""
+
+    HTML = ("<p>See <a href='/about'>about</a>, <a href='#notes'>notes</a>, "
+            "<a href='mailto:a@b.example'>mail</a> and <a href='//cdn.example/x'>cdn</a>."
+            "</p><p><img src='../media/pic.jpg' alt='A pic'></p>")
+
+    def test_they_are_made_whole_against_the_post_page(self) -> None:
+        md = html_to_markdown(self.HTML, base_url="https://blog.example/2026/10/post")
+        self.assertIn("[about](https://blog.example/about)", md)
+        self.assertIn("![A pic](https://blog.example/2026/media/pic.jpg)", md)
+        self.assertIn("[cdn](https://cdn.example/x)", md)
+        self.assertIn("[notes](#notes)", md)                # a place in the post
+        self.assertIn("[mail](mailto:a@b.example)", md)
+
+    def test_without_a_page_they_stay(self) -> None:
+        self.assertIn("[about](/about)", html_to_markdown(self.HTML))
+        self.assertIn("[about](/about)", html_to_markdown(self.HTML, base_url="ftp://x/"))
+
+    def test_a_draft_gets_whole_addresses(self) -> None:
+        template = item_to_article(_item(link="https://blog.example/2026/10/post",
+                                         content_html=self.HTML))
+        self.assertIn("https://blog.example/2026/media/pic.jpg", template.content)
+
+    def test_the_images_to_copy_are_whole(self) -> None:
+        from nostr.imports.snapshots import images_to_copy
+        item = _item(link="https://blog.example/2026/10/post", image=None,
+                     content_html=self.HTML)
+        self.assertEqual(images_to_copy([item]), ["https://blog.example/2026/media/pic.jpg"])
+
+
 if __name__ == "__main__":
     unittest.main()

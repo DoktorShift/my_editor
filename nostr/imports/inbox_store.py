@@ -39,7 +39,7 @@ import logging
 import sqlite3
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
@@ -63,6 +63,11 @@ CHECK_LEASE = 120
 MANUAL_CHECK_GAP = 60
 PAGE_SIZE = 50
 FINISHED_JOB_DAYS = 7
+# How long a post keeps its text here (the owner's decision Q-9): while it
+# waits in the inbox, 90 days at most; skipped or imported, 30 days. Then
+# it keeps its title, link and state, enough to know it again.
+WAITING_TEXT_DAYS = 90
+SETTLED_TEXT_DAYS = 30
 
 NEW, OLDER, SKIPPED = "new", "older", "skipped"
 DRAFTED, PUBLISHED, REMOVED = "drafted", "published", "removed"
@@ -130,6 +135,8 @@ class PostRow:
     image_count: int
     source_title: str = ""
     source_url: str = ""
+    # Its text is no longer kept (Q-9): importing it reads its page.
+    trimmed: bool = False
 
     @property
     def key(self) -> Tuple[str, str]:
@@ -231,6 +238,30 @@ CREATE TABLE job_rows (job_id TEXT NOT NULL, idx INTEGER NOT NULL, d_tag TEXT NO
 """
 
 
+def _cut(item: FeedItem) -> FeedItem:
+    """``item`` with its text cut to what the inbox keeps, marked partial."""
+    def cut(text: Optional[str]) -> Optional[str]:
+        if not text:
+            return text
+        data = text.encode("utf-8")
+        if len(data) <= MAX_BODY_BYTES:
+            return text
+        return data[:MAX_BODY_BYTES].decode("utf-8", errors="ignore")
+    return replace(item, content_html=cut(item.content_html) or "",
+                   content_markdown=cut(item.content_markdown),
+                   summary=cut(item.summary), partial=True)
+
+
+def _trimmed(snapshot: dict) -> dict:
+    """What a post keeps once its text is gone (Q-9): what makes it the
+    same post again (its identifier comes from guid, link and title), its
+    date, and the mark that its text must be read from its page."""
+    kept = {name: snapshot.get(name) for name in ("guid", "title", "link", "published_at",
+                                                  "title_from_url")}
+    kept.update(content_html="", partial=True, trimmed=True, categories=[])
+    return kept
+
+
 def database_path(config_dir: Path, pubkey: str) -> Path:
     return Path(config_dir) / "imports" / f"{pubkey.lower()}.sqlite3"
 
@@ -263,6 +294,28 @@ class InboxStore:
     def close(self) -> None:
         self._db.close()
 
+    def data_version(self) -> int:
+        """A number that changes when another connection (another
+        MyEditor) has changed the inbox since the last call."""
+        return int(self._db.execute("PRAGMA data_version").fetchone()[0])
+
+    def check(self) -> None:
+        """Raise ``sqlite3.DatabaseError`` when the file is damaged: pages
+        that cannot be read (the usual damage after a crash during a write,
+        or a copy a sync tool took mid-write) or tables that are gone. Run
+        once when the inbox is opened, so damage shows there, where the
+        file can be set aside, and not in a list later."""
+        found = [row[0] for row in self._db.execute("PRAGMA quick_check")]
+        if found != ["ok"]:
+            raise sqlite3.DatabaseError("the inbox is damaged: " + "; ".join(
+                str(line) for line in found[:3]))
+        tables = {row[0] for row in self._db.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'")}
+        missing = {"sources", "items", "ledger", "jobs", "job_rows"} - tables
+        if missing:
+            raise sqlite3.DatabaseError("the inbox is incomplete: " + ", ".join(
+                sorted(missing)))
+
     def _now(self) -> int:
         return int(self._clock())
 
@@ -276,6 +329,17 @@ class InboxStore:
             self._db.executescript(
                 "BEGIN; CREATE TABLE IF NOT EXISTS skip_memory (d_tag TEXT PRIMARY KEY, "
                 "at INTEGER NOT NULL); PRAGMA user_version = 2; COMMIT;")
+        if version < 3:
+            # When each post took its state, and whether its text is gone
+            # (Q-9). Skipped and imported posts already here count from
+            # now, since when they took their state was not kept.
+            columns = {row[1] for row in self._db.execute("PRAGMA table_info(items)")}
+            added = "".join(
+                f"ALTER TABLE items ADD COLUMN {name} INTEGER NOT NULL DEFAULT 0; "
+                for name in ("changed_at", "trimmed") if name not in columns)
+            self._db.executescript(
+                f"BEGIN; {added}UPDATE items SET changed_at = {int(self._now())} "
+                "WHERE changed_at = 0; PRAGMA user_version = 3; COMMIT;")
 
     # ------------------------------------------------------------------ #
     # Sources                                                              #
@@ -367,14 +431,15 @@ class InboxStore:
     def claim(self, key: str, *, manual: bool = False) -> bool:
         """Take the check of ``key`` (no other check of it runs until it is
         done or its lease runs out). A manual check is allowed once a
-        minute; an automatic one only when due."""
+        minute, also of a source not checked automatically; an automatic
+        one only when due and not turned off."""
         now = self._now()
-        condition = "last_attempt <= ?" if manual else "next_check <= ?"
+        condition = "last_attempt <= ?" if manual else "paused = 0 AND next_check <= ?"
         limit = now - MANUAL_CHECK_GAP if manual else now
         with self._db:
             cursor = self._db.execute(
                 "UPDATE sources SET checking_until = ?, last_attempt = ? WHERE key = ? "
-                f"AND paused = 0 AND checking_until <= ? AND {condition}",
+                f"AND checking_until <= ? AND {condition}",
                 (now + CHECK_LEASE, now, key, now, limit))
         return cursor.rowcount == 1
 
@@ -461,12 +526,14 @@ class InboxStore:
                 snapshot = snapshots.to_snapshot(item)
                 text = json.dumps(snapshot, ensure_ascii=False)
                 if len(text.encode("utf-8")) > MAX_BODY_BYTES + 64 * 1024:
-                    # Too long to keep here: said in the log and counted,
-                    # never dropped without a word (review L7).
+                    # Kept with its text cut at the limit, as STANDUP keeps
+                    # one, and marked: importing it reads its own page for
+                    # the whole text (review L7: it was dropped).
                     too_long += 1
-                    _log.info("a post of %s is too long to keep in the inbox: %s", key,
-                              (item.title or item.link or d_tag)[:120])
-                    continue
+                    _log.warning("a post of %s is longer than the inbox keeps; its text is "
+                                 "cut: %s", key, (item.title or item.link or d_tag)[:120])
+                    item = _cut(item)
+                    text = json.dumps(snapshots.to_snapshot(item), ensure_ascii=False)
                 if baseline or (published and published < source["created_at"]):
                     fresh = OLDER
                 else:
@@ -484,13 +551,13 @@ class InboxStore:
                 self._db.execute(
                     "INSERT INTO items (source_key, d_tag, snapshot, found_at, published_at, "
                     "position, state, previous_state, revision, title, excerpt, image, link, "
-                    "author, read_minutes, image_count) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)",
+                    "author, read_minutes, image_count, changed_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (key, d_tag, text, now, published, _position(now, published), state,
                      state if state in (NEW, OLDER) else fresh,
                      item.title or "", snapshots.excerpt(item), snapshots.cover(item),
                      item.link or "", item.author or "",
-                     snapshots.minutes_of(item), snapshots.images_in(item)))
+                     snapshots.minutes_of(item), snapshots.images_in(item), now))
             if waiting:
                 # A post dated ahead waits for its time; the feed must be
                 # read again then, not answered "unchanged" (review L6).
@@ -555,7 +622,7 @@ class InboxStore:
             state=row["state"], revision=row["revision"], read_minutes=row["read_minutes"],
             image_count=row["image_count"],
             source_title=row["s_title"] or row["s_feed_title"] or row["s_url"],
-            source_url=row["s_url"])
+            source_url=row["s_url"], trimmed=bool(row["trimmed"]))
 
     def post(self, source_key: str, d_tag: str) -> Optional[PostRow]:
         row = self._db.execute(
@@ -569,6 +636,36 @@ class InboxStore:
         row = self._db.execute("SELECT snapshot FROM items WHERE source_key = ? AND d_tag = ?",
                                (source_key, d_tag)).fetchone()
         return snapshots.from_snapshot(json.loads(row["snapshot"])) if row else None
+
+    def trim_text(self) -> int:
+        """Let go of the text of the posts kept long enough (Q-9): one
+        waiting in the inbox 90 days after it arrived, one skipped or
+        imported 30 days after that. Each keeps its title, link, date and
+        state; opening it says its text is no longer here, and a draft made
+        of it reads its page. Returns how many posts let go."""
+        now = self._now()
+        waiting = now - WAITING_TEXT_DAYS * 24 * 3600
+        settled = now - SETTLED_TEXT_DAYS * 24 * 3600
+        rows = self._db.execute(
+            "SELECT rowid, snapshot FROM items WHERE trimmed = 0 AND ("
+            "(state IN (?, ?) AND found_at < ?) OR "
+            "(state NOT IN (?, ?) AND changed_at < ?))",
+            (NEW, OLDER, waiting, NEW, OLDER, settled)).fetchall()
+        if not rows:
+            return 0
+        with self._db:
+            for row in rows:
+                try:
+                    snapshot = json.loads(row["snapshot"])
+                except ValueError:
+                    snapshot = {}
+                self._db.execute(
+                    "UPDATE items SET snapshot = ?, trimmed = 1, excerpt = '', image = '', "
+                    "author = '', read_minutes = 0, image_count = 0, "
+                    "revision = revision + 1 WHERE rowid = ?",
+                    (json.dumps(_trimmed(snapshot if isinstance(snapshot, dict) else {}),
+                                ensure_ascii=False), row["rowid"]))
+        return len(rows)
 
     def counts(self) -> Counts:
         found = {row["state"]: row["n"] for row in self._db.execute(
@@ -621,9 +718,9 @@ class InboxStore:
             else:
                 state, previous = row["previous_state"], row["previous_state"]
             self._db.execute(
-                "UPDATE items SET state = ?, previous_state = ?, revision = revision + 1 "
-                "WHERE source_key = ? AND d_tag = ? AND revision = ?",
-                (state, previous, source_key, d_tag, revision))
+                "UPDATE items SET state = ?, previous_state = ?, revision = revision + 1, "
+                "changed_at = ? WHERE source_key = ? AND d_tag = ? AND revision = ?",
+                (state, previous, self._now(), source_key, d_tag, revision))
         return revision + 1
 
     # -- what is imported ---------------------------------------------------------
@@ -644,13 +741,33 @@ class InboxStore:
                     marks = ", ".join("?" * len(chunk))
                     kept = ", ".join("?" * len(keep))
                     cursor = self._db.execute(
-                        f"UPDATE items SET state = ?, revision = revision + 1 "
+                        f"UPDATE items SET state = ?, revision = revision + 1, changed_at = ? "
                         f"WHERE d_tag IN ({marks}) AND state NOT IN ({kept})",
-                        (state, *chunk, *keep))
+                        (state, now, *chunk, *keep))
                     changed += cursor.rowcount
                     for d_tag in chunk:
                         self._ledger(d_tag, state, now)
+                    changed += self._settle_failed(chunk)
         return changed
+
+    def _settle_failed(self, d_tags: Sequence[str]) -> int:
+        """A post that failed in an import and exists now (imported again,
+        here or in the other app) is no longer a failure of that import
+        (CP2 review N8: it read "Failed" in Imported, and the import kept
+        saying "1 failed"). An import left with nothing failed or to do is
+        complete. A running import keeps its own rows. Returns how many
+        rows changed."""
+        marks = ", ".join("?" * len(d_tags))
+        cursor = self._db.execute(
+            f"UPDATE job_rows SET status = ?, error = '' WHERE status = ? "
+            f"AND d_tag IN ({marks}) AND job_id IN (SELECT id FROM jobs WHERE status IN "
+            f"('partial', 'paused', 'stopped'))", (ROW_EXISTING, ROW_FAILED, *d_tags))
+        if cursor.rowcount:
+            self._db.execute(
+                "UPDATE jobs SET status = 'completed', updated_at = ? WHERE status = "
+                "'partial' AND NOT EXISTS (SELECT 1 FROM job_rows WHERE job_id = jobs.id AND "
+                "status IN (?, ?))", (self._now(), ROW_FAILED, ROW_PENDING))
+        return cursor.rowcount
 
     def mark_imported(self, d_tag: str, state: str = DRAFTED) -> None:
         """A draft was just made from ``d_tag`` here."""
@@ -705,23 +822,33 @@ class InboxStore:
         row = self._db.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
         return self._job(row) if row else None
 
-    def jobs(self) -> List[Job]:
-        """Every job, newest first."""
-        return [self._job(row) for row in self._db.execute(
-            "SELECT * FROM jobs ORDER BY created_at DESC, rowid DESC")]
+    def jobs(self, *, statuses: Sequence[str] = (), payloads: bool = True) -> List[Job]:
+        """The jobs (with ``statuses`` only, when given), newest first.
+        Without ``payloads`` their rows come without the posts and signed
+        drafts they keep: what progress needs, at a fraction of the cost
+        (CP2 review L-d: every row's post was read again at every step)."""
+        sql, args = "SELECT * FROM jobs", ()
+        if statuses:
+            sql += f" WHERE status IN ({', '.join('?' * len(statuses))})"
+            args = tuple(statuses)
+        return [self._job(row, payloads=payloads) for row in self._db.execute(
+            sql + " ORDER BY created_at DESC, rowid DESC", args)]
 
-    def _job(self, row) -> Job:
+    def _job(self, row, *, payloads: bool = True) -> Job:
         job = Job(id=row["id"], label=row["label"], source_type=row["source_type"],
                   source_url=row["source_url"], status=row["status"],
                   options=json.loads(row["options"] or "{}"), created_at=row["created_at"],
                   updated_at=row["updated_at"], error=row["error"])
-        for r in self._db.execute("SELECT * FROM job_rows WHERE job_id = ? ORDER BY idx",
-                                  (job.id,)):
+        columns = "*" if payloads else "idx, d_tag, title, source_key, status, stage, error"
+        for r in self._db.execute(f"SELECT {columns} FROM job_rows WHERE job_id = ? "
+                                  "ORDER BY idx", (job.id,)):
+            signed = r["signed_event"] if payloads else None
+            snapshot = r["snapshot"] if payloads else None
             job.rows.append(JobRow(
                 index=r["idx"], d_tag=r["d_tag"], title=r["title"], source_key=r["source_key"],
                 status=r["status"], stage=r["stage"], error=r["error"],
-                signed_event=json.loads(r["signed_event"]) if r["signed_event"] else None,
-                snapshot=json.loads(r["snapshot"]) if r["snapshot"] else None))
+                signed_event=json.loads(signed) if signed else None,
+                snapshot=json.loads(snapshot) if snapshot else None))
         return job
 
     def save_job(self, job: Job) -> None:

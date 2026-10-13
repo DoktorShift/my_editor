@@ -115,11 +115,12 @@ class TestTheBar:
         assert bar(window).note.text().startswith(EXPIRY_NOTE)
         assert EXPIRY_NOTE == "Imported drafts you don't change are removed after 90 days."
 
-    def test_a_signer_app_may_ask_once_per_draft_and_image(self, window):
+    def test_a_signer_app_may_ask_twice_per_draft_and_once_per_image(self, window):
         model = window.posts.model_
         model.set_checked(0, True)
         model.set_checked(1, True)
-        assert "Your signer may ask up to 2 times" in bar(window).note.text()
+        assert ("Your signer app may ask up to 4 times, twice for each draft and once for each "
+                "image.") in bar(window).note.text()
 
     def test_a_key_kept_here_never_asks(self, tmp_path, jobs):
         controller = make_controller(tmp_path, jobs, signer="local")
@@ -222,11 +223,16 @@ class TestController:
         assert controller.defaults_for([]) == (True, True)
 
     def test_signer_prompts(self, window):
+        """CP2 review N7: each draft asks a signer app twice (encrypt, then
+        sign), each copied image once, the cover too."""
         controller = window._controller
         post = window.posts.model_.post(0)
-        with_images = post.__class__(**{**post.__dict__, "image_count": 3})
-        assert controller.signer_prompts([with_images], copy_images=True) == 4
-        assert controller.signer_prompts([with_images], copy_images=False) == 1
+        plain = post.__class__(**{**post.__dict__, "image_count": 3, "image": ""})
+        assert controller.signer_prompts([plain], copy_images=True) == 2 + 3
+        assert controller.signer_prompts([plain], copy_images=False) == 2
+        covered = post.__class__(**{**post.__dict__, "image_count": 3,
+                                    "image": "https://img.example/cover.png"})
+        assert controller.signer_prompts([covered, plain], copy_images=True) == 4 + 4 + 3
 
 
 def test_the_bar_and_its_options_have_names(window):
@@ -241,7 +247,8 @@ def test_words():
     assert create_label(1) == "Create Draft"
     assert create_label(5) == "Create 5 Drafts"
     assert signer_note(0) == ""
-    assert signer_note(1).startswith("Your signer may ask once.")
+    assert signer_note(5).startswith("Your signer app may ask up to 5 times, twice for each "
+                                     "draft")
 
 
 def test_the_expiry_sentence_is_said_in_one_place():
@@ -356,6 +363,19 @@ def test_the_review_shows_what_the_import_copies(window, monkeypatch):
     window._review_images()
     assert shown == [sorted(snapshots.images_to_copy([item]))]
     assert window._skip_images == {"https://x.example/a.png"}
+
+
+def test_images_that_cannot_be_read_say_so(window, monkeypatch):
+    """CP2 review L8: a failed search for the images read as "no image to
+    copy"."""
+    from nostr.imports import snapshots
+    from nostr.imports_controller import IMAGES_UNREADABLE
+
+    def broken(_items):
+        raise ValueError("a body that cannot be converted")
+    monkeypatch.setattr(snapshots, "images_to_copy", broken)
+    window._review_images()
+    assert window.banner.label.text() == IMAGES_UNREADABLE
 
 
 def test_no_image_to_copy_is_said(window, monkeypatch):
