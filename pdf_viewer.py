@@ -776,13 +776,12 @@ class PdfViewerTab(QWidget):
 
     def release(self) -> None:
         """Let go of the document as the tab closes, before it is deleted:
-        the view stops rendering it, Find stops scanning it, the outline
-        stops reading it, and the file is closed."""
+        Find's results leave the view, and the file is closed, which stops
+        the view rendering it and Find scanning it. (Taking the document
+        from the view or the search instead makes Qt connect to nothing,
+        and say so in the log.)"""
         self._reload_pending = False
         self.view.setSearchModel(None)
-        self._search.setDocument(None)
-        self._bookmarks.setDocument(None)
-        self.view.setDocument(None)
         self.document.close()
 
     def document_title(self) -> str:

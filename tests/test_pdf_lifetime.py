@@ -120,3 +120,49 @@ def test_a_closed_pdf_tab_goes_with_its_document_and_search(tmp_path):
     assert r["close_ms"] < 150, r["close_ms"]
     assert "Traceback" not in proc.stderr and "RuntimeError" not in proc.stderr, proc.stderr
     assert proc.returncode == 0, proc.stderr
+
+
+QUIET_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtCore import QEvent, QPointF, qInstallMessageHandler
+from PySide6.QtGui import QPageSize, QPainter, QPdfWriter
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+main_window.MainWindow._maybe_auto_check_for_updates = lambda self: None
+path = os.path.join(os.environ["HOME"], "quiet.pdf")
+writer = QPdfWriter(path)
+writer.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
+painter = QPainter(writer)
+painter.drawText(QPointF(200, 300), "words to find")
+painter.end()
+w = main_window.MainWindow()
+w.show()
+viewer = w.open_path(path) or w.current_pdf_viewer()
+viewer.toggle_findbar()
+viewer.findbar.edit.setText("words")
+app.processEvents()
+said = []
+qInstallMessageHandler(lambda kind, context, message: said.append(message))
+w.close_tab(w.tabs.indexOf(viewer))
+for _ in range(3):
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
+qInstallMessageHandler(None)
+w.close()
+print("RESULT " + json.dumps(said))
+"""
+
+
+def test_closing_a_pdf_says_nothing_in_the_log(tmp_path):
+    """Review 2, L3: each closed PDF wrote three "QObject::connect: invalid
+    nullptr parameter" warnings, which the app's log keeps."""
+    proc = subprocess.run(
+        [sys.executable, "-c", CHILD_PROLOGUE + QUIET_SCRIPT + CHILD_EPILOGUE, REPO],
+        env=child_env(tmp_path), capture_output=True, text=True, timeout=120)
+    line = next((out for out in proc.stdout.splitlines() if out.startswith("RESULT ")), "")
+    assert line, proc.stdout + proc.stderr
+    said = json.loads(line[len("RESULT "):])
+    assert [m for m in said if "QObject" in m or "nullptr" in m] == [], said
