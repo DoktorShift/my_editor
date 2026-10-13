@@ -60,6 +60,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QTextBrowser
 
 import i18n
+import media_files
 import rich_text
 import word_count
 from doc_walk import iter_blocks
@@ -78,8 +79,6 @@ COLUMN_WIDTH = 680
 WORDS_PER_MINUTE = word_count.WORDS_PER_MINUTE
 SERIF = ["Charter", "Iowan Old Style", "Source Serif Pro", "Georgia", "serif"]
 MEDIA_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
-AUDIO_EXTENSIONS = (".mp3", ".m4a", ".aac", ".ogg", ".oga", ".opus", ".wav", ".flac")
-VIDEO_EXTENSIONS = (".mp4", ".webm", ".mov", ".m4v")
 
 _REFERENCE = re.compile(r"nostr:(npub1|nprofile1|note1|nevent1|naddr1)[02-9ac-hj-np-z]+")
 _URL = re.compile(r"https?://[^\s<>\"]+[^\s<>\".,;:!?)\]]")
@@ -148,9 +147,10 @@ def player_label(url: str) -> Optional[str]:
     video, where readers show a player; None for any other address."""
     path = QUrl(url).path()
     name = path.rsplit("/", 1)[-1]
-    if path.lower().endswith(AUDIO_EXTENSIONS):
+    kind = media_files.kind_of(media_files.type_of(path) or "")
+    if kind == media_files.AUDIO:
         return _("▶ Audio: {name}").format(name=name)
-    if path.lower().endswith(VIDEO_EXTENSIONS):
+    if kind == media_files.VIDEO:
         return _("▶ Video: {name}").format(name=name)
     return None
 
