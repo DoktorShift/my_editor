@@ -710,3 +710,17 @@ def test_a_key_written_twice_is_read_as_a_parser_reads_it():
     text = "---\ntitle: First\ntitle: Last\n---\nB\n"
     front, _ = front_matter.split(text)
     assert from_front_matter(front).title == "Last" and kept_in_file(front) == frozenset()
+
+
+@pytest.mark.parametrize("style", [">", ">-", ">+"])
+@pytest.mark.parametrize("summary", ["Line one\nLine two", "One\n\nTwo after a gap", "Just one"])
+def test_a_folded_summary_keeps_its_line_breaks(style, summary):
+    """In a ">" block YAML reads a single line break as a space: one in the
+    summary is written as an empty line, as YAML reads it back."""
+    yaml = pytest.importorskip("yaml")
+    text = f"---\ndescription: {style}\n  A long description\n  over two lines.\nlayout: post\n---\nB\n"
+    out = changed(text, summary=summary)
+    assert out.startswith(f"---\ndescription: {style}\n")
+    read = yaml.safe_load(out.split("---\n")[1])["description"]
+    assert read.strip("\n") == summary
+    assert from_front_matter(front_matter.split(out)[0]).summary == summary

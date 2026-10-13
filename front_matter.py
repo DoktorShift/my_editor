@@ -374,6 +374,10 @@ def _rewritten(old: Entry, value: Union[str, Sequence[str]], bare: bool) -> Entr
     if isinstance(value, str):
         block = _BLOCK_SCALAR.match(written) if old.syntax == YAML else None
         if block is not None:
+            if block.group(1) == ">":
+                # Folded, YAML reads a line break as a space, and n empty
+                # lines as n line breaks.
+                value = re.sub(r"\n+", lambda breaks: breaks.group(0) + "\n", value)
             return Entry(old.key, (key_part + written + comment,)
                          + _block_lines(old.lines[1:], value), old.syntax)
         if len(old.lines) > 1 and old.syntax == TOML:
@@ -621,7 +625,7 @@ def _list_item(line: str) -> str:
 
 def _block_text(lines: Sequence[str], style: str, chomping: str) -> str:
     """The text of a block scalar: its indented lines, as they are for "|",
-    folded into one line per paragraph for ">"."""
+    folded for ">" as YAML folds them."""
     body = list(lines)
     indents = [len(line) - len(line.lstrip(" ")) for line in body if line.strip()]
     cut = min(indents) if indents else 0
@@ -631,16 +635,17 @@ def _block_text(lines: Sequence[str], style: str, chomping: str) -> str:
     if style == "|":
         text = "\n".join(rows)
     else:
-        paragraphs, current = [], []
+        # Folded: lines next to each other joined by a space, n empty lines
+        # between two read as n line breaks.
+        text, empty = "", 0
         for row in rows:
-            if row:
-                current.append(row.strip())
-            elif current:
-                paragraphs.append(" ".join(current))
-                current = []
-        if current:
-            paragraphs.append(" ".join(current))
-        text = "\n".join(paragraphs)
+            if not row:
+                empty += 1
+                continue
+            if text:
+                text += "\n" * empty if empty else " "
+            text += row.strip()
+            empty = 0
     return text if chomping == "-" else text + "\n" if chomping == "+" else text
 
 
