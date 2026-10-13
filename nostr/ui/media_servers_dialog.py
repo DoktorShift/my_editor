@@ -22,8 +22,9 @@ from __future__ import annotations
 
 from typing import Callable, Optional, Sequence
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, Qt, QUrl, Signal
 from PySide6.QtGui import QPalette
+from PySide6.QtNetwork import QHostAddress
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
@@ -43,6 +44,26 @@ import url_safety
 from i18n import _
 
 from ..blossom.settings import BlossomSettings
+
+
+def server_address(text: str) -> Optional[str]:
+    """The server origin ``text`` names, or None when it is not a media
+    server address: one with spaces, a host with no dot (other than
+    localhost or an IP address), or anything but https (http only on
+    this computer). A bare host means https."""
+    text = (text or "").strip()
+    if not text or any(ch.isspace() for ch in text):
+        return None
+    if "://" not in text:
+        text = "https://" + text
+    url = QUrl(text, QUrl.ParsingMode.StrictMode)
+    host = url.host()
+    if not url.isValid() or not host:
+        return None
+    if "." not in host and host != "localhost" and QHostAddress(host).isNull():
+        return None
+    origin = url_safety.origin_of(text)
+    return origin if origin and url_safety.is_safe_media_url(origin) else None
 
 
 class MediaServersDialog(QDialog):
@@ -114,8 +135,10 @@ class MediaServersDialog(QDialog):
         self.address.setAccessibleName(_("Server address"))
         self.address.setPlaceholderText("https://media.example.com")
         self.address.setClearButtonEnabled(True)
-        self.address.textChanged.connect(lambda _text: self.address_error.hide())
-        self.address.returnPressed.connect(self._add)
+        self.address.textChanged.connect(self._address_edited)
+        # Return in the field adds what is typed (or says why not) and
+        # never closes the sheet; with nothing typed it is Done's.
+        self.address.installEventFilter(self)
         self.add_button = QPushButton(_("Add Server"))
         self.add_button.setAutoDefault(False)
         self.add_button.clicked.connect(self._add)
@@ -162,10 +185,10 @@ class MediaServersDialog(QDialog):
 
         done_row = QHBoxLayout()
         done_row.addStretch(1)
-        done = QPushButton(_("Done"))
-        done.setDefault(True)
-        done.clicked.connect(self.accept)
-        done_row.addWidget(done)
+        self.done_button = QPushButton(_("Done"))
+        self.done_button.setDefault(True)
+        self.done_button.clicked.connect(self.accept)
+        done_row.addWidget(self.done_button)
         layout.addLayout(done_row)
 
     # -- state ---------------------------------------------------------------
@@ -217,18 +240,38 @@ class MediaServersDialog(QDialog):
 
     # -- actions -------------------------------------------------------------
 
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802
+        if watched is self.address and event.type() == QEvent.Type.KeyPress \
+                and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) \
+                and self.address.text().strip():
+            self._add()
+            return True
+        if watched is self.address and event.type() in (QEvent.Type.FocusIn,
+                                                         QEvent.Type.FocusOut):
+            self._address_edited()
+        return super().eventFilter(watched, event)
+
+    def _address_edited(self, *_text) -> None:
+        """Add Server is the default while an address is being typed, as
+        in System Settings' add fields; Done otherwise."""
+        self.address_error.hide()
+        typing = self.address.hasFocus() and bool(self.address.text().strip())
+        self.add_button.setDefault(typing)
+        self.done_button.setDefault(not typing)
+
     def _add(self) -> None:
         text = self.address.text().strip()
-        if text and "://" not in text:
-            text = "https://" + text
+        origin = server_address(text)
         before = self._settings.configured_servers
-        after = self._settings.add_server(text) if text else before
+        if origin is None:
+            self.address_error.show()
+            return
+        if origin in before:
+            self.address.clear()
+            self._refresh(select=origin)
+            return
+        after = self._settings.add_server(origin)
         if after == before:
-            origin = url_safety.origin_of(text) if text else None
-            if origin in before:
-                self.address.clear()
-                self._refresh(select=origin)
-                return
             self.address_error.show()
             return
         self.address.clear()

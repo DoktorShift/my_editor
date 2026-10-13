@@ -302,3 +302,14 @@ def test_the_derived_keys_are_written_beside_version_1(tmp_path):
     assert data["config_origin"] == CONFIG_ORIGIN_BUD03
     assert data["discovered"] == PUBLISHED
     assert data["discovered_pubkey"] == PUBKEY
+
+
+@pytest.mark.parametrize("bad", ["https://media example com", "https://ex ample.com",
+                                 "https://\tx.example"])
+def test_an_address_with_spaces_is_never_a_server(tmp_path, bad):
+    """Also from a published list: a host with spaces is no server, and
+    uploads to it would only seem to succeed."""
+    s = settings.BlossomSettings(tmp_path / "b.json")
+    s.set_custom_servers(["https://one.example"])
+    assert s.add_server(bad) == ["https://one.example"]
+    assert s.set_custom_servers(["https://one.example", bad]) == ["https://one.example"]

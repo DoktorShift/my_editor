@@ -169,3 +169,44 @@ def test_every_control_has_a_name_for_a_screen_reader(tmp_path):
     for button in (dialog.add_button, dialog.remove_button, dialog.primary_button,
                    dialog.share_button):
         assert button.text()
+
+
+@pytest.mark.parametrize("text", ["http://example.com", "ftp://x.example", "https://",
+                                  "media example com", "https://ex ample.com/a b",
+                                  "nodot", "https://nodot"])
+def test_a_malformed_address_is_refused_by_return_and_the_sheet_stays(tmp_path, text):
+    from PySide6.QtTest import QTest
+    dialog, settings, changes = sheet(tmp_path)
+    dialog.show()
+    dialog.address.setFocus()
+    dialog.address.setText(text)
+    QTest.keyClick(dialog.address, Qt.Key.Key_Return)
+    assert dialog.isVisible()
+    assert not dialog.address_error.isHidden()
+    assert settings.configured_servers == [A, B]
+    assert changes == []
+    dialog.add_button.click()
+    assert settings.configured_servers == [A, B]
+
+
+@pytest.mark.parametrize("text, origin", [("c.example", C), ("https://c.example/path", C),
+                                          ("http://localhost:3000", "http://localhost:3000"),
+                                          ("https://192.0.2.7", "https://192.0.2.7")])
+def test_return_adds_a_good_address_and_the_sheet_stays(tmp_path, text, origin):
+    from PySide6.QtTest import QTest
+    dialog, settings, _changes = sheet(tmp_path)
+    dialog.show()
+    dialog.address.setFocus()
+    dialog.address.setText(text)
+    QTest.keyClick(dialog.address, Qt.Key.Key_Return)
+    assert dialog.isVisible()
+    assert settings.configured_servers == [A, B, origin]
+
+
+def test_done_answers_return_when_the_address_field_is_empty(tmp_path):
+    from PySide6.QtTest import QTest
+    dialog, _settings, _changes = sheet(tmp_path)
+    dialog.show()
+    dialog.address.setFocus()
+    QTest.keyClick(dialog.address, Qt.Key.Key_Return)
+    assert not dialog.isVisible()

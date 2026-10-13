@@ -70,7 +70,7 @@ def _normalize(url: str) -> Optional[str]:
     old scheme check did not enforce. ``_load`` re-normalizes every
     persisted entry, so a hand-edited file naming a plain-http host is
     dropped on read as well as on write."""
-    if not isinstance(url, str):
+    if not isinstance(url, str) or any(ch.isspace() for ch in url.strip()):
         return None
     origin = url_safety.origin_of(url.strip())
     if origin is None or not url_safety.is_safe_media_url(origin):
