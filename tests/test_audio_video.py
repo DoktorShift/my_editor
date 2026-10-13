@@ -391,3 +391,83 @@ def test_a_pdf_or_a_print_shows_audio_as_its_link_never_a_grey_box(uploaded, tmp
     else:
         assert "song.mp3" not in text
     assert doc.toPlainText().count("￼") == 1          # the document is untouched
+
+
+PASTE_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtGui import QTextCursor
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+from nostr.blossom.store import MediaFile
+
+song, sha = sys.argv[2], sys.argv[3]
+w = main_window.MainWindow()
+w.show()
+w._media_store.upload_bytes = lambda body, name, mime_type: None
+w.nostr_state._active = True
+w._update_nostr_commands()
+w._upload_limit = lambda: 10**9
+url = f"https://cdn.example/{sha}"
+r = {}
+source = w.new_tab()
+source.setFocus()
+w._upload_into(source, song)
+w._media_store.upload_status.emit(f"myeditor-asset:{sha}", "uploading")
+w._media_store.upload_finished.emit(f"myeditor-asset:{sha}", MediaFile(
+    hash=sha, url=url, mime_type="audio/mpeg", size=1,
+    urls=[{"server": "https://cdn.example", "url": url}]))
+app.processEvents()
+c = source.textCursor()
+c.setPosition(0)
+c.setPosition(1, QTextCursor.MoveMode.KeepAnchor)
+source.setTextCursor(c)
+copied = source.createMimeDataFromSelection()
+
+def blocks(ed):
+    doc = ed.document()
+    return [doc.findBlockByNumber(i).text() for i in range(doc.blockCount())]
+
+for case, words, at in (("inside a word", "Head", 2), ("end of a paragraph", "Other doc", 9),
+                        ("start of a paragraph", "Start", 0)):
+    ed = w.new_tab()
+    ed.setFocus()
+    QTest.keyClicks(ed, words)
+    c = ed.textCursor()
+    c.setPosition(at)
+    ed.setTextCursor(c)
+    ed.insertFromMimeData(copied)
+    r[case] = {"blocks": blocks(ed), "published": w._publish_text(ed, "markdown"),
+               "note": w._publish_text(ed, "note")}
+    ed.undo()
+    r[case]["undone"] = blocks(ed)
+for i in range(w.tabs.count()):
+    e = w._editor_from_widget(w.tabs.widget(i))
+    if e is not None:
+        e.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_a_pasted_or_dropped_file_is_a_paragraph_of_its_own_wherever_it_lands(tmp_path):
+    """Review N2: pasted (or dragged, the same way in) inside a sentence,
+    the file splits the paragraph and goes between its parts; its address
+    is never glued to words."""
+    song = tmp_path / "song.mp3"
+    song.write_bytes(BODY)
+    r = run_window_script(PASTE_SCRIPT, tmp_path, str(song), SHA)
+    inside = r["inside a word"]
+    assert inside["blocks"] == ["He", "￼", "ad"]
+    assert inside["published"] == f"He\n\n{URL}.mp3\n\nad"
+    assert inside["undone"] == ["Head"]
+    end = r["end of a paragraph"]
+    assert end["blocks"][:2] == ["Other doc", "￼"]
+    assert end["published"].startswith(f"Other doc\n\n{URL}.mp3")
+    assert end["undone"] == ["Other doc"]
+    start = r["start of a paragraph"]
+    assert start["blocks"] == ["\ufffc", "Start"]
+    assert start["published"] == f"{URL}.mp3\n\nStart"

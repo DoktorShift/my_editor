@@ -2000,6 +2000,55 @@ class HtmlEditor(QTextEdit):
         return mime
 
     def insertFromMimeData(self, source):
+        """Every paste and every drop of text arrives here (_insert_mime);
+        audio or video in what came in then stands in a paragraph of its
+        own, wherever it landed (_set_media_apart)."""
+        start = self.textCursor().selectionStart()
+        self._insert_mime(source)
+        self._set_media_apart(start, self.textCursor().position())
+
+    def _set_media_apart(self, start: int, end: int) -> None:
+        """Audio and video between ``start`` and ``end`` sharing a paragraph
+        with words get one of their own: the paragraph is split before and
+        after it, the words on each side keeping their paragraph's format.
+        Part of the same step of Undo as what brought it there."""
+        if self._is_media is None:
+            return
+        doc = self.document()
+        found = []
+        block = doc.findBlock(start)
+        while block.isValid() and block.position() <= end:
+            if block.text() != "\ufffc":
+                it = block.begin()
+                while not it.atEnd():
+                    fragment = it.fragment()
+                    fmt = fragment.charFormat()
+                    if fmt.isImageFormat() and self._is_media(fmt.toImageFormat().name()):
+                        found.extend(range(fragment.position(),
+                                           fragment.position() + fragment.length()))
+                    it += 1
+            block = block.next()
+        if not found:
+            return
+        cursor = QTextCursor(doc)
+        cursor.joinPreviousEditBlock()
+        for position in reversed(found):
+            cursor.setPosition(position)
+            block = cursor.block()
+            words_format = block.blockFormat()
+            if position + 1 < block.position() + block.length() - 1:
+                after = QTextCursor(doc)
+                after.setPosition(position + 2)
+                cursor.setPosition(position + 1)
+                cursor.insertBlock(words_format, after.charFormat())
+            if position > block.position():
+                cursor.setPosition(position)
+                cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
+            else:
+                cursor.setBlockFormat(QTextBlockFormat())     # a plain paragraph
+        cursor.endEditBlock()
+
+    def _insert_mime(self, source):
         """Every paste and every drop of text arrives here.
 
         - A web address pasted over words makes them a link to it (over
