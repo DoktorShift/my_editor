@@ -563,3 +563,15 @@ def test_the_card_asks_for_the_height_it_has_at_its_own_width(tmp_path):
     assert card.height() == card.layout().totalHeightForWidth(card.WIDTH)
     assert sheet._cover.height() >= sheet._cover.minimumSizeHint().height()
     sheet.close()
+
+
+def test_typing_in_a_note_keeps_its_people_as_they_are(tmp_path):
+    """Review low 8: every key typed made every person's chip again."""
+    from nostr.ui.publish_sheet import _Person
+    sheet = note(tmp_path)
+    before = sheet._people.findChildren(_Person)
+    QTest.keyClicks(sheet._text_edit, " and more words")
+    QApplication.processEvents()
+    assert sheet._people.findChildren(_Person) == before and len(before) == 1
+    sheet._text_edit.setPlainText(f"Now nostr:{bech32.encode_npub(CAROL)} too")
+    assert [name for _p, name in sheet._people.people()] == ["Carol, mentioned"]

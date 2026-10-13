@@ -217,6 +217,7 @@ class PeopleRow(QWidget):
         self._known_people = known_people
         self._avatars = avatars
         self._people: List[_Person] = []
+        self._shown: Optional[List[Tuple[str, str]]] = None
         self._flow = FlowLayout(self, spacing=6)
         self._nobody = QLabel(nobody)
         self._nobody.setObjectName("muted")
@@ -233,7 +234,13 @@ class PeopleRow(QWidget):
         return [(person.pubkey, person.accessibleName()) for person in self._people]
 
     def show_people(self, people: Iterable[Tuple[str, str]]) -> None:
-        """Show ``people``, ``(pubkey, role)`` each, in order."""
+        """Show ``people``, ``(pubkey, role)`` each, in order. The same
+        people as shown already change nothing (a note asks at every key
+        typed)."""
+        people = list(people)
+        if people == self._shown:
+            return
+        self._shown = people
         for person in self._people:
             self._flow.removeWidget(person)
             person.hide()
