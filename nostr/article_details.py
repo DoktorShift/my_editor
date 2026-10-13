@@ -546,8 +546,12 @@ def _with_detail(entries: List[front_matter.Entry], syntax: str, key: str, value
         # A date YAML and TOML read as one (a timestamp), not a text;
         # in quotes only when the file had it so.
         bare = not original.startswith(("\"", "'"))
-    if key == "tags" and current is not None and isinstance(current.value, str) \
-            and len(_string_tags(current.value)) > 1:
+    # What is meant, before it is written in the file's way (a string of
+    # tags, their spelling there; in quotes, a list of texts), so the check
+    # holds what is read back to it, not to what that way reads.
+    meant = _detail(key, value)
+    in_files_way = key == "tags" and current is not None and not quoted
+    if in_files_way and isinstance(current.value, str) and len(_string_tags(current.value)) > 1:
         # Written as a string of tags ("ruby jekyll", "a, b"): a string
         # again, in its way, while it can hold each tag whole. A string
         # of one tag, or none, is no such way: Hugo and Eleventy read
@@ -556,7 +560,7 @@ def _with_detail(entries: List[front_matter.Entry], syntax: str, key: str, value
         mark = separator.strip() or " "
         if not any(mark in tag for tag in value):
             value = separator.join(value)
-    elif key == "tags" and current is not None and isinstance(current.value, list):
+    elif in_files_way and isinstance(current.value, list):
         # A hashtag the file has keeps its spelling there ("#idea").
         spelled = {tag.lower(): item for item in current.value
                    for tag in _hashtags([item])}
@@ -576,7 +580,7 @@ def _with_detail(entries: List[front_matter.Entry], syntax: str, key: str, value
     else:
         entries.insert(front_matter.FrontMatter(tuple(entries), syntax=syntax)
                        .where_new_entries_go(entries), written)
-    return entries, (place,), _detail(key, value)
+    return entries, (place,), meant
 
 
 def _without_detail(entries: List[front_matter.Entry], syntax: str, key: str, quoted: bool):

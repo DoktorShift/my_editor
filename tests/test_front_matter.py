@@ -942,3 +942,12 @@ def test_zolas_tags_in_an_inline_table_are_shown_and_kept_as_written():
     front, _ = front_matter.split(ZOLA_INLINE)
     assert from_front_matter(front).hashtags == ("a",) and kept_in_file(front) == {"tags"}
     assert changed(ZOLA_INLINE, hashtags=("b",)) == ZOLA_INLINE
+
+
+@pytest.mark.parametrize("tags", [("a", '"', "c"), ('"x, y', "z"), ("a", "'b, c'")])
+def test_tags_written_as_a_string_read_back_as_the_tags_meant(tags):
+    """Found by fuzzing (round 8): a tag a comma string can't hold whole
+    was checked against the string's own reading, not the tags meant."""
+    text = "---\ntags: a, b\nlayout: post\n---\nB\n"
+    out = changed(text, hashtags=tags)
+    assert from_front_matter(front_matter.split(out)[0]).hashtags == tags
