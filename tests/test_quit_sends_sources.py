@@ -92,6 +92,7 @@ def closing_host(monkeypatch, order):
                                           subscriptions=Subscriptions())
     host._resolve_unsaved_before_closing = lambda: True
     host._asset_manager = types.SimpleNamespace(flush=lambda: None)
+    host._media_saver = types.SimpleNamespace(cancel=lambda: order.append("saves stopped"))
     host._save_session = lambda: None
     host.tabs = QTabWidget()
     host.status = QStatusBar()

@@ -40,7 +40,6 @@ to the shared blob cache, because that cache is what an export walks.
 
 from __future__ import annotations
 
-import hashlib
 import os
 from typing import Dict, List, Optional
 
@@ -72,7 +71,6 @@ from constants import DARK_MUTED_FG, LIGHT_MUTED_FG
 import theme
 import url_safety
 from alerts import confirm_destructive
-from atomic_file import save_document
 from i18n import _, ngettext
 from media_files import format_size  # noqa: F401, imported from here too
 
@@ -92,7 +90,8 @@ from .media_grid import (
     Tile,
 )
 from .media_preview import QuickLook
-from .thumbnail_loader import ThumbnailLoader, write_problem
+from .media_saver import MediaSaver, save_failure
+from .thumbnail_loader import ThumbnailLoader
 
 _PREFIXES = {"image": "image/", "video": "video/", "audio": "audio/"}
 
@@ -154,6 +153,7 @@ class MediaLibraryDialog(QDialog):
         pick_mode: bool = False,
         pick_alt_text: bool = True,
         visibility: Optional[MediaVisibility] = None,
+        saver: Optional[MediaSaver] = None,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
@@ -190,16 +190,20 @@ class MediaLibraryDialog(QDialog):
         # with them (Delete).
         self._unsharing: Dict[str, tuple] = {}
         self._deleting: Dict[str, int] = {}
-        # Save As, one file at a time: (tile, target, addresses left to
-        # try), and the download running.
-        self._saves: List[tuple] = []
-        self._download = None
+        # Save As: the saver of what outlives this window (the main
+        # window), so a save goes on when it closes; else its own, whose
+        # save stops when it closes.
+        self._owns_saver = saver is None
+        self._saver = saver if saver is not None else MediaSaver(self._loader, parent=self)
         self._quick_look: Optional[QuickLook] = None
         self._fetching = False
         self._fetch_failed = ""
 
         self._build(pick_alt_text and pick_mode)
         self._rest_status()
+        if self._saver.current:              # a save still running from a window before
+            self._save_bar.setValue(self._saver.percent)
+            self._show_saving(self._saver.current)
         self._adopt_running_uploads()
         # No minimum width of its own: the layout's is the smallest window,
         # every control at its own width in every language, and the grid
@@ -290,6 +294,9 @@ class MediaLibraryDialog(QDialog):
         self._save_cancel.hide()
         footer.addWidget(self._save_bar)
         footer.addWidget(self._save_cancel)
+        self._saver.started.connect(self._on_save_started)
+        self._saver.progress.connect(self._save_bar.setValue)
+        self._saver.finished.connect(self._on_save_finished)
         footer.addWidget(self._storage, 0,
                          Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         layout.addLayout(footer)
@@ -787,79 +794,31 @@ class MediaLibraryDialog(QDialog):
             targets = [(tile, _unique_path(folder, _save_name(tile))) for tile in files] \
                 if folder else []
         for tile, target in targets:
-            urls = [u.get("url") for u in tile.media.urls if u.get("url")] or [tile.media.url]
-            self._saves.append((tile, target, urls))
-        self._next_save()
+            sha, visibility = tile.key, self._visibility
+            opener = ((lambda data: visibility.open_private(sha, data))
+                      if visibility.is_private(sha) else None)
+            self._saver.save(tile.media, target, opener=opener)
 
-    def _next_save(self) -> None:
-        """Save the next file: from this computer's copy when there is
-        one, else streamed from its servers, one address after another,
-        bounded by its own size and checked against its hash."""
-        while self._saves and self._download is None:
-            tile, target, urls = self._saves[0]
-            sha = tile.key
-            cached = self._loader.cache_path(sha)
-            if cached.is_file():
-                self._saves.pop(0)
-                self._save_cached(tile, target, cached)
-                continue
-            transform = ((lambda data, s=sha: self._visibility.open_private(s, data))
-                         if self._visibility.is_private(sha) else None)
-            self._download = self._loader.download_to(urls[0], sha, target,
-                                                      size=tile.media.size, transform=transform)
-            self._download.progress.connect(self._on_save_progress)
-            self._download.finished.connect(self._on_save_finished)
-            self._show_status(_("Saving “{name}”…").format(name=os.path.basename(target)), "")
-            self._status_timer.stop()
-            self._save_bar.setValue(0)
-            self._save_bar.show()
-            self._save_cancel.show()
+    def _show_saving(self, target: str) -> None:
+        self._show_status(_("Saving “{name}”…").format(name=os.path.basename(target)), "")
+        self._status_timer.stop()
+        self._save_bar.show()
+        self._save_cancel.show()
 
-    def _save_cached(self, tile: Tile, target: str, cached) -> None:
-        name = os.path.basename(target)
-        try:
-            data = cached.read_bytes()
-        except OSError:
-            data = b""
-        if hashlib.sha256(data).hexdigest() != tile.key:
-            data = b""
-        if data and self._visibility.is_private(tile.key):
-            # Saving a private file saves the file, not its envelope.
-            data = self._visibility.open_private(tile.key, data) or b""
-        if not data:
-            self._say(_("“{name}” couldn’t be saved. Try again.").format(name=name), error=True)
-            return
-        try:
-            save_document(target, data)
-        except OSError as exc:
-            self._say(_save_failure(write_problem(exc), name), error=True)
+    def _on_save_started(self, target: str) -> None:
+        self._save_bar.setValue(0)
+        self._show_saving(target)
 
-    def _on_save_progress(self, received: int, total: int) -> None:
-        if total > 0:
-            self._save_bar.setValue(min(100, received * 100 // total))
-
-    def _on_save_finished(self, why: str) -> None:
-        tile, target, urls = self._saves[0]
-        self._download.deleteLater()
-        self._download = None
-        name = os.path.basename(target)
-        if why in ("network", "missing", "server", "wrong_file") and len(urls) > 1:
-            self._saves[0] = (tile, target, urls[1:])        # the next server
-            self._next_save()
-            return
-        self._saves.pop(0)
+    def _on_save_finished(self, target: str, why: str) -> None:
         self._save_bar.hide()
         self._save_cancel.hide()
         if why and why != "cancelled":
-            self._say(_save_failure(why, name), error=True)
+            self._say(save_failure(why, target), error=True)
         else:
             self._rest_status()
-        self._next_save()
 
     def _cancel_save(self) -> None:
-        self._saves = self._saves[:1]
-        if self._download is not None:
-            self._download.cancel()
+        self._saver.cancel()
 
     # -- delete ---------------------------------------------------------------
 
@@ -1221,6 +1180,11 @@ class MediaLibraryDialog(QDialog):
     def done(self, result: int) -> None:
         if self._quick_look is not None:
             self._quick_look.close()
+        if self._owns_saver:
+            # Nothing outlives this window to finish it: stopped, and
+            # its part file removed. A shared saver goes on, and its
+            # signals stop reaching this window when it is deleted.
+            self._saver.cancel()
         super().done(result)
 
 
@@ -1270,25 +1234,6 @@ def _save_name(tile: Tile) -> str:
     if not os.path.splitext(name)[1]:
         name += media_files.extension_for(tile.media.mime_type or "")
     return name
-
-
-def _save_failure(why: str, name: str) -> str:
-    """Why the file saved as ``name`` wasn't, as FileDownload says it."""
-    said = {
-        "network": _("“{name}” couldn’t be downloaded. Check your internet connection "
-                     "and try again."),
-        "missing": _("“{name}” isn’t on your media servers anymore, so it couldn’t be "
-                     "saved."),
-        "server": _("“{name}” couldn’t be downloaded: your media server didn’t send it. "
-                    "Try again later."),
-        "too_large": _("“{name}” wasn’t saved: a media server sent more than the file."),
-        "wrong_file": _("“{name}” wasn’t saved: a media server returned the wrong file."),
-        "unsafe": _("“{name}” wasn’t saved: a media server sent it from an address "
-                    "MyEditor doesn’t trust."),
-        "full": _("“{name}” couldn’t be saved: there isn’t enough space for it there. "
-                  "Free up some space or choose another folder."),
-    }.get(why) or _("“{name}” couldn’t be saved there. Choose another folder.")
-    return said.format(name=name)
 
 
 def _unique_path(folder: str, name: str) -> str:

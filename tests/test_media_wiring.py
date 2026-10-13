@@ -413,3 +413,58 @@ def test_quitting_with_only_failed_library_uploads_asks_nothing(monkeypatch):
                         lambda *a, **kw: pytest.fail("asked"))
     host = _quitting_host([AddedUpload(name="Old.png", mime="image/png", state="failed")])
     assert MainWindow._resolve_unsaved_before_closing(host) is True
+
+
+def _saving_host(window_open=False):
+    from types import SimpleNamespace
+    shown = []
+    host = SimpleNamespace(
+        _media_window_open=lambda: window_open,
+        _media_saver=SimpleNamespace(current=""),
+        status=SimpleNamespace(showMessage=lambda text, ms=0: shown.append((text, ms))),
+    )
+    for name in ("_on_media_save_started", "_on_media_save_finished", "_say_media_save_running"):
+        setattr(host, name, getattr(MainWindow, name).__get__(host))
+    return host, shown
+
+
+def test_a_save_that_outlives_its_library_window_is_said_in_the_window():
+    """Closing the library doesn't stop a Save As, as in the Finder: the
+    status bar says it is saving, and how it went, until the next message."""
+    host, shown = _saving_host()
+    host._media_saver.current = "/Users/me/Movies/Talk.mp4"
+    host._say_media_save_running()                       # the library closed
+    host._on_media_save_finished("/Users/me/Movies/Talk.mp4", "")
+    host._on_media_save_started("/Users/me/Movies/Scan.pdf")
+    host._on_media_save_finished("/Users/me/Movies/Scan.pdf", "missing")
+    assert shown == [
+        ("Saving “Talk.mp4”…", 0),
+        ("Saved: /Users/me/Movies/Talk.mp4", 0),
+        ("Saving “Scan.pdf”…", 0),
+        ("“Scan.pdf” isn’t on your media servers anymore, so it couldn’t be saved.", 0),
+    ]
+
+
+def test_an_open_library_window_says_how_its_saves_go_itself():
+    host, shown = _saving_host(window_open=True)
+    host._media_saver.current = "/Users/me/Movies/Talk.mp4"
+    host._say_media_save_running()
+    host._on_media_save_started("/Users/me/Movies/Talk.mp4")
+    host._on_media_save_finished("/Users/me/Movies/Talk.mp4", "network")
+    assert shown == []
+
+
+def test_the_library_windows_share_the_windows_saver():
+    source = inspect.getsource(MainWindow)
+    assert source.count("saver=self._media_saver,") == 2
+    init = textwrap.dedent(inspect.getsource(MainWindow.__init__))
+    assert "self._media_saver.started.connect(self._on_media_save_started)" in init
+    assert "self._media_saver.finished.connect(self._on_media_save_finished)" in init
+
+
+def test_quitting_stops_a_save_and_its_part_file_goes(monkeypatch):
+    from PySide6.QtGui import QCloseEvent
+    from tests.test_quit_sends_sources import closing_host
+    order = []
+    MainWindow.closeEvent(closing_host(monkeypatch, order), QCloseEvent())
+    assert "saves stopped" in order

@@ -35,12 +35,14 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QCoreApplication, QEvent  # noqa: E402
+from PySide6.QtCore import QCoreApplication, QEvent, QObject  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import nostr.ui.media_library_dialog as dialog_module  # noqa: E402
 from nostr.blossom.store import MediaFile  # noqa: E402
 from nostr.ui.media_library_dialog import MediaLibraryDialog  # noqa: E402
+from nostr.ui import media_saver  # noqa: E402
+from nostr.ui.media_saver import MediaSaver  # noqa: E402
 from nostr.ui import thumbnail_loader  # noqa: E402
 from nostr.ui.thumbnail_loader import ThumbnailLoader  # noqa: E402
 from tests.test_media_library import FakeStore, select  # noqa: E402
@@ -129,13 +131,13 @@ def blob(server, body: bytes, *, day: int = 0, mime: str = "video/mp4") -> Media
                      uploaded_at_ms=1_780_000_000_000 - day * 86_400_000)
 
 
-def library(tmp_path, monkeypatch, files, *, names=None):
+def library(tmp_path, monkeypatch, files, *, names=None, saver=None, pick=False):
     """The library window, with the real loader and its cache in tmp_path."""
     cache = tmp_path / "cache"
     monkeypatch.setattr(dialog_module, "ThumbnailLoader",
                         lambda parent=None: ThumbnailLoader(parent, cache_dir=cache))
     dialog = MediaLibraryDialog(store=FakeStore(files, names=names or {}), is_dark=False,
-                                pick_mode=False)
+                                pick_mode=pick, saver=saver)
     dialog.resize(860, 560)
     dialog.show()
     QCoreApplication.processEvents()
@@ -274,8 +276,81 @@ def test_a_file_saved_from_this_computer_onto_a_full_disk_says_so(tmp_path, monk
     def full(path, data):
         raise OSError(errno.ENOSPC, "No space left on device")
 
-    monkeypatch.setattr(dialog_module, "save_document", full)
+    monkeypatch.setattr(media_saver, "save_document", full)
     save_as(monkeypatch, world, media, tmp_path / "Clip.mp4")
     assert world.dialog._status.text() == (
         "“Clip.mp4” couldn’t be saved: there isn’t enough space for it there. Free up some "
         "space or choose another folder.")
+
+
+# --------------------------------------------------------------------------- #
+# Closing the window while it saves
+# --------------------------------------------------------------------------- #
+
+def _keeper(tmp_path):
+    """What outlives the library windows (the main window), with the saver
+    it gives them."""
+    keeper = QObject()
+    loader = ThumbnailLoader(keeper, cache_dir=tmp_path / "cache")
+    return keeper, MediaSaver(loader, parent=keeper)
+
+
+def folder(path) -> list:
+    return sorted(p.name for p in path.iterdir())
+
+
+@pytest.mark.parametrize("pick", [False, True])
+def test_a_save_goes_on_after_the_window_that_asked_for_it_closes(
+        tmp_path, monkeypatch, server, pick):
+    """As in the Finder: closing the window doesn't stop the save."""
+    _Blobs.delay = 0.02
+    body = os.urandom(1024 * 1024)
+    big = blob(server, body)
+    keeper, saver = _keeper(tmp_path)
+    done = []
+    saver.finished.connect(lambda path, why: done.append((os.path.basename(path), why)))
+    world = library(tmp_path, monkeypatch, [big], names={big.hash: "Big.mp4"}, saver=saver,
+                    pick=pick)
+    out = tmp_path / "out"
+    out.mkdir()
+    save_as(monkeypatch, world, big, out / "Big.mp4")
+    assert wait_for(lambda: world.dialog._save_bar.value() > 0, 10)
+    world.dialog.close()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert wait_for(lambda: done, 15)
+    assert done == [("Big.mp4", "")]
+    assert folder(out) == ["Big.mp4"] and (out / "Big.mp4").read_bytes() == body
+
+
+def test_a_window_opened_while_a_save_runs_shows_it(tmp_path, monkeypatch, server):
+    _Blobs.delay = 0.02
+    big = blob(server, os.urandom(1024 * 1024))
+    keeper, saver = _keeper(tmp_path)
+    first = library(tmp_path, monkeypatch, [big], names={big.hash: "Big.mp4"}, saver=saver)
+    out = tmp_path / "out"
+    out.mkdir()
+    save_as(monkeypatch, first, big, out / "Big.mp4")
+    assert wait_for(lambda: first.dialog._save_bar.value() > 0, 10)
+    first.dialog.close()
+    second = library(tmp_path, monkeypatch, [big], names={big.hash: "Big.mp4"}, saver=saver)
+    assert saving(second) and second.dialog._status.text() == "Saving “Big.mp4”…"
+    assert wait_for(lambda: not saving(second), 15)
+    assert folder(out) == ["Big.mp4"]
+
+
+def test_a_window_saving_on_its_own_stops_the_save_when_it_closes_and_leaves_nothing(
+        tmp_path, monkeypatch, server):
+    """A window with nothing to outlive it (no main window) can't hand the
+    save on: closing it stops the save, and its part file goes."""
+    _Blobs.delay = 0.02
+    big = blob(server, os.urandom(1024 * 1024))
+    world = library(tmp_path, monkeypatch, [big], names={big.hash: "Big.mp4"})
+    out = tmp_path / "out"
+    out.mkdir()
+    save_as(monkeypatch, world, big, out / "Big.mp4")
+    assert wait_for(lambda: world.dialog._save_bar.value() > 0, 10)
+    assert folder(out) == [".Big.mp4.part"]
+    world.dialog.close()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    wait_for(lambda: False, 0.3)
+    assert folder(out) == []

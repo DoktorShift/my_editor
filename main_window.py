@@ -232,6 +232,7 @@ from nostr.membership_controller import MembershipController
 from nostr.key_vault import KeyVault
 from nostr.account_controller import AccountController
 from nostr.ui.media_library_dialog import MediaLibraryDialog, format_size
+from nostr.ui.media_saver import MediaSaver, save_failure
 from nostr.ui.media_servers_dialog import MediaServersDialog
 from nostr.ui.publish_article_dialog import PublishArticleDialog
 from nostr.ui.publish_copy_dialog import resolve_pick
@@ -601,6 +602,13 @@ class MainWindow(QMainWindow):
         # cache on the way out, so an upload never has to be downloaded
         # back to be shown.
         self._media_library_dialog = None
+        # The Insert Image picker while it is open (it is modal).
+        self._media_picker = None
+        # Save As from either: it goes on when the window that asked
+        # closes, and is said in the status bar then.
+        self._media_saver = MediaSaver(self._media_image_loader, parent=self)
+        self._media_saver.started.connect(self._on_media_save_started)
+        self._media_saver.finished.connect(self._on_media_save_finished)
         # The Media Servers sheet while it is open (it is modal).
         self._media_servers_sheet = None
         # Association membership, which grants a relay and a media server.
@@ -5856,7 +5864,9 @@ class MainWindow(QMainWindow):
         if not closing_for_update and not self._resolve_unsaved_before_closing():
             event.ignore()
             return
-        # Quitting from here: nothing still on its way goes into a document.
+        # Quitting from here: a Save As still running stops, and its part
+        # file goes; nothing still on its way goes into a document.
+        self._media_saver.cancel()
         for i in range(self.tabs.count()):
             self._drop_media_reads(self._editor_from_widget(self.tabs.widget(i)))
         if hasattr(self, "_knit_runner"):
@@ -6276,6 +6286,29 @@ class MainWindow(QMainWindow):
     def _forget_media_library(self, dialog) -> None:
         if self._media_library_dialog is dialog:
             self._media_library_dialog = None
+
+    def _media_window_open(self) -> bool:
+        """Whether a Media Library window (the library or the picker) is
+        open, to say how a Save As goes itself."""
+        return self._visible_media_library() is not None or self._media_picker is not None
+
+    def _say_media_save_running(self) -> None:
+        """A library window closed: a Save As it started goes on, said here."""
+        if self._media_saver.current:
+            self._on_media_save_started(self._media_saver.current)
+
+    def _on_media_save_started(self, target: str) -> None:
+        if not self._media_window_open():
+            self.status.showMessage(
+                _("Saving “{name}”…").format(name=os.path.basename(target)), 0)
+
+    def _on_media_save_finished(self, target: str, why: str) -> None:
+        """How a Save As went, when no library window is open to say it:
+        kept until the next message, as a saved document's is."""
+        if self._media_window_open() or why == "cancelled":
+            return
+        self.status.showMessage(save_failure(why, target) if why
+                                else _("Saved: {path}").format(path=target), 0)
 
     def _open_membership_window(self) -> None:
         """Nostr > EINUNDZWANZIG Membership."""
@@ -7080,6 +7113,7 @@ class MainWindow(QMainWindow):
             is_dark=self.is_dark_theme,
             pick_mode=False,
             visibility=self._media_visibility,
+            saver=self._media_saver,
             parent=self,
         )
         dialog.bind_private_library(self._private_library)
@@ -7087,6 +7121,8 @@ class MainWindow(QMainWindow):
         # The dialog deletes itself on close; forget it then, so nothing
         # later asks a deleted object whether it is visible.
         dialog.destroyed.connect(lambda _obj=None, d=dialog: self._forget_media_library(d))
+        # A Save As it started goes on: said here from now on.
+        dialog.destroyed.connect(lambda _obj=None: self._say_media_save_running())
         self._media_library_dialog = dialog
         dialog.show()
 
@@ -7110,6 +7146,7 @@ class MainWindow(QMainWindow):
             is_dark=self.is_dark_theme,
             pick_mode=True,
             visibility=self._media_visibility,
+            saver=self._media_saver,
             parent=self,
         )
         dialog.bind_private_library(self._private_library)
@@ -7119,7 +7156,12 @@ class MainWindow(QMainWindow):
         dialog.file_picked.connect(
             lambda media, alt, e=ed: self._insert_media_at_cursor(media, e, alt)
         )
-        dialog.exec()
+        self._media_picker = dialog
+        try:
+            dialog.exec()
+        finally:
+            self._media_picker = None
+        self._say_media_save_running()
 
     def _insert_media_at_cursor(self, media: MediaFile, editor, alt_text: str = "") -> None:
         """Insert a library pick at the editor's cursor, immediately.
