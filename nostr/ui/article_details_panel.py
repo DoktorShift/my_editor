@@ -57,6 +57,26 @@ DEFAULT_WIDTH = 300
 MAX_WIDTH = 420
 
 
+class _WrappingCheckBox(QWidget):
+    """A checkbox whose words wrap in a narrow panel (a QCheckBox's own text
+    never does, and would widen the panel past its edge); a click on the
+    words toggles it too, as on the checkbox's own text."""
+
+    def __init__(self, text: str, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+        self.box = QCheckBox()
+        self.box.setAccessibleName(text)
+        row.addWidget(self.box, 0, Qt.AlignmentFlag.AlignTop)
+        self.words = QLabel(text)
+        self.words.setWordWrap(True)
+        self.words.mousePressEvent = lambda _event: (
+            self.box.isEnabled() and self.box.toggle())
+        row.addWidget(self.words, 1)
+
+
 class ArticleDetailsPanel(QFrame):
     """The inspector. ``changed(ArticleDetails)`` as the person edits;
     ``close_requested`` from its close button."""
@@ -177,9 +197,10 @@ class ArticleDetailsPanel(QFrame):
         self.add_coauthor_button.clicked.connect(self._ask_coauthor)
         self.add_coauthor_button.setEnabled(self._pick_person is not None)
         form.addWidget(self.add_coauthor_button, 0, Qt.AlignmentFlag.AlignLeft)
-        self.share_zaps = QCheckBox(_("Share zaps equally with co-authors"))
+        self._share_row = share = _WrappingCheckBox(_("Share zaps equally with co-authors"))
+        self.share_zaps = share.box
         self.share_zaps.toggled.connect(self._share_zaps_toggled)
-        form.addWidget(self.share_zaps)
+        form.addWidget(share)
         self.zaps_note = QLabel()
         self.zaps_note.setObjectName("article_details_hint")
         self.zaps_note.setWordWrap(True)
@@ -333,13 +354,16 @@ class ArticleDetailsPanel(QFrame):
         while self.coauthor_rows.count():
             item = self.coauthor_rows.takeAt(0)
             if item.widget() is not None:
+                # Gone from sight now, not when the event loop deletes it.
+                item.widget().hide()
                 item.widget().deleteLater()
         for pubkey, _hint in details.coauthors:
             self.coauthor_rows.addWidget(self._coauthor_row(pubkey))
         self.share_zaps.blockSignals(True)
         self.share_zaps.setChecked(bool(details.zaps))
         self.share_zaps.blockSignals(False)
-        self.share_zaps.setEnabled(bool(details.coauthors) or bool(details.zaps))
+        # Disabled as a whole: the box and its words.
+        self._share_row.setEnabled(bool(details.coauthors) or bool(details.zaps))
         foreign = bool(details.zaps) and details.zaps != self._equal_zaps(details.coauthors)
         self.zaps_note.setText(_("Zaps are shared the way another app set them.")
                                if foreign else "")
