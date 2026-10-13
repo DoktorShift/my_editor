@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from PySide6.QtCore import (
-    Qt, QTimer, QRect, QRectF, QPoint, QMetaMethod, QEvent, QMimeData, QUrl, Signal,
+    Qt, QTimer, QRect, QRectF, QPoint, QMetaMethod, QEvent, QUrl, Signal,
 )
 from PySide6.QtGui import (
     QPainter, QTextBlockFormat, QTextCursor, QTextCharFormat, QColor, QClipboard, QPen,
@@ -1276,10 +1276,12 @@ class HtmlEditor(QTextEdit):
             self.setTextCursor(cursor)
             return True
         if e.key() in (Qt.Key_Return, Qt.Key_Enter) and self.is_media_block(block):
-            # A clean paragraph: one Qt makes would take the object's format.
+            # A clean paragraph (one Qt makes would take the object's
+            # format), in the run of typing.
             cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
-            cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
             self.setTextCursor(cursor)
+            with self._typing(TYPED, cursor):
+                cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
             return True
         if e.text() and e.text().isprintable() and self.is_media_block(block):
             cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
@@ -1708,34 +1710,31 @@ class HtmlEditor(QTextEdit):
                 is_empty_bullet = (content_after_bullet == "") and (cursor_pos_in_block <= bullet_end_pos)
 
                 if is_empty_bullet:
-                    # Double Enter: remove bullet, start plain line
-                    c.beginEditBlock()
-                    c.movePosition(QTextCursor.StartOfBlock)
-                    c.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
-                    c.removeSelectedText()
-                    c.insertText("\n")
-                    c = self.textCursor()
-                    c.movePosition(QTextCursor.StartOfBlock)
-                    fmt = QTextCharFormat()
-                    fmt.setFontWeight(400)
-                    fmt.setFontItalic(False)
-                    fmt.setFontUnderline(False)
-                    fmt.clearForeground()
-                    c.setCharFormat(fmt)
-                    self.mergeCurrentCharFormat(fmt)
+                    # Double Enter: remove bullet, start plain line (in the
+                    # run of typing)
+                    with self._typing(TYPED):
+                        c.movePosition(QTextCursor.StartOfBlock)
+                        c.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
+                        c.removeSelectedText()
+                        c.insertText("\n")
+                        c = self.textCursor()
+                        c.movePosition(QTextCursor.StartOfBlock)
+                        fmt = QTextCharFormat()
+                        fmt.setFontWeight(400)
+                        fmt.setFontItalic(False)
+                        fmt.setFontUnderline(False)
+                        fmt.clearForeground()
+                        c.setCharFormat(fmt)
+                        self.mergeCurrentCharFormat(fmt)
                     self.active_format.update({'bold': False, 'italic': False, 'underline': False, 'color': None})
-                    c.endEditBlock()
                     self.setTextCursor(c)
                     self.ensureCursorVisible()
                     return
                 else:
-                    # Continue bullet on next line
-                    c.beginEditBlock()
-                    c.insertText("\n" + " " * spaces + "• ")
-                    c = self.textCursor()
+                    # Continue bullet on next line (in the run of typing)
+                    with self._typing(TYPED, c):
+                        c.insertText("\n" + " " * spaces + "• ")
                     self._apply_active_format_to_cursor()
-                    c.endEditBlock()
-                    self.setTextCursor(c)
                     self.ensureCursorVisible()
                     return
             else:
@@ -1872,19 +1871,21 @@ class HtmlEditor(QTextEdit):
         if (rich_text.quote_depth(block) and block.textList() is None and plain and (
                 (key in (Qt.Key_Return, Qt.Key_Enter) and not block.text())
                 or (key == Qt.Key_Backspace and cursor.atBlockStart()))):
-            # Return on an empty quoted line, or Backspace at the start of
-            # a quoted paragraph: one level of quote less.
-            cursor.beginEditBlock()
-            rich_text.set_quote_depth(block, rich_text.quote_depth(block) - 1)
-            cursor.endEditBlock()
+            # Return on an empty quoted line (in the run of typing), or
+            # Backspace at the start of a quoted paragraph: one level of
+            # quote less.
+            with self._typing(TYPED if key != Qt.Key_Backspace else BACKWARD, cursor):
+                rich_text.set_quote_depth(block, rich_text.quote_depth(block) - 1)
             self.viewport().update()
             return True
         if block.textList() is not None and plain and (
                 (key in (Qt.Key_Return, Qt.Key_Enter) and not block.text())
                 or (key == Qt.Key_Backspace and cursor.atBlockStart())):
-            # Return on an empty item, or Backspace at an item's start: one
-            # level up, and out of the list from the top level.
-            rich_text.change_indent(cursor, -1)
+            # Return on an empty item (in the run of typing), or Backspace
+            # at an item's start: one level up, and out of the list from the
+            # top level.
+            with self._typing(TYPED if key != Qt.Key_Backspace else BACKWARD, cursor):
+                rich_text.change_indent(cursor, -1)
             self.setTextCursor(cursor)
             return True
         if rich_text.is_task(block) and plain and key in (Qt.Key_Return, Qt.Key_Enter):
@@ -1892,15 +1893,14 @@ class HtmlEditor(QTextEdit):
             # the item the caret was in keeps its tick: at its start, the
             # new item is the empty one above it.
             at_start = cursor.atBlockStart() and bool(block.text())
-            cursor.beginEditBlock()
-            tick = block.blockFormat().marker()
-            cursor.insertBlock()
-            if at_start:
-                rich_text.set_tick(cursor.block().previous(), rich_text.UNTICKED)
-                rich_text.set_tick(cursor.block(), tick)
-            else:
-                rich_text.set_tick(cursor.block(), rich_text.UNTICKED)
-            cursor.endEditBlock()
+            with self._typing(TYPED, cursor):
+                tick = block.blockFormat().marker()
+                cursor.insertBlock()
+                if at_start:
+                    rich_text.set_tick(cursor.block().previous(), rich_text.UNTICKED)
+                    rich_text.set_tick(cursor.block(), tick)
+                else:
+                    rich_text.set_tick(cursor.block(), rich_text.UNTICKED)
             self.setTextCursor(cursor)
             return True
         heading = block.blockFormat().headingLevel()
@@ -1908,15 +1908,14 @@ class HtmlEditor(QTextEdit):
             # Return at the end of a heading starts a Body paragraph, the
             # way Pages and every Markdown editor continue after a title;
             # anywhere else in it, both halves stay headings.
-            cursor.beginEditBlock()
-            fmt = block.blockFormat()
-            if cursor.atBlockEnd():
-                fmt = rich_text.heading_block_format(fmt, 0)
-                char = rich_text.body_char_format(cursor.charFormat(), own_weight=False)
-            else:
-                char = cursor.charFormat()
-            cursor.insertBlock(fmt, char)
-            cursor.endEditBlock()
+            with self._typing(TYPED, cursor):
+                fmt = block.blockFormat()
+                if cursor.atBlockEnd():
+                    fmt = rich_text.heading_block_format(fmt, 0)
+                    char = rich_text.body_char_format(cursor.charFormat(), own_weight=False)
+                else:
+                    char = cursor.charFormat()
+                cursor.insertBlock(fmt, char)
             self.setTextCursor(cursor)
             self.setCurrentCharFormat(char)
             self._update_active_format()
@@ -2017,11 +2016,10 @@ class HtmlEditor(QTextEdit):
             before = block.text()[:cursor.positionInBlock()]
             line = before[before.rfind(LINE_BREAK) + 1:]
             indent = line[:len(line) - len(line.lstrip(" \t"))]
-            cursor.beginEditBlock()
-            cursor.insertBlock()
-            if indent:
-                cursor.insertText(indent)
-            cursor.endEditBlock()
+            with self._typing(TYPED, cursor):
+                cursor.insertBlock()
+                if indent:
+                    cursor.insertText(indent)
             self.setTextCursor(cursor)
             return True
         if key == Qt.Key_Down and plain and not block.next().isValid():
@@ -2118,10 +2116,11 @@ class HtmlEditor(QTextEdit):
             below = block.next()
             if not below.isValid() or rich_text.is_divider(below) or \
                     key in (Qt.Key_Return, Qt.Key_Enter):
-                cursor.beginEditBlock()
                 cursor.movePosition(QTextCursor.EndOfBlock)
-                cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
-                cursor.endEditBlock()
+                self.setTextCursor(cursor)
+                # In the run of typing, with what is typed after it.
+                with self._typing(TYPED, cursor):
+                    cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
             else:
                 cursor.setPosition(below.position())
             self.setTextCursor(cursor)

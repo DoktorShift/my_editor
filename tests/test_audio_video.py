@@ -885,6 +885,14 @@ for where, offset in (("before", 0), ("after", 1)):
     r[where + " one redo"] = blocks()
     w.act_undo.trigger()
     r[where + " undone again"] = blocks()
+# Return at the end of the file's paragraph, then words: one run too.
+c = ed.textCursor()
+c.setPosition(object_at() + 1)
+ed.setTextCursor(c)
+QTest.keyClick(ed, Qt.Key.Key_Return)
+QTest.keyClicks(ed, "Below")
+ed.undo()
+r["return after, one undo"] = blocks()
 ed.document().setModified(False)
 w._media_not_uploaded = lambda doc: []
 w.close()
@@ -906,6 +914,7 @@ def test_typing_at_a_file_is_one_step_of_undo(tmp_path):
         assert r[where + " one undo"] == start
         assert r[where + " one redo"] == r[where + " typed"]
         assert r[where + " undone again"] == start
+    assert r["return after, one undo"] == start
 
 
 CLIPBOARD_SCRIPT = r"""

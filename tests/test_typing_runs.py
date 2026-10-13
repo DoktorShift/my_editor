@@ -269,3 +269,49 @@ def test_a_key_that_changes_nothing_does_not_rename_the_step_before(clock):
     ed.setTextCursor(cursor)
     key(ed, Qt.Key.Key_Backspace)              # at the start: nothing to delete
     assert ed.undo_name() == "Bold"
+
+
+def structured():
+    ed = typed()
+    ed.set_structure_check(lambda: True)
+    return ed
+
+
+def test_return_with_its_own_handling_is_in_the_run(clock):
+    """Return in a checklist, a code block, at the end of a heading and on
+    an empty list item, as in body text: part of the run of typing."""
+    ed = structured()
+    ed.toggle_checklist()
+    QTest.keyClicks(ed, "one")
+    key(ed, Qt.Key.Key_Return)
+    QTest.keyClicks(ed, "two")
+    key(ed, Qt.Key.Key_Return)
+    QTest.keyClicks(ed, "three")
+    assert ed.toPlainText() == "one\ntwo\nthree"
+    ed.undo()
+    assert ed.toPlainText() == ""
+
+    ed = structured()
+    ed.make_code_block("python")
+    QTest.keyClicks(ed, "a = 1")
+    key(ed, Qt.Key.Key_Return)
+    QTest.keyClicks(ed, "b = 2")
+    ed.undo()
+    assert ed.toPlainText() == ""
+
+    ed = structured()
+    ed.set_heading(1)
+    QTest.keyClicks(ed, "Title")
+    key(ed, Qt.Key.Key_Return)
+    QTest.keyClicks(ed, "Body")
+    ed.undo()
+    assert ed.toPlainText() == ""
+
+    ed = structured()
+    ed.toggle_list("bullet")
+    QTest.keyClicks(ed, "item")
+    key(ed, Qt.Key.Key_Return)
+    key(ed, Qt.Key.Key_Return)                     # an empty item: out of the list
+    QTest.keyClicks(ed, "after")
+    ed.undo()
+    assert ed.toPlainText() == ""
