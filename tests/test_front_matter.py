@@ -610,3 +610,17 @@ def test_an_apostrophe_in_a_files_hashtag_is_part_of_it(text, tags):
     parsed = yaml.safe_load(out.split("---\n")[1])["tags"]
     parsed = parsed if isinstance(parsed, list) else [t.strip() for t in parsed.split(",")]
     assert parsed == list(tags) + ["Extra"]
+
+
+@pytest.mark.parametrize("text", [
+    "---\ntags: [a, b]\n  # a note on the tags\nlayout: post\n---\nB\n",
+    "---\ntags: [a,\n  b]\n  # a note on the tags\nlayout: post\n---\nB\n",
+])
+def test_a_comment_line_after_a_flow_list_stays_after_it(text):
+    """Round 6, L2: such a list was kept read-only, its tags unread."""
+    yaml = pytest.importorskip("yaml")
+    front, _ = front_matter.split(text)
+    assert from_front_matter(front).hashtags == ("a", "b")
+    out = changed(text, hashtags=("a", "b", "new"))
+    assert out == "---\ntags: [a, b, new]\n  # a note on the tags\nlayout: post\n---\nB\n"
+    assert yaml.safe_load(out.split("---\n")[1])["tags"] == ["a", "b", "new"]

@@ -339,7 +339,7 @@ def _rewritten(old: Entry, value: Union[str, Sequence[str]], bare: bool) -> Entr
         # An inline list, on its line or over lines: written on one line,
         # the whole of it, its comments after it.
         return Entry(old.key, (key_part + _inline_list_like(flow[0], items, old.syntax)
-                               + flow[1],), old.syntax)
+                               + flow[1],) + flow[2], old.syntax)
     if old.syntax == YAML and not written and old.value is not None:
         return Entry(old.key, (key_part.rstrip() + comment,)
                      + _block_list_like(old.lines[1:], items), old.syntax)
@@ -356,21 +356,24 @@ def _valid(written: Entry, value, bare: bool) -> Entry:
     return written
 
 
-def _flow_list(written: str, more: Sequence[str]) -> Optional[Tuple[str, str]]:
+def _flow_list(written: str, more: Sequence[str]) -> Optional[Tuple[str, str, Tuple[str, ...]]]:
     """A flow list ("[a, b]"), on its line or continued on the lines
-    ``more``: its text on one line, and what follows it as comments (the
-    comment after its "]", then those inside it, each kept). Read as YAML
+    ``more``: its text on one line, what follows it as comments (the
+    comment after its "]", then those inside it, each kept), and the
+    comment lines after it. Read as YAML
     reads it: a "#" starts a comment only after a space or at a line's
     start, and never inside quotes; the list ends at the "]" that closes
     it, not one in a comment or a text. None when it is not closed there,
     or something other than a comment follows it."""
     content: List[str] = []
     inside: List[str] = []
+    after: List[str] = []
     depth, quote, tail, closed = 0, "", "", False
     for row in [written, *more]:
         if closed:
-            if row.strip():
+            if row.strip() and not row.strip().startswith("#"):
                 return None                 # the entry goes on after the list
+            after.append(row)               # a comment line after it, or blank
             continue
         out, at = [], 0
         while at < len(row):
@@ -410,7 +413,7 @@ def _flow_list(written: str, more: Sequence[str]) -> Optional[Tuple[str, str]]:
     if not closed or quote:
         return None
     return (" ".join(part for part in content if part),
-            tail.rstrip() + "".join("  " + comment for comment in inside))
+            tail.rstrip() + "".join("  " + comment for comment in inside), tuple(after))
 
 
 def _at_item_start(line: Sequence[str], before: Sequence[str]) -> bool:
@@ -442,7 +445,7 @@ def _value_and_comment(rest: str) -> Tuple[str, str]:
     if quoted is not None:
         end = quoted.end()
     elif flow is not None:
-        return flow
+        return flow[0], flow[1]
     else:
         found = re.search(r"\s+#", rest)
         end = found.start() if found else len(rest.rstrip())
