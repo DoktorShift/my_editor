@@ -784,3 +784,33 @@ def test_save_to_folder_says_what_wasnt_saved_after_its_window_closed(
         "“Two.mp4” isn’t on your media servers anymore, so it couldn’t be saved.")
     bar.showMessage("Saved: /Users/me/Essay.md")
     assert bar.toolTip() == ""
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink") or sys.platform == "win32",
+                    reason="links need privileges on Windows")
+@pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0,
+                    reason="root may write into any folder")
+@pytest.mark.parametrize("cached", [False, True])
+def test_save_as_onto_a_link_into_a_folder_that_takes_no_new_file(tmp_path, monkeypatch, server,
+                                                                  cached):
+    """The linked file can be written, its folder can't take a new one:
+    it is written in place, from a download as from this computer's copy."""
+    body = b"new content" * 100
+    media = blob(server, body)
+    world = library(tmp_path, monkeypatch, [media])
+    if cached:
+        world.dialog._loader.cache_path(media.hash).write_bytes(body)
+    real = tmp_path / "elsewhere" / "Clip.mp4"
+    real.parent.mkdir()
+    real.write_bytes(b"old")
+    out = tmp_path / "out"
+    out.mkdir()
+    os.symlink(real, out / "Clip.mp4")
+    os.chmod(real.parent, 0o555)
+    try:
+        save_as(monkeypatch, world, media, out / "Clip.mp4")
+        assert wait_for(lambda: not saving(world), 5)
+        assert real.read_bytes() == body
+        assert os.path.islink(out / "Clip.mp4") and folder(out) == ["Clip.mp4"]
+    finally:
+        os.chmod(real.parent, 0o755)

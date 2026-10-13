@@ -425,10 +425,18 @@ class FileDownload(QObject):
             problem = "unsafe"
         else:
             try:
-                # Beside the file a link names, where it will be put; a
-                # file kept beside a new name goes beside the target.
-                fd, part = new_document_file(self._target, suffix=".part",
-                                             follow_link=not self._keep_existing)
+                # Beside the file a link names, where it will be put (or
+                # beside the link, when that folder takes no new file,
+                # and the file is written in place); a file kept beside a
+                # new name goes beside the target.
+                try:
+                    fd, part = new_document_file(self._target, suffix=".part",
+                                                 follow_link=not self._keep_existing)
+                except PermissionError:
+                    if not os.path.islink(self._target):
+                        raise
+                    fd, part = new_document_file(self._target, suffix=".part",
+                                                 follow_link=False)
                 self._part = Path(part)
                 self._file = os.fdopen(fd, "wb")
             except OSError as exc:

@@ -146,12 +146,16 @@ def place_document(temporary: PathLike, path: PathLike) -> None:
     """Put a file written in full (from ``new_document_file`` for the same
     ``path``) at ``path`` in one step, as ``save_document`` saves: a link
     keeps pointing where it did, and the file it points to keeps its
-    permissions and extended attributes. A file with several hard links
-    gets the content in place. ``temporary`` is gone afterwards, whatever
-    happens. Raises OSError."""
+    permissions and extended attributes. A file with several hard links,
+    or one whose folder couldn't take ``temporary`` (made beside a link
+    instead), gets the content in place. ``temporary`` is gone
+    afterwards, whatever happens. Raises OSError."""
     temporary, target = os.fspath(temporary), os.path.realpath(os.fspath(path))
     try:
-        if _hard_linked(target):
+        # Written in place: a file with several names, or one whose folder
+        # couldn't take the temporary file (it was made elsewhere).
+        if _hard_linked(target) or \
+                os.path.dirname(os.path.realpath(temporary)) != os.path.dirname(target):
             with open(temporary, "rb") as source:
                 _write_in_place(target, source.read())
             _remove_quietly(temporary)
