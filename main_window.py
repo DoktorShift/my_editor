@@ -1903,6 +1903,11 @@ class MainWindow(QMainWindow):
                                                   _("citation")),
                                         slash_section=slash_menu.INSERT),
                                 triggered=lambda: self._editor_call("insert_footnote"))
+        # Image...: a picture file, put in as dropping it at the caret would.
+        self.act_insert_image = add(Command("insert.image", _("Image\u2026"), INSERT,
+                                            keywords=(_("picture"), _("photo")),
+                                            slash_section=slash_menu.INSERT),
+                                    triggered=self._insert_image)
         # Table...: its size is chosen on a grid at the caret (table_picker).
         self.act_table = add(Command("insert.table", _("Table\u2026"), INSERT,
                                      keywords=(_("grid"), _("rows"), _("columns")),
@@ -1972,7 +1977,8 @@ class MainWindow(QMainWindow):
         self._rich_actions = [self.act_strike, self.act_code, *self.act_styles,
                               self.act_bullets, self.act_numbers, self.act_checklist,
                               self.act_quote, self.act_divider, self.act_link,
-                              self.act_code_block, self.act_table, self.act_footnote]
+                              self.act_code_block, self.act_table, self.act_footnote,
+                              self.act_insert_image]
         # Paragraph structure, which a table cell (one line of words in
         # Markdown) cannot hold: off in a table.
         self._block_actions = [*self.act_styles, self.act_bullets, self.act_numbers,
@@ -1983,7 +1989,7 @@ class MainWindow(QMainWindow):
         self._word_actions = [self.act_bold, self.act_italic, self.act_underline,
                               self.act_strike, self.act_code, self.act_link,
                               *self.act_colors, self.act_remove_color, self.act_reset_format,
-                              self.act_footnote]
+                              self.act_footnote, self.act_insert_image]
 
         self._search_matches = []
         self._current_match_index = -1
@@ -2151,10 +2157,13 @@ class MainWindow(QMainWindow):
             Command("nostr.media_library", _("Media Library…"), NOSTR,
                     nostr=True, listed_as=_("Media library"), keywords=("images", "upload")),
             triggered=self._on_nostr_media_library)
+        # A file of the media library, already on the media servers: not
+        # Insert > Image..., which puts in a file from the computer.
         self.act_nostr_insert_image = add(
-            Command("nostr.insert_image", _("Insert Image…"), NOSTR,
-                    nostr=True, listed_as=_("Insert image"),
-                    keywords=(_("picture"), _("photo")), slash_section=slash_menu.INSERT),
+            Command("nostr.insert_image", _("Insert from Media Library…"), NOSTR,
+                    nostr=True, listed_as=_("Insert from media library"),
+                    keywords=(_("picture"), _("photo"), _("image")),
+                    slash_section=slash_menu.INSERT),
             triggered=self._on_nostr_insert_image)
         # Mention: "@" at the start of a word does the same while typing.
         self.act_insert_mention = add(
@@ -2352,6 +2361,7 @@ class MainWindow(QMainWindow):
         self.m_insert = self.menuBar().addMenu(_("&Insert"))
         self.m_insert.addAction(self.act_link)
         self.m_insert.addSeparator()
+        self.m_insert.addAction(self.act_insert_image)
         self.m_insert.addAction(self.act_table)
         self.m_insert.addAction(self.act_divider)
         self.m_insert.addAction(self.act_code_block)
@@ -3117,6 +3127,20 @@ class MainWindow(QMainWindow):
             return
         for asset in pending:
             self._asset_manager.request_upload(asset.sha256)
+
+    def _insert_image(self) -> None:
+        """Insert > Image…: a picture file chosen in the system's dialog,
+        put in at the caret exactly as dropping it there would
+        (_handle_dropped_images: one step of Undo, and the offer to upload
+        it while a Nostr account is in use)."""
+        ed = self.current_editor()
+        if ed is None or self._editor_kind(ed) != "rich":
+            return
+        patterns = " ".join("*" + ext for ext in sorted(_IMAGE_EXTS))
+        path, _filter = QFileDialog.getOpenFileName(
+            self, _("Insert Image"), "", _("Images ({patterns})").format(patterns=patterns))
+        if path:
+            self._handle_dropped_images([file_paths.normalize(path)], N_("Image"))
 
     def _handle_dropped_text(self, text: str):
         ed = self.current_editor()
