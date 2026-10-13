@@ -79,11 +79,11 @@ _FRIENDLY = {
         "again."
     ),
     ERROR_CODES.UPLOAD_FAILED: _(
-        "The upload did not finish. The image stays in your document and "
+        "The upload did not finish. The file stays in your document and "
         "can be retried."
     ),
     ERROR_CODES.NETWORK_UNAVAILABLE: _(
-        "The server could not be reached. The image stays in your document "
+        "The server could not be reached. The file stays in your document "
         "and can be uploaded later."
     ),
     ERROR_CODES.SIGNER_IDENTITY_MISMATCH: _(

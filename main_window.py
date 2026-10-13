@@ -7067,7 +7067,7 @@ class MainWindow(QMainWindow):
         waiting = len(self._asset_manager.failed_assets())
         message = friendly_message(code)
         if waiting > 1:
-            message += " " + ngettext("{count} image is waiting.", "{count} images are waiting.",
+            message += " " + ngettext("{count} file is waiting.", "{count} files are waiting.",
                                       waiting).format(count=waiting)
         self.status.showMessage(message, 8000)
 

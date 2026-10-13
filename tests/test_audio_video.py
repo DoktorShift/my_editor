@@ -601,3 +601,39 @@ def test_with_the_caret_before_the_file_return_and_typing_go_before_it(tmp_path)
     assert r["return"] == ["Top", "", "￼", ""] and r["caret on the object"] is True
     assert r["undone"] == ["Top", "￼", ""]
     assert r["typed"] == ["Top", "Intro", "￼", ""] and r["caret after the words"] is True
+
+
+FAILED_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+
+song, sha = sys.argv[2], sys.argv[3]
+w = main_window.MainWindow()
+w.show()
+w._media_store.upload_bytes = lambda body, name, mime_type: None
+w.nostr_state._active = True
+w._update_nostr_commands()
+w._upload_limit = lambda: 10**9
+ed = w.new_tab()
+w._upload_into(ed, song)
+r = {}
+for code in ("UPLOAD_FAILED", "NETWORK_UNAVAILABLE", "PAYMENT_REQUIRED"):
+    w._on_asset_upload_failed(sha, code)
+    r[code] = w.status.currentMessage()
+ed.document().setModified(False)
+w._media_not_uploaded = lambda doc: []
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_a_failed_audio_upload_does_not_speak_of_an_image(tmp_path):
+    song = tmp_path / "song.mp3"
+    song.write_bytes(BODY)
+    r = run_window_script(FAILED_SCRIPT, tmp_path, str(song), SHA)
+    for said in r.values():
+        assert said and "image" not in said.lower()
