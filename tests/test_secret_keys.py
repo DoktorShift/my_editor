@@ -480,9 +480,9 @@ def test_save_as_draft_refuses_a_key_in_the_slug(monkeypatch):
     assert not dialog._slug_problem.isHidden()
     assert "slug" in dialog._slug_problem.text()
     assert dialog._slug_edit.accessibleDescription() == dialog._slug_problem.text()
+    assert heard == []                         # not shown yet: no one to hear it
+    dialog.show()                              # opened with it: said once, now
     assert heard == [dialog._slug_problem.text()]
-    dialog.show()                              # said before it was shown: said again
-    assert heard == [dialog._slug_problem.text()] * 2
     dialog.close()
     dialog._slug_edit.setText("backup")
     dialog._on_slug_edited("backup")

@@ -31,10 +31,11 @@ def field_problem(field, label, problem: str) -> None:
     """Say what is wrong with ``field`` in ``label`` under it, or nothing
     when ``problem`` is empty: shown, read with the field (its accessible
     description) when the field gets the focus, and announced when it
-    first appears or changes, not again with every key typed."""
+    first appears or changes, not again with every key typed. A window
+    not shown yet says it once it is (no one could hear it before)."""
     said = label.text() if not label.isHidden() else ""
     label.setText(problem)
     label.setVisible(bool(problem))
     field.setAccessibleDescription(problem)
-    if problem and problem != said:
+    if problem and problem != said and field.isVisible():
         announce(field, problem)

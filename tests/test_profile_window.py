@@ -188,6 +188,7 @@ def test_a_field_problem_is_read_with_the_field_and_said_once(monkeypatch):
     heard = []
     monkeypatch.setattr(announce, "announce", lambda source, text: heard.append(text))
     win, net = window()
+    win.show()                                          # heard only from a shown window
     net.reads[0](found(name="alice"))
     edit(win, "about", "My key: " + NSEC)
     edit(win, "about", "My key: " + NSEC + " ")        # typing on: said once
@@ -196,6 +197,7 @@ def test_a_field_problem_is_read_with_the_field_and_said_once(monkeypatch):
     assert heard == [problem]
     edit(win, "about", "Hello")
     assert win._edits["about"].accessibleDescription() == "" and win._errors["about"].isHidden()
+    win.close()
 
 
 @pytest.mark.parametrize("key, value", [
