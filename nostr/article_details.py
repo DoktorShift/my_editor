@@ -628,11 +628,35 @@ def _holds(before: front_matter.FrontMatter, after: front_matter.FrontMatter, ke
     if meant == _detail(key, None):
         return _reading(again, key) == meant and all(
             _at(new, place) is _ABSENT or _at(new, place) in ("", None, []) for place in places)
-    # Read so by this reader, and by the parser as text (12:30 is no
-    # title, 750 is).
     found = _found(again, key)
-    return found is not None and _detail(key, found[2].value) == meant \
-        and _detail(key, _as_value(_at(new, places[0]))) == meant
+    if found is None or _detail(key, found[2].value) != meant:
+        return False
+    # Read so by the parser too: what the file held before as it writes it
+    # ("3.10", "yes"), what is typed here as text (12:30 is no title, 750
+    # is; a date is a date).
+    read, written = _at(new, places[0]), found[2].value
+    held = _found(before, key)
+    return _detail(key, _as_value(read, written, again.syntax)) == meant and (
+        key == "date" or _typed_as_text(read, written, held[2].value if held else None))
+
+
+def _typed_as_text(read: Any, written: Union[str, List[str], None],
+                   held: Union[str, List[str], None]) -> bool:
+    """Whether a parser reads as text every value in ``read`` (written as
+    ``written``) that the file did not hold before (``held``, as this
+    reader read it): an item kept may stay as the file writes it."""
+    if not isinstance(read, list):
+        return isinstance(read, str)
+    texts = written if isinstance(written, list) and len(written) == len(read) \
+        else [None] * len(read)
+    left = list(held) if isinstance(held, list) else []
+    for item, text in zip(read, texts):
+        if isinstance(item, str):
+            continue
+        if text not in left:
+            return False
+        left.remove(text)
+    return True
 
 
 def _at(mapping: dict, place: Tuple[str, ...]) -> Any:

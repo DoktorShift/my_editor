@@ -1035,3 +1035,21 @@ def test_the_window_finds_a_front_matter_with_lone_cr_line_endings(tmp_path):
     assert r["cr_only.md shown"] == "Body."
     assert r["cr_only.md saved"] == "---\rtitle: CR Title\rtags: [x]\r---\r\r" + (
         "Body. More." + os.linesep)
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("---\ntags:\n  - python   # main\n  - 3.10     # the version\nlayout: post\n---\nB\n",
+     "---\ntags:\n  - python   # main\n  - 3.10     # the version\n  - added\nlayout: post\n---\nB\n"),
+    ("---\ntags:\n  - python\n  - yes\n---\nB\n", "---\ntags:\n  - python\n  - yes\n  - added\n---\nB\n"),
+    ("---\ntags: [python, 3.10]\n---\nB\n", "---\ntags: [python, 3.10, added]\n---\nB\n"),
+])
+def test_a_list_holding_a_number_keeps_its_style_when_a_tag_is_added(text, expected):
+    """Round 9, M1: written again as a quoted flow list, its comments gone."""
+    front, _ = front_matter.split(text)
+    assert changed(text, hashtags=from_front_matter(front).hashtags + ("added",)) == expected
+
+
+def test_a_number_typed_into_a_list_is_written_as_text():
+    text = "---\ntags:\n  - python\n  - 3.10\n---\nB\n"
+    assert changed(text, hashtags=("python", "3.10", "3.11")) == text.replace(
+        "  - 3.10\n", '  - 3.10\n  - "3.11"\n')
