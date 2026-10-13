@@ -168,6 +168,7 @@ def place_document(temporary: PathLike, path: PathLike) -> None:
             _keep_owner(temporary, existing)
             os.chmod(temporary, stat.S_IMODE(existing.st_mode))
             _copy_extended_attributes(target, temporary)
+            _keep_creation_date(temporary, existing)
         else:
             os.chmod(temporary, _NEW_FILE_MODE)
         _replace(temporary, target)
@@ -190,6 +191,57 @@ def _keep_owner(temporary: str, existing: os.stat_result) -> None:
             return
         except OSError:
             continue
+
+
+class _AttrList(ctypes.Structure):
+    """setattrlist(2)'s struct attrlist."""
+    _fields_ = [("bitmapcount", ctypes.c_ushort), ("reserved", ctypes.c_uint16),
+                ("commonattr", ctypes.c_uint32), ("volattr", ctypes.c_uint32),
+                ("dirattr", ctypes.c_uint32), ("fileattr", ctypes.c_uint32),
+                ("forkattr", ctypes.c_uint32)]
+
+
+class _Timespec(ctypes.Structure):
+    _fields_ = [("tv_sec", ctypes.c_long), ("tv_nsec", ctypes.c_long)]
+
+
+_ATTR_BIT_MAP_COUNT = 5
+_ATTR_CMN_CRTIME = 0x00000200
+
+
+def _keep_creation_date(temporary: str, existing: os.stat_result) -> None:
+    """On macOS, best effort: the new file keeps the document's creation
+    date (Finder's "Created"), as TextEdit keeps it, instead of the time
+    of this save."""
+    born = getattr(existing, "st_birthtime", None)
+    libc = _libc() if sys.platform == "darwin" and born is not None else None
+    if libc is None:
+        return
+    setattrlist = libc.setattrlist
+    setattrlist.argtypes = [ctypes.c_char_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t,
+                            ctypes.c_ulong]
+    setattrlist.restype = ctypes.c_int
+    seconds = int(born)
+    when = _Timespec(seconds, int(round((born - seconds) * 1e9)))
+    attributes = _AttrList(_ATTR_BIT_MAP_COUNT, 0, _ATTR_CMN_CRTIME, 0, 0, 0, 0)
+    if setattrlist(os.fsencode(temporary), ctypes.byref(attributes), ctypes.byref(when),
+                   ctypes.sizeof(when), 0) != 0:
+        _log.debug("creation date of %s not kept (errno %s)", temporary, ctypes.get_errno())
+
+
+_libc_handle = None
+
+
+def _libc():
+    """The C library, for what Python doesn't offer; None where it can't
+    be loaded."""
+    global _libc_handle
+    if _libc_handle is None:
+        try:
+            _libc_handle = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+        except OSError:
+            _libc_handle = False
+    return _libc_handle or None
 
 
 def _hard_linked(target: str) -> bool:

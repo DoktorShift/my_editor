@@ -466,6 +466,20 @@ def test_a_shorter_text_saved_in_place_leaves_nothing_of_the_old(tmp_path):
     assert path.read_bytes() == b"short" == (folder / "Other.md").read_bytes()
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="creation dates as macOS keeps them")
+def test_on_macos_a_document_keeps_its_creation_date(tmp_path):
+    """As TextEdit keeps it: Finder's "Created" is when the document was
+    made, not when it was last saved."""
+    path = tmp_path / "essay.md"
+    path.write_bytes(b"old")
+    made = 1_600_000_000                               # an earlier time moves it back
+    os.utime(path, (made, made))
+    assert int(os.stat(path).st_birthtime) == made
+    save_document(path, b"new")
+    assert int(os.stat(path).st_birthtime) == made
+    assert path.read_bytes() == b"new"
+
+
 @pytest.mark.skipif(sys.platform != "darwin", reason="Finder tags exist on macOS only")
 def test_on_macos_finder_tags_and_attributes_are_kept(tmp_path):
     import subprocess
