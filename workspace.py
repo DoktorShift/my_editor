@@ -66,6 +66,8 @@ class TabState:
     # The article details set in the tab (Article Details, the publish
     # window, a file's front matter), as tags.
     details: Optional[list] = None
+    # A Markdown file's front matter as written: [key, line, ...] each.
+    front_matter: Optional[list] = None
 
 
 @dataclass(frozen=True)
@@ -163,6 +165,7 @@ def _parse_tab(raw) -> Optional[TabState]:
     draft = raw.get("draft")
     article = raw.get("article") if are_tags(raw.get("article")) else None
     details = raw.get("details") if are_tags(raw.get("details")) else None
+    matter = raw.get("front_matter") if are_tags(raw.get("front_matter")) else None
     return TabState(
         kind=kind,
         path=path,
@@ -175,6 +178,7 @@ def _parse_tab(raw) -> Optional[TabState]:
         article=article,
         article_author=_str(raw.get("article_author")) or "",
         details=details,
+        front_matter=matter,
     )
 
 

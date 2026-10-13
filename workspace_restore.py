@@ -30,6 +30,7 @@ from typing import Optional
 from PySide6.QtCore import QEvent, QObject, QTimer
 from PySide6.QtGui import QTextCursor
 
+import front_matter
 from nostr.article_details import ArticleDetails
 from recovery import (
     classify_backup, document_is_empty, is_restorable, load_backup_content, read_backup,
@@ -75,6 +76,7 @@ def capture_editor_tab(ed) -> Optional[TabState]:
         article=identity.get("article"),
         article_author=identity.get("article_author", ""),
         details=identity.get("details"),
+        front_matter=identity.get("front_matter"),
     )
 
 
@@ -217,7 +219,7 @@ def resume_tab(window, tab: TabState, *, draft_type):
         load_backup_content(ed, record, modified=tab.modified)
         ed._backup.take_over(record["_backup_file"])
     restore_identity(ed, tab.draft, tab.article, tab.article_author, tab.details,
-                     draft_type=draft_type)
+                     tab.front_matter, draft_type=draft_type)
     index = _tab_index(window, ed)
     if index >= 0:
         window.tabs.setTabText(index, window._compose_tab_title(ed))
@@ -325,13 +327,14 @@ def _tab_index(window, widget) -> int:
     return -1
 
 
-def restore_identity(ed, draft, article, article_author, details=None, *,
-                     draft_type) -> None:
+def restore_identity(ed, draft, article, article_author, details=None,
+                     matter=None, *, draft_type) -> None:
     """Give a reopened tab back what it was besides its text
     (recovery.tab_identity): the draft it is bound to, rebuilt as
     ``draft_type``, the published article it edits with whose it is, and
-    the article details set in it. Anything malformed is left out: the
-    tab is then a plain document."""
+    the article details set in it, and its file's front matter as it was
+    written. Anything malformed is left out: the tab is then a plain
+    document."""
     if isinstance(draft, dict):
         ed._draft_binding = _dataclass_from(draft_type, draft)
     if are_tags(article):
@@ -339,6 +342,8 @@ def restore_identity(ed, draft, article, article_author, details=None, *,
         ed._published_author = article_author if isinstance(article_author, str) else ""
     if are_tags(details):
         ed._article_details = ArticleDetails.from_tags(details)
+    if are_tags(matter) and all(entry for entry in matter):
+        ed._front_matter = [front_matter.Entry(entry[0], tuple(entry[1:])) for entry in matter]
 
 
 def _dataclass_from(cls, data: dict):

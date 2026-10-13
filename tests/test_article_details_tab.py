@@ -174,3 +174,19 @@ def test_a_restart_and_a_crash_keep_them():
 def test_hashtags_are_lowercase_without_the_hash_each_once():
     assert hashtags_from("Bitcoin, #nostr, ,  NOSTR , art") == ("bitcoin", "nostr", "art")
     assert hashtags_from("") == ()
+
+
+def test_a_restart_and_a_crash_keep_a_files_front_matter_as_written():
+    import front_matter
+    entries, _body = front_matter.split("---\ntitle: A\nparams:\n  toc: true\n---\nText")
+    ed = HtmlEditor()
+    ed._front_matter = entries
+    identity = recovery.tab_identity(ed)
+    assert identity["front_matter"] == [["title", "title: A"],
+                                        ["params", "params:", "  toc: true"]]
+    raw = {"kind": workspace.DOCUMENT, "front_matter": identity["front_matter"]}
+    assert workspace._parse_tab(raw).front_matter == identity["front_matter"]
+    again = HtmlEditor()
+    workspace_restore.restore_identity(again, None, None, "", None, identity["front_matter"],
+                                       draft_type=dict)
+    assert again._front_matter == entries

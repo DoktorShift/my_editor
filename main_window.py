@@ -54,6 +54,7 @@ from commands import (
     EDIT, FILE, FORMAT, HELP, INSERT, NOSTR, SEARCH, VIEW, WINDOW, Command, CommandRegistry,
     all_key_texts, platform_keys,
 )
+import front_matter
 import slash_menu
 from slash_menu import SlashItem
 from table_picker import TablePicker
@@ -175,7 +176,7 @@ from nostr.ui.imports_window import SETTINGS_KEY as IMPORTS_SETTINGS_KEY
 from nostr.ui.imports_window import ImportsWindow
 from nostr.imports.constants import IDENTIFIER_PREFIX as IMPORT_IDENTIFIER_PREFIX
 from nostr.imports.constants import SOURCE_TAG as IMPORT_SOURCE_TAG
-from nostr.article_details import ArticleDetails
+from nostr.article_details import ArticleDetails, from_front_matter, front_matter_with
 from nostr.first_publications import FirstPublications
 from nostr.drafts import (
     INNER_KIND_LONG_FORM,
@@ -2575,7 +2576,7 @@ class MainWindow(QMainWindow):
         # too, so saving or publishing it goes on under its identifier.
         workspace_restore.restore_identity(
             ed, backup.get("draft"), backup.get("article"), backup.get("article_author"),
-            backup.get("details"), draft_type=DraftBinding)
+            backup.get("details"), backup.get("front_matter"), draft_type=DraftBinding)
         self._attach_highlighter(ed, ed._file_path)
 
         container, bar = self._editor_container(ed)
@@ -3022,7 +3023,13 @@ class MainWindow(QMainWindow):
             normalize_after_set_html(ed.document())
             ed.document().clearUndoRedoStacks()
         elif ext.endswith('.md'):
-            self._load_markdown(ed, content)
+            # The article's details are the file's front matter (Q-F): shown
+            # in Article Details, never in the text, never published as it.
+            entries, body = front_matter.split(content)
+            ed._front_matter = entries
+            details = from_front_matter(entries)
+            ed._article_details = details if details != ArticleDetails() else None
+            self._load_markdown(ed, body)
         elif ext.endswith('.rmd'):
             # R Markdown is edited as source, the way RStudio does it.
             ed.setPlainText(content)
@@ -3456,6 +3463,7 @@ class MainWindow(QMainWindow):
                     content = serialize_plain_with_images(ed.document(), reference)
                 else:
                     content = document_to_markdown(ed.document(), reference)
+                content = self._with_front_matter(ed, content)
             else:
                 # .txt and anything unknown: images cannot be carried, so
                 # they are omitted rather than left as the raw U+FFFC
@@ -3474,6 +3482,15 @@ class MainWindow(QMainWindow):
                        name=os.path.basename(path)),
                    message=f"{e}\n\n{_SAVE_FAILED_HINT}", caution=True)
             return False
+
+    def _with_front_matter(self, ed, body: str) -> str:
+        """A Markdown file's text: ``body`` under the front matter that holds
+        the article's details (Q-F), with every entry it had that MyEditor
+        does not know. None when there are no details and it had none."""
+        entries = front_matter_with(self._article_details_of(ed),
+                                    getattr(ed, "_front_matter", None))
+        ed._front_matter = entries or None
+        return front_matter.join(entries, body)
 
     def _on_file_changed(self, path: str):
         if path in self._saving_paths:

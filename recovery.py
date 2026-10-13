@@ -125,6 +125,10 @@ def tab_identity(editor) -> dict:
     details = getattr(editor, "_article_details", None)
     if details is not None:
         identity["details"] = details.tags()
+    entries = getattr(editor, "_front_matter", None)
+    if entries is not None:
+        # A Markdown file's front matter as written, entry by entry.
+        identity["front_matter"] = [[entry.key, *entry.lines] for entry in entries]
     return identity
 
 
