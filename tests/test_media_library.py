@@ -1163,3 +1163,15 @@ def test_deleting_a_private_file_says_the_app_that_keeps_it_loses_it(tmp_path, m
     assert shown[0].message == (
         "It’s also gone from the other app that keeps it privately. You can’t undo "
         "this action.")
+
+
+def test_in_german_the_save_progress_is_named_as_a_progress(tmp_path, monkeypatch):
+    """VoiceOver reads the bar's name: a process, not the Save command."""
+    import i18n
+    i18n.install("de")
+    try:
+        world = build(tmp_path, monkeypatch)
+        assert world.dialog._save_bar.accessibleName() == "Speichervorgang"
+        assert world.dialog._save_stop.accessibleName() == "Speichern stoppen"
+    finally:
+        i18n.install("en")
