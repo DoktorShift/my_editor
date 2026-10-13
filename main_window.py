@@ -49,7 +49,7 @@ from atomic_file import (
 import diagnostics
 import file_paths
 import i18n
-from i18n import _, ngettext, pgettext
+from i18n import N_, _, ngettext, pgettext
 from commands import (
     EDIT, FILE, FORMAT, HELP, INSERT, NOSTR, SEARCH, VIEW, WINDOW, Command, CommandRegistry,
     all_key_texts, platform_keys, redo_words, undo_words,
@@ -4303,7 +4303,9 @@ class MainWindow(QMainWindow):
         if selected in self._search_matches:
             # No highlight cursors for the document to move while it changes.
             ed.set_highlights("find", [])
-            _start, end = replace_match(ed.document(), selected, self.findbar.replacement())
+            with ed.undo_step(N_("Replace")):
+                _start, end = replace_match(ed.document(), selected,
+                                            self.findbar.replacement())
             cursor.setPosition(end)
             ed.setTextCursor(cursor)
             self._find_refresh.stop()          # found again right here
@@ -4326,8 +4328,9 @@ class MainWindow(QMainWindow):
         # the replacements: take them away first (thousands of matches made
         # Replace All take minutes).
         ed.set_highlights("find", [])
-        count = replace_all(ed.document(), needle, self.findbar.replacement(),
-                            self.findbar.options())
+        with ed.undo_step(N_("Replace All")):
+            count = replace_all(ed.document(), needle, self.findbar.replacement(),
+                                self.findbar.options())
         self._find_refresh.stop()              # found again right here
         self._update_search_matches(needle)
         self._last_search_text = needle

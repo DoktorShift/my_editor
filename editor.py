@@ -700,6 +700,7 @@ class HtmlEditor(QTextEdit):
             block = block.next()
         self.set_highlights("spelling", selections)
 
+    @_named_step(N_("Correction"))
     def replace_misspelling(self, misspelling, block_position: int, words: str) -> None:
         """A suggestion for a misspelled word, in its place and in its
         format, as one step to undo."""
@@ -1146,20 +1147,18 @@ class HtmlEditor(QTextEdit):
         self._close_slash()
         if start < 0:
             return
-        announce.announce(self, _("{title} applied").format(
-            title=action.text().replace("&", "").rstrip("\u2026")))
-        doc = self.document()
-        step = QTextCursor(doc)
-        step.beginEditBlock()
-        words = QTextCursor(doc)
-        words.setPosition(start)
-        words.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
-        words.removeSelectedText()
-        self.setTextCursor(words)
-        # The text has the focus all along (the menu never takes it); a
-        # command may give it to a panel of its own (Add Link's).
-        action.trigger()
-        step.endEditBlock()
+        title = action.text().replace("&", "").rstrip("\u2026")
+        announce.announce(self, _("{title} applied").format(title=title))
+        # One step, called by the command's own name.
+        with self.undo_step(title):
+            words = QTextCursor(self.document())
+            words.setPosition(start)
+            words.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+            words.removeSelectedText()
+            self.setTextCursor(words)
+            # The text has the focus all along (the menu never takes it); a
+            # command may give it to a panel of its own (Add Link's).
+            action.trigger()
 
     def _slash_key(self, e) -> bool:
         """The keys of the open slash menu. True when one was handled."""

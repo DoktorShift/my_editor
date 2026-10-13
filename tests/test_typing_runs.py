@@ -353,3 +353,62 @@ def test_one_undo_takes_back_a_whole_command(clock):
     ed.undo()
     ed.undo()
     assert ed.toPlainText() == "" and ed.document().availableUndoSteps() == 0
+
+
+def test_a_correction_and_a_slash_command_are_named_steps(clock):
+    import types
+    from PySide6.QtGui import QAction
+    ed = structured()
+    QTest.keyClicks(ed, "teh cat")
+    ed.replace_misspelling(types.SimpleNamespace(start=0, end=3), 0, "the")
+    assert ed.toPlainText() == "the cat" and ed.undo_name() == "Correction"
+
+    ed = structured()
+    QTest.keyClicks(ed, "/li")
+    ed._slash_at = 0
+    action = QAction("Bulleted List", ed)
+    action.triggered.connect(lambda: ed.toggle_list("bullet"))
+    ed._pick_slash(action)
+    assert ed.undo_name() == "Bulleted List"
+    ed.undo()
+    assert ed.toPlainText() == "/li" and ed.redo_name() == "Bulleted List"
+
+
+REPLACE_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtGui import QTextCursor
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+w = main_window.MainWindow()
+w.show()
+ed = w.new_tab()
+ed.setFocus()
+QTest.keyClicks(ed, "cat and cat and cat")
+w.findbar.text = lambda: "cat"
+w.findbar.replacement = lambda: "dog"
+cursor = ed.textCursor()
+cursor.setPosition(0)
+ed.setTextCursor(cursor)
+w._replace_current()
+w._replace_current()
+r = {"one": [ed.toPlainText(), ed.undo_name()]}
+w._replace_all()
+r["all"] = [ed.toPlainText(), ed.undo_name()]
+ed.undo()
+r["undone"] = [ed.toPlainText(), ed.redo_name()]
+ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_replace_and_replace_all_are_named_steps(tmp_path):
+    from tests.app_process import run_window_script
+    r = run_window_script(REPLACE_SCRIPT, tmp_path)
+    assert r["one"] == ["dog and cat and cat", "Replace"]
+    assert r["all"] == ["dog and dog and dog", "Replace All"]
+    assert r["undone"] == ["dog and cat and cat", "Replace All"]
