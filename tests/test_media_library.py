@@ -1005,3 +1005,27 @@ def test_a_listing_that_may_be_incomplete_is_said_quietly(tmp_path, monkeypatch)
     assert world.dialog._status.text() == (
         "Your media servers may not have listed every file. Refresh to look again.")
     assert world.dialog._status.property("tone") == ""
+
+
+@pytest.mark.parametrize("search", ["", "nothing like it"])
+def test_files_dropped_where_the_grid_would_be_are_added(tmp_path, monkeypatch, search):
+    """On an empty library (the first file is the one most likely dragged
+    in) and on "No items match" alike."""
+    from PySide6.QtCore import QMimeData, QPointF, QUrl
+    from PySide6.QtGui import QDragEnterEvent, QDropEvent
+    path = tmp_path / "Garden.png"
+    path.write_bytes(PNG_BYTES)
+    world = build(tmp_path, monkeypatch, FakeStore([media(1)] if search else []))
+    world.dialog._search.setText(search)
+    assert world.dialog._stack.currentWidget() is world.dialog._empty
+    data = QMimeData()
+    data.setUrls([QUrl.fromLocalFile(str(path))])
+    target = world.dialog._empty
+    enter = QDragEnterEvent(target.rect().center(), Qt.DropAction.CopyAction, data,
+                            Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(target, enter)
+    assert enter.isAccepted()
+    drop = QDropEvent(QPointF(target.rect().center()), Qt.DropAction.CopyAction, data,
+                      Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(target, drop)
+    assert ("upload_file", "Garden.png") in world.store.calls

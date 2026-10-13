@@ -107,6 +107,35 @@ def kind_of_mime(mime: str) -> str:
     return "file"
 
 
+class _DropPage(QWidget):
+    """The page where the grid would be (empty, loading, no match): files
+    dropped on it are added, as on the grid."""
+
+    def __init__(self, add) -> None:
+        super().__init__()
+        self._add = add
+        self.setAcceptDrops(True)
+
+    @staticmethod
+    def _paths(event) -> List[str]:
+        data = event.mimeData()
+        return [u.toLocalFile() for u in data.urls() if u.isLocalFile()] if data.hasUrls() else []
+
+    def dragEnterEvent(self, event) -> None:  # noqa: N802
+        if self._paths(event):
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event) -> None:  # noqa: N802
+        if self._paths(event):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:  # noqa: N802
+        paths = self._paths(event)
+        if paths:
+            event.acceptProposedAction()
+            self._add(paths)
+
+
 class MediaLibraryDialog(QDialog):
     """The Media Library window, browsing or picking."""
 
@@ -321,7 +350,7 @@ class MediaLibraryDialog(QDialog):
         return bar
 
     def _build_empty_page(self) -> QWidget:
-        page = QWidget()
+        page = _DropPage(self._add_paths)
         column = QVBoxLayout(page)
         column.addStretch(1)
         self._empty_text = QLabel()
