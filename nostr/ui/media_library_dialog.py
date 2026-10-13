@@ -768,10 +768,8 @@ class MediaLibraryDialog(QDialog):
     actions. The library itself works identically in both modes."""
 
     file_picked = Signal(object, str)   # MediaFile, alt_text (empty when alt row is hidden)
-    # Upload to these servers the profile lists too; only after the click.
-    server_suggestions_accepted = Signal(list)
-    # Publish the servers uploads go to, for other Nostr apps; asked first.
-    share_server_list_requested = Signal()
+    # Media Servers…: the window that owns the settings opens the sheet.
+    servers_requested = Signal()
 
     def __init__(
         self,
@@ -1061,45 +1059,14 @@ class MediaLibraryDialog(QDialog):
         self._servers_label.setVisible(False)
         layout.addWidget(self._servers_label)
 
-        # Media servers the account's Nostr profile lists that this app
-        # does not upload to. Only an offer: nothing changes without the
-        # click (a published list never becomes an upload target on its
-        # own once servers are configured here).
-        self._suggested_servers: List[str] = []
-        self._suggestions_dismissed = False
-        self._suggestion_box = QWidget()
-        suggestion_row = QHBoxLayout(self._suggestion_box)
-        suggestion_row.setContentsMargins(0, 0, 0, 0)
-        suggestion_row.setSpacing(8)
-        self._suggestion_label = QLabel("")
-        self._suggestion_label.setObjectName("media_notice")
-        self._suggestion_label.setWordWrap(True)
-        self._suggestion_label.setTextFormat(Qt.PlainText)
-        not_now = QPushButton(_("Not Now"))
-        not_now.setAutoDefault(False)
-        not_now.clicked.connect(self._dismiss_server_suggestions)
-        self._suggestion_use = QPushButton(_("Use for Uploads"))
-        self._suggestion_use.setAutoDefault(False)
-        self._suggestion_use.clicked.connect(
-            lambda: self.server_suggestions_accepted.emit(list(self._suggested_servers)))
-        suggestion_row.addWidget(self._suggestion_label, 1)
-        suggestion_row.addWidget(not_now)
-        suggestion_row.addWidget(self._suggestion_use)
-        self._suggestion_box.setVisible(False)
-        layout.addWidget(self._suggestion_box)
-
-        # Other Nostr apps look for this account's pictures on the servers
-        # its published list names. Publishing it is the person's choice.
-        self._share_servers = QPushButton(_("Share Server List…"))
-        self._share_servers.setFlat(True)
-        self._share_servers.setAutoDefault(False)
-        self._share_servers.setToolTip(
-            _("Tell other Nostr apps which servers hold your media."))
-        self._share_servers.clicked.connect(self.share_server_list_requested)
-        share_row = QHBoxLayout()
-        share_row.addWidget(self._share_servers)
-        share_row.addStretch(1)
-        layout.addLayout(share_row)
+        self._servers_button = QPushButton(_("Media Servers…"))
+        self._servers_button.setFlat(True)
+        self._servers_button.setAutoDefault(False)
+        self._servers_button.clicked.connect(self.servers_requested)
+        servers_row = QHBoxLayout()
+        servers_row.addWidget(self._servers_button)
+        servers_row.addStretch(1)
+        layout.addLayout(servers_row)
 
         # Drop zone.
         self._drop_zone = _DropZone(self)
@@ -1803,25 +1770,6 @@ class MediaLibraryDialog(QDialog):
         self._servers_label.setText(text)
         self._servers_label.setVisible(bool(text))
         self._refresh_storage()
-
-    def set_server_suggestions(self, servers: List[str]) -> None:
-        """Offer the media servers the profile lists that uploads do not
-        go to yet. An empty list, or Not Now, hides the offer."""
-        self._suggested_servers = list(servers or [])
-        hosts = [url_safety.host_of(s) or s for s in self._suggested_servers]
-        text = ngettext(
-            "Your account also lists {servers} for media. Use it for uploads "
-            "here too?",
-            "Your account also lists {servers} for media. Use them for uploads "
-            "here too?",
-            len(hosts),
-        ).format(servers=", ".join(hosts))
-        self._suggestion_label.setText(text if hosts else "")
-        self._suggestion_box.setVisible(bool(hosts) and not self._suggestions_dismissed)
-
-    def _dismiss_server_suggestions(self) -> None:
-        self._suggestions_dismissed = True
-        self._suggestion_box.setVisible(False)
 
     def _has_files_on(self, origin: str) -> bool:
         return any(origin in _origins_of(m) for m in self._store.files.values())

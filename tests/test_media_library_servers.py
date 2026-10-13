@@ -230,49 +230,11 @@ def test_a_closed_library_leaves_nothing_connected_to_the_store(tmp_path, monkey
     assert errors == []
 
 
-# -- servers the profile lists, offered for uploads --------------------------------------
+# -- the servers themselves are managed in one place ------------------------------------
 
-def test_servers_the_profile_lists_are_offered_not_used(tmp_path, monkeypatch):
-    dialog = build(tmp_path, monkeypatch, ServerStore())
-    accepted = []
-    dialog.server_suggestions_accepted.connect(accepted.append)
-    dialog.set_server_suggestions(["https://cdn.example"])
-    assert not dialog._suggestion_box.isHidden()
-    assert dialog._suggestion_label.text() == (
-        "Your account also lists cdn.example for media. Use it for uploads here too?")
-    assert accepted == []                       # nothing without the click
-    dialog._suggestion_use.click()
-    assert accepted == [["https://cdn.example"]]
-
-
-def test_several_servers_are_offered_together(tmp_path, monkeypatch):
-    dialog = build(tmp_path, monkeypatch, ServerStore())
-    dialog.set_server_suggestions(["https://a.example", "https://b.example"])
-    assert dialog._suggestion_label.text() == (
-        "Your account also lists a.example, b.example for media. Use them for "
-        "uploads here too?")
-
-
-def test_not_now_hides_the_offer_for_this_window(tmp_path, monkeypatch):
-    dialog = build(tmp_path, monkeypatch, ServerStore())
-    dialog.set_server_suggestions(["https://cdn.example"])
-    not_now = [b for b in dialog._suggestion_box.findChildren(QPushButton)
-               if b.text() == "Not Now"][0]
-    not_now.click()
-    assert dialog._suggestion_box.isHidden()
-    dialog.set_server_suggestions(["https://cdn.example", "https://b.example"])
-    assert dialog._suggestion_box.isHidden()
-
-
-def test_nothing_to_offer_shows_nothing(tmp_path, monkeypatch):
-    dialog = build(tmp_path, monkeypatch, ServerStore())
-    dialog.set_server_suggestions([])
-    assert dialog._suggestion_box.isHidden()
-
-
-def test_sharing_the_server_list_is_asked_for_from_the_library(tmp_path, monkeypatch):
+def test_media_servers_is_asked_for_from_the_library(tmp_path, monkeypatch):
     dialog = build(tmp_path, monkeypatch, ServerStore())
     asked = []
-    dialog.share_server_list_requested.connect(lambda: asked.append(True))
-    dialog._share_servers.click()
+    dialog.servers_requested.connect(lambda: asked.append(True))
+    dialog._servers_button.click()
     assert asked == [True]

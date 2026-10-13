@@ -300,21 +300,14 @@ def test_dead_image_addresses_are_recovered_from_the_published_servers(init_body
     assert 0 <= list_at < assets_at
 
 
-def test_every_library_window_is_offered_the_published_servers():
-    source = textwrap.dedent(inspect.getsource(MainWindow))
-    tree = ast.parse(source)
-    offered = [
-        node for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and getattr(node.func, "attr", "") == "set_server_suggestions"
-    ]
-    libraries = [
-        node for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and getattr(node.func, "id", "") == "MediaLibraryDialog"
-    ]
-    # Each library window when it opens, plus the open one when the list changes.
-    assert len(offered) >= len(libraries) + 1
+def test_the_media_servers_sheet_is_offered_the_published_servers():
+    """The servers the account lists are offered where servers are
+    managed: when the sheet opens, and while it is open when the list
+    changes."""
+    source = textwrap.dedent(inspect.getsource(MainWindow._open_media_servers))
+    assert "suggestions=self._media_server_suggestions()" in source
+    source = textwrap.dedent(inspect.getsource(MainWindow._on_media_server_suggestions))
+    assert "offer(self._media_server_suggestions())" in source
 
 
 def test_sharing_the_server_list_asks_first_then_publishes_what_uploads_use(monkeypatch):

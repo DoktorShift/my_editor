@@ -162,7 +162,7 @@ from nostr.blossom.errors import friendly_message
 from nostr.blossom.names import MediaNames
 from nostr.blossom.hashes import hash_from_url
 from nostr.imports.workers import run_for_size
-from nostr.media_server_list import publish_server_list
+from nostr.media_server_list import publish_server_list, server_list_tags
 from nostr.outbox import writer as outbox_writer
 from nostr.profile_editing import ProfileEditing
 from nostr.relay import NOT_CHOSEN
@@ -231,6 +231,7 @@ from nostr.membership_controller import MembershipController
 from nostr.key_vault import KeyVault
 from nostr.account_controller import AccountController
 from nostr.ui.media_library_dialog import MediaLibraryDialog, format_size
+from nostr.ui.media_servers_dialog import MediaServersDialog
 from nostr.ui.publish_article_dialog import PublishArticleDialog
 from nostr.ui.publish_copy_dialog import resolve_pick
 from nostr.ui.publish_note_dialog import PublishNoteDialog
@@ -599,6 +600,8 @@ class MainWindow(QMainWindow):
         # cache on the way out, so an upload never has to be downloaded
         # back to be shown.
         self._media_library_dialog = None
+        # The Media Servers sheet while it is open (it is modal).
+        self._media_servers_sheet = None
         # Association membership, which grants a relay and a media server.
         # Resolved in the background; until it answers the account simply
         # has no benefits, which is the same state as not being a member.
@@ -6156,32 +6159,42 @@ class MainWindow(QMainWindow):
         return self._server_list.suggestions
 
     def _on_media_server_suggestions(self, _servers: list) -> None:
-        dialog = self._visible_media_library()
-        if dialog is not None:
-            dialog.set_server_suggestions(self._media_server_suggestions())
+        sheet = self._media_servers_sheet
+        if sheet is not None and shiboken6.isValid(sheet):
+            sheet.offer(self._media_server_suggestions())
 
-    def _use_suggested_media_servers(self, servers: list) -> None:
-        """The person chose to upload to the servers their profile lists,
-        besides the ones configured here. Their files there are listed
-        from now on too."""
-        settings = self._media_store.settings
-        for server in servers:
-            settings.add_server(server)
-        self._media_store.refetch_if_targets_changed()
-        dialog = self._visible_media_library()
-        if dialog is not None:
-            dialog.set_server_suggestions(self._media_server_suggestions())
+    def _open_media_servers(self) -> None:
+        """Media Servers…, from the Media Library: which servers keep the
+        person's files, in which order, and sharing that list."""
+        parent = self._visible_media_library() or self
+        sheet = MediaServersDialog(
+            settings=self._media_store.settings,
+            entitled=self._entitled_blossom_servers(),
+            suggestions=self._media_server_suggestions(),
+            server_label=self._media_server_label,
+            is_dark=self.is_dark_theme, parent=parent)
+        sheet.changed.connect(self._media_store.refetch_if_targets_changed)
+        sheet.share_requested.connect(lambda s=sheet: self._share_media_server_list(s))
+        self._media_servers_sheet = sheet
+        try:
+            sheet.exec()
+        finally:
+            self._media_servers_sheet = None
+            sheet.deleteLater()
 
-    def _share_media_server_list(self) -> None:
+    def _share_media_server_list(self, parent=None) -> None:
         """Publish the servers uploads go to as the account's media server
         list (kind 10063), after asking: it replaces the list other apps
-        read now, if the account published one."""
+        read now, if the account published one. The servers named are the
+        ones the list will hold (a plain-http one, or more than ten, is
+        left out of it)."""
         active = self._profile_store.default()
         if active is None:
             return
         servers = [url_safety.origin_of(s) or s for s in self._media_store.target_servers()]
-        hosts = ", ".join(url_safety.host_of(s) or s for s in servers)
-        parent = self._visible_media_library() or self
+        hosts = ", ".join(url_safety.host_of(tag[1]) or tag[1]
+                          for tag in server_list_tags(servers, None))
+        parent = parent or self._visible_media_library() or self
         choice = ask(parent, title=_("Tell Other Apps Where Your Media Is?"),
                      message=_("Other Nostr apps then look on {hosts} for your pictures, "
                                "in this order. This replaces the list they use now, if "
@@ -7025,9 +7038,7 @@ class MainWindow(QMainWindow):
             parent=self,
         )
         dialog.bind_private_library(self._private_library)
-        dialog.server_suggestions_accepted.connect(self._use_suggested_media_servers)
-        dialog.share_server_list_requested.connect(self._share_media_server_list)
-        dialog.set_server_suggestions(self._media_server_suggestions())
+        dialog.servers_requested.connect(self._open_media_servers)
         # The dialog deletes itself on close; forget it then, so nothing
         # later asks a deleted object whether it is visible.
         dialog.destroyed.connect(lambda _obj=None, d=dialog: self._forget_media_library(d))
@@ -7058,9 +7069,7 @@ class MainWindow(QMainWindow):
             parent=self,
         )
         dialog.bind_private_library(self._private_library)
-        dialog.server_suggestions_accepted.connect(self._use_suggested_media_servers)
-        dialog.share_server_list_requested.connect(self._share_media_server_list)
-        dialog.set_server_suggestions(self._media_server_suggestions())
+        dialog.servers_requested.connect(self._open_media_servers)
         # Pre-select images in the picker - videos / audio can't be
         # inserted as inline document objects.
         dialog._filter_combo.setCurrentIndex(1)
