@@ -1130,3 +1130,77 @@ def test_a_text_written_as_a_list_or_a_mapping_is_shown_kept_as_written(text, fi
     assert getattr(from_front_matter(front), field) == shown
     assert {"title": "title", "summary": "summary"}[field] in kept_in_file(front)
     assert changed(text, **{field: "New"}) == text
+
+
+LAZY_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtGui import QTextCursor
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import front_matter
+import main_window
+
+read = []
+real = front_matter._parsed_text
+def counted(*args):
+    read.append(1)
+    return real(*args)
+front_matter._parsed_text = counted
+
+path = sys.argv[2]
+w = main_window.MainWindow()
+w.show()
+ed = w.open_path(path)
+app.processEvents()
+c = ed.textCursor()
+c.movePosition(QTextCursor.MoveOperation.End)
+c.insertText(" More.")
+w._save_to(path)
+ed._backup.write_now()
+r = {"read at open and save": len(read), "saved": open(path, encoding="utf-8").read()}
+r["title"] = w._article_details_of(ed).title
+r["read for the details"] = len(read) > 0
+ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_opening_and_saving_a_file_reads_no_article_details(tmp_path):
+    """Round 9, L3: every open read the front matter with a YAML parser and
+    tried changes on it, for everyone, Nostr or not: 18 s for 1 MB. The
+    details are read when something asks for them."""
+    text = "---\ntitle: Lazy\ntags: [a]\n---\n\nBody text.\n"
+    path = tmp_path / "lazy.md"
+    path.write_text(text, encoding="utf-8")
+    r = run_window_script(LAZY_SCRIPT, tmp_path, str(path))
+    assert r["read at open and save"] == 0
+    assert r["saved"] == text.replace("Body text.", "Body text. More.")
+    assert r["title"] == "Lazy" and r["read for the details"] is True
+
+
+def test_what_is_kept_is_worked_out_once_per_front_matter(monkeypatch):
+    import nostr.article_details as module
+    front, _ = front_matter.split("---\ntitle: Once\ntags: [a]\n---\nB\n")
+    tried = []
+    real = module._written
+    monkeypatch.setattr(module, "_written", lambda *args: tried.append(1) or real(*args))
+    kept_in_file(front)
+    first = len(tried)
+    kept_in_file(front_matter.split("---\ntitle: Once\ntags: [a]\n---\nB\n")[0])
+    assert first > 0 and len(tried) == first
+
+
+def test_a_huge_front_matter_is_not_tried_change_by_change(monkeypatch):
+    """Each trial reads the whole front matter again: past a size, a change
+    is checked only when it is made."""
+    import nostr.article_details as module
+    lines = "".join(f"key{n}: value {n}\n" for n in range(4000))
+    front, _ = front_matter.split(f"---\ntitle: Big\n{lines}---\nB\n")
+    tried = []
+    real = module._written
+    monkeypatch.setattr(module, "_written", lambda *args: tried.append(1) or real(*args))
+    assert kept_in_file(front) == frozenset() and tried == []
+    assert from_front_matter(front).title == "Big"

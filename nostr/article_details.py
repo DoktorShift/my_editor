@@ -35,6 +35,7 @@ on the draft's wrap, and a draft the person saved has none.
 
 from __future__ import annotations
 
+import functools
 import json
 import re
 from dataclasses import dataclass, field, fields, replace
@@ -291,9 +292,20 @@ def _string_tags(written: str) -> Tuple[str, ...]:
 def kept_in_file(front: Optional[front_matter.FrontMatter]) -> FrozenSet[str]:
     """The details ``front`` writes in a way this app can't read safely (a
     mapping, an anchor, a tag), with no entry for them it can, or can't
-    change safely (a change tried, _trials, or one made before, a parser
-    would read otherwise): they stay as written, whatever is set here.
-    Named as in _FRONT_KEYS."""
+    change safely (a change tried, _trials, a parser would read
+    otherwise): they stay as written, whatever is set here. Named as in
+    _FRONT_KEYS. Worked out once for a front matter."""
+    return _kept_in_file(front)
+
+
+# Past this size a front matter is not tried change by change, each trial
+# reading all of it again: a change is checked as it is made instead
+# (front_matter_with), and one that would not hold is not written.
+_MOST_TRIED = 64 * 1024
+
+
+@functools.lru_cache(maxsize=32)
+def _kept_in_file(front: Optional[front_matter.FrontMatter]) -> FrozenSet[str]:
     mapping = front_matter.parsed(front)
     if mapping is None:
         return frozenset(dict(_FRONT_KEYS))  # no parser reads it: nothing is changed
@@ -303,6 +315,9 @@ def kept_in_file(front: Optional[front_matter.FrontMatter]) -> FrozenSet[str]:
         if found and not any(_readable(key, entry, read) for _at, _inner, entry, read in found) \
                 or _unseen(key, found, mapping):
             kept.add(key)
+    if front is not None and sum(len(line) + 1 for entry in front.entries
+                                 for line in entry.lines) > _MOST_TRIED:
+        return frozenset(kept)
     details = from_front_matter(front)
     for key, _others in _FRONT_KEYS:
         if key not in kept and any(key in _refused(details.with_changes(**trial), front, kept)

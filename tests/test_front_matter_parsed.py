@@ -10,6 +10,7 @@ test_front_matter.py: for each change, either the detail is kept as written
 again with only that detail changed, to what was set.
 """
 
+import functools
 import pathlib
 import re
 import tomllib
@@ -19,6 +20,7 @@ import pytest
 import yaml
 
 import front_matter
+from nostr import article_details
 from nostr.article_details import (
     from_front_matter, front_matter_with, kept_in_file)
 from tests.test_front_matter import HUGO, JEKYLL, TOML
@@ -157,6 +159,9 @@ def broken_on(monkeypatch, word):
                                       written.syntax)
         return written
     rewritten, quoted = front_matter.rewritten, front_matter.quoted
+    # What is kept is worked out once per front matter: afresh with these.
+    monkeypatch.setattr(article_details, "_kept_in_file", functools.lru_cache(maxsize=32)(
+        article_details._kept_in_file.__wrapped__))
     monkeypatch.setattr(front_matter, "rewritten", lambda old, value, **kwargs: broken(
         rewritten(old, value, **kwargs), value))
     monkeypatch.setattr(front_matter, "quoted", lambda old, key, value, *args: broken(

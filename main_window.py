@@ -3122,10 +3122,11 @@ class MainWindow(QMainWindow):
         elif ext.endswith('.md'):
             # The article's details are the file's front matter (Q-F): shown
             # in Article Details, never in the text, never published as it.
+            # Read when something asks for them (_article_details_of), never
+            # on opening: a file nobody publishes pays nothing for them.
             ed._front_matter = front
-            details = from_front_matter(front).keeping(kept_in_file(front))
-            ed._article_details = details if details != ArticleDetails() or details.kept \
-                else None
+            ed._article_details = None
+            ed._details_unread = front is not None
             self._load_markdown(ed, content)
         elif ext.endswith('.rmd'):
             # R Markdown is edited as source, the way RStudio does it.
@@ -3587,8 +3588,10 @@ class MainWindow(QMainWindow):
                     content = document_to_markdown(ed.document(), reference)
                 # Its front matter (Q-F): as written but for the details
                 # changed here; none when there are none and it had none.
-                front = front_matter_with(self._article_details_of(ed),
-                                          getattr(ed, "_front_matter", None))
+                # Details nothing asked for are the file's: it stays as is.
+                front = getattr(ed, "_front_matter", None)
+                if not getattr(ed, "_details_unread", False):
+                    front = front_matter_with(self._article_details_of(ed), front)
                 if not self._saving_without(ed, front, path):
                     return False
                 head = front_matter.join(front, "")
@@ -3672,8 +3675,10 @@ class MainWindow(QMainWindow):
         tab keeps what was typed either way, and the article still
         publishes it. Asked once for the same details."""
         refused = front.refused if front is not None else frozenset()
+        if not refused:
+            return True
         details = self._article_details_of(ed)
-        if not refused or getattr(ed, "_told_not_saved", None) == (refused, details):
+        if getattr(ed, "_told_not_saved", None) == (refused, details):
             return True
         if len(refused) == 1:
             title = _("“{detail}” can’t be saved in the file").format(
@@ -8178,6 +8183,8 @@ class MainWindow(QMainWindow):
         saved gets its first publication date from this computer's record,
         so the next save puts it into the draft, and every device that
         opens the draft keeps the date."""
+        if ed is not None and getattr(ed, "_details_unread", False):
+            self._read_details_of(ed)
         own = getattr(ed, "_article_details", None) if ed is not None else None
         if own is not None:
             return own
@@ -8210,6 +8217,17 @@ class MainWindow(QMainWindow):
         directory = getattr(self, "_relay_directory", None)
         return (profile.user_pubkey,
                 directory.relay_hint(profile.user_pubkey) if directory is not None else "")
+
+    @staticmethod
+    def _read_details_of(ed) -> None:
+        """The details of the file in ``ed`` read from its front matter, as
+        the first thing asks for them: those set in the tab before (a
+        restored tab's), else the file's, with those it keeps as written."""
+        ed._details_unread = False
+        front = getattr(ed, "_front_matter", None)
+        details = (getattr(ed, "_article_details", None) or from_front_matter(front)).keeping(
+            kept_in_file(front))
+        ed._article_details = details if details != ArticleDetails() or details.kept else None
 
     def _set_article_details(self, ed, details: ArticleDetails) -> None:
         """The details of the article in ``ed``, as set in Article Details or
