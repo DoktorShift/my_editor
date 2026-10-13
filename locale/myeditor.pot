@@ -5799,8 +5799,8 @@ msgstr ""
 #: nostr/ui/article_details_panel.py:483
 #: nostr/ui/draft_relays_sheet.py:158
 #: nostr/ui/media_library_dialog.py:658
-#: nostr/ui/media_servers_dialog.py:126
-#: nostr/ui/media_servers_dialog.py:292
+#: nostr/ui/media_servers_dialog.py:159
+#: nostr/ui/media_servers_dialog.py:329
 msgid "Remove"
 msgstr ""
 
@@ -7808,69 +7808,81 @@ msgstr ""
 msgid "“{name}” couldn’t be saved. Try again."
 msgstr ""
 
-#: nostr/ui/media_servers_dialog.py:87
-msgid "Media Servers"
-msgstr ""
-
-#: nostr/ui/media_servers_dialog.py:109
-msgid "Images, videos and audio you add are kept on these servers. New files go to the first one, and the others keep copies."
-msgstr ""
-
-#: nostr/ui/media_servers_dialog.py:115
-msgid "Media servers"
-msgstr ""
-
-#: nostr/ui/media_servers_dialog.py:122
-msgid "Make Primary"
-msgstr ""
-
-#: nostr/ui/media_servers_dialog.py:124
-msgid "New files go to this server first."
-msgstr ""
-
-#: nostr/ui/media_servers_dialog.py:137
-msgid "Server address"
-msgstr ""
-
-#: nostr/ui/media_servers_dialog.py:144
-msgid "Add Server"
-msgstr ""
-
-#: nostr/ui/media_servers_dialog.py:150
+#: nostr/ui/media_servers_dialog.py:98
 msgid "Enter a server address that starts with https://, such as https://media.example.com."
 msgstr ""
 
-#: nostr/ui/media_servers_dialog.py:165
+#: nostr/ui/media_servers_dialog.py:120
+msgid "Media Servers"
+msgstr ""
+
+#: nostr/ui/media_servers_dialog.py:142
+msgid "Images, videos and audio you add are kept on these servers. New files go to the first one, and the others keep copies."
+msgstr ""
+
+#: nostr/ui/media_servers_dialog.py:148
+msgid "Media servers"
+msgstr ""
+
+#: nostr/ui/media_servers_dialog.py:155
+msgid "Make Primary"
+msgstr ""
+
+#: nostr/ui/media_servers_dialog.py:157
+msgid "New files go to this server first."
+msgstr ""
+
+#: nostr/ui/media_servers_dialog.py:170
+msgid "Server address"
+msgstr ""
+
+#: nostr/ui/media_servers_dialog.py:177
+msgid "Add Server"
+msgstr ""
+
+#: nostr/ui/media_servers_dialog.py:196
 msgid "Add to List"
 msgstr ""
 
-#: nostr/ui/media_servers_dialog.py:179
+#: nostr/ui/media_servers_dialog.py:210
 msgid "Share this list so other Nostr apps find your files."
 msgstr ""
 
-#: nostr/ui/media_servers_dialog.py:181
+#: nostr/ui/media_servers_dialog.py:212
 msgid "Share with Other Apps…"
 msgstr ""
 
-#: nostr/ui/media_servers_dialog.py:218
+#: nostr/ui/media_servers_dialog.py:254
 msgid "Included with your membership"
 msgstr ""
 
-#: nostr/ui/media_servers_dialog.py:224
+#: nostr/ui/media_servers_dialog.py:94
+msgid "A server address can’t have spaces in it."
+msgstr ""
+
+#: nostr/ui/media_servers_dialog.py:95
+msgid "This address has an invisible character in it, as text copied from a web page sometimes does. Type it instead."
+msgstr ""
+
+#: nostr/ui/media_servers_dialog.py:97
+msgid "Enter a full server address, such as media.example.com."
+msgstr ""
+
+#: nostr/ui/media_servers_dialog.py:260
 #, python-brace-format
 msgid "Your Nostr account also lists {servers}."
 msgstr ""
 
-#: nostr/ui/media_servers_dialog.py:290
+#: nostr/ui/media_servers_dialog.py:327
 msgid "Files already there stay there. The Media Library shows them only while another of your servers has them too."
 msgstr ""
 
-#: nostr/ui/media_servers_dialog.py:212
+#: nostr/ui/media_servers_dialog.py:248
 #, python-brace-format
 msgid "{server}, included with your membership"
 msgstr ""
 
-#: nostr/ui/media_servers_dialog.py:289
+#: nostr/ui/media_servers_dialog.py:326
 #, python-brace-format
 msgid "Remove “{server}”?"
 msgstr ""

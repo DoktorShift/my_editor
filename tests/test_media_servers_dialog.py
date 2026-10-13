@@ -228,3 +228,52 @@ def test_the_main_window_opens_it_as_a_sheet_on_the_library():
     source = textwrap.dedent(inspect.getsource(MainWindow._open_media_servers))
     assert "sheet.open()" in source and "exec()" not in source
     assert "self._visible_media_library()" in source
+
+
+SPACE = "A server address can’t have spaces in it."
+HIDDEN = ("This address has an invisible character in it, as text copied from a web page "
+          "sometimes does. Type it instead.")
+HOST = "Enter a full server address, such as media.example.com."
+HTTPS = "Enter a server address that starts with https://, such as https://media.example.com."
+
+
+@pytest.mark.parametrize("text, said", [
+    ("media example.com", SPACE),
+    ("https://media.example.com​", HIDDEN),
+    ("https://media.exam­ple.com", HIDDEN),
+    ("‮https://media.example.com", HIDDEN),
+    ("nodot", HOST),
+    ("https://example.", HOST),
+    ("https://999.1.1.1", HOST),
+    ("https://1.2.3", HOST),
+    ("https://media.123", HOST),
+    ("http://insecure.example", HTTPS),
+    ("ftp://x.example", HTTPS),
+])
+def test_an_address_that_is_refused_says_what_is_wrong_with_it(tmp_path, text, said):
+    dialog, settings, _changes = sheet(tmp_path)
+    dialog.address.setText(text)
+    dialog.add_button.click()
+    assert settings.configured_servers == [A, B]
+    assert dialog.address_error.text() == said
+
+
+def test_a_server_named_in_another_script_is_one_server_however_it_is_typed(tmp_path):
+    dialog, settings, changes = sheet(tmp_path)
+    dialog.address.setText("https://bücher.de")
+    dialog.add_button.click()
+    dialog.address.setText("https://xn--bcher-kva.de")
+    dialog.add_button.click()
+    assert settings.configured_servers == [A, B, "https://xn--bcher-kva.de"]
+    assert rows(dialog)[-1] == "bücher.de"
+    assert len(changes) == 1
+
+
+@pytest.mark.parametrize("text, origin", [("https://c.example.", C),
+                                          ("https://[2001:db8::1]:8443/", "https://[2001:db8::1]:8443"),
+                                          ("https://192.0.2.7", "https://192.0.2.7")])
+def test_a_full_address_is_added_as_its_server(tmp_path, text, origin):
+    dialog, settings, _changes = sheet(tmp_path)
+    dialog.address.setText(text)
+    dialog.add_button.click()
+    assert settings.configured_servers == [A, B, origin]

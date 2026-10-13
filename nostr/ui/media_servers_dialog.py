@@ -20,7 +20,9 @@ Every change is saved at once and announced with ``changed``.
 
 from __future__ import annotations
 
-from typing import Callable, Optional, Sequence
+import unicodedata
+from typing import Callable, Optional, Sequence, Tuple
+from urllib.parse import urlsplit
 
 from PySide6.QtCore import QEvent, Qt, QUrl, Signal
 from PySide6.QtGui import QPalette
@@ -46,24 +48,55 @@ from i18n import _
 from ..blossom.settings import BlossomSettings
 
 
-def server_address(text: str) -> Optional[str]:
-    """The server origin ``text`` names, or None when it is not a media
-    server address: one with spaces, a host with no dot (other than
-    localhost or an IP address), or anything but https (http only on
-    this computer). A bare host means https."""
+def server_address(text: str) -> Tuple[Optional[str], str]:
+    """``(origin, "")`` for the media server ``text`` names, else
+    ``(None, problem)``: "space", "hidden" (an invisible character, as
+    text copied from a web page can hold), "host" (no full host: no dot
+    other than localhost, a number that is no IP address) or "https"
+    (anything but https; http only on this computer). A bare host means
+    https. A host in another script is kept as its ASCII form, so the
+    two ways of writing it are one server."""
     text = (text or "").strip()
-    if not text or any(ch.isspace() for ch in text):
-        return None
+    if any(ch.isspace() for ch in text):
+        return None, "space"
+    if any(unicodedata.category(ch) in ("Cc", "Cf", "Cn", "Co", "Cs") for ch in text):
+        return None, "hidden"
     if "://" not in text:
         text = "https://" + text
     url = QUrl(text, QUrl.ParsingMode.StrictMode)
-    host = url.host()
+    if url.isValid() and url.scheme() not in ("https", "http"):
+        return None, "https"
+    host = url.host().rstrip(".")
     if not url.isValid() or not host:
-        return None
-    if "." not in host and host != "localhost" and QHostAddress(host).isNull():
-        return None
-    origin = url_safety.origin_of(text)
-    return origin if origin and url_safety.is_safe_media_url(origin) else None
+        return None, "host"
+    if ":" not in host:                       # an IPv6 address is in brackets, and checked
+        # As typed: Qt reads "1.2.3" as 1.2.0.3.
+        try:
+            typed = (urlsplit(text).hostname or "").rstrip(".").split(".")
+        except ValueError:
+            return None, "host"
+        if all(label.isdigit() for label in typed):
+            # A dotted number is an IPv4 address in full or nothing.
+            if len(typed) != 4 or QHostAddress(host).isNull():
+                return None, "host"
+        elif typed[-1].isdigit() or "." not in host and host != "localhost":
+            return None, "host"             # no name ends in a number, or lacks a dot
+        url.setHost(host)
+    # Encoded, a host in another script is its ASCII form.
+    origin = url_safety.origin_of(bytes(url.toEncoded()).decode("ascii", "replace"))
+    if not origin:
+        return None, "host"
+    return (origin, "") if url_safety.is_safe_media_url(origin) else (None, "https")
+
+
+def _address_problem(problem: str) -> str:
+    return {
+        "space": _("A server address can’t have spaces in it."),
+        "hidden": _("This address has an invisible character in it, as text copied from a "
+                    "web page sometimes does. Type it instead."),
+        "host": _("Enter a full server address, such as media.example.com."),
+    }.get(problem) or _("Enter a server address that starts with https://, such as "
+                        "https://media.example.com.")
 
 
 class MediaServersDialog(QDialog):
@@ -147,9 +180,7 @@ class MediaServersDialog(QDialog):
         add_row.addWidget(self.address, 1)
         add_row.addWidget(self.add_button)
         layout.addLayout(add_row)
-        self.address_error = QLabel(_(
-            "Enter a server address that starts with https://, such as "
-            "https://media.example.com."))
+        self.address_error = QLabel()
         self.address_error.setObjectName("media_servers_error")
         self.address_error.setWordWrap(True)
         self.address_error.hide()
@@ -196,7 +227,12 @@ class MediaServersDialog(QDialog):
     # -- state ---------------------------------------------------------------
 
     def _name(self, origin: str) -> str:
-        return self._label(origin) or url_safety.host_of(origin) or origin
+        host = url_safety.host_of(origin)
+        # A host in another script is kept in its ASCII form, and shown
+        # as it is written where Qt (as a browser) trusts its domain not
+        # to mix lookalike letters.
+        return self._label(origin) or (QUrl.fromAce(host.encode("ascii", "replace"))
+                                       if host else origin)
 
     def _refresh(self, select: str = "") -> None:
         configured = self._settings.configured_servers
@@ -263,10 +299,10 @@ class MediaServersDialog(QDialog):
         self.done_button.setDefault(not typing)
 
     def _add(self) -> None:
-        text = self.address.text().strip()
-        origin = server_address(text)
+        origin, problem = server_address(self.address.text())
         before = self._settings.configured_servers
         if origin is None:
+            self.address_error.setText(_address_problem(problem))
             self.address_error.show()
             return
         if origin in before:
@@ -275,6 +311,7 @@ class MediaServersDialog(QDialog):
             return
         after = self._settings.add_server(origin)
         if after == before:
+            self.address_error.setText(_address_problem("https"))
             self.address_error.show()
             return
         self.address.clear()
