@@ -143,6 +143,43 @@ def test_a_gif_loses_its_comment_and_xmp_and_keeps_every_frame():
     assert not QImage.fromData(out.data).isNull()
 
 
+@pytest.mark.parametrize("label", [0x01, 0x02, 0x7F, 0xCE, 0xFA])
+def test_a_gif_keeps_only_the_blocks_it_needs_to_show(label):
+    """An allow list, not a deny list: any extension but the graphic
+    control and the loop goes (plain text, and every label no decoder
+    knows), whatever it may carry."""
+    hidden = b"\x21" + bytes([label]) + _blocks(b"52.5N 13.4E")
+    out = scrub_for_publication(_GIF_HEAD + _LOOP + hidden + _FRAME + b"\x3b")
+    assert out.data == _GIF_HEAD + _LOOP + _FRAME + b"\x3b"
+
+
+@pytest.mark.parametrize("identifier", [b"NETSCAPE2.0", b"ANIMEXTS1.0"])
+def test_a_loop_block_keeps_only_its_loop(identifier):
+    """What follows the loop count in a loop block (a buffering hint, or
+    anything else) goes; the loop count stays."""
+    loop = (b"\x21\xff\x0b" + identifier + b"\x03\x01\x05\x00" + b"\x05\x02\x00\x10\x00\x00"
+            + _blocks(b"52.5N 13.4E")[:-1] + b"\x00")
+    out = scrub_for_publication(_GIF_HEAD + loop + _FRAME + b"\x3b")
+    assert out.data == (_GIF_HEAD + b"\x21\xff\x0b" + identifier + b"\x03\x01\x05\x00\x00"
+                        + _FRAME + b"\x3b")
+
+
+def test_a_loop_block_without_a_loop_goes():
+    loop = b"\x21\xff\x0bNETSCAPE2.0" + _blocks(b"52.5N 13.4E")
+    out = scrub_for_publication(_GIF_HEAD + loop + _FRAME + b"\x3b")
+    assert out.data == _GIF_HEAD + _FRAME + b"\x3b"
+
+
+def test_a_graphic_control_keeps_only_its_four_bytes():
+    frame = (bytes.fromhex("21f904" "04" "0a00" "00") + _blocks(b"52.5N 13.4E")
+             + _FRAME[8:])
+    out = scrub_for_publication(_GIF_HEAD + frame + b"\x3b")
+    assert out.data == _GIF_HEAD + _FRAME + b"\x3b"
+    malformed = bytes.fromhex("21f9" "03" "040a00" "00") + _FRAME[8:]
+    out = scrub_for_publication(_GIF_HEAD + malformed + b"\x3b")
+    assert out.data == _GIF_HEAD + _FRAME[8:] + b"\x3b"
+
+
 def test_a_gif_that_cannot_be_read_is_refused():
     with pytest.raises(ScrubError):
         scrub_for_publication(_GIF_HEAD + b"\x21\xfe\x05abc")   # cut short

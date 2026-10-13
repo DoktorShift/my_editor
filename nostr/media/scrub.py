@@ -154,19 +154,26 @@ def can_scrub(mime: str) -> bool:
 
 
 def _gif_frames_only(data: bytes) -> bytes:
-    """The GIF ``data`` without its comments and application blocks
-    (other than the loop): header, palettes, graphic control, plain text
-    and frames copied as they are. Raises ScrubError when it cannot be
-    read to its end."""
-    def sub_blocks(at: int) -> int:
-        """Where the run of sub-blocks starting at ``at`` ends."""
+    """The GIF ``data`` with only what showing it needs: the header and
+    palettes, each frame, its graphic control (delay, transparency) and
+    the loop, copied as they are. Every other block goes, whatever its
+    label: comments, application blocks such as XMP, plain text, labels
+    no decoder knows, and anything after the loop count in a loop block.
+    Raises ScrubError when it cannot be read to its end."""
+    def sub_blocks(at: int):
+        """Where the run of sub-blocks starting at ``at`` ends, and where
+        its first loop sub-block (three bytes, the first 1) starts, if
+        it has one."""
+        loop = None
         while True:
             if at >= len(data):
                 raise ScrubError("this GIF ends early")
             size = data[at]
-            at += 1 + size
             if size == 0:
-                return at
+                return at + 1, loop
+            if size == 3 and loop is None and at + 1 < len(data) and data[at + 1] == 1:
+                loop = at
+            at += 1 + size
 
     if len(data) < 13:
         raise ScrubError("this GIF ends early")
@@ -183,19 +190,19 @@ def _gif_frames_only(data: bytes) -> bytes:
             local = data[at + 9]
             start = at
             at += 10 + (3 * 2 ** ((local & 7) + 1) if local & 0x80 else 0) + 1
-            at = sub_blocks(at)
+            at, _loop = sub_blocks(at)
             out += data[start:at]
             continue
         if introducer != 0x21 or at + 2 > len(data):
             raise ScrubError("this GIF has a block it cannot read")
-        label, start = data[at + 1], at
-        end = sub_blocks(at + 2)
-        if label == 0xFF:                              # application
-            identifier = data[at + 3:at + 3 + data[at + 2]] if at + 2 < len(data) else b""
-            if bytes(identifier) in _GIF_KEPT_APPLICATIONS:
-                out += data[start:end]
-        elif label != 0xFE:                            # comments go
-            out += data[start:end]
+        label = data[at + 1]
+        end, loop = sub_blocks(at + 2)
+        size = data[at + 2]
+        first = data[at + 3:at + 3 + size]
+        if label == 0xF9 and size == 4:                # graphic control
+            out += b"\x21\xf9\x04" + first + b"\x00"
+        elif label == 0xFF and first in _GIF_KEPT_APPLICATIONS and loop is not None:
+            out += b"\x21\xff" + data[at + 2:at + 3 + size] + data[loop:loop + 4] + b"\x00"
         at = end
     raise ScrubError("this GIF ends early")
 
