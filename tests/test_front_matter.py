@@ -852,7 +852,7 @@ def test_a_detail_is_never_taken_out_with_the_front_matter_around_it():
     assert rest == body and again is not None
 
 
-@pytest.mark.parametrize("odd", [" ", "\x85", "\x0c", "\r", " ", "\x1c"])
+@pytest.mark.parametrize("odd", [" ", "\x85", "\x0c", " ", "\x1c"])
 def test_a_line_break_yaml_does_not_end_a_line_on_stays_as_written(odd):
     """Round 8, L3: a save with no change wrote these as line breaks. (A
     form feed or U+001C is no character YAML reads in a file at all: that
@@ -1002,3 +1002,30 @@ def test_the_window_saves_a_front_matter_with_its_own_line_endings(tmp_path):
     for path, text in paths:
         assert r[os.path.basename(path) + " saved"] == text.replace(
             "Body text.", "Body text. More."), path
+
+
+# -- a lone CR ends a line, as YAML reads it (round 9, H1) ----------------------
+
+CR_ONLY = "---\rtitle: CR Title\rtags: [x]\r---\r\rBody.\r"
+
+
+@pytest.mark.parametrize("text", [CR_ONLY, "---\r\ntitle: CR Title\rtags: [x]\n---\r\rBody.\r",
+                                  '+++\rtitle = "CR Title"\rtags = ["x"]\r+++\r\rBody.\r'])
+def test_a_front_matter_whose_lines_end_in_a_lone_cr_is_found(text):
+    """Classic Mac line endings: the front matter was not found, its text
+    published as the article, and a save wrote a second front matter."""
+    front, body = front_matter.split(text)
+    assert front is not None and body == "Body.\r"
+    details = from_front_matter(front)
+    assert (details.title, details.hashtags) == ("CR Title", ("x",))
+    assert unchanged_save(text) == text
+    assert changed(text, title="New") == text.replace("CR Title", "New")
+
+
+def test_the_window_finds_a_front_matter_with_lone_cr_line_endings(tmp_path):
+    path = tmp_path / "cr_only.md"
+    path.write_bytes(CR_ONLY.encode("utf-8"))
+    r = run_window_script(SCRIPT, tmp_path, str(path))
+    assert r["cr_only.md shown"] == "Body."
+    assert r["cr_only.md saved"] == "---\rtitle: CR Title\rtags: [x]\r---\r\r" + (
+        "Body. More." + os.linesep)
