@@ -373,3 +373,43 @@ def test_a_library_upload_that_fails_with_no_library_open_is_said_in_the_window(
 def test_the_window_listens_for_library_upload_failures(init_body):
     source = textwrap.dedent(inspect.getsource(MainWindow.__init__))
     assert "upload_failed.connect(self._on_library_upload_failed)" in source
+
+
+def _quitting_host(added):
+    from types import SimpleNamespace
+    host = SimpleNamespace(
+        tabs=SimpleNamespace(count=lambda: 0, widget=lambda i: None),
+        _media_store=SimpleNamespace(added_uploads=lambda: list(added)),
+    )
+    for name in ("_uploading", "_still_uploading", "_what_leaving_does", "_may_leave_uploads",
+                 "_save_question_words", "_editor_from_widget", "_library_uploads"):
+        method = getattr(MainWindow, name)
+        setattr(host, name, method.__get__(host) if not isinstance(
+            MainWindow.__dict__.get(name), staticmethod) else method)
+    return host
+
+
+def test_quitting_while_the_library_uploads_asks_first(monkeypatch):
+    """As with audio and video in a document: quitting stops the upload,
+    so it is asked, with Cancel the default."""
+    import main_window as mw_module
+    from nostr.blossom.store import AddedUpload
+    asked = []
+    monkeypatch.setattr(mw_module, "confirm_destructive",
+                        lambda parent, **kw: asked.append(kw) or False)
+    host = _quitting_host([AddedUpload(name="Holiday.png", mime="image/png", state="sending"),
+                           AddedUpload(name="Old.png", mime="image/png", state="failed")])
+    assert MainWindow._resolve_unsaved_before_closing(host) is False
+    assert asked[0]["title"] == "“Holiday.png” is still uploading."
+    assert asked[0]["message"] == (
+        "Quitting now stops the upload, and the file isn’t added to your Media Library.")
+    assert asked[0]["action"] == "Quit Anyway"
+
+
+def test_quitting_with_only_failed_library_uploads_asks_nothing(monkeypatch):
+    import main_window as mw_module
+    from nostr.blossom.store import AddedUpload
+    monkeypatch.setattr(mw_module, "confirm_destructive",
+                        lambda *a, **kw: pytest.fail("asked"))
+    host = _quitting_host([AddedUpload(name="Old.png", mime="image/png", state="failed")])
+    assert MainWindow._resolve_unsaved_before_closing(host) is True

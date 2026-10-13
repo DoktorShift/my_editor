@@ -14,6 +14,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import List, Optional, Tuple
 
 from send2trash import send2trash
@@ -2924,7 +2925,9 @@ class MainWindow(QMainWindow):
         """Save, discard or keep unsaved documents. True means close."""
         editors = [ed for i in range(self.tabs.count())
                    if (ed := self._editor_from_widget(self.tabs.widget(i))) is not None]
-        uploading = self._uploading(*editors)
+        # Quitting stops every upload: the documents' and the Media
+        # Library's alike.
+        uploading = self._uploading(*editors) + self._library_uploads()
         unsaved = [i for i in range(self.tabs.count())
                    if (ed := self._editor_from_widget(self.tabs.widget(i)))
                    and ed.document().isModified()]
@@ -6798,14 +6801,31 @@ class MainWindow(QMainWindow):
                 if asset.upload_state in (AssetState.QUEUED, AssetState.SIGNING,
                                           AssetState.UPLOADING)]
 
+    def _library_uploads(self) -> list:
+        """Files added in the Media Library still on their way, as the
+        quit question names them (a failed one is not stopped by quitting:
+        nothing is moving)."""
+        return [SimpleNamespace(alt=added.name, library=True)
+                for added in self._media_store.added_uploads() if added.state != "failed"]
+
     @staticmethod
     def _still_uploading(uploading: list) -> str:
         return ngettext("“{name}” is still uploading.", "{count} files are still uploading.",
                         len(uploading)).format(name=uploading[0].alt, count=len(uploading))
 
     @staticmethod
-    def _what_leaving_does(*, quitting: bool) -> str:
-        """What closing (or quitting) does to audio and video still uploading."""
+    def _what_leaving_does(uploading: list = (), *, quitting: bool) -> str:
+        """What closing (or quitting) does to the uploads still running:
+        audio and video in a document, files added to the Media Library."""
+        library = sum(1 for u in uploading if getattr(u, "library", False))
+        if quitting and library == len(uploading) and library:
+            return ngettext(
+                "Quitting now stops the upload, and the file isn’t added to your Media Library.",
+                "Quitting now stops the uploads, and the files aren’t added to your Media "
+                "Library.", library)
+        if quitting and library:
+            return _("Quitting now stops every upload: the documents won’t hold their files, "
+                     "and your Media Library won’t get its new ones.")
         if quitting:
             return _("Quitting now stops the upload, and the document won’t hold the file.")
         return _("If you close the document now, the upload goes on to your media library, "
@@ -6818,7 +6838,7 @@ class MainWindow(QMainWindow):
             return True
         return confirm_destructive(
             self, title=self._still_uploading(uploading),
-            message=self._what_leaving_does(quitting=quitting),
+            message=self._what_leaving_does(uploading, quitting=quitting),
             action=_("Quit Anyway") if quitting else _("Close Anyway"))
 
     def _save_question_words(self, uploading: list, *, quitting: bool) -> str:
@@ -6827,7 +6847,7 @@ class MainWindow(QMainWindow):
         if not uploading:
             return ""
         return " ".join((self._still_uploading(uploading),
-                         self._what_leaving_does(quitting=quitting),
+                         self._what_leaving_does(uploading, quitting=quitting),
                          _("Your changes will be lost if you don’t save them.")))
 
     def _media_name(self, url: str) -> Optional[str]:
