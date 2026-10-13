@@ -470,3 +470,29 @@ def test_quitting_stops_a_save_and_its_part_file_goes(monkeypatch):
     order = []
     MainWindow.closeEvent(closing_host(monkeypatch, order), QCloseEvent())
     assert "saves stopped" in order
+
+
+@pytest.mark.parametrize("states, title, message", [
+    (["finishing"], "“Holiday.png” is still uploading.",
+     "Quitting now stops copying it to your other media servers. It’s already in your Media "
+     "Library."),
+    (["finishing", "finishing"], "2 files are still uploading.",
+     "Quitting now stops copying them to your other media servers. They’re already in your "
+     "Media Library."),
+    (["finishing", "sending"], "2 files are still uploading.",
+     "Quitting now stops the upload, and the file isn’t added to your Media Library."),
+])
+def test_quitting_while_a_library_file_is_only_being_copied_says_it_is_in_the_library(
+        monkeypatch, states, title, message):
+    """Once its first server has it, the file is in the library: quitting
+    stops only its copies to the other servers."""
+    import main_window as mw_module
+    from nostr.blossom.store import AddedUpload
+    asked = []
+    monkeypatch.setattr(mw_module, "confirm_destructive",
+                        lambda parent, **kw: asked.append(kw) or False)
+    names = ["Holiday.png", "Talk.mp4"]
+    host = _quitting_host([AddedUpload(name=names[i], mime="image/png", state=state)
+                           for i, state in enumerate(states)])
+    assert MainWindow._resolve_unsaved_before_closing(host) is False
+    assert (asked[0]["title"], asked[0]["message"]) == (title, message)

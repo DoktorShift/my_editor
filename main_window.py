@@ -6860,7 +6860,8 @@ class MainWindow(QMainWindow):
         """Files added in the Media Library still on their way, as the
         quit question names them (a failed one is not stopped by quitting:
         nothing is moving)."""
-        return [SimpleNamespace(alt=added.name, library=True)
+        return [SimpleNamespace(alt=added.name, library=True,
+                                finishing=added.state == "finishing")
                 for added in self._media_store.added_uploads() if added.state != "failed"]
 
     @staticmethod
@@ -6871,7 +6872,17 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _what_leaving_does(uploading: list = (), *, quitting: bool) -> str:
         """What closing (or quitting) does to the uploads still running:
-        audio and video in a document, files added to the Media Library."""
+        audio and video in a document, files added to the Media Library.
+        A library file its first server has is in the library already:
+        quitting stops only its copies to the other servers."""
+        copying = [u for u in uploading if getattr(u, "finishing", False)]
+        if quitting and copying and len(copying) == len(uploading):
+            return ngettext(
+                "Quitting now stops copying it to your other media servers. It’s already in "
+                "your Media Library.",
+                "Quitting now stops copying them to your other media servers. They’re already "
+                "in your Media Library.", len(copying))
+        uploading = [u for u in uploading if not getattr(u, "finishing", False)]
         library = sum(1 for u in uploading if getattr(u, "library", False))
         if quitting and library == len(uploading) and library:
             return ngettext(
