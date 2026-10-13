@@ -312,18 +312,6 @@ def test_an_article_carries_imeta_after_its_metadata_and_before_extras():
     assert kinds == ["client", "d", "title", "image", "t", "imeta", "source"]
 
 
-def test_the_content_check_runs_after_mentions_are_appended():
-    # The mention URIs are appended by the builder, so only the builder
-    # holds the final content string the substring guard has to see.
-    event = build_note(
-        body_with(URL), PK,
-        mentions=[(PK, "")],
-        media=[full_record()],
-    )
-    assert len(imeta_of(event)) == 1
-    assert "nostr:nprofile1" in event["content"]
-
-
 def test_media_defaults_to_nothing_so_no_caller_changes():
     assert imeta_of(build_note(body_with(URL), PK)) == []
     assert imeta_of(build_article(body_with(URL), PK, "slug")) == []

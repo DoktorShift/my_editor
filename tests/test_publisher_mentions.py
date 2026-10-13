@@ -82,35 +82,21 @@ def test_build_note_no_mentions_unchanged_body():
     assert _p_tags(event) == []
 
 
-def test_build_note_appends_chip_mentions_as_uris():
-    event = build_note(
-        "hello",
-        AUTHOR_PK,
-        mentions=[(ALICE_PK, "wss://r.example"), (BOB_PK, "")],
-    )
-    # Body has the original prose, then a blank line, then both URIs
-    assert event["content"].startswith("hello\n\nnostr:nprofile1")
-    assert "nostr:nprofile1" in event["content"]
-    # One p-tag per mention, in order, with relay hint preserved
-    assert _p_tags(event) == [
-        ["p", ALICE_PK, "wss://r.example"],
-        ["p", BOB_PK],
-    ]
+def test_a_note_or_article_goes_out_as_written_and_takes_no_extra_people():
+    """The publish sheets add nobody beside the text (the "+ add person"
+    row is gone): the builders take no mentions of their own."""
+    with pytest.raises(TypeError):
+        build_note("hello", AUTHOR_PK, mentions=[(ALICE_PK, "")])
+    with pytest.raises(TypeError):
+        build_article("hello", AUTHOR_PK, "x", mentions=[(ALICE_PK, "")])
 
 
-def test_build_note_dedupes_inline_vs_chip():
-    """A chip mention whose pubkey already appears inline must NOT cause a
-    second URI to be appended, but the p-tag is still emitted once."""
-    nprofile = encode_nprofile(ALICE_PK, ["wss://inline.example"])
-    body = f"As nostr:{nprofile} pointed out, this is great."
-    event = build_note(
-        body,
-        AUTHOR_PK,
-        mentions=[(ALICE_PK, "wss://chip.example")],
-    )
-    # Body is unchanged: no duplicate URI appended.
+def test_a_person_mentioned_twice_is_tagged_once_with_the_first_hint():
+    first = encode_nprofile(ALICE_PK, ["wss://inline.example"])
+    second = encode_nprofile(ALICE_PK, ["wss://later.example"])
+    body = f"As nostr:{first} pointed out, and nostr:{second} again."
+    event = build_note(body, AUTHOR_PK)
     assert event["content"] == body
-    # Exactly one p-tag for Alice; inline relay hint wins (first seen).
     assert _p_tags(event) == [["p", ALICE_PK, "wss://inline.example"]]
 
 
@@ -122,26 +108,6 @@ def test_build_note_inline_only_still_emits_p_tag():
     assert _p_tags(event) == [["p", BOB_PK]]
 
 
-def test_build_note_empty_body_with_chip_mentions():
-    """If the user has only mentions and no prose, the body is just the
-    URI line (no leading blank line)."""
-    event = build_note("", AUTHOR_PK, mentions=[(ALICE_PK, "")])
-    assert event["content"].startswith("nostr:nprofile1")
-    assert not event["content"].startswith("\n")
-
-
-def test_build_note_dedupes_duplicate_chip_picks():
-    event = build_note(
-        "hi",
-        AUTHOR_PK,
-        mentions=[(ALICE_PK, "wss://a"), (ALICE_PK, "wss://b")],
-    )
-    # Only one URI appended, only one p-tag; the first-seen hint wins.
-    nprofile_count = event["content"].count("nostr:nprofile1")
-    assert nprofile_count == 1
-    assert _p_tags(event) == [["p", ALICE_PK, "wss://a"]]
-
-
 # --------------------------------------------------------------------------- #
 # build_article + mentions                                                    #
 # --------------------------------------------------------------------------- #
@@ -151,28 +117,14 @@ def test_build_article_p_tags_appear_after_d_tag_before_metadata():
     we put p-tags right after the d-tag so the article's identity stays
     obvious at the top of the tag list."""
     event = build_article(
-        "body text",
+        f"body text for nostr:{encode_npub(ALICE_PK)}",
         AUTHOR_PK,
         slug="hello",
         title="Hello",
-        mentions=[(ALICE_PK, "")],
     )
     keys = [t[0] for t in event["tags"]]
     # Expect: client, d, p, title  (no other tags in this test)
     assert keys == ["client", "d", "p", "title"]
-
-
-def test_build_article_dedupes_inline_vs_chip():
-    nprofile = encode_nprofile(CAROL_PK, ["wss://inline.example"])
-    body = f"As nostr:{nprofile} once wrote, this matters."
-    event = build_article(
-        body,
-        AUTHOR_PK,
-        slug="x",
-        mentions=[(CAROL_PK, "wss://chip.example")],
-    )
-    assert event["content"] == body  # no duplicate appended
-    assert _p_tags(event) == [["p", CAROL_PK, "wss://inline.example"]]
 
 
 def test_build_article_no_mentions_no_p_tags():

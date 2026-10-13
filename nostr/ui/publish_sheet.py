@@ -47,7 +47,6 @@ from constants import DARK_BORDER, DARK_MUTED_FG, LIGHT_BORDER, LIGHT_MUTED_FG
 from i18n import _
 from popup_placement import fitting_size
 
-from .. import refs
 from ..article_details import AUTHOR_MARKER
 from ..avatar_store import AvatarStore
 from ..bech32 import encode_npub
@@ -121,15 +120,6 @@ def sheet_stylesheet(is_dark: bool) -> str:
     QToolButton#disclosure {{ border: 1px solid transparent; padding: 2px 0; }}
     QToolButton#disclosure:focus {{ border-color: {ring}; }}
     """
-
-
-def person_name(known_people: KnownPeople, pubkey: str) -> str:
-    """How a person is called: their name when known, else their short
-    Nostr address."""
-    person = known_people.get(pubkey)
-    if person is not None and person.display_name:
-        return person.display_name
-    return refs.short_key(encode_npub(pubkey))
 
 
 def people_tagged(event: dict, content: str, *, markdown: bool) -> List[Tuple[str, str]]:
@@ -250,7 +240,7 @@ class PeopleRow(QWidget):
             self._flow.removeWidget(self._add_button)
         self._people = []
         for pubkey, role in people:
-            name = person_name(self._known_people, pubkey)
+            name = self._known_people.name_of(pubkey)
             person = _Person(pubkey, name, role, self._avatars.get(pubkey), self)
             if person.remove is not None:
                 person.remove.clicked.connect(
@@ -277,7 +267,7 @@ class PeopleRow(QWidget):
     def _on_avatar_added(self, pubkey: str, picture) -> None:
         for person in self._people:
             if person.pubkey == pubkey:
-                person.set_avatar(picture, person_name(self._known_people, pubkey))
+                person.set_avatar(picture, self._known_people.name_of(pubkey))
 
 
 class AccountRow(QWidget):

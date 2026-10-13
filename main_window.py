@@ -6600,10 +6600,8 @@ class MainWindow(QMainWindow):
 
     def _person_name(self, pubkey: str) -> str:
         """How a person is called: their name when known, else their short
-        Nostr address."""
-        person = self._known_people.get(pubkey)
-        return (person.display_name if person is not None and person.display_name
-                else refs.short_key(encode_npub(pubkey)))
+        Nostr address (KnownPeople.name_of)."""
+        return self._known_people.name_of(pubkey)
 
     # -- mentions ----------------------------------------------------------------
 
@@ -6887,7 +6885,7 @@ class MainWindow(QMainWindow):
             self._refresh_asset_in_documents(sha)
 
     # -- secret keys: never pasted where Nostr is written ---------------------
-    # (nor published: nostr/ui/secret_key_check.py, at the publish dialogs)
+    # (nor published: nostr/ui/secret_key_check.py, at the publish sheets)
 
     def _guard_paste(self, ed, text: str):
         """A paste with a Nostr secret key in it, into prose while a Nostr

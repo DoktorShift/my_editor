@@ -47,7 +47,7 @@ from i18n import _, display_locale, ngettext
 
 from . import CLIENT_NAME
 from .article_details import AUTHOR_MARKER
-from .bech32 import bech32_decode, decode_npub, decode_nprofile, encode_nprofile
+from .bech32 import bech32_decode, decode_npub, decode_nprofile
 from .blossom.hashes import blob_url, hash_from_url
 from .bunker import BunkerClient, BunkerSessionPool
 from .drafts import (
@@ -132,50 +132,17 @@ def extract_inline_mentions(content: str, *, markdown: bool = False) -> List[Men
     return found
 
 
-def _resolve_mentions(
-    content: str, chip_mentions: Sequence[Mention], *, markdown: bool
-) -> Tuple[str, List[List[str]]]:
-    """Merge inline + chip mentions into (final_content, p_tags).
-
-    Behaviour:
-      - Any ``nostr:n…`` URI already inline in ``content`` is left where it is.
-      - Chip mentions whose pubkey is NOT already inline are appended to the
-        body as ``nostr:nprofile1…`` URIs, separated from prose by one blank
-        line and from each other by single spaces.
-      - The resulting p-tag list deduplicates by pubkey, preserving the
-        first-seen relay hint (inline URIs are seen first).
-    """
-    inline = extract_inline_mentions(content, markdown=markdown)
-    inline_pks = {pk for pk, _ in inline}
-
-    appended_uris: List[str] = []
-    for pk, hint in chip_mentions:
-        if pk in inline_pks:
-            continue
-        nprofile = encode_nprofile(pk, [hint] if hint else [])
-        appended_uris.append(f"nostr:{nprofile}")
-        inline_pks.add(pk)  # avoid double-appending if caller passes dupes
-
-    if appended_uris:
-        sep = "\n\n" if content.strip() else ""
-        final_content = content + sep + " ".join(appended_uris)
-    else:
-        final_content = content
-
-    # Union of mention pubkeys for p-tags. Order: inline first, then chip
-    # mentions in the order the user picked them. First seen wins the relay
-    # hint slot, usually the more specific one.
-    seen: set[str] = set()
+def _mention_tags(content: str, *, markdown: bool) -> List[List[str]]:
+    """A ``p`` tag for each person ``content`` mentions, once each, in the
+    order of the text, with the relay hint written first for them."""
+    seen: set = set()
     p_tags: List[List[str]] = []
-    for pk, hint in list(inline) + list(chip_mentions):
+    for pk, hint in extract_inline_mentions(content, markdown=markdown):
         if pk in seen:
             continue
         seen.add(pk)
-        tag = ["p", pk]
-        if hint:
-            tag.append(hint)
-        p_tags.append(tag)
-    return final_content, p_tags
+        p_tags.append(["p", pk] + ([hint] if hint else []))
+    return p_tags
 
 
 # --------------------------------------------------------------------------- #
@@ -388,16 +355,14 @@ def build_note(
     content: str,
     pubkey_hex: str,
     *,
-    mentions: Optional[Sequence[Mention]] = None,
     extra_tags: Optional[List[List[str]]] = None,
     media: Sequence[PublishedMedia] = (),
 ) -> dict:
     """Construct an unsigned kind 1 event ready for a remote signer.
 
-    ``mentions`` is a list of ``(pubkey_hex, relay_hint)`` tuples, typically
-    sourced from the publish dialog's mention-chip row. They're merged with
-    any inline ``nostr:n…`` URIs already in ``content`` (deduplicated), and
-    their URIs are appended at the end of the body if not already present.
+    Everyone ``content`` mentions (its ``nostr:npub``/``nprofile`` links,
+    written there as the sheet's mentions are) gets a ``p`` tag, once,
+    with the relay hint the link carries.
 
     ``media`` describes images this app resolved into URLs already in
     ``content``; the imeta tags are built here rather than threaded
@@ -410,18 +375,18 @@ def build_note(
     Always attaches ``["client", CLIENT_NAME]`` so readers that honour the
     NIP-89 client tag display "Published from MyEditor" under the note.
     """
-    final_content, p_tags = _resolve_mentions(content, mentions or [], markdown=False)
+    p_tags = _mention_tags(content, markdown=False)
     tags: List[List[str]] = [["client", CLIENT_NAME]]
     tags.extend(p_tags)
     # Quoted notes and articles (NIP-18 q tags) and their authors.
-    tags.extend(refs.quote_tags(refs.find_references(final_content, markdown=False),
+    tags.extend(refs.quote_tags(refs.find_references(content, markdown=False),
                                 [tag[1] for tag in p_tags]))
-    tags.extend(build_imeta_tags(media, final_content))
+    tags.extend(build_imeta_tags(media, content))
     if extra_tags:
         tags.extend(extra_tags)
     return build_event(
         kind=1,
-        content=final_content,
+        content=content,
         tags=tags,
         pubkey_hex=pubkey_hex,
     )
@@ -437,7 +402,6 @@ def build_article(
     image: str = "",
     published_at: Optional[int] = None,
     hashtags: Iterable[str] = (),
-    mentions: Optional[Sequence[Mention]] = None,
     extra_tags: Optional[List[List[str]]] = None,
     media: Sequence[PublishedMedia] = (),
 ) -> dict:
@@ -447,9 +411,8 @@ def build_article(
     event addressable. Re-publishing with the same slug replaces the
     previous version on relays that honour parameterized replacement.
 
-    ``mentions`` follows the same convention as ``build_note``: chip-picked
-    profiles whose URIs aren't already in the body are appended at the end,
-    and a ``["p", hex, relay-hint]`` tag is emitted per unique pubkey.
+    Everyone ``content`` mentions gets a ``p`` tag, as in ``build_note``
+    (outside code: a link in code mentions nobody).
 
     Per NIP-23, ``content`` is Markdown and clients MUST NOT hard line-break
     paragraphs or accept HTML. This does not transform the content; that is the
@@ -467,14 +430,14 @@ def build_article(
     """
     if not slug.strip():
         raise ValueError("article slug (d-tag) must not be empty")
-    final_content, p_tags = _resolve_mentions(content, mentions or [], markdown=True)
+    p_tags = _mention_tags(content, markdown=True)
     tags: List[List[str]] = [
         ["client", CLIENT_NAME],
         ["d", slug.strip()],
     ]
     tags.extend(p_tags)
     # Quoted notes and articles (NIP-18 q tags) and their authors.
-    tags.extend(refs.quote_tags(refs.find_references(final_content),
+    tags.extend(refs.quote_tags(refs.find_references(content),
                                 [tag[1] for tag in p_tags]))
     if title.strip():
         tags.append(["title", title.strip()])
@@ -489,13 +452,13 @@ def build_article(
         tag = raw.strip().lstrip("#").lower()
         if tag:
             tags.append(["t", tag])
-    tags.extend(build_imeta_tags(media, final_content))
+    tags.extend(build_imeta_tags(media, content))
     if extra_tags:
         tags.extend(extra_tags)
     tags = _one_tag_per_person(tags)
     return build_event(
         kind=30023,
-        content=final_content,
+        content=content,
         tags=tags,
         pubkey_hex=pubkey_hex,
     )

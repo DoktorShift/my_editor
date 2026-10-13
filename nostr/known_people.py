@@ -6,7 +6,7 @@ Populated from three sources, recorded so the picker can show provenance:
 
   ``contact``  the user's NIP-02 follow list (kind 3)
   ``search``   results streamed back from NIP-50 search relays
-  ``mention``  manually-pasted nostr:n… URI in a publish dialog
+  ``mention``  manually-pasted nostr:n… URI in a publish sheet
 
 Persisted to ``~/.config/my_editor/known_people.json`` with atomic
 rewrites so a crash mid-write can't corrupt the cache.
@@ -20,6 +20,9 @@ from pathlib import Path
 from typing import Iterable, List, Optional
 
 from atomic_file import write_text
+
+from . import refs
+from .bech32 import encode_npub
 
 
 KNOWN_PEOPLE_FILE = Path.home() / ".config" / "my_editor" / "known_people.json"
@@ -64,6 +67,14 @@ class KnownPeople:
 
     def get(self, pubkey_hex: str) -> Optional[Person]:
         return self._people.get(pubkey_hex)
+
+    def name_of(self, pubkey_hex: str) -> str:
+        """How a person is called: their name when known, else their short
+        Nostr address, never their key."""
+        person = self._people.get(pubkey_hex)
+        if person is not None and person.display_name:
+            return person.display_name
+        return refs.short_key(encode_npub(pubkey_hex))
 
     def all(self) -> List[Person]:
         return list(self._people.values())
