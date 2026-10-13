@@ -344,3 +344,18 @@ def test_a_document_saved_while_its_audio_uploads_is_edited_again_when_it_is_don
     assert r["close asked"] == 1
     assert f"Before.\n\n{URL}.mp3\n\nAfter." in r["saved after"]
     assert r["modified after second save"] is False
+
+
+def test_an_html_file_links_to_the_uploaded_file_with_its_extension():
+    import types
+    from PySide6.QtGui import QTextDocument, QTextImageFormat
+    from export_html import document_to_html
+    doc = QTextDocument()
+    cursor = doc.rootFrame().firstCursorPosition()
+    image = QTextImageFormat()
+    image.setName(f"myeditor-asset:{SHA}")
+    image.setProperty(QTextImageFormat.ImageAltText, "song.mp3")
+    cursor.insertImage(image)
+    uploaded = types.SimpleNamespace(mime="audio/mpeg", remote_url=URL, data=b"")
+    out = document_to_html(doc, asset_resolver=lambda name: uploaded)
+    assert f'<a href="{URL}.mp3">▶ Audio: song.mp3</a>' in out

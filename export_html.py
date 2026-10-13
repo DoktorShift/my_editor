@@ -144,11 +144,12 @@ def _render_image(img_fmt, source_url_for, policy, asset_resolver) -> str:
         # Audio or video: a link to it once it is on a media server, where a
         # reader of the page finds it; nothing while it is not (never a
         # picture of it, never a placeholder).
+        mime = str(getattr(resolved, "mime", "") or "")
         remote = str(getattr(resolved, "remote_url", "") or "")
         if not remote:
             return ""
-        words = (_("▶ Audio: {name}") if kind == media_files.AUDIO
-                 else _("▶ Video: {name}")).format(name=alt or remote.rsplit("/", 1)[-1])
+        remote = media_files.address_with_extension(remote, mime)
+        words = media_files.link_words(mime, alt or remote.rsplit("/", 1)[-1])
         return f'<a href="{html.escape(remote, quote=True)}">{html.escape(words)}</a>'
 
     if resolved is not None and getattr(resolved, "data", b""):

@@ -139,7 +139,7 @@ msgstr "Zur Fußnote bei gedrückter Strg-Taste klicken"
 msgid "{place}, {header}"
 msgstr "{place}, {header}"
 
-#: export_html.py:395
+#: export_html.py:396
 #: main_window.py:1320
 #: main_window.py:2640
 #: main_window.py:3673
@@ -150,21 +150,9 @@ msgstr "{place}, {header}"
 msgid "Untitled"
 msgstr "Ohne Titel"
 
-#: export_html.py:178
+#: export_html.py:179
 msgid "[image unavailable]"
 msgstr "[Bild nicht verfügbar]"
-
-#: export_html.py:150
-#: nostr/preview.py:152
-#, python-brace-format
-msgid "▶ Audio: {name}"
-msgstr "▶ Audio: {name}"
-
-#: export_html.py:151
-#: nostr/preview.py:154
-#, python-brace-format
-msgid "▶ Video: {name}"
-msgstr "▶ Video: {name}"
 
 #: export_pdf.py:278
 #, python-brace-format
@@ -881,7 +869,7 @@ msgid "Write"
 msgstr "Schreiben"
 
 #: main_window.py:2038
-#: nostr/preview.py:569
+#: nostr/preview.py:566
 #: nostr/ui/media_library_dialog.py:603
 #: nostr/ui/media_library_dialog.py:1659
 msgid "Preview"
@@ -2461,6 +2449,16 @@ msgstr ""
 #: main_window.py:7275
 msgid "Open Draft"
 msgstr "Entwurf öffnen"
+
+#: media_files.py:71
+#, python-brace-format
+msgid "▶ Audio: {name}"
+msgstr "▶ Audio: {name}"
+
+#: media_files.py:70
+#, python-brace-format
+msgid "▶ Video: {name}"
+msgstr "▶ Video: {name}"
 
 #: page_setup_dialog.py:95
 #: page_setup_dialog.py:105
@@ -4159,7 +4157,7 @@ msgstr "Das Passwort ist falsch."
 msgid "Quoted note"
 msgstr "Zitierte Notiz"
 
-#: nostr/preview.py:465
+#: nostr/preview.py:462
 #: nostr/ui/drafts_preview.py:523
 #, python-brace-format
 msgid "{n} min read"

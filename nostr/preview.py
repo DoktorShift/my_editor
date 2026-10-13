@@ -146,13 +146,10 @@ def player_label(url: str) -> Optional[str]:
     """"▶ Audio: name" or "▶ Video: name" for the address of audio or
     video, where readers show a player; None for any other address."""
     path = QUrl(url).path()
-    name = path.rsplit("/", 1)[-1]
-    kind = media_files.kind_of(media_files.type_of(path) or "")
-    if kind == media_files.AUDIO:
-        return _("▶ Audio: {name}").format(name=name)
-    if kind == media_files.VIDEO:
-        return _("▶ Video: {name}").format(name=name)
-    return None
+    mime = media_files.type_of(path)
+    if mime is None:
+        return None
+    return media_files.link_words(mime, path.rsplit("/", 1)[-1])
 
 
 _OWN_LINE_URL = re.compile(r"^(https?://\S+)$", re.MULTILINE)

@@ -15,6 +15,8 @@ from __future__ import annotations
 import os
 from typing import Optional
 
+from i18n import _
+
 AUDIO_TYPES = {".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac",
                ".ogg": "audio/ogg", ".oga": "audio/ogg", ".opus": "audio/opus",
                ".wav": "audio/wav", ".flac": "audio/flac"}
@@ -51,3 +53,19 @@ def kind_of(mime: str) -> Optional[str]:
 def extension_for(mime: str) -> str:
     """The extension readers know a type by (".mp3" for "audio/mpeg")."""
     return next((ext for ext, known in TYPES.items() if known == (mime or "").lower()), "")
+
+
+def address_with_extension(url: str, mime: str) -> str:
+    """``url`` with the extension of ``mime`` when its last part has none,
+    so a reader can tell audio from video by it (as standup's
+    embeddableMediaUrl does)."""
+    tail = url.split("?", 1)[0].rsplit("/", 1)[-1]
+    return url if "." in tail else url + extension_for(mime)
+
+
+def link_words(mime: str, name: str) -> str:
+    """The words of a link to an audio or video file, where readers show a
+    player: "▶ Audio: name" or "▶ Video: name"."""
+    if kind_of(mime) == VIDEO:
+        return _("▶ Video: {name}").format(name=name)
+    return _("▶ Audio: {name}").format(name=name)

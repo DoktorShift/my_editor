@@ -8445,11 +8445,8 @@ def _is_media(assets, name: str) -> bool:
 
 
 def _published_address(asset) -> str:
-    """Where an uploaded asset is read: its address, with the extension of
-    its type when the address has none, so a reader can tell audio from
-    video by it (as standup's embeddableMediaUrl does)."""
-    url = asset.remote_url
+    """Where an uploaded asset is read: its address, an audio or video
+    file's with the extension of its type."""
     if not asset.is_media:
-        return url
-    tail = url.split("?", 1)[0].rsplit("/", 1)[-1]
-    return url if "." in tail else url + media_files.extension_for(asset.mime)
+        return asset.remote_url
+    return media_files.address_with_extension(asset.remote_url, asset.mime)
