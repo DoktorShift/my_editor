@@ -113,7 +113,9 @@ class TagField(QFrame):
         self.entry.setObjectName("tag_field_entry")
         self.entry.setFrame(False)
         self.entry.setPlaceholderText(_("Add a hashtag"))
-        self.entry.setMinimumWidth(110)
+        # Room for its words, in any language, before a tag is typed.
+        self.entry.setMinimumWidth(max(110, self.entry.fontMetrics().horizontalAdvance(
+            self.entry.placeholderText()) + 16))
         # A comma typed or pasted ends a tag: what came before it is one.
         self.entry.textEdited.connect(self._edited)
         self._flow.addWidget(self.entry)
