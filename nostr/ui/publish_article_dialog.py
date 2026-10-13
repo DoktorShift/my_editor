@@ -541,6 +541,8 @@ class PublishArticleDialog(QDialog):
         adv.addLayout(compact_row)
 
         adv.addWidget(self._cover)
+        self._image_edit.show()
+        adv.addWidget(_make_field(_("Cover image"), self._image_edit))
 
         self._advanced_panel.setVisible(False)
         root.addWidget(self._advanced_panel)

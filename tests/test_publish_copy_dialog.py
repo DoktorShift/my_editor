@@ -1060,10 +1060,18 @@ def _chooser(library):
     like an ordinary public blob for the life of the window."""
     from nostr.ui.cover_field import CoverImageField
     profile = SimpleNamespace(user_pubkey="ab" * 32, bunker_relays=["wss://bunker.example"])
-    field = CoverImageField(media_store=object(), media_visibility=MediaVisibility(),
+    field = CoverImageField(media_store=_Store(), media_visibility=MediaVisibility(),
                             private_library=library, profile=lambda: profile, is_dark=True)
     field.profile_used = profile
     return field
+
+
+class _Store(QObject):
+    """A media store that holds nothing and uploads nothing."""
+
+    upload_finished = Signal(str, object)
+    upload_failed = Signal(str, str)
+    files: dict = {}
 
 
 class _StubPicker:

@@ -2256,6 +2256,7 @@ msgid "MyEditor can read audio and video files of these kinds: {kinds}."
 msgstr ""
 
 #: main_window.py:6851
+#: nostr/ui/cover_field.py:280
 msgid "Uploading…"
 msgstr ""
 
@@ -4514,6 +4515,7 @@ msgstr ""
 
 #: nostr/blossom/store.py:723
 #: nostr/blossom/store.py:737
+#: nostr/ui/cover_field.py:273
 #, python-brace-format
 msgid "Could not read file: {error}"
 msgstr ""
@@ -5914,7 +5916,8 @@ msgstr ""
 msgid "Zaps are shared the way another app set them."
 msgstr ""
 
-#: nostr/ui/article_details_panel.py:485
+#: nostr/ui/article_details_panel.py:468
+#: nostr/ui/cover_field.py:149
 #: nostr/ui/draft_relays_sheet.py:158
 msgid "Remove"
 msgstr ""
@@ -5923,7 +5926,7 @@ msgstr ""
 msgid "Not published yet."
 msgstr ""
 
-#: nostr/ui/article_details_panel.py:567
+#: nostr/ui/article_details_panel.py:529
 #: nostr/ui/publish_article_dialog.py:511
 #: nostr/ui/stash_kind_dialog.py:406
 msgid "article-slug"
@@ -5933,7 +5936,7 @@ msgstr ""
 msgid "A saved or published article keeps its address; saving it under another one makes another article."
 msgstr ""
 
-#: nostr/ui/article_details_panel.py:487
+#: nostr/ui/article_details_panel.py:470
 #: nostr/ui/mention_chips.py:141
 #: nostr/ui/tag_field.py:90
 #, python-brace-format
@@ -6092,38 +6095,74 @@ msgid_plural "This code works for {seconds} more seconds."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/cover_field.py:75
-#: nostr/ui/cover_field.py:91
+#: nostr/ui/cover_field.py:129
+#: nostr/ui/cover_field.py:136
+#: nostr/ui/cover_field.py:160
+#: nostr/ui/publish_article_dialog.py:545
 msgid "Cover image"
 msgstr ""
 
-#: nostr/ui/cover_field.py:82
-#: nostr/ui/cover_field.py:174
+#: nostr/ui/cover_field.py:150
+msgid "Remove Cover Image"
+msgstr ""
+
+#: nostr/ui/cover_field.py:192
+#: nostr/ui/cover_field.py:308
 msgid ""
 "No cover\n"
 "selected"
 msgstr ""
 
-#: nostr/ui/cover_field.py:150
+#: nostr/ui/cover_field.py:234
 msgid "Choose hero image"
 msgstr ""
 
-#: nostr/ui/cover_field.py:104
-msgid "Choose or upload…"
+#: nostr/ui/cover_field.py:139
+msgid "Drop a picture here to upload it as the cover."
 msgstr ""
 
-#: nostr/ui/cover_field.py:110
+#: nostr/ui/cover_field.py:143
+msgid "Choose…"
+msgstr ""
+
+#: nostr/ui/cover_field.py:144
+msgid "Choose Cover Image"
+msgstr ""
+
+#: nostr/ui/cover_field.py:145
+msgid "Choose a picture from your Media Library, or upload one."
+msgstr ""
+
+#: nostr/ui/cover_field.py:262
+msgid "A picture can be uploaded once you use a Nostr account with media servers. Paste its web address instead."
+msgstr ""
+
+#: nostr/ui/cover_field.py:266
+msgid "Only a picture can be a cover."
+msgstr ""
+
+#: nostr/ui/cover_field.py:172
 msgid "Pictures you pick are uploaded to your media servers."
 msgstr ""
 
-#: nostr/ui/cover_field.py:112
+#: nostr/ui/cover_field.py:174
 msgid "Paste an image URL hosted anywhere on the public web."
 msgstr ""
 
-#: nostr/ui/cover_field.py:177
+#: nostr/ui/cover_field.py:299
+#, python-brace-format
+msgid "The picture was not uploaded: {reason}"
+msgstr ""
+
+#: nostr/ui/cover_field.py:319
 msgid ""
 "Preview shown\n"
 "for library picks"
+msgstr ""
+
+#: nostr/ui/cover_field.py:277
+#, python-brace-format
+msgid "This picture can’t be a cover: {reason}."
 msgstr ""
 
 #: nostr/ui/draft_conflict_banner.py:184
@@ -8613,63 +8652,63 @@ msgstr ""
 msgid "comma, separated, hashtags"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:580
+#: nostr/ui/publish_article_dialog.py:582
 #: nostr/ui/publish_note_dialog.py:289
 msgid "Publish"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:773
+#: nostr/ui/publish_article_dialog.py:775
 msgid "Checking whether this article was published before…"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:565
+#: nostr/ui/publish_article_dialog.py:567
 #: nostr/ui/publish_note_dialog.py:273
 msgid "Publishing as"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:632
+#: nostr/ui/publish_article_dialog.py:634
 msgid "▾  Advanced"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:634
+#: nostr/ui/publish_article_dialog.py:636
 msgid "▸  Advanced  ·  slug, cover image, hashtags"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:671
+#: nostr/ui/publish_article_dialog.py:673
 #: nostr/ui/publish_note_dialog.py:331
 msgid "(no accounts)"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:805
+#: nostr/ui/publish_article_dialog.py:807
 msgid "Couldn't check whether this article was published before"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:806
+#: nostr/ui/publish_article_dialog.py:808
 msgid "None of the relays you publish to answered. If the article went out before, publishing it as new gives it today's date, and readers see it as a new article."
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:874
+#: nostr/ui/publish_article_dialog.py:876
 msgid "The article was not published: no relay took it. Check your internet connection and try again."
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:644
+#: nostr/ui/publish_article_dialog.py:646
 #, python-brace-format
 msgid "{words} word · ~{minutes} min read"
 msgid_plural "{words} words · ~{minutes} min read"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/publish_article_dialog.py:897
+#: nostr/ui/publish_article_dialog.py:899
 #: nostr/ui/publish_note_dialog.py:430
 #, python-brace-format
 msgid "Publish failed: {reason}"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:809
+#: nostr/ui/publish_article_dialog.py:811
 msgid "Publish as New"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:841
+#: nostr/ui/publish_article_dialog.py:843
 #, python-brace-format
 msgid "Cannot build article: {reason}"
 msgstr ""

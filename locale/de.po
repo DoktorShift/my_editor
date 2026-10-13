@@ -2266,6 +2266,7 @@ msgid "MyEditor can read audio and video files of these kinds: {kinds}."
 msgstr "MyEditor kann Audio- und Videodateien dieser Arten lesen: {kinds}."
 
 #: main_window.py:6851
+#: nostr/ui/cover_field.py:280
 msgid "Uploading…"
 msgstr "Wird hochgeladen …"
 
@@ -4529,6 +4530,7 @@ msgstr "Die Datei ist für alle eingerichteten Server zu groß ({limit} MiB). Ve
 
 #: nostr/blossom/store.py:723
 #: nostr/blossom/store.py:737
+#: nostr/ui/cover_field.py:273
 #, python-brace-format
 msgid "Could not read file: {error}"
 msgstr "Die Datei konnte nicht gelesen werden: {error}"
@@ -5929,7 +5931,8 @@ msgstr "Bleibt so, wie es in der Datei steht."
 msgid "Zaps are shared the way another app set them."
 msgstr "Zaps werden so geteilt, wie es eine andere App festgelegt hat."
 
-#: nostr/ui/article_details_panel.py:485
+#: nostr/ui/article_details_panel.py:468
+#: nostr/ui/cover_field.py:149
 #: nostr/ui/draft_relays_sheet.py:158
 msgid "Remove"
 msgstr "Entfernen"
@@ -5938,7 +5941,7 @@ msgstr "Entfernen"
 msgid "Not published yet."
 msgstr "Noch nicht veröffentlicht."
 
-#: nostr/ui/article_details_panel.py:567
+#: nostr/ui/article_details_panel.py:529
 #: nostr/ui/publish_article_dialog.py:511
 #: nostr/ui/stash_kind_dialog.py:406
 msgid "article-slug"
@@ -5948,7 +5951,7 @@ msgstr "mein-artikel"
 msgid "A saved or published article keeps its address; saving it under another one makes another article."
 msgstr "Ein gespeicherter oder veröffentlichter Artikel behält seine Adresse; unter einer anderen gespeichert, wird er ein anderer Artikel."
 
-#: nostr/ui/article_details_panel.py:487
+#: nostr/ui/article_details_panel.py:470
 #: nostr/ui/mention_chips.py:141
 #: nostr/ui/tag_field.py:90
 #, python-brace-format
@@ -6107,13 +6110,19 @@ msgid_plural "This code works for {seconds} more seconds."
 msgstr[0] "Dieser Code gilt noch {seconds} Sekunde."
 msgstr[1] "Dieser Code gilt noch {seconds} Sekunden."
 
-#: nostr/ui/cover_field.py:75
-#: nostr/ui/cover_field.py:91
+#: nostr/ui/cover_field.py:129
+#: nostr/ui/cover_field.py:136
+#: nostr/ui/cover_field.py:160
+#: nostr/ui/publish_article_dialog.py:545
 msgid "Cover image"
 msgstr "Titelbild"
 
-#: nostr/ui/cover_field.py:82
-#: nostr/ui/cover_field.py:174
+#: nostr/ui/cover_field.py:150
+msgid "Remove Cover Image"
+msgstr "Titelbild entfernen"
+
+#: nostr/ui/cover_field.py:192
+#: nostr/ui/cover_field.py:308
 msgid ""
 "No cover\n"
 "selected"
@@ -6121,29 +6130,59 @@ msgstr ""
 "Kein Titelbild\n"
 "ausgewählt"
 
-#: nostr/ui/cover_field.py:150
+#: nostr/ui/cover_field.py:234
 msgid "Choose hero image"
 msgstr "Titelbild auswählen"
 
-#: nostr/ui/cover_field.py:104
-msgid "Choose or upload…"
-msgstr "Auswählen oder hochladen …"
+#: nostr/ui/cover_field.py:139
+msgid "Drop a picture here to upload it as the cover."
+msgstr "Ziehe ein Bild hierher, um es als Titelbild hochzuladen."
 
-#: nostr/ui/cover_field.py:110
+#: nostr/ui/cover_field.py:143
+msgid "Choose…"
+msgstr "Auswählen …"
+
+#: nostr/ui/cover_field.py:144
+msgid "Choose Cover Image"
+msgstr "Titelbild auswählen"
+
+#: nostr/ui/cover_field.py:145
+msgid "Choose a picture from your Media Library, or upload one."
+msgstr "Wähle ein Bild aus deiner Mediathek oder lade eines hoch."
+
+#: nostr/ui/cover_field.py:262
+msgid "A picture can be uploaded once you use a Nostr account with media servers. Paste its web address instead."
+msgstr "Ein Bild lässt sich hochladen, sobald du ein Nostr-Konto mit Medienservern verwendest. Füge stattdessen seine Webadresse ein."
+
+#: nostr/ui/cover_field.py:266
+msgid "Only a picture can be a cover."
+msgstr "Nur ein Bild kann ein Titelbild sein."
+
+#: nostr/ui/cover_field.py:172
 msgid "Pictures you pick are uploaded to your media servers."
 msgstr "Bilder, die du auswählst, werden auf deine Medienserver hochgeladen."
 
-#: nostr/ui/cover_field.py:112
+#: nostr/ui/cover_field.py:174
 msgid "Paste an image URL hosted anywhere on the public web."
 msgstr "Füge die Adresse eines Bildes ein, das öffentlich im Web liegt."
 
-#: nostr/ui/cover_field.py:177
+#: nostr/ui/cover_field.py:299
+#, python-brace-format
+msgid "The picture was not uploaded: {reason}"
+msgstr "Das Bild wurde nicht hochgeladen: {reason}"
+
+#: nostr/ui/cover_field.py:319
 msgid ""
 "Preview shown\n"
 "for library picks"
 msgstr ""
 "Vorschau nur für\n"
 "Bilder der Mediathek"
+
+#: nostr/ui/cover_field.py:277
+#, python-brace-format
+msgid "This picture can’t be a cover: {reason}."
+msgstr "Dieses Bild kann kein Titelbild sein: {reason}."
 
 #: nostr/ui/draft_conflict_banner.py:184
 msgid "A newer version of this draft was published from another device."
@@ -8632,63 +8671,63 @@ msgstr "Schreib deinen Artikel in Markdown …"
 msgid "comma, separated, hashtags"
 msgstr "durch, Komma, getrennt"
 
-#: nostr/ui/publish_article_dialog.py:580
+#: nostr/ui/publish_article_dialog.py:582
 #: nostr/ui/publish_note_dialog.py:289
 msgid "Publish"
 msgstr "Veröffentlichen"
 
-#: nostr/ui/publish_article_dialog.py:773
+#: nostr/ui/publish_article_dialog.py:775
 msgid "Checking whether this article was published before…"
 msgstr "Prüfe, ob dieser Artikel schon veröffentlicht wurde …"
 
-#: nostr/ui/publish_article_dialog.py:565
+#: nostr/ui/publish_article_dialog.py:567
 #: nostr/ui/publish_note_dialog.py:273
 msgid "Publishing as"
 msgstr "Veröffentlichen als"
 
-#: nostr/ui/publish_article_dialog.py:632
+#: nostr/ui/publish_article_dialog.py:634
 msgid "▾  Advanced"
 msgstr "▾  Erweitert"
 
-#: nostr/ui/publish_article_dialog.py:634
+#: nostr/ui/publish_article_dialog.py:636
 msgid "▸  Advanced  ·  slug, cover image, hashtags"
 msgstr "▸  Erweitert  ·  Slug, Titelbild, Hashtags"
 
-#: nostr/ui/publish_article_dialog.py:671
+#: nostr/ui/publish_article_dialog.py:673
 #: nostr/ui/publish_note_dialog.py:331
 msgid "(no accounts)"
 msgstr "(keine Konten)"
 
-#: nostr/ui/publish_article_dialog.py:805
+#: nostr/ui/publish_article_dialog.py:807
 msgid "Couldn't check whether this article was published before"
 msgstr "Es konnte nicht geprüft werden, ob dieser Artikel schon veröffentlicht wurde"
 
-#: nostr/ui/publish_article_dialog.py:806
+#: nostr/ui/publish_article_dialog.py:808
 msgid "None of the relays you publish to answered. If the article went out before, publishing it as new gives it today's date, and readers see it as a new article."
 msgstr "Keines der Relays, auf denen du veröffentlichst, hat geantwortet. Wenn der Artikel schon einmal erschienen ist, bekommt er als neu veröffentlicht das heutige Datum, und Leser sehen ihn als neuen Artikel."
 
-#: nostr/ui/publish_article_dialog.py:874
+#: nostr/ui/publish_article_dialog.py:876
 msgid "The article was not published: no relay took it. Check your internet connection and try again."
 msgstr "Der Artikel wurde nicht veröffentlicht: Kein Relay hat ihn angenommen. Prüfe deine Internetverbindung und versuche es erneut."
 
-#: nostr/ui/publish_article_dialog.py:644
+#: nostr/ui/publish_article_dialog.py:646
 #, python-brace-format
 msgid "{words} word · ~{minutes} min read"
 msgid_plural "{words} words · ~{minutes} min read"
 msgstr[0] "{words} Wort · ~{minutes} Min. Lesezeit"
 msgstr[1] "{words} Wörter · ~{minutes} Min. Lesezeit"
 
-#: nostr/ui/publish_article_dialog.py:897
+#: nostr/ui/publish_article_dialog.py:899
 #: nostr/ui/publish_note_dialog.py:430
 #, python-brace-format
 msgid "Publish failed: {reason}"
 msgstr "Veröffentlichen fehlgeschlagen: {reason}"
 
-#: nostr/ui/publish_article_dialog.py:809
+#: nostr/ui/publish_article_dialog.py:811
 msgid "Publish as New"
 msgstr "Als neu veröffentlichen"
 
-#: nostr/ui/publish_article_dialog.py:841
+#: nostr/ui/publish_article_dialog.py:843
 #, python-brace-format
 msgid "Cannot build article: {reason}"
 msgstr "Artikel kann nicht erstellt werden: {reason}"
