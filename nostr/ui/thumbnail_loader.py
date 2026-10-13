@@ -19,6 +19,7 @@ goes through an explicit format allowlist rather than Qt sniffing.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 from pathlib import Path
@@ -373,11 +374,22 @@ class ThumbnailLoader(QObject):
 _UNKNOWN_SIZE_LIMIT = 1024 * 1024 * 1024
 
 
+# A disk with no room left, or none left for this account.
+_FULL_ERRNOS = {errno.ENOSPC, getattr(errno, "EDQUOT", errno.ENOSPC)}
+
+
+def write_problem(exc: OSError) -> str:
+    """Why a file could not be written, as FileDownload says it."""
+    return "full" if exc.errno in _FULL_ERRNOS else "write"
+
+
 class FileDownload(QObject):
     """One Save As download, streamed to a file beside the target and
     moved onto it only when it is the right file. ``finished`` carries ""
     or why not: "cancelled", "network", "missing", "server",
-    "too_large", "wrong_file", "unsafe" or "write"."""
+    "too_large", "wrong_file", "unsafe", "full" (no room on the disk) or
+    "write". It is sent once, whatever goes wrong, and the part file is
+    gone by then."""
 
     progress = Signal(int, int)        # received, total
     finished = Signal(str)
@@ -407,8 +419,8 @@ class FileDownload(QObject):
         else:
             try:
                 self._file = open(self._part, "wb")
-            except OSError:
-                problem = "write"
+            except OSError as exc:
+                problem = write_problem(exc)
         if problem:
             QTimer.singleShot(0, self, lambda: self._end(problem))
             return
@@ -453,8 +465,8 @@ class FileDownload(QObject):
         self._hash.update(data)
         try:
             self._file.write(data)
-        except OSError:
-            self._why = "write"
+        except OSError as exc:
+            self._why = write_problem(exc)
             self._reply.abort()
 
     def _on_finished(self) -> None:
@@ -484,26 +496,44 @@ class FileDownload(QObject):
         if self._ended:
             return
         self._ended = True
-        if self._file is not None:
-            self._file.close()
-            self._file = None
-        if not why:
-            try:
-                if self._transform is not None:
-                    data = self._transform(self._part.read_bytes())
-                    if data is None:
-                        why = "wrong_file"
-                    else:
-                        write_bytes(self._target, data)
-                else:
-                    os.replace(self._part, self._target)
-            except OSError:
-                why = "write"
+        said = "write"
         try:
-            self._part.unlink()
-        except OSError:
-            pass
-        self.finished.emit(why)
+            said = self._close(why) or self._place()
+        except OSError as exc:
+            said = write_problem(exc)
+        finally:
+            try:
+                self._part.unlink()
+            except OSError:
+                pass
+            self.finished.emit(said)
+
+    def _close(self, why: str) -> str:
+        """Close the part file: ``why`` the download ended early, else why
+        its last bytes didn't reach the disk (a disk that filled, a
+        volume removed), else ""."""
+        file, self._file = self._file, None
+        if file is None:
+            return why
+        try:
+            with file:
+                if not why:
+                    file.flush()
+                    os.fsync(file.fileno())
+        except OSError as exc:
+            return why or write_problem(exc)
+        return why
+
+    def _place(self) -> str:
+        """Put the downloaded file at the target. Raises OSError."""
+        if self._transform is None:
+            os.replace(self._part, self._target)
+            return ""
+        data = self._transform(self._part.read_bytes())
+        if data is None:
+            return "wrong_file"
+        write_bytes(self._target, data)
+        return ""
 
 
 def _final_url_allowed(requested: str, final: str) -> bool:

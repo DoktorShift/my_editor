@@ -92,7 +92,7 @@ from .media_grid import (
     Tile,
 )
 from .media_preview import QuickLook
-from .thumbnail_loader import ThumbnailLoader
+from .thumbnail_loader import ThumbnailLoader, write_problem
 
 _PREFIXES = {"image": "image/", "video": "video/", "audio": "audio/"}
 
@@ -831,9 +831,8 @@ class MediaLibraryDialog(QDialog):
             return
         try:
             save_document(target, data)
-        except OSError:
-            self._say(_("“{name}” couldn’t be saved there. Choose another folder.")
-                      .format(name=name), error=True)
+        except OSError as exc:
+            self._say(_save_failure(write_problem(exc), name), error=True)
 
     def _on_save_progress(self, received: int, total: int) -> None:
         if total > 0:
@@ -851,21 +850,8 @@ class MediaLibraryDialog(QDialog):
         self._saves.pop(0)
         self._save_bar.hide()
         self._save_cancel.hide()
-        said = {
-            "network": _("“{name}” couldn’t be downloaded. Check your internet connection "
-                         "and try again."),
-            "missing": _("“{name}” isn’t on your media servers anymore, so it couldn’t be "
-                         "saved."),
-            "server": _("“{name}” couldn’t be downloaded: your media server didn’t send it. "
-                        "Try again later."),
-            "too_large": _("“{name}” wasn’t saved: a media server sent more than the file."),
-            "wrong_file": _("“{name}” wasn’t saved: a media server returned the wrong file."),
-            "unsafe": _("“{name}” wasn’t saved: a media server sent it from an address "
-                        "MyEditor doesn’t trust."),
-            "write": _("“{name}” couldn’t be saved there. Choose another folder."),
-        }.get(why)
-        if said:
-            self._say(said.format(name=name), error=True)
+        if why and why != "cancelled":
+            self._say(_save_failure(why, name), error=True)
         else:
             self._rest_status()
         self._next_save()
@@ -1284,6 +1270,25 @@ def _save_name(tile: Tile) -> str:
     if not os.path.splitext(name)[1]:
         name += media_files.extension_for(tile.media.mime_type or "")
     return name
+
+
+def _save_failure(why: str, name: str) -> str:
+    """Why the file saved as ``name`` wasn't, as FileDownload says it."""
+    said = {
+        "network": _("“{name}” couldn’t be downloaded. Check your internet connection "
+                     "and try again."),
+        "missing": _("“{name}” isn’t on your media servers anymore, so it couldn’t be "
+                     "saved."),
+        "server": _("“{name}” couldn’t be downloaded: your media server didn’t send it. "
+                    "Try again later."),
+        "too_large": _("“{name}” wasn’t saved: a media server sent more than the file."),
+        "wrong_file": _("“{name}” wasn’t saved: a media server returned the wrong file."),
+        "unsafe": _("“{name}” wasn’t saved: a media server sent it from an address "
+                    "MyEditor doesn’t trust."),
+        "full": _("“{name}” couldn’t be saved: there isn’t enough space for it there. "
+                  "Free up some space or choose another folder."),
+    }.get(why) or _("“{name}” couldn’t be saved there. Choose another folder.")
+    return said.format(name=name)
 
 
 def _unique_path(folder: str, name: str) -> str:

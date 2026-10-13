@@ -721,7 +721,7 @@ msgstr ""
 #: main_window.py:7672
 #: main_window.py:1725
 #: nostr/ui/media_library_dialog.py:669
-#: nostr/ui/media_library_dialog.py:902
+#: nostr/ui/media_library_dialog.py:888
 #: nostr/ui/published_view.py:641
 msgid "Delete"
 msgstr ""
@@ -2247,9 +2247,9 @@ msgid "MyEditor can read audio and video files of these kinds: {kinds}."
 msgstr ""
 
 #: main_window.py:6914
-#: nostr/ui/media_library_dialog.py:1052
-#: nostr/ui/media_library_dialog.py:1079
-#: nostr/ui/media_library_dialog.py:1082
+#: nostr/ui/media_library_dialog.py:1038
+#: nostr/ui/media_library_dialog.py:1065
+#: nostr/ui/media_library_dialog.py:1068
 msgid "Uploading…"
 msgstr ""
 
@@ -4780,7 +4780,7 @@ msgstr ""
 
 #: nostr/imports/errors.py:144
 #: nostr/imports/fetch.py:160
-#: nostr/ui/thumbnail_loader.py:288
+#: nostr/ui/thumbnail_loader.py:289
 msgid "network error"
 msgstr ""
 
@@ -5192,7 +5192,7 @@ msgid "This image couldn’t be downloaded from your media servers."
 msgstr ""
 
 #: nostr/media/publish_copy.py:635
-#: nostr/ui/thumbnail_loader.py:57
+#: nostr/ui/thumbnail_loader.py:58
 msgid "a server returned the wrong file"
 msgstr ""
 
@@ -7434,17 +7434,22 @@ msgstr ""
 msgid "couldn’t upload: {reason}"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:932
+#: nostr/ui/media_library_dialog.py:918
 msgid "Anyone with the link will no longer see it, and anything you published with it will no longer show it."
 msgid_plural "Anyone with the link will no longer see them, and anything you published with them will no longer show them."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/media_library_dialog.py:1257
+#: nostr/ui/media_library_dialog.py:1243
 msgid "File"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:1356
+#: nostr/ui/media_library_dialog.py:1290
+#, python-brace-format
+msgid "“{name}” couldn’t be saved there. Choose another folder."
+msgstr ""
+
+#: nostr/ui/media_library_dialog.py:1361
 #, python-brace-format
 msgid "At least {used} of {quota} used"
 msgstr ""
@@ -7475,51 +7480,51 @@ msgstr ""
 msgid "Quick Look"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:891
+#: nostr/ui/media_library_dialog.py:877
 msgid "It’s also gone from the other app that keeps it privately. You can’t undo this action."
 msgid_plural "They’re also gone from the other apps that keep them privately. You can’t undo this action."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/media_library_dialog.py:897
+#: nostr/ui/media_library_dialog.py:883
 msgid "Anything you published with it will no longer show it. You can’t undo this action."
 msgid_plural "Anything you published with them will no longer show them. You can’t undo this action."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/media_library_dialog.py:969
+#: nostr/ui/media_library_dialog.py:955
 #, python-brace-format
 msgid "“{name}” is still on one of your media servers. {reason}"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:971
+#: nostr/ui/media_library_dialog.py:957
 #, python-brace-format
 msgid "“{name}” wasn’t deleted. {reason}"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:978
+#: nostr/ui/media_library_dialog.py:964
 msgid "The file"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:987
+#: nostr/ui/media_library_dialog.py:973
 msgid "Add to Media Library"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:1065
-#: nostr/ui/media_library_dialog.py:1033
-#: nostr/ui/media_library_dialog.py:1052
+#: nostr/ui/media_library_dialog.py:1051
+#: nostr/ui/media_library_dialog.py:1019
+#: nostr/ui/media_library_dialog.py:1038
 msgid "Waiting…"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:1165
+#: nostr/ui/media_library_dialog.py:1151
 msgid "Couldn’t reach your media servers. Check your internet connection."
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:1195
+#: nostr/ui/media_library_dialog.py:1181
 msgid "Anyone with the link can see the files you add here."
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:1358
+#: nostr/ui/media_library_dialog.py:1363
 #, python-brace-format
 msgid "Full: {used} of {quota} used"
 msgstr ""
@@ -7545,7 +7550,7 @@ msgid "Videos"
 msgstr ""
 
 #: nostr/ui/media_library_dialog.py:320
-#: nostr/ui/media_library_dialog.py:1257
+#: nostr/ui/media_library_dialog.py:1243
 msgid "Audio"
 msgstr ""
 
@@ -7605,33 +7610,33 @@ msgstr ""
 msgid "Choose a Folder"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:937
+#: nostr/ui/media_library_dialog.py:923
 #: nostr/ui/media_library_dialog.py:668
 msgid "Stop Sharing"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:1021
+#: nostr/ui/media_library_dialog.py:1007
 msgid "The pasted image couldn’t be read."
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:1160
+#: nostr/ui/media_library_dialog.py:1146
 msgid "Your media servers may not have listed every file. Refresh to look again."
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:1257
+#: nostr/ui/media_library_dialog.py:1243
 msgid "Image"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:1257
+#: nostr/ui/media_library_dialog.py:1243
 msgid "Video"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:1360
+#: nostr/ui/media_library_dialog.py:1365
 #, python-brace-format
 msgid "Almost full: {used} of {quota} used"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:1362
+#: nostr/ui/media_library_dialog.py:1367
 #, python-brace-format
 msgid "{used} of {quota} used"
 msgstr ""
@@ -7649,80 +7654,79 @@ msgstr ""
 msgid "This image can’t be used until your signer app lets MyEditor check whether it is private."
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:855
-#, python-brace-format
-msgid "“{name}” couldn’t be downloaded. Check your internet connection and try again."
-msgstr ""
-
-#: nostr/ui/media_library_dialog.py:857
-#, python-brace-format
-msgid "“{name}” isn’t on your media servers anymore, so it couldn’t be saved."
-msgstr ""
-
-#: nostr/ui/media_library_dialog.py:859
-#, python-brace-format
-msgid "“{name}” couldn’t be downloaded: your media server didn’t send it. Try again later."
-msgstr ""
-
-#: nostr/ui/media_library_dialog.py:861
-#, python-brace-format
-msgid "“{name}” wasn’t saved: a media server sent more than the file."
-msgstr ""
-
-#: nostr/ui/media_library_dialog.py:862
-#, python-brace-format
-msgid "“{name}” wasn’t saved: a media server returned the wrong file."
-msgstr ""
-
-#: nostr/ui/media_library_dialog.py:863
-#, python-brace-format
-msgid "“{name}” wasn’t saved: a media server sent it from an address MyEditor doesn’t trust."
-msgstr ""
-
-#: nostr/ui/media_library_dialog.py:865
-#: nostr/ui/media_library_dialog.py:835
-#, python-brace-format
-msgid "“{name}” couldn’t be saved there. Choose another folder."
-msgstr ""
-
-#: nostr/ui/media_library_dialog.py:886
+#: nostr/ui/media_library_dialog.py:872
 #, python-brace-format
 msgid "Delete “{name}”?"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:887
+#: nostr/ui/media_library_dialog.py:873
 #, python-brace-format
 msgid "Delete {count} item?"
 msgid_plural "Delete {count} items?"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/media_library_dialog.py:929
+#: nostr/ui/media_library_dialog.py:915
 #, python-brace-format
 msgid "Stop sharing “{name}”?"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:930
+#: nostr/ui/media_library_dialog.py:916
 #, python-brace-format
 msgid "Stop sharing {count} item?"
 msgid_plural "Stop sharing {count} items?"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/media_library_dialog.py:988
+#: nostr/ui/media_library_dialog.py:974
 #, python-brace-format
 msgid "Images, Videos, Audio and PDFs ({patterns})"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:1120
-#: nostr/ui/media_library_dialog.py:1041
+#: nostr/ui/media_library_dialog.py:1106
+#: nostr/ui/media_library_dialog.py:1027
 #, python-brace-format
 msgid "“{name}” wasn’t added. {reason}"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:1135
+#: nostr/ui/media_library_dialog.py:1121
 #, python-brace-format
 msgid "“{name}” is added, but one of your media servers didn’t keep a copy."
+msgstr ""
+
+#: nostr/ui/media_library_dialog.py:1278
+#, python-brace-format
+msgid "“{name}” couldn’t be downloaded. Check your internet connection and try again."
+msgstr ""
+
+#: nostr/ui/media_library_dialog.py:1280
+#, python-brace-format
+msgid "“{name}” isn’t on your media servers anymore, so it couldn’t be saved."
+msgstr ""
+
+#: nostr/ui/media_library_dialog.py:1282
+#, python-brace-format
+msgid "“{name}” couldn’t be downloaded: your media server didn’t send it. Try again later."
+msgstr ""
+
+#: nostr/ui/media_library_dialog.py:1284
+#, python-brace-format
+msgid "“{name}” wasn’t saved: a media server sent more than the file."
+msgstr ""
+
+#: nostr/ui/media_library_dialog.py:1285
+#, python-brace-format
+msgid "“{name}” wasn’t saved: a media server returned the wrong file."
+msgstr ""
+
+#: nostr/ui/media_library_dialog.py:1286
+#, python-brace-format
+msgid "“{name}” wasn’t saved: a media server sent it from an address MyEditor doesn’t trust."
+msgstr ""
+
+#: nostr/ui/media_library_dialog.py:1288
+#, python-brace-format
+msgid "“{name}” couldn’t be saved: there isn’t enough space for it there. Free up some space or choose another folder."
 msgstr ""
 
 #: nostr/ui/media_library_dialog.py:517
@@ -7750,24 +7754,24 @@ msgstr ""
 msgid "“{name}” couldn’t be saved. Try again."
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:956
+#: nostr/ui/media_library_dialog.py:942
 #, python-brace-format
 msgid "“{name}” is no longer shared."
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:961
+#: nostr/ui/media_library_dialog.py:947
 #, python-brace-format
 msgid "“{name}” is still shared. {reason}"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:1005
+#: nostr/ui/media_library_dialog.py:991
 #, python-brace-format
 msgid "“{name}” wasn’t added. The Media Library takes images, videos, audio and PDFs."
 msgid_plural "{count} files weren’t added. The Media Library takes images, videos, audio and PDFs."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/media_library_dialog.py:1026
+#: nostr/ui/media_library_dialog.py:1012
 msgid "Pasted Image"
 msgstr ""
 
@@ -8864,15 +8868,15 @@ msgstr ""
 msgid "Summary (optional)"
 msgstr ""
 
-#: nostr/ui/thumbnail_loader.py:56
+#: nostr/ui/thumbnail_loader.py:57
 msgid "blob URL was not allowed"
 msgstr ""
 
-#: nostr/ui/thumbnail_loader.py:286
-#: nostr/ui/thumbnail_loader.py:298
+#: nostr/ui/thumbnail_loader.py:287
+#: nostr/ui/thumbnail_loader.py:299
 msgid "blob exceeds cache limit"
 msgstr ""
 
-#: nostr/ui/thumbnail_loader.py:296
+#: nostr/ui/thumbnail_loader.py:297
 msgid "empty response"
 msgstr ""
