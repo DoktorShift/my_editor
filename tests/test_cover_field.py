@@ -196,3 +196,29 @@ def test_the_well_shows_how_far_the_upload_is_and_says_when_it_is_done(field, tm
     made.drop(str(picture_file(tmp_path, "b.png")))
     store.upload_failed.emit(store.uploads[1][1], "the server said no")
     assert not made.uploading() and busy == [True, False, True, False]
+
+
+def test_a_cover_chosen_while_a_drop_uploads_wins(field, tmp_path):
+    """Review round 2: a cover typed or picked while a dropped picture was
+    still uploading was overwritten when the upload finished."""
+    made, store, _problems = field
+    made.drop(str(picture_file(tmp_path)))
+    job = store.uploads[0][1]
+    made.setText("https://cdn.example/typed.jpg")
+    assert not made.uploading()
+    store.upload_finished.emit(job, MediaFile(hash="ef" * 32, url="https://x/" + "ef" * 32))
+    assert made.text() == "https://cdn.example/typed.jpg"
+
+
+def test_the_drop_is_known_by_its_own_upload_not_by_its_file_name(field, tmp_path):
+    """Review round 2: another upload of a file with the same name (from
+    the Media Library, or a drop in the text) finishing first was taken
+    as the cover."""
+    made, store, _problems = field
+    made.drop(str(picture_file(tmp_path, "cover.png")))
+    job = store.uploads[0][1]
+    assert job != "cover.png" and "cover" in job
+    store.upload_finished.emit("cover.png", MediaFile(hash="cd" * 32, url="https://x/other"))
+    assert made.text() == "" and made.uploading()
+    store.upload_finished.emit(job, MediaFile(hash="ef" * 32, url="https://x/mine"))
+    assert made.text() == "https://x/mine"

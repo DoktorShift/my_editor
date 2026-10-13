@@ -30,6 +30,7 @@ address typed would be a surprise.
 from __future__ import annotations
 
 import os
+import uuid
 from typing import Callable, Optional
 
 from PySide6.QtCore import QSize, Qt, Signal
@@ -283,7 +284,10 @@ class CoverImageField(QWidget):
         except ScrubError as exc:
             self.problem.emit(_("This picture can’t be a cover: {reason}.").format(reason=exc))
             return
-        self._uploading = os.path.basename(path) or "cover"
+        # The upload is known by a name of its own: another upload of a
+        # file of the same name (from the Media Library) is not this one.
+        stem, extension = os.path.splitext(os.path.basename(path) or "cover")
+        self._uploading = f"{stem}-{uuid.uuid4().hex[:8]}{extension}"
         self._show_placeholder(_("Uploading…"))
         self.uploading_changed.emit(True)
         self._media_store.upload_bytes(public.data, name=self._uploading,
@@ -316,6 +320,11 @@ class CoverImageField(QWidget):
     # -- the well -------------------------------------------------------------
 
     def _on_url_changed(self, text: str, *, quiet: bool = False) -> None:
+        if self._uploading and not quiet:
+            # A cover typed, pasted, picked or removed while a dropped
+            # picture uploads: that one is the cover, not the upload.
+            self._uploading = ""
+            self.uploading_changed.emit(False)
         address = text.strip()
         sha = (hash_from_url(address) or "").lower() if address else ""
         self.remove_button.setVisible(bool(address))
