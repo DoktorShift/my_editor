@@ -506,3 +506,23 @@ def test_a_shared_copy_the_listing_does_not_show_is_still_deleted(tmp_path):
     assert deleted == [C]
     assert router.by_host["good.example"].deletes == [C]
     assert router.by_host["mirror.example"].deletes == []
+
+
+def test_a_delete_also_reaches_the_servers_its_record_names(tmp_path):
+    """Stop Sharing deletes a public copy from every server it was ever
+    put on, not only where the listing shows it now: a server removed
+    from Media Servers keeps serving the copy otherwise, while the window
+    says it is no longer shared."""
+    router = Router(FakeBlossomServer(SERVER, blobs=[descriptor(C)]),
+                    FakeBlossomServer(MIRROR, blobs=[descriptor(C, server=MIRROR)]))
+    store, nam, _signer, _ = make(tmp_path, router, servers=(SERVER,))
+    store.fetch()
+    nam.settle()
+    assert [u["server"] for u in store.files[C].urls] == [SERVER]   # MIRROR is not listed
+    deleted = []
+    store.file_deleted.connect(deleted.append)
+    store.delete_file(C, servers=[MIRROR])
+    nam.settle()
+    assert deleted == [C]
+    assert router.by_host["good.example"].deletes == [C]
+    assert router.by_host["mirror.example"].deletes == [C]

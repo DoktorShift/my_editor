@@ -1428,34 +1428,37 @@ class MediaStore(QObject):
         back on the next listing, and the person would have believed it
         deleted.
 
-        ``servers`` names where a file the listing does not show is kept,
-        so it can be deleted there.
+        ``servers`` names where else the file was put (a public copy's
+        record): it is deleted there too, listed or not.
         """
         profile = self._profile_provider()
         if profile is None:
             self.delete_failed.emit(file_hash, ERROR_CODES.NO_SIGNER)
             return
+        # The servers to ask: wherever the listing shows the file, and
+        # wherever ``servers`` says it was put (a public copy's record:
+        # a server since removed from the list, another device's upload).
         media = self._files.get(file_hash)
-        if media is None:
-            # Not in the listing: where ``servers`` says it is kept (a
-            # public copy made on another device, say).
-            urls = [{"server": origin, "url": blob_url(origin, file_hash)}
-                    for origin in dict.fromkeys(_origin_or_empty(s) for s in servers) if origin]
-            if not urls:
+        urls = [dict(u) for u in media.urls] if media is not None else []
+        listed = {extract_server_from_blob_url(u.get("url", "")) for u in urls}
+        for origin in dict.fromkeys(_origin_or_empty(s) for s in servers):
+            if origin and origin not in listed:
+                urls.append({"server": origin, "url": blob_url(origin, file_hash)})
+                listed.add(origin)
+        if not urls:
+            if media is None:
                 return
+            urls = [{"server": "", "url": media.url}]
+        if media is None:
             media = MediaFile(hash=file_hash, url=urls[0]["url"], urls=urls)
 
-        # The servers to ask: the file's own copies (whatever ``/list``
-        # told us), with the blob URL as a fallback for a file known by
-        # one record only.
         target_servers: list[str] = []
-        for entry in media.urls:
+        for entry in urls:
             origin = extract_server_from_blob_url(entry.get("url", ""))
             if origin and origin not in target_servers:
                 target_servers.append(origin)
         if not target_servers:
-            target_servers.append(extract_server_from_blob_url(media.url)
-                                  or self._settings.primary)
+            target_servers.append(self._settings.primary)
 
         remaining = {"count": len(target_servers)}
         failures: list[tuple[str, str]] = []
@@ -1471,7 +1474,7 @@ class MediaStore(QObject):
                 self.delete_failed.emit(file_hash, _delete_failure_code(failures))
             else:
                 kept = {origin for origin, _code in failures}
-                media.urls = [u for u in media.urls
+                media.urls = [u for u in urls
                               if extract_server_from_blob_url(u.get("url", "")) in kept]
                 if media.urls:
                     media.url = str(media.urls[0].get("url") or media.url)

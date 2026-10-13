@@ -804,7 +804,11 @@ class MediaLibraryDialog(QDialog):
     def _delete_copies(self, files: List[Tile], *, stays: bool) -> None:
         for tile, copy in self._shared_copies(files):
             self._unsharing[copy.sha256] = (tile.name, stays)
-            self._store.delete_file(copy.sha256, servers=list(copy.servers) + [copy.url])
+            # Everywhere it may be: the servers its record names (one
+            # since removed from the list included) and the ones in use
+            # now. A server without it answers that it has none.
+            servers = list(copy.servers) + [copy.url] + self._store.target_servers()
+            self._store.delete_file(copy.sha256, servers=servers)
 
     def _on_file_deleted(self, sha: str) -> None:
         # Deleting a public copy is what un-sharing it is, so the record

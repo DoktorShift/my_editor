@@ -744,6 +744,7 @@ def _shared_original(tmp_path, monkeypatch):
     ledger = PublicLedger(path=tmp_path / "public.json")
     ledger.record(PublicBlob(sha256=copy_sha, url=f"{MEMBERS}/{copy_sha}.png",
                              servers=[MEMBERS], source_hash=original.hash))
+    # The copy's record names MEMBERS only; SERVER is configured.
     visibility = MediaVisibility(library=FakeLibrary([blob]), ledger=ledger)
     world = build(tmp_path, monkeypatch, FakeStore([original]), visibility=visibility)
     world.store.delete_file = lambda sha, servers=(): world.store.calls.append(
@@ -776,7 +777,9 @@ def test_stop_sharing_asks_then_deletes_the_copy_where_it_is(tmp_path, monkeypat
         "Anyone with the link will no longer see it, and anything you published with it "
         "will no longer show it.")
     assert world.store.calls[-1][:2] == ("delete", copy_sha)
-    assert MEMBERS in world.store.calls[-1][2]
+    # Every server the copy was put on (its record) and every server in
+    # use now: a copy is not "no longer shared" while one of them has it.
+    assert {MEMBERS, SERVER} <= set(world.store.calls[-1][2])
 
     world.store.file_deleted.emit(copy_sha)
     world.store.library_changed.emit()
