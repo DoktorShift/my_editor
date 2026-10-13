@@ -663,7 +663,7 @@ class PublishArticleDialog(QDialog):
     def _set_busy(self, busy: bool) -> None:
         for edit in (self._title_edit, self._summary_edit, self._slug_edit, self._image_edit):
             edit.setReadOnly(busy)
-        self._hashtags.setReadOnly(busy)
+        self._hashtags.setEnabled(not busy)
         self._cover.setReadOnly(busy)
         self._people.setEnabled(not busy)
         self._account.setEnabled(not busy)

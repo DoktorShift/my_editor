@@ -290,7 +290,11 @@ def test_co_authors_are_added_and_removed_as_in_article_details(tmp_path, captur
 def test_a_failure_is_said_in_red_and_publish_can_be_tried_again(tmp_path, captured):
     sheet = article(tmp_path, default_title="T")
     sheet._publish("t", sheet._body, 1_800_000_000)
+    # While it goes out, nothing can change, and nothing moves.
+    assert not sheet._publish_btn.isEnabled() and not sheet._hashtags.isEnabled()
+    assert not sheet._hashtags.entry.isHidden() and not sheet._account.isEnabled()
     sheet._on_completed([("wss://a.example", False, "blocked")])
+    assert sheet._hashtags.isEnabled() and sheet._account.isEnabled()
     assert not sheet._status.isHidden() and "no relay took it" in sheet._status.text()
     assert theme.error_text_color(False) in sheet._status.styleSheet()
     assert sheet._publish_btn.isEnabled()
