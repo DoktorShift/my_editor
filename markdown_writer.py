@@ -79,10 +79,15 @@ ImageTarget = Callable[[object], Optional[str]]
 # How Markdown is read back into the editor (.md files, article drafts):
 # GitHub's dialect without its underline extension, which reads
 # ``_word_`` as underline (a local-only format this writer leaves out)
-# where every Nostr reader shows italics.
+# where every Nostr reader shows italics, and without Qt's own front matter
+# reading, which takes any leading "---" block for front matter and drops
+# it: a file's front matter is read by front_matter.py (only a block with a
+# key), and a document that opens with a divider keeps its first section.
 _MD_FLAG_UNDERLINE = 0x4000
+_QT_FRONT_MATTER = 0x100000
 READ_FEATURES = QTextDocument.MarkdownFeature(
-    QTextDocument.MarkdownFeature.MarkdownDialectGitHub.value & ~_MD_FLAG_UNDERLINE)
+    QTextDocument.MarkdownFeature.MarkdownDialectGitHub.value
+    & ~_MD_FLAG_UNDERLINE & ~_QT_FRONT_MATTER)
 
 # How a paste is read: the same, but a tag is text. Text that shows a tag
 # ("<div>", "ssh <user>@<host>") is about one, and HTML is no structure a
