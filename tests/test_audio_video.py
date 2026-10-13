@@ -68,6 +68,15 @@ def test_types_come_from_one_table_whatever_the_computer_says():
     assert media_files.extension_for("audio/mpeg") == ".mp3"
 
 
+def test_the_preview_names_the_file_by_its_own_name():
+    url = f"{URL}.mp3"
+    named = {url: "Interview with Bob.mp3"}.get
+    assert f"[▶ Audio: Interview with Bob.mp3]({url})" in preview.markdown_for_preview(
+        f"Listen:\n\n{url}\n", media_names=named)
+    assert "▶ Audio: Interview with Bob.mp3" in preview.note_html(
+        f"Listen {url}", media_names=named)
+
+
 def test_the_preview_shows_where_readers_put_the_player():
     url = f"{URL}.mp3"
     markdown = preview.markdown_for_preview(f"Listen:\n\n{url}\n\nInline {url} stays.")
@@ -637,3 +646,46 @@ def test_a_failed_audio_upload_does_not_speak_of_an_image(tmp_path):
     r = run_window_script(FAILED_SCRIPT, tmp_path, str(song), SHA)
     for said in r.values():
         assert said and "image" not in said.lower()
+
+
+PREVIEW_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+from nostr.blossom.store import MediaFile
+
+song, sha = sys.argv[2], sys.argv[3]
+w = main_window.MainWindow()
+w.show()
+w._media_store.upload_bytes = lambda body, name, mime_type: None
+w.nostr_state._active = True
+w._update_nostr_commands()
+w._upload_limit = lambda: 10**9
+ed = w.new_tab()
+w._upload_into(ed, song)
+r = {"checks while uploading": list(w._preview_content(ed, "article").checks)}
+url = f"https://cdn.example/{sha}"
+w._media_store.upload_status.emit(f"myeditor-asset:{sha}", "uploading")
+w._media_store.upload_finished.emit(f"myeditor-asset:{sha}", MediaFile(
+    hash=sha, url=url, mime_type="audio/mpeg", size=1,
+    urls=[{"server": "https://cdn.example", "url": url}]))
+app.processEvents()
+r["name"] = w._media_name(url + ".mp3")
+w.nostr_state._active = False
+r["document preview"] = w._preview_content(ed, "article").text
+ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_the_preview_shows_the_file_as_readers_do_and_says_while_it_uploads(tmp_path):
+    song = tmp_path / "song.mp3"
+    song.write_bytes(BODY)
+    r = run_window_script(PREVIEW_SCRIPT, tmp_path, str(song), SHA)
+    assert any("still uploading" in check for check in r["checks while uploading"])
+    assert r["name"] == "song.mp3"
+    assert r["document preview"] == f"{URL}.mp3"

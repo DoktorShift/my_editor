@@ -74,6 +74,8 @@ from nostr.refs import outside_code
 NameLookup = Callable[[str], Optional[str]]
 # image address -> the image, when it is at hand (no network here)
 ImageLookup = Callable[[str], Optional[QImage]]
+# The name an audio or video file had, by its address (None when unknown).
+MediaNames = Callable[[str], Optional[str]]
 
 COLUMN_WIDTH = 680
 WORDS_PER_MINUTE = word_count.WORDS_PER_MINUTE
@@ -142,25 +144,28 @@ def reference_label(reference: str, names: Optional[NameLookup]) -> str:
     return "@" + name
 
 
-def player_label(url: str) -> Optional[str]:
+def player_label(url: str, media_names: Optional[MediaNames] = None) -> Optional[str]:
     """"▶ Audio: name" or "▶ Video: name" for the address of audio or
-    video, where readers show a player; None for any other address."""
+    video, where readers show a player, named as the file was (else by its
+    address); None for any other address."""
     path = QUrl(url).path()
     mime = media_files.type_of(path)
     if mime is None:
         return None
-    return media_files.link_words(mime, path.rsplit("/", 1)[-1])
+    name = (media_names(url) if media_names else None) or path.rsplit("/", 1)[-1]
+    return media_files.link_words(mime, name)
 
 
 _OWN_LINE_URL = re.compile(r"^(https?://\S+)$", re.MULTILINE)
 
 
-def markdown_for_preview(markdown: str, names: Optional[NameLookup] = None) -> str:
+def markdown_for_preview(markdown: str, names: Optional[NameLookup] = None,
+                         media_names: Optional[MediaNames] = None) -> str:
     """The article's Markdown with every ``nostr:`` reference turned into
     a link that reads like the apps show it, and audio or video standing
     on a line of its own shown where readers put its player."""
     def player(match) -> str:
-        label = player_label(match.group(1))
+        label = player_label(match.group(1), media_names)
         return f"[{label}]({match.group(1)})" if label else match.group(0)
 
     def replace(text: str) -> str:
@@ -297,6 +302,7 @@ MARKDOWN_FEATURES = QTextDocument.MarkdownFeature(
 
 
 def body_document(markdown: str, *, names: Optional[NameLookup] = None,
+                  media_names: Optional[MediaNames] = None,
                   dark: bool = False, parent=None) -> QTextDocument:
     """Markdown as the readers show an article's body: the document's
     preview when nothing is published."""
@@ -308,7 +314,7 @@ def body_document(markdown: str, *, names: Optional[NameLookup] = None,
     body.setFamilies(SERIF)
     body.setPointSizeF(13.5)
     doc.setDefaultFont(body)
-    read_markdown(doc, markdown_for_preview(markdown, names), MARKDOWN_FEATURES)
+    read_markdown(doc, markdown_for_preview(markdown, names, media_names), MARKDOWN_FEATURES)
     _tidy_tables(doc)
     notes = _render_footnotes(doc)
     _style_body(doc.begin(), palette(dark))
@@ -429,11 +435,13 @@ def _anchor_notes(doc: QTextDocument, count: int) -> None:
 
 
 def article_document(markdown: str, article: Article, *, names: Optional[NameLookup] = None,
+                     media_names: Optional[MediaNames] = None,
                      dark: bool = False, parent=None) -> QTextDocument:
     """The article as readers will see it."""
     colors = palette(dark)
     # The body, rendered from exactly the published Markdown.
-    doc = body_document(markdown, names=names, dark=dark, parent=parent)
+    doc = body_document(markdown, names=names, media_names=media_names, dark=dark,
+                        parent=parent)
 
     # The header goes in front: cover, title, summary, byline, a rule. A
     # new block is opened before the body's first one, which keeps its own
@@ -502,7 +510,7 @@ def split_media(text: str) -> tuple:
 
 
 def note_html(text: str, *, author: str = "", names: Optional[NameLookup] = None,
-              dark: bool = False) -> str:
+              media_names: Optional[MediaNames] = None, dark: bool = False) -> str:
     """The note as HTML for a QTextBrowser: plain text, links colored."""
     colors = palette(dark)
     body, media = split_media(text)
@@ -520,7 +528,7 @@ def note_html(text: str, *, author: str = "", names: Optional[NameLookup] = None
         elif token.startswith("#"):
             pieces.append(f'<span style="color:{colors.link};">{html.escape(token)}</span>')
         else:
-            words = player_label(token) or token
+            words = player_label(token, media_names) or token
             pieces.append(f'<a href="{html.escape(token, quote=True)}" '
                           f'style="color:{colors.link};">{html.escape(words)}</a>')
         last = match.end()
@@ -536,10 +544,12 @@ def note_html(text: str, *, author: str = "", names: Optional[NameLookup] = None
 
 
 def note_document(text: str, *, author: str = "", names: Optional[NameLookup] = None,
+                  media_names: Optional[MediaNames] = None,
                   dark: bool = False, parent=None) -> QTextDocument:
     doc = QTextDocument(parent)
     doc.setDocumentMargin(0)
-    doc.setHtml(note_html(text, author=author, names=names, dark=dark))
+    doc.setHtml(note_html(text, author=author, names=names, media_names=media_names,
+                          dark=dark))
     return doc
 
 
@@ -556,10 +566,12 @@ class NostrPreview(QTextBrowser):
     an empty frame otherwise.
     """
 
-    def __init__(self, *, images: Optional[ImageLookup] = None, dark: bool = False,
+    def __init__(self, *, images: Optional[ImageLookup] = None,
+                 media_names: Optional[MediaNames] = None, dark: bool = False,
                  parent=None) -> None:
         super().__init__(parent)
         self._images = images
+        self._media_names = media_names
         self._dark = dark
         self.setOpenExternalLinks(True)
         self.setOpenLinks(True)
@@ -577,16 +589,19 @@ class NostrPreview(QTextBrowser):
 
     def show_article(self, markdown: str, article: Article, *,
                      names: Optional[NameLookup] = None) -> None:
-        self._show(article_document(markdown, article, names=names, dark=self._dark,
+        self._show(article_document(markdown, article, names=names,
+                                    media_names=self._media_names, dark=self._dark,
                                     parent=self))
 
     def show_markdown(self, markdown: str, *, names: Optional[NameLookup] = None) -> None:
         """Markdown as it reads, without an article's header."""
-        self._show(body_document(markdown, names=names, dark=self._dark, parent=self))
+        self._show(body_document(markdown, names=names, media_names=self._media_names,
+                                 dark=self._dark, parent=self))
 
     def show_note(self, text: str, *, author: str = "",
                   names: Optional[NameLookup] = None) -> None:
-        self._show(note_document(text, author=author, names=names, dark=self._dark,
+        self._show(note_document(text, author=author, names=names,
+                                 media_names=self._media_names, dark=self._dark,
                                  parent=self))
 
     def _show(self, doc: QTextDocument) -> None:

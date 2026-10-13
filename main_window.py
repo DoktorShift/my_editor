@@ -157,6 +157,7 @@ from nostr.ui.reference_popover import ReferencePopover
 from nostr.ui.article_details_panel import ArticleDetailsPanel, DEFAULT_WIDTH as ARTICLE_DETAILS_WIDTH
 from nostr import refs
 from nostr.blossom.errors import friendly_message
+from nostr.blossom.hashes import hash_from_url
 from nostr.media_server_list import publish_server_list
 from nostr.outbox import writer as outbox_writer
 from nostr.profile_editing import ProfileEditing
@@ -5490,6 +5491,7 @@ class MainWindow(QMainWindow):
             pane = PreviewPane(
                 lambda kind, e=ed: self._preview_content(e, kind),
                 images=lambda name, e=ed: self._preview_image(e, name),
+                media_names=self._media_name,
                 dark=self.is_dark_theme,
                 note=binding is not None and binding.inner_kind == INNER_KIND_SHORT_NOTE)
             pane.setVisible(False)
@@ -5506,6 +5508,11 @@ class MainWindow(QMainWindow):
         names = self._preview_name
         if not self.nostr_state.active:
             def pictures(fmt):
+                media = _media_asset(self._asset_manager, fmt.name())
+                if media is not None:
+                    # Audio or video: where readers show its player, once
+                    # it is on a media server.
+                    return _published_address(media) if media.is_uploaded else None
                 return image_markdown(str(fmt.property(QTextImageFormat.ImageAltText) or ""),
                                       fmt.name())
             if getattr(ed, "_markdown_source", False):
@@ -5517,6 +5524,9 @@ class MainWindow(QMainWindow):
         profile = self._profile_store.default()
         author = (profile.display_name or profile.npub_short()) if profile is not None else ""
         checks = []
+        if self._media_not_uploaded(ed.document()):
+            checks.append(_("Audio or video is still uploading: it shows here, and is "
+                            "published, once it is on your media servers."))
         missing = self._pictures_not_uploaded(ed)
         if missing:
             checks.append(ngettext(
@@ -6711,6 +6721,14 @@ class MainWindow(QMainWindow):
             message=_("Quitting now stops the upload, and the document won’t hold the "
                       "file."),
             action=_("Quit Anyway"))
+
+    def _media_name(self, url: str) -> Optional[str]:
+        """The name an audio or video file had, by the address it was
+        uploaded to (its hash names it); None when it is not one of this
+        app's."""
+        sha = hash_from_url(url)
+        asset = self._asset_manager.get(sha) if sha else None
+        return asset.alt if asset is not None and asset.is_media and asset.alt else None
 
     def _is_media_name(self, name: str) -> bool:
         """Whether an object of the text is audio or video."""

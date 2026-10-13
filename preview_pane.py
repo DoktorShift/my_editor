@@ -39,7 +39,7 @@ from constants import (
     LIGHT_SELECTION,
 )
 from i18n import _, pgettext
-from nostr.preview import Article, ImageLookup, NameLookup, NostrPreview
+from nostr.preview import Article, ImageLookup, MediaNames, NameLookup, NostrPreview
 
 # What the preview shows.
 DOCUMENT = "document"      # the document as it reads (no Nostr account in use)
@@ -74,10 +74,12 @@ class PreviewPane(QWidget):
 
     ``content(kind)`` gives what to draw, ``kind`` being ARTICLE or NOTE as
     chosen in Preview As (the window answers DOCUMENT while no Nostr
-    account is in use); ``images`` finds the pictures it names."""
+    account is in use); ``images`` finds the pictures it names, and
+    ``media_names`` the names of the audio and video files."""
 
     def __init__(self, content: Callable[[str], PreviewContent], *,
-                 images: Optional[ImageLookup] = None, dark: bool = False,
+                 images: Optional[ImageLookup] = None,
+                 media_names: Optional[MediaNames] = None, dark: bool = False,
                  note: bool = False, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("PreviewPane")
@@ -116,7 +118,7 @@ class PreviewPane(QWidget):
         self._checks.setVisible(False)
         layout.addWidget(self._checks)
 
-        self.view = NostrPreview(images=images, dark=dark)
+        self.view = NostrPreview(images=images, media_names=media_names, dark=dark)
         layout.addWidget(self.view, 1)
 
         self._timer = QTimer(self)
