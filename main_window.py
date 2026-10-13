@@ -6937,9 +6937,10 @@ class MainWindow(QMainWindow):
                                 len(saving))
             return " ".join((
                 MainWindow._what_leaving_does(uploading, quitting=True),
-                ngettext("The file being saved won’t be saved.",
-                         "The {count} files being saved won’t be saved.",
-                         len(saving)).format(count=len(saving))))
+                ngettext("Quitting also stops saving “{name}”.",
+                         "Quitting also stops saving {count} files.",
+                         len(saving)).format(name=os.path.basename(saving[0]),
+                                             count=len(saving))))
         copying = [u for u in uploading if getattr(u, "finishing", False)]
         if quitting and copying and len(copying) == len(uploading):
             return ngettext(

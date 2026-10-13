@@ -512,11 +512,11 @@ def test_quitting_while_a_library_file_is_only_being_copied_says_it_is_in_the_li
      "Quitting now stops the downloads, and the files aren’t saved."),
     (["sending"], ["/out/Talk.mp4"], "2 files are still uploading or being saved.",
      "Quitting now stops the upload, and the file isn’t added to your Media Library. "
-     "The file being saved won’t be saved."),
+     "Quitting also stops saving “Talk.mp4”."),
     (["sending"], ["/out/Talk.mp4", "/out/Scan.pdf"],
      "3 files are still uploading or being saved.",
      "Quitting now stops the upload, and the file isn’t added to your Media Library. "
-     "The 2 files being saved won’t be saved."),
+     "Quitting also stops saving 2 files."),
 ])
 def test_quitting_while_a_save_runs_asks_first(monkeypatch, states, saves, title, message):
     """Quitting would throw away a download the person asked for, as
