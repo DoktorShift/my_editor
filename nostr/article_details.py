@@ -38,12 +38,13 @@ import json
 import re
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
-from typing import FrozenSet, Iterable, List, Optional, Sequence, Tuple
+from typing import Callable, FrozenSet, Iterable, List, Optional, Sequence, Tuple
 
 import front_matter
 
 from . import refs
 from .bech32 import encode_nprofile, encode_npub
+from .drafts import derive_title_from_markdown, flatten_markdown_inline
 
 # Tags MyEditor writes itself; every other tag is carried as it is.
 DETAILS = ("d", "title", "summary", "image", "published_at", "t")
@@ -53,6 +54,41 @@ REBUILT = ("client", "p", "q")
 # article names co-authors, its signer is written first, as standup takes
 # the first one for the writer; the co-authors follow.
 AUTHOR_MARKER = "author"
+
+
+# A heading line (CommonMark: one to six "#" and a space), and a mention.
+_HEADING = re.compile(r"^\s{0,3}#{1,6}\s")
+_MENTION = re.compile(r"nostr:((?:npub|nprofile)1[02-9ac-hj-np-z]+)")
+
+
+def default_title(markdown: str,
+                  names: Optional[Callable[[str], Optional[str]]] = None) -> str:
+    """The title offered for an article that names none (the publish
+    window, the preview): its first heading, else its first line with
+    words, as plain text without Markdown. A mention is "@" and the
+    person's name (``names``: pubkey -> name or None), or their short key
+    when the name is unknown, never the key itself. Code blocks are not
+    looked at; inline code is kept as written."""
+    lines = []
+    fence = None
+    for line in (markdown or "").split("\n"):
+        stripped = line.lstrip()
+        if fence is not None:
+            if stripped.startswith(fence):
+                fence = None
+        elif stripped.startswith(("```", "~~~")):
+            fence = stripped[:3]
+        else:
+            lines.append(line)
+
+    def named(text: str) -> str:
+        return _MENTION.sub(lambda found: " @" + (refs.person_name(found.group(1), names)
+                                                  or found.group(0)), text)
+
+    text = refs.outside_code("\n".join(lines), named)
+    heading = next((line for line in text.split("\n")
+                    if _HEADING.match(line) and flatten_markdown_inline(line.lstrip(" #"))), "")
+    return derive_title_from_markdown(heading or text)
 
 
 def hashtags_from(text: str) -> Tuple[str, ...]:

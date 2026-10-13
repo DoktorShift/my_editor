@@ -241,3 +241,43 @@ def test_an_edited_article_tags_each_quote_in_its_text_once():
     event = build_article(content=body, pubkey_hex=pk, slug=details.identifier,
                           title=details.title, extra_tags=details.carried_tags(body))
     assert [tag[1] for tag in event["tags"] if tag[0] == "q"] == [kept]
+
+
+# -- the title an article that names none is offered ----------------------------------
+
+NPUB = "npub1f2ktq2xcmh9wpmv0s6wqu6r9uvlvp7qr6sdqqk87x3dmnc9w0juswgtagx"
+
+
+def test_the_default_title_is_the_first_heading():
+    from nostr.article_details import default_title
+    assert default_title("An opening line.\n\n## *The* heading\n\nMore.") == "The heading"
+    assert default_title("```\n# not a heading\n```\n\n# Real one") == "Real one"
+
+
+def test_without_a_heading_it_is_the_first_line_as_plain_text():
+    from nostr.article_details import default_title
+    assert default_title("*fafuui S s* and **more**\n\nBody.") == "fafuui S s and more"
+    assert default_title("![hero](https://x/y.png)\n\nSee [the post](https://x/p).") \
+        == "See the post."
+    assert default_title("") == ""
+
+
+def test_a_mention_in_the_title_is_its_name_never_its_key():
+    from nostr import bech32
+    from nostr.article_details import default_title
+    pubkey = bech32.decode_npub(NPUB)
+    names = {pubkey: "DrShift"}.get
+    assert default_title(f"*fafuui S s*nostr:{NPUB}", names) == "fafuui S s @DrShift"
+    unknown = default_title(f"*fafuui S s*nostr:{NPUB}")
+    assert unknown == "fafuui S s @npub1f2kt…tagx" and len(unknown) < 30
+    assert default_title(f"`nostr:{NPUB}` in code") == f"nostr:{NPUB} in code"
+
+
+def test_the_window_offers_and_previews_the_same_default_title():
+    """Publish as Article and the preview take an article's title from the
+    one rule (article_details.default_title), not a line of their own."""
+    import inspect
+    from main_window import MainWindow
+    for method in (MainWindow._on_nostr_publish_article, MainWindow._preview_content):
+        source = inspect.getsource(method)
+        assert "default_title(" in source and 'lstrip("# ")' not in source

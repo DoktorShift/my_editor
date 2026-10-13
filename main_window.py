@@ -188,7 +188,7 @@ from nostr.ui.imports_window import ImportsWindow
 from nostr.imports.constants import IDENTIFIER_PREFIX as IMPORT_IDENTIFIER_PREFIX
 from nostr.imports.constants import SOURCE_TAG as IMPORT_SOURCE_TAG
 from nostr.article_details import (
-    ArticleDetails, from_front_matter, front_matter_with, kept_in_file)
+    ArticleDetails, default_title, from_front_matter, front_matter_with, kept_in_file)
 from nostr.first_publications import FirstPublications
 from nostr.drafts import (
     INNER_KIND_LONG_FORM,
@@ -5571,8 +5571,7 @@ class MainWindow(QMainWindow):
         if rich_text.orphan_notes(ed.document()):
             checks.append(_("A note no mark refers to: most apps leave it out."))
         details = self._article_details_of(ed)
-        title = details.title or next(
-            (line.lstrip("# ").strip() for line in markdown.splitlines() if line.strip()), "")
+        title = details.title or default_title(markdown, self._preview_name)
         first = next((line for line in markdown.splitlines() if line.strip()), "")
         if details.title and first.startswith("# ") and first[2:].strip() == details.title:
             # Said only for a title set on purpose: without one, the title
@@ -6922,17 +6921,15 @@ class MainWindow(QMainWindow):
         #      ``d`` and title from its draft, preserving the addressable
         #      coordinate so re-publishing replaces the draft in place).
         #   2. File path basename for disk-backed tabs.
-        #   3. First non-blank line as a heuristic title for free-form tabs.
+        #   3. The first heading, else the first line, as plain text, for
+        #      a title (article_details.default_title).
         # A draft of an article (an import, an edit) brings all its details:
         # summary, cover, hashtags, source, and when it first went out (a
         # new version keeps that date).
         details = self._article_details_of(ed)
-        default_title = details.title
+        title = details.title or default_title(body, self._preview_name)
         default_slug = details.identifier
         first_published = details.published_at
-        if not default_title:
-            first_line = next((ln for ln in body.splitlines() if ln.strip()), "")
-            default_title = first_line.lstrip("# ").strip()
         if not default_slug:
             path = self.current_path()
             default_slug = (
@@ -6954,7 +6951,7 @@ class MainWindow(QMainWindow):
             media_visibility=self._media_visibility,
             copy_maker=self._copy_maker,
             private_library=self._private_library,
-            default_title=default_title,
+            default_title=title,
             default_slug=default_slug,
             first_published=first_published,
             details=details,

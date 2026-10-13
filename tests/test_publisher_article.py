@@ -33,7 +33,7 @@ def test_slugify_produces_expected(title, expected):
     assert slugify(title) == expected
 
 
-NPUB = "npub1f2ktq2ycmh9wpmv0s6wqu6r9uvlvp7qr6sdqqk87x3dmh8s2u7tsj8kr6q"
+NPUB = "npub1f2ktq2xcmh9wpmv0s6wqu6r9uvlvp7qr6sdqqk87x3dmnc9w0juswgtagx"
 
 
 def test_a_slug_never_holds_a_key():
@@ -41,7 +41,7 @@ def test_a_slug_never_holds_a_key():
     entity, a shortened one ("npub1abcd…wxyz") and a long run of letters
     and digits (a hex key) are left out, never written into the link."""
     assert slugify(f"*Fafuui S s*nostr:{NPUB}") == "fafuui-s-s"
-    assert slugify("Fafuui S s @npub1f2kt\u2026r6q") == "fafuui-s-s"
+    assert slugify("Fafuui S s @npub1f2kt\u2026tagx") == "fafuui-s-s"
     assert slugify(f"Hello {'ab12' * 16} world") == "hello-world"
     assert slugify(f"Backup nsec1{'q' * 58}") == "backup"
     assert slugify(f"nostr:{NPUB}") == "untitled"
