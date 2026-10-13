@@ -107,7 +107,7 @@ form.save_button.click()
 rep.check("Save Backup File writes the file", backed.wait(30_000) and backup_path.exists(),
           backed.last[0] if backed.fired else "")
 alice_pk = win.pubkey
-text = backup_path.read_text() if backup_path.exists() else ""
+text = backup_path.read_text(encoding="utf-8") if backup_path.exists() else ""
 mode = stat.S_IMODE(backup_path.stat().st_mode) if backup_path.exists() else 0
 rep.check("the backup file is readable by its owner only (0600)", mode == 0o600, oct(mode))
 rep.check("the backup names the npub and holds an ncryptsec, never an nsec",
@@ -131,7 +131,8 @@ rep.check("the account is saved, local, active, and no longer pending",
 rep.check("the key is in the key vault (0600), not in the profiles file",
           stack.vault.has(alice_pk)
           and stat.S_IMODE((nd.HOME / ".config/my_editor/nostr_keys.json").stat().st_mode) == 0o600
-          and nak_sk_hex not in (nd.HOME / ".config/my_editor/nostr_profiles.json").read_text())
+          and nak_sk_hex not in (nd.HOME / ".config/my_editor/nostr_profiles.json").read_text(
+              encoding="utf-8"))
 
 nd.spin(500)
 relay_list = latest([RNOSTR, NRS, STRFRY], 10002, alice_pk)
@@ -200,7 +201,7 @@ if bwin is not None:
     bwin.backup_form.save_plain()
     backed.wait(15_000)
     nd.ALERT_POLICY = nd.default_alert_policy
-    plain = plain_path.read_text() if plain_path.exists() else ""
+    plain = plain_path.read_text(encoding="utf-8") if plain_path.exists() else ""
     rep.check("the unprotected backup asks first, then holds the nsec",
               any("without a password" in a["title"] for a in nd.ALERTS_SEEN)
               and bech32.encode_nsec(nak_sk_hex) in plain)

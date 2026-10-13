@@ -927,7 +927,7 @@ class Report:
                 "slot_errors": SLOT_ERRORS,
                 "patched_modules": _PATCHED_MODULES}
         path = OUT_DIR / f"{self.name}.json"
-        path.write_text(json.dumps(data, indent=2, default=str))
+        path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
         counts = {}
         for c in self.checks:
             counts[c["status"]] = counts.get(c["status"], 0) + 1
@@ -958,11 +958,11 @@ class FakeWeb:
             body.encode() if isinstance(body, str) else json.dumps(body).encode())
         target.write_bytes(data)
         if content_type:
-            (target.parent / (target.name + ".ctype")).write_text(content_type)
+            (target.parent / (target.name + ".ctype")).write_text(content_type, encoding="utf-8")
 
     def requests(self) -> List[str]:
         log = self.root / "_requests.log"
-        return log.read_text().splitlines() if log.exists() else []
+        return log.read_text(encoding="utf-8").splitlines() if log.exists() else []
 
     def start(self) -> "FakeWeb":
         _require_free_port(self.port)
@@ -1025,7 +1025,7 @@ def _serve(port: int, root: str) -> None:
 
     class Handler(BaseHTTPRequestHandler):
         def _log(self):
-            with open(os.path.join(root, "_requests.log"), "a") as log:
+            with open(os.path.join(root, "_requests.log"), "a", encoding="utf-8") as log:
                 log.write(f"{self.command} {self.path}\n")
 
         def do_GET(self):
@@ -1044,7 +1044,7 @@ def _serve(port: int, root: str) -> None:
             data = open(target, "rb").read()
             ctype_file = target + ".ctype"
             if os.path.isfile(ctype_file):
-                ctype = open(ctype_file).read().strip()
+                ctype = open(ctype_file, encoding="utf-8").read().strip()
             else:
                 ctype = types.get(os.path.splitext(target)[1], "application/json")
             self.send_response(200)
@@ -1112,7 +1112,7 @@ class DockerBlossom:
     def __init__(self, port: int, name: str) -> None:
         self.port, self.name = port, f"ndak-myeditor-blossom-{name}"
         self.dir = Path(tempfile.mkdtemp(prefix=f"ndak-blossom-{name}-"))
-        (self.dir / "config.yml").write_text(_BLOSSOM_CONFIG)
+        (self.dir / "config.yml").write_text(_BLOSSOM_CONFIG, encoding="utf-8")
 
     def start(self) -> "DockerBlossom":
         subprocess.run(["docker", "rm", "-f", self.name], capture_output=True)
@@ -1152,7 +1152,8 @@ class StandInBlossom:
         path = self.dir / "requests.jsonl"
         if not path.exists():
             return []
-        return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+        lines = path.read_text(encoding="utf-8").splitlines()
+        return [json.loads(line) for line in lines if line.strip()]
 
     def stop(self) -> None:
         if self.proc is not None:
@@ -1200,7 +1201,7 @@ def _serve_blossom(port: int, root: str) -> None:
     owners: Dict[str, dict] = {}        # sha -> {"type", "size", "uploaded", "owners": set}
 
     def log(entry: dict) -> None:
-        with open(os.path.join(root, "requests.jsonl"), "a") as fh:
+        with open(os.path.join(root, "requests.jsonl"), "a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry) + "\n")
 
     def auth_event(header: str):
