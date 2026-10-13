@@ -284,3 +284,13 @@ def test_the_sheet_names_every_kind_the_library_keeps(tmp_path):
     texts = [label.text() for label in dialog.findChildren(QLabel)]
     assert ("Images, videos, audio and PDFs you add are kept on these servers. New files go "
             "to the first one, and the others keep copies.") in texts
+
+
+@pytest.mark.parametrize("address, row", [("https://[2001:db8::1]:8443", "2001:db8::1"),
+                                          ("http://[::1]:3000", "::1")])
+def test_a_server_at_an_ip_address_is_listed_by_it(tmp_path, address, row):
+    dialog, settings, _changes = sheet(tmp_path)
+    dialog.address.setText(address)
+    dialog.add_button.click()
+    assert settings.configured_servers[-1] == address
+    assert rows(dialog)[-1] == row

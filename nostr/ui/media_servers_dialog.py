@@ -89,6 +89,16 @@ def server_address(text: str) -> Tuple[Optional[str], str]:
     return (origin, "") if url_safety.is_safe_media_url(origin) else (None, "https")
 
 
+def _display_host(host: str) -> str:
+    """``host`` as a person reads it. An IP address is shown as it is
+    written. A host in another script is kept in its ASCII form, and
+    shown as it is written where Qt (as a browser) trusts its domain not
+    to mix lookalike letters."""
+    if not host or ":" in host:
+        return host
+    return QUrl.fromAce(host.encode("ascii", "replace")) or host
+
+
 def _address_problem(problem: str) -> str:
     return {
         "space": _("A server address can’t have spaces in it."),
@@ -227,12 +237,7 @@ class MediaServersDialog(QDialog):
     # -- state ---------------------------------------------------------------
 
     def _name(self, origin: str) -> str:
-        host = url_safety.host_of(origin)
-        # A host in another script is kept in its ASCII form, and shown
-        # as it is written where Qt (as a browser) trusts its domain not
-        # to mix lookalike letters.
-        return self._label(origin) or (QUrl.fromAce(host.encode("ascii", "replace"))
-                                       if host else origin)
+        return self._label(origin) or _display_host(url_safety.host_of(origin)) or origin
 
     def _refresh(self, select: str = "") -> None:
         configured = self._settings.configured_servers
