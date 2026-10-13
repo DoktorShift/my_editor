@@ -77,7 +77,7 @@ An article's details (title, summary, cover, hashtags, slug, the date it first w
 
 ### Audio and video
 
-`Insert > Audio or Video…` makes the file an asset of the document, as a picture is (`AssetManager.adopt_media`: named by its hash, uploaded through the asset queue, kept through a crash or a restart), shown as a card (`nostr/ui/media_card.py`). Its type comes from one table (`media_files.py`), never the system's. Once uploaded it is written as its address, with its extension so readers can tell audio from video, and described by an `imeta` tag (NIP-92: its type, hash and size); until then it is written nowhere, and nothing is published while one is in the text.
+`Insert > Audio or Video…` makes the file an asset of the document, as a picture is (`AssetManager.adopt_media`: named by its hash, uploaded through the asset queue, kept through a crash or a restart), shown as a card (`nostr/ui/media_card.py`). Its type comes from one table (`media_files.py`), never the system's. Once uploaded it is written as its address, with its extension so readers can tell audio from video (`media_files.address_with_extension`), and described by an `imeta` tag (NIP-92: its type, hash and size); until then it is written nowhere, nothing is published while one is in the text, and a file saved meanwhile is edited again when the upload is done. It stays a paragraph of its own however it comes in (`HtmlEditor._set_media_apart` for pastes and drops).
 
 ### Relays and routing
 
