@@ -165,6 +165,7 @@ def place_document(temporary: PathLike, path: PathLike) -> None:
         except FileNotFoundError:
             existing = None
         if existing is not None:
+            _keep_owner(temporary, existing)
             os.chmod(temporary, stat.S_IMODE(existing.st_mode))
             _copy_extended_attributes(target, temporary)
         else:
@@ -174,6 +175,21 @@ def place_document(temporary: PathLike, path: PathLike) -> None:
         _remove_quietly(temporary)
         raise
     _sync_folder(os.path.dirname(target))
+
+
+def _keep_owner(temporary: str, existing: os.stat_result) -> None:
+    """Best effort, as the system's editors do: the file keeps its group
+    (any account may give its file one of its own groups) and its owner
+    (where this account may give it). Before the permissions are set,
+    which changing the owner can clear."""
+    if not hasattr(os, "chown"):
+        return
+    for owner, group in ((existing.st_uid, existing.st_gid), (-1, existing.st_gid)):
+        try:
+            os.chown(temporary, owner, group)
+            return
+        except OSError:
+            continue
 
 
 def _hard_linked(target: str) -> bool:

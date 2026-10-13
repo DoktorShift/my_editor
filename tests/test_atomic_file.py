@@ -343,6 +343,21 @@ def test_a_temporary_file_of_the_longest_name_still_fits(tmp_path):
 
 
 @posix_only
+def test_a_document_keeps_its_group(tmp_path):
+    """As the system's own editors keep it, not the folder's or the
+    person's main group."""
+    path = tmp_path / "team.md"
+    path.write_bytes(b"old")
+    other = [g for g in os.getgroups() if g != os.stat(path).st_gid]
+    if not other:
+        pytest.skip("this account is in no other group")
+    os.chown(path, -1, other[0])
+    save_document(path, b"new")
+    assert os.stat(path).st_gid == other[0]
+    assert path.read_bytes() == b"new"
+
+
+@posix_only
 def test_a_link_stays_a_link(tmp_path):
     real = tmp_path / "real.md"
     real.write_bytes(b"old")
