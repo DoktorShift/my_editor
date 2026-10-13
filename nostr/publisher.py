@@ -33,6 +33,7 @@ reject the blob it just downloaded, which is worse than an absent one.
 
 from __future__ import annotations
 
+import hashlib
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -46,7 +47,7 @@ from i18n import _, display_locale, ngettext
 
 from . import CLIENT_NAME
 from .article_details import AUTHOR_MARKER
-from .bech32 import decode_npub, decode_nprofile, encode_nprofile
+from .bech32 import bech32_decode, decode_npub, decode_nprofile, encode_nprofile
 from .blossom.hashes import blob_url, hash_from_url
 from .bunker import BunkerClient, BunkerSessionPool
 from .drafts import (
@@ -606,40 +607,75 @@ def find_first_publication(relay_pool: RelayPool, relay_directory: RelayDirector
 # Slug helper                                                                  #
 # --------------------------------------------------------------------------- #
 
-_SLUG_KEEP = re.compile(r"[^a-z0-9]+")
-# A Nostr entity in a title (a mention, a quoted note, a key), whole or
-# shortened as a name it has none ("npub1abcd\u2026wxyz").
-_SLUG_ENTITY = re.compile(
-    r"(?:nostr:)?(?:npub|nprofile|nsec|ncryptsec|note|nevent|naddr)1[0-9a-z]*"
-    r"(?:\u2026[0-9a-z]+)?", re.IGNORECASE)
-# A word of the slug this long with a digit in it is a key or a hash, not
-# a word (the longest German words have no digits).
-_SLUG_KEY_LENGTH = 24
+# A Nostr entity written in a title (a mention, a quote, a key): left out
+# of the link name when it really is one (its checksum holds); a word that
+# only starts like one ("Note10", "note1 on") stays.
+_SLUG_ENTITY = re.compile(r"(?:nostr:)?((?:npub|nprofile|nsec|ncryptsec|note|nevent|naddr)1"
+                          r"[0-9a-z]+)", re.IGNORECASE)
+_SLUG_ENTITY_KINDS = ("npub", "nprofile", "nsec", "ncryptsec", "note", "nevent", "naddr")
+# One shortened as a name it has none ("npub1abcd\u2026wxyz").
+_SLUG_SHORT_KEY = re.compile(r"(?:npub|nprofile|note|nevent|naddr)1[0-9a-z]*\u2026[0-9a-z]+",
+                             re.IGNORECASE)
+# A hex key or hash: never a word.
+_SLUG_HEX = re.compile(r"[0-9a-f]{32,}")
+# Letters Unicode does not take apart into a letter and an accent.
+_SLUG_LETTERS = str.maketrans({"\u0142": "l", "\u00f8": "o", "\u0111": "d", "\u00e6": "ae",
+                               "\u0153": "oe", "\u00df": "ss", "\u1e9e": "ss",
+                               "\u00fe": "th", "\u00f0": "d", "\u0131": "i",
+                               "\u0127": "h", "\u0167": "t", "\u0140": "l"})
 SLUG_MAX = 48
 
 
-def slugify(text: str, *, fallback: str = "untitled") -> str:
-    """Turn a title (or filename) into a stable d-tag identifier: the
-    article's link name.
+def _is_entity(word: str) -> bool:
+    try:
+        hrp, _data = bech32_decode(word)
+    except ValueError:
+        return False
+    return hrp in _SLUG_ENTITY_KINDS
 
-    Lowercase, ASCII-only, hyphen-separated, a letter with an accent as
-    the letter ("Grüße" is "grusse"). A Nostr entity or key in the title
-    is left out (a mention shows as a name in the title, never as a key in
-    the link), and so is a long run of letters and digits (a hex key). At
-    most ``SLUG_MAX`` characters, cut after a word where one ends.
-    Returns ``fallback`` if the cleaned result is empty.
+
+def slugify(text: str) -> str:
+    """Turn a title (or a file's name) into the article's link name, its
+    d-tag identifier.
+
+    Lower case, words joined by hyphens. Latin letters are written without
+    their accents ("Grüße" is "grusse", "Łódź" is "lodz"); a word in
+    another script is kept as written (NIP-23 identifiers are any text,
+    as Hugo and WordPress keep such slugs), so articles titled in
+    Cyrillic or Japanese never share one name. A Nostr key, mention or
+    quote in the title is left out (only one whose checksum holds; a word
+    like "Note10" stays), and so is a hex key. At most ``SLUG_MAX``
+    characters, cut after a word where one ends. A title with no words
+    left (emoji only) gets a short name of its own from the title, never
+    one shared by every such title; no title gives none.
     """
-    text = _SLUG_ENTITY.sub(" ", text or "").replace("\u00df", "ss").replace("\u1e9e", "ss")
-    text = "".join(char for char in unicodedata.normalize("NFKD", text)
-                   if not unicodedata.combining(char))
-    words = [word for word in _SLUG_KEEP.split(text.lower())
-             if word and not (len(word) >= _SLUG_KEY_LENGTH
-                              and any(char.isdigit() for char in word))]
-    cleaned = "-".join(words)
-    if len(cleaned) > SLUG_MAX:
-        cut = cleaned[:SLUG_MAX + 1]
-        cleaned = cut[:cut.rfind("-")] if "-" in cut else cleaned[:SLUG_MAX]
-    return cleaned or fallback
+    if not (text or "").strip():
+        return ""
+    cleaned = _SLUG_SHORT_KEY.sub(" ", text)
+    cleaned = _SLUG_ENTITY.sub(lambda found: " " if _is_entity(found.group(1))
+                               else found.group(0), cleaned)
+    cleaned = cleaned.lower().translate(_SLUG_LETTERS)
+    kept: List[str] = []
+    for char in unicodedata.normalize("NFKD", cleaned):
+        if unicodedata.combining(char) and kept and kept[-1].isascii():
+            continue                       # a Latin letter's accent
+        kept.append(char)
+    cleaned = unicodedata.normalize("NFC", "".join(kept))
+    words, word = [], []
+    for char in cleaned + " ":
+        if unicodedata.category(char)[0] in "LNM":
+            word.append(char)
+        elif word:
+            words.append("".join(word))
+            word = []
+    words = [w for w in words if not _SLUG_HEX.fullmatch(w)]
+    slug = "-".join(words)
+    if len(slug) > SLUG_MAX:
+        cut = slug[:SLUG_MAX + 1]
+        slug = cut[:cut.rfind("-")] if "-" in cut else slug[:SLUG_MAX]
+    if not slug:
+        slug = "article-" + hashlib.sha256(text.strip().encode("utf-8")).hexdigest()[:8]
+    return slug
 
 
 # --------------------------------------------------------------------------- #

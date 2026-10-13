@@ -44,7 +44,7 @@ def test_a_slug_never_holds_a_key():
     assert slugify("Fafuui S s @npub1f2kt\u2026tagx") == "fafuui-s-s"
     assert slugify(f"Hello {'ab12' * 16} world") == "hello-world"
     assert slugify(f"Backup nsec1{'q' * 58}") == "backup"
-    assert slugify(f"nostr:{NPUB}") == "untitled"
+    assert slugify(f"nostr:{NPUB}").startswith("article-")
     assert slugify("Hello @DrShift") == "hello-drshift"          # a name is a word
 
 
@@ -57,11 +57,45 @@ def test_a_slug_is_cut_at_a_word():
     assert len(slugify("x" * 90)) == 48                           # one word: cut in it
 
 
-def test_slugify_empty_returns_fallback():
-    assert slugify("") == "untitled"
-    assert slugify("   ") == "untitled"
-    assert slugify("!!!") == "untitled"
-    assert slugify("", fallback="draft") == "draft"
+def test_slugify_of_nothing_is_nothing():
+    assert slugify("") == ""
+    assert slugify("   ") == ""
+
+
+@pytest.mark.parametrize("title, slug", [
+    ("Note10 ideas for 2026", "note10-ideas-for-2026"),        # words, not keys
+    ("note1 on writing", "note1-on-writing"),
+    ("npub1 is a prefix", "npub1-is-a-prefix"),
+    ("Łódź and Øl", "lodz-and-ol"),
+    ("Smørrebrød, Ærø, Œuvre, Straße", "smorrebrod-aero-oeuvre-strasse"),
+    ("Þingvellir ðe", "thingvellir-de"),
+    ("Привет, мир", "привет-мир"),                            # kept as written, in lower case
+    ("日本語のタイトル 2026", "日本語のタイトル-2026"),
+    ("नमस्ते दुनिया", "नमस्ते-दुनिया"),                            # the vowel signs stay
+    ("Ελληνικά Νέα", "ελληνικά-νέα"),
+])
+def test_a_slug_keeps_every_scripts_words(title, slug):
+    """Review low 3: an ordinary word that starts like a key was dropped,
+    letters with a stroke vanished, and a title in another script became
+    "untitled" for every article, so they replaced one another on relays."""
+    assert slugify(title) == slug
+
+
+def test_a_title_with_no_words_gets_a_link_name_of_its_own():
+    first, second = slugify("🌸🌸🌸"), slugify("👍🏽 !!!")
+    assert first.startswith("article-") and second.startswith("article-")
+    assert first != second and len(first) <= 20
+    assert slugify("🌸🌸🌸") == first                         # the same title, the same name
+
+
+def test_only_a_real_key_is_left_out():
+    import secrets
+    from nostr import bech32
+    nsec = bech32.encode_nsec(secrets.token_hex(32))
+    note = bech32.encode_note("ab" * 32)
+    assert slugify(f"Backup {nsec} now") == "backup-now"
+    assert slugify(f"See {note} today") == "see-today"
+    assert slugify(f"{note[:-1]}x").startswith("note1")      # no key: a word
 
 
 # --------------------------------------------------------------------------- #
