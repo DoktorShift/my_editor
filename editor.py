@@ -221,6 +221,7 @@ class HtmlEditor(QTextEdit):
         # what it is called (undo_step). A step can hold several changes.
         self._run: Optional[_Run] = None
         self._undo_names: dict = {}
+        self._joined_at = None          # a run's step being joined (_typing)
         # Where Copy's data is made, with nothing selected (createMime...).
         self._empty_copy = None
         # What a paste or a drop is called in Edit > Undo (insertFromMimeData).
@@ -335,12 +336,16 @@ class HtmlEditor(QTextEdit):
         before = run.before if goes_on else doc.availableUndoSteps()
         if goes_on:
             cursor.joinPreviousEditBlock()
+            # Qt reports a joined block that ends with nothing in it as a
+            # new step: _forget_redone_names knows it is none.
+            self._joined_at = run.steps
         else:
             cursor.beginEditBlock()
         try:
             yield cursor
         finally:
             cursor.endEditBlock()
+            self._joined_at = None
             doc.contentsChange.disconnect(changed)
             if changes:
                 self._run = _Run(kind, cursor.position(), doc.availableUndoSteps(),
@@ -425,8 +430,12 @@ class HtmlEditor(QTextEdit):
         return names
 
     def _forget_redone_names(self) -> None:
-        """A new change drops what could be redone, and with it its names."""
+        """A new change drops what could be redone, and with it its names.
+        A run's block joined and ended with nothing in it (Tab that only
+        goes to the next cell, Backspace at the start) is no change."""
         now = self.document().availableUndoSteps()
+        if now == self._joined_at:
+            return
         self._undo_names = {steps: name for steps, name in self._undo_names.items()
                             if steps < now}
 

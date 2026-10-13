@@ -516,3 +516,30 @@ def test_the_toolbar_lists_and_takes_back_steps_of_undo(tmp_path):
     assert r["focusable"] == [True, True, "QToolButton"]
     assert r["names"] == ["Undo", "Redo"]
     assert r["popup"] == [True, True]
+
+
+@pytest.mark.parametrize("which", [K.Key_Tab, K.Key_Backtab, K.Key_Return])
+def test_a_key_that_only_moves_in_a_table_keeps_every_name(which):
+    """Review M1: Tab, Shift-Tab or Return that only goes to another cell
+    ended the run's edit block with nothing in it; Qt took that for a new
+    step, and the top step's name, and with it the whole list, was lost."""
+    ed = structured()
+    ed.insert_table(3, 2)
+    QTest.keyClicks(ed, "a")
+    if which == K.Key_Backtab:
+        key(ed, K.Key_Tab)
+        QTest.keyClicks(ed, "b")
+    history = ed.undo_history()
+    key(ed, which)
+    assert ed.undo_history() == history and ed.undo_name() == "Typing"
+
+
+def test_backspace_at_the_start_after_a_run_of_deleting_keeps_every_name():
+    ed = structured("abc")
+    ed.end_typing_run()
+    key(ed, K.Key_Backspace)
+    key(ed, K.Key_Backspace)
+    assert ed.undo_history() == ["Typing", "Typing"]
+    for _ in range(3):                       # past the start: nothing to delete
+        key(ed, K.Key_Backspace)
+    assert ed.toPlainText() == "" and ed.undo_history() == ["Typing", "Typing"]
