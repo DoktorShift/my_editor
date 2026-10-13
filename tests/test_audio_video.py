@@ -223,3 +223,57 @@ def test_audio_in_the_window(tmp_path):
     assert "Below" in r["return_then_type"] and "￼" not in r["return_then_type"]
     assert r["backspace_from_below"][:2] == ["Listen:", "Below"]        # H1
     assert r["undo_backspace_brings_it_back"] is True
+
+
+RMD_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+from nostr.blossom.store import MediaFile
+
+song, sha, folder = sys.argv[2], sys.argv[3], sys.argv[4]
+w = main_window.MainWindow()
+w.show()
+w._media_store.upload_bytes = lambda body, name, mime_type: None
+w.nostr_state._active = True
+w._update_nostr_commands()
+w._upload_limit = lambda: 10**9
+r = {}
+ed = w.new_tab()
+ed.setFocus()
+QTest.keyClicks(ed, "Before.")
+w._upload_into(ed, song)
+QTest.keyClicks(ed, "After.")
+w._save_to(os.path.join(folder, "during.rmd"))
+r["during"] = open(os.path.join(folder, "during.rmd"), encoding="utf-8").read()
+r["copied"] = os.path.exists(os.path.join(folder, "during_media", sha + ".mp3"))
+url = f"https://cdn.example/{sha}"
+w._media_store.upload_status.emit(f"myeditor-asset:{sha}", "uploading")
+w._media_store.upload_finished.emit(f"myeditor-asset:{sha}", MediaFile(
+    hash=sha, url=url, mime_type="audio/mpeg", size=1,
+    urls=[{"server": "https://cdn.example", "url": url}]))
+app.processEvents()
+w._save_to(os.path.join(folder, "after.rmd"))
+r["after"] = open(os.path.join(folder, "after.rmd"), encoding="utf-8").read()
+ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_r_markdown_writes_audio_as_a_link_during_and_after_the_upload(tmp_path):
+    """Review N4: R Markdown links to the file, a copy beside the document
+    while it uploads and its address once uploaded; never "image
+    unavailable"."""
+    song = tmp_path / "song.mp3"
+    song.write_bytes(BODY)
+    r = run_window_script(RMD_SCRIPT, tmp_path, str(song), SHA, str(tmp_path))
+    assert f"Before.\n\n[song.mp3](during_media/{SHA}.mp3)\n\nAfter." in r["during"]
+    assert r["copied"] is True
+    assert f"Before.\n\n[song.mp3]({URL}.mp3)\n\nAfter." in r["after"]
+    assert "unavailable" not in r["during"] + r["after"]

@@ -103,7 +103,7 @@ from export_pdf import export_pdf, load_page_setup
 from page_setup_dialog import PageSetupDialog
 import printing
 from pdf_viewer import PdfViewerTab
-from rmarkdown import KnitRunner, derive_title, document_to_rmd, media_dir_for
+from rmarkdown import KnitRunner, MediaLink, derive_title, document_to_rmd, media_dir_for
 from rmd_setup_dialog import RmdSetupDialog
 import rmd_toolchain
 
@@ -3787,9 +3787,16 @@ class MainWindow(QMainWindow):
         # ![alt](sidecar) syntax here. Reading the source out as plain text
         # would drop it, leaving a bare U+FFFC for pandoc to choke on.
         target = self._image_target_for_file_save(ed.document(), path)
-        source = serialize_plain_with_images(
-            ed.document(), self._markdown_reference_for(target)
-        )
+        picture = self._markdown_reference_for(target)
+
+        def reference(fmt):
+            media = _media_asset(self._asset_manager, fmt.name())
+            if media is None:
+                return picture(fmt)
+            link = self._media_file_link(media, path)
+            return link.markdown() if link is not None else None
+
+        source = serialize_plain_with_images(ed.document(), reference)
         if getattr(ed, "_loaded_as_rmd_source", False) or origin.endswith(".rmd"):
             return source
         if source.lstrip().startswith("---") and not self._has_formatting(ed):
@@ -3810,6 +3817,9 @@ class MainWindow(QMainWindow):
         policy = image_safety.ImageRootPolicy(self._image_roots_for(rmd_path))
 
         def copy(name: str):
+            media = _media_asset(self._asset_manager, name)
+            if media is not None:
+                return self._media_file_link(media, rmd_path)
             sha = parse_asset_key(name)
             if sha is not None:
                 data = self._asset_manager.resolve_bytes(name)
@@ -3842,6 +3852,25 @@ class MainWindow(QMainWindow):
             return f"{os.path.basename(media_dir)}/{filename}"
 
         return copy
+
+    def _media_file_link(self, asset, save_path: str) -> Optional[MediaLink]:
+        """An audio or video file as a link from the document saved at
+        ``save_path``: to its address once uploaded, else to a copy of it
+        in the document's media folder, as the document's pictures are."""
+        label = asset.alt or f"{asset.sha256}{media_files.extension_for(asset.mime)}"
+        if asset.is_uploaded:
+            return MediaLink(label, _published_address(asset))
+        data = self._asset_manager.resolve_bytes(asset.key)
+        if not data:
+            return None
+        media_dir = media_dir_for(save_path)
+        name = asset.sha256 + media_files.extension_for(asset.mime)
+        try:
+            os.makedirs(media_dir, exist_ok=True)
+            save_document(os.path.join(media_dir, name), data)
+        except OSError:
+            return None
+        return MediaLink(label, f"{os.path.basename(media_dir)}/{name}")
 
     def _save_as_rtf(self, editor, path: str) -> bool:
         try:
@@ -8368,11 +8397,16 @@ def _details_saved_as(details: Optional[ArticleDetails], choice: StashChoice) ->
                              summary=choice.summary)
 
 
-def _is_media(assets, name: str) -> bool:
-    """Whether the object named ``name`` is an audio or video asset."""
+def _media_asset(assets, name: str):
+    """The audio or video asset the object named ``name`` is, or None."""
     sha = parse_asset_key(name)
     asset = assets.get(sha) if sha else None
-    return asset is not None and asset.is_media
+    return asset if asset is not None and asset.is_media else None
+
+
+def _is_media(assets, name: str) -> bool:
+    """Whether the object named ``name`` is an audio or video asset."""
+    return _media_asset(assets, name) is not None
 
 
 def _published_address(asset) -> str:

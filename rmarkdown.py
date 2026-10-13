@@ -14,6 +14,8 @@ Export model (mirrors how RStudio treats documents):
   which copies each image into a sidecar media folder next to the .Rmd
   and returns the relative reference. Knitted html_document output is
   self-contained, so the rendered artifact still travels as one file.
+  For audio and video it returns a MediaLink instead: the file is a link
+  of its own paragraph, "[name](address)", not a picture.
 
 Knitting runs `Rscript -e 'rmarkdown::render(...)'` in a QProcess with
 the environment composed by rmd_toolchain (managed R, pandoc, private
@@ -27,6 +29,7 @@ import datetime
 import json
 import os
 import re
+from dataclasses import dataclass
 
 from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, Signal
 from PySide6.QtGui import QTextBlockFormat, QTextCharFormat, QTextListFormat
@@ -118,6 +121,19 @@ def _render_text_run_md(text: str, fmt, heading: bool = False) -> str:
     return lead + core + trail
 
 
+@dataclass(frozen=True)
+class MediaLink:
+    """What copy_image answers for an audio or video file: a link to it,
+    named ``label``, at ``url`` (its address, or its copy beside the .Rmd)."""
+
+    label: str
+    url: str
+
+    def markdown(self) -> str:
+        label = re.sub(r"([\\\[\]])", r"\\\1", self.label)
+        return f"[{label}]({self.url})"
+
+
 def _render_runs_md(runs, copy_image, heading: bool = False) -> str:
     parts = []
     link_parts: list[str] = []
@@ -140,7 +156,9 @@ def _render_runs_md(runs, copy_image, heading: bool = False) -> str:
             continue
         if fmt.isImageFormat():
             target = copy_image(fmt.toImageFormat().name()) if copy_image else None
-            if target:
+            if isinstance(target, MediaLink):
+                parts.append(target.markdown())
+            elif target:
                 parts.append(f"![]({target})")
             else:
                 parts.append("*[image unavailable]*")
@@ -255,6 +273,16 @@ def document_to_rmd(doc, title: str, copy_image=None) -> str:
             prev_kind = "blank"
             continue
 
+        media = _media_link(block, copy_image)
+        if media is not None:
+            # Audio or video: a link in a paragraph of its own.
+            if prev_kind not in (None, "blank"):
+                lines.append("")
+            lines.append(media.markdown())
+            lines.append("")
+            prev_kind = "blank"
+            continue
+
         content = _guard_line_start(
             _render_runs_md(list(iter_block_runs(block)), copy_image))
         if prev_kind == "text":
@@ -269,6 +297,17 @@ def document_to_rmd(doc, title: str, copy_image=None) -> str:
 
     body = "\n".join(lines).strip("\n")
     return f"{header}\n\n{body}\n"
+
+
+def _media_link(block, copy_image):
+    """The MediaLink of a paragraph that is one audio or video file, else None."""
+    if copy_image is None or block.text() != _OBJ:
+        return None
+    fmt = block.begin().fragment().charFormat()
+    if not fmt.isImageFormat():
+        return None
+    target = copy_image(fmt.toImageFormat().name())
+    return target if isinstance(target, MediaLink) else None
 
 
 def media_dir_for(rmd_path: str) -> str:
