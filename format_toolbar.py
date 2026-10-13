@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from typing import Dict, Optional
 
-from PySide6.QtCore import QEvent, QPointF, QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QPointF, QSize, Qt
 from PySide6.QtGui import QAction, QColor, QKeySequence, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QHBoxLayout, QMenu, QPushButton, QStyle, QStyleOptionButton, QStylePainter, QToolBar,
@@ -310,9 +310,9 @@ class FormatToolbar(QToolBar):
             more.setAccessibleName(_("More Formatting"))
             more.setToolTip(_("More Formatting"))
             if more.menu() is not None:
-                # Once Qt has filled it again, which it does as it opens.
-                more.menu().aboutToShow.connect(lambda m=more.menu(): QTimer.singleShot(
-                    0, lambda: self._hold_hidden_popups(m)))
+                # Before it shows, so it paints whole the first time.
+                self._more_menu = more.menu()
+                self._more_menu.aboutToShow.connect(self._hold_hidden_popups)
         self.set_style_name(_("Body"))
         # Each pop-up's arrow, drawn (Disclosure): in the room the sheet
         # gives Undo's, Redo's and Insert's menu, and the style pop-up's.
@@ -329,10 +329,14 @@ class FormatToolbar(QToolBar):
         redo = self.buttons["redo"].sizeHint().width() + self.layout().spacing()
         return QSize(hint.width() + redo, hint.height())
 
-    def _hold_hidden_popups(self, menu: QMenu) -> None:
-        """The chevron's ``menu``, as it opens: the style pop-up and Insert
-        too when they have no room, as submenus (Qt lists the hidden
-        buttons only, not the pop-ups)."""
+    def _hold_hidden_popups(self) -> None:
+        """The chevron's menu, as it opens: the style pop-up and Insert too
+        when they have no room, as submenus (Qt lists the hidden buttons
+        only, not the pop-ups)."""
+        menu = self._more_menu
+        # A layout still to be done would fill the menu again once shown,
+        # without them: it is done now, before they go in.
+        self.layout().activate()
         for entry in self._popup_entries:
             menu.removeAction(entry)
         self._popup_entries = []

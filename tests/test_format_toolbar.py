@@ -439,3 +439,46 @@ def test_the_style_popup_follows_the_style_menu(toolbar):
     assert not toolbar.style_button.isEnabled()
     style_menu.menuAction().setEnabled(True)
     assert toolbar.style_button.isEnabled()
+
+
+SHOWN_WHOLE = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtCore import QEvent, QObject
+from PySide6.QtWidgets import QApplication, QToolButton
+app = QApplication(sys.argv[:1])
+import main_window
+
+w = main_window.MainWindow()
+w.show()
+ed = w.new_tab()
+app.processEvents()
+w.resize(w.minimumSizeHint())          # its layout still to be done when it opens
+tb = w.format_toolbar
+menu = tb.findChild(QToolButton, "qt_toolbar_ext_button").menu()
+seen = []
+
+class Count(QObject):
+    def eventFilter(self, obj, event):
+        if event.type() in (QEvent.Type.Show, QEvent.Type.Paint):
+            seen.append(len([a for a in menu.actions() if a.menu() is not None]))
+        return False
+
+count = Count()
+menu.installEventFilter(count)
+menu.popup(tb.mapToGlobal(tb.rect().bottomLeft()))
+app.processEvents()
+app.processEvents()
+menu.hide()
+ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps({"seen": seen}))
+"""
+
+
+def test_the_chevron_menu_is_whole_from_its_first_paint(tmp_path):
+    # Review H3: Style and Insert went in after it showed, so it painted,
+    # then grew by two rows.
+    r = run_window_script(SHOWN_WHOLE, tmp_path)
+    assert r["seen"] and all(count == 2 for count in r["seen"]), r
