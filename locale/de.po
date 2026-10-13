@@ -5839,8 +5839,8 @@ msgstr "Zaps werden so geteilt, wie es eine andere App festgelegt hat."
 #: nostr/ui/article_details_panel.py:483
 #: nostr/ui/draft_relays_sheet.py:158
 #: nostr/ui/media_library_dialog.py:658
-#: nostr/ui/media_servers_dialog.py:159
-#: nostr/ui/media_servers_dialog.py:329
+#: nostr/ui/media_servers_dialog.py:200
+#: nostr/ui/media_servers_dialog.py:365
 msgid "Remove"
 msgstr "Entfernen"
 
@@ -7802,7 +7802,7 @@ msgstr[1] "{count} Dateien wurden nicht hinzugefügt. Die Mediathek nimmt Bilder
 msgid "Pasted Image"
 msgstr "Eingesetztes Bild"
 
-#: nostr/ui/media_saver.py:181
+#: nostr/ui/media_saver.py:182
 #, python-brace-format
 msgid "“{name}” couldn’t be saved there. Choose another folder."
 msgstr "„{name}“ konnte dort nicht gesichert werden. Wähle einen anderen Ordner."
@@ -7852,81 +7852,86 @@ msgstr "„{name}“ konnte nicht gesichert werden: Dort ist nicht genug Platz d
 msgid "“{name}” couldn’t be saved. Try again."
 msgstr "„{name}“ konnte nicht gesichert werden. Versuche es erneut."
 
-#: nostr/ui/media_servers_dialog.py:98
+#: nostr/ui/media_saver.py:181
+#, python-brace-format
+msgid "“{name}” couldn’t be saved: its name is too long. Choose a shorter one."
+msgstr "„{name}“ konnte nicht gespeichert werden: Der Name ist zu lang. Wähle einen kürzeren."
+
+#: nostr/ui/media_servers_dialog.py:139
 msgid "Enter a server address that starts with https://, such as https://media.example.com."
 msgstr "Gib eine Serveradresse ein, die mit https:// beginnt, etwa https://media.example.com."
 
-#: nostr/ui/media_servers_dialog.py:120
+#: nostr/ui/media_servers_dialog.py:161
 msgid "Media Servers"
 msgstr "Medienserver"
 
-#: nostr/ui/media_servers_dialog.py:142
+#: nostr/ui/media_servers_dialog.py:183
 msgid "Images, videos, audio and PDFs you add are kept on these servers. New files go to the first one, and the others keep copies."
 msgstr "Bilder, Videos, Audio und PDFs, die du hinzufügst, werden auf diesen Servern gespeichert. Neue Dateien gehen an den ersten, die anderen bewahren Kopien auf."
 
-#: nostr/ui/media_servers_dialog.py:148
+#: nostr/ui/media_servers_dialog.py:189
 msgid "Media servers"
 msgstr "Medienserver"
 
-#: nostr/ui/media_servers_dialog.py:155
+#: nostr/ui/media_servers_dialog.py:196
 msgid "Make Primary"
 msgstr "Als Hauptserver festlegen"
 
-#: nostr/ui/media_servers_dialog.py:157
+#: nostr/ui/media_servers_dialog.py:198
 msgid "New files go to this server first."
 msgstr "Neue Dateien gehen zuerst an diesen Server."
 
-#: nostr/ui/media_servers_dialog.py:170
+#: nostr/ui/media_servers_dialog.py:211
 msgid "Server address"
 msgstr "Serveradresse"
 
-#: nostr/ui/media_servers_dialog.py:177
+#: nostr/ui/media_servers_dialog.py:218
 msgid "Add Server"
 msgstr "Server hinzufügen"
 
-#: nostr/ui/media_servers_dialog.py:196
+#: nostr/ui/media_servers_dialog.py:237
 msgid "Add to List"
 msgstr "Zur Liste hinzufügen"
 
-#: nostr/ui/media_servers_dialog.py:210
+#: nostr/ui/media_servers_dialog.py:251
 msgid "Share this list so other Nostr apps find your files."
 msgstr "Teile diese Liste, damit andere Nostr-Apps deine Dateien finden."
 
-#: nostr/ui/media_servers_dialog.py:212
+#: nostr/ui/media_servers_dialog.py:253
 msgid "Share with Other Apps…"
 msgstr "Mit anderen Apps teilen …"
 
-#: nostr/ui/media_servers_dialog.py:254
+#: nostr/ui/media_servers_dialog.py:290
 msgid "Included with your membership"
 msgstr "In deiner Mitgliedschaft enthalten"
 
-#: nostr/ui/media_servers_dialog.py:94
+#: nostr/ui/media_servers_dialog.py:135
 msgid "A server address can’t have spaces in it."
 msgstr "Eine Serveradresse darf keine Leerzeichen enthalten."
 
-#: nostr/ui/media_servers_dialog.py:95
+#: nostr/ui/media_servers_dialog.py:136
 msgid "This address has an invisible character in it, as text copied from a web page sometimes does. Type it instead."
 msgstr "Diese Adresse enthält ein unsichtbares Zeichen, wie es in Text von Webseiten manchmal vorkommt. Tippe sie stattdessen ein."
 
-#: nostr/ui/media_servers_dialog.py:97
+#: nostr/ui/media_servers_dialog.py:138
 msgid "Enter a full server address, such as media.example.com."
 msgstr "Gib eine vollständige Serveradresse ein, etwa media.example.com."
 
-#: nostr/ui/media_servers_dialog.py:260
+#: nostr/ui/media_servers_dialog.py:296
 #, python-brace-format
 msgid "Your Nostr account also lists {servers}."
 msgstr "Dein Nostr-Konto nennt außerdem {servers}."
 
-#: nostr/ui/media_servers_dialog.py:327
+#: nostr/ui/media_servers_dialog.py:363
 msgid "Files already there stay there. The Media Library shows them only while another of your servers has them too."
 msgstr "Dateien, die schon dort sind, bleiben dort. Die Mediathek zeigt sie nur, solange auch ein anderer deiner Server sie hat."
 
-#: nostr/ui/media_servers_dialog.py:248
+#: nostr/ui/media_servers_dialog.py:284
 #, python-brace-format
 msgid "{server}, included with your membership"
 msgstr "{server}, in deiner Mitgliedschaft enthalten"
 
-#: nostr/ui/media_servers_dialog.py:326
+#: nostr/ui/media_servers_dialog.py:362
 #, python-brace-format
 msgid "Remove “{server}”?"
 msgstr "„{server}“ entfernen?"

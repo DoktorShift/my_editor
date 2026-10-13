@@ -382,6 +382,8 @@ _FULL_ERRNOS = {errno.ENOSPC, getattr(errno, "EDQUOT", errno.ENOSPC)}
 
 def write_problem(exc: OSError) -> str:
     """Why a file could not be written, as FileDownload says it."""
+    if exc.errno == errno.ENAMETOOLONG:
+        return "name"
     return "full" if exc.errno in _FULL_ERRNOS else "write"
 
 
@@ -391,8 +393,8 @@ class FileDownload(QObject):
     or why not: "cancelled", "network", "missing", "server",
     "too_large", "wrong_file", "unsafe", "key" (the transform could not
     open the right file: a private file's key is wrong), "full" (no room
-    on the disk) or "write". It is sent once, whatever goes wrong, and the part file is
-    gone by then."""
+    on the disk), "name" (too long for the folder) or "write". It is
+    sent once, whatever goes wrong, and the part file is gone by then."""
 
     progress = Signal(int, int)        # received, total
     finished = Signal(str)

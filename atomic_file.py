@@ -127,8 +127,7 @@ def save_document(path: PathLike, data: bytes) -> None:
         _write_in_place(target, data)
         return
     try:
-        fd, temporary = tempfile.mkstemp(prefix="." + os.path.basename(target) + ".",
-                                         suffix=".tmp", dir=folder)
+        fd, temporary = new_document_file(target)
     except PermissionError:
         _write_in_place(target, data)
         return
@@ -137,8 +136,8 @@ def save_document(path: PathLike, data: bytes) -> None:
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
-        os.chmod(temporary, stat.S_IMODE(existing.st_mode) if existing is not None
-                 else _NEW_FILE_MODE)
+        if existing is not None:
+            os.chmod(temporary, stat.S_IMODE(existing.st_mode))
         if existing is not None:
             _copy_extended_attributes(target, temporary)
         _replace(temporary, target)

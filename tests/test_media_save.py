@@ -576,3 +576,41 @@ def test_the_part_file_leaves_a_file_of_its_old_name_alone(tmp_path, monkeypatch
     assert wait_for(lambda: not saving(world), 5)
     assert (out / ".Pic.mp4.part").read_bytes() == b"someone else's"
     assert folder(out) == [".Pic.mp4.part", "Pic.mp4"]
+
+
+# --------------------------------------------------------------------------- #
+# A long name typed in Save As
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("cached", [False, True])
+def test_the_longest_name_a_folder_holds_is_saved(tmp_path, monkeypatch, server, cached):
+    """The system's save dialog takes a name of up to 255 bytes; nothing
+    the save adds to it for its own temporary file may push it over."""
+    body = b"long" * 100
+    media = blob(server, body)
+    world = library(tmp_path, monkeypatch, [media])
+    if cached:
+        world.dialog._loader.cache_path(media.hash).write_bytes(body)
+    out = tmp_path / "out"
+    out.mkdir()
+    name = "n" * 251 + ".mp4"
+    save_as(monkeypatch, world, media, out / name)
+    assert wait_for(lambda: (out / name).exists() and not saving(world), 5)
+    assert folder(out) == [name]
+
+
+@pytest.mark.parametrize("cached", [False, True])
+def test_a_name_too_long_for_the_folder_says_so(tmp_path, monkeypatch, server, cached):
+    body = b"long" * 100
+    media = blob(server, body)
+    world = library(tmp_path, monkeypatch, [media])
+    if cached:
+        world.dialog._loader.cache_path(media.hash).write_bytes(body)
+    out = tmp_path / "out"
+    out.mkdir()
+    name = "n" * 300 + ".mp4"
+    save_as(monkeypatch, world, media, out / name)
+    assert wait_for(lambda: not saving(world), 5)
+    assert world.dialog._status.text() == (
+        f"“{name}” couldn’t be saved: its name is too long. Choose a shorter one.")
+    assert folder(out) == []

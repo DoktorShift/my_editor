@@ -178,5 +178,6 @@ def save_failure(why: str, path: str) -> str:
         "full": _("“{name}” couldn’t be saved: there isn’t enough space for it there. "
                   "Free up some space or choose another folder."),
         "unreadable": _("“{name}” couldn’t be saved. Try again."),
+        "name": _("“{name}” couldn’t be saved: its name is too long. Choose a shorter one."),
     }.get(why) or _("“{name}” couldn’t be saved there. Choose another folder.")
     return said.format(name=os.path.basename(path))
