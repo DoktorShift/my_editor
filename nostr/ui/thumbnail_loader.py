@@ -389,8 +389,9 @@ class FileDownload(QObject):
     """One Save As download, streamed to a file beside the target and
     moved onto it only when it is the right file. ``finished`` carries ""
     or why not: "cancelled", "network", "missing", "server",
-    "too_large", "wrong_file", "unsafe", "full" (no room on the disk) or
-    "write". It is sent once, whatever goes wrong, and the part file is
+    "too_large", "wrong_file", "unsafe", "key" (the transform could not
+    open the right file: a private file's key is wrong), "full" (no room
+    on the disk) or "write". It is sent once, whatever goes wrong, and the part file is
     gone by then."""
 
     progress = Signal(int, int)        # received, total
@@ -542,7 +543,7 @@ class FileDownload(QObject):
             return ""
         data = self._transform(self._part.read_bytes())
         if data is None:
-            return "wrong_file"
+            return "key"
         write_bytes(self._target, data)
         return ""
 

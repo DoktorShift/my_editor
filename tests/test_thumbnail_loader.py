@@ -476,3 +476,14 @@ def test_save_as_of_a_private_file_writes_what_the_transform_opens(tmp_path):
     reply.finish()
     assert done == [""]
     assert target.read_bytes() == b"opened sealed bytes"
+
+
+def test_save_as_of_a_private_file_its_key_does_not_open_says_so(tmp_path):
+    envelope = b"sealed bytes"
+    sha = _sha(envelope)
+    _job, reply, target, done, _progress = _download(
+        tmp_path, FakeReply(status=200, body=envelope), data_sha=sha, size=len(envelope),
+        transform=lambda data: None)
+    reply.finish()
+    assert done == ["key"]
+    assert list(target.parent.iterdir()) == []

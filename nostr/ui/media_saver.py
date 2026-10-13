@@ -50,7 +50,11 @@ class MediaSaver(QObject):
     started = Signal(str)            # the path being saved
     progress = Signal(int)           # percent of it
     # The path, and "" when it is saved, "cancelled", or why it wasn't
-    # (a FileDownload reason, or "unreadable"): save_failure says it.
+    # (a FileDownload reason, or "unreadable": this computer's copy could
+    # not be read): save_failure says it. Only a reason another server
+    # may not have ("network", "missing", "server", "wrong_file") tries
+    # the next one; a private file's wrong key ("key") is the same
+    # wherever the file comes from.
     finished = Signal(str, str)
 
     def __init__(self, loader, parent: Optional[QObject] = None) -> None:
@@ -120,11 +124,11 @@ class MediaSaver(QObject):
         except OSError:
             data = b""
         if hashlib.sha256(data).hexdigest() != save.sha:
-            data = b""
-        if data and save.opener is not None:
-            data = save.opener(data) or b""
-        if not data:
             return "unreadable"
+        if save.opener is not None:
+            data = save.opener(data)
+            if data is None:
+                return "key"
         if save.keep_existing:
             save.target = free_path(save.target)
         try:
@@ -165,6 +169,7 @@ def save_failure(why: str, path: str) -> str:
         "wrong_file": _("“{name}” wasn’t saved: a media server returned the wrong file."),
         "unsafe": _("“{name}” wasn’t saved: a media server sent it from an address "
                     "MyEditor doesn’t trust."),
+        "key": _("“{name}” wasn’t saved: it’s kept privately, and its key doesn’t open it."),
         "full": _("“{name}” couldn’t be saved: there isn’t enough space for it there. "
                   "Free up some space or choose another folder."),
         "unreadable": _("“{name}” couldn’t be saved. Try again."),

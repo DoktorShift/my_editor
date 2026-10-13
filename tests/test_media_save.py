@@ -40,12 +40,15 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import nostr.ui.media_library_dialog as dialog_module  # noqa: E402
 from nostr.blossom.store import MediaFile  # noqa: E402
+from nostr.media.filecrypto import encrypt_file  # noqa: E402
+from nostr.media.media_visibility import MediaVisibility  # noqa: E402
+from nostr.media.visibility import PrivateBlob, PublicLedger  # noqa: E402
 from nostr.ui.media_library_dialog import MediaLibraryDialog  # noqa: E402
 from nostr.ui import media_saver  # noqa: E402
 from nostr.ui.media_saver import MediaSaver  # noqa: E402
 from nostr.ui import thumbnail_loader  # noqa: E402
 from nostr.ui.thumbnail_loader import ThumbnailLoader  # noqa: E402
-from tests.test_media_library import FakeStore, select  # noqa: E402
+from tests.test_media_library import FakeLibrary, FakeStore, select  # noqa: E402
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -70,6 +73,7 @@ def close_windows():
 class _Blobs:
     files: dict = {}         # sha256 -> bytes
     delay = 0.0              # seconds after each 64 KiB
+    asked: list = []         # the paths asked for
 
 
 class _Handler(http.server.BaseHTTPRequestHandler):
@@ -77,6 +81,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):  # noqa: N802
+        _Blobs.asked.append(self.path)
         body = _Blobs.files.get(self.path.strip("/").split(".")[0])
         if body is None:
             self.send_response(404)
@@ -131,13 +136,14 @@ def blob(server, body: bytes, *, day: int = 0, mime: str = "video/mp4") -> Media
                      uploaded_at_ms=1_780_000_000_000 - day * 86_400_000)
 
 
-def library(tmp_path, monkeypatch, files, *, names=None, saver=None, pick=False):
+def library(tmp_path, monkeypatch, files, *, names=None, saver=None, pick=False,
+            visibility=None):
     """The library window, with the real loader and its cache in tmp_path."""
     cache = tmp_path / "cache"
     monkeypatch.setattr(dialog_module, "ThumbnailLoader",
                         lambda parent=None: ThumbnailLoader(parent, cache_dir=cache))
     dialog = MediaLibraryDialog(store=FakeStore(files, names=names or {}), is_dark=False,
-                                pick_mode=pick, saver=saver)
+                                pick_mode=pick, saver=saver, visibility=visibility)
     dialog.resize(860, 560)
     dialog.show()
     QCoreApplication.processEvents()
@@ -446,3 +452,53 @@ def test_a_long_name_is_cut_to_what_a_folder_holds_keeping_its_extension(
     assert saved.endswith("ü.mp4")
     # With room for the hidden part file it is downloaded to, and a number.
     assert len(f".{saved} 99.part".encode()) <= 255
+
+
+# --------------------------------------------------------------------------- #
+# A private file
+# --------------------------------------------------------------------------- #
+
+KEY = "5c" * 32
+
+
+@pytest.mark.parametrize("key", ["6d" * 32, "zz" * 32, "abc"])
+def test_a_private_file_its_key_does_not_open_says_so_and_asks_no_other_server(
+        tmp_path, monkeypatch, server, key):
+    """The file is the right one (its hash matched): the key is wrong, and
+    no other server has a better one."""
+    envelope = encrypt_file(b"the real picture" * 100, key_hex=KEY).envelope
+    sha = hashlib.sha256(envelope).hexdigest()
+    _Blobs.files[sha] = envelope
+    other = server.replace("127.0.0.1", "localhost")
+    private = MediaFile(hash=sha, url=f"{server}/{sha}",
+                        urls=[{"server": server, "url": f"{server}/{sha}"},
+                              {"server": other, "url": f"{other}/{sha}"}],
+                        mime_type="application/octet-stream", size=len(envelope))
+    blob_record = PrivateBlob(sha256=sha, key_hex=key, mime="image/png", name="Beach.png")
+    visibility = MediaVisibility(library=FakeLibrary([blob_record]),
+                                 ledger=PublicLedger(path=tmp_path / "public.json"))
+    world = library(tmp_path, monkeypatch, [private], visibility=visibility)
+    out = tmp_path / "out"
+    out.mkdir()
+    _Blobs.asked = []
+    save_as(monkeypatch, world, private, out / "Beach.png")
+    assert wait_for(lambda: not saving(world), 5)
+    assert world.dialog._status.text() == (
+        "“Beach.png” wasn’t saved: it’s kept privately, and its key doesn’t open it.")
+    assert _Blobs.asked == [f"/{sha}"]
+    assert folder(out) == []
+
+
+def test_a_private_file_on_this_computer_its_key_does_not_open_says_so(
+        tmp_path, monkeypatch, server):
+    envelope = encrypt_file(b"the real picture", key_hex=KEY).envelope
+    sha = hashlib.sha256(envelope).hexdigest()
+    private = MediaFile(hash=sha, url=f"{server}/{sha}", size=len(envelope))
+    blob_record = PrivateBlob(sha256=sha, key_hex="6d" * 32, mime="image/png", name="Beach.png")
+    visibility = MediaVisibility(library=FakeLibrary([blob_record]),
+                                 ledger=PublicLedger(path=tmp_path / "public.json"))
+    world = library(tmp_path, monkeypatch, [private], visibility=visibility)
+    world.dialog._loader.cache_path(sha).write_bytes(envelope)
+    save_as(monkeypatch, world, private, tmp_path / "Beach.png")
+    assert world.dialog._status.text() == (
+        "“Beach.png” wasn’t saved: it’s kept privately, and its key doesn’t open it.")
