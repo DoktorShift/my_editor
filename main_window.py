@@ -3086,9 +3086,9 @@ class MainWindow(QMainWindow):
         elif ext.endswith('.md'):
             # The article's details are the file's front matter (Q-F): shown
             # in Article Details, never in the text, never published as it.
-            entries, body = front_matter.split(content)
-            ed._front_matter = entries
-            details = from_front_matter(entries)
+            front, body = front_matter.split(content)
+            ed._front_matter = front
+            details = from_front_matter(front)
             ed._article_details = details if details != ArticleDetails() else None
             self._load_markdown(ed, body)
         elif ext.endswith('.rmd'):
@@ -3556,13 +3556,13 @@ class MainWindow(QMainWindow):
             return False
 
     def _with_front_matter(self, ed, body: str) -> str:
-        """A Markdown file's text: ``body`` under the front matter that holds
-        the article's details (Q-F), with every entry it had that MyEditor
-        does not know. None when there are no details and it had none."""
-        entries = front_matter_with(self._article_details_of(ed),
-                                    getattr(ed, "_front_matter", None))
-        ed._front_matter = entries or None
-        return front_matter.join(entries, body)
+        """A Markdown file's text: ``body`` under its front matter (Q-F), as
+        written but for the details changed here; none when there are no
+        details and it had none."""
+        front = front_matter_with(self._article_details_of(ed),
+                                  getattr(ed, "_front_matter", None))
+        ed._front_matter = front
+        return front_matter.join(front, body)
 
     def _on_file_changed(self, path: str):
         if path in self._saving_paths:

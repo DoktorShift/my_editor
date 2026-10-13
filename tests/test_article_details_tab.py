@@ -18,8 +18,8 @@ What must hold:
   A restart and a crash keep them, with the tab's draft and the article
   it edits.
 
-  Hashtags are written separated by commas, and read lowercase, without
-  "#", each once.
+  Hashtags are written separated by commas, and read without "#", each
+  once whatever its case, in the case written.
 """
 
 import os
@@ -149,7 +149,7 @@ def test_the_publish_window_hands_back_only_what_changed_in_it(monkeypatch):
     assert not dialog.details_changed()
     fields["_tags_edit"].setText("#A, b,  b ,")
     assert dialog.details_changed()
-    assert dialog.details().hashtags == ("a", "b")
+    assert dialog.details().hashtags == ("A", "b")                # the case written
     dialog._tags_edit.setText("a")
     dialog._published_at_used = 1_700_000_000
     assert dialog.details_changed() and dialog.details().published_at == 1_700_000_000
@@ -173,18 +173,18 @@ def test_a_restart_and_a_crash_keep_them():
 
 
 def test_hashtags_are_lowercase_without_the_hash_each_once():
-    assert hashtags_from("Bitcoin, #nostr, ,  NOSTR , art") == ("bitcoin", "nostr", "art")
+    assert hashtags_from("Bitcoin, #nostr, ,  NOSTR , art") == ("Bitcoin", "nostr", "art")
     assert hashtags_from("") == ()
 
 
 def test_a_restart_and_a_crash_keep_a_files_front_matter_as_written():
     import front_matter
-    entries, _body = front_matter.split("---\ntitle: A\nparams:\n  toc: true\n---\nText")
+    written = "---\ntitle: A # mine\nparams:\n  toc: true\n---\n\n"
+    entries, _body = front_matter.split(written + "Text")
     ed = HtmlEditor()
     ed._front_matter = entries
     identity = recovery.tab_identity(ed)
-    assert identity["front_matter"] == [["title", "title: A"],
-                                        ["params", "params:", "  toc: true"]]
+    assert identity["front_matter"] == written                     # every byte of it
     raw = {"kind": workspace.DOCUMENT, "front_matter": identity["front_matter"]}
     assert workspace._parse_tab(raw).front_matter == identity["front_matter"]
     again = HtmlEditor()

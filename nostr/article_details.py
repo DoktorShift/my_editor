@@ -34,6 +34,7 @@ on the draft's wrap, and a draft the person saved has none.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Iterable, List, Optional, Sequence, Tuple
@@ -52,12 +53,13 @@ AUTHOR_MARKER = "author"
 
 
 def hashtags_from(text: str) -> Tuple[str, ...]:
-    """The hashtags written in ``text``, separated by commas: lowercase,
-    without "#", each once, in the order written."""
+    """The hashtags written in ``text``, separated by commas: without "#",
+    each once whatever its case, in the order and the case written (an
+    article's ``t`` tags are lowercase, as they are published)."""
     found: List[str] = []
     for raw in (text or "").split(","):
-        tag = raw.strip().lstrip("#").strip().lower()
-        if tag and tag not in found:
+        tag = raw.strip().lstrip("#").strip()
+        if tag and tag.lower() not in (seen.lower() for seen in found):
             found.append(tag)
     return tuple(found)
 
@@ -156,7 +158,7 @@ class ArticleDetails:
             tags.append(["image", self.image.strip()])
         if self.published_at:
             tags.append(["published_at", str(int(self.published_at))])
-        tags.extend(["t", tag] for tag in self.hashtags)
+        tags.extend(["t", tag.lower()] for tag in self.hashtags)
         return tags + self._people_tags()
 
     def _people_tags(self) -> List[List[str]]:
@@ -185,16 +187,20 @@ _FRONT_KEYS = (("title", ()), ("summary", ("description",)),
                ("zap_split", ()))
 
 
-def from_front_matter(entries: Optional[Sequence[front_matter.Entry]]) -> ArticleDetails:
-    """The details a file's front matter holds (empty for none)."""
+def from_front_matter(front: Optional[front_matter.FrontMatter]) -> ArticleDetails:
+    """The details a file's front matter holds (empty for none). Each is
+    read from the first entry under its key or another app's name for it
+    that can be read fully; one that can't (a mapping) is left alone."""
     values = {}
-    for entry in entries or ():
+    for entry in front.entries if front is not None else ():
+        value = entry.value
         for key, others in _FRONT_KEYS:
-            if (entry.key == key or entry.key in others) and key not in values:
-                values[key] = entry.value
+            if (entry.key == key or entry.key in others) and key not in values \
+                    and value is not None:
+                values[key] = value
     def text(key: str) -> str:
         value = values.get(key, "")
-        return value if isinstance(value, str) else ""
+        return value.strip() if isinstance(value, str) else ""
     def items(key: str) -> List[str]:
         value = values.get(key, [])
         return value if isinstance(value, list) else [part for part in value.split(",")]
@@ -216,34 +222,75 @@ def from_front_matter(entries: Optional[Sequence[front_matter.Entry]]) -> Articl
                           coauthors=tuple(coauthors), zaps=tuple(zaps))
 
 
-def front_matter_with(details: ArticleDetails,
-                      entries: Optional[Sequence[front_matter.Entry]]) -> List[front_matter.Entry]:
-    """``entries`` (a file's front matter, or none) with ``details`` written
-    into it: each detail where it was, the others after the entries in the
-    order of _FRONT_KEYS; empty details left out; every entry this app
-    does not know as it was."""
-    written = {"title": details.title.strip(), "summary": details.summary.strip(),
-               "image": details.image.strip(), "tags": list(details.hashtags),
-               "slug": details.identifier.strip(),
-               "date": _iso(details.published_at) if details.published_at else "",
-               "coauthors": [_address(pubkey, hint) for pubkey, hint in details.coauthors],
-               "zap_split": [f"{_address(tag[1], tag[2] if len(tag) > 2 else '')} "
-                             f"{tag[3] if len(tag) > 3 else '1'}" for tag in details.zaps]}
-    known = {name: key for key, others in _FRONT_KEYS for name in (key, *others)}
-    done = set()
-    out: List[front_matter.Entry] = []
-    for entry in entries or ():
-        key = known.get(entry.key)
-        if key is None:
-            out.append(entry)
-        elif key not in done:
-            done.add(key)
-            if written[key]:
-                out.append(front_matter.entry(entry.key, written[key]))
-    for key, _others in _FRONT_KEYS:
-        if key not in done and written[key]:
-            out.append(front_matter.entry(key, written[key]))
-    return out
+def front_matter_with(details: ArticleDetails, front: Optional[front_matter.FrontMatter]
+                      ) -> Optional[front_matter.FrontMatter]:
+    """``front`` (a file's front matter, or None) with what changed of the
+    details written into it, and nothing else: an unchanged detail keeps its
+    entry as written, byte for byte; a changed one replaces its entry where
+    it was (a date in the form and time zone it had), or follows the other
+    entries in the order of _FRONT_KEYS; one emptied is left out. Entries
+    this app does not know, or can't read fully, stay as written. None when
+    there are no details and there was no front matter."""
+    was = from_front_matter(front)
+    entries = list(front.entries) if front is not None else []
+    old = _front_values(was)
+    new = _front_values(details)
+    changed = [key for key, _others in _FRONT_KEYS if new[key] != old[key]]
+    if not changed:
+        return front
+    for key in changed:
+        names = (key, *dict(_FRONT_KEYS)[key])
+        at = next((i for i, entry in enumerate(entries)
+                   if entry.key in names and entry.value is not None), None)
+        if not new[key]:
+            if at is not None:
+                del entries[at]
+            continue
+        value = new[key]
+        if key == "date":
+            original = entries[at].value if at is not None else ""
+            value = _date_like(details.published_at, original if isinstance(original, str)
+                               else "")
+        written = front_matter.entry(entries[at].key if at is not None else key, value)
+        if at is not None:
+            entries[at] = written
+        else:
+            entries.append(written)
+    if front is None:
+        return front_matter.FrontMatter(tuple(entries), changed=True)
+    return front.with_entries(entries)
+
+
+def _front_values(details: ArticleDetails) -> dict:
+    """The details as the values compared and written in front matter."""
+    return {"title": details.title.strip(), "summary": details.summary.strip(),
+            "image": details.image.strip(), "tags": list(details.hashtags),
+            "slug": details.identifier.strip(),
+            "date": details.published_at or 0,
+            "coauthors": [_address(pubkey, hint) for pubkey, hint in details.coauthors],
+            "zap_split": [f"{_address(tag[1], tag[2] if len(tag) > 2 else '')} "
+                          f"{tag[3] if len(tag) > 3 else '1'}" for tag in details.zaps]}
+
+
+def _date_like(when: int, original: str) -> str:
+    """``when`` written the way ``original`` (the date the file had) is: a
+    Unix time, a date, or a date and time in its time zone; an ISO 8601
+    time in UTC when the file had none."""
+    moment = datetime.fromtimestamp(int(when), tz=timezone.utc)
+    original = original.strip()
+    if original.isdigit():
+        return str(int(when))
+    if re.fullmatch(r"\d{4}-\d{1,2}-\d{1,2}", original):
+        return moment.strftime("%Y-%m-%d")
+    parsed = _parsed(original)
+    if parsed is None:
+        return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+    separator = " " if " " in original.strip() else "T"
+    if parsed.tzinfo is None or original.endswith(("Z", "z")):
+        return moment.strftime(f"%Y-%m-%d{separator}%H:%M:%S") + (
+            "Z" if original.endswith(("Z", "z")) else "")
+    local = moment.astimezone(parsed.tzinfo)
+    return local.isoformat(sep=separator)
 
 
 def _person(written: str) -> Optional[Tuple[str, str]]:
@@ -259,8 +306,12 @@ def _address(pubkey: str, hint: str) -> str:
     return encode_nprofile(pubkey, [hint]) if hint else encode_npub(pubkey)
 
 
-def _iso(when: int) -> str:
-    return datetime.fromtimestamp(int(when), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+def _parsed(written: str) -> Optional[datetime]:
+    try:
+        return datetime.fromisoformat(written.strip().replace("Z", "+00:00")
+                                      .replace("z", "+00:00").replace(" ", "T", 1))
+    except ValueError:
+        return None
 
 
 def _moment(written: str) -> Optional[int]:
@@ -271,9 +322,8 @@ def _moment(written: str) -> Optional[int]:
         return None
     if written.isdigit():
         return int(written) or None
-    try:
-        moment = datetime.fromisoformat(written.replace("Z", "+00:00").replace(" ", "T", 1))
-    except ValueError:
+    moment = _parsed(written)
+    if moment is None:
         return None
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=timezone.utc)

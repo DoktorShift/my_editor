@@ -78,13 +78,13 @@ def _clamp(line: str, max_len: int) -> str:
 def parse_frontmatter(raw: str) -> Tuple[Dict[str, str], str]:
     """Split ``---`` front matter off the top (front_matter.split, the one
     reader of it): its values as texts, a list's items joined by commas."""
-    entries, body = front_matter.split(str(raw or ""))
-    if entries is None:
+    front, body = front_matter.split(str(raw or ""))
+    if front is None:
         return {}, str(raw or "")
     values: Dict[str, str] = {}
-    for item in entries:
-        if item.key:
-            value = item.value
+    for item in front.entries:
+        value = item.value
+        if item.key and value is not None:
             values[item.key] = value if isinstance(value, str) else ", ".join(value)
     return values, body
 

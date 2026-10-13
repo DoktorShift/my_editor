@@ -45,6 +45,7 @@ from PySide6.QtCore import QTimer
 
 from PySide6.QtGui import QTextCursor, QTextDocument, QTextFormat
 
+import front_matter
 import rich_text
 from atomic_file import write_text
 from doc_walk import iter_blocks, iter_image_names
@@ -125,10 +126,10 @@ def tab_identity(editor) -> dict:
     details = getattr(editor, "_article_details", None)
     if details is not None:
         identity["details"] = details.tags()
-    entries = getattr(editor, "_front_matter", None)
-    if entries is not None:
-        # A Markdown file's front matter as written, entry by entry.
-        identity["front_matter"] = [[entry.key, *entry.lines] for entry in entries]
+    front = getattr(editor, "_front_matter", None)
+    if front is not None:
+        # A Markdown file's front matter as written, every byte of it.
+        identity["front_matter"] = front_matter.join(front, "")
     return identity
 
 

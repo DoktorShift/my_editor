@@ -4,20 +4,26 @@
 details it holds in nostr/article_details.py, and a .md file's way in and
 out of the window).
 
-What must hold (decision Q-F):
+What must hold (decision Q-F, and the checkpoint 4 review's H2, M4, L7):
 
-  An article's details live in the file's front matter, at the top, the
-  way Jekyll, Hugo, Obsidian and iA Writer keep them: written only when
-  there are details (or the file had front matter), never shown in the
-  text, never published as text. Entries MyEditor does not know stay
-  exactly as written, comments and nested lines too. A file whose front
-  matter used to show as a heading and a divider now opens with its
-  text alone.
+  The front matter as written is the source of truth. An article's details
+  are read from it (``title``, ``summary`` or ``description``, ``image`` or
+  ``cover``, ``tags``, ``slug``, ``date``, ``coauthors``, ``zap_split``),
+  shown in Article Details, never in the text, never published as text. A
+  file saved with no detail changed keeps its front matter byte for byte:
+  unknown keys, nested mappings (Hugo's ``cover:``), comments, quoting, key
+  order, block values, the byte order mark and its line endings. A changed
+  detail rewrites its own entry only, where it was; a date in the form and
+  time zone it was written in. Tags keep their case.
 
-  Values are read as front matter in the wild writes them (plain or
-  quoted texts, lists in brackets or as "- item" lines; ``description``,
-  ``cover`` and ``hashtags`` too) and written so that YAML reads them back
-  as the same text.
+  Values are read the way front matter in the wild writes them, block
+  values (``>-``, ``|``) included; a value that can't be read fully (a
+  mapping) is never shown as a detail and never replaced. Values written
+  are quoted when YAML would read them as another type, list items when
+  they hold "," or brackets.
+
+  A ``---`` block without a key is no front matter: a document opening
+  with a divider keeps its first section.
 """
 
 import os
@@ -34,23 +40,27 @@ from nostr.article_details import (  # noqa: E402
     ArticleDetails, from_front_matter, front_matter_with)
 from tests.app_process import run_window_script  # noqa: E402
 
-FILE = """---
-title: "Hello: World"
-description: A short one
-cover: https://cdn.example/c.jpg
-tags:
-  - bitcoin
-  - Nostr
-layout: post   # Jekyll's
-params:
-  toc: true
-date: 2026-10-01T08:30:00Z
----
+HUGO = ('---\ntitle: "My post"\ndate: 2024-03-01T00:30:00+01:00\ncover:\n'
+        '  image: "images/hero.jpg"\n  alt: "A hero"\ntags: ["Go", "Hugo"]\n---\n\nBody text.\n')
+JEKYLL = ("---\nlayout: post   # Jekyll's\ntitle: Hi\ndescription: >-\n  A long description\n"
+          "  over two lines.\nimage:\n  path: /assets/a.png\n  alt: An image\n---\n\nBody text.\n")
+CRLF_BOM = "﻿---\r\ntitle: Hello\r\nlayout: post\r\n---\r\n\r\nBody text.\r\n"
+DIVIDER = "---\n\nThe first section of my essay.\n\n---\n\nThe second section.\n"
 
-# The text
 
-Body.
-"""
+def moment(*parts, offset=0) -> int:
+    from datetime import timedelta
+    return int(datetime(*parts, tzinfo=timezone(timedelta(hours=offset))).timestamp())
+
+
+def unchanged_save(text: str) -> str:
+    front, body = front_matter.split(text)
+    return front_matter.join(front_matter_with(from_front_matter(front), front), body)
+
+
+@pytest.mark.parametrize("text", [HUGO, JEKYLL, CRLF_BOM])
+def test_a_file_saved_with_no_detail_changed_keeps_its_front_matter_byte_for_byte(text):
+    assert unchanged_save(text) == text
 
 
 def test_without_front_matter_the_text_is_all_body():
@@ -58,109 +68,127 @@ def test_without_front_matter_the_text_is_all_body():
     assert front_matter.split("Text\n---\nmore\n---\n")[0] is None   # not at the top
 
 
-def test_the_block_is_found_with_a_byte_order_mark_and_windows_line_ends():
-    entries, body = front_matter.split("﻿---\r\ntitle: A\r\n---\r\nText")
-    assert [entry.key for entry in entries] == ["title"] and body == "Text"
-    assert front_matter.split("---\n---\nText") == ([], "Text")
+def test_a_block_without_a_key_is_text():
+    assert front_matter.split(DIVIDER) == (None, DIVIDER)
+    commented, _ = front_matter.split("---\n# a comment\ntitle: A\n---\nText")
+    assert from_front_matter(commented).title == "A"
 
 
 def test_values_are_read_as_written_in_the_wild():
-    entries, body = front_matter.split(FILE)
-    values = {entry.key: entry.value for entry in entries}
-    assert values["title"] == "Hello: World"
-    assert values["tags"] == ["bitcoin", "Nostr"]
-    assert values["layout"] == "post   # Jekyll's"
-    assert body.startswith("\n# The text")
-    one, _ = front_matter.split("---\na: 'it''s'\nb: [x, \"y, z\"]\nc: \"line\\nbreak\"\n---\n")
-    assert [entry.value for entry in one] == ["it's", ["x", "y, z"], "line\nbreak"]
+    hugo = from_front_matter(front_matter.split(HUGO)[0])
+    assert hugo.title == "My post" and hugo.hashtags == ("Go", "Hugo")     # case kept
+    assert hugo.image == ""                                  # the cover: mapping is not read
+    assert hugo.published_at == moment(2024, 3, 1, 0, 30, offset=1)
+    jekyll = from_front_matter(front_matter.split(JEKYLL)[0])
+    assert jekyll.summary == "A long description over two lines."
+    assert jekyll.image == ""                                 # image: path/alt mapping
+    entries, _ = front_matter.split("---\na: 'it''s'\nb: [x, \"y, z\"]\nc: |\n  one\n  two\n"
+                                    "d: plain # comment\n---\n")
+    assert [entry.value for entry in entries.entries] == [
+        "it's", ["x", "y, z"], "one\ntwo", "plain"]
 
 
-@pytest.mark.parametrize("value", ["plain words", "true", "123", "a: b", "#hash", " padded ",
-                                   "Ünïcödé", "\"quoted\"", "", "- dash", "[bracket]"])
+def test_a_changed_detail_rewrites_its_entry_only():
+    front, body = front_matter.split(HUGO)
+    details = from_front_matter(front).with_changes(title="A new title")
+    out = front_matter.join(front_matter_with(details, front), body)
+    assert out == HUGO.replace('title: "My post"', "title: A new title")
+
+
+def test_a_changed_date_keeps_its_form_and_time_zone():
+    front, body = front_matter.split(HUGO)
+    later = from_front_matter(front).with_changes(
+        published_at=moment(2024, 3, 2, 8, 0, offset=1))
+    out = front_matter.join(front_matter_with(later, front), body)
+    assert 'date: "2024-03-02T08:00:00+01:00"' in out
+    for original, expected in (("2026-10-01", '"2026-10-02"'), ("1700000000", '"1700086400"'),
+                               ("2026-10-01T08:00:00Z", '"2026-10-02T08:00:00Z"')):
+        front, _ = front_matter.split(f"---\ndate: {original}\n---\n")
+        details = from_front_matter(front)
+        moved = details.with_changes(published_at=details.published_at + 86400)
+        assert f"date: {expected}" in front_matter.join(front_matter_with(moved, front), "")
+
+
+def test_a_detail_whose_entry_cant_be_read_is_written_beside_it_never_over_it():
+    front, body = front_matter.split(HUGO)
+    details = from_front_matter(front).with_changes(image="https://cdn.example/c.jpg")
+    out = front_matter.join(front_matter_with(details, front), body)
+    assert '  image: "images/hero.jpg"\n  alt: "A hero"\n' in out          # cover: kept
+    assert "image: https://cdn.example/c.jpg\n" in out
+
+
+def test_an_emptied_detail_is_left_out_and_none_written_without_details():
+    front, body = front_matter.split(HUGO)
+    out = front_matter.join(front_matter_with(
+        from_front_matter(front).with_changes(title=""), front), body)
+    assert "title:" not in out and "cover:" in out
+    assert front_matter_with(ArticleDetails(), None) is None
+    assert front_matter.join(None, "Body") == "Body"
+
+
+@pytest.mark.parametrize("value", ["plain words", "true", "123", "0x1F", "1e3", "2026-10-06",
+                                   "a: b", "#hash", " padded ", "Ünïcödé", "\"quoted\"", "",
+                                   "- dash", "[bracket]", "trailing:", "a #b"])
 def test_what_is_written_reads_back_as_the_same_text(value):
-    entry = front_matter.entry("k", value)
-    entries, _ = front_matter.split(front_matter.join([entry], "x"))
-    assert entries[0].value == value
+    entries, _ = front_matter.split(front_matter.join(
+        front_matter.FrontMatter((front_matter.entry("k", value),)), "x"))
+    assert entries.entries[0].value == value
+
+
+def test_list_items_with_commas_or_brackets_are_quoted():
+    items = ["c++", "a]b", "x,y", "plain"]
+    entries, _ = front_matter.split(front_matter.join(
+        front_matter.FrontMatter((front_matter.entry("tags", items),)), "x"))
+    assert entries.entries[0].value == items
 
 
 def test_the_details_are_read_from_other_apps_keys():
-    details = from_front_matter(front_matter.split(FILE)[0])
-    assert details.title == "Hello: World" and details.summary == "A short one"
-    assert details.image == "https://cdn.example/c.jpg"
-    assert details.hashtags == ("bitcoin", "nostr")
-    assert details.published_at == int(datetime(2026, 10, 1, 8, 30, tzinfo=timezone.utc).timestamp())
-    assert from_front_matter(None) == ArticleDetails()
-
-
-@pytest.mark.parametrize("written, expected", [
-    ("1700000000", 1700000000),
-    ("2026-10-01", int(datetime(2026, 10, 1, tzinfo=timezone.utc).timestamp())),
-    ("2026-10-01 10:30:00+02:00", int(datetime(2026, 10, 1, 8, 30, tzinfo=timezone.utc).timestamp())),
-    ("soon", None), ("", None)])
-def test_dates_are_read_in_their_common_forms(written, expected):
-    entries, _ = front_matter.split(f"---\ndate: {written}\n---\n")
-    assert from_front_matter(entries).published_at == expected
-
-
-def test_written_back_each_detail_stays_where_it_was_and_unknown_entries_as_they_were():
-    entries, _ = front_matter.split(FILE)
-    details = from_front_matter(entries).with_changes(
-        summary="", title="New title", identifier="new-title")
-    out = front_matter_with(details, entries)
-    keys = [entry.key for entry in out]
-    assert keys == ["title", "cover", "tags", "layout", "params", "date", "slug"]
-    text = front_matter.join(out, "Body.\n")
-    assert "layout: post   # Jekyll's\n" in text and "params:\n  toc: true\n" in text
-    assert "description" not in text                      # emptied: left out
-    assert "tags: [bitcoin, nostr]\n" in text
-    assert 'date: "2026-10-01T08:30:00Z"\n' in text
-    assert text.endswith("---\n\nBody.\n")
-
-
-def test_no_details_and_no_front_matter_write_none():
-    assert front_matter_with(ArticleDetails(), None) == []
-    assert front_matter.join([], "Body") == "Body"
+    front, _ = front_matter.split("---\ndescription: A short one\ncover: https://c/x.jpg\n"
+                                  "hashtags: [a, B]\npublished_at: 1700000000\n---\n")
+    details = from_front_matter(front)
+    assert (details.summary, details.image, details.hashtags, details.published_at) == (
+        "A short one", "https://c/x.jpg", ("a", "B"), 1700000000)
 
 
 SCRIPT = r"""
 import json, os, sys
 sys.path.insert(0, sys.argv[1])
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import QApplication
 app = QApplication(sys.argv[:1])
 import main_window
-from nostr.article_details import ArticleDetails
 
-path, plain = sys.argv[2], sys.argv[3]
 w = main_window.MainWindow()
 w.show()
-w.open_path(path)
-ed = w.current_editor()
-r = {"text": ed.toPlainText(), "title": w._article_details_of(ed).title,
-     "published": w._publish_text(ed, "markdown")}
-w._set_article_details(ed, w._article_details_of(ed).with_changes(summary="Set here"))
-w.save()
-r["saved"] = open(path, encoding="utf-8").read()
-w.open_path(plain)
-ed2 = w.current_editor()
-w.save()
-r["plain_saved"] = open(plain, encoding="utf-8").read()
+r = {}
+for path in sys.argv[2:]:
+    w.open_path(path)
+    ed = w.current_editor()
+    name = os.path.basename(path)
+    r[name + " shown"] = ed.toPlainText()
+    r[name + " published"] = w._publish_text(ed, "markdown")
+    c = ed.textCursor()
+    c.movePosition(QTextCursor.MoveOperation.End)
+    c.insertText(" More.")
+    w._save_to(path)
+    r[name + " saved"] = open(path, "rb").read().decode("utf-8")
+    ed.document().setModified(False)
 w.close()
 print("RESULT " + json.dumps(r))
 """
 
 
-def test_a_markdown_file_in_the_window(tmp_path):
-    path = tmp_path / "post.md"
-    path.write_text(FILE, encoding="utf-8")
-    plain = tmp_path / "plain.md"
-    plain.write_text("# Just text\n\nNo details.\n", encoding="utf-8")
-    r = run_window_script(SCRIPT, tmp_path, str(path), str(plain))
-    assert r["text"].startswith("The text") and "title:" not in r["text"]
-    assert r["title"] == "Hello: World"
-    assert "---" not in r["published"] and "layout" not in r["published"]
-    saved = r["saved"]
-    assert saved.startswith('---\ntitle: "Hello: World"\ndescription: Set here\n')
-    assert "layout: post   # Jekyll's\n" in saved and "  - " not in saved
-    assert saved.endswith("# The text\n\nBody.\n")
-    assert r["plain_saved"] == "# Just text\n\nNo details.\n"
+def test_markdown_files_in_the_window(tmp_path):
+    paths = []
+    for name, text in (("hugo.md", HUGO), ("jekyll.md", JEKYLL), ("divider.md", DIVIDER)):
+        path = tmp_path / name
+        path.write_bytes(text.encode("utf-8"))
+        paths.append(str(path))
+    r = run_window_script(SCRIPT, tmp_path, *paths)
+    assert r["hugo.md shown"] == "Body text."
+    assert "cover" not in r["hugo.md published"] and "---" not in r["hugo.md published"]
+    assert r["hugo.md saved"] == HUGO.replace("Body text.\n", "Body text. More.\n")
+    assert r["jekyll.md saved"] == JEKYLL.replace("Body text.\n", "Body text. More.\n")
+    assert "The first section of my essay." in r["divider.md shown"]
+    assert r["divider.md saved"] == DIVIDER.replace("second section.\n", "second section. More.\n")

@@ -3,29 +3,45 @@
 """A Markdown file's front matter: the ``---`` block at its top that Jekyll,
 Hugo, Obsidian and iA Writer keep a document's details in.
 
-Read as entries, each its key and the lines written for it (the key's line
-and the indented lines under it), so that an entry this app does not know
-is written back exactly as it was. Values are read the way front matter in
-the wild writes them, not as full YAML: a plain or quoted text, a list in
-brackets (``[a, b]``) or a list of "- item" lines. Values this app writes
-are quoted whenever YAML would read them as something else.
+The front matter as written is the source of truth. It is read as entries,
+each its key and the lines written for it (the key's line and the indented
+lines under it), and kept with the lines that open and close the block and
+the blank lines after it, so that a file saved without a change to its
+details comes back byte for byte, and a change rewrites only the entries it
+touches.
+
+Values are read the way front matter in the wild writes them, not as full
+YAML: a plain or quoted text, a block of text (``|``, ``>``, with ``-`` or
+``+``), a list in brackets (``[a, b]``) or a list of "- item" lines. A value
+this reader cannot read fully (a mapping, Hugo's ``cover:`` with ``image``
+and ``alt`` under it) reads as None: it is never shown as a detail and never
+replaced. Values this app writes are quoted whenever YAML would read them as
+something other than the text (a date, a number, true, a comment).
+
+A ``---`` block counts as front matter only when it holds at least one key;
+otherwise it is text (a document that opens with a divider).
 """
 
 from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Optional, Sequence, Tuple, Union
 
 # The block: "---" on the first line (after a byte order mark), then
 # anything, then "---" on a line of its own.
-_BLOCK = re.compile(r"\A﻿?---[ \t]*\r?\n(.*?)(?:\r?\n)?^---[ \t]*(?:\r?\n|\Z)",
+_BLOCK = re.compile(r"\A(﻿?---[ \t]*)\r?\n(.*?)(?:\r?\n)?^(---[ \t]*)(?:\r?\n|\Z)",
                     re.DOTALL | re.MULTILINE)
 _KEY = re.compile(r"^([A-Za-z0-9_][A-Za-z0-9_.-]*)[ \t]*:(?:[ \t]+(.*?))?[ \t]*$")
-# A plain value YAML would read as text again, as written.
-_PLAIN = re.compile(r"^[A-Za-z0-9À-￿][^:#\n]*$")
-_YAML_WORDS = {"true", "false", "yes", "no", "on", "off", "null", "~"}
+_BLOCK_SCALAR = re.compile(r"^([|>])([+-]?)(\d?)[ \t]*(?:#.*)?$")
+# A plain value YAML reads as text again, as written: no indicator first,
+# no ": " or " #" inside, and not a word or form YAML reads as another type.
+_PLAIN = re.compile(r"^[^\s\-?:,\[\]{}#&*!|>'\"%@`][^\n]*$")
+_YAML_WORDS = {"true", "false", "yes", "no", "on", "off", "y", "n", "null", "~"}
+_YAML_NUMBER = re.compile(r"^[-+]?(?:0[xob][0-9a-fA-F_]+|[0-9][0-9_]*(?:\.[0-9_]*)?"
+                          r"(?:[eE][-+]?[0-9]+)?|\.[0-9]+|\.inf|\.nan)$", re.IGNORECASE)
+_YAML_DATE = re.compile(r"^\d{4}-\d{1,2}-\d{1,2}(?:[Tt ].*)?$")
 
 
 @dataclass(frozen=True)
@@ -36,44 +52,81 @@ class Entry:
     lines: Tuple[str, ...]
 
     @property
-    def value(self) -> Union[str, List[str]]:
-        """The value as text, or as a list of texts for a list."""
+    def value(self) -> Union[str, List[str], None]:
+        """The value as text, or as a list of texts for a list; None for a
+        value this reader cannot read fully (a mapping, anything else)."""
         first = _KEY.match(self.lines[0])
         written = (first.group(2) or "") if first else ""
+        rest = [line for line in self.lines[1:] if line.strip()
+                and not line.lstrip().startswith("#")]
+        block = _BLOCK_SCALAR.match(written)
+        if block is not None:
+            return _block_text(self.lines[1:], block.group(1), block.group(2))
         if written.startswith("[") and written.endswith("]"):
             return [_unquote(part) for part in _split_inline(written[1:-1]) if part.strip()]
-        items = [line.strip()[1:].strip() for line in self.lines[1:]
-                 if line.strip().startswith("-")]
-        if not written and items:
-            return [_unquote(item) for item in items]
-        return _unquote(written)
+        if not written and rest:
+            if all(line.lstrip().startswith("- ") or line.strip() == "-" for line in rest):
+                return [_unquote(line.strip()[1:].strip()) for line in rest]
+            return None                     # a mapping or something else: unread
+        if rest or written.startswith(("{", "&", "*", "!")):
+            return None                     # continued over lines, or not plain YAML
+        return _unquote(_without_comment(written))
 
 
-def split(text: str) -> Tuple[Optional[List[Entry]], str]:
-    """``(entries, body)`` of ``text``: its front matter and what follows
-    it, or ``(None, text)`` when it has none."""
-    found = _BLOCK.match(text or "")
+@dataclass(frozen=True)
+class FrontMatter:
+    """A file's front matter as written: its entries, the lines that open
+    and close it, and the blank lines between it and the text."""
+
+    entries: Tuple[Entry, ...]
+    opening: str = "---"
+    closing: str = "---"
+    gap: str = "\n"
+    # Line endings as the file writes them.
+    newline: str = "\n"
+    changed: bool = field(default=False, compare=False)
+
+    def with_entries(self, entries: Sequence[Entry]) -> "FrontMatter":
+        return FrontMatter(tuple(entries), self.opening, self.closing, self.gap, self.newline,
+                           changed=tuple(entries) != self.entries or self.changed)
+
+
+def split(text: str) -> Tuple[Optional[FrontMatter], str]:
+    """``(front matter, body)`` of ``text``, or ``(None, text)`` when it has
+    no front matter (no block at its top, or a block without a key)."""
+    text = text or ""
+    found = _BLOCK.match(text)
     if found is None:
-        return None, text or ""
+        return None, text
     entries: List[Entry] = []
-    for line in found.group(1).splitlines():
+    newline = "\r\n" if "\r\n" in found.group(0) else "\n"
+    for line in found.group(2).splitlines():
         key = _KEY.match(line)
         if key is not None and not line[:1].isspace():
             entries.append(Entry(key.group(1), (line,)))
         elif entries:
             entries[-1] = Entry(entries[-1].key, entries[-1].lines + (line,))
-        elif line.strip():
-            # Lines before any key (a comment): kept with an empty key.
+        else:
+            # Lines before any key (a comment, a blank line): kept with no key.
             entries.append(Entry("", (line,)))
-    return entries, text[found.end():]
+    if not any(entry.key for entry in entries):
+        return None, text                   # a divider, some text, a divider: text
+    rest = text[found.end():]
+    body = rest.lstrip("\r\n")
+    return (FrontMatter(tuple(entries), found.group(1), found.group(3),
+                        rest[:len(rest) - len(body)], newline), body)
 
 
-def join(entries: Sequence[Entry], body: str) -> str:
-    """``body`` with ``entries`` as its front matter (none when empty)."""
-    if not entries:
+def join(front: Optional[FrontMatter], body: str) -> str:
+    """``body`` under ``front`` as it was written, or alone when there is
+    none (or no entry is left in it)."""
+    if front is None or not any(entry.key for entry in front.entries):
         return body
-    lines = [line for entry in entries for line in entry.lines]
-    return "---\n" + "\n".join(lines) + "\n---\n\n" + body.lstrip("\n")
+    nl = front.newline
+    lines = [line for entry in front.entries for line in entry.lines]
+    gap = front.gap if front.gap else nl
+    return (front.opening + nl + nl.join(lines) + (nl if lines else "") + front.closing
+            + nl + gap.replace("\r\n", "\n").replace("\n", nl) + body.lstrip("\n"))
 
 
 def entry(key: str, value: Union[str, Sequence[str]]) -> Entry:
@@ -81,22 +134,52 @@ def entry(key: str, value: Union[str, Sequence[str]]) -> Entry:
     quoted when it has to be, or a list in brackets."""
     if isinstance(value, str):
         return Entry(key, (f"{key}: {_quoted(value)}",))
-    return Entry(key, (f"{key}: [" + ", ".join(_quoted(item) for item in value) + "]",))
+    items = ", ".join(_quoted(item, in_list=True) for item in value)
+    return Entry(key, (f"{key}: [{items}]",))
 
 
-def _quoted(value: str) -> str:
-    if _PLAIN.match(value) and value.lower() not in _YAML_WORDS \
-            and not _looks_numeric(value) and value == value.strip():
-        return value
-    return json.dumps(value, ensure_ascii=False)
+def _quoted(value: str, *, in_list: bool = False) -> str:
+    """``value`` as YAML reads it back as the same text: bare when it can
+    be, else in double quotes."""
+    plain = (_PLAIN.match(value) is not None and value == value.strip()
+             and ": " not in value and " #" not in value and not value.endswith(":")
+             and value.lower() not in _YAML_WORDS and not _YAML_NUMBER.match(value)
+             and not _YAML_DATE.match(value)
+             and not (in_list and any(char in value for char in ",[]{}")))
+    return value if plain else json.dumps(value, ensure_ascii=False)
 
 
-def _looks_numeric(value: str) -> bool:
-    try:
-        float(value)
-    except ValueError:
-        return False
-    return True
+def _block_text(lines: Sequence[str], style: str, chomping: str) -> str:
+    """The text of a block scalar: its indented lines, as they are for "|",
+    folded into one line per paragraph for ">"."""
+    body = list(lines)
+    indents = [len(line) - len(line.lstrip(" ")) for line in body if line.strip()]
+    cut = min(indents) if indents else 0
+    rows = [line[cut:] if line.strip() else "" for line in body]
+    while rows and not rows[-1]:
+        rows.pop()
+    if style == "|":
+        text = "\n".join(rows)
+    else:
+        paragraphs, current = [], []
+        for row in rows:
+            if row:
+                current.append(row.strip())
+            elif current:
+                paragraphs.append(" ".join(current))
+                current = []
+        if current:
+            paragraphs.append(" ".join(current))
+        text = "\n".join(paragraphs)
+    return text if chomping == "-" else text + "\n" if chomping == "+" else text
+
+
+def _without_comment(written: str) -> str:
+    """A plain value without the comment after it ("post  # Jekyll's")."""
+    if written[:1] in "\"'":
+        return written
+    found = re.search(r"\s+#", written)
+    return written[:found.start()] if found else written
 
 
 def _unquote(value: str) -> str:

@@ -342,8 +342,8 @@ def restore_identity(ed, draft, article, article_author, details=None,
         ed._published_author = article_author if isinstance(article_author, str) else ""
     if are_tags(details):
         ed._article_details = ArticleDetails.from_tags(details)
-    if are_tags(matter) and all(entry for entry in matter):
-        ed._front_matter = [front_matter.Entry(entry[0], tuple(entry[1:])) for entry in matter]
+    if isinstance(matter, str):
+        ed._front_matter = front_matter.split(matter)[0]
 
 
 def _dataclass_from(cls, data: dict):

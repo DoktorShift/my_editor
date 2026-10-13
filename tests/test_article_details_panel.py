@@ -73,7 +73,7 @@ def test_what_is_typed_goes_to_the_tab_as_the_details():
     panel.title_edit.setText("A New Title ")
     panel.tags_edit.setText("Bitcoin, #Nostr")
     assert sent[-1] == DETAILS.with_changes(title="A New Title",
-                                            hashtags=("bitcoin", "nostr"))
+                                            hashtags=("Bitcoin", "Nostr"))
     # Shown again as handed back: the space being typed stays.
     panel.show_article(sent[-1], fixed_identifier=False)
     assert panel.title_edit.text() == "A New Title "
