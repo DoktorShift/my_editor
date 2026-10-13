@@ -1,52 +1,57 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Modal dialog for publishing a kind 1 short note.
+"""Publish as Note: a sheet on the document's window that publishes a
+short note (kind 1).
 
-Lifecycle:
-  - Opens with the editor's plain-text content already populated.
-  - User can edit the text, see a live character count, and switch the
-    signing profile inline before pressing Publish.
-  - Publish kicks off a NotePublishJob; the dialog shows live status until
-    completion. On success the dialog closes and the result lands in the
-    main window's status bar.
+The note is composed here, as a share sheet composes what it shares:
+it starts as the document's text in plain words (what apps show for a
+note) and can be changed before it goes out; the document is not
+changed by it.
+
+A mention shows as "@" and the person's name, never as their key, as in
+the editor (rich_text: a link to the person's ``nostr:`` address): the
+note's text, pasted text holding ``nostr:npub1…``, and a mention chosen
+by typing "@" at the start of a word. Backspace takes a mention away
+whole, and what is typed inside one goes after it. Published (and
+copied), each mention is its ``nostr:`` address again, which every Nostr
+app shows as the name, and the person gets a ``p`` tag (NIP-27).
+
+People shows everyone the note will tag, from the event the publisher
+builds; "Publishing as" chooses the account, as in Publish as Article.
 """
 
 from __future__ import annotations
 
 from typing import Callable, List, Optional, Sequence
 
-from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QColor, QPixmap
+from PySide6.QtCore import QMimeData, QSize, Qt, Signal
+from PySide6.QtGui import QTextCursor, QTextDocumentFragment
 from PySide6.QtWidgets import (
-    QDialog,
-    QDialogButtonBox,
-    QHBoxLayout,
-    QLabel,
-    QMenu,
-    QTextEdit,
-    QToolButton,
-    QVBoxLayout,
+    QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QPushButton, QTextEdit, QVBoxLayout,
+    QWidget,
 )
 
-import theme
+import rich_text
 from alerts import answer_return_as_the_system_does
+from highlighter import RichTextLook
 from i18n import _, ngettext
 
+from .. import refs
 from ..avatar_store import AvatarStore
+from ..bech32 import encode_nprofile, encode_npub
 from ..bunker import BunkerSessionPool, humanize_failure
 from ..known_people import KnownPeople
+from ..nip05_check import Nip05Check
 from ..outbox import RelayDirectory, relays_from
 from ..profiles import Profile, ProfileStore
 from ..publisher import PublishedMedia, PublishJob, PublishResult, build_note
 from ..relay import RelayPool
 from ..search import Nip50SearchClient
-from .avatar import (
-    AVATAR_SIZE,
-    CHIP_TOTAL_WIDTH,
-    compose_chip_icon,
-    pixmap_for_profile,
+from .mention_picker import MentionPicker
+from .publish_sheet import (
+    AccountRow, BottomRow, PeopleRow, StatusLine, fit_to_window, make_sheet, people_tagged,
+    sheet_stylesheet,
 )
-from .mention_chips import MentionChipRow
 from .secret_key_check import publishable
 
 
@@ -54,111 +59,118 @@ from .secret_key_check import publishable
 _LONGFORM_HINT_CHARS = 1_000
 
 
-# --------------------------------------------------------------------------- #
-# Styles: pulled from the editor's existing palette                          #
-# --------------------------------------------------------------------------- #
+class NoteText(QTextEdit):
+    """The note's text: plain words, with mentions as names (see the
+    module docstring). ``mention_requested(at)`` for an "@" typed at the
+    start of a word, at its position."""
 
-_DARK_DIALOG_CSS = """
-QDialog { background: #1E1E1E; }
-QLabel { color: #D4D4D4; font-size: 12px; }
-QLabel#publish_hint { color: #858585; }
-QLabel#publish_status { color: #FFB347; }
-QLabel#publish_count { color: #858585; font-size: 11px; }
-QTextEdit {
-    background: #252526;
-    color: #D4D4D4;
-    border: 1px solid #3C3C3C;
-    border-radius: 4px;
-    padding: 8px;
-    font-family: "Menlo", "Consolas", "Noto Sans Mono", monospace;
-    font-size: 12px;
-    selection-background-color: #264F78;
-}
-QPushButton {
-    background: #2D2D30;
-    color: #D4D4D4;
-    border: 1px solid #3C3C3C;
-    padding: 6px 14px;
-    border-radius: 4px;
-}
-QPushButton:hover { background: #3C3C3C; }
-QPushButton:pressed { background: #1E1E1E; }
-QPushButton:disabled { background: #252526; color: #6A6A6A; border-color: #2D2D2D; }
-QToolButton#profile_switch {
-    background: transparent;
-    border: none;
-    border-radius: 4px;
-    padding: 3px 6px;
-    color: #CCCCCC;
-}
-QToolButton#profile_switch:hover { background: #3C3C3C; }
-QToolButton#profile_switch::menu-indicator { image: none; width: 0; }
-"""
+    mention_requested = Signal(int)
 
-_LIGHT_DIALOG_CSS = """
-QDialog { background: #FFFFFF; }
-QLabel { color: #333333; font-size: 12px; }
-QLabel#publish_hint { color: #777777; }
-QLabel#publish_status { color: #A05000; }
-QLabel#publish_count { color: #999999; font-size: 11px; }
-QTextEdit {
-    background: #FFFFFF;
-    color: #333333;
-    border: 1px solid #E1E1E1;
-    border-radius: 4px;
-    padding: 8px;
-    font-family: "Menlo", "Consolas", "Noto Sans Mono", monospace;
-    font-size: 12px;
-    selection-background-color: #0078D4;
-}
-QPushButton {
-    background: #ECECEC;
-    color: #333333;
-    border: 1px solid #CCCCCC;
-    padding: 6px 14px;
-    border-radius: 4px;
-}
-QPushButton:hover { background: #E1E1E1; }
-QPushButton:pressed { background: #D0D0D0; }
-QPushButton:disabled { background: #F8F8F8; color: #BBBBBB; border-color: #EBEBEB; }
-QToolButton#profile_switch {
-    background: transparent;
-    border: none;
-    border-radius: 4px;
-    padding: 3px 6px;
-    color: #555555;
-}
-QToolButton#profile_switch:hover { background: #E1E1E1; }
-QToolButton#profile_switch::menu-indicator { image: none; width: 0; }
-"""
+    def __init__(self, label_for: Callable[[str], Optional[str]], *, is_dark: bool,
+                 parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        # How a person a ``nostr:`` address names is called, or None when
+        # it names no person.
+        self._label_for = label_for
+        self.setAcceptRichText(False)
+        self.setTabChangesFocus(True)
+        # Mentions as names in the link colour, as in the editor.
+        self._look = RichTextLook(self.document(), is_dark)
 
-# Match the styled QMenu used by the chip so the in-dialog switch looks native.
-_DARK_MENU_CSS = """
-QMenu { background: #252526; color: #CCCCCC; border: 1px solid #3C3C3C; padding: 4px; }
-QMenu::item { padding: 4px 20px 4px 30px; }
-QMenu::item:selected { background: #1E1E1E; color: #FFFFFF; }
-QMenu::separator { height: 1px; background: #3C3C3C; margin: 4px 0px; }
-"""
+    def set_note(self, text: str) -> None:
+        self.setPlainText(text)
+        rich_text.link_references(self.document(), self._label_for)
+        self.document().clearUndoRedoStacks()
 
-_LIGHT_MENU_CSS = """
-QMenu { background: #F8F8F8; color: #333333; border: 1px solid #E1E1E1; padding: 4px; }
-QMenu::item { padding: 4px 20px 4px 30px; }
-QMenu::item:selected { background: #F3F3F3; color: #000000; }
-QMenu::separator { height: 1px; background: #E1E1E1; margin: 4px 0px; }
-"""
+    def note(self) -> str:
+        """The note as it is published: each mention its ``nostr:`` address."""
+        return rich_text.plain_text_of(QTextDocumentFragment(self.document())).strip()
 
+    def insert_mention(self, at: int, href: str, name: str) -> None:
+        """The mention of ``name`` in place of the "@" typed at ``at`` (when
+        it is still there), else at the caret."""
+        cursor = self.textCursor()
+        doc = self.document()
+        if 0 <= at < doc.characterCount() and doc.characterAt(at) == "@":
+            cursor.setPosition(at)
+            cursor.setPosition(at + 1, QTextCursor.MoveMode.KeepAnchor)
+        rich_text.insert_mention(cursor, href, name)
+        self.setTextCursor(cursor)
+        self.setCurrentCharFormat(rich_text.without_link(self.currentCharFormat()))
 
-# --------------------------------------------------------------------------- #
-# Dialog                                                                       #
-# --------------------------------------------------------------------------- #
+    # -- typing ---------------------------------------------------------------------
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802, Qt's name
+        cursor = self.textCursor()
+        mention = rich_text.mention_at(cursor)
+        plain = event.modifiers() in (Qt.KeyboardModifier.NoModifier,
+                                      Qt.KeyboardModifier.KeypadModifier)
+        if mention is not None and plain and (
+                event.key() == Qt.Key.Key_Backspace and mention[0] < cursor.position()
+                or event.key() == Qt.Key.Key_Delete and cursor.position() < mention[1]):
+            # A mention goes as a whole: half a name links to nobody.
+            cursor.setPosition(mention[0])
+            cursor.setPosition(mention[1], QTextCursor.MoveMode.KeepAnchor)
+            cursor.removeSelectedText()
+            self.setTextCursor(cursor)
+            return
+        typed = event.text()
+        if typed and typed.isprintable():
+            self._type_outside_mentions()
+        super().keyPressEvent(event)
+        if typed == "@":
+            self._maybe_ask_mention()
+
+    def inputMethodEvent(self, event) -> None:  # noqa: N802, Qt's name
+        if event.commitString() or event.preeditString():
+            self._type_outside_mentions()
+        super().inputMethodEvent(event)
+        if event.commitString() == "@":
+            self._maybe_ask_mention()
+
+    def _type_outside_mentions(self) -> None:
+        """What is typed is never part of a mention: inside one it goes
+        after it, beside one it is plain."""
+        cursor = self.textCursor()
+        mention = rich_text.mention_at(cursor)
+        if mention is not None and mention[0] < cursor.position() < mention[1]:
+            cursor.setPosition(mention[1])
+            self.setTextCursor(cursor)
+        self.setCurrentCharFormat(rich_text.without_link(self.currentCharFormat()))
+
+    def _maybe_ask_mention(self) -> None:
+        """An "@" was just typed: ask whom to mention when it starts a word
+        (not in an email address)."""
+        cursor = self.textCursor()
+        before = cursor.block().text()[:cursor.positionInBlock() - 1]
+        if before and not (before[-1].isspace() or before[-1] in "([{\"'“‘"):
+            return
+        self.mention_requested.emit(cursor.position() - 1)
+
+    # -- the clipboard ----------------------------------------------------------------
+
+    def insertFromMimeData(self, source: QMimeData) -> None:  # noqa: N802, Qt's name
+        """Pasted as plain words, a ``nostr:`` address of a person shown as
+        their name."""
+        if not source.hasText():
+            return
+        self._type_outside_mentions()
+        self.textCursor().insertText(source.text())
+        rich_text.link_references(self.document(), self._label_for)
+
+    def createMimeDataFromSelection(self) -> QMimeData:  # noqa: N802, Qt's name
+        """Copied, a mention is its ``nostr:`` address, which other apps
+        read as the person."""
+        data = QMimeData()
+        data.setText(rich_text.plain_text_of(self.textCursor().selection()))
+        return data
+
 
 class PublishNoteDialog(QDialog):
-    """Compose, switch profile, publish a kind 1 note.
+    """Compose and publish a note (see the module docstring).
 
-    Emits ``published(results)`` after a successful publish (results = list
-    of ``(url, ok, message)`` tuples). The dialog closes itself on success.
-    On failure the status line shows the reason and the user can retry.
-    """
+    ``published(event_id, results)`` once a relay took it; the sheet then
+    closes. A failure is shown in it, to try again."""
 
     # Args: (signed_event_id_hex, list[PublishResult])
     published = Signal(str, list)
@@ -176,205 +188,148 @@ class PublishNoteDialog(QDialog):
         known_people: KnownPeople,
         search_client: Nip50SearchClient,
         avatars: AvatarStore,
+        address_check: Optional[Nip05Check] = None,
         media: Sequence[PublishedMedia] = (),
         parent=None,
         is_dark: bool = True,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(_("Publish as Note"))
+        make_sheet(self)
+        self.setMinimumSize(420, 300)
         # What is known of the pictures, audio and video in the text, for
         # their descriptions (NIP-92 imeta); only those still in the text
         # when it goes out are described.
         self._media = tuple(media)
-        self.setModal(True)
-        self.setMinimumSize(560, 380)
-
-        self._store = store
         self._relay_pool = relay_pool
         self._relay_directory = relay_directory
         self._session_pool = session_pool
         # Relays this account has standing on beyond its own list, resolved
-        # when the publish actually happens rather than at dialog open.
+        # when the publish actually happens rather than at the sheet's opening.
         self._entitled_relays = entitled_relays
         self._known_people = known_people
         self._search_client = search_client
         self._avatars = avatars
+        self._address_check = address_check
         self._is_dark = is_dark
-        self._current_profile = active_profile
         self._job: Optional[PublishJob] = None
         self._signed_event_id: Optional[str] = None
+        self._picker: Optional[MentionPicker] = None
+        self._mention_at = -1
 
-        self._build_ui(initial_content=content)
-        self._apply_theme()
-        self._refresh_profile_chip()
-        self._refresh_char_count()
+        self._build(active_profile, store)
+        self._text_edit.set_note(content)
+        self._text_edit.textChanged.connect(self._refresh)
+        self._refresh()
+        fit_to_window(self, QSize(600, 440))
 
-        # When the active profile's avatar lands after the dialog opens,
-        # repaint the "Publishing as ●…" switcher so it stops showing initials.
-        self._avatars.avatar_added.connect(self._on_avatar_added)
+    # -- the sheet ----------------------------------------------------------------
 
-    def _on_avatar_added(self, pubkey_hex: str, _pixmap) -> None:
-        if pubkey_hex == self._current_profile.user_pubkey:
-            self._refresh_profile_chip()
-
-    # -- UI ----------------------------------------------------------------
-
-    def _build_ui(self, *, initial_content: str) -> None:
+    def _build(self, profile: Profile, store: ProfileStore) -> None:
+        self.setStyleSheet(sheet_stylesheet(self._is_dark))
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 18, 20, 16)
-        layout.setSpacing(10)
+        layout.setContentsMargins(20, 18, 20, 14)
+        layout.setSpacing(8)
 
-        header = QLabel(_("Publish a short note to Nostr."))
-        layout.addWidget(header)
-
-        hint = QLabel(_(
-            "Formatting is stripped. Short notes are plain text. "
-            "For richer documents, use Publish as Article."
-        ))
-        hint.setObjectName("publish_hint")
+        heading = QLabel(_("Publish as Note"))
+        heading.setObjectName("title")
+        layout.addWidget(heading)
+        hint = QLabel(_("Formatting is stripped. Short notes are plain text. "
+                        "For richer documents, use Publish as Article."))
+        hint.setObjectName("muted")
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
-        self._text_edit = QTextEdit()
-        self._text_edit.setAcceptRichText(False)
-        self._text_edit.setPlainText(initial_content)
-        self._text_edit.textChanged.connect(self._refresh_char_count)
+        def label_for(entity: str) -> Optional[str]:
+            def name(pubkey: str) -> Optional[str]:
+                person = self._known_people.get(pubkey)
+                return person.display_name if person is not None else None
+            return refs.person_name(entity, name)
+
+        self._text_edit = NoteText(label_for, is_dark=self._is_dark)
+        self._text_edit.setAccessibleName(_("Note"))
+        self._text_edit.mention_requested.connect(self._ask_mention)
         layout.addWidget(self._text_edit, 1)
 
         self._char_count = QLabel("")
-        self._char_count.setObjectName("publish_count")
+        self._char_count.setObjectName("help")
         self._char_count.setWordWrap(True)
         layout.addWidget(self._char_count)
 
-        # Mentions chip row, picks become ["p", hex, relay-hint] tags + URI
-        # lines appended to the body on publish.
-        self._mention_row = MentionChipRow(
-            self._known_people,
-            self._search_client,
-            avatars=self._avatars,
-            parent=self,
-            is_dark=self._is_dark,
-        )
-        layout.addWidget(self._mention_row)
+        # Everyone the note tags: shown while there is someone.
+        self._people_line = QWidget()
+        people_row = QHBoxLayout(self._people_line)
+        people_row.setContentsMargins(0, 0, 0, 0)
+        people_row.setSpacing(10)
+        people_label = QLabel(_("People:"))
+        people_label.setContentsMargins(0, 3, 0, 0)
+        people_row.addWidget(people_label, 0, Qt.AlignmentFlag.AlignTop)
+        self._people = PeopleRow(self._known_people, self._avatars)
+        self._people.setAccessibleName(_("People"))
+        people_row.addWidget(self._people, 1)
+        layout.addWidget(self._people_line)
 
-        # Progress and errors get a full-width line of their own above the
-        # buttons, so a long message never squeezes them. Hidden while empty.
-        self._status = QLabel("")
-        self._status.setObjectName("publish_status")
-        self._status.setWordWrap(True)
-        self._status.setVisible(False)
+        self._status = StatusLine(self._is_dark)
         layout.addWidget(self._status)
 
-        # Bottom row: "Publishing as [chip] · switch ▾"  +  Cancel / Publish.
-        bottom = QHBoxLayout()
-        bottom.setContentsMargins(0, 4, 0, 0)
-        bottom.setSpacing(6)
-
-        publishing_as = QLabel(_("Publishing as"))
-        bottom.addWidget(publishing_as)
-
-        self._profile_switch = QToolButton()
-        self._profile_switch.setObjectName("profile_switch")
-        self._profile_switch.setPopupMode(QToolButton.InstantPopup)
-        self._profile_switch.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self._profile_switch.setIconSize(QSize(CHIP_TOTAL_WIDTH, AVATAR_SIZE))
-        self._profile_switch.setCursor(Qt.PointingHandCursor)
-        self._switch_menu = QMenu(self._profile_switch)
-        self._profile_switch.setMenu(self._switch_menu)
-        bottom.addWidget(self._profile_switch)
-        bottom.addStretch(1)
-
+        self._account = AccountRow(profile, store, self._avatars, is_dark=self._is_dark)
+        self._account.switched.connect(lambda _profile: self._refresh())
         buttons = QDialogButtonBox()
-        self._cancel_btn = buttons.addButton(QDialogButtonBox.Cancel)
-        self._publish_btn = buttons.addButton(_("Publish"), QDialogButtonBox.AcceptRole)
-        answer_return_as_the_system_does(buttons.buttons())
+        self._cancel_btn = buttons.addButton(QDialogButtonBox.StandardButton.Cancel)
+        self._publish_btn = buttons.addButton(_("Publish"),
+                                              QDialogButtonBox.ButtonRole.AcceptRole)
         self._cancel_btn.clicked.connect(self._on_cancel)
         self._publish_btn.clicked.connect(self._on_publish)
-        bottom.addWidget(buttons)
+        layout.addWidget(BottomRow(self._account, buttons))
+        QWidget.setTabOrder(self._text_edit, self._account.button)
+        answer_return_as_the_system_does(self.findChildren(QPushButton))
 
-        layout.addLayout(bottom)
+    # -- mentions -----------------------------------------------------------------
 
-    def _apply_theme(self) -> None:
-        self.setStyleSheet((_DARK_DIALOG_CSS if self._is_dark else _LIGHT_DIALOG_CSS)
-                           + theme.default_and_focus_css(self._is_dark))
-        self._switch_menu.setStyleSheet(
-            _DARK_MENU_CSS if self._is_dark else _LIGHT_MENU_CSS
-        )
+    def _ask_mention(self, at: int) -> None:
+        """Whom to mention, asked at the caret: the people you follow first,
+        then a search; Escape keeps the "@"."""
+        if self._picker is None:
+            self._picker = MentionPicker(
+                self._known_people, self._search_client, avatars=self._avatars, parent=self,
+                is_dark=self._is_dark, address_check=self._address_check)
+            self._picker.picked.connect(self._mention_picked)
+        self._mention_at = at
+        self._picker.open_at(self._text_edit.cursorRect(), self._text_edit.viewport())
 
-    # -- profile switcher --------------------------------------------------
-
-    def _refresh_profile_chip(self) -> None:
-        profile = self._current_profile
-        avatar_pix = self._avatars.get(profile.user_pubkey)
-        avatar = pixmap_for_profile(
-            profile.display_name, profile.user_pubkey, avatar_pix, size=AVATAR_SIZE
-        )
-        self._profile_switch.setIcon(compose_chip_icon(avatar, self._chevron_color()))
-        # Force the icon onto a fixed footprint so width never twitches as
-        # the user switches between profiles with very different names.
-        from PySide6.QtCore import QSize
-        self._profile_switch.setIconSize(QSize(CHIP_TOTAL_WIDTH, AVATAR_SIZE))
-        label = profile.display_name or profile.npub_short()
-        self._profile_switch.setText(f"  {label}")
-        self._profile_switch.setToolTip(profile.npub_short())
-
-        self._rebuild_switch_menu()
-
-    def _chevron_color(self) -> QColor:
-        return QColor("#CCCCCC") if self._is_dark else QColor("#555555")
-
-    def _rebuild_switch_menu(self) -> None:
-        menu = self._switch_menu
-        menu.clear()
-        profiles = self._store.list()
-        if not profiles:
-            act = menu.addAction(_("(no accounts)"))
-            act.setEnabled(False)
-            return
-        for profile in profiles:
-            label = profile.display_name or profile.npub_short()
-            act = menu.addAction(label)
-            act.setCheckable(True)
-            act.setChecked(profile.user_pubkey == self._current_profile.user_pubkey)
-            act.triggered.connect(
-                lambda _checked=False, p=profile: self._on_profile_switched(p)
-            )
-
-    def _on_profile_switched(self, profile: Profile) -> None:
-        if profile.user_pubkey == self._current_profile.user_pubkey:
-            return
-        self._current_profile = profile
-        # Keep the main chip in sync so the user's "default" reflects their
-        # latest publish choice.
-        self._store.set_default(profile.user_pubkey)
-        self._refresh_profile_chip()
+    def _mention_picked(self, person) -> None:
+        self._text_edit.setFocus()
+        address = ("nostr:" + encode_nprofile(person.pubkey, [person.relay_hint])
+                   if person.relay_hint else "nostr:" + encode_npub(person.pubkey))
+        self._text_edit.insert_mention(self._mention_at, address, person.display_name
+                                       or refs.short_key(encode_npub(person.pubkey)))
 
     # -- content / status --------------------------------------------------
 
     def _content(self) -> str:
-        return self._text_edit.toPlainText().strip()
+        return self._text_edit.note()
 
-    def _refresh_char_count(self) -> None:
-        n = len(self._content())
+    def _refresh(self) -> None:
+        content = self._content()
+        # As long as it reads: a mention counts as its name.
+        n = len(self._text_edit.toPlainText().strip())
         msg = ngettext("{n} character", "{n} characters", n).format(n=n)
         if n >= _LONGFORM_HINT_CHARS:
             msg = _("{count} · long note, consider Publish as Article instead").format(
                 count=msg)
         self._char_count.setText(msg)
-        self._publish_btn.setEnabled(n > 0 and self._job is None)
+        self._publish_btn.setEnabled(bool(content) and self._job is None)
+        event = build_note(content, self._account.profile().user_pubkey)
+        people = people_tagged(event, content, markdown=False)
+        self._people.show_people(people)
+        self._people_line.setVisible(bool(people))
 
     def _set_status(self, text: str, *, error: bool = False) -> None:
-        self._status.setText(text)
-        self._status.setVisible(bool(text))
-        if error:
-            color = "#FF6B6B" if self._is_dark else "#C0392B"
-        else:
-            color = "#FFB347" if self._is_dark else "#A05000"
-        self._status.setStyleSheet(f"color: {color};")
+        self._status.say(text, error=error)
 
     def _set_busy(self, busy: bool) -> None:
         self._text_edit.setReadOnly(busy)
-        self._profile_switch.setEnabled(not busy)
+        self._account.setEnabled(not busy)
         self._publish_btn.setEnabled(not busy and bool(self._content()))
 
     # -- publish flow ------------------------------------------------------
@@ -386,10 +341,10 @@ class PublishNoteDialog(QDialog):
         if self._job is not None:
             return  # already running
 
+        profile = self._account.profile()
         unsigned = publishable(self, build_note(
             content,
-            self._current_profile.user_pubkey,
-            mentions=self._mention_row.mentions(),
+            profile.user_pubkey,
             media=self._media,
         ), is_dark=self._is_dark)
         if unsigned is None:
@@ -400,7 +355,7 @@ class PublishNoteDialog(QDialog):
             relay_pool=self._relay_pool,
             relay_directory=self._relay_directory,
             session_pool=self._session_pool,
-            profile=self._current_profile,
+            profile=profile,
             entitled_relays=relays_from(self._entitled_relays),
             unsigned_event=unsigned,
             parent=self,

@@ -284,7 +284,7 @@ def test_a_signer_that_cannot_be_reached_fails_the_job():
     assert pool.published == [] and seen["completed"] == []
 
 
-def _dialog(kind, tmp_path, job):
+def _dialog(kind, tmp_path, job, *, is_dark=True, parent=None, **more):
     from nostr.avatar_store import AvatarStore
     from nostr.known_people import KnownPeople
     from nostr.profiles import Profile as StoredProfile
@@ -300,7 +300,7 @@ def _dialog(kind, tmp_path, job):
     common = dict(active_profile=profile, store=store, relay_pool=FakePool(),
                   relay_directory=directory(), session_pool=FakeSessionPool(FakeClient()),
                   known_people=people, search_client=Nip50SearchClient(HandPool(), people),
-                  avatars=AvatarStore())
+                  avatars=AvatarStore(), is_dark=is_dark, parent=parent, **more)
     if kind == "note":
         from nostr.ui.publish_note_dialog import PublishNoteDialog
         dialog = PublishNoteDialog(content="hello", **common)
@@ -311,17 +311,31 @@ def _dialog(kind, tmp_path, job):
     return dialog
 
 
-def test_publish_article_opens_no_taller_than_a_small_screen(tmp_path, monkeypatch):
+@pytest.mark.parametrize("kind", ["note", "article"])
+def test_a_publish_sheet_opens_no_taller_than_a_small_screen_or_its_window(
+        tmp_path, monkeypatch, kind):
     """1024x640 (a 13-inch MacBook Air at its larger text setting): the
-    whole window, title bar included, fits, so Publish is on screen."""
+    whole sheet fits, so Publish is on screen; and a sheet is never taller
+    or wider than the window it is attached to, however small (its fields
+    scroll)."""
     from PySide6.QtCore import QRect
+    from PySide6.QtWidgets import QMainWindow
     import popup_placement
     monkeypatch.setattr(popup_placement, "available_area", lambda widget: QRect(0, 25, 1024, 615))
-    dialog = _dialog("article", tmp_path, None)
+    dialog = _dialog(kind, tmp_path, None)
     assert dialog.height() + popup_placement.TITLE_BAR <= 615
     assert dialog.width() <= 1024 and dialog.height() >= dialog.minimumHeight()
-    monkeypatch.setattr(popup_placement, "available_area", lambda widget: QRect(0, 0, 1920, 1080))
-    assert _dialog("article", tmp_path, None).size().toTuple() == (760, 680)
+    for size in ((1024, 640), (640, 480), (344, 210)):         # 344x210: the window's least
+        window = QMainWindow()
+        window.resize(*size)
+        window.show()
+        sheet = _dialog(kind, tmp_path, None, parent=window)
+        sheet.show()
+        QApplication.processEvents()
+        assert sheet.height() <= window.height() and sheet.width() <= window.width()
+        assert sheet._publish_btn.isVisible()
+        sheet.close()
+        window.close()
 
 
 class StubJob:

@@ -50,9 +50,7 @@ def test_the_default_and_the_focus_can_be_seen(tmp_path, monkeypatch, mac, kind,
     # focused Cancel takes the accent and the ring that shows on it, and
     # Publish turns plain: what Return will press is what looks pressed.
     monkeypatch.setattr(alerts, "IS_MAC", mac)
-    dialog = _dialog(kind, tmp_path, None)
-    dialog._is_dark = dark
-    dialog._apply_theme()
+    dialog = _dialog(kind, tmp_path, None, is_dark=dark)
     if kind == "article":
         dialog._title_edit.setText("My title")     # Publish needs a title
     dialog.show()

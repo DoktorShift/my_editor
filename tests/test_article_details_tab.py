@@ -160,35 +160,18 @@ def test_after_save_as_draft_article_details_shows_and_keeps_what_was_saved(tmp_
                           ["Bitcoin"], 1, 2]
 
 
-def test_the_publish_window_hands_back_only_what_changed_in_it(monkeypatch):
-    from nostr.ui import publish_article_dialog as module
-    dialog = module.PublishArticleDialog.__new__(module.PublishArticleDialog)
-    fields = {}
-
-    class Field:
-        def __init__(self, text=""):
-            self._text = text
-
-        def text(self):
-            return self._text
-
-        def setText(self, text):
-            self._text = text
-
-    for name in ("_slug_edit", "_title_edit", "_summary_edit", "_image_edit", "_tags_edit"):
-        fields[name] = Field()
-        setattr(dialog, name, fields[name])
-    dialog._details = ArticleDetails(identifier="my-post", title="T", hashtags=("a",))
-    dialog._published_at_used = None
-    fields["_slug_edit"].setText("my-post")
-    fields["_title_edit"].setText("T")
-    fields["_tags_edit"].setText("a")
-    dialog._details_shown = dialog.details()
+def test_the_publish_window_hands_back_only_what_changed_in_it(tmp_path):
+    from PySide6.QtTest import QTest
+    from tests.test_publish_job import _dialog
+    details = ArticleDetails(identifier="my-post", title="T", hashtags=("a",))
+    dialog = _dialog("article", tmp_path, None, details=details, default_title="T",
+                     default_slug="my-post")
     assert not dialog.details_changed()
-    fields["_tags_edit"].setText("#A, b,  b ,")
+    QTest.keyClicks(dialog._hashtags.entry, "#A, b,  b ,")
     assert dialog.details_changed()
-    assert dialog.details().hashtags == ("A", "b")                # the case written
-    dialog._tags_edit.setText("a")
+    assert dialog.details().hashtags == ("a", "b")                # each once, as written
+    dialog._hashtags.set_tags(("a",))
+    assert not dialog.details_changed()
     dialog._published_at_used = 1_700_000_000
     assert dialog.details_changed() and dialog.details().published_at == 1_700_000_000
 

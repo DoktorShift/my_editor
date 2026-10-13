@@ -37,7 +37,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import front_matter  # noqa: E402
 from nostr.article_details import (  # noqa: E402
-    ArticleDetails, from_front_matter, front_matter_with, hashtags_from, hashtags_text,
+    ArticleDetails, from_front_matter, front_matter_with,
     kept_in_file)
 from tests.app_process import run_window_script  # noqa: E402
 
@@ -337,7 +337,6 @@ def test_a_tag_holding_a_comma_stays_one_tag():
     front, body = front_matter.split('---\ntags: [a, "b, c", \'d\']\n---\n\nB\n')
     details = from_front_matter(front)
     assert details.hashtags == ("a", "b, c", "d")
-    assert hashtags_from(hashtags_text(details.hashtags)) == details.hashtags
     added = details.with_changes(hashtags=details.hashtags + ("Extra",))
     out = front_matter.join(front_matter_with(added, front), body)
     assert "tags: [a, \"b, c\", 'd', Extra]\n" in out

@@ -34,7 +34,6 @@ on the draft's wrap, and a draft the person saved has none.
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
@@ -93,17 +92,10 @@ def default_title(markdown: str,
 
 def hashtags_from(text: str) -> Tuple[str, ...]:
     """The hashtags written in ``text``, separated by commas (one holding a
-    comma in double quotes, as hashtags_text writes it): without "#", each
-    once whatever its case, in the order and the case written (an article's
-    ``t`` tags are lowercase, as they are published)."""
+    comma in double quotes): without "#", each once whatever its case, in
+    the order and the case written (an article's ``t`` tags are
+    lowercase, as they are published)."""
     return _hashtags(front_matter.split_items(text or ""))
-
-
-def hashtags_text(hashtags: Sequence[str]) -> str:
-    """``hashtags`` as they are typed in a field: separated by commas, one
-    holding a comma or a double quote in double quotes, so it stays whole."""
-    return ", ".join(json.dumps(tag, ensure_ascii=False) if any(c in tag for c in ',"')
-                     else tag for tag in hashtags)
 
 
 def _hashtags(items: Iterable[str]) -> Tuple[str, ...]:

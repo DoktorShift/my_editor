@@ -187,7 +187,7 @@ def test_the_publish_dialog_offers_and_publishes_the_drafts_details(tmp_path, mo
     dialog = _dialog(tmp_path, details)
     assert dialog._summary_edit.text() == "What it is about"
     assert dialog._image_edit.text() == COVER
-    assert dialog._tags_edit.text() == "bitcoin, nostr"
+    assert dialog._hashtags.tags() == ("bitcoin", "nostr")
     dialog._title_edit.setText("A new title")
     assert dialog._slug_edit.text() == "imported-post"        # the article keeps its identifier
     dialog._on_publish()

@@ -460,7 +460,7 @@ def test_a_key_in_the_slug_never_leaves_the_computer(tmp_path, monkeypatch):
     dialog._slug_edit.setText(f"backup-{NSEC}")
     dialog._on_slug_edited(dialog._slug_edit.text())
     assert not dialog._slug_problem.isHidden() and "slug" in dialog._slug_problem.text()
-    assert dialog._advanced_open and not dialog._advanced_panel.isHidden()
+    assert dialog._details_toggle.isChecked() and dialog._slug_edit.isVisibleTo(dialog)
     assert not dialog._publish_btn.isEnabled()
     dialog._on_publish()
     assert asked == [] and dialog._relay_pool.published == []

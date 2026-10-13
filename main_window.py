@@ -6505,12 +6505,16 @@ class MainWindow(QMainWindow):
             known_people=self._known_people,
             search_client=self._search_client,
             avatars=self._avatars,
+            address_check=self._address_check,
             media=media,
             parent=self,
             is_dark=self.is_dark_theme,
         )
         dialog.published.connect(self._on_nostr_note_published)
-        dialog.exec()
+        # Composed for sharing, as a share sheet is: the document is not
+        # changed by what is changed in it.
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.open()
 
     def _toggle_ticks(self) -> None:
         ed = self.current_editor()
@@ -6947,6 +6951,8 @@ class MainWindow(QMainWindow):
             known_people=self._known_people,
             search_client=self._search_client,
             avatars=self._avatars,
+            address_check=self._address_check,
+            can_receive_zaps=self._ask_can_receive_zaps,
             media_store=self._media_store,
             media_visibility=self._media_visibility,
             copy_maker=self._copy_maker,
@@ -6961,9 +6967,14 @@ class MainWindow(QMainWindow):
             is_dark=self.is_dark_theme,
         )
         dialog.published.connect(self._on_nostr_article_published)
-        dialog.exec()
-        # What was changed there is the article's, as in Article Details.
-        if dialog.details_changed():
+        dialog.finished.connect(lambda _result, d=dialog, e=ed: self._article_sheet_closed(d, e))
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.open()
+
+    def _article_sheet_closed(self, dialog, ed) -> None:
+        """Publish as Article closed, published or not: what was changed
+        there is the article's, as in Article Details."""
+        if ed is not None and shiboken6.isValid(ed) and dialog.details_changed():
             self._set_article_details(ed, dialog.details())
 
     def _on_nostr_article_published(self, _naddr: str, results):
