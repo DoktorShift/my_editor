@@ -257,3 +257,15 @@ def test_composed_and_option_characters_stay_in_the_run(clock):
     ed.undo()
     assert ed.toPlainText() == ""
 
+
+def test_a_key_that_changes_nothing_does_not_rename_the_step_before(clock):
+    ed = typed("word")
+    cursor = ed.textCursor()
+    cursor.select(QTextCursor.SelectionType.WordUnderCursor)
+    ed.setTextCursor(cursor)
+    ed.toggle_bold()
+    cursor = ed.textCursor()
+    cursor.setPosition(0)
+    ed.setTextCursor(cursor)
+    key(ed, Qt.Key.Key_Backspace)              # at the start: nothing to delete
+    assert ed.undo_name() == "Bold"

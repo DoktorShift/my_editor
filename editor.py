@@ -289,8 +289,15 @@ class HtmlEditor(QTextEdit):
         (BACKWARD, FORWARD) with: in the run going on, when this goes on
         with it, else in a new one. What changes the text meanwhile, by
         this cursor or by Qt's own handling of a key or of an input
-        method, is in the run."""
+        method, is in the run; a key that changes nothing leaves the run
+        and the name of the step before as they were."""
         doc = self.document()
+        changes = []
+
+        def changed(*_where) -> None:
+            changes.append(_where)
+
+        doc.contentsChange.connect(changed)
         cursor = cursor or self.textCursor()
         run = self._run
         goes_on = (run is not None and run.kind == kind and not cursor.hasSelection()
@@ -305,11 +312,13 @@ class HtmlEditor(QTextEdit):
             yield cursor
         finally:
             cursor.endEditBlock()
-            self._run = _Run(kind, cursor.position(), doc.availableUndoSteps(),
-                             time.monotonic())
-            self._undo_names[doc.availableUndoSteps()] = N_("Typing")
-            self.setTextCursor(cursor)
-            self.undo_named.emit()
+            doc.contentsChange.disconnect(changed)
+            if changes:
+                self._run = _Run(kind, cursor.position(), doc.availableUndoSteps(),
+                                 time.monotonic())
+                self._undo_names[doc.availableUndoSteps()] = N_("Typing")
+                self.setTextCursor(cursor)
+                self.undo_named.emit()
 
     def end_typing_run(self) -> None:
         """What is typed next is a step of Undo of its own."""
