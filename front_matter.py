@@ -191,7 +191,9 @@ def split(text: str) -> Tuple[Optional[FrontMatter], str]:
         found = _BLOCK.match(text)
     if found is None:
         return None, text
-    lines = found.group(2).splitlines()
+    # Lines end at "\n" or "\r\n" only, as YAML and TOML end them: a form
+    # feed, a lone "\r" or U+2028 inside a line stays there.
+    lines = re.split(r"\r?\n", found.group(2)) if found.group(2) else []
     entries = _toml_entries(lines) if syntax == TOML else _yaml_entries(lines)
     if lines and not any(entry.key for entry in entries):
         return None, text                   # a divider, some text, a divider: text

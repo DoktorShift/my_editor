@@ -851,3 +851,16 @@ def test_a_detail_is_never_taken_out_with_the_front_matter_around_it():
     written = front_matter_with(from_front_matter(front).with_changes(hashtags=()), front)
     again, rest = front_matter.split(front_matter.join(written, body))
     assert rest == body and again is not None
+
+
+@pytest.mark.parametrize("odd", [" ", "\x85", "\x0c", "\r", " ", "\x1c"])
+def test_a_line_break_yaml_does_not_end_a_line_on_stays_as_written(odd):
+    """Round 8, L3: a save with no change wrote these as line breaks. (A
+    form feed or U+001C is no character YAML reads in a file at all: that
+    front matter stays as written whatever is set.)"""
+    text = f'---\ntitle: "Hello{odd}World"\nlayout: post\n---\nB\n'
+    assert unchanged_save(text) == text
+    crlf = text.replace("\n", "\r\n")
+    assert unchanged_save(crlf) == crlf
+    added = text.replace("layout: post\n", "layout: post\nsummary: S\n")
+    assert changed(text, summary="S") == (text if odd in "\x0c\x1c" else added)
