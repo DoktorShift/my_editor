@@ -34,7 +34,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt  # noqa: E402
-from PySide6.QtGui import QInputMethodEvent, QMouseEvent, QTextCursor  # noqa: E402
+from PySide6.QtGui import QFocusEvent, QInputMethodEvent, QMouseEvent, QTextCursor  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication, QLineEdit, QMainWindow, QMenu, QToolButton, QVBoxLayout, QWidget,
@@ -489,3 +489,30 @@ def test_the_style_popup_has_the_toolbar_disclosure_arrow(w):
     arrows = [c for c in w.bar.style_button.children() if isinstance(c, Disclosure)]
     assert len(arrows) == 1 and arrows[0].isVisible()
     assert isinstance(w.bar.style_button, PopupButton)          # no Qt dot
+
+
+def test_a_popup_taking_the_keys_closes_it_while_the_window_stays_active(w, monkeypatch):
+    """A menu or a popover opening sends the text FocusOut for a popup and
+    nothing else on Linux, Windows and a Mac (the window stays active, and
+    the text keeps its focus underneath): the bar goes then too, unless the
+    popup is its own style menu."""
+    import selection_bar
+    w.double_click(word_at(TEXT, "Another", 5) + 2)
+    assert w.bar.isVisible()
+    other = QMenu(w.window)
+    monkeypatch.setattr(selection_bar.QApplication, "activePopupWidget",
+                        staticmethod(lambda: other))
+    QApplication.sendEvent(w.editor, QFocusEvent(QEvent.Type.FocusOut,
+                                                 Qt.FocusReason.PopupFocusReason))
+    settle()
+    assert w.editor.hasFocus() and w.window.isActiveWindow()
+    assert not w.bar.isVisible()
+    monkeypatch.undo()                                 # no popup up
+    w.double_click(word_at(TEXT, "Another", 5) + 2)
+    assert w.bar.isVisible()
+    monkeypatch.setattr(selection_bar.QApplication, "activePopupWidget",
+                        staticmethod(lambda: w.style_menu))
+    QApplication.sendEvent(w.editor, QFocusEvent(QEvent.Type.FocusOut,
+                                                 Qt.FocusReason.PopupFocusReason))
+    settle()
+    assert w.bar.isVisible()

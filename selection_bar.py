@@ -212,11 +212,15 @@ class SelectionBar(QFrame):
             QTimer.singleShot(0, self._place)
 
     def _hide_unless_in_use(self) -> None:
-        """The focus or the window went elsewhere: the bar goes, unless it
-        went to the bar's own style menu."""
-        if self._style_menu.isVisible():
+        """The focus or the window went elsewhere, or a popup (a menu, a
+        popover) took the keys: the bar goes, unless that is the bar's own
+        style menu. (A popup leaves the text its focus and the window
+        active: it is asked for by name.)"""
+        popup = QApplication.activePopupWidget()
+        if popup is self._style_menu or self._style_menu.isVisible():
             return
-        if not self._editor.hasFocus() or not self._editor.isActiveWindow():
+        if (popup is not None or not self._editor.hasFocus()
+                or not self._editor.isActiveWindow()):
             self.hide()
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802, Qt's name
