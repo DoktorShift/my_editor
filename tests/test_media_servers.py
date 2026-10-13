@@ -490,3 +490,19 @@ def test_a_signer_that_cannot_be_reached_is_named_too(tmp_path):
 
 def test_servers_that_cannot_be_reached_are_named_as_the_reason(tmp_path):
     assert _unlistable(tmp_path, down=True) == ["NETWORK_UNAVAILABLE"]
+
+
+def test_a_shared_copy_the_listing_does_not_show_is_still_deleted(tmp_path):
+    """Stop Sharing deletes a public copy by the servers its record
+    names, also when this device's listing has not seen it (made on
+    another device, or on a server not listed)."""
+    router = Router(FakeBlossomServer(SERVER, blobs=[descriptor(C)]),
+                    FakeBlossomServer(MIRROR))
+    store, nam, _signer, _ = make(tmp_path, router)
+    deleted = []
+    store.file_deleted.connect(deleted.append)
+    store.delete_file(C, servers=[SERVER])
+    nam.settle()
+    assert deleted == [C]
+    assert router.by_host["good.example"].deletes == [C]
+    assert router.by_host["mirror.example"].deletes == []

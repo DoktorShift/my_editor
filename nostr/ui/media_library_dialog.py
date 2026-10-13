@@ -146,6 +146,10 @@ class MediaLibraryDialog(QDialog):
         # their tile, by job name.
         self._job_notes: Dict[str, str] = {}
         self._early_failures: Dict[str, str] = {}
+        # Shared copies being deleted, by the copy's sha256: the
+        # original's name, and whether it stays (Stop Sharing) or goes
+        # with them (Delete).
+        self._unsharing: Dict[str, tuple] = {}
         # Downloads for Save As, by sha256: where each one goes.
         self._saving: Dict[str, List[str]] = {}
         self._quick_look: Optional[QuickLook] = None
@@ -580,6 +584,8 @@ class MediaLibraryDialog(QDialog):
                        self._save_as)
         if not self._pick_mode:
             menu.addSeparator()
+            if self._shared_copies(files):
+                menu.addAction(_("Stop Sharing"), self._stop_sharing)
             menu.addAction(_("Delete"), self._delete)
 
     # -- open, insert, quick look ------------------------------------------
@@ -738,15 +744,59 @@ class MediaLibraryDialog(QDialog):
         if not confirm_destructive(self, title=title, message=message, action=_("Delete"),
                                    is_dark=self._is_dark):
             return
+        # A shared original goes with its copy, or the copy would stay
+        # public with no tile left to reach it.
+        self._delete_copies(files, stays=False)
         for tile in files:
             self._store.delete_file(tile.key)
+
+    def _shared_copies(self, files: List[Tile]) -> list:
+        """(tile, its public copy) for the files shared through a copy:
+        private originals someone published."""
+        found = []
+        for tile in files:
+            copy = self._visibility.public_copy_of(tile.key)
+            if copy is not None:
+                found.append((tile, copy))
+        return found
+
+    def _stop_sharing(self) -> None:
+        """Stop Sharing, as iCloud and Photos name it: the public copy is
+        deleted from every server, the private original stays."""
+        shared = self._shared_copies(self._selected_files())
+        if not shared:
+            return
+        title = (_("Stop sharing “{name}”?").format(name=shared[0][0].name) if len(shared) == 1
+                 else ngettext("Stop sharing {count} item?", "Stop sharing {count} items?",
+                               len(shared)).format(count=len(shared)))
+        message = ngettext(
+            "Anyone with the link will no longer see it, and anything you published with it "
+            "will no longer show it.",
+            "Anyone with the link will no longer see them, and anything you published with "
+            "them will no longer show them.", len(shared))
+        if confirm_destructive(self, title=title, message=message, action=_("Stop Sharing"),
+                               is_dark=self._is_dark):
+            self._delete_copies([tile for tile, _copy in shared], stays=True)
+
+    def _delete_copies(self, files: List[Tile], *, stays: bool) -> None:
+        for tile, copy in self._shared_copies(files):
+            self._unsharing[copy.sha256] = (tile.name, stays)
+            self._store.delete_file(copy.sha256, servers=list(copy.servers) + [copy.url])
 
     def _on_file_deleted(self, sha: str) -> None:
         # Deleting a public copy is what un-sharing it is, so the record
         # of what is shared follows.
         self._visibility.forget_public_copy(sha)
+        name, stays = self._unsharing.pop(sha, ("", False))
+        if stays:
+            self._say(_("“{name}” is no longer shared.").format(name=name))
 
     def _on_delete_failed(self, sha: str, code: str) -> None:
+        if sha in self._unsharing:
+            name, _stays = self._unsharing.pop(sha)
+            self._say(_("“{name}” is still shared. {reason}").format(
+                name=name, reason=friendly_message(code)), error=True)
+            return
         name = self._name_of(sha)
         if sha in self._store.files:
             text = _("“{name}” is still on one of your media servers. {reason}")

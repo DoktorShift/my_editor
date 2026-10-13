@@ -1402,7 +1402,7 @@ class MediaStore(QObject):
     # Delete
     # ------------------------------------------------------------------
 
-    def delete_file(self, file_hash: str) -> None:
+    def delete_file(self, file_hash: str, *, servers: Sequence[str] = ()) -> None:
         """Delete a blob from every server it lives on.
 
         Files are deduped by sha256 across servers, so the same hash can
@@ -1415,6 +1415,9 @@ class MediaStore(QObject):
         never reported gone while a server still serves it: it would come
         back on the next listing, and the person would have believed it
         deleted.
+
+        ``servers`` names where a file the listing does not show is kept,
+        so it can be deleted there.
         """
         profile = self._profile_provider()
         if profile is None:
@@ -1422,7 +1425,13 @@ class MediaStore(QObject):
             return
         media = self._files.get(file_hash)
         if media is None:
-            return
+            # Not in the listing: where ``servers`` says it is kept (a
+            # public copy made on another device, say).
+            urls = [{"server": origin, "url": blob_url(origin, file_hash)}
+                    for origin in dict.fromkeys(_origin_or_empty(s) for s in servers) if origin]
+            if not urls:
+                return
+            media = MediaFile(hash=file_hash, url=urls[0]["url"], urls=urls)
 
         # The servers to ask: the file's own copies (whatever ``/list``
         # told us), with the blob URL as a fallback for a file known by
@@ -1446,6 +1455,8 @@ class MediaStore(QObject):
             if not failures:
                 self._files.pop(file_hash, None)
                 self.file_deleted.emit(file_hash)
+            elif file_hash not in self._files:
+                self.delete_failed.emit(file_hash, _delete_failure_code(failures))
             else:
                 kept = {origin for origin, _code in failures}
                 media.urls = [u for u in media.urls

@@ -452,7 +452,7 @@ msgstr ""
 #: nostr/ui/drafts_panel.py:1154
 #: nostr/ui/imports_activity.py:288
 #: nostr/ui/imports_window.py:1186
-#: nostr/ui/media_library_dialog.py:201
+#: nostr/ui/media_library_dialog.py:205
 msgid "Try Again"
 msgstr ""
 
@@ -635,7 +635,7 @@ msgid "Open"
 msgstr ""
 
 #: main_window.py:3501
-#: nostr/ui/media_library_dialog.py:685
+#: nostr/ui/media_library_dialog.py:691
 msgid "Save As"
 msgstr ""
 
@@ -714,8 +714,8 @@ msgstr ""
 
 #: main_window.py:7613
 #: main_window.py:1721
-#: nostr/ui/media_library_dialog.py:583
-#: nostr/ui/media_library_dialog.py:738
+#: nostr/ui/media_library_dialog.py:589
+#: nostr/ui/media_library_dialog.py:744
 #: nostr/ui/published_view.py:641
 msgid "Delete"
 msgstr ""
@@ -797,7 +797,7 @@ msgid "Save"
 msgstr ""
 
 #: main_window.py:1668
-#: nostr/ui/media_library_dialog.py:579
+#: nostr/ui/media_library_dialog.py:583
 msgid "Save As…"
 msgstr ""
 
@@ -1172,7 +1172,7 @@ msgstr ""
 
 #: main_window.py:5221
 #: nostr/ui/connect_dialog.py:212
-#: nostr/ui/media_library_dialog.py:575
+#: nostr/ui/media_library_dialog.py:579
 #: nostr/ui/published_view.py:700
 msgid "Copy Link"
 msgstr ""
@@ -2257,7 +2257,7 @@ msgid "MyEditor can read audio and video files of these kinds: {kinds}."
 msgstr ""
 
 #: main_window.py:6877
-#: nostr/ui/media_library_dialog.py:837
+#: nostr/ui/media_library_dialog.py:887
 msgid "Uploading…"
 msgstr ""
 
@@ -3193,8 +3193,8 @@ msgstr ""
 
 #: slash_menu.py:164
 #: slash_menu.py:172
-#: nostr/ui/media_library_dialog.py:321
-#: nostr/ui/media_library_dialog.py:572
+#: nostr/ui/media_library_dialog.py:325
+#: nostr/ui/media_library_dialog.py:576
 #: nostr/ui/reference_popover.py:81
 msgid "Insert"
 msgstr ""
@@ -5864,7 +5864,7 @@ msgstr ""
 
 #: nostr/ui/article_details_panel.py:483
 #: nostr/ui/draft_relays_sheet.py:158
-#: nostr/ui/media_library_dialog.py:564
+#: nostr/ui/media_library_dialog.py:568
 #: nostr/ui/media_servers_dialog.py:103
 #: nostr/ui/media_servers_dialog.py:246
 msgid "Remove"
@@ -6345,13 +6345,13 @@ msgid "Close drafts panel"
 msgstr ""
 
 #: nostr/ui/drafts_panel.py:1513
-#: nostr/ui/media_library_dialog.py:542
+#: nostr/ui/media_library_dialog.py:546
 msgid "Refresh"
 msgstr ""
 
 #: nostr/ui/drafts_panel.py:1537
-#: nostr/ui/media_library_dialog.py:271
-#: nostr/ui/media_library_dialog.py:272
+#: nostr/ui/media_library_dialog.py:275
+#: nostr/ui/media_library_dialog.py:276
 msgid "Actions"
 msgstr ""
 
@@ -6874,7 +6874,7 @@ msgid "Show the number of new posts on the app icon? You can change this in the 
 msgstr ""
 
 #: nostr/ui/imports_badge.py:29
-#: nostr/ui/media_library_dialog.py:245
+#: nostr/ui/media_library_dialog.py:249
 msgid "Show"
 msgstr ""
 
@@ -7251,7 +7251,7 @@ msgid "Follow a website, or import a file or a link"
 msgstr ""
 
 #: nostr/ui/imports_window.py:363
-#: nostr/ui/media_library_dialog.py:261
+#: nostr/ui/media_library_dialog.py:265
 msgid "Search"
 msgstr ""
 
@@ -7512,7 +7512,7 @@ msgstr ""
 
 #: nostr/ui/media_grid.py:241
 #: nostr/ui/media_grid.py:310
-#: nostr/ui/media_library_dialog.py:563
+#: nostr/ui/media_library_dialog.py:567
 msgid "Retry"
 msgstr ""
 
@@ -7525,75 +7525,81 @@ msgstr ""
 msgid "couldn’t upload: {reason}"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:733
+#: nostr/ui/media_library_dialog.py:739
 msgid "Anything you published with it will no longer show it. You can’t undo this action."
 msgid_plural "Anything you published with them will no longer show them. You can’t undo this action."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/media_library_dialog.py:962
+#: nostr/ui/media_library_dialog.py:772
+msgid "Anyone with the link will no longer see it, and anything you published with it will no longer show it."
+msgid_plural "Anyone with the link will no longer see them, and anything you published with them will no longer show them."
+msgstr[0] ""
+msgstr[1] ""
+
+#: nostr/ui/media_library_dialog.py:1012
 msgid "File"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:1061
+#: nostr/ui/media_library_dialog.py:1111
 #, python-brace-format
 msgid "At least {used} of {quota} used"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:239
-#: nostr/ui/media_library_dialog.py:444
+#: nostr/ui/media_library_dialog.py:243
+#: nostr/ui/media_library_dialog.py:448
 msgid "Add…"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:240
+#: nostr/ui/media_library_dialog.py:244
 msgid "Add images, videos or audio from your computer"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:252
+#: nostr/ui/media_library_dialog.py:256
 msgid "Sort By"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:262
+#: nostr/ui/media_library_dialog.py:266
 msgid "Search Media"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:543
+#: nostr/ui/media_library_dialog.py:547
 msgid "Media Servers…"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:573
+#: nostr/ui/media_library_dialog.py:577
 #: nostr/ui/media_preview.py:78
 msgid "Quick Look"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:752
+#: nostr/ui/media_library_dialog.py:802
 #, python-brace-format
 msgid "“{name}” is still on one of your media servers. {reason}"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:754
+#: nostr/ui/media_library_dialog.py:804
 #, python-brace-format
 msgid "“{name}” couldn’t be deleted. {reason}"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:761
+#: nostr/ui/media_library_dialog.py:811
 msgid "The file"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:770
+#: nostr/ui/media_library_dialog.py:820
 msgid "Add to Media Library"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:823
-#: nostr/ui/media_library_dialog.py:807
+#: nostr/ui/media_library_dialog.py:873
+#: nostr/ui/media_library_dialog.py:857
 msgid "Waiting…"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:914
+#: nostr/ui/media_library_dialog.py:964
 msgid "Couldn’t reach your media servers. Check your internet connection."
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:1063
+#: nostr/ui/media_library_dialog.py:1113
 #, python-brace-format
 msgid "Full: {used} of {quota} used"
 msgstr ""
@@ -7606,174 +7612,201 @@ msgstr ""
 msgid "Media Library"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:246
+#: nostr/ui/media_library_dialog.py:250
 msgid "All Items"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:246
+#: nostr/ui/media_library_dialog.py:250
 msgid "Images"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:247
+#: nostr/ui/media_library_dialog.py:251
 msgid "Videos"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:247
-#: nostr/ui/media_library_dialog.py:962
+#: nostr/ui/media_library_dialog.py:251
+#: nostr/ui/media_library_dialog.py:1012
 msgid "Audio"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:253
+#: nostr/ui/media_library_dialog.py:257
 msgid "Newest First"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:253
+#: nostr/ui/media_library_dialog.py:257
 msgid "Oldest First"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:254
+#: nostr/ui/media_library_dialog.py:258
 msgid "Largest First"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:254
+#: nostr/ui/media_library_dialog.py:258
 msgid "Smallest First"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:255
+#: nostr/ui/media_library_dialog.py:259
 msgid "Name"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:307
+#: nostr/ui/media_library_dialog.py:311
 msgid "Alt text:"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:310
+#: nostr/ui/media_library_dialog.py:314
 msgid "Alt text"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:311
+#: nostr/ui/media_library_dialog.py:315
 msgid "Describe the image for people who can’t see it"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:566
+#: nostr/ui/media_library_dialog.py:570
 msgid "Cancel Upload"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:575
+#: nostr/ui/media_library_dialog.py:579
 msgid "Copy Links"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:578
+#: nostr/ui/media_library_dialog.py:582
 #: nostr/ui/media_preview.py:103
 #: nostr/ui/published_view.py:697
 msgid "Open in Browser"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:579
+#: nostr/ui/media_library_dialog.py:583
 msgid "Save to Folder…"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:616
+#: nostr/ui/media_library_dialog.py:622
 msgid "MyEditor is still checking whether this image is private. One moment."
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:685
+#: nostr/ui/media_library_dialog.py:691
 msgid "All Files (*)"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:688
+#: nostr/ui/media_library_dialog.py:694
 msgid "Choose a Folder"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:799
+#: nostr/ui/media_library_dialog.py:777
+#: nostr/ui/media_library_dialog.py:588
+msgid "Stop Sharing"
+msgstr ""
+
+#: nostr/ui/media_library_dialog.py:849
 msgid "The pasted image couldn’t be read."
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:962
+#: nostr/ui/media_library_dialog.py:1012
 msgid "Image"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:962
+#: nostr/ui/media_library_dialog.py:1012
 msgid "Video"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:1065
+#: nostr/ui/media_library_dialog.py:1115
 #, python-brace-format
 msgid "Almost full: {used} of {quota} used"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:1067
+#: nostr/ui/media_library_dialog.py:1117
 #, python-brace-format
 msgid "{used} of {quota} used"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:442
+#: nostr/ui/media_library_dialog.py:446
 #: nostr/ui/published_view.py:129
 msgid "Loading…"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:619
+#: nostr/ui/media_library_dialog.py:625
 msgid "This image can’t be used until your signer app lets MyEditor check whether it is private."
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:730
+#: nostr/ui/media_library_dialog.py:736
 #, python-brace-format
 msgid "Delete “{name}”?"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:731
+#: nostr/ui/media_library_dialog.py:737
 #, python-brace-format
 msgid "Delete {count} item?"
 msgid_plural "Delete {count} items?"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/media_library_dialog.py:771
+#: nostr/ui/media_library_dialog.py:769
+#, python-brace-format
+msgid "Stop sharing “{name}”?"
+msgstr ""
+
+#: nostr/ui/media_library_dialog.py:770
+#, python-brace-format
+msgid "Stop sharing {count} item?"
+msgid_plural "Stop sharing {count} items?"
+msgstr[0] ""
+msgstr[1] ""
+
+#: nostr/ui/media_library_dialog.py:821
 #, python-brace-format
 msgid "Images, Videos and Audio ({patterns})"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:802
+#: nostr/ui/media_library_dialog.py:852
 msgid "Pasted Image"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:875
+#: nostr/ui/media_library_dialog.py:925
 #, python-brace-format
 msgid "“{name}” wasn’t added. {reason}"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:888
+#: nostr/ui/media_library_dialog.py:938
 #, python-brace-format
 msgid "“{name}” is added, but one of your media servers didn’t keep a copy."
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:440
+#: nostr/ui/media_library_dialog.py:444
 #, python-brace-format
 msgid "No items match “{text}”."
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:444
+#: nostr/ui/media_library_dialog.py:448
 msgid "Images, videos and audio you add appear here."
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:500
+#: nostr/ui/media_library_dialog.py:504
 #, python-brace-format
 msgid "“{name}” couldn’t be downloaded. Check your internet connection and try again."
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:784
+#: nostr/ui/media_library_dialog.py:792
+#, python-brace-format
+msgid "“{name}” is no longer shared."
+msgstr ""
+
+#: nostr/ui/media_library_dialog.py:797
+#, python-brace-format
+msgid "“{name}” is still shared. {reason}"
+msgstr ""
+
+#: nostr/ui/media_library_dialog.py:834
 #, python-brace-format
 msgid "“{name}” wasn’t added. The Media Library takes images, videos and audio."
 msgid_plural "{count} files weren’t added. The Media Library takes images, videos and audio."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/media_library_dialog.py:713
+#: nostr/ui/media_library_dialog.py:719
 #, python-brace-format
 msgid "“{name}” couldn’t be saved. Try again."
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:719
+#: nostr/ui/media_library_dialog.py:725
 #, python-brace-format
 msgid "“{name}” couldn’t be saved there. Choose another folder."
 msgstr ""

@@ -704,3 +704,79 @@ def test_no_colour_is_written_into_the_media_windows(module):
     """Every colour comes from the palette, theme.py or constants.py."""
     source = (Path(__file__).parent.parent / "nostr" / "ui" / f"{module}.py").read_text(encoding="utf-8")
     assert not re.findall(r"#[0-9A-Fa-f]{6}\b", source)
+
+
+# --------------------------------------------------------------------------- #
+# Stop Sharing
+# --------------------------------------------------------------------------- #
+
+def _shared_original(tmp_path, monkeypatch):
+    envelope = sealed()
+    original = MediaFile(hash=sha_of(envelope), url=f"{SERVER}/{sha_of(envelope)}", size=10)
+    copy_sha = "c" * 64
+    blob = PrivateBlob(sha256=original.hash, key_hex=KEY, mime="image/png", name="Beach.png")
+    ledger = PublicLedger(path=tmp_path / "public.json")
+    ledger.record(PublicBlob(sha256=copy_sha, url=f"{MEMBERS}/{copy_sha}.png",
+                             servers=[MEMBERS], source_hash=original.hash))
+    visibility = MediaVisibility(library=FakeLibrary([blob]), ledger=ledger)
+    world = build(tmp_path, monkeypatch, FakeStore([original]), visibility=visibility)
+    world.store.delete_file = lambda sha, servers=(): world.store.calls.append(
+        ("delete", sha, tuple(servers)))
+    return world, original, copy_sha, ledger
+
+
+def _menu_texts(world):
+    world.dialog._fill_actions_menu()
+    return [a.text() for a in world.dialog._actions_menu.actions() if a.text()]
+
+
+def test_stop_sharing_is_offered_only_for_a_shared_copy(tmp_path, monkeypatch):
+    world, original, _copy, _ledger = _shared_original(tmp_path, monkeypatch)
+    select(world, original.hash)
+    assert "Stop Sharing" in _menu_texts(world)
+    plain = build(tmp_path, monkeypatch, FakeStore([media(1)]))
+    select(plain, f"{1:064x}")
+    assert "Stop Sharing" not in _menu_texts(plain)
+
+
+def test_stop_sharing_asks_then_deletes_the_copy_where_it_is(tmp_path, monkeypatch):
+    world, original, copy_sha, ledger = _shared_original(tmp_path, monkeypatch)
+    select(world, original.hash)
+    alert, shown = fake_alert(click="Stop Sharing")
+    monkeypatch.setattr(alerts, "Alert", alert)
+    world.dialog._stop_sharing()
+    assert shown[0].title == "Stop sharing “Beach.png”?"
+    assert shown[0].message == (
+        "Anyone with the link will no longer see it, and anything you published with it "
+        "will no longer show it.")
+    assert world.store.calls[-1][:2] == ("delete", copy_sha)
+    assert MEMBERS in world.store.calls[-1][2]
+
+    world.store.file_deleted.emit(copy_sha)
+    world.store.library_changed.emit()
+    assert ledger.get(copy_sha) is None
+    assert not tiles(world)[0].shared
+    assert world.dialog._status.text() == "“Beach.png” is no longer shared."
+
+
+def test_a_copy_a_server_still_has_is_still_shared_and_it_says_so(tmp_path, monkeypatch):
+    world, original, copy_sha, ledger = _shared_original(tmp_path, monkeypatch)
+    select(world, original.hash)
+    monkeypatch.setattr(alerts, "Alert", fake_alert(click="Stop Sharing")[0])
+    world.dialog._stop_sharing()
+    world.store.delete_failed.emit(copy_sha, "NETWORK_UNAVAILABLE")
+    assert ledger.get(copy_sha) is not None
+    assert tiles(world)[0].shared
+    assert world.dialog._status.text() == (
+        "“Beach.png” is still shared. Couldn’t reach your media server. Check your "
+        "internet connection.")
+
+
+def test_deleting_a_shared_original_deletes_its_copy_too(tmp_path, monkeypatch):
+    """Otherwise the copy stays public with no tile left to reach it."""
+    world, original, copy_sha, _ledger = _shared_original(tmp_path, monkeypatch)
+    select(world, original.hash)
+    monkeypatch.setattr(alerts, "Alert", fake_alert(click="Delete")[0])
+    world.dialog._delete()
+    deleted = [call[1] for call in world.store.calls if call[0] == "delete"]
+    assert deleted == [copy_sha, original.hash]
