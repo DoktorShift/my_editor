@@ -37,7 +37,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import FrozenSet, Iterable, List, Optional, Sequence, Tuple
 
 import front_matter
 
@@ -234,6 +234,20 @@ def from_front_matter(front: Optional[front_matter.FrontMatter]) -> ArticleDetai
                           coauthors=tuple(coauthors), zaps=tuple(zaps))
 
 
+def kept_in_file(front: Optional[front_matter.FrontMatter]) -> FrozenSet[str]:
+    """The details ``front`` writes in a way this app can't read safely (a
+    mapping, an anchor, a tag), with no entry for them it can: they stay as
+    written, whatever is set here. Named as in _FRONT_KEYS."""
+    kept = set()
+    for key, others in _FRONT_KEYS:
+        names = (key, *others)
+        found = [entry for entry in (front.entries if front is not None else ())
+                 if entry.key in names]
+        if found and all(entry.value is None for entry in found):
+            kept.add(key)
+    return frozenset(kept)
+
+
 def front_matter_with(details: ArticleDetails, front: Optional[front_matter.FrontMatter]
                       ) -> Optional[front_matter.FrontMatter]:
     """``front`` (a file's front matter, or None) with what changed of the
@@ -241,13 +255,17 @@ def front_matter_with(details: ArticleDetails, front: Optional[front_matter.Fron
     entry as written, byte for byte; a changed one replaces its entry where
     it was (a date in the form and time zone it had), or follows the other
     entries in the order of _FRONT_KEYS; one emptied is left out. Entries
-    this app does not know, or can't read fully, stay as written. None when
-    there are no details and there was no front matter."""
+    this app does not know, or can't read fully, stay as written, and so
+    does a detail only such an entry holds (kept_in_file): never a second
+    entry beside it. None when there are no details and there was no front
+    matter."""
     was = from_front_matter(front)
     entries = list(front.entries) if front is not None else []
     old = _front_values(was)
     new = _front_values(details)
-    changed = [key for key, _others in _FRONT_KEYS if new[key] != old[key]]
+    kept = kept_in_file(front)
+    changed = [key for key, _others in _FRONT_KEYS
+               if new[key] != old[key] and key not in kept]
     if not changed:
         return front
     for key in changed:

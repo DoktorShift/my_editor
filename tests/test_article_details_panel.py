@@ -179,3 +179,21 @@ def test_the_inspector_in_the_window(tmp_path):
     assert r["note_page"] is True
     assert r["back"] == "Typed in the inspector"
     assert r["hidden_without"] is True
+
+
+def test_a_detail_kept_as_written_in_the_file_is_shown_read_only_and_says_so():
+    """Review N5: a detail the file writes in a way MyEditor can't read
+    safely (a mapping, an anchor) is left as written; Article Details shows
+    it read-only, with a plain line under it."""
+    panel = ArticleDetailsPanel()
+    panel.show_article(ArticleDetails(title="T"), fixed_identifier=False,
+                       kept_in_file=frozenset({"image", "tags"}))
+    assert panel.cover.url_edit.isReadOnly() and panel.tags_edit.isReadOnly()
+    assert not panel.title_edit.isReadOnly()
+    notes = [label.text() for label in panel.findChildren(type(panel.zaps_note))
+             if not label.isHidden() and label.text() == "Kept as written in the file."]
+    assert len(notes) == 2
+    panel.show_article(ArticleDetails(title="T"), fixed_identifier=False)
+    assert not panel.cover.url_edit.isReadOnly() and not panel.tags_edit.isReadOnly()
+    assert not any(label.text() == "Kept as written in the file." and not label.isHidden()
+                   for label in panel.findChildren(type(panel.zaps_note)))

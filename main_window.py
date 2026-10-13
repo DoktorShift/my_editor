@@ -183,7 +183,8 @@ from nostr.ui.imports_window import SETTINGS_KEY as IMPORTS_SETTINGS_KEY
 from nostr.ui.imports_window import ImportsWindow
 from nostr.imports.constants import IDENTIFIER_PREFIX as IMPORT_IDENTIFIER_PREFIX
 from nostr.imports.constants import SOURCE_TAG as IMPORT_SOURCE_TAG
-from nostr.article_details import ArticleDetails, from_front_matter, front_matter_with
+from nostr.article_details import (
+    ArticleDetails, from_front_matter, front_matter_with, kept_in_file)
 from nostr.first_publications import FirstPublications
 from nostr.drafts import (
     INNER_KIND_LONG_FORM,
@@ -6468,7 +6469,8 @@ class MainWindow(QMainWindow):
         else:
             fixed = (binding is not None and binding.inner_kind == INNER_KIND_LONG_FORM) or \
                 self._published_article_of(ed) is not None
-            panel.show_article(self._article_details_of(ed), fixed_identifier=fixed)
+            panel.show_article(self._article_details_of(ed), fixed_identifier=fixed,
+                               kept_in_file=kept_in_file(getattr(ed, "_front_matter", None)))
 
     def _pick_coauthor(self, anchor, chosen) -> None:
         """Who writes the article with its author, asked under ``anchor`` the

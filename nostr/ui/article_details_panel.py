@@ -113,6 +113,10 @@ class ArticleDetailsPanel(QFrame):
         self._is_dark = is_dark
         self._shown = ArticleDetails()
         self._filling = False
+        # The details the file writes in a way that is kept as written
+        # (article_details.kept_in_file), and the line under each.
+        self._kept: frozenset = frozenset()
+        self._kept_notes: dict = {}
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -169,6 +173,7 @@ class ArticleDetailsPanel(QFrame):
         self.title_edit = QLineEdit()
         self.title_edit.setPlaceholderText(_("Article title"))
         self._add_labeled(form, _("Title"), self.title_edit)
+        self._add_kept_note(form, "title")
 
         self.summary_edit = QPlainTextEdit()
         self.summary_edit.setPlaceholderText(_("Short summary (one sentence)"))
@@ -177,6 +182,7 @@ class ArticleDetailsPanel(QFrame):
         lines = self.summary_edit.fontMetrics().lineSpacing()
         self.summary_edit.setFixedHeight(lines * 3 + 12)
         self._add_labeled(form, _("Summary"), self.summary_edit)
+        self._add_kept_note(form, "summary")
 
         self.cover = CoverImageField(
             media_store=media_store, media_visibility=media_visibility,
@@ -187,10 +193,12 @@ class ArticleDetailsPanel(QFrame):
         form.addWidget(self.cover)
         self.cover_problem = self._problem_label()
         form.addWidget(self.cover_problem)
+        self._add_kept_note(form, "image")
 
         self.tags_edit = QLineEdit()
         self.tags_edit.setPlaceholderText(_("comma, separated, hashtags"))
         self._add_labeled(form, _("Hashtags"), self.tags_edit)
+        self._add_kept_note(form, "tags")
 
         form.addSpacing(6)
         coauthors_label = QLabel(_("Co-Authors"))
@@ -213,6 +221,7 @@ class ArticleDetailsPanel(QFrame):
         self.zaps_note.setObjectName("article_details_hint")
         self.zaps_note.setWordWrap(True)
         form.addWidget(self.zaps_note)
+        self._add_kept_note(form, "coauthors")
 
         # Advanced: what most people never change, closed at first.
         self.advanced_toggle = QToolButton()
@@ -230,6 +239,7 @@ class ArticleDetailsPanel(QFrame):
         advanced.setSpacing(6)
         self.identifier_edit = QLineEdit()
         self._add_labeled(advanced, _("Slug (article ID)"), self.identifier_edit)
+        self._add_kept_note(advanced, "slug")
         self.identifier_note = QLabel()
         self.identifier_note.setObjectName("article_details_hint")
         self.identifier_note.setWordWrap(True)
@@ -261,6 +271,15 @@ class ArticleDetailsPanel(QFrame):
         layout.addWidget(label)
         layout.addWidget(field)
 
+    def _add_kept_note(self, layout, detail: str) -> None:
+        """The plain line under a detail the file keeps as written."""
+        note = QLabel(_("Kept as written in the file."))
+        note.setObjectName("article_details_hint")
+        note.setWordWrap(True)
+        note.hide()
+        layout.addWidget(note)
+        self._kept_notes[detail] = note
+
     @staticmethod
     def _problem_label() -> QLabel:
         label = QLabel()
@@ -283,6 +302,9 @@ class ArticleDetailsPanel(QFrame):
             + f"#article_details_scroll, #article_details_body {{ background: {background}; }}"
             + f"QLineEdit, QPlainTextEdit {{ background: {field}; color: {text};"
               f" border: 1px solid {border}; border-radius: 4px; padding: 3px 6px; }}"
+            # Shown, not edited: on the panel's own ground, in muted ink.
+            + f"QLineEdit:read-only, QPlainTextEdit[readOnly=\"true\"] {{"
+              f" background: {background}; color: {muted}; }}"
             + f"#article_details_label, #article_field_label {{ color: {muted}; }}"
             + f"#article_details_hint, #article_field_hint, #article_details_note"
               f" {{ color: {muted}; }}"
@@ -299,10 +321,13 @@ class ArticleDetailsPanel(QFrame):
 
     # -- showing a tab's article ------------------------------------------------
 
-    def show_article(self, details: ArticleDetails, *, fixed_identifier: bool) -> None:
+    def show_article(self, details: ArticleDetails, *, fixed_identifier: bool,
+                     kept_in_file: frozenset = frozenset()) -> None:
         """Show ``details``, the article in the tab in front, without
         handing them back. ``fixed_identifier``: the article has its
-        address already (a saved draft, a published article)."""
+        address already (a saved draft, a published article).
+        ``kept_in_file``: the details its file writes in a way that stays as
+        written (article_details.kept_in_file), shown read-only."""
         # What the fields hold already (the person's own typing, handed
         # back and shown again) is left as typed: a space at the end of a
         # word being written stays.
@@ -310,11 +335,12 @@ class ArticleDetailsPanel(QFrame):
         self._filling = True
         try:
             self._shown = details
+            self._show_kept(kept_in_file)
             if not typed:
                 self._fill_fields(details)
             else:
                 self._show_people(details)
-            self.identifier_edit.setReadOnly(fixed_identifier)
+            self.identifier_edit.setReadOnly(fixed_identifier or "slug" in self._kept)
             self.identifier_note.setText(
                 _("A saved or published article keeps its address; saving it under "
                   "another one makes another article.") if fixed_identifier else "")
@@ -325,6 +351,21 @@ class ArticleDetailsPanel(QFrame):
         finally:
             self._filling = False
         self._pages.setCurrentWidget(self._form)
+
+    def _show_kept(self, kept: frozenset) -> None:
+        """The details kept as written in the file: read-only, saying so."""
+        self._kept = frozenset(kept)
+        for detail, note in self._kept_notes.items():
+            # One line for the co-authors and how zaps are shared.
+            note.setVisible(detail in self._kept or detail == "coauthors"
+                            and "zap_split" in self._kept)
+        self.title_edit.setReadOnly("title" in self._kept)
+        self.summary_edit.setReadOnly("summary" in self._kept)
+        self.cover.setReadOnly("image" in self._kept)
+        self.tags_edit.setReadOnly("tags" in self._kept)
+        # The read-only look comes from a property the style sheet reads.
+        self.summary_edit.style().unpolish(self.summary_edit)
+        self.summary_edit.style().polish(self.summary_edit)
 
     def _fill_fields(self, details: ArticleDetails) -> None:
         self._set_text(self.title_edit, details.title)
@@ -370,18 +411,21 @@ class ArticleDetailsPanel(QFrame):
         previous = self.tags_edit
         for pubkey, _hint in details.coauthors:
             row, remove = self._coauthor_row(pubkey)
+            remove.setEnabled("coauthors" not in self._kept)
             self.coauthor_rows.addWidget(row)
             QWidget.setTabOrder(previous, remove)
             previous = remove
         QWidget.setTabOrder(previous, self.add_coauthor_button)
+        self.add_coauthor_button.setEnabled(self._pick_person is not None
+                                            and "coauthors" not in self._kept)
         self.share_zaps.blockSignals(True)
         self.share_zaps.setChecked(bool(details.zaps))
         self.share_zaps.blockSignals(False)
         # Disabled as a whole: the box and its words.
         unzappable = [pubkey for pubkey, _hint in details.coauthors
                       if self._zappable.get(pubkey) is False]
-        self._share_row.setEnabled(len(unzappable) < len(details.coauthors)
-                                   or bool(details.zaps))
+        self._share_row.setEnabled((len(unzappable) < len(details.coauthors)
+                                    or bool(details.zaps)) and "zap_split" not in self._kept)
         foreign = bool(details.zaps) and details.zaps != self._equal_zaps(details.coauthors)
         if foreign:
             note = _("Zaps are shared the way another app set them.")

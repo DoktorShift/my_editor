@@ -37,7 +37,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import front_matter  # noqa: E402
 from nostr.article_details import (  # noqa: E402
-    ArticleDetails, from_front_matter, front_matter_with)
+    ArticleDetails, from_front_matter, front_matter_with, kept_in_file)
 from tests.app_process import run_window_script  # noqa: E402
 
 HUGO = ('---\ntitle: "My post"\ndate: 2024-03-01T00:30:00+01:00\ncover:\n'
@@ -132,12 +132,17 @@ def test_a_date_written_new_is_a_date_to_yaml_not_a_text():
     assert type(yaml.safe_load(out.split("---\n")[1])["date"]).__name__ == "datetime"
 
 
-def test_a_detail_whose_entry_cant_be_read_is_written_beside_it_never_over_it():
-    front, body = front_matter.split(HUGO)
-    details = from_front_matter(front).with_changes(image="https://cdn.example/c.jpg")
-    out = front_matter.join(front_matter_with(details, front), body)
-    assert '  image: "images/hero.jpg"\n  alt: "A hero"\n' in out          # cover: kept
-    assert "image: https://cdn.example/c.jpg\n" in out
+@pytest.mark.parametrize("text, change, kept", [
+    (HUGO, {"image": "https://cdn.example/c.jpg"}, {"image"}),             # Hugo's cover:
+    ("---\ntitle: T\nimage:\n  path: /a.png\n  alt: A\n---\n\nB\n",
+     {"image": "https://cdn.example/c.jpg"}, {"image"}),                    # Jekyll Chirpy
+    ("---\ntitle: &t Real\nog: *t\n---\n\nB\n", {"title": "New"}, {"title"}),
+])
+def test_a_detail_whose_entry_cant_be_read_is_left_as_written_never_doubled(text, change, kept):
+    front, body = front_matter.split(text)
+    assert kept_in_file(front) == kept
+    details = from_front_matter(front).with_changes(**change)
+    assert front_matter.join(front_matter_with(details, front), body) == text
 
 
 def test_an_emptied_detail_is_left_out_and_none_written_without_details():
@@ -281,3 +286,45 @@ def test_pandoc_front_matter_closed_by_dots_is_front_matter():
     front, body = front_matter.split(PANDOC)
     assert body == "Body text.\n" and from_front_matter(front).title == "Pandoc"
     assert unchanged_save(PANDOC) == PANDOC
+
+
+KEPT_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+
+path = sys.argv[2]
+w = main_window.MainWindow()
+w.show()
+w.nostr_state._active = True               # Article Details is a Nostr feature
+w._update_nostr_commands()
+w.open_path(path)
+ed = w.current_editor()
+w.act_article_details.setChecked(True)
+app.processEvents()
+panel = w._article_details_panel
+r = {"cover read-only": panel.cover.url_edit.isReadOnly(),
+     "title read-only": panel.title_edit.isReadOnly(),
+     "notes": [l.text() for l in panel.findChildren(type(panel.zaps_note))
+               if l.isVisibleTo(panel) and l.text().startswith("Kept")]}
+w._set_article_details(ed, w._article_details_of(ed).with_changes(
+    image="https://cdn.example/c.jpg"))
+w._save_to(path)
+r["saved"] = open(path, encoding="utf-8").read()
+ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_a_cover_the_file_keeps_is_read_only_in_article_details(tmp_path):
+    chirpy = "---\ntitle: T\nimage:\n  path: /a.png\n  alt: A\n---\n\nBody text.\n"
+    path = tmp_path / "chirpy.md"
+    path.write_text(chirpy, encoding="utf-8")
+    r = run_window_script(KEPT_SCRIPT, tmp_path, str(path))
+    assert r["cover read-only"] is True and r["title read-only"] is False
+    assert r["notes"] == ["Kept as written in the file."]
+    assert r["saved"] == chirpy
