@@ -46,6 +46,87 @@ LAYOUT = ("bold", "italic", "strike", None, "link", None, "bullets", "numbers", 
           "quote")
 
 
+# How each command's button is drawn, on the toolbar and on the format bar
+# over a selection (selection_bar.py), in the ink it is given.
+ICONS = {
+    "undo": format_icons.undo,
+    "redo": format_icons.redo,
+    "bold": lambda ink: format_icons.letter(pgettext("format button", "B"), ink, bold=True),
+    "italic": lambda ink: format_icons.letter(pgettext("format button", "I"), ink,
+                                              italic=True),
+    # A letter whose struck form still reads as a letter crossed out (a
+    # struck D reads as the letter Đ).
+    "strike": lambda ink: format_icons.letter(pgettext("format button", "S"), ink,
+                                              strike=True),
+    "code": format_icons.code_block,
+    "link": format_icons.link,
+    "bullets": format_icons.bulleted_list,
+    "numbers": format_icons.numbered_list,
+    "checklist": format_icons.checklist,
+    "quote": format_icons.quote,
+}
+
+
+def draw_icons(actions: Dict[str, QAction], dark: bool) -> None:
+    """Give each of ``actions`` (by ICONS' names) its icon, in the theme's
+    ink. The menus stay text, as menus on every platform are."""
+    ink = QColor(DARK_FG if dark else LIGHT_FG)
+    for name, action in actions.items():
+        action.setIcon(ICONS[name](ink))
+        action.setIconVisibleInMenu(False)
+
+
+def button_rules(scope: str, dark: bool) -> str:
+    """The style of the command buttons inside ``scope`` (a selector): quiet
+    until the pointer is over one, and one that is on shows an edge of at
+    least 3:1 against what is behind it (WCAG 1.4.11), not a faint fill
+    alone."""
+    hover, checked = (("rgba(255, 255, 255, 0.08)", "rgba(255, 255, 255, 0.16)") if dark
+                      else ("rgba(0, 0, 0, 0.06)", "rgba(0, 0, 0, 0.11)"))
+    checked_edge = DARK_MUTED_FG if dark else LIGHT_MUTED_FG
+    text = DARK_FG if dark else LIGHT_FG
+    selection = DARK_SELECTION if dark else LIGHT_SELECTION
+    return f"""
+        {scope} QToolButton {{
+            color: {text};
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 5px;
+            padding: 3px;
+        }}
+        {scope} QToolButton:hover {{ background: {hover}; }}
+        {scope} QToolButton:checked {{
+            background: {checked};
+            border-color: {checked_edge};
+        }}
+        {scope} QToolButton:focus {{ border-color: {selection}; }}
+    """
+
+
+def style_popup_rules(dark: bool) -> str:
+    """The paragraph style pop-up's own sheet: it reads left to right, its
+    name first and the arrow at the end, as in TextEdit and Pages. (A
+    ::menu-indicator rule would make Qt drop the padding.)"""
+    text, border, selection = ((DARK_FG, DARK_BORDER, DARK_SELECTION) if dark
+                               else (LIGHT_FG, LIGHT_BORDER, LIGHT_SELECTION))
+    hover = "rgba(255, 255, 255, 0.08)" if dark else "rgba(0, 0, 0, 0.06)"
+    dim = format_icons.dimmed(QColor(text))
+    dim_text = f"rgba({dim.red()}, {dim.green()}, {dim.blue()}, {dim.alphaF():.2f})"
+    return f"""
+        QPushButton {{
+            color: {text};
+            background: transparent;
+            border: 1px solid {border};
+            border-radius: 5px;
+            padding: 4px 24px 4px 9px;
+            text-align: left;
+        }}
+        QPushButton:hover {{ background: {hover}; }}
+        QPushButton:focus {{ border-color: {selection}; }}
+        QPushButton:disabled {{ color: {dim_text}; background: transparent; }}
+    """
+
+
 def tooltip_for(action: QAction, title: str = "") -> str:
     """"Bold (⌘B)": the command's name (or ``title``) and its key, as the
     platform writes keys, or only the name when it has none."""
@@ -193,35 +274,11 @@ class FormatToolbar(QToolBar):
 
     def set_dark(self, dark: bool) -> None:
         self._dark = dark
-        ink = QColor(DARK_FG if dark else LIGHT_FG)
-        icons = {
-            "undo": format_icons.undo(ink),
-            "redo": format_icons.redo(ink),
-            "bold": format_icons.letter(pgettext("format button", "B"), ink, bold=True),
-            "italic": format_icons.letter(pgettext("format button", "I"), ink, italic=True),
-            # A letter whose struck form still reads as a letter crossed out
-            # (a struck D reads as the letter Đ).
-            "strike": format_icons.letter(pgettext("format button", "S"), ink, strike=True),
-            "link": format_icons.link(ink),
-            "bullets": format_icons.bulleted_list(ink),
-            "numbers": format_icons.numbered_list(ink),
-            "checklist": format_icons.checklist(ink),
-            "quote": format_icons.quote(ink),
-        }
-        for name, icon in icons.items():
-            self._actions[name].setIcon(icon)
-            # The menus stay text, as menus on every platform are.
-            self._actions[name].setIconVisibleInMenu(False)
-        self.insert_button.setIcon(format_icons.plus(ink))
-        background, border, selection = (
-            (DARK_MENU_BG, DARK_BORDER, DARK_SELECTION) if dark
-            else (LIGHT_MENU_BG, LIGHT_BORDER, LIGHT_SELECTION))
+        draw_icons({name: self._actions[name] for name in (*HISTORY, *LAYOUT) if name}, dark)
+        self.insert_button.setIcon(format_icons.plus(QColor(DARK_FG if dark else LIGHT_FG)))
+        background, border = (DARK_MENU_BG, DARK_BORDER) if dark else (LIGHT_MENU_BG,
+                                                                       LIGHT_BORDER)
         hover = "rgba(255, 255, 255, 0.08)" if dark else "rgba(0, 0, 0, 0.06)"
-        checked = "rgba(255, 255, 255, 0.16)" if dark else "rgba(0, 0, 0, 0.11)"
-        # A button that is on shows it with an edge of at least 3:1 against
-        # the toolbar (WCAG 1.4.11), not with a faint fill alone.
-        checked_edge = DARK_MUTED_FG if dark else LIGHT_MUTED_FG
-        text = DARK_FG if dark else LIGHT_FG
         self.setStyleSheet(f"""
             #FormatToolbar {{
                 background: {background};
@@ -230,19 +287,7 @@ class FormatToolbar(QToolBar):
                 padding: 3px 8px;
                 spacing: 2px;
             }}
-            #FormatToolbar QToolButton {{
-                color: {text};
-                background: transparent;
-                border: 1px solid transparent;
-                border-radius: 5px;
-                padding: 3px;
-            }}
-            #FormatToolbar QToolButton:hover {{ background: {hover}; }}
-            #FormatToolbar QToolButton:checked {{
-                background: {checked};
-                border-color: {checked_edge};
-            }}
-            #FormatToolbar QToolButton:focus {{ border-color: {selection}; }}
+            {button_rules("#FormatToolbar", dark)}
             #FormatToolbar QToolButton[popupMode="1"],
             #FormatToolbar QToolButton[popupMode="2"] {{ padding-right: 13px; }}
             #FormatToolbar QToolButton::menu-indicator {{
@@ -264,28 +309,8 @@ class FormatToolbar(QToolBar):
                 margin: 5px 6px;
             }}
         """)
-        self._style_style_button(text, border, hover, selection)
+        self.style_button.setStyleSheet(style_popup_rules(dark))
         self._style_trailing()
-
-    def _style_style_button(self, text: str, border: str, hover: str, selection: str) -> None:
-        dim = format_icons.dimmed(QColor(text))
-        dim_text = f"rgba({dim.red()}, {dim.green()}, {dim.blue()}, {dim.alphaF():.2f})"
-        # Its own sheet: a pop-up button reads left to right, its name
-        # first and the arrow at the end, as in TextEdit and Pages. (A
-        # ::menu-indicator rule would make Qt drop the padding.)
-        self.style_button.setStyleSheet(f"""
-            QPushButton {{
-                color: {text};
-                background: transparent;
-                border: 1px solid {border};
-                border-radius: 5px;
-                padding: 4px 24px 4px 9px;
-                text-align: left;
-            }}
-            QPushButton:hover {{ background: {hover}; }}
-            QPushButton:focus {{ border-color: {selection}; }}
-            QPushButton:disabled {{ color: {dim_text}; background: transparent; }}
-        """)
 
     @staticmethod
     def _describe(action: QAction, button: QToolButton) -> None:
