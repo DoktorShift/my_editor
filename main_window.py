@@ -2989,6 +2989,11 @@ class MainWindow(QMainWindow):
                 active_job.cancel()
                 editor._active_stash_job = None
         self.tabs.removeTab(index)
+        if editor is not None:
+            # The tab goes, its editor and document with it, once what is
+            # running now has finished: a long session that opens and
+            # closes many tabs does not keep growing.
+            w.deleteLater()
 
     def _close_current_tab(self):
         # Command-W closes the window in front (Settings, Keyboard
