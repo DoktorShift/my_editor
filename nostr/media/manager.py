@@ -443,12 +443,21 @@ class AssetManager(QObject):
         size: int = 0,
         alt: str = "",
     ) -> Optional[DocumentAsset]:
-        """Adopt a blob that is already hosted, e.g. a library pick."""
+        """Adopt a blob that is already hosted, e.g. a library pick (an
+        image, or audio or video, which a document shows as its card).
+
+        Recorded as an upload of it would be: hash, address, type, size,
+        name, and the servers that hold it (from the library's record, else
+        the address's own), so it publishes the same imeta. Nothing is
+        downloaded or sent: it is there already.
+        """
         sha = (sha256 or "").lower()
         if not is_sha256(sha):
             return None
         if not _acceptable_remote_url(remote_url, sha):
             return None
+        servers = _servers_of(self._library_record(sha)) or \
+            [origin for origin in [url_safety.origin_of(remote_url)] if origin]
 
         existing = self._index.get(sha)
         if existing is not None:
@@ -459,7 +468,7 @@ class AssetManager(QObject):
                     # Learning the blob is already hosted is an ingest
                     # fact, not a queue transition: it re-enters at
                     # COMPLETE exactly as a fresh library adopt would.
-                    self._enter_complete(existing, remote_url, existing.servers)
+                    self._enter_complete(existing, remote_url, existing.servers or servers)
             if alt and not existing.alt:
                 existing.alt = alt
             existing.updated_at = int(time.time())
@@ -474,6 +483,7 @@ class AssetManager(QObject):
             alt=alt,
             upload_state=AssetState.COMPLETE,
             remote_url=remote_url,
+            servers=servers,
             created_at=now,
             updated_at=now,
         )

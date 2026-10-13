@@ -752,3 +752,30 @@ def test_gif_bytes_are_adoptable(tmp_path):
     asset = ctx.manager.adopt_bytes(GIF_BYTES)
     assert asset.mime == "image/gif"
     assert asset.sha256 == sha_of(GIF_BYTES) == GIF_SHA
+
+
+def test_a_hosted_audio_file_is_adopted_as_an_uploaded_one(tmp_path):
+    """A Media Library tile is already on the servers: adopting it records
+    what an upload of it would have (hash, servers, type, size, name), so
+    the document shows the same card and publishes the same imeta, and
+    nothing is downloaded or sent again."""
+    ctx = make_manager(tmp_path)
+    sha = "a1" * 32
+    ctx.uploader.files[sha] = make_media(
+        sha, servers=("https://one.example", "https://two.example"), mime="audio/mpeg",
+        size=4096)
+    asset = ctx.manager.adopt_library_file(
+        sha256=sha, remote_url=f"https://one.example/{sha}", mime="audio/mpeg",
+        size=4096, alt="Podcast intro.mp3")
+    assert asset.is_media and asset.is_uploaded
+    assert (asset.mime, asset.size, asset.alt) == ("audio/mpeg", 4096, "Podcast intro.mp3")
+    assert asset.servers == ["https://one.example", "https://two.example"]
+    assert ctx.uploader.calls == [] and ctx.store.loads == []
+
+
+def test_a_hosted_file_unknown_to_the_listing_names_its_own_server(tmp_path):
+    ctx = make_manager(tmp_path)
+    sha = "b2" * 32
+    asset = ctx.manager.adopt_library_file(
+        sha256=sha, remote_url=f"https://cdn.example/{sha}.mp4", mime="video/mp4", size=9)
+    assert asset.servers == ["https://cdn.example"]
