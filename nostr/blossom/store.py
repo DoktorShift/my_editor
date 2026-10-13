@@ -935,6 +935,8 @@ class MediaStore(QObject):
         self._uploads[name] = state
         self.upload_started.emit(name)
         self.upload_status.emit(name, state.status)
+        if self._uploads.get(name) is not state:
+            return                           # cancelled as it started
 
         self._upload_missing(
             name=name,

@@ -184,3 +184,14 @@ def test_an_editor_upload_keeps_its_own_job_name_and_no_file_name(tmp_path):
     jobs.nam.settle()
     assert jobs.kinds(f"asset:{SHA}")[-1] == "finished"
     assert jobs.store.name_of(SHA) == ""
+
+
+def test_cancel_as_soon_as_the_upload_starts_sends_nothing(tmp_path):
+    """The window's × can be pressed the moment the tile starts moving,
+    which is while the store is still telling everyone it started."""
+    jobs = Jobs(tmp_path)
+    jobs.store.upload_started.connect(jobs.store.cancel_upload)
+    name = jobs.store.upload_file(_file(tmp_path))
+    jobs.nam.settle()
+    assert jobs.nam.calls == []
+    assert jobs.kinds(name) == ["started", "cancelled"]
