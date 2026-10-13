@@ -116,8 +116,11 @@ class SelectionBar(QFrame):
             row.addWidget(button)
         self.set_style_name(_("Body"))
 
+        # The view kept by itself: the filter never asks the editor for it,
+        # which is gone first when everything is taken down at the end.
+        self._viewport = editor.viewport()
         editor.installEventFilter(self)
-        editor.viewport().installEventFilter(self)
+        self._viewport.installEventFilter(self)
         editor.selectionChanged.connect(self._selection_changed)
         editor.cursorPositionChanged.connect(self._selection_changed)
         editor.visible_area_changed.connect(self.hide)
@@ -209,7 +212,7 @@ class SelectionBar(QFrame):
         if removed != added:
             self.hide()
         else:
-            QTimer.singleShot(0, self._place)
+            QTimer.singleShot(0, self, self._place)
 
     def _hide_unless_in_use(self) -> None:
         """The focus or the window went elsewhere, or a popup (a menu, a
@@ -225,14 +228,14 @@ class SelectionBar(QFrame):
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802, Qt's name
         kind = event.type()
-        if watched is self._editor.viewport():
+        if watched is self._viewport:
             if kind == QEvent.Type.MouseButtonPress:
                 self.hide()
             elif (kind == QEvent.Type.MouseButtonRelease
                   and event.button() == Qt.MouseButton.LeftButton):
                 # Once the text has handled the release (a click inside a
                 # selection clears it then).
-                QTimer.singleShot(0, self._show_if_selected)
+                QTimer.singleShot(0, self, self._show_if_selected)
             return False
         if self.isHidden():
             # (Not isVisible: hidden with the text, in another tab, the bar
@@ -251,7 +254,7 @@ class SelectionBar(QFrame):
             self.hide()
         elif kind in (QEvent.Type.FocusOut, QEvent.Type.WindowDeactivate):
             # Once the focus has landed (a menu opening takes it first).
-            QTimer.singleShot(0, self._hide_unless_in_use)
+            QTimer.singleShot(0, self, self._hide_unless_in_use)
         return False
 
     # -- a click on the bar between its buttons stays on the bar -------------------

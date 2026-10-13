@@ -561,3 +561,18 @@ def test_in_a_table_cell_the_bar_and_the_toolbar_agree(tmp_path):
     from tests.app_process import run_window_script
     r = run_window_script(TABLE_SCRIPT, tmp_path)
     assert r == {"table": [False, False, False], "plain": [False, False]}
+
+
+def test_the_editor_going_first_leaves_the_bar_nothing_to_ask(capfd):
+    """Review L1: taken down with the editor (at the interpreter's end the
+    editor's half goes first), the bar's filter still heard its view and
+    asked the editor, already gone, for it."""
+    import shiboken6
+    window = Window()
+    window.double_click(word_at(TEXT, "Another", 5) + 2)
+    assert window.bar.isVisible()
+    shiboken6.delete(window.editor)
+    QApplication.processEvents()
+    settle()
+    assert "RuntimeError" not in capfd.readouterr().err
+    window.close()
