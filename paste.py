@@ -462,10 +462,13 @@ def from_mime(source: QMimeData) -> Optional[Pasted]:
     return None
 
 
-def selection_markdown(cursor: QTextCursor, *, literal: bool = False) -> str:
+def selection_markdown(cursor: QTextCursor, *, literal: bool = False,
+                       outside=None) -> str:
     """The selection as Markdown, for the clipboard: pictures keep their
     names, so they are found again when pasted into this document.
-    ``literal``: its text written to read back as the same text."""
+    ``literal``: its text written to read back as the same text.
+    ``outside(name)``: for Markdown other apps read, the text an object
+    stands as there (audio or video: its address), or None to keep it."""
     doc = QTextDocument()
     QTextCursor(doc).insertFragment(cursor.selection())
     started_in = cursor.document().findBlock(cursor.selectionStart())
@@ -475,6 +478,9 @@ def selection_markdown(cursor: QTextCursor, *, literal: bool = False) -> str:
         rich_text.set_heading(QTextCursor(doc.begin()), rich_text.BODY)
 
     def keep_pictures(fmt: QTextImageFormat) -> str:
+        text = outside(fmt.name()) if outside is not None else None
+        if text is not None:
+            return text
         return image_markdown(str(fmt.property(QTextImageFormat.Property.ImageAltText) or ""),
                               fmt.name())
 

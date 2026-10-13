@@ -435,6 +435,9 @@ c.setPosition(0)
 c.setPosition(1, QTextCursor.MoveMode.KeepAnchor)
 source.setTextCursor(c)
 copied = source.createMimeDataFromSelection()
+from paste import MARKDOWN_MIME
+r["copied text"] = copied.text()
+r["copied markdown"] = bytes(copied.data(MARKDOWN_MIME)).decode()
 
 def blocks(ed):
     doc = ed.document()
@@ -477,6 +480,9 @@ def test_a_pasted_or_dropped_file_is_a_paragraph_of_its_own_wherever_it_lands(tm
     assert end["blocks"][:2] == ["Other doc", "￼"]
     assert end["published"].startswith(f"Other doc\n\n{URL}.mp3")
     assert end["undone"] == ["Other doc"]
+    # Other apps get the address, never an internal name or U+FFFC.
+    assert r["copied text"].strip() == f"{URL}.mp3"
+    assert r["copied markdown"].strip() == f"{URL}.mp3"
     start = r["start of a paragraph"]
     assert start["blocks"] == ["\ufffc", "Start"]
     assert start["published"] == f"{URL}.mp3\n\nStart"

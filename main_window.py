@@ -1209,7 +1209,7 @@ class MainWindow(QMainWindow):
         self._update_editor_theme(ed)
         self._apply_view_prefs_to_editor(ed)
         ed.set_resource_resolver(self._resolve_asset_image, ASSET_SCHEME)
-        ed.set_media_check(self._is_media_name)
+        ed.set_media_lookup(self._media_text)
         ed.set_local_image_resolver(lambda name, e=ed: self._resolve_local_image(e, name))
         ed.image_pasted.connect(lambda img, e=ed: self._handle_pasted_image(e, img))
         ed.notice.connect(lambda text: self.status.showMessage(text, 8000))
@@ -6730,9 +6730,14 @@ class MainWindow(QMainWindow):
         asset = self._asset_manager.get(sha) if sha else None
         return asset.alt if asset is not None and asset.is_media and asset.alt else None
 
-    def _is_media_name(self, name: str) -> bool:
-        """Whether an object of the text is audio or video."""
-        return _is_media(self._asset_manager, name)
+    def _media_text(self, name: str) -> Optional[str]:
+        """For an audio or video object of the text, what another app gets
+        for it: its address once uploaded, its name until then; None for
+        any other object."""
+        media = _media_asset(self._asset_manager, name)
+        if media is None:
+            return None
+        return _published_address(media) if media.is_uploaded else media.alt
 
     def _media_not_uploaded(self, doc) -> list:
         """The audio and video in ``doc`` not on a media server yet."""
