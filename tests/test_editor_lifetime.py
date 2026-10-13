@@ -221,3 +221,51 @@ def test_closed_tabs_go_and_nothing_breaks(tmp_path, seed):
     assert r["editors"] == r["open"], r
     assert "Traceback" not in proc.stderr and "RuntimeError" not in proc.stderr, proc.stderr
     assert proc.returncode == 0, proc.stderr
+
+
+TRASH_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtCore import QEvent
+from PySide6.QtWidgets import QApplication
+import shiboken6
+app = QApplication(sys.argv[:1])
+import main_window
+from editor import HtmlEditor
+main_window.confirm_destructive = lambda parent, **kw: True
+main_window.send2trash = lambda path: os.remove(path)
+w = main_window.MainWindow()
+w.show()
+w.act_check_spelling.setChecked(True)
+path = os.path.join(os.environ["HOME"], "gone.md")
+open(path, "w").write("Some wrods\n")
+w.open_path(path)
+app.processEvents()
+ed = w.current_editor()
+spelling = ed.spelling()
+w._delete_tab_file(w.tabs.currentIndex(), ed)
+for _ in range(3):
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
+open_editors = [w._editor_from_widget(w.tabs.widget(i)) for i in range(w.tabs.count())]
+r = {"trashed": not os.path.exists(path), "editor_alive": shiboken6.isValid(ed),
+     "spelling_open": spelling is not None and shiboken6.isValid(spelling)
+     and not spelling._closed,
+     "editors": len(w.findChildren(HtmlEditor)),
+     "open": len([e for e in open_editors if e is not None])}
+for e in open_editors:
+    if e is not None:
+        e.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_moving_a_tabs_file_to_the_trash_closes_the_tab_for_good(tmp_path):
+    """Review 2, L1: Delete File (Move to Trash) only took the tab out of
+    the tab bar, without anything closing a tab does."""
+    r = run_window_script(TRASH_SCRIPT, tmp_path)
+    assert r["trashed"]
+    assert not r["editor_alive"] and not r["spelling_open"]
+    assert r["editors"] == r["open"]

@@ -2872,11 +2872,8 @@ class MainWindow(QMainWindow):
             inform(self, title=failed.format(name=file_name), message=str(e))
             return
 
-        # Close tab without prompting to save - file is gone
-        if hasattr(ed, '_backup'):
-            ed._backup.delete()
-        self._watcher.removePath(file_path)
-        self.tabs.removeTab(idx)
+        # The file is gone: the tab closes for good, asking nothing more.
+        self._discard_tab(idx)
 
     def _rename_tab(self, idx: int, ed):
         old_path = ed._file_path
@@ -2958,6 +2955,14 @@ class MainWindow(QMainWindow):
                 self.tabs.setCurrentIndex(index)
                 if not self.save():
                     return
+        self._discard_tab(index)
+
+    def _discard_tab(self, index: int) -> None:
+        """Take a document's tab away for good, asking nothing (close_tab
+        asks first; Move to Trash has, about the file): what it set going
+        stops, and the tab is deleted with its editor and document."""
+        w = self.tabs.widget(index)
+        editor = self._editor_from_widget(w)
         if editor:
             self._drop_media_reads(editor)
             # What the tab set going stops: its spelling (no late result
