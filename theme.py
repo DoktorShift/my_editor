@@ -130,11 +130,20 @@ def default_and_focus_css(is_dark: bool) -> str:
     giving up the extra pixel so the button keeps its size; 6 px by 14 px
     padding and a 1 px border are what it is drawn for) and the default
     button in the accent. Every dialog with its own button style appends
-    them after it, so the default and the focus show there too."""
+    them after it, so the default and the focus show there too.
+
+    A destructive button is never the default by design, but on Windows and
+    Linux the default moves to the button with the focus; it then keeps the
+    plain fill and its red label (red on the accent cannot be read) and the
+    ring that marks the focus."""
     ring = _FOCUS_RING[is_dark]
+    field = DARK_MENU_BG if is_dark else LIGHT_MENU_BG
+    destructive = _DIALOG_DESTRUCTIVE[is_dark]
     return (f"QPushButton:focus, QPushButton#destructive:focus "
             f"{{ border: 2px solid {ring}; padding: 5px 13px; }}\n"
-            + accent_button_css("QPushButton:default", is_dark))
+            + accent_button_css("QPushButton:default", is_dark)
+            + f"QPushButton#destructive:default {{ background: {field}; color: {destructive}; "
+              f"border: 2px solid {ring}; padding: 5px 13px; }}\n")
 
 
 def accent_button_css(selector: str, is_dark: bool) -> str:

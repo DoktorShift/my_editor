@@ -242,6 +242,32 @@ def test_return_on_a_focused_button_follows_the_system(monkeypatch, mac, chosen)
     assert alert.value == chosen
 
 
+@pytest.mark.parametrize("mac", [True, False])
+@pytest.mark.parametrize("is_dark", [False, True])
+def test_a_focused_destructive_button_can_be_read(monkeypatch, mac, is_dark):
+    # Review S1: on Windows and Linux the focused button becomes the default,
+    # and the default's accent fill put the red "Don't Save" at 1.2:1. It
+    # keeps the plain fill and its red label; the ring marks the focus.
+    from PySide6.QtCore import QPoint
+    from tests.test_theme import _contrast_ratio
+    monkeypatch.setattr(alerts, "IS_MAC", mac)
+    alert = Alert(None, title="t", buttons=save_changes_buttons(), is_dark=is_dark)
+    alert.show()
+    alert.activateWindow()
+    QApplication.processEvents()
+    try:
+        button = alert.buttons["Don't Save"]
+        button.setFocus(Qt.FocusReason.TabFocusReason)
+        QApplication.processEvents()
+        fill = button.grab().toImage().pixelColor(QPoint(5, 4)).name()
+        red = theme._DIALOG_DESTRUCTIVE[is_dark]
+        assert _contrast_ratio(red, fill) >= 4.5, (fill, red)
+        edge = button.grab().toImage().pixelColor(1, button.height() // 2)
+        assert edge == QColor(theme.focus_ring_color(is_dark))
+    finally:
+        alert.close()
+
+
 @pytest.mark.parametrize("is_dark", [False, True])
 def test_a_destructive_button_is_red_text_on_its_own_theme(is_dark):
     alert = Alert(None, title="t", buttons=save_changes_buttons(), is_dark=is_dark)
