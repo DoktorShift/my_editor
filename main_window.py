@@ -150,6 +150,7 @@ from nostr.bech32 import encode_nprofile, encode_npub
 from nostr.nip05_check import Nip05Check
 from nostr.ui.mention_picker import MentionPicker
 from nostr.ui.reference_popover import ReferencePopover
+from nostr.ui.article_details_panel import ArticleDetailsPanel, DEFAULT_WIDTH as ARTICLE_DETAILS_WIDTH
 from nostr import refs
 from nostr.blossom.errors import friendly_message
 from nostr.media_server_list import publish_server_list
@@ -1351,6 +1352,7 @@ class MainWindow(QMainWindow):
 
     def _on_tab_changed(self, index=None):
         self._show_backup_status()
+        self._fill_article_details_panel()
         self._apply_view(self.current_editor())
         self._update_window_title()
         self._update_word_count()
@@ -2092,6 +2094,15 @@ class MainWindow(QMainWindow):
                     keywords=(_("quote"), _("embed"), _("note"), _("article")),
                     slash_section=slash_menu.INSERT),
             triggered=lambda: self._ask_reference(self.current_editor()))
+        # Article Details: the inspector beside the document, as in Pages
+        # (View > Inspector, Option-Command-I there; no convention elsewhere).
+        self.act_article_details = add(
+            Command("nostr.article_details", _("Article Details"), NOSTR,
+                    platform_keys("Ctrl+Alt+I", None), checkable=True, nostr=True,
+                    listed_as=_("Show or hide Article Details"),
+                    keywords=(_("inspector"), _("title"), _("summary"), _("cover"),
+                              _("hashtags"))),
+            toggled=self._show_article_details_panel)
         # Drafts surface - the side-docked panel, toggled from the Nostr
         # menu (no key, as above).
         self.act_nostr_drafts = add(
@@ -2343,6 +2354,10 @@ class MainWindow(QMainWindow):
             m_language.addAction(action)
         m_view.addSeparator()
         m_view.addAction(self.act_window_sidebar)
+        # Article Details, while a Nostr account is in use (D-1).
+        self._view_nostr_separator = m_view.addSeparator()
+        m_view.addAction(self.act_article_details)
+        m_view.aboutToShow.connect(self._fill_view_menu)
         m_view.addAction(self.act_fullscreen)
         self._m_background = m_background
 
@@ -2354,6 +2369,7 @@ class MainWindow(QMainWindow):
         m_nostr.addAction(self.act_nostr_insert_image)
         m_nostr.addAction(self.act_insert_mention)
         m_nostr.addAction(self.act_insert_reference)
+        m_nostr.addAction(self.act_article_details)
         m_nostr.addSeparator()
         m_nostr.addAction(self.act_nostr_drafts)
         m_nostr.addAction(self.act_refresh_drafts)
@@ -2520,10 +2536,22 @@ class MainWindow(QMainWindow):
         self._central_splitter.setHandleWidth(1)
         self._central_splitter.setChildrenCollapsible(False)
         self._central_splitter.addWidget(editor_side)
+        # The inspector beside the document, the drafts panel at the edge.
+        self._article_details_panel = ArticleDetailsPanel(
+            media_store=self._media_store, media_visibility=self._media_visibility,
+            copy_maker=self._copy_maker, private_library=self._private_library,
+            profile=self._profile_store.default, is_dark=self.is_dark_theme)
+        self._article_details_panel.changed.connect(
+            lambda details: self._set_article_details(self.current_editor(), details))
+        self._article_details_panel.close_requested.connect(
+            lambda: self.act_article_details.setChecked(False))
+        self._central_splitter.addWidget(self._article_details_panel)
         self._central_splitter.addWidget(self._drafts_panel)
-        # Editor takes all stretch; panel starts hidden.
+        # Editor takes all stretch; the panels start hidden.
         self._central_splitter.setStretchFactor(0, 1)
         self._central_splitter.setStretchFactor(1, 0)
+        self._central_splitter.setStretchFactor(2, 0)
+        self._article_details_panel.hide()
         self._drafts_panel.hide()
 
         self.setCentralWidget(self._central_splitter)
@@ -5119,6 +5147,8 @@ class MainWindow(QMainWindow):
         if getattr(self, "_drafts_panel", None) is not None:
             self._drafts_panel.apply_theme(self.is_dark_theme)
             self._published_view.apply_theme(self.is_dark_theme)
+        if getattr(self, "_article_details_panel", None) is not None:
+            self._article_details_panel.set_dark(self.is_dark_theme)
         for banner in getattr(self, "_tab_conflict_banners", {}).values():
             banner.apply_theme(self.is_dark_theme)
         imports_window = getattr(self, "_imports", None) and self._imports.window()
@@ -5812,6 +5842,7 @@ class MainWindow(QMainWindow):
         """Nothing of Nostr stays on screen once no account is in use."""
         if not active:
             self._hide_drafts_panel()
+            self.act_article_details.setChecked(False)
         if getattr(self, "_settings_window", None) is not None:
             self._settings_window.refresh()
         if getattr(self, "_shortcuts_window", None) is not None:
@@ -6333,6 +6364,46 @@ class MainWindow(QMainWindow):
         if active:
             self.m_insert.addActions(self._insert_nostr_actions)
 
+    def _fill_view_menu(self) -> None:
+        """The View menu as it opens: Article Details only while a Nostr
+        account is in use (D-1)."""
+        active = bool(self.nostr_state.active)
+        self._view_nostr_separator.setVisible(active)
+        self.act_article_details.setVisible(active)
+
+    # -- Article Details ----------------------------------------------------------
+
+    def _show_article_details_panel(self, shown: bool) -> None:
+        panel = self._article_details_panel
+        if shown and self.nostr_state.active:
+            self._fill_article_details_panel()
+            panel.show()
+            self._give_panel_room(panel, ARTICLE_DETAILS_WIDTH)
+        else:
+            if panel.isAncestorOf(QApplication.focusWidget()):
+                ed = self.current_editor()
+                if ed is not None:
+                    ed.setFocus()
+            panel.hide()
+
+    def _fill_article_details_panel(self) -> None:
+        """Article Details shows the article in the tab in front: its details
+        (_article_details_of), or why there are none."""
+        panel = getattr(self, "_article_details_panel", None)
+        if panel is None or not panel.isVisible() and not self.act_article_details.isChecked():
+            return
+        ed = self.current_editor()
+        binding = getattr(ed, "_draft_binding", None) if ed is not None else None
+        if ed is None:
+            panel.show_no_article(_("Article details belong to a document written here."))
+        elif binding is not None and binding.inner_kind == INNER_KIND_SHORT_NOTE:
+            panel.show_no_article(_("This is a note. Notes have no title, summary or cover; "
+                                    "save it as an article to give it some."))
+        else:
+            fixed = (binding is not None and binding.inner_kind == INNER_KIND_LONG_FORM) or \
+                self._published_article_of(ed) is not None
+            panel.show_article(self._article_details_of(ed), fixed_identifier=fixed)
+
     # -- mentions ----------------------------------------------------------------
 
     def _mention_label(self, entity: str) -> Optional[str]:
@@ -6774,16 +6845,25 @@ class MainWindow(QMainWindow):
         # If the panel currently has zero width (its first appearance),
         # split the central area so the panel gets its default width
         # while the editor keeps the remainder.
-        sizes = self._central_splitter.sizes()
-        if len(sizes) == 2 and sizes[1] <= 0:
-            total = max(sum(sizes), self._central_splitter.width())
-            panel_w = min(DEFAULT_PANEL_WIDTH, max(total - 360, 240))
-            self._central_splitter.setSizes([total - panel_w, panel_w])
+        self._give_panel_room(self._drafts_panel, DEFAULT_PANEL_WIDTH)
         self.act_nostr_drafts.setChecked(True)
         self._draft_sync.refresh()
         self._draft_deletions.refresh()
         self._follow_account_in_published()
         self._update_refresh_command()
+
+    def _give_panel_room(self, panel, width: int) -> None:
+        """A side panel shown for the first time gets ``width`` from the
+        document's side; later, the width the person dragged it to."""
+        splitter = self._central_splitter
+        index = splitter.indexOf(panel)
+        sizes = splitter.sizes()
+        if index < 0 or sizes[index] > 0:
+            return
+        room = min(width, max(sizes[0] - 360, 240))
+        sizes[0] -= room
+        sizes[index] = room
+        splitter.setSizes(sizes)
 
     def _hide_drafts_panel(self) -> None:
         if self._drafts_panel is None:
@@ -7614,6 +7694,8 @@ class MainWindow(QMainWindow):
             return
         ed._article_details = details
         ed.document().setModified(True)
+        if ed is self.current_editor():
+            self._fill_article_details_panel()
 
     def _stash_defaults_for(
         self,
@@ -7732,6 +7814,9 @@ class MainWindow(QMainWindow):
         ed._recovered_title = ""
         ed.document().setModified(False)
         self._update_tab_title()
+        if ed is self.current_editor():
+            # A note or an article now, with the draft's address.
+            self._fill_article_details_panel()
 
         # Optimistic store update - by the time the relay echo arrives
         # via DraftSync, the panel already shows the row.

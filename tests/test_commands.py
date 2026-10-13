@@ -210,10 +210,16 @@ def test_the_shortcut_window_lists_every_command_shortcut(main_window_commands):
         if command.shortcut is not None:
             assert any(keys == key_text(command.shortcut) for keys, _w in listed), command.id
     # The UI audit: no invented keys for Nostr commands (Q-A). A key the
-    # system itself names (Refresh: Command-R, F5) is the platform's own.
+    # system itself names (Refresh: Command-R, F5) is the platform's own;
+    # a key named here is the convention of the app Q-A follows for it.
+    conventions = {
+        # Pages, Numbers and Keynote: View > Show Inspector, on a Mac only.
+        "nostr.article_details": "Ctrl+Alt+I" if sys.platform == "darwin" else None,
+    }
     nostr_keys = [c.id for c in win.commands.commands()
                   if c.id.startswith("nostr.") and c.shortcut is not None
-                  and not isinstance(c.shortcut, QKeySequence.StandardKey)]
+                  and not isinstance(c.shortcut, QKeySequence.StandardKey)
+                  and conventions.get(c.id) != c.shortcut]
     assert nostr_keys == []
 
 
