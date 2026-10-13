@@ -399,3 +399,50 @@ def test_find_matches_of_one_tab_never_land_on_another(tmp_path):
     r = run_window_script(FIND_SCRIPT, tmp_path)
     assert r["warnings"] == [] and r["after_close"] == []
     assert r["short_highlights"] == 1
+
+
+STALE_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtCore import Qt, qInstallMessageHandler
+from PySide6.QtGui import QTextCursor
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+warnings = []
+qInstallMessageHandler(lambda kind, context, message: warnings.append(message))
+w = main_window.MainWindow()
+w.resize(900, 500)
+w.show()
+ed = w.new_tab()
+ed.setFocus()
+ed.setPlainText("".join("line %d with the word find\n" % i for i in range(60)))
+w._show_find(replace=False)
+w.findbar.edit.setText("find")
+app.processEvents()
+found = len(w._search_matches)
+cursor = ed.textCursor()
+cursor.setPosition(24)                            # in the first match
+cursor.movePosition(QTextCursor.MoveOperation.End, QTextCursor.MoveMode.KeepAnchor)
+ed.setTextCursor(cursor)
+QTest.keyClick(ed, Qt.Key.Key_Backspace)          # the text shrinks
+ed.verticalScrollBar().setValue(0)
+w._on_visible_area_changed(ed)                    # before Find looks again
+QTest.qWait(600)                                  # then it does
+r = {"found": found, "warnings": [m for m in warnings if "out of range" in m],
+     "after": len(w._search_matches)}
+ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_matches_from_before_an_edit_are_not_painted(tmp_path):
+    """Review 2: the matches found before an edit were painted at their
+    old places when the view scrolled before Find looked again, past the
+    end of a shorter text ("Position out of range")."""
+    from tests.app_process import run_window_script
+    r = run_window_script(STALE_SCRIPT, tmp_path)
+    assert r["found"] == 60 and r["warnings"] == [] and r["after"] == 0

@@ -4794,6 +4794,10 @@ class MainWindow(QMainWindow):
         self._search_matches = find_all(ed.document(), needle, self.findbar.options())
         # Whose they are: a tab's matches are never painted on another.
         self._matches_of = ed
+        # And of which text: found before a change, they are not painted
+        # again until Find has looked again (the highlights on screen move
+        # with the text meanwhile).
+        self._matches_revision = ed.document().revision()
         # The match that is selected stays the current one when the matches
         # are found again (after typing, after a replacement).
         cursor = ed.textCursor()
@@ -4810,6 +4814,8 @@ class MainWindow(QMainWindow):
             return
         if not self._search_matches or getattr(self, "_matches_of", None) is not ed:
             ed.set_highlights("find", [])
+            return
+        if getattr(self, "_matches_revision", None) != ed.document().revision():
             return
         match_fmt = QTextCharFormat()
         match_fmt.setBackground(QColor("#FFD700"))
