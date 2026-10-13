@@ -5827,6 +5827,8 @@ class MainWindow(QMainWindow):
         if not closing_for_update and not self._resolve_unsaved_before_closing():
             event.ignore()
             return
+        # Quitting from here: nothing still on its way goes into a document.
+        self._quitting = True
         if hasattr(self, "_knit_runner"):
             self._knit_runner.kill()
         self._asset_manager.flush()
@@ -6687,8 +6689,10 @@ class MainWindow(QMainWindow):
             self._say_cannot_add(name)
             return
         # Where it goes: the caret now, followed through what is typed while
-        # a large file is read and hashed off the UI thread.
+        # a large file is read and hashed off the UI thread (staying before
+        # what is typed there).
         at = QTextCursor(ed.textCursor())
+        at.setKeepPositionOnInsert(True)
         run_for_size(size, lambda: self._asset_manager.store_media_file(path),
                      lambda stored: self._insert_media(ed, at, stored, mime, name),
                      lambda _error: self._say_cannot_add(name), parent=ed)
@@ -6702,6 +6706,10 @@ class MainWindow(QMainWindow):
         """The file kept in the local store (``stored``: its sha256 and size)
         as an object of ``ed``'s text, in a paragraph of its own at ``at``,
         and on its way to the media servers."""
+        if self._editor_widget_index(ed) < 0 or getattr(self, "_quitting", False):
+            # The document was closed, or the app quit, while the file was
+            # read: it goes nowhere, and nothing is uploaded.
+            return
         sha, size = stored
         asset = self._asset_manager.adopt_stored_media(sha, size=size, mime=mime, name=name)
         if asset is None:
@@ -6715,9 +6723,11 @@ class MainWindow(QMainWindow):
         ed.document().addResource(QTextDocument.ImageResource, QUrl(asset.key),
                                   self._media_card(asset))
         caret_there = ed.textCursor().position() == at.position()
-        rich_text.insert_own_paragraph(at, image=image)
+        cursor = QTextCursor(ed.document())
+        cursor.setPosition(at.position())
+        rich_text.insert_own_paragraph(cursor, image=image)
         if caret_there:
-            ed.setTextCursor(at)
+            ed.setTextCursor(cursor)
         self._asset_manager.request_upload(asset.sha256)
 
     def _uploading(self, *editors) -> list:

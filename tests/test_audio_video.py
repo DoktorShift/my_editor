@@ -812,7 +812,8 @@ def test_a_large_file_is_read_and_hashed_off_the_ui_thread(tmp_path):
     song.write_bytes(BODY)
     r = run_window_script(LARGE_SCRIPT, tmp_path, str(song), SHA)
     assert r["right away"] == "Before."
-    assert r["after"][:2] == ["Before. Typed meanwhile.", "￼"]
+    # After the paragraph the caret was in, as a file inserted at once goes.
+    assert r["after"][:2] == ["Before. Typed meanwhile.", "\ufffc"]
     assert r["sent"] == [f"myeditor-asset:{SHA}"]
     assert r["read on the UI thread"] == []
 
@@ -987,3 +988,111 @@ def test_no_internal_name_ever_leaves_the_app_on_the_clipboard(tmp_path):
     assert len(r["private"]) == 2
     assert len(r["pasted back"]) == 2 and all(n.startswith("myeditor-asset:")
                                               for n in r["pasted back"])
+
+
+CLOSED_SCRIPT = r"""
+import json, os, sys, threading
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+from nostr.imports import workers
+workers.BACKGROUND_FROM_BYTES = 0                 # every file is read in the background
+import main_window
+
+song, sha = sys.argv[2], sys.argv[3]
+main_window._ask_save_changes = lambda parent, title, **kw: "discard"   # Don't Save
+w = main_window.MainWindow()
+w.show()
+sent = []
+w._media_store.upload_bytes = lambda body, *, name, mime_type: sent.append(name)
+w.nostr_state._active = True
+w._update_nostr_commands()
+w._upload_limit = lambda: 10**9
+r = {}
+# Closed while the file is read: nothing goes into it, nothing is uploaded.
+ed = w.new_tab()
+ed.setFocus()
+ed.textCursor().insertText("Abandoned.")
+w._upload_into(ed, song)
+w.close_tab(w.tabs.currentIndex())
+for _ in range(100):
+    app.processEvents()
+    threading.Event().wait(0.01)
+r["closed: in the document"] = "￼" in ed.toPlainText()
+r["closed: adopted"] = w._asset_manager.get(sha) is not None
+r["closed: sent"] = list(sent)
+# Typed on while the file is read: it goes where the caret was.
+ed = w.new_tab()
+ed.setFocus()
+ed.textCursor().insertText("Before.")
+w._upload_into(ed, song)
+typing = ed.textCursor()
+typing.insertText(" Typed meanwhile.")
+typing.insertBlock()
+typing.insertText("A paragraph typed meanwhile.")
+for _ in range(100):
+    app.processEvents()
+    if sent:
+        break
+    threading.Event().wait(0.01)
+r["typed: blocks"] = [ed.document().findBlockByNumber(i).text()
+                      for i in range(ed.document().blockCount())]
+ed.document().setModified(False)
+w._media_not_uploaded = lambda doc: []
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_a_file_still_read_when_its_document_closes_goes_nowhere(tmp_path):
+    """Review M2: closing the document (Don't Save) while a large file is
+    read drops it: nothing goes into the closed document and nothing is
+    uploaded. Typed on meanwhile, the file goes after the paragraph the
+    caret was in, not after what was typed since."""
+    song = tmp_path / "song.mp3"
+    song.write_bytes(BODY)
+    r = run_window_script(CLOSED_SCRIPT, tmp_path, str(song), SHA)
+    assert r["closed: in the document"] is False
+    assert r["closed: adopted"] is False and r["closed: sent"] == []
+    assert r["typed: blocks"][:2] == ["Before. Typed meanwhile.", "\ufffc"]
+    assert r["typed: blocks"][-1] == "A paragraph typed meanwhile."
+
+
+QUIT_READ_SCRIPT = r"""
+import json, os, sys, threading
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtGui import QCloseEvent
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+from nostr.imports import workers
+workers.BACKGROUND_FROM_BYTES = 0
+import main_window
+
+song, sha = sys.argv[2], sys.argv[3]
+w = main_window.MainWindow()
+w.show()
+sent = []
+w._media_store.upload_bytes = lambda body, *, name, mime_type: sent.append(name)
+w.nostr_state._active = True
+w._update_nostr_commands()
+w._upload_limit = lambda: 10**9
+ed = w.new_tab()
+w._upload_into(ed, song)
+ed.document().setModified(False)
+event = QCloseEvent()
+w.closeEvent(event)                       # quitting while the file is read
+for _ in range(100):
+    app.processEvents()
+    threading.Event().wait(0.01)
+print("RESULT " + json.dumps({"quit": event.isAccepted(), "sent": sent,
+                              "adopted": w._asset_manager.get(sha) is not None}))
+"""
+
+
+def test_a_file_still_read_when_the_app_quits_goes_nowhere(tmp_path):
+    song = tmp_path / "song.mp3"
+    song.write_bytes(BODY)
+    r = run_window_script(QUIT_READ_SCRIPT, tmp_path, str(song), SHA)
+    assert r == {"quit": True, "sent": [], "adopted": False}

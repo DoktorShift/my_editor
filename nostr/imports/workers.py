@@ -97,9 +97,18 @@ class _Task(QRunnable):
         try:
             result = self._fn()
         except BaseException as exc:  # noqa: BLE001, must never kill the pool thread
-            self._holder.failed.emit(exc)
+            self._deliver(self._holder.failed, exc)
             return
-        self._holder.done.emit(result)
+        self._deliver(self._holder.done, result)
+
+    @staticmethod
+    def _deliver(signal, value) -> None:
+        try:
+            signal.emit(value)
+        except RuntimeError:
+            # The holder went with its parent (a closed document, the app
+            # quitting): there is no one to deliver to.
+            pass
 
 
 def run_blocking(
