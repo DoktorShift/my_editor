@@ -352,3 +352,14 @@ def test_a_draft_keeps_imeta_on_the_inner_event_and_none_on_the_wrap():
     )
     assert imeta_of(wrap) == []
     assert SHA not in json.dumps(wrap)
+
+
+@pytest.mark.parametrize("content", [
+    f"*{URL}*", f"**{URL}**", f"`{URL}`", f"| {URL} |", f"|{URL}|", f"{URL}#frag",
+    f"Look at {URL}…", f"Look: {URL}", f"　{URL}　", f"_{URL}_",
+])
+def test_an_address_in_emphasis_code_a_table_or_after_any_space_is_found(content):
+    """Review low 6: written in emphasis, in code, in a table, with a
+    fragment, before an ellipsis or after a no-break or ideographic space,
+    the address is still the address in the text (NIP-92)."""
+    assert len(build_imeta_tags([full_record()], content)) == 1

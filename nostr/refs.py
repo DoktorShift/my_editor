@@ -174,10 +174,12 @@ def outside_code(markdown: str, change: Callable[[str], str]) -> str:
 
 
 # What may stand right before and after an address written in a note or an
-# article: the start or end, a space, or Markdown's and HTML's brackets and
-# quotes. A sentence's full stop or comma may follow it, before a space.
-_BEFORE_ADDRESS = set(" \t\r\n(<[\"'")
-_AFTER_ADDRESS = set(" \t\r\n)>]\"'")
+# article: the start or end, any space (a no-break or an ideographic one
+# too), Markdown's emphasis, code and table marks, brackets and quotes; a
+# fragment ("#...") or an ellipsis after it. A sentence's full stop or
+# comma may follow it, before any of those.
+_BEFORE_ADDRESS = set("(<[\"'*_`|")
+_AFTER_ADDRESS = set(")>]\"'*_`|#\u2026")
 _SENTENCE_MARKS = set(".,;:!?")
 
 
@@ -194,7 +196,8 @@ def address_in(address: str, text: str) -> bool:
         after = text[end] if end < len(text) else " "
         if after in _SENTENCE_MARKS:
             after = text[end + 1] if end + 1 < len(text) else " "
-        if before in _BEFORE_ADDRESS and after in _AFTER_ADDRESS:
+        if ((before.isspace() or before in _BEFORE_ADDRESS)
+                and (after.isspace() or after in _AFTER_ADDRESS)):
             return True
         start = text.find(address, start + 1)
     return False
