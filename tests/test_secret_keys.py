@@ -338,7 +338,7 @@ def test_the_people_search_says_why_a_key_is_not_searched(tmp_path, monkeypatch)
     problem = picker._problem.text()
     assert "secret key" in problem and not picker._problem.isHidden()
     assert picker._search_edit.accessibleDescription() == problem and heard == [problem]
-    assert pool.subs == [] and picker._hint.text() != "Searching Nostr…"
+    assert pool.subs == [] and picker._hint.isHidden()           # no "Keep typing" too
     picker._search_edit.setText("ali")
     assert picker._problem.isHidden()
     picker.hide()

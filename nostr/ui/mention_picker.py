@@ -392,6 +392,10 @@ class MentionPicker(QWidget):
         if searching:
             self._hint.setText(_("Searching Nostr…"))
             self._hint.setVisible(True)
+        elif not self._problem.isHidden():
+            # Why it isn't searched is said under the field; nothing more
+            # to wait or type for.
+            self._hint.setVisible(False)
         elif not people:
             query = self._search_edit.text().strip()
             self._hint.setText(_("No matches yet. Keep typing") if query
