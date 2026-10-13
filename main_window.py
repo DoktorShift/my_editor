@@ -7993,10 +7993,22 @@ class MainWindow(QMainWindow):
             title=choice.title or (choice.identifier if choice.kind is StashKind.NOTE else ""),
             profile_pubkey=active.user_pubkey.lower() if active else "",
         )
-        # An article's details set in the tab are in the draft now, which
-        # holds them from here on (_article_details_of reads them there).
+        # Optimistic store update - by the time the relay echo arrives
+        # via DraftSync, the panel already shows the row. First, so that
+        # nothing read after this point finds the draft as it was.
+        self._draft_store.upsert_from_inner(
+            identifier=choice.identifier,
+            inner=inner,
+            event_id=event_id,
+            created_at=created_at,
+            expiration=None,
+        )
+        # The tab's article is what was just saved: its model holds exactly
+        # that (title, summary, cover, hashtags, co-authors, zaps), so
+        # Article Details goes on showing it, never an older draft.
         if choice.kind is StashKind.ARTICLE:
-            ed._article_details = None
+            ed._article_details = ArticleDetails.from_tags(inner.get("tags") or []).with_changes(
+                identifier=choice.identifier, title=choice.title)
         # A successful stash clears the modified flag - the tab's
         # contents now match the latest draft snapshot on the network.
         ed._recovered_title = ""
@@ -8005,16 +8017,6 @@ class MainWindow(QMainWindow):
         if ed is self.current_editor():
             # A note or an article now, with the draft's address.
             self._fill_article_details_panel()
-
-        # Optimistic store update - by the time the relay echo arrives
-        # via DraftSync, the panel already shows the row.
-        self._draft_store.upsert_from_inner(
-            identifier=choice.identifier,
-            inner=inner,
-            event_id=event_id,
-            created_at=created_at,
-            expiration=None,
-        )
 
     def _editor_widget_index(self, ed) -> int:
         """Return the tab index that hosts ``ed``, or -1 if not found.

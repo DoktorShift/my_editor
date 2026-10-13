@@ -10,7 +10,8 @@ What must hold:
   file's front matter) win over those its draft holds, wherever they are
   read: saving the draft, publishing, the preview. Setting them marks the
   tab changed, as typing does; setting what it already has changes
-  nothing. A draft saved with them holds them from then on.
+  nothing. Saved as a draft, the tab's model is what was saved, and
+  Article Details goes on showing it (review H3).
 
   The publish window hands back what was changed in it, and only that: a
   window opened and closed again leaves the tab as it was.
@@ -106,20 +107,55 @@ def test_saving_the_draft_again_takes_the_tabs_title_and_details():
     assert ["image", "https://cdn.example/cover.jpg"] in tags and ["t", "nostr"] in tags
 
 
-def test_a_saved_article_draft_holds_the_details_from_then_on():
-    from main_window import MainWindow
-    from nostr.ui.stash_kind_dialog import StashChoice, StashKind
-    window, ed = window_with_draft(), bound_editor()
-    window._set_article_details(ed, OWN)
-    window._editor_widget_index = lambda _ed: 0
-    window._profile_store = types.SimpleNamespace(default=lambda: None)
-    window._update_tab_title = lambda: None
-    window._draft_store.upsert_from_inner = lambda **_kw: None
-    MainWindow._on_draft_stashed(
-        window, ed, StashChoice(kind=StashKind.ARTICLE, identifier="my-post",
-                                title="Set in the tab", summary="Own summary"),
-        "e" * 64, 1, {})
-    assert ed._article_details is None
+STASH_SCRIPT = r"""
+import json, os, sys, types
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+from main_window import StashChoice, StashKind
+from nostr.article_details import ArticleDetails
+from nostr.drafts import build_inner_event
+w = main_window.MainWindow()
+w.show()
+w.nostr_state._active = True
+w._update_nostr_commands()
+PK = "a1" * 32
+w._profile_store.default = lambda: types.SimpleNamespace(user_pubkey=PK)
+ed = w.new_tab()
+ed.textCursor().insertText("Body of the article.")
+w.act_article_details.setChecked(True)
+mine = ArticleDetails(title="My Title", summary="My summary", image="https://cdn.example/c.jpg",
+                      hashtags=("bitcoin",), coauthors=(("b2" * 32, "wss://r.example"),),
+                      zaps=(("zap", PK, "", "1"), ("zap", "b2" * 32, "wss://r.example", "1")))
+w._set_article_details(ed, mine)
+choice = StashChoice(kind=StashKind.ARTICLE, identifier="my-title", title="My Title",
+                     summary="My summary")
+inner = build_inner_event(kind=30023, content="Body of the article.", pubkey_hex=PK,
+                          tags=mine.with_changes(identifier="my-title").draft_tags("Body"))
+w._on_draft_stashed(ed, choice, "e" * 64, 1_800_000_000, inner)
+panel = w._article_details_panel
+r = {"summary": panel.summary_edit.toPlainText(), "cover": panel.cover.text(),
+     "tags": panel.tags_edit.text(), "rows": panel.coauthor_rows.count(),
+     "zaps": panel.share_zaps.isChecked(), "fixed": panel.identifier_edit.isReadOnly()}
+panel.title_edit.setText("My Title!")
+d = w._article_details_of(ed)
+r["after"] = [d.title, d.summary, d.image, list(d.hashtags), len(d.coauthors), len(d.zaps)]
+ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_after_save_as_draft_article_details_shows_and_keeps_what_was_saved(tmp_path):
+    from tests.app_process import run_window_script
+    r = run_window_script(STASH_SCRIPT, tmp_path)
+    assert (r["summary"], r["cover"], r["tags"]) == (
+        "My summary", "https://cdn.example/c.jpg", "bitcoin")
+    assert r["rows"] == 1 and r["zaps"] is True and r["fixed"] is True
+    assert r["after"] == ["My Title!", "My summary", "https://cdn.example/c.jpg",
+                          ["bitcoin"], 1, 2]
 
 
 def test_the_publish_window_hands_back_only_what_changed_in_it(monkeypatch):
