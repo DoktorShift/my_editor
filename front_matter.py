@@ -54,8 +54,8 @@ _BLOCK = re.compile(r"\A(﻿?---[ \t]*)\r?\n(.*?)(?:\r?\n)?^((?:---|\.\.\.)[ \t]
                     re.DOTALL | re.MULTILINE)
 _TOML_BLOCK = re.compile(r"\A(﻿?\+\+\+[ \t]*)\r?\n(.*?)(?:\r?\n)?^(\+\+\+[ \t]*)(?:\r?\n|\Z)",
                          re.DOTALL | re.MULTILINE)
-# A TOML key line (a bare, quoted or dotted key, then "="), and a table.
-_TOML_KEY = re.compile(r"^([^\s#\[=][^=]*?)[ \t]*=")
+# A TOML key line (a bare, quoted or dotted key, then "="), indented or not.
+_TOML_KEY = re.compile(r"^\s*([^\s#\[=][^=]*?)[ \t]*=")
 # A YAML key line: a key, plain or quoted ("tags", 'tags'), then ":".
 _KEY = re.compile(r"""^("[^"\n]*"|'[^'\n]*'|[A-Za-z0-9_][A-Za-z0-9_.-]*)[ \t]*:(?:[ \t]+(.*?))?[ \t]*$""")
 _BLOCK_SCALAR = re.compile(r"^([|>])([+-]?)(\d?)[ \t]*(?:#.*)?$")
@@ -271,17 +271,30 @@ def _toml_entries(lines: Sequence[str]) -> List[Entry]:
         last = entries[-1] if entries else None
         open_text = last is not None and _open_multiline("\n".join(last.lines))
         key = _TOML_KEY.match(line)
+        # TOML lets a key or a table be indented; such a line starts one
+        # only after an entry TOML reads whole, not inside a list going on
+        # over lines ('  "a = b",').
+        starts = not line[:1].isspace() or last is None or _whole(last)
         if last is not None and (open_text or last.key.startswith("[")):
             entries[-1] = Entry(last.key, last.lines + (line,), TOML)
-        elif line.startswith("["):
+        elif line.lstrip().startswith("[") and starts:
             entries.append(Entry(line.strip(), (line,), TOML))
-        elif key is not None:
+        elif key is not None and starts:
             entries.append(Entry(_unquote(key.group(1).strip()), (line,), TOML))
         elif last is not None:
             entries[-1] = Entry(last.key, last.lines + (line,), TOML)
         else:
             entries.append(Entry("", (line,), TOML))
     return entries
+
+
+def _whole(entry: Entry) -> bool:
+    """Whether TOML reads ``entry`` (a key and its lines) as it is."""
+    try:
+        tomllib.loads("\n".join(entry.lines))
+    except tomllib.TOMLDecodeError:
+        return False
+    return True
 
 
 def _open_multiline(written: str) -> bool:

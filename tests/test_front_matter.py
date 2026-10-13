@@ -725,3 +725,26 @@ def test_a_folded_summary_keeps_its_line_breaks(style, summary):
     read = yaml.safe_load(out.split("---\n")[1])["description"]
     assert read.strip("\n") == summary
     assert from_front_matter(front_matter.split(out)[0]).summary == summary
+
+
+@pytest.mark.parametrize("text, expected", [
+    ('+++\ntitle = "T"\n  tags = ["a"]\n+++\nB\n', '+++\ntitle = "T"\n  tags = ["a", "Extra"]\n+++\nB\n'),
+    ('+++\ntitle = "T"\n  "tags" = ["a"]\n+++\nB\n',
+     '+++\ntitle = "T"\n  "tags" = ["a", "Extra"]\n+++\nB\n'),
+    ('+++\ntitle = "T"\n\n[taxonomies]\n  tags = ["a"]\n+++\nB\n',
+     '+++\ntitle = "T"\n\n[taxonomies]\n  tags = ["a", "Extra"]\n+++\nB\n'),
+    ('+++\ntitle = "T"\n  [taxonomies]\n  tags = ["a"]\n+++\nB\n',
+     '+++\ntitle = "T"\n  [taxonomies]\n  tags = ["a", "Extra"]\n+++\nB\n'),
+])
+def test_an_indented_toml_key_is_its_key(text, expected):
+    """Round 7, L1: TOML lets a key be indented; it was not seen."""
+    front, _ = front_matter.split(text)
+    assert from_front_matter(front).hashtags == ("a",) and kept_in_file(front) == frozenset()
+    assert changed(text, hashtags=("a", "Extra")) == expected
+
+
+def test_an_item_holding_an_equals_sign_stays_in_its_toml_list():
+    text = '+++\ntitle = "T"\ntags = [\n  "a = b",\n  "c",\n]\n+++\nB\n'
+    front, _ = front_matter.split(text)
+    assert from_front_matter(front).hashtags == ("a = b", "c")
+    assert changed(text, hashtags=("a = b", "c", "d")) == text.replace('  "c",\n', '  "c",\n  "d",\n')
