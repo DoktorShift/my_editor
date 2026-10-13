@@ -110,10 +110,11 @@ class SelectionBar(QFrame):
             button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
             button.setIconSize(QSize(format_icons.SIZE, format_icons.SIZE))
-            action.changed.connect(lambda a=action, b=button: FormatToolbar._describe(a, b))
-            FormatToolbar._describe(action, button)
+            # A method of the bar: the connection goes with it.
+            action.changed.connect(self._describe_buttons)
             self.buttons[name] = button
             row.addWidget(button)
+        self._describe_buttons()
         self.set_style_name(_("Body"))
 
         # The view kept by itself: the filter never asks the editor for it,
@@ -131,6 +132,12 @@ class SelectionBar(QFrame):
         line.setObjectName("SelectionBarSeparator")
         line.setFixedWidth(1)
         return line
+
+    def _describe_buttons(self) -> None:
+        """Each button says what its command is called now, as the
+        toolbar's do (FormatToolbar._describe)."""
+        for name, button in self.buttons.items():
+            FormatToolbar._describe(self._actions[name], button)
 
     # -- what the window tells it ------------------------------------------------
 

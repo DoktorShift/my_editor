@@ -576,3 +576,21 @@ def test_the_editor_going_first_leaves_the_bar_nothing_to_ask(capfd):
     settle()
     assert "RuntimeError" not in capfd.readouterr().err
     window.close()
+
+
+def test_a_bar_lets_go_of_the_window_commands_when_it_goes():
+    """Review L2: each bar tied the window's commands to a function that
+    outlived it; a command changing after the bar had gone called it on
+    buttons that were gone."""
+    import shiboken6
+    from PySide6.QtCore import SIGNAL
+    window = Window()
+    bold = window.actions["bold"]
+    listening = bold.receivers(SIGNAL("changed()"))
+    second = SelectionBar(window.editor, window.actions, window.style_menu,
+                          dark=lambda: False, wanted=lambda: True)
+    assert bold.receivers(SIGNAL("changed()")) > listening
+    shiboken6.delete(second)
+    assert bold.receivers(SIGNAL("changed()")) == listening
+    bold.setText("Bold again")                 # nothing left to call
+    window.close()
