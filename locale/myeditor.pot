@@ -422,7 +422,7 @@ msgstr ""
 
 #: main_window.py:287
 #: main_window.py:6773
-msgid "Your changes will be lost if you don't save them."
+msgid "Your changes will be lost if you don’t save them."
 msgstr ""
 
 #: main_window.py:6753
@@ -1140,11 +1140,11 @@ msgid "Restart MyEditor to Change the Language"
 msgstr ""
 
 #: main_window.py:4568
-msgid "MyEditor couldn't keep a copy of this document for the restart. Your changes will be lost if you don't save them."
+msgid "MyEditor couldn’t keep a copy of this document for the restart. Your changes will be lost if you don’t save them."
 msgstr ""
 
 #: main_window.py:4593
-msgid "MyEditor closes to install the update. Changes you don't save will be lost."
+msgid "MyEditor closes to install the update. Changes you don’t save will be lost."
 msgstr ""
 
 #: main_window.py:4620
@@ -1371,7 +1371,7 @@ msgid "Saving under the current account would create a separate draft. How would
 msgstr ""
 
 #: main_window.py:289
-msgid "Don't Save"
+msgid "Don’t Save"
 msgstr ""
 
 #: main_window.py:1651

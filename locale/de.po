@@ -422,7 +422,7 @@ msgstr "Dein Dokument ist weiterhin geöffnet. Wähle mit „Speichern unter“ 
 
 #: main_window.py:287
 #: main_window.py:6773
-msgid "Your changes will be lost if you don't save them."
+msgid "Your changes will be lost if you don’t save them."
 msgstr "Deine Änderungen gehen verloren, wenn du sie nicht speicherst."
 
 #: main_window.py:6753
@@ -1142,11 +1142,11 @@ msgid "Restart MyEditor to Change the Language"
 msgstr "Starte MyEditor neu, um die Sprache zu wechseln"
 
 #: main_window.py:4568
-msgid "MyEditor couldn't keep a copy of this document for the restart. Your changes will be lost if you don't save them."
+msgid "MyEditor couldn’t keep a copy of this document for the restart. Your changes will be lost if you don’t save them."
 msgstr "MyEditor konnte für den Neustart keine Kopie dieses Dokuments anlegen. Deine Änderungen gehen verloren, wenn du sie nicht speicherst."
 
 #: main_window.py:4593
-msgid "MyEditor closes to install the update. Changes you don't save will be lost."
+msgid "MyEditor closes to install the update. Changes you don’t save will be lost."
 msgstr "MyEditor wird geschlossen, um das Update zu installieren. Änderungen, die du nicht speicherst, gehen verloren."
 
 #: main_window.py:4620
@@ -1376,7 +1376,7 @@ msgid "Saving under the current account would create a separate draft. How would
 msgstr "Wenn du unter dem aktuellen Konto speicherst, entsteht ein eigener Entwurf. Wie möchtest du vorgehen?"
 
 #: main_window.py:289
-msgid "Don't Save"
+msgid "Don’t Save"
 msgstr "Nicht speichern"
 
 #: main_window.py:1651

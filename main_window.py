@@ -284,9 +284,9 @@ def _ask_save_changes(parent, title: str, *, save_label: str = "",
     Returns "save", "discard" or "cancel". Don't Save is destructive (red,
     and placed apart from the other two on macOS); Save is the default.
     """
-    message = message or _("Your changes will be lost if you don't save them.")
+    message = message or _("Your changes will be lost if you don’t save them.")
     return ask(parent, title=title, message=message, buttons=(
-        Button(_("Don't Save"), "discard", DESTRUCTIVE),
+        Button(_("Don’t Save"), "discard", DESTRUCTIVE),
         Button(_("Cancel"), "cancel", CANCEL),
         Button(save_label or _("Save"), "save", DEFAULT),
     ))
@@ -4565,8 +4565,8 @@ class MainWindow(QMainWindow):
         return _ask_save_changes(
             self, _("Do you want to save the changes you made to “{name}” "
                     "before updating?").format(name=name),
-            message=_("MyEditor couldn't keep a copy of this document for the restart. "
-                      "Your changes will be lost if you don't save them."))
+            message=_("MyEditor couldn’t keep a copy of this document for the restart. "
+                      "Your changes will be lost if you don’t save them."))
 
     def _save_tab_of(self, ed) -> bool:
         """Save the document in ``ed``'s tab, the way Save does."""
@@ -4590,7 +4590,7 @@ class MainWindow(QMainWindow):
             return True
         r = _ask_save_changes(
             self, _("Save your changes before updating?"),
-            message=_("MyEditor closes to install the update. Changes you don't save will be "
+            message=_("MyEditor closes to install the update. Changes you don’t save will be "
                       "lost."))
         if r == "cancel":
             return False
@@ -6770,7 +6770,7 @@ class MainWindow(QMainWindow):
             return ""
         return " ".join((self._still_uploading(uploading),
                          self._what_leaving_does(quitting=quitting),
-                         _("Your changes will be lost if you don't save them.")))
+                         _("Your changes will be lost if you don’t save them.")))
 
     def _media_name(self, url: str) -> Optional[str]:
         """The name an audio or video file had, by the address it was

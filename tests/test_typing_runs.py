@@ -412,3 +412,13 @@ def test_replace_and_replace_all_are_named_steps(tmp_path):
     assert r["one"] == ["dog and cat and cat", "Replace"]
     assert r["all"] == ["dog and dog and dog", "Replace All"]
     assert r["undone"] == ["dog and cat and cat", "Replace All"]
+
+
+def test_the_save_question_writes_typographic_apostrophes(monkeypatch):
+    """Review L7: "doesn’t" and "don't" side by side in one alert."""
+    import main_window
+    seen = {}
+    monkeypatch.setattr(main_window, "ask", lambda parent, **kw: seen.update(kw) or "cancel")
+    main_window._ask_save_changes(None, "Do you want to save?")
+    words = [seen["message"]] + [button.label for button in seen["buttons"]]
+    assert all("'" not in text for text in words), words
