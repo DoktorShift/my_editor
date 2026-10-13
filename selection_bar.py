@@ -186,7 +186,8 @@ class SelectionBar(QFrame):
         return bool(self._editor.textCursor().block().layout().preeditAreaText())
 
     def _place(self) -> None:
-        """Centred above the selection's first line, or below its last."""
+        """Centred above the selection's first line, or below its last, in
+        either direction of writing."""
         if not self.isVisible():
             return
         editor = self._editor
@@ -199,8 +200,11 @@ class SelectionBar(QFrame):
         line_end.movePosition(QTextCursor.MoveOperation.EndOfLine)
         if line_end.position() > end.position():
             line_end = end
-        top, right = editor.cursorRect(start), editor.cursorRect(line_end)
-        first = QRect(top.left(), top.top(), max(1, right.left() - top.left()), top.height())
+        # Its two ends, whichever side each is on: right to left, the
+        # selection starts at the right.
+        top, other = editor.cursorRect(start), editor.cursorRect(line_end)
+        left, right = sorted((top.left(), other.left()))
+        first = QRect(left, top.top(), max(1, right - left), top.height())
         area = editor.viewport().rect().adjusted(_MARGIN, _MARGIN, -_MARGIN, -_MARGIN)
         place_above(self, first, editor.cursorRect(end), area)
 

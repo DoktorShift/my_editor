@@ -594,3 +594,24 @@ def test_a_bar_lets_go_of_the_window_commands_when_it_goes():
     assert bold.receivers(SIGNAL("changed()")) == listening
     bold.setText("Bold again")                 # nothing left to call
     window.close()
+
+
+def test_over_right_to_left_words_it_is_centred_on_them():
+    """Review L3: measured from the selection's logical start, the bar sat
+    off to the side of a Hebrew word."""
+    window = Window()
+    hebrew = "שלום עולם " * 6
+    window.editor.setPlainText(hebrew)
+    at = hebrew.index("עולם", 30)
+    window.double_click(at + 2)
+    cursor = window.editor.textCursor()
+    assert cursor.selectedText() == "עולם"
+    edges = []
+    for position in (cursor.selectionStart(), cursor.selectionEnd()):
+        probe = QTextCursor(window.editor.document())
+        probe.setPosition(position)
+        edges.append(window.editor.cursorRect(probe).left())
+    centre = (edges[0] + edges[1]) / 2
+    assert window.bar.isVisible()
+    assert abs(window.bar.geometry().center().x() - centre) <= 2
+    window.close()
