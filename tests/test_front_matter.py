@@ -523,3 +523,12 @@ def test_a_toml_array_over_lines_keeps_its_lines_and_comments():
     assert out == '+++\ntags = [\n  "a",\n  "b",\n  "Extra"\n]\n+++\nB\n'
     out = changed(MULTI_LINE_TOML["comment on an item"], hashtags=("a", "b", "Extra"))
     assert out == '+++\ntags = [\n  "a",  # first\n  "b",\n  "Extra",\n]\n+++\nB\n'
+
+
+@pytest.mark.parametrize("written", ["", " ~", " idea"])
+def test_tags_left_to_fill_or_one_word_become_a_list(written):
+    """Review N2: Hugo and Eleventy read "tags: idea draft" as one tag."""
+    yaml = pytest.importorskip("yaml")
+    text = f"---\ntitle: x\ntags:{written}\n---\n\nB\n"
+    out = changed(text, hashtags=("idea", "draft"))
+    assert yaml.safe_load(out.split("---\n")[1])["tags"] == ["idea", "draft"]

@@ -228,12 +228,7 @@ def from_front_matter(front: Optional[front_matter.FrontMatter]) -> ArticleDetai
         value = values.get(key, [])
         return value if isinstance(value, list) else [part for part in value.split(",")]
     tags = values.get("tags", [])
-    if isinstance(tags, list):
-        hashtags = _hashtags(tags)
-    elif "," in tags:
-        hashtags = hashtags_from(tags)
-    else:
-        hashtags = _hashtags(tags.split())     # Jekyll's "tags: ruby jekyll"
+    hashtags = _hashtags(tags) if isinstance(tags, list) else _string_tags(tags)
     coauthors = []
     for written in items("coauthors"):
         person = _person(written)
@@ -249,6 +244,12 @@ def from_front_matter(front: Optional[front_matter.FrontMatter]) -> ArticleDetai
                           summary=text("summary"), image=text("image"),
                           hashtags=hashtags, published_at=_moment(text("date")),
                           coauthors=tuple(coauthors), zaps=tuple(zaps))
+
+
+def _string_tags(written: str) -> Tuple[str, ...]:
+    """The hashtags a string of them holds: separated by commas, else by
+    spaces, as Jekyll reads "tags: ruby jekyll"."""
+    return hashtags_from(written) if "," in written else _hashtags(written.split())
 
 
 def kept_in_file(front: Optional[front_matter.FrontMatter]) -> FrozenSet[str]:
@@ -338,9 +339,12 @@ def front_matter_with(details: ArticleDetails, front: Optional[front_matter.Fron
             # A date YAML and TOML read as one (a timestamp), not a text;
             # in quotes only when the file had it so.
             bare = not original.startswith(("\"", "'"))
-        if key == "tags" and current is not None and isinstance(current.value, str):
-            # Written as a string ("ruby jekyll", "a, b"): a string again, in
-            # its way, while it can hold each tag whole.
+        if key == "tags" and current is not None and isinstance(current.value, str) \
+                and len(_string_tags(current.value)) > 1:
+            # Written as a string of tags ("ruby jekyll", "a, b"): a string
+            # again, in its way, while it can hold each tag whole. A string
+            # of one tag, or none, is no such way: Hugo and Eleventy read
+            # "idea draft" as one tag, so it becomes a list.
             separator = ", " if "," in current.value else " "
             mark = separator.strip() or " "
             if not any(mark in tag for tag in value):
