@@ -283,6 +283,9 @@ def rewritten(old: Entry, value: Union[str, Sequence[str]], *, bare: bool = Fals
     key_part, rest = _key_and_rest(old)
     if key_part is None:
         return entry(old.key, value, syntax=old.syntax, bare=bare)
+    if old.syntax == YAML and not key_part[-1:].isspace():
+        # A key left empty to fill ("title:"): YAML needs a space after it.
+        key_part += " "
     written, comment = _value_and_comment(rest)
     if isinstance(value, str):
         block = _BLOCK_SCALAR.match(written) if old.syntax == YAML else None

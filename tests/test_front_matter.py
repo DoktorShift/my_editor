@@ -382,3 +382,30 @@ def test_toml_keeps_its_own_style_too():
     changed = details.with_changes(title="New", hashtags=("a", "b", "c"))
     assert front_matter.join(front_matter_with(changed, front), body) == (
         "+++\ntitle   = 'New'  # c\ntags = ['a', 'b', 'c']\n+++\nB\n")
+
+
+# -- keys left empty to fill: Obsidian templates, Hugo and Jekyll archetypes ----
+
+TEMPLATES = {
+    "obsidian": "---\ntitle:\ndate:\ntags:\n---\n\nBody text.\n",
+    "templater": "---\ntitle: \ndescription:\ndate: \n---\nBody text.\n",
+    "hugo": '---\ntitle:\ndate:\ndraft: true\ntags: []\n---\n\nBody text.\n',
+    "jekyll": "---\nlayout: post\ntitle:\ndate:\ncategories:\n---\nBody text.\n",
+}
+
+
+@pytest.mark.parametrize("name", sorted(TEMPLATES))
+def test_a_detail_set_on_an_empty_key_is_valid_yaml_and_reads_back(name):
+    text = TEMPLATES[name]
+    front, body = front_matter.split(text)
+    assert unchanged_save(text) == text
+    details = from_front_matter(front).with_changes(
+        title="Hello world", summary="A summary", published_at=1791876318,
+        hashtags=("one", "two"))
+    out = front_matter.join(front_matter_with(details, front), body)
+    assert "title: Hello world\n" in out and "date: 2026-10-13T07:25:18Z\n" in out
+    again = from_front_matter(front_matter.split(out)[0])
+    assert (again.title, again.summary, again.published_at, again.hashtags) == (
+        "Hello world", "A summary", 1791876318, ("one", "two"))
+    yaml = pytest.importorskip("yaml")
+    assert yaml.safe_load(out.split("---\n")[1])["title"] == "Hello world"
