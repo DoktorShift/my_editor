@@ -5901,8 +5901,8 @@ msgstr "Zuerst veröffentlicht am {moment}"
 #, python-brace-format
 msgid "{names} can’t receive zaps: their profile has no lightning address. They get no share."
 msgid_plural "{names} can’t receive zaps: their profiles have no lightning address. They get no share."
-msgstr[0] "{names} kann keine Zaps empfangen: Im Profil steht keine Lightning-Adresse. Es gibt keinen Anteil."
-msgstr[1] "{names} können keine Zaps empfangen: Bei ihnen steht keine Lightning-Adresse im Profil. Sie bekommen keinen Anteil."
+msgstr[0] "{names} kann keine Zaps empfangen: Im Profil steht keine Lightning-Adresse. Diese Person erhält keinen Anteil."
+msgstr[1] "{names} können keine Zaps empfangen: Bei ihnen steht keine Lightning-Adresse im Profil. Sie erhalten keinen Anteil."
 
 #: nostr/ui/assistant.py:149
 msgid "Working"
