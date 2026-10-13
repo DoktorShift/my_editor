@@ -951,3 +951,13 @@ def test_tags_written_as_a_string_read_back_as_the_tags_meant(tags):
     text = "---\ntags: a, b\nlayout: post\n---\nB\n"
     out = changed(text, hashtags=tags)
     assert from_front_matter(front_matter.split(out)[0]).hashtags == tags
+
+
+def test_a_toml_list_over_lines_holding_numbers_can_be_changed():
+    """Round 8, H2: shown, but kept as written, as its numbers had no
+    reading of their own over lines."""
+    text = '+++\ntitle = "T"\ntags = [\n  1,\n  "b"\n]\n+++\n\nBody.\n'
+    front, _ = front_matter.split(text)
+    assert from_front_matter(front).hashtags == ("1", "b") and kept_in_file(front) == frozenset()
+    out = changed(text, hashtags=("1", "b", "c"))
+    assert from_front_matter(front_matter.split(out)[0]).hashtags == ("1", "b", "c")

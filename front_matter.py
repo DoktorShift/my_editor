@@ -379,6 +379,13 @@ def _toml_value(entry: Entry) -> Union[str, List[str], None]:
         # Numbers among texts ("python", 3.10): each item as written.
         items = [_unquote(part) for part in _split_inline(entry.written[1:-1]) if part.strip()]
         return items if len(items) == len(value) else None
+    if isinstance(value, list) and all(isinstance(item, (str, bool, int, float))
+                                       for item in value):
+        # Over lines: a number as TOML writes it, which it reads back as
+        # the same number.
+        return [item if isinstance(item, str) else
+                ("true" if item else "false") if isinstance(item, bool) else str(item)
+                for item in value]
     return None
 
 
