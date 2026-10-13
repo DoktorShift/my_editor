@@ -166,9 +166,10 @@ def test_a_confirmed_mirror_becomes_a_fallback(tmp_path):
     asset = win.uploaded_asset(servers=[OURS, "https://mirror.example"])
     _content, tags = _tags_for(win, _editor_with(asset.key))
 
-    assert f"fallback https://mirror.example/{PNG_SHA}" in tags[0]
+    # With the picture's extension (BUD-01), from its type.
+    assert f"fallback https://mirror.example/{PNG_SHA}.png" in tags[0]
     # The origin the primary URL already sits on is not repeated.
-    assert f"fallback {OURS}/{PNG_SHA}" not in tags[0]
+    assert not any(entry.startswith(f"fallback {OURS}/") for entry in tags[0])
 
 
 def test_the_alt_on_the_fragment_beats_the_stored_one(tmp_path):

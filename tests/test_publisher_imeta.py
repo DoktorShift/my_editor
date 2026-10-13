@@ -82,13 +82,28 @@ def test_a_complete_record_emits_every_field_in_a_fixed_order():
         "dim 800x600",
         "alt A kitten",
         "size 12345",
-        f"fallback {MIRROR}/{SHA}",
+        f"fallback {MIRROR}/{SHA}.png",
     ]]
 
 
 def test_the_primary_origin_is_not_repeated_as_a_fallback():
     tags = build_imeta_tags([full_record()], body_with(URL))
     assert not any(entry.startswith(f"fallback {OURS}/") for entry in tags[0])
+
+
+@pytest.mark.parametrize("url, mime, fallback", [
+    (f"{OURS}/{SHA}.png", "image/png", f"{MIRROR}/{SHA}.png"),       # as the primary has it
+    (f"{OURS}/{SHA}.JPG", "image/png", f"{MIRROR}/{SHA}.JPG"),       # its own spelling
+    (f"{OURS}/{SHA}", "audio/mpeg", f"{MIRROR}/{SHA}.mp3"),          # from the type
+    (f"{OURS}/{SHA}", "application/octet-stream", f"{MIRROR}/{SHA}"),  # none known
+    (f"{OURS}/{SHA}.png?x=1", "image/png", f"{MIRROR}/{SHA}.png"),   # not the query
+])
+def test_a_fallback_keeps_the_blobs_file_extension(url, mime, fallback):
+    """BUD-01: a server MUST accept /<sha256> with an optional file
+    extension; the extension is what tells a reader a picture from a
+    sound before it loads, so a fallback keeps the primary's."""
+    tags = build_imeta_tags([full_record(url=url, mime=mime)], body_with(url))
+    assert f"fallback {fallback}" in tags[0]
 
 
 @pytest.mark.parametrize("content", [

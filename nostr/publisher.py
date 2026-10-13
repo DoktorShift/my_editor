@@ -40,6 +40,7 @@ from typing import Callable, Iterable, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QObject, Signal
 
+import media_files
 import url_safety
 from i18n import _, display_locale, ngettext
 
@@ -255,9 +256,10 @@ def _fallbacks_for(record: PublishedMedia) -> List[str]:
     """
     if not record.sha256:
         return []
+    extension = _blob_extension(record)
     out: List[str] = []
     for origin in record.servers:
-        candidate = blob_url(origin, record.sha256)
+        candidate = blob_url(origin, record.sha256) + extension
         if candidate == record.url or url_safety.same_origin(candidate, record.url):
             continue
         if candidate in out or not _is_injection_free(candidate):
@@ -266,6 +268,19 @@ def _fallbacks_for(record: PublishedMedia) -> List[str]:
             continue
         out.append(candidate)
     return out
+
+
+def _blob_extension(record: PublishedMedia) -> str:
+    """The file extension a fallback address keeps: the one the primary
+    address gives the blob (``<sha256>.png``), else the one its type has.
+    BUD-01: a server MUST accept ``/<sha256>`` with an optional file
+    extension, and a reader tells a picture from a sound by it before
+    anything loads."""
+    tail = record.url.split("?", 1)[0].split("#", 1)[0].rsplit("/", 1)[-1]
+    name, dot, extension = tail.partition(".")
+    if name.lower() == record.sha256.lower() and dot and extension.isalnum():
+        return "." + extension
+    return media_files.extension_for(record.mime)
 
 
 # A web address in published text.
