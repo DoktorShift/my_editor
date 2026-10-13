@@ -85,3 +85,22 @@ def test_no_hint_is_cut_off_even_at_the_narrowest(shown, language, kind):
             assert hint.height() >= hint.heightForWidth(hint.width()), (language, hint.text())
     finally:
         i18n.install(i18n.ENGLISH)
+
+
+@pytest.mark.parametrize("dark", [True, False])
+def test_save_draft_looks_dimmed_while_it_cannot_be_chosen(shown, dark):
+    # An article draft needs a title: until then Save draft is dimmed, and
+    # it was drawn as a pale accent with white text, which reads as a
+    # chosen action rather than an unavailable one.
+    from PySide6.QtGui import QColor
+    from constants import DARK_MENU_BG, LIGHT_MENU_BG
+    import theme
+    dialog = shown(default=StashKind.ARTICLE, is_dark=dark)
+    save = dialog._save_btn
+    assert not save.isEnabled()
+    inside = save.grab().toImage().pixelColor(6, save.height() // 2)
+    assert inside == QColor(DARK_MENU_BG if dark else LIGHT_MENU_BG)
+    dialog._title_edit.setText("A title")
+    QApplication.processEvents()
+    inside = save.grab().toImage().pixelColor(6, save.height() // 2)
+    assert inside == QColor(theme._DIALOG_ACCENT[dark][0])

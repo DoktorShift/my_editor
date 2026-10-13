@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import theme
 from alerts import answer_return_as_the_system_does, start_on_default
 from i18n import _
 
@@ -135,9 +136,6 @@ QPushButton {
 QPushButton:hover { background: #3C3C3C; }
 QPushButton:pressed { background: #1E1E1E; }
 QPushButton:disabled { background: #252526; color: #6A6A6A; border-color: #2D2D2D; }
-QPushButton:default { background: #007ACC; color: #FFFFFF; border-color: #1177C7; }
-QPushButton:default:hover { background: #1177C7; }
-QPushButton:default:disabled { background: #2D4F69; color: #8A9BA8; border-color: #2D4F69; }
 """
 
 _LIGHT_CSS = """
@@ -195,9 +193,6 @@ QPushButton {
 QPushButton:hover { background: #E1E1E1; }
 QPushButton:pressed { background: #D0D0D0; }
 QPushButton:disabled { background: #F8F8F8; color: #BBBBBB; border-color: #EBEBEB; }
-QPushButton:default { background: #0078D4; color: #FFFFFF; border-color: #1066B4; }
-QPushButton:default:hover { background: #1066B4; }
-QPushButton:default:disabled { background: #BDD9F0; color: #FFFFFF; border-color: #BDD9F0; }
 """
 
 
@@ -433,7 +428,10 @@ class StashKindDialog(QDialog):
         self._refresh_save_enabled()
 
     def _apply_theme(self) -> None:
-        self.setStyleSheet(_DARK_CSS if self._is_dark else _LIGHT_CSS)
+        # The default button, its focus ring and its dimmed state from the
+        # one place every dialog takes them (theme.py).
+        self.setStyleSheet((_DARK_CSS if self._is_dark else _LIGHT_CSS)
+                           + theme.default_and_focus_css(self._is_dark))
 
     # -- behaviour ---------------------------------------------------------
 
