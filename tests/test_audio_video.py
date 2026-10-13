@@ -1331,3 +1331,54 @@ def test_keeping_a_large_copy_never_holds_up_another_file(tmp_path):
     big.join()
     assert waited < 0.5, waited
     assert not (cache / done).exists()             # released, nobody else held it
+
+
+def test_a_copy_whose_write_failed_gives_its_count_back(tmp_path):
+    """658d04e counts a copy before writing it; a write that fails gives
+    the count back, so the copy another read of the same file keeps is
+    taken out when that one lets it go, and only then."""
+    from PySide6.QtCore import QObject, Signal
+    from nostr.media.assets import AssetIndex
+    from nostr.media.manager import AssetManager
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    failing = []
+
+    class Store(QObject):
+        upload_status = Signal(str, str)
+        upload_finished = Signal(str, object)
+        upload_failed = Signal(str, str)
+        ready = Signal(str, str, object)
+        failed = Signal(str, str)
+        url_ready = Signal(str, str, object)
+        url_failed = Signal(str, str)
+        files = {}
+
+        def cache_path(self, sha):
+            return cache / sha
+
+        def has(self, sha):
+            return (cache / sha).is_file()
+
+        def put_bytes(self, data):
+            if failing:
+                raise OSError("the disk is full")
+            sha = hashlib.sha256(data).hexdigest()
+            (cache / sha).write_bytes(data)
+            return sha
+
+        def load(self, sha, url):
+            pass
+
+    store = Store()
+    manager = AssetManager(blob_store=store, uploader=store, profile_provider=lambda: None,
+                           index=AssetIndex(tmp_path / "index.json"))
+    (tmp_path / "talk.mp4").write_bytes(os.urandom(600))
+    sha, _size = manager.store_media_file(str(tmp_path / "talk.mp4"))     # one read keeps it
+    failing.append(True)
+    with pytest.raises(OSError):
+        manager.store_media_file(str(tmp_path / "talk.mp4"))             # another one's fails
+    assert manager._kept_for == {sha: 1}
+    assert (cache / sha).exists()
+    manager.release_stored(sha)                                          # the first lets it go
+    assert manager._kept_for == {} and not (cache / sha).exists()
