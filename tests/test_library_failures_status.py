@@ -13,6 +13,7 @@ What must hold:
   said there, not here. It shortens in a narrow window instead of
   widening it, and gives way to another message there: shortened, it
   leaves the message its room, and takes it back when the message goes.
+  The word count and the caret's line step aside before it does.
 """
 
 from tests.app_process import run_window_script  # noqa: E402
@@ -69,6 +70,31 @@ app.processEvents()
 r["narrow_quiet_text"] = w._library_problem.text()
 w.resize(1100, 700)
 app.processEvents()
+# Narrower still, with a document whose word count shows: the word count
+# gives way first, and comes back when the message goes.
+editor = w.new_tab()
+editor.insertPlainText("A few words in a document, enough to be counted here. " * 40)
+app.processEvents()
+w._update_word_count()
+app.processEvents()
+r["counted"] = w._words_label.text()
+r["widths"] = {}
+for width in (480, 560, 640):
+    w.resize(width, 600)
+    w.status.showMessage(message, 0)
+    app.processEvents()
+    app.processEvents()
+    left = min(x.geometry().left() for x in (w._library_problem, w._words_label,
+                                              w._library_open, w._line_label)
+               if x.isVisible() and x.width() > 0)
+    r["widths"][width] = [left, w.status.fontMetrics().horizontalAdvance(message)]
+w.status.clearMessage()
+app.processEvents()
+app.processEvents()
+r["words_back"] = w._words_label.width() > 0
+editor.document().setModified(False)
+w.resize(1100, 700)
+app.processEvents()
 w._library_open.click()
 app.processEvents()
 r["opened"] = opened
@@ -98,5 +124,9 @@ def test_failures_after_the_library_closed_are_counted_and_stay_until_it_opens(t
     assert room >= needed + 16                     # the message is drawn inset
     assert r["narrow_text"].endswith("…")
     assert len(r["narrow_quiet_text"]) > len(r["narrow_text"])
+    assert r["counted"]
+    for width, (room, needed) in r["widths"].items():
+        assert room >= needed + 16, f"the message is cut at {width} points"
+    assert r["words_back"]
     assert r["opened"] == [True]
     assert r["after_open"] == [False, "", False]

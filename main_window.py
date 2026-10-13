@@ -447,16 +447,17 @@ class MainWindow(QMainWindow):
         for widget in (self._library_problem, self._library_open):
             widget.setVisible(False)
             self.status.addPermanentWidget(widget)
-        # It gives way to another message in a narrow window: shortened,
-        # it leaves the message its room.
-        self.status.messageChanged.connect(lambda _message: self._fit_library_problem())
-        _WidthWatcher(self.status, self._fit_library_problem)
         # How long the document is, quietly: words and reading time, or
         # the words of the selection while there is one.
         self._words_label = QLabel()
         self._words_label.setObjectName("WordCount")
         self._words_label.setContentsMargins(0, 0, 12, 0)
         self.status.addPermanentWidget(self._words_label)
+        # A message keeps its room in a narrow window: the word count gives
+        # way first, then the library failure line shortens.
+        self.status.messageChanged.connect(lambda _message: self._fit_status_bar())
+        _WidthWatcher(self.status, self._fit_status_bar)
+        _WidthWatcher(self._words_label, self._fit_status_bar)
         self._word_count_timer = QTimer(self)
         self._word_count_timer.setSingleShot(True)
         self._word_count_timer.setInterval(300)
@@ -7092,23 +7093,42 @@ class MainWindow(QMainWindow):
         self._library_open.setAccessibleDescription(text)
         self._library_problem.setVisible(bool(text))
         self._library_open.setVisible(bool(text))
-        self._fit_library_problem()
+        self._fit_status_bar()
 
-    def _fit_library_problem(self) -> None:
-        """The failure line takes the room a message in the status bar
-        leaves (a few letters at least), and all it needs without one."""
+    def _fit_status_bar(self) -> None:
+        """A message in the status bar keeps its room in a narrow window.
+        What says least steps aside first, while it doesn't fit beside
+        the message and what matters more: the word count, then the
+        caret's line; then the library failure line shortens (a few
+        letters at least). Without a message, each takes all it needs."""
         label = self._library_problem
+        no_limit = 16777215                              # Qt's QWIDGETSIZE_MAX
+        for widget in (self._words_label, self._line_label, label):
+            widget.setMaximumWidth(no_limit)
         message = self.status.currentMessage()
-        if not label.isVisible() or not message:
-            label.setMaximumWidth(16777215)             # Qt's QWIDGETSIZE_MAX: no limit
+        if not message:
             return
-        others = sum(widget.sizeHint().width() + self.status.layout().spacing()
-                     for widget in (self._backup_problem, self._backup_retry,
-                                    self._library_open, self._words_label, self._line_label)
-                     if widget.isVisible())
+        spacing = self.status.layout().spacing()
+
+        def width_of(widget) -> int:
+            return widget.sizeHint().width() + spacing if widget.isVisible() else 0
+
         needed = self.status.fontMetrics().horizontalAdvance(message) + 40   # its margins
-        label.setMaximumWidth(max(label.minimumSizeHint().width(),
-                                  self.status.width() - others - needed))
+        room = (self.status.width() - needed
+                - sum(width_of(w) for w in (self._backup_problem, self._backup_retry,
+                                            self._library_open)))
+        # The failure line at its full width, then the caret's line, then
+        # the word count: each stays while it fits beside those before it.
+        kept = width_of(label)
+        for widget in (self._line_label, self._words_label):
+            if room - kept >= width_of(widget):
+                kept += width_of(widget)
+            else:
+                widget.setMaximumWidth(0)
+                kept += spacing
+        if label.isVisible():
+            label.setMaximumWidth(max(label.minimumSizeHint().width(),
+                                      room - (kept - width_of(label))))
 
     def _on_media_upload_progress(self, name: str, sent: int, total: int) -> None:
         sha = parse_asset_key(name)
