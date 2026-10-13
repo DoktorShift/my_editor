@@ -25,7 +25,7 @@ It exists only while a Nostr account is in use (decision D-1).
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 
 from PySide6.QtCore import QDateTime, Qt, Signal
 from PySide6.QtWidgets import (
@@ -365,8 +365,15 @@ class ArticleDetailsPanel(QFrame):
                 # Gone from sight now, not when the event loop deletes it.
                 item.widget().hide()
                 item.widget().deleteLater()
+        # Tab reaches each Remove in turn, between the hashtags and Add
+        # Co-Author, where they are seen (rows made later would come last).
+        previous = self.tags_edit
         for pubkey, _hint in details.coauthors:
-            self.coauthor_rows.addWidget(self._coauthor_row(pubkey))
+            row, remove = self._coauthor_row(pubkey)
+            self.coauthor_rows.addWidget(row)
+            QWidget.setTabOrder(previous, remove)
+            previous = remove
+        QWidget.setTabOrder(previous, self.add_coauthor_button)
         self.share_zaps.blockSignals(True)
         self.share_zaps.setChecked(bool(details.zaps))
         self.share_zaps.blockSignals(False)
@@ -416,7 +423,7 @@ class ArticleDetailsPanel(QFrame):
                 return
         self._show_people(self._shown)
 
-    def _coauthor_row(self, pubkey: str) -> QWidget:
+    def _coauthor_row(self, pubkey: str) -> Tuple[QWidget, QPushButton]:
         row = QWidget()
         layout = QHBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -430,7 +437,7 @@ class ArticleDetailsPanel(QFrame):
         remove.setAccessibleName(_("Remove {name}").format(name=name))
         remove.clicked.connect(lambda _checked=False, key=pubkey: self._remove_coauthor(key))
         layout.addWidget(remove)
-        return row
+        return row, remove
 
     def _ask_coauthor(self) -> None:
         if self._pick_person is not None:

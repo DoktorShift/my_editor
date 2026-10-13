@@ -144,6 +144,19 @@ def test_remove_is_reached_with_tab_between_hashtags_and_add_co_author():
                      "Share zaps equally with co-authors"]
 
 
+def test_remove_is_reached_with_tab_between_hashtags_and_add_co_author():
+    panel, sent, asked = panel_with(ArticleDetails(title="T", coauthors=((BOB, ""), (CAROL, ""))))
+    chain, widget = [], panel.tags_edit
+    for _step in range(4):
+        widget = widget.nextInFocusChain()
+        while not (widget.focusPolicy() & Qt.FocusPolicy.TabFocus
+                   and widget.isVisibleTo(panel)):        # as Tab itself goes
+            widget = widget.nextInFocusChain()
+        chain.append(widget.accessibleName() or widget.text())
+    assert chain == ["Remove Bob", "Remove Carol", "Add Co-Author…",
+                     "Share zaps equally with co-authors"]
+
+
 @pytest.mark.parametrize("dark", [False, True])
 def test_the_share_words_dim_with_the_box(dark):
     panel, sent, asked = panel_with(ArticleDetails(title="T"))
