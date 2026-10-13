@@ -107,11 +107,10 @@ class Entry:
         if block is not None:
             return _block_text(self.lines[1:], block.group(1), block.group(2))
         if written.startswith("["):
-            close = written.rfind("]")
-            rest = written[close + 1:] if close > 0 else ""
-            if close > 0 and (not rest.strip() or re.match(r"\s+#", rest)):
-                return [_unquote(part) for part in _split_inline(written[1:close])
-                        if part.strip()]
+            flow = _flow_list(written, self.lines[1:])
+            if flow is None:
+                return None                 # not closed where it can be read
+            return [_unquote(part) for part in _split_inline(flow[0][1:-1]) if part.strip()]
         if not written and rest:
             if all(line.lstrip().startswith("- ") or line.strip() == "-" for line in rest):
                 return [_list_item(line) for line in rest]
@@ -329,6 +328,12 @@ def _rewritten(old: Entry, value: Union[str, Sequence[str]], bare: bool) -> Entr
     if written.startswith("[") and len(old.lines) == 1:
         return Entry(old.key, (key_part + _inline_list_like(written, items, old.syntax)
                                + comment,), old.syntax)
+    flow = _flow_list(rest, old.lines[1:]) if old.syntax == YAML and rest.startswith("[") \
+        else None
+    if flow is not None:
+        # A flow list over lines: written again on one line, the whole of it.
+        return Entry(old.key, (key_part + _inline_list_like(flow[0], items, YAML)
+                               + flow[1],), old.syntax)
     if old.syntax == YAML and not written and old.value is not None:
         return Entry(old.key, (key_part.rstrip() + comment,)
                      + _block_list_like(old.lines[1:], items), old.syntax)
@@ -343,6 +348,23 @@ def _valid(written: Entry, value, bare: bool) -> Entry:
     except tomllib.TOMLDecodeError:
         return entry(written.key, value, syntax=TOML, bare=bare)
     return written
+
+
+def _flow_list(written: str, more: Sequence[str]) -> Optional[Tuple[str, str]]:
+    """A YAML flow list ("[a, b]"), on its line or continued on the lines
+    ``more``: its text on one line and the comment after it; None when it
+    is not closed there, or something follows it."""
+    rows = [written.rstrip()]
+    if "]" not in written:
+        rows += [line.strip() for line in more if line.strip()]
+    text = " ".join(rows)
+    close = text.rfind("]")
+    if close < 0:
+        return None
+    tail = text[close + 1:]
+    if tail.strip() and not re.match(r"\s+#", tail):
+        return None
+    return text[:close + 1], tail
 
 
 def _key_and_rest(old: Entry) -> Tuple[Optional[str], str]:

@@ -532,3 +532,15 @@ def test_tags_left_to_fill_or_one_word_become_a_list(written):
     text = f"---\ntitle: x\ntags:{written}\n---\n\nB\n"
     out = changed(text, hashtags=("idea", "draft"))
     assert yaml.safe_load(out.split("---\n")[1])["tags"] == ["idea", "draft"]
+
+
+def test_a_yaml_flow_list_over_lines_is_read_and_rewritten_whole():
+    """Review N3: "tags: [a,\\n  b]" was read as the tag "[a"."""
+    yaml = pytest.importorskip("yaml")
+    text = "---\ntitle: x\ntags: [a,\n  b]   # the tags\nlayout: post\n---\n\nB\n"
+    front, _ = front_matter.split(text)
+    assert from_front_matter(front).hashtags == ("a", "b")
+    assert unchanged_save(text) == text
+    out = changed(text, hashtags=("a", "b", "new"))
+    assert out == "---\ntitle: x\ntags: [a, b, new]   # the tags\nlayout: post\n---\n\nB\n"
+    assert yaml.safe_load(out.split("---\n")[1])["tags"] == ["a", "b", "new"]
