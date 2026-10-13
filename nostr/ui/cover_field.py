@@ -296,7 +296,7 @@ class CoverImageField(QWidget):
     def _on_upload_progress(self, name: str, sent: int, total: int) -> None:
         if self._uploading and name == self._uploading and total > 0:
             percent = min(100, sent * 100 // total)
-            self.preview.setText(_("Uploading… {percent} %").format(percent=percent))
+            self.preview.setText(_("Uploading…\n{percent} %").format(percent=percent))
 
     def _on_uploaded(self, name: str, media: MediaFile) -> None:
         if not self._uploading or name != self._uploading:

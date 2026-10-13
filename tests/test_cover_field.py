@@ -190,7 +190,7 @@ def test_the_well_shows_how_far_the_upload_is_and_says_when_it_is_done(field, tm
     store.upload_progress.emit("other.png", 50, 100)
     assert made.preview.text() == "Uploading\u2026"           # another upload
     store.upload_progress.emit(name, 42, 100)
-    assert made.preview.text() == "Uploading\u2026 42 %"
+    assert made.preview.text() == "Uploading\u2026\n42 %"
     store.upload_finished.emit(name, MediaFile(hash="ef" * 32, url="https://x/" + "ef" * 32))
     assert not made.uploading() and busy == [True, False]
     made.drop(str(picture_file(tmp_path, "b.png")))
@@ -222,3 +222,23 @@ def test_the_drop_is_known_by_its_own_upload_not_by_its_file_name(field, tmp_pat
     assert made.text() == "" and made.uploading()
     store.upload_finished.emit(job, MediaFile(hash="ef" * 32, url="https://x/mine"))
     assert made.text() == "https://x/mine"
+
+
+@pytest.mark.parametrize("language", ["en", "de"])
+def test_the_upload_progress_fits_the_well_in_every_language(field, tmp_path, language):
+    """Review round 2: "Wird hochgeladen … 100 %" was wider than the well
+    on a Mac. The progress is two lines, as "No cover selected" is."""
+    import i18n
+    from PySide6.QtGui import QFontMetrics
+    made, store, _problems = field
+    i18n.install(language)
+    try:
+        made.drop(str(picture_file(tmp_path)))
+        store.upload_progress.emit(store.uploads[0][1], 100, 100)
+        lines = made.preview.text().split("\n")
+        assert len(lines) == 2 and lines[1] == "100 %"
+        metrics = QFontMetrics(made.preview.font())
+        assert all(metrics.horizontalAdvance(line) < cover_field.THUMB.width() - 16
+                   for line in lines)
+    finally:
+        i18n.install(i18n.ENGLISH)
