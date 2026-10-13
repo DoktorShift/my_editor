@@ -58,3 +58,33 @@ def test_quitting_after_copy_or_cut_ends_cleanly(tmp_path, command):
     assert "clipboard: some **words** here" in result.stdout or \
         "clipboard: some words here" in result.stdout, result.stdout + result.stderr
     assert result.returncode == 0, result.stderr[-2000:]
+
+
+def test_copy_lets_qt_serialise_nothing_it_then_drops(monkeypatch):
+    """Review N6: Qt's own copy writes the selection as HTML and as an
+    OpenDocument, pictures and all, which Copy then replaced: its data is
+    made where there is nothing selected, and our formats set on it."""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    sys.path.insert(0, REPO)
+    from PySide6.QtGui import QTextCursor
+    from PySide6.QtWidgets import QApplication, QTextEdit
+    from editor import HtmlEditor
+    app = QApplication.instance() or QApplication([])
+    asked = []
+    real = QTextEdit.createMimeDataFromSelection
+
+    def counted(self):
+        asked.append(self.textCursor().selectedText())
+        return real(self)
+
+    monkeypatch.setattr(QTextEdit, "createMimeDataFromSelection", counted)
+    ed = HtmlEditor()
+    ed.setPlainText("some words here")
+    cursor = ed.textCursor()
+    cursor.select(QTextCursor.SelectionType.Document)
+    ed.setTextCursor(cursor)
+    mime = ed.createMimeDataFromSelection()
+    assert asked == [""]                              # nothing to serialise
+    assert mime.text() == "some words here"
+    assert "application/vnd.oasis.opendocument.text" not in mime.formats()
+    assert app is not None

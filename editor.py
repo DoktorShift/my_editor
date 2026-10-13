@@ -22,7 +22,7 @@ from PySide6.QtGui import (
     QTextOption, QImage, QPixmap, QTextDocument, QTextDocumentFragment, QTextFormat,
     QDesktopServices,
 )
-from PySide6.QtWidgets import QTextEdit, QMenu, QApplication, QToolTip
+from PySide6.QtWidgets import QTextEdit, QMenu, QApplication, QToolTip, QWidget
 from constants import (
     DARK_BG, DARK_FG, LIGHT_BG, LIGHT_FG, DARK_SELECTION, LIGHT_SELECTION,
     DARK_GUIDE, LIGHT_GUIDE, DARK_CURRENT_LINE, LIGHT_CURRENT_LINE, DARK_PAPER, LIGHT_PAPER,
@@ -115,6 +115,20 @@ _STYLE_STEPS = {"bold": N_("Bold"), "italic": N_("Italic"), "underline": N_("Und
                 "strike": N_("Strikethrough"), "code": N_("Code")}
 
 
+class _EmptyCopy(QTextEdit):
+    """A text field never shown, with nothing in it, whose only use is to
+    have Qt make clipboard data (HtmlEditor.createMimeDataFromSelection):
+    Qt's own object, which outlives Python, with no copy of a selection
+    in it yet."""
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.hide()
+
+    def qt_data(self):
+        return self.createMimeDataFromSelection()
+
+
 def _open_paragraph_above(cursor: QTextCursor) -> None:
     """A clean paragraph above the one ``cursor`` starts, the cursor in it."""
     cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
@@ -197,6 +211,8 @@ class HtmlEditor(QTextEdit):
         # what it is called (undo_step). A step can hold several changes.
         self._run: Optional[_Run] = None
         self._undo_names: dict = {}
+        # Where Copy's data is made, with nothing selected (createMime...).
+        self._empty_copy = None
         # What a paste or a drop is called in Edit > Undo (insertFromMimeData).
         self._mime_step = N_("Paste")
         self.document().undoCommandAdded.connect(self._forget_redone_names)
@@ -2208,17 +2224,14 @@ class HtmlEditor(QTextEdit):
         The data is Qt's own, made by QTextEdit, with these formats set on
         it: the clipboard keeps it after MyEditor quits, and Qt frees it
         after the Python interpreter has gone, which data made in Python
-        does not survive (a crash at every quit after a Copy)."""
+        does not survive (a crash at every quit after a Copy). It is made
+        where nothing is selected (_EmptyCopy), so Qt writes no HTML and no
+        OpenDocument copy of the selection that these would replace."""
         cursor = self.textCursor()
         fragment = cursor.selection()
-        mime = super().createMimeDataFromSelection()
-        # Qt fills its formats from the selection when first asked: once,
-        # now, so they don't overwrite those set below later on; and its
-        # OpenDocument copy names the objects by their internal names.
-        mime.formats()
-        mime.text()
-        for kind in mime.formats():
-            mime.removeFormat(kind)
+        if self._empty_copy is None:
+            self._empty_copy = _EmptyCopy(self)
+        mime = self._empty_copy.qt_data()
         # What other apps read: the app's own objects as their address (or
         # name), never their internal name.
         mime.setText(rich_text.plain_text_of(self._outside_copy(html=False)))
