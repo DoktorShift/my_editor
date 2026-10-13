@@ -82,6 +82,8 @@ def server_address(text: str) -> Tuple[Optional[str], str]:
         elif typed[-1].isdigit() or "." not in host and host != "localhost":
             return None, "host"             # no name ends in a number, or lacks a dot
         url.setHost(host)
+    if url.port() == {"https": 443, "http": 80}[url.scheme()]:
+        url.setPort(-1)                       # the default port is the same server
     # Encoded, a host in another script is its ASCII form.
     origin = url_safety.origin_of(bytes(url.toEncoded()).decode("ascii", "replace"))
     if not origin:

@@ -312,3 +312,14 @@ def test_a_lookalike_host_is_never_shown_as_the_real_one(tmp_path, address, row)
     dialog.address.setText(address)
     dialog.add_button.click()
     assert rows(dialog)[-1] == row
+
+
+@pytest.mark.parametrize("text, origin", [("https://c.example:443", C),
+                                          ("http://localhost:80", "http://localhost"),
+                                          ("https://c.example:8443", "https://c.example:8443")])
+def test_a_default_port_is_the_same_server_as_none(tmp_path, text, origin):
+    dialog, settings, changes = sheet(tmp_path, servers=(A, B, C))
+    dialog.address.setText(text)
+    dialog.add_button.click()
+    assert settings.configured_servers[-1] == origin
+    assert len(settings.configured_servers) == (3 if origin == C else 4)
