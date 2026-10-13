@@ -334,14 +334,11 @@ def _rewritten(old: Entry, value: Union[str, Sequence[str]], bare: bool) -> Entr
         if lines is not None:
             return Entry(old.key, (old.lines[0],) + lines + (old.lines[-1],), old.syntax)
         return entry(old.key, items, syntax=old.syntax, bare=bare)
-    if written.startswith("[") and len(old.lines) == 1:
-        return Entry(old.key, (key_part + _inline_list_like(written, items, old.syntax)
-                               + comment,), old.syntax)
-    flow = _flow_list(rest, old.lines[1:]) if old.syntax == YAML and rest.startswith("[") \
-        else None
+    flow = _flow_list(rest, old.lines[1:]) if rest.startswith("[") else None
     if flow is not None:
-        # A flow list over lines: written again on one line, the whole of it.
-        return Entry(old.key, (key_part + _inline_list_like(flow[0], items, YAML)
+        # An inline list, on its line or over lines: written on one line,
+        # the whole of it, its comments after it.
+        return Entry(old.key, (key_part + _inline_list_like(flow[0], items, old.syntax)
                                + flow[1],), old.syntax)
     if old.syntax == YAML and not written and old.value is not None:
         return Entry(old.key, (key_part.rstrip() + comment,)
@@ -360,20 +357,60 @@ def _valid(written: Entry, value, bare: bool) -> Entry:
 
 
 def _flow_list(written: str, more: Sequence[str]) -> Optional[Tuple[str, str]]:
-    """A YAML flow list ("[a, b]"), on its line or continued on the lines
-    ``more``: its text on one line and the comment after it; None when it
-    is not closed there, or something follows it."""
-    rows = [written.rstrip()]
-    if "]" not in written:
-        rows += [line.strip() for line in more if line.strip()]
-    text = " ".join(rows)
-    close = text.rfind("]")
-    if close < 0:
+    """A flow list ("[a, b]"), on its line or continued on the lines
+    ``more``: its text on one line, and what follows it as comments (the
+    comment after its "]", then those inside it, each kept). Read as YAML
+    reads it: a "#" starts a comment only after a space or at a line's
+    start, and never inside quotes; the list ends at the "]" that closes
+    it, not one in a comment or a text. None when it is not closed there,
+    or something other than a comment follows it."""
+    content: List[str] = []
+    inside: List[str] = []
+    depth, quote, tail, closed = 0, "", "", False
+    for row in [written, *more]:
+        if closed:
+            if row.strip():
+                return None                 # the entry goes on after the list
+            continue
+        out, at = [], 0
+        while at < len(row):
+            char = row[at]
+            if quote:
+                out.append(char)
+                if quote == '"' and char == "\\":
+                    out.append(row[at + 1:at + 2])
+                    at += 2
+                    continue
+                if char == quote:
+                    if quote == "'" and row[at + 1:at + 2] == "'":
+                        out.append("'")
+                        at += 2
+                        continue
+                    quote = ""
+                at += 1
+                continue
+            if char == "#" and (at == 0 or row[at - 1] in " \t"):
+                inside.append(row[at:].strip())
+                break
+            out.append(char)
+            if char in "\"'":
+                quote = char
+            elif char in "[{":
+                depth += 1
+            elif char in "]}":
+                depth -= 1
+                if depth == 0:
+                    tail = row[at + 1:]
+                    if tail.strip() and not re.match(r"\s+#", tail):
+                        return None
+                    closed = True
+                    break
+            at += 1
+        content.append("".join(out).strip())
+    if not closed or quote:
         return None
-    tail = text[close + 1:]
-    if tail.strip() and not re.match(r"\s+#", tail):
-        return None
-    return text[:close + 1], tail
+    return (" ".join(part for part in content if part),
+            tail.rstrip() + "".join("  " + comment for comment in inside))
 
 
 def _key_and_rest(old: Entry) -> Tuple[Optional[str], str]:
@@ -390,10 +427,11 @@ def _value_and_comment(rest: str) -> Tuple[str, str]:
     if rest.startswith("#"):
         return "", " " + rest               # no value yet, a comment only
     quoted = _QUOTED.match(rest)
+    flow = _flow_list(rest, ()) if rest.startswith("[") else None
     if quoted is not None:
         end = quoted.end()
-    elif rest.startswith("["):
-        end = rest.rfind("]") + 1 or len(rest)
+    elif flow is not None:
+        return flow
     else:
         found = re.search(r"\s+#", rest)
         end = found.start() if found else len(rest.rstrip())

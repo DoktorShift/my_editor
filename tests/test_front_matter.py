@@ -555,3 +555,29 @@ def test_zola_taxonomies_header_with_a_comment_or_spaces(header):
     out = changed(text, hashtags=("rust", "web", "zola"))
     assert out == text.replace('["rust", "web"]', '["rust", "web", "zola"]')
     assert tomllib.loads(out.split("+++\n")[1])["taxonomies"]["tags"] == ["rust", "web", "zola"]
+
+
+# -- comments in and after YAML flow lists (round 5, M1 and L4) -----------------
+
+@pytest.mark.parametrize("text, tags", [
+    ("---\ntags: [a,  # first\n  b]\n---\nB\n", ("a", "b")),
+    ("---\ntags: [a,  # see [1]\n  b]   # the tags\n---\nB\n", ("a", "b")),
+    ('---\ntags: ["a # not a comment",\n  b]\n---\nB\n', ("a # not a comment", "b")),
+    ("---\ntags: [a, b]  # see [1]\n---\nB\n", ("a", "b")),
+])
+def test_a_comment_in_or_after_a_flow_list_is_no_tag(text, tags):
+    yaml = pytest.importorskip("yaml")
+    front, _ = front_matter.split(text)
+    assert from_front_matter(front).hashtags == tags
+    assert unchanged_save(text) == text
+    out = changed(text, hashtags=tags + ("new",))
+    assert yaml.safe_load(out.split("---\n")[1])["tags"] == list(tags) + ["new"]
+    assert from_front_matter(front_matter.split(out)[0]).hashtags == tags + ("new",)
+
+
+def test_the_comments_of_a_flow_list_over_lines_are_kept_after_it():
+    out = changed("---\ntags: [a,  # first\n  b]   # the tags\n---\nB\n",
+                  hashtags=("a", "b", "new"))
+    assert out == "---\ntags: [a, b, new]   # the tags  # first\n---\nB\n"
+    out = changed("---\ntags: [a, b]  # see [1]\n---\nB\n", hashtags=("a", "b", "new"))
+    assert out == "---\ntags: [a, b, new]  # see [1]\n---\nB\n"
