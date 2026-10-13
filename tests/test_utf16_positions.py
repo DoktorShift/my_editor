@@ -380,3 +380,12 @@ def test_whole_words_next_to_marks_and_astral_letters_are_what_qt_finds(needle):
     for options in (FindOptions(whole_words=True),
                     FindOptions(whole_words=True, match_case=True)):
         assert find_all(doc, needle, options) == qt_find_all(doc, needle, options)
+
+
+def test_a_note_keeps_its_no_break_spaces(tmp_path, ):
+    """Review round 2: a note's no-break spaces ("100 km",
+    "« quote »") went out as plain spaces."""
+    from tests.test_publish_sheets import note
+    text = f"100 km away, « quote » for nostr:{BOB_NPUB}\nnext line"
+    sheet = note(tmp_path, content=text)
+    assert sheet._text_edit.note() == text

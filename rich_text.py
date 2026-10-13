@@ -965,10 +965,12 @@ def mention_at(cursor: QTextCursor) -> Optional[Tuple[int, int]]:
     return found[0], found[1]
 
 
-def plain_text_of(fragment: QTextDocumentFragment) -> str:
+def plain_text_of(fragment: QTextDocumentFragment, *, as_written: bool = False) -> str:
     """The plain text of ``fragment`` as another app should get it: each
     mention as its ``nostr:`` address, which every Nostr app reads as the
-    person ("@Name" alone names nobody there)."""
+    person ("@Name" alone names nobody there). ``as_written`` keeps its
+    no-break spaces (Qt's plain text makes them spaces), as a note that
+    goes out does."""
     doc = QTextDocument()
     QTextCursor(doc).insertFragment(fragment)
     mentions = []
@@ -983,13 +985,13 @@ def plain_text_of(fragment: QTextDocumentFragment) -> str:
                 if found is not None and found not in mentions:
                     mentions.append(found)
             it += 1
-    if not mentions:
-        return fragment.toPlainText()
     for start, end, href in reversed(mentions):
         cursor = QTextCursor(doc)
         cursor.setPosition(start)
         cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
         cursor.insertText(href)
+    if as_written:
+        return doc.toRawText().replace("\u2029", "\n").replace("\u2028", "\n")
     return doc.toPlainText()
 
 

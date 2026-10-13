@@ -87,8 +87,10 @@ class NoteText(QTextEdit):
         self.document().clearUndoRedoStacks()
 
     def note(self) -> str:
-        """The note as it is published: each mention its ``nostr:`` address."""
-        return rich_text.plain_text_of(QTextDocumentFragment(self.document())).strip()
+        """The note as it is published: each mention its ``nostr:`` address,
+        its no-break spaces as written."""
+        return rich_text.plain_text_of(QTextDocumentFragment(self.document()),
+                                       as_written=True).strip()
 
     def insert_mention(self, at: int, href: str, name: str) -> None:
         """The mention of ``name`` in place of the "@" typed at ``at`` (when
