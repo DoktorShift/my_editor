@@ -225,7 +225,7 @@ def test_a_key_behind_a_json_escape_is_found(about):
 @pytest.mark.parametrize("content", [
     "[" * 100_000 + json.dumps(f"My key:\n{NSEC}") + "]" * 100_000,   # deeper than JSON reads
     json.dumps({"about": "x" * (300 * 1024)}),                         # longer than is read
-])
+], ids=["too-deep", "too-long"])      # the text itself is no name: Windows caps the variable
 def test_json_that_cant_be_read_in_full_is_never_signed(content):
     """No falling back to the raw text, where an escape could hide a key:
     what can't be read can't be cleared, so it is refused, in words."""
