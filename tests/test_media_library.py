@@ -586,10 +586,10 @@ def test_save_as_downloads_a_large_video_with_progress_and_cancel(tmp_path, monk
     job.progress.emit(30 * 1024 * 1024, video.size)
     assert not world.dialog._save_bar.isHidden() and world.dialog._save_bar.value() == 50
     assert world.dialog._status.text() == "Saving “Talk.mp4”…"
-    world.dialog._save_cancel.click()
+    world.dialog._save_stop.click()
     assert job.cancelled
     job.finished.emit("cancelled")
-    assert world.dialog._save_bar.isHidden() and world.dialog._save_cancel.isHidden()
+    assert world.dialog._save_bar.isHidden() and world.dialog._save_stop.isHidden()
     assert world.dialog._status.text() == "Anyone with the link can see the files you add here."
 
 

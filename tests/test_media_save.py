@@ -502,3 +502,22 @@ def test_a_private_file_on_this_computer_its_key_does_not_open_says_so(
     save_as(monkeypatch, world, private, tmp_path / "Beach.png")
     assert world.dialog._status.text() == (
         "“Beach.png” wasn’t saved: it’s kept privately, and its key doesn’t open it.")
+
+
+def test_a_picker_saving_shows_one_cancel_and_a_stop_for_the_save(tmp_path, monkeypatch, server):
+    """The picker's Cancel closes it; the save's own button stops the save,
+    and says so to VoiceOver."""
+    from PySide6.QtWidgets import QPushButton
+    _Blobs.delay = 0.02
+    big = blob(server, os.urandom(1024 * 1024))
+    world = library(tmp_path, monkeypatch, [big], names={big.hash: "Big.mp4"}, pick=True)
+    out = tmp_path / "out"
+    out.mkdir()
+    save_as(monkeypatch, world, big, out / "Big.mp4")
+    assert wait_for(lambda: world.dialog._save_bar.value() > 0, 10)
+    shown = [b.text() for b in world.dialog.findChildren(QPushButton) if b.isVisible()]
+    assert shown.count("Cancel") == 1 and "Stop" in shown
+    assert world.dialog._save_stop.accessibleName() == "Stop Saving"
+    world.dialog._save_stop.click()
+    assert wait_for(lambda: not saving(world), 5)
+    assert folder(out) == []

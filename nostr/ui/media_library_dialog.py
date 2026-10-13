@@ -289,12 +289,15 @@ class MediaLibraryDialog(QDialog):
         self._save_bar.setFixedWidth(120)
         self._save_bar.setAccessibleName(_("Saving"))
         self._save_bar.hide()
-        self._save_cancel = QPushButton(_("Cancel"))
-        self._save_cancel.setAutoDefault(False)
-        self._save_cancel.clicked.connect(self._cancel_save)
-        self._save_cancel.hide()
+        # "Stop", not "Cancel": the picker's Cancel, beside it, closes the
+        # window.
+        self._save_stop = QPushButton(_("Stop"))
+        self._save_stop.setAccessibleName(_("Stop Saving"))
+        self._save_stop.setAutoDefault(False)
+        self._save_stop.clicked.connect(self._cancel_save)
+        self._save_stop.hide()
         footer.addWidget(self._save_bar)
-        footer.addWidget(self._save_cancel)
+        footer.addWidget(self._save_stop)
         self._saver.started.connect(self._on_save_started)
         self._saver.progress.connect(self._save_bar.setValue)
         self._saver.finished.connect(self._on_save_finished)
@@ -807,7 +810,7 @@ class MediaLibraryDialog(QDialog):
         self._show_status(_("Saving “{name}”…").format(name=os.path.basename(target)), "")
         self._status_timer.stop()
         self._save_bar.show()
-        self._save_cancel.show()
+        self._save_stop.show()
 
     def _on_save_started(self, target: str) -> None:
         self._save_bar.setValue(0)
@@ -815,7 +818,7 @@ class MediaLibraryDialog(QDialog):
 
     def _on_save_finished(self, target: str, why: str) -> None:
         self._save_bar.hide()
-        self._save_cancel.hide()
+        self._save_stop.hide()
         if why and why != "cancelled":
             self._say(save_failure(why, target), error=True)
         else:
