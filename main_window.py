@@ -3343,6 +3343,8 @@ class MainWindow(QMainWindow):
 
         def as_note(fmt) -> Optional[str]:
             url = destination(fmt)
+            if url and _is_media(self._asset_manager, fmt.name()):
+                return url                     # always a line of its own
             # A bare URL welded to the surrounding words is unreadable
             # and unlinkable, so it always keeps its own whitespace.
             return f" {url} " if url else None

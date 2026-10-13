@@ -179,6 +179,7 @@ w._media_store.upload_finished.emit(f"myeditor-asset:{sha}", media)
 r["undo_steps_unchanged"] = doc.availableUndoSteps() == undo_steps
 content, records = w._publish_payload(ed, "markdown")
 r["published"] = content
+r["published note"] = w._publish_text(ed, "note")
 r["imeta"] = build_imeta_tags(records, content)
 r["gate_done"] = w._confirm_images_uploaded(ed)
 # Undo takes back the person's typing, not the finished upload.
@@ -224,6 +225,8 @@ def test_audio_in_the_window(tmp_path):
     assert r["close_asked"] is True and r["still_open"] is True         # L4
     assert r["undo_steps_unchanged"] is True                            # M2
     assert f"Listen:\n\n{URL}.mp3\n\nNotes" in r["published"]
+    # A line of its own in a note, without spaces around it.
+    assert f"\n{URL}.mp3\n" in r["published note"] and f" {URL}" not in r["published note"]
     assert r["imeta"] == [["imeta", f"url {URL}.mp3", "m audio/mpeg", f"x {SHA}",
                            f"size {len(BODY)}"]]
     assert r["gate_done"] is True
