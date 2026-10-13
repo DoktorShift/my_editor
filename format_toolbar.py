@@ -166,18 +166,16 @@ class PopupButton(QPushButton):
     """A pop-up button (the paragraph style's) drawn without Qt's own menu
     indicator, which is a dot on a Mac: its Disclosure is its arrow."""
 
-    def setMenu(self, menu: QMenu) -> None:  # noqa: N802, Qt's name
-        """``menu``, whose own action says whether it can be used: the
-        button follows it, so Format > Style has one state on the menu bar,
-        the toolbar and the format bar."""
-        super().setMenu(menu)
-        menu.menuAction().changed.connect(self._follow_menu)
-        self._follow_menu()
+    def follow(self, menu: QMenu) -> None:
+        """Be usable while ``menu`` (Format > Style) is: its own action says
+        so, and the button follows it, so the menu has one state on the menu
+        bar, the toolbar and every format bar."""
+        self._followed = menu.menuAction()
+        self._followed.changed.connect(self._follow)
+        self._follow()
 
-    def _follow_menu(self) -> None:
-        menu = self.menu()
-        if menu is not None:
-            self.setEnabled(menu.menuAction().isEnabled())
+    def _follow(self) -> None:
+        self.setEnabled(self._followed.isEnabled())
 
     def paintEvent(self, _event) -> None:  # noqa: N802, Qt's name
         painter = QStylePainter(self)
@@ -270,6 +268,7 @@ class FormatToolbar(QToolBar):
         self.style_button.setObjectName("StyleButton")
         self._style_menu = style_menu        # the window's; kept while the bar uses it
         self.style_button.setMenu(style_menu)
+        self.style_button.follow(style_menu)
         self.style_button.setAccessibleName(_("Style"))
         self.style_button.setToolTip(_("Paragraph style"))
         names = [a.text() for a in style_menu.actions()] + [pgettext("paragraph style", "Mixed")]

@@ -223,7 +223,7 @@ def test_a_click_without_a_selection_or_a_right_click_shows_none(w):
 def test_it_holds_the_style_popup_and_the_window_commands(w):
     assert [w.bar.buttons[name].defaultAction() for name in BUTTONS] == [
         w.actions[name] for name in BUTTONS]
-    assert w.bar.style_button.menu() is w.style_menu
+    assert w.bar.style_button.menu().actions() == w.style_menu.actions()
     w.bar.set_style_name("Heading 2")
     assert w.bar.style_button.text() == "Heading 2"
     w.actions["italic"].setEnabled(False)
@@ -377,10 +377,11 @@ def test_a_composition_or_a_popup_opening_closes_it(w):
 
 def test_the_style_menu_keeps_it(w):
     w.double_click(word_at(TEXT, "Another", 5) + 2)
-    w.style_menu.popup(w.bar.style_button.mapToGlobal(QPoint(0, w.bar.style_button.height())))
+    menu = w.bar.style_button.menu()
+    menu.popup(w.bar.style_button.mapToGlobal(QPoint(0, w.bar.style_button.height())))
     settle()
     assert w.bar.isVisible()
-    w.style_menu.close()
+    menu.close()
 
 
 def test_where_the_window_does_not_want_it_none_shows():
@@ -511,7 +512,7 @@ def test_a_popup_taking_the_keys_closes_it_while_the_window_stays_active(w, monk
     w.double_click(word_at(TEXT, "Another", 5) + 2)
     assert w.bar.isVisible()
     monkeypatch.setattr(selection_bar.QApplication, "activePopupWidget",
-                        staticmethod(lambda: w.style_menu))
+                        staticmethod(lambda: w.bar.style_button.menu()))
     QApplication.sendEvent(w.editor, QFocusEvent(QEvent.Type.FocusOut,
                                                  Qt.FocusReason.PopupFocusReason))
     settle()
@@ -669,3 +670,23 @@ def test_over_a_code_block_it_does_not_show(tmp_path):
     from tests.app_process import run_window_script
     r = run_window_script(CODE_SCRIPT, tmp_path)
     assert r == {"code": [True, False]}
+
+
+def test_the_window_style_menu_outlives_a_bar():
+    """A menu given to a button is taken as the button's own by PySide,
+    and went with it: a closed tab's bar took Format > Style down (the
+    menu bar's menus are Qt's, made by addMenu, as this one)."""
+    import shiboken6
+    from PySide6.QtCore import QEvent
+    window = Window()
+    style_menu = window.window.menuBar().addMenu("Format").addMenu("Style")
+    style_menu.addActions(window.style_menu.actions())
+    other = HtmlEditor()
+    second = SelectionBar(other, window.actions, style_menu,
+                          dark=lambda: False, wanted=lambda: True)
+    assert second.style_button.menu().actions() == style_menu.actions()
+    other.deleteLater()                         # as a closed tab's editor goes
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert not shiboken6.isValid(second)
+    assert shiboken6.isValid(style_menu) and style_menu.actions()
+    window.close()

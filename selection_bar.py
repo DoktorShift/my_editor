@@ -82,7 +82,11 @@ class SelectionBar(QFrame):
         self.hide()
         self._editor = editor
         self._actions = actions
-        self._style_menu = style_menu
+        # The window's style commands in a menu of the bar's own: a menu
+        # given to a button is taken as the button's by PySide, and Format
+        # > Style would go with a closed tab's bar.
+        self._style_menu = QMenu(self)
+        self._style_menu.addActions(style_menu.actions())
         self._dark = dark
         self._wanted = wanted
         self._shown_dark = None
@@ -92,7 +96,8 @@ class SelectionBar(QFrame):
         row.setContentsMargins(4, 3, 4, 3)
         row.setSpacing(2)
         self.style_button = PopupButton(self)
-        self.style_button.setMenu(style_menu)
+        self.style_button.setMenu(self._style_menu)
+        self.style_button.follow(style_menu)
         self.style_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.style_button.setAccessibleName(_("Style"))
         self.style_button.setToolTip(_("Paragraph style"))
