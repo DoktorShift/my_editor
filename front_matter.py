@@ -55,6 +55,8 @@ _BLOCK_SCALAR = re.compile(r"^([|>])([+-]?)(\d?)[ \t]*(?:#.*)?$")
 # no ": " or " #" inside, and not a word or form YAML reads as another type.
 _PLAIN = re.compile(r"^[^\s\-?:,\[\]{}#&*!|>'\"%@`][^\n]*$")
 _YAML_WORDS = {"true", "false", "yes", "no", "on", "off", "y", "n", "null", "~"}
+# How YAML writes "no value" (unquoted).
+_YAML_NULLS = {"~", "null", "Null", "NULL"}
 _YAML_NUMBER = re.compile(r"^[-+]?(?:0[xob][0-9a-fA-F_]+|[0-9][0-9_]*(?:\.[0-9_]*)?"
                           r"(?:[eE][-+]?[0-9]+)?|\.[0-9]+|\.inf|\.nan)$", re.IGNORECASE)
 _YAML_DATE = re.compile(r"^\d{4}-\d{1,2}-\d{1,2}(?:[Tt ].*)?$")
@@ -104,7 +106,10 @@ class Entry:
             return None                     # a mapping or something else: unread
         if rest or written.startswith(("{", "&", "*", "!")):
             return None                     # continued over lines, or not plain YAML
-        return _unquote(_without_comment(written))
+        plain = _without_comment(written)
+        if plain in _YAML_NULLS:
+            return ""                       # YAML's "no value"
+        return _unquote(plain)
 
 
 @dataclass(frozen=True)
@@ -317,6 +322,8 @@ def _key_and_rest(old: Entry) -> Tuple[Optional[str], str]:
 
 def _value_and_comment(rest: str) -> Tuple[str, str]:
     """The value as written and what follows it (spaces and a comment)."""
+    if rest.startswith("#"):
+        return "", " " + rest               # no value yet, a comment only
     quoted = _QUOTED.match(rest)
     if quoted is not None:
         end = quoted.end()
@@ -435,6 +442,8 @@ def _without_comment(written: str) -> str:
     if quoted is not None:
         rest = written[quoted.end():]
         return quoted.group(1) if not rest.strip() or re.match(r"\s+#", rest) else written
+    if written.startswith("#"):
+        return ""                           # no value, a comment only
     found = re.search(r"\s+#", written)
     return written[:found.start()] if found else written
 

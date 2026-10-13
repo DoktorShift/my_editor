@@ -409,3 +409,25 @@ def test_a_detail_set_on_an_empty_key_is_valid_yaml_and_reads_back(name):
         "Hello world", "A summary", 1791876318, ("one", "two"))
     yaml = pytest.importorskip("yaml")
     assert yaml.safe_load(out.split("---\n")[1])["title"] == "Hello world"
+
+
+@pytest.mark.parametrize("written", ["~", "null", "Null", "NULL", ""])
+def test_a_yaml_null_is_no_value(written):
+    front, body = front_matter.split(
+        f"---\ntitle: {written}\nsummary: {written}   # to fill\ntags: {written}\n---\n\nB\n")
+    details = from_front_matter(front)
+    assert (details.title, details.summary, details.hashtags) == ("", "", ())
+    tags = details.with_changes(identifier="post").draft_tags("B")
+    assert not [tag for tag in tags if tag[0] in ("title", "summary", "t")]
+
+
+def test_a_quoted_null_is_the_word():
+    front, _ = front_matter.split('---\ntitle: "null"\n---\n')
+    assert from_front_matter(front).title == "null"
+
+
+def test_a_value_set_on_a_key_with_only_a_comment_keeps_the_comment():
+    front, body = front_matter.split("---\nsummary:    # to fill\ntitle: ~\n---\nB\n")
+    details = from_front_matter(front).with_changes(summary="Filled", title="Set")
+    assert front_matter.join(front_matter_with(details, front), body) == (
+        "---\nsummary:    Filled # to fill\ntitle: Set\n---\nB\n")
