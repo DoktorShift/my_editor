@@ -444,6 +444,15 @@ def test_a_relay_that_never_answers_the_sign_in_did_not_refuse_it(pool):
     assert failed == [(MINE, "the relay did not answer the sign-in", False)]
 
 
+def test_the_person_asking_again_may_be_asked_again(pool):
+    pool.sign_in = signer = Signer(fail="user rejected")
+    sub, relay, seen = refused_read(pool, MINE)
+    pool.forget_refusals(["wss://Mine.Example/"])        # Try Again, Save, Refresh
+    again = pool.subscribe([MINE], [{"kinds": [1]}])
+    relay.says("CLOSED", again.sub_id, "auth-required: sign in")
+    assert len(signer.asked) == 2
+
+
 def test_a_sign_in_taken_for_an_account_no_longer_in_use_closes_the_connection(pool):
     pool.sign_in = signer = Signer()
     sub, relay, seen = refused_read(pool, MINE)

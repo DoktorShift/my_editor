@@ -57,6 +57,9 @@ class Lists(QObject):
     def read(self, on_done):
         on_done([])
 
+    def ask_again(self):
+        pass
+
     def save(self, relays, on_done, *, on_step=None, leave_unread=False):
         on_done(SaveOutcome(MoveOutcome(), WriteOutcome(WRITTEN)))
 

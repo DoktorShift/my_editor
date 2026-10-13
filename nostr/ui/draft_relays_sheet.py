@@ -236,6 +236,7 @@ class DraftRelaysSheet(AssistantWindow):
     # -- reading ---------------------------------------------------------------
 
     def _read_list(self, *, then_say: str = "") -> None:
+        self._relays.ask_again()             # the person asked: open, or Try Again
         self._generation += 1
         generation = self._generation
         self._set_state(READING, busy=_("Reading where your drafts are kept…"))
@@ -358,6 +359,7 @@ class DraftRelaysSheet(AssistantWindow):
         if self._state != EDITING or not self._changed():
             return
         chosen = self.chosen()
+        self._relays.ask_again()             # the person asked: Save, or Save Anyway
         self._generation += 1
         generation = self._generation
         self._list_saving = False

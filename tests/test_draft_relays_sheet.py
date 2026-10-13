@@ -85,6 +85,10 @@ class Lists(QObject):
         self.cancelled = 0
         self.list_on_its_way = False
         self.left_behind = []
+        self.asked_again = 0
+
+    def ask_again(self):
+        self.asked_again += 1
 
     def drafts_left_behind(self):
         return list(self.left_behind)
@@ -515,3 +519,15 @@ def test_the_relays_still_looked_at_follow_a_move_in_the_background():
     lists.left_behind_changed.emit()                        # its drafts moved
     assert sheet._left_list.count() == 0 and not sheet._left.isVisibleTo(sheet)
 
+
+def test_the_person_asking_again_lets_a_declined_sign_in_be_asked_again():
+    # Review round 2, R1: "approve that, then try again" has to be true.
+    lists = Lists(["wss://mine.example"], readable=False)
+    sheet, _saved = open_sheet(lists)
+    opened = lists.asked_again
+    lists.readable = True
+    sheet.buttons["retry"].click()
+    assert lists.asked_again == opened + 1
+    add(sheet, "wss://two.example")
+    sheet.buttons["save"].click()
+    assert lists.asked_again == opened + 2

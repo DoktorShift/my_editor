@@ -237,6 +237,11 @@ class Relay(QObject):
         one (``hold``), and nothing signed in on this one goes with it."""
         self._ws.close()
 
+    def forget_refusals(self) -> None:
+        """The person asked again: a sign-in refused on this connection may
+        be asked for once more."""
+        self._refused.clear()
+
     def signed_in_with(self, signer) -> set:
         """The keys ``signer`` signed in on this connection."""
         return {key for key, by in self._signed_in.items() if by is signer}
@@ -650,6 +655,15 @@ class RelayPool(QObject):
                     self._sign_in_ended(u, signer, ok, why, answered))
             self._relays[normalized] = relay
         return relay
+
+    def forget_refusals(self, urls: List[str]) -> None:
+        """The person asked again (Try Again, Save, Refresh): a sign-in to
+        ``urls`` refused on the connection now open may be asked for once
+        more. What MyEditor reads by itself still does not ask again."""
+        for url in urls:
+            relay = self._relays.get(_normalize(url))
+            if relay is not None:
+                relay.forget_refusals()
 
     def end_sign_ins(self, keep: str) -> None:
         """Close every connection the pool's own signer signed in on as

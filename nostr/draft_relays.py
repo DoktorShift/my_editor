@@ -76,6 +76,7 @@ from nostr.outbox import ask_draft_relays, defaults
 from nostr.outbox.lookup import fetch_replaceable
 from nostr.outbox.policy import (
     LookupState, created_at_of, dedupe_relays, is_newer, lookup_relays, normalize_relay_url,
+    relays_from,
 )
 from nostr.outbox.writer import (
     CAUSE_SIGNER, FAILED, REFUSED, UNCHANGED, BaseChanged, ReplaceableWriter, WriteOutcome,
@@ -790,9 +791,13 @@ class PrivateDraftRelays(QObject):
         self._directory.stop_reading_drafts_on(self.author, [relay])
 
     def ask_again(self) -> None:
-        """Let the next read ask the signer app again for a list it did not
-        decrypt (the person asked to refresh)."""
+        """The person asked again (Refresh Drafts, Try Again, Save): the
+        next read asks the signer app again for a list it did not decrypt,
+        and the account's relays that refused a sign-in on their connection
+        (the person said no) may ask for one again."""
         self._declined_id = None
+        self._pool.forget_refusals(self._directory.own_relays(self.author)
+                                   + list(relays_from(self._entitled)))
 
     def _decrypt(self, ciphertext: str, on_done) -> None:
         """``on_done(relays, declined)``: the list decrypted, or None, with

@@ -1081,3 +1081,13 @@ def test_only_the_signer_apps_own_refusal_counts_as_declined(first_failure, decl
     for _refresh in range(3):
         reader.read(lambda _relays: None)
     assert (client.tries == 1) is declined
+
+
+def test_asking_again_lets_the_accounts_relays_ask_for_a_sign_in_again():
+    # Review round 2, R1: after the person said no to a sign-in, Try Again,
+    # Save and Refresh Drafts may ask again; what MyEditor reads by itself
+    # does not.
+    drafts, relays, _directory, _client = moving(ABSENT)
+    drafts._entitled = ["wss://members.example"]
+    drafts.ask_again()
+    assert relays.forgotten and {U1, U2, "wss://members.example"} <= set(relays.forgotten[-1])

@@ -147,6 +147,10 @@ class FakePool:
         self.published: List[tuple] = []
         self.stored: Dict[str, dict] = {}
         self.subscriptions: List[tuple] = []
+        self.forgotten: List[List[str]] = []      # forget_refusals, each call
+
+    def forget_refusals(self, urls):
+        self.forgotten.append(list(urls))
 
     def publish(self, urls, event):
         self.published.append((list(urls), event))
@@ -355,6 +359,10 @@ class HandPool:
 
     def __init__(self):
         self.subs: List[FakeSubscription] = []
+        self.forgotten: List[List[str]] = []      # forget_refusals, each call
+
+    def forget_refusals(self, urls):
+        self.forgotten.append(list(urls))
 
     def subscribe(self, urls, filters):
         sub = FakeSubscription(urls, filters)
