@@ -728,6 +728,13 @@ class MediaStore(QObject):
                     attempt_server(server, signed=True, retried=True)
                     return
             listing = listings[url_safety.origin_of(origin)]
+            if page > 1:
+                # The first page was listed and is kept; the rest may be
+                # missing (a server refusing the cursor, or busy for the
+                # second request), which is not a failed listing.
+                listing.truncated = True
+                finish_one()
+                return
             listing.ok = False
             listing.error_code = _error_code(err)
             remaining["errors"] += 1

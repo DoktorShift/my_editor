@@ -808,3 +808,26 @@ def test_an_odd_number_in_a_listing_never_stops_the_library(tmp_path, odd):
     ctx.store.fetch()
     ctx.settle()
     assert list(ctx.store.files) == [blob["sha256"]]
+
+
+def test_a_failed_later_page_keeps_what_the_first_page_listed(tmp_path):
+    """A server that refuses the cursor (older, or strict), or is briefly
+    busy for the second request, has still listed the first page: those
+    files stay, and the listing is marked possibly incomplete rather than
+    failed (which would empty the library and blame the connection)."""
+    server = FakeBlossomServer(SERVER, blobs=_many(5))
+
+    def responder(verb, request, body):
+        if QUrlQuery(QUrl(request.url()).query()).hasQueryItem("cursor"):
+            return error_reply(400, reason="Unknown parameter cursor")
+        return server(verb, request, body)
+
+    ctx = make_store(tmp_path, responder=responder)
+    errors = []
+    ctx.store.fetch_error.connect(errors.append)
+    ctx.store.fetch()
+    ctx.settle()
+    assert len(ctx.store.files) == 5
+    listing = ctx.store.server_listings()[SERVER]
+    assert listing.ok and listing.truncated
+    assert errors == []

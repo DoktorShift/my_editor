@@ -115,7 +115,9 @@ class FakeStore(QObject):
         return [SERVER, MEMBERS]
 
     def server_listings(self):
-        return {s: ServerListing(origin=s, ok=self.listing_ok) for s in self.target_servers()}
+        return {s: ServerListing(origin=s, ok=self.listing_ok,
+                                 truncated=getattr(self, "truncated", False))
+                for s in self.target_servers()}
 
     def quota_for(self, origin):
         return self.quota if origin == MEMBERS else None
@@ -991,3 +993,15 @@ def test_a_private_file_has_no_link_to_hand_out(tmp_path, monkeypatch):
     assert not _menu_action(world, "Open in Browser").isEnabled()
     press(world.grid, Qt.Key.Key_C, Qt.KeyboardModifier.ControlModifier)
     assert QApplication.clipboard().text() == "before"
+
+
+def test_a_listing_that_may_be_incomplete_is_said_quietly(tmp_path, monkeypatch):
+    """Not an error and not the connection: some files may be missing
+    from the list, and Refresh is the way to look again."""
+    store = FakeStore([media(1)])
+    world = build(tmp_path, monkeypatch, store)
+    store.truncated = True
+    store.fetch_finished.emit()
+    assert world.dialog._status.text() == (
+        "Your media servers may not have listed every file. Refresh to look again.")
+    assert world.dialog._status.property("tone") == ""

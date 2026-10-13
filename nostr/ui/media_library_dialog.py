@@ -1098,6 +1098,10 @@ class MediaLibraryDialog(QDialog):
     def _on_fetch_finished(self) -> None:
         self._fetching = False
         self._show_page()
+        if any(listing.ok and listing.truncated
+               for listing in self._store.server_listings().values()):
+            self._say(_("Your media servers may not have listed every file. Refresh to "
+                        "look again."))
 
     def _on_fetch_error(self, code: str) -> None:
         if code == ERROR_CODES.NETWORK_UNAVAILABLE:
