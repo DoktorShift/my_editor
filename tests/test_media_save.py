@@ -756,25 +756,45 @@ def test_save_to_folder_says_at_the_end_what_wasnt_saved(tmp_path, monkeypatch, 
         "“Two.mp4” isn’t on your media servers anymore, so it couldn’t be saved.")
 
 
+def tooltip_at(widget, x) -> str:
+    """The tooltip the pointer at ``x`` in ``widget`` shows, "" for none."""
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QHelpEvent
+    from PySide6.QtWidgets import QToolTip
+    QToolTip.hideText()
+    wait_for(lambda: not QToolTip.isVisible(), 2)      # it fades out
+    point = QPoint(x, widget.height() // 2)
+    QApplication.sendEvent(widget, QHelpEvent(QEvent.Type.ToolTip, point,
+                                              widget.mapToGlobal(point)))
+    return QToolTip.text() if QToolTip.isVisible() else ""
+
+
 def test_save_to_folder_says_what_wasnt_saved_after_its_window_closed(
         tmp_path, monkeypatch, server):
-    from PySide6.QtWidgets import QStatusBar
+    """In the status bar, with each reason in the message's tooltip: over
+    the message alone, not the word count beside it, and gone with it."""
+    from PySide6.QtWidgets import QLabel, QStatusBar
+    import main_window
     files, names = _three_with_one_gone(server)
     keeper, saver = _keeper(tmp_path)
     bar = QStatusBar()
+    words = QLabel("1,234 words")
+    bar.addPermanentWidget(words)
+    bar.resize(700, 24)
+    bar.show()
+
     class Host:                                    # the main window's part of it
-        status, _media_save_said, _status_tip = bar, "", ""
+        status, _media_save_said = bar, ""
+        _message_tip = main_window._MessageTip(bar)
 
         @staticmethod
         def _media_window_open():
             return False
 
     host = Host()
-    import main_window
     for name in ("_on_media_save_started", "_on_media_save_finished", "_on_media_saves_finished",
-                 "_media_save_announced", "_drop_status_tip"):
+                 "_media_save_announced"):
         setattr(host, name, getattr(main_window.MainWindow, name).__get__(host))
-    bar.messageChanged.connect(host._drop_status_tip)
     saver.started.connect(host._on_media_save_started)
     saver.finished.connect(host._on_media_save_finished)
     saver.batch_finished.connect(host._on_media_saves_finished)
@@ -782,10 +802,11 @@ def test_save_to_folder_says_what_wasnt_saved_after_its_window_closed(
     out.mkdir()
     saver.save_all([(media, str(out / names[media.hash]), None) for media in files])
     assert wait_for(lambda: len(folder(out)) == 2 and bar.currentMessage() == SUMMARY, 5)
-    assert bar.toolTip() == (
-        "“Two.mp4” isn’t on your media servers anymore, so it couldn’t be saved.")
+    reason = "“Two.mp4” isn’t on your media servers anymore, so it couldn’t be saved."
+    assert tooltip_at(bar, 10) == reason
+    assert tooltip_at(words, 5) == ""
     bar.showMessage("Saved: /Users/me/Essay.md")
-    assert bar.toolTip() == ""
+    assert tooltip_at(bar, 10) == ""
 
 
 @pytest.mark.skipif(not hasattr(os, "symlink") or sys.platform == "win32",

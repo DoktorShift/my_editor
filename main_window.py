@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QFileDialog, QInputDialog, QLineEdit, QMenu, QWidget,
     QVBoxLayout, QPlainTextEdit, QTextEdit, QTabWidget, QToolButton, QHBoxLayout, QStatusBar,
     QPushButton, QTabBar, QLabel, QDialog, QSplitter,
-    QProgressDialog
+    QProgressDialog, QToolTip
 )
 
 from constants import (
@@ -327,6 +327,37 @@ def _field_signals(field) -> list:
     if not isinstance(field, QLineEdit):
         signals += [field.undoAvailable, field.redoAvailable]
     return signals
+
+class _MessageTip(QObject):
+    """A tooltip for one status bar message: shown over the message alone
+    (not the word count or a button beside it), and gone with it."""
+
+    def __init__(self, bar) -> None:
+        super().__init__(bar)
+        self._bar = bar
+        self._message = self._tip = ""
+        bar.installEventFilter(self)
+        bar.messageChanged.connect(self._changed)
+
+    def set(self, message: str, tip: str) -> None:
+        """``tip`` for ``message``, which the bar shows now."""
+        self._message, self._tip = message, tip
+
+    def _changed(self, message: str) -> None:
+        if message != self._message:
+            self._message = self._tip = ""
+
+    def eventFilter(self, obj, event) -> bool:
+        if event.type() != QEvent.Type.ToolTip or not self._tip:
+            return False
+        beside = [child.geometry().left() for child in self._bar.findChildren(
+                      QWidget, options=Qt.FindChildOption.FindDirectChildrenOnly)
+                  if child.isVisible() and child.width() > 0]
+        if event.pos().x() < min(beside, default=self._bar.width()):
+            QToolTip.showText(event.globalPos(), self._tip, self._bar)
+            return True
+        return False
+
 
 class _WidthWatcher(QObject):
     """Calls ``changed()`` when a widget's width changes (a tab's Split
@@ -630,8 +661,7 @@ class MainWindow(QMainWindow):
         # What this bar last said about a save ("Saving “x”…" to be followed
         # by its end), and the message its tooltip of reasons belongs to.
         self._media_save_said = ""
-        self._status_tip = ""
-        self.status.messageChanged.connect(self._drop_status_tip)
+        self._message_tip = _MessageTip(self.status)
         self._media_saver.batch_finished.connect(self._on_media_saves_finished)
         self._media_saver.started.connect(self._on_media_save_started)
         self._media_saver.finished.connect(self._on_media_save_finished)
@@ -6353,19 +6383,12 @@ class MainWindow(QMainWindow):
             return
         self._media_save_said, tip = saves_failure(total, failures)
         self.status.showMessage(self._media_save_said, 0)
-        self._status_tip = self._media_save_said
-        self.status.setToolTip(tip)
+        self._message_tip.set(self._media_save_said, tip)
 
     def _media_save_announced(self) -> bool:
         """Whether the status bar still shows what it last said about a save."""
         return bool(self._media_save_said) and \
             self.status.currentMessage() == self._media_save_said
-
-    def _drop_status_tip(self, message: str) -> None:
-        """The reasons in the tooltip belong to the message they explain."""
-        if message != self._status_tip:
-            self._status_tip = ""
-            self.status.setToolTip("")
 
     def _open_membership_window(self) -> None:
         """Nostr > EINUNDZWANZIG Membership."""

@@ -468,7 +468,7 @@ def test_the_library_windows_share_the_windows_saver():
     assert "self._media_saver.started.connect(self._on_media_save_started)" in init
     assert "self._media_saver.finished.connect(self._on_media_save_finished)" in init
     assert "self._media_saver.batch_finished.connect(self._on_media_saves_finished)" in init
-    assert "self.status.messageChanged.connect(self._drop_status_tip)" in init
+    assert "self._message_tip = _MessageTip(self.status)" in init
 
 
 def test_quitting_stops_a_save_and_its_part_file_goes(monkeypatch):
