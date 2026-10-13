@@ -342,3 +342,25 @@ def test_shift_tab_after_emoji_puts_the_caret_at_the_lines_end(line):
     type_text(ed, "Z")
     assert ed.toPlainText() == line.strip() + "Z"
 
+
+def test_return_in_code_keeps_the_indent_of_the_caret_line_after_emoji():
+    """Review round 2, low: the guard above made no line break in the
+    block; with a line break (U+2028) after the caret, the old code took
+    the indent of the line after it."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QTextCursor
+    from PySide6.QtTest import QTest
+    from editor import HtmlEditor
+    from markdown_writer import read_markdown
+    ed = HtmlEditor()
+    read_markdown(ed.document(), "```\n  🌸🌸x\n```\n")
+    block = ed.document().begin()
+    cursor = QTextCursor(block)
+    cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+    cursor.insertText("  y")
+    cursor.setPosition(block.position() + 7)                 # after "  🌸🌸x"
+    ed.setTextCursor(cursor)
+    QTest.keyClick(ed, Qt.Key.Key_Return)
+    assert ed.textCursor().block().text().startswith("  ")
+    assert ed.textCursor().block().text() == "  " + ed.textCursor().block().text()[2:]
+    assert ed.textCursor().positionInBlock() == 2
