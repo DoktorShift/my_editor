@@ -96,6 +96,7 @@ class _Run:
     end: int
     steps: int
     at: float
+    before: int = 0             # Qt's count of changes before the run
 
 
 def _named_step(name: str):
@@ -191,8 +192,9 @@ class HtmlEditor(QTextEdit):
         self._resource_resolver = None
         # The app's own objects as other apps get them (set_object_lookup).
         self._outside = None
-        # The typing run going on (one step of Undo, _typing), and what each
-        # step of Undo is called (by the Undo count after it, undo_step).
+        # The typing run going on (one step of Undo, _typing), and each step
+        # of Undo by Qt's count of changes after it: the count before it and
+        # what it is called (undo_step). A step can hold several changes.
         self._run: Optional[_Run] = None
         self._undo_names: dict = {}
         # What a paste or a drop is called in Edit > Undo (insertFromMimeData).
@@ -304,6 +306,7 @@ class HtmlEditor(QTextEdit):
                    and run.end == cursor.position()
                    and run.steps == doc.availableUndoSteps()
                    and time.monotonic() - run.at < TYPING_PAUSE_S)
+        before = run.before if goes_on else doc.availableUndoSteps()
         if goes_on:
             cursor.joinPreviousEditBlock()
         else:
@@ -315,8 +318,8 @@ class HtmlEditor(QTextEdit):
             doc.contentsChange.disconnect(changed)
             if changes:
                 self._run = _Run(kind, cursor.position(), doc.availableUndoSteps(),
-                                 time.monotonic())
-                self._undo_names[doc.availableUndoSteps()] = N_("Typing")
+                                 time.monotonic(), before)
+                self._undo_names[doc.availableUndoSteps()] = (before, N_("Typing"))
                 self.setTextCursor(cursor)
                 self.undo_named.emit()
 
@@ -332,27 +335,33 @@ class HtmlEditor(QTextEdit):
 
     @contextmanager
     def undo_step(self, name: str):
-        """A command's change as its own step of Undo, called ``name`` (an
-        N_ word: "Paste", "Bold"), which Edit > Undo shows where the
-        platform names it."""
+        """A command's change as its own step of Undo, one step whatever it
+        changes, called ``name`` (an N_ word: "Paste", "Bold"), which Edit >
+        Undo shows where the platform names it."""
         self.end_typing_run()
         before = self.document().availableUndoSteps()
+        whole = QTextCursor(self.document())
+        whole.beginEditBlock()
         try:
             yield
         finally:
+            whole.endEditBlock()
             after = self.document().availableUndoSteps()
             if after > before and name:
-                self._undo_names[after] = name
+                self._undo_names[after] = (before, name)
             self.end_typing_run()
             self.undo_named.emit()
 
     def undo_name(self) -> str:
         """What Undo would take back (an N_ word, "" when not known)."""
-        return self._undo_names.get(self.document().availableUndoSteps(), "")
+        step = self._undo_names.get(self.document().availableUndoSteps())
+        return step[1] if step else ""
 
     def redo_name(self) -> str:
-        """What Redo would bring back (an N_ word, "" when not known)."""
-        return self._undo_names.get(self.document().availableUndoSteps() + 1, "")
+        """What Redo would bring back (an N_ word, "" when not known): the
+        step that starts where the document is now."""
+        now = self.document().availableUndoSteps()
+        return next((name for before, name in self._undo_names.values() if before == now), "")
 
     def _forget_redone_names(self) -> None:
         """A new change drops what could be redone, and with it its names."""

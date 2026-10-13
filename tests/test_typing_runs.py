@@ -315,3 +315,41 @@ def test_return_with_its_own_handling_is_in_the_run(clock):
     QTest.keyClicks(ed, "after")
     ed.undo()
     assert ed.toPlainText() == ""
+
+
+def test_redo_carries_the_name_of_what_it_brings_back(clock):
+    """Qt counts the changes in a step, not the steps: a Bold, a heading or
+    a table holds several, and Redo still says which step it is."""
+    ed = structured()
+    QTest.keyClicks(ed, "word")
+    cursor = ed.textCursor()
+    cursor.select(QTextCursor.SelectionType.WordUnderCursor)
+    ed.setTextCursor(cursor)
+    ed.toggle_bold()
+    ed.set_heading(1)
+    ed.insert_table(2, 2)
+    for name in ("Table", "Paragraph Style", "Bold", "Typing"):
+        assert ed.undo_name() == name
+        ed.undo()
+        assert ed.redo_name() == name
+    for name in ("Typing", "Bold", "Paragraph Style", "Table"):
+        assert ed.redo_name() == name
+        ed.redo()
+        assert ed.undo_name() == name
+
+
+def test_one_undo_takes_back_a_whole_command(clock):
+    """A paragraph style used to take two Undos, the first one doing
+    nothing to be seen."""
+    ed = structured()
+    QTest.keyClicks(ed, "word")
+    cursor = ed.textCursor()
+    cursor.select(QTextCursor.SelectionType.WordUnderCursor)
+    ed.setTextCursor(cursor)
+    ed.toggle_bold()
+    ed.set_heading(1)
+    ed.undo()
+    assert ed.textCursor().block().blockFormat().headingLevel() == 0
+    ed.undo()
+    ed.undo()
+    assert ed.toPlainText() == "" and ed.document().availableUndoSteps() == 0
