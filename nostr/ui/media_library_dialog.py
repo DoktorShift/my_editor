@@ -164,6 +164,7 @@ class MediaLibraryDialog(QDialog):
 
         self._build(pick_alt_text and pick_mode)
         self._rest_status()
+        self._adopt_running_uploads()
         # No minimum width of its own: the layout's is the smallest window,
         # every control at its own width in every language, and the grid
         # at least two columns.
@@ -899,6 +900,20 @@ class MediaLibraryDialog(QDialog):
         if state == FAILED:
             self._say(_("“{name}” wasn’t added. {reason}").format(name=name, reason=detail),
                       error=True)
+
+    def _adopt_running_uploads(self) -> None:
+        """The files still being added when this window opens, from an
+        earlier window or one that failed after it closed: the store
+        owns them, so they are tiles here too."""
+        states = {"waiting": WAITING, "sending": SENDING, "finishing": FINISHING,
+                  "failed": FAILED}
+        for added in self._store.added_uploads():
+            state = states.get(added.state, WAITING)
+            detail = {FAILED: added.error, WAITING: _("Waiting…")}.get(state, _("Uploading…"))
+            preview = _local_preview(mime=added.mime, path=added.path) if added.path else None
+            self._jobs[added.name] = Tile(key=added.name, name=added.name, detail=detail,
+                                          kind=kind_of_mime(added.mime), state=state,
+                                          progress=added.progress, pixmap=preview)
 
     def _cancel_upload(self, name: str) -> None:
         self._store.cancel_upload(name)

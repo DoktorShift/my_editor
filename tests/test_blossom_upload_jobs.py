@@ -195,3 +195,26 @@ def test_cancel_as_soon_as_the_upload_starts_sends_nothing(tmp_path):
     jobs.nam.settle()
     assert jobs.nam.calls == []
     assert jobs.kinds(name) == ["started", "cancelled"]
+
+
+def test_the_files_being_added_are_known_to_the_store(tmp_path):
+    """A library window that opens later shows them: the store owns the
+    jobs, not the window that started them."""
+    jobs = Jobs(tmp_path, replies=[error_reply(0)])
+    name = jobs.store.upload_file(_file(tmp_path, "Holiday.png"))
+    jobs.nam.settle()
+    [added] = jobs.store.added_uploads()
+    assert (added.name, added.mime, added.state, added.path) == (
+        name, "image/png", "failed", str(tmp_path / "Holiday.png"))
+    assert "Check your internet connection" in added.error
+
+
+def test_adding_a_file_that_failed_again_retries_it_under_its_name(tmp_path):
+    jobs = Jobs(tmp_path, replies=[error_reply(0)])
+    path = _file(tmp_path, "Holiday.png")
+    name = jobs.store.upload_file(path)
+    jobs.nam.settle()
+    assert jobs.store.upload_file(path) == name == "Holiday.png"
+    jobs.nam.settle()
+    assert jobs.kinds(name)[-1] == "finished"
+    assert jobs.store.added_uploads() == []

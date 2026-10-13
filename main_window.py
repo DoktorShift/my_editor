@@ -663,6 +663,9 @@ class MainWindow(QMainWindow):
         # percent), shown on its card in the text.
         self._media_progress: dict = {}
         self._media_store.upload_progress.connect(self._on_media_upload_progress)
+        # A file added in the Media Library is the store's job, not the
+        # window's: a failure after that window closed is said here.
+        self._media_store.upload_failed.connect(self._on_library_upload_failed)
 
         # Private media. The ledger is the record of everything this app
         # has deliberately made public and is the only way to revoke any
@@ -6898,6 +6901,15 @@ class MainWindow(QMainWindow):
                 if media is not None and media.sha256 not in shown:
                     shown.add(media.sha256)
                     self._refresh_asset_in_documents(media.sha256)
+
+    def _on_library_upload_failed(self, name: str, reason: str) -> None:
+        """A file added in the Media Library did not upload while no
+        library window is open: said in the status bar. The next library
+        window shows it with Retry."""
+        if self._media_store.can_retry(name) and self._visible_media_library() is None:
+            self.status.showMessage(
+                _("“{name}” wasn’t added to your Media Library. {reason}").format(
+                    name=name, reason=reason), 10000)
 
     def _on_media_upload_progress(self, name: str, sent: int, total: int) -> None:
         sha = parse_asset_key(name)

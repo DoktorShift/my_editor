@@ -191,6 +191,20 @@ class _Added:
     path: Optional[Path] = None
     body: Optional[bytes] = None
     failed: bool = False
+    error: str = ""
+
+
+@dataclass(frozen=True)
+class AddedUpload:
+    """A file being added to the library, as a window opened later sees
+    it: ``state`` is "waiting", "sending", "finishing" or "failed"."""
+
+    name: str
+    mime: str
+    state: str
+    progress: int = -1
+    error: str = ""
+    path: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -360,6 +374,24 @@ class MediaStore(QObject):
     def upload_job(self, name: str) -> Optional[UploadJobState]:
         """The running job of that name, or None."""
         return self._uploads.get(name)
+
+    def added_uploads(self) -> List[AddedUpload]:
+        """The files added to the library that have not landed yet, in
+        the order they were added: still on their way, or failed."""
+        out = []
+        for name, added in self._added.items():
+            job = self._uploads.get(name)
+            if added.failed:
+                state = "failed"
+            elif job is None or job.status in ("queued", "signing"):
+                state = "waiting" if job is None else "sending"
+            else:
+                state = "finishing" if job.status == "mirroring" else "sending"
+            out.append(AddedUpload(name=name, mime=added.mime, state=state,
+                                   progress=job.progress if job is not None else -1,
+                                   error=added.error,
+                                   path=str(added.path) if added.path else ""))
+        return out
 
     def can_retry(self, name: str) -> bool:
         """Whether that added file failed and can be sent again."""
@@ -758,6 +790,11 @@ class MediaStore(QObject):
         via ``upload_failed``, and the job can then be retried.
         """
         path = Path(file_path)
+        for name, added in self._added.items():
+            if added.failed and added.path == path:
+                # The same file again after it failed: its job, retried.
+                self.retry_upload(name)
+                return name
         mime = media_files.type_of(path.name) or "application/octet-stream"
         added = _Added(label=path.name or "upload", mime=mime, path=path)
         name = self._name_for(added.label)
@@ -780,7 +817,7 @@ class MediaStore(QObject):
         added = self._added.get(name)
         if added is None or not added.failed:
             return
-        added.failed = False
+        added.failed, added.error = False, ""
         if added.path is not None:
             self._read_added(name, added)
         else:
@@ -1407,6 +1444,7 @@ class MediaStore(QObject):
         added = self._added.get(name)
         if added is not None:
             added.failed = True
+            added.error = reason or friendly_message(code)
         self.upload_failed.emit(name, reason or friendly_message(code))
         self.upload_failed_code.emit(name, code)
 

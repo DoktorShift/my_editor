@@ -149,6 +149,9 @@ class FakeStore(QObject):
     def upload_job(self, name):
         return None
 
+    def added_uploads(self):
+        return list(getattr(self, "added", []))
+
     def can_retry(self, name):
         return True
 
@@ -871,3 +874,24 @@ def test_a_file_the_editor_uploads_appears_in_an_open_library_at_once(tmp_path, 
     nam.settle()
     assert [tile.key for tile in tiles(world)] == [sha]
     assert len([c for c in nam.calls if c[0] == "get"]) == 1      # no second listing
+
+
+def test_a_library_opened_later_shows_the_files_still_being_added(tmp_path, monkeypatch):
+    """The store owns the uploads, not the window that started them: one
+    that failed after its window closed is shown with its reason and
+    Retry when the library opens again."""
+    from nostr.blossom.store import AddedUpload
+    path = tmp_path / "Holiday.png"
+    path.write_bytes(PNG_BYTES)
+    store = FakeStore()
+    reason = "Couldn’t reach your media server. Check your internet connection."
+    store.added = [AddedUpload(name="Holiday.png", mime="image/png", state="failed",
+                               error=reason, path=str(path)),
+                   AddedUpload(name="Clip.mp4", mime="video/mp4", state="sending", progress=40)]
+    world = build(tmp_path, monkeypatch, store)
+    failed, sending = world.model.tile("Holiday.png"), world.model.tile("Clip.mp4")
+    assert (failed.state, failed.detail) == (FAILED, reason)
+    assert failed.pixmap is not None
+    assert (sending.state, sending.progress) == (SENDING, 40)
+    world.grid.retry_requested.emit("Holiday.png")
+    assert ("retry", "Holiday.png") in store.calls

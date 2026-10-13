@@ -347,3 +347,29 @@ def test_sharing_the_server_list_asks_first_then_publishes_what_uploads_use(monk
     MainWindow._share_media_server_list(host)          # Share List
     assert published == [["https://a.example", "https://b.example"]]
     assert refreshed == [True] and shown == ["Your media server list is shared."]
+
+
+def test_a_library_upload_that_fails_with_no_library_open_is_said_in_the_window():
+    """The store owns the job, so its failure reaches the person even
+    after the library window that started it was closed: in the status
+    bar, as an editor upload's does. An open library says it itself."""
+    from types import SimpleNamespace
+    shown = []
+    library = None
+    host = SimpleNamespace(
+        _media_store=SimpleNamespace(can_retry=lambda name: name == "Holiday.png"),
+        _visible_media_library=lambda: library,
+        status=SimpleNamespace(showMessage=lambda text, ms=0: shown.append(text)),
+    )
+    reason = "Couldn’t reach your media server. Check your internet connection."
+    MainWindow._on_library_upload_failed(host, "Holiday.png", reason)
+    MainWindow._on_library_upload_failed(host, f"asset:{'e' * 64}", reason)   # the editor's own
+    assert shown == [f"“Holiday.png” wasn’t added to your Media Library. {reason}"]
+    library = object()
+    MainWindow._on_library_upload_failed(host, "Holiday.png", reason)
+    assert len(shown) == 1
+
+
+def test_the_window_listens_for_library_upload_failures(init_body):
+    source = textwrap.dedent(inspect.getsource(MainWindow.__init__))
+    assert "upload_failed.connect(self._on_library_upload_failed)" in source
