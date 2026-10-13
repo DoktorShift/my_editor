@@ -413,6 +413,8 @@ def _readable(key: str, entry: front_matter.Entry, read: Any) -> bool:
     if value is None or read is _ABSENT or read is not _UNREAD \
             and _detail(key, value) != _detail(key, _as_value(read, value, entry.syntax)):
         return False
+    if key in _TEXTS and isinstance(value, list):
+        return False                        # a list for a text: shown as one (_held)
     if key == "date":
         return isinstance(value, str) and (not value.strip() or _moment(value) is not None)
     return True
@@ -453,7 +455,10 @@ def _held(front: Optional[front_matter.FrontMatter], key: str) -> Union[str, Lis
     where it holds no text there, or nothing."""
     mapping = front_matter.parsed(front)
     if mapping is None:
-        return None
+        # No parser reads it: a list for a text, as this reader reads it.
+        value = next((entry.value for _at, _inner, entry, _read in _candidates(front, key)
+                      if entry.value is not None), None)
+        return ", ".join(value) if key in _TEXTS and isinstance(value, list) else None
     syntax = front.syntax if front is not None else front_matter.YAML
     places = [(read, entry.value) for _at, _inner, entry, read in _candidates(front, key)
               if read is not _ABSENT]
@@ -466,9 +471,28 @@ def _held(front: Optional[front_matter.FrontMatter], key: str) -> Union[str, Lis
         if key == "image" and isinstance(read, dict):
             read = next((read[name] for name in ("image", "src", "path", "url")
                          if isinstance(read.get(name), str)), None)
+        elif key in _TEXTS and isinstance(read, dict):
+            read = _first_text(read)        # one per language: the first
         value = _as_value(read, written, syntax)
+        if key in _TEXTS and isinstance(value, list):
+            value = ", ".join(value)        # a list for a text, as one
         if value is not None:
             return value
+    return None
+
+
+# The details that are a text (a list or a mapping for one is read as one).
+_TEXTS = ("title", "summary", "image", "slug")
+
+
+def _first_text(mapping: dict) -> Optional[str]:
+    """The first text ``mapping`` holds, at whatever depth (a title with
+    "en:" and "de:" under it)."""
+    for value in mapping.values():
+        found = value if isinstance(value, str) else \
+            _first_text(value) if isinstance(value, dict) else None
+        if found:
+            return found
     return None
 
 

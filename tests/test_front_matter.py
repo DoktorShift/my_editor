@@ -1115,3 +1115,18 @@ def test_a_texts_line_ending_is_counted_over_its_text_alone(tmp_path):
     path.write_bytes(text.encode("utf-8"))
     r = run_window_script(SCRIPT, tmp_path, str(path))
     assert r["lf_text.md saved"] == text.replace("Body text.", "Body text. More.")
+
+
+@pytest.mark.parametrize("text, field, shown", [
+    ("---\ntitle: [Part, One]\n---\nB\n", "title", "Part, One"),
+    ("---\ntitle:\n  - Part\n  - 2.10\n---\nB\n", "title", "Part, 2.10"),
+    ("---\ntitle:\n  en: Hello\n  de: Hallo\n---\nB\n", "title", "Hello"),
+    ("---\nsummary: [One, Two]\n---\nB\n", "summary", "One, Two"),
+    ("---\ntitle: [Part, One]\nnotes: [unclosed\n---\nB\n", "title", "Part, One"),
+])
+def test_a_text_written_as_a_list_or_a_mapping_is_shown_kept_as_written(text, field, shown):
+    """Round 9, L2: shown empty (and a list one could be typed over)."""
+    front, _ = front_matter.split(text)
+    assert getattr(from_front_matter(front), field) == shown
+    assert {"title": "title", "summary": "summary"}[field] in kept_in_file(front)
+    assert changed(text, **{field: "New"}) == text
