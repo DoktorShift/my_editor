@@ -48,7 +48,6 @@ from PySide6.QtWidgets import (
     QBoxLayout,
     QCheckBox,
     QDialog,
-    QDialogButtonBox,
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,

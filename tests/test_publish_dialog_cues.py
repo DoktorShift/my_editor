@@ -5,7 +5,8 @@ will do, as every other dialog does.
 
 What must hold, light and dark: Publish, the default, is drawn in the
 accent, and the button with the keyboard focus has the ring, Cancel
-included. (Review R3: their own stylesheets drew both buttons alike and
+included; on Windows and Linux, where the default follows the focus, a
+focused Cancel takes the accent instead. (Review R3: their own stylesheets drew both buttons alike and
 no focus at all, in the two dialogs whose action cannot be taken back.)
 """
 
@@ -42,8 +43,13 @@ def middle(button):
 
 @pytest.mark.parametrize("dark", [True, False])
 @pytest.mark.parametrize("kind", ["note", "article"])
-def test_the_default_and_the_focus_can_be_seen(tmp_path, monkeypatch, kind, dark):
-    monkeypatch.setattr(alerts, "IS_MAC", True)       # the default stays on Publish
+@pytest.mark.parametrize("mac", [True, False])
+def test_the_default_and_the_focus_can_be_seen(tmp_path, monkeypatch, mac, kind, dark):
+    # On a Mac the default stays on Publish and a focused Cancel gets the
+    # ring; on Windows and Linux the default moves with the focus, so a
+    # focused Cancel takes the accent and the ring that shows on it, and
+    # Publish turns plain: what Return will press is what looks pressed.
+    monkeypatch.setattr(alerts, "IS_MAC", mac)
     dialog = _dialog(kind, tmp_path, None)
     dialog._is_dark = dark
     dialog._apply_theme()
@@ -53,13 +59,19 @@ def test_the_default_and_the_focus_can_be_seen(tmp_path, monkeypatch, kind, dark
     QApplication.processEvents()
     try:
         publish, cancel = dialog._publish_btn, dialog._cancel_btn
+        accent = QColor(theme._DIALOG_ACCENT[dark][0])
         assert publish.isDefault()
-        assert middle(publish) == QColor(theme._DIALOG_ACCENT[dark][0])
+        assert middle(publish) == accent
         assert middle(cancel) != middle(publish)
         unfocused = edge(cancel)
         cancel.setFocus(Qt.FocusReason.TabFocusReason)
         QApplication.processEvents()
-        assert edge(cancel) == QColor(theme.focus_ring_color(dark))
+        if mac:
+            assert edge(cancel) == QColor(theme.focus_ring_color(dark))
+        else:
+            assert cancel.isDefault() and middle(cancel) == accent
+            assert edge(cancel) == QColor(theme.focus_ring_on_accent_color(dark))
+            assert middle(publish) != accent
         assert edge(cancel) != unfocused
     finally:
         dialog.close()

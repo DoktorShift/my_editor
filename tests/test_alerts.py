@@ -130,7 +130,7 @@ class _ButtonLayoutStyle(QProxyStyle):
 
     def styleHint(self, hint, option=None, widget=None, data=None):  # noqa: N802
         if hint == QStyle.StyleHint.SH_DialogButtonLayout:
-            return int(self._layout)
+            return self._layout.value
         return super().styleHint(hint, option, widget, data)
 
 
