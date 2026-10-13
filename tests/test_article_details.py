@@ -144,7 +144,7 @@ def test_saved_under_another_identifier_it_has_no_first_publication_yet():
 
 # -- the publish dialog ------------------------------------------------------------------
 
-def _dialog(tmp_path, details):
+def _dialog(tmp_path, details, **more):
     from nostr.avatar_store import AvatarStore
     from nostr.known_people import KnownPeople
     from nostr.profiles import Profile as StoredProfile
@@ -166,7 +166,7 @@ def _dialog(tmp_path, details):
         search_client=Nip50SearchClient(HandPool(), people), avatars=AvatarStore(),
         default_title=details.title, default_slug=details.identifier,
         first_published=details.published_at, details=details,
-        published_at_lookup=lambda *_args: None)
+        published_at_lookup=lambda *_args: None, **more)
 
 
 def test_the_publish_dialog_offers_and_publishes_the_drafts_details(tmp_path, monkeypatch):
@@ -289,4 +289,41 @@ def test_save_as_draft_shows_a_kept_detail_read_only_saying_so(qt_app):
              if label.text() == "Kept as written in the file." and label.isVisibleTo(dialog)]
     assert dialog._title_edit.isReadOnly() and not dialog._slug_edit.isReadOnly()
     assert len(notes) == 1
+    dialog.close()
+
+
+class _AnyMediaStore:
+    """A media store the cover only asks whether there is one."""
+    def __getattr__(self, name):
+        return lambda *args, **kwargs: None
+
+
+def test_a_cover_being_worked_on_lets_nothing_be_picked_and_keeps_its_hint(qt_app):
+    """Round 10, M2: while the publish window worked, "Choose or upload…"
+    stayed enabled; a cover kept as written says nothing of picking one."""
+    from nostr.ui.cover_field import CoverImageField
+    cover = CoverImageField(media_store=_AnyMediaStore())
+    cover.show()
+    hint = cover._hint
+    cover.setBusy(True)
+    assert not cover.pick_button.isEnabled() and cover.url_edit.isReadOnly()
+    assert hint.isVisibleTo(cover)
+    cover.setBusy(False)
+    assert cover.pick_button.isEnabled() and not cover.url_edit.isReadOnly()
+    cover.setReadOnly(True)
+    cover.setBusy(True)
+    cover.setBusy(False)
+    assert not cover.pick_button.isEnabled() and cover.url_edit.isReadOnly()
+    assert not hint.isVisibleTo(cover)
+    cover.close()
+
+
+def test_the_publish_window_lets_no_cover_be_picked_while_it_works(tmp_path, qt_app):
+    dialog = _dialog(tmp_path, ArticleDetails(title="T"), media_store=_AnyMediaStore())
+    dialog.show()
+    QApplication.processEvents()
+    dialog._set_busy(True)
+    assert not dialog._cover.pick_button.isEnabled()
+    dialog._set_busy(False)
+    assert dialog._cover.pick_button.isEnabled()
     dialog.close()

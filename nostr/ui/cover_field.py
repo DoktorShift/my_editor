@@ -62,6 +62,8 @@ class CoverImageField(QWidget):
         self._private_library = private_library
         self._profile = profile
         self._is_dark = is_dark
+        # Kept as written in its file (setReadOnly), its window working (setBusy).
+        self._read_only = self._busy = False
         self._thumb_hash = ""
         self._loader: Optional[ThumbnailLoader] = (
             ThumbnailLoader(parent=self) if media_store is not None else None)
@@ -124,10 +126,23 @@ class CoverImageField(QWidget):
         self.url_edit.setText(text)
 
     def setReadOnly(self, read_only: bool) -> None:
-        self.url_edit.setReadOnly(read_only)
+        """A cover that stays as it is (kept as written in its file): read
+        only, and nothing said of picking one."""
+        self._read_only = read_only
+        self._hint.setVisible(not read_only)
+        self._enable()
+
+    def setBusy(self, busy: bool) -> None:
+        """While the window it is in works (publishing): nothing can be
+        typed or picked, and it is shown as it was."""
+        self._busy = busy
+        self._enable()
+
+    def _enable(self) -> None:
+        fixed = self._read_only or self._busy
+        self.url_edit.setReadOnly(fixed)
         if self.pick_button is not None:
-            self.pick_button.setEnabled(not read_only)
-        self._hint.setVisible(not read_only)    # how to pick one: nothing to pick
+            self.pick_button.setEnabled(not fixed)
 
     def set_dark(self, is_dark: bool) -> None:
         self._is_dark = is_dark
