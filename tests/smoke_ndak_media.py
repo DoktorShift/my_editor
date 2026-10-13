@@ -20,6 +20,13 @@ Covers upload (BUD-02) with mirroring (BUD-04) to every server, listing,
 images in a note with NIP-92 imeta, delete across servers, the kind 10063
 server list, private files (kind 34578, written the way Lotus writes them,
 since MyEditor only reads them), and the public copy maker.
+
+The Media Library window is driven too, against the same servers and a
+fourth address where nothing answers (D, http://localhost:7809): adding
+a file with progress on its tile, Cancel, a server that is down (the
+file lands on the others, the window says one plain sentence), Stop
+Sharing a private image's public copy, and Delete with one server
+unreachable (the file stays, and the window says so).
 """
 
 from __future__ import annotations
@@ -43,6 +50,7 @@ from PySide6.QtGui import QColor, QImage  # noqa: E402
 
 import image_safety  # noqa: E402
 from nostr import crypto, events  # noqa: E402
+from nostr.blossom.names import MediaNames  # noqa: E402
 from nostr.blossom.server_list import UserServerList, build_server_list_event  # noqa: E402
 from nostr.blossom.settings import BlossomSettings  # noqa: E402
 from nostr.blossom.store import MediaStore  # noqa: E402
@@ -55,11 +63,29 @@ from nostr.media.publish_copy import PublicCopyMaker  # noqa: E402
 from nostr.media.visibility import PublicLedger  # noqa: E402
 from nostr.publisher import PublishedMedia, PublishJob, build_note  # noqa: E402
 from nostr.ui.account_windows import local_profile  # noqa: E402
+from nostr.ui.media_grid import FAILED, SENDING, TILE_ROLE  # noqa: E402
+from nostr.ui.media_library_dialog import MediaLibraryDialog  # noqa: E402
 from nostr.ui.thumbnail_loader import ThumbnailLoader  # noqa: E402
 
 RNOSTR, NRS, STRFRY = nd.RNOSTR, nd.NRS, nd.STRFRY
 A, B, M = nd.BLOSSOM_A, nd.BLOSSOM_B, nd.BLOSSOM_M
 rep = nd.Report("media")
+D = "http://localhost:7809"   # a media server that is down: nothing listens here
+
+
+def click(label: str):
+    """An alert policy that clicks the button named ``label``."""
+    def policy(alert: dict):
+        for button in alert["buttons"]:
+            if button.label == label:
+                return button.value
+        return nd.default_alert_policy(alert)
+    return policy
+
+
+def select(window, key: str) -> None:
+    model = window._model
+    window._grid.setCurrentIndex(model.index(model.row_of(key)))
 
 
 def png(color: str, w: int = 64, h: int = 48, text_chunk: bytes = b"") -> bytes:
@@ -226,6 +252,83 @@ try:
                   and del_log[-1]["verdict"] == "ok", json.dumps(auth["tags"]))
 
     # ----------------------------------------------------------------------- #
+    rep.section("The Media Library window: progress, Cancel, a server down, Delete")
+    window_settings = BlossomSettings(nd.HOME / "window-blossom.json")
+    window_settings.set_custom_servers([D, A, B])          # the first one is down
+    store3 = MediaStore(session_pool=stack.sessions, profile_provider=lambda: stack.store.default(),
+                        settings=window_settings, blob_cache=loader,
+                        names=MediaNames(nd.HOME / "media_names.json"))
+    window = MediaLibraryDialog(store=store3, is_dark=False)
+    window.show()
+    talk = nd.HOME / "Talk.mp4"
+    talk.write_bytes(os.urandom(3 * 1024 * 1024))
+    tsha = hashlib.sha256(talk.read_bytes()).hexdigest()
+    seen_states = []
+    store3.upload_progress.connect(lambda n, a, b: seen_states.append(
+        (window._model.tile(n).state, window._model.tile(n).progress) if window._model.tile(n) else None))
+    progress = nd.Catch(store3.upload_progress)
+    landed = nd.Catch(store3.upload_finished, store3.upload_failed)
+    missed = nd.Catch(store3.mirror_failed)
+    window._add_paths([str(talk)])
+    rep.check("an added file is a tile at once, under its own name",
+              window._model.tile("Talk.mp4") is not None)
+    landed.wait(120_000)
+    rep.check("its upload reports progress on the tile, up to the whole file",
+              any(sent == total > 0 for _n, sent, total in progress.calls)
+              and any(state and state[0] == SENDING for state in seen_states),
+              f"{len(progress.calls)} progress reports, last {progress.calls[-1] if progress.calls else None}")
+    rep.check("with the first server down, the file still lands on the others",
+              landed.fired and landed.last[0] == "Talk.mp4" and not isinstance(landed.last[1], str)
+              and nd.http_status(f"{A}/{tsha}") == 200 and nd.http_status(f"{B}/{tsha}") == 200,
+              str(landed.last)[:200])
+    rep.check("the server that was down is reported as one without a copy",
+              [c[1] for c in missed.calls] == ["localhost:7809"], str(missed.calls))
+    rep.check("the window says one plain sentence about it, naming no server",
+              window._status.text() == "“Talk.mp4” is added, but one of your media servers "
+                                       "didn’t keep a copy.", window._status.text())
+    tile = window._model.tile(tsha)
+    rep.check("the file's tile carries the name it was added with, and the shared mark",
+              tile is not None and tile.name == "Talk.mp4" and tile.shared,
+              f"{tile.name if tile else None}")
+
+    lecture = nd.HOME / "Lecture.mp4"
+    lecture.write_bytes(os.urandom(2 * 1024 * 1024))
+    lsha = hashlib.sha256(lecture.read_bytes()).hexdigest()
+    started = nd.Catch(store3.upload_started)
+    cancelled = nd.Catch(store3.upload_cancelled)
+    outcome = nd.Catch(store3.upload_finished, store3.upload_failed)
+    store3.upload_started.connect(lambda n: n == "Lecture.mp4" and window._cancel_upload(n))
+    window._add_paths([str(lecture)])
+    nd.wait_until(lambda: cancelled.fired, 10_000)
+    nd.wait_until(lambda: outcome.fired, 4_000)
+    rep.check("Cancel stops an upload: nothing else is reported, and no server has the file",
+              cancelled.calls == [("Lecture.mp4",)] and not outcome.fired
+              and nd.http_status(f"{A}/{lsha}") == 404 and nd.http_status(f"{B}/{lsha}") == 404,
+              f"cancelled {cancelled.calls}, outcome {outcome.calls}")
+    rep.check("the cancelled file's tile is gone", window._model.tile("Lecture.mp4") is None)
+
+    # Delete with one server unreachable: the record names D too, as a
+    # listing from before D went down would.
+    store3.files[tsha].urls.append({"server": D, "url": f"{D}/{tsha}"})
+    select(window, tsha)
+    nd.ALERT_POLICY = click("Delete")
+    gone = nd.Catch(store3.file_deleted, store3.delete_failed)
+    window._delete()
+    gone.wait(30_000)
+    nd.ALERT_POLICY = nd.default_alert_policy
+    rep.check("Delete asked first", nd.ALERTS_SEEN and nd.ALERTS_SEEN[-1]["title"] == "Delete “Talk.mp4”?",
+              str(nd.ALERTS_SEEN[-1:]))
+    rep.check("the servers that answered deleted it",
+              nd.http_status(f"{A}/{tsha}") == 404 and nd.http_status(f"{B}/{tsha}") == 404)
+    rep.check("with one server unreachable the file is not called gone: it stays, on that server",
+              gone.last == (tsha, "NETWORK_UNAVAILABLE") and tsha in store3.files
+              and [u["server"] for u in store3.files[tsha].urls] == [D], str(gone.last))
+    rep.check("and the window says so in one plain sentence",
+              window._status.text().startswith("“Talk.mp4” is still on one of your media servers."),
+              window._status.text())
+    window.close()
+
+    # ----------------------------------------------------------------------- #
     rep.section("The account's media server list (kind 10063, BUD-03)")
     server_list = build_server_list_event([B, M], pk)
     signed_list = stack.sign(alice, server_list)
@@ -337,6 +440,36 @@ try:
             rep.check("asking again reuses the copy instead of uploading another",
                       again.get("r") is not None and again["r"].ok and not again["r"].minted,
                       str(again.get("r")))
+            rep.section("Stop Sharing, from the Media Library window")
+            listed = nd.Catch(store2.fetch_finished)
+            store2.fetch(force=True)
+            listed.wait(30_000)
+            window2 = MediaLibraryDialog(store=store2, is_dark=False, visibility=visibility)
+            window2.show()
+            original = window2._model.tile(esha)
+            rep.check("the private original and its public copy are one tile, marked shared",
+                      original is not None and original.shared and original.name == "secret.png"
+                      and window2._model.tile(public.sha256) is None,
+                      str([t.name for t in window2._model.tiles]))
+            select(window2, esha)
+            nd.ALERT_POLICY = click("Stop Sharing")
+            unshared = nd.Catch(store2.file_deleted, store2.delete_failed)
+            window2._stop_sharing()
+            unshared.wait(30_000)
+            nd.ALERT_POLICY = nd.default_alert_policy
+            rep.check("Stop Sharing asked first",
+                      nd.ALERTS_SEEN and nd.ALERTS_SEEN[-1]["title"] == "Stop sharing “secret.png”?",
+                      str(nd.ALERTS_SEEN[-1:]))
+            rep.check("the public copy is deleted from every server it was on",
+                      unshared.last == (public.sha256,)
+                      and all(nd.http_status(f"{origin}/{public.sha256}") == 404
+                              for origin in (A, B)), str(unshared.last))
+            rep.check("the private original stays, no longer shared, and the record forgets the copy",
+                      nd.http_status(f"{A}/{esha}") == 200 and ledger.copy_of(esha) is None
+                      and visibility.state_of(esha) == "private"
+                      and window2._status.text() == "“secret.png” is no longer shared.",
+                      window2._status.text())
+            window2.close()
         rep.note("MyEditor never writes kind 34578 itself (no write path in nostr/media); the "
                  "copy maker runs without `records` in main_window.py, so the publicCopy "
                  "pointer on the private record is never written.")
