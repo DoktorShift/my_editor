@@ -273,10 +273,64 @@ def _replace(source: str, target: str) -> None:
 
 
 def _write_in_place(target: str, data: bytes) -> None:
-    with open(target, "wb") as f:
-        f.write(data)
-        f.flush()
-        os.fsync(f.fileno())
+    """Write ``data`` over the file at ``target`` itself, where it can't be
+    replaced. Like a replacement, a failure leaves the file as it was:
+    the room for the new text is made first (the file grows, its old
+    text untouched, and shrinks back when the disk can't hold it), only
+    then is the new text written over the old and the rest cut off, and
+    when that fails all the same (a copy-on-write disk, a removed volume)
+    the old text, kept in memory, is written back."""
+    try:
+        # Unbuffered, so nothing is left waiting to be written when a
+        # write fails and the old text goes back.
+        f = open(target, "r+b", buffering=0)
+    except FileNotFoundError:
+        with open(target, "wb") as new:              # nothing there to keep
+            new.write(data)
+            new.flush()
+            os.fsync(new.fileno())
+        return
+    with f:
+        old = f.read()
+        if len(data) > len(old):
+            try:
+                _grow(f, len(data) - len(old))
+            except OSError:
+                _put_back(f, old)
+                raise
+        try:
+            _write_at_start(f, data)
+        except OSError:
+            _put_back(f, old)
+            raise
+
+
+def _grow(f, extra: int) -> None:
+    """Make room for ``extra`` more bytes at the end of ``f``: written as
+    zeros, so the disk has them (a hole would not)."""
+    f.seek(0, os.SEEK_END)
+    chunk = memoryview(b"\0" * (1 << 20))
+    while extra > 0:
+        extra -= f.write(chunk[:min(extra, len(chunk))])
+    os.fsync(f.fileno())
+
+
+def _write_at_start(f, data: bytes) -> None:
+    """``data`` from the start of the unbuffered ``f``, the rest cut off."""
+    f.seek(0)
+    view = memoryview(data)
+    while view:
+        view = view[f.write(view):]
+    f.truncate(len(data))
+    os.fsync(f.fileno())
+
+
+def _put_back(f, old: bytes) -> None:
+    """Best effort: the old text, as it was."""
+    try:
+        _write_at_start(f, old)
+    except OSError:
+        _log.error("%s could not be put back as it was", f.name)
 
 
 def _copy_extended_attributes(source: str, target: str) -> None:

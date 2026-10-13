@@ -380,6 +380,77 @@ def test_a_document_in_a_folder_that_cannot_take_new_files_is_still_saved(tmp_pa
         os.chmod(folder, 0o755)
 
 
+def _in_place_case(tmp_path, kind):
+    """A document saved in place: one with a second name (a hard link), or
+    in a folder that can't take a new file."""
+    folder = tmp_path / "docs"
+    folder.mkdir()
+    path = folder / "Essay.md"
+    path.write_bytes(b"my whole essay\n" * 1000)
+    if kind == "hard link":
+        os.link(path, folder / "Other.md")
+    else:
+        os.chmod(folder, 0o555)
+    return folder, path
+
+
+@posix_only
+@pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0,
+                    reason="root may write into any folder")
+@pytest.mark.parametrize("kind", ["hard link", "read-only folder"])
+def test_a_document_saved_in_place_survives_a_disk_that_cant_take_the_new_text(tmp_path, kind):
+    """The new text needs more room than is left: the save fails, and the
+    document is as it was, not emptied or half written."""
+    resource = pytest.importorskip("resource")
+    folder, path = _in_place_case(tmp_path, kind)
+    old = path.read_bytes()
+    soft, hard = resource.getrlimit(resource.RLIMIT_FSIZE)
+    resource.setrlimit(resource.RLIMIT_FSIZE, (len(old) + 4096, hard))
+    try:
+        with pytest.raises(OSError):
+            save_document(path, b"a much longer new version\n" * 10_000)
+    finally:
+        resource.setrlimit(resource.RLIMIT_FSIZE, (soft, hard))
+        os.chmod(folder, 0o755)
+    assert path.read_bytes() == old
+
+
+@posix_only
+@pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0,
+                    reason="root may write into any folder")
+@pytest.mark.parametrize("kind", ["hard link", "read-only folder"])
+def test_a_document_saved_in_place_is_put_back_when_writing_it_fails(tmp_path, monkeypatch,
+                                                                    kind):
+    """The room was there, and writing the new text over it failed all the
+    same (a copy-on-write disk, a removed volume): the old text is
+    written back."""
+    folder, path = _in_place_case(tmp_path, kind)
+    old = path.read_bytes()
+    calls = []
+    real_fsync = os.fsync
+
+    def fsync(fd):
+        calls.append(fd)
+        if len(calls) == 2:                 # the new text, after the room was made
+            raise OSError(28, "No space left on device")
+        real_fsync(fd)
+
+    monkeypatch.setattr(atomic_file.os, "fsync", fsync)
+    try:
+        with pytest.raises(OSError):
+            save_document(path, b"a much longer new version\n" * 10_000)
+    finally:
+        os.chmod(folder, 0o755)
+    assert path.read_bytes() == old
+
+
+@posix_only
+def test_a_shorter_text_saved_in_place_leaves_nothing_of_the_old(tmp_path):
+    folder, path = _in_place_case(tmp_path, "hard link")
+    save_document(path, b"short")
+    assert path.read_bytes() == b"short" == (folder / "Other.md").read_bytes()
+
+
 @pytest.mark.skipif(sys.platform != "darwin", reason="Finder tags exist on macOS only")
 def test_on_macos_finder_tags_and_attributes_are_kept(tmp_path):
     import subprocess
