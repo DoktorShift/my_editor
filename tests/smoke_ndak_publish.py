@@ -390,7 +390,8 @@ own_name = f"My Post {uuid.uuid4().hex[:6]}"
 old_at = int(time.time()) - 86_400 * 30
 # As version 3.3 published "My Post ….md": the file's name as it is, no record kept.
 nd.nak_publish(alice_sk.hex(), [RNOSTR, NRS], kind=30023, content="Written in 3.3.",
-               tags=[["d", own_name], ["title", "My Post"], ["published_at", str(old_at)]])
+               tags=[["d", own_name], ["title", "My Post"], ["published_at", str(old_at)]],
+               created_at=old_at)
 record = FirstPublications(nd.HOME / "first_publications_ndak.json")
 
 
