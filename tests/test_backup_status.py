@@ -9,7 +9,8 @@ What must hold:
   written again (by Try Again or by the next automatic attempt), the
   message goes. Another tab whose backup works shows nothing. A document
   too large to back up says so, without Try Again, which could not help.
-  The message shortens in a narrow window instead of widening it.
+  The message is whole where it fits, and shortens in a narrow window
+  instead of widening it.
 """
 
 from tests.app_process import run_window_script  # noqa: E402
@@ -44,9 +45,10 @@ atomic_file._replace = lambda *_: (_ for _ in ()).throw(OSError(28, "No space le
 broken._backup.write_now()
 app.processEvents()
 r["failed"] = shown()
+r["whole"] = w._backup_problem.text()
 r["names"] = unnamed_controls(w.statusBar())
 r["min_width"] = w.minimumSizeHint().width()
-w.resize(420, 600)
+w.resize(r["min_width"], 600)
 app.processEvents()
 r["narrow"] = [w._backup_problem.text().endswith("\u2026"),
                w._backup_problem.accessibleName()]
@@ -78,6 +80,7 @@ def test_the_status_bar_speaks_only_when_a_backup_fails(tmp_path):
     r = run_window_script(SCRIPT, tmp_path)
     assert r["quiet"] == [False, "", False]
     assert r["failed"] == [True, "Couldn't keep a backup of this document.", True]
+    assert r["whole"] == "Couldn't keep a backup of this document."   # room: never shortened
     assert r["names"] == []
     assert r["min_width"] < 420                       # the message does not widen it
     assert r["narrow"] == [True, "Couldn't keep a backup of this document."]

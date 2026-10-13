@@ -3,8 +3,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 
+import math
+
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QPainter, QColor
+from PySide6.QtGui import QFontMetricsF, QPainter, QColor
 from PySide6.QtWidgets import (
     QWidget, QGridLayout, QHBoxLayout, QLineEdit, QLabel, QPushButton, QFrame, QMenu, QToolButton,
     QSizePolicy,
@@ -19,7 +21,11 @@ class ElidedLabel(QLabel):
     """A one-line label that shortens its text with "\u2026" when it has
     less room than the text needs, instead of making the window wider
     (a status bar message in a long language). Screen readers and the
-    tooltip get the whole text."""
+    tooltip get the whole text.
+
+    The text is measured in fractions of a pixel, as Qt shortens it: the
+    whole number of pixels can be a little less, and a label given the
+    room it asked for then shortened a text that fits."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -37,7 +43,7 @@ class ElidedLabel(QLabel):
 
     def sizeHint(self) -> QSize:  # noqa: N802
         margins = self.contentsMargins()
-        width = (self.fontMetrics().horizontalAdvance(self._full)
+        width = (math.ceil(QFontMetricsF(self.font()).horizontalAdvance(self._full))
                  + margins.left() + margins.right() + 2)
         return QSize(width, super().sizeHint().height())
 
@@ -52,8 +58,11 @@ class ElidedLabel(QLabel):
     def _elide(self) -> None:
         margins = self.contentsMargins()
         room = max(0, self.width() - margins.left() - margins.right() - 2)
-        super().setText(self.fontMetrics().elidedText(self._full, Qt.TextElideMode.ElideRight,
-                                                      room))
+        metrics = QFontMetricsF(self.font())
+        if metrics.horizontalAdvance(self._full) <= room:
+            super().setText(self._full)
+        else:
+            super().setText(metrics.elidedText(self._full, Qt.TextElideMode.ElideRight, room))
 
 
 class LineNumberGutter(QWidget):
