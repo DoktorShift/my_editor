@@ -40,6 +40,7 @@ to the shared blob cache, because that cache is what an export walks.
 
 from __future__ import annotations
 
+import hashlib
 import os
 from typing import Dict, List, Optional
 
@@ -54,6 +55,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMenu,
+    QProgressBar,
     QPushButton,
     QSizePolicy,
     QStackedWidget,
@@ -156,8 +158,10 @@ class MediaLibraryDialog(QDialog):
         # original's name, and whether it stays (Stop Sharing) or goes
         # with them (Delete).
         self._unsharing: Dict[str, tuple] = {}
-        # Downloads for Save As, by sha256: where each one goes.
-        self._saving: Dict[str, List[str]] = {}
+        # Save As, one file at a time: (tile, target, addresses left to
+        # try), and the download running.
+        self._saves: List[tuple] = []
+        self._download = None
         self._quick_look: Optional[QuickLook] = None
         self._fetching = False
         self._fetch_failed = ""
@@ -242,6 +246,18 @@ class MediaLibraryDialog(QDialog):
         self._storage.setObjectName("media_hint")
         self._storage.setTextFormat(Qt.TextFormat.PlainText)
         footer.addWidget(self._status, 1)
+        self._save_bar = QProgressBar()
+        self._save_bar.setRange(0, 100)
+        self._save_bar.setTextVisible(False)
+        self._save_bar.setFixedWidth(120)
+        self._save_bar.setAccessibleName(_("Saving"))
+        self._save_bar.hide()
+        self._save_cancel = QPushButton(_("Cancel"))
+        self._save_cancel.setAutoDefault(False)
+        self._save_cancel.clicked.connect(self._cancel_save)
+        self._save_cancel.hide()
+        footer.addWidget(self._save_bar)
+        footer.addWidget(self._save_cancel)
         footer.addWidget(self._storage, 0,
                          Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         layout.addLayout(footer)
@@ -510,7 +526,6 @@ class MediaLibraryDialog(QDialog):
         self._set_thumbnail(sha, pix)
         if self._quick_look_key() == sha:
             self._quick_look.set_picture(pix)
-        self._finish_saves(sha)
 
     def _on_thumbnail_failed(self, sha: str, reason: str) -> None:
         if reason == "not an image":
@@ -522,11 +537,6 @@ class MediaLibraryDialog(QDialog):
                     self._set_thumbnail(sha, picture)
                     if self._quick_look_key() == sha:
                         self._quick_look.set_picture(picture)
-            self._finish_saves(sha)
-            return
-        for target in self._saving.pop(sha, []):
-            self._say(_("“{name}” couldn’t be downloaded. Check your internet connection "
-                        "and try again.").format(name=os.path.basename(target)), error=True)
 
     def _private_picture(self, sha: str) -> Optional[QPixmap]:
         try:
@@ -721,35 +731,93 @@ class MediaLibraryDialog(QDialog):
             targets = [(tile, _unique_path(folder, _save_name(tile))) for tile in files] \
                 if folder else []
         for tile, target in targets:
-            self._saving.setdefault(tile.key, []).append(target)
-            if self._loader.cache_path(tile.key).is_file():
-                self._finish_saves(tile.key)
-            else:
-                # Downloaded, and checked against its hash, by the loader.
-                self._loader.load(tile.key, tile.media.url)
+            urls = [u.get("url") for u in tile.media.urls if u.get("url")] or [tile.media.url]
+            self._saves.append((tile, target, urls))
+        self._next_save()
 
-    def _finish_saves(self, sha: str) -> None:
-        targets = self._saving.pop(sha, [])
-        if not targets:
-            return
+    def _next_save(self) -> None:
+        """Save the next file: from this computer's copy when there is
+        one, else streamed from its servers, one address after another,
+        bounded by its own size and checked against its hash."""
+        while self._saves and self._download is None:
+            tile, target, urls = self._saves[0]
+            sha = tile.key
+            cached = self._loader.cache_path(sha)
+            if cached.is_file():
+                self._saves.pop(0)
+                self._save_cached(tile, target, cached)
+                continue
+            transform = ((lambda data, s=sha: self._visibility.open_private(s, data))
+                         if self._visibility.is_private(sha) else None)
+            self._download = self._loader.download_to(urls[0], sha, target,
+                                                      size=tile.media.size, transform=transform)
+            self._download.progress.connect(self._on_save_progress)
+            self._download.finished.connect(self._on_save_finished)
+            self._show_status(_("Saving “{name}”…").format(name=os.path.basename(target)), "")
+            self._status_timer.stop()
+            self._save_bar.setValue(0)
+            self._save_bar.show()
+            self._save_cancel.show()
+
+    def _save_cached(self, tile: Tile, target: str, cached) -> None:
+        name = os.path.basename(target)
         try:
-            data = self._loader.cache_path(sha).read_bytes()
+            data = cached.read_bytes()
         except OSError:
             data = b""
-        if data and self._visibility.is_private(sha):
+        if hashlib.sha256(data).hexdigest() != tile.key:
+            data = b""
+        if data and self._visibility.is_private(tile.key):
             # Saving a private file saves the file, not its envelope.
-            data = self._visibility.open_private(sha, data) or b""
-        for target in targets:
-            name = os.path.basename(target)
-            if not data:
-                self._say(_("“{name}” couldn’t be saved. Try again.").format(name=name),
-                          error=True)
-                continue
-            try:
-                save_document(target, data)
-            except OSError:
-                self._say(_("“{name}” couldn’t be saved there. Choose another folder.")
-                          .format(name=name), error=True)
+            data = self._visibility.open_private(tile.key, data) or b""
+        if not data:
+            self._say(_("“{name}” couldn’t be saved. Try again.").format(name=name), error=True)
+            return
+        try:
+            save_document(target, data)
+        except OSError:
+            self._say(_("“{name}” couldn’t be saved there. Choose another folder.")
+                      .format(name=name), error=True)
+
+    def _on_save_progress(self, received: int, total: int) -> None:
+        if total > 0:
+            self._save_bar.setValue(min(100, received * 100 // total))
+
+    def _on_save_finished(self, why: str) -> None:
+        tile, target, urls = self._saves[0]
+        self._download.deleteLater()
+        self._download = None
+        name = os.path.basename(target)
+        if why in ("network", "missing", "server", "wrong_file") and len(urls) > 1:
+            self._saves[0] = (tile, target, urls[1:])        # the next server
+            self._next_save()
+            return
+        self._saves.pop(0)
+        self._save_bar.hide()
+        self._save_cancel.hide()
+        said = {
+            "network": _("“{name}” couldn’t be downloaded. Check your internet connection "
+                         "and try again."),
+            "missing": _("“{name}” isn’t on your media servers anymore, so it couldn’t be "
+                         "saved."),
+            "server": _("“{name}” couldn’t be downloaded: your media server didn’t send it. "
+                        "Try again later."),
+            "too_large": _("“{name}” wasn’t saved: a media server sent more than the file."),
+            "wrong_file": _("“{name}” wasn’t saved: a media server returned the wrong file."),
+            "unsafe": _("“{name}” wasn’t saved: a media server sent it from an address "
+                        "MyEditor doesn’t trust."),
+            "write": _("“{name}” couldn’t be saved there. Choose another folder."),
+        }.get(why)
+        if said:
+            self._say(said.format(name=name), error=True)
+        else:
+            self._rest_status()
+        self._next_save()
+
+    def _cancel_save(self) -> None:
+        self._saves = self._saves[:1]
+        if self._download is not None:
+            self._download.cancel()
 
     # -- delete ---------------------------------------------------------------
 

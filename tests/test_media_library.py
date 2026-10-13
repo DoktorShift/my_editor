@@ -169,6 +169,20 @@ class FakeStore(QObject):
         self.calls.append(("delete", sha))
 
 
+class FakeDownload(QObject):
+    progress = Signal(int, int)
+    finished = Signal(str)
+
+    def __init__(self, url, sha, target, size, transform):
+        super().__init__()
+        self.url, self.sha, self.target, self.size = url, sha, target, size
+        self.transform = transform
+        self.cancelled = False
+
+    def cancel(self):
+        self.cancelled = True
+
+
 class FakeLoader(QObject):
     ready = Signal(str, str, object)
     failed = Signal(str, str)
@@ -180,6 +194,12 @@ class FakeLoader(QObject):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self.loads = []
+        self.downloads = []
+
+    def download_to(self, url, sha, target, *, size, transform=None):
+        job = FakeDownload(url, sha, target, size, transform)
+        self.downloads.append(job)
+        return job
 
     def cache_path(self, sha):
         return self.root / sha.lower()
@@ -539,10 +559,10 @@ def test_copy_link_copies_every_selected_address(tmp_path, monkeypatch):
     assert QApplication.clipboard().text() == f"{one.url}\n{two.url}"
 
 
-def test_save_as_saves_a_video_that_was_not_downloaded_yet(tmp_path, monkeypatch):
-    """The loader caches what it downloads before it tries to show it, so
-    a video it cannot show is still there to save."""
-    video = media(4, mime="video/mp4")
+def _save_video(tmp_path, monkeypatch, *, servers=(SERVER,)):
+    video = media(4, mime="video/mp4", size=60 * 1024 * 1024)
+    video.urls = [{"server": s, "url": f"{s}/{video.hash}.mp4"} for s in servers]
+    video.url = video.urls[0]["url"]
     world = build(tmp_path, monkeypatch, FakeStore([video], names={video.hash: "Talk.mp4"}))
     target = tmp_path / "out" / "Talk.mp4"
     target.parent.mkdir()
@@ -550,10 +570,47 @@ def test_save_as_saves_a_video_that_was_not_downloaded_yet(tmp_path, monkeypatch
                         lambda *a, **k: (str(target), ""))
     select(world, video.hash)
     world.dialog._save_as()
-    assert world.loader.loads == [video.hash]
-    world.loader.cache_path(video.hash).write_bytes(b"video bytes")
-    world.loader.failed.emit(video.hash, "not an image")
-    assert target.read_bytes() == b"video bytes"
+    return world, video, target
+
+
+def test_save_as_downloads_a_large_video_with_progress_and_cancel(tmp_path, monkeypatch):
+    """Not through the thumbnail cache, whose cap is far below a video's
+    size: streamed to the file, bounded by the file's own size, with a
+    determinate bar and Cancel at the foot of the window."""
+    world, video, target = _save_video(tmp_path, monkeypatch)
+    [job] = world.loader.downloads
+    assert (job.sha, str(job.target), job.size) == (video.hash, str(target), video.size)
+    assert world.loader.loads == []
+    job.progress.emit(30 * 1024 * 1024, video.size)
+    assert not world.dialog._save_bar.isHidden() and world.dialog._save_bar.value() == 50
+    assert world.dialog._status.text() == "Saving “Talk.mp4”…"
+    world.dialog._save_cancel.click()
+    assert job.cancelled
+    job.finished.emit("cancelled")
+    assert world.dialog._save_bar.isHidden() and world.dialog._save_cancel.isHidden()
+    assert world.dialog._status.text() == "Anyone with the link can see the files you add here."
+
+
+def test_save_as_tries_the_next_server_and_then_gives_the_real_reason(tmp_path, monkeypatch):
+    world, video, _target = _save_video(tmp_path, monkeypatch, servers=(SERVER, MEMBERS))
+    world.loader.downloads[0].finished.emit("missing")
+    assert world.loader.downloads[1].url.startswith(MEMBERS)
+    world.loader.downloads[1].finished.emit("too_large")
+    assert world.dialog._status.text() == (
+        "“Talk.mp4” wasn’t saved: a media server sent more than the file.")
+
+
+@pytest.mark.parametrize("why, said", [
+    ("network", "“Talk.mp4” couldn’t be downloaded. Check your internet connection and try again."),
+    ("missing", "“Talk.mp4” isn’t on your media servers anymore, so it couldn’t be saved."),
+    ("server", "“Talk.mp4” couldn’t be downloaded: your media server didn’t send it. Try again later."),
+    ("wrong_file", "“Talk.mp4” wasn’t saved: a media server returned the wrong file."),
+    ("write", "“Talk.mp4” couldn’t be saved there. Choose another folder."),
+])
+def test_save_as_failures_say_their_own_reason(tmp_path, monkeypatch, why, said):
+    world, _video, _target = _save_video(tmp_path, monkeypatch)
+    world.loader.downloads[0].finished.emit(why)
+    assert world.dialog._status.text() == said
 
 
 def test_saving_a_private_file_saves_the_file_not_its_envelope(tmp_path, monkeypatch):
@@ -562,7 +619,7 @@ def test_saving_a_private_file_saves_the_file_not_its_envelope(tmp_path, monkeyp
     blob = PrivateBlob(sha256=private.hash, key_hex=KEY, mime="image/png", name="Secret.png")
     world = build(tmp_path, monkeypatch, FakeStore([private]),
                   visibility=MediaVisibility(library=FakeLibrary([blob])))
-    world.loader.cache_path(private.hash).write_bytes(envelope)
+    world.loader.cache_path(private.hash).write_bytes(envelope)    # cached: no download
     target = tmp_path / "Secret.png"
     monkeypatch.setattr(dialog_module.QFileDialog, "getSaveFileName",
                         lambda *a, **k: (str(target), ""))

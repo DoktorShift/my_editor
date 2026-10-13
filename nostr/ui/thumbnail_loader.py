@@ -235,6 +235,19 @@ class ThumbnailLoader(QObject):
 
         reply.finished.connect(_done)
 
+    def download_to(self, url: str, sha256: str, target, *, size: int,
+                    transform=None) -> "FileDownload":
+        """Save As: stream the file at ``url`` into ``target``, bounded by
+        its own ``size`` rather than the thumbnail cap, and checked against
+        ``sha256`` before it takes the target's name. ``transform`` turns
+        the downloaded bytes into what is written (a private file's
+        envelope into the file). Same policy, redirect rules and final-URL
+        check as every other download here."""
+        job = FileDownload(self._nam, url, sha256, Path(target), size=size,
+                           transform=transform, parent=self)
+        job.start()
+        return job
+
     # -- shared request plumbing ------------------------------------------
 
     def _start(self, url: str):
@@ -353,6 +366,130 @@ class ThumbnailLoader(QObject):
             self.url_ready.emit(url, sha, QPixmap.fromImage(image))
         finally:
             reply.deleteLater()
+
+
+# A file whose size is not known is still bounded: the largest file the
+# members' server takes.
+_UNKNOWN_SIZE_LIMIT = 1024 * 1024 * 1024
+
+
+class FileDownload(QObject):
+    """One Save As download, streamed to a file beside the target and
+    moved onto it only when it is the right file. ``finished`` carries ""
+    or why not: "cancelled", "network", "missing", "server",
+    "too_large", "wrong_file", "unsafe" or "write"."""
+
+    progress = Signal(int, int)        # received, total
+    finished = Signal(str)
+
+    def __init__(self, nam, url: str, sha256: str, target: Path, *, size: int,
+                 transform=None, parent=None) -> None:
+        super().__init__(parent)
+        self._nam, self._url, self._sha = nam, url, (sha256 or "").lower()
+        self._target = Path(target)
+        self._part = self._target.with_name(f".{self._target.name}.part")
+        self._limit = size if size > 0 else _UNKNOWN_SIZE_LIMIT
+        self._transform = transform
+        self._hash = hashlib.sha256()
+        self._received = 0
+        self._file = None
+        self._reply = None
+        self._why = ""
+
+    def start(self) -> None:
+        if not url_safety.is_safe_media_url(self._url):
+            self._end("unsafe")
+            return
+        try:
+            self._file = open(self._part, "wb")
+        except OSError:
+            self._end("write")
+            return
+        request = QNetworkRequest(QUrl(self._url))
+        request.setRawHeader(b"User-Agent", b"my-editor-blossom-save/1")
+        request.setTransferTimeout(_HTTP_TIMEOUT_MS)
+        request.setAttribute(QNetworkRequest.Attribute.RedirectPolicyAttribute,
+                             QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy)
+        request.setMaximumRedirectsAllowed(_MAX_REDIRECTS)
+        self._reply = reply = self._nam.get(request)
+        if hasattr(reply, "readyRead"):
+            reply.readyRead.connect(self._read)
+        reply.downloadProgress.connect(self._on_progress)
+        reply.finished.connect(self._on_finished)
+
+    def cancel(self) -> None:
+        if self._reply is not None and not self._why:
+            self._why = "cancelled"
+            self._reply.abort()
+
+    def _on_progress(self, received: int, total: int) -> None:
+        if received > self._limit or (total > 0 and total > self._limit):
+            if not self._why:
+                self._why = "too_large"
+                self._reply.abort()
+            return
+        self.progress.emit(int(received), int(total if total > 0 else self._limit))
+
+    def _read(self) -> None:
+        data = bytes(self._reply.readAll())
+        if not data or self._why:
+            return
+        self._received += len(data)
+        if self._received > self._limit:
+            self._why = "too_large"
+            self._reply.abort()
+            return
+        self._hash.update(data)
+        try:
+            self._file.write(data)
+        except OSError:
+            self._why = "write"
+            self._reply.abort()
+
+    def _on_finished(self) -> None:
+        reply = self._reply
+        try:
+            if not self._why:
+                self._read()
+            if not self._why:
+                self._why = self._reply_problem(reply)
+            if not self._why and self._hash.hexdigest() != self._sha:
+                self._why = "wrong_file"
+            self._end(self._why)
+        finally:
+            reply.deleteLater()
+
+    def _reply_problem(self, reply) -> str:
+        status = int(reply.attribute(QNetworkRequest.HttpStatusCodeAttribute) or 0)
+        if reply.error() != QNetworkReply.NoError or not 200 <= status < 300:
+            if status == 404:
+                return "missing"
+            return "network" if status == 0 else "server"
+        if not _final_url_allowed(self._url, reply.url().toString()):
+            return "unsafe"
+        return ""
+
+    def _end(self, why: str) -> None:
+        if self._file is not None:
+            self._file.close()
+            self._file = None
+        if not why:
+            try:
+                if self._transform is not None:
+                    data = self._transform(self._part.read_bytes())
+                    if data is None:
+                        why = "wrong_file"
+                    else:
+                        write_bytes(self._target, data)
+                else:
+                    os.replace(self._part, self._target)
+            except OSError:
+                why = "write"
+        try:
+            self._part.unlink()
+        except OSError:
+            pass
+        self.finished.emit(why)
 
 
 def _final_url_allowed(requested: str, final: str) -> bool:
