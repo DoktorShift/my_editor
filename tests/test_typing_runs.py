@@ -431,3 +431,37 @@ def test_a_line_break_is_in_the_run_too(clock):
     assert ed.toPlainText().replace(" ", "\n") == "abc\ndef"
     ed.undo()
     assert ed.toPlainText() == ""
+
+
+@pytest.mark.parametrize("typed, name", [
+    ("# ", "Paragraph Style"), ("- ", "List"), ("1. ", "List"), ("> ", "Quote"),
+    ("[ ] ", "Checklist"), ("a **bold**", "Bold"), ("an *it*", "Italic"),
+])
+def test_a_markdown_shortcut_is_a_named_step(clock, typed, name):
+    """Review N7: what a shortcut makes is named as the command that makes
+    it would be."""
+    ed = structured()
+    ed.set_markdown_shortcuts_check(lambda: True)
+    QTest.keyClicks(ed, typed)
+    assert ed.undo_name() == name
+
+
+def test_a_shortcut_on_return_is_a_named_step(clock):
+    for typed, name in (("---", "Divider"), ("```python", "Code Block")):
+        ed = structured()
+        ed.set_markdown_shortcuts_check(lambda: True)
+        QTest.keyClicks(ed, typed)
+        key(ed, Qt.Key.Key_Return)
+        assert ed.undo_name() == name
+
+
+def test_a_drop_is_a_named_step(clock):
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QDropEvent
+    ed = typed("Words ")
+    data = QMimeData()
+    data.setText("dropped")
+    event = QDropEvent(QPointF(5, 5), Qt.DropAction.CopyAction, data,
+                       Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    ed.dropEvent(event)
+    assert "dropped" in ed.toPlainText() and ed.undo_name() == "Drag"

@@ -110,6 +110,10 @@ def _named_step(name: str):
     return wrap
 
 
+# What Edit > Undo calls what a Markdown Shortcut makes ("heading 1", ...).
+_SHORTCUT_STEPS = {"heading": N_("Paragraph Style"), "bullet": N_("List"),
+                   "number": N_("List"), "quote": N_("Quote"), "checklist": N_("Checklist")}
+
 # What Edit > Undo calls a change of each inline style.
 _STYLE_STEPS = {"bold": N_("Bold"), "italic": N_("Italic"), "underline": N_("Underline"),
                 "strike": N_("Strikethrough"), "code": N_("Code")}
@@ -362,11 +366,16 @@ class HtmlEditor(QTextEdit):
             yield
         finally:
             whole.endEditBlock()
-            after = self.document().availableUndoSteps()
-            if after > before and name:
-                self._undo_names[after] = (before, name)
-            self.end_typing_run()
-            self.undo_named.emit()
+            self._name_step(before, name)
+
+    def _name_step(self, before: int, name: str) -> None:
+        """Call the step made since Qt's count of changes was ``before``
+        ``name``, when there is one; what is typed next is a run of its own."""
+        after = self.document().availableUndoSteps()
+        if after > before and name:
+            self._undo_names[after] = (before, name)
+        self.end_typing_run()
+        self.undo_named.emit()
 
     def undo_name(self) -> str:
         """What Undo would take back (an N_ word, "" when not known)."""
@@ -954,16 +963,24 @@ class HtmlEditor(QTextEdit):
         if not text or not self._shortcuts_apply():
             return
         cursor = self.textCursor()
-        if text == " " and markdown_shortcuts.after_space(cursor):
+        # What a shortcut makes is a step of its own, named as the command
+        # that makes it would be.
+        before = self.document().availableUndoSteps()
+        made = markdown_shortcuts.after_space(cursor) if text == " " else ""
+        if made:
             self.setTextCursor(cursor)
             level = cursor.block().blockFormat().headingLevel()
             self.setCurrentCharFormat(rich_text.restyled(self.currentCharFormat(), level))
             self._update_active_format()
-        elif not text[-1].isalnum() and markdown_shortcuts.after_mark(cursor):
+            self._name_step(before, _SHORTCUT_STEPS.get(made.split()[0], ""))
+            return
+        style = markdown_shortcuts.after_mark(cursor) if not text[-1].isalnum() else None
+        if style:
             # What is typed next is in the style the opening mark was
             # typed in, which the cursor carries.
             self.setTextCursor(cursor)
             self._update_active_format()
+            self._name_step(before, _STYLE_STEPS.get(style, ""))
 
     def inputMethodEvent(self, event):
         # Characters some keyboards compose (a backtick or a tilde after a
@@ -1762,9 +1779,12 @@ class HtmlEditor(QTextEdit):
                     self.ensureCursorVisible()
                     return
             else:
+                before = self.document().availableUndoSteps()
                 if self._shortcuts_apply() and markdown_shortcuts.on_return(c):
                     # "---" and Return: a divider; "```python": a code block
-                    # (Markdown Shortcuts).
+                    # (Markdown Shortcuts), named as those commands are.
+                    self._name_step(before, N_("Code Block")
+                                    if rich_text.is_code_block(c.block()) else N_("Divider"))
                     self.setTextCursor(c)
                     self.setCurrentCharFormat(c.block().charFormat())
                     self.ensureCursorVisible()
@@ -2181,11 +2201,15 @@ class HtmlEditor(QTextEdit):
         else:
             # Text goes where it was dropped, the way a paste would put it
             # there (insertFromMimeData), as one step on the undo stack.
-            self._mime_step = ""                   # no name of its own: "Undo"
+            # Qt makes the drop one step around the paste it does, so the
+            # step is named here, as a whole.
+            before = self.document().availableUndoSteps()
+            self._mime_step = ""
             try:
                 super().dropEvent(event)
             finally:
                 self._mime_step = N_("Paste")
+            self._name_step(before, N_("Drag"))
 
     @_named_step(N_("Cut"))
     def cut(self):
