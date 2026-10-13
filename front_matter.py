@@ -224,7 +224,7 @@ _MOST_VALUES = 10_000
 @functools.lru_cache(maxsize=64)
 def _parsed_text(syntax: str, text: str) -> Optional[dict]:
     try:
-        mapping = tomllib.loads(text) if syntax == TOML else yaml.load(text, Loader=yaml.SafeLoader)
+        mapping = tomllib.loads(text) if syntax == TOML else _yaml_load(text)
         if mapping is None and syntax == YAML:
             mapping = {}                    # nothing but comments and blanks
         if not isinstance(mapping, dict) or not _within(mapping, [_MOST_VALUES]):
@@ -233,6 +233,21 @@ def _parsed_text(syntax: str, text: str) -> Optional[dict]:
         # Not YAML or TOML; a date no calendar has; nested past counting.
         return None
     return mapping
+
+
+def _yaml_load(text: str) -> Any:
+    """PyYAML's reading of ``text``. Its own reader refuses a tab where
+    libyaml, Jekyll and Hugo read a space: after a key's colon, before a
+    comment, at a line's end. Such a tab is read as a space; one in a
+    line's indentation, which YAML forbids, is not."""
+    try:
+        return yaml.load(text, Loader=yaml.SafeLoader)
+    except yaml.YAMLError:
+        if "\t" not in text:
+            raise
+    spaced = re.sub(r"(?m)(?<=\S)[^\S\n]*\t", lambda tabs: tabs.group(0).replace("\t", " "),
+                    text)
+    return yaml.load(spaced, Loader=yaml.SafeLoader)
 
 
 def _within(value: Any, left: List[int]) -> bool:

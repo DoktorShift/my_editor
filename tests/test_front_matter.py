@@ -689,8 +689,6 @@ ALL_DETAILS = frozenset({"title", "summary", "image", "tags", "slug", "date",
     # YAML reads these as true and as a text with a letter "A" in it.
     ("---\ntitle: yes\n---\nB\n", {"title"}),
     ('---\nsummary: "\\x41"\n---\nB\n', {"summary"}),
-    # Front matter no YAML parser reads: nothing is read, nothing changed.
-    ("---\ntitle: T\ntags: [a,\t# x\n  b]\n---\nB\n", ALL_DETAILS),
 ])
 def test_a_detail_read_otherwise_by_a_parser_is_kept_as_written(text, kept):
     front, _ = front_matter.split(text)
@@ -748,3 +746,34 @@ def test_an_item_holding_an_equals_sign_stays_in_its_toml_list():
     front, _ = front_matter.split(text)
     assert from_front_matter(front).hashtags == ("a = b", "c")
     assert changed(text, hashtags=("a = b", "c", "d")) == text.replace('  "c",\n', '  "c",\n  "d",\n')
+
+
+# -- a tab, and a front matter no parser reads (round 8, H1) --------------------
+
+TABBED = ("---\ntitle: My post\nslug: my-first-post\ndate: 2024-03-01\ntags: [a,\t# the first\n  b]\n"
+          "image: /c.png\nsummary: S\ndraft: false\t\nlayout:\tpost\t# Jekyll's\n---\nB\n")
+
+
+def test_a_tab_after_text_reads_as_a_space_as_jekyll_and_hugo_read_it():
+    """PyYAML's own reader refuses these tabs; libyaml, Jekyll and Hugo
+    take them as spaces. Every detail was read as empty."""
+    front, _ = front_matter.split(TABBED)
+    details = from_front_matter(front)
+    assert (details.title, details.identifier, details.hashtags, details.image,
+            details.summary) == ("My post", "my-first-post", ("a", "b"), "/c.png", "S")
+    assert details.published_at == moment(2024, 3, 1)
+    assert kept_in_file(front) == frozenset()
+    assert changed(TABBED, title="New") == TABBED.replace("title: My post", "title: New")
+
+
+UNREAD = "---\ntitle: T\nslug: my-post\ntags: [a, b]\nnotes: [unclosed\n---\nB\n"
+
+
+def test_a_front_matter_no_parser_reads_shows_its_details_kept_as_written():
+    """Read as MyEditor reads it, every detail read-only: never as empty,
+    so the article keeps its title and its address."""
+    front, _ = front_matter.split(UNREAD)
+    details = from_front_matter(front)
+    assert (details.title, details.identifier, details.hashtags) == ("T", "my-post", ("a", "b"))
+    assert kept_in_file(front) == ALL_DETAILS
+    assert changed(UNREAD, title="New", hashtags=("c",)) == UNREAD

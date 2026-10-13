@@ -52,8 +52,13 @@ def changes(details):
     ]
 
 
+# libyaml, through PyYAML: the reader Jekyll's and Hugo's are like (a tab
+# after text is a space), and not the one front_matter.parsed uses.
+LIBYAML = getattr(yaml, "CSafeLoader", None)
+
+
 def parser_read(text):
-    """The front matter of ``text`` as PyYAML or tomllib reads it; None
+    """The front matter of ``text`` as libyaml or tomllib reads it; None
     when they read none."""
     front, _body = front_matter.split(text)
     if front is None:
@@ -61,7 +66,7 @@ def parser_read(text):
     written = "".join(line + "\n" for entry in front.entries for line in entry.lines)
     try:
         read = tomllib.loads(written) if front.syntax == front_matter.TOML \
-            else yaml.safe_load(written) or {}
+            else yaml.load(written, Loader=LIBYAML) or {}
     except (yaml.YAMLError, ValueError):
         return None
     return read if isinstance(read, dict) else None
@@ -104,6 +109,8 @@ def holds(detail, value, meant):
 
 @pytest.mark.parametrize("name, text", SAMPLES, ids=[name for name, _text in SAMPLES])
 def test_a_change_is_written_as_a_parser_reads_it_or_not_at_all(name, text):
+    if LIBYAML is None:
+        pytest.skip("PyYAML without libyaml")
     front, body = front_matter.split(text)
     details = from_front_matter(front)
     kept = kept_in_file(front)

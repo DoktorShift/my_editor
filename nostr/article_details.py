@@ -324,30 +324,36 @@ def _trials(key: str, details: ArticleDetails) -> List[dict]:
     return [{_FIELDS[key]: value} for value in values]
 
 
-# What a parser reads for an entry it does not find (_candidates).
+# What a parser reads for an entry it does not find, and for every entry
+# of a front matter it can't read at all (_candidates).
 _ABSENT = object()
+_UNREAD = object()
 
 
 def _candidates(front: Optional[front_matter.FrontMatter], key: str):
     """``(index, inner index or None, entry, read)`` of each entry under
     the detail ``key``'s names, whatever their case (Hugo's "Title"); for
     the hashtags in TOML also those in Zola's [taxonomies] table. ``read``:
-    what a YAML or TOML parser reads for it (front_matter.parsed), or
-    _ABSENT."""
+    what a YAML or TOML parser reads for it (front_matter.parsed), _ABSENT,
+    or _UNREAD when no parser reads the front matter."""
     names = _names(key)
     entries = front.entries if front is not None else ()
-    mapping = front_matter.parsed(front) or {}
+    mapping = front_matter.parsed(front)
+
+    def read(table: Any, name: str) -> Any:
+        if mapping is None:
+            return _UNREAD                  # no parser reads it: only this reader does
+        return table.get(name, _ABSENT) if isinstance(table, dict) else _ABSENT
     for at, entry in enumerate(entries):
         if entry.key.lower() in names:
-            yield at, None, entry, mapping.get(entry.key, _ABSENT)
+            yield at, None, entry, read(mapping, entry.key)
     if key == "tags":
         for at, entry in enumerate(entries):
             if entry.table.lower() == "taxonomies":
-                table = mapping.get(entry.table)
+                table = mapping.get(entry.table) if mapping is not None else None
                 for inner, sub in enumerate(entry.inner_entries()):
                     if sub.key.lower() in names:
-                        yield at, inner, sub, (table.get(sub.key, _ABSENT)
-                                               if isinstance(table, dict) else _ABSENT)
+                        yield at, inner, sub, read(table, sub.key)
 
 
 def _names(key: str) -> set:
@@ -375,7 +381,8 @@ def _readable(key: str, entry: front_matter.Entry, read: Any) -> bool:
     a parser reads it (``read``), and a date only when it is one
     (Eleventy's "date: Last Modified" is not)."""
     value = entry.value
-    if value is None or read is _ABSENT or _detail(key, value) != _detail(key, _as_value(read)):
+    if value is None or read is _ABSENT or read is not _UNREAD \
+            and _detail(key, value) != _detail(key, _as_value(read)):
         return False
     if key == "date":
         return isinstance(value, str) and (not value.strip() or _moment(value) is not None)
