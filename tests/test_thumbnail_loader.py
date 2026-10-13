@@ -223,7 +223,7 @@ def test_bytes_that_do_not_match_the_hash_are_refused(tmp_path):
     loader.load("a" * 64, BLOB_URL)
     nam.issued[0].finish()
     assert ready == []
-    assert failed[0][1] == "downloaded bytes do not match sha256"
+    assert failed[0][1] == "a server returned the wrong file"
 
 
 def test_a_corrupt_cache_entry_is_replaced(tmp_path):
@@ -359,3 +359,37 @@ def test_the_fetch_reports_a_transport_failure_rather_than_empty_bytes(tmp_path)
     got, refused = _fetch(loader, _nam, BLOB_URL)
     assert got == []
     assert refused == ["host not found"]
+
+
+# --------------------------------------------------------------------------- #
+# An address that names its file
+# --------------------------------------------------------------------------- #
+
+def test_an_address_naming_another_file_is_refused(tmp_path):
+    """BUD-03: the last 64-hex run in a blob address is the file's hash.
+    Bytes that hash to something else are not that file, whoever served
+    them, and must not be shown or remembered as it."""
+    named = "e" * 64
+    url = f"https://blossom.example/{named}.png?size=small"
+    loader, nam = _loader(tmp_path, [FakeReply(status=200, body=_png()),
+                                     FakeReply(status=200, body=_png())])
+    ready, failed = [], []
+    loader.url_ready.connect(lambda *args: ready.append(args))
+    loader.url_failed.connect(lambda *args: failed.append(args))
+    loader.load_url(url)
+    nam.issued[0].finish()
+    assert ready == []
+    assert failed == [(url, "a server returned the wrong file")]
+    loader.load_url(url)               # not remembered as that file
+    assert len(nam.calls) == 2
+
+
+def test_an_address_naming_its_own_file_is_shown(tmp_path):
+    data = _png()
+    url = f"https://blossom.example/{_sha(data)}.png"
+    loader, nam = _loader(tmp_path, [FakeReply(status=200, body=data)])
+    ready = []
+    loader.url_ready.connect(lambda *args: ready.append(args))
+    loader.load_url(url)
+    nam.issued[0].finish()
+    assert [r[1] for r in ready] == [_sha(data)]

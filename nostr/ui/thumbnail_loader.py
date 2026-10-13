@@ -33,6 +33,8 @@ from atomic_file import write_bytes
 from i18n import _
 from image_safety import decode_image_bytes
 
+from ..blossom.hashes import hash_from_url
+
 
 CACHE_DIR = Path.home() / ".config" / "my_editor" / "blossom_cache"
 
@@ -52,6 +54,7 @@ _MAX_REDIRECTS = 4
 # Shown to a person, as the reason a preview is missing. "not an image"
 # below is not translated: callers compare against it.
 _UNSAFE_URL_REASON = _("blob URL was not allowed")
+_WRONG_FILE_REASON = _("a server returned the wrong file")
 
 
 class ThumbnailLoader(QObject):
@@ -299,7 +302,7 @@ class ThumbnailLoader(QObject):
             # Validate the bytes match the hash before trusting them.
             actual = hashlib.sha256(data).hexdigest()
             if actual != sha:
-                self.failed.emit(sha, _("downloaded bytes do not match sha256"))
+                self.failed.emit(sha, _WRONG_FILE_REASON)
                 return
             image = decode_image_bytes(data)
             if image is None:
@@ -328,6 +331,13 @@ class ThumbnailLoader(QObject):
                 self.url_failed.emit(url, reason)
                 return
             sha = hashlib.sha256(data).hexdigest()
+            # A blob address names its file (BUD-03: the last 64-hex run
+            # of the path). Bytes that hash to anything else are not that
+            # file, whoever served them.
+            named = hash_from_url(url.split("#", 1)[0].split("?", 1)[0])
+            if named and named != sha:
+                self.url_failed.emit(url, _WRONG_FILE_REASON)
+                return
             image = decode_image_bytes(data)
             # Cached either way, and the url → sha mapping recorded
             # either way, so a refusal is remembered as cheaply as a

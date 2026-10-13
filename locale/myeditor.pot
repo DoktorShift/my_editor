@@ -4483,15 +4483,15 @@ msgstr ""
 msgid "That server did not accept the signed authorization. Check that your signer app is connected, then try again."
 msgstr ""
 
-#: nostr/blossom/store.py:793
+#: nostr/blossom/store.py:797
 msgid "Nothing to upload."
 msgstr ""
 
-#: nostr/blossom/store.py:798
+#: nostr/blossom/store.py:802
 msgid "No media server is set up."
 msgstr ""
 
-#: nostr/blossom/store.py:829
+#: nostr/blossom/store.py:833
 msgid "There isn’t enough space left on your media servers for this file."
 msgstr ""
 
@@ -4499,7 +4499,7 @@ msgstr ""
 msgid "Couldn’t reach any media server. Check your internet connection and your media servers."
 msgstr ""
 
-#: nostr/blossom/store.py:730
+#: nostr/blossom/store.py:737
 msgid "File is empty."
 msgstr ""
 
@@ -4507,13 +4507,13 @@ msgstr ""
 msgid "Couldn’t reach any media server. Showing what the library had before."
 msgstr ""
 
-#: nostr/blossom/store.py:810
+#: nostr/blossom/store.py:814
 #, python-brace-format
 msgid "File is too large for any configured server ({limit} MiB). Try a smaller file or add a server that accepts it."
 msgstr ""
 
-#: nostr/blossom/store.py:723
-#: nostr/blossom/store.py:737
+#: nostr/blossom/store.py:730
+#: nostr/blossom/store.py:744
 #, python-brace-format
 msgid "Could not read file: {error}"
 msgstr ""
@@ -4793,7 +4793,7 @@ msgstr ""
 
 #: nostr/imports/errors.py:144
 #: nostr/imports/fetch.py:160
-#: nostr/ui/thumbnail_loader.py:272
+#: nostr/ui/thumbnail_loader.py:275
 msgid "network error"
 msgstr ""
 
@@ -5306,6 +5306,7 @@ msgid "This file could not be downloaded from any of your servers."
 msgstr ""
 
 #: nostr/media/publish_copy.py:639
+#: nostr/ui/thumbnail_loader.py:57
 msgid "a server returned the wrong file"
 msgstr ""
 
@@ -9106,19 +9107,15 @@ msgstr ""
 msgid "Summary (optional)"
 msgstr ""
 
-#: nostr/ui/thumbnail_loader.py:54
+#: nostr/ui/thumbnail_loader.py:56
 msgid "blob URL was not allowed"
 msgstr ""
 
-#: nostr/ui/thumbnail_loader.py:270
-#: nostr/ui/thumbnail_loader.py:282
+#: nostr/ui/thumbnail_loader.py:273
+#: nostr/ui/thumbnail_loader.py:285
 msgid "blob exceeds cache limit"
 msgstr ""
 
-#: nostr/ui/thumbnail_loader.py:280
+#: nostr/ui/thumbnail_loader.py:283
 msgid "empty response"
-msgstr ""
-
-#: nostr/ui/thumbnail_loader.py:302
-msgid "downloaded bytes do not match sha256"
 msgstr ""
