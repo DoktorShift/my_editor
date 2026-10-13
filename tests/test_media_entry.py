@@ -292,6 +292,7 @@ class _EntryWindow:
     _handle_pasted_image = MainWindow._handle_pasted_image
     _handle_dropped_images = MainWindow._handle_dropped_images
     _handle_dropped_urls = MainWindow._handle_dropped_urls
+    _library_file_at = MainWindow._library_file_at
     _confirm_paste_upload = MainWindow._confirm_paste_upload
     _paste_choice = MainWindow._paste_choice
     _store_paste_choice = MainWindow._store_paste_choice
@@ -422,7 +423,9 @@ def test_ask_consults_the_prompt_and_keeps_local_by_default(tmp_path,
 
     win._handle_pasted_image(win.editor, _clipboard_image())
 
-    assert [d.title for d in shown] == ["Upload this image to cdn.example?"]
+    assert [d.title for d in shown] == ["Upload this image to your media servers?"]
+    assert shown[0].message == ("Anyone with the link can view it. The image is already in "
+                                "your document and stays there either way.")
     assert shown[0].default.label == "Keep Local"
     assert win._uploader.calls == []
     assert len(win.image_names()) == 1
@@ -509,6 +512,7 @@ def test_a_drop_uploads_only_when_the_prompt_is_accepted(tmp_path, monkeypatch):
     win._handle_dropped_images([_png_file(tmp_path)])
 
     assert [d.title for d in shown] == ["Upload 1 image to your media servers?"]
+    assert shown[0].message.startswith("Anyone with the link can view them.")
     assert shown[0].default.label == "Upload", "dropping is a deliberate act"
     assert win._uploader.calls == []
     assert len(win.image_names()) == 1
@@ -537,6 +541,22 @@ def test_a_file_that_is_not_an_image_is_named_and_nothing_is_inserted(tmp_path):
 
     assert win.image_names() == []
     assert any("notes.png" in m for m in win.status.messages)
+
+
+def test_a_tile_dragged_from_the_media_library_is_inserted(tmp_path):
+    """A tile dragged out of the library carries the file's address; the
+    document takes it as Insert Image would, the private gate included."""
+    win = _EntryWindow(tmp_path / "cache", profile=object())
+    sha = "e" * 64
+    record = types.SimpleNamespace(hash=sha, url=f"https://cdn.example/{sha}.png")
+    win._media_store = types.SimpleNamespace(files={sha: record})
+    inserted = []
+    win._insert_media_at_cursor = lambda media, editor, alt="": inserted.append((media, editor))
+
+    win._handle_dropped_urls([QUrl(record.url), QUrl("https://elsewhere.example/a.png")])
+
+    assert inserted == [(record, win.editor)]
+    assert win.bar.unsupported == []
 
 
 def test_dropped_files_are_routed_by_extension(tmp_path):
@@ -615,9 +635,11 @@ def test_a_refresh_for_bytes_that_never_arrived_changes_nothing(tmp_path):
     assert ed.document().isModified() is False
 
 
-def test_the_prompt_names_every_server_the_image_goes_to(tmp_path, paste_choice, monkeypatch):
-    # The members' server receives the upload too, so the question has to
-    # say so: a person deciding what to publish must see every destination.
+def test_the_prompt_says_who_can_see_the_image_not_which_hosts(
+        tmp_path, paste_choice, monkeypatch):
+    # What the person decides is whether the image may be seen by anyone
+    # with its link; the servers are their own, listed in Media Servers,
+    # and a row of host names is not what they can judge it by.
     paste_choice("ask")
     box, shown = fake_alert()
     monkeypatch.setattr(alerts, "Alert", box)
@@ -627,5 +649,5 @@ def test_the_prompt_names_every_server_the_image_goes_to(tmp_path, paste_choice,
 
     win._handle_pasted_image(win.editor, _clipboard_image())
 
-    assert shown[0].title == ("Upload this image to cdn.example, "
-                              "blossom.einundzwanzig.space?")
+    assert shown[0].title == "Upload this image to your media servers?"
+    assert "cdn.example" not in shown[0].title + shown[0].message

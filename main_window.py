@@ -2999,6 +2999,11 @@ class MainWindow(QMainWindow):
         image_paths = []
         for url in urls:
             if not url.isLocalFile():
+                # A tile dragged out of the Media Library: its address,
+                # inserted as Insert Image inserts it.
+                media = self._library_file_at(url.toString())
+                if media is not None and self.current_editor() is not None:
+                    self._insert_media_at_cursor(media, self.current_editor())
                 continue
             # A URL's path has forward slashes, also on Windows.
             path = file_paths.normalize(url.toLocalFile())
@@ -3020,6 +3025,12 @@ class MainWindow(QMainWindow):
             bar = self._bar_from_widget(self.tabs.currentWidget())
             if bar:
                 bar.show_unsupported(", ".join(unsupported))
+
+    def _library_file_at(self, url: str):
+        """The Media Library's file at this address, or None."""
+        sha = hash_from_url(url)
+        store = getattr(self, "_media_store", None)
+        return store.files.get(sha) if sha and store is not None else None
 
     def _handle_dropped_images(self, paths):
         """Images were dropped on the window: adopt and insert them now.
@@ -3065,7 +3076,8 @@ class MainWindow(QMainWindow):
             title=ngettext("Upload {count} image to your media servers?",
                            "Upload {count} images to your media servers?",
                            count).format(count=count),
-            message=_("They're already in your document and stay there either way."),
+            message=_("Anyone with the link can view them. They’re already in your "
+                      "document and stay there either way."),
             buttons=(Button(_("Keep Local"), False, CANCEL), Button(_("Upload"), True, DEFAULT)))
         if not upload:
             return
@@ -6138,14 +6150,10 @@ class MainWindow(QMainWindow):
         than its host: the members' server is the association's."""
         return self._membership.server_label(origin)
 
-    def _on_media_servers_adopted(self, servers: list) -> None:
+    def _on_media_servers_adopted(self, _servers: list) -> None:
         """Nothing was configured here, so the servers the account
-        publishes became its upload servers. Said once, where it shows."""
-        hosts = ", ".join(url_safety.host_of(s) or s for s in servers)
-        self.status.showMessage(
-            _("Media uploads go to the media servers your Nostr account lists: "
-              "{hosts}").format(
-                hosts=hosts), 8000)
+        publishes became its upload servers: a background change, shown
+        in Media Servers and nowhere else."""
         if self._visible_media_library() is not None:
             self._media_store.refetch_if_targets_changed()
 
@@ -7126,7 +7134,6 @@ class MainWindow(QMainWindow):
         cursor = editor.textCursor()
         cursor.insertText(url)
         editor.setTextCursor(cursor)
-        self.status.showMessage(_("Inserted URL only (non-image): {url}").format(url=url), 5000)
 
     def _insert_asset(self, editor, asset, *, alt: str) -> None:
         """Put one asset into the document. Local only, cannot fail.
@@ -7155,7 +7162,6 @@ class MainWindow(QMainWindow):
         cursor = editor.textCursor()
         cursor.insertImage(fmt)
         editor.setTextCursor(cursor)
-        self.status.showMessage(_("Inserted image · alt: {alt}").format(alt=alt), 5000)
 
     def _refresh_asset_in_documents(self, sha: str) -> None:
         """Repaint every open document that shows this asset.
@@ -7232,18 +7238,13 @@ class MainWindow(QMainWindow):
         intent gesture, so the outcome of an accidental one has to be
         that nothing was published.
         """
-        # Every server the upload goes to, the members' server included.
-        hosts = ", ".join(
-            url_safety.host_of(s) or s for s in self._media_store.target_servers()
-        )
-        # A paste is a quick, low-intent gesture, so Keep Local is the default.
-        if hosts:
-            title = _("Upload this image to {hosts}?").format(hosts=hosts)
-        else:
-            title = _("Upload this image to your media servers?")
+        # What the person decides is who can see it, which the message
+        # says; the servers are their own, listed in Media Servers. A
+        # paste is a quick, low-intent gesture, so Keep Local is the
+        # default.
         upload, remember = ask_with_checkbox(
             self,
-            title=title,
+            title=_("Upload this image to your media servers?"),
             message=_("Anyone with the link can view it. The image is already in "
                       "your document and stays there either way."),
             buttons=(Button(_("Upload"), True, NORMAL), Button(_("Keep Local"), False, DEFAULT)),
