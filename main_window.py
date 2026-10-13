@@ -2575,7 +2575,7 @@ class MainWindow(QMainWindow):
         # too, so saving or publishing it goes on under its identifier.
         workspace_restore.restore_identity(
             ed, backup.get("draft"), backup.get("article"), backup.get("article_author"),
-            draft_type=DraftBinding)
+            backup.get("details"), draft_type=DraftBinding)
         self._attach_highlighter(ed, ed._file_path)
 
         container, bar = self._editor_container(ed)
@@ -6455,6 +6455,9 @@ class MainWindow(QMainWindow):
         )
         dialog.published.connect(self._on_nostr_article_published)
         dialog.exec()
+        # What was changed there is the article's, as in Article Details.
+        if dialog.details_changed():
+            self._set_article_details(ed, dialog.details())
 
     def _on_nostr_article_published(self, _naddr: str, results):
         self._say_published(results, article=True)
@@ -7459,7 +7462,7 @@ class MainWindow(QMainWindow):
         choice = StashChoice(
             kind=kind,
             identifier=binding.identifier,
-            title=binding.title,
+            title=details.title or binding.title,
             summary=details.summary,
         )
         if not self._confirm_images_uploaded(ed):
@@ -7554,7 +7557,9 @@ class MainWindow(QMainWindow):
         return article
 
     def _article_details_of(self, ed) -> ArticleDetails:
-        """The details of the article in a tab: those its draft holds (an
+        """The details of the article in a tab. Those set in the tab win
+        (Article Details, the publish window, a Markdown file's front
+        matter): one model for all of them. Else those its draft holds (an
         imported article's cover, hashtags, first publication date and
         source among them), with the tab's own identifier and title.
         Empty for a tab that is no article draft.
@@ -7563,6 +7568,9 @@ class MainWindow(QMainWindow):
         saved gets its first publication date from this computer's record,
         so the next save puts it into the draft, and every device that
         opens the draft keeps the date."""
+        own = getattr(ed, "_article_details", None) if ed is not None else None
+        if own is not None:
+            return own
         binding = getattr(ed, "_draft_binding", None) if ed is not None else None
         if binding is None or binding.inner_kind != INNER_KIND_LONG_FORM:
             # An article opened from the Published view carries its own.
@@ -7579,6 +7587,16 @@ class MainWindow(QMainWindow):
             details = details.with_changes(published_at=first_publications.get(
                 profile.user_pubkey, binding.identifier))
         return details
+
+    def _set_article_details(self, ed, details: ArticleDetails) -> None:
+        """The details of the article in ``ed``, as set in Article Details or
+        the publish window: kept with the tab (its next draft save, its
+        restart and crash records, a Markdown file's front matter). A change
+        marks the tab modified, as a change to its text does."""
+        if ed is None or details == self._article_details_of(ed):
+            return
+        ed._article_details = details
+        ed.document().setModified(True)
 
     def _stash_defaults_for(
         self,
@@ -7613,6 +7631,12 @@ class MainWindow(QMainWindow):
         if prior is None and published is not None:
             # An article opened from the Published view: the same article.
             title, slug, summary = published.title, published.identifier, published.summary
+        own = getattr(ed, "_article_details", None)
+        if own is not None:
+            # As set in Article Details (or a file's front matter).
+            title = own.title or title
+            summary = own.summary or summary
+            slug = slug or own.identifier
 
         if not title:
             # Fall back to the file basename without extension.
@@ -7682,6 +7706,10 @@ class MainWindow(QMainWindow):
             title=choice.title or (choice.identifier if choice.kind is StashKind.NOTE else ""),
             profile_pubkey=active.user_pubkey.lower() if active else "",
         )
+        # An article's details set in the tab are in the draft now, which
+        # holds them from here on (_article_details_of reads them there).
+        if choice.kind is StashKind.ARTICLE:
+            ed._article_details = None
         # A successful stash clears the modified flag - the tab's
         # contents now match the latest draft snapshot on the network.
         ed._recovered_title = ""

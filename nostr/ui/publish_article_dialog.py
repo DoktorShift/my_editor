@@ -37,7 +37,7 @@ from popup_placement import fitting_size
 from alerts import CANCEL, DEFAULT, NORMAL, Button, ask, answer_return_as_the_system_does
 from i18n import _, display_locale, ngettext
 
-from ..article_details import ArticleDetails
+from ..article_details import ArticleDetails, hashtags_from
 from ..first_publications import FirstPublications
 from ..avatar_store import AvatarStore
 from ..bech32 import encode_naddr
@@ -425,6 +425,8 @@ class PublishArticleDialog(QDialog):
         self._summary_edit.setText(self._details.summary)
         self._image_edit.setText(self._details.image)
         self._tags_edit.setText(", ".join(self._details.hashtags))
+        # What it showed at first: only what changes here goes back to the tab.
+        self._details_shown = self.details()
         self._apply_theme()
         self._refresh_profile_chip()
         self._refresh_meta()
@@ -841,7 +843,24 @@ class PublishArticleDialog(QDialog):
     # -- helpers / state ---------------------------------------------------
 
     def _hashtag_list(self) -> List[str]:
-        return [t.strip() for t in self._tags_edit.text().split(",") if t.strip()]
+        return list(hashtags_from(self._tags_edit.text()))
+
+    def details(self) -> ArticleDetails:
+        """The article's details as the window has them now (the one model
+        Article Details shows too): what it was given, with what was typed
+        here, and the first publication date it published with."""
+        return self._details.with_changes(
+            identifier=self._slug_edit.text().strip(),
+            title=self._title_edit.text().strip(),
+            summary=self._summary_edit.text().strip(),
+            image=self._image_edit.text().strip(),
+            hashtags=hashtags_from(self._tags_edit.text()),
+            published_at=self._published_at_used or self._details.published_at)
+
+    def details_changed(self) -> bool:
+        """Whether anything of :meth:`details` changed here (typed, or
+        published with a first publication date)."""
+        return self.details() != self._details_shown
 
     def _refresh_publish_enabled(self) -> None:
         slug = self._slug_edit.text().strip()

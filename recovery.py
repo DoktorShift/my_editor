@@ -110,8 +110,10 @@ def _source_mtime_ns(file_path: str | None) -> int | None:
 def tab_identity(editor) -> dict:
     """What a tab is besides its text, for its backup and its restart
     record: the Nostr draft it is bound to (``draft``, the binding's
-    fields) and the published article it edits (``article``, its tags,
-    and ``article_author``, whose it is). Empty for a plain document."""
+    fields), the published article it edits (``article``, its tags, and
+    ``article_author``, whose it is), and the article details set in the
+    tab (``details``, as tags: Article Details, the publish window, a
+    file's front matter). Empty for a plain document."""
     identity: dict = {}
     binding = getattr(editor, "_draft_binding", None)
     if binding is not None:
@@ -120,6 +122,9 @@ def tab_identity(editor) -> dict:
     if article is not None:
         identity["article"] = article.tags()
         identity["article_author"] = getattr(editor, "_published_author", "")
+    details = getattr(editor, "_article_details", None)
+    if details is not None:
+        identity["details"] = details.tags()
     return identity
 
 

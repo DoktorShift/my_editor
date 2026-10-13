@@ -37,7 +37,7 @@ from recovery import (
 )
 from update_check import version_tuple
 from welcome import is_pristine_welcome
-from workspace import DOCUMENT, PDF, WELCOME, TabState
+from workspace import DOCUMENT, PDF, WELCOME, TabState, are_tags
 
 
 # -- writing the tabs down -----------------------------------------------------
@@ -74,6 +74,7 @@ def capture_editor_tab(ed) -> Optional[TabState]:
         draft=identity.get("draft"),
         article=identity.get("article"),
         article_author=identity.get("article_author", ""),
+        details=identity.get("details"),
     )
 
 
@@ -215,7 +216,8 @@ def resume_tab(window, tab: TabState, *, draft_type):
     if record is not None:
         load_backup_content(ed, record, modified=tab.modified)
         ed._backup.take_over(record["_backup_file"])
-    restore_identity(ed, tab.draft, tab.article, tab.article_author, draft_type=draft_type)
+    restore_identity(ed, tab.draft, tab.article, tab.article_author, tab.details,
+                     draft_type=draft_type)
     index = _tab_index(window, ed)
     if index >= 0:
         window.tabs.setTabText(index, window._compose_tab_title(ed))
@@ -323,18 +325,20 @@ def _tab_index(window, widget) -> int:
     return -1
 
 
-def restore_identity(ed, draft, article, article_author, *, draft_type) -> None:
+def restore_identity(ed, draft, article, article_author, details=None, *,
+                     draft_type) -> None:
     """Give a reopened tab back what it was besides its text
     (recovery.tab_identity): the draft it is bound to, rebuilt as
-    ``draft_type``, and the published article it edits with whose it is.
-    Anything malformed is left out: the tab is then a plain document."""
+    ``draft_type``, the published article it edits with whose it is, and
+    the article details set in it. Anything malformed is left out: the
+    tab is then a plain document."""
     if isinstance(draft, dict):
         ed._draft_binding = _dataclass_from(draft_type, draft)
-    if isinstance(article, list) and all(
-            isinstance(tag, list) and all(isinstance(part, str) for part in tag)
-            for tag in article):
+    if are_tags(article):
         ed._published_article = ArticleDetails.from_tags(article)
         ed._published_author = article_author if isinstance(article_author, str) else ""
+    if are_tags(details):
+        ed._article_details = ArticleDetails.from_tags(details)
 
 
 def _dataclass_from(cls, data: dict):

@@ -63,6 +63,9 @@ class TabState:
     # still replaces that article after the restart, and whose it is.
     article: Optional[list] = None
     article_author: str = ""
+    # The article details set in the tab (Article Details, the publish
+    # window, a file's front matter), as tags.
+    details: Optional[list] = None
 
 
 @dataclass(frozen=True)
@@ -158,11 +161,8 @@ def _parse_tab(raw) -> Optional[TabState]:
     if kind == PDF and not path:
         return None
     draft = raw.get("draft")
-    article = raw.get("article")
-    if not (isinstance(article, list) and all(
-            isinstance(tag, list) and all(isinstance(part, str) for part in tag)
-            for tag in article)):
-        article = None
+    article = raw.get("article") if are_tags(raw.get("article")) else None
+    details = raw.get("details") if are_tags(raw.get("details")) else None
     return TabState(
         kind=kind,
         path=path,
@@ -174,7 +174,15 @@ def _parse_tab(raw) -> Optional[TabState]:
         draft=draft if isinstance(draft, dict) else None,
         article=article,
         article_author=_str(raw.get("article_author")) or "",
+        details=details,
     )
+
+
+def are_tags(value) -> bool:
+    """Whether ``value`` is a list of tags, each a list of strings."""
+    return isinstance(value, list) and all(
+        isinstance(tag, list) and all(isinstance(part, str) for part in tag)
+        for tag in value)
 
 
 def _int(value) -> int:

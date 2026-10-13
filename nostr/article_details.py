@@ -34,6 +34,17 @@ DETAILS = ("d", "title", "summary", "image", "published_at", "t")
 REBUILT = ("client", "p", "q")
 
 
+def hashtags_from(text: str) -> Tuple[str, ...]:
+    """The hashtags written in ``text``, separated by commas: lowercase,
+    without "#", each once, in the order written."""
+    found: List[str] = []
+    for raw in (text or "").split(","):
+        tag = raw.strip().lstrip("#").strip().lower()
+        if tag and tag not in found:
+            found.append(tag)
+    return tuple(found)
+
+
 @dataclass(frozen=True)
 class ArticleDetails:
     """The details of one article (see the module docstring)."""
