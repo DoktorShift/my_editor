@@ -648,6 +648,7 @@ class MainWindow(QMainWindow):
             parent=self,
         )
         self._asset_manager.asset_changed.connect(self._refresh_asset_in_documents)
+        self._asset_manager.asset_changed.connect(self._on_media_uploaded)
         self._asset_manager.asset_upload_failed.connect(self._on_asset_upload_failed)
         # How far each audio or video file's upload has got (sha256 ->
         # percent), shown on its card in the text.
@@ -3555,7 +3556,7 @@ class MainWindow(QMainWindow):
             ed._recovered_title = ""
             ed.document().setModified(False)
             self._update_tab_title()
-            self.status.showMessage(_("Saved: {path}").format(path=path))
+            self._say_saved(ed, path)
             return True
 
         except Exception as e:
@@ -3563,6 +3564,40 @@ class MainWindow(QMainWindow):
                        name=os.path.basename(path)),
                    message=f"{e}\n\n{_SAVE_FAILED_HINT}", caution=True)
             return False
+
+    def _say_saved(self, ed, path: str) -> None:
+        """Say a document was saved, and whether audio or video in it is
+        still to go in. A Markdown or HTML file holds such a file once it is
+        on a media server: until then the save writes what it can, and the
+        document is edited again when the upload is done
+        (_on_media_uploaded), as Pages does when an inserted item finishes
+        loading after a save."""
+        waiting = (self._media_not_uploaded(ed.document())
+                   if path.lower().endswith((".md", ".html", ".htm")) else [])
+        ed._media_left_out = {asset.sha256 for asset in waiting}
+        if not waiting:
+            self.status.showMessage(_("Saved: {path}").format(path=path))
+            return
+        self.status.showMessage(ngettext(
+            "Saved. “{name}” goes into the file once it is uploaded.",
+            "Saved. {count} files go into the file once they are uploaded.",
+            len(waiting)).format(name=waiting[0].alt, count=len(waiting)))
+
+    def _on_media_uploaded(self, sha: str) -> None:
+        """Audio or video a save had to leave out is uploaded: the documents
+        saved without it are edited again, so Close and Quit ask."""
+        asset = self._asset_manager.get(sha)
+        if asset is None or not asset.is_media or not asset.is_uploaded:
+            return
+        for i in range(self.tabs.count()):
+            ed = self._editor_from_widget(self.tabs.widget(i))
+            left_out = getattr(ed, "_media_left_out", set()) if ed is not None else set()
+            if sha in left_out:
+                left_out.discard(sha)
+                ed.document().setModified(True)
+                self.status.showMessage(
+                    _("“{name}” is uploaded. Save the document to put it in.").format(
+                        name=asset.alt))
 
     def _with_front_matter(self, ed, body: str) -> str:
         """A Markdown file's text: ``body`` under its front matter (Q-F), as
@@ -6655,7 +6690,7 @@ class MainWindow(QMainWindow):
                                  "{count} files are still uploading.", len(uploading)).format(
                 name=uploading[0].alt, count=len(uploading)),
             message=_("If you close the document now, the upload goes on to your media "
-                      "library, but the document doesn't keep it."),
+                      "library, but the document doesn’t keep it."),
             action=_("Close Anyway"))
 
     def _may_quit_with_uploads(self) -> bool:
@@ -6672,8 +6707,8 @@ class MainWindow(QMainWindow):
             self, title=ngettext("“{name}” is still uploading.",
                                  "{count} files are still uploading.", len(uploading)).format(
                 name=uploading[0].alt, count=len(uploading)),
-            message=_("Quitting now stops the upload. The next time you publish the "
-                      "document, or save it as a draft, it is uploaded again."),
+            message=_("Quitting now stops the upload, and the document won’t hold the "
+                      "file."),
             action=_("Quit Anyway"))
 
     def _is_media_name(self, name: str) -> bool:

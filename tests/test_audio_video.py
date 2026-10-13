@@ -277,3 +277,70 @@ def test_r_markdown_writes_audio_as_a_link_during_and_after_the_upload(tmp_path)
     assert r["copied"] is True
     assert f"Before.\n\n[song.mp3]({URL}.mp3)\n\nAfter." in r["after"]
     assert "unavailable" not in r["during"] + r["after"]
+
+
+SAVED_DURING_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+from nostr.blossom.store import MediaFile
+
+song, sha, folder = sys.argv[2], sys.argv[3], sys.argv[4]
+asked = []
+main_window._ask_save_changes = lambda parent, title, **kw: (asked.append(title), "cancel")[1]
+w = main_window.MainWindow()
+w.show()
+w._media_store.upload_bytes = lambda body, name, mime_type: None
+w.nostr_state._active = True
+w._update_nostr_commands()
+w._upload_limit = lambda: 10**9
+r = {}
+ed = w.new_tab()
+ed.setFocus()
+QTest.keyClicks(ed, "Before.")
+w._upload_into(ed, song)
+QTest.keyClicks(ed, "After.")
+path = os.path.join(folder, "doc.md")
+w._save_to(path)
+r["saved during"] = open(path, encoding="utf-8").read()
+r["modified after save"] = ed.document().isModified()
+r["said at save"] = w.status.currentMessage()
+url = f"https://cdn.example/{sha}"
+w._media_store.upload_status.emit(f"myeditor-asset:{sha}", "uploading")
+w._media_store.upload_finished.emit(f"myeditor-asset:{sha}", MediaFile(
+    hash=sha, url=url, mime_type="audio/mpeg", size=1,
+    urls=[{"server": "https://cdn.example", "url": url}]))
+app.processEvents()
+r["modified after upload"] = ed.document().isModified()
+r["said after upload"] = w.status.currentMessage()
+w.close_tab(w.tabs.currentIndex())
+r["close asked"] = len(asked)
+w._save_to(path)
+r["saved after"] = open(path, encoding="utf-8").read()
+r["modified after second save"] = ed.document().isModified()
+ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_a_document_saved_while_its_audio_uploads_is_edited_again_when_it_is_done(tmp_path):
+    """Review N1, as Pages does when an inserted item finishes loading after
+    a save: the save writes what it can, says the file goes in once
+    uploaded, and the document is edited again when it is, so Close and
+    Quit ask."""
+    song = tmp_path / "song.mp3"
+    song.write_bytes(BODY)
+    r = run_window_script(SAVED_DURING_SCRIPT, tmp_path, str(song), SHA, str(tmp_path))
+    assert r["saved during"] == "Before.\n\nAfter.\n" and SHA not in r["saved during"]
+    assert r["modified after save"] is False
+    assert "“song.mp3” goes into the file once it is uploaded" in r["said at save"]
+    assert r["modified after upload"] is True
+    assert r["said after upload"] == "“song.mp3” is uploaded. Save the document to put it in."
+    assert r["close asked"] == 1
+    assert f"Before.\n\n{URL}.mp3\n\nAfter." in r["saved after"]
+    assert r["modified after second save"] is False

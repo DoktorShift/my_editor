@@ -249,9 +249,14 @@ def _paragraph_block(block, image_target) -> _Block:
         spans = _merged([_plain_weight(span) for span in _spans_of(runs, image_target)])
         return _Block("heading", spans, level=heading, spaced=True)
     quote = fmt.property(QTextFormat.Property.BlockQuoteLevel)
+    spans = _spans_of(runs, image_target)
+    if not spans and not text.strip(OBJECT_REPLACEMENT + " \t"):
+        # Only objects, none of them written here (audio or video not
+        # uploaded yet): no paragraph, rather than an empty one.
+        return _Block("empty", spaced=spaced)
     if isinstance(quote, int) and quote > 0:
-        return _Block("quote", _spans_of(runs, image_target), level=quote, spaced=spaced)
-    return _Block("paragraph", _spans_of(runs, image_target), spaced=spaced, indent=indent)
+        return _Block("quote", spans, level=quote, spaced=spaced)
+    return _Block("paragraph", spans, spaced=spaced, indent=indent)
 
 
 def _list_block(block, text_list, image_target) -> _Block:
