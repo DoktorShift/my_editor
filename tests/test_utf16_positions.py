@@ -139,3 +139,17 @@ def test_a_slash_after_emoji_opens_the_slash_menu(before):
     s = Setup()
     type_text(s.editor, before + "/he")
     assert s.titles()[:1] == ["Heading 1"]
+
+
+@pytest.mark.parametrize("text, markdown", [
+    ("🌸 a **bold** word", "🌸 a **bold** word\n"),
+    ("👨‍👩‍👧 an _italic_ 🇩🇪 word", "👨‍👩‍👧 an *italic* 🇩🇪 word\n"),
+    ("👍🏽 run `ls 🌸` now", "👍🏽 run `ls 🌸` now\n"),
+    ("a **🌸 bold** word", "a **🌸 bold** word\n"),
+    ("an _italic_👍🏽 x", "an *italic*👍🏽 x\n"),
+])
+def test_markdown_shortcuts_after_emoji_style_the_words_typed(text, markdown):
+    from tests.rich_text_helpers import assert_round_trip
+    from tests.test_markdown_shortcuts import typed
+    ed = typed(text)
+    assert assert_round_trip(ed.document()) == markdown
