@@ -219,7 +219,8 @@ def resume_tab(window, tab: TabState, *, draft_type):
         load_backup_content(ed, record, modified=tab.modified)
         ed._backup.take_over(record["_backup_file"])
     restore_identity(ed, tab.draft, tab.article, tab.article_author, tab.details,
-                     tab.front_matter, draft_type=draft_type)
+                     tab.front_matter, record.get("newline") if record is not None else None,
+                     draft_type=draft_type)
     index = _tab_index(window, ed)
     if index >= 0:
         window.tabs.setTabText(index, window._compose_tab_title(ed))
@@ -328,13 +329,15 @@ def _tab_index(window, widget) -> int:
 
 
 def restore_identity(ed, draft, article, article_author, details=None,
-                     matter=None, *, draft_type) -> None:
+                     matter=None, newline=None, *, draft_type) -> None:
     """Give a reopened tab back what it was besides its text
     (recovery.tab_identity): the draft it is bound to, rebuilt as
-    ``draft_type``, the published article it edits with whose it is, and
-    the article details set in it, and its file's front matter as it was
-    written. Anything malformed is left out: the tab is then a plain
-    document."""
+    ``draft_type``, the published article it edits with whose it is, the
+    article details set in it, its file's front matter as it was written,
+    and the line ending its file's text is saved with. Anything malformed
+    is left out: the tab is then a plain document."""
+    if newline in ("\r\n", "\n", "\r"):
+        ed._newline = newline
     if isinstance(draft, dict):
         ed._draft_binding = _dataclass_from(draft_type, draft)
     if are_tags(article):

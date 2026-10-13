@@ -1053,3 +1053,55 @@ def test_a_number_typed_into_a_list_is_written_as_text():
     text = "---\ntags:\n  - python\n  - 3.10\n---\nB\n"
     assert changed(text, hashtags=("python", "3.10", "3.11")) == text.replace(
         "  - 3.10\n", '  - 3.10\n  - "3.11"\n')
+
+
+RESTORED_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtGui import QTextCursor
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+from recovery import read_backup
+
+w = main_window.MainWindow()
+w.show()
+r = {}
+for path in sys.argv[2:]:
+    ed = w.open_path(path)
+    c = ed.textCursor()
+    c.movePosition(QTextCursor.MoveOperation.End)
+    c.insertText(" More.")
+    ed._backup.write_now()
+    record = read_backup(ed._backup.path)
+    ed.document().setModified(False)
+    w.close_tab(w.tabs.currentIndex())
+    app.processEvents()
+    restored = w._restore_one_backup(record)
+    w.tabs.setCurrentIndex(w.tabs.count() - 1)
+    w._save_to(path)
+    r[os.path.basename(path)] = open(path, "rb").read().decode("utf-8")
+    restored.document().setModified(False)
+    w.close_tab(w.tabs.currentIndex())
+    app.processEvents()
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_a_restored_tab_saves_with_the_line_endings_its_file_had(tmp_path):
+    """Round 9, M2: a tab restored from its backup saved its text with this
+    system's line ending under a front matter keeping the file's own."""
+    texts = {"crlf.md": "---\r\ntitle: A\r\ntags: [x]\r\n---\r\n\r\nBody one.\r\nBody two.\r\n",
+             "bom_crlf.md": "﻿---\r\ntitle: A\r\n---\r\n\r\nBody.\r\n",
+             "toml_crlf.md": '+++\r\ntitle = "A"\r\n+++\r\n\r\nBody.\r\n'}
+    paths = []
+    for name, text in texts.items():
+        (tmp_path / name).write_bytes(text.encode("utf-8"))
+        paths.append(str(tmp_path / name))
+    r = run_window_script(RESTORED_SCRIPT, tmp_path, *paths)
+    for name, text in texts.items():
+        saved = r[name]
+        assert "More." in saved and saved.startswith(text.split("Body")[0]), name
+        assert saved.count("\n") == saved.count("\r\n"), (name, saved)   # every one CRLF

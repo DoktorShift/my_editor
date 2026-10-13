@@ -2647,7 +2647,8 @@ class MainWindow(QMainWindow):
         # too, so saving or publishing it goes on under its identifier.
         workspace_restore.restore_identity(
             ed, backup.get("draft"), backup.get("article"), backup.get("article_author"),
-            backup.get("details"), backup.get("front_matter"), draft_type=DraftBinding)
+            backup.get("details"), backup.get("front_matter"), backup.get("newline"),
+            draft_type=DraftBinding)
         self._attach_highlighter(ed, ed._file_path)
 
         container, bar = self._editor_container(ed)

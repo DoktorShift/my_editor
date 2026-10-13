@@ -112,9 +112,11 @@ def tab_identity(editor) -> dict:
     """What a tab is besides its text, for its backup and its restart
     record: the Nostr draft it is bound to (``draft``, the binding's
     fields), the published article it edits (``article``, its tags, and
-    ``article_author``, whose it is), and the article details set in the
+    ``article_author``, whose it is), the article details set in the
     tab (``details``, as tags: Article Details, the publish window, a
-    file's front matter). Empty for a plain document."""
+    file's front matter), its file's front matter as written, and the line
+    ending its file's text is saved with (``newline``). Empty for a plain
+    document."""
     identity: dict = {}
     binding = getattr(editor, "_draft_binding", None)
     if binding is not None:
@@ -130,6 +132,9 @@ def tab_identity(editor) -> dict:
     if front is not None:
         # A Markdown file's front matter as written, every byte of it.
         identity["front_matter"] = front_matter.join(front, "")
+    newline = getattr(editor, "_newline", None)
+    if newline:
+        identity["newline"] = newline
     return identity
 
 
