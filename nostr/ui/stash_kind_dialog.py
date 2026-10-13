@@ -432,10 +432,15 @@ class StashKindDialog(QDialog):
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
-        # It opens on its action, so Return saves and Space does too.
-        start_on_default(self._save_btn)
-
         self._refresh_save_enabled()
+        # It opens on its action, so Return saves and Space does too; an
+        # article without a title yet opens on its title, which Save waits
+        # for (the focus would otherwise fall to Cancel, which on Windows
+        # and Linux then takes the default).
+        if self._save_btn.isEnabled():
+            start_on_default(self._save_btn)
+        else:
+            self._title_edit.setFocus()
 
     def _apply_theme(self) -> None:
         # The default button, its focus ring and its dimmed state from the

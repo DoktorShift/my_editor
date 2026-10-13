@@ -98,6 +98,10 @@ def test_save_draft_looks_dimmed_while_it_cannot_be_chosen(shown, dark):
     dialog = shown(default=StashKind.ARTICLE, is_dark=dark)
     save = dialog._save_btn
     assert not save.isEnabled()
+    # It opens on the title Save waits for: a dimmed Save can't take the
+    # focus, and Cancel would then take the default on Windows and Linux
+    # (review P1: the test failed there, with Save never the default).
+    assert dialog.focusWidget() is dialog._title_edit
     inside = save.grab().toImage().pixelColor(6, save.height() // 2)
     assert inside == QColor(DARK_MENU_BG if dark else LIGHT_MENU_BG)
     dialog._title_edit.setText("A title")
