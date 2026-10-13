@@ -24,11 +24,11 @@ from typing import Iterator, List, Optional, Tuple
 
 from PySide6.QtGui import (
     QFont, QFontDatabase, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextDocument,
-    QTextDocumentFragment, QTextFormat, QTextLength, QTextListFormat, QTextTable,
-    QTextTableFormat,
+    QTextDocumentFragment, QTextFormat, QTextImageFormat, QTextLength, QTextListFormat,
+    QTextTable, QTextTableFormat,
 )
 
-from doc_walk import UPLOAD, iter_blocks
+from doc_walk import iter_blocks
 
 # Inline styles, by name. Underline has no Markdown; it stays in local
 # files only (markdown_writer.has_local_only_formatting).
@@ -848,12 +848,14 @@ def insert_divider(cursor: QTextCursor) -> None:
     cursor.endEditBlock()
 
 
-def insert_own_paragraph(cursor: QTextCursor, text: str) -> None:
-    """``text`` as a Body paragraph of its own (a reference to a note or an
-    article, which readers show as a card only when it stands alone): the
-    paragraph at the cursor when it is empty, else a new one after it;
-    after a table or a block of code when the cursor is in one. An empty
-    paragraph follows, where the cursor goes. One step on the undo stack."""
+def insert_own_paragraph(cursor: QTextCursor, text: str = "",
+                         image: Optional[QTextImageFormat] = None) -> None:
+    """``text``, or the object ``image`` (audio or video), as a Body
+    paragraph of its own (readers show a note, an article or a player as a
+    card only when it stands alone): the paragraph at the cursor when it is
+    empty, else a new one after it; after a table or a block of code when
+    the cursor is in one. An empty paragraph follows, where the cursor
+    goes. One step on the undo stack."""
     cursor.beginEditBlock()
     if cursor.currentTable() is not None:
         leave_table(cursor)
@@ -866,97 +868,16 @@ def insert_own_paragraph(cursor: QTextCursor, text: str) -> None:
     if block.text() or _has_own_style(block):
         cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
         cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
-    cursor.insertText(text, QTextCharFormat())
+    if image is not None:
+        cursor.insertImage(image)
+    else:
+        cursor.insertText(text, QTextCharFormat())
     after = cursor.block().next()
     if after.isValid() and not after.text() and not _has_own_style(after) \
             and QTextCursor(after).currentTable() is None:
         cursor.setPosition(after.position())
     else:
         cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
-    cursor.endEditBlock()
-
-
-# Upload placeholders (doc_walk.UPLOAD): a paragraph standing for a file
-# being uploaded (audio or video). It takes part in Undo; undone, the
-# upload finishes in the media library and nothing is put in its place.
-
-def insert_upload_placeholder(cursor: QTextCursor, upload_id: str, words: str) -> None:
-    """A paragraph of its own saying ``words`` for the upload ``upload_id``,
-    where insert_own_paragraph puts one. One step on the undo stack."""
-    edit = QTextCursor(cursor.document())
-    edit.beginEditBlock()
-    insert_own_paragraph(cursor, words)
-    block = cursor.block().previous()
-    fmt = block.blockFormat()
-    fmt.setProperty(UPLOAD, upload_id)
-    QTextCursor(block).setBlockFormat(fmt)
-    words_format = QTextCharFormat()
-    words_format.setFontItalic(True)
-    span = QTextCursor(block)
-    span.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
-    span.mergeCharFormat(words_format)
-    edit.endEditBlock()
-
-
-def upload_placeholders(doc) -> List[Tuple[str, object]]:
-    """(upload id, block) of every upload placeholder in ``doc``."""
-    found = []
-    block = doc.begin()
-    while block.isValid():
-        upload_id = block.blockFormat().property(UPLOAD)
-        if upload_id:
-            found.append((str(upload_id), block))
-        block = block.next()
-    return found
-
-
-def is_upload_placeholder(block) -> bool:
-    return bool(block.blockFormat().property(UPLOAD))
-
-
-def set_upload_words(block, words: str) -> None:
-    """What the placeholder says (still uploading, or that it failed)."""
-    span = QTextCursor(block)
-    span.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
-    italic = QTextCharFormat()
-    italic.setFontItalic(True)
-    span.insertText(words, italic)
-
-
-def finish_upload(block, url: str) -> None:
-    """The placeholder becomes the uploaded file's address, a link showing
-    itself (written bare, where readers show a player). One undo step."""
-    cursor = QTextCursor(block)
-    cursor.beginEditBlock()
-    fmt = block.blockFormat()
-    fmt.clearProperty(UPLOAD)
-    cursor.setBlockFormat(fmt)
-    cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
-    link = QTextCharFormat()
-    link.setAnchor(True)
-    link.setAnchorHref(url)
-    cursor.insertText(url, link)
-    cursor.endEditBlock()
-
-
-def remove_upload(block) -> None:
-    """The placeholder goes, with its paragraph. One undo step."""
-    cursor = QTextCursor(block)
-    cursor.beginEditBlock()
-    previous = block.previous()
-    if previous.isValid():
-        # From the end of the paragraph before: what stays keeps its format.
-        cursor.setPosition(previous.position() + previous.length() - 1)
-        cursor.setPosition(block.position() + block.length() - 1,
-                           QTextCursor.MoveMode.KeepAnchor)
-        cursor.removeSelectedText()
-    else:
-        cursor.setBlockFormat(QTextBlockFormat())
-        cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock,
-                            QTextCursor.MoveMode.KeepAnchor)
-        cursor.removeSelectedText()
-        if block.next().isValid():
-            cursor.deleteChar()
     cursor.endEditBlock()
 
 

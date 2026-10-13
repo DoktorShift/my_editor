@@ -80,6 +80,7 @@ class _Window:
     _publish_payload = MainWindow._publish_payload
     _publish_text = MainWindow._publish_text
     _unpublishable_images = MainWindow._unpublishable_images
+    _media_not_uploaded = MainWindow._media_not_uploaded
     _has_images = MainWindow._has_images
     _loses_content_on_save = MainWindow._loses_content_on_save
     _has_formatting = MainWindow._has_formatting

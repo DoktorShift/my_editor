@@ -151,6 +151,12 @@ class DocumentAsset:
         return asset_key(self.sha256)
 
     @property
+    def is_media(self) -> bool:
+        """Audio or video (MediaStore's upload, shown as a card, written as
+        its address), not a picture."""
+        return self.mime.startswith(("audio/", "video/"))
+
+    @property
     def is_uploaded(self) -> bool:
         return (
             self.upload_state in (AssetState.MIRRORED, AssetState.COMPLETE)

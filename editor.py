@@ -27,6 +27,7 @@ import announce
 import image_safety
 import link_url
 import markdown_shortcuts
+import media_files
 import paste
 import rich_text
 from slash_menu import SlashMenu
@@ -136,6 +137,8 @@ class HtmlEditor(QTextEdit):
         # Injected by the window so the editor carries no knowledge of
         # what an asset is or where its bytes live.
         self._resource_resolver = None
+        # Whether an object is audio or video (set_media_check).
+        self._is_media = None
         self._asset_scheme = None
         self._asset_placeholder = None
         self._local_image_resolver = None
@@ -1056,6 +1059,60 @@ class HtmlEditor(QTextEdit):
         if has_bullet:
             self._indent_typed_bullet(line, start, spaces, has_bullet, delta)
 
+    # -------- Audio and video --------
+    def set_media_check(self, check) -> None:
+        """Install ``check(name)``: whether the object named ``name`` is
+        audio or video (a paragraph of its own, kept that way)."""
+        self._is_media = check
+
+    def is_media_block(self, block) -> bool:
+        """Whether ``block`` holds an audio or video object and nothing else."""
+        if self._is_media is None or not block.isValid() or block.text() != "\ufffc":
+            return False
+        fmt = block.begin().fragment().charFormat()
+        return fmt.isImageFormat() and bool(self._is_media(fmt.toImageFormat().name()))
+
+    def _keep_media_apart(self, e) -> bool:
+        """Audio or video stays a paragraph of its own: typing in its
+        paragraph goes into a new one after it, Return there starts a clean
+        paragraph, and Backspace from the paragraph below (or Delete from
+        the one above) takes it away whole, as one step, rather than joining
+        text to it. True when the key was answered here."""
+        cursor = self.textCursor()
+        if cursor.hasSelection():
+            return False
+        block = cursor.block()
+        if e.key() in (Qt.Key_Return, Qt.Key_Enter) and self.is_media_block(block):
+            # A clean paragraph: one Qt makes would take the object's format.
+            cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+            cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
+            self.setTextCursor(cursor)
+            return True
+        if e.text() and e.text().isprintable() and self.is_media_block(block):
+            cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+            cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
+            self.setTextCursor(cursor)
+            return False                       # the character is typed there
+        if e.key() == Qt.Key_Backspace and cursor.atBlockStart() \
+                and self.is_media_block(block.previous()):
+            self._remove_media_block(block.previous())
+            return True
+        if e.key() == Qt.Key_Delete and cursor.atBlockEnd() \
+                and self.is_media_block(block.next()) and not self.is_media_block(block):
+            self._remove_media_block(block.next())
+            return True
+        return False
+
+    def _remove_media_block(self, block) -> None:
+        cursor = QTextCursor(block)
+        cursor.beginEditBlock()
+        cursor.movePosition(QTextCursor.MoveOperation.NextBlock, QTextCursor.MoveMode.KeepAnchor)
+        if cursor.position() == block.position():          # the last paragraph
+            cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock,
+                                QTextCursor.MoveMode.KeepAnchor)
+        cursor.removeSelectedText()
+        cursor.endEditBlock()
+
     # -------- Links --------
     def set_nostr_check(self, check) -> None:
         """Install ``check()``: whether a Nostr account is in use."""
@@ -1412,6 +1469,10 @@ class HtmlEditor(QTextEdit):
         if (e.key() == Qt.Key_Z and e.modifiers() == (Qt.ControlModifier | Qt.ShiftModifier)) or \
            (e.key() == Qt.Key_Y and e.modifiers() == Qt.ControlModifier):
             self.redo()
+            return
+
+        if self._keep_media_apart(e):
+            self.ensureCursorVisible()
             return
 
         if e.text() and e.text().isprintable():
@@ -2006,9 +2067,12 @@ class HtmlEditor(QTextEdit):
         if source.hasUrls() and self.isSignalConnected(
                 QMetaMethod.fromSignal(self.urls_dropped)):
             urls = list(source.urls())
-            if urls and all(u.isLocalFile() and image_safety.is_image_file(u.toLocalFile())
-                            for u in urls):
-                # Image files copied in the Finder or Explorer.
+            if urls and all(u.isLocalFile() and (
+                    image_safety.is_image_file(u.toLocalFile())
+                    or (self.nostr_in_use() and media_files.is_audio_or_video(u.toLocalFile())))
+                    for u in urls):
+                # Image files copied in the Finder or Explorer, and, while
+                # a Nostr account is in use, audio and video, as a drop.
                 self.urls_dropped.emit(urls)
                 return True
         if source.hasImage() and not text.strip() and self.isSignalConnected(

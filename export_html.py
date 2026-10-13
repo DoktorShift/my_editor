@@ -39,6 +39,7 @@ from PySide6.QtGui import (
     QTextListFormat,
 )
 
+import media_files
 import rich_text
 from constants import DARK_BG, DARK_FG, LIGHT_BG, LIGHT_FG, MONO_FONT
 from i18n import _
@@ -138,6 +139,18 @@ def _render_image(img_fmt, source_url_for, policy, asset_resolver) -> str:
     source_url = source_url_for(name) if source_url_for else None
     data = None
     resolved = asset_resolver(name) if asset_resolver else None
+    kind = media_files.kind_of(str(getattr(resolved, "mime", "") or ""))
+    if kind is not None:
+        # Audio or video: a link to it once it is on a media server, where a
+        # reader of the page finds it; nothing while it is not (never a
+        # picture of it, never a placeholder).
+        remote = str(getattr(resolved, "remote_url", "") or "")
+        if not remote:
+            return ""
+        words = (_("▶ Audio: {name}") if kind == media_files.AUDIO
+                 else _("▶ Video: {name}")).format(name=alt or remote.rsplit("/", 1)[-1])
+        return f'<a href="{html.escape(remote, quote=True)}">{html.escape(words)}</a>'
+
     if resolved is not None and getattr(resolved, "data", b""):
         data = resolved.data
         remote_url = str(getattr(resolved, "remote_url", "") or "")

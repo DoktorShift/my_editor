@@ -28,10 +28,12 @@ from typing import Callable, Deque, Dict, Iterable, List, Optional, Protocol, Tu
 
 from PySide6.QtCore import QObject, Signal
 
+import media_files
 import url_safety
 
 from export_html import sniff_image_mime
 
+from ..blossom import BLOSSOM_MAX_FILE_SIZE
 from ..blossom.errors import is_signer_failure
 
 # The one BUD-03 hash-from-URL rule, imported rather than repeated: a
@@ -61,6 +63,8 @@ ADOPTABLE_MIMES = frozenset(
 # Matches the blob cache's own download cap so both halves of the cache
 # agree on what can exist in it.
 MAX_ASSET_BYTES = 25 * 1024 * 1024
+# Audio and video: as large as a media server takes at most.
+MAX_MEDIA_BYTES = BLOSSOM_MAX_FILE_SIZE
 
 _DATA_URI_RE = re.compile(r"^data:([^,]*),(.*)$", re.DOTALL)
 
@@ -313,6 +317,34 @@ class AssetManager(QObject):
             created_at=now,
             updated_at=now,
         )
+        self._index.put(asset)
+        self.asset_added.emit(sha)
+        return asset
+
+    def adopt_media(self, data: bytes, *, mime: str, name: str) -> Optional[DocumentAsset]:
+        """Take ownership of an audio or video file's bytes (``mime`` from
+        media_files' table of the types accepted, ``name`` the file's, kept
+        as its alternative text). The same record, upload queue and index
+        as a picture's, so the text holds it as an object named by its
+        key, and it outlives a crash or a restart. None when refused."""
+        if not data or media_files.kind_of(mime) is None or len(data) > MAX_MEDIA_BYTES:
+            return None
+        sha = hashlib.sha256(data).hexdigest()
+        existing = self._index.get(sha)
+        if existing is not None:
+            if not self._blob_store.has(sha):
+                try:
+                    self._blob_store.put_bytes(data)
+                except OSError:
+                    pass
+            return existing
+        try:
+            self._blob_store.put_bytes(data)
+        except OSError:
+            return None
+        now = int(time.time())
+        asset = DocumentAsset(sha256=sha, mime=mime, size=len(data), alt=name,
+                              upload_state=AssetState.LOCAL, created_at=now, updated_at=now)
         self._index.put(asset)
         self.asset_added.emit(sha)
         return asset

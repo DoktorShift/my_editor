@@ -1,28 +1,35 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Pins audio and video in the text (Insert > Audio or Video, a dropped
-file: rich_text's upload placeholders, the window's upload through the
-media store, the writers, imeta, the preview).
+"""Pins audio and video in the text (Insert > Audio or Video, a dropped or
+pasted file: media_files.py, the asset manager's adopt_media, the editor's
+media paragraphs, the window's card, writers, gate and close questions).
 
-What must hold:
+What must hold (and the checkpoint 4 review's H1, M1 to M3, L3 to L6):
 
-  A file goes to the media servers the Media Library's own way, and a
-  paragraph of its own stands for it meanwhile ("Uploading name…"), one
-  step to undo. Undone or removed, the upload ends in the media library
-  and nothing is put in its place. Done, the paragraph becomes the file's
-  address (with its extension, so readers can tell what it is), where
-  readers show a player; failed, it says so, and the person chooses Try
-  Again or Remove. A file larger than every media server takes is refused
-  at once, saying the limit.
+  The file is an object of the text, as a picture is: an asset named by
+  the hash of its bytes, in a paragraph of its own, shown as a card that
+  says how its upload is going ("Uploading… 42 %"). Its upload goes to the
+  media servers through the asset manager's queue; finishing it changes
+  nothing in the document and no step of Undo, so Undo takes back the
+  person's own last change, and Undo or Redo of the insertion brings
+  back the file itself, never an orphan placeholder. The same file twice
+  is one upload.
 
-  A placeholder is never saved or published as text: the writers leave it
-  out, and nothing is published or saved as a draft while one is there.
-  Published, the file is described (imeta: its type, hash and size) from
-  what the media servers confirmed. The preview shows "▶ Audio: name"
-  where readers put the player.
+  It stays a paragraph of its own: typing in its paragraph goes into a new
+  one after it; Return after it starts a clean paragraph; Backspace from
+  the paragraph below takes it away whole, never joining text to it.
 
-  The command is Nostr's (D-1): in the Insert menu only while an account
-  is in use.
+  Until it is on a media server it is written nowhere (Markdown, a note,
+  plain text, an HTML file, the preview) and nothing is published or saved
+  as a draft; asking to publish uploads it again after a failure. Once it
+  is, it is written as its address (with its extension), on a line of its
+  own, and described by imeta from what this app knows of it. A crash
+  record keeps the object, never words standing for it.
+
+  Closing a document or quitting while an upload runs asks first, with
+  Cancel the default. A pasted audio or video file goes in as a dropped
+  one, while an account is in use. Types come from one table, whatever
+  the computer's says.
 """
 
 import hashlib
@@ -34,17 +41,17 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QMimeData, QUrl  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-import rich_text  # noqa: E402
-from doc_walk import serialize_plain_with_images  # noqa: E402
+import media_files  # noqa: E402
 from editor import HtmlEditor  # noqa: E402
-from markdown_writer import document_to_markdown, document_to_note_text, read_markdown  # noqa: E402,E501
 from nostr import preview  # noqa: E402
 from tests.app_process import run_window_script  # noqa: E402
 
-SHA = hashlib.sha256(b"sound").hexdigest()
-URL = f"https://cdn.example/{SHA}.mp3"
+BODY = b"ID3" + b"sound" * 50
+SHA = hashlib.sha256(BODY).hexdigest()
+URL = f"https://cdn.example/{SHA}"
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -52,142 +59,137 @@ def qt_app():
     return QApplication.instance() or QApplication([])
 
 
-def with_placeholder(markdown="Listen:\n"):
-    ed = HtmlEditor()
-    read_markdown(ed.document(), markdown)
-    cursor = ed.textCursor()
-    cursor.movePosition(cursor.MoveOperation.End)
-    rich_text.insert_upload_placeholder(cursor, "id-1", "Uploading song.mp3…")
-    ed.setTextCursor(cursor)
-    return ed
-
-
-def test_a_placeholder_stands_alone_and_is_one_undo_step():
-    ed = with_placeholder()
-    found = rich_text.upload_placeholders(ed.document())
-    assert [upload_id for upload_id, _block in found] == ["id-1"]
-    assert found[0][1].text() == "Uploading song.mp3…"
-    ed.undo()
-    assert rich_text.upload_placeholders(ed.document()) == []
-    assert ed.toPlainText() == "Listen:"
-
-
-def test_a_placeholder_is_never_written_as_text():
-    ed = with_placeholder()
-    for written in (document_to_markdown(ed.document()), document_to_note_text(ed.document()),
-                    serialize_plain_with_images(ed.document(), lambda fmt: None)):
-        assert "Uploading" not in written and "Listen:" in written
-
-
-def test_done_it_becomes_the_address_written_bare():
-    ed = with_placeholder()
-    _id, block = rich_text.upload_placeholders(ed.document())[0]
-    rich_text.finish_upload(block, URL)
-    assert rich_text.upload_placeholders(ed.document()) == []
-    assert URL in document_to_markdown(ed.document())
-    assert "Uploading" not in ed.toPlainText()
-
-
-def test_removed_its_paragraph_goes_and_the_text_around_it_stays():
-    ed = with_placeholder("Before.\n\nAfter.\n")
-    blocks = rich_text.upload_placeholders(ed.document())
-    rich_text.set_upload_words(blocks[0][1], "Couldn’t upload song.mp3.")
-    assert blocks[0][1].text() == "Couldn’t upload song.mp3."
-    rich_text.remove_upload(blocks[0][1])
-    assert rich_text.upload_placeholders(ed.document()) == []
-    assert ed.toPlainText().split("\n")[:2] == ["Before.", "After."]
-
-
-def test_an_address_without_an_extension_gets_the_files():
-    from main_window import _with_extension
-    assert _with_extension(f"https://cdn.example/{SHA}", "/x/Song.MP3") == \
-        f"https://cdn.example/{SHA}.mp3"
-    assert _with_extension(URL, "/x/other.wav") == URL
+def test_types_come_from_one_table_whatever_the_computer_says():
+    assert media_files.type_of("/x/Song.M4A") == "audio/mp4"
+    assert media_files.type_of("clip.ogg") == "audio/ogg"
+    assert media_files.type_of("film.mov") == "video/quicktime"
+    assert media_files.type_of("https://cdn.example/a.flac?x=1") == "audio/flac"
+    assert media_files.type_of("notes.txt") is None
+    assert media_files.extension_for("audio/mpeg") == ".mp3"
 
 
 def test_the_preview_shows_where_readers_put_the_player():
-    markdown = preview.markdown_for_preview(f"Listen:\n\n{URL}\n\nInline {URL} stays.")
-    assert f"[▶ Audio: {SHA}.mp3]({URL})" in markdown
-    assert f"Inline {URL} stays." in markdown
+    url = f"{URL}.mp3"
+    markdown = preview.markdown_for_preview(f"Listen:\n\n{url}\n\nInline {url} stays.")
+    assert f"[▶ Audio: {SHA}.mp3]({url})" in markdown
+    assert f"Inline {url} stays." in markdown
     assert "▶ Video: clip.mp4" in preview.note_html("See https://cdn.example/clip.mp4")
+
+
+def test_a_pasted_audio_file_goes_in_as_a_dropped_one_only_with_an_account(tmp_path):
+    song = tmp_path / "song.mp3"
+    song.write_bytes(BODY)
+    data = QMimeData()
+    data.setUrls([QUrl.fromLocalFile(str(song))])
+    data.setText("song.mp3")
+    for account, expected in ((True, 1), (False, 0)):
+        ed = HtmlEditor()
+        ed.set_nostr_check(lambda: account)
+        dropped = []
+        ed.urls_dropped.connect(dropped.append)
+        ed.insertFromMimeData(data)
+        assert len(dropped) == expected
+        assert ("song.mp3" in ed.toPlainText()) is (not account)
 
 
 SCRIPT = r"""
 import json, os, sys
 sys.path.insert(0, sys.argv[1])
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QTextCursor
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 app = QApplication(sys.argv[:1])
-import main_window, rich_text
+import main_window, recovery
+from doc_walk import serialize_plain_with_images
+from markdown_writer import document_to_markdown
+from export_html import document_to_html
 from nostr.blossom.store import MediaFile
 from nostr.publisher import build_imeta_tags
 
-path, big = sys.argv[2], sys.argv[3]
+path, big, sha = sys.argv[2], sys.argv[3], sys.argv[4]
 told, asked = [], []
 main_window.inform = lambda parent, **kw: told.append(kw.get("title", ""))
-answers = [True, False]
-main_window.ask = lambda parent, **kw: (asked.append(kw.get("title", "")), answers.pop(0))[1]
+main_window.confirm_destructive = lambda parent, **kw: (asked.append(kw), False)[1]
 w = main_window.MainWindow()
 w.show()
-ed = w.new_tab()
 sent = []
 w._media_store.upload_bytes = lambda body, name, mime_type: sent.append((name, mime_type, len(body)))
-r = {}
-w._fill_insert_menu()
-r["menu_without"] = "nostr.insert_audio_video" in [a.objectName() for a in w.m_insert.actions()]
 w.nostr_state._active = True
 w._update_nostr_commands()
-w._fill_insert_menu()
-r["menu_with"] = "nostr.insert_audio_video" in [a.objectName() for a in w.m_insert.actions()]
+ed = w.new_tab()
+ed.setFocus()
+r = {}
+QTest.keyClicks(ed, "Listen:")
 w._upload_limit = lambda: 100
 w._upload_into(ed, big)
 r["too_large"] = told[-1] if told else ""
-r["no_placeholder"] = rich_text.upload_placeholders(ed.document()) == []
 w._upload_limit = lambda: 10**9
 w._upload_into(ed, path)
+doc = ed.document()
+blocks = []
+b = doc.begin()
+while b.isValid():
+    blocks.append(b.text()); b = b.next()
+r["blocks"] = blocks
+r["media_block"] = ed.is_media_block(doc.findBlockByNumber(1))
 r["sent"] = sent
-r["placeholder"] = [b.text() for _i, b in rich_text.upload_placeholders(ed.document())]
-r["gate"] = w._confirm_images_uploaded(ed)
-r["gate_said"] = told[-1]
-name = sent[0][0]
-w._media_store.upload_failed.emit(name, "The server is busy.")
-r["asked"] = asked[-1]
-r["retried"] = len(sent)
-r["after_retry"] = [b.text() for _i, b in rich_text.upload_placeholders(ed.document())]
-sha = sys.argv[4]
-media = MediaFile(hash=sha, url=f"https://cdn.example/{sha}", mime_type="audio/mpeg", size=5,
-                  urls=[{"server": "https://cdn.example", "url": f"https://cdn.example/{sha}"}])
-w._media_store._files[sha] = media          # the library knows it, as after an upload
-w._media_store.upload_finished.emit(name, media)
-r["text"] = ed.toPlainText()
-r["gate_after"] = w._confirm_images_uploaded(ed)
-content, records = w._publish_payload(ed, "markdown")
-r["imeta"] = build_imeta_tags(records, content)
-# Both publish windows are given what is known of the media, for imeta.
-given = {}
-class Window:
-    def __init__(self, **kw):
-        given[kw.get("body_markdown") is not None and "article" or "note"] = kw.get("media")
-        self.published = type("S", (), {"connect": lambda *a: None})()
-    def exec(self):
-        return 0
-    def details_changed(self):
-        return False
-main_window.PublishNoteDialog = Window
-main_window.PublishArticleDialog = Window
-import types
-real_default = w._profile_store.default
-w._profile_store.default = lambda: types.SimpleNamespace(user_pubkey="a1" * 32)
-w._on_nostr_publish_note()
-w._on_nostr_publish_article()
-w._profile_store.default = real_default
-r["given"] = {kind: [m.url for m in media or ()] for kind, media in given.items()}
-w._upload_into(ed, path)
-name2 = sent[-1][0]
+w._upload_into(ed, path)                 # the same file again: one upload
+r["sent_twice"] = len(sent)
 ed.undo()
-w._media_store.upload_failed.emit(name2, "gone")
-r["undone_asked"] = len(asked)
-ed.document().setModified(False)
+w._media_progress[sha] = 42
+w._refresh_asset_in_documents(sha)
+r["card_words"] = w._media_card(w._asset_manager.get(sha)).isNull() is False
+# Typing in the media paragraph goes into a new one after it.
+c = ed.textCursor(); c.setPosition(doc.findBlockByNumber(1).position() + 1); ed.setTextCursor(c)
+QTest.keyClicks(ed, "Notes")
+r["after_typing"] = [doc.findBlockByNumber(i).text() for i in range(doc.blockCount())]
+# While it uploads it is written nowhere, and nothing is published.
+r["md_pending"] = document_to_markdown(doc)
+r["publish_pending"] = w._publish_text(ed, "markdown")
+r["note_pending"] = w._publish_text(ed, "note")
+r["plain_pending"] = serialize_plain_with_images(doc, lambda fmt: None)
+r["html_pending"] = "Uploading" in document_to_html(
+    doc, asset_resolver=w._asset_manager.export_view)
+r["gate_pending"] = w._confirm_images_uploaded(ed)
+r["gate_said"] = told[-1]
+snapshot = doc.toHtml()
+r["crash_keeps_object"] = f"myeditor-asset:{sha}" in snapshot and "Uploading" not in snapshot
+# Closing while it uploads asks, Cancel the default (the stand-in answers Cancel).
+w.close_tab(w.tabs.currentIndex())
+r["close_asked"] = bool(asked) and asked[-1]["action"] == "Close Anyway"
+r["still_open"] = w._editor_widget_index(ed) >= 0
+# The upload finishes: nothing in the document changes, no step of Undo.
+undo_steps = doc.availableUndoSteps()
+media = MediaFile(hash=sha, url=f"https://cdn.example/{sha}", mime_type="audio/mpeg",
+                  size=len(open(path, "rb").read()),
+                  urls=[{"server": "https://cdn.example", "url": f"https://cdn.example/{sha}"}])
+w._media_store.upload_status.emit(f"myeditor-asset:{sha}", "uploading")
+w._media_store.upload_finished.emit(f"myeditor-asset:{sha}", media)
+r["undo_steps_unchanged"] = doc.availableUndoSteps() == undo_steps
+content, records = w._publish_payload(ed, "markdown")
+r["published"] = content
+r["imeta"] = build_imeta_tags(records, content)
+r["gate_done"] = w._confirm_images_uploaded(ed)
+# Undo takes back the person's typing, not the finished upload.
+ed.undo()
+r["after_undo"] = [doc.findBlockByNumber(i).text() for i in range(doc.blockCount())]
+# Return after it starts a clean paragraph; Backspace from below takes it whole.
+c = ed.textCursor(); c.setPosition(doc.findBlockByNumber(1).position() + 1); ed.setTextCursor(c)
+QTest.keyClick(ed, Qt.Key.Key_Return)
+QTest.keyClicks(ed, "Below")
+r["return_then_type"] = document_to_markdown(doc)
+c = ed.textCursor(); c.setPosition(doc.findBlockByNumber(2).position()); ed.setTextCursor(c)
+QTest.keyClick(ed, Qt.Key.Key_Backspace)
+r["backspace_from_below"] = [doc.findBlockByNumber(i).text() for i in range(doc.blockCount())]
+ed.undo()
+r["undo_backspace_brings_it_back"] = ed.is_media_block(doc.findBlockByNumber(1))
+for i in range(w.tabs.count()):
+    e = w._editor_from_widget(w.tabs.widget(i))
+    if e is not None:
+        e.document().setModified(False)
+w._media_not_uploaded = lambda doc: []
 w.close()
 print("RESULT " + json.dumps(r))
 """
@@ -195,21 +197,29 @@ print("RESULT " + json.dumps(r))
 
 def test_audio_in_the_window(tmp_path):
     song = tmp_path / "song.mp3"
-    song.write_bytes(b"sound")
+    song.write_bytes(BODY)
     big = tmp_path / "big.mp3"
     big.write_bytes(b"x" * 200)
     r = run_window_script(SCRIPT, tmp_path, str(song), str(big), SHA)
-    assert r["menu_without"] is False and r["menu_with"] is True                 # D-1
-    assert r["too_large"] == "“big.mp3” is too large" and r["no_placeholder"]
-    assert r["sent"][0] == ["song.mp3", "audio/mpeg", 5]
-    assert r["placeholder"] == ["Uploading song.mp3…"]
-    assert r["gate"] is False and r["gate_said"] == "Audio or video is still uploading"
-    assert r["asked"] == "Couldn’t upload “song.mp3”" and r["retried"] == 2
-    assert r["after_retry"] == ["Uploading song.mp3…"]
-    assert r["text"] == f"https://cdn.example/{SHA}.mp3\n"
-    assert r["gate_after"] is True
-    assert r["imeta"] == [[f"imeta", f"url https://cdn.example/{SHA}.mp3", "m audio/mpeg",
-                           f"x {SHA}", "size 5"]]
-    assert r["undone_asked"] == 1                        # undone: nothing asked, nothing put in
-    address = f"https://cdn.example/{SHA}.mp3"
-    assert r["given"] == {"note": [address], "article": [address]}
+    assert r["too_large"] == "“big.mp3” is too large"
+    assert r["blocks"] == ["Listen:", "￼", ""] and r["media_block"] is True
+    assert r["sent"] == [[f"myeditor-asset:{SHA}", "audio/mpeg", len(BODY)]]
+    assert r["sent_twice"] == 1                                         # M1: one upload
+    assert r["card_words"] is True
+    assert r["after_typing"] == ["Listen:", "￼", "Notes", ""]      # H1
+    for written in ("md_pending", "publish_pending", "note_pending", "plain_pending"):
+        assert SHA not in r[written] and "Uploading" not in r[written]  # M3
+        assert "Notes" in r[written]
+    assert r["html_pending"] is False and r["crash_keeps_object"] is True
+    assert r["gate_pending"] is False and r["gate_said"] == "Audio or video is still uploading"
+    assert r["close_asked"] is True and r["still_open"] is True         # L4
+    assert r["undo_steps_unchanged"] is True                            # M2
+    assert f"Listen:\n\n{URL}.mp3\n\nNotes" in r["published"]
+    assert r["imeta"] == [["imeta", f"url {URL}.mp3", "m audio/mpeg", f"x {SHA}",
+                           f"size {len(BODY)}"]]
+    assert r["gate_done"] is True
+    # Undo takes back typing, not the finished upload: the file stays.
+    assert r["after_undo"][:2] == ["Listen:", "\ufffc"] and "Notes" not in r["after_undo"]
+    assert "Below" in r["return_then_type"] and "￼" not in r["return_then_type"]
+    assert r["backspace_from_below"][:2] == ["Listen:", "Below"]        # H1
+    assert r["undo_backspace_brings_it_back"] is True

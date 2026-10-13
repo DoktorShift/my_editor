@@ -11,9 +11,7 @@ import os
 import platform
 import re
 import sys
-import mimetypes
 import time
-import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -58,6 +56,7 @@ from commands import (
     all_key_texts, platform_keys,
 )
 import front_matter
+import media_files
 import slash_menu
 from slash_menu import SlashItem
 from table_picker import TablePicker
@@ -122,10 +121,6 @@ _SUPPORTED_EXTS = {'.md', '.html', '.htm', '.txt', '.rmd', '.pdf'}
 # ordinary "unsupported" bar message instead of a silent nothing.
 _IMAGE_EXTS = image_safety.IMAGE_FILE_SUFFIXES
 
-# Audio and video that go into an article or a note through the media
-# servers (Insert > Audio or Video, or dropped while an account is in use).
-_AUDIO_VIDEO_EXTS = (".mp3", ".m4a", ".aac", ".ogg", ".oga", ".opus", ".wav", ".flac",
-                     ".mp4", ".webm", ".mov", ".m4v")
 
 # Persisted answer to the paste-upload prompt: "ask" | "always" | "never".
 _PASTE_UPLOAD_SETTING = "upload_pasted_images"
@@ -157,6 +152,7 @@ from nostr.avatar_store import AvatarBatchLoader, AvatarStore
 from nostr.bech32 import encode_nprofile, encode_npub
 from nostr.nip05_check import Nip05Check
 from nostr.ui.mention_picker import MentionPicker
+from nostr.ui import media_card
 from nostr.ui.reference_popover import ReferencePopover
 from nostr.ui.article_details_panel import ArticleDetailsPanel, DEFAULT_WIDTH as ARTICLE_DETAILS_WIDTH
 from nostr import refs
@@ -198,7 +194,7 @@ from nostr.drafts import (
     serialize_inner_event,
 )
 from nostr.known_people import KnownPeople, Person
-from nostr.media.assets import ASSET_SCHEME, asset_key, parse_asset_key
+from nostr.media.assets import ASSET_SCHEME, AssetState, asset_key, parse_asset_key
 from nostr.imports.sources.nostr import RelayQueryAdapter
 from nostr.media.manager import AssetManager
 from nostr.media.media_visibility import MediaVisibility
@@ -652,12 +648,10 @@ class MainWindow(QMainWindow):
         )
         self._asset_manager.asset_changed.connect(self._refresh_asset_in_documents)
         self._asset_manager.asset_upload_failed.connect(self._on_asset_upload_failed)
-        # Audio and video going into a document: name -> (editor, upload id,
-        # file path), while its upload runs (the store answers by name).
-        self._media_uploads: dict = {}
+        # How far each audio or video file's upload has got (sha256 ->
+        # percent), shown on its card in the text.
+        self._media_progress: dict = {}
         self._media_store.upload_progress.connect(self._on_media_upload_progress)
-        self._media_store.upload_finished.connect(self._on_media_upload_finished)
-        self._media_store.upload_failed.connect(self._on_media_upload_failed)
 
         # Private media. The ledger is the record of everything this app
         # has deliberately made public and is the only way to revoke any
@@ -1211,7 +1205,8 @@ class MainWindow(QMainWindow):
         ed.selectionChanged.connect(self._update_clipboard_commands)
         self._update_editor_theme(ed)
         self._apply_view_prefs_to_editor(ed)
-        ed.set_resource_resolver(self._asset_manager.resolve_image, ASSET_SCHEME)
+        ed.set_resource_resolver(self._resolve_asset_image, ASSET_SCHEME)
+        ed.set_media_check(self._is_media_name)
         ed.set_local_image_resolver(lambda name, e=ed: self._resolve_local_image(e, name))
         ed.image_pasted.connect(lambda img, e=ed: self._handle_pasted_image(e, img))
         ed.notice.connect(lambda text: self.status.showMessage(text, 8000))
@@ -2836,6 +2831,8 @@ class MainWindow(QMainWindow):
 
         editor = self._editor_from_widget(w)
 
+        if editor and not self._may_close_with_uploads(editor):
+            return
         if editor and editor.document().isModified():
             file_name = os.path.basename(editor._file_path) if getattr(editor, '_file_path', None) else _("Untitled")
             r = _ask_save_changes(
@@ -2978,7 +2975,7 @@ class MainWindow(QMainWindow):
                 self.open_path(path)
             elif ext in _IMAGE_EXTS:
                 image_paths.append(path)
-            elif ext in _AUDIO_VIDEO_EXTS and self._may_insert_audio_video(
+            elif media_files.is_audio_or_video(path) and self._may_insert_audio_video(
                     self.current_editor()):
                 self._upload_into(self.current_editor(), path)
             else:
@@ -3244,10 +3241,15 @@ class MainWindow(QMainWindow):
         """
         if ed is None:
             return True
-        if rich_text.upload_placeholders(ed.document()):
+        waiting = self._media_not_uploaded(ed.document())
+        if waiting:
+            # Not there yet: its upload goes on (or starts again after a
+            # failure or a restart), and publishing waits for it.
+            for asset in waiting:
+                self._asset_manager.request_upload(asset.sha256)
             inform(self, title=_("Audio or video is still uploading"),
-                   message=_("Publish or save it once the upload is done, or remove it "
-                             "from the text."))
+                   message=_("Publish or save it as a draft once the upload is done; it "
+                             "goes on uploading meanwhile."))
             return False
         blocked = self._unpublishable_images(ed.document())
         if not blocked:
@@ -3296,14 +3298,16 @@ class MainWindow(QMainWindow):
         def remember(asset, url: str, fmt) -> None:
             if not url or url in records:
                 return
-            alt = str(fmt.property(QTextImageFormat.ImageAltText) or "")
+            # Audio and video have no alternative text: their name is a name.
+            alt = "" if asset.is_media else (
+                str(fmt.property(QTextImageFormat.ImageAltText) or "") or asset.alt)
             records[url] = PublishedMedia(
                 url=url,
                 sha256=asset.sha256,
                 mime=asset.mime,
                 width=asset.width,
                 height=asset.height,
-                alt=alt or asset.alt,
+                alt=alt,
                 size=asset.size,
                 servers=tuple(asset.servers),
             )
@@ -3321,13 +3325,16 @@ class MainWindow(QMainWindow):
             asset = self._asset_manager.get(sha)
             if asset is None or not asset.is_uploaded:
                 return None
-            remember(asset, asset.remote_url, fmt)
-            return asset.remote_url
+            url = _published_address(asset)
+            remember(asset, url, fmt)
+            return url
 
         def as_markdown(fmt) -> Optional[str]:
             url = destination(fmt)
             if not url:
                 return None
+            if _is_media(self._asset_manager, fmt.name()):
+                return url                     # where readers show a player
             return image_markdown(str(fmt.property(QTextImageFormat.ImageAltText) or ""), url)
 
         def as_note(fmt) -> Optional[str]:
@@ -3649,6 +3656,8 @@ class MainWindow(QMainWindow):
             destination = target(fmt)
             if not destination:
                 return None
+            if _is_media(self._asset_manager, fmt.name()):
+                return destination             # audio or video: its address
             return image_markdown(str(fmt.property(QTextImageFormat.ImageAltText) or ""),
                                   destination)
 
@@ -3688,7 +3697,11 @@ class MainWindow(QMainWindow):
 
             asset = self._asset_manager.get(sha)
             if asset is not None and asset.is_uploaded:
-                return asset.remote_url
+                return _published_address(asset)
+            if asset is not None and asset.is_media:
+                # Not on a media server yet: nothing to write (never a
+                # placeholder); saved again once it is, it is there.
+                return None
 
             data = self._asset_manager.resolve_bytes(name)
             if data:
@@ -5712,6 +5725,9 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         # An update relaunch already handled unsaved work, so skip the prompt.
         closing_for_update = getattr(self, "_closing_for_update", False)
+        if not closing_for_update and not self._may_quit_with_uploads():
+            event.ignore()
+            return
         if not closing_for_update and not self._resolve_unsaved_before_closing():
             event.ignore()
             return
@@ -6537,7 +6553,7 @@ class MainWindow(QMainWindow):
         ed = self.current_editor()
         if not self._may_insert_audio_video(ed):
             return
-        patterns = " ".join("*" + ext for ext in _AUDIO_VIDEO_EXTS)
+        patterns = " ".join("*" + ext for ext in media_files.EXTENSIONS)
         path, _filter = QFileDialog.getOpenFileName(
             self, _("Insert Audio or Video"), "",
             _("Audio and video ({patterns})").format(patterns=patterns))
@@ -6552,11 +6568,15 @@ class MainWindow(QMainWindow):
         return min(largest, BLOSSOM_MAX_FILE_SIZE)
 
     def _upload_into(self, ed, path: str) -> None:
-        """Upload ``path`` through the media servers (the Media Library's own
-        way) and stand a placeholder for it in ``ed`` until it is there. A
-        file too large for every media server is refused at once, saying
-        the limit (nostrdesign: say it before, not after a long wait)."""
+        """Put the audio or video file ``path`` into ``ed`` as a paragraph of
+        its own and send it to the media servers. It is an object of the
+        text, as a picture is (an asset, named by its hash): finishing its
+        upload changes nothing the person wrote and no step of Undo, and it
+        outlives a crash or a restart. A file larger than every media server
+        takes is refused at once, saying the limit (nostrdesign: before a
+        long wait, not after)."""
         name = os.path.basename(path)
+        mime = media_files.type_of(path)
         try:
             size = os.path.getsize(path)
         except OSError:
@@ -6566,81 +6586,114 @@ class MainWindow(QMainWindow):
                    message=_("Your media servers take files up to {size}.").format(
                        size=format_size(self._upload_limit())))
             return
-        upload_id = uuid.uuid4().hex
-        key = name
-        while key in self._media_uploads:
-            stem, ext = os.path.splitext(name)
-            key = f"{stem} ({len(self._media_uploads) + 1}){ext}"
-        cursor = ed.textCursor()
-        rich_text.insert_upload_placeholder(cursor, upload_id,
-                                            _("Uploading {name}…").format(name=name))
-        ed.setTextCursor(cursor)
-        self._media_uploads[key] = (ed, upload_id, path)
-        self._send_upload(key)
-
-    def _send_upload(self, key: str) -> None:
-        _ed, _upload_id, path = self._media_uploads[key]
         try:
-            body = Path(path).read_bytes()
-        except OSError as exc:
-            self._on_media_upload_failed(key, str(exc))
+            data = Path(path).read_bytes()
+        except OSError:
+            data = b""
+        asset = self._asset_manager.adopt_media(data, mime=mime or "", name=name) \
+            if mime else None
+        if asset is None:
+            inform(self, title=_("Couldn’t add “{name}”").format(name=name),
+                   message=_("MyEditor can read audio and video files of these kinds: "
+                             "{kinds}.").format(kinds=", ".join(media_files.EXTENSIONS)))
             return
-        mime = mimetypes.guess_type(path)[0] or "application/octet-stream"
-        self._media_store.upload_bytes(body, name=key, mime_type=mime)
+        image = QTextImageFormat()
+        image.setName(asset.key)
+        image.setProperty(QTextImageFormat.ImageAltText, name)
+        image.setWidth(media_card.WIDTH)
+        image.setHeight(media_card.HEIGHT)
+        ed.document().addResource(QTextDocument.ImageResource, QUrl(asset.key),
+                                  self._media_card(asset))
+        cursor = ed.textCursor()
+        rich_text.insert_own_paragraph(cursor, image=image)
+        ed.setTextCursor(cursor)
+        self._asset_manager.request_upload(asset.sha256)
 
-    def _placeholder_of(self, key: str):
-        """(editor, block) of the upload ``key``'s placeholder, or None
-        when it is gone (undone, removed, its tab closed)."""
-        entry = self._media_uploads.get(key)
-        if entry is None or not shiboken6.isValid(entry[0]):
-            return None
-        ed, upload_id, _path = entry
-        for found, block in rich_text.upload_placeholders(ed.document()):
-            if found == upload_id:
-                return ed, block
-        return None
+    def _may_close_with_uploads(self, editor) -> bool:
+        """Closing a document while audio or video in it is still uploading
+        asks first (Cancel is the default): the file goes on to the media
+        library, but it won't be in this document. True to close."""
+        uploading = [asset for asset in self._media_not_uploaded(editor.document())
+                     if asset.upload_state in (AssetState.QUEUED, AssetState.SIGNING,
+                                               AssetState.UPLOADING)]
+        if not uploading:
+            return True
+        return confirm_destructive(
+            self, title=ngettext("“{name}” is still uploading.",
+                                 "{count} files are still uploading.", len(uploading)).format(
+                name=uploading[0].alt, count=len(uploading)),
+            message=_("If you close the document now, the upload goes on to your media "
+                      "library, but the document doesn't keep it."),
+            action=_("Close Anyway"))
 
-    def _on_media_upload_progress(self, key: str, sent: int, total: int) -> None:
-        if key in self._media_uploads and total > 0:
-            self.status.showMessage(_("Uploading {name}: {percent} %").format(
-                name=key, percent=_number(min(100, sent * 100 // total))), 3000)
+    def _may_quit_with_uploads(self) -> bool:
+        """Quitting while audio or video is still uploading asks first
+        (Cancel is the default): quitting stops the upload. True to quit."""
+        uploading = [asset for i in range(self.tabs.count())
+                     if (ed := self._editor_from_widget(self.tabs.widget(i))) is not None
+                     for asset in self._media_not_uploaded(ed.document())
+                     if asset.upload_state in (AssetState.QUEUED, AssetState.SIGNING,
+                                               AssetState.UPLOADING)]
+        if not uploading:
+            return True
+        return confirm_destructive(
+            self, title=ngettext("“{name}” is still uploading.",
+                                 "{count} files are still uploading.", len(uploading)).format(
+                name=uploading[0].alt, count=len(uploading)),
+            message=_("Quitting now stops the upload. The next time you publish the "
+                      "document, or save it as a draft, it is uploaded again."),
+            action=_("Quit Anyway"))
 
-    def _on_media_upload_finished(self, key: str, media) -> None:
-        found = self._placeholder_of(key)
-        entry = self._media_uploads.pop(key, None)
-        if entry is None:
-            return                    # an upload of the Media Library's own
-        if found is None:
-            self.status.showMessage(
-                _("{name} is in your media library.").format(name=key), 5000)
-            return
-        _ed, block = found
-        rich_text.finish_upload(block, _with_extension(media.url, entry[2]))
-        self.status.showMessage(_("{name} is uploaded.").format(name=key), 5000)
+    def _is_media_name(self, name: str) -> bool:
+        """Whether an object of the text is audio or video."""
+        return _is_media(self._asset_manager, name)
 
-    def _on_media_upload_failed(self, key: str, reason: str) -> None:
-        if key not in self._media_uploads:
-            return
-        found = self._placeholder_of(key)
-        if found is None:
-            self._media_uploads.pop(key, None)
-            return
-        ed, block = found
-        rich_text.set_upload_words(block, _("Couldn’t upload {name}.").format(name=key))
-        again = ask(self, title=_("Couldn’t upload “{name}”").format(name=key),
-                    message=reason,
-                    is_dark=self.is_dark_theme,
-                    buttons=(Button(_("Remove"), False, NORMAL),
-                             Button(_("Try Again"), True, DEFAULT)))
-        found = self._placeholder_of(key)         # still there after the question?
-        if found is None:
-            self._media_uploads.pop(key, None)
-        elif again:
-            rich_text.set_upload_words(found[1], _("Uploading {name}…").format(name=key))
-            self._send_upload(key)
+    def _media_not_uploaded(self, doc) -> list:
+        """The audio and video in ``doc`` not on a media server yet."""
+        found = []
+        for name in dict.fromkeys(iter_image_names(doc)):
+            sha = parse_asset_key(name)
+            asset = self._asset_manager.get(sha) if sha else None
+            if asset is not None and asset.is_media and not asset.is_uploaded:
+                found.append(asset)
+        return found
+
+    def _resolve_asset_image(self, name: str):
+        """What an object of the text shows: an audio or video file's card,
+        a picture's picture."""
+        sha = parse_asset_key(name)
+        asset = self._asset_manager.get(sha) if sha else None
+        if asset is not None and asset.is_media:
+            return self._media_card(asset)
+        return self._asset_manager.resolve_image(name)
+
+    def _media_card(self, asset):
+        """The card of an audio or video file, saying how its upload is."""
+        kind = media_files.kind_of(asset.mime)
+        title = (_("Audio · {name}") if kind == media_files.AUDIO
+                 else _("Video · {name}")).format(name=asset.alt or asset.sha256[:12])
+        state = asset.upload_state
+        if asset.is_uploaded:
+            words = ""
+        elif state is AssetState.FAILED:
+            words = _("Couldn’t upload. Publishing or saving as a draft tries again.")
+        elif state in (AssetState.QUEUED, AssetState.SIGNING, AssetState.UPLOADING):
+            percent = self._media_progress.get(asset.sha256)
+            words = (_("Uploading… {percent} %").format(percent=_number(percent))
+                     if percent is not None else _("Uploading…"))
         else:
-            rich_text.remove_upload(found[1])
-            self._media_uploads.pop(key, None)
+            words = _("Not uploaded yet. Publishing or saving as a draft uploads it.")
+        return media_card.render(title, words, dark=self.is_dark_theme)
+
+    def _on_media_upload_progress(self, name: str, sent: int, total: int) -> None:
+        sha = parse_asset_key(name)
+        asset = self._asset_manager.get(sha) if sha else None
+        if asset is None or not asset.is_media or total <= 0:
+            return
+        percent = min(100, sent * 100 // total)
+        if self._media_progress.get(sha) != percent:
+            self._media_progress[sha] = percent
+            self._refresh_asset_in_documents(sha)
 
     # -- secret keys: never pasted where Nostr is written ---------------------
     # (nor published: nostr/ui/secret_key_check.py, at the publish dialogs)
@@ -6912,10 +6965,14 @@ class MainWindow(QMainWindow):
         a saved document stays saved and no backup is triggered.
         """
         key = asset_key(sha)
-        data = self._asset_manager.resolve_bytes(key)
-        if not data:
-            return
-        payload = QByteArray(data)
+        asset = self._asset_manager.get(sha)
+        if asset is not None and asset.is_media:
+            payload = self._media_card(asset)
+        else:
+            data = self._asset_manager.resolve_bytes(key)
+            if not data:
+                return
+            payload = QByteArray(data)
         for i in range(self.tabs.count()):
             ed = self._editor_from_widget(self.tabs.widget(i))
             if ed is None:
@@ -8293,11 +8350,19 @@ class MainWindow(QMainWindow):
         self._dismiss_conflict_banner(ed)
 
 
-def _with_extension(url: str, path: str) -> str:
-    """``url`` with the file's extension when its address has none, so a
-    reader can tell audio and video by it (as standup's embeddableMediaUrl
-    does)."""
-    tail = url.split("?", 1)[0].rsplit("/", 1)[-1]
-    if "." in tail:
+def _is_media(assets, name: str) -> bool:
+    """Whether the object named ``name`` is an audio or video asset."""
+    sha = parse_asset_key(name)
+    asset = assets.get(sha) if sha else None
+    return asset is not None and asset.is_media
+
+
+def _published_address(asset) -> str:
+    """Where an uploaded asset is read: its address, with the extension of
+    its type when the address has none, so a reader can tell audio from
+    video by it (as standup's embeddableMediaUrl does)."""
+    url = asset.remote_url
+    if not asset.is_media:
         return url
-    return url + os.path.splitext(path)[1].lower()
+    tail = url.split("?", 1)[0].rsplit("/", 1)[-1]
+    return url if "." in tail else url + media_files.extension_for(asset.mime)

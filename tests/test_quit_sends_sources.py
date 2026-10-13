@@ -91,6 +91,7 @@ def closing_host(monkeypatch, order):
                                           shutdown=lambda: order.append("inbox closed"),
                                           subscriptions=Subscriptions())
     host._resolve_unsaved_before_closing = lambda: True
+    host._may_quit_with_uploads = lambda: True
     host._asset_manager = types.SimpleNamespace(flush=lambda: None)
     host._save_session = lambda: None
     host.tabs = QTabWidget()

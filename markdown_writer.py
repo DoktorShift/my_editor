@@ -65,7 +65,6 @@ from doc_walk import (
     BULLET_MARKER,
     LINE_SEPARATOR,
     OBJECT_REPLACEMENT,
-    UPLOAD,
     bullet_depth,
     iter_block_runs,
     iter_blocks,
@@ -308,8 +307,7 @@ def _blocks_of_frame(frame, image_target) -> List[_Block]:
                 blocks.append(_table_block(child, image_target))
             else:
                 blocks.extend(_blocks_of_frame(child, image_target))
-        elif block.isValid() and not block.blockFormat().property(UPLOAD):
-            # (An upload still going is no text: left out.)
+        elif block.isValid():
             blocks.append(_one_block(block, image_target))
         it += 1
     return _joined_code(blocks)
