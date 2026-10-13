@@ -1082,3 +1082,35 @@ def test_a_delete_no_server_took_says_it_was_not_deleted(tmp_path, monkeypatch):
     world.store.delete_failed.emit(one.hash, "NETWORK_UNAVAILABLE")
     assert world.dialog._status.text().startswith(
         "“Garden.jpg” is still on one of your media servers.")
+
+
+def test_escape_clears_the_search_as_in_the_finder(tmp_path, monkeypatch):
+    world = build(tmp_path, monkeypatch, FakeStore([media(1)]))
+    world.dialog._search.setFocus()
+    world.dialog._search.setText("garden")
+    press(world.dialog._search, Qt.Key.Key_Escape)
+    assert world.dialog._search.text() == "" and world.dialog.isVisible()
+
+
+def test_escape_does_not_close_the_browsing_library(tmp_path, monkeypatch):
+    """A Finder or Photos window does not close on Escape; a picker
+    (a question being answered) does, as Cancel."""
+    world = build(tmp_path, monkeypatch, FakeStore([media(1)]))
+    press(world.grid, Qt.Key.Key_Escape)
+    press(world.dialog._search, Qt.Key.Key_Escape)
+    assert world.dialog.isVisible()
+    picker = build(tmp_path, monkeypatch, FakeStore([media(1)]), pick=True)
+    press(picker.grid, Qt.Key.Key_Escape)
+    assert not picker.dialog.isVisible()
+
+
+def test_return_in_the_search_field_goes_to_the_results_not_insert(tmp_path, monkeypatch):
+    one = media(1)
+    world = build(tmp_path, monkeypatch, FakeStore([one]), pick=True)
+    picked = []
+    world.dialog.file_picked.connect(lambda *a: picked.append(a))
+    select(world, one.hash)
+    world.dialog._search.setFocus()
+    press(world.dialog._search, Qt.Key.Key_Return)
+    assert picked == [] and world.dialog.isVisible()
+    assert world.grid.hasFocus() or QApplication.focusWidget() is world.grid

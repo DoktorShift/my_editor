@@ -44,7 +44,9 @@ import hashlib
 import os
 from typing import Dict, List, Optional
 
-from PySide6.QtCore import QBuffer, QDateTime, QIODevice, QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import (
+    QBuffer, QDateTime, QEvent, QIODevice, QSize, Qt, QTimer, QUrl, Signal,
+)
 from PySide6.QtGui import QAction, QCursor, QDesktopServices, QImageReader, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -337,6 +339,9 @@ class MediaLibraryDialog(QDialog):
         self._search.setMinimumWidth(90)
         self._search.setMaximumWidth(220)
         self._search.textChanged.connect(self._rebuild)
+        # Escape clears it and Return goes to the results, as in the
+        # Finder (see eventFilter).
+        self._search.installEventFilter(self)
         bar.addWidget(self._search, 1)
         self._actions_button = QToolButton()
         self._actions_button.setObjectName("media_actions")
@@ -1186,6 +1191,29 @@ class MediaLibraryDialog(QDialog):
         self._status.setProperty("tone", tone)
         self._status.style().unpolish(self._status)
         self._status.style().polish(self._status)
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802
+        if watched is self._search and event.type() == QEvent.Type.KeyPress:
+            key = event.key()
+            if key == Qt.Key.Key_Escape and self._search.text():
+                self._search.clear()
+                return True
+            if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                # To the results, not the default button: a search is
+                # not a choice.
+                if not self._grid.currentIndex().isValid() and self._model.rowCount():
+                    self._grid.setCurrentIndex(self._model.index(0))
+                self._grid.setFocus(Qt.FocusReason.OtherFocusReason)
+                return True
+        return super().eventFilter(watched, event)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        # A Finder or Photos window does not close on Escape; a picker,
+        # a question being answered, does (Cancel).
+        if event.key() == Qt.Key.Key_Escape and not self._pick_mode:
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def showEvent(self, event) -> None:  # noqa: N802
         # The app's button style gives every push button a minimum width,
