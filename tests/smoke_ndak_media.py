@@ -63,7 +63,7 @@ from nostr.media.publish_copy import PublicCopyMaker  # noqa: E402
 from nostr.media.visibility import PublicLedger  # noqa: E402
 from nostr.publisher import PublishedMedia, PublishJob, build_note  # noqa: E402
 from nostr.ui.account_windows import local_profile  # noqa: E402
-from nostr.ui.media_grid import FAILED, SENDING, TILE_ROLE  # noqa: E402
+from nostr.ui.media_grid import SENDING  # noqa: E402
 from nostr.ui.media_library_dialog import MediaLibraryDialog  # noqa: E402
 from nostr.ui.thumbnail_loader import ThumbnailLoader  # noqa: E402
 

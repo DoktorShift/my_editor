@@ -43,7 +43,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import shiboken6  # noqa: E402
 from PySide6.QtCore import QCoreApplication, QEvent, QObject, Qt, Signal  # noqa: E402
-from PySide6.QtGui import QColor, QImage, QKeyEvent, QPixmap  # noqa: E402
+from PySide6.QtGui import QKeyEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import alerts  # noqa: E402

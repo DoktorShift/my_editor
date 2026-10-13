@@ -651,10 +651,10 @@ class PublicCopyMaker(QObject):
         self.copy_progress.emit(copy.blob.sha256, CopyStage.PREPARING)
         try:
             scrubbed = scrub_for_publication(plaintext, copy.blob.mime)
-        except ScrubError as exc:
+        except ScrubError:
             # Step 4 refusing is the feature. There is no branch from
-            # here that uploads the bytes anyway.
-            # The scrub's own reason is a diagnostic (exc), not news.
+            # here that uploads the bytes anyway. The scrub's own reason
+            # is a diagnostic, not news for the person.
             self._fail(copy, _("This image couldn’t be prepared for sharing, so it "
                                "wasn’t shared."))
             return
