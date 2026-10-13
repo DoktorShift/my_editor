@@ -895,3 +895,13 @@ def test_a_library_opened_later_shows_the_files_still_being_added(tmp_path, monk
     assert (sending.state, sending.progress) == (SENDING, 40)
     world.grid.retry_requested.emit("Holiday.png")
     assert ("retry", "Holiday.png") in store.calls
+
+
+def test_a_picker_does_not_offer_media_servers(tmp_path, monkeypatch):
+    """Choosing an image is not where servers are managed, and the
+    article cover's picker has nobody to open the sheet: the item would
+    be dead there."""
+    world = build(tmp_path, monkeypatch, FakeStore([media(1)]), pick=True)
+    world.dialog._fill_actions_menu()
+    texts = [a.text() for a in world.dialog._actions_menu.actions() if a.text()]
+    assert "Media Servers…" not in texts and "Refresh" in texts

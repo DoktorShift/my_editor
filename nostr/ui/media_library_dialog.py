@@ -568,7 +568,9 @@ class MediaLibraryDialog(QDialog):
         if menu.actions():
             menu.addSeparator()
         menu.addAction(_("Refresh"), self._refresh)
-        menu.addAction(_("Media Servers…"), self.servers_requested.emit)
+        if not self._pick_mode:
+            # Servers are managed from the library, not while choosing.
+            menu.addAction(_("Media Servers…"), self.servers_requested.emit)
 
     def _context_menu(self, point) -> None:
         index = self._grid.indexAt(point)

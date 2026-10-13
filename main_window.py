@@ -7087,7 +7087,6 @@ class MainWindow(QMainWindow):
             parent=self,
         )
         dialog.bind_private_library(self._private_library)
-        dialog.servers_requested.connect(self._open_media_servers)
         # Pre-select images in the picker - videos / audio can't be
         # inserted as inline document objects.
         dialog._filter_combo.setCurrentIndex(1)
