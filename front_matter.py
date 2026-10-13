@@ -70,6 +70,15 @@ class Entry:
     lines: Tuple[str, ...]
     syntax: str = YAML
 
+    @property
+    def table(self) -> str:
+        """The name of the TOML table this entry is the header of
+        ("[ taxonomies ]  # terms" is "taxonomies"); "" for any other."""
+        if self.syntax != TOML:
+            return ""
+        found = re.match(r"^\[\s*([^\[\]]+?)\s*\]\s*(?:#.*)?$", self.key)
+        return found.group(1).strip("\"'") if found else ""
+
     def inner_entries(self) -> List["Entry"]:
         """A TOML table's own entries ("[taxonomies]" and the keys under it);
         none for any other entry."""

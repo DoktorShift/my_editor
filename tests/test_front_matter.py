@@ -544,3 +544,14 @@ def test_a_yaml_flow_list_over_lines_is_read_and_rewritten_whole():
     out = changed(text, hashtags=("a", "b", "new"))
     assert out == "---\ntitle: x\ntags: [a, b, new]   # the tags\nlayout: post\n---\n\nB\n"
     assert yaml.safe_load(out.split("---\n")[1])["tags"] == ["a", "b", "new"]
+
+
+@pytest.mark.parametrize("header", ["[taxonomies]  # the terms", "[ taxonomies ]"])
+def test_zola_taxonomies_header_with_a_comment_or_spaces(header):
+    import tomllib
+    text = f'+++\ntitle = "Z"\n{header}\ntags = ["rust", "web"]\n+++\n\nB\n'
+    front, _ = front_matter.split(text)
+    assert from_front_matter(front).hashtags == ("rust", "web")
+    out = changed(text, hashtags=("rust", "web", "zola"))
+    assert out == text.replace('["rust", "web"]', '["rust", "web", "zola"]')
+    assert tomllib.loads(out.split("+++\n")[1])["taxonomies"]["tags"] == ["rust", "web", "zola"]

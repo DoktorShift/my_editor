@@ -275,7 +275,7 @@ def _candidates(front: Optional[front_matter.FrontMatter], key: str):
             yield at, None, entry
     if key == "tags":
         for at, entry in enumerate(entries):
-            if entry.key.strip().lower() == "[taxonomies]":
+            if entry.table.lower() == "taxonomies":
                 for inner, sub in enumerate(entry.inner_entries()):
                     if sub.key.lower() in names:
                         yield at, inner, sub
