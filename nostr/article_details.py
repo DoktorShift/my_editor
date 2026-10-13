@@ -55,19 +55,20 @@ REBUILT = ("client", "p", "q")
 AUTHOR_MARKER = "author"
 
 
-# A heading line (CommonMark: one to six "#" and a space), and a mention.
+# A heading line (CommonMark: one to six "#" and a space), and a reference.
 _HEADING = re.compile(r"^\s{0,3}#{1,6}\s")
-_MENTION = re.compile(r"nostr:((?:npub|nprofile)1[02-9ac-hj-np-z]+)")
+_REFERENCE = re.compile(r"nostr:((?:npub|nprofile|note|nevent|naddr)1[02-9ac-hj-np-z]+)")
 
 
 def default_title(markdown: str,
                   names: Optional[Callable[[str], Optional[str]]] = None) -> str:
     """The title offered for an article that names none (the publish
     window, the preview): its first heading, else its first line with
-    words, as plain text without Markdown. A mention is "@" and the
-    person's name (``names``: pubkey -> name or None), or their short key
-    when the name is unknown, never the key itself. Code blocks are not
-    looked at; inline code is kept as written."""
+    words, as plain text without Markdown. A reference never reads as a
+    key: a mention is "@" and the person's name (``names``: pubkey -> name
+    or None) or their short key, a quoted note or article a short label
+    (refs.reference_label). Code blocks are not looked at; inline code is
+    kept as written."""
     lines = []
     fence = None
     for line in (markdown or "").split("\n"):
@@ -81,8 +82,13 @@ def default_title(markdown: str,
             lines.append(line)
 
     def named(text: str) -> str:
-        return _MENTION.sub(lambda found: " @" + (refs.person_name(found.group(1), names)
-                                                  or found.group(0)), text)
+        def label(found) -> str:
+            # Apart from a word before it ("*Words*nostr:…"), not from a
+            # bracket ("(nostr:…)").
+            before = text[found.start() - 1] if found.start() else " "
+            apart = " " if before.isalnum() or before in "*_~`" else ""
+            return apart + refs.reference_label(found.group(1), names)
+        return _REFERENCE.sub(label, text)
 
     text = refs.outside_code("\n".join(lines), named)
     heading = next((line for line in text.split("\n")

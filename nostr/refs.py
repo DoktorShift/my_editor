@@ -137,6 +137,21 @@ def person_name(entity: str,
     return name or short_key(bech32.encode_npub(reference.pubkey))
 
 
+def reference_label(entity: str,
+                    names: Optional[Callable[[str], Optional[str]]] = None) -> str:
+    """How a reference reads where its key would not (a title, the
+    preview): "@" and the person's name (or short key), "Quoted note", or
+    "Article"; the entity as written when it does not decode."""
+    reference = read_entity(entity.removeprefix("nostr:"))
+    if reference is None:
+        return entity
+    if reference.kind == NOTE:
+        return _("Quoted note")
+    if reference.kind == ARTICLE:
+        return _("Article")
+    return "@" + person_name(reference.entity, names)
+
+
 def outside_code(markdown: str, change: Callable[[str], str]) -> str:
     """Apply ``change`` to the Markdown outside fenced code blocks and
     inline code, which show references as they are."""

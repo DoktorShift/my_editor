@@ -66,7 +66,6 @@ import word_count
 from doc_walk import doc_length, doc_offset, iter_blocks
 from i18n import _, ngettext
 from markdown_writer import READ_FEATURES, read_markdown
-from nostr import bech32
 from nostr import refs
 from nostr.refs import outside_code
 
@@ -125,23 +124,8 @@ short_key = refs.short_key
 
 
 def reference_label(reference: str, names: Optional[NameLookup]) -> str:
-    """How a ``nostr:`` reference reads in the preview."""
-    entity = reference[len("nostr:"):]
-    try:
-        if entity.startswith("npub1"):
-            pubkey = bech32.decode_npub(entity)
-        elif entity.startswith("nprofile1"):
-            pubkey = bech32.decode_nprofile(entity)[0]
-        elif entity.startswith("naddr1"):
-            return _("Article")
-        else:
-            return _("Quoted note")
-    except (ValueError, IndexError):
-        return entity
-    name = names(pubkey) if names else None
-    if not name:
-        name = short_key(bech32.encode_npub(pubkey))
-    return "@" + name
+    """How a ``nostr:`` reference reads in the preview (refs.reference_label)."""
+    return refs.reference_label(reference, names)
 
 
 def player_label(url: str, media_names: Optional[MediaNames] = None) -> Optional[str]:

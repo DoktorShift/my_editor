@@ -291,3 +291,24 @@ def test_a_carried_picture_description_needs_the_address_itself_in_the_text():
     assert details.carried_tags(f"![x]({PICTURE})")[-1][1] == f"url {PICTURE}"
     assert not any(tag[0] == "imeta" for tag in
                    details.carried_tags(f"See https://proxy.example/?u={PICTURE} now."))
+
+
+def test_a_title_reads_every_kind_of_reference_never_as_a_key():
+    """Review low 2: a first line that quotes a note or an article gave a
+    raw, cut key as the title; "(nostr:npub…)" gave "( @Name)"."""
+    from nostr import bech32
+    from nostr.article_details import default_title
+    pubkey = bech32.decode_npub(NPUB)
+    names = {pubkey: "DrShift"}.get
+    nprofile = bech32.encode_nprofile(pubkey, ["wss://relay.example.com"])
+    nevent = bech32.encode_nevent("e5" * 32, ["wss://relay.example.com"], pubkey)
+    note = bech32.encode_note("e5" * 32)
+    naddr = bech32.encode_naddr(identifier="my-post", author_pubkey_hex=pubkey, kind=30023,
+                                relays=[])
+    assert default_title(f"Thanks (nostr:{NPUB}) and nostr:{nprofile}!", names) \
+        == "Thanks (@DrShift) and @DrShift!"
+    assert default_title(f"nostr:{nevent}\n\nWhy it matters.", names) == "Quoted note"
+    assert default_title(f"As nostr:{note} says", names) == "As Quoted note says"
+    assert default_title(f"Read nostr:{naddr} first", names) == "Read Article first"
+    for title in (default_title(f"x nostr:{e}") for e in (NPUB, nprofile, nevent, note, naddr)):
+        assert "nostr:" not in title and max(len(word) for word in title.split()) < 20
