@@ -447,6 +447,10 @@ class MainWindow(QMainWindow):
         for widget in (self._library_problem, self._library_open):
             widget.setVisible(False)
             self.status.addPermanentWidget(widget)
+        # It gives way to another message in a narrow window: shortened,
+        # it leaves the message its room.
+        self.status.messageChanged.connect(lambda _message: self._fit_library_problem())
+        _WidthWatcher(self.status, self._fit_library_problem)
         # How long the document is, quietly: words and reading time, or
         # the words of the selection while there is one.
         self._words_label = QLabel()
@@ -7087,6 +7091,23 @@ class MainWindow(QMainWindow):
         self._library_open.setAccessibleDescription(text)
         self._library_problem.setVisible(bool(text))
         self._library_open.setVisible(bool(text))
+        self._fit_library_problem()
+
+    def _fit_library_problem(self) -> None:
+        """The failure line takes the room a message in the status bar
+        leaves (a few letters at least), and all it needs without one."""
+        label = self._library_problem
+        message = self.status.currentMessage()
+        if not label.isVisible() or not message:
+            label.setMaximumWidth(16777215)             # Qt's QWIDGETSIZE_MAX: no limit
+            return
+        others = sum(widget.sizeHint().width() + self.status.layout().spacing()
+                     for widget in (self._backup_problem, self._backup_retry,
+                                    self._library_open, self._words_label, self._line_label)
+                     if widget.isVisible())
+        needed = self.status.fontMetrics().horizontalAdvance(message) + 40   # its margins
+        label.setMaximumWidth(max(label.minimumSizeHint().width(),
+                                  self.status.width() - others - needed))
 
     def _on_media_upload_progress(self, name: str, sent: int, total: int) -> None:
         sha = parse_asset_key(name)

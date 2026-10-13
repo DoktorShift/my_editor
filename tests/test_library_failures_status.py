@@ -11,7 +11,8 @@ What must hold:
   with Retry), however many other messages come and go; Open Media
   Library beside it does that. A failure while the library is open is
   said there, not here. It shortens in a narrow window instead of
-  widening it.
+  widening it, and gives way to another message there: shortened, it
+  leaves the message its room, and takes it back when the message goes.
 """
 
 from tests.app_process import run_window_script  # noqa: E402
@@ -54,6 +55,20 @@ app.processEvents()
 r["after_other_message"] = shown()
 r["names"] = unnamed_controls(w.statusBar())
 r["min_width"] = w.minimumSizeHint().width()
+# A narrow window: the failure gives way to a message, shortened, and
+# takes its room back when the message goes.
+message = "Saved: /Users/me/Documents/Essay.md"
+w.resize(600, 600)
+w.status.showMessage(message, 0)
+app.processEvents()
+r["narrow_room"] = [w._library_problem.geometry().left(),
+                    w.status.fontMetrics().horizontalAdvance(message)]
+r["narrow_text"] = w._library_problem.text()
+w.status.clearMessage()
+app.processEvents()
+r["narrow_quiet_text"] = w._library_problem.text()
+w.resize(1100, 700)
+app.processEvents()
 w._library_open.click()
 app.processEvents()
 r["opened"] = opened
@@ -79,5 +94,9 @@ def test_failures_after_the_library_closed_are_counted_and_stay_until_it_opens(t
     assert r["after_other_message"] == r["three"]
     assert r["names"] == []
     assert r["min_width"] < 420
+    room, needed = r["narrow_room"]
+    assert room >= needed + 16                     # the message is drawn inset
+    assert r["narrow_text"].endswith("…")
+    assert len(r["narrow_quiet_text"]) > len(r["narrow_text"])
     assert r["opened"] == [True]
     assert r["after_open"] == [False, "", False]
