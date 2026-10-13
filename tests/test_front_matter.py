@@ -1015,8 +1015,7 @@ def test_the_window_saves_a_front_matter_with_its_own_line_endings(tmp_path):
 CR_ONLY = "---\rtitle: CR Title\rtags: [x]\r---\r\rBody.\r"
 
 
-@pytest.mark.parametrize("text", [CR_ONLY, "---\r\ntitle: CR Title\rtags: [x]\n---\r\rBody.\r",
-                                  '+++\rtitle = "CR Title"\rtags = ["x"]\r+++\r\rBody.\r'])
+@pytest.mark.parametrize("text", [CR_ONLY, "---\r\ntitle: CR Title\rtags: [x]\n---\r\rBody.\r"])
 def test_a_front_matter_whose_lines_end_in_a_lone_cr_is_found(text):
     """Classic Mac line endings: the front matter was not found, its text
     published as the article, and a save wrote a second front matter."""
@@ -1244,3 +1243,16 @@ def test_a_front_matter_no_parser_reads_says_so_once_in_article_details(tmp_path
     assert r["notes"] == ["Every detail is kept as written in the file: MyEditor can’t read "
                           "its front matter in full."]
     assert r["title"] == title and r["title from"] == 0 and r["cover hint"] == []
+
+
+def test_a_lone_cr_ends_no_line_of_toml():
+    """Round 10, L3: TOML ends a line at LF or CRLF only, and tomllib reads
+    no front matter whose lines end in a lone CR: none is found, as none
+    would be by Hugo."""
+    assert front_matter.split('+++\rtitle = "T"\r+++\r\rBody.\r')[0] is None
+    # A lone CR inside a TOML text: tomllib reads no front matter there, so
+    # every detail stays as written, the title shown as this reader reads it.
+    text = '+++\ntitle = "T"\nsummary = """one\rtwo"""\n+++\n\nBody.\n'
+    front, _ = front_matter.split(text)
+    assert from_front_matter(front).title == "T" and kept_in_file(front) == ALL_DETAILS
+    assert unchanged_save(text) == text and changed(text, title="New") == text
