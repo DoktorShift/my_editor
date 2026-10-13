@@ -33,7 +33,7 @@ def test_every_code_is_its_own_name():
 
 
 def test_every_code_has_friendly_copy():
-    assert len(ALL_CODES) == 15
+    assert len(ALL_CODES) == 19
     for code in ALL_CODES:
         message = friendly_message(code)
         assert message
@@ -135,11 +135,20 @@ def test_format_err_uses_the_code_and_carries_the_detail():
     )
 
 
-@pytest.mark.parametrize("reason", [
-    "Your signer app declined the request to the media server: user declined",
-    "Connect your signer app first.",
-])
-def test_signer_strings_pass_through_byte_identical(reason):
-    """The asset manager still classifies signer failures by prefix.
-    Rewording them here would silently reclassify every one of them."""
-    assert _format_err(reason) == reason
+# Words a person should never have to read in a media message.
+_JARGON = ("blob", "sha", "hash", "http", "mib", "blossom", "authorization",
+           "redirect", "described", "mirror", "endpoint", "token", "signed")
+
+
+def test_copy_is_plain_words():
+    for code in ALL_CODES + ["NO_SUCH_CODE"]:
+        words = re.findall(r"[a-z0-9]+", friendly_message(code).lower())
+        assert not set(words) & set(_JARGON), (code, friendly_message(code))
+
+
+def test_copy_is_short():
+    """One or two short sentences: what happened, what to do."""
+    for code in ALL_CODES:
+        message = friendly_message(code)
+        assert len(message) <= 110, (code, message)
+        assert message.count(". ") <= 1, (code, message)

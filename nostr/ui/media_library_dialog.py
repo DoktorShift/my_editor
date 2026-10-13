@@ -74,6 +74,7 @@ from atomic_file import save_document
 
 import i18n
 import media_files
+from media_files import format_size  # noqa: F401, imported from here too
 import theme
 import url_safety
 from i18n import _, ngettext
@@ -503,16 +504,6 @@ _PICK_PENDING_NOTICE = _(
 # pastes within one wall-clock second must not collide in the upload
 # queue, otherwise the auto-insert routes to the wrong editor.
 _paste_counter = itertools.count(1)
-
-
-def format_size(byte_count: int) -> str:
-    """A file's size the way a person reads it, in the units the storage
-    line beside it uses: 117 KB, 1.2 MB."""
-    if byte_count >= 1024 * 1024:
-        return _decimal(f"{byte_count / (1024 * 1024):.1f} MB")
-    if byte_count >= 1024:
-        return f"{round(byte_count / 1024)} KB"
-    return f"{byte_count} B"
 
 
 def _decimal(text: str) -> str:

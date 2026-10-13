@@ -152,25 +152,24 @@ def test_upload_without_a_profile_never_touches_the_network(tmp_path):
     ctx.store.upload_bytes(BODY, name="a.png")
     assert ctx.nam.calls == []
     assert ctx.pool.calls == 0
-    assert ctx.failures == [("a.png", "Connect your signer app first.")]
+    assert ctx.failures == [("a.png", friendly_message(ERROR_CODES.NO_SIGNER))]
+    assert ctx.failure_codes == [("a.png", ERROR_CODES.NO_SIGNER)]
 
 
 def test_an_empty_body_is_refused(tmp_path):
     ctx = make_store(tmp_path)
     ctx.store.upload_bytes(b"", name="a.png")
     assert ctx.nam.calls == []
-    assert ctx.failures == [("a.png", "Nothing to upload.")]
+    assert ctx.failure_codes == [("a.png", ERROR_CODES.FILE_UNREADABLE)]
 
 
-def test_a_signer_refusal_keeps_its_exact_wording(tmp_path):
-    """``nostr/media/manager.py`` classifies signer failures by matching
-    this prefix. Rewording it silently reclassifies every one of them."""
+def test_a_signer_refusal_is_said_plainly(tmp_path):
+    """The signer's own words are for the signer; the person reads what
+    happened and what to do, and the code says which it was."""
     ctx = make_store(tmp_path, signer=FakeSigner(failure="user declined"))
     ctx.store.upload_bytes(BODY, name="a.png")
     assert ctx.verbs() == []               # refused before the PUT
-    assert ctx.failures[0][1] == (
-        "Your signer app declined the request to the media server: user declined"
-    )
+    assert ctx.failures[0][1] == friendly_message(ERROR_CODES.SIGNER_REJECTED)
     assert ctx.failure_codes == [("a.png", ERROR_CODES.SIGNER_REJECTED)]
 
 
@@ -443,8 +442,9 @@ def test_the_size_message_names_the_server_cap_not_the_file(tmp_path, monkeypatc
     ctx.store.upload_bytes(b"x" * (2 * 1024 * 1024), name="big.png")
     assert ctx.nam.calls == []
     reason = ctx.failures[0][1]
-    assert "(1 MiB)" in reason
-    assert "2 MiB" not in reason
+    assert "(1.0 MB)" in reason
+    assert "2.0 MB" not in reason
+    assert ctx.failure_codes == [("big.png", ERROR_CODES.FILE_TOO_LARGE)]
 
 
 def test_reroute_is_announced_only_after_a_server_confirms(tmp_path, monkeypatch):

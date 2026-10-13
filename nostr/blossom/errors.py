@@ -41,6 +41,12 @@ class ERROR_CODES:
     SIGNER_IDENTITY_MISMATCH = "SIGNER_IDENTITY_MISMATCH"
     NO_SIGNER = "NO_SIGNER"
 
+    # Refused before anything was sent: the file, or where it would go.
+    FILE_UNREADABLE = "FILE_UNREADABLE"
+    FILE_TOO_LARGE = "FILE_TOO_LARGE"
+    QUOTA_FULL = "QUOTA_FULL"
+    NO_SERVER = "NO_SERVER"
+
     # Server verdicts. Distinct from the transport codes above because
     # the server answered: it just refused, and the reasons need
     # different copy and a different retry policy.
@@ -51,78 +57,58 @@ class ERROR_CODES:
     AUTH_REJECTED = "AUTH_REJECTED"
 
 
-# The two sentences that say the signer, not a server, stopped a request.
-# The asset manager tells the two kinds of failure apart by them
-# (nostr/media/manager.py), so they are written once, here, and compared
-# in the language they are shown in. Temporary until the store reports
-# structured codes for every failure.
-NO_SIGNER = _("Connect your signer app first.")
-
-
-# Friendly copy per code. Sentence case, no "we", no blame, says what
-# happened and what to do next. An image never disappears from a
-# document because of any of these, and the copy says so where it is
-# the user's first question.
+# One short sentence per code, or two: what happened, and what to do
+# about it. No protocol words, no host names, no "we", no blame. The
+# library shows these under a file and the editor in its status bar, so
+# none of them assumes where the file is.
+_TRY_AGAIN = N_("The upload didn’t finish. Try again.")
 _FRIENDLY = {
     ERROR_CODES.REDIRECT_REFUSED: _(
-        "The server redirected this request. For safety it was not sent "
-        "again. Try a different server."
+        "Your media server answered in a way MyEditor doesn’t trust, so nothing "
+        "was sent."
     ),
-    ERROR_CODES.UNSAFE_URL: _(
-        "That address is not allowed. Only regular web links can be used "
-        "here."
-    ),
+    ERROR_CODES.UNSAFE_URL: _("That address can’t be used."),
     ERROR_CODES.TOO_LARGE: _(
-        "The transfer was larger than allowed and was stopped."
+        "A media server sent more than MyEditor accepts, so it was stopped."
     ),
-    ERROR_CODES.UNSUPPORTED_FORMAT: _(
-        "That file format cannot be shown here. The file itself is "
-        "unaffected."
-    ),
-    ERROR_CODES.HOST_MISMATCH: _(
-        "The signed authorization does not match this server. Nothing was "
-        "sent."
-    ),
+    ERROR_CODES.UNSUPPORTED_FORMAT: _("MyEditor can’t show this kind of file."),
+    # Only a mis-wired request reaches this, never the person's doing.
+    ERROR_CODES.HOST_MISMATCH: _(_TRY_AGAIN),
     ERROR_CODES.SIGNER_REJECTED: _(
-        "Your signer app declined the request. Approve it there and try "
-        "again."
+        "Your signer app didn’t approve the request. Check it and try again."
     ),
-    ERROR_CODES.UPLOAD_FAILED: _(
-        "The upload did not finish. The file stays in your document and "
-        "can be retried."
-    ),
+    ERROR_CODES.UPLOAD_FAILED: _(_TRY_AGAIN),
     ERROR_CODES.NETWORK_UNAVAILABLE: _(
-        "The server could not be reached. The file stays in your document "
-        "and can be uploaded later."
+        "Couldn’t reach your media server. Check your internet connection."
     ),
     ERROR_CODES.SIGNER_IDENTITY_MISMATCH: _(
-        "Your signer app answered for a different account. Nothing was sent."
+        "Your signer app answered for a different account, so nothing was sent."
     ),
+    ERROR_CODES.NO_SIGNER: _("Connect your signer app first."),
+    ERROR_CODES.FILE_UNREADABLE: _("This file couldn’t be read."),
+    ERROR_CODES.FILE_TOO_LARGE: _("This file is larger than your media servers take."),
+    ERROR_CODES.QUOTA_FULL: _(
+        "There isn’t enough space left on your media servers for this file."
+    ),
+    ERROR_CODES.NO_SERVER: _("Add a media server first, in Media Servers."),
+    # The check stays (client.py, replicate.py); the words are plain.
     ERROR_CODES.HASH_MISMATCH: _(
-        "The server described a different file than the one that was sent. "
-        "Nothing was stored and the file stays in your document."
+        "A media server returned the wrong file, so it wasn’t used. Try again."
     ),
-    ERROR_CODES.SERVER_TOO_LARGE: _(
-        "That server refused the file for being too large. Try another "
-        "server, or a smaller file."
-    ),
+    ERROR_CODES.SERVER_TOO_LARGE: _("This file is too large for your media server."),
     ERROR_CODES.PAYMENT_REQUIRED: _(
-        "That server asks for payment for uploads. The file stays in your "
-        "document. Try another server."
+        "Your media server asks for payment. Choose another one in Media Servers."
     ),
-    ERROR_CODES.RATE_LIMITED: _(
-        "That server is asking for a slower pace. Wait a moment and try "
-        "again."
-    ),
-    ERROR_CODES.NO_SIGNER: NO_SIGNER,
+    ERROR_CODES.RATE_LIMITED: _("Your media server is busy. Wait a moment and try again."),
     ERROR_CODES.AUTH_REJECTED: _(
-        "That server did not accept the signed authorization. Check that "
-        "your signer app is connected, then try again."
+        "Your media server refused the request. Check your signer app and try again."
     ),
 }
 
 _FALLBACK = _("Something went wrong with that media request. Nothing was lost.")
 
+# The signer's own words, for the importer's record of what it copied.
+# The person reads the code's sentence above instead.
 _SIGNER_REJECTED = N_("Your signer app declined the request to the media server: {reason}")
 
 
@@ -130,15 +116,6 @@ def signer_rejected(reason) -> str:
     """The sentence for a signer that refused to sign, with its own words."""
     return _(_SIGNER_REJECTED).format(reason=reason)
 
-
-def is_signer_failure(text) -> bool:
-    """Whether ``text`` is one of the two sentences above."""
-    text = str(text or "")
-    if text.startswith(NO_SIGNER):
-        return True
-    # The signer's own words come last, so the sentence is known up to them.
-    opening = _(_SIGNER_REJECTED).partition("{reason}")[0]
-    return bool(opening) and text.startswith(opening)
 
 # A raw header can carry anything the operator typed, including CR LF.
 # This string lands in a plain-text label, so newlines and control

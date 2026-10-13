@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 from typing import Optional
 
+import i18n
 from i18n import _
 
 AUDIO_TYPES = {".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac",
@@ -78,3 +79,14 @@ def link_words(mime: str, name: str) -> str:
     if kind_of(mime) == VIDEO:
         return _("▶ Video: {name}").format(name=name)
     return _("▶ Audio: {name}").format(name=name)
+
+
+def format_size(byte_count: int) -> str:
+    """A file's size the way a person reads it: 117 KB, 1.2 MB, with the
+    decimal point the app's language writes (1,2 MB in German)."""
+    if byte_count >= 1024 * 1024:
+        text = f"{byte_count / (1024 * 1024):.1f} MB"
+        return text.replace(".", i18n.display_locale().decimalPoint())
+    if byte_count >= 1024:
+        return f"{round(byte_count / 1024)} KB"
+    return f"{byte_count} B"

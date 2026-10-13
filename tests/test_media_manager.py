@@ -31,6 +31,7 @@ from nostr.media.assets import (
     DocumentAsset,
     asset_key,
 )
+from nostr.blossom.errors import friendly_message
 from nostr.media.manager import AssetErrorCodes, AssetManager
 
 from tests.media_fakes import (
@@ -547,31 +548,28 @@ def test_single_flight_uploads_run_strictly_in_order(tmp_path):
     assert second.upload_state is AssetState.SIGNING
 
 
-def test_signer_failures_are_classified(tmp_path):
-    for reason in ("Your signer app declined the request to the media server: user said no",
-                   "Connect your signer app first."):
-        ctx = make_manager(tmp_path)
-        asset = ctx.manager.adopt_bytes(PNG_BYTES)
-        ctx.manager.request_upload(asset.sha256)
-        ctx.uploader.fail(asset.key, reason)
-        assert asset.failure_code == AssetErrorCodes.SIGNER_REJECTED
-        assert ctx.signals.failed == [(PNG_SHA, AssetErrorCodes.SIGNER_REJECTED)]
-
-
-def test_other_failures_are_upload_failures(tmp_path):
+@pytest.mark.parametrize("code", [
+    "SIGNER_REJECTED", "NO_SIGNER", "NETWORK_UNAVAILABLE", "QUOTA_FULL",
+    "FILE_TOO_LARGE", "HASH_MISMATCH", "UPLOAD_FAILED",
+])
+def test_the_stores_code_is_the_assets_code(tmp_path, code):
+    """The person is told why an image did not upload: no connection, a
+    full server and a declined signer are different things to do
+    about. The code the store reports reaches the editor unchanged,
+    instead of being guessed from the first words of a sentence."""
     ctx = make_manager(tmp_path)
     asset = ctx.manager.adopt_bytes(PNG_BYTES)
     ctx.manager.request_upload(asset.sha256)
-    ctx.uploader.fail(asset.key, "Host unreachable (HTTP 0)")
-    assert asset.failure_code == AssetErrorCodes.UPLOAD_FAILED
-    assert ctx.signals.failed == [(PNG_SHA, AssetErrorCodes.UPLOAD_FAILED)]
+    ctx.uploader.fail(asset.key, code)
+    assert asset.failure_code == code
+    assert ctx.signals.failed == [(PNG_SHA, code)]
 
 
 def test_failure_keeps_every_identity_field(tmp_path):
     ctx = make_manager(tmp_path)
     asset = ctx.manager.adopt_bytes(PNG_BYTES, alt="a picture", caption="a caption")
     ctx.manager.request_upload(asset.sha256)
-    ctx.uploader.fail(asset.key, "server said no")
+    ctx.uploader.fail(asset.key)
 
     assert asset.upload_state is AssetState.FAILED
     assert asset.can_retry
@@ -581,7 +579,7 @@ def test_failure_keeps_every_identity_field(tmp_path):
     assert asset.alt == "a picture"
     assert asset.caption == "a caption"
     assert (asset.width, asset.height) == (3, 2)
-    assert asset.failure_reason == "server said no"
+    assert asset.failure_reason == friendly_message("UPLOAD_FAILED")
     assert ctx.manager.resolve_bytes(asset.key) == PNG_BYTES   # bytes still there
 
 
@@ -592,7 +590,7 @@ def test_a_failure_stops_the_queue_without_stranding_it(tmp_path):
     ctx.manager.request_upload(first.sha256)
     ctx.manager.request_upload(second.sha256)
 
-    ctx.uploader.fail(first.key, "server said no")
+    ctx.uploader.fail(first.key)
     assert list(ctx.manager._queue) == []
     assert ctx.manager._inflight is None
     assert len(ctx.uploader.calls) == 1               # no second signer prompt
@@ -609,7 +607,7 @@ def test_retry_reuses_the_cached_bytes(tmp_path):
     ctx = make_manager(tmp_path)
     asset = ctx.manager.adopt_bytes(PNG_BYTES)
     ctx.manager.request_upload(asset.sha256)
-    ctx.uploader.fail(asset.key, "server said no")
+    ctx.uploader.fail(asset.key)
 
     ctx.manager.retry(asset.sha256)
     assert asset.upload_state is AssetState.SIGNING
@@ -634,7 +632,7 @@ def test_a_late_callback_after_a_failure_is_ignored(tmp_path):
     ctx = make_manager(tmp_path)
     asset = ctx.manager.adopt_bytes(PNG_BYTES)
     ctx.manager.request_upload(asset.sha256)
-    ctx.uploader.fail(asset.key, "server said no")
+    ctx.uploader.fail(asset.key)
 
     ctx.uploader.finish(asset.key, make_media(PNG_SHA))
     assert asset.upload_state is AssetState.FAILED
@@ -645,7 +643,7 @@ def test_a_superseded_attempt_cannot_complete_the_asset(tmp_path):
     ctx = make_manager(tmp_path)
     asset = ctx.manager.adopt_bytes(PNG_BYTES)
     ctx.manager.request_upload(asset.sha256)
-    ctx.uploader.fail(asset.key, "server said no")
+    ctx.uploader.fail(asset.key)
     ctx.manager.retry(asset.sha256)
 
     # The job the retry replaced answers late, still carrying its own
@@ -661,7 +659,7 @@ def test_uploads_this_manager_did_not_start_are_ignored(tmp_path):
     asset = ctx.manager.adopt_bytes(PNG_BYTES)
     ctx.uploader.status("holiday snap.png", "uploading")
     ctx.uploader.finish("holiday snap.png", make_media(PNG_SHA))
-    ctx.uploader.fail("holiday snap.png", "server said no")
+    ctx.uploader.fail("holiday snap.png")
 
     assert asset.upload_state is AssetState.LOCAL
     assert ctx.signals.failed == []
@@ -691,12 +689,12 @@ def test_a_finished_url_for_another_hash_is_refused(tmp_path):
 
 def test_a_synchronous_failure_leaves_the_manager_consistent(tmp_path):
     ctx = make_manager(tmp_path)
-    ctx.uploader.fail_synchronously = "Connect your signer app first."
+    ctx.uploader.fail_synchronously = "NO_SIGNER"
     asset = ctx.manager.adopt_bytes(PNG_BYTES)
 
     ctx.manager.request_upload(asset.sha256)
     assert asset.upload_state is AssetState.FAILED
-    assert asset.failure_code == AssetErrorCodes.SIGNER_REJECTED
+    assert asset.failure_code == "NO_SIGNER"
     assert ctx.manager._inflight is None
     assert list(ctx.manager._queue) == []
     assert ctx.manager._jobs == {}

@@ -53,7 +53,7 @@ from .client import (
     server_origin,
     whole_number,
 )
-from .errors import ERROR_CODES, NO_SIGNER, friendly_message, signer_rejected
+from .errors import ERROR_CODES, friendly_message
 from .hashes import blob_url, url_agrees_with_hash
 from .plan import get_effective_max_file, lists_publicly, plan_upload, UploadPlan
 from .settings import BlossomSettings
@@ -200,11 +200,9 @@ class MediaStore(QObject):
     upload_progress = Signal(str, int, int)            # name, sent, total
     upload_status = Signal(str, str)                   # name, status
     upload_finished = Signal(str, object)              # name, MediaFile
+    # Every failure is both: the plain sentence to show, then its stable
+    # code, so a subscriber branches on the code and never on the words.
     upload_failed = Signal(str, str)                   # name, reason
-    # Same failure, as a stable code. Emitted alongside ``upload_failed``
-    # so a subscriber can branch on the code instead of string-matching
-    # the reason. ``upload_failed`` stays: it is what the asset manager
-    # reads today.
     upload_failed_code = Signal(str, str)              # name, code
 
     # Reroute toast trigger. Fired once per upload, after a server has
@@ -722,26 +720,25 @@ class MediaStore(QObject):
         path = Path(file_path)
         name = path.name or "upload"
         if profile is None:
-            self.upload_failed.emit(name, NO_SIGNER)
+            self._refuse(name, ERROR_CODES.NO_SIGNER)
             return
         try:
             size = path.stat().st_size
-        except OSError as exc:
-            self.upload_failed.emit(name, _("Could not read file: {error}").format(error=exc))
+        except OSError:
+            self._refuse(name, ERROR_CODES.FILE_UNREADABLE)
             return
         mime = media_files.type_of(path.name) or "application/octet-stream"
 
         def read(read_back) -> None:
             body, _sha = read_back
             if not body:
-                self.upload_failed.emit(name, _("File is empty."))
+                self._refuse(name, ERROR_CODES.FILE_UNREADABLE)
                 return
             self.upload_bytes(body, name=name, mime_type=mime)
 
         # A large file is read (and kept in the cache) off the UI thread.
         run_for_size(size, lambda: self._read_and_keep(path), read,
-                     lambda exc: self.upload_failed.emit(
-                         name, _("Could not read file: {error}").format(error=exc)),
+                     lambda _exc: self._refuse(name, ERROR_CODES.FILE_UNREADABLE),
                      parent=self)
 
     def _read_and_keep(self, path: Path) -> tuple:
@@ -791,29 +788,27 @@ class MediaStore(QObject):
         """
         profile = self._profile_provider()
         if profile is None:
-            self.upload_failed.emit(name, NO_SIGNER)
+            self._refuse(name, ERROR_CODES.NO_SIGNER)
             return
         if not body:
-            self.upload_failed.emit(name, _("Nothing to upload."))
+            self._refuse(name, ERROR_CODES.FILE_UNREADABLE)
             return
 
         servers = self._target_servers()
         if not servers:
-            self.upload_failed.emit(name, _("No media server is set up."))
+            self._refuse(name, ERROR_CODES.NO_SERVER)
             return
 
         # The size plan runs first, so an oversized file is refused
         # without a single request leaving the process.
         plan: UploadPlan = plan_upload(len(body), servers)
         if plan.primary is None:
-            # The number the user needs is the largest cap any configured
-            # server publishes, not the size of their own file.
-            limit_mb = max(1, max(get_effective_max_file(s) for s in servers) // (1024 * 1024))
-            self.upload_failed.emit(
-                name,
-                _("File is too large for any configured server ({limit} MiB). "
-                  "Try a smaller file or add a server that accepts it.").format(limit=limit_mb),
-            )
+            # The number the person needs is the largest file any of
+            # their servers takes, not the size of their own file.
+            limit = max(get_effective_max_file(s) for s in servers)
+            self._refuse(name, ERROR_CODES.FILE_TOO_LARGE, _(
+                "This file is larger than your media servers take ({size})."
+            ).format(size=media_files.format_size(limit)))
             return
 
         # Hashing a large file, and keeping it in the cache, happens off
@@ -828,9 +823,7 @@ class MediaStore(QObject):
         eligible = [server for server in plan.eligible
                     if self._has_room(server, sha, len(body), name)]
         if not eligible:
-            self.upload_failed.emit(
-                name,
-                _("There isn\u2019t enough space left on your media servers for this file."))
+            self._refuse(name, ERROR_CODES.QUOTA_FULL)
             return
         state = UploadJobState(name=name, status="queued", hash=sha)
         self._uploads[name] = state
@@ -1016,9 +1009,8 @@ class MediaStore(QObject):
                 # A signer failure is not a server failure: the next
                 # server would ask the same signer, so failing over just
                 # buys a second prompt and a second refusal.
-                on_failure=lambda reason: self._fail_upload(
-                    name, _format_err(reason), code=ERROR_CODES.SIGNER_REJECTED
-                ),
+                on_failure=lambda _reason: self._fail_upload(
+                    name, ERROR_CODES.SIGNER_REJECTED),
             )
 
         def on_attempt_failed(index: int, err: BlossomError) -> None:
@@ -1031,7 +1023,7 @@ class MediaStore(QObject):
             ):
                 attempt(next_index)
                 return
-            self._fail_upload(name, _format_err(err), code=_error_code(err))
+            self._fail_upload(name, _error_code(err), _format_err(err))
 
         attempt(0)
 
@@ -1258,14 +1250,18 @@ class MediaStore(QObject):
         self.upload_finished.emit(name, media)
         self.library_changed.emit()
 
-    def _fail_upload(self, name: str, reason: str, *, code: str = "") -> None:
+    def _fail_upload(self, name: str, code: str, reason: str = "") -> None:
         state = self._uploads.pop(name, None)
         if state is not None:
             state.status = "failed"
-            state.error = reason
+            state.error = reason or friendly_message(code)
         self.upload_status.emit(name, "failed")
-        self.upload_failed.emit(name, reason)
-        self.upload_failed_code.emit(name, code or ERROR_CODES.UPLOAD_FAILED)
+        self._refuse(name, code, reason)
+
+    def _refuse(self, name: str, code: str, reason: str = "") -> None:
+        """Report one upload's failure: the sentence, then its code."""
+        self.upload_failed.emit(name, reason or friendly_message(code))
+        self.upload_failed_code.emit(name, code)
 
     # ------------------------------------------------------------------
     # Delete
@@ -1397,7 +1393,7 @@ class MediaStore(QObject):
             client.sign_event(
                 unsigned_event,
                 on_success=on_signed,
-                on_failure=lambda reason: on_failure(signer_rejected(reason)),
+                on_failure=on_failure,
             )
 
         self._session_pool.get(profile, on_ready=on_ready, on_error=on_failure)
@@ -1486,17 +1482,8 @@ def _is_retryable(err) -> bool:
     return err.status in _RETRYABLE_STATUSES
 
 
-def _format_err(err) -> str:
-    """User-facing copy for a failure.
-
-    A :class:`BlossomError` becomes mapped copy plus the operator's own
-    ``X-Reason``, never a Qt transport string and never protocol jargon.
-    Anything else is a signer message and passes through byte-identical:
-    the asset manager still classifies those by prefix, so rewording
-    them here would silently reclassify every signer failure.
-    """
-    if isinstance(err, BlossomError):
-        return friendly_message(
-            err.code or ERROR_CODES.UPLOAD_FAILED, detail=err.detail
-        )
-    return str(err)
+def _format_err(err: BlossomError) -> str:
+    """The plain sentence for a server's or the transport's failure: the
+    code's copy plus the operator's own ``X-Reason``, never a Qt
+    transport string."""
+    return friendly_message(err.code or ERROR_CODES.UPLOAD_FAILED, detail=err.detail)

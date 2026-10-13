@@ -471,7 +471,7 @@ def test_a_failed_upload_leaves_the_image_in_the_document(tmp_path,
                                                           paste_choice):
     paste_choice("always")
     win = _EntryWindow(tmp_path / "cache", profile=object())
-    win._uploader.fail_synchronously = "server said no"
+    win._uploader.fail_synchronously = "UPLOAD_FAILED"
 
     win._handle_pasted_image(win.editor, _clipboard_image())
 
