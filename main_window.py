@@ -5273,6 +5273,7 @@ class MainWindow(QMainWindow):
             self._published_view.apply_theme(self.is_dark_theme)
         if getattr(self, "_article_details_panel", None) is not None:
             self._article_details_panel.set_dark(self.is_dark_theme)
+        self._redraw_media_cards()
         for banner in getattr(self, "_tab_conflict_banners", {}).values():
             banner.apply_theme(self.is_dark_theme)
         imports_window = getattr(self, "_imports", None) and self._imports.window()
@@ -6751,6 +6752,18 @@ class MainWindow(QMainWindow):
         else:
             words = _("Not uploaded yet. Publishing or saving as a draft uploads it.")
         return media_card.render(title, words, dark=self.is_dark_theme)
+
+    def _redraw_media_cards(self) -> None:
+        """Draw the cards of the audio and video in the open documents
+        again, in the appearance now in use."""
+        shown = set()
+        for i in range(self.tabs.count()):
+            ed = self._editor_from_widget(self.tabs.widget(i))
+            for name in iter_image_names(ed.document()) if ed is not None else ():
+                media = _media_asset(self._asset_manager, name)
+                if media is not None and media.sha256 not in shown:
+                    shown.add(media.sha256)
+                    self._refresh_asset_in_documents(media.sha256)
 
     def _on_media_upload_progress(self, name: str, sent: int, total: int) -> None:
         sha = parse_asset_key(name)

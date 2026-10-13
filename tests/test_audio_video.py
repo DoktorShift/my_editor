@@ -471,3 +471,49 @@ def test_a_pasted_or_dropped_file_is_a_paragraph_of_its_own_wherever_it_lands(tm
     start = r["start of a paragraph"]
     assert start["blocks"] == ["\ufffc", "Start"]
     assert start["published"] == f"{URL}.mp3\n\nStart"
+
+
+THEME_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QTextDocument
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+from nostr.ui import media_card
+
+song, sha = sys.argv[2], sys.argv[3]
+w = main_window.MainWindow()
+w.show()
+w._media_store.upload_bytes = lambda body, name, mime_type: None
+w.nostr_state._active = True
+w._update_nostr_commands()
+w._upload_limit = lambda: 10**9
+ed = w.new_tab()
+w._upload_into(ed, song)
+
+def fill():
+    image = ed.document().resource(QTextDocument.ImageResource, QUrl(f"myeditor-asset:{sha}"))
+    ratio = image.devicePixelRatio()
+    return image.pixelColor(int((media_card.WIDTH - 8) * ratio),
+                            int(media_card.HEIGHT / 2 * ratio)).lightness()
+
+r = {}
+w._set_theme(False)
+r["light"] = fill()
+w._set_theme(True)
+r["dark"] = fill()
+ed.document().setModified(False)
+w._media_not_uploaded = lambda doc: []
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_the_card_follows_the_appearance(tmp_path):
+    song = tmp_path / "song.mp3"
+    song.write_bytes(BODY)
+    r = run_window_script(THEME_SCRIPT, tmp_path, str(song), SHA)
+    assert r["light"] > 200 and r["dark"] < 80
