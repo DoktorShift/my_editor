@@ -427,3 +427,15 @@ def test_every_popup_has_the_same_small_disclosure_arrow(toolbar, dark):
     undo_arrow = next(c for c in toolbar.buttons["undo"].children() if isinstance(c, Disclosure))
     assert undo_arrow.ink().alphaF() < 0.5
     toolbar.window_.hide()
+
+
+def test_the_style_popup_follows_the_style_menu(toolbar):
+    """One state for Format > Style, wherever it is offered: the menu's own
+    action says whether it can be used, and the pop-up follows it."""
+    from PySide6.QtWidgets import QMenu as Menu
+    style_menu = toolbar.style_button.menu()
+    assert isinstance(style_menu, Menu)
+    style_menu.menuAction().setEnabled(False)
+    assert not toolbar.style_button.isEnabled()
+    style_menu.menuAction().setEnabled(True)
+    assert toolbar.style_button.isEnabled()

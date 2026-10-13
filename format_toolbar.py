@@ -166,6 +166,19 @@ class PopupButton(QPushButton):
     """A pop-up button (the paragraph style's) drawn without Qt's own menu
     indicator, which is a dot on a Mac: its Disclosure is its arrow."""
 
+    def setMenu(self, menu: QMenu) -> None:  # noqa: N802, Qt's name
+        """``menu``, whose own action says whether it can be used: the
+        button follows it, so Format > Style has one state on the menu bar,
+        the toolbar and the format bar."""
+        super().setMenu(menu)
+        menu.menuAction().changed.connect(self._follow_menu)
+        self._follow_menu()
+
+    def _follow_menu(self) -> None:
+        menu = self.menu()
+        if menu is not None:
+            self.setEnabled(menu.menuAction().isEnabled())
+
     def paintEvent(self, _event) -> None:  # noqa: N802, Qt's name
         painter = QStylePainter(self)
         option = QStyleOptionButton()

@@ -5273,8 +5273,11 @@ class MainWindow(QMainWindow):
             self.format_toolbar.setVisible(self.show_toolbar and bool(kind))
             if getattr(self, "format_bar", None) is not None:
                 self.format_bar.setVisible(self.show_toolbar and bool(kind))
-            self.format_toolbar.style_button.setEnabled(kind == "rich" and not reading
-                                                        and not in_table)
+        # Format > Style, and every pop-up of it (the toolbar's, the format
+        # bar's), which follow its action.
+        if getattr(self, "m_style", None) is not None:
+            self.m_style.menuAction().setEnabled(kind == "rich" and not reading
+                                                 and not in_table)
         # Only the preview shows: nothing to edit there (Copy and Select
         # All act on the preview itself, through the focus).
         for action in self._editor_actions:

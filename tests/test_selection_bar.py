@@ -516,3 +516,48 @@ def test_a_popup_taking_the_keys_closes_it_while_the_window_stays_active(w, monk
                                                  Qt.FocusReason.PopupFocusReason))
     settle()
     assert w.bar.isVisible()
+
+
+def test_its_style_popup_follows_the_style_menu(w):
+    w.style_menu.menuAction().setEnabled(False)
+    assert not w.bar.style_button.isEnabled()
+    w.style_menu.menuAction().setEnabled(True)
+    assert w.bar.style_button.isEnabled()
+
+
+TABLE_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+w = main_window.MainWindow()
+w.show()
+ed = w.new_tab()
+ed.insert_table(2, 2)
+app.processEvents()
+w._update_format_buttons()
+r = {"table": [w.format_toolbar.style_button.isEnabled(),
+               ed.selection_bar.style_button.isEnabled(),
+               w.m_style.menuAction().isEnabled()]}
+path = os.path.join(os.environ["HOME"], "plain.txt")
+open(path, "w").write("words\n")
+w.open_path(path)
+app.processEvents()
+plain = w.current_editor()
+r["plain"] = [w.format_toolbar.style_button.isEnabled(),
+              plain.selection_bar.style_button.isEnabled()]
+for i in range(w.tabs.count()):
+    e = w._editor_from_widget(w.tabs.widget(i))
+    if e is not None:
+        e.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_in_a_table_cell_the_bar_and_the_toolbar_agree(tmp_path):
+    from tests.app_process import run_window_script
+    r = run_window_script(TABLE_SCRIPT, tmp_path)
+    assert r == {"table": [False, False, False], "plain": [False, False]}
