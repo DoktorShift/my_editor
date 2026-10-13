@@ -886,11 +886,19 @@ class MediaLibraryDialog(QDialog):
         title = (_("Delete “{name}”?").format(name=files[0].name) if len(files) == 1
                  else ngettext("Delete {count} item?", "Delete {count} items?",
                                len(files)).format(count=len(files)))
-        message = ngettext(
-            "Anything you published with it will no longer show it. You can’t undo "
-            "this action.",
-            "Anything you published with them will no longer show them. You can’t undo "
-            "this action.", len(files))
+        if all(self._visibility.state_of(tile.key) == PRIVATE for tile in files):
+            # Another app's private files (Lotus, say): gone from it too.
+            message = ngettext(
+                "It’s also gone from the other app that keeps it privately. You can’t undo "
+                "this action.",
+                "They’re also gone from the other apps that keep them privately. You can’t "
+                "undo this action.", len(files))
+        else:
+            message = ngettext(
+                "Anything you published with it will no longer show it. You can’t undo "
+                "this action.",
+                "Anything you published with them will no longer show them. You can’t undo "
+                "this action.", len(files))
         if not confirm_destructive(self, title=title, message=message, action=_("Delete"),
                                    is_dark=self._is_dark):
             return

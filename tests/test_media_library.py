@@ -1114,3 +1114,20 @@ def test_return_in_the_search_field_goes_to_the_results_not_insert(tmp_path, mon
     press(world.dialog._search, Qt.Key.Key_Return)
     assert picked == [] and world.dialog.isVisible()
     assert world.grid.hasFocus() or QApplication.focusWidget() is world.grid
+
+
+def test_deleting_a_private_file_says_the_app_that_keeps_it_loses_it(tmp_path, monkeypatch):
+    """A private file belongs to another app's private library (Lotus,
+    say): deleting it here takes it from there too."""
+    envelope = sealed()
+    private = MediaFile(hash=sha_of(envelope), url=f"{SERVER}/{sha_of(envelope)}", size=10)
+    blob = PrivateBlob(sha256=private.hash, key_hex=KEY, mime="image/png", name="Secret.png")
+    world = build(tmp_path, monkeypatch, FakeStore([private]),
+                  visibility=MediaVisibility(library=FakeLibrary([blob])))
+    alert, shown = fake_alert(click="Cancel")
+    monkeypatch.setattr(alerts, "Alert", alert)
+    select(world, private.hash)
+    world.dialog._delete()
+    assert shown[0].message == (
+        "It’s also gone from the other app that keeps it privately. You can’t undo "
+        "this action.")
