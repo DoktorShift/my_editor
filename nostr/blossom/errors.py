@@ -39,6 +39,7 @@ class ERROR_CODES:
     UPLOAD_FAILED = "UPLOAD_FAILED"
     NETWORK_UNAVAILABLE = "NETWORK_UNAVAILABLE"
     SIGNER_IDENTITY_MISMATCH = "SIGNER_IDENTITY_MISMATCH"
+    NO_SIGNER = "NO_SIGNER"
 
     # Server verdicts. Distinct from the transport codes above because
     # the server answered: it just refused, and the reasons need
@@ -48,6 +49,14 @@ class ERROR_CODES:
     PAYMENT_REQUIRED = "PAYMENT_REQUIRED"
     RATE_LIMITED = "RATE_LIMITED"
     AUTH_REJECTED = "AUTH_REJECTED"
+
+
+# The two sentences that say the signer, not a server, stopped a request.
+# The asset manager tells the two kinds of failure apart by them
+# (nostr/media/manager.py), so they are written once, here, and compared
+# in the language they are shown in. Temporary until the store reports
+# structured codes for every failure.
+NO_SIGNER = _("Connect your signer app first.")
 
 
 # Friendly copy per code. Sentence case, no "we", no blame, says what
@@ -105,6 +114,7 @@ _FRIENDLY = {
         "That server is asking for a slower pace. Wait a moment and try "
         "again."
     ),
+    ERROR_CODES.NO_SIGNER: NO_SIGNER,
     ERROR_CODES.AUTH_REJECTED: _(
         "That server did not accept the signed authorization. Check that "
         "your signer app is connected, then try again."
@@ -113,12 +123,6 @@ _FRIENDLY = {
 
 _FALLBACK = _("Something went wrong with that media request. Nothing was lost.")
 
-# The two sentences that say the signer, not a server, stopped a request.
-# The asset manager tells the two kinds of failure apart by them
-# (nostr/media/manager.py), so they are written once, here, and compared
-# in the language they are shown in. Temporary until the store reports
-# structured codes for every failure.
-NO_SIGNER = _("Connect your signer app first.")
 _SIGNER_REJECTED = N_("Your signer app declined the request to the media server: {reason}")
 
 

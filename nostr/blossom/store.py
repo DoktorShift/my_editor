@@ -1312,57 +1312,53 @@ class MediaStore(QObject):
         """Delete a blob from every server it lives on.
 
         Files are deduped by sha256 across servers, so the same hash can
-        be on N hosts; we issue a parallel DELETE to each, then commit
-        the local removal once all of them have reported back. A delete
-        is "successful" if at least one server confirmed it (or the
-        whole list returned 404, meaning the blob is already gone). We only
-        surface an error to the UI when every server actively rejected.
+        be on N hosts; a DELETE goes to each in parallel. A server that
+        confirms (or answers 404, already gone) is dropped from the
+        file's record. Only when every server confirmed is the file gone
+        and ``file_deleted`` emitted; otherwise the file stays in the
+        library with the servers that still hold it, and
+        ``delete_failed`` carries the code of what stopped it. A file is
+        never reported gone while a server still serves it: it would come
+        back on the next listing, and the person would have believed it
+        deleted.
         """
         profile = self._profile_provider()
         if profile is None:
-            self.delete_failed.emit(file_hash, NO_SIGNER)
+            self.delete_failed.emit(file_hash, ERROR_CODES.NO_SIGNER)
             return
         media = self._files.get(file_hash)
         if media is None:
             return
 
-        # Build the unique set of servers to target. Source of truth is
-        # the file's own ``urls`` (whatever ``/list`` told us), with the
-        # blob URL as a fallback for files we have only one record of.
+        # The servers to ask: the file's own copies (whatever ``/list``
+        # told us), with the blob URL as a fallback for a file known by
+        # one record only.
         target_servers: list[str] = []
-        seen: set[str] = set()
         for entry in media.urls:
             origin = extract_server_from_blob_url(entry.get("url", ""))
-            if origin and origin not in seen:
+            if origin and origin not in target_servers:
                 target_servers.append(origin)
-                seen.add(origin)
         if not target_servers:
-            fallback = extract_server_from_blob_url(media.url)
-            if fallback:
-                target_servers.append(fallback)
-            else:
-                target_servers.append(self._settings.primary)
+            target_servers.append(extract_server_from_blob_url(media.url)
+                                  or self._settings.primary)
 
-        # Track per-server outcomes so the UI gets a meaningful summary.
         remaining = {"count": len(target_servers)}
-        successes: list[str] = []
         failures: list[tuple[str, str]] = []
 
         def finish_one() -> None:
             remaining["count"] -= 1
             if remaining["count"] > 0:
                 return
-            # Always drop the local record: the user said "remove this".
-            self._files.pop(file_hash, None)
-            if successes:
+            if not failures:
+                self._files.pop(file_hash, None)
                 self.file_deleted.emit(file_hash)
             else:
-                summary = "; ".join(f"{_hostname(host)}: {msg}" for host, msg in failures)
-                self.delete_failed.emit(
-                    file_hash,
-                    _("No server accepted the delete ({servers}). Removed locally.").format(
-                        servers=summary),
-                )
+                kept = {origin for origin, _code in failures}
+                media.urls = [u for u in media.urls
+                              if extract_server_from_blob_url(u.get("url", "")) in kept]
+                if media.urls:
+                    media.url = str(media.urls[0].get("url") or media.url)
+                self.delete_failed.emit(file_hash, _delete_failure_code(failures))
             self.library_changed.emit()
 
         for origin in target_servers:
@@ -1370,8 +1366,8 @@ class MediaStore(QObject):
                 profile=profile,
                 file_hash=file_hash,
                 origin=origin,
-                on_ok=lambda o=origin: (successes.append(o), finish_one()),
-                on_err=lambda msg, o=origin: (failures.append((o, msg)), finish_one()),
+                on_ok=finish_one,
+                on_err=lambda code, o=origin: (failures.append((o, code)), finish_one()),
             )
 
     def _delete_one_server(
@@ -1385,7 +1381,7 @@ class MediaStore(QObject):
     ) -> None:
         """Sign and send a single DELETE. 404 is treated as success
         (the file isn't on that server anymore, which is what the user
-        was asking for)."""
+        was asking for). ``on_err`` gets the failure's code."""
         unsigned = build_blossom_auth_event(
             "delete",
             file_hash=file_hash,
@@ -1398,7 +1394,7 @@ class MediaStore(QObject):
                 if err.status == 404:
                     on_ok()
                 else:
-                    on_err(_format_err(err))
+                    on_err(_error_code(err))
 
             self._client.delete(
                 origin,
@@ -1412,7 +1408,7 @@ class MediaStore(QObject):
             profile,
             unsigned,
             on_signed=after_sign,
-            on_failure=on_err,
+            on_failure=lambda _reason: on_err(ERROR_CODES.SIGNER_REJECTED),
         )
 
     # ------------------------------------------------------------------
@@ -1498,6 +1494,17 @@ def _error_code(err) -> str:
         return err.code or ERROR_CODES.UPLOAD_FAILED
     # Everything else reaching here came from the signing step.
     return ERROR_CODES.SIGNER_REJECTED
+
+
+def _delete_failure_code(failures) -> str:
+    """The one code a delete that some server did not take is reported
+    with: the signer first (nothing was asked of the servers), then an
+    unreachable server (try again later), then whatever a server said."""
+    codes = [code for _origin, code in failures]
+    for wanted in (ERROR_CODES.SIGNER_REJECTED, ERROR_CODES.NETWORK_UNAVAILABLE):
+        if wanted in codes:
+            return wanted
+    return codes[0] if codes else ERROR_CODES.UPLOAD_FAILED
 
 
 def _is_retryable(err) -> bool:

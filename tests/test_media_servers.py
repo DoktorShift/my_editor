@@ -63,9 +63,12 @@ class Router:
         self.by_host = {QUrl(s.origin).host(): s for s in servers}
         self.down = set()
         self.wants_token = set()
+        self.unreachable = set()
 
     def __call__(self, verb, request, body):
         host = request.url().host()
+        if host in self.unreachable and verb != "get":
+            return error_reply(0)
         if host in self.down and verb == "get":
             return error_reply(503, reason="Down for maintenance.")
         if host in self.wants_token and verb == "get" and \
@@ -119,6 +122,46 @@ def test_an_unreachable_server_keeps_its_files_from_last_time(tmp_path):
     assert set(store.files) == {A, C}            # C is not gone, only unconfirmed
     assert not store.server_listings()[MIRROR].ok
     assert store.files[C].urls[0]["server"] == MIRROR
+
+
+def _listed_on_both(tmp_path):
+    router = Router(FakeBlossomServer(SERVER, blobs=[descriptor(A)]),
+                    FakeBlossomServer(MIRROR, blobs=[descriptor(A, server=MIRROR)]))
+    store, nam, _signer, _ = make(tmp_path, router)
+    store.fetch()
+    nam.settle()
+    deleted, failed = [], []
+    store.file_deleted.connect(deleted.append)
+    store.delete_failed.connect(lambda sha, code: failed.append((sha, code)))
+    return store, nam, router, deleted, failed
+
+
+def test_a_delete_no_server_takes_keeps_the_file(tmp_path):
+    """Never claim a file is gone when it is not: it comes back on the
+    next listing, and the person believed it deleted."""
+    store, nam, router, deleted, failed = _listed_on_both(tmp_path)
+    router.unreachable |= {"good.example", "mirror.example"}
+    store.delete_file(A)
+    nam.settle()
+    assert deleted == []
+    assert failed == [(A, "NETWORK_UNAVAILABLE")]
+    assert {u["server"] for u in store.files[A].urls} == {SERVER, MIRROR}
+
+
+def test_a_delete_one_server_misses_keeps_the_copy_it_still_has(tmp_path):
+    store, nam, router, deleted, failed = _listed_on_both(tmp_path)
+    router.unreachable.add("mirror.example")
+    store.delete_file(A)
+    nam.settle()
+    assert deleted == []
+    assert failed == [(A, "NETWORK_UNAVAILABLE")]
+    assert [u["server"] for u in store.files[A].urls] == [MIRROR]
+    assert store.files[A].url.startswith(MIRROR)
+
+    router.unreachable.clear()
+    store.delete_file(A)
+    nam.settle()
+    assert deleted == [A] and A not in store.files
 
 
 def test_copies_are_ordered_primary_first(tmp_path):

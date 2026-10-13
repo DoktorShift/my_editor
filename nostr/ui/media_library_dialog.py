@@ -77,6 +77,7 @@ import media_files
 import theme
 import url_safety
 from i18n import _, ngettext
+from ..blossom.errors import friendly_message
 from ..blossom.store import MediaFile, MediaStore
 from ..media.media_visibility import (
     PRIVATE,
@@ -2002,14 +2003,9 @@ class MediaLibraryDialog(QDialog):
                 _("Removed the public copy. That picture is private again.")
             )
 
-    def _on_delete_failed(self, file_hash: str, reason: str) -> None:
-        # The store already removed the file locally, so surface as a
-        # neutral note rather than a red error, since "the file is gone
-        # from your library" is exactly what the user asked for.
-        short = file_hash[:8]
-        self._set_status(
-            _("Removed {hash}… locally · {reason}").format(hash=short, reason=reason),
-            error=False)
+    def _on_delete_failed(self, file_hash: str, code: str) -> None:
+        # The file stays in the grid: a server still has it.
+        self._set_status(friendly_message(code), error=True)
 
 
 # --------------------------------------------------------------------------- #
