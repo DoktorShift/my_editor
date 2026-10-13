@@ -325,7 +325,7 @@ rep.check("the app learns Eve's relay list (two relays that are down) from the i
           set((stack.lookup(eve.user_pubkey) or policy.RelayList()).write) == {DEAD_1, DEAD_2})
 dialog, published = publish_note(eve, "This note has nowhere to go", timeout_ms=20_000)
 rep.check("no relay accepts: the dialog stays open and says so",
-          not published.fired and "No relay accepted the note" in dialog._status.text(),
+          not published.fired and "no relay took it" in dialog._status.text(),
           dialog._status.text())
 rep.check("and Publish can be pressed again (the retry path is a new publish)",
           dialog._publish_btn.isEnabled())
