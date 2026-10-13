@@ -78,6 +78,9 @@ class NoteText(QTextEdit):
         # Mentions as names in the link colour, as in the editor.
         self._look = RichTextLook(self.document(), is_dark)
 
+    def set_dark(self, is_dark: bool) -> None:
+        self._look.set_theme(is_dark)
+
     def set_note(self, text: str) -> None:
         self.setPlainText(text)
         rich_text.link_references(self.document(), self._label_for)
@@ -285,6 +288,17 @@ class PublishNoteDialog(QDialog):
         layout.addWidget(BottomRow(self._account, buttons))
         QWidget.setTabOrder(self._text_edit, self._account.button)
         answer_return_as_the_system_does(self.findChildren(QPushButton))
+
+    def apply_theme(self, is_dark: bool) -> None:
+        """The app's appearance changed while the sheet is open: all of it
+        takes the new one, as the window does."""
+        self._is_dark = is_dark
+        self.setStyleSheet(sheet_stylesheet(is_dark))
+        self._text_edit.set_dark(is_dark)
+        self._account.set_dark(is_dark)
+        self._status.set_dark(is_dark)
+        if self._picker is not None:
+            self._picker.set_dark(is_dark)
 
     # -- mentions -----------------------------------------------------------------
 

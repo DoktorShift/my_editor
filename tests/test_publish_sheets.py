@@ -449,3 +449,32 @@ def test_publish_waits_for_a_dropped_cover_and_a_failure_is_said_under_it(
     assert sheet._publish_btn.isEnabled()
     assert not sheet._cover_problem.isHidden()
     assert "the server said no" in sheet._cover_problem.text()
+
+
+@pytest.mark.parametrize("make", [article, note])
+def test_a_sheet_follows_the_appearance_while_it_is_open(tmp_path, make):
+    """Review M3: switched to Dark while a sheet was open, its labels came
+    out dark on dark. A sheet takes the new appearance as the window
+    does, everything in it."""
+    from nostr.ui.publish_sheet import sheet_stylesheet
+    from constants import DARK_MENU_BG
+    sheet = make(tmp_path)                                   # opened light
+    sheet._set_status("It went wrong", error=True)
+    sheet.apply_theme(True)
+    assert sheet.styleSheet() == sheet_stylesheet(True)
+    assert theme.error_text_color(True) in sheet._status.styleSheet()
+    assert sheet._account._is_dark
+    if make is article:
+        assert DARK_MENU_BG in sheet._card.styleSheet()
+        assert sheet._hashtags._is_dark and sheet._cover._is_dark
+    else:
+        assert sheet._text_edit._look._is_dark
+    sheet.close()
+
+
+def test_the_window_gives_an_open_sheet_its_new_appearance():
+    import inspect
+    from main_window import MainWindow
+    assert "_publish_sheet" in inspect.getsource(MainWindow._set_theme)
+    for handler in (MainWindow._on_nostr_publish_article, MainWindow._on_nostr_publish_note):
+        assert "self._publish_sheet = dialog" in inspect.getsource(handler)

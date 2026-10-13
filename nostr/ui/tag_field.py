@@ -154,6 +154,7 @@ class TagField(QFrame):
         return self._read_only
 
     def set_dark(self, is_dark: bool) -> None:
+        self._is_dark = is_dark
         field, border, text, muted = (
             (DARK_MENU_BG, DARK_BORDER, DARK_FG, DARK_MUTED_FG) if is_dark
             else (LIGHT_MENU_BG, LIGHT_BORDER, LIGHT_FG, LIGHT_MUTED_FG))

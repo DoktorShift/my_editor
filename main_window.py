@@ -5312,6 +5312,11 @@ class MainWindow(QMainWindow):
             window = getattr(self, name, None)
             if window is not None:
                 window.apply_theme(self.is_dark_theme)
+        # A publish sheet open on the window (window-modal: the menus and
+        # the system's appearance still reach the app).
+        sheet = getattr(self, "_publish_sheet", None)
+        if sheet is not None and shiboken6.isValid(sheet):
+            sheet.apply_theme(self.is_dark_theme)
 
     def _on_os_color_scheme_changed(self, scheme):
         if not self._follow_os_theme:
@@ -6514,6 +6519,7 @@ class MainWindow(QMainWindow):
         # Composed for sharing, as a share sheet is: the document is not
         # changed by what is changed in it.
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._publish_sheet = dialog
         dialog.open()
 
     def _toggle_ticks(self) -> None:
@@ -6969,6 +6975,7 @@ class MainWindow(QMainWindow):
         dialog.published.connect(self._on_nostr_article_published)
         dialog.finished.connect(lambda _result, d=dialog, e=ed: self._article_sheet_closed(d, e))
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._publish_sheet = dialog
         dialog.open()
 
     def _article_sheet_closed(self, dialog, ed) -> None:

@@ -307,6 +307,10 @@ class AccountRow(QWidget):
     def profile(self) -> Profile:
         return self._profile
 
+    def set_dark(self, is_dark: bool) -> None:
+        self._is_dark = is_dark
+        self._show()
+
     def _show(self) -> None:
         profile = self._profile
         avatar = pixmap_for_profile(profile.display_name, profile.user_pubkey,
@@ -347,6 +351,7 @@ class StatusLine(QLabel):
     def __init__(self, is_dark: bool, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._is_dark = is_dark
+        self._error = False
         self.setWordWrap(True)
         self.setTextFormat(Qt.TextFormat.PlainText)
         self.setVisible(False)
@@ -354,11 +359,19 @@ class StatusLine(QLabel):
     def say(self, text: str, *, error: bool = False) -> None:
         self.setText(text)
         self.setVisible(bool(text))
-        color = (theme.error_text_color(self._is_dark) if error
-                 else DARK_MUTED_FG if self._is_dark else LIGHT_MUTED_FG)
-        self.setStyleSheet(f"color: {color};")
+        self._error = error
+        self._color()
         if text and error:
             announce.announce(self, text)
+
+    def set_dark(self, is_dark: bool) -> None:
+        self._is_dark = is_dark
+        self._color()
+
+    def _color(self) -> None:
+        color = (theme.error_text_color(self._is_dark) if self._error
+                 else DARK_MUTED_FG if self._is_dark else LIGHT_MUTED_FG)
+        self.setStyleSheet(f"color: {color};")
 
 
 class BottomRow(QWidget):

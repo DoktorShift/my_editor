@@ -107,18 +107,7 @@ class _ArticleCard(QFrame):
         self.setObjectName("article_card")
         self.setAccessibleName(_("Preview"))
         self.setFixedWidth(self.WIDTH)
-        border, ground, muted = ((DARK_BORDER, DARK_MENU_BG, DARK_MUTED_FG) if is_dark
-                                 else (LIGHT_BORDER, LIGHT_BG, LIGHT_MUTED_FG))
-        self.setStyleSheet(
-            f"QFrame#article_card {{ background: {ground}; border: 1px solid {border};"
-            f" border-radius: 8px; }}"
-            f"QLabel#card_cover {{ background: {border}; border: none;"
-            f" border-top-left-radius: 7px; border-top-right-radius: 7px; }}"
-            f"QLabel#card_title {{ font-size: 15px; font-weight: 600; background: transparent; }}"
-            f"QLabel#card_summary, QLabel#card_byline {{ color: {muted};"
-            f" background: transparent; }}"
-            f"QLabel#card_byline {{ font-size: 11px; }}"
-            f"QLabel#card_title[untitled=\"true\"] {{ color: {muted}; }}")
+        self.set_dark(is_dark)
         column = QVBoxLayout(self)
         column.setContentsMargins(1, 1, 1, 12)
         column.setSpacing(6)
@@ -134,6 +123,20 @@ class _ArticleCard(QFrame):
             label.setContentsMargins(12, 0, 12, 0)
             column.addWidget(label)
         column.addStretch(1)
+
+    def set_dark(self, is_dark: bool) -> None:
+        border, ground, muted = ((DARK_BORDER, DARK_MENU_BG, DARK_MUTED_FG) if is_dark
+                                 else (LIGHT_BORDER, LIGHT_BG, LIGHT_MUTED_FG))
+        self.setStyleSheet(
+            f"QFrame#article_card {{ background: {ground}; border: 1px solid {border};"
+            f" border-radius: 8px; }}"
+            f"QLabel#card_cover {{ background: {border}; border: none;"
+            f" border-top-left-radius: 7px; border-top-right-radius: 7px; }}"
+            f"QLabel#card_title {{ font-size: 15px; font-weight: 600; background: transparent; }}"
+            f"QLabel#card_summary, QLabel#card_byline {{ color: {muted};"
+            f" background: transparent; }}"
+            f"QLabel#card_byline {{ font-size: 11px; }}"
+            f"QLabel#card_title[untitled=\"true\"] {{ color: {muted}; }}")
 
     @staticmethod
     def _words(name: str) -> QLabel:
@@ -530,6 +533,19 @@ class PublishArticleDialog(QDialog):
             self._form.setRowVisible(row, shown)
         if self.isVisible():
             self._fit(self.width())                 # room for them
+
+    def apply_theme(self, is_dark: bool) -> None:
+        """The app's appearance changed while the sheet is open: all of it
+        takes the new one, as the window does."""
+        self._is_dark = is_dark
+        self.setStyleSheet(sheet_stylesheet(is_dark))
+        self._card.set_dark(is_dark)
+        self._hashtags.set_dark(is_dark)
+        self._cover.set_dark(is_dark)
+        self._account.set_dark(is_dark)
+        self._status.set_dark(is_dark)
+        if self._coauthor_picker is not None:
+            self._coauthor_picker.set_dark(is_dark)
 
     def resizeEvent(self, event) -> None:  # noqa: N802, Qt's name
         super().resizeEvent(event)
