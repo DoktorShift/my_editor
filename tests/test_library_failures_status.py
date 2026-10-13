@@ -121,12 +121,14 @@ def test_failures_after_the_library_closed_are_counted_and_stay_until_it_opens(t
     assert r["names"] == []
     assert r["min_width"] < 420
     room, needed = r["narrow_room"]
-    assert room >= needed + 16                     # the message is drawn inset
+    # QStatusBar draws the message from 6 points in to 2 before the
+    # first permanent widget.
+    assert room >= needed + 8
     assert r["narrow_text"].endswith("…")
     assert len(r["narrow_quiet_text"]) > len(r["narrow_text"])
     assert r["counted"]
     for width, (room, needed) in r["widths"].items():
-        assert room >= needed + 16, f"the message is cut at {width} points"
+        assert room >= needed + 8, f"the message is cut at {width} points"
     assert r["words_back"]
     assert r["opened"] == [True]
     assert r["after_open"] == [False, "", False]
