@@ -73,7 +73,7 @@ def save_draft(stack, profile, inner, identifier):
 rep.section("An account from an earlier session")
 (nd.HOME / ".config" / "my_editor").mkdir(parents=True, exist_ok=True)
 (nd.HOME / ".config" / "my_editor" / "settings.json").write_text(
-    json.dumps({"last_update_check": time.time(), "welcome_shown": True}))
+    json.dumps({"last_update_check": time.time(), "welcome_shown": True}), encoding="utf-8")
 web.put("/avatar.png", png("#4466aa"))
 first = nd.Stack()
 alice, sk, setup = nd.local_account(first, "Alice App")

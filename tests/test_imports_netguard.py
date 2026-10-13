@@ -73,7 +73,8 @@ def test_a_name_resolving_into_the_local_network_is_refused(answer):
 @pytest.mark.parametrize("url", [
     "http://localhost:8080/feed", "http://router/feed", "http://nas.local/feed",
     "http://192.168.1.1/feed", "http://[::1]/feed", "http://user:pw@blog.example/feed",
-    "ftp://blog.example/feed", "https://blog.example/" + "x" * 2100,
+    "ftp://blog.example/feed",
+    pytest.param("https://blog.example/" + "x" * 2100, id="longer-than-an-address-may-be"),
 ])
 def test_refused_without_asking_the_network(url):
     asked = []

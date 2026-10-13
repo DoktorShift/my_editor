@@ -46,7 +46,7 @@ def main(argv) -> int:
         if not result.exists() or result.stat().st_mtime < started:
             failed.append(f"{area}: exited {code} without results")
             continue
-        data = json.loads(result.read_text())
+        data = json.loads(result.read_text(encoding="utf-8"))
         for check in data["checks"]:
             totals[check["status"]] = totals.get(check["status"], 0) + 1
             if check["status"] == "FAIL":

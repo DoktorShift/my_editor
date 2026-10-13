@@ -51,3 +51,13 @@ def test_every_text_file_is_opened_with_an_explicit_encoding():
         for line, call in text_io_without_encoding(tree):
             found.append(f"{path.relative_to(ROOT)}:{line} {call}")
     assert found == [], "add encoding=\"utf-8\" to:\n" + "\n".join(found)
+
+
+def test_every_test_name_fits_where_windows_keeps_it(request):
+    """pytest keeps the running test's name in an environment variable,
+    and Windows refuses one longer than 32767 characters: a parameter
+    whose text is the name (a huge JSON document) then fails before the
+    test runs, on Windows only. Such parameters get short ids."""
+    too_long = [item.nodeid[:80] + "…" for item in request.session.items
+                if len(item.nodeid) > 1000]
+    assert too_long == []
