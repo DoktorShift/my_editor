@@ -393,18 +393,49 @@ def _toml_value(entry: Entry) -> Union[str, List[str], None]:
         return entry.written
     if isinstance(value, list) and all(isinstance(item, str) for item in value):
         return value
-    if isinstance(value, list) and entry.written.startswith("[") and entry.written.endswith("]"):
-        # Numbers among texts ("python", 3.10): each item as written.
-        items = [_unquote(part) for part in _split_inline(entry.written[1:-1]) if part.strip()]
-        return items if len(items) == len(value) else None
-    if isinstance(value, list) and all(isinstance(item, (str, bool, int, float))
-                                       for item in value):
-        # Over lines: a number as TOML writes it, which it reads back as
-        # the same number.
-        return [item if isinstance(item, str) else
-                ("true" if item else "false") if isinstance(item, bool) else str(item)
-                for item in value]
+    if isinstance(value, list):
+        return _toml_items(entry, value)
     return None
+
+
+def _toml_items(entry: Entry, value: list) -> Optional[List[str]]:
+    """A TOML list holding numbers among its texts ("python", 3.10), on
+    its line or over lines: each item as written ("3.10", never "3.1"),
+    when each is what tomllib reads there; else None."""
+    written = " ".join(_without_toml_comment(line) for line in
+                       (entry.lines[0].partition("=")[2], *entry.lines[1:])).strip()
+    if not (written.startswith("[") and written.endswith("]")):
+        return None
+    items = [part.strip() for part in _split_inline(written[1:-1]) if part.strip()]
+    if len(items) != len(value):
+        return None
+    texts = []
+    for text, item in zip(items, value):
+        if isinstance(item, str) and _unquote(text) == item:
+            texts.append(item)
+        elif not isinstance(item, (str, list, dict)) and reads_as(text, item, TOML):
+            texts.append(text)
+        else:
+            return None
+    return texts
+
+
+def _without_toml_comment(line: str) -> str:
+    """A TOML line without its comment: from a "#" outside a string on."""
+    quote, at = "", 0
+    while at < len(line):
+        char = line[at]
+        if quote:
+            taken, quote = _in_quote(quote, line, at) if quote == '"' else \
+                (char, "" if char == quote else quote)  # '...' has no escapes
+            at += len(taken)
+            continue
+        if char == "#":
+            return line[:at]
+        if char in "\"'":
+            quote = char
+        at += 1
+    return line
 
 
 def _with_trailers_apart(entries: List[Entry]) -> List[Entry]:

@@ -953,14 +953,20 @@ def test_tags_written_as_a_string_read_back_as_the_tags_meant(tags):
     assert from_front_matter(front_matter.split(out)[0]).hashtags == tags
 
 
-def test_a_toml_list_over_lines_holding_numbers_can_be_changed():
+@pytest.mark.parametrize("text", [
+    '+++\ntitle = "T"\ntags = [\n  1,\n  "b",  # a tag\n  3.10,\n  1e3, 0x1F,\n]\n+++\n\nBody.\n',
+    '+++\ntitle = "T"\n\n[taxonomies]\ntags = [\n  1,\n  "b",\n  3.10, 1e3,\n  0x1F\n]\n+++\n\nBody.\n',
+    '+++\ntitle = "T"\ntaxonomies.tags = [\n  1, "b", 3.10,\n  1e3, 0x1F]\n+++\n\nBody.\n',
+])
+def test_a_toml_list_over_lines_holding_numbers_reads_them_as_written(text):
     """Round 8, H2: shown, but kept as written, as its numbers had no
-    reading of their own over lines."""
-    text = '+++\ntitle = "T"\ntags = [\n  1,\n  "b"\n]\n+++\n\nBody.\n'
+    reading of their own over lines. Round 9, H2: then read as Python
+    prints them ("3.1" for 3.10), shown, published and written so."""
+    tags = ("1", "b", "3.10", "1e3", "0x1F")
     front, _ = front_matter.split(text)
-    assert from_front_matter(front).hashtags == ("1", "b") and kept_in_file(front) == frozenset()
-    out = changed(text, hashtags=("1", "b", "c"))
-    assert from_front_matter(front_matter.split(out)[0]).hashtags == ("1", "b", "c")
+    assert from_front_matter(front).hashtags == tags and kept_in_file(front) == frozenset()
+    out = changed(text, hashtags=tags + ("c",))
+    assert from_front_matter(front_matter.split(out)[0]).hashtags == tags + ("c",)
 
 
 # -- line endings as each line has them -----------------------------------------
