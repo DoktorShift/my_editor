@@ -521,3 +521,17 @@ def test_a_picker_saving_shows_one_cancel_and_a_stop_for_the_save(tmp_path, monk
     world.dialog._save_stop.click()
     assert wait_for(lambda: not saving(world), 5)
     assert folder(out) == []
+
+
+def test_the_saver_names_every_save_quitting_would_stop(tmp_path, monkeypatch, server):
+    _Blobs.delay = 0.02
+    one, two = blob(server, os.urandom(512 * 1024)), blob(server, os.urandom(512 * 1024), day=1)
+    keeper, saver = _keeper(tmp_path)
+    out = tmp_path / "out"
+    out.mkdir()
+    assert saver.pending() == []
+    saver.save(one, str(out / "One.mp4"))
+    saver.save(two, str(out / "Two.mp4"))
+    assert saver.pending() == [str(out / "One.mp4"), str(out / "Two.mp4")]
+    saver.cancel()
+    assert saver.pending() == []

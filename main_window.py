@@ -2949,16 +2949,17 @@ class MainWindow(QMainWindow):
         """Save, discard or keep unsaved documents. True means close."""
         editors = [ed for i in range(self.tabs.count())
                    if (ed := self._editor_from_widget(self.tabs.widget(i))) is not None]
-        # Quitting stops every upload: the documents' and the Media
-        # Library's alike.
+        # Quitting stops every upload, the documents' and the Media
+        # Library's alike, and every Save As still downloading.
         uploading = self._uploading(*editors) + self._library_uploads()
+        saving = self._media_saves()
         unsaved = [i for i in range(self.tabs.count())
                    if (ed := self._editor_from_widget(self.tabs.widget(i)))
                    and ed.document().isModified()]
         if not unsaved:
-            # Nothing to save: audio or video still uploading is the question.
-            return self._may_leave_uploads(uploading, quitting=True)
-        words = self._save_question_words(uploading, quitting=True)
+            # Nothing to save: what is still uploading or saving is the question.
+            return self._may_leave_uploads(uploading, quitting=True, saving=saving)
+        words = self._save_question_words(uploading, quitting=True, saving=saving)
         if len(unsaved) == 1:
             ed = self._editor_from_widget(self.tabs.widget(unsaved[0]))
             name = os.path.basename(ed._file_path) if getattr(ed, "_file_path", None) else _("Untitled")
@@ -6864,17 +6865,42 @@ class MainWindow(QMainWindow):
                                 finishing=added.state == "finishing")
                 for added in self._media_store.added_uploads() if added.state != "failed"]
 
-    @staticmethod
-    def _still_uploading(uploading: list) -> str:
-        return ngettext("“{name}” is still uploading.", "{count} files are still uploading.",
-                        len(uploading)).format(name=uploading[0].alt, count=len(uploading))
+    def _media_saves(self) -> list:
+        """The Save As downloads quitting would stop: the one running and
+        the ones waiting, by the path each is saved to."""
+        return self._media_saver.pending()
 
     @staticmethod
-    def _what_leaving_does(uploading: list = (), *, quitting: bool) -> str:
-        """What closing (or quitting) does to the uploads still running:
-        audio and video in a document, files added to the Media Library.
-        A library file its first server has is in the library already:
-        quitting stops only its copies to the other servers."""
+    def _still_uploading(uploading: list, saving: list = ()) -> str:
+        if not saving:
+            return ngettext("“{name}” is still uploading.", "{count} files are still uploading.",
+                            len(uploading)).format(name=uploading[0].alt, count=len(uploading))
+        if not uploading:
+            return ngettext("A file is still being saved.", "{count} files are still being saved.",
+                            len(saving)).format(count=len(saving))
+        count = len(uploading) + len(saving)
+        return ngettext("{count} file is still uploading or being saved.",
+                        "{count} files are still uploading or being saved.",
+                        count).format(count=count)
+
+    @staticmethod
+    def _what_leaving_does(uploading: list = (), *, quitting: bool, saving: list = ()) -> str:
+        """What closing (or quitting) does to the uploads still running
+        (audio and video in a document, files added to the Media Library)
+        and, quitting, to the Save As downloads. A library file its first
+        server has is in the library already: quitting stops only its
+        copies to the other servers. Closing a document leaves a save
+        running."""
+        if quitting and saving:
+            if not uploading:
+                return ngettext("Quitting now stops the download, and the file isn’t saved.",
+                                "Quitting now stops the downloads, and the files aren’t saved.",
+                                len(saving))
+            return " ".join((
+                MainWindow._what_leaving_does(uploading, quitting=True),
+                ngettext("The file being saved won’t be saved.",
+                         "The {count} files being saved won’t be saved.",
+                         len(saving)).format(count=len(saving))))
         copying = [u for u in uploading if getattr(u, "finishing", False)]
         if quitting and copying and len(copying) == len(uploading):
             return ngettext(
@@ -6897,23 +6923,29 @@ class MainWindow(QMainWindow):
         return _("If you close the document now, the upload goes on to your media library, "
                  "but the document doesn’t keep it.")
 
-    def _may_leave_uploads(self, uploading: list, *, quitting: bool) -> bool:
+    def _may_leave_uploads(self, uploading: list, *, quitting: bool,
+                           saving: list = ()) -> bool:
         """With nothing unsaved, closing or quitting while audio or video
-        uploads asks this alone (Cancel is the default). True to go on."""
-        if not uploading:
+        uploads (or, quitting, while a Save As downloads) asks this alone
+        (Cancel is the default). True to go on."""
+        saving = saving if quitting else []
+        if not uploading and not saving:
             return True
         return confirm_destructive(
-            self, title=self._still_uploading(uploading),
-            message=self._what_leaving_does(uploading, quitting=quitting),
+            self, title=self._still_uploading(uploading, saving),
+            message=self._what_leaving_does(uploading, quitting=quitting, saving=saving),
             action=_("Quit Anyway") if quitting else _("Close Anyway"))
 
-    def _save_question_words(self, uploading: list, *, quitting: bool) -> str:
-        """The save question's words: with audio or video still uploading,
-        what leaving does to it first, so it is one question, not two."""
-        if not uploading:
+    def _save_question_words(self, uploading: list, *, quitting: bool,
+                             saving: list = ()) -> str:
+        """The save question's words: with audio or video still uploading
+        (or, quitting, a Save As downloading), what leaving does to it
+        first, so it is one question, not two."""
+        saving = saving if quitting else []
+        if not uploading and not saving:
             return ""
-        return " ".join((self._still_uploading(uploading),
-                         self._what_leaving_does(uploading, quitting=quitting),
+        return " ".join((self._still_uploading(uploading, saving),
+                         self._what_leaving_does(uploading, quitting=quitting, saving=saving),
                          _("Your changes will be lost if you don’t save them.")))
 
     def _media_name(self, url: str) -> Optional[str]:

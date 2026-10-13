@@ -73,6 +73,11 @@ class MediaSaver(QObject):
     def percent(self) -> int:
         return self._percent
 
+    def pending(self) -> List[str]:
+        """The paths still to be saved: the one downloading and the ones
+        waiting, which quitting would stop."""
+        return [save.target for save in self._queue]
+
     def save(self, media: MediaFile, target: str, *,
              opener: Optional[Callable[[bytes], Optional[bytes]]] = None,
              keep_existing: bool = False) -> None:

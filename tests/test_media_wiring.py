@@ -377,14 +377,16 @@ def test_the_window_listens_for_library_upload_failures(init_body):
     assert "upload_failed.connect(self._on_library_upload_failed)" in source
 
 
-def _quitting_host(added):
+def _quitting_host(added, saves=()):
     from types import SimpleNamespace
     host = SimpleNamespace(
         tabs=SimpleNamespace(count=lambda: 0, widget=lambda i: None),
         _media_store=SimpleNamespace(added_uploads=lambda: list(added)),
+        _media_saver=SimpleNamespace(pending=lambda: list(saves)),
     )
     for name in ("_uploading", "_still_uploading", "_what_leaving_does", "_may_leave_uploads",
-                 "_save_question_words", "_editor_from_widget", "_library_uploads"):
+                 "_save_question_words", "_editor_from_widget", "_library_uploads",
+                 "_media_saves"):
         method = getattr(MainWindow, name)
         setattr(host, name, method.__get__(host) if not isinstance(
             MainWindow.__dict__.get(name), staticmethod) else method)
@@ -496,3 +498,46 @@ def test_quitting_while_a_library_file_is_only_being_copied_says_it_is_in_the_li
                            for i, state in enumerate(states)])
     assert MainWindow._resolve_unsaved_before_closing(host) is False
     assert (asked[0]["title"], asked[0]["message"]) == (title, message)
+
+
+@pytest.mark.parametrize("states, saves, title, message", [
+    ([], ["/out/Talk.mp4"], "A file is still being saved.",
+     "Quitting now stops the download, and the file isn’t saved."),
+    ([], ["/out/Talk.mp4", "/out/Scan.pdf"], "2 files are still being saved.",
+     "Quitting now stops the downloads, and the files aren’t saved."),
+    (["sending"], ["/out/Talk.mp4"], "2 files are still uploading or being saved.",
+     "Quitting now stops the upload, and the file isn’t added to your Media Library. "
+     "The file being saved won’t be saved."),
+    (["sending"], ["/out/Talk.mp4", "/out/Scan.pdf"],
+     "3 files are still uploading or being saved.",
+     "Quitting now stops the upload, and the file isn’t added to your Media Library. "
+     "The 2 files being saved won’t be saved."),
+])
+def test_quitting_while_a_save_runs_asks_first(monkeypatch, states, saves, title, message):
+    """Quitting would throw away a download the person asked for, as
+    Safari asks before quitting with downloads: in the one question that
+    asks about uploads, with Cancel the default."""
+    import main_window as mw_module
+    from nostr.blossom.store import AddedUpload
+    asked = []
+    monkeypatch.setattr(mw_module, "confirm_destructive",
+                        lambda parent, **kw: asked.append(kw) or False)
+    host = _quitting_host([AddedUpload(name="Holiday.png", mime="image/png", state=state)
+                           for state in states], saves)
+    assert MainWindow._resolve_unsaved_before_closing(host) is False
+    assert (asked[0]["title"], asked[0]["message"], asked[0]["action"]) == (
+        title, message, "Quit Anyway")
+
+
+def test_quitting_with_unsaved_changes_and_a_save_running_says_both_in_one_question():
+    host = _quitting_host([], ["/out/Talk.mp4"])
+    assert host._save_question_words(host._uploading(), quitting=True,
+                                     saving=host._media_saves()) == (
+        "A file is still being saved. Quitting now stops the download, and the file isn’t "
+        "saved. Your changes will be lost if you don’t save them.")
+
+
+def test_closing_a_document_while_a_save_runs_asks_nothing(monkeypatch):
+    """The save goes on: only quitting stops it."""
+    host = _quitting_host([], ["/out/Talk.mp4"])
+    assert host._may_leave_uploads([], quitting=False) is True
