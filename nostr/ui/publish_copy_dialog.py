@@ -60,7 +60,7 @@ from ..media.visibility import PrivateBlob, PublicBlob
 # picker's stylesheet rather than growing one of its own. Two windows in
 # one gesture that do not look like the same app is how a consent prompt
 # starts reading like something that arrived from somewhere else.
-from .media_library_dialog import _DARK_CSS, _LIGHT_CSS, _format_size
+from .media_library_dialog import _DARK_CSS, _LIGHT_CSS, format_size
 
 
 # The dialog's own states. ``EXPLAIN`` is the only one from which
@@ -556,7 +556,7 @@ def _row_text(blob: PrivateBlob, stage: str) -> str:
     when there is not one, so a file is identifiable either way.
     """
     name = (blob.name or "").strip() or f"{blob.sha256[:8]}…"
-    return f"{name}  ·  {_format_size(blob.size)}  ·  {_STAGE_TEXT.get(stage, stage)}"
+    return f"{name}  ·  {format_size(blob.size)}  ·  {_STAGE_TEXT.get(stage, stage)}"
 
 
 def _storage_line(pending: Sequence[PrivateBlob]) -> str:
@@ -576,11 +576,11 @@ def _storage_line(pending: Sequence[PrivateBlob]) -> str:
         return _(
             "The copy uses about {size} more on your media "
             "servers. The original keeps its own space."
-        ).format(size=_format_size(total))
+        ).format(size=format_size(total))
     return _(
         "The copies use about {size} more on your media "
         "servers, on top of the originals, which keep their own space."
-    ).format(size=_format_size(total))
+    ).format(size=format_size(total))
 
 
 def _cancelled_line(minted: int) -> str:

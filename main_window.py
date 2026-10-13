@@ -11,8 +11,11 @@ import os
 import platform
 import re
 import sys
+import mimetypes
 import time
+import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 from send2trash import send2trash
@@ -119,6 +122,16 @@ _SUPPORTED_EXTS = {'.md', '.html', '.htm', '.txt', '.rmd', '.pdf'}
 # ordinary "unsupported" bar message instead of a silent nothing.
 _IMAGE_EXTS = image_safety.IMAGE_FILE_SUFFIXES
 
+# A web address in published text, and the hash a media server's address
+# carries (BUD-01: https://<server>/<sha256>[.ext]).
+_MEDIA_ADDRESS = re.compile(r"https?://[^\s<>()\[\]\"']+")
+_SHA256 = re.compile(r"(?<![0-9a-fA-F])[0-9a-fA-F]{64}(?![0-9a-fA-F])")
+
+# Audio and video that go into an article or a note through the media
+# servers (Insert > Audio or Video, or dropped while an account is in use).
+_AUDIO_VIDEO_EXTS = (".mp3", ".m4a", ".aac", ".ogg", ".oga", ".opus", ".wav", ".flac",
+                     ".mp4", ".webm", ".mov", ".m4v")
+
 # Persisted answer to the paste-upload prompt: "ask" | "always" | "never".
 _PASTE_UPLOAD_SETTING = "upload_pasted_images"
 
@@ -160,6 +173,8 @@ from nostr.relay import NOT_CHOSEN
 from nostr.relay_auth import DECLINED, AccountSignIn
 from nostr.state import NostrState
 from nostr.ui.profile_window import ProfileWindow
+from nostr.blossom import BLOSSOM_MAX_FILE_SIZE
+from nostr.blossom.plan import get_effective_max_file
 from nostr.blossom.server_list import UserServerList
 from nostr.blossom.store import MediaFile, MediaStore
 from nostr.bunker import BunkerSessionPool
@@ -217,7 +232,7 @@ from nostr.ui.published_view import PublishedView, add_to_panel as add_published
 from nostr.membership_controller import MembershipController
 from nostr.key_vault import KeyVault
 from nostr.account_controller import AccountController
-from nostr.ui.media_library_dialog import MediaLibraryDialog
+from nostr.ui.media_library_dialog import MediaLibraryDialog, format_size
 from nostr.ui.publish_article_dialog import PublishArticleDialog
 from nostr.ui.publish_copy_dialog import resolve_pick
 from nostr.ui.publish_note_dialog import PublishNoteDialog
@@ -641,6 +656,12 @@ class MainWindow(QMainWindow):
         )
         self._asset_manager.asset_changed.connect(self._refresh_asset_in_documents)
         self._asset_manager.asset_upload_failed.connect(self._on_asset_upload_failed)
+        # Audio and video going into a document: name -> (editor, upload id,
+        # file path), while its upload runs (the store answers by name).
+        self._media_uploads: dict = {}
+        self._media_store.upload_progress.connect(self._on_media_upload_progress)
+        self._media_store.upload_finished.connect(self._on_media_upload_finished)
+        self._media_store.upload_failed.connect(self._on_media_upload_failed)
 
         # Private media. The ledger is the record of everything this app
         # has deliberately made public and is the only way to revoke any
@@ -2107,6 +2128,13 @@ class MainWindow(QMainWindow):
                     keywords=(_("inspector"), _("title"), _("summary"), _("cover"),
                               _("hashtags"))),
             toggled=self._show_article_details_panel)
+        # Audio or video, uploaded to the media servers and put in the text
+        # as its address, where readers show a player.
+        self.act_insert_audio_video = add(
+            Command("nostr.insert_audio_video", _("Insert Audio or Video…"), NOSTR,
+                    nostr=True, keywords=(_("audio"), _("video"), _("podcast"), _("music"),
+                                          _("film")), slash_section=slash_menu.INSERT),
+            triggered=self._ask_audio_or_video)
         # Drafts surface - the side-docked panel, toggled from the Nostr
         # menu (no key, as above).
         self.act_nostr_drafts = add(
@@ -2283,7 +2311,7 @@ class MainWindow(QMainWindow):
         # account is in use (decision D-1); always in the Nostr menu.
         self._insert_nostr_separator = self.m_insert.addSeparator()
         self._insert_nostr_actions = [self.act_insert_mention, self.act_insert_reference,
-                                      self.act_nostr_insert_image]
+                                      self.act_nostr_insert_image, self.act_insert_audio_video]
         self.m_insert.aboutToShow.connect(self._fill_insert_menu)
 
         m_format = self.menuBar().addMenu(_("F&ormat"))
@@ -2373,6 +2401,7 @@ class MainWindow(QMainWindow):
         m_nostr.addAction(self.act_nostr_insert_image)
         m_nostr.addAction(self.act_insert_mention)
         m_nostr.addAction(self.act_insert_reference)
+        m_nostr.addAction(self.act_insert_audio_video)
         m_nostr.addAction(self.act_article_details)
         m_nostr.addSeparator()
         m_nostr.addAction(self.act_nostr_drafts)
@@ -2953,6 +2982,9 @@ class MainWindow(QMainWindow):
                 self.open_path(path)
             elif ext in _IMAGE_EXTS:
                 image_paths.append(path)
+            elif ext in _AUDIO_VIDEO_EXTS and self._may_insert_audio_video(
+                    self.current_editor()):
+                self._upload_into(self.current_editor(), path)
             else:
                 unsupported.append(os.path.basename(path))
 
@@ -3216,6 +3248,11 @@ class MainWindow(QMainWindow):
         """
         if ed is None:
             return True
+        if rich_text.upload_placeholders(ed.document()):
+            inform(self, title=_("Audio or video is still uploading"),
+                   message=_("Publish or save it once the upload is done, or remove it "
+                             "from the text."))
+            return False
         blocked = self._unpublishable_images(ed.document())
         if not blocked:
             return True
@@ -3312,7 +3349,28 @@ class MainWindow(QMainWindow):
             content = serialize_plain_with_images(ed.document(), target).rstrip("\n")
         else:
             content = document_to(ed.document(), flavor, target).rstrip("\n")
+        for media in self._library_audio_video_in(content):
+            records.setdefault(media.url, media)
         return content, list(records.values())
+
+    def _library_audio_video_in(self, content: str) -> List[PublishedMedia]:
+        """The audio and video of the account's media library that
+        ``content`` holds, described from what the media servers confirmed
+        when it was uploaded (its type, its hash, its size): found by the
+        hash every media server address carries, at the address as it is
+        written in the text."""
+        files = self._media_store.files
+        found = []
+        for url in _MEDIA_ADDRESS.findall(content):
+            sha = next(iter(_SHA256.findall(url.rsplit("/", 1)[-1])), "").lower()
+            media = files.get(sha)
+            if media is None or not media.mime_type.startswith(("audio/", "video/")):
+                continue
+            servers = tuple(entry.get("server", "") for entry in media.urls
+                            if entry.get("server"))
+            found.append(PublishedMedia(url=url, sha256=sha, mime=media.mime_type,
+                                        size=media.size, servers=servers))
+        return found
 
     def _publish_text(self, ed, flavor: str) -> str:
         """The content half of :meth:`_publish_payload`."""
@@ -4647,7 +4705,8 @@ class MainWindow(QMainWindow):
         "view.line_numbers", "view.syntax_highlighting", "view.paper_mode", "view.toolbar",
         "view.highlight_line", "view.write", "view.preview", "view.split",
         "edit.footnote_jump", "nostr.publish_note", "nostr.publish_article",
-        "nostr.insert_image", "nostr.insert_mention", "nostr.insert_reference"})
+        "nostr.insert_image", "nostr.insert_mention", "nostr.insert_reference",
+        "nostr.insert_audio_video"})
     _DOCUMENT_PREFIXES = ("format.", "insert.")
 
     def _is_document_command(self, command_id: str) -> bool:
@@ -6481,6 +6540,123 @@ class MainWindow(QMainWindow):
         popover.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         popover.show_below(ed.cursorRect(), ed.viewport())
 
+    # -- audio and video ----------------------------------------------------------
+
+    def _may_insert_audio_video(self, ed) -> bool:
+        return (ed is not None and self.nostr_state.active
+                and self._editor_kind(ed) == "rich")
+
+    def _ask_audio_or_video(self) -> None:
+        """Insert > Audio or Video: a file chosen, uploaded to the media
+        servers, and put in the text as its own paragraph."""
+        ed = self.current_editor()
+        if not self._may_insert_audio_video(ed):
+            return
+        patterns = " ".join("*" + ext for ext in _AUDIO_VIDEO_EXTS)
+        path, _filter = QFileDialog.getOpenFileName(
+            self, _("Insert Audio or Video"), "",
+            _("Audio and video ({patterns})").format(patterns=patterns))
+        if path:
+            self._upload_into(ed, file_paths.normalize(path))
+
+    def _upload_limit(self) -> int:
+        """The largest file one of the media servers takes."""
+        servers = self._media_store.target_servers()
+        largest = max((get_effective_max_file(server) for server in servers),
+                      default=BLOSSOM_MAX_FILE_SIZE)
+        return min(largest, BLOSSOM_MAX_FILE_SIZE)
+
+    def _upload_into(self, ed, path: str) -> None:
+        """Upload ``path`` through the media servers (the Media Library's own
+        way) and stand a placeholder for it in ``ed`` until it is there. A
+        file too large for every media server is refused at once, saying
+        the limit (nostrdesign: say it before, not after a long wait)."""
+        name = os.path.basename(path)
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            size = -1
+        if size > self._upload_limit():
+            inform(self, title=_("“{name}” is too large").format(name=name),
+                   message=_("Your media servers take files up to {size}.").format(
+                       size=format_size(self._upload_limit())))
+            return
+        upload_id = uuid.uuid4().hex
+        key = name
+        while key in self._media_uploads:
+            stem, ext = os.path.splitext(name)
+            key = f"{stem} ({len(self._media_uploads) + 1}){ext}"
+        cursor = ed.textCursor()
+        rich_text.insert_upload_placeholder(cursor, upload_id,
+                                            _("Uploading {name}…").format(name=name))
+        ed.setTextCursor(cursor)
+        self._media_uploads[key] = (ed, upload_id, path)
+        self._send_upload(key)
+
+    def _send_upload(self, key: str) -> None:
+        _ed, _upload_id, path = self._media_uploads[key]
+        try:
+            body = Path(path).read_bytes()
+        except OSError as exc:
+            self._on_media_upload_failed(key, str(exc))
+            return
+        mime = mimetypes.guess_type(path)[0] or "application/octet-stream"
+        self._media_store.upload_bytes(body, name=key, mime_type=mime)
+
+    def _placeholder_of(self, key: str):
+        """(editor, block) of the upload ``key``'s placeholder, or None
+        when it is gone (undone, removed, its tab closed)."""
+        entry = self._media_uploads.get(key)
+        if entry is None or not shiboken6.isValid(entry[0]):
+            return None
+        ed, upload_id, _path = entry
+        for found, block in rich_text.upload_placeholders(ed.document()):
+            if found == upload_id:
+                return ed, block
+        return None
+
+    def _on_media_upload_progress(self, key: str, sent: int, total: int) -> None:
+        if key in self._media_uploads and total > 0:
+            self.status.showMessage(_("Uploading {name}: {percent} %").format(
+                name=key, percent=_number(min(100, sent * 100 // total))), 3000)
+
+    def _on_media_upload_finished(self, key: str, media) -> None:
+        found = self._placeholder_of(key)
+        entry = self._media_uploads.pop(key, None)
+        if entry is None:
+            return                    # an upload of the Media Library's own
+        if found is None:
+            self.status.showMessage(
+                _("{name} is in your media library.").format(name=key), 5000)
+            return
+        _ed, block = found
+        rich_text.finish_upload(block, _with_extension(media.url, entry[2]))
+        self.status.showMessage(_("{name} is uploaded.").format(name=key), 5000)
+
+    def _on_media_upload_failed(self, key: str, reason: str) -> None:
+        if key not in self._media_uploads:
+            return
+        found = self._placeholder_of(key)
+        if found is None:
+            self._media_uploads.pop(key, None)
+            return
+        ed, block = found
+        rich_text.set_upload_words(block, _("Couldn’t upload {name}.").format(name=key))
+        again = ask(self, title=_("Couldn’t upload “{name}”").format(name=key),
+                    message=reason,
+                    is_dark=self.is_dark_theme,
+                    buttons=(Button(_("Remove"), False, NORMAL),
+                             Button(_("Try Again"), True, DEFAULT)))
+        found = self._placeholder_of(key)         # still there after the question?
+        if found is None:
+            self._media_uploads.pop(key, None)
+        elif again:
+            rich_text.set_upload_words(found[1], _("Uploading {name}…").format(name=key))
+            self._send_upload(key)
+        else:
+            rich_text.remove_upload(found[1])
+            self._media_uploads.pop(key, None)
+
     # -- secret keys: never pasted where Nostr is written ---------------------
     # (nor published: nostr/ui/secret_key_check.py, at the publish dialogs)
 
@@ -8115,3 +8291,13 @@ class MainWindow(QMainWindow):
             binding.title = record.title
         self._update_tab_title()
         self._dismiss_conflict_banner(ed)
+
+
+def _with_extension(url: str, path: str) -> str:
+    """``url`` with the file's extension when its address has none, so a
+    reader can tell audio and video by it (as standup's embeddableMediaUrl
+    does)."""
+    tail = url.split("?", 1)[0].rsplit("/", 1)[-1]
+    if "." in tail:
+        return url
+    return url + os.path.splitext(path)[1].lower()

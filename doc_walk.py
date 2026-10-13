@@ -29,6 +29,14 @@ OBJECT_REPLACEMENT = "\ufffc"
 LINE_SEPARATOR = "\u2028"
 
 
+# A paragraph standing for a file being uploaded holds the upload's id in
+# this block property (rich_text's upload placeholders). It is never saved
+# or published as text: the writers leave it out. (QTextFormat's
+# UserProperty is 0x100000; written as a number, so the exporters stay free
+# of Qt widgets.)
+UPLOAD = 0x100000 + 0x3D2
+
+
 def iter_blocks(doc):
     """Yield the document's QTextBlocks in order."""
     block = doc.begin()
@@ -93,6 +101,8 @@ def serialize_plain_with_images(doc, image_target) -> str:
     """
     lines = []
     for block in iter_blocks(doc):
+        if block.blockFormat().property(UPLOAD):
+            continue
         parts = []
         for text, fmt in iter_block_runs(block):
             if fmt.isImageFormat():

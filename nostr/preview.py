@@ -24,6 +24,8 @@ of it, as Damus and Primal do.
 In both, a ``nostr:`` reference to a person shows as "@Name" (their
 name when it is known, a shortened key otherwise); one to a note or an
 article shows as a labelled link, since cards differ between apps.
+The address of audio or video (by file extension) shows where readers
+put their player: "▶ Audio: name" or "▶ Video: name", a link to it.
 
 Footnotes in an article show as most long-form readers draw them: raised
 numbers by first use, and the notes numbered at the end (the preview
@@ -76,6 +78,8 @@ COLUMN_WIDTH = 680
 WORDS_PER_MINUTE = word_count.WORDS_PER_MINUTE
 SERIF = ["Charter", "Iowan Old Style", "Source Serif Pro", "Georgia", "serif"]
 MEDIA_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+AUDIO_EXTENSIONS = (".mp3", ".m4a", ".aac", ".ogg", ".oga", ".opus", ".wav", ".flac")
+VIDEO_EXTENSIONS = (".mp4", ".webm", ".mov", ".m4v")
 
 _REFERENCE = re.compile(r"nostr:(npub1|nprofile1|note1|nevent1|naddr1)[02-9ac-hj-np-z]+")
 _URL = re.compile(r"https?://[^\s<>\"]+[^\s<>\".,;:!?)\]]")
@@ -139,10 +143,31 @@ def reference_label(reference: str, names: Optional[NameLookup]) -> str:
     return "@" + name
 
 
+def player_label(url: str) -> Optional[str]:
+    """"▶ Audio: name" or "▶ Video: name" for the address of audio or
+    video, where readers show a player; None for any other address."""
+    path = QUrl(url).path()
+    name = path.rsplit("/", 1)[-1]
+    if path.lower().endswith(AUDIO_EXTENSIONS):
+        return _("▶ Audio: {name}").format(name=name)
+    if path.lower().endswith(VIDEO_EXTENSIONS):
+        return _("▶ Video: {name}").format(name=name)
+    return None
+
+
+_OWN_LINE_URL = re.compile(r"^(https?://\S+)$", re.MULTILINE)
+
+
 def markdown_for_preview(markdown: str, names: Optional[NameLookup] = None) -> str:
     """The article's Markdown with every ``nostr:`` reference turned into
-    a link that reads like the apps show it."""
+    a link that reads like the apps show it, and audio or video standing
+    on a line of its own shown where readers put its player."""
+    def player(match) -> str:
+        label = player_label(match.group(1))
+        return f"[{label}]({match.group(1)})" if label else match.group(0)
+
     def replace(text: str) -> str:
+        text = _OWN_LINE_URL.sub(player, text)
         return _REFERENCE.sub(
             lambda m: f"[{reference_label(m.group(0), names)}]({m.group(0)})", text)
     return outside_code(markdown, replace)
@@ -498,8 +523,9 @@ def note_html(text: str, *, author: str = "", names: Optional[NameLookup] = None
         elif token.startswith("#"):
             pieces.append(f'<span style="color:{colors.link};">{html.escape(token)}</span>')
         else:
+            words = player_label(token) or token
             pieces.append(f'<a href="{html.escape(token, quote=True)}" '
-                          f'style="color:{colors.link};">{html.escape(token)}</a>')
+                          f'style="color:{colors.link};">{html.escape(words)}</a>')
         last = match.end()
     pieces.append(html.escape(body[last:]))
     images = "".join(

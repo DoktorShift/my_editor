@@ -503,7 +503,7 @@ _PICK_PENDING_NOTICE = _(
 _paste_counter = itertools.count(1)
 
 
-def _format_size(byte_count: int) -> str:
+def format_size(byte_count: int) -> str:
     """A file's size the way a person reads it, in the units the storage
     line beside it uses: 117 KB, 1.2 MB."""
     if byte_count >= 1024 * 1024:
@@ -2026,7 +2026,7 @@ def _meta_text(media: MediaFile) -> str:
     ).format(count=server_count)
     return (
         f"{media.url}\n"
-        f"{dims}{_format_size(media.size)}  ·  {media.mime_type}  ·  {mirrored}"
+        f"{dims}{format_size(media.size)}  ·  {media.mime_type}  ·  {mirrored}"
     )
 
 
@@ -2062,7 +2062,7 @@ def _short_label(media: MediaFile, state: str = PUBLIC) -> str:
     """
     server_count = len(media.urls)
     badge = f"· {server_count}×" if server_count > 1 else ""
-    lines = [f"{_format_size(media.size)} {badge}", _identity_line(media)]
+    lines = [f"{format_size(media.size)} {badge}", _identity_line(media)]
     state_label = _STATE_LABELS.get(state, "")
     if state_label:
         lines.append(state_label)
@@ -2081,7 +2081,7 @@ def _tooltip_for(
     lines = [
         f"sha256: {media.hash}",
         _("type:   {type}").format(type=media.mime_type),
-        _("size:   {size}").format(size=_format_size(media.size)),
+        _("size:   {size}").format(size=format_size(media.size)),
     ]
     if media.width and media.height:
         lines.append(_("dim:    {width} × {height}").format(
