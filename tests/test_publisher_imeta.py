@@ -351,3 +351,13 @@ def test_an_address_in_emphasis_code_a_table_or_after_any_space_is_found(content
     fragment, before an ellipsis or after a no-break or ideographic space,
     the address is still the address in the text (NIP-92)."""
     assert len(build_imeta_tags([full_record()], content)) == 1
+
+
+@pytest.mark.parametrize("content", [f"{URL}_v2", f"foo_{URL}", f"see {URL}_v2 now"])
+def test_an_address_joined_to_a_word_by_an_underscore_is_another_address(content):
+    """Review round 2: "…a.png_v2" and "foo_…a.png" counted as a.png."""
+    assert build_imeta_tags([full_record()], content) == []
+
+
+def test_underscores_around_an_address_are_still_emphasis():
+    assert len(build_imeta_tags([full_record()], f"see _{URL}_ now")) == 1

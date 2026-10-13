@@ -196,8 +196,13 @@ def address_in(address: str, text: str) -> bool:
         after = text[end] if end < len(text) else " "
         if after in _SENTENCE_MARKS:
             after = text[end + 1] if end + 1 < len(text) else " "
-        if ((before.isspace() or before in _BEFORE_ADDRESS)
-                and (after.isspace() or after in _AFTER_ADDRESS)):
+        # An underscore is emphasis only apart from words ("_address_"),
+        # not one joining the address to a word ("…png_v2", "foo_https:").
+        before_ok = before.isspace() or before in _BEFORE_ADDRESS and not (
+            before == "_" and start > 1 and text[start - 2].isalnum())
+        after_ok = after.isspace() or after in _AFTER_ADDRESS and not (
+            after == "_" and end + 1 < len(text) and text[end + 1].isalnum())
+        if before_ok and after_ok:
             return True
         start = text.find(address, start + 1)
     return False
