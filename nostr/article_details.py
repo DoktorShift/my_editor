@@ -264,9 +264,9 @@ def front_matter_with(details: ArticleDetails, front: Optional[front_matter.Fron
         if key == "date":
             original = entries[at].written if at is not None else ""
             value = _date_like(details.published_at, original.strip("\"'"))
-            # A date TOML reads as one, as TOML writes it; in quotes when
-            # the file had it so.
-            bare = syntax == front_matter.TOML and not original.startswith(("\"", "'"))
+            # A date YAML and TOML read as one (a timestamp), not a text;
+            # in quotes only when the file had it so.
+            bare = not original.startswith(("\"", "'"))
         written = front_matter.entry(entries[at].key if at is not None else key, value,
                                      syntax=syntax, bare=bare)
         if at is not None:
@@ -304,12 +304,19 @@ def _date_like(when: int, original: str) -> str:
     parsed = _parsed(original)
     if parsed is None:
         return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
-    separator = " " if " " in original.strip() else "T"
+    separator = original[10] if len(original) > 10 and original[10] in "Tt " else "T"
     if parsed.tzinfo is None or original.endswith(("Z", "z")):
         return moment.strftime(f"%Y-%m-%d{separator}%H:%M:%S") + (
             "Z" if original.endswith(("Z", "z")) else "")
     local = moment.astimezone(parsed.tzinfo)
-    return local.isoformat(sep=separator)
+    offset = re.search(r"(\s?)([+-])(\d{2})(:?)(\d{2})?$", original)
+    if offset is None:
+        return local.isoformat(sep=separator)
+    # The offset as the file wrote it: "+01:00", "+0100", " +0100".
+    space, _sign, _hours, colon, minutes = offset.groups()
+    zone = local.strftime("%z")                       # "+0100"
+    zone = zone[:3] + (colon + zone[3:] if minutes is not None else "")
+    return local.strftime(f"%Y-%m-%d{separator}%H:%M:%S") + space + zone
 
 
 def _person(written: str) -> Optional[Tuple[str, str]]:

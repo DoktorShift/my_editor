@@ -102,13 +102,24 @@ def test_a_changed_date_keeps_its_form_and_time_zone():
     later = from_front_matter(front).with_changes(
         published_at=moment(2024, 3, 2, 8, 0, offset=1))
     out = front_matter.join(front_matter_with(later, front), body)
-    assert 'date: "2024-03-02T08:00:00+01:00"' in out
-    for original, expected in (("2026-10-01", '"2026-10-02"'), ("1700000000", '"1700086400"'),
-                               ("2026-10-01T08:00:00Z", '"2026-10-02T08:00:00Z"')):
+    assert "date: 2024-03-02T08:00:00+01:00\n" in out
+    for original, expected in (("2026-10-01", "2026-10-02"), ("1700000000", "1700086400"),
+                               ("2026-10-01T08:00:00Z", "2026-10-02T08:00:00Z"),
+                               ('"2026-10-01"', '"2026-10-02"'),
+                               ("2015-11-10 15:41:45 +0100", "2015-11-11 15:41:45 +0100")):
         front, _ = front_matter.split(f"---\ndate: {original}\n---\n")
         details = from_front_matter(front)
         moved = details.with_changes(published_at=details.published_at + 86400)
         assert f"date: {expected}" in front_matter.join(front_matter_with(moved, front), "")
+
+
+def test_a_date_written_new_is_a_date_to_yaml_not_a_text():
+    front, body = front_matter.split("---\ntitle: T\n---\n\nB\n")
+    details = from_front_matter(front).with_changes(published_at=1791876318)
+    out = front_matter.join(front_matter_with(details, front), body)
+    assert "date: 2026-10-13T07:25:18Z\n" in out
+    yaml = pytest.importorskip("yaml")
+    assert type(yaml.safe_load(out.split("---\n")[1])["date"]).__name__ == "datetime"
 
 
 def test_a_detail_whose_entry_cant_be_read_is_written_beside_it_never_over_it():
