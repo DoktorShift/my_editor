@@ -45,6 +45,8 @@ from constants import DARK_BG, DARK_FG, LIGHT_BG, LIGHT_FG, MONO_FONT
 from i18n import _
 from doc_walk import (
     bullet_depth,
+    doc_length,
+    doc_offset,
     iter_block_runs,
     iter_blocks,
     parse_bullet_line,
@@ -470,7 +472,8 @@ def normalize_after_set_html(doc) -> None:
         keep = 0 if text == NBSP and block.textList() is None else len(text.rstrip())
         if keep < len(text):
             cursor = QTextCursor(block)
-            cursor.setPosition(block.position() + keep)
+            # (A place in the text, as a place in the document.)
+            cursor.setPosition(block.position() + doc_offset(text, keep))
             cursor.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
             cursor.removeSelectedText()
 
@@ -481,6 +484,6 @@ def normalize_after_set_html(doc) -> None:
     trimmed = text.rstrip(" " + NBSP)
     if len(trimmed) < len(text):
         cursor = QTextCursor(last)
-        cursor.setPosition(last.position() + len(trimmed))
+        cursor.setPosition(last.position() + doc_length(trimmed))
         cursor.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
         cursor.removeSelectedText()

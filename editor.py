@@ -2062,7 +2062,8 @@ class HtmlEditor(QTextEdit):
         if key in (Qt.Key_Return, Qt.Key_Enter) and (plain or shift):
             # The new line starts as far in as the caret's line (after any
             # line break in the block), no further than the caret.
-            before = block.text()[:cursor.positionInBlock()]
+            text = block.text()
+            before = text[:text_index(text, cursor.positionInBlock())]
             line = before[before.rfind(LINE_BREAK) + 1:]
             indent = line[:len(line) - len(line.lstrip(" \t"))]
             with self._typing(TYPED, cursor):

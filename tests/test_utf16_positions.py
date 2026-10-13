@@ -245,3 +245,63 @@ def test_a_footnote_mark_after_emoji_is_raised_where_it_is():
     assert raised == ["[^1]", "[^1]"]
     note = _styled(block_named(doc, "[^1]: 🇩🇪 The source."))
     assert "".join(w for w, f in note) == "[^1]: 🇩🇪 The source."   # quieter, all of it
+
+
+EMOJI_STRUCTURED = ("# The 🌸 Cat\n\nA 👍🏽 cat, a CAT and a 👨‍👩‍👧 category.\n\n- 🇩🇪 cat one\n"
+                    "    - cat 🌸 two\n\n| cat 🌸 | dog |\n| --- | --- |\n| a 👍🏽 cat | cats |\n\n"
+                    "> 🌸 cat\n\n```\n🌸 = cat\n```\n\nLast 👨‍👩‍👧 cat here, my_cat and cat.\n")
+
+
+@pytest.mark.parametrize("needle", ["cat", "Cat", "a c", "t", "cat one", "🌸"])
+def test_find_after_emoji_finds_what_qt_finds(needle):
+    from find_replace import FindOptions, find_all
+    from tests.test_find_replace import doc_of, qt_find_all
+    doc = doc_of(EMOJI_STRUCTURED)
+    for options in (FindOptions(), FindOptions(match_case=True), FindOptions(whole_words=True)):
+        assert find_all(doc, needle, options) == qt_find_all(doc, needle, options)
+
+
+def test_an_opened_html_file_keeps_the_last_letters_of_a_list_item_after_emoji():
+    from PySide6.QtGui import QTextDocument
+    from export_html import normalize_after_set_html
+    doc = QTextDocument()
+    doc.setHtml("<ul><li>🌸👨‍👩‍👧 an item   </li><li>🇩🇪 two </li></ul><p>👍🏽 end </p>")
+    normalize_after_set_html(doc)
+    assert doc.toPlainText() == "🌸👨‍👩‍👧 an item\n🇩🇪 two\n👍🏽 end"
+
+
+def test_return_in_code_after_emoji_keeps_the_lines_indent():
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QTextCursor
+    from PySide6.QtTest import QTest
+    from tests.rich_text_helpers import from_markdown
+    from editor import HtmlEditor
+    from markdown_writer import read_markdown, document_to_markdown
+    ed = HtmlEditor()
+    read_markdown(ed.document(), "```\n  🌸🌸x\n```\n")
+    cursor = ed.textCursor()
+    cursor.setPosition(ed.document().begin().position())
+    cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+    ed.setTextCursor(cursor)
+    QTest.keyClick(ed, Qt.Key.Key_Return, Qt.KeyboardModifier.ShiftModifier)
+    QTest.keyClicks(ed, "      y")
+    cursor = ed.textCursor()
+    cursor.setPosition(ed.document().begin().position() + 7)   # after "  🌸🌸x"
+    ed.setTextCursor(cursor)
+    QTest.keyClick(ed, Qt.Key.Key_Return)
+    QTest.keyClicks(ed, "z")
+    assert "  🌸🌸x\n  z" in document_to_markdown(ed.document())
+
+
+def test_a_replacement_with_emoji_is_where_it_says_it_is():
+    from PySide6.QtGui import QTextCursor
+    from find_replace import find_all, replace_all, replace_match
+    from tests.test_find_replace import doc_of
+    doc = doc_of("🌸 a cat and a cat.\n")
+    start, end = replace_match(doc, find_all(doc, "cat")[0], "👨‍👩‍👧 dog")
+    cursor = QTextCursor(doc)
+    cursor.setPosition(start)
+    cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+    assert cursor.selectedText() == "👨‍👩‍👧 dog"
+    assert replace_all(doc, "a", "🇩🇪") == 4 and doc.toPlainText() == \
+        "🌸 🇩🇪 👨‍👩‍👧 dog 🇩🇪nd 🇩🇪 c🇩🇪t."
