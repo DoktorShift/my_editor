@@ -41,13 +41,14 @@ from constants import (
 )
 from i18n import _, format_moment, ngettext
 
-from ..article_details import ArticleDetails, equal_zaps
+from ..article_details import ArticleDetails
 from ..blossom.store import MediaStore
 from ..media.media_visibility import MediaVisibility
 from ..media.private_library import PrivateLibrary
 from ..media.publish_copy import PublicCopyMaker
 from ..profiles import Profile
 from ..publisher import slugify
+from .coauthors import Coauthors
 from .cover_field import CoverImageField
 from .eliding_label import ElidingLabel
 from .secret_key_check import slug_problem
@@ -100,13 +101,12 @@ class ArticleDetailsPanel(QFrame):
         # answering with a Person), and how a person is called.
         self._pick_person = pick_person
         self._name_of = name_of
-        self._profile = profile
-        # Whether someone can receive zaps (pubkey, relay hint, answer(bool)),
-        # what was answered (pubkey -> bool, None while asking), and the
-        # relay a zap to someone is announced on.
-        self._can_receive_zaps = can_receive_zaps
-        self._zappable: dict = {}
-        self._relay_hint = relay_hint
+        # Adding and removing co-authors, and sharing zaps with them, as
+        # Publish as Article does: whether someone can receive zaps
+        # (pubkey, relay hint, answer(bool)) and the relay a zap to someone
+        # is announced on decide the shares.
+        self._coauthors = Coauthors(profile=profile, relay_hint=relay_hint,
+                                    can_receive_zaps=can_receive_zaps)
         self.setObjectName("ArticleDetailsPanel")
         self.setAccessibleName(_("Article Details"))
         self.setMinimumWidth(MIN_WIDTH)
@@ -424,11 +424,11 @@ class ArticleDetailsPanel(QFrame):
         self.share_zaps.setChecked(bool(details.zaps))
         self.share_zaps.blockSignals(False)
         # Disabled as a whole: the box and its words.
-        unzappable = [pubkey for pubkey, _hint in details.coauthors
-                      if self._zappable.get(pubkey) is False]
+        unzappable = self._coauthors.unzappable(details.coauthors)
         self._share_row.setEnabled((len(unzappable) < len(details.coauthors)
                                     or bool(details.zaps)) and "zap_split" not in self._kept)
-        foreign = bool(details.zaps) and details.zaps != self._equal_zaps(details.coauthors)
+        foreign = bool(details.zaps) and details.zaps != self._coauthors.equal_zaps(
+            details.coauthors)
         if foreign:
             note = _("Zaps are shared the way another app set them.")
         elif unzappable:
@@ -443,35 +443,18 @@ class ArticleDetailsPanel(QFrame):
         self.zaps_note.setText(note)
         self.zaps_note.setVisible(bool(note))
         # Last: an answer at once shows the co-authors again.
-        for pubkey, hint in details.coauthors:
-            self._ask_if_zappable(pubkey, hint)
-
-    def _ask_if_zappable(self, pubkey: str, hint: str) -> None:
-        """Ask once whether a co-author can receive zaps (their profile
-        names a lightning address); until the answer, they are counted in."""
-        if self._can_receive_zaps is None or pubkey in self._zappable:
-            return
-        self._zappable[pubkey] = None
-        self._can_receive_zaps(pubkey, hint, lambda able, key=pubkey: self._zappable_answered(
-            key, able))
+        self._coauthors.ask(details.coauthors, self._zappable_answered)
 
     def _zappable_answered(self, pubkey: str, able: Optional[bool]) -> None:
         """A co-author who can't receive zaps loses their equal share; one
-        whose profile couldn't be read (None) keeps it, says nothing, and is
-        asked about again the next time the co-authors are shown."""
-        if able is None:
-            self._zappable.pop(pubkey, None)
+        whose profile couldn't be read keeps it and says nothing."""
+        details = self._coauthors.learned(self._shown, pubkey, able)
+        if details is None:
             return
-        before = self._equal_zaps(self._shown.coauthors)
-        self._zappable[pubkey] = able
-        if not any(p == pubkey for p, _hint in self._shown.coauthors):
-            return
-        if self._shown.zaps and self._shown.zaps == before:
-            after = self._equal_zaps(self._shown.coauthors)
-            if after != before:
-                self._hand_back(self._shown.with_changes(zaps=after))
-                return
-        self._show_people(self._shown)
+        if details != self._shown:
+            self._hand_back(details)
+        else:
+            self._show_people(details)
 
     def _coauthor_row(self, pubkey: str) -> Tuple[QWidget, QPushButton]:
         row = QWidget()
@@ -494,36 +477,15 @@ class ArticleDetailsPanel(QFrame):
             self._pick_person(self.add_coauthor_button, self._add_coauthor)
 
     def _add_coauthor(self, person) -> None:
-        own = self._profile()
-        if any(pubkey == person.pubkey for pubkey, _hint in self._shown.coauthors) or (
-                own is not None and person.pubkey == own.user_pubkey):
-            return                     # already there, or the author: nothing to add
-        self._people_changed(self._shown.coauthors + ((person.pubkey, person.relay_hint or ""),))
+        details = self._coauthors.added(self._shown, person)
+        if details is not None:        # None: already there, or the author
+            self._hand_back(details)
 
     def _remove_coauthor(self, pubkey: str) -> None:
-        self._people_changed(tuple(p for p in self._shown.coauthors if p[0] != pubkey))
-
-    def _people_changed(self, coauthors) -> None:
-        """New co-authors: shared zaps follow them (equally); zaps another
-        app shared are left as they were until changed here."""
-        zaps = self._shown.zaps
-        if zaps and zaps == self._equal_zaps(self._shown.coauthors):
-            zaps = self._equal_zaps(coauthors)
-        self._hand_back(self._shown.with_changes(coauthors=coauthors, zaps=zaps))
+        self._hand_back(self._coauthors.removed(self._shown, pubkey))
 
     def _share_zaps_toggled(self, shared: bool) -> None:
-        zaps = self._equal_zaps(self._shown.coauthors) if shared else ()
-        self._hand_back(self._shown.with_changes(zaps=zaps))
-
-    def _equal_zaps(self, coauthors):
-        """Equal shares with the co-authors who can receive zaps (or are not
-        known yet not to)."""
-        own = self._profile()
-        if own is None:
-            return ()
-        recipients = tuple(person for person in coauthors
-                           if self._zappable.get(person[0]) is not False)
-        return equal_zaps(own.user_pubkey, self._relay_hint(own.user_pubkey), recipients)
+        self._hand_back(self._coauthors.shared(self._shown, shared))
 
     def _hand_back(self, details: ArticleDetails) -> None:
         self._shown = details
