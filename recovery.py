@@ -399,6 +399,7 @@ class EditorBackup:
         """
         self._timer.stop()
         self._max_timer.stop()
+        self._listener = None
         try:
             self._editor.document().contentsChanged.disconnect(self._schedule)
         except RuntimeError:

@@ -2957,6 +2957,16 @@ class MainWindow(QMainWindow):
                     return
         if editor:
             self._drop_media_reads(editor)
+            # What the tab set going stops: its spelling (no late result
+            # comes to it), and Find's matches when they are its own.
+            spelling_of_tab = editor.spelling()
+            if spelling_of_tab is not None:
+                spelling_of_tab.close()
+                editor.set_spelling(None)
+            if getattr(self, "_matches_of", None) is editor:
+                self._search_matches = []
+                self._current_match_index = -1
+                self._matches_of = None
         if editor and hasattr(editor, '_backup'):
             editor._backup.delete()
         if editor:
@@ -5620,7 +5630,8 @@ class MainWindow(QMainWindow):
         """A tab got wider or narrower: Split may fit now, or not any more.
         Looked at once the layout has settled, never in the middle of it."""
         if ed is self.current_editor() and self.view_mode == SPLIT:
-            QTimer.singleShot(0, lambda e=ed: self._width_settled(e))
+            # Tied to the editor: dropped if its tab is closed meanwhile.
+            QTimer.singleShot(0, ed, lambda e=ed: self._width_settled(e))
 
     def _width_settled(self, ed) -> None:
         if (shiboken6.isValid(ed) and ed is self.current_editor() and self.view_mode == SPLIT
