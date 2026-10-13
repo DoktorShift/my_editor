@@ -2863,6 +2863,8 @@ class MainWindow(QMainWindow):
                 self.tabs.setCurrentIndex(index)
                 if not self.save():
                     return
+        if editor:
+            self._drop_media_reads(editor)
         if editor and hasattr(editor, '_backup'):
             editor._backup.delete()
         if editor:
@@ -5831,7 +5833,8 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         # Quitting from here: nothing still on its way goes into a document.
-        self._quitting = True
+        for i in range(self.tabs.count()):
+            self._drop_media_reads(self._editor_from_widget(self.tabs.widget(i)))
         if hasattr(self, "_knit_runner"):
             self._knit_runner.kill()
         self._asset_manager.flush()
@@ -6696,24 +6699,39 @@ class MainWindow(QMainWindow):
         # what is typed there).
         at = QTextCursor(ed.textCursor())
         at.setKeepPositionOnInsert(True)
-        run_for_size(size, lambda: self._asset_manager.store_media_file(path),
-                     lambda stored: self._insert_media(ed, at, stored, mime, name),
-                     lambda _error: self._say_cannot_add(name), parent=ed)
+        # Dropped when the document closes or the app quits meanwhile
+        # (close_tab, closeEvent): nothing is then kept or uploaded.
+        read = _MediaRead()
+        ed._media_reads = getattr(ed, "_media_reads", []) + [read]
+        run_for_size(size, lambda: self._asset_manager.store_media_file(
+                         path, lambda: read.dropped),
+                     lambda stored: self._insert_media(ed, at, stored, mime, name, read),
+                     lambda _error: self._say_cannot_add(name), parent=self)
+
+    @staticmethod
+    def _drop_media_reads(ed) -> None:
+        """The audio and video still being read for ``ed`` go nowhere."""
+        for read in getattr(ed, "_media_reads", []) if ed is not None else []:
+            read.dropped = True
 
     def _say_cannot_add(self, name: str) -> None:
         inform(self, title=_("Couldn’t add “{name}”").format(name=name),
                message=_("MyEditor can read audio and video files of these kinds: "
                          "{kinds}.").format(kinds=", ".join(media_files.AUDIO_VIDEO_EXTENSIONS)))
 
-    def _insert_media(self, ed, at, stored, mime: str, name: str) -> None:
+    def _insert_media(self, ed, at, stored, mime: str, name: str,
+                      read: "_MediaRead") -> None:
         """The file kept in the local store (``stored``: its sha256 and size)
         as an object of ``ed``'s text, in a paragraph of its own at ``at``,
         and on its way to the media servers."""
-        if self._editor_widget_index(ed) < 0 or getattr(self, "_quitting", False):
-            # The document was closed, or the app quit, while the file was
-            # read: it goes nowhere, and nothing is uploaded.
-            return
+        if stored is None:
+            return                         # dropped before it was kept
         sha, size = stored
+        if read.dropped or self._editor_widget_index(ed) < 0:
+            # The document was closed, or the app quit, while the file was
+            # read: it goes nowhere, nothing is uploaded, nothing is kept.
+            self._asset_manager.discard_stored(sha)
+            return
         asset = self._asset_manager.adopt_stored_media(sha, size=size, mime=mime, name=name)
         if asset is None:
             self._say_cannot_add(name)
@@ -8529,6 +8547,14 @@ def _media_asset(assets, name: str):
     sha = parse_asset_key(name)
     asset = assets.get(sha) if sha else None
     return asset if asset is not None and asset.is_media else None
+
+
+class _MediaRead:
+    """An audio or video file being read for a document, off the UI thread:
+    dropped when the document closes or the app quits."""
+
+    def __init__(self) -> None:
+        self.dropped = False
 
 
 def _is_media(assets, name: str) -> bool:

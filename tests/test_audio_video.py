@@ -1031,6 +1031,7 @@ for _ in range(100):
 r["closed: in the document"] = "￼" in ed.toPlainText()
 r["closed: adopted"] = w._asset_manager.get(sha) is not None
 r["closed: sent"] = list(sent)
+r["closed: kept"] = w._media_image_loader.cache_path(sha).exists()
 # Typed on while the file is read: it goes where the caret was.
 ed = w.new_tab()
 ed.setFocus()
@@ -1064,6 +1065,7 @@ def test_a_file_still_read_when_its_document_closes_goes_nowhere(tmp_path):
     r = run_window_script(CLOSED_SCRIPT, tmp_path, str(song), SHA)
     assert r["closed: in the document"] is False
     assert r["closed: adopted"] is False and r["closed: sent"] == []
+    assert r["closed: kept"] is False              # review N5: no copy left behind
     assert r["typed: blocks"][:2] == ["Before. Typed meanwhile.", "\ufffc"]
     assert r["typed: blocks"][-1] == "A paragraph typed meanwhile."
 
@@ -1096,7 +1098,8 @@ for _ in range(100):
     app.processEvents()
     threading.Event().wait(0.01)
 print("RESULT " + json.dumps({"quit": event.isAccepted(), "sent": sent,
-                              "adopted": w._asset_manager.get(sha) is not None}))
+                              "adopted": w._asset_manager.get(sha) is not None,
+                              "kept": w._media_image_loader.cache_path(sha).exists()}))
 """
 
 
@@ -1104,4 +1107,4 @@ def test_a_file_still_read_when_the_app_quits_goes_nowhere(tmp_path):
     song = tmp_path / "song.mp3"
     song.write_bytes(BODY)
     r = run_window_script(QUIT_READ_SCRIPT, tmp_path, str(song), SHA)
-    assert r == {"quit": True, "sent": [], "adopted": False}
+    assert r == {"quit": True, "sent": [], "adopted": False, "kept": False}

@@ -336,14 +336,30 @@ class AssetManager(QObject):
             return None
         return self.adopt_stored_media(sha, size=len(data), mime=mime, name=name)
 
-    def store_media_file(self, path: str) -> Tuple[str, int]:
+    def store_media_file(self, path: str,
+                         dropped: Callable[[], bool] = lambda: False
+                         ) -> Optional[Tuple[str, int]]:
         """Keep the file at ``path`` in the local store and answer its
-        ``(sha256, size)``, for adopt_stored_media. Files only, so a large
-        one can be read and hashed on a worker thread. Raises OSError."""
+        ``(sha256, size)``, for adopt_stored_media; None when ``dropped()``
+        says it is not wanted any more by the time it is read. Files only,
+        so a large one can be read and hashed on a worker thread. Raises
+        OSError."""
         data = Path(path).read_bytes()
         if not data:
             raise OSError("empty file")
+        if dropped():
+            return None
         return self._blob_store.put_bytes(data), len(data)
+
+    def discard_stored(self, sha: str) -> None:
+        """Take a file stored for a document that is gone out of the local
+        store again, unless an asset or the media library has it too."""
+        if self._index.get(sha) is not None or sha in getattr(self._uploader, "files", {}):
+            return
+        try:
+            self._blob_store.cache_path(sha).unlink(missing_ok=True)
+        except OSError:
+            pass
 
     def adopt_stored_media(self, sha: str, *, size: int, mime: str,
                            name: str) -> Optional[DocumentAsset]:
