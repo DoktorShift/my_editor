@@ -24,7 +24,9 @@ A Markdown file keeps them in its front matter, under the keys Jekyll,
 Hugo, Obsidian and iA Writer use (``title``, ``summary`` or
 ``description``, ``image``, ``tags``, ``slug``, ``date``), so they are
 the document's wherever it goes, and are never published as its text.
-Entries of the front matter this app does not know stay as written.
+Co-authors are ``coauthors`` (their Nostr addresses) and zap shares
+``zap_split`` ("<address> <weight>" each). Entries of the front matter
+this app does not know stay as written.
 
 The expiry of an imported draft is not a detail of the article; it is
 on the draft's wrap, and a draft the person saved has none.
@@ -38,9 +40,15 @@ from typing import Iterable, List, Optional, Sequence, Tuple
 
 import front_matter
 
+from . import refs
+from .bech32 import encode_nprofile, encode_npub
+
 # Tags MyEditor writes itself; every other tag is carried as it is.
 DETAILS = ("d", "title", "summary", "image", "published_at", "t")
 REBUILT = ("client", "p", "q")
+# A co-author: ["p", <pubkey>, <relay hint>, "author"] (the marker standup
+# writes and reads back for "this person wrote it").
+AUTHOR_MARKER = "author"
 
 
 def hashtags_from(text: str) -> Tuple[str, ...]:
@@ -64,6 +72,10 @@ class ArticleDetails:
     image: str = ""
     hashtags: Tuple[str, ...] = ()
     published_at: Optional[int] = None
+    # Who wrote it with the author: (pubkey, relay hint) each.
+    coauthors: Tuple[Tuple[str, str], ...] = ()
+    # How zaps to it are shared (NIP-57 zap tags, as written).
+    zaps: Tuple[Tuple[str, ...], ...] = ()
     carried: Tuple[Tuple[str, ...], ...] = field(default=())
 
     @classmethod
@@ -72,6 +84,8 @@ class ArticleDetails:
         every hashtag counts)."""
         found = {}
         hashtags: List[str] = []
+        coauthors: List[Tuple[str, str]] = []
+        zaps: List[Tuple[str, ...]] = []
         carried: List[Tuple[str, ...]] = []
         for tag in tags or ():
             if not isinstance(tag, (list, tuple)) or len(tag) < 2 \
@@ -83,6 +97,11 @@ class ArticleDetails:
                     hashtags.append(value.strip().lower())
             elif name in DETAILS:
                 found.setdefault(name, value)
+            elif name == "p" and len(tag) >= 4 and tag[3] == AUTHOR_MARKER:
+                if value not in (pubkey for pubkey, _hint in coauthors):
+                    coauthors.append((value, tag[2]))
+            elif name == "zap":
+                zaps.append(tuple(tag))
             elif name not in REBUILT:
                 carried.append(tuple(tag))
         published_at = None
@@ -93,7 +112,7 @@ class ArticleDetails:
         return cls(identifier=found.get("d", ""), title=found.get("title", ""),
                    summary=found.get("summary", ""), image=found.get("image", ""),
                    hashtags=tuple(hashtags), published_at=published_at,
-                   carried=tuple(carried))
+                   coauthors=tuple(coauthors), zaps=tuple(zaps), carried=tuple(carried))
 
     def with_changes(self, **changes) -> "ArticleDetails":
         return replace(self, **changes)
@@ -114,6 +133,13 @@ class ArticleDetails:
         """The tags of an article draft's inner event with ``content``."""
         return self._detail_tags() + self.carried_tags(content)
 
+    def published_tags(self, content: str) -> List[List[str]]:
+        """The tags an article with ``content`` is published with besides
+        those its publisher makes of the details it is given (title,
+        summary, cover, hashtags, first date): co-authors, zap shares and
+        the carried tags."""
+        return self._people_tags() + self.carried_tags(content)
+
     def tags(self) -> List[List[str]]:
         """Every detail as a tag, the carried ones all as they are:
         ``from_tags`` makes the same details of them again (for keeping
@@ -131,7 +157,23 @@ class ArticleDetails:
         if self.published_at:
             tags.append(["published_at", str(int(self.published_at))])
         tags.extend(["t", tag] for tag in self.hashtags)
-        return tags
+        return tags + self._people_tags()
+
+    def _people_tags(self) -> List[List[str]]:
+        return ([["p", pubkey, hint, AUTHOR_MARKER] for pubkey, hint in self.coauthors]
+                + [list(tag) for tag in self.zaps])
+
+
+def equal_zaps(author: str, author_relay: str,
+               coauthors: Sequence[Tuple[str, str]]) -> Tuple[Tuple[str, ...], ...]:
+    """Zaps shared equally between the author and ``coauthors``: a zap tag
+    of four parts each (pubkey, relay hint, weight), as every reader of
+    zap splits reads them. None without co-authors."""
+    if not coauthors:
+        return ()
+    people = [(author, author_relay)] + [person for person in coauthors
+                                          if person[0] != author]
+    return tuple(("zap", pubkey, hint or "", "1") for pubkey, hint in people)
 
 
 # -- a Markdown file's front matter -----------------------------------------------
@@ -139,7 +181,8 @@ class ArticleDetails:
 # Each detail's key, then the other keys it is read from (other apps' names).
 _FRONT_KEYS = (("title", ()), ("summary", ("description",)),
                ("image", ("cover", "cover_image")), ("tags", ("hashtags",)),
-               ("slug", ()), ("date", ("published_at",)))
+               ("slug", ()), ("date", ("published_at",)), ("coauthors", ()),
+               ("zap_split", ()))
 
 
 def from_front_matter(entries: Optional[Sequence[front_matter.Entry]]) -> ArticleDetails:
@@ -152,11 +195,25 @@ def from_front_matter(entries: Optional[Sequence[front_matter.Entry]]) -> Articl
     def text(key: str) -> str:
         value = values.get(key, "")
         return value if isinstance(value, str) else ""
-    tags = values.get("tags", ())
-    hashtags = hashtags_from(", ".join(tags) if isinstance(tags, list) else tags)
+    def items(key: str) -> List[str]:
+        value = values.get(key, [])
+        return value if isinstance(value, list) else [part for part in value.split(",")]
+    hashtags = hashtags_from(", ".join(items("tags")))
+    coauthors = []
+    for written in items("coauthors"):
+        person = _person(written)
+        if person is not None and person[0] not in (p for p, _hint in coauthors):
+            coauthors.append(person)
+    zaps = []
+    for written in items("zap_split"):
+        address, _space, weight = written.strip().partition(" ")
+        person = _person(address)
+        if person is not None and weight.strip().isdigit():
+            zaps.append(("zap", person[0], person[1], weight.strip()))
     return ArticleDetails(identifier=text("slug"), title=text("title"),
                           summary=text("summary"), image=text("image"),
-                          hashtags=hashtags, published_at=_moment(text("date")))
+                          hashtags=hashtags, published_at=_moment(text("date")),
+                          coauthors=tuple(coauthors), zaps=tuple(zaps))
 
 
 def front_matter_with(details: ArticleDetails,
@@ -168,7 +225,10 @@ def front_matter_with(details: ArticleDetails,
     written = {"title": details.title.strip(), "summary": details.summary.strip(),
                "image": details.image.strip(), "tags": list(details.hashtags),
                "slug": details.identifier.strip(),
-               "date": _iso(details.published_at) if details.published_at else ""}
+               "date": _iso(details.published_at) if details.published_at else "",
+               "coauthors": [_address(pubkey, hint) for pubkey, hint in details.coauthors],
+               "zap_split": [f"{_address(tag[1], tag[2] if len(tag) > 2 else '')} "
+                             f"{tag[3] if len(tag) > 3 else '1'}" for tag in details.zaps]}
     known = {name: key for key, others in _FRONT_KEYS for name in (key, *others)}
     done = set()
     out: List[front_matter.Entry] = []
@@ -184,6 +244,19 @@ def front_matter_with(details: ArticleDetails,
         if key not in done and written[key]:
             out.append(front_matter.entry(key, written[key]))
     return out
+
+
+def _person(written: str) -> Optional[Tuple[str, str]]:
+    """(pubkey, relay hint) of a person's Nostr address, or None."""
+    reference = refs.read_entity(written.strip().removeprefix("nostr:"))
+    if reference is None or reference.kind != refs.PERSON:
+        return None
+    return reference.pubkey, reference.relay
+
+
+def _address(pubkey: str, hint: str) -> str:
+    """A person's Nostr address, with their relay when one is known."""
+    return encode_nprofile(pubkey, [hint]) if hint else encode_npub(pubkey)
 
 
 def _iso(when: int) -> str:

@@ -437,6 +437,9 @@ class MainWindow(QMainWindow):
         self.status.addPermanentWidget(self._line_label)
         # The mention picker at the caret, made on its first use.
         self._mention_picker = None
+        # Article Details' co-author picker, and who it answers.
+        self._coauthor_picker = None
+        self._coauthor_chosen = None
 
         self._apply_theme()
 
@@ -907,8 +910,9 @@ class MainWindow(QMainWindow):
         muted = DARK_MUTED_FG if self.is_dark_theme else LIGHT_MUTED_FG
         self._words_label.setStyleSheet(f"color: {muted}; font-size: 12px;")
         self._show_backup_status()
-        if self._mention_picker is not None:
-            self._mention_picker.set_dark(self.is_dark_theme)
+        for picker in (self._mention_picker, getattr(self, "_coauthor_picker", None)):
+            if picker is not None:
+                picker.set_dark(self.is_dark_theme)
 
         for i in range(self.tabs.count()):
             ed = self._editor_from_widget(self.tabs.widget(i))
@@ -2540,7 +2544,8 @@ class MainWindow(QMainWindow):
         self._article_details_panel = ArticleDetailsPanel(
             media_store=self._media_store, media_visibility=self._media_visibility,
             copy_maker=self._copy_maker, private_library=self._private_library,
-            profile=self._profile_store.default, is_dark=self.is_dark_theme)
+            profile=self._profile_store.default, pick_person=self._pick_coauthor,
+            name_of=self._person_name, is_dark=self.is_dark_theme)
         self._article_details_panel.changed.connect(
             lambda details: self._set_article_details(self.current_editor(), details))
         self._article_details_panel.close_requested.connect(
@@ -6403,6 +6408,26 @@ class MainWindow(QMainWindow):
             fixed = (binding is not None and binding.inner_kind == INNER_KIND_LONG_FORM) or \
                 self._published_article_of(ed) is not None
             panel.show_article(self._article_details_of(ed), fixed_identifier=fixed)
+
+    def _pick_coauthor(self, anchor, chosen) -> None:
+        """Who writes the article with its author, asked under ``anchor`` the
+        way a mention is: the people you follow first, then a search; their
+        Nostr address only once confirmed. ``chosen(person)`` answers."""
+        if self._coauthor_picker is None:
+            self._coauthor_picker = MentionPicker(
+                self._known_people, self._search_client, avatars=self._avatars,
+                parent=self, is_dark=self.is_dark_theme, address_check=self._address_check)
+            self._coauthor_picker.picked.connect(
+                lambda person: self._coauthor_chosen and self._coauthor_chosen(person))
+        self._coauthor_chosen = chosen
+        self._coauthor_picker.open_at(anchor.rect(), anchor)
+
+    def _person_name(self, pubkey: str) -> str:
+        """How a person is called: their name when known, else their short
+        Nostr address."""
+        person = self._known_people.get(pubkey)
+        return (person.display_name if person is not None and person.display_name
+                else refs.short_key(encode_npub(pubkey)))
 
     # -- mentions ----------------------------------------------------------------
 

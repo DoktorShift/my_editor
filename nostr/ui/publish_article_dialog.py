@@ -822,7 +822,7 @@ class PublishArticleDialog(QDialog):
                 published_at=published_at,
                 hashtags=self._hashtag_list(),
                 mentions=self._mention_row.mentions(),
-                extra_tags=self._details.carried_tags(body) or None,
+                extra_tags=self._details.published_tags(body) or None,
             )
         except ValueError as exc:
             # Make sure the Advanced panel is open so the slug field is visible

@@ -16,6 +16,10 @@ published article's) is shown, not edited: another address would be
 another article. A tab that holds no article (a note's draft, a PDF)
 says so instead of showing empty fields.
 
+Co-authors are chosen the way a mention is, from people whose Nostr
+address is confirmed; they are tagged as authors of the article. Zaps to
+it can be shared equally between the author and them.
+
 It exists only while a Nostr account is in use (decision D-1).
 """
 
@@ -25,8 +29,8 @@ from typing import Callable, Optional
 
 from PySide6.QtCore import QDateTime, Qt, Signal
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QScrollArea, QStackedWidget,
-    QToolButton, QVBoxLayout, QWidget,
+    QCheckBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QPushButton,
+    QScrollArea, QStackedWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
 import announce
@@ -37,7 +41,7 @@ from constants import (
 )
 from i18n import _, format_moment
 
-from ..article_details import ArticleDetails, hashtags_from
+from ..article_details import ArticleDetails, equal_zaps, hashtags_from
 from ..blossom.store import MediaStore
 from ..media.media_visibility import MediaVisibility
 from ..media.private_library import PrivateLibrary
@@ -45,6 +49,7 @@ from ..media.publish_copy import PublicCopyMaker
 from ..profiles import Profile
 from ..publisher import slugify
 from .cover_field import CoverImageField
+from .eliding_label import ElidingLabel
 from .secret_key_check import slug_problem
 
 MIN_WIDTH = 260
@@ -64,8 +69,15 @@ class ArticleDetailsPanel(QFrame):
                  copy_maker: Optional[PublicCopyMaker] = None,
                  private_library: Optional[PrivateLibrary] = None,
                  profile: Callable[[], Optional[Profile]] = lambda: None,
+                 pick_person: Optional[Callable[[QWidget, Callable], None]] = None,
+                 name_of: Callable[[str], str] = lambda pubkey: pubkey,
                  is_dark: bool = False, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        # Who a co-author is asked of (the window's picker, at a widget,
+        # answering with a Person), and how a person is called.
+        self._pick_person = pick_person
+        self._name_of = name_of
+        self._profile = profile
         self.setObjectName("ArticleDetailsPanel")
         self.setAccessibleName(_("Article Details"))
         self.setMinimumWidth(MIN_WIDTH)
@@ -151,6 +163,27 @@ class ArticleDetailsPanel(QFrame):
         self.tags_edit = QLineEdit()
         self.tags_edit.setPlaceholderText(_("comma, separated, hashtags"))
         self._add_labeled(form, _("Hashtags"), self.tags_edit)
+
+        form.addSpacing(6)
+        coauthors_label = QLabel(_("Co-Authors"))
+        coauthors_label.setObjectName("article_details_label")
+        form.addWidget(coauthors_label)
+        self.coauthor_rows = QVBoxLayout()
+        self.coauthor_rows.setContentsMargins(0, 0, 0, 0)
+        self.coauthor_rows.setSpacing(2)
+        form.addLayout(self.coauthor_rows)
+        self.add_coauthor_button = QPushButton(_("Add Co-Author…"))
+        self.add_coauthor_button.setAutoDefault(False)
+        self.add_coauthor_button.clicked.connect(self._ask_coauthor)
+        self.add_coauthor_button.setEnabled(self._pick_person is not None)
+        form.addWidget(self.add_coauthor_button, 0, Qt.AlignmentFlag.AlignLeft)
+        self.share_zaps = QCheckBox(_("Share zaps equally with co-authors"))
+        self.share_zaps.toggled.connect(self._share_zaps_toggled)
+        form.addWidget(self.share_zaps)
+        self.zaps_note = QLabel()
+        self.zaps_note.setObjectName("article_details_hint")
+        self.zaps_note.setWordWrap(True)
+        form.addWidget(self.zaps_note)
 
         # Advanced: what most people never change, closed at first.
         self.advanced_toggle = QToolButton()
@@ -250,6 +283,8 @@ class ArticleDetailsPanel(QFrame):
             self._shown = details
             if not typed:
                 self._fill_fields(details)
+            else:
+                self._show_people(details)
             self.identifier_edit.setReadOnly(fixed_identifier)
             self.identifier_note.setText(
                 _("A saved or published article keeps its address; saving it under "
@@ -271,6 +306,7 @@ class ArticleDetailsPanel(QFrame):
         if hashtags_from(self.tags_edit.text()) != details.hashtags:
             self.tags_edit.setText(", ".join(details.hashtags))
         self._set_text(self.identifier_edit, details.identifier)
+        self._show_people(details)
 
     def show_no_article(self, reason: str) -> None:
         """The tab in front holds no article: ``reason`` instead of fields."""
@@ -289,6 +325,76 @@ class ArticleDetailsPanel(QFrame):
                 _("First published {moment}").format(moment=format_moment(moment)))
         else:
             self.first_published.setText(_("Not published yet."))
+
+    # -- co-authors -------------------------------------------------------------
+
+    def _show_people(self, details: ArticleDetails) -> None:
+        """The co-authors, each with Remove, and how zaps are shared."""
+        while self.coauthor_rows.count():
+            item = self.coauthor_rows.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
+        for pubkey, _hint in details.coauthors:
+            self.coauthor_rows.addWidget(self._coauthor_row(pubkey))
+        self.share_zaps.blockSignals(True)
+        self.share_zaps.setChecked(bool(details.zaps))
+        self.share_zaps.blockSignals(False)
+        self.share_zaps.setEnabled(bool(details.coauthors) or bool(details.zaps))
+        foreign = bool(details.zaps) and details.zaps != self._equal_zaps(details.coauthors)
+        self.zaps_note.setText(_("Zaps are shared the way another app set them.")
+                               if foreign else "")
+        self.zaps_note.setVisible(foreign)
+
+    def _coauthor_row(self, pubkey: str) -> QWidget:
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        name = self._name_of(pubkey)
+        label = ElidingLabel()
+        label.set_full_text(name)
+        layout.addWidget(label, 1)
+        remove = QPushButton(_("Remove"))
+        remove.setAutoDefault(False)
+        remove.setAccessibleName(_("Remove {name}").format(name=name))
+        remove.clicked.connect(lambda _checked=False, key=pubkey: self._remove_coauthor(key))
+        layout.addWidget(remove)
+        return row
+
+    def _ask_coauthor(self) -> None:
+        if self._pick_person is not None:
+            self._pick_person(self.add_coauthor_button, self._add_coauthor)
+
+    def _add_coauthor(self, person) -> None:
+        own = self._profile()
+        if any(pubkey == person.pubkey for pubkey, _hint in self._shown.coauthors) or (
+                own is not None and person.pubkey == own.user_pubkey):
+            return                     # already there, or the author: nothing to add
+        self._people_changed(self._shown.coauthors + ((person.pubkey, person.relay_hint or ""),))
+
+    def _remove_coauthor(self, pubkey: str) -> None:
+        self._people_changed(tuple(p for p in self._shown.coauthors if p[0] != pubkey))
+
+    def _people_changed(self, coauthors) -> None:
+        """New co-authors: shared zaps follow them (equally); zaps another
+        app shared are left as they were until changed here."""
+        zaps = self._shown.zaps
+        if zaps and zaps == self._equal_zaps(self._shown.coauthors):
+            zaps = self._equal_zaps(coauthors)
+        self._hand_back(self._shown.with_changes(coauthors=coauthors, zaps=zaps))
+
+    def _share_zaps_toggled(self, shared: bool) -> None:
+        zaps = self._equal_zaps(self._shown.coauthors) if shared else ()
+        self._hand_back(self._shown.with_changes(zaps=zaps))
+
+    def _equal_zaps(self, coauthors):
+        own = self._profile()
+        return equal_zaps(own.user_pubkey, "", coauthors) if own is not None else ()
+
+    def _hand_back(self, details: ArticleDetails) -> None:
+        self._shown = details
+        self._show_people(details)
+        self.changed.emit(details)
 
     # -- editing ----------------------------------------------------------------
 

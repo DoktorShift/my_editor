@@ -58,6 +58,7 @@ def window_with_draft(tags=DRAFT_TAGS):
     stand_in._article_details_of = lambda ed: MainWindow._article_details_of(stand_in, ed)
     stand_in._set_article_details = lambda ed, d: MainWindow._set_article_details(
         stand_in, ed, d)
+    stand_in.current_editor = lambda: None
     return stand_in
 
 

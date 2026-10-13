@@ -43,6 +43,7 @@ import url_safety
 from i18n import _, display_locale, ngettext
 
 from . import CLIENT_NAME
+from .article_details import AUTHOR_MARKER
 from .bech32 import decode_npub, decode_nprofile, encode_nprofile
 from .blossom.hashes import blob_url
 from .bunker import BunkerClient, BunkerSessionPool
@@ -451,6 +452,7 @@ def build_article(
     tags.extend(build_imeta_tags(media, final_content))
     if extra_tags:
         tags.extend(extra_tags)
+    tags = _one_tag_per_person(tags)
     return build_event(
         kind=30023,
         content=final_content,
@@ -1255,3 +1257,26 @@ class DraftBulkDeleteJob(QObject):
             return
         self._done = True
         self.finished.emit(self._deleted, list(self._failures))
+
+
+def _one_tag_per_person(tags: List[List[str]]) -> List[List[str]]:
+    """``tags`` with one ``p`` tag per person: a co-author also mentioned in
+    the text keeps the tag that names them a co-author (with its marker),
+    and the mention's relay hint when that one has none."""
+    marked = {tag[1]: tag for tag in tags
+              if tag[0] == "p" and len(tag) >= 4 and tag[3] == AUTHOR_MARKER}
+    out: List[List[str]] = []
+    seen = set()
+    for tag in tags:
+        if tag[0] != "p" or len(tag) < 2:
+            out.append(tag)
+            continue
+        person = tag[1]
+        if person in seen:
+            continue
+        seen.add(person)
+        keep = marked.get(person, tag)
+        if keep is not tag and len(tag) >= 3 and tag[2] and not keep[2]:
+            keep = ["p", person, tag[2], AUTHOR_MARKER]
+        out.append(list(keep))
+    return out

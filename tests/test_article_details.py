@@ -209,13 +209,16 @@ def test_tags_another_app_gave_an_article_survive_editing_it_here():
               ["l", "review", "ugc"], ["client", "OtherApp"], ["p", "c" * 64],
               ["q", "d" * 64]]
     details = ArticleDetails.from_tags(theirs)
+    # Zap shares are a detail of their own (Article Details shows them),
+    # kept as written; the rest is carried.
+    assert [list(tag) for tag in details.zaps] == [
+        ["zap", pk, "wss://r.example", "1"], ["zap", "b" * 64, "", "2"]]
     assert [list(tag) for tag in details.carried] == [
-        ["zap", pk, "wss://r.example", "1"], ["zap", "b" * 64, "", "2"],
         ["content-warning", "spoilers"], ["alt", "An article"], ["L", "ugc"],
         ["l", "review", "ugc"]]                           # q is made from the text
     event = build_article(content="The body.", pubkey_hex=pk, slug=details.identifier,
                           title=details.title, published_at=details.published_at,
-                          extra_tags=details.carried_tags("The body."))
+                          extra_tags=details.published_tags("The body."))
     tags = event["tags"]
     for tag in theirs[3:9]:
         assert tag in tags
