@@ -69,6 +69,16 @@ def test_without_front_matter_the_text_is_all_body():
     assert front_matter.split("Text\n---\nmore\n---\n")[0] is None   # not at the top
 
 
+def test_an_empty_block_is_front_matter_and_stays_as_it_was():
+    empty = "---\n---\n\nBody text.\n"
+    front, body = front_matter.split(empty)
+    assert front is not None and body == "Body text.\n"
+    assert unchanged_save(empty) == empty
+    titled = from_front_matter(front).with_changes(title="T")
+    assert front_matter.join(front_matter_with(titled, front), body) == (
+        "---\ntitle: T\n---\n\nBody text.\n")
+
+
 def test_a_block_without_a_key_is_text():
     assert front_matter.split(DIVIDER) == (None, DIVIDER)
     commented, _ = front_matter.split("---\n# a comment\ntitle: A\n---\nText")

@@ -25,8 +25,8 @@ TOML is read with tomllib, one entry at a time, and written in TOML
 are kept whole and never read, and new entries go above them, where TOML
 needs its plain keys.
 
-A ``---`` block counts as front matter only when it holds at least one key;
-otherwise it is text (a document that opens with a divider).
+A ``---`` block counts as front matter when it holds at least one key, or
+nothing at all; otherwise it is text (a document that opens with a divider).
 """
 
 from __future__ import annotations
@@ -152,7 +152,7 @@ def split(text: str) -> Tuple[Optional[FrontMatter], str]:
         return None, text
     lines = found.group(2).splitlines()
     entries = _toml_entries(lines) if syntax == TOML else _yaml_entries(lines)
-    if not any(entry.key for entry in entries):
+    if lines and not any(entry.key for entry in entries):
         return None, text                   # a divider, some text, a divider: text
     entries = _with_trailers_apart(entries)
     newline = "\r\n" if "\r\n" in found.group(0) else "\n"
@@ -244,8 +244,8 @@ def _with_trailers_apart(entries: List[Entry]) -> List[Entry]:
 def join(front: Optional[FrontMatter], body: str) -> str:
     """``body`` under ``front`` as it was written, or alone when there is
     none (or no entry is left in it)."""
-    if front is None or not any(entry.key for entry in front.entries):
-        return body
+    if front is None or front.changed and not any(entry.key for entry in front.entries):
+        return body                         # none, or none left (an empty one stays)
     nl = front.newline
     lines = [line for entry in front.entries for line in entry.lines]
     # The blank lines after it as they were: none when the text began
