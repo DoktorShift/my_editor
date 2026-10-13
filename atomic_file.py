@@ -58,6 +58,11 @@ def _new_file_mode() -> int:
 
 _NEW_FILE_MODE = _new_file_mode()
 
+# As much of a document's name as its temporary file's name begins with:
+# at four bytes a character at most, it leaves room in 255 bytes for the
+# random part and the suffix.
+_TEMPORARY_NAME_CHARS = 40
+
 
 def write_bytes(path: PathLike, data: bytes) -> None:
     """Put ``data`` at ``path`` in one step, creating the folder if needed.
@@ -158,6 +163,8 @@ def place_document(temporary: PathLike, path: PathLike) -> None:
         if existing is not None:
             os.chmod(temporary, stat.S_IMODE(existing.st_mode))
             _copy_extended_attributes(target, temporary)
+        else:
+            os.chmod(temporary, _NEW_FILE_MODE)
         _replace(temporary, target)
     except BaseException:
         _remove_quietly(temporary)
@@ -180,19 +187,17 @@ def new_document_file(path: PathLike, *, suffix: str = ".tmp",
     links to, unless ``follow_link`` is False), to write one of the
     person's files into before it takes its name: ``(fd, path)``.
 
-    Its name is unique and short, so a name of any length the folder
-    holds still has room, and it is created new (never a file or a link
-    already there, whoever left it), with the permissions any new file
-    gets on this system. Raises OSError."""
+    Its name begins with the document's (shortened, so a name of any
+    length the folder holds still has room), so a file a crash leaves
+    behind says whose it is. It is created new (never a file or a link
+    already there, whoever left it) and readable by this account only
+    while it is written: it takes the document's permissions when it is
+    put in place (``place_document``). Raises OSError."""
     path = os.path.abspath(os.fspath(path))
     folder = (os.path.dirname(os.path.realpath(path)) if follow_link
               else os.path.realpath(os.path.dirname(path)))
-    fd, temporary = tempfile.mkstemp(prefix=".", suffix=suffix, dir=folder)
-    try:
-        os.chmod(temporary, _NEW_FILE_MODE)
-    except OSError:
-        pass
-    return fd, temporary
+    prefix = "." + os.path.basename(path)[:_TEMPORARY_NAME_CHARS] + "."
+    return tempfile.mkstemp(prefix=prefix, suffix=suffix, dir=folder)
 
 
 def free_path(path: PathLike, taken=()) -> str:

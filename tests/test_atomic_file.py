@@ -300,6 +300,49 @@ def test_a_new_document_gets_the_usual_permissions(tmp_path):
 
 
 @posix_only
+@pytest.mark.parametrize("existing_mode", [None, 0o600, 0o644])
+def test_the_new_text_is_private_until_it_takes_the_documents_place(tmp_path, monkeypatch,
+                                                                    existing_mode):
+    """While it is written, and if a crash leaves it behind, the
+    temporary file is readable by this account only; the document then
+    gets its own permissions (a new one, a new file's)."""
+    path = tmp_path / "Diary.md"
+    if existing_mode is not None:
+        path.write_bytes(b"old")
+        os.chmod(path, existing_mode)
+    seen = []
+    real_fsync = os.fsync
+
+    def fsync(fd):
+        seen.append(stat.S_IMODE(os.fstat(fd).st_mode))
+        real_fsync(fd)
+
+    monkeypatch.setattr(atomic_file.os, "fsync", fsync)
+    save_document(path, b"new private text")
+    assert seen[0] == 0o600
+    assert stat.S_IMODE(os.stat(path).st_mode) == (
+        existing_mode if existing_mode is not None else atomic_file._NEW_FILE_MODE)
+
+
+def test_a_temporary_file_says_which_document_it_belongs_to(tmp_path):
+    """A crash can leave it behind: its name starts with the document's."""
+    fd, temporary = atomic_file.new_document_file(tmp_path / "Diary.md")
+    os.close(fd)
+    name = os.path.basename(temporary)
+    assert name.startswith(".Diary.md.") and name.endswith(".tmp")
+    if os.name == "posix":
+        assert stat.S_IMODE(os.stat(temporary).st_mode) == 0o600
+
+
+def test_a_temporary_file_of_the_longest_name_still_fits(tmp_path):
+    long_name = "ü" * 125 + ".md"                    # 253 bytes in UTF-8
+    fd, temporary = atomic_file.new_document_file(tmp_path / long_name)
+    os.close(fd)
+    assert len(os.path.basename(temporary).encode("utf-8")) <= 255
+    assert os.path.basename(temporary).startswith(".üüü")
+
+
+@posix_only
 def test_a_link_stays_a_link(tmp_path):
     real = tmp_path / "real.md"
     real.write_bytes(b"old")
