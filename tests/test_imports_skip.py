@@ -204,7 +204,6 @@ def test_the_documents_commands_are_dimmed_while_imports_is_in_front(window, mon
     front = {"window": window}
     from PySide6.QtGui import QAction
     fullscreen = QAction("Full Screen")
-    fullscreen.setCheckable(True)
     host = SimpleNamespace(
         commands=registry, act_window_sidebar=sidebar, _m_background=QMenu(),
         act_fullscreen=fullscreen, isFullScreen=lambda: False, act_close_tab=QAction("Close"),
@@ -214,8 +213,10 @@ def test_the_documents_commands_are_dimmed_while_imports_is_in_front(window, mon
         _DOCUMENT_PREFIXES=MainWindow._DOCUMENT_PREFIXES)
     host._is_document_command = lambda cid: MainWindow._is_document_command(host, cid)
     host._update_window_commands = lambda: MainWindow._update_window_commands(host)
+    host._name_full_screen = lambda: MainWindow._name_full_screen(host)
     bold.setEnabled(False)          # as the document left it
     MainWindow._update_window_commands(host)
+    assert fullscreen.text() == "Enter Full Screen"     # named for the window in front
     assert not save.isEnabled() and not bold.isEnabled()
     assert copy.isEnabled()          # acts on the window in front
     assert sidebar.isEnabled() and sidebar.text() == "Hide Sidebar"
@@ -234,8 +235,13 @@ def test_the_documents_commands_are_dimmed_while_imports_is_in_front(window, mon
     MainWindow._toggle_window_sidebar(host)
     assert not window.act_sidebar.isChecked()
     assert sidebar.text() == "Show Sidebar"
+    window.showFullScreen()
+    MainWindow._update_window_commands(host)
+    assert fullscreen.text() == "Exit Full Screen"
+    window.showNormal()
     front["window"] = None           # the editor's window in front again
     MainWindow._update_window_commands(host)
+    assert fullscreen.text() == "Enter Full Screen"
     assert save.isEnabled() and not bold.isEnabled()
     assert not sidebar.isEnabled()
     assert host.act_close_tab.text() == "Close Tab"

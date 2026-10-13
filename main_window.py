@@ -4615,10 +4615,8 @@ class MainWindow(QMainWindow):
         # closed under it.
         self.act_close_tab.setText(_("Close Window") if in_front else _("Close Tab"))
         self.act_close_tab.setEnabled(not (in_front and imports.sheet_in_front()))
-        # Full Screen says whether the window in front is.
-        blocked = self.act_fullscreen.blockSignals(True)
-        self.act_fullscreen.setChecked((imports or self).isFullScreen())
-        self.act_fullscreen.blockSignals(blocked)
+        # Enter or Exit Full Screen, for the window now in front.
+        self._name_full_screen()
         if in_front:
             shown = imports.act_sidebar.isChecked()
             self.act_window_sidebar.setText(_("Hide Sidebar") if shown else _("Show Sidebar"))
