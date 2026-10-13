@@ -241,3 +241,52 @@ def test_an_edited_article_tags_each_quote_in_its_text_once():
     event = build_article(content=body, pubkey_hex=pk, slug=details.identifier,
                           title=details.title, extra_tags=details.carried_tags(body))
     assert [tag[1] for tag in event["tags"] if tag[0] == "q"] == [kept]
+
+
+# -- a detail the file keeps as written, in every window (round 8, M2) ----------
+
+def kept():
+    """Details whose title and hashtags the file keeps as written."""
+    return ArticleDetails(title="Hello", summary="S", identifier="hello",
+                          hashtags=("a",)).keeping({"title", "tags"})
+
+
+def test_a_kept_detail_never_changes_in_the_model():
+    """Whatever window hands the details back, one the file keeps as written
+    stays as the file has it: the rule is the model's, not a widget's."""
+    details = kept()
+    changed = details.with_changes(title="A real title", summary="New", hashtags=("b",))
+    assert (changed.title, changed.summary, changed.hashtags) == ("Hello", "New", ("a",))
+    taken = details.with_details_of(ArticleDetails(title="Other", summary="Other",
+                                                   identifier="x"))
+    assert (taken.title, taken.summary, taken.identifier) == ("Hello", "Other", "x")
+    assert taken.kept == details.kept and details.kept_fields == {"title", "hashtags"}
+
+
+def test_the_publish_window_shows_a_kept_detail_read_only_saying_so(tmp_path, qt_app):
+    dialog = _dialog(tmp_path, kept())
+    dialog.show()
+    QApplication.processEvents()
+    notes = [label for label in dialog.findChildren(type(dialog._status))
+             if label.text() == "Kept as written in the file."]
+    assert dialog._title_edit.isReadOnly() and dialog._tags_edit.isReadOnly()
+    assert not dialog._summary_edit.isReadOnly() and len(notes) == 2
+    dialog._set_busy(True)
+    dialog._set_busy(False)
+    assert dialog._title_edit.isReadOnly() and dialog._tags_edit.isReadOnly()
+    dialog._title_edit.setText("A real title")
+    assert dialog.details().title == "Hello"
+    dialog.close()
+
+
+def test_save_as_draft_shows_a_kept_detail_read_only_saying_so(qt_app):
+    from nostr.ui.stash_kind_dialog import StashKind, StashKindDialog
+    dialog = StashKindDialog(default=StashKind.ARTICLE, suggested_title="Hello",
+                             suggested_slug="hello", kept={"title"})
+    dialog.show()
+    QApplication.processEvents()
+    notes = [label for label in dialog.findChildren(type(dialog._slug_problem))
+             if label.text() == "Kept as written in the file." and label.isVisibleTo(dialog)]
+    assert dialog._title_edit.isReadOnly() and not dialog._slug_edit.isReadOnly()
+    assert len(notes) == 1
+    dialog.close()

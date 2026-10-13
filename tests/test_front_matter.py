@@ -881,3 +881,46 @@ def test_a_cleared_detail_is_gone_from_every_key_it_is_read_from(text, change, e
     assert out == expected
     again = from_front_matter(front_matter.split(out)[0])
     assert (again.summary, again.image, again.hashtags) == ("", "", ())
+
+
+KEPT_CHANGED_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+from nostr.article_details import ArticleDetails
+
+path = sys.argv[2]
+w = main_window.MainWindow()
+w.show()
+w.nostr_state._active = True               # Article Details is a Nostr feature
+w._update_nostr_commands()
+w.open_path(path)
+ed = w.current_editor()
+w.act_article_details.setChecked(True)
+app.processEvents()
+panel = w._article_details_panel
+# What the publish window hands back: a title typed over the kept one.
+w._set_article_details(ed, ArticleDetails(title="A real title", summary="New"))
+app.processEvents()
+r = {"title": w._article_details_of(ed).title, "shown": panel.title_edit.text(),
+     "read-only": panel.title_edit.isReadOnly()}
+w._save_to(path)
+r["saved"] = open(path, encoding="utf-8").read()
+ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_a_kept_detail_changed_in_another_window_stays_as_in_the_file(tmp_path):
+    """Round 8, M2: the publish window's title went into the tab, was
+    dropped at saving without a word, and showed under "Kept as written"."""
+    text = "---\ntitle: &t Hello\nsummary: S\n---\n\nBody text.\n"
+    path = tmp_path / "anchored.md"
+    path.write_text(text, encoding="utf-8")
+    r = run_window_script(KEPT_CHANGED_SCRIPT, tmp_path, str(path))
+    assert (r["title"], r["shown"], r["read-only"]) == ("Hello", "Hello", True)
+    assert r["saved"] == text.replace("summary: S", "summary: New")

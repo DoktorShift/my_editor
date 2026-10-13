@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import AbstractSet, Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -293,10 +293,14 @@ class StashKindDialog(QDialog):
         suggested_slug: str = "",
         suggested_summary: str = "",
         existing_note_identifier: str = "",
+        kept: AbstractSet[str] = frozenset(),
         is_dark: bool = True,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
+        # The details the article's file keeps as written (the fields of
+        # ArticleDetails.kept_fields): read-only here too, saying so.
+        self._kept = frozenset(kept)
         self.setWindowTitle(_("Save as Nostr draft"))
         self.setModal(True)
         self.setMinimumWidth(500)
@@ -308,7 +312,7 @@ class StashKindDialog(QDialog):
         self._existing_note_identifier = existing_note_identifier
         # Tracks whether the user has touched the slug manually; until
         # they do, the slug mirrors slugify(title) in real time.
-        self._slug_is_auto = not bool(suggested_slug)
+        self._slug_is_auto = not bool(suggested_slug) and "identifier" not in self._kept
         self._choice: Optional[StashChoice] = None
 
         self._build_ui(
@@ -318,6 +322,17 @@ class StashKindDialog(QDialog):
         )
         self._apply_theme()
         self._select(default)
+
+    def _kept_if(self, field: QWidget, name: str, edit: QLineEdit) -> QWidget:
+        """``field``, read-only with the line Article Details shows under
+        it when the article's file keeps the detail ``name`` as written."""
+        if name in self._kept:
+            edit.setReadOnly(True)
+            note = QLabel(_("Kept as written in the file."))
+            note.setObjectName("stash_kind_subtitle")
+            note.setWordWrap(True)
+            field.layout().addWidget(note)
+        return field
 
     # -- public properties -------------------------------------------------
 
@@ -400,7 +415,8 @@ class StashKindDialog(QDialog):
         self._title_edit.setPlaceholderText(_("Article title (used to derive the slug)"))
         self._title_edit.setText(suggested_title)
         self._title_edit.textChanged.connect(self._on_title_changed)
-        article_layout.addWidget(_field(_("Title"), self._title_edit))
+        article_layout.addWidget(self._kept_if(_field(_("Title"), self._title_edit),
+                                               "title", self._title_edit))
 
         self._slug_edit = QLineEdit()
         self._slug_edit.setPlaceholderText(_("article-slug"))
@@ -415,12 +431,14 @@ class StashKindDialog(QDialog):
         self._slug_problem.setWordWrap(True)
         self._slug_problem.hide()
         slug_field.layout().addWidget(self._slug_problem)
-        article_layout.addWidget(slug_field)
+        article_layout.addWidget(self._kept_if(slug_field, "identifier", self._slug_edit))
 
         self._summary_edit = QLineEdit()
         self._summary_edit.setPlaceholderText(_("Optional one-sentence summary"))
         self._summary_edit.setText(suggested_summary)
-        article_layout.addWidget(_field(_("Summary (optional)"), self._summary_edit))
+        article_layout.addWidget(self._kept_if(_field(_("Summary (optional)"),
+                                                      self._summary_edit),
+                                               "summary", self._summary_edit))
 
         root.addWidget(self._article_panel)
 

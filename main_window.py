@@ -3112,8 +3112,9 @@ class MainWindow(QMainWindow):
             # in Article Details, never in the text, never published as it.
             front, body = front_matter.split(content)
             ed._front_matter = front
-            details = from_front_matter(front)
-            ed._article_details = details if details != ArticleDetails() else None
+            details = from_front_matter(front).keeping(kept_in_file(front))
+            ed._article_details = details if details != ArticleDetails() or details.kept \
+                else None
             self._load_markdown(ed, body)
         elif ext.endswith('.rmd'):
             # R Markdown is edited as source, the way RStudio does it.
@@ -3589,6 +3590,8 @@ class MainWindow(QMainWindow):
             if ext.endswith('.md'):
                 ed._front_matter = front
                 ed._details_not_saved = front.refused if front is not None else frozenset()
+                if getattr(ed, "_article_details", None) is not None:
+                    ed._article_details = ed._article_details.keeping(kept_in_file(front))
             ed._recovered_title = ""
             ed.document().setModified(False)
             self._update_tab_title()
@@ -6627,7 +6630,7 @@ class MainWindow(QMainWindow):
             fixed = (binding is not None and binding.inner_kind == INNER_KIND_LONG_FORM) or \
                 self._published_article_of(ed) is not None
             panel.show_article(self._article_details_of(ed), fixed_identifier=fixed,
-                               kept_in_file=kept_in_file(getattr(ed, "_front_matter", None)))
+                               kept_in_file=self._article_details_of(ed).kept)
 
     def _pick_coauthor(self, anchor, chosen) -> None:
         """Who writes the article with its author, asked under ``anchor`` the
@@ -7985,6 +7988,7 @@ class MainWindow(QMainWindow):
             suggested_slug=slug_hint,
             suggested_summary=summary_hint,
             existing_note_identifier=existing_note_id,
+            kept=self._article_details_of(ed).kept_fields,
             is_dark=self.is_dark_theme,
             parent=self,
         )
@@ -8192,9 +8196,13 @@ class MainWindow(QMainWindow):
     def _set_article_details(self, ed, details: ArticleDetails) -> None:
         """The details of the article in ``ed``, as set in Article Details or
         the publish window: kept with the tab (its next draft save, its
-        restart and crash records, a Markdown file's front matter). A change
+        restart and crash records, a Markdown file's front matter), but for
+        those its file keeps as written (ArticleDetails.kept). A change
         marks the tab modified, as a change to its text does."""
-        if ed is None or details == self._article_details_of(ed):
+        if ed is None:
+            return
+        details = self._article_details_of(ed).with_details_of(details)
+        if details == self._article_details_of(ed):
             return
         ed._article_details = details
         ed.document().setModified(True)

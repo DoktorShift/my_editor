@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from datetime import date, datetime, timezone
 from typing import AbstractSet, Any, FrozenSet, Iterable, List, Optional, Sequence, Tuple, Union
 
@@ -96,6 +96,10 @@ class ArticleDetails:
     # How zaps to it are shared (NIP-57 zap tags, as written).
     zaps: Tuple[Tuple[str, ...], ...] = ()
     carried: Tuple[Tuple[str, ...], ...] = field(default=())
+    # The details the file the article is written in keeps as written
+    # (kept_in_file, named as in _FRONT_KEYS): no window changes them, and
+    # each shows them read-only, saying so.
+    kept: FrozenSet[str] = field(default=frozenset(), compare=False)
 
     @classmethod
     def from_tags(cls, tags: Iterable[Sequence[str]], signer: str = "") -> "ArticleDetails":
@@ -135,7 +139,27 @@ class ArticleDetails:
                    coauthors=tuple(coauthors), zaps=tuple(zaps), carried=tuple(carried))
 
     def with_changes(self, **changes) -> "ArticleDetails":
-        return replace(self, **changes)
+        """These details with ``changes`` (a field and its value each), but
+        for those the file keeps as written (kept_fields), which stay."""
+        fixed = self.kept_fields
+        return replace(self, **{name: value for name, value in changes.items()
+                                if name not in fixed})
+
+    def with_details_of(self, other: "ArticleDetails") -> "ArticleDetails":
+        """These details with ``other``'s in their place, as a window hands
+        them back, but for those the file keeps as written."""
+        return self.with_changes(**{each.name: getattr(other, each.name)
+                                    for each in fields(other) if each.name != "kept"})
+
+    def keeping(self, kept: AbstractSet[str]) -> "ArticleDetails":
+        """These details, the file keeping ``kept`` (named as in _FRONT_KEYS)
+        as written."""
+        return replace(self, kept=frozenset(kept))
+
+    @property
+    def kept_fields(self) -> FrozenSet[str]:
+        """The fields (``title``, ``hashtags``, ...) of the details kept."""
+        return frozenset(_FIELDS[name] for name in self.kept)
 
     def carried_tags(self, content: str) -> List[List[str]]:
         """The carried tags, as lists: picture descriptions only for the

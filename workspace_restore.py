@@ -31,7 +31,7 @@ from PySide6.QtCore import QEvent, QObject, QTimer
 from PySide6.QtGui import QTextCursor
 
 import front_matter
-from nostr.article_details import ArticleDetails
+from nostr.article_details import ArticleDetails, kept_in_file
 from recovery import (
     classify_backup, document_is_empty, is_restorable, load_backup_content, read_backup,
     tab_identity,
@@ -340,10 +340,12 @@ def restore_identity(ed, draft, article, article_author, details=None,
     if are_tags(article):
         ed._published_article = ArticleDetails.from_tags(article)
         ed._published_author = article_author if isinstance(article_author, str) else ""
-    if are_tags(details):
-        ed._article_details = ArticleDetails.from_tags(details)
     if isinstance(matter, str):
         ed._front_matter = front_matter.split(matter)[0]
+    if are_tags(details):
+        # Those its file keeps as written stay so (ArticleDetails.kept).
+        ed._article_details = ArticleDetails.from_tags(details).keeping(
+            kept_in_file(getattr(ed, "_front_matter", None)))
 
 
 def _dataclass_from(cls, data: dict):

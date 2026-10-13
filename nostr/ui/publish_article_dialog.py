@@ -409,7 +409,8 @@ class PublishArticleDialog(QDialog):
         # they haven't, slug stays in sync with title. An article that has
         # an identifier already (its draft's) keeps it: another one would
         # publish another article.
-        self._slug_is_auto = not self._details.identifier
+        self._slug_is_auto = not self._details.identifier \
+            and "identifier" not in self._details.kept_fields
         self._advanced_open = False
 
         self._build_ui(
@@ -420,6 +421,9 @@ class PublishArticleDialog(QDialog):
         self._summary_edit.setText(self._details.summary)
         self._image_edit.setText(self._details.image)
         self._tags_edit.setText(hashtags_text(self._details.hashtags))
+        for edit in self._kept_edits():        # those the file keeps: read-only
+            edit.setReadOnly(True)
+        self._cover.setReadOnly(self._image_edit in self._kept_edits())
         # What it showed at first: only what changes here goes back to the tab.
         self._details_shown = self.details()
         self._apply_theme()
@@ -455,12 +459,14 @@ class PublishArticleDialog(QDialog):
         self._title_edit.setText(default_title)
         self._title_edit.textChanged.connect(self._on_title_changed)
         root.addWidget(self._title_edit)
+        self._add_kept_note(root, "title")
 
         # ---- Summary (quieter, italic-feel via lower contrast) ----------
         self._summary_edit = QLineEdit()
         self._summary_edit.setObjectName("article_summary")
         self._summary_edit.setPlaceholderText(_("Short summary (one sentence)"))
         root.addWidget(self._summary_edit)
+        self._add_kept_note(root, "summary")
 
         root.addWidget(_make_divider(self))
         root.addSpacing(6)
@@ -534,13 +540,16 @@ class PublishArticleDialog(QDialog):
         self._slug_problem.setWordWrap(True)
         self._slug_problem.hide()
         slug_field.layout().addWidget(self._slug_problem)
+        self._add_kept_note(slug_field.layout(), "identifier")
+        tags_field = _make_field(_("Hashtags"), self._tags_edit)
+        self._add_kept_note(tags_field.layout(), "hashtags")
         # Top-aligned: a message under the slug must not push Hashtags down.
         compact_row.addWidget(slug_field, 1, Qt.AlignmentFlag.AlignTop)
-        compact_row.addWidget(_make_field(_("Hashtags"), self._tags_edit), 1,
-                              Qt.AlignmentFlag.AlignTop)
+        compact_row.addWidget(tags_field, 1, Qt.AlignmentFlag.AlignTop)
         adv.addLayout(compact_row)
 
         adv.addWidget(self._cover)
+        self._add_kept_note(adv, "image")
 
         self._advanced_panel.setVisible(False)
         root.addWidget(self._advanced_panel)
@@ -732,7 +741,25 @@ class PublishArticleDialog(QDialog):
             color = "#FFB347" if self._is_dark else "#A05000"
         self._status.setStyleSheet(f"color: {color};")
 
+    def _add_kept_note(self, layout, field_name: str) -> None:
+        """Under a detail the article's file keeps as written
+        (ArticleDetails.kept): the line Article Details shows there too."""
+        if field_name in self._details.kept_fields:
+            note = QLabel(_("Kept as written in the file."))
+            note.setObjectName("article_field_hint")
+            note.setWordWrap(True)
+            layout.addWidget(note)
+
+    def _kept_edits(self) -> set:
+        """The fields of the details the file keeps as written: read-only."""
+        edits = {"title": self._title_edit, "summary": self._summary_edit,
+                 "identifier": self._slug_edit, "image": self._image_edit,
+                 "hashtags": self._tags_edit}
+        return {edit for name, edit in edits.items() if name in self._details.kept_fields}
+
     def _set_busy(self, busy: bool) -> None:
+        kept = self._kept_edits()
+        self._cover.setReadOnly(busy or self._image_edit in kept)
         for w in (
             self._title_edit,
             self._summary_edit,
@@ -741,7 +768,7 @@ class PublishArticleDialog(QDialog):
             self._tags_edit,
             self._body_edit,
         ):
-            w.setReadOnly(busy)
+            w.setReadOnly(busy or w in kept)
         self._profile_switch.setEnabled(not busy)
         self._advanced_toggle.setEnabled(not busy)
         self._refresh_publish_enabled()
