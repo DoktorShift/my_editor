@@ -220,10 +220,7 @@ def from_front_matter(front: Optional[front_matter.FrontMatter]) -> ArticleDetai
     that this reader reads as a parser does; else as the parser reads it
     (_held), kept as written then (kept_in_file), but never read as empty
     while the file holds it."""
-    values = {}
-    for key, _others in _FRONT_KEYS:
-        found = _found(front, key)
-        values[key] = _detail(key, found[2].value if found is not None else _held(front, key))
+    values = {key: _reading(front, key) for key, _others in _FRONT_KEYS}
     coauthors = []
     for written in values["coauthors"]:
         person = _person(written)
@@ -239,6 +236,14 @@ def from_front_matter(front: Optional[front_matter.FrontMatter]) -> ArticleDetai
                           summary=values["summary"], image=values["image"],
                           hashtags=values["tags"], published_at=values["date"],
                           coauthors=tuple(coauthors), zaps=tuple(zaps))
+
+
+def _reading(front: Optional[front_matter.FrontMatter], key: str) -> Any:
+    """The detail ``key`` as ``front`` holds it (_detail): from its first
+    entry this reader reads as a parser does, else as the parser reads it
+    (_held)."""
+    found = _found(front, key)
+    return _detail(key, found[2].value if found is not None else _held(front, key))
 
 
 def _detail(key: str, value: Union[str, List[str], None]) -> Any:
@@ -482,8 +487,8 @@ def _written(details: ArticleDetails, front: Optional[front_matter.FrontMatter],
     entries = list(base.entries)
     refused = set()
     for key in changed:
-        after, place, meant = _with_detail(entries, base.syntax, key, new[key], details)
-        if _holds(base.with_entries(entries), base.with_entries(after), key, place, meant):
+        after, places, meant = _with_detail(entries, base.syntax, key, new[key], details)
+        if _holds(base.with_entries(entries), base.with_entries(after), key, places, meant):
             entries = after
         else:
             refused.add(key)
@@ -492,23 +497,19 @@ def _written(details: ArticleDetails, front: Optional[front_matter.FrontMatter],
 
 def _with_detail(entries: List[front_matter.Entry], syntax: str, key: str, value,
                  details: ArticleDetails):
-    """``(entries, place, meant)``: ``entries`` with the detail ``key`` set
-    to ``value`` (as _front_values gives it; emptied, left out), the key it
-    is at (a table's name and its key for one in a table), and the detail
-    as the parser should then read it there (_detail; None when left out)."""
+    """``(entries, places, meant)``: ``entries`` with the detail ``key`` set
+    to ``value`` (as _front_values gives it), the keys it is then at (a
+    table's name and its key for one in a table), and the detail as the
+    parser should then read it there (_detail). Emptied, it is left out of
+    every key it is read from (an alias too: "description" with
+    "summary"), and is then read as empty."""
     entries = list(entries)
+    if not value:
+        return _without_detail(entries, syntax, key)
     found = _found(front_matter.FrontMatter(tuple(entries), syntax=syntax), key)
     at, inner, current = found if found is not None else (None, None, None)
     place = (key,) if current is None else (current.key,) if inner is None \
         else (entries[at].table, current.key)
-    if not value:
-        if inner is not None:
-            rest = entries[at].inner_entries()
-            del rest[inner]
-            entries[at] = entries[at].with_inner(rest)
-        elif at is not None:
-            del entries[at]
-        return entries, place, None
     bare = False
     if key == "date":
         original = current.written if current is not None else ""
@@ -542,23 +543,42 @@ def _with_detail(entries: List[front_matter.Entry], syntax: str, key: str, value
     else:
         entries.insert(front_matter.FrontMatter(tuple(entries), syntax=syntax)
                        .where_new_entries_go(entries), written)
-    return entries, place, _detail(key, value)
+    return entries, (place,), _detail(key, value)
+
+
+def _without_detail(entries: List[front_matter.Entry], syntax: str, key: str):
+    """_with_detail for the detail ``key`` emptied: every entry it is read
+    from left out."""
+    found = list(_candidates(front_matter.FrontMatter(tuple(entries), syntax=syntax), key))
+    places = tuple((entry.key,) if inner is None else (entries[at].table, entry.key)
+                   for at, inner, entry, _read in found)
+    # Inside a table first, then whole entries from the last: the places
+    # of those still to go stay where they are.
+    for at, inner, _entry, _read in sorted((item for item in found if item[1] is not None),
+                                           key=lambda item: -item[1]):
+        rest = entries[at].inner_entries()
+        del rest[inner]
+        entries[at] = entries[at].with_inner(rest)
+    for at in sorted({at for at, inner, _entry, _read in found if inner is None}, reverse=True):
+        del entries[at]
+    return entries, places, _detail(key, None)
 
 
 def _holds(before: front_matter.FrontMatter, after: front_matter.FrontMatter, key: str,
-           place: Tuple[str, ...], meant: Any) -> bool:
+           places: Sequence[Tuple[str, ...]], meant: Any) -> bool:
     """Whether ``after``, as it is written into the file and read back
-    from it, is read by a parser as ``before`` but at ``place``, where it
-    reads the detail ``key`` as ``meant`` (nothing for None), and reads it
-    so with this app's reader; the text under it untouched."""
+    from it, is read by a parser as ``before`` but at ``places``, and
+    holds the detail ``key`` as ``meant`` (_detail), read so by this app's
+    reader too; the text under it untouched."""
     again, rest = front_matter.split(front_matter.join(after, ""))
     if rest:
         return False                        # some of it would read as text
     old, new = front_matter.parsed(before), front_matter.parsed(again)
-    if old is None or new is None or _without(old, place) != _without(new, place):
+    if old is None or new is None or _without(old, places) != _without(new, places):
         return False
-    if meant is None:
-        return _at(new, place) is _ABSENT
+    if meant == _detail(key, None):
+        return _reading(again, key) == meant and all(_at(new, place) is _ABSENT
+                                                     for place in places)
     found = _found(again, key)
     return found is not None and _detail(key, found[2].value) == meant
 
@@ -572,13 +592,14 @@ def _at(mapping: dict, place: Tuple[str, ...]) -> Any:
     return mapping
 
 
-def _without(mapping: dict, place: Tuple[str, ...]) -> dict:
-    """``mapping`` without what it holds at ``place``, unchanged itself."""
+def _without(mapping: dict, places: Sequence[Tuple[str, ...]]) -> dict:
+    """``mapping`` without what it holds at ``places``, unchanged itself."""
     mapping = dict(mapping)
-    if len(place) == 1:
-        mapping.pop(place[0], None)
-    elif isinstance(mapping.get(place[0]), dict):
-        mapping[place[0]] = _without(mapping[place[0]], place[1:])
+    for place in places:
+        if len(place) == 1:
+            mapping.pop(place[0], None)
+        elif isinstance(mapping.get(place[0]), dict):
+            mapping[place[0]] = _without(mapping[place[0]], [place[1:]])
     return mapping
 
 

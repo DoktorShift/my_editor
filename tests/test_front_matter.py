@@ -744,11 +744,12 @@ def test_a_toml_number_is_shown_as_written():
 
 
 def test_a_key_written_twice_is_read_as_a_parser_reads_it():
-    """PyYAML keeps the last of two "title" keys; so does this reader. It
-    stays as written: emptied, the first would be the title."""
-    text = "---\ntitle: First\ntitle: Last\n---\nB\n"
+    """PyYAML keeps the last of two "title" keys; so does this reader.
+    Emptied, both go (round 8, L2): the first never comes back."""
+    text = "---\ntitle: First\ntitle: Last\nlayout: post\n---\nB\n"
     front, _ = front_matter.split(text)
-    assert from_front_matter(front).title == "Last" and kept_in_file(front) == {"title"}
+    assert from_front_matter(front).title == "Last" and kept_in_file(front) == frozenset()
+    assert changed(text, title="") == "---\nlayout: post\n---\nB\n"
 
 
 @pytest.mark.parametrize("style", [">", ">-", ">+"])
@@ -864,3 +865,19 @@ def test_a_line_break_yaml_does_not_end_a_line_on_stays_as_written(odd):
     assert unchanged_save(crlf) == crlf
     added = text.replace("layout: post\n", "layout: post\nsummary: S\n")
     assert changed(text, summary="S") == (text if odd in "\x0c\x1c" else added)
+
+
+@pytest.mark.parametrize("text, change, expected", [
+    ("---\nsummary: S\ndescription: D\nlayout: post\n---\nB\n", {"summary": ""},
+     "---\nlayout: post\n---\nB\n"),
+    ("---\nimage: /a.png\ncover: /b.png\nlayout: post\n---\nB\n", {"image": ""},
+     "---\nlayout: post\n---\nB\n"),
+    ('+++\ntags = ["a"]\ndraft = true\n\n[taxonomies]\ntags = ["b"]\n+++\nB\n', {"hashtags": ()},
+     '+++\ndraft = true\n\n[taxonomies]\n+++\nB\n'),
+])
+def test_a_cleared_detail_is_gone_from_every_key_it_is_read_from(text, change, expected):
+    """Round 8, L2: the other key came back as the detail on reopening."""
+    out = changed(text, **change)
+    assert out == expected
+    again = from_front_matter(front_matter.split(out)[0])
+    assert (again.summary, again.image, again.hashtags) == ("", "", ())
