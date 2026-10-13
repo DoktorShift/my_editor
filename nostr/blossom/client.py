@@ -577,6 +577,11 @@ class _InflightUpload(QObject):
         reply.uploadProgress.connect(self._emit_progress)
         reply.finished.connect(self._on_finished)
 
+    def abort(self) -> None:
+        """Stop the request. Qt then reports it finished with an error,
+        which reaches ``on_failure`` like any other."""
+        self._reply.abort()
+
     def _emit_progress(self, sent: int, total: int) -> None:
         if self._on_progress is not None:
             self._on_progress(int(sent), int(total))
@@ -664,8 +669,10 @@ class BlossomClient(QObject):
         on_progress: Optional[Callable[[int, int], None]] = None,
         *,
         sha256: Optional[str] = None,
-    ) -> None:
+    ) -> Optional["_InflightUpload"]:
         """Upload ``body`` (raw bytes) to ``server``'s ``/upload``.
+        Returns the request in flight, whose ``abort()`` stops it, or
+        None when it was refused before anything was sent.
 
         Blossom convention is ``PUT /upload`` with ``Authorization: Nostr
         <base64url>``. The server computes its own sha256 and rejects if
@@ -691,7 +698,7 @@ class BlossomClient(QObject):
             )
         except BlossomError as exc:
             on_failure(exc)
-            return
+            return None
         reply = self._nam.put(request, QByteArray(body))
         # Track the wrapper by reply id so we don't leak.
         wrapper = _InflightUpload(
@@ -704,6 +711,7 @@ class BlossomClient(QObject):
             expected_sha=sha,
         )
         self._inflight[id(reply)] = wrapper
+        return wrapper
 
     # -- mirror ------------------------------------------------------------
 

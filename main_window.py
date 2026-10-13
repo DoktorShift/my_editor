@@ -159,6 +159,7 @@ from nostr.ui.reference_popover import ReferencePopover
 from nostr.ui.article_details_panel import ArticleDetailsPanel, DEFAULT_WIDTH as ARTICLE_DETAILS_WIDTH
 from nostr import refs
 from nostr.blossom.errors import friendly_message
+from nostr.blossom.names import MediaNames
 from nostr.blossom.hashes import hash_from_url
 from nostr.imports.workers import run_for_size
 from nostr.media_server_list import publish_server_list
@@ -623,6 +624,7 @@ class MainWindow(QMainWindow):
             blob_cache=self._media_image_loader,
             entitled_servers=self._entitled_blossom_servers,
             server_quota=self._entitled_quota,
+            names=MediaNames(),
             parent=self,
         )
         # An account that was already signed in when the app opened never

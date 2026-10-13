@@ -55,6 +55,7 @@ from .client import (
 )
 from .errors import ERROR_CODES, friendly_message
 from .hashes import blob_url, url_agrees_with_hash
+from .names import MediaNames
 from .plan import get_effective_max_file, lists_publicly, plan_upload, UploadPlan
 from .settings import BlossomSettings
 from ..imports.workers import run_for_size
@@ -174,6 +175,22 @@ class UploadJobState:
     status: str = "queued"     # queued | signing | uploading | mirroring | done | failed
     error: str = ""
     hash: str = ""
+    # The PUT in flight, while the bytes are on their way: what Cancel
+    # aborts. None before the signer answered and once a server has it.
+    sending: Optional[object] = None
+
+
+@dataclass(eq=False)
+class _Added:
+    """A file the person added to the Media Library: what a retry sends
+    again, and the name it is remembered by. Compared by identity, so a
+    late answer about an earlier attempt can tell it is stale."""
+
+    label: str
+    mime: str
+    path: Optional[Path] = None
+    body: Optional[bytes] = None
+    failed: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +227,10 @@ class MediaStore(QObject):
     # primary.
     upload_rerouted = Signal(str, str, str)            # name, from_host, to_host
 
+    # The person cancelled an upload while its bytes were on their way.
+    # Nothing else is reported for it.
+    upload_cancelled = Signal(str)                     # name
+
     # A mirror did not take the copy. Non-fatal: the primary has the
     # file, so the upload still succeeds and the document is untouched.
     mirror_failed = Signal(str, str, str)              # name, host, code
@@ -234,6 +255,7 @@ class MediaStore(QObject):
         blob_cache: Optional[BlobCache] = None,
         entitled_servers: Optional[Callable[[], Sequence[str]]] = None,
         server_quota: Optional[Callable[[str], Optional[int]]] = None,
+        names: Optional[MediaNames] = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -254,6 +276,10 @@ class MediaStore(QObject):
         # such as the per-member allowance on an association's server.
         # Used to show usage and to leave a full server out of an upload.
         self._server_quota = server_quota
+        # The names files had when they were added here (servers keep
+        # none). Without a book, this session's names only.
+        self._names = names
+        self._session_names: Dict[str, str] = {}
 
         self._files: Dict[str, MediaFile] = {}
         self._listings: Dict[str, ServerListing] = {}
@@ -278,10 +304,14 @@ class MediaStore(QObject):
         # makes them safe to dedup against without listing again.
         self._committed: Set[str] = set()
 
-        # Track active upload jobs by display name so the UI can render
-        # multiple parallel uploads. (Phase 1 we expect one at a time
-        # but the shape supports more.)
+        # Upload jobs by name, from upload_started until they end. The
+        # asset manager names its own (an asset key); a file added to the
+        # library gets a name of its own that no other job has.
         self._uploads: Dict[str, UploadJobState] = {}
+        # Files added to the library, by job name, from the moment they
+        # are added until they land, are cancelled, or a failure is
+        # dismissed: what Retry sends again.
+        self._added: Dict[str, _Added] = {}
 
     # ------------------------------------------------------------------
     # Read API
@@ -316,6 +346,24 @@ class MediaStore(QObject):
         return sum(f.size for f in self._files.values()
                    if any(url_safety.origin_of(u.get("server", "")) == target
                           for u in f.urls))
+
+    def name_of(self, sha256: str) -> str:
+        """The name the file had when it was added here, or ""."""
+        sha = (sha256 or "").lower()
+        if self._names is not None:
+            name = self._names.get(sha)
+            if name:
+                return name
+        return self._session_names.get(sha, "")
+
+    def upload_job(self, name: str) -> Optional[UploadJobState]:
+        """The running job of that name, or None."""
+        return self._uploads.get(name)
+
+    def can_retry(self, name: str) -> bool:
+        """Whether that added file failed and can be sent again."""
+        added = self._added.get(name)
+        return added is not None and added.failed
 
     def quota_for(self, origin: str) -> Optional[int]:
         """The space this account has on ``origin``, when one is known."""
@@ -708,36 +756,94 @@ class MediaStore(QObject):
     # Upload
     # ------------------------------------------------------------------
 
-    def upload_file(self, file_path: str) -> None:
-        """Read the file from disk and dispatch through the upload
-        pipeline. Errors surface via ``upload_failed``.
-
-        Display name is the file's basename so multiple parallel uploads
-        of the same file would collide. Phase 1 we don't expect that;
-        if it becomes a real case we'll switch to a per-job UUID.
+    def upload_file(self, file_path: str) -> str:
+        """Add the file at ``file_path`` to the library: read it, then
+        upload it as :meth:`upload_bytes` does. Returns the job's name,
+        the file's name made unique among the jobs in flight ("photo
+        (2).png"), which every signal about it carries. Errors surface
+        via ``upload_failed``, and the job can then be retried.
         """
-        profile = self._profile_provider()
         path = Path(file_path)
-        name = path.name or "upload"
-        if profile is None:
-            self._refuse(name, ERROR_CODES.NO_SIGNER)
+        mime = media_files.type_of(path.name) or "application/octet-stream"
+        added = _Added(label=path.name or "upload", mime=mime, path=path)
+        name = self._name_for(added.label)
+        self._added[name] = added
+        self._read_added(name, added)
+        return name
+
+    def add_bytes(self, body: bytes, *, label: str, mime_type: str) -> str:
+        """Add bytes that are no file yet (a pasted image) to the
+        library, under ``label``. Returns the job's name, as
+        :meth:`upload_file` does."""
+        added = _Added(label=label, mime=mime_type, body=bytes(body))
+        name = self._name_for(label)
+        self._added[name] = added
+        self._dispatch(added.body, name, mime_type, added)
+        return name
+
+    def retry_upload(self, name: str) -> None:
+        """Send an added file that failed again, under the same name."""
+        added = self._added.get(name)
+        if added is None or not added.failed:
             return
+        added.failed = False
+        if added.path is not None:
+            self._read_added(name, added)
+        else:
+            self._dispatch(added.body or b"", name, added.mime, added)
+
+    def dismiss_upload(self, name: str) -> None:
+        """Forget an added file that failed; its name is free again."""
+        added = self._added.get(name)
+        if added is not None and added.failed:
+            del self._added[name]
+
+    def cancel_upload(self, name: str) -> bool:
+        """Stop an upload while its bytes are on their way: the request
+        is aborted, a signer that answers later is ignored, and
+        ``upload_cancelled`` is all that is reported. Refused (False)
+        once a server holds the file: the copies on the other servers
+        then finish in the background."""
+        job = self._uploads.get(name)
+        if job is not None and job.status not in ("queued", "signing", "uploading"):
+            return False
+        added = self._added.get(name)
+        if job is None and (added is None or added.failed):
+            return False
+        self._uploads.pop(name, None)
+        self._added.pop(name, None)
+        if job is not None and job.sending is not None:
+            job.sending.abort()
+        self.upload_cancelled.emit(name)
+        return True
+
+    def _name_for(self, label: str) -> str:
+        """``label``, or "label (2)" and so on when a job has it."""
+        stem, ext = os.path.splitext(label)
+        name, number = label, 2
+        while name in self._added or name in self._uploads:
+            name = f"{stem} ({number}){ext}"
+            number += 1
+        return name
+
+    def _read_added(self, name: str, added: _Added) -> None:
         try:
-            size = path.stat().st_size
+            size = added.path.stat().st_size
         except OSError:
             self._refuse(name, ERROR_CODES.FILE_UNREADABLE)
             return
-        mime = media_files.type_of(path.name) or "application/octet-stream"
 
         def read(read_back) -> None:
+            if self._added.get(name) is not added:
+                return                       # cancelled while it was read
             body, _sha = read_back
             if not body:
                 self._refuse(name, ERROR_CODES.FILE_UNREADABLE)
                 return
-            self.upload_bytes(body, name=name, mime_type=mime)
+            self._dispatch(body, name, added.mime, added)
 
         # A large file is read (and kept in the cache) off the UI thread.
-        run_for_size(size, lambda: self._read_and_keep(path), read,
+        run_for_size(size, lambda: self._read_and_keep(added.path), read,
                      lambda _exc: self._refuse(name, ERROR_CODES.FILE_UNREADABLE),
                      parent=self)
 
@@ -786,6 +892,10 @@ class MediaStore(QObject):
         the servers the planner accepted, so a server skipped for size
         can never be reached by a retry.
         """
+        self._dispatch(body, name, mime_type, None)
+
+    def _dispatch(self, body: bytes, name: str, mime_type: str,
+                  added: Optional[_Added]) -> None:
         profile = self._profile_provider()
         if profile is None:
             self._refuse(name, ERROR_CODES.NO_SIGNER)
@@ -815,11 +925,13 @@ class MediaStore(QObject):
         # the UI thread; the upload goes on from here once it is done.
         run_for_size(len(body), lambda: self._hash_and_keep(body),
                      lambda sha: self._upload_hashed(body, name, mime_type, profile, sha,
-                                                     servers, plan),
+                                                     servers, plan, added),
                      parent=self)
 
     def _upload_hashed(self, body: bytes, name: str, mime_type: str, profile, sha: str,
-                       servers, plan: UploadPlan) -> None:
+                       servers, plan: UploadPlan, added: Optional[_Added] = None) -> None:
+        if added is not None and self._added.get(name) is not added:
+            return                           # cancelled while it was hashed
         eligible = [server for server in plan.eligible
                     if self._has_room(server, sha, len(body), name)]
         if not eligible:
@@ -958,6 +1070,13 @@ class MediaStore(QObject):
         # offered the blob a second time as a mirror target: the request
         # would be new but the problem would be the same one.
         exhausted: List[str] = []
+        # This upload's job. Every answer below asks whether it is still
+        # the job of that name: after a Cancel it is not, and a signer or
+        # a server answering late sends and reports nothing.
+        job = self._uploads.get(name)
+
+        def live() -> bool:
+            return self._uploads.get(name) is job
 
         def attempt(index: int) -> None:
             target = missing[index]
@@ -974,33 +1093,28 @@ class MediaStore(QObject):
                 pubkey_hex=profile.user_pubkey,
             )
 
-            job = self._uploads.get(name)
             if job is not None and job.status != "signing":
                 job.status = "signing"
                 self.upload_status.emit(name, job.status)
 
             def on_signed(auth_event: dict) -> None:
-                job = self._uploads.get(name)
+                if not live():
+                    return
                 if job is not None:
                     job.status = "uploading"
                     self.upload_status.emit(name, job.status)
-                self._client.upload(
+                sending = self._client.upload(
                     origin,
                     body,
                     mime_type,
                     auth_event,
-                    on_success=lambda result: self._on_primary_uploaded(
-                        name=name,
-                        body=body,
-                        profile=profile,
-                        primary_result=result,
-                        mirror_servers=mirrors,
-                        configured_primary=configured_primary,
-                    ),
+                    on_success=lambda result: on_sent(result, mirrors),
                     on_failure=lambda err: on_attempt_failed(index, err),
                     on_progress=lambda sent, total: self._on_progress(name, sent, total),
                     sha256=sha,
                 )
+                if job is not None and live():
+                    job.sending = sending
 
             self._sign_with_bunker(
                 profile,
@@ -1009,11 +1123,29 @@ class MediaStore(QObject):
                 # A signer failure is not a server failure: the next
                 # server would ask the same signer, so failing over just
                 # buys a second prompt and a second refusal.
-                on_failure=lambda _reason: self._fail_upload(
+                on_failure=lambda _reason: live() and self._fail_upload(
                     name, ERROR_CODES.SIGNER_REJECTED),
             )
 
+        def on_sent(result: UploadResult, mirrors: List[str]) -> None:
+            if not live():
+                return
+            if job is not None:
+                job.sending = None
+            self._on_primary_uploaded(
+                name=name,
+                body=body,
+                profile=profile,
+                primary_result=result,
+                mirror_servers=mirrors,
+                configured_primary=configured_primary,
+            )
+
         def on_attempt_failed(index: int, err: BlossomError) -> None:
+            if not live():
+                return
+            if job is not None:
+                job.sending = None
             exhausted.append(missing[index])
             next_index = index + 1
             if (
@@ -1232,6 +1364,11 @@ class MediaStore(QObject):
         # Written from confirmations this process collected, so the next
         # upload of the same bytes can trust it without listing again.
         self._committed.add(media.hash)
+        added = self._added.pop(name, None)
+        if added is not None:
+            self._session_names[media.hash] = added.label
+            if self._names is not None:
+                self._names.remember(media.hash, added.label)
         state = self._uploads.pop(name, None)
         if state is not None:
             state.status = "done"
@@ -1259,7 +1396,11 @@ class MediaStore(QObject):
         self._refuse(name, code, reason)
 
     def _refuse(self, name: str, code: str, reason: str = "") -> None:
-        """Report one upload's failure: the sentence, then its code."""
+        """Report one upload's failure: the sentence, then its code. An
+        added file stays, to be retried or dismissed."""
+        added = self._added.get(name)
+        if added is not None:
+            added.failed = True
         self.upload_failed.emit(name, reason or friendly_message(code))
         self.upload_failed_code.emit(name, code)
 
