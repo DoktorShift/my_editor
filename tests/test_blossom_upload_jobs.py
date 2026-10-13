@@ -218,3 +218,18 @@ def test_adding_a_file_that_failed_again_retries_it_under_its_name(tmp_path):
     jobs.nam.settle()
     assert jobs.kinds(name)[-1] == "finished"
     assert jobs.store.added_uploads() == []
+
+
+def test_a_file_is_remembered_by_its_name_once_its_first_server_has_it(tmp_path):
+    """Copying it to the other servers comes after: quitting then stops
+    the copies, and the file stays in the library under its own name."""
+    jobs = Jobs(tmp_path, servers=(SERVER, MIRROR))
+    jobs.nam._responder = lambda verb, request, body: (
+        FakeBlossomServer(MIRROR) if request.url().host() == "mirror.example"
+        else jobs.server)(verb, request, body)
+    jobs.signer.defer = True
+    name = jobs.store.upload_file(_file(tmp_path, "Holiday 2026.png"))
+    jobs.signer.release()
+    jobs.nam.settle_one()
+    assert jobs.store.upload_job(name).status == "mirroring"
+    assert MediaNames(tmp_path / "media_names.json").get(SHA) == "Holiday 2026.png"

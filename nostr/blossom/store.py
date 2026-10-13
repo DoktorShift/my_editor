@@ -1349,6 +1349,10 @@ class MediaStore(QObject):
             self._commit_upload(name, media, configured_primary=configured_primary)
             return
 
+        # The first server has it: it is in the library from now on, so
+        # its name is remembered now, not after the copies (quitting
+        # stops those, and it would come back named by its day).
+        self._remember_name(name, media.hash)
         state = self._uploads.get(name)
         if state is not None:
             state.status = "mirroring"
@@ -1401,6 +1405,15 @@ class MediaStore(QObject):
 
         step(0)
 
+    def _remember_name(self, name: str, sha: str) -> None:
+        """Remember the file added as job ``name`` by the name it was
+        added with (an editor upload's job is not a file name)."""
+        added = self._added.get(name)
+        if added is not None:
+            self._session_names[sha] = added.label
+            if self._names is not None:
+                self._names.remember(sha, added.label)
+
     def _commit_upload(
         self,
         name: str,
@@ -1414,11 +1427,8 @@ class MediaStore(QObject):
         # Written from confirmations this process collected, so the next
         # upload of the same bytes can trust it without listing again.
         self._committed.add(media.hash)
-        added = self._added.pop(name, None)
-        if added is not None:
-            self._session_names[media.hash] = added.label
-            if self._names is not None:
-                self._names.remember(media.hash, added.label)
+        self._remember_name(name, media.hash)
+        self._added.pop(name, None)
         state = self._uploads.pop(name, None)
         if state is not None:
             state.status = "done"
