@@ -27,16 +27,23 @@ needs its plain keys.
 
 A ``---`` block counts as front matter when it holds at least one key, or
 nothing at all; otherwise it is text (a document that opens with a divider).
+
+What this reader makes of a file, and every change written to it, is held
+against what a YAML parser (PyYAML) or tomllib reads there (parsed): a
+detail they read otherwise is never read or changed by this app.
 """
 
 from __future__ import annotations
 
+import functools
 import json
 import re
 import tomllib
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import Any, List, Optional, Sequence, Tuple, Union
+
+import yaml
 
 YAML = "yaml"
 TOML = "toml"
@@ -186,6 +193,51 @@ def split(text: str) -> Tuple[Optional[FrontMatter], str]:
     body = rest.lstrip("\r\n")
     return (FrontMatter(tuple(entries), found.group(1), found.group(3),
                         rest[:len(rest) - len(body)], newline, syntax=syntax), body)
+
+
+def parsed(front: Optional[FrontMatter]) -> Optional[dict]:
+    """``front`` as a YAML parser (or tomllib) reads it: its keys and their
+    values ({} for none), or None when it reads no mapping there, or one
+    too large to hold against (an alias repeated over and over). Shared:
+    never changed by its reader."""
+    if front is None:
+        return {}
+    return _parsed_text(front.syntax, "\n".join(line for entry in front.entries
+                                                for line in entry.lines))
+
+
+# The most values a front matter is held against: far more than any holds,
+# far fewer than an alias repeated within itself ("billion laughs") gives.
+_MOST_VALUES = 10_000
+
+
+# PyYAML's own reader, never its libyaml one: that reads some files (a tab
+# in a list) the other refuses, and is not on every system.
+@functools.lru_cache(maxsize=64)
+def _parsed_text(syntax: str, text: str) -> Optional[dict]:
+    try:
+        mapping = tomllib.loads(text) if syntax == TOML else yaml.load(text, Loader=yaml.SafeLoader)
+        if mapping is None and syntax == YAML:
+            mapping = {}                    # nothing but comments and blanks
+        if not isinstance(mapping, dict) or not _within(mapping, [_MOST_VALUES]):
+            return None
+    except (yaml.YAMLError, ValueError, TypeError, RecursionError):
+        # Not YAML or TOML; a date no calendar has; nested past counting.
+        return None
+    return mapping
+
+
+def _within(value: Any, left: List[int]) -> bool:
+    """Whether ``value`` holds no more values than ``left[0]`` (counted
+    down as they are met, each alias again)."""
+    left[0] -= 1
+    if left[0] < 0:
+        return False
+    if isinstance(value, dict):
+        return all(_within(key, left) and _within(item, left) for key, item in value.items())
+    if isinstance(value, list):
+        return all(_within(item, left) for item in value)
+    return True
 
 
 def _yaml_entries(lines: Sequence[str]) -> List[Entry]:

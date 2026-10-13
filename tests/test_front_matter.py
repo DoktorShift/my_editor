@@ -670,3 +670,43 @@ def test_an_escaped_quote_stays_inside_its_hashtag(text, tags):
 ])
 def test_a_hashtag_with_quotes_and_commas_comes_back_from_the_field(tags):
     assert hashtags_from(hashtags_text(tags)) == tags
+
+
+# -- what is read is what a YAML or TOML parser reads (round 7) ----------------
+
+ALL_DETAILS = frozenset({"title", "summary", "image", "tags", "slug", "date",
+                         "coauthors", "zap_split"})
+
+
+@pytest.mark.parametrize("text, kept", [
+    # A mapping in the list, as YAML reads "a: b" there (L2).
+    ("---\ntags: [a: b, c]\n---\nB\n", {"tags"}),
+    # A key written the explicit way, and a dotted TOML key (L1).
+    # ("? tags" is no key to this reader: the title's entry goes on there.)
+    ("---\ntitle: T\n? tags\n: [a]\n---\nB\n", {"title", "tags"}),
+    ('+++\ntitle = "T"\n"tags".x = "a"\n+++\nB\n', {"tags"}),
+    ("+++\ntitle = \"T\"\ntaxonomies.tags = [\"a\"]\n+++\nB\n", {"tags"}),
+    # YAML reads these as true and as a text with a letter "A" in it.
+    ("---\ntitle: yes\n---\nB\n", {"title"}),
+    ('---\nsummary: "\\x41"\n---\nB\n', {"summary"}),
+    # Front matter no YAML parser reads: nothing is read, nothing changed.
+    ("---\ntitle: T\ntags: [a,\t# x\n  b]\n---\nB\n", ALL_DETAILS),
+])
+def test_a_detail_read_otherwise_by_a_parser_is_kept_as_written(text, kept):
+    front, _ = front_matter.split(text)
+    assert kept_in_file(front) == frozenset(kept)
+    read = from_front_matter(front)
+    titled = "title" not in kept and ("title: T" in text or 'title = "T"' in text)
+    assert read.title == ("T" if titled else "")
+    assert read.summary == "" and read.hashtags == ()
+    for detail in kept:
+        change = {"title": {"title": "New"}, "summary": {"summary": "New"},
+                  "tags": {"hashtags": ("new",)}}.get(detail)
+        assert change is None or changed(text, **change) == text
+
+
+def test_a_key_written_twice_is_read_as_a_parser_reads_it():
+    """PyYAML keeps the last of two "title" keys; so does this reader."""
+    text = "---\ntitle: First\ntitle: Last\n---\nB\n"
+    front, _ = front_matter.split(text)
+    assert from_front_matter(front).title == "Last" and kept_in_file(front) == frozenset()

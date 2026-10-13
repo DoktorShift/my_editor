@@ -26,7 +26,8 @@ Hugo, Obsidian and iA Writer use (``title``, ``summary`` or
 the document's wherever it goes, and are never published as its text.
 Co-authors are ``coauthors`` (their Nostr addresses) and zap shares
 ``zap_split`` ("<address> <weight>" each). Entries of the front matter
-this app does not know stay as written.
+this app does not know stay as written, and so does a detail a YAML or
+TOML parser reads otherwise than this app's reader (front_matter.parsed).
 
 The expiry of an imported draft is not a detail of the article; it is
 on the draft's wrap, and a draft the person saved has none.
@@ -37,8 +38,8 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
-from typing import FrozenSet, Iterable, List, Optional, Sequence, Tuple
+from datetime import date, datetime, timezone
+from typing import Any, FrozenSet, Iterable, List, Optional, Sequence, Tuple, Union
 
 import front_matter
 
@@ -220,31 +221,34 @@ def from_front_matter(front: Optional[front_matter.FrontMatter]) -> ArticleDetai
     values = {}
     for key, _others in _FRONT_KEYS:
         found = _found(front, key)
-        if found is not None:
-            values[key] = found[2].value
-    def text(key: str) -> str:
-        value = values.get(key, "")
-        return value.strip() if isinstance(value, str) else ""
-    def items(key: str) -> List[str]:
-        value = values.get(key, [])
-        return value if isinstance(value, list) else [part for part in value.split(",")]
-    tags = values.get("tags", [])
-    hashtags = _hashtags(tags) if isinstance(tags, list) else _string_tags(tags)
+        values[key] = _detail(key, found[2].value if found is not None else None)
     coauthors = []
-    for written in items("coauthors"):
+    for written in values["coauthors"]:
         person = _person(written)
         if person is not None and person[0] not in (p for p, _hint in coauthors):
             coauthors.append(person)
     zaps = []
-    for written in items("zap_split"):
+    for written in values["zap_split"]:
         address, _space, weight = written.strip().partition(" ")
         person = _person(address)
         if person is not None and weight.strip().isdigit():
             zaps.append(("zap", person[0], person[1], weight.strip()))
-    return ArticleDetails(identifier=text("slug"), title=text("title"),
-                          summary=text("summary"), image=text("image"),
-                          hashtags=hashtags, published_at=_moment(text("date")),
+    return ArticleDetails(identifier=values["slug"], title=values["title"],
+                          summary=values["summary"], image=values["image"],
+                          hashtags=values["tags"], published_at=values["date"],
                           coauthors=tuple(coauthors), zaps=tuple(zaps))
+
+
+def _detail(key: str, value: Union[str, List[str], None]) -> Any:
+    """What the detail ``key`` holds when its entry's value is ``value`` (a
+    text, a list of texts; None for no entry): its hashtags, its moment,
+    its items, or its text."""
+    if key == "tags":
+        return _hashtags(value) if isinstance(value, list) else _string_tags(value or "")
+    if key in ("coauthors", "zap_split"):
+        return value if isinstance(value, list) else (value or "").split(",")
+    text = value.strip() if isinstance(value, str) else ""
+    return _moment(text) if key == "date" else text
 
 
 def _string_tags(written: str) -> Tuple[str, ...]:
@@ -257,46 +261,98 @@ def kept_in_file(front: Optional[front_matter.FrontMatter]) -> FrozenSet[str]:
     """The details ``front`` writes in a way this app can't read safely (a
     mapping, an anchor, a tag), with no entry for them it can: they stay as
     written, whatever is set here. Named as in _FRONT_KEYS."""
+    mapping = front_matter.parsed(front)
+    if mapping is None:
+        return frozenset(dict(_FRONT_KEYS))  # no parser reads it: nothing is changed
     kept = set()
     for key, _others in _FRONT_KEYS:
-        found = [entry for _at, _inner, entry in _candidates(front, key)]
-        if found and not any(_readable(key, entry) for entry in found):
+        found = list(_candidates(front, key))
+        if found and not any(_readable(key, entry, read) for _at, _inner, entry, read in found) \
+                or _unseen(key, found, mapping):
             kept.add(key)
     return frozenset(kept)
 
 
+# What a parser reads for an entry it does not find (_candidates).
+_ABSENT = object()
+
+
 def _candidates(front: Optional[front_matter.FrontMatter], key: str):
-    """``(index, inner index or None, entry)`` of each entry under the
-    detail ``key``'s names, whatever their case (Hugo's "Title"); for the
-    hashtags in TOML also those in Zola's [taxonomies] table."""
-    names = {name.lower() for name in (key, *dict(_FRONT_KEYS)[key])}
+    """``(index, inner index or None, entry, read)`` of each entry under
+    the detail ``key``'s names, whatever their case (Hugo's "Title"); for
+    the hashtags in TOML also those in Zola's [taxonomies] table. ``read``:
+    what a YAML or TOML parser reads for it (front_matter.parsed), or
+    _ABSENT."""
+    names = _names(key)
     entries = front.entries if front is not None else ()
+    mapping = front_matter.parsed(front) or {}
     for at, entry in enumerate(entries):
         if entry.key.lower() in names:
-            yield at, None, entry
+            yield at, None, entry, mapping.get(entry.key, _ABSENT)
     if key == "tags":
         for at, entry in enumerate(entries):
             if entry.table.lower() == "taxonomies":
+                table = mapping.get(entry.table)
                 for inner, sub in enumerate(entry.inner_entries()):
                     if sub.key.lower() in names:
-                        yield at, inner, sub
+                        yield at, inner, sub, (table.get(sub.key, _ABSENT)
+                                               if isinstance(table, dict) else _ABSENT)
 
 
-def _readable(key: str, entry: front_matter.Entry) -> bool:
-    """Whether ``entry`` holds the detail ``key`` in a way read safely: a
-    date only when it is one (Eleventy's "date: Last Modified" is not)."""
+def _names(key: str) -> set:
+    """The names the detail ``key`` is written under, in lower case."""
+    return {name.lower() for name in (key, *dict(_FRONT_KEYS)[key])}
+
+
+def _unseen(key: str, found, mapping: dict) -> bool:
+    """Whether a parser reads the detail ``key`` under a name this reader
+    finds no entry for (a key written "? tags", "tags.x", twice in Zola's
+    taxonomies): the detail then stays as written."""
+    names = _names(key)
+    def under(table) -> set:
+        return {name for name in table if isinstance(name, str) and name.lower() in names} \
+            if isinstance(table, dict) else set()
+    seen = {entry.key for _at, inner, entry, _read in found if inner is None}
+    seen_inner = {entry.key for _at, inner, entry, _read in found if inner is not None}
+    taxonomies = [table for name, table in mapping.items()
+                  if key == "tags" and isinstance(name, str) and name.lower() == "taxonomies"]
+    return bool(under(mapping) - seen) or any(under(table) - seen_inner for table in taxonomies)
+
+
+def _readable(key: str, entry: front_matter.Entry, read: Any) -> bool:
+    """Whether ``entry`` holds the detail ``key`` in a way read safely: as
+    a parser reads it (``read``), and a date only when it is one
+    (Eleventy's "date: Last Modified" is not)."""
     value = entry.value
-    if value is None:
+    if value is None or read is _ABSENT or _detail(key, value) != _detail(key, _as_value(read)):
         return False
     if key == "date":
         return isinstance(value, str) and (not value.strip() or _moment(value) is not None)
     return True
 
 
+def _as_value(read: Any) -> Union[str, List[str], None]:
+    """What a parser read for an entry as this app's reader gives a value
+    (front_matter.Entry.value): a text, a number or a date written as one,
+    or a list of them; None for anything else (true, a mapping)."""
+    if read is None:
+        return ""
+    if isinstance(read, str):
+        return read
+    if isinstance(read, (int, float)) and not isinstance(read, bool):
+        return str(read)
+    if isinstance(read, (date, datetime)):
+        return read.isoformat()
+    if isinstance(read, list):
+        items = [_as_value(item) for item in read]
+        return items if all(isinstance(item, str) for item in items) else None
+    return None
+
+
 def _found(front, key: str):
     """The first readable entry of the detail ``key`` (_candidates), or None."""
-    return next(((at, inner, entry) for at, inner, entry in _candidates(front, key)
-                 if _readable(key, entry)), None)
+    return next(((at, inner, entry) for at, inner, entry, read in _candidates(front, key)
+                 if _readable(key, entry, read)), None)
 
 
 def front_matter_with(details: ArticleDetails, front: Optional[front_matter.FrontMatter]
