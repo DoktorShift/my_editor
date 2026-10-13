@@ -364,3 +364,19 @@ def test_return_in_code_keeps_the_indent_of_the_caret_line_after_emoji():
     assert ed.textCursor().block().text().startswith("  ")
     assert ed.textCursor().block().text() == "  " + ed.textCursor().block().text()[2:]
     assert ed.textCursor().positionInBlock() == 2
+
+
+@pytest.mark.parametrize("needle", ["Cat", "cat", "b"])
+def test_whole_words_next_to_marks_and_astral_letters_are_what_qt_finds(needle):
+    """Review round 2: Qt takes a combining mark and a character beyond
+    U+FFFF as the end of a word; find took them as part of it. (An accent
+    on a match's own last letter stays its own rule: "Cafe" is not
+    "Café", test_find_replace.)"""
+    from PySide6.QtGui import QTextDocument
+    from find_replace import FindOptions, find_all
+    from tests.test_find_replace import qt_find_all
+    doc = QTextDocument()
+    doc.setPlainText("éCat and b\U0002000bcat, 👍🏽cat, x́b, b")
+    for options in (FindOptions(whole_words=True),
+                    FindOptions(whole_words=True, match_case=True)):
+        assert find_all(doc, needle, options) == qt_find_all(doc, needle, options)

@@ -45,9 +45,11 @@ class FindOptions:
 
 
 def _in_word(char: str) -> bool:
-    """Letters, numbers and the accents on them make words (Qt's own
-    rule for whole words, with accents added)."""
-    return char.isalnum() or unicodedata.combining(char) != 0
+    """Letters and numbers make words, as Qt finds whole words: a mark
+    and a character beyond U+FFFF (an emoji, a rare CJK letter, which Qt
+    sees as two halves) end one. (An accent on a match's last letter is
+    looked at on its own: find_all.)"""
+    return char.isalnum() and ord(char) <= 0xFFFF
 
 
 def _pattern(needle: str, options: FindOptions) -> re.Pattern:
