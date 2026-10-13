@@ -61,6 +61,10 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from main_thread_gc import collect_due  # noqa: E402
 
 _APP = QApplication.instance() or QApplication(sys.argv[:1])
+# As main.py does: a widget given a style sheet is polished at once.
+import theme  # noqa: E402
+
+theme.install_style_sheet_guard(_APP)
 
 gc.disable()
 

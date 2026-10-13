@@ -18,9 +18,9 @@ constants.py so there is no second list to keep in sync. Call
 apply_app_theme() once at startup and again on every theme change.
 """
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QEvent, QObject, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPalette, QPen
-from PySide6.QtWidgets import QApplication, QDialogButtonBox, QProxyStyle, QStyle
+from PySide6.QtWidgets import QApplication, QDialogButtonBox, QProxyStyle, QStyle, QWidget
 
 from constants import (
     DARK_BG, DARK_BORDER, DARK_FG, DARK_MENU_BG, DARK_MUTED_FG, DARK_SELECTION,
@@ -259,3 +259,30 @@ def apply_app_theme(is_dark: bool) -> None:
     if app is None:
         return
     app.setPalette(_palette(is_dark))
+
+
+class _StyleSheetGuard(QObject):
+    """Polishes a widget as soon as it is given a style sheet.
+
+    Qt keeps a widget's parsed style sheet under the widget's address as
+    soon as anything in it is measured, and forgets it when the widget goes
+    only if the widget was polished. A window given a style sheet and
+    dropped without ever being shown (a dialog built and then not needed)
+    left its style sheet behind under its address, and the next window
+    allocated at that address drew with it (review M1: Publish in the
+    Media Library's grey, not the accent). Polished at once, every widget
+    with a style sheet is forgotten with it."""
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802, Qt's name
+        if (event.type() == QEvent.Type.StyleChange and isinstance(watched, QWidget)
+                and not watched.testAttribute(Qt.WidgetAttribute.WA_WState_Polished)
+                and watched.styleSheet()):
+            watched.ensurePolished()
+        return False
+
+
+def install_style_sheet_guard(app: QApplication) -> None:
+    """Install :class:`_StyleSheetGuard` on ``app`` (once)."""
+    if getattr(app, "_style_sheet_guard", None) is None:
+        app._style_sheet_guard = _StyleSheetGuard(app)
+        app.installEventFilter(app._style_sheet_guard)

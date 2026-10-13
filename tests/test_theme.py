@@ -181,3 +181,24 @@ def test_every_button_box_puts_cancel_first_and_the_default_trailing(qapp, base)
                          QDialogButtonBox.ButtonRole.AcceptRole]
     finally:
         dialog.close()
+
+
+def test_a_window_given_a_style_sheet_is_polished_at_once():
+    """Qt keeps a window's parsed style sheet under the window's address
+    once anything in it is measured, and forgets it only for a window that
+    was polished. A window given a style sheet and dropped unshown (a
+    dialog built and not needed) left its style under that address, and
+    the next window allocated there drew with it: on Linux, Publish as
+    Note's Publish came out in the Media Library's grey after the public
+    copy dialog had been built (review M1). The app polishes a widget as
+    soon as it is given a style sheet (theme.install_style_sheet_guard,
+    which main.py and the tests install)."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QDialog, QLabel, QVBoxLayout
+    dialog = QDialog()
+    QVBoxLayout(dialog).addWidget(QLabel("x"))
+    dialog.setStyleSheet("QLabel { color: #2D2D30; }")
+    assert dialog.testAttribute(Qt.WidgetAttribute.WA_WState_Polished)
+    import inspect
+    import main
+    assert "install_style_sheet_guard(app)" in inspect.getsource(main)
