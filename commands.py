@@ -90,6 +90,10 @@ class Command:
     # The slash menu's group it is offered in (slash_menu.SECTIONS); ""
     # keeps it out of the slash menu.
     slash_section: str = ""
+    # Its title in the Insert menu and the slash menu, where the menu's
+    # name says the verb ("Mention…" for "Insert Mention…"), as Pages'
+    # Insert menu says "Table", never "Insert Table"; "" for its title.
+    insert_title: str = ""
 
 
 def platform_keys(mac: ShortcutSpec, other: ShortcutSpec, *,
@@ -197,6 +201,28 @@ class CommandRegistry(QObject):
         for keys in all_keys:
             self._by_keys[keys] = command.id
         return action
+
+    def use_insert_titles(self, menu) -> None:
+        """While ``menu`` (named for the verb: Insert) is open, its commands
+        show their insert_title; the titles they had come back as it
+        closes. The same actions, so one key and one state for each,
+        whichever menu shows it."""
+        shown: Dict[QAction, str] = {}
+
+        def opening() -> None:
+            for action in menu.actions():
+                entry = self._entries.get(action.objectName())
+                if entry is not None and entry.command.insert_title and action not in shown:
+                    shown[action] = action.text()
+                    action.setText(entry.command.insert_title)
+
+        def closing() -> None:
+            for action, text in shown.items():
+                action.setText(text)
+            shown.clear()
+
+        menu.aboutToShow.connect(opening)
+        menu.aboutToHide.connect(closing)
 
     # -- reading -----------------------------------------------------------
 

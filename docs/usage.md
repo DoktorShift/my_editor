@@ -159,7 +159,7 @@ The **`View`** menu holds the appearance options: `View > Appearance` (Automatic
 
 ### Nostr
 
-The Nostr commands have no shortcuts of their own: no platform has a convention for them. They are in the `Nostr` menu (and in Help > Keyboard Shortcuts' search): Publish as Note…, Publish as Article…, Media Library…, Insert from Media Library…, Insert Mention…, Insert Note or Article…, Insert Audio or Video…, Article Details, Drafts. Two answer a key of the system's or of the app it follows: Refresh Drafts the system's own Refresh key, and Article Details Option-Command-I on a Mac, the key Pages, Numbers and Keynote give their inspector.
+The Nostr commands have no shortcuts of their own: no platform has a convention for them. They are in the `Nostr` menu (and in Help > Keyboard Shortcuts' search): Publish as Note…, Publish as Article…, Media Library…, Insert Image from Media Library…, Insert Mention…, Insert Note or Article…, Insert Audio or Video…, Article Details, Drafts. In the Insert menu, which they join while an account is in use, they go without the verb its name already says, as in Pages: Mention…, Note or Article…, Image from Media Library…, Audio or Video…; Add Link… is Link… there too. Two answer a key of the system's or of the app it follows: Refresh Drafts the system's own Refresh key, and Article Details Option-Command-I on a Mac, the key Pages, Numbers and Keynote give their inspector.
 
 While a Nostr account is in use, the editor offers Nostr where you write, and nowhere else:
 

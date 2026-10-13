@@ -82,10 +82,13 @@ ICONS: Dict[str, IconMaker] = {
 
 @dataclass(frozen=True)
 class SlashItem:
-    """One row of the menu: a command, under its group's name."""
+    """One row of the menu: a command, under its group's name, called
+    ``title`` when given (Command.insert_title: "Mention…" under Insert),
+    else by its own title."""
 
     section: str
     action: QAction
+    title: str = ""
 
 
 _HEADER = Qt.ItemDataRole.UserRole + 1
@@ -213,7 +216,7 @@ class SlashMenu(QFrame):
             action = item.action
             make_icon = ICONS.get(action.objectName())
             row = QListWidgetItem(make_icon(ink) if make_icon else QIcon(),
-                                  action.text().replace("&", ""))
+                                  (item.title or action.text()).replace("&", ""))
             row.setData(_KEYS, action.shortcut().toString(
                 QKeySequence.SequenceFormat.NativeText))
             row.setToolTip(action.toolTip() if action.toolTip() != action.text() else "")

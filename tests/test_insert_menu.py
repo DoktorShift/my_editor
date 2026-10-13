@@ -154,3 +154,66 @@ def test_the_toolbar_button_opens_the_same_menu(r):
     assert r["with"] == ["insert.link", *COMMANDS[:5], "nostr.insert_mention",
                          "nostr.insert_reference", "nostr.insert_image",
                          "nostr.insert_audio_video"]
+
+
+WORDING_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtGui import QKeySequence
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+w = main_window.MainWindow()
+w.show()
+ed = w.new_tab()
+w.nostr_state._active = True
+w._update_nostr_commands()
+app.processEvents()
+
+def shown(menu):
+    return [a.text() for a in menu.actions() if a.isVisible() and not a.isSeparator()]
+
+
+from PySide6.QtWidgets import QMenu
+nostr = next(o for o in w.act_insert_mention.associatedObjects()
+             if isinstance(o, QMenu) and o is not w.m_insert)
+r = {}
+w.m_insert.aboutToShow.emit()
+r["insert"] = shown(w.m_insert)
+r["link_key"] = w.act_link.shortcut().toString(QKeySequence.SequenceFormat.PortableText)
+r["same_actions"] = all(a in w.m_insert.actions() for a in (
+    w.act_link, w.act_insert_mention, w.act_nostr_insert_image))
+w.m_insert.aboutToHide.emit()
+r["after"] = [w.act_link.text(), w.act_insert_mention.text(), w.act_nostr_insert_image.text()]
+nostr.aboutToShow.emit()
+r["nostr"] = [a.text() for a in nostr.actions() if a.objectName() in (
+    "nostr.insert_image", "nostr.insert_mention", "nostr.insert_reference",
+    "nostr.insert_audio_video")]
+nostr.aboutToHide.emit()
+r["slash"] = [item.title or item.action.text() for item in w._slash_items("")
+              if item.section == "insert"]
+context = QMenu(w)
+w._fill_editor_context_menu(context, ed, ed.cursorRect().center())
+r["context"] = [a.text() for a in context.actions() if not a.isSeparator()]
+ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_the_insert_menu_says_what_it_inserts_without_insert(tmp_path):
+    """Pages' Insert menu says "Table" and "Choose…", never "Insert Table":
+    the menu's name says the verb. The Nostr menu keeps the verb, and both
+    menus hold the same commands, with one key and one state."""
+    r = run_window_script(WORDING_SCRIPT, tmp_path)
+    assert r["insert"] == ["Link…", "Image…", "Table…", "Divider", "Code Block", "Footnote",
+                           "Mention…", "Note or Article…", "Image from Media Library…",
+                           "Audio or Video…"]
+    assert r["link_key"] == "Ctrl+K" and r["same_actions"]
+    assert r["after"] == ["Add Link…", "Insert Mention…", "Insert Image from Media Library…"]
+    assert r["nostr"] == ["Insert Image from Media Library…", "Insert Mention…",
+                          "Insert Note or Article…", "Insert Audio or Video…"]
+    assert r["slash"] == ["Link…", "Footnote", "Image…", "Image from Media Library…",
+                          "Mention…", "Note or Article…", "Audio or Video…"]
+    assert not any(title.startswith("Insert") for title in r["context"])

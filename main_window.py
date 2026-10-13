@@ -1894,7 +1894,8 @@ class MainWindow(QMainWindow):
         # Edit Link… while the caret is in a link.
         self.act_link = add(Command("insert.link", _("Add Link\u2026"), INSERT, "Ctrl+K",
                                     keywords=(_("web address"), "url", _("hyperlink")),
-                                    slash_section=slash_menu.INSERT),
+                                    slash_section=slash_menu.INSERT,
+                                    insert_title=_("Link\u2026")),
                             triggered=lambda: self._editor_call("show_link_popover"))
         self.act_divider = add(Command("insert.divider", _("Divider"), INSERT,
                                        keywords=(_("horizontal rule"), _("line"),
@@ -2188,22 +2189,23 @@ class MainWindow(QMainWindow):
         # A file of the media library, already on the media servers: not
         # Insert > Image..., which puts in a file from the computer.
         self.act_nostr_insert_image = add(
-            Command("nostr.insert_image", _("Insert from Media Library…"), NOSTR,
-                    nostr=True, listed_as=_("Insert from media library"),
+            Command("nostr.insert_image", _("Insert Image from Media Library…"), NOSTR,
+                    nostr=True, listed_as=_("Insert image from media library"),
                     keywords=(_("picture"), _("photo"), _("image")),
-                    slash_section=slash_menu.INSERT),
+                    slash_section=slash_menu.INSERT,
+                    insert_title=_("Image from Media Library…")),
             triggered=self._on_nostr_insert_image)
         # Mention: "@" at the start of a word does the same while typing.
         self.act_insert_mention = add(
             Command("nostr.insert_mention", _("Insert Mention…"), NOSTR, nostr=True,
                     keywords=(_("person"), _("people"), _("tag"), "@"),
-                    slash_section=slash_menu.INSERT),
+                    slash_section=slash_menu.INSERT, insert_title=_("Mention…")),
             triggered=lambda: self._ask_mention(self.current_editor(), -1))
         # A note or an article quoted in the text, as a paragraph of its own.
         self.act_insert_reference = add(
             Command("nostr.insert_reference", _("Insert Note or Article…"), NOSTR, nostr=True,
                     keywords=(_("quote"), _("embed"), _("note"), _("article")),
-                    slash_section=slash_menu.INSERT),
+                    slash_section=slash_menu.INSERT, insert_title=_("Note or Article…")),
             triggered=lambda: self._ask_reference(self.current_editor()))
         # Article Details: the inspector beside the document, as in Pages
         # (View > Inspector, Option-Command-I there; no convention elsewhere).
@@ -2219,7 +2221,8 @@ class MainWindow(QMainWindow):
         self.act_insert_audio_video = add(
             Command("nostr.insert_audio_video", _("Insert Audio or Video…"), NOSTR,
                     nostr=True, keywords=(_("audio"), _("video"), _("podcast"), _("music"),
-                                          _("film")), slash_section=slash_menu.INSERT),
+                                          _("film")), slash_section=slash_menu.INSERT,
+                    insert_title=_("Audio or Video…")),
             triggered=self._ask_audio_or_video)
         # Drafts surface - the side-docked panel, toggled from the Nostr
         # menu (no key, as above).
@@ -2400,6 +2403,8 @@ class MainWindow(QMainWindow):
         self._insert_nostr_actions = [self.act_insert_mention, self.act_insert_reference,
                                       self.act_nostr_insert_image, self.act_insert_audio_video]
         self.m_insert.aboutToShow.connect(self._fill_insert_menu)
+        # Named for the verb: "Mention…" in it, "Insert Mention…" elsewhere.
+        self.commands.use_insert_titles(self.m_insert)
 
         m_format = self.menuBar().addMenu(_("F&ormat"))
         self.m_style = m_format.addMenu(_("Style"))
@@ -5137,7 +5142,8 @@ class MainWindow(QMainWindow):
     def _slash_items(self, query: str) -> list:
         """What the slash menu offers for ``query``: the window's commands,
         ranked (CommandRegistry.rank), Nostr ones while Nostr is in use."""
-        return [SlashItem(command.slash_section, self.commands.action(command.id))
+        return [SlashItem(command.slash_section, self.commands.action(command.id),
+                          command.insert_title)
                 for command in self.commands.rank(query, nostr=self.nostr_state.active)]
 
     def _set_markdown_shortcuts(self, on: bool) -> None:

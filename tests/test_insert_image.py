@@ -17,7 +17,7 @@ What must hold:
 
   The Insert menu never shows two items for a picture: the Nostr one,
   which inserts a file from the media library (already on the media
-  servers), says so ("Insert from Media Library…").
+  servers), says so ("Image from Media Library…").
 """
 
 import os
@@ -56,8 +56,10 @@ w.show()
 r = {}
 
 def titles():
-    w._fill_insert_menu()
-    return [a.text() for a in w.m_insert.actions() if a.isVisible() and not a.isSeparator()]
+    w.m_insert.aboutToShow.emit()
+    shown = [a.text() for a in w.m_insert.actions() if a.isVisible() and not a.isSeparator()]
+    w.m_insert.aboutToHide.emit()
+    return shown
 
 r["menu"] = titles()
 ed = w.new_tab()
@@ -125,7 +127,7 @@ def test_one_image_item_in_the_insert_menu(r):
     assert r["menu"].count("Image…") == 1
     assert not any("Image" in title and title != "Image…" for title in r["menu"])
     assert r["menu_account"].count("Image…") == 1
-    assert "Insert from Media Library…" in r["menu_account"]
+    assert "Image from Media Library…" in r["menu_account"]
     assert "Insert Image…" not in r["menu_account"]
 
 
