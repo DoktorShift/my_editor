@@ -1100,3 +1100,30 @@ def test_an_unchecked_cover_pick_leaves_the_field_alone():
     assert cover.text == ""
     assert cover.thumb_hash == ""
     assert "couldn’t check yet whether this image is private" in cover.errors[0]
+
+
+class _ReadLibrary(_UncheckedLibrary):
+    def vouches_for(self, sha):
+        return True
+
+
+@pytest.mark.parametrize("mime", ["video/mp4", "audio/mpeg", "image/heic", "application/pdf"])
+def test_a_private_file_whose_details_cannot_be_removed_is_not_offered(tmp_path, mime, monkeypatch):
+    """The question promises "camera and location details are removed
+    first"; for a kind of file that cannot be cleaned here it would be
+    untrue, so it is not asked: the file is refused, saying why."""
+    import nostr.ui.publish_copy_dialog as module
+    asked = []
+    monkeypatch.setattr(module, "PublishCopyDialog",
+                        lambda **kw: asked.append(kw) or pytest.fail("asked"))
+    blob = private(mime=mime, name="clip")
+    media = make_media(blob.sha256, servers=(SERVER,), mime="application/octet-stream")
+    maker = PublicCopyMaker(ledger=PublicLedger(path=tmp_path / "public.json"),
+                            fetcher=FakeFetcher({}), uploader=FakeUploader())
+    resolution = resolve_pick(media, visibility=MediaVisibility(library=_ReadLibrary([blob])),
+                              maker=maker)
+    assert not resolution.ok and not resolution.cancelled
+    assert resolution.reason == (
+        "MyEditor can’t share this kind of private file yet, because it can’t remove "
+        "its camera and location details.")
+    assert asked == []

@@ -52,6 +52,7 @@ from i18n import _, ngettext
 
 from ..media.media_visibility import UNKNOWN, MediaVisibility
 from ..media.publish_copy import PublicCopyMaker, PublishSet
+from ..media.scrub import can_scrub
 from ..media.visibility import PrivateBlob, PublicBlob
 import theme
 
@@ -400,6 +401,14 @@ def resolve_pick(
             mime=str(getattr(media, "mime_type", "") or ""),
             size=int(getattr(media, "size", 0) or 0),
             ok=True,
+        )
+
+    if not all(can_scrub(blob.mime) for blob in private):
+        # The question promises the camera and location details are
+        # removed; for a kind this app cannot clean, that would be untrue.
+        return PickResolution(
+            reason=_("MyEditor can’t share this kind of private file yet, because it "
+                     "can’t remove its camera and location details."),
         )
 
     if maker is None:

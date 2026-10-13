@@ -500,14 +500,17 @@ def test_the_copy_is_addressed_at_the_server_that_confirmed_it(tmp_path):
     assert result.public.url == f"{CDN}/{result.public.sha256}"
 
 
-def test_an_animated_gif_is_published_untouched_and_says_so(tmp_path):
+def test_a_gif_is_published_with_its_frames_as_they_are_and_cleaned(tmp_path):
+    """A GIF is not re-encoded (an animation would lose its frames), but
+    it is cleaned: comments and application blocks such as XMP go. This
+    one has none, so its bytes are unchanged, and it counts as cleaned."""
     env = build(tmp_path, blobs={f"{SERVER_ONE}/{GIF_CIPHER_SHA}": GIF_CIPHER})
     blob = private(GIF_CIPHER, mime="image/gif")
 
     result = env.copy_one(blob)
 
     assert env.uploader.calls[0].body == GIF_BYTES
-    assert result.public.scrubbed is False, "nothing was stripped, so do not claim it"
+    assert result.public.scrubbed is True
     assert result.public.mime == "image/gif"
 
 

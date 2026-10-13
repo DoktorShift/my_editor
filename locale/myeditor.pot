@@ -28,7 +28,7 @@ msgstr ""
 #: alerts.py:362
 #: link_popover.py:100
 #: main_window.py:3455
-#: main_window.py:8408
+#: main_window.py:8407
 #: main_window.py:293
 #: main_window.py:3315
 #: main_window.py:6065
@@ -635,7 +635,7 @@ msgid "Open"
 msgstr ""
 
 #: main_window.py:3516
-#: nostr/ui/media_library_dialog.py:715
+#: nostr/ui/media_library_dialog.py:717
 msgid "Save As"
 msgstr ""
 
@@ -700,31 +700,31 @@ msgstr ""
 msgid "Quitting now stops the upload, and the document won’t hold the file."
 msgstr ""
 
-#: main_window.py:7486
+#: main_window.py:7485
 msgid "Drafts are saved on your usual relays again."
 msgstr ""
 
-#: main_window.py:7566
+#: main_window.py:7565
 msgid "Trying again. Approve the request in your signer app…"
 msgstr ""
 
-#: main_window.py:7626
+#: main_window.py:7625
 #: main_window.py:1724
-#: nostr/ui/media_library_dialog.py:613
-#: nostr/ui/media_library_dialog.py:768
+#: nostr/ui/media_library_dialog.py:615
+#: nostr/ui/media_library_dialog.py:770
 #: nostr/ui/published_view.py:641
 msgid "Delete"
 msgstr ""
 
-#: main_window.py:7801
+#: main_window.py:7800
 msgid "No drafts were deleted"
 msgstr ""
 
-#: main_window.py:8333
+#: main_window.py:8332
 msgid "Already saving this draft - wait for it to finish."
 msgstr ""
 
-#: main_window.py:8396
+#: main_window.py:8395
 msgid "(unknown account)"
 msgstr ""
 
@@ -793,7 +793,7 @@ msgid "Save"
 msgstr ""
 
 #: main_window.py:1671
-#: nostr/ui/media_library_dialog.py:607
+#: nostr/ui/media_library_dialog.py:609
 msgid "Save As…"
 msgstr ""
 
@@ -1168,7 +1168,7 @@ msgstr ""
 
 #: main_window.py:5236
 #: nostr/ui/connect_dialog.py:212
-#: nostr/ui/media_library_dialog.py:603
+#: nostr/ui/media_library_dialog.py:605
 #: nostr/ui/published_view.py:700
 msgid "Copy Link"
 msgstr ""
@@ -1302,74 +1302,74 @@ msgstr ""
 msgid "Your note is published."
 msgstr ""
 
-#: main_window.py:7144
+#: main_window.py:7143
 msgid "That link cannot be inserted."
 msgstr ""
 
-#: main_window.py:7232
+#: main_window.py:7231
 msgid "That image could not be added."
 msgstr ""
 
-#: main_window.py:7259
+#: main_window.py:7258
 msgid "Upload this image to your media servers?"
 msgstr ""
 
-#: main_window.py:7260
+#: main_window.py:7259
 msgid "Anyone with the link can view it. The image is already in your document and stays there either way."
 msgstr ""
 
-#: main_window.py:7263
+#: main_window.py:7262
 msgid "Remember this choice"
 msgstr ""
 
-#: main_window.py:7502
+#: main_window.py:7501
 msgid "Draft isn't ready to open yet - still decrypting."
 msgstr ""
 
-#: main_window.py:7609
+#: main_window.py:7608
 msgid ""
 "They use a draft format this editor doesn't recognise, so removing them from here might leave them visible in the other client.\n"
 "\n"
 "To remove them cleanly, open them in the app that created them and delete them there."
 msgstr ""
 
-#: main_window.py:7625
+#: main_window.py:7624
 msgid "Delete “this draft” from your Nostr drafts?"
 msgstr ""
 
-#: main_window.py:7640
+#: main_window.py:7639
 msgid "A blank-content replacement will be published to your relays. Other clients (and your other devices) will treat the draft as removed. This action can't be undone."
 msgid_plural "A blank-content replacement will be published to your relays. Other clients (and your other devices) will treat them as removed. This action can't be undone."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:7648
+#: main_window.py:7647
 msgid "A draft whose slug holds a secret key is deleted by a request instead, which doesn't send the key again. Your other devices, and apps that follow such requests, will treat it as removed. This action can't be undone."
 msgid_plural "Drafts whose slugs hold a secret key are deleted by a request each instead, which doesn't send the keys again. Your other devices, and apps that follow such requests, will treat them as removed. This action can't be undone."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:7720
+#: main_window.py:7719
 msgid "Deleting drafts…"
 msgstr ""
 
-#: main_window.py:7720
+#: main_window.py:7719
 msgid "Stop"
 msgstr ""
 
-#: main_window.py:7721
+#: main_window.py:7720
 msgid "Deleting drafts"
 msgstr ""
 
-#: main_window.py:7824
+#: main_window.py:7823
 msgid "Your signer app is not responding. Open it and make sure it is running."
 msgstr ""
 
-#: main_window.py:7989
+#: main_window.py:7988
 msgid "Replacing it overwrites its text on all your devices."
 msgstr ""
 
-#: main_window.py:7990
+#: main_window.py:7989
 #: main_window.py:4329
 #: update_flow.py:138
 #: update_flow.py:169
@@ -1377,7 +1377,7 @@ msgstr ""
 msgid "Replace"
 msgstr ""
 
-#: main_window.py:8414
+#: main_window.py:8413
 msgid "Saving under the current account would create a separate draft. How would you like to handle it?"
 msgstr ""
 
@@ -1667,48 +1667,48 @@ msgstr ""
 msgid "Paste Public Key"
 msgstr ""
 
-#: main_window.py:7482
+#: main_window.py:7481
 msgid "Drafts are now saved only on the relay you chose."
 msgid_plural "Drafts are now saved only on the {count} relays you chose."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:7628
+#: main_window.py:7627
 #, python-brace-format
 msgid "Delete {count} draft from your Nostr drafts?"
 msgid_plural "Delete {count} drafts from your Nostr drafts?"
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:7631
+#: main_window.py:7630
 #, python-brace-format
 msgid "Delete {count} Draft"
 msgid_plural "Delete {count} Drafts"
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:7675
+#: main_window.py:7674
 msgid "An imported draft takes a second request, which tells other apps it is gone."
 msgid_plural "Imported drafts take a second request each, which tells other apps they are gone."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:7797
+#: main_window.py:7796
 #, python-brace-format
 msgid "{deleted} of {total} draft deleted"
 msgid_plural "{deleted} of {total} drafts deleted"
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:8057
+#: main_window.py:8056
 msgid "Nothing to save as a draft"
 msgstr ""
 
-#: main_window.py:8058
+#: main_window.py:8057
 msgid "The current document is empty. Add some content first."
 msgstr ""
 
-#: main_window.py:8070
+#: main_window.py:8069
 msgid "This draft is too large"
 msgstr ""
 
@@ -2055,13 +2055,13 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: main_window.py:3084
-#: main_window.py:7262
+#: main_window.py:7261
 #: settings_window.py:55
 msgid "Keep Local"
 msgstr ""
 
 #: main_window.py:3084
-#: main_window.py:7262
+#: main_window.py:7261
 #: settings_window.py:55
 msgid "Upload"
 msgstr ""
@@ -2237,9 +2237,9 @@ msgid "MyEditor can read audio and video files of these kinds: {kinds}."
 msgstr ""
 
 #: main_window.py:6888
-#: nostr/ui/media_library_dialog.py:912
-#: nostr/ui/media_library_dialog.py:939
-#: nostr/ui/media_library_dialog.py:942
+#: nostr/ui/media_library_dialog.py:914
+#: nostr/ui/media_library_dialog.py:941
+#: nostr/ui/media_library_dialog.py:944
 msgid "Uploading…"
 msgstr ""
 
@@ -2262,83 +2262,83 @@ msgid_plural "Your note is published; {accepted} of {total} relays took it."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:7208
+#: main_window.py:7207
 #, python-brace-format
 msgid "{count} file is waiting."
 msgid_plural "{count} files are waiting."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:7403
+#: main_window.py:7402
 msgid "This article has a draft that can’t be shown yet."
 msgstr ""
 
-#: main_window.py:7491
+#: main_window.py:7490
 #, python-brace-format
 msgid "Copied event id {id}…"
 msgstr ""
 
-#: main_window.py:7606
+#: main_window.py:7605
 msgid "This draft was created by another Nostr client"
 msgid_plural "These {count} drafts were created by other Nostr clients"
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:7622
+#: main_window.py:7621
 #, python-brace-format
 msgid "Delete “{name}” from your Nostr drafts?"
 msgstr ""
 
-#: main_window.py:7668
+#: main_window.py:7667
 #, python-brace-format
 msgid "Your signer app will ask you to approve each one, so expect {count} request. You can stop partway through."
 msgid_plural "Your signer app will ask you to approve each one, so expect {count} requests. You can stop partway through."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:7682
+#: main_window.py:7681
 #, python-brace-format
 msgid "{count} draft from another Nostr client is not included, and will be left alone."
 msgid_plural "{count} drafts from another Nostr client are not included, and will be left alone."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:7708
+#: main_window.py:7707
 msgid "Couldn't start the deletion"
 msgstr ""
 
-#: main_window.py:7788
+#: main_window.py:7787
 msgid "Draft deleted."
 msgid_plural "{count} drafts deleted."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:7805
+#: main_window.py:7804
 #, python-brace-format
 msgid "{count} could not be removed and is still on your relays. You can try again."
 msgid_plural "{count} could not be removed and are still on your relays. You can try again."
 msgstr[0] ""
 msgstr[1] ""
 
-#: main_window.py:7987
+#: main_window.py:7986
 #, python-brace-format
 msgid "A draft named “{name}” already exists. Do you want to replace it?"
 msgstr ""
 
-#: main_window.py:8066
-#: main_window.py:8250
+#: main_window.py:8065
+#: main_window.py:8249
 msgid "Couldn't prepare the draft"
 msgstr ""
 
-#: main_window.py:8067
+#: main_window.py:8066
 msgid "Its contents could not be prepared for encryption."
 msgstr ""
 
-#: main_window.py:8094
+#: main_window.py:8093
 msgid "Couldn't save the draft"
 msgstr ""
 
-#: main_window.py:8411
+#: main_window.py:8410
 #, python-brace-format
 msgid "This draft was last saved as {original}, but you're signed in as {active}"
 msgstr ""
@@ -2392,52 +2392,52 @@ msgstr ""
 msgid "Your media servers take files up to {size}."
 msgstr ""
 
-#: main_window.py:7404
+#: main_window.py:7403
 msgid "The draft couldn’t be decrypted. Double-click it in the Drafts panel to try again, or open the version that is published now."
 msgstr ""
 
-#: main_window.py:7407
+#: main_window.py:7406
 msgid "The draft is still being decrypted. Choose Edit again once its title shows in the Drafts panel, or open the version that is published now."
 msgstr ""
 
-#: main_window.py:7415
+#: main_window.py:7414
 msgid "This article has a draft with changes you haven’t published."
 msgstr ""
 
-#: main_window.py:7417
+#: main_window.py:7416
 msgid "Open the draft to go on with it, or open the version that is published."
 msgstr ""
 
-#: main_window.py:7691
+#: main_window.py:7690
 msgid "Not included:"
 msgstr ""
 
-#: main_window.py:7731
+#: main_window.py:7730
 #, python-brace-format
 msgid "Deleting draft {current} of {total}…"
 msgstr ""
 
-#: main_window.py:7884
+#: main_window.py:7883
 #: main_window.py:3492
 msgid "That account isn’t signed in anymore"
 msgstr ""
 
-#: main_window.py:7885
+#: main_window.py:7884
 #: main_window.py:3493
 msgid "Connect it again with Nostr > Connect Signer App… to save here."
 msgstr ""
 
-#: main_window.py:8071
+#: main_window.py:8070
 #, python-brace-format
 msgid "It has {size} bytes, and encryption allows {limit}. Split it into smaller drafts or publish it directly."
 msgstr ""
 
-#: main_window.py:8403
+#: main_window.py:8402
 #, python-brace-format
 msgid "Switch to {name} and Save"
 msgstr ""
 
-#: main_window.py:8406
+#: main_window.py:8405
 #, python-brace-format
 msgid "Save a Copy as {name}"
 msgstr ""
@@ -2482,12 +2482,12 @@ msgstr ""
 msgid "Uploading… {percent} %"
 msgstr ""
 
-#: main_window.py:7409
-#: main_window.py:7420
+#: main_window.py:7408
+#: main_window.py:7419
 msgid "Open Published Version"
 msgstr ""
 
-#: main_window.py:7709
+#: main_window.py:7708
 #, python-brace-format
 msgid ""
 "These drafts can't be removed from here.\n"
@@ -2495,7 +2495,7 @@ msgid ""
 "{error}"
 msgstr ""
 
-#: main_window.py:7421
+#: main_window.py:7420
 msgid "Open Draft"
 msgstr ""
 
@@ -3181,7 +3181,7 @@ msgstr ""
 #: slash_menu.py:164
 #: slash_menu.py:172
 #: nostr/ui/media_library_dialog.py:348
-#: nostr/ui/media_library_dialog.py:600
+#: nostr/ui/media_library_dialog.py:602
 #: nostr/ui/reference_popover.py:81
 msgid "Insert"
 msgstr ""
@@ -5187,7 +5187,7 @@ msgid "MyEditor couldn’t save its list of shared images, so the image wasn’t
 msgstr ""
 
 #: nostr/media/publish_copy.py:719
-#: nostr/ui/publish_copy_dialog.py:482
+#: nostr/ui/publish_copy_dialog.py:491
 msgid "This image couldn’t be shared."
 msgstr ""
 
@@ -5755,9 +5755,9 @@ msgstr ""
 
 #: nostr/ui/article_details_panel.py:483
 #: nostr/ui/draft_relays_sheet.py:158
-#: nostr/ui/media_library_dialog.py:592
-#: nostr/ui/media_servers_dialog.py:103
-#: nostr/ui/media_servers_dialog.py:246
+#: nostr/ui/media_library_dialog.py:594
+#: nostr/ui/media_servers_dialog.py:126
+#: nostr/ui/media_servers_dialog.py:291
 msgid "Remove"
 msgstr ""
 
@@ -7403,7 +7403,7 @@ msgstr ""
 
 #: nostr/ui/media_grid.py:241
 #: nostr/ui/media_grid.py:310
-#: nostr/ui/media_library_dialog.py:591
+#: nostr/ui/media_library_dialog.py:593
 msgid "Retry"
 msgstr ""
 
@@ -7416,23 +7416,23 @@ msgstr ""
 msgid "couldn’t upload: {reason}"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:763
+#: nostr/ui/media_library_dialog.py:765
 msgid "Anything you published with it will no longer show it. You can’t undo this action."
 msgid_plural "Anything you published with them will no longer show them. You can’t undo this action."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/media_library_dialog.py:796
+#: nostr/ui/media_library_dialog.py:798
 msgid "Anyone with the link will no longer see it, and anything you published with it will no longer show it."
 msgid_plural "Anyone with the link will no longer see them, and anything you published with them will no longer show them."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/media_library_dialog.py:1090
+#: nostr/ui/media_library_dialog.py:1092
 msgid "File"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:1189
+#: nostr/ui/media_library_dialog.py:1191
 #, python-brace-format
 msgid "At least {used} of {quota} used"
 msgstr ""
@@ -7454,48 +7454,44 @@ msgstr ""
 msgid "Search Media"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:571
-msgid "Media Servers…"
-msgstr ""
-
-#: nostr/ui/media_library_dialog.py:601
+#: nostr/ui/media_library_dialog.py:603
 #: nostr/ui/media_preview.py:78
 msgid "Quick Look"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:830
+#: nostr/ui/media_library_dialog.py:832
 #, python-brace-format
 msgid "“{name}” is still on one of your media servers. {reason}"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:832
+#: nostr/ui/media_library_dialog.py:834
 #, python-brace-format
 msgid "“{name}” couldn’t be deleted. {reason}"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:839
+#: nostr/ui/media_library_dialog.py:841
 msgid "The file"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:848
+#: nostr/ui/media_library_dialog.py:850
 msgid "Add to Media Library"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:925
-#: nostr/ui/media_library_dialog.py:893
-#: nostr/ui/media_library_dialog.py:912
+#: nostr/ui/media_library_dialog.py:927
+#: nostr/ui/media_library_dialog.py:895
+#: nostr/ui/media_library_dialog.py:914
 msgid "Waiting…"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:1021
+#: nostr/ui/media_library_dialog.py:1023
 msgid "Couldn’t reach your media servers. Check your internet connection."
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:1051
+#: nostr/ui/media_library_dialog.py:1053
 msgid "Anyone with the link can see the files you add here."
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:1191
+#: nostr/ui/media_library_dialog.py:1193
 #, python-brace-format
 msgid "Full: {used} of {quota} used"
 msgstr ""
@@ -7521,7 +7517,7 @@ msgid "Videos"
 msgstr ""
 
 #: nostr/ui/media_library_dialog.py:272
-#: nostr/ui/media_library_dialog.py:1090
+#: nostr/ui/media_library_dialog.py:1092
 msgid "Audio"
 msgstr ""
 
@@ -7557,59 +7553,63 @@ msgstr ""
 msgid "Describe the image for people who can’t see it"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:594
+#: nostr/ui/media_library_dialog.py:573
+msgid "Media Servers…"
+msgstr ""
+
+#: nostr/ui/media_library_dialog.py:596
 msgid "Cancel Upload"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:603
+#: nostr/ui/media_library_dialog.py:605
 msgid "Copy Links"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:606
+#: nostr/ui/media_library_dialog.py:608
 #: nostr/ui/media_preview.py:103
 #: nostr/ui/published_view.py:697
 msgid "Open in Browser"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:607
+#: nostr/ui/media_library_dialog.py:609
 msgid "Save to Folder…"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:646
+#: nostr/ui/media_library_dialog.py:648
 msgid "MyEditor is still checking whether this image is private. One moment."
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:715
+#: nostr/ui/media_library_dialog.py:717
 msgid "All Files (*)"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:718
+#: nostr/ui/media_library_dialog.py:720
 msgid "Choose a Folder"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:801
-#: nostr/ui/media_library_dialog.py:612
+#: nostr/ui/media_library_dialog.py:803
+#: nostr/ui/media_library_dialog.py:614
 msgid "Stop Sharing"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:881
+#: nostr/ui/media_library_dialog.py:883
 msgid "The pasted image couldn’t be read."
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:1090
+#: nostr/ui/media_library_dialog.py:1092
 msgid "Image"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:1090
+#: nostr/ui/media_library_dialog.py:1092
 msgid "Video"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:1193
+#: nostr/ui/media_library_dialog.py:1195
 #, python-brace-format
 msgid "Almost full: {used} of {quota} used"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:1195
+#: nostr/ui/media_library_dialog.py:1197
 #, python-brace-format
 msgid "{used} of {quota} used"
 msgstr ""
@@ -7623,46 +7623,46 @@ msgstr ""
 msgid "Images, videos and audio you add appear here. Anyone with the link can see them."
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:649
+#: nostr/ui/media_library_dialog.py:651
 msgid "This image can’t be used until your signer app lets MyEditor check whether it is private."
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:760
+#: nostr/ui/media_library_dialog.py:762
 #, python-brace-format
 msgid "Delete “{name}”?"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:761
+#: nostr/ui/media_library_dialog.py:763
 #, python-brace-format
 msgid "Delete {count} item?"
 msgid_plural "Delete {count} items?"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/media_library_dialog.py:793
+#: nostr/ui/media_library_dialog.py:795
 #, python-brace-format
 msgid "Stop sharing “{name}”?"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:794
+#: nostr/ui/media_library_dialog.py:796
 #, python-brace-format
 msgid "Stop sharing {count} item?"
 msgid_plural "Stop sharing {count} items?"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/media_library_dialog.py:849
+#: nostr/ui/media_library_dialog.py:851
 #, python-brace-format
 msgid "Images, Videos and Audio ({patterns})"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:980
-#: nostr/ui/media_library_dialog.py:901
+#: nostr/ui/media_library_dialog.py:982
+#: nostr/ui/media_library_dialog.py:903
 #, python-brace-format
 msgid "“{name}” wasn’t added. {reason}"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:995
+#: nostr/ui/media_library_dialog.py:997
 #, python-brace-format
 msgid "“{name}” is added, but one of your media servers didn’t keep a copy."
 msgstr ""
@@ -7677,95 +7677,95 @@ msgstr ""
 msgid "“{name}” couldn’t be downloaded. Check your internet connection and try again."
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:820
+#: nostr/ui/media_library_dialog.py:822
 #, python-brace-format
 msgid "“{name}” is no longer shared."
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:825
+#: nostr/ui/media_library_dialog.py:827
 #, python-brace-format
 msgid "“{name}” is still shared. {reason}"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:866
+#: nostr/ui/media_library_dialog.py:868
 #, python-brace-format
 msgid "“{name}” wasn’t added. The Media Library takes images, videos and audio."
 msgid_plural "{count} files weren’t added. The Media Library takes images, videos and audio."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/media_library_dialog.py:886
+#: nostr/ui/media_library_dialog.py:888
 msgid "Pasted Image"
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:743
+#: nostr/ui/media_library_dialog.py:745
 #, python-brace-format
 msgid "“{name}” couldn’t be saved. Try again."
 msgstr ""
 
-#: nostr/ui/media_library_dialog.py:749
+#: nostr/ui/media_library_dialog.py:751
 #, python-brace-format
 msgid "“{name}” couldn’t be saved there. Choose another folder."
 msgstr ""
 
-#: nostr/ui/media_servers_dialog.py:66
+#: nostr/ui/media_servers_dialog.py:87
 msgid "Media Servers"
 msgstr ""
 
-#: nostr/ui/media_servers_dialog.py:86
+#: nostr/ui/media_servers_dialog.py:109
 msgid "Images, videos and audio you add are kept on these servers. New files go to the first one, and the others keep copies."
 msgstr ""
 
-#: nostr/ui/media_servers_dialog.py:92
+#: nostr/ui/media_servers_dialog.py:115
 msgid "Media servers"
 msgstr ""
 
-#: nostr/ui/media_servers_dialog.py:99
+#: nostr/ui/media_servers_dialog.py:122
 msgid "Make Primary"
 msgstr ""
 
-#: nostr/ui/media_servers_dialog.py:101
+#: nostr/ui/media_servers_dialog.py:124
 msgid "New files go to this server first."
 msgstr ""
 
-#: nostr/ui/media_servers_dialog.py:114
+#: nostr/ui/media_servers_dialog.py:137
 msgid "Server address"
 msgstr ""
 
-#: nostr/ui/media_servers_dialog.py:119
+#: nostr/ui/media_servers_dialog.py:144
 msgid "Add Server"
 msgstr ""
 
-#: nostr/ui/media_servers_dialog.py:125
+#: nostr/ui/media_servers_dialog.py:150
 msgid "Enter a server address that starts with https://, such as https://media.example.com."
 msgstr ""
 
-#: nostr/ui/media_servers_dialog.py:140
+#: nostr/ui/media_servers_dialog.py:165
 msgid "Add to List"
 msgstr ""
 
-#: nostr/ui/media_servers_dialog.py:154
+#: nostr/ui/media_servers_dialog.py:179
 msgid "Share this list so other Nostr apps find your files."
 msgstr ""
 
-#: nostr/ui/media_servers_dialog.py:156
+#: nostr/ui/media_servers_dialog.py:181
 msgid "Share with Other Apps…"
 msgstr ""
 
-#: nostr/ui/media_servers_dialog.py:192
+#: nostr/ui/media_servers_dialog.py:217
 msgid "Included with your membership"
 msgstr ""
 
-#: nostr/ui/media_servers_dialog.py:198
+#: nostr/ui/media_servers_dialog.py:223
 #, python-brace-format
 msgid "Your Nostr account also lists {servers}."
 msgstr ""
 
-#: nostr/ui/media_servers_dialog.py:244
+#: nostr/ui/media_servers_dialog.py:289
 msgid "Files already there stay there. The Media Library shows them only while another of your servers has them too."
 msgstr ""
 
-#: nostr/ui/media_servers_dialog.py:243
+#: nostr/ui/media_servers_dialog.py:288
 #, python-brace-format
 msgid "Remove “{server}”?"
 msgstr ""
@@ -8418,76 +8418,80 @@ msgstr ""
 msgid "Cannot build article: {reason}"
 msgstr ""
 
-#: nostr/ui/publish_copy_dialog.py:69
+#: nostr/ui/publish_copy_dialog.py:70
 msgid "MyEditor couldn’t check yet whether this image is private. Try again in a moment, or check your signer app."
 msgstr ""
 
-#: nostr/ui/publish_copy_dialog.py:470
+#: nostr/ui/publish_copy_dialog.py:479
 msgid "Cancelled. Nothing was shared."
 msgstr ""
 
-#: nostr/ui/publish_copy_dialog.py:105
-#: nostr/ui/publish_copy_dialog.py:213
-#: nostr/ui/publish_copy_dialog.py:244
+#: nostr/ui/publish_copy_dialog.py:106
+#: nostr/ui/publish_copy_dialog.py:214
+#: nostr/ui/publish_copy_dialog.py:245
 msgid "Share"
 msgstr ""
 
-#: nostr/ui/publish_copy_dialog.py:173
+#: nostr/ui/publish_copy_dialog.py:174
 msgid "Anyone with the link will be able to see it. Camera and location details are removed first."
 msgid_plural "Anyone with the link will be able to see them. Camera and location details are removed first."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/publish_copy_dialog.py:190
+#: nostr/ui/publish_copy_dialog.py:191
 msgid "Sharing"
 msgstr ""
 
-#: nostr/ui/publish_copy_dialog.py:471
+#: nostr/ui/publish_copy_dialog.py:480
 #, python-brace-format
 msgid "Cancelled. {count} image was shared before that; Stop Sharing in the Media Library undoes it."
 msgid_plural "Cancelled. {count} images were shared before that; Stop Sharing in the Media Library undoes it."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/publish_copy_dialog.py:485
+#: nostr/ui/publish_copy_dialog.py:494
 #, python-brace-format
 msgid "{reason} {count} other image was shared already; Stop Sharing in the Media Library undoes it."
 msgid_plural "{reason} {count} other images were shared already; Stop Sharing in the Media Library undoes it."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/publish_copy_dialog.py:231
+#: nostr/ui/publish_copy_dialog.py:232
 msgid "These images are shared already."
 msgstr ""
 
-#: nostr/ui/publish_copy_dialog.py:337
+#: nostr/ui/publish_copy_dialog.py:338
 msgid "Stopping…"
 msgstr ""
 
-#: nostr/ui/publish_copy_dialog.py:407
+#: nostr/ui/publish_copy_dialog.py:410
+msgid "MyEditor can’t share this kind of private file yet, because it can’t remove its camera and location details."
+msgstr ""
+
+#: nostr/ui/publish_copy_dialog.py:416
 msgid "This image is private and can’t be shared right now. Connect your signer app and try again."
 msgstr ""
 
-#: nostr/ui/publish_copy_dialog.py:446
+#: nostr/ui/publish_copy_dialog.py:455
 msgid "The image wasn’t shared, so nothing was inserted."
 msgstr ""
 
-#: nostr/ui/publish_copy_dialog.py:234
+#: nostr/ui/publish_copy_dialog.py:235
 msgid "Share this image?"
 msgstr ""
 
-#: nostr/ui/publish_copy_dialog.py:239
+#: nostr/ui/publish_copy_dialog.py:240
 msgid "Sharing this image…"
 msgstr ""
 
-#: nostr/ui/publish_copy_dialog.py:235
+#: nostr/ui/publish_copy_dialog.py:236
 #, python-brace-format
 msgid "Share “{name}”?"
 msgid_plural "Share {count} images?"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/publish_copy_dialog.py:240
+#: nostr/ui/publish_copy_dialog.py:241
 #, python-brace-format
 msgid "Sharing “{name}”…"
 msgid_plural "Sharing {count} images…"
