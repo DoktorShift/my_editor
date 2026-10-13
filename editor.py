@@ -2174,10 +2174,22 @@ class HtmlEditor(QTextEdit):
         holds Markdown structure, the selection as this editor writes
         Markdown, so a paste here keeps every structure exactly. (Qt's own
         copy would offer Qt's Markdown, which reads a heading's weight as
-        bold, and builds an OpenDocument copy of every selection.)"""
+        bold, and builds an OpenDocument copy of every selection.)
+
+        The data is Qt's own, made by QTextEdit, with these formats set on
+        it: the clipboard keeps it after MyEditor quits, and Qt frees it
+        after the Python interpreter has gone, which data made in Python
+        does not survive (a crash at every quit after a Copy)."""
         cursor = self.textCursor()
         fragment = cursor.selection()
-        mime = QMimeData()
+        mime = super().createMimeDataFromSelection()
+        # Qt fills its formats from the selection when first asked: once,
+        # now, so they don't overwrite those set below later on; and its
+        # OpenDocument copy names the objects by their internal names.
+        mime.formats()
+        mime.text()
+        for kind in mime.formats():
+            mime.removeFormat(kind)
         # What other apps read: the app's own objects as their address (or
         # name), never their internal name.
         mime.setText(rich_text.plain_text_of(self._outside_copy(html=False)))
