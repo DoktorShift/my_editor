@@ -83,9 +83,10 @@ def test_values_are_read_as_written_in_the_wild():
     assert jekyll.summary == "A long description over two lines."
     assert jekyll.image == ""                                 # image: path/alt mapping
     entries, _ = front_matter.split("---\na: 'it''s'\nb: [x, \"y, z\"]\nc: |\n  one\n  two\n"
-                                    "d: plain # comment\n---\n")
+                                    "d: plain # comment\ne: \"My \\\"post\\\"\"   # on the site\n"
+                                    "f: 'it''s' # too\ng: [Go, \"a # b\"]  # tags\n---\n")
     assert [entry.value for entry in entries.entries] == [
-        "it's", ["x", "y, z"], "one\ntwo", "plain"]
+        "it's", ["x", "y, z"], "one\ntwo", "plain", 'My "post"', "it's", ["Go", "a # b"]]
 
 
 def test_a_changed_detail_rewrites_its_entry_only():

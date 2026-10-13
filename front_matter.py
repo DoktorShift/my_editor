@@ -62,8 +62,12 @@ class Entry:
         block = _BLOCK_SCALAR.match(written)
         if block is not None:
             return _block_text(self.lines[1:], block.group(1), block.group(2))
-        if written.startswith("[") and written.endswith("]"):
-            return [_unquote(part) for part in _split_inline(written[1:-1]) if part.strip()]
+        if written.startswith("["):
+            close = written.rfind("]")
+            rest = written[close + 1:] if close > 0 else ""
+            if close > 0 and (not rest.strip() or re.match(r"\s+#", rest)):
+                return [_unquote(part) for part in _split_inline(written[1:close])
+                        if part.strip()]
         if not written and rest:
             if all(line.lstrip().startswith("- ") or line.strip() == "-" for line in rest):
                 return [_unquote(line.strip()[1:].strip()) for line in rest]
@@ -174,10 +178,17 @@ def _block_text(lines: Sequence[str], style: str, chomping: str) -> str:
     return text if chomping == "-" else text + "\n" if chomping == "+" else text
 
 
+# A quoted value: "..." with its escapes, or '...' with '' for a quote.
+_QUOTED = re.compile(r"""^("(?:[^"\\]|\\.)*"|'(?:[^']|'')*')""")
+
+
 def _without_comment(written: str) -> str:
-    """A plain value without the comment after it ("post  # Jekyll's")."""
-    if written[:1] in "\"'":
-        return written
+    """A value without the comment after it ("post  # Jekyll's", or
+    '"My post"  # shown on the site')."""
+    quoted = _QUOTED.match(written)
+    if quoted is not None:
+        rest = written[quoted.end():]
+        return quoted.group(1) if not rest.strip() or re.match(r"\s+#", rest) else written
     found = re.search(r"\s+#", written)
     return written[:found.start()] if found else written
 
