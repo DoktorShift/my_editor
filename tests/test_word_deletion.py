@@ -186,3 +186,60 @@ def test_in_a_typed_bullet_it_deletes_words_not_the_indent():
     ed.textCursor().insertText("    • item two")
     QTest.keyClick(ed, BACK, WORD)
     assert ed.toPlainText() == "    • item "
+
+
+# What a Mac's own text view (NSTextView) leaves of a text after deleting a
+# word or to the line's edge from a caret: (text, caret, key, text after,
+# caret after). Carets count UTF-16 units, as Qt's and AppKit's do.
+# Option-Delete is "wb", Fn-Option-Delete "wf", Command-Delete "lb" and
+# Fn-Command-Delete "lf".
+NATIVE = [
+    ("hello world", 11, 'wb', "hello ", 6),
+    ("hello world", 0, 'wf', " world", 0),
+    ("hello world", 5, 'wf', "hello", 5),
+    ("hello world", 6, 'wb', "world", 0),
+    ("foo, bar", 3, 'wf', "foo", 3),
+    ("foo, bar", 5, 'wb', "bar", 0),
+    ("foo, bar", 4, 'wb', " bar", 0),
+    ("foo, bar.", 9, 'wb', "foo, ", 5),
+    ("say 😀😀 now", 8, 'wb', "say  now", 4),
+    ("say 😀😀 now", 4, 'wf', "say 😀 now", 4),
+    ("say 👍🏽 ok", 8, 'wb', "say  ok", 4),
+    ("say 😀😀 now", 4, 'wf', "say 😀 now", 4),
+    ("café au", 5, 'wb', " au", 0),
+    ("café au", 0, 'wf', " au", 0),
+    ("日本語のテキスト", 8, 'wb', "日本語の", 4),
+    ("日本語のテキスト", 0, 'wf', "のテキスト", 0),
+    ("中文 测试", 5, 'wb', "中文 ", 3),
+    ("it's done", 9, 'wb', "it's ", 5),
+    ("it's done", 4, 'wb', " done", 0),
+    ("a.b.c", 5, 'wb', "", 0),
+    ("x = y + z", 9, 'wb', "x = y + ", 8),
+    ("https://example.com/path", 24, 'wb', "https://example.com/", 20),
+    ("e-mail me", 6, 'wb', "e- me", 2),
+    ("e-mail me", 0, 'wf', "-mail me", 0),
+    ("one   two", 6, 'wb', "two", 0),
+    ("one   two", 3, 'wf', "one", 3),
+    ("end.  ", 6, 'wb', "", 0),
+    ("hello world", 8, 'lb', "rld", 0),
+    ("hello world", 3, 'lf', "hel", 3),
+    ("@alice hi", 6, 'wb', "@ hi", 1),
+    ("word nbsp", 9, 'wb', "word ", 5),
+]
+
+KEYS = {"wb": (BACK, WORD), "wf": (FORWARD, WORD), "lb": (BACK, LINE), "lf": (FORWARD, LINE)}
+
+
+@pytest.mark.parametrize("text, at, op, after, caret_after", NATIVE)
+def test_a_mac_deletes_as_its_own_text_view_does(text, at, op, after, caret_after):
+    """Review M2: punctuation, Japanese without spaces and emoji, as AppKit
+    finds words, not as Qt does."""
+    if not MAC:
+        pytest.skip("a Mac's own word boundaries")
+    ed = editor(structure=False)
+    ed.setPlainText(text)
+    caret(ed, at)
+    QTest.keyClick(ed, *KEYS[op])
+    # (Qt's plain text writes a no-break space as a space.)
+    assert (ed.toPlainText(), ed.textCursor().position()) == (after.replace("\xa0", " "),
+                                                              caret_after)

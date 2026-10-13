@@ -33,6 +33,7 @@ import announce
 from doc_walk import iter_blocks
 import image_safety
 import link_url
+import mac_words
 import markdown_shortcuts
 import media_files
 import paste
@@ -1986,16 +1987,10 @@ class HtmlEditor(QTextEdit):
             if reach == "line":
                 cursor.movePosition(QTextCursor.MoveOperation.StartOfLine if kind == BACKWARD
                                     else QTextCursor.MoveOperation.EndOfLine, keep)
+            elif sys.platform == "darwin" and self._mac_word(cursor, kind):
+                pass                    # as the Mac's own text view finds words
             elif kind == BACKWARD:
                 cursor.movePosition(QTextCursor.MoveOperation.PreviousWord, keep)
-            elif sys.platform == "darwin":
-                # To the end of the word, as on a Mac (from a word's end,
-                # the next word's).
-                start = cursor.position()
-                cursor.movePosition(QTextCursor.MoveOperation.EndOfWord, keep)
-                if cursor.position() == start:
-                    cursor.movePosition(QTextCursor.MoveOperation.NextWord, keep)
-                    cursor.movePosition(QTextCursor.MoveOperation.EndOfWord, keep)
             else:
                 # To the start of the next word, as on Windows and Linux.
                 cursor.movePosition(QTextCursor.MoveOperation.NextWord, keep)
@@ -2009,6 +2004,20 @@ class HtmlEditor(QTextEdit):
             cursor.setPosition(low)
             cursor.setPosition(high, keep)
             cursor.removeSelectedText()
+
+    @staticmethod
+    def _mac_word(cursor: QTextCursor, kind: str) -> bool:
+        """Select the word Option-Delete (``kind`` BACKWARD) or
+        Fn-Option-Delete deletes from ``cursor``, where AppKit's text view
+        finds it (mac_words.py). False when AppKit cannot be asked."""
+        block = cursor.block()
+        found = mac_words.deleted_range(block.text(), cursor.positionInBlock(),
+                                        forward=kind == FORWARD)
+        if found is None:
+            return False
+        cursor.setPosition(block.position() + found[0])
+        cursor.setPosition(block.position() + found[1], QTextCursor.MoveMode.KeepAnchor)
+        return True
 
     # -------- Keys inside Markdown structure --------
     def _structure_key(self, e) -> bool:
