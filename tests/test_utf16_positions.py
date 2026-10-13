@@ -197,3 +197,51 @@ def test_the_preview_raises_footnote_marks_after_emoji_in_their_place():
     doc = pv.article_document(FOOTNOTED, pv.Article(title="T"))
     assert "🌸 A claim1 👨‍👩‍👧 and1 again." in doc.toPlainText()
     assert "🇩🇪 The source." in doc.toPlainText()
+
+
+def _styled(block):
+    """(words, format) of every piece the highlighter styled in ``block``,
+    the pieces' document places taken back to the text's."""
+    from PySide6.QtGui import QTextCharFormat
+    from doc_walk import text_index
+    text = block.text()
+    return [(text[text_index(text, r.start):text_index(text, r.start + r.length)],
+             QTextCharFormat(r.format)) for r in block.layout().formats()]
+
+
+@pytest.mark.parametrize("dark", [False, True])
+def test_code_after_emoji_is_colored_where_it_is(dark):
+    from PySide6.QtGui import QTextDocument
+    from highlighter import RichTextLook, SyntaxHighlighter
+    from tests.rich_text_helpers import block_named, from_markdown
+    from tests.test_code_highlighting import KEYWORD, STRING
+    line = "x = '🌸👍🏽' if '👨‍👩‍👧' else '🇩🇪'"
+    doc = from_markdown(f"```python\n{line}\n```\n")
+    look = RichTextLook(doc, is_dark=dark)
+    look.rehighlight()
+    pieces = _styled(block_named(doc, line))
+    strings = [w for w, f in pieces if f.foreground().color().name() == STRING[dark]]
+    keywords = [w for w, f in pieces if f.foreground().color().name() == KEYWORD[dark]]
+    assert strings == ["'🌸👍🏽'", "'👨‍👩‍👧'", "'🇩🇪'"] and keywords == ["if", "else"]
+    assert "".join(w for w, f in pieces) == line             # the code font, all of it
+    source = QTextDocument()
+    source.setPlainText(line)
+    file_look = SyntaxHighlighter(source, "python", is_dark=dark)
+    file_look.rehighlight()
+    pieces = _styled(source.begin())
+    assert [w for w, f in pieces if f.foreground().color().name() == STRING[dark]] == [
+        "'🌸👍🏽'", "'👨‍👩‍👧'", "'🇩🇪'"]
+
+
+def test_a_footnote_mark_after_emoji_is_raised_where_it_is():
+    from PySide6.QtGui import QTextCharFormat
+    from highlighter import RichTextLook
+    from tests.rich_text_helpers import block_named, from_markdown
+    doc = from_markdown(FOOTNOTED)
+    look = RichTextLook(doc, is_dark=False)
+    look.rehighlight()
+    raised = [w for w, f in _styled(block_named(doc, "🌸 A claim[^1] 👨‍👩‍👧 and[^1] again."))
+              if f.verticalAlignment() == QTextCharFormat.VerticalAlignment.AlignSuperScript]
+    assert raised == ["[^1]", "[^1]"]
+    note = _styled(block_named(doc, "[^1]: 🇩🇪 The source."))
+    assert "".join(w for w, f in note) == "[^1]: 🇩🇪 The source."   # quieter, all of it

@@ -29,6 +29,7 @@ from typing import Callable
 from PySide6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor, QFont, QTextFormat
 
 import rich_text
+from doc_walk import doc_length, doc_offset
 from fonts import code_font, monospace_family
 
 
@@ -526,7 +527,14 @@ class CodeRules:
         """Color one line through ``set_format(start, length, format)``.
         ``previous_state`` is what this returned for the line before (0 for
         none); the result is this line's, which says whether a multi-line
-        construct goes on into the next line."""
+        construct goes on into the next line. ``set_format`` gets places
+        in the document (where an emoji takes two), not in ``text``."""
+        if doc_length(text) != len(text):
+            in_document = set_format
+
+            def set_format(start: int, length: int, fmt) -> None:
+                in_document(doc_offset(text, start),
+                            doc_length(text[start:start + length]), fmt)
         # --- Continue a multiline construct from the previous block ---
         offset = 0
         if previous_state > 0:
@@ -670,7 +678,7 @@ class RichTextLook(QSyntaxHighlighter):
         return entry[1]
 
     def _highlight_code(self, block, text: str, language: str) -> None:
-        self.setFormat(0, len(text), self._code_line)
+        self.setFormat(0, doc_length(text), self._code_line)
         canonical = canonical_language(language)
         if canonical is None or canonical == "markdown":
             self.setCurrentBlockState(0)
@@ -690,14 +698,17 @@ class RichTextLook(QSyntaxHighlighter):
         start = 0
         definition = FOOTNOTE_DEFINITION.match(text)
         if definition is not None:
-            self.setFormat(0, len(text), self._footnote_text)
+            self.setFormat(0, doc_length(text), self._footnote_text)
             label = QTextCharFormat(self._footnote_text)
             label.setForeground(QColor(self._LINK[self._is_dark]))
             begin = text.index("[")
-            self.setFormat(begin, definition.end() - 1 - begin, label)
+            self.setFormat(doc_offset(text, begin),
+                           doc_length(text[begin:definition.end() - 1]), label)
             start = definition.end()
+        # (Places in the text, as places in the block: an emoji takes two.)
         for mark in FOOTNOTE_MARK.finditer(text, start):
-            self.setFormat(mark.start(), mark.end() - mark.start(), self._footnote_mark)
+            self.setFormat(doc_offset(text, mark.start()), doc_length(mark.group(0)),
+                           self._footnote_mark)
 
     def highlightBlock(self, text: str):
         block = self.currentBlock()
