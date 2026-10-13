@@ -163,7 +163,7 @@ If your signer (Amber, nsec.app) times out a decrypt approval or you dismiss the
 
 ## Media library (Blossom)
 
-Keep images, video and audio on your own Blossom media servers, browse them in a library that works like a Finder window or Photos, and put them into notes and articles. Every upload is authorised by a kind 24242 event your signer signs; no separate API key, no third-party account.
+Keep images, video, audio and PDFs on your own Blossom media servers, browse them in a library that works like a Finder window or Photos, and put them into notes and articles. Every upload is authorised by a kind 24242 event your signer signs; no separate API key, no third-party account.
 
 ### The library
 
