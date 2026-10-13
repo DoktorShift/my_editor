@@ -57,10 +57,11 @@ AUTHOR_MARKER = "author"
 
 def hashtags_from(text: str) -> Tuple[str, ...]:
     """The hashtags written in ``text``, separated by commas (one holding a
-    comma in double quotes, as hashtags_text writes it): without "#", each
+    comma in double quotes, as hashtags_text writes it; an apostrophe is a
+    letter, "don't panic"): without "#", each
     once whatever its case, in the order and the case written (an article's
     ``t`` tags are lowercase, as they are published)."""
-    return _hashtags(front_matter.split_items(text or ""))
+    return _hashtags(front_matter.split_items(text or "", quotes='"'))
 
 
 def hashtags_text(hashtags: Sequence[str]) -> str:

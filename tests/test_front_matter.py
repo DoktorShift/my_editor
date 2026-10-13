@@ -581,3 +581,32 @@ def test_the_comments_of_a_flow_list_over_lines_are_kept_after_it():
     assert out == "---\ntags: [a, b, new]   # the tags  # first\n---\nB\n"
     out = changed("---\ntags: [a, b]  # see [1]\n---\nB\n", hashtags=("a", "b", "new"))
     assert out == "---\ntags: [a, b, new]  # see [1]\n---\nB\n"
+
+
+# -- an apostrophe inside a word is no quote (round 6, H1 and L1) -------------
+
+@pytest.mark.parametrize("typed, tags", [
+    ("nostr, don't panic, books", ("nostr", "don't panic", "books")),
+    ("women's history, art, music", ("women's history", "art", "music")),
+    ("rock'n'roll, jazz", ("rock'n'roll", "jazz")),
+    ('a, "b, c", d', ("a", "b, c", "d")),
+])
+def test_an_apostrophe_in_a_typed_hashtag_is_part_of_it(typed, tags):
+    assert hashtags_from(typed) == tags
+    assert hashtags_from(hashtags_text(tags)) == tags
+
+
+@pytest.mark.parametrize("text, tags", [
+    ("---\ntags: o'reilly, books\n---\nB\n", ("o'reilly", "books")),
+    ("---\ntags: [women's history, art]\n---\nB\n", ("women's history", "art")),
+    ("---\ntags: [don't,\n  panic]\n---\nB\n", ("don't", "panic")),
+    ("---\ntags: ['it''s', b]\n---\nB\n", ("it's", "b")),
+])
+def test_an_apostrophe_in_a_files_hashtag_is_part_of_it(text, tags):
+    yaml = pytest.importorskip("yaml")
+    front, _ = front_matter.split(text)
+    assert from_front_matter(front).hashtags == tags
+    out = changed(text, hashtags=tags + ("Extra",))
+    parsed = yaml.safe_load(out.split("---\n")[1])["tags"]
+    parsed = parsed if isinstance(parsed, list) else [t.strip() for t in parsed.split(",")]
+    assert parsed == list(tags) + ["Extra"]

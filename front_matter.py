@@ -393,7 +393,7 @@ def _flow_list(written: str, more: Sequence[str]) -> Optional[Tuple[str, str]]:
                 inside.append(row[at:].strip())
                 break
             out.append(char)
-            if char in "\"'":
+            if char in "\"'" and _at_item_start(out[:-1], content):
                 quote = char
             elif char in "[{":
                 depth += 1
@@ -411,6 +411,17 @@ def _flow_list(written: str, more: Sequence[str]) -> Optional[Tuple[str, str]]:
         return None
     return (" ".join(part for part in content if part),
             tail.rstrip() + "".join("  " + comment for comment in inside))
+
+
+def _at_item_start(line: Sequence[str], before: Sequence[str]) -> bool:
+    """Whether what is read of a flow list so far (``before``, its earlier
+    lines, then ``line``) ends where an item starts: after "[", "{", ","
+    or ":" and blanks. Only there does a quote open an item."""
+    for text in ("".join(line), *reversed(before)):
+        text = text.rstrip()
+        if text:
+            return text[-1] in "[{,:"
+    return True
 
 
 def _key_and_rest(old: Entry) -> Tuple[Optional[str], str]:
@@ -613,21 +624,23 @@ def _unquote(value: str) -> str:
     return value
 
 
-def split_items(written: str) -> List[str]:
+def split_items(written: str, quotes: str = "\"'") -> List[str]:
     """The items of a comma-separated text, each as its text: one in
-    double quotes keeps its commas ('a, "b, c"' is two items)."""
-    return [_unquote(part) for part in _split_inline(written) if part.strip()]
+    quotes (of ``quotes``) keeps its commas ('a, "b, c"' is two items)."""
+    return [_unquote(part) for part in _split_inline(written, quotes) if part.strip()]
 
 
-def _split_inline(inside: str) -> List[str]:
-    """The items of an inline list, commas inside quotes kept."""
+def _split_inline(inside: str, quotes: str = "\"'") -> List[str]:
+    """The items of an inline list, commas inside quotes kept. A quote
+    opens only as an item's first character, as YAML and TOML read it: the
+    apostrophe of "don't" is a letter."""
     items, current, quote = [], "", ""
     for char in inside:
         if quote:
             current += char
             if char == quote:
                 quote = ""
-        elif char in "\"'":
+        elif char in quotes and not current.strip():
             quote = char
             current += char
         elif char == ",":
