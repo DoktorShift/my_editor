@@ -2562,7 +2562,7 @@ class MainWindow(QMainWindow):
              "bold": self.act_bold, "italic": self.act_italic, "strike": self.act_strike,
              "link": self.act_link, "bullets": self.act_bullets, "numbers": self.act_numbers,
              "checklist": self.act_checklist, "quote": self.act_quote},
-            self.m_style, dark=self.is_dark_theme)
+            self.m_style, self.m_insert, dark=self.is_dark_theme)
         self.format_toolbar.undo_menu.aboutToShow.connect(
             lambda: self._fill_history(self.format_toolbar.undo_menu, redo=False))
         self.format_toolbar.redo_menu.aboutToShow.connect(

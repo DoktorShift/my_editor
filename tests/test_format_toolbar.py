@@ -10,6 +10,8 @@ What must hold:
 
   Undo and Redo come first, before the style pop-up, each with the list
   of its steps beside it; their tips name the step ("Undo Typing (⌘Z)").
+  After the lists and the quote, one Insert button opens the window's own
+  Insert menu.
 
   The buttons show the style at the caret, and the pop-up names the
   paragraph style.
@@ -55,9 +57,12 @@ def toolbar():
     style_menu = QMenu()
     for title in ("Body", "Heading 1", "Heading 2", "Heading 3"):
         style_menu.addAction(title)
-    bar = FormatToolbar(actions, style_menu, dark=False, parent=window)
+    insert_menu = QMenu()
+    insert_menu.addAction("Table…")
+    bar = FormatToolbar(actions, style_menu, insert_menu, dark=False, parent=window)
     bar.window_ = window                     # keep the window alive with the bar
     bar.actions_ = actions
+    bar.insert_menu_ = insert_menu
     return bar
 
 
@@ -116,6 +121,22 @@ def test_undo_and_redo_tips_name_the_step(toolbar):
     assert toolbar.buttons["undo"].toolTip() == f"Undo Typing ({native})"
 
 
+def test_insert_opens_the_window_insert_menu(toolbar):
+    from PySide6.QtWidgets import QWidgetAction
+    trailing = toolbar.actions()[-2:]
+    assert toolbar.actions()[-3] is toolbar.actions_["quote"]
+    assert trailing[0].isSeparator()
+    assert isinstance(trailing[1], QWidgetAction)
+    button = trailing[1].defaultWidget()
+    assert button is toolbar.insert_button
+    assert button.menu() is toolbar.insert_menu_
+    assert button.popupMode() == QToolButton.ToolButtonPopupMode.InstantPopup
+    assert button.accessibleName() == "Insert" and button.toolTip() == "Insert"
+    for dark in (True, False):
+        toolbar.set_dark(dark)
+        assert not button.icon().isNull()
+
+
 def test_both_themes_draw_every_icon(toolbar):
     for dark in (True, False):
         toolbar.set_dark(dark)
@@ -160,6 +181,7 @@ app.processEvents()
 r = {}
 tb = w.format_toolbar
 r["shown"] = tb.isVisible()
+r["insert_menu"] = tb.insert_button.menu() is w.m_insert
 cursor = ed.document().find("bold")
 ed.setTextCursor(cursor)
 app.processEvents()
@@ -237,6 +259,7 @@ def test_a_narrow_german_window_keeps_the_view_switch_in_sight(tmp_path):
 def test_the_toolbar_in_the_window(tmp_path):
     r = run_window_script(WINDOW_SCRIPT, tmp_path)
     assert r["shown"]
+    assert r["insert_menu"]
     assert r["bold_checked"]
     assert r["style_body"] == "Body" and r["style_heading"] == "Heading 1"
     assert r["hidden"] and r["remembered"] is False and r["back"]
@@ -267,7 +290,7 @@ def test_a_control_that_cannot_act_looks_it(dark):
                for name in (*HISTORY, *LAYOUT) if name}
     menu = QMenu()
     menu.addAction("Body")
-    bar = FormatToolbar(actions, menu, dark=dark, parent=window)
+    bar = FormatToolbar(actions, menu, QMenu(), dark=dark, parent=window)
     window.addToolBar(bar)
     window.show()
     QApplication.processEvents()
@@ -290,6 +313,6 @@ def test_a_button_that_is_on_has_a_visible_edge(dark):
     actions = {name: registry.add(Command(f"format.{name}", name.capitalize(),
                                           commands.FORMAT, checkable=True))
                for name in (*HISTORY, *LAYOUT) if name}
-    bar = FormatToolbar(actions, QMenu(), dark=dark, parent=window)
+    bar = FormatToolbar(actions, QMenu(), QMenu(), dark=dark, parent=window)
     edge = DARK_MUTED_FG if dark else LIGHT_MUTED_FG
     assert "QToolButton:checked" in bar.styleSheet() and edge in bar.styleSheet()

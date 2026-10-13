@@ -343,6 +343,6 @@ def test_the_link_button_says_edit_link_to_a_screen_reader_too():
     from format_toolbar import HISTORY, LAYOUT, FormatToolbar
     window = QMainWindow()
     actions = {name: QAction(name.capitalize(), window) for name in (*HISTORY, *LAYOUT) if name}
-    bar = FormatToolbar(actions, QMenu(), dark=False, parent=window)
+    bar = FormatToolbar(actions, QMenu(), QMenu(), dark=False, parent=window)
     actions["link"].setText("Edit Link…")
     assert bar.buttons["link"].accessibleName() == "Edit Link"

@@ -37,14 +37,14 @@ msgid "Cancel"
 msgstr "Abbrechen"
 
 #: commands.py:47
-#: format_toolbar.py:87
+#: format_toolbar.py:89
 #: main_window.py:1741
 #: nostr/ui/imports_window.py:1035
 msgid "Undo"
 msgstr "Widerrufen"
 
 #: commands.py:54
-#: format_toolbar.py:87
+#: format_toolbar.py:89
 #: main_window.py:1743
 msgid "Redo"
 msgstr "Wiederholen"
@@ -353,54 +353,63 @@ msgstr "[Bild nicht verfügbar]"
 msgid "Page {number} of {count}"
 msgstr "Seite {number} von {count}"
 
-#: format_toolbar.py:62
 #: format_toolbar.py:64
+#: format_toolbar.py:66
 msgid "Format"
 msgstr "Format"
 
-#: format_toolbar.py:100
+#: format_toolbar.py:102
 #: main_window.py:2377
 msgid "Style"
 msgstr "Stil"
 
-#: format_toolbar.py:101
+#: format_toolbar.py:103
 msgid "Paragraph style"
 msgstr "Absatzstil"
 
-#: format_toolbar.py:124
+#: format_toolbar.py:130
+#: format_toolbar.py:131
+#: slash_menu.py:164
+#: slash_menu.py:172
+#: nostr/ui/media_library_dialog.py:1233
+#: nostr/ui/reference_popover.py:81
+msgid "Insert"
+msgstr "Einfügen"
+
+#: format_toolbar.py:139
 #: main_window.py:1812
 msgid "Body"
 msgstr "Text"
 
-#: format_toolbar.py:53
+#: format_toolbar.py:54
 #: pdf_viewer.py:178
 #, python-brace-format
 msgid "{command} ({keys})"
 msgstr "{command} ({keys})"
 
-#: format_toolbar.py:102
+#: format_toolbar.py:104
 #: main_window.py:5044
 #: main_window.py:1661
 msgctxt "paragraph style"
 msgid "Mixed"
 msgstr "Gemischt"
 
-#: format_toolbar.py:122
-#: format_toolbar.py:123
+#: format_toolbar.py:137
+#: format_toolbar.py:138
 msgid "More Formatting"
 msgstr "Weitere Formatierungen"
 
-#: format_toolbar.py:185
+#: format_toolbar.py:200
 msgctxt "format button"
 msgid "B"
 msgstr "F"
 
-#: format_toolbar.py:186
+#: format_toolbar.py:201
 msgctxt "format button"
 msgid "I"
 msgstr "K"
 
-#: format_toolbar.py:189
+#: format_toolbar.py:204
 msgctxt "format button"
 msgid "S"
 msgstr "S"
@@ -3255,13 +3264,6 @@ msgstr "Originalgröße"
 #: shortcuts_dialog.py:104
 msgid "Toggle table of contents"
 msgstr "Inhaltsverzeichnis ein- oder ausblenden"
-
-#: slash_menu.py:164
-#: slash_menu.py:172
-#: nostr/ui/media_library_dialog.py:1233
-#: nostr/ui/reference_popover.py:81
-msgid "Insert"
-msgstr "Einfügen"
 
 #: slash_menu.py:57
 msgctxt "slash menu section"

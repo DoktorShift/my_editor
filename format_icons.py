@@ -217,3 +217,12 @@ def redo(color: QColor) -> QIcon:
         painter.scale(-1, 1)
         _turning_arrow(painter, ink)
     return _icon(draw, color)
+
+
+def plus(color: QColor) -> QIcon:
+    """A plus sign: Insert."""
+    def draw(painter: QPainter, ink: QColor) -> None:
+        painter.setPen(_pen(ink, 1.7))
+        painter.drawLine(QPointF(9, 3.5), QPointF(9, 14.5))
+        painter.drawLine(QPointF(3.5, 9), QPointF(14.5, 9))
+    return _icon(draw, color)

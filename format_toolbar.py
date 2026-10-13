@@ -3,9 +3,10 @@
 """The format toolbar: the few text controls writers reach for most.
 
 Undo and Redo, the paragraph style (Body, Heading 1 to 3), bold, italic,
-strikethrough, a link, the two kinds of list and a quote. Everything else
-is in the menus, and the menus hold everything; this bar repeats only what
-is used all the time, the way TextEdit's and Pages' format bars do.
+strikethrough, a link, the two kinds of list, a quote, and one Insert
+button that opens the Insert menu itself (as Pages' toolbar has). Everything
+else is in the menus, and the menus hold everything; this bar repeats only
+what is used all the time, the way TextEdit's and Pages' format bars do.
 Underline has no button: Markdown and Nostr have no underline (it stays in
 the Format menu, for local files).
 
@@ -55,10 +56,11 @@ def tooltip_for(action: QAction, title: str = "") -> str:
 
 class FormatToolbar(QToolBar):
     """The format toolbar. ``actions`` maps HISTORY's and LAYOUT's names
-    to the window's commands; ``style_menu`` is Format > Style."""
+    to the window's commands; ``style_menu`` is Format > Style and
+    ``insert_menu`` the Insert menu."""
 
-    def __init__(self, actions: Dict[str, QAction], style_menu: QMenu, *,
-                 dark: bool = True, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, actions: Dict[str, QAction], style_menu: QMenu, insert_menu: QMenu,
+                 *, dark: bool = True, parent: Optional[QWidget] = None) -> None:
         super().__init__(_("Format"), parent)
         self.setObjectName("FormatToolbar")
         self.setAccessibleName(_("Format"))
@@ -115,6 +117,19 @@ class FormatToolbar(QToolBar):
             self.buttons[name] = button
             action.changed.connect(lambda a=action, b=button: self._describe(a, b))
             self._describe(action, button)
+        self.addSeparator()
+
+        # Insert: the window's Insert menu itself, so the same items in the
+        # same order, the Nostr ones only while an account is in use (the
+        # menu fills itself as it opens).
+        self.insert_button = QToolButton(self)
+        self.insert_button.setObjectName("InsertButton")
+        self.insert_button.setMenu(insert_menu)
+        self.insert_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.insert_button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        self.insert_button.setAccessibleName(_("Insert"))
+        self.insert_button.setToolTip(_("Insert"))
+        self.addWidget(self.insert_button)
         # The chevron that holds the buttons a narrow window has no room
         # for: Qt gives it no name, so a screen reader would say "button".
         more = self.findChild(QToolButton, "qt_toolbar_ext_button")
@@ -197,6 +212,7 @@ class FormatToolbar(QToolBar):
             self._actions[name].setIcon(icon)
             # The menus stay text, as menus on every platform are.
             self._actions[name].setIconVisibleInMenu(False)
+        self.insert_button.setIcon(format_icons.plus(ink))
         background, border, selection = (
             (DARK_MENU_BG, DARK_BORDER, DARK_SELECTION) if dark
             else (LIGHT_MENU_BG, LIGHT_BORDER, LIGHT_SELECTION))
@@ -227,7 +243,12 @@ class FormatToolbar(QToolBar):
                 border-color: {checked_edge};
             }}
             #FormatToolbar QToolButton:focus {{ border-color: {selection}; }}
-            #FormatToolbar QToolButton[popupMode="1"] {{ padding-right: 13px; }}
+            #FormatToolbar QToolButton[popupMode="1"],
+            #FormatToolbar QToolButton[popupMode="2"] {{ padding-right: 13px; }}
+            #FormatToolbar QToolButton::menu-indicator {{
+                subcontrol-origin: padding;
+                subcontrol-position: center right;
+            }}
             #FormatToolbar QToolButton::menu-button {{
                 background: transparent;
                 border: none;
