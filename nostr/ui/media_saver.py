@@ -230,6 +230,6 @@ def saves_failure(total: int, failures: list) -> Tuple[str, str]:
     and every reason, one per line, for its tooltip."""
     reasons = [save_failure(why, path) for path, why in failures]
     saved = total - len(failures)
-    head = ngettext("{saved} of {total} file was saved.", "{saved} of {total} files were saved.",
+    head = ngettext("Saved {saved} of {total} file.", "Saved {saved} of {total} files.",
                     total).format(saved=saved, total=total)
     return f"{head} {reasons[0]}", "\n".join(reasons)

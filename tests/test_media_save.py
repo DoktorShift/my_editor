@@ -738,7 +738,7 @@ def _three_with_one_gone(server):
     return [one, gone, three], names
 
 
-SUMMARY = ("2 of 3 files were saved. “Two.mp4” isn’t on your media servers anymore, so it "
+SUMMARY = ("Saved 2 of 3 files. “Two.mp4” isn’t on your media servers anymore, so it "
            "couldn’t be saved.")
 
 
@@ -814,3 +814,18 @@ def test_save_as_onto_a_link_into_a_folder_that_takes_no_new_file(tmp_path, monk
         assert os.path.islink(out / "Clip.mp4") and folder(out) == ["Clip.mp4"]
     finally:
         os.chmod(real.parent, 0o755)
+
+
+def test_a_save_to_folder_that_saved_one_file_says_so_in_the_singular(tmp_path, monkeypatch,
+                                                                      server):
+    one = blob(server, b"one" * 100)
+    gone = [blob(server, f"gone {n}".encode() * 100, day=n) for n in (1, 2)]
+    for media in gone:
+        del _Blobs.files[media.hash]
+    names = {one.hash: "One.mp4", gone[0].hash: "Two.mp4", gone[1].hash: "Three.mp4"}
+    world = library(tmp_path, monkeypatch, [one, *gone], names=names)
+    out = tmp_path / "out"
+    out.mkdir()
+    save_to_folder(monkeypatch, world, out)
+    assert wait_for(lambda: len(folder(out)) == 1 and not saving(world), 5)
+    assert world.dialog._status.text().startswith("Saved 1 of 3 files. ")
