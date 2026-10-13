@@ -24,7 +24,7 @@ import os
 from pathlib import Path
 from typing import Dict, Optional
 
-from PySide6.QtCore import QObject, QUrl, Signal
+from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
@@ -395,15 +395,22 @@ class FileDownload(QObject):
         self._file = None
         self._reply = None
         self._why = ""
+        self._ended = False
 
     def start(self) -> None:
+        """Begin. A download that cannot begin (an address not allowed, a
+        folder that is gone or may not be written in) says so on the next
+        turn of the event loop, once whoever started it is listening."""
+        problem = ""
         if not url_safety.is_safe_media_url(self._url):
-            self._end("unsafe")
-            return
-        try:
-            self._file = open(self._part, "wb")
-        except OSError:
-            self._end("write")
+            problem = "unsafe"
+        else:
+            try:
+                self._file = open(self._part, "wb")
+            except OSError:
+                problem = "write"
+        if problem:
+            QTimer.singleShot(0, self, lambda: self._end(problem))
             return
         request = QNetworkRequest(QUrl(self._url))
         request.setRawHeader(b"User-Agent", b"my-editor-blossom-save/1")
@@ -418,9 +425,13 @@ class FileDownload(QObject):
         reply.finished.connect(self._on_finished)
 
     def cancel(self) -> None:
-        if self._reply is not None and not self._why:
-            self._why = "cancelled"
-            self._reply.abort()
+        if self._ended or self._why:
+            return
+        self._why = "cancelled"
+        if self._reply is not None:
+            self._reply.abort()            # finished follows, and ends it
+        else:
+            self._end("cancelled")
 
     def _on_progress(self, received: int, total: int) -> None:
         if received > self._limit or (total > 0 and total > self._limit):
@@ -470,6 +481,9 @@ class FileDownload(QObject):
         return ""
 
     def _end(self, why: str) -> None:
+        if self._ended:
+            return
+        self._ended = True
         if self._file is not None:
             self._file.close()
             self._file = None
