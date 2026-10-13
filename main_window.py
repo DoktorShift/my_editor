@@ -6751,7 +6751,7 @@ class MainWindow(QMainWindow):
                      if percent is not None else _("Uploading…"))
         else:
             words = _("Not uploaded yet. Publishing or saving as a draft uploads it.")
-        return media_card.render(title, words, dark=self.is_dark_theme)
+        return media_card.render(title, words, dark=self.is_dark_theme, mime=asset.mime)
 
     def _redraw_media_cards(self) -> None:
         """Draw the cards of the audio and video in the open documents

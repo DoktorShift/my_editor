@@ -517,3 +517,26 @@ def test_the_card_follows_the_appearance(tmp_path):
     song.write_bytes(BODY)
     r = run_window_script(THEME_SCRIPT, tmp_path, str(song), SHA)
     assert r["light"] > 200 and r["dark"] < 80
+
+
+def test_the_card_shows_what_the_file_is_never_a_control_that_does_nothing():
+    """The card plays nothing (Qt Multimedia is not in the app), so it
+    shows no play button: a glyph for audio or for video, the name and how
+    the upload goes. It keeps a little room above and below, as a
+    picture's paragraph does."""
+    from nostr.ui import media_card
+    audio = media_card.render("Audio · a.mp3", "", dark=False, mime="audio/mpeg")
+    video = media_card.render("Audio · a.mp3", "", dark=False, mime="video/mp4")
+    ratio = audio.devicePixelRatio()
+
+    def glyph(image):
+        return [image.pixelColor(int(x * ratio), int(y * ratio)).name()
+                for x in range(16, 43, 2)
+                for y in range(int(media_card.HEIGHT / 2) - 11, int(media_card.HEIGHT / 2) + 11, 2)]
+
+    assert glyph(audio) != glyph(video)                       # what the file is
+    middle = int(media_card.WIDTH / 2 * ratio)
+    for image in (audio, video):
+        assert image.pixelColor(middle, int(media_card.MARGIN / 2 * ratio)).alpha() == 0
+        assert image.pixelColor(
+            middle, int((media_card.HEIGHT - media_card.MARGIN / 2) * ratio)).alpha() == 0
