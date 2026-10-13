@@ -359,3 +359,35 @@ def test_an_html_file_links_to_the_uploaded_file_with_its_extension():
     uploaded = types.SimpleNamespace(mime="audio/mpeg", remote_url=URL, data=b"")
     out = document_to_html(doc, asset_resolver=lambda name: uploaded)
     assert f'<a href="{URL}.mp3">▶ Audio: song.mp3</a>' in out
+
+
+@pytest.mark.parametrize("uploaded", [True, False])
+def test_a_pdf_or_a_print_shows_audio_as_its_link_never_a_grey_box(uploaded, tmp_path):
+    """A PDF and a printed page link to an uploaded audio or video file,
+    as the HTML export does, and leave out one not uploaded yet: never the
+    grey stand-in for a picture that can't be read."""
+    import types
+    from PySide6.QtGui import QPdfWriter, QTextDocument, QTextImageFormat
+    from export_pdf import paginate
+    doc = QTextDocument()
+    cursor = doc.rootFrame().firstCursorPosition()
+    cursor.insertText("Before.")
+    cursor.insertBlock()
+    image = QTextImageFormat()
+    image.setName(f"myeditor-asset:{SHA}")
+    image.setProperty(QTextImageFormat.ImageAltText, "song.mp3")
+    cursor.insertImage(image)
+    cursor.insertBlock()
+    cursor.insertText("After.")
+    asset = types.SimpleNamespace(mime="audio/mpeg", remote_url=URL if uploaded else "",
+                                  data=BODY)
+    writer = QPdfWriter(str(tmp_path / "out.pdf"))
+    paged = paginate(doc, writer, writer.resolution(), asset_resolver=lambda name: asset)
+    text = paged.clone.toPlainText()
+    assert "￼" not in text and "Before." in text and "After." in text
+    if uploaded:
+        found = paged.clone.find("▶ Audio: song.mp3")
+        assert found.charFormat().anchorHref() == f"{URL}.mp3"
+    else:
+        assert "song.mp3" not in text
+    assert doc.toPlainText().count("￼") == 1          # the document is untouched

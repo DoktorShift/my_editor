@@ -38,11 +38,13 @@ from PySide6.QtGui import (
     QPainter,
     QPalette,
     QPdfWriter,
+    QTextCharFormat,
     QTextCursor,
     QTextDocument,
     QTextImageFormat,
 )
 
+import media_files
 from atomic_file import read_json, write_json
 from fonts import monospace_font
 from i18n import _
@@ -147,6 +149,43 @@ def _prime_clone_images(clone, policy: ImageRootPolicy, asset_resolver) -> dict:
     return sizes
 
 
+def _media_as_links(clone, asset_resolver) -> None:
+    """Audio and video on paper: a link to the file once it is on a media
+    server, as the HTML export writes it; left out while it is not. Never
+    a picture of it, never the grey stand-in."""
+    if asset_resolver is None:
+        return
+    found = []
+    block = clone.begin()
+    while block.isValid():
+        it = block.begin()
+        while not it.atEnd():
+            fragment = it.fragment()
+            fmt = fragment.charFormat()
+            if fragment.isValid() and fmt.isImageFormat():
+                resolved = asset_resolver(fmt.toImageFormat().name())
+                mime = str(getattr(resolved, "mime", "") or "")
+                if media_files.kind_of(mime) is not None:
+                    found.append((fragment.position(), fragment.length(), resolved, fmt))
+            it += 1
+        block = block.next()
+    for position, length, resolved, fmt in reversed(found):
+        cursor = QTextCursor(clone)
+        cursor.setPosition(position)
+        cursor.setPosition(position + length, QTextCursor.MoveMode.KeepAnchor)
+        remote = str(getattr(resolved, "remote_url", "") or "")
+        if not remote:
+            cursor.removeSelectedText()
+            continue
+        mime = str(resolved.mime)
+        name = str(fmt.toImageFormat().property(QTextImageFormat.ImageAltText) or "")
+        link = QTextCharFormat()
+        link.setAnchor(True)
+        link.setAnchorHref(media_files.address_with_extension(remote, mime))
+        link.setFontUnderline(True)
+        cursor.insertText(media_files.link_words(mime, name or remote.rsplit("/", 1)[-1]), link)
+
+
 def _iter_image_names(doc):
     block = doc.begin()
     while block.isValid():
@@ -226,6 +265,7 @@ def paginate(doc, device, resolution: int, *, image_roots=(), asset_resolver=Non
     content_h = float(paint.height()) - footer_px
 
     clone = doc.clone()
+    _media_as_links(clone, asset_resolver)
     sizes = _prime_clone_images(clone, ImageRootPolicy(image_roots), asset_resolver)
     # Layout must measure fonts against the device's dpi, exactly as
     # doc.print_() would.

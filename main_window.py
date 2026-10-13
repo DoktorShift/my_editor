@@ -3567,13 +3567,13 @@ class MainWindow(QMainWindow):
 
     def _say_saved(self, ed, path: str) -> None:
         """Say a document was saved, and whether audio or video in it is
-        still to go in. A Markdown or HTML file holds such a file once it is
-        on a media server: until then the save writes what it can, and the
+        still to go in. A Markdown, HTML or PDF file holds such a file once
+        it is on a media server (its address, or a link to it): until then the save writes what it can, and the
         document is edited again when the upload is done
         (_on_media_uploaded), as Pages does when an inserted item finishes
         loading after a save."""
         waiting = (self._media_not_uploaded(ed.document())
-                   if path.lower().endswith((".md", ".html", ".htm")) else [])
+                   if path.lower().endswith((".md", ".html", ".htm", ".pdf")) else [])
         ed._media_left_out = {asset.sha256 for asset in waiting}
         if not waiting:
             self.status.showMessage(_("Saved: {path}").format(path=path))
@@ -4028,7 +4028,7 @@ class MainWindow(QMainWindow):
             editor._recovered_title = ""
             editor.document().setModified(False)
             self._update_tab_title()
-            self.status.showMessage(_("Saved: {path}").format(path=path))
+            self._say_saved(editor, path)
             return True
         except Exception as e:
             inform(self, title=_("Couldn't save \u201c{name}\u201d").format(
