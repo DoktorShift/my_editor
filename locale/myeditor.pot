@@ -1347,8 +1347,8 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: main_window.py:7624
-msgid "A draft whose slug holds a secret key is deleted by a request instead, which doesn't send the key again. Your other devices, and apps that follow such requests, will treat it as removed. This action can't be undone."
-msgid_plural "Drafts whose slugs hold a secret key are deleted by a request each instead, which doesn't send the keys again. Your other devices, and apps that follow such requests, will treat them as removed. This action can't be undone."
+msgid "A draft whose link name holds a secret key is deleted by a request instead, which doesn't send the key again. Your other devices, and apps that follow such requests, will treat it as removed. This action can't be undone."
+msgid_plural "Drafts whose link names hold a secret key are deleted by a request each instead, which doesn't send the keys again. Your other devices, and apps that follow such requests, will treat them as removed. This action can't be undone."
 msgstr[0] ""
 msgstr[1] ""
 
@@ -4294,7 +4294,7 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: nostr/publisher.py:1075
-msgid "This draft can’t be deleted: its slug holds a secret key, and the version on your relays isn’t known here. Refresh your drafts and try again."
+msgid "This draft can’t be deleted: its link name holds a secret key, and the version on your relays isn’t known here. Refresh your drafts and try again."
 msgstr ""
 
 #: nostr/publisher.py:903
@@ -5870,6 +5870,7 @@ msgstr ""
 
 #: nostr/ui/article_details_panel.py:175
 #: nostr/ui/publish_article_dialog.py:381
+#: nostr/ui/stash_kind_dialog.py:400
 msgid "Article title"
 msgstr ""
 
@@ -5912,7 +5913,9 @@ msgid "Advanced"
 msgstr ""
 
 #: nostr/ui/article_details_panel.py:241
-msgid "Slug (article ID)"
+#: nostr/ui/publish_article_dialog.py:434
+#: nostr/ui/stash_kind_dialog.py:410
+msgid "Link name"
 msgstr ""
 
 #: nostr/ui/article_details_panel.py:277
@@ -5937,11 +5940,11 @@ msgstr ""
 #: nostr/ui/article_details_panel.py:529
 #: nostr/ui/publish_article_dialog.py:433
 #: nostr/ui/stash_kind_dialog.py:406
-msgid "article-slug"
+msgid "my-article"
 msgstr ""
 
 #: nostr/ui/article_details_panel.py:347
-msgid "A saved or published article keeps its address; saving it under another one makes another article."
+msgid "A saved or published article keeps its link name; saving it under another one makes another article."
 msgstr ""
 
 #: nostr/ui/article_details_panel.py:470
@@ -8652,10 +8655,6 @@ msgstr ""
 msgid "Publish"
 msgstr ""
 
-#: nostr/ui/publish_article_dialog.py:434
-msgid "Link name"
-msgstr ""
-
 #: nostr/ui/publish_article_dialog.py:452
 msgid "A saved or published article keeps its link name; publishing it under another one makes another article."
 msgstr ""
@@ -9122,29 +9121,29 @@ msgstr ""
 msgid "End-to-end encrypted to your Nostr key. Only you can decrypt it. Shows up on your other devices that use the same account."
 msgstr ""
 
-#: nostr/ui/secret_key_check.py:26
-msgid "A secret key can’t be part of the slug, which is published as it is. Change the title or the slug."
+#: nostr/ui/secret_key_check.py:27
+msgid "A secret key can’t be part of the link name, which is published as it is. Change the title or the link name."
 msgstr ""
 
-#: nostr/ui/secret_key_check.py:62
-#: nostr/ui/secret_key_check.py:51
-#: nostr/ui/secret_key_check.py:56
+#: nostr/ui/secret_key_check.py:63
+#: nostr/ui/secret_key_check.py:52
+#: nostr/ui/secret_key_check.py:57
 msgid "This text contains a secret key"
 msgstr ""
 
-#: nostr/ui/secret_key_check.py:64
+#: nostr/ui/secret_key_check.py:65
 msgid "Anyone who has it can publish as its owner, and once published it can never be taken back. Replace it with the public key, which only says who it belongs to?"
 msgstr ""
 
-#: nostr/ui/secret_key_check.py:43
+#: nostr/ui/secret_key_check.py:44
 msgid "This text can’t be checked for a secret key"
 msgstr ""
 
-#: nostr/ui/secret_key_check.py:58
+#: nostr/ui/secret_key_check.py:59
 msgid "Anyone who has it can publish as its owner, and once published it can never be taken back. Remove it before publishing."
 msgstr ""
 
-#: nostr/ui/secret_key_check.py:68
+#: nostr/ui/secret_key_check.py:69
 msgid "Replace with Public Key"
 msgstr ""
 
@@ -9155,14 +9154,6 @@ msgstr ""
 
 #: nostr/ui/stash_kind_dialog.py:349
 msgid "Drafts are end-to-end encrypted to your key. Pick the kind so the draft can be promoted to a publish later."
-msgstr ""
-
-#: nostr/ui/stash_kind_dialog.py:400
-msgid "Article title (used to derive the slug)"
-msgstr ""
-
-#: nostr/ui/stash_kind_dialog.py:410
-msgid "Slug (the draft's d-tag)"
 msgstr ""
 
 #: nostr/ui/stash_kind_dialog.py:421
@@ -9178,7 +9169,7 @@ msgid "Short note"
 msgstr ""
 
 #: nostr/ui/stash_kind_dialog.py:362
-msgid "A quick thought, as plain text. Published as a note. No slug: the draft gets a private identifier."
+msgid "A quick thought, as plain text. Published as a note. No link name: the draft gets a private identifier."
 msgstr ""
 
 #: nostr/ui/stash_kind_dialog.py:368
@@ -9186,7 +9177,7 @@ msgid "Long-form article"
 msgstr ""
 
 #: nostr/ui/stash_kind_dialog.py:369
-msgid "A Markdown post with a fixed slug. Published as an article. The slug ties the draft to the article it becomes, so saving it again replaces it."
+msgid "A Markdown post with a fixed link name. Published as an article. The link name ties the draft to the article it becomes, so saving it again replaces it."
 msgstr ""
 
 #: nostr/ui/stash_kind_dialog.py:423

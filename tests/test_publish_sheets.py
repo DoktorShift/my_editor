@@ -36,6 +36,7 @@ What must hold:
 """
 
 import os
+import re
 import sys
 import types
 
@@ -380,3 +381,23 @@ def test_the_note_sheet_names_every_control(tmp_path):
     sheet = note(tmp_path)
     assert unnamed_controls(sheet) == []
     sheet.close()
+
+
+# -- one word for an article's identifier ----------------------------------------------------
+
+def test_an_articles_identifier_is_its_link_name_wherever_it_is_named():
+    """Publish as Article, Article Details, Save as Nostr Draft and the
+    drafts' messages call the article's identifier its link name: never
+    "slug", "article ID" or "d-tag", not even in an example."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "i18n_script", os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "scripts", "i18n.py"))
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    messages, _problems = script.extract()
+    named = [key[1] for key in messages
+             if re.search(r"slug|article ID|d-tag", key[1], re.IGNORECASE)]
+    assert named == []
+    from nostr.ui.secret_key_check import SLUG_HOLDS_A_KEY
+    assert "link name" in SLUG_HOLDS_A_KEY

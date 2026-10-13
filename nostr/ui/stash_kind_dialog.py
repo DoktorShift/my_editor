@@ -361,14 +361,14 @@ class StashKindDialog(QDialog):
             title=_("Short note"),
             hint=_(
                 "A quick thought, as plain text. Published as a note. "
-                "No slug: the draft gets a private identifier."
+                "No link name: the draft gets a private identifier."
             ),
         )
         self._article_card = _KindCard(
             title=_("Long-form article"),
             hint=_(
-                "A Markdown post with a fixed slug. Published as an "
-                "article. The slug ties the draft to the article it "
+                "A Markdown post with a fixed link name. Published as an "
+                "article. The link name ties the draft to the article it "
                 "becomes, so saving it again replaces it."
             ),
         )
@@ -397,17 +397,17 @@ class StashKindDialog(QDialog):
         article_layout.addWidget(_divider())
 
         self._title_edit = QLineEdit()
-        self._title_edit.setPlaceholderText(_("Article title (used to derive the slug)"))
+        self._title_edit.setPlaceholderText(_("Article title"))
         self._title_edit.setText(suggested_title)
         self._title_edit.textChanged.connect(self._on_title_changed)
         article_layout.addWidget(_field(_("Title"), self._title_edit))
 
         self._slug_edit = QLineEdit()
-        self._slug_edit.setPlaceholderText(_("article-slug"))
+        self._slug_edit.setPlaceholderText(_("my-article"))
         seed_slug = suggested_slug or (slugify(suggested_title) if suggested_title else "")
         self._slug_edit.setText(seed_slug)
         self._slug_edit.textEdited.connect(self._on_slug_edited)
-        slug_field = _field(_("Slug (the draft's d-tag)"), self._slug_edit)
+        slug_field = _field(_("Link name"), self._slug_edit)
         # Why the slug can't be saved, under it (the draft's slug is not
         # encrypted: relays and readers see it).
         self._slug_problem = QLabel()

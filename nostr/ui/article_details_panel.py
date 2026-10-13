@@ -238,7 +238,7 @@ class ArticleDetailsPanel(QFrame):
         advanced.setContentsMargins(0, 0, 0, 0)
         advanced.setSpacing(6)
         self.identifier_edit = QLineEdit()
-        self._add_labeled(advanced, _("Slug (article ID)"), self.identifier_edit)
+        self._add_labeled(advanced, _("Link name"), self.identifier_edit)
         self._add_kept_note(advanced, "slug")
         self.identifier_note = QLabel()
         self.identifier_note.setObjectName("article_details_hint")
@@ -344,7 +344,7 @@ class ArticleDetailsPanel(QFrame):
                 self._show_people(details)
             self.identifier_edit.setReadOnly(fixed_identifier or "slug" in self._kept)
             self.identifier_note.setText(
-                _("A saved or published article keeps its address; saving it under "
+                _("A saved or published article keeps its link name; saving it under "
                   "another one makes another article.") if fixed_identifier else "")
             self.identifier_note.setVisible(fixed_identifier)
             self._show_first_published(details.published_at)
@@ -526,7 +526,7 @@ class ArticleDetailsPanel(QFrame):
         """An empty address shows the one publishing would make of the
         title, as a placeholder: it follows the title until it is typed."""
         title = self.title_edit.text().strip()
-        self.identifier_edit.setPlaceholderText(slugify(title) if title else _("article-slug"))
+        self.identifier_edit.setPlaceholderText(slugify(title) if title else _("my-article"))
 
     def _say_cover_problem(self, reason: str) -> None:
         announce.field_problem(self.cover.url_edit, self.cover_problem, reason)

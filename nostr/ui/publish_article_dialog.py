@@ -430,7 +430,7 @@ class PublishArticleDialog(QDialog):
 
         # Show Details: the link name, the cover's address, the first date.
         self._slug_edit = QLineEdit()
-        self._slug_edit.setPlaceholderText(_("article-slug"))
+        self._slug_edit.setPlaceholderText(_("my-article"))
         self._slug_edit.setAccessibleName(_("Link name"))
         self._slug_edit.setText(default_slug or (slugify(default_title) if default_title
                                                  else ""))

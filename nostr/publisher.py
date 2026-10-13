@@ -1072,7 +1072,7 @@ class DraftDeleteJob(QObject):
         the key again (as its d tag), so the draft's wrap is deleted by its
         id alone, with a NIP-09 request that names no address."""
         if not self._replaced_wrap_id:
-            self._emit_failed(_("This draft can’t be deleted: its slug holds a secret key, "
+            self._emit_failed(_("This draft can’t be deleted: its link name holds a secret key, "
                                 "and the version on your relays isn’t known here. Refresh "
                                 "your drafts and try again."))
             return

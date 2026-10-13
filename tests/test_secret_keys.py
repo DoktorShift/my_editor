@@ -459,7 +459,7 @@ def test_a_key_in_the_slug_never_leaves_the_computer(tmp_path, monkeypatch):
     assert dialog._slug_edit.text() == "backup"                 # never with a key
     dialog._slug_edit.setText(f"backup-{NSEC}")
     dialog._on_slug_edited(dialog._slug_edit.text())
-    assert not dialog._slug_problem.isHidden() and "slug" in dialog._slug_problem.text()
+    assert not dialog._slug_problem.isHidden() and "link name" in dialog._slug_problem.text()
     assert dialog._details_toggle.isChecked() and dialog._slug_edit.isVisibleTo(dialog)
     assert not dialog._publish_btn.isEnabled()
     dialog._on_publish()
@@ -483,7 +483,7 @@ def test_save_as_draft_refuses_a_key_in_the_slug(monkeypatch):
     dialog = StashKindDialog(default=StashKind.ARTICLE, suggested_slug=f"backup-{NSEC}")
     assert not dialog._save_btn.isEnabled()
     assert not dialog._slug_problem.isHidden()
-    assert "slug" in dialog._slug_problem.text()
+    assert "link name" in dialog._slug_problem.text()
     assert dialog._slug_edit.accessibleDescription() == dialog._slug_problem.text()
     assert heard == []                         # not shown yet: no one to hear it
     dialog.show()                              # opened with it: said once, now

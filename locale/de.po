@@ -1352,10 +1352,10 @@ msgstr[0] "Auf deinen Relays wird ein leerer Ersatz veröffentlicht. Andere Apps
 msgstr[1] "Auf deinen Relays wird ein leerer Ersatz veröffentlicht. Andere Apps (und deine anderen Geräte) behandeln die Entwürfe dann als gelöscht. Das lässt sich nicht rückgängig machen."
 
 #: main_window.py:7624
-msgid "A draft whose slug holds a secret key is deleted by a request instead, which doesn't send the key again. Your other devices, and apps that follow such requests, will treat it as removed. This action can't be undone."
-msgid_plural "Drafts whose slugs hold a secret key are deleted by a request each instead, which doesn't send the keys again. Your other devices, and apps that follow such requests, will treat them as removed. This action can't be undone."
-msgstr[0] "Ein Entwurf, in dessen Slug ein geheimer Schlüssel steht, wird stattdessen mit einer Anfrage gelöscht, die den Schlüssel nicht noch einmal sendet. Deine anderen Geräte und Apps, die solche Anfragen beachten, behandeln ihn dann als gelöscht. Das lässt sich nicht rückgängig machen."
-msgstr[1] "Entwürfe, in deren Slug ein geheimer Schlüssel steht, werden stattdessen mit je einer Anfrage gelöscht, die die Schlüssel nicht noch einmal sendet. Deine anderen Geräte und Apps, die solche Anfragen beachten, behandeln sie dann als gelöscht. Das lässt sich nicht rückgängig machen."
+msgid "A draft whose link name holds a secret key is deleted by a request instead, which doesn't send the key again. Your other devices, and apps that follow such requests, will treat it as removed. This action can't be undone."
+msgid_plural "Drafts whose link names hold a secret key are deleted by a request each instead, which doesn't send the keys again. Your other devices, and apps that follow such requests, will treat them as removed. This action can't be undone."
+msgstr[0] "Ein Entwurf, in dessen Linknamen ein geheimer Schlüssel steht, wird stattdessen mit einer Anfrage gelöscht, die den Schlüssel nicht noch einmal sendet. Deine anderen Geräte und Apps, die solche Anfragen beachten, behandeln ihn dann als gelöscht. Das lässt sich nicht rückgängig machen."
+msgstr[1] "Entwürfe, in deren Linknamen ein geheimer Schlüssel steht, werden stattdessen mit je einer Anfrage gelöscht, die die Schlüssel nicht noch einmal sendet. Deine anderen Geräte und Apps, die solche Anfragen beachten, behandeln sie dann als gelöscht. Das lässt sich nicht rückgängig machen."
 
 #: main_window.py:7696
 msgid "Deleting drafts…"
@@ -4309,8 +4309,8 @@ msgstr[0] "Veröffentlicht. Angenommen von {accepted}/{total} Relay."
 msgstr[1] "Veröffentlicht. Angenommen von {accepted}/{total} Relays."
 
 #: nostr/publisher.py:1075
-msgid "This draft can’t be deleted: its slug holds a secret key, and the version on your relays isn’t known here. Refresh your drafts and try again."
-msgstr "Dieser Entwurf lässt sich nicht löschen: In seinem Slug steht ein geheimer Schlüssel, und die Fassung auf deinen Relays ist hier nicht bekannt. Lade deine Entwürfe neu und versuche es noch einmal."
+msgid "This draft can’t be deleted: its link name holds a secret key, and the version on your relays isn’t known here. Refresh your drafts and try again."
+msgstr "Dieser Entwurf lässt sich nicht löschen: In seinem Linknamen steht ein geheimer Schlüssel, und die Fassung auf deinen Relays ist hier nicht bekannt. Lade deine Entwürfe neu und versuche es noch einmal."
 
 #: nostr/publisher.py:903
 #, python-brace-format
@@ -5885,6 +5885,7 @@ msgstr "Artikeldetails schließen"
 
 #: nostr/ui/article_details_panel.py:175
 #: nostr/ui/publish_article_dialog.py:381
+#: nostr/ui/stash_kind_dialog.py:400
 msgid "Article title"
 msgstr "Titel des Artikels"
 
@@ -5927,8 +5928,10 @@ msgid "Advanced"
 msgstr "Erweitert"
 
 #: nostr/ui/article_details_panel.py:241
-msgid "Slug (article ID)"
-msgstr "Slug (Artikel-ID)"
+#: nostr/ui/publish_article_dialog.py:434
+#: nostr/ui/stash_kind_dialog.py:410
+msgid "Link name"
+msgstr "Linkname"
 
 #: nostr/ui/article_details_panel.py:277
 msgid "Kept as written in the file."
@@ -5952,12 +5955,12 @@ msgstr "Noch nicht veröffentlicht."
 #: nostr/ui/article_details_panel.py:529
 #: nostr/ui/publish_article_dialog.py:433
 #: nostr/ui/stash_kind_dialog.py:406
-msgid "article-slug"
+msgid "my-article"
 msgstr "mein-artikel"
 
 #: nostr/ui/article_details_panel.py:347
-msgid "A saved or published article keeps its address; saving it under another one makes another article."
-msgstr "Ein gespeicherter oder veröffentlichter Artikel behält seine Adresse; unter einer anderen gespeichert, wird er ein anderer Artikel."
+msgid "A saved or published article keeps its link name; saving it under another one makes another article."
+msgstr "Ein gespeicherter oder veröffentlichter Artikel behält seinen Linknamen; unter einem anderen gespeichert, wird er ein anderer Artikel."
 
 #: nostr/ui/article_details_panel.py:470
 #: nostr/ui/publish_sheet.py:189
@@ -8671,10 +8674,6 @@ msgstr "Als Artikel veröffentlichen"
 msgid "Publish"
 msgstr "Veröffentlichen"
 
-#: nostr/ui/publish_article_dialog.py:434
-msgid "Link name"
-msgstr "Linkname"
-
 #: nostr/ui/publish_article_dialog.py:452
 msgid "A saved or published article keeps its link name; publishing it under another one makes another article."
 msgstr "Ein gespeicherter oder veröffentlichter Artikel behält seinen Linknamen; unter einem anderen veröffentlicht, wird er ein anderer Artikel."
@@ -9141,29 +9140,29 @@ msgstr "Als privaten Nostr-Entwurf speichern"
 msgid "End-to-end encrypted to your Nostr key. Only you can decrypt it. Shows up on your other devices that use the same account."
 msgstr "Ende-zu-Ende mit deinem Nostr-Schlüssel verschlüsselt. Nur du kannst ihn entschlüsseln. Erscheint auf deinen anderen Geräten, die dasselbe Konto verwenden."
 
-#: nostr/ui/secret_key_check.py:26
-msgid "A secret key can’t be part of the slug, which is published as it is. Change the title or the slug."
-msgstr "Ein geheimer Schlüssel darf nicht im Slug stehen, denn der Slug wird so veröffentlicht, wie er ist. Ändere den Titel oder den Slug."
+#: nostr/ui/secret_key_check.py:27
+msgid "A secret key can’t be part of the link name, which is published as it is. Change the title or the link name."
+msgstr "Ein geheimer Schlüssel darf nicht im Linknamen stehen, denn der Linkname wird so veröffentlicht, wie er ist. Ändere den Titel oder den Linknamen."
 
-#: nostr/ui/secret_key_check.py:62
-#: nostr/ui/secret_key_check.py:51
-#: nostr/ui/secret_key_check.py:56
+#: nostr/ui/secret_key_check.py:63
+#: nostr/ui/secret_key_check.py:52
+#: nostr/ui/secret_key_check.py:57
 msgid "This text contains a secret key"
 msgstr "Dieser Text enthält einen geheimen Schlüssel"
 
-#: nostr/ui/secret_key_check.py:64
+#: nostr/ui/secret_key_check.py:65
 msgid "Anyone who has it can publish as its owner, and once published it can never be taken back. Replace it with the public key, which only says who it belongs to?"
 msgstr "Wer ihn hat, kann im Namen seines Besitzers veröffentlichen, und einmal veröffentlicht, lässt er sich nie mehr zurückholen. Durch den öffentlichen Schlüssel ersetzen, der nur sagt, wem er gehört?"
 
-#: nostr/ui/secret_key_check.py:43
+#: nostr/ui/secret_key_check.py:44
 msgid "This text can’t be checked for a secret key"
 msgstr "Dieser Text lässt sich nicht auf einen geheimen Schlüssel prüfen"
 
-#: nostr/ui/secret_key_check.py:58
+#: nostr/ui/secret_key_check.py:59
 msgid "Anyone who has it can publish as its owner, and once published it can never be taken back. Remove it before publishing."
 msgstr "Wer ihn hat, kann im Namen seines Besitzers veröffentlichen, und einmal veröffentlicht, lässt er sich nie mehr zurückholen. Entferne ihn vor dem Veröffentlichen."
 
-#: nostr/ui/secret_key_check.py:68
+#: nostr/ui/secret_key_check.py:69
 msgid "Replace with Public Key"
 msgstr "Durch öffentlichen Schlüssel ersetzen"
 
@@ -9175,14 +9174,6 @@ msgstr "Als Nostr-Entwurf speichern"
 #: nostr/ui/stash_kind_dialog.py:349
 msgid "Drafts are end-to-end encrypted to your key. Pick the kind so the draft can be promoted to a publish later."
 msgstr "Entwürfe sind Ende-zu-Ende mit deinem Schlüssel verschlüsselt. Wähle die Art, damit du den Entwurf später veröffentlichen kannst."
-
-#: nostr/ui/stash_kind_dialog.py:400
-msgid "Article title (used to derive the slug)"
-msgstr "Artikeltitel (daraus entsteht der Slug)"
-
-#: nostr/ui/stash_kind_dialog.py:410
-msgid "Slug (the draft's d-tag)"
-msgstr "Slug (Kennung des Entwurfs)"
 
 #: nostr/ui/stash_kind_dialog.py:421
 msgid "Optional one-sentence summary"
@@ -9197,16 +9188,16 @@ msgid "Short note"
 msgstr "Kurze Notiz"
 
 #: nostr/ui/stash_kind_dialog.py:362
-msgid "A quick thought, as plain text. Published as a note. No slug: the draft gets a private identifier."
-msgstr "Ein kurzer Gedanke als reiner Text. Wird als Notiz veröffentlicht. Ohne Slug: Der Entwurf erhält eine private Kennung."
+msgid "A quick thought, as plain text. Published as a note. No link name: the draft gets a private identifier."
+msgstr "Ein kurzer Gedanke als reiner Text. Wird als Notiz veröffentlicht. Ohne Linknamen: Der Entwurf erhält eine private Kennung."
 
 #: nostr/ui/stash_kind_dialog.py:368
 msgid "Long-form article"
 msgstr "Langer Artikel"
 
 #: nostr/ui/stash_kind_dialog.py:369
-msgid "A Markdown post with a fixed slug. Published as an article. The slug ties the draft to the article it becomes, so saving it again replaces it."
-msgstr "Ein Markdown-Beitrag mit festem Slug. Wird als Artikel veröffentlicht. Der Slug verbindet den Entwurf mit dem späteren Artikel, sodass erneutes Speichern ihn ersetzt."
+msgid "A Markdown post with a fixed link name. Published as an article. The link name ties the draft to the article it becomes, so saving it again replaces it."
+msgstr "Ein Markdown-Beitrag mit festem Linknamen. Wird als Artikel veröffentlicht. Der Linkname verbindet den Entwurf mit dem späteren Artikel, sodass erneutes Speichern ihn ersetzt."
 
 #: nostr/ui/stash_kind_dialog.py:423
 msgid "Summary (optional)"

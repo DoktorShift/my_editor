@@ -7622,11 +7622,11 @@ class MainWindow(QMainWindow):
                 "This action can't be undone.", replaced))
         if keyed:
             lines.append(ngettext(
-                "A draft whose slug holds a secret key is deleted by a request instead, "
+                "A draft whose link name holds a secret key is deleted by a request instead, "
                 "which doesn't send the key again. Your other devices, and apps that "
                 "follow such requests, will treat it as removed. This action can't be "
                 "undone.",
-                "Drafts whose slugs hold a secret key are deleted by a request each "
+                "Drafts whose link names hold a secret key are deleted by a request each "
                 "instead, which doesn't send the keys again. Your other devices, and apps "
                 "that follow such requests, will treat them as removed. This action can't "
                 "be undone.", keyed))
