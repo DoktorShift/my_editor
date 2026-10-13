@@ -350,3 +350,52 @@ def test_find_next_and_replace_go_on_from_the_caret(tmp_path):
     assert r["replace_selects"] == "fish| D"            # Replace first finds the next one
     assert r["unchanged"] == "fish A, fish B!, fish C, fish D"
     assert r["replaced"] == "fish A, fish B!, fish C, cat D"
+
+
+FIND_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtCore import qInstallMessageHandler
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+warnings = []
+qInstallMessageHandler(lambda kind, context, message: warnings.append(message))
+w = main_window.MainWindow()
+w.resize(1000, 700)
+w.show()
+short = w.new_tab()
+short.setPlainText("one word")
+long = w.new_tab()
+long.setPlainText("word " * 400)
+w._show_find(replace=False)
+w.findbar.edit.setText("word")
+app.processEvents()
+w.tabs.setCurrentIndex(w._editor_widget_index(short))   # its view is laid out anew
+app.processEvents()
+r = {"warnings": [m for m in warnings if "out of range" in m],
+     "short_highlights": len(short.highlights("find"))}
+w.tabs.setCurrentIndex(w._editor_widget_index(long))
+app.processEvents()
+long.document().setModified(False)
+w.close_tab(w.tabs.currentIndex())                     # the tab with the matches
+app.processEvents()
+r["after_close"] = [m for m in warnings if "out of range" in m]
+for i in range(w.tabs.count()):
+    e = w._editor_from_widget(w.tabs.widget(i))
+    if e is not None:
+        e.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_find_matches_of_one_tab_never_land_on_another(tmp_path):
+    """Switching tabs laid the new tab's view out before the old tab's
+    matches were forgotten, and they were painted on it: "Position out of
+    range" for a shorter text, wrong words for a longer one."""
+    from tests.app_process import run_window_script
+    r = run_window_script(FIND_SCRIPT, tmp_path)
+    assert r["warnings"] == [] and r["after_close"] == []
+    assert r["short_highlights"] == 1

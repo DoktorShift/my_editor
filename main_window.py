@@ -4769,6 +4769,8 @@ class MainWindow(QMainWindow):
         if not ed:
             return
         self._search_matches = find_all(ed.document(), needle, self.findbar.options())
+        # Whose they are: a tab's matches are never painted on another.
+        self._matches_of = ed
         # The match that is selected stays the current one when the matches
         # are found again (after typing, after a replacement).
         cursor = ed.textCursor()
@@ -4783,7 +4785,7 @@ class MainWindow(QMainWindow):
         ed = self.current_editor()
         if not ed:
             return
-        if not self._search_matches:
+        if not self._search_matches or getattr(self, "_matches_of", None) is not ed:
             ed.set_highlights("find", [])
             return
         match_fmt = QTextCharFormat()
