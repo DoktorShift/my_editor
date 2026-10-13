@@ -3111,8 +3111,10 @@ class MainWindow(QMainWindow):
         front = None
         if ext.endswith('.md'):
             front, content = front_matter.split(content)
-            if front is not None and "\n" in content:
-                ed._newline = newline_of(content)
+            if front is not None:
+                # A text of one line takes its front matter's ending.
+                ed._newline = newline_of(content) if re.search(r"[\r\n]", content) \
+                    else front.newline
         content = with_newlines(content)
         if ext.endswith(('.html', '.htm')):
             ed.setHtml(content)

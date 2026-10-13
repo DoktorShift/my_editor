@@ -430,3 +430,11 @@ def test_a_stray_windows_ending_in_the_text_is_not_doubled(tmp_path):
     path = tmp_path / "pasted.md"
     save_text_document(path, "a\r\nb\n", newline="\r\n")
     assert path.read_bytes() == b"a\r\nb\r\n"
+
+
+@pytest.mark.parametrize("text, newline", [
+    ("one\rtwo\rthree\r", "\r"), ("one\r\ntwo\rthree\n", "\n"), ("a\rb\r\nc\r\nd\r\n", "\r\n"),
+])
+def test_a_lone_cr_is_a_line_ending_of_its_own(text, newline):
+    """Classic Mac OS files end their lines in a lone CR (round 10, M1)."""
+    assert newline_of(text) == newline

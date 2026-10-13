@@ -176,11 +176,15 @@ def with_newlines(text: str) -> str:
 def newline_of(text: str) -> str:
     """The line ending most lines of ``text`` use; this system's when
     there is none. A Markdown file from a Git repository keeps its "\n"
-    on Windows, a file written on Windows keeps its "\r\n" elsewhere."""
+    on Windows, a file written on Windows keeps its "\r\n" elsewhere, and
+    one from classic Mac OS its lone "\r"."""
     windows = text.count("\r\n")
     unix = text.count("\n") - windows
-    if windows == unix == 0:
+    mac = text.count("\r") - windows
+    if windows == unix == mac == 0:
         return os.linesep
+    if mac > windows and mac > unix:
+        return "\r"
     return "\r\n" if windows > unix else "\n"
 
 

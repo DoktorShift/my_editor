@@ -1033,8 +1033,8 @@ def test_the_window_finds_a_front_matter_with_lone_cr_line_endings(tmp_path):
     path.write_bytes(CR_ONLY.encode("utf-8"))
     r = run_window_script(SCRIPT, tmp_path, str(path))
     assert r["cr_only.md shown"] == "Body."
-    assert r["cr_only.md saved"] == "---\rtitle: CR Title\rtags: [x]\r---\r\r" + (
-        "Body. More." + os.linesep)
+    # Its text keeps its lone CR too (round 10, M1): no file of two styles.
+    assert r["cr_only.md saved"] == CR_ONLY.replace("Body.", "Body. More.")
 
 
 @pytest.mark.parametrize("text, expected", [
