@@ -44,6 +44,7 @@ from constants import (
 )
 from widgets import ElidedLabel, FindBar, LineNumberGutter, FileChangedBar, UpdateBar
 from format_toolbar import FormatToolbar
+from selection_bar import SelectionBar
 from atomic_file import (
     read_json, read_text_document, save_document, save_text_document, write_json,
 )
@@ -1232,7 +1233,28 @@ class MainWindow(QMainWindow):
         ed.set_slash_items(self._slash_items)
         ed.set_link_opener(self._open_link)
         ed.set_nostr_check(lambda: self.nostr_state.active)
+        ed.selection_bar = SelectionBar(
+            ed, {"bold": self.act_bold, "italic": self.act_italic, "strike": self.act_strike,
+                 "code": self.act_code, "link": self.act_link},
+            self.m_style, dark=lambda: self.is_dark_theme,
+            wanted=lambda e=ed: self._wants_selection_bar(e))
         return ed
+
+    def _wants_selection_bar(self, ed) -> bool:
+        """Whether the format bar may show over ``ed``'s selection: chosen
+        in Settings, in the tab in front, where formatting applies (a
+        document that holds Markdown), while it is being written."""
+        return (self.format_bar_on_selection and ed is self.current_editor()
+                and self._editor_kind(ed) == "rich" and not self._shows_preview_only(ed)
+                and not ed.isReadOnly())
+
+    def _set_format_bar_on_selection(self, on: bool) -> None:
+        """Settings' Show the Format Bar When Selecting Text, remembered."""
+        self.format_bar_on_selection = bool(on)
+        save_setting("format_bar_on_selection", self.format_bar_on_selection)
+        ed = self.current_editor()
+        if not on and ed is not None:
+            ed.selection_bar.hide()
 
     def _resolve_local_image(self, editor, name: str):
         """QImage for an image named relative to the editor's own file.
@@ -1660,6 +1682,8 @@ class MainWindow(QMainWindow):
             else:
                 name = pgettext("paragraph style", "Mixed")
             self.format_toolbar.set_style_name(name)
+            if ed is not None:
+                ed.selection_bar.set_style_name(name)
         # A checklist is shown as one, not as a bulleted list as well.
         self.act_bullets.setChecked(paragraphs.list_kind == rich_text.BULLET
                                     and not paragraphs.tasks)
@@ -2083,6 +2107,9 @@ class MainWindow(QMainWindow):
                     checkable=True, keywords=(_("spelling"), _("spellcheck"))),
             toggled=self._set_check_spelling, checked=self.check_spelling)
         self.markdown_shortcuts = bool(load_settings().get("markdown_shortcuts", False))
+        # The format bar over text selected with the pointer (Settings).
+        self.format_bar_on_selection = bool(
+            load_settings().get("format_bar_on_selection", True))
         self.act_markdown_shortcuts = add(
             Command("edit.markdown_shortcuts", _("Markdown Shortcuts"), EDIT, checkable=True,
                     keywords=(_("autoformat"), _("substitutions"), "markdown")),
@@ -4472,6 +4499,8 @@ class MainWindow(QMainWindow):
                 paste_choice=self._paste_choice,
                 choose_paste=self._store_paste_choice,
                 nostr_in_use=lambda: self.nostr_state.active,
+                format_bar=lambda: self.format_bar_on_selection,
+                choose_format_bar=self._set_format_bar_on_selection,
                 is_dark=self.is_dark_theme, parent=self)
             window.setAttribute(Qt.WA_DeleteOnClose, True)
             window.destroyed.connect(lambda _obj=None: setattr(self, "_settings_window", None))

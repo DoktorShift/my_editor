@@ -10,6 +10,9 @@ What must hold:
 
   A choice applies at once: no OK, Apply or Cancel. Escape closes it.
 
+  Whether the format bar shows over a selection made with the pointer is a
+  writing choice, on unless turned off, and kept.
+
   What happens to a pasted image is offered only while a Nostr account is
   in use (nothing of Nostr before), and reads the setting again when the
   window is shown, since an alert's Remember This Choice can change it.
@@ -53,7 +56,7 @@ def group_of(names, checked):
 
 
 class Fixture:
-    def __init__(self, *, nostr=False, paste="ask"):
+    def __init__(self, *, nostr=False, paste="ask", format_bar=True):
         self.appearance_group, self.appearance = group_of(("system", "light", "dark"), "system")
         self.language_group, languages = group_of(("system", "en", "de"), "en")
         self.languages = list(languages.items())
@@ -62,6 +65,7 @@ class Fixture:
         self.monospace.setCheckable(True)
         self.paste = paste
         self.nostr = nostr
+        self.format_bar = format_bar
         self.triggered = []
         for mode, action in self.appearance.items():
             action.triggered.connect(lambda _c=False, m=mode: self.triggered.append(m))
@@ -69,7 +73,12 @@ class Fixture:
             appearance=self.appearance, languages=self.languages,
             choose_language=self.chosen_languages.append, monospace=self.monospace,
             paste_choice=lambda: self.paste, choose_paste=self._store_paste,
-            nostr_in_use=lambda: self.nostr, is_dark=False)
+            nostr_in_use=lambda: self.nostr,
+            format_bar=lambda: self.format_bar, choose_format_bar=self._store_format_bar,
+            is_dark=False)
+
+    def _store_format_bar(self, on):
+        self.format_bar = on
 
     def _store_paste(self, value):
         self.paste = value
@@ -119,6 +128,19 @@ def test_the_writing_font_is_the_view_menu_command():
     f = Fixture()
     f.window.monospace.click()
     assert f.monospace.isChecked()
+
+
+def test_the_format_bar_over_a_selection_is_a_writing_choice():
+    f = Fixture()
+    box = f.window.format_bar
+    assert box.text() == "Show the format bar when selecting text"
+    assert box.isChecked()
+    box.click()
+    assert f.format_bar is False
+    f.format_bar = True                                  # chosen elsewhere
+    f.window.refresh()
+    assert box.isChecked()
+    assert Fixture(format_bar=False).window.format_bar.isChecked() is False
 
 
 def test_pasted_images_are_offered_only_while_nostr_is_in_use():
