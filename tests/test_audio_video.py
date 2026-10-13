@@ -121,6 +121,8 @@ path, big, sha = sys.argv[2], sys.argv[3], sys.argv[4]
 told, asked = [], []
 main_window.inform = lambda parent, **kw: told.append(kw.get("title", ""))
 main_window.confirm_destructive = lambda parent, **kw: (asked.append(kw), False)[1]
+main_window._ask_save_changes = lambda parent, title, **kw: (
+    asked.append(dict(kw, title=title)), "cancel")[1]
 w = main_window.MainWindow()
 w.show()
 sent = []
@@ -167,7 +169,17 @@ snapshot = doc.toHtml()
 r["crash_keeps_object"] = f"myeditor-asset:{sha}" in snapshot and "Uploading" not in snapshot
 # Closing while it uploads asks, Cancel the default (the stand-in answers Cancel).
 w.close_tab(w.tabs.currentIndex())
-r["close_asked"] = bool(asked) and asked[-1]["action"] == "Close Anyway"
+r["close_asked"] = asked[:]
+asked.clear()
+ed.document().setModified(False)                    # nothing to save: the upload alone
+w.close_tab(w.tabs.currentIndex())
+r["close_asked_saved"] = asked[:]
+ed.document().setModified(True)
+asked.clear()
+event = __import__("PySide6.QtGui", fromlist=["QCloseEvent"]).QCloseEvent()
+w.closeEvent(event)
+r["quit_asked"] = asked[:]
+r["quit_refused"] = not event.isAccepted()
 r["still_open"] = w._editor_widget_index(ed) >= 0
 # The upload finishes: nothing in the document changes, no step of Undo.
 undo_steps = doc.availableUndoSteps()
@@ -222,7 +234,17 @@ def test_audio_in_the_window(tmp_path):
         assert "Notes" in r[written]
     assert r["html_pending"] is False and r["crash_keeps_object"] is True
     assert r["gate_pending"] is False and r["gate_said"] == "Audio or video is still uploading"
-    assert r["close_asked"] is True and r["still_open"] is True         # L4
+    # Closing a changed document while its audio uploads: one question,
+    # the save one, saying what happens to the upload (L4, review).
+    [close] = r["close_asked"]
+    assert close["title"].startswith("Do you want to save the changes")
+    assert "is still uploading" in close["message"] and r["still_open"] is True
+    [saved] = r["close_asked_saved"]
+    assert saved["action"] == "Close Anyway"           # nothing to save: the upload alone
+    [quit_question] = r["quit_asked"]
+    assert quit_question["title"].startswith("Do you want to save the changes")
+    assert "Quitting now stops the upload" in quit_question["message"]
+    assert r["quit_refused"] is True
     assert r["undo_steps_unchanged"] is True                            # M2
     assert f"Listen:\n\n{URL}.mp3\n\nNotes" in r["published"]
     # A line of its own in a note, without spaces around it.

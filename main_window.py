@@ -2837,13 +2837,16 @@ class MainWindow(QMainWindow):
 
         editor = self._editor_from_widget(w)
 
-        if editor and not self._may_close_with_uploads(editor):
+        uploading = self._uploading(editor) if editor else []
+        if editor and not editor.document().isModified() \
+                and not self._may_leave_uploads(uploading, quitting=False):
             return
         if editor and editor.document().isModified():
             file_name = os.path.basename(editor._file_path) if getattr(editor, '_file_path', None) else _("Untitled")
             r = _ask_save_changes(
                 self, _("Do you want to save the changes you made to \u201c{name}\u201d?").format(
-                    name=file_name))
+                    name=file_name),
+                message=self._save_question_words(uploading, quitting=False))
             if r == "cancel":
                 return
             if r == "save":
@@ -2898,24 +2901,29 @@ class MainWindow(QMainWindow):
 
     def _resolve_unsaved_before_closing(self) -> bool:
         """Save, discard or keep unsaved documents. True means close."""
+        editors = [ed for i in range(self.tabs.count())
+                   if (ed := self._editor_from_widget(self.tabs.widget(i))) is not None]
+        uploading = self._uploading(*editors)
         unsaved = [i for i in range(self.tabs.count())
                    if (ed := self._editor_from_widget(self.tabs.widget(i)))
                    and ed.document().isModified()]
         if not unsaved:
-            return True
+            # Nothing to save: audio or video still uploading is the question.
+            return self._may_leave_uploads(uploading, quitting=True)
+        words = self._save_question_words(uploading, quitting=True)
         if len(unsaved) == 1:
             ed = self._editor_from_widget(self.tabs.widget(unsaved[0]))
             name = os.path.basename(ed._file_path) if getattr(ed, "_file_path", None) else _("Untitled")
             answer = _ask_save_changes(
                 self, _("Do you want to save the changes you made to \u201c{name}\u201d?").format(
-                    name=name))
+                    name=name), message=words)
         else:
             count = len(unsaved)
             answer = _ask_save_changes(
                 self, ngettext("Do you want to save the changes to {count} document?",
                                "Do you want to save the changes to {count} documents?",
                                count).format(count=count),
-                save_label=_("Save All"))
+                save_label=_("Save All"), message=words)
         if answer == "cancel":
             return False
         if answer == "save":
@@ -5806,9 +5814,6 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         # An update relaunch already handled unsaved work, so skip the prompt.
         closing_for_update = getattr(self, "_closing_for_update", False)
-        if not closing_for_update and not self._may_quit_with_uploads():
-            event.ignore()
-            return
         if not closing_for_update and not self._resolve_unsaved_before_closing():
             event.ignore()
             return
@@ -6705,40 +6710,44 @@ class MainWindow(QMainWindow):
             ed.setTextCursor(at)
         self._asset_manager.request_upload(asset.sha256)
 
-    def _may_close_with_uploads(self, editor) -> bool:
-        """Closing a document while audio or video in it is still uploading
-        asks first (Cancel is the default): the file goes on to the media
-        library, but it won't be in this document. True to close."""
-        uploading = [asset for asset in self._media_not_uploaded(editor.document())
-                     if asset.upload_state in (AssetState.QUEUED, AssetState.SIGNING,
-                                               AssetState.UPLOADING)]
-        if not uploading:
-            return True
-        return confirm_destructive(
-            self, title=ngettext("“{name}” is still uploading.",
-                                 "{count} files are still uploading.", len(uploading)).format(
-                name=uploading[0].alt, count=len(uploading)),
-            message=_("If you close the document now, the upload goes on to your media "
-                      "library, but the document doesn’t keep it."),
-            action=_("Close Anyway"))
+    def _uploading(self, *editors) -> list:
+        """The audio and video in ``editors`` still on its way to the media
+        servers."""
+        return [asset for ed in editors for asset in self._media_not_uploaded(ed.document())
+                if asset.upload_state in (AssetState.QUEUED, AssetState.SIGNING,
+                                          AssetState.UPLOADING)]
 
-    def _may_quit_with_uploads(self) -> bool:
-        """Quitting while audio or video is still uploading asks first
-        (Cancel is the default): quitting stops the upload. True to quit."""
-        uploading = [asset for i in range(self.tabs.count())
-                     if (ed := self._editor_from_widget(self.tabs.widget(i))) is not None
-                     for asset in self._media_not_uploaded(ed.document())
-                     if asset.upload_state in (AssetState.QUEUED, AssetState.SIGNING,
-                                               AssetState.UPLOADING)]
+    @staticmethod
+    def _still_uploading(uploading: list) -> str:
+        return ngettext("“{name}” is still uploading.", "{count} files are still uploading.",
+                        len(uploading)).format(name=uploading[0].alt, count=len(uploading))
+
+    @staticmethod
+    def _what_leaving_does(*, quitting: bool) -> str:
+        """What closing (or quitting) does to audio and video still uploading."""
+        if quitting:
+            return _("Quitting now stops the upload, and the document won’t hold the file.")
+        return _("If you close the document now, the upload goes on to your media library, "
+                 "but the document doesn’t keep it.")
+
+    def _may_leave_uploads(self, uploading: list, *, quitting: bool) -> bool:
+        """With nothing unsaved, closing or quitting while audio or video
+        uploads asks this alone (Cancel is the default). True to go on."""
         if not uploading:
             return True
         return confirm_destructive(
-            self, title=ngettext("“{name}” is still uploading.",
-                                 "{count} files are still uploading.", len(uploading)).format(
-                name=uploading[0].alt, count=len(uploading)),
-            message=_("Quitting now stops the upload, and the document won’t hold the "
-                      "file."),
-            action=_("Quit Anyway"))
+            self, title=self._still_uploading(uploading),
+            message=self._what_leaving_does(quitting=quitting),
+            action=_("Quit Anyway") if quitting else _("Close Anyway"))
+
+    def _save_question_words(self, uploading: list, *, quitting: bool) -> str:
+        """The save question's words: with audio or video still uploading,
+        what leaving does to it first, so it is one question, not two."""
+        if not uploading:
+            return ""
+        return " ".join((self._still_uploading(uploading),
+                         self._what_leaving_does(quitting=quitting),
+                         _("Your changes will be lost if you don't save them.")))
 
     def _media_name(self, url: str) -> Optional[str]:
         """The name an audio or video file had, by the address it was
