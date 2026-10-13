@@ -259,8 +259,7 @@ class HtmlEditor(QTextEdit):
         # Characters per line when writing; None for code (full width).
         self._writing_measure_chars = None
         self._highlights = {layer: [] for layer in self.HIGHLIGHT_LAYERS}
-        self._highlights_stale = False
-        self.document().contentsChange.connect(self._highlights_moved)
+        self.document().contentsChange.connect(self._renew_highlights)
         self.verticalScrollBar().valueChanged.connect(self.visible_area_changed)
         # Spelling (spelling.DocumentSpelling), while it is checked here.
         self._spelling = None
@@ -685,17 +684,15 @@ class HtmlEditor(QTextEdit):
     def highlights(self, layer: str) -> list:
         return list(self._highlights[layer])
 
-    def _highlights_moved(self, *_change) -> None:
-        self._highlights_stale = any(self._highlights.values())
-
-    def _renew_highlights(self) -> None:
-        """Before painting after a change, every highlight gets a new
-        cursor where the change left its own. Qt crashed painting a
-        highlight whose cursor had come through a change of a table's rows
-        or columns (a column added before the caret's, with a word
-        underlined above the table); a cursor made afresh at the same place
-        paints."""
-        self._highlights_stale = False
+    def _renew_highlights(self, *_change) -> None:
+        """Right after every change, every highlight gets a new cursor
+        where the change left its own. Qt moves a highlight's end into the
+        cells a table gains right after it (Add Row Above, Add Column
+        Before, with a word underlined above the table), and then crashes
+        painting it, or changing the table again (Delete Row), whichever
+        comes first; a cursor made afresh at the same place does neither."""
+        if not any(self._highlights.values()):
+            return
         doc = self.document()
         for layer in self.HIGHLIGHT_LAYERS:
             renewed = []
@@ -858,8 +855,6 @@ class HtmlEditor(QTextEdit):
         self._paint_quote_bars(painter)
         painter.end()
 
-        if self._highlights_stale:
-            self._renew_highlights()
         super().paintEvent(event)
 
         # Block cursor on top of the text, in code and plain text.
