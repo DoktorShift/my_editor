@@ -194,3 +194,25 @@ def test_markdown_files_in_the_window(tmp_path):
     assert r["jekyll.md saved"] == JEKYLL.replace("Body text.\n", "Body text. More.\n")
     assert "The first section of my essay." in r["divider.md shown"]
     assert r["divider.md saved"] == DIVIDER.replace("second section.\n", "second section. More.\n")
+
+
+
+def test_comment_and_blank_lines_after_a_changed_entry_stay():
+    text = ("---\ntitle: Hello\n# the tags below are for the site\ntags: [a]\n"
+            "summary: S\n\nlayout: post\n---\n\nB\n")
+    front, body = front_matter.split(text)
+    details = from_front_matter(front).with_changes(title="New", summary="Other")
+    assert front_matter.join(front_matter_with(details, front), body) == text.replace(
+        "title: Hello", "title: New").replace("summary: S", "summary: Other")
+    crlf = "---\r\ntitle: T\r\n# a comment\r\nlayout: post\r\n---\r\n\r\nB\r\n"
+    front, body = front_matter.split(crlf)
+    details = from_front_matter(front).with_changes(title="U")
+    assert front_matter.join(front_matter_with(details, front), body) == crlf.replace(
+        "title: T", "title: U")
+
+
+def test_a_block_value_keeps_its_own_lines():
+    text = "---\nsummary: |+\n  Line one\n  Line two\n\nslug: keep-me\n---\n\nB\n"
+    front, _ = front_matter.split(text)
+    assert from_front_matter(front).summary == "Line one\nLine two"
+    assert unchanged_save(text) == text

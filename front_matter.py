@@ -115,10 +115,28 @@ def split(text: str) -> Tuple[Optional[FrontMatter], str]:
             entries.append(Entry("", (line,)))
     if not any(entry.key for entry in entries):
         return None, text                   # a divider, some text, a divider: text
+    entries = _with_trailers_apart(entries)
     rest = text[found.end():]
     body = rest.lstrip("\r\n")
     return (FrontMatter(tuple(entries), found.group(1), found.group(3),
                         rest[:len(rest) - len(body)], newline), body)
+
+
+def _with_trailers_apart(entries: List[Entry]) -> List[Entry]:
+    """The blank and comment lines at the end of each entry as an entry of
+    their own, without a key: they introduce what follows (or close the
+    block), so rewriting the entry before them leaves them where they are."""
+    apart: List[Entry] = []
+    for entry in entries:
+        lines = list(entry.lines)
+        trailer: List[str] = []
+        while entry.key and len(lines) > 1 and (
+                not lines[-1].strip() or lines[-1].startswith("#")):
+            trailer.insert(0, lines.pop())
+        apart.append(Entry(entry.key, tuple(lines)))
+        if trailer:
+            apart.append(Entry("", tuple(trailer)))
+    return apart
 
 
 def join(front: Optional[FrontMatter], body: str) -> str:
