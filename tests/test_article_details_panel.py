@@ -197,3 +197,13 @@ def test_a_detail_kept_as_written_in_the_file_is_shown_read_only_and_says_so():
     assert not panel.cover.url_edit.isReadOnly() and not panel.tags_edit.isReadOnly()
     assert not any(label.text() == "Kept as written in the file." and not label.isHidden()
                    for label in panel.findChildren(type(panel.zaps_note)))
+
+
+def test_a_hashtag_holding_a_comma_is_shown_and_handed_back_whole():
+    panel = ArticleDetailsPanel()
+    sent = []
+    panel.changed.connect(sent.append)
+    panel.show_article(ArticleDetails(title="T", hashtags=("a", "b, c")), fixed_identifier=False)
+    assert panel.tags_edit.text() == 'a, "b, c"'
+    panel.tags_edit.setText(panel.tags_edit.text() + ", d")
+    assert sent[-1].hashtags == ("a", "b, c", "d")

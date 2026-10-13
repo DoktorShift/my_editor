@@ -36,7 +36,7 @@ from popup_placement import fitting_size
 from alerts import CANCEL, DEFAULT, NORMAL, Button, ask, answer_return_as_the_system_does
 from i18n import _, display_locale, ngettext
 
-from ..article_details import ArticleDetails, hashtags_from
+from ..article_details import ArticleDetails, hashtags_from, hashtags_text
 from ..first_publications import FirstPublications
 from ..avatar_store import AvatarStore
 from ..bech32 import encode_naddr
@@ -419,7 +419,7 @@ class PublishArticleDialog(QDialog):
         )
         self._summary_edit.setText(self._details.summary)
         self._image_edit.setText(self._details.image)
-        self._tags_edit.setText(", ".join(self._details.hashtags))
+        self._tags_edit.setText(hashtags_text(self._details.hashtags))
         # What it showed at first: only what changes here goes back to the tab.
         self._details_shown = self.details()
         self._apply_theme()

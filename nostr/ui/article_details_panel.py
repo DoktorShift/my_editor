@@ -41,7 +41,7 @@ from constants import (
 )
 from i18n import _, format_moment, ngettext
 
-from ..article_details import ArticleDetails, equal_zaps, hashtags_from
+from ..article_details import ArticleDetails, equal_zaps, hashtags_from, hashtags_text
 from ..blossom.store import MediaStore
 from ..media.media_visibility import MediaVisibility
 from ..media.private_library import PrivateLibrary
@@ -374,7 +374,7 @@ class ArticleDetailsPanel(QFrame):
         if self.cover.text() != details.image:
             self.cover.setText(details.image)
         if hashtags_from(self.tags_edit.text()) != details.hashtags:
-            self.tags_edit.setText(", ".join(details.hashtags))
+            self.tags_edit.setText(hashtags_text(details.hashtags))
         self._set_text(self.identifier_edit, details.identifier)
         self._show_people(details)
 

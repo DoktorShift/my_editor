@@ -37,7 +37,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import front_matter  # noqa: E402
 from nostr.article_details import (  # noqa: E402
-    ArticleDetails, from_front_matter, front_matter_with, kept_in_file)
+    ArticleDetails, from_front_matter, front_matter_with, hashtags_from, hashtags_text,
+    kept_in_file)
 from tests.app_process import run_window_script  # noqa: E402
 
 HUGO = ('---\ntitle: "My post"\ndate: 2024-03-01T00:30:00+01:00\ncover:\n'
@@ -104,7 +105,7 @@ def test_a_changed_detail_rewrites_its_entry_only():
     front, body = front_matter.split(HUGO)
     details = from_front_matter(front).with_changes(title="A new title")
     out = front_matter.join(front_matter_with(details, front), body)
-    assert out == HUGO.replace('title: "My post"', "title: A new title")
+    assert out == HUGO.replace('title: "My post"', 'title: "A new title"')
 
 
 def test_a_changed_date_keeps_its_form_and_time_zone():
@@ -275,7 +276,7 @@ def test_a_changed_detail_is_written_into_the_toml_in_place_in_toml():
     out = front_matter.join(front_matter_with(changed, front), body)
     assert out == TOML.replace('title = "My TOML post"', 'title = "A \\"new\\" title"').replace(
         'date = 2024-03-01T08:00:00+01:00', "date = 2024-03-02T08:00:00+01:00").replace(
-        'tags = ["a", "b"]  # for the site', 'tags = ["a", "b", "Extra"]').replace(
+        'tags = ["a", "b"]  # for the site', 'tags = ["a", "b", "Extra"]  # for the site').replace(
         "draft = false\n", 'draft = false\nsummary = "Short"\n')
     import tomllib
     assert tomllib.loads(out.split("+++\n")[1])["params"] == {"toc": True}   # still a table
@@ -328,3 +329,56 @@ def test_a_cover_the_file_keeps_is_read_only_in_article_details(tmp_path):
     assert r["cover read-only"] is True and r["title read-only"] is False
     assert r["notes"] == ["Kept as written in the file."]
     assert r["saved"] == chirpy
+
+
+# -- only what changed changes, in the file's own style ----------------------
+
+def test_a_tag_holding_a_comma_stays_one_tag():
+    front, body = front_matter.split('---\ntags: [a, "b, c", \'d\']\n---\n\nB\n')
+    details = from_front_matter(front)
+    assert details.hashtags == ("a", "b, c", "d")
+    assert hashtags_from(hashtags_text(details.hashtags)) == details.hashtags
+    added = details.with_changes(hashtags=details.hashtags + ("Extra",))
+    out = front_matter.join(front_matter_with(added, front), body)
+    assert "tags: [a, \"b, c\", 'd', Extra]\n" in out
+
+
+def test_a_block_list_stays_a_block_list():
+    text = '---\naliases:\n  - My Note\ntags:\n  - project/alpha\n  - "#idea"\npublish: true\n---\n\nB\n'
+    front, body = front_matter.split(text)
+    details = from_front_matter(front)
+    added = details.with_changes(hashtags=details.hashtags + ("Extra",))
+    assert front_matter.join(front_matter_with(added, front), body) == text.replace(
+        '  - "#idea"\n', '  - "#idea"\n  - Extra\n')
+    fewer = details.with_changes(hashtags=("idea",))
+    assert front_matter.join(front_matter_with(fewer, front), body) == text.replace(
+        "  - project/alpha\n", "")
+
+
+def test_a_rewritten_line_keeps_its_alignment_quotes_and_comment():
+    text = ('---\nlayout: post\ntitle:  "Welcome to Jekyll!"   # on the site\n'
+            "date:   2015-11-10 15:41:45 +0100\nsummary: 'It''s here'\n---\nB\n")
+    front, body = front_matter.split(text)
+    details = from_front_matter(front).with_changes(
+        title="A new title", summary="Now it's new",
+        published_at=from_front_matter(front).published_at + 86400)
+    assert front_matter.join(front_matter_with(details, front), body) == (
+        '---\nlayout: post\ntitle:  "A new title"   # on the site\n'
+        "date:   2015-11-11 15:41:45 +0100\nsummary: 'Now it''s new'\n---\nB\n")
+
+
+def test_a_block_text_stays_a_block_text():
+    text = "---\ndescription: >-\n  A long description\n  over two lines.\nlayout: post\n---\nB\n"
+    front, body = front_matter.split(text)
+    details = from_front_matter(front).with_changes(summary="A shorter one.")
+    assert front_matter.join(front_matter_with(details, front), body) == (
+        "---\ndescription: >-\n  A shorter one.\nlayout: post\n---\nB\n")
+
+
+def test_toml_keeps_its_own_style_too():
+    text = "+++\ntitle   = 'Literal'  # c\ntags = ['a', 'b']\n+++\nB\n"
+    front, body = front_matter.split(text)
+    details = from_front_matter(front)
+    changed = details.with_changes(title="New", hashtags=("a", "b", "c"))
+    assert front_matter.join(front_matter_with(changed, front), body) == (
+        "+++\ntitle   = 'New'  # c\ntags = ['a', 'b', 'c']\n+++\nB\n")

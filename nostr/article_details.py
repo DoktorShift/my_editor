@@ -34,6 +34,7 @@ on the draft's wrap, and a draft the person saved has none.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
@@ -55,11 +56,23 @@ AUTHOR_MARKER = "author"
 
 
 def hashtags_from(text: str) -> Tuple[str, ...]:
-    """The hashtags written in ``text``, separated by commas: without "#",
-    each once whatever its case, in the order and the case written (an
-    article's ``t`` tags are lowercase, as they are published)."""
+    """The hashtags written in ``text``, separated by commas (one holding a
+    comma in double quotes, as hashtags_text writes it): without "#", each
+    once whatever its case, in the order and the case written (an article's
+    ``t`` tags are lowercase, as they are published)."""
+    return _hashtags(front_matter.split_items(text or ""))
+
+
+def hashtags_text(hashtags: Sequence[str]) -> str:
+    """``hashtags`` as they are typed in a field: separated by commas, one
+    holding a comma or a double quote in double quotes, so it stays whole."""
+    return ", ".join(json.dumps(tag, ensure_ascii=False) if any(c in tag for c in ',"')
+                     else tag for tag in hashtags)
+
+
+def _hashtags(items: Iterable[str]) -> Tuple[str, ...]:
     found: List[str] = []
-    for raw in (text or "").split(","):
+    for raw in items:
         tag = raw.strip().lstrip("#").strip()
         if tag and tag.lower() not in (seen.lower() for seen in found):
             found.append(tag)
@@ -216,7 +229,8 @@ def from_front_matter(front: Optional[front_matter.FrontMatter]) -> ArticleDetai
     def items(key: str) -> List[str]:
         value = values.get(key, [])
         return value if isinstance(value, list) else [part for part in value.split(",")]
-    hashtags = hashtags_from(", ".join(items("tags")))
+    tags = values.get("tags", [])
+    hashtags = _hashtags(tags) if isinstance(tags, list) else hashtags_from(tags)
     coauthors = []
     for written in items("coauthors"):
         person = _person(written)
@@ -285,8 +299,13 @@ def front_matter_with(details: ArticleDetails, front: Optional[front_matter.Fron
             # A date YAML and TOML read as one (a timestamp), not a text;
             # in quotes only when the file had it so.
             bare = not original.startswith(("\"", "'"))
-        written = front_matter.entry(entries[at].key if at is not None else key, value,
-                                     syntax=syntax, bare=bare)
+        if key == "tags" and at is not None and isinstance(entries[at].value, list):
+            # A hashtag the file has keeps its spelling there ("#idea").
+            spelled = {tag.lower(): item for item in entries[at].value
+                       for tag in _hashtags([item])}
+            value = [spelled.get(tag.lower(), tag) for tag in value]
+        written = (front_matter.rewritten(entries[at], value, bare=bare) if at is not None
+                   else front_matter.entry(key, value, syntax=syntax, bare=bare))
         if at is not None:
             entries[at] = written
         elif front is not None:

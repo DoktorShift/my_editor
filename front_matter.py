@@ -273,6 +273,118 @@ def entry(key: str, value: Union[str, Sequence[str]], *, syntax: str = YAML,
     return Entry(key, (f"{key}: [{items}]",))
 
 
+def rewritten(old: Entry, value: Union[str, Sequence[str]], *, bare: bool = False) -> Entry:
+    """``old`` with ``value`` in its place, in the file's own style: the key
+    and the spaces after it as written, a comment after the value kept,
+    quotes of the kind it had, a block list a block list, an inline list
+    inline with the items that stay as they were written, a block text a
+    block text. A value written in a way this can't follow is written as
+    entry() writes a new one."""
+    key_part, rest = _key_and_rest(old)
+    if key_part is None:
+        return entry(old.key, value, syntax=old.syntax, bare=bare)
+    written, comment = _value_and_comment(rest)
+    if isinstance(value, str):
+        block = _BLOCK_SCALAR.match(written) if old.syntax == YAML else None
+        if block is not None:
+            return Entry(old.key, (key_part + written + comment,)
+                         + _block_lines(old.lines[1:], value), old.syntax)
+        if len(old.lines) > 1 and old.syntax == TOML:
+            return entry(old.key, value, syntax=old.syntax, bare=bare)
+        return Entry(old.key, (key_part + _like(written, value, old.syntax, bare) + comment,)
+                     + tuple(old.lines[1:]), old.syntax)
+    items = list(value)
+    if written.startswith("[") and len(old.lines) == 1:
+        return Entry(old.key, (key_part + _inline_list_like(written, items, old.syntax)
+                               + comment,), old.syntax)
+    if old.syntax == YAML and not written and old.value is not None:
+        return Entry(old.key, (key_part.rstrip() + comment,)
+                     + _block_list_like(old.lines[1:], items), old.syntax)
+    return entry(old.key, items, syntax=old.syntax, bare=bare)
+
+
+def _key_and_rest(old: Entry) -> Tuple[Optional[str], str]:
+    """The key's part of its first line, with the spaces after ":" or "="
+    as written, and the rest of the line."""
+    pattern = r"^(\s*[^=]+?\s*=[ \t]*)(.*)$" if old.syntax == TOML else \
+        r"^([^\s:][^:]*?[ \t]*:[ \t]*)(.*)$"
+    found = re.match(pattern, old.lines[0])
+    return (found.group(1), found.group(2)) if found else (None, "")
+
+
+def _value_and_comment(rest: str) -> Tuple[str, str]:
+    """The value as written and what follows it (spaces and a comment)."""
+    quoted = _QUOTED.match(rest)
+    if quoted is not None:
+        end = quoted.end()
+    elif rest.startswith("["):
+        end = rest.rfind("]") + 1 or len(rest)
+    else:
+        found = re.search(r"\s+#", rest)
+        end = found.start() if found else len(rest.rstrip())
+    tail = rest[end:]
+    if tail.strip() and not re.match(r"\s+#", tail):
+        return rest, ""
+    return rest[:end], tail
+
+
+def _like(written: str, value: str, syntax: str, bare: bool) -> str:
+    """``value`` quoted the way ``written`` was: in single quotes, in
+    double quotes, or bare when it can be."""
+    if bare:
+        return value
+    if written.startswith("'") and "\n" not in value and (syntax == YAML or "'" not in value):
+        return "'" + (value.replace("'", "''") if syntax == YAML else value) + "'"
+    if syntax == TOML or written.startswith('"'):
+        return json.dumps(value, ensure_ascii=False)
+    return _quoted(value)
+
+
+def _inline_list_like(written: str, items: Sequence[str], syntax: str) -> str:
+    """An inline list of ``items``, written as ``written`` was: each item
+    that stays as it was written, the separator and the padding inside the
+    brackets as they were, a new item quoted like the first one."""
+    inside = written[1:written.rfind("]")] if "]" in written else written[1:]
+    tokens = [token.strip() for token in _split_inline(inside) if token.strip()]
+    kept = {}
+    for token in tokens:
+        kept.setdefault(_unquote(token), token)
+    first = tokens[0] if tokens else ""
+    parts = []
+    for item in items:
+        if item in kept:
+            parts.append(kept.pop(item))
+        elif syntax == TOML or first.startswith(("'", '"')):
+            parts.append(_like(first, item, syntax, False) if first.startswith("'")
+                         else json.dumps(item, ensure_ascii=False))
+        else:
+            parts.append(_quoted(item, in_list=True))
+    separator = "," if inside and ", " not in inside and "," in inside else ", "
+    pad = " " if inside.startswith(" ") else ""
+    return "[" + pad + separator.join(parts) + (pad if inside.endswith(" ") else "") + "]"
+
+
+def _block_list_like(lines: Sequence[str], items: Sequence[str]) -> Tuple[str, ...]:
+    """A block list of ``items`` as ``lines`` wrote one: each item that stays
+    on its own line as written, a new one indented like the first, any
+    other line (a comment) kept after them."""
+    item_lines = [line for line in lines if re.match(r"^\s*-(\s|$)", line)]
+    others = [line for line in lines if line not in item_lines]
+    lead = re.match(r"^(\s*-\s*)", item_lines[0]).group(1) if item_lines else "  - "
+    kept = {}
+    for line in item_lines:
+        kept.setdefault(_unquote(line.strip()[1:].strip()), line)
+    return tuple(kept.pop(item) if item in kept else lead + _quoted(item) for item in items) \
+        + tuple(others)
+
+
+def _block_lines(lines: Sequence[str], value: str) -> Tuple[str, ...]:
+    """``value`` as the lines of a block text, indented as ``lines`` were."""
+    indents = [len(line) - len(line.lstrip(" ")) for line in lines if line.strip()]
+    indent = " " * (min(indents) if indents else 2)
+    return tuple(indent + row if row else "" for row in value.split("\n"))
+
+
 def _quoted(value: str, *, in_list: bool = False) -> str:
     """``value`` as YAML reads it back as the same text: bare when it can
     be, else in double quotes."""
@@ -334,6 +446,12 @@ def _unquote(value: str) -> str:
     if len(value) >= 2 and value[0] == value[-1] == "'":
         return value[1:-1].replace("''", "'")
     return value
+
+
+def split_items(written: str) -> List[str]:
+    """The items of a comma-separated text, each as its text: one in
+    double quotes keeps its commas ('a, "b, c"' is two items)."""
+    return [_unquote(part) for part in _split_inline(written) if part.strip()]
 
 
 def _split_inline(inside: str) -> List[str]:
