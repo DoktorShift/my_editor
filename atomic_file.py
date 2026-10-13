@@ -118,12 +118,7 @@ def save_document(path: PathLike, data: bytes) -> None:
     with several hard links, which a replacement would split), it is
     written in place, as before. Raises OSError."""
     target = os.path.realpath(os.fspath(path))
-    folder = os.path.dirname(target)
-    try:
-        existing: Optional[os.stat_result] = os.stat(target)
-    except FileNotFoundError:
-        existing = None
-    if existing is not None and existing.st_nlink > 1:
+    if _hard_linked(target):
         _write_in_place(target, data)
         return
     try:
@@ -136,26 +131,62 @@ def save_document(path: PathLike, data: bytes) -> None:
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
+    except BaseException:
+        _remove_quietly(temporary)
+        raise
+    place_document(temporary, target)
+
+
+def place_document(temporary: PathLike, path: PathLike) -> None:
+    """Put a file written in full (from ``new_document_file`` for the same
+    ``path``) at ``path`` in one step, as ``save_document`` saves: a link
+    keeps pointing where it did, and the file it points to keeps its
+    permissions and extended attributes. A file with several hard links
+    gets the content in place. ``temporary`` is gone afterwards, whatever
+    happens. Raises OSError."""
+    temporary, target = os.fspath(temporary), os.path.realpath(os.fspath(path))
+    try:
+        if _hard_linked(target):
+            with open(temporary, "rb") as source:
+                _write_in_place(target, source.read())
+            _remove_quietly(temporary)
+            return
+        try:
+            existing: Optional[os.stat_result] = os.stat(target)
+        except FileNotFoundError:
+            existing = None
         if existing is not None:
             os.chmod(temporary, stat.S_IMODE(existing.st_mode))
-        if existing is not None:
             _copy_extended_attributes(target, temporary)
         _replace(temporary, target)
     except BaseException:
         _remove_quietly(temporary)
         raise
-    _sync_folder(folder)
+    _sync_folder(os.path.dirname(target))
 
 
-def new_document_file(path: PathLike, *, suffix: str = ".tmp") -> Tuple[int, str]:
-    """A new, empty hidden file in the folder of ``path``, to write one of
-    the person's files into before it takes its name: ``(fd, path)``.
+def _hard_linked(target: str) -> bool:
+    """Whether ``target`` is a file with several hard links, which a
+    replacement would split."""
+    try:
+        return os.stat(target).st_nlink > 1
+    except FileNotFoundError:
+        return False
+
+
+def new_document_file(path: PathLike, *, suffix: str = ".tmp",
+                      follow_link: bool = True) -> Tuple[int, str]:
+    """A new, empty hidden file in the folder of ``path`` (of the file it
+    links to, unless ``follow_link`` is False), to write one of the
+    person's files into before it takes its name: ``(fd, path)``.
 
     Its name is unique and short, so a name of any length the folder
     holds still has room, and it is created new (never a file or a link
     already there, whoever left it), with the permissions any new file
     gets on this system. Raises OSError."""
-    folder = os.path.dirname(os.path.abspath(os.fspath(path)))
+    path = os.path.abspath(os.fspath(path))
+    folder = (os.path.dirname(os.path.realpath(path)) if follow_link
+              else os.path.realpath(os.path.dirname(path)))
     fd, temporary = tempfile.mkstemp(prefix=".", suffix=suffix, dir=folder)
     try:
         os.chmod(temporary, _NEW_FILE_MODE)

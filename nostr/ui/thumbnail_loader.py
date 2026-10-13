@@ -30,7 +30,7 @@ from PySide6.QtGui import QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
 import url_safety
-from atomic_file import free_path, new_document_file, write_bytes
+from atomic_file import free_path, new_document_file, place_document, save_document, write_bytes
 from i18n import _
 from image_safety import decode_image_bytes
 
@@ -425,7 +425,10 @@ class FileDownload(QObject):
             problem = "unsafe"
         else:
             try:
-                fd, part = new_document_file(self._target, suffix=".part")
+                # Beside the file a link names, where it will be put; a
+                # file kept beside a new name goes beside the target.
+                fd, part = new_document_file(self._target, suffix=".part",
+                                             follow_link=not self._keep_existing)
                 self._part = Path(part)
                 self._file = os.fdopen(fd, "wb")
             except OSError as exc:
@@ -541,16 +544,18 @@ class FileDownload(QObject):
         return why
 
     def _place(self) -> str:
-        """Put the downloaded file at the target. Raises OSError."""
+        """Put the downloaded file at the target, as any of the person's
+        files is saved (atomic_file.save_document): onto the file a link
+        names, keeping that file's permissions. Raises OSError."""
         if self._keep_existing:
             self._target = Path(free_path(self._target))
         if self._transform is None:
-            os.replace(self._part, self._target)
+            place_document(self._part, self._target)
             return ""
         data = self._transform(self._part.read_bytes())
         if data is None:
             return "key"
-        write_bytes(self._target, data)
+        save_document(self._target, data)
         return ""
 
 

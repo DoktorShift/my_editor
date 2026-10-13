@@ -614,3 +614,66 @@ def test_a_name_too_long_for_the_folder_says_so(tmp_path, monkeypatch, server, c
     assert world.dialog._status.text() == (
         f"“{name}” couldn’t be saved: its name is too long. Choose a shorter one.")
     assert folder(out) == []
+
+
+# --------------------------------------------------------------------------- #
+# What the saved file is
+# --------------------------------------------------------------------------- #
+
+def _new_file_mode() -> int:
+    mask = os.umask(0)
+    os.umask(mask)
+    return 0o666 & ~mask
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink") or sys.platform == "win32",
+                    reason="links need privileges on Windows")
+@pytest.mark.parametrize("cached", [False, True])
+def test_save_as_onto_a_link_replaces_the_file_it_points_to(tmp_path, monkeypatch, server,
+                                                             cached):
+    """The system's save dialog asked to replace the file the link names:
+    that file gets the new content and keeps its permissions, and the link
+    stays, from a download or from this computer's copy alike."""
+    body = b"new content" * 100
+    media = blob(server, body)
+    world = library(tmp_path, monkeypatch, [media])
+    if cached:
+        world.dialog._loader.cache_path(media.hash).write_bytes(body)
+    real = tmp_path / "elsewhere" / "Clip.mp4"
+    real.parent.mkdir()
+    real.write_bytes(b"old")
+    os.chmod(real, 0o640)
+    out = tmp_path / "out"
+    out.mkdir()
+    os.symlink(real, out / "Clip.mp4")
+    save_as(monkeypatch, world, media, out / "Clip.mp4")
+    assert wait_for(lambda: real.read_bytes() == body and not saving(world), 5)
+    assert os.path.islink(out / "Clip.mp4")
+    assert oct(os.stat(real).st_mode & 0o777) == oct(0o640)
+    assert folder(out) == ["Clip.mp4"] and folder(real.parent) == ["Clip.mp4"]
+
+
+@pytest.mark.parametrize("cached", [False, True])
+def test_a_saved_private_file_has_a_new_files_permissions(tmp_path, monkeypatch, server,
+                                                         cached):
+    """As any file saved here: readable as the system's settings make a
+    new file, whether downloaded or from this computer's copy."""
+    envelope = encrypt_file(b"the real picture" * 100, key_hex=KEY).envelope
+    sha = hashlib.sha256(envelope).hexdigest()
+    _Blobs.files[sha] = envelope
+    private = MediaFile(hash=sha, url=f"{server}/{sha}",
+                        urls=[{"server": server, "url": f"{server}/{sha}"}],
+                        mime_type="application/octet-stream", size=len(envelope))
+    blob_record = PrivateBlob(sha256=sha, key_hex=KEY, mime="image/png", name="Beach.png")
+    visibility = MediaVisibility(library=FakeLibrary([blob_record]),
+                                 ledger=PublicLedger(path=tmp_path / "public.json"))
+    world = library(tmp_path, monkeypatch, [private], visibility=visibility)
+    if cached:
+        world.dialog._loader.cache_path(sha).write_bytes(envelope)
+    out = tmp_path / "out"
+    out.mkdir()
+    save_as(monkeypatch, world, private, out / "Beach.png")
+    assert wait_for(lambda: (out / "Beach.png").exists() and not saving(world), 5)
+    assert (out / "Beach.png").read_bytes() == b"the real picture" * 100
+    if sys.platform != "win32":
+        assert oct(os.stat(out / "Beach.png").st_mode & 0o777) == oct(_new_file_mode())
