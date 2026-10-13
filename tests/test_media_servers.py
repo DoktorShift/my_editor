@@ -430,34 +430,32 @@ MB = 1024 ** 2
 
 def test_storage_text_says_the_number_and_warns_in_words():
     ok = ServerListing(origin=E21, ok=True)
-    text, fraction = storage_text(int(1.2 * GB), PER_USER_BYTES, ok)
-    assert text == "1.2 GB of 5 GB used" and fraction == pytest.approx(0.24)
-    text, _ = storage_text(int(4.6 * GB), PER_USER_BYTES, ok)
-    assert text.startswith("Almost full:")
-    text, fraction = storage_text(6 * GB, PER_USER_BYTES, ok)
-    assert text.startswith("Full:") and fraction == 1.0
-    assert storage_text(640 * MB, PER_USER_BYTES, ok)[0] == "640 MB of 5 GB used"
+    assert storage_text(int(1.2 * GB), PER_USER_BYTES, ok) == "1.2 GB of 5 GB used"
+    assert storage_text(int(4.6 * GB), PER_USER_BYTES, ok).startswith("Almost full:")
+    assert storage_text(6 * GB, PER_USER_BYTES, ok).startswith("Full:")
+    assert storage_text(640 * MB, PER_USER_BYTES, ok) == "640 MB of 5 GB used"
 
 
 def test_the_members_allowance_reads_as_the_association_states_it():
     # 5 x 1024^3 bytes once read "5.4 GB" against a "5 GB" promise.
     ok = ServerListing(origin=E21, ok=True)
-    text, _ = storage_text(PER_USER_BYTES, PER_USER_BYTES, ok)
-    assert text == "Full: 5 GB of 5 GB used"
+    assert storage_text(PER_USER_BYTES, PER_USER_BYTES, ok) == "Full: 5 GB of 5 GB used"
     assert PER_USER_LABEL == "5 GB"
 
 
 def test_storage_text_rounds_up_to_a_gigabyte_rather_than_1024_megabytes():
     ok = ServerListing(origin=E21, ok=True)
-    assert storage_text(GB - 1, PER_USER_BYTES, ok)[0].startswith("1 GB of")
+    assert storage_text(GB - 1, PER_USER_BYTES, ok).startswith("1 GB of")
 
 
-def test_storage_text_is_honest_about_what_it_does_not_know():
-    assert storage_text(0, 5 * GB, None)[0] == "Checking…"
+def test_storage_text_says_nothing_rather_than_a_guess():
+    """A number from a listing that failed is a guess: the line is left
+    out (as iCloud leaves it out) rather than saying "unavailable"."""
+    assert storage_text(0, 5 * GB, None) == ""
     down = ServerListing(origin=E21, ok=False)
-    assert storage_text(0, 5 * GB, down)[0] == "Usage unavailable right now."
+    assert storage_text(0, 5 * GB, down) == ""
     cut = ServerListing(origin=E21, ok=True, truncated=True)
-    assert storage_text(GB, 5 * GB, cut)[0].startswith("At least")
+    assert storage_text(GB, 5 * GB, cut).startswith("At least")
 
 
 # --------------------------------------------------------------------------- #

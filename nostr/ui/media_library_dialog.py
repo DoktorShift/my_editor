@@ -1,773 +1,111 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Media Library dialog: browse, upload, preview, delete Blossom media.
+"""The Media Library: the person's images, videos and audio.
 
-One self-contained dialog. Toolbar with filter + sort + Upload + Refresh
-above a thumbnail grid; an upload-progress strip pinned at the bottom
-while uploads are running; a preview lightbox on double-click.
+One window for both uses: browsing (non-modal, from Nostr > Media
+Library…) and picking (modal: Insert Image, an article's cover). It is
+built the way a Finder window or Photos is:
 
-Designed to fit the existing publisher-dialog aesthetic: dark/light CSS
-applied at construction, monospace headings, generous padding, no
-animation. Picker variant is a thin subclass that adds a "Select" button.
+- a toolbar with Add… (the system's file dialog), the kind of file to
+  show, the order, a search field, and an action menu (⋯) with the
+  selected files' commands, Refresh and Media Servers…;
+- a scrolling grid of tiles (``media_grid``), several of them selectable;
+- Quick Look on Space (``media_preview``); Return or a double-click
+  inserts when picking and otherwise opens Quick Look;
+- the same commands in a tile's context menu, in plain verbs: Insert,
+  Quick Look, Copy Link, Open in Browser, Save As…, Delete;
+- a file being added is a tile with its own progress and Cancel, and one
+  that failed says why, with Retry: nothing waits in a modal;
+- one quiet line at the bottom for what just happened, and how much of
+  an allowance is used when a server gives one ("1.2 GB of 5 GB used").
 
-The grid also says which files are private. A blob stored encrypted and
-a blob anyone can open look identical from the server's side, both are
-just bytes at a hash, so without a mark the user's only clue that they
-picked a private picture would be the warning at the very end of a
-publish. That is too late to be a choice. The mark is a word on the tile
-and a chip on the thumbnail, not a colour alone: ``accessibility.md``
-says to "offer visual indicators, like distinct shapes or icons, in
-addition to color to help people perceive differences in function and
-changes in state", and an item's text in this grid is painted in one
-colour that the selection overrides anyway.
+What stays in the background: several servers, copies on each, a server
+taking over when one cannot take a file, a server left out when it is
+full. And privacy is handled rather than explained. A file anyone with
+the link can open has a globe on its thumbnail (MyEditor's own uploads
+all are: a media server serves a file to whoever has its address); a
+private file from another app has none. Choosing a private one to
+insert asks before it is shared (``publish_copy_dialog``). When nobody
+could check whether a file is private, the picker says so under the grid
+and offers Try Again, because using such a file could share something
+private; the library itself says nothing.
 
-Private thumbnails are real thumbnails. The bytes are decrypted in
-memory and handed straight to Qt; nothing decrypted is ever written to
-the shared blob cache, because that cache is what an export walks. See
-``media.private_preview``.
+Private thumbnails are real thumbnails: the bytes are decrypted in
+memory and handed straight to Qt, and nothing decrypted is ever written
+to the shared blob cache, because that cache is what an export walks.
 """
 
 from __future__ import annotations
 
-from typing import Callable, Final, List, Optional
+import os
+from typing import Dict, List, Optional
 
-import itertools
-import time
-from pathlib import Path
-from types import SimpleNamespace
-
-from PySide6.QtCore import QBuffer, QDateTime, QIODevice, QRect, QSize, Qt, Signal, QUrl
-from PySide6.QtGui import (
-    QAction,
-    QColor,
-    QCursor,
-    QDesktopServices,
-    QFont,
-    QIcon,
-    QKeySequence,
-    QPainter,
-    QPixmap,
-)
+from PySide6.QtCore import QBuffer, QDateTime, QIODevice, QSize, Qt, QUrl, Signal
+from PySide6.QtGui import QAction, QCursor, QDesktopServices, QImageReader, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QDialog,
     QFileDialog,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListView,
-    QListWidget,
-    QListWidgetItem,
     QMenu,
-    QProgressBar,
     QPushButton,
     QSizePolicy,
+    QStackedWidget,
     QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-from alerts import confirm_destructive
-from atomic_file import save_document
-
 import i18n
 import media_files
-from media_files import format_size  # noqa: F401, imported from here too
 import theme
 import url_safety
+from alerts import confirm_destructive
+from atomic_file import save_document
 from i18n import _, ngettext
-from ..blossom.errors import friendly_message
+from media_files import format_size  # noqa: F401, imported from here too
+
+from ..blossom.errors import ERROR_CODES, friendly_message
 from ..blossom.store import MediaFile, MediaStore
-from ..media.media_visibility import (
-    PRIVATE,
-    PUBLIC,
-    PUBLISHED_COPY,
-    UNKNOWN,
-    MediaVisibility,
-)
+from ..media.media_visibility import PUBLIC, PUBLISHED_COPY, MediaVisibility
 from ..media.private_library import PrivateLibrary
+from .media_grid import (
+    FAILED,
+    FINISHING,
+    SENDING,
+    THUMB,
+    TILE_ROLE,
+    WAITING,
+    MediaGrid,
+    MediaModel,
+    Tile,
+)
+from .media_preview import QuickLook
 from .thumbnail_loader import ThumbnailLoader
 
+_PREFIXES = {"image": "image/", "video": "video/", "audio": "audio/"}
 
-# --------------------------------------------------------------------------- #
-# Theme CSS: matches the publisher dialog family
-# --------------------------------------------------------------------------- #
-
-_DARK_CSS = """
-QDialog { background: #1E1E1E; }
-QLabel { color: #D4D4D4; font-size: 12px; }
-QLabel#media_hint { color: #858585; }
-QLabel#media_status { color: #FFB347; }
-QLabel#media_empty { color: #6A6A6A; font-size: 13px; }
-QLabel#media_notice {
-    color: #FFB347;
-    background: #2D2517;
-    border: 1px solid #5A4620;
-    border-radius: 4px;
-    padding: 8px 10px;
-}
-/* Work in progress is not trouble. Same shape so the grid does not jump
-   when one becomes the other, but the dialog's own grey rather than the
-   amber it uses to mean "read this". 7.0:1 on its background. */
-QLabel#media_notice[tone="working"] {
-    color: #C8C8C8;
-    background: #262626;
-    border: 1px solid #3C3C3C;
-}
-QPushButton, QToolButton {
-    background: #2D2D30;
-    color: #D4D4D4;
-    border: 1px solid #3C3C3C;
-    padding: 6px 14px;
-    border-radius: 4px;
-    min-height: 22px;
-}
-QPushButton:hover, QToolButton:hover { background: #3C3C3C; }
-QPushButton:pressed, QToolButton:pressed { background: #1E1E1E; }
-/* The control with the keyboard focus: the app's ring (theme.py). */
-QPushButton:focus, QToolButton:focus { border: 2px solid #4FA3F7; padding: 5px 13px; }
-QPushButton:disabled, QToolButton:disabled { background: #252526; color: #6A6A6A; border-color: #2D2D2D; }
-QComboBox {
-    background: #2D2D30;
-    color: #D4D4D4;
-    border: 1px solid #3C3C3C;
-    border-radius: 4px;
-    padding: 5px 30px 5px 12px;
-    min-height: 22px;
-    min-width: 130px;
-}
-QComboBox:hover { background: #3C3C3C; }
-QComboBox:focus, QComboBox:on { border-color: #1177BB; }
-QComboBox::drop-down {
-    subcontrol-origin: padding;
-    subcontrol-position: center right;
-    width: 24px;
-    border: none;
-    background: transparent;
-}
-QComboBox::down-arrow {
-    width: 10px;
-    height: 6px;
-    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><polygon points='0,0 10,0 5,6' fill='%23B0B0B0'/></svg>");
-}
-QComboBox::down-arrow:on {
-    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><polygon points='0,6 10,6 5,0' fill='%23D4D4D4'/></svg>");
-}
-QComboBox QAbstractItemView {
-    background: #252526;
-    color: #D4D4D4;
-    border: 1px solid #3C3C3C;
-    border-radius: 4px;
-    selection-background-color: #094771;
-    outline: none;
-    padding: 4px;
-}
-QComboBox QAbstractItemView::item {
-    padding: 6px 12px;
-    min-height: 22px;
-    border-radius: 3px;
-}
-QComboBox QAbstractItemView::item:selected { background: #094771; color: #FFFFFF; }
-QComboBox QAbstractItemView::item:hover { background: #2A2D2E; }
-QPushButton#media_destructive { color: #FF6B5E; }
-QPushButton#media_destructive:hover { border-color: #FF6B5E; }
-QPushButton#media_destructive:disabled { color: #6A6A6A; }
-QListWidget {
-    background: #1E1E1E;
-    color: #D4D4D4;
-    border: 1px solid #3C3C3C;
-    border-radius: 4px;
-    padding: 6px;
-}
-QListWidget::item {
-    background: #252526;
-    border: 1px solid #2D2D30;
-    border-radius: 6px;
-    padding: 6px;
-    margin: 4px;
-}
-QListWidget::item:selected {
-    background: #094771;
-    border-color: #1177BB;
-    color: #FFFFFF;
-}
-QListWidget::item:hover { background: #2A2D2E; }
-QProgressBar {
-    background: #252526;
-    color: #D4D4D4;
-    border: 1px solid #3C3C3C;
-    border-radius: 3px;
-    text-align: center;
-    height: 14px;
-}
-QProgressBar::chunk { background: #1177BB; border-radius: 3px; }
-QLineEdit {
-    background: #252526;
-    color: #D4D4D4;
-    border: 1px solid #3C3C3C;
-    border-radius: 4px;
-    padding: 6px 10px;
-    selection-background-color: #264F78;
-}
-QLineEdit:focus { border-color: #1177BB; }
-QFrame#media_drop_zone {
-    background: #252526;
-    border: 1px dashed #3C3C3C;
-    border-radius: 6px;
-}
-QFrame#media_drop_zone[drag_active="true"] {
-    background: #094771;
-    border-color: #1177BB;
-}
-"""
-
-_LIGHT_CSS = """
-QDialog { background: #FFFFFF; }
-QLabel { color: #333333; font-size: 12px; }
-QLabel#media_hint { color: #777777; }
-QLabel#media_status { color: #A05000; }
-QLabel#media_empty { color: #999999; font-size: 13px; }
-QLabel#media_notice {
-    color: #7A3E00;
-    background: #FDF3E3;
-    border: 1px solid #E0BE85;
-    border-radius: 4px;
-    padding: 8px 10px;
-}
-/* See the dark sheet. 8.6:1 on its background. */
-QLabel#media_notice[tone="working"] {
-    color: #4A4A4A;
-    background: #F4F4F4;
-    border: 1px solid #DCDCDC;
-}
-QPushButton, QToolButton {
-    background: #ECECEC;
-    color: #333333;
-    border: 1px solid #CCCCCC;
-    padding: 6px 14px;
-    border-radius: 4px;
-    min-height: 22px;
-}
-QPushButton:hover, QToolButton:hover { background: #E1E1E1; }
-QPushButton:pressed, QToolButton:pressed { background: #D0D0D0; }
-QPushButton:focus, QToolButton:focus { border: 2px solid #0078D4; padding: 5px 13px; }
-QPushButton:disabled, QToolButton:disabled { background: #F8F8F8; color: #BBBBBB; border-color: #EBEBEB; }
-QComboBox {
-    background: #FFFFFF;
-    color: #333333;
-    border: 1px solid #CCCCCC;
-    border-radius: 4px;
-    padding: 5px 30px 5px 12px;
-    min-height: 22px;
-    min-width: 130px;
-}
-QComboBox:hover { border-color: #999999; }
-QComboBox:focus, QComboBox:on { border-color: #0066CC; }
-QComboBox::drop-down {
-    subcontrol-origin: padding;
-    subcontrol-position: center right;
-    width: 24px;
-    border: none;
-    background: transparent;
-}
-QComboBox::down-arrow {
-    width: 10px;
-    height: 6px;
-    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><polygon points='0,0 10,0 5,6' fill='%23666666'/></svg>");
-}
-QComboBox::down-arrow:on {
-    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><polygon points='0,6 10,6 5,0' fill='%23333333'/></svg>");
-}
-QComboBox QAbstractItemView {
-    background: #FFFFFF;
-    color: #333333;
-    border: 1px solid #CCCCCC;
-    border-radius: 4px;
-    selection-background-color: #CCE4F7;
-    outline: none;
-    padding: 4px;
-}
-QComboBox QAbstractItemView::item {
-    padding: 6px 12px;
-    min-height: 22px;
-    border-radius: 3px;
-}
-QComboBox QAbstractItemView::item:selected { background: #CCE4F7; color: #003366; }
-QComboBox QAbstractItemView::item:hover { background: #F2F2F2; }
-QPushButton#media_destructive { color: #C0392B; }
-QPushButton#media_destructive:hover { border-color: #C0392B; }
-QPushButton#media_destructive:disabled { color: #BBBBBB; }
-QListWidget {
-    background: #FAFAFA;
-    color: #333333;
-    border: 1px solid #E1E1E1;
-    border-radius: 4px;
-    padding: 6px;
-}
-QListWidget::item {
-    background: #FFFFFF;
-    border: 1px solid #EAEAEA;
-    border-radius: 6px;
-    padding: 6px;
-    margin: 4px;
-}
-QListWidget::item:selected {
-    background: #CCE4F7;
-    border-color: #0066CC;
-    color: #003366;
-}
-QListWidget::item:hover { background: #F2F2F2; }
-QProgressBar {
-    background: #F0F0F0;
-    color: #333333;
-    border: 1px solid #CCCCCC;
-    border-radius: 3px;
-    text-align: center;
-    height: 14px;
-}
-QProgressBar::chunk { background: #0066CC; border-radius: 3px; }
-QLineEdit {
-    background: #FFFFFF;
-    color: #333333;
-    border: 1px solid #CCCCCC;
-    border-radius: 4px;
-    padding: 6px 10px;
-    selection-background-color: #CCE4F7;
-}
-QLineEdit:focus { border-color: #0066CC; }
-QFrame#media_drop_zone {
-    background: #F8F8F8;
-    border: 1px dashed #CCCCCC;
-    border-radius: 6px;
-}
-QFrame#media_drop_zone[drag_active="true"] {
-    background: #E6F2FB;
-    border-color: #0066CC;
-}
-"""
-
-# The accent-filled action (Upload, Insert, Create): the app's accent and
-# its focus ring, as every dialog's default button has them (theme.py).
-_DARK_CSS += theme.accent_button_css("QPushButton#media_primary", True)
-_LIGHT_CSS += theme.accent_button_css("QPushButton#media_primary", False)
+# Types a file being added is shown from its own bytes while it uploads:
+# the ones the app decodes anyway.
+_PREVIEWABLE = {"image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"}
+_PREVIEW_MAX_BYTES = 40 * 1024 * 1024
 
 
-_THUMB_SIZE = 128
+def kind_of_mime(mime: str) -> str:
+    for kind, prefix in _PREFIXES.items():
+        if (mime or "").startswith(prefix):
+            return kind
+    return "file"
 
-# The toolbar's type filter, as the store defines it. Applied here as
-# well as there, because an encrypted blob's real type is not the one
-# the server reports.
-_FILTER_PREFIXES = {"image": "image/", "video": "video/", "audio": "audio/"}
-
-# Tile text is three lines: size, hash prefix, and the visibility word.
-# The third is blank for an ordinary public blob, so every cell is the
-# same height whether or not it carries a state. Uniform cells are what
-# let the grid keep ``setUniformItemSizes``.
-_LABEL_LINES = 3
-
-# The states whose bytes on the server are an encryption envelope. The
-# grid treats these as one thing in several places, because what they
-# share, that the server's type is the envelope's and the picture is
-# sealed rather than broken, is what those places are reasoning about.
-_ENCRYPTED_STATES = (PRIVATE, PUBLISHED_COPY)
-
-# The chip drawn onto a thumbnail that is not plainly public. The same
-# word for both private states: the file is private either way, and
-# which of the two it is, is spelled out on the tile and in the tooltip
-# rather than left to the colour. An unchecked file gets its own word,
-# because "private" would be a claim and this is the absence of one.
-_CHIP_TEXT = {
-    PRIVATE: _("PRIVATE"),
-    PUBLISHED_COPY: _("PRIVATE"),
-    UNKNOWN: _("NOT CHECKED"),
-}
-
-# A verdict the library has not reached yet, as opposed to one it tried
-# to reach and could not. Every rendering table here is read with
-# ``.get(state, "")``, so this state draws no chip, prints no word and
-# adds no tooltip line without any of them needing to know it exists.
-#
-# The distinction is the whole point. UNKNOWN is a finding and deserves
-# to be said out loud, because it means publishing is blocked until
-# somebody does something. A load that is simply still running is not a
-# finding, and stamping NOT CHECKED across an entire grid while the
-# answers are still arriving reports a verdict the app has not reached.
-# What is softened here is the badge and never the permission: the
-# publish gate keeps asking ``state_of``, which does not know this state.
-_PENDING: Final[str] = "pending"
-_CHIP_PAD_X = 6
-_CHIP_PAD_Y = 3
-_CHIP_MARGIN = 6
-
-# Chip fill and ink, per theme. The fills are the two colours this
-# dialog already uses, the status amber and the accent blue; the ink is
-# chosen against the fill rather than against the tile, so the chip
-# keeps its contrast whatever the thumbnail behind it looks like and
-# whether or not the tile is selected. Amber means "private, nothing has
-# left"; blue means "a public copy of this exists", which is the same
-# blue this dialog already uses for the action a user is most likely to
-# take. color.md: "Avoid using the same color to mean different things."
-# Unchecked is neither of those colours: a state that means "no answer
-# yet" must not borrow the colour of an answer. It gets the dialog's own
-# grey, which reads as absent rather than as a third category of file.
-_CHIP_COLORS = {
-    True: {
-        # 9.4:1 ink on fill.
-        PRIVATE: ("#FFB347", "#1E1E1E"),
-        # 4.8:1 ink on fill.
-        PUBLISHED_COPY: ("#1177BB", "#FFFFFF"),
-        # 5.4:1 ink on fill.
-        UNKNOWN: ("#6A6A6A", "#FFFFFF"),
-    },
-    False: {
-        # 5.8:1 ink on fill.
-        PRIVATE: ("#A05000", "#FFFFFF"),
-        # 5.6:1 ink on fill.
-        PUBLISHED_COPY: ("#0066CC", "#FFFFFF"),
-        # 6.9:1 ink on fill.
-        UNKNOWN: ("#5A5A5A", "#FFFFFF"),
-    },
-}
-
-# The word on the tile. Sentence case, as the rest of this dialog's
-# labels are. writing.md: "Choose words that are easily understood and
-# convey the right thing."
-_STATE_LABELS = {
-    PUBLIC: "",
-    PRIVATE: _("Private"),
-    PUBLISHED_COPY: _("Private · copy published"),
-    UNKNOWN: _("Not checked"),
-}
-
-# The sentence in the tooltip. Longer, because a tooltip is where
-# someone goes when the word alone was not enough.
-_STATE_TOOLTIPS = {
-    PRIVATE: _("private, stored encrypted and readable only by you"),
-    PUBLISHED_COPY: _("private, and a public copy of it exists"),
-    UNKNOWN: _(
-        "not checked, because your private library could not be read, so "
-        "this app cannot say whether this file is private"
-    ),
-}
-
-# What the picker says when the current selection is private. Shown
-# inline next to the choice rather than as an alert: alerts.md says to
-# "avoid using an alert merely to provide information" and to "prefer
-# finding an alternative way to communicate it within the relevant
-# context". The alert comes later, when there is actually a decision to
-# make and something irreversible behind it.
-_PICK_PRIVATE_NOTICE = _(
-    "This picture is private. Using it in something you publish creates a "
-    "separate public copy that anyone can open. The original stays private, "
-    "and you can confirm or cancel before anything is uploaded."
-)
-_PICK_PUBLISHED_NOTICE = _(
-    "This picture is private and already has a public copy. Using it here "
-    "reuses that copy, so nothing new is uploaded."
-)
-# Said before the click rather than after it, for the same reason the two
-# above are: the user is choosing, and this is the one state where the
-# choice cannot be honoured. It says what is missing rather than what
-# went wrong, because the file itself is fine.
-_PICK_UNKNOWN_NOTICE = _(
-    "This picture has not been checked against your private library, so it "
-    "cannot be used yet. Publishing it while it is unchecked could expose a "
-    "file you keep private."
-)
-
-# What the banner says when the library has never been read at all, which
-# is the state before the first load answers. The library's own status
-# line replaces this as soon as there is one.
-_LIBRARY_UNREAD = _(
-    "Your private library has not been read yet, so this app cannot tell "
-    "which of these files are private."
-)
-
-# Shown while the load is running. Reading the library costs a signer
-# round-trip per file, so this is the normal state of a large library for
-# a few seconds, and it is progress rather than trouble: it says what is
-# happening, not what is missing.
-_LIBRARY_CHECKING = _("Checking which of your files are private…")
-
-# The picker equivalent, for the seconds before the answer for the
-# selected file arrives. The publish gate still refuses a file in this
-# state; what changes is that the user is told it is coming rather than
-# told it cannot be used.
-_PICK_PENDING_NOTICE = _(
-    "Checking whether this picture is private. This takes a moment the "
-    "first time."
-)
-
-# Monotonic counter used to disambiguate paste-to-upload job names, two
-# pastes within one wall-clock second must not collide in the upload
-# queue, otherwise the auto-insert routes to the wrong editor.
-_paste_counter = itertools.count(1)
-
-
-def _decimal(text: str) -> str:
-    """``text`` with its decimal point written the way the language the
-    app is shown in writes it (1.5 MiB, 1,5 MiB)."""
-    return text.replace(".", i18n.display_locale().decimalPoint())
-
-
-# --------------------------------------------------------------------------- #
-# Drop zone
-# --------------------------------------------------------------------------- #
-
-class _DropZone(QFrame):
-    """File-drop affordance. Emits ``files_dropped(list[str])``."""
-
-    files_dropped = Signal(list)
-
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self.setObjectName("media_drop_zone")
-        self.setAcceptDrops(True)
-        self.setMinimumHeight(56)
-        self.setProperty("drag_active", False)
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 10, 14, 10)
-        self._label = QLabel(_("Drop files here to upload, or use the Upload button."))
-        self._label.setObjectName("media_hint")
-        # Takes the whole row and wraps there, rather than widening the
-        # window when a translation is longer.
-        self._label.setWordWrap(True)
-        layout.addWidget(self._label, 1)
-
-    def dragEnterEvent(self, event) -> None:
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-            self._set_drag_active(True)
-        else:
-            event.ignore()
-
-    def dragLeaveEvent(self, event) -> None:
-        self._set_drag_active(False)
-        super().dragLeaveEvent(event)
-
-    def dropEvent(self, event) -> None:
-        self._set_drag_active(False)
-        if not event.mimeData().hasUrls():
-            event.ignore()
-            return
-        paths: List[str] = []
-        for url in event.mimeData().urls():
-            if url.isLocalFile():
-                paths.append(url.toLocalFile())
-        if paths:
-            self.files_dropped.emit(paths)
-            event.acceptProposedAction()
-
-    def _set_drag_active(self, active: bool) -> None:
-        self.setProperty("drag_active", "true" if active else "false")
-        style = self.style()
-        style.unpolish(self)
-        style.polish(self)
-
-
-# --------------------------------------------------------------------------- #
-# Preview lightbox
-# --------------------------------------------------------------------------- #
-
-class _PreviewDialog(QDialog):
-    """Full-pixmap preview: large image area, metadata strip, and the
-    standard Copy URL / Download / Open in browser actions you'd expect
-    from any media-library lightbox.
-
-    Keyboard:
-      ←/→  navigate · Esc close · Cmd/Ctrl+C copies URL · Cmd/Ctrl+S downloads
-    """
-
-    download_requested = Signal(object)   # MediaFile
-
-    def __init__(
-        self,
-        files: List[MediaFile],
-        start_index: int,
-        loader: ThumbnailLoader,
-        *,
-        is_dark: bool,
-        parent: Optional[QWidget] = None,
-    ) -> None:
-        super().__init__(parent)
-        self.setWindowTitle(_("Preview"))
-        # Default to roughly half of a typical 1080p panel so the image
-        # has real room. Minimum keeps the controls usable on small
-        # laptops.
-        self.resize(1024, 720)
-        self.setMinimumSize(720, 540)
-        # Without this the dialog stays alive (hidden) after the user
-        # closes it, and its still-connected ``loader.ready`` slot fires
-        # on every subsequent thumbnail decode. WA_DeleteOnClose makes
-        # Qt release the C++ object on close so the connection is
-        # cleaned up with it.
-        self.setAttribute(Qt.WA_DeleteOnClose)
-        self.setStyleSheet(_DARK_CSS if is_dark else _LIGHT_CSS)
-        self._files = files
-        self._loader = loader
-        self._is_dark = is_dark
-        self._index = max(0, min(start_index, len(files) - 1))
-        self._current_pixmap: Optional[QPixmap] = None
-        self._build_ui()
-        loader.ready.connect(self._on_thumb_ready)
-        self._refresh()
-
-    def _build_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(10)
-
-        # Massive image area, takes all the slack from the layout.
-        self._image = QLabel()
-        self._image.setAlignment(Qt.AlignCenter)
-        self._image.setMinimumHeight(420)
-        self._image.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        layout.addWidget(self._image, 1)
-
-        # Metadata strip: URL, size, mime, server count.
-        self._meta = QLabel("")
-        self._meta.setObjectName("media_hint")
-        self._meta.setWordWrap(True)
-        self._meta.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        layout.addWidget(self._meta)
-
-        # Action row: Copy / Download / Open in browser / nav.
-        action_row = QHBoxLayout()
-        action_row.setSpacing(8)
-
-        self._copy_btn = QPushButton(_("Copy URL"))
-        self._copy_btn.setShortcut(QKeySequence.Copy)
-        self._copy_btn.clicked.connect(self._copy_url)
-        action_row.addWidget(self._copy_btn)
-
-        self._download_btn = QPushButton(_("Download"))
-        self._download_btn.setShortcut(QKeySequence.Save)
-        self._download_btn.clicked.connect(self._download)
-        action_row.addWidget(self._download_btn)
-
-        self._open_btn = QPushButton(_("Open in Browser"))
-        self._open_btn.clicked.connect(self._open_browser)
-        action_row.addWidget(self._open_btn)
-
-        action_row.addStretch(1)
-
-        self._counter = QLabel("")
-        self._counter.setObjectName("media_hint")
-        action_row.addWidget(self._counter)
-
-        self._prev_btn = QPushButton(_("◀ Previous"))
-        self._prev_btn.clicked.connect(self._prev)
-        action_row.addWidget(self._prev_btn)
-
-        self._next_btn = QPushButton(_("Next ▶"))
-        self._next_btn.clicked.connect(self._next)
-        action_row.addWidget(self._next_btn)
-
-        layout.addLayout(action_row)
-
-    def keyPressEvent(self, event) -> None:
-        if event.key() == Qt.Key_Left:
-            self._prev()
-        elif event.key() == Qt.Key_Right:
-            self._next()
-        elif event.key() == Qt.Key_Escape:
-            self.accept()
-        else:
-            super().keyPressEvent(event)
-
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
-        # Re-scale the current image to the new viewport so the preview
-        # tracks the window. Skipped if no pixmap yet (still loading).
-        self._rescale_current()
-
-    def _current(self) -> MediaFile:
-        return self._files[self._index]
-
-    def _refresh(self) -> None:
-        if not self._files:
-            self.accept()
-            return
-        media = self._current()
-        self._meta.setText(_meta_text(media))
-        self._counter.setText(f"{self._index + 1} / {len(self._files)}")
-        self._current_pixmap = None
-        self._image.setPixmap(QPixmap())
-        if (media.mime_type or "").startswith("image/"):
-            self._image.setText(_("Loading…"))
-            self._loader.load(media.hash, media.url)
-        else:
-            self._image.setText(_("[{type}, open in browser to inspect]").format(
-                type=media.mime_type or _("binary")))
-        # Download / open-in-browser always make sense; copy URL always makes sense.
-        # No need to enable/disable anything per item.
-
-    def _rescale_current(self) -> None:
-        if self._current_pixmap is None or self._current_pixmap.isNull():
-            return
-        target_w = max(1, self._image.width())
-        target_h = max(1, self._image.height())
-        scaled = self._current_pixmap.scaled(
-            target_w, target_h,
-            Qt.KeepAspectRatio, Qt.SmoothTransformation,
-        )
-        self._image.setPixmap(scaled)
-
-    def _on_thumb_ready(self, sha: str, _path: str, pix: QPixmap) -> None:
-        if self._index >= len(self._files):
-            return
-        if self._current().hash != sha:
-            return
-        # First decode for this file → refresh the meta line so the
-        # dimensions appear in the strip below the image.
-        media = self._current()
-        if not media.width and not pix.isNull():
-            media.width = pix.width()
-            media.height = pix.height()
-            self._refresh_meta_only()
-        self._current_pixmap = pix
-        self._rescale_current()
-
-    def _refresh_meta_only(self) -> None:
-        self._meta.setText(_meta_text(self._current()))
-
-    def _prev(self) -> None:
-        if not self._files:
-            return
-        self._index = (self._index - 1) % len(self._files)
-        self._refresh()
-
-    def _next(self) -> None:
-        if not self._files:
-            return
-        self._index = (self._index + 1) % len(self._files)
-        self._refresh()
-
-    def _copy_url(self) -> None:
-        QApplication.clipboard().setText(self._current().url)
-
-    def _open_browser(self) -> None:
-        QDesktopServices.openUrl(QUrl(self._current().url))
-
-    def _download(self) -> None:
-        self.download_requested.emit(self._current())
-
-
-# --------------------------------------------------------------------------- #
-# Media Library dialog
-# --------------------------------------------------------------------------- #
 
 class MediaLibraryDialog(QDialog):
-    """Browse / upload / delete Blossom media for the active profile.
+    """The Media Library window, browsing or picking."""
 
-    Picker mode (``pick_mode=True``) shows a "Select" button and emits
-    ``file_picked(MediaFile)`` instead of providing in-place editor
-    actions. The library itself works identically in both modes."""
-
-    file_picked = Signal(object, str)   # MediaFile, alt_text (empty when alt row is hidden)
+    # The picked file and its alternative text (empty without the field).
+    file_picked = Signal(object, str)
     # Media Servers…: the window that owns the settings opens the sheet.
     servers_requested = Signal()
 
@@ -779,54 +117,219 @@ class MediaLibraryDialog(QDialog):
         pick_mode: bool = False,
         pick_alt_text: bool = True,
         visibility: Optional[MediaVisibility] = None,
-        server_label: Optional[Callable[[str], Optional[str]]] = None,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle(_("Media Library") if not pick_mode else _("Insert Image"))
-        # A friendly name for a server origin, when it has one (the
-        # members' server of an association). None means "use the host".
-        self._server_label = server_label or (lambda _origin: None)
-        self.setModal(False if not pick_mode else True)
-        self.resize(820, 620)
-        # Auto-delete on close so the dialog's connections to MediaStore
-        # / ThumbnailLoader are released. Otherwise a parent-owned but
-        # hidden dialog keeps firing every refresh / upload signal in
-        # the background.
-        self.setAttribute(Qt.WA_DeleteOnClose)
+        self.setWindowTitle(_("Insert Image") if pick_mode else _("Media Library"))
+        self.setModal(pick_mode)
+        self.resize(860, 560)
+        self.setMinimumSize(540, 400)
+        # Deleted on close, so its connections to the store and the
+        # loader go with it.
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.setStyleSheet(theme.dialog_stylesheet(is_dark) + _extra_css(is_dark))
 
         self._store = store
         self._is_dark = is_dark
         self._pick_mode = pick_mode
-        self._pick_alt_text = pick_alt_text and pick_mode
-        self._loader = ThumbnailLoader(parent=self)
-        # Empty by default: with no library and no ledger wired there is
-        # nothing to be private of, and every blob is public, which is
-        # the answer this dialog gave before any of this existed. That is
-        # not the same as a library that exists and has not been read;
-        # that one answers "not checked" and the grid marks it.
+        # Empty by default: with no private library wired there is
+        # nothing to be private of, and every file is public.
         self._visibility = visibility or MediaVisibility()
-        # Set by ``bind_private_library``. Kept as well as the visibility
-        # object because the two answer different questions: visibility
-        # says what one file is, this says whether the answers can be
-        # relied on at all, and the user needs to be told the second.
         self._private_library: Optional[PrivateLibrary] = None
-        self._library_status = ""
-        self._items_by_hash: dict[str, QListWidgetItem] = {}
-        self._active_uploads: dict[str, QProgressBar] = {}
-        # sha256 -> why its thumbnail could not be produced. Survives a
-        # grid rebuild so the explanation is not lost on every refresh.
-        self._preview_errors: dict[str, str] = {}
+        self._loader = ThumbnailLoader(parent=self)
+        self._thumbs: Dict[str, QPixmap] = {}
+        self._asked: set = set()
+        # Files added from this window, by job name, until they land.
+        self._jobs: Dict[str, Tile] = {}
+        # What a finished upload has to say (a copy a server did not
+        # keep), said once it is added; and failures that arrived before
+        # their tile, by job name.
+        self._job_notes: Dict[str, str] = {}
+        self._early_failures: Dict[str, str] = {}
+        # Downloads for Save As, by sha256: where each one goes.
+        self._saving: Dict[str, List[str]] = {}
+        self._quick_look: Optional[QuickLook] = None
+        self._fetching = False
+        self._fetch_failed = ""
 
-        self._build_ui()
-        self._install_shortcuts()
-        self.setStyleSheet(_DARK_CSS if is_dark else _LIGHT_CSS)
+        self._build(pick_alt_text and pick_mode)
+        self._connect()
+        self._rebuild()
+        self._refresh_storage()
+        self._grid.setFocus(Qt.FocusReason.OtherFocusReason)
+        store.fetch()
 
-        # Wire store signals.
-        store.library_changed.connect(self._refresh_grid)
-        # Bound methods, not lambdas: Qt drops a method's connection when
-        # this dialog is deleted, while a lambda would outlive it and run
-        # against deleted widgets on the store's next fetch.
+    # ------------------------------------------------------------------
+    # Building
+    # ------------------------------------------------------------------
+
+    def _build(self, alt_text: bool) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addLayout(self._build_toolbar())
+
+        self._model = MediaModel(self)
+        self._grid = MediaGrid(is_dark=self._is_dark)
+        self._grid.setModel(self._model)
+        self._grid.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._grid.customContextMenuRequested.connect(self._context_menu)
+        self._grid.selectionModel().selectionChanged.connect(self._selection_changed)
+        self._grid.open_requested.connect(self._open)
+        self._grid.quick_look_requested.connect(self._toggle_quick_look)
+        self._grid.delete_requested.connect(self._delete)
+        self._grid.copy_requested.connect(self._copy_links)
+        self._grid.paste_requested.connect(self._paste)
+        self._grid.files_dropped.connect(self._add_paths)
+        self._grid.cancel_requested.connect(self._cancel_upload)
+        self._grid.retry_requested.connect(self._retry_upload)
+        self._grid.visible_changed.connect(self._load_visible)
+
+        self._stack = QStackedWidget()
+        self._stack.addWidget(self._grid)
+        self._stack.addWidget(self._build_empty_page())
+        layout.addWidget(self._stack, 1)
+
+        # The picker's one sentence about the file chosen, when it cannot
+        # be used yet, with the way out.
+        self._pick_notice = QWidget()
+        notice = QHBoxLayout(self._pick_notice)
+        notice.setContentsMargins(14, 6, 14, 0)
+        self._pick_notice_text = QLabel()
+        self._pick_notice_text.setWordWrap(True)
+        self._pick_notice_text.setTextFormat(Qt.TextFormat.PlainText)
+        self._pick_notice_button = QPushButton(_("Try Again"))
+        self._pick_notice_button.setAutoDefault(False)
+        self._pick_notice_button.clicked.connect(self._check_private_again)
+        notice.addWidget(self._pick_notice_text, 1)
+        notice.addWidget(self._pick_notice_button)
+        self._pick_notice.hide()
+        layout.addWidget(self._pick_notice)
+
+        footer = QHBoxLayout()
+        footer.setContentsMargins(14, 6, 14, 8)
+        footer.setSpacing(12)
+        self._status = QLabel()
+        self._status.setObjectName("media_status")
+        self._status.setWordWrap(True)
+        self._status.setTextFormat(Qt.TextFormat.PlainText)
+        self._status.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._storage = QLabel()
+        self._storage.setObjectName("media_hint")
+        self._storage.setTextFormat(Qt.TextFormat.PlainText)
+        footer.addWidget(self._status, 1)
+        footer.addWidget(self._storage, 0,
+                         Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        layout.addLayout(footer)
+
+        self._alt_edit: Optional[QLineEdit] = None
+        self._insert_button: Optional[QPushButton] = None
+        if self._pick_mode:
+            layout.addLayout(self._build_pick_bar(alt_text))
+
+        find = QAction(self)
+        find.setShortcut(QKeySequence.StandardKey.Find)
+        find.triggered.connect(lambda: self._search.setFocus(Qt.FocusReason.ShortcutFocusReason))
+        self.addAction(find)
+
+    def _build_toolbar(self) -> QHBoxLayout:
+        bar = QHBoxLayout()
+        bar.setContentsMargins(14, 12, 14, 10)
+        bar.setSpacing(8)
+        self._add_button = QPushButton(_("Add…"))
+        self._add_button.setToolTip(_("Add images, videos or audio from your computer"))
+        self._add_button.setAutoDefault(False)
+        self._add_button.clicked.connect(self._choose_files)
+        bar.addWidget(self._add_button)
+        self._filter_combo = QComboBox()
+        self._filter_combo.setAccessibleName(_("Show"))
+        for kind, label in (("all", _("All Items")), ("image", _("Images")),
+                            ("video", _("Videos")), ("audio", _("Audio"))):
+            self._filter_combo.addItem(label, kind)
+        self._filter_combo.currentIndexChanged.connect(self._rebuild)
+        bar.addWidget(self._filter_combo)
+        self._sort_combo = QComboBox()
+        self._sort_combo.setAccessibleName(_("Sort By"))
+        for key, label in (("newest", _("Newest First")), ("oldest", _("Oldest First")),
+                           ("largest", _("Largest First")), ("smallest", _("Smallest First")),
+                           ("name", _("Name"))):
+            self._sort_combo.addItem(label, key)
+        self._sort_combo.currentIndexChanged.connect(self._rebuild)
+        bar.addWidget(self._sort_combo)
+        bar.addStretch(1)
+        self._search = QLineEdit()
+        self._search.setPlaceholderText(_("Search"))
+        self._search.setAccessibleName(_("Search Media"))
+        self._search.setClearButtonEnabled(True)
+        self._search.setMinimumWidth(110)
+        self._search.setMaximumWidth(220)
+        self._search.textChanged.connect(self._rebuild)
+        bar.addWidget(self._search, 1)
+        self._actions_button = QToolButton()
+        self._actions_button.setObjectName("media_actions")
+        self._actions_button.setText("⋯")
+        self._actions_button.setAccessibleName(_("Actions"))
+        self._actions_button.setToolTip(_("Actions"))
+        self._actions_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._actions_menu = QMenu(self._actions_button)
+        self._actions_menu.aboutToShow.connect(self._fill_actions_menu)
+        self._actions_button.setMenu(self._actions_menu)
+        bar.addWidget(self._actions_button)
+        return bar
+
+    def _build_empty_page(self) -> QWidget:
+        page = QWidget()
+        column = QVBoxLayout(page)
+        column.addStretch(1)
+        self._empty_text = QLabel()
+        self._empty_text.setObjectName("media_empty")
+        self._empty_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_text.setWordWrap(True)
+        self._empty_text.setTextFormat(Qt.TextFormat.PlainText)
+        column.addWidget(self._empty_text)
+        self._empty_button = QPushButton()
+        self._empty_button.setAutoDefault(False)
+        self._empty_button.clicked.connect(self._empty_action)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        row.addWidget(self._empty_button)
+        row.addStretch(1)
+        column.addLayout(row)
+        column.addStretch(2)
+        self._empty = page
+        return page
+
+    def _build_pick_bar(self, alt_text: bool) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.setContentsMargins(14, 0, 14, 14)
+        row.setSpacing(8)
+        if alt_text:
+            label = QLabel(_("Alt text:"))
+            self._alt_edit = QLineEdit()
+            label.setBuddy(self._alt_edit)
+            self._alt_edit.setAccessibleName(_("Alt text"))
+            self._alt_edit.setPlaceholderText(_("Describe the image for people who can’t see it"))
+            self._alt_edit.setClearButtonEnabled(True)
+            row.addWidget(label)
+            row.addWidget(self._alt_edit, 1)
+        else:
+            row.addStretch(1)
+        cancel = QPushButton(_("Cancel"))
+        cancel.setAutoDefault(False)
+        cancel.clicked.connect(self.reject)
+        row.addWidget(cancel)
+        self._insert_button = QPushButton(_("Insert"))
+        self._insert_button.setDefault(True)
+        self._insert_button.clicked.connect(self._insert)
+        row.addWidget(self._insert_button)
+        return row
+
+    def _connect(self) -> None:
+        store = self._store
+        # Bound methods: Qt drops them when this window is deleted.
+        store.library_changed.connect(self._rebuild)
+        store.library_changed.connect(self._refresh_storage)
+        store.listings_changed.connect(self._refresh_storage)
         store.fetch_started.connect(self._on_fetch_started)
         store.fetch_finished.connect(self._on_fetch_finished)
         store.fetch_error.connect(self._on_fetch_error)
@@ -835,1320 +338,693 @@ class MediaLibraryDialog(QDialog):
         store.upload_status.connect(self._on_upload_status)
         store.upload_finished.connect(self._on_upload_finished)
         store.upload_failed.connect(self._on_upload_failed)
-        store.upload_rerouted.connect(self._on_upload_rerouted)
-        store.server_skipped.connect(self._on_server_skipped)
-        store.mirror_failed.connect(self._on_mirror_failed)
-        store.listings_changed.connect(self._refresh_servers)
-        store.library_changed.connect(self._refresh_storage)
+        store.upload_cancelled.connect(self._on_upload_cancelled)
+        store.mirror_failed.connect(self._on_copy_missing)
+        store.server_skipped.connect(self._on_copy_missing)
         store.file_deleted.connect(self._on_file_deleted)
         store.delete_failed.connect(self._on_delete_failed)
-
-        # Wire thumbnail loader signals to update existing items. The
-        # failure side matters as much as the success side: without it a
-        # blob that cannot be previewed is indistinguishable from one
-        # still loading, forever.
         self._loader.ready.connect(self._on_thumbnail_ready)
         self._loader.failed.connect(self._on_thumbnail_failed)
-
-        # Kick off an initial fetch.
-        self._refresh_servers()
-        self._refresh_grid()
-        store.fetch()
 
     # ------------------------------------------------------------------
     # The private library
     # ------------------------------------------------------------------
 
     def bind_private_library(self, library: PrivateLibrary) -> None:
-        """Follow a private library, and say so when it cannot be read.
-
-        Both of its signals matter and for different reasons.
-        ``library_changed`` repaints the grid, so a file that turns out
-        to be private stops being drawn as an ordinary blob. And
-        ``status_changed`` is the only place the app ever learns that
-        the library did not open: without it, "your private library
-        stayed closed" is a sentence emitted into nothing while the user
-        stands in front of a grid of files it cannot vouch for.
-
-        Called rather than passed to the constructor because binding the
-        profile is what starts the load, and that is the caller's
-        decision: it is where the signer prompts come from.
-        """
+        """Follow the private library: a file that turns out private loses
+        its globe, and the picker learns when the check failed."""
         self._private_library = library
-        # Seeded rather than waited for. The library outlives this dialog,
-        # so a load that finished before it was built emitted its status
-        # into a widget that did not exist yet, and this reported a
-        # library read minutes ago as one that had never been read.
-        self._library_status = library.status
         library.library_changed.connect(self._on_private_library_changed)
         library.status_changed.connect(self._on_private_library_status)
         self._on_private_library_changed()
 
-    def _on_private_library_status(self, text: str) -> None:
-        self._library_status = text
-        self._refresh_library_notice()
-
     def _on_private_library_changed(self) -> None:
-        self._refresh_grid()
-        self._refresh_library_notice()
+        self._rebuild()
 
-    def _library_pending(self) -> bool:
-        """Whether the answers are still on their way."""
-        library = self._private_library
-        return library is not None and library.loading
-
-    def _library_failure_for(self, sha256: str) -> str:
-        """Why this one file could not be accounted for, if it could not.
-
-        Failures are filed under the record's ``d`` tag, which for a file
-        record is its content hash, so a tile can find its own.
-        """
-        library = self._private_library
-        if library is None or not sha256:
-            return ""
-        wanted = sha256.strip().lower()
-        for failure in library.failures:
-            if (failure.identifier or "").strip().lower() == wanted:
-                return failure.reason
-        return ""
-
-    def _may_be_private(self, sha256: str) -> bool:
-        """Whether deleting this file could delete a private one: it is
-        private, or nobody has checked. Asks the state to act on, not
-        the state drawn, which softens "not checked" while the private
-        library loads."""
-        return self._visibility.state_of(sha256) in (*_ENCRYPTED_STATES, UNKNOWN)
-
-    def _shown_state(self, sha256: str) -> str:
-        """The state to draw, which is not always the state to act on.
-
-        Only ever softens :data:`UNKNOWN`, and only while the load that
-        would answer it is still running. Everything else is passed
-        through untouched, so a file the library has actually failed to
-        account for still gets its badge.
-        """
-        state = self._visibility.state_of(sha256)
-        if state == UNKNOWN and self._library_pending():
-            return _PENDING
-        return state
-
-    def _refresh_library_notice(self) -> None:
-        """Say what is happening, and only when there is something to say.
-
-        Three situations, and they used to share one amber banner and one
-        run-on sentence assembled from whatever internal complaints were
-        lying around. Reading the library is normal work that takes a
-        signer round-trip per file, so most of the time this is a
-        progress line, not a warning; a person who is told something is
-        wrong every time they open a dialog stops reading the times it
-        is.
-
-        Settled is silence. Nothing is more reassuring than a dialog that
-        has nothing to report.
-        """
-        library = self._private_library
-        if library is None or library.settled:
-            self._library_label.setVisible(False)
-            return
-
-        if library.loading:
-            self._show_library_notice(_LIBRARY_CHECKING, working=True)
-            return
-
-        # Not loading and not settled: something is genuinely unresolved,
-        # and the grid is showing files it cannot vouch for. One sentence
-        # that says what it means for the user, rather than the load's
-        # internal complaints concatenated. The per-record reasons stay
-        # on the tiles they belong to, where they name a file.
-        count = len(library.failures)
-        if count:
-            self._show_library_notice(
-                ngettext(
-                    "{count} item in your private library could not be opened, "
-                    "so files marked NOT CHECKED cannot be used in published "
-                    "work. Refresh to try again.",
-                    "{count} items in your private library could not be opened, "
-                    "so files marked NOT CHECKED cannot be used in published "
-                    "work. Refresh to try again.",
-                    count,
-                ).format(count=count),
-                working=False,
-            )
-            return
-        self._show_library_notice(
-            self._library_status or _LIBRARY_UNREAD, working=False,
-        )
-
-    def _show_library_notice(self, text: str, *, working: bool) -> None:
-        self._library_label.setText(text)
-        self._library_label.setProperty("tone", "working" if working else "")
-        # A property that styling depends on does not repaint on its own.
-        self._library_label.style().unpolish(self._library_label)
-        self._library_label.style().polish(self._library_label)
-        self._library_label.setVisible(True)
-
-    # ------------------------------------------------------------------
-    # UI construction
-    # ------------------------------------------------------------------
-
-    def _build_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(10)
-
-        # Filter / sort row + Upload / Refresh.
-        toolbar = QHBoxLayout()
-        toolbar.setSpacing(8)
-
-        self._filter_combo = _styled_combo()
-        _name(self._filter_combo, _("Show"))
-        self._filter_combo.addItem(_("All files"), "all")
-        self._filter_combo.addItem(_("Images"), "image")
-        self._filter_combo.addItem(_("Videos"), "video")
-        self._filter_combo.addItem(_("Audio"), "audio")
-        self._filter_combo.currentIndexChanged.connect(self._refresh_grid)
-        toolbar.addWidget(self._filter_combo)
-
-        self._sort_combo = _styled_combo()
-        _name(self._sort_combo, _("Sort"))
-        self._sort_combo.addItem(_("Newest first"), "newest")
-        self._sort_combo.addItem(_("Oldest first"), "oldest")
-        self._sort_combo.addItem(_("Largest first"), "largest")
-        self._sort_combo.addItem(_("Smallest first"), "smallest")
-        self._sort_combo.currentIndexChanged.connect(self._refresh_grid)
-        toolbar.addWidget(self._sort_combo)
-
-        # Which server's files to show. Rebuilt whenever the set of
-        # servers changes (a membership that resolves adds its server).
-        self._source_combo = _styled_combo()
-        _name(self._source_combo, _("Show files from"))
-        self._source_combo.addItem(_("All servers"), "")
-        self._source_combo.currentIndexChanged.connect(self._on_source_changed)
-        toolbar.addWidget(self._source_combo)
-
-        toolbar.addStretch(1)
-
-        self._upload_btn = QPushButton(_("Upload"))
-        self._upload_btn.setObjectName("media_primary")
-        self._upload_btn.clicked.connect(self._on_upload_clicked)
-        toolbar.addWidget(self._upload_btn)
-
-        self._refresh_btn = QPushButton(_("Refresh"))
-        self._refresh_btn.clicked.connect(lambda: self._store.fetch(force=True))
-        toolbar.addWidget(self._refresh_btn)
-
-        layout.addLayout(toolbar)
-
-        # Space used on servers that give this account a known allowance,
-        # such as the members' server. Text says the number, the bar only
-        # repeats it, so the meaning never rests on the bar alone.
-        self._storage_box = QWidget()
-        self._storage_rows = QVBoxLayout(self._storage_box)
-        self._storage_rows.setContentsMargins(0, 0, 0, 0)
-        self._storage_rows.setSpacing(4)
-        self._storage_box.setVisible(False)
-        self._storage_widgets: dict = {}
-        layout.addWidget(self._storage_box)
-
-        # Servers that could not be listed. Their files from last time
-        # stay in the grid; this says why they may be out of date.
-        self._servers_label = QLabel("")
-        self._servers_label.setObjectName("media_notice")
-        self._servers_label.setWordWrap(True)
-        self._servers_label.setTextFormat(Qt.PlainText)
-        self._servers_label.setVisible(False)
-        layout.addWidget(self._servers_label)
-
-        self._servers_button = QPushButton(_("Media Servers…"))
-        self._servers_button.setFlat(True)
-        self._servers_button.setAutoDefault(False)
-        self._servers_button.clicked.connect(self.servers_requested)
-        servers_row = QHBoxLayout()
-        servers_row.addWidget(self._servers_button)
-        servers_row.addStretch(1)
-        layout.addLayout(servers_row)
-
-        # Drop zone.
-        self._drop_zone = _DropZone(self)
-        self._drop_zone.files_dropped.connect(self._on_files_dropped)
-        layout.addWidget(self._drop_zone)
-
-        # The private library's own trouble, above the grid it applies
-        # to. Not in the status line at the bottom: that line is the
-        # store's, it is overwritten by every fetch and upload, and a
-        # sentence saying half these tiles cannot be trusted must not be
-        # cleared by an unrelated refresh finishing.
-        self._library_label = QLabel("")
-        self._library_label.setObjectName("media_notice")
-        self._library_label.setWordWrap(True)
-        # The words in here come from a signer, which is somebody else's
-        # program. QLabel guesses rich text when it is not told, so a
-        # reason containing markup would be rendered as markup rather
-        # than shown as what it is.
-        self._library_label.setTextFormat(Qt.PlainText)
-        self._library_label.setVisible(False)
-        layout.addWidget(self._library_label)
-
-        # Grid.
-        self._grid = QListWidget()
-        self._grid.setAccessibleName(_("Files"))
-        self._grid.setViewMode(QListWidget.IconMode)
-        self._grid.setIconSize(QSize(_THUMB_SIZE, _THUMB_SIZE))
-        self._grid.setResizeMode(QListWidget.Adjust)
-        self._grid.setMovement(QListWidget.Static)
-        self._grid.setSelectionMode(QListWidget.ExtendedSelection)
-        self._grid.setUniformItemSizes(True)
-        self._grid.setGridSize(
-            QSize(_THUMB_SIZE + 24, _THUMB_SIZE + 28 + _LABEL_LINES * 16)
-        )
-        self._grid.setSpacing(4)
-        self._grid.setContextMenuPolicy(Qt.CustomContextMenu)
-        self._grid.customContextMenuRequested.connect(self._on_grid_context)
-        self._grid.itemDoubleClicked.connect(self._on_item_activated)
-        self._grid.itemSelectionChanged.connect(self._refresh_pick_notice)
-        self._grid.itemSelectionChanged.connect(self._update_selection_actions)
-        layout.addWidget(self._grid, 1)
-
-        # Empty state placeholder (shown when grid is empty).
-        self._empty_label = QLabel(_(
-            "No media yet. Drop a file above or hit Upload."
-        ))
-        self._empty_label.setObjectName("media_empty")
-        self._empty_label.setAlignment(Qt.AlignCenter)
-        # It stands where the grid stands, and takes the room the grid
-        # would, so an empty library does not spread its rows apart.
-        layout.addWidget(self._empty_label, 1)
-
-        # Discoverability hint, surfaces the double-click / right-click /
-        # paste / delete affordances that aren't obvious from the grid alone.
-        if self._pick_mode:
-            hint_text = _(
-                "Double-click a tile to preview · Right-click for actions · "
-                "Paste an image to upload"
-            )
-        else:
-            hint_text = _(
-                "Double-click a tile to preview · Right-click for actions · "
-                "Paste an image to upload · Del to remove selected"
-            )
-        self._hint_label = QLabel(hint_text)
-        self._hint_label.setObjectName("media_hint")
-        # Wraps rather than widening the window when a translation is longer.
-        self._hint_label.setWordWrap(True)
-        layout.addWidget(self._hint_label)
-
-        # The picker's early warning. It sits directly above the alt-text
-        # row and the Insert button, which is where the eye already is
-        # when the choice is being made, and it is hidden entirely when
-        # the selection is an ordinary public file so it never becomes
-        # furniture the user learns to skip.
-        self._notice_label = QLabel("")
-        self._notice_label.setObjectName("media_notice")
-        self._notice_label.setWordWrap(True)
-        self._notice_label.setVisible(False)
-        layout.addWidget(self._notice_label)
-
-        # Alt-text field, only when the embedding flow actually uses
-        # alt text (the editor's "Insert image" picker does; the
-        # article-cover picker does not, because Nostr's NIP-23
-        # ``image`` tag is a URL with no alt sibling).
-        if self._pick_alt_text:
-            alt_row = QHBoxLayout()
-            alt_row.setSpacing(8)
-            alt_label = QLabel(_("Alt text (optional):"))
-            alt_row.addWidget(alt_label)
-            self._alt_edit = QLineEdit()
-            alt_label.setBuddy(self._alt_edit)
-            self._alt_edit.setAccessibleName(_("Alt text"))
-            self._alt_edit.setPlaceholderText(_("Describe the image for screen readers"))
-            self._alt_edit.setClearButtonEnabled(True)
-            alt_row.addWidget(self._alt_edit, 1)
-            layout.addLayout(alt_row)
-        else:
-            self._alt_edit = None
-
-        # Upload progress strip.
-        self._upload_panel = QFrame()
-        self._upload_panel_layout = QVBoxLayout(self._upload_panel)
-        self._upload_panel_layout.setContentsMargins(0, 0, 0, 0)
-        self._upload_panel_layout.setSpacing(4)
-        self._upload_panel.setVisible(False)
-        layout.addWidget(self._upload_panel)
-
-        # Bottom row: status + actions.
-        bottom = QHBoxLayout()
-        bottom.setSpacing(8)
-        self._status_label = QLabel("")
-        self._status_label.setObjectName("media_status")
-        self._status_label.setWordWrap(True)
-        # Carries a media server's own words, for the same reason.
-        self._status_label.setTextFormat(Qt.PlainText)
-        bottom.addWidget(self._status_label, 1)
-
-        if self._pick_mode:
-            self._cancel_btn = QPushButton(_("Cancel"))
-            self._cancel_btn.clicked.connect(self.reject)
-            bottom.addWidget(self._cancel_btn)
-            self._select_btn = QPushButton(_("Insert"))
-            self._select_btn.setObjectName("media_primary")
-            self._select_btn.setDefault(True)
-            self._select_btn.clicked.connect(self._on_select_clicked)
-            bottom.addWidget(self._select_btn)
-        else:
-            self._copy_btn = QPushButton(_("Copy URL"))
-            self._copy_btn.clicked.connect(self._on_copy_clicked)
-            bottom.addWidget(self._copy_btn)
-            self._download_btn = QPushButton(_("Download"))
-            self._download_btn.clicked.connect(self._on_download_clicked)
-            bottom.addWidget(self._download_btn)
-            self._open_btn = QPushButton(_("Open in Browser"))
-            self._open_btn.clicked.connect(self._on_open_browser_clicked)
-            bottom.addWidget(self._open_btn)
-            self._delete_btn = QPushButton(_("Delete"))
-            self._delete_btn.setObjectName("media_destructive")
-            self._delete_btn.clicked.connect(self._on_delete_clicked)
-            bottom.addWidget(self._delete_btn)
-            self._close_btn = QPushButton(_("Close"))
-            self._close_btn.clicked.connect(self.accept)
-            bottom.addWidget(self._close_btn)
-
-        layout.addLayout(bottom)
-        self._update_selection_actions()
-
-    # ------------------------------------------------------------------
-    # Keyboard shortcuts
-    # ------------------------------------------------------------------
-
-    def _install_shortcuts(self) -> None:
-        """Wire grid-scoped Paste / Delete shortcuts.
-
-        Scoping to the grid (Qt.WidgetShortcut) keeps the QLineEdit alt
-        field free to do its own native Ctrl+V paste. Users invoke the
-        upload-on-paste behaviour by clicking the grid first, which is
-        how Notion / Slack / GitHub all behave.
-        """
-        paste_action = QAction(self._grid)
-        paste_action.setShortcuts(QKeySequence.Paste)
-        paste_action.setShortcutContext(Qt.WidgetShortcut)
-        paste_action.triggered.connect(self._on_paste_image)
-        self._grid.addAction(paste_action)
-
-        # Delete is library-only, pick mode is read-only.
-        if not self._pick_mode:
-            delete_action = QAction(self._grid)
-            delete_action.setShortcuts([QKeySequence.Delete, QKeySequence(Qt.Key_Backspace)])
-            delete_action.setShortcutContext(Qt.WidgetShortcut)
-            delete_action.triggered.connect(self._on_delete_clicked)
-            self._grid.addAction(delete_action)
-
-    def _on_paste_image(self) -> None:
-        """Upload the clipboard image, if any. Falls through silently on
-        a non-image clipboard so the user can keep pasting text into
-        whatever widget actually has focus."""
-        mime = QApplication.clipboard().mimeData()
-        if not mime.hasImage():
-            self._set_status(_("Clipboard has no image to upload."), error=True)
-            return
-        image = QApplication.clipboard().image()
-        if image.isNull():
-            self._set_status(_("Clipboard image could not be read."), error=True)
-            return
-        buf = QBuffer()
-        buf.open(QIODevice.WriteOnly)
-        if not image.save(buf, "PNG"):
-            self._set_status(_("Could not encode clipboard image as PNG."), error=True)
-            return
-        body = bytes(buf.data())
-        name = _paste_upload_name()
-        self._store.upload_bytes(body, name=name, mime_type="image/png")
-
-    # ------------------------------------------------------------------
-    # Grid management
-    # ------------------------------------------------------------------
-
-    def _visible_files(self) -> List[MediaFile]:
-        """The list the grid shows, filtered on what each file really is.
-
-        The store filters on the type the server reports, which for an
-        encrypted blob is the envelope's and not the picture's. Left to
-        it, the image picker would hide every private photo the user
-        owns, which is exactly the pick this whole flow exists to handle.
-        So the sort stays with the store and the type test happens here,
-        against the type the private record declares.
-        """
-        filter_type = self._filter_combo.currentData() or "all"
-        sort_by = self._sort_combo.currentData() or "newest"
-        files = self._store.file_list(filter_type="all", sort_by=sort_by)
-        source = self._source_combo.currentData() or ""
-        if source:
-            files = [m for m in files if source in _origins_of(m)]
-        prefix = _FILTER_PREFIXES.get(filter_type)
-        if not prefix:
-            return files
-        return [m for m in files if self._effective_mime(m).startswith(prefix)]
-
-    def _effective_mime(self, media: MediaFile) -> str:
-        return (
-            self._visibility.declared_mime(media.hash) or (media.mime_type or "")
-        )
-
-    def _refresh_grid(self) -> None:
-        files = self._visible_files()
-
-        self._grid.clear()
-        self._items_by_hash.clear()
-        for media in files:
-            self._add_grid_item(media)
-
-        if files:
-            self._grid.setVisible(True)
-            self._empty_label.setVisible(False)
-        else:
-            self._grid.setVisible(False)
-            source = self._source_combo.currentData() or ""
-            if source:
-                self._empty_label.setText(
-                    _("Nothing on {server} yet. Files you upload go there too.").format(
-                        server=self._server_name(source)))
-            else:
-                self._empty_label.setText(_("No media yet. Drop a file above or hit Upload."))
-            self._empty_label.setVisible(True)
-        # A rebuild drops the selection, so the notice it belonged to has
-        # to go with it rather than describe a file that is no longer
-        # picked.
+    def _on_private_library_status(self, _text: str) -> None:
         self._refresh_pick_notice()
-        self._update_selection_actions()
 
-    def _update_selection_actions(self) -> None:
-        """What acts on chosen files is dimmed while none is chosen, as the
-        HIG asks of a command that cannot act (it used to answer "Select a
-        file first." after the click, with Delete always red and ready)."""
-        chosen = bool(self._grid.selectedItems())
-        names = (("_select_btn",) if self._pick_mode
-                 else ("_copy_btn", "_download_btn", "_open_btn", "_delete_btn"))
-        for name in names:
-            button = getattr(self, name, None)
-            if button is not None:
-                button.setEnabled(chosen)
+    def _check_private_again(self) -> None:
+        if self._private_library is not None:
+            self._private_library.refresh()
+        self._refresh_pick_notice()
 
-    def _add_grid_item(self, media: MediaFile) -> None:
-        state = self._shown_state(media.hash)
-        item = QListWidgetItem()
-        item.setText(_short_label(media, state))
-        item.setTextAlignment(Qt.AlignHCenter)
-        item.setToolTip(_tooltip_for(
-            media,
-            preview_error=self._preview_errors.get(media.hash, ""),
-            state=state,
-            public_copy=self._visibility.public_copy_of(media.hash),
-            library_error=self._library_failure_for(media.hash),
-        ))
-        item.setData(Qt.UserRole, media.hash)
+    # ------------------------------------------------------------------
+    # Tiles
+    # ------------------------------------------------------------------
 
-        # Default icon: a placeholder coloured square. Replaced when the
-        # thumbnail loader finishes.
-        item.setIcon(_placeholder_icon(media.mime_type, state, self._is_dark))
-        self._grid.addItem(item)
-        self._items_by_hash[media.hash] = item
+    def _rebuild(self, *_args) -> None:
+        """Lay the grid out again from the store, keeping the selection."""
+        selected = [tile.key for tile in self._grid.selected_tiles()]
+        current = self._grid.currentIndex().data(TILE_ROLE)
+        self._model.set_tiles(self._job_tiles() + self._file_tiles())
+        selection = self._grid.selectionModel()
+        for key in selected:
+            row = self._model.row_of(key)
+            if row >= 0:
+                selection.select(self._model.index(row), selection.SelectionFlag.Select)
+        if current is not None and self._model.row_of(current.key) >= 0:
+            selection.setCurrentIndex(self._model.index(self._model.row_of(current.key)),
+                                      selection.SelectionFlag.NoUpdate)
+        self._show_page()
+        self._selection_changed()
 
-        # A private blob is ciphertext, so the server calls it a byte
-        # stream and the mime test below would never ask for it. Fetch it
-        # anyway: the download, the hash check and the cache are all
-        # already safe for opaque bytes, and the decrypt happens after,
-        # in memory, on the failure the decoder is about to report.
-        # Unless the record positively says it is something else: a
-        # private video would otherwise be pulled down in full only to
-        # learn that the image decoder refuses it. A record that names no
-        # type at all is still worth trying, because the only other
-        # source for that answer is the envelope's own byte stream.
-        #
-        # An unchecked blob is fetched on the server's word alone, like
-        # any other. Nothing here knows better yet, and guessing would
-        # mean downloading every opaque blob in the library on the chance
-        # that one of them is a sealed picture.
-        if state in _ENCRYPTED_STATES:
-            declared = self._visibility.declared_mime(media.hash)
-            wanted = not declared or declared.startswith("image/")
-        else:
-            wanted = (media.mime_type or "").startswith("image/")
-        if wanted:
-            self._loader.load(media.hash, media.url)
+    def _matches(self, tile: Tile) -> bool:
+        kind = self._filter_combo.currentData() or "all"
+        text = self._search.text().strip().casefold()
+        return (kind == "all" or tile.kind == kind) and (not text or text in tile.name.casefold())
 
-    def _on_thumbnail_failed(self, sha: str, reason: str) -> None:
-        """Record why a preview is missing and say so on the item.
+    def _job_tiles(self) -> List[Tile]:
+        return [tile for tile in self._jobs.values() if self._matches(tile)]
 
-        For a private file this is the expected first answer, not a
-        fault: the decoder was handed an encryption envelope and refused
-        it, exactly as it should. The bytes are cached by now, so this is
-        where the key gets used.
-        """
-        if self._visibility.is_private(sha) and reason == "not an image":
-            reason = self._try_private_preview(sha)
-            if not reason:
-                return
-        self._preview_errors[sha] = reason
-        item = self._items_by_hash.get(sha)
-        media = self._store.files.get(sha)
-        if item is None or media is None:
+    def _file_tiles(self) -> List[Tile]:
+        sort = self._sort_combo.currentData() or "newest"
+        files = self._store.file_list(filter_type="all",
+                                      sort_by="newest" if sort == "name" else sort)
+        tiles = [self._file_tile(media) for media in files if not self._is_hidden_copy(media.hash)]
+        tiles = [tile for tile in tiles if self._matches(tile)]
+        if sort == "name":
+            tiles.sort(key=lambda tile: tile.name.casefold())
+        return tiles
+
+    def _is_hidden_copy(self, sha: str) -> bool:
+        """A public copy whose private original is in the library shows
+        as the original's globe, not as a tile of its own: one picture,
+        one tile."""
+        source = self._visibility.copy_source(sha)
+        return bool(source) and source in self._store.files \
+            and self._visibility.state_of(source) == PUBLISHED_COPY
+
+    def _file_tile(self, media: MediaFile) -> Tile:
+        mime = self._visibility.declared_mime(media.hash) or media.mime_type or ""
+        kind = kind_of_mime(mime)
+        day = _day_of(media)
+        name = (self._store.name_of(media.hash) or self._visibility.name_of(media.hash)
+                or day or kind_word_title(kind))
+        detail = day if name != day else format_size(media.size)
+        state = self._visibility.state_of(media.hash)
+        return Tile(key=media.hash, name=name, detail=detail, kind=kind,
+                    shared=state in (PUBLIC, PUBLISHED_COPY), media=media,
+                    pixmap=self._thumbs.get(media.hash))
+
+    def _show_page(self) -> None:
+        """The grid, or one plain sentence where it would be."""
+        if self._model.rowCount():
+            self._stack.setCurrentWidget(self._grid)
             return
-        item.setToolTip(_tooltip_for(
-            media,
-            preview_error=reason,
-            state=self._shown_state(sha),
-            public_copy=self._visibility.public_copy_of(sha),
-            library_error=self._library_failure_for(sha),
-        ))
-
-    def _try_private_preview(self, sha: str) -> str:
-        """Decrypt a private file's cached bytes and show them, or say why.
-
-        Returns "" when the tile now holds a real picture, otherwise the
-        reason for the placeholder.
-
-        The bytes read here are the ciphertext the loader already cached,
-        which is safe to keep on disk because it is ciphertext. What
-        comes out of the decrypt goes to Qt and nowhere else: it is never
-        handed to ``put_bytes``, never written to a file, and never
-        offered to the export path, because the blob cache is exactly
-        where an export would find it.
-        """
-        path = self._loader.cache_path(sha)
-        try:
-            envelope = path.read_bytes()
-        except OSError:
-            return _("the downloaded bytes could not be read back")
-
-        outcome = self._visibility.preview(sha, envelope)
-        del envelope
-        if not outcome.ok:
-            return outcome.reason
-
-        item = self._items_by_hash.get(sha)
-        if item is None:
-            return ""
-        pix = QPixmap.fromImage(outcome.image).scaled(
-            _THUMB_SIZE, _THUMB_SIZE,
-            Qt.KeepAspectRatio, Qt.SmoothTransformation,
-        )
-        self._preview_errors.pop(sha, None)
-        item.setIcon(_chipped_icon(pix, self._shown_state(sha), self._is_dark))
-        media = self._store.files.get(sha)
-        if media is not None:
-            item.setToolTip(_tooltip_for(
-                media,
-                state=self._shown_state(sha),
-                public_copy=self._visibility.public_copy_of(sha),
-                library_error=self._library_failure_for(sha),
-            ))
-        return ""
-
-    def _refresh_pick_notice(self) -> None:
-        """Warn at the picker, not at the confirmation, that a pick is private.
-
-        Only in pick mode: in library mode nothing is about to be
-        published, so the same sentence would be a statement of fact with
-        no decision attached to it.
-        """
-        if not self._pick_mode:
-            return
-        media = self._first_selected()
-        # ``_shown_state`` rather than ``state_of``: this line is what the
-        # user reads, and "cannot be used" is the wrong thing to tell
-        # someone whose answer is two seconds away. The gate behind the
-        # click is unchanged and still refuses.
-        state = self._shown_state(media.hash) if media is not None else PUBLIC
-        if state == PRIVATE:
-            self._notice_label.setText(_PICK_PRIVATE_NOTICE)
-        elif state == PUBLISHED_COPY:
-            self._notice_label.setText(_PICK_PUBLISHED_NOTICE)
-        elif state == _PENDING:
-            self._notice_label.setText(_PICK_PENDING_NOTICE)
-        elif state == UNKNOWN:
-            self._notice_label.setText(_PICK_UNKNOWN_NOTICE)
+        text = self._search.text().strip()
+        button = ""
+        if self._fetch_failed and not self._store.files:
+            message, button = self._fetch_failed, _("Try Again")
+        elif text:
+            message = _("No items match “{text}”.").format(text=text)
+        elif self._fetching:
+            message = _("Loading…")
         else:
-            self._notice_label.setText("")
-        self._notice_label.setVisible(bool(self._notice_label.text()))
+            message, button = _("Images, videos and audio you add appear here."), _("Add…")
+        self._empty_text.setText(message)
+        self._empty_button.setText(button)
+        self._empty_button.setVisible(bool(button))
+        self._stack.setCurrentWidget(self._empty)
+
+    def _empty_action(self) -> None:
+        if self._fetch_failed:
+            self._refresh()
+        else:
+            self._choose_files()
+
+    # ------------------------------------------------------------------
+    # Thumbnails, as tiles come into view
+    # ------------------------------------------------------------------
+
+    def _load_visible(self) -> None:
+        for key in self._grid.visible_keys():
+            tile = self._model.tile(key)
+            if tile is None or not tile.is_file or key in self._thumbs or key in self._asked:
+                continue
+            if self._wants_picture(tile):
+                self._asked.add(key)
+                self._loader.load(key, tile.media.url)
+
+    def _wants_picture(self, tile: Tile) -> bool:
+        """A picture, whatever the server calls it: a private picture is
+        an envelope the server calls a byte stream, opened here when the
+        decoder refuses it."""
+        if self._visibility.is_private(tile.key):
+            declared = self._visibility.declared_mime(tile.key)
+            return not declared or declared.startswith("image/")
+        return tile.kind == "image"
 
     def _on_thumbnail_ready(self, sha: str, _path: str, pix: QPixmap) -> None:
-        # Stash the decoded dimensions on the MediaFile the first time
-        # we see them. Cheap (we have the pixmap), and powers the
-        # tooltip / preview metadata without a second decode pass.
         media = self._store.files.get(sha)
         if media is not None and not media.width and not pix.isNull():
-            media.width = pix.width()
-            media.height = pix.height()
-        # A later success supersedes an earlier failure, for instance
-        # after a retry or a mirror that actually has the bytes.
-        self._preview_errors.pop(sha, None)
-        item = self._items_by_hash.get(sha)
-        if item is None:
+            media.width, media.height = pix.width(), pix.height()
+        self._set_thumbnail(sha, pix)
+        if self._quick_look_key() == sha:
+            self._quick_look.set_picture(pix)
+        self._finish_saves(sha)
+
+    def _on_thumbnail_failed(self, sha: str, reason: str) -> None:
+        if reason == "not an image":
+            # The bytes are in the cache. A private picture is sealed, not
+            # broken: it is opened here, in memory.
+            if self._visibility.is_private(sha):
+                picture = self._private_picture(sha)
+                if picture is not None:
+                    self._set_thumbnail(sha, picture)
+                    if self._quick_look_key() == sha:
+                        self._quick_look.set_picture(picture)
+            self._finish_saves(sha)
             return
-        state = self._shown_state(sha)
-        if media is not None:
-            item.setToolTip(_tooltip_for(
-                media, state=state,
-                public_copy=self._visibility.public_copy_of(sha),
-                library_error=self._library_failure_for(sha),
-            ))
-        scaled = pix.scaled(
-            _THUMB_SIZE, _THUMB_SIZE,
-            Qt.KeepAspectRatio, Qt.SmoothTransformation,
-        )
-        item.setIcon(_chipped_icon(scaled, state, self._is_dark))
+        for target in self._saving.pop(sha, []):
+            self._say(_("“{name}” couldn’t be downloaded. Check your internet connection "
+                        "and try again.").format(name=os.path.basename(target)), error=True)
 
-    def _selected_media(self) -> List[MediaFile]:
-        result: List[MediaFile] = []
-        for item in self._grid.selectedItems():
-            sha = item.data(Qt.UserRole)
-            media = self._store.files.get(sha)
-            if media is not None:
-                result.append(media)
-        return result
+    def _private_picture(self, sha: str) -> Optional[QPixmap]:
+        try:
+            envelope = self._loader.cache_path(sha).read_bytes()
+        except OSError:
+            return None
+        outcome = self._visibility.preview(sha, envelope)
+        del envelope
+        return QPixmap.fromImage(outcome.image) if outcome.ok else None
 
-    def _first_selected(self) -> Optional[MediaFile]:
-        media_list = self._selected_media()
-        return media_list[0] if media_list else None
+    def _set_thumbnail(self, sha: str, pix: QPixmap) -> None:
+        ratio = self.devicePixelRatioF()
+        side = int(THUMB * ratio)
+        scaled = pix.scaled(QSize(side, side), Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                            Qt.TransformationMode.SmoothTransformation)
+        scaled.setDevicePixelRatio(ratio)
+        self._thumbs[sha] = scaled
+        tile = self._model.tile(sha)
+        if tile is not None:
+            tile.pixmap = scaled
+            self._model.changed(sha)
 
     # ------------------------------------------------------------------
-    # Actions
+    # Selection and the commands on it
     # ------------------------------------------------------------------
 
-    def _on_upload_clicked(self) -> None:
-        # Use a single multi-select dialog so a user can upload several
-        # files in one go. The store handles them sequentially.
-        patterns = " ".join("*" + ext for ext in media_files.EXTENSIONS)
-        paths, _filter = QFileDialog.getOpenFileNames(
-            self,
-            _("Choose Files to Upload"),
-            "",
-            _("Media files ({patterns})").format(patterns=patterns) + ";;" + _("All files (*)"),
-        )
-        if not paths:
-            return
-        for path in paths:
-            self._store.upload_file(path)
+    def _selected_files(self) -> List[Tile]:
+        return [tile for tile in self._grid.selected_tiles() if tile.is_file]
 
-    def _on_files_dropped(self, paths: List[str]) -> None:
-        for path in paths:
-            self._store.upload_file(path)
+    def _selection_changed(self, *_args) -> None:
+        self._refresh_pick_notice()
+        if self._quick_look is not None and self._quick_look.isVisible():
+            self._show_in_quick_look()
 
-    def _on_copy_clicked(self) -> None:
-        media = self._first_selected()
-        if media is None:
-            self._set_status(_("Select a file first."), error=True)
-            return
-        QApplication.clipboard().setText(media.url)
-        self._set_status(_("Copied URL: {url}").format(url=media.url), error=False)
+    def _fill_actions_menu(self) -> None:
+        menu = self._actions_menu
+        menu.clear()
+        self._add_file_commands(menu, self._grid.selected_tiles())
+        if menu.actions():
+            menu.addSeparator()
+        menu.addAction(_("Refresh"), self._refresh)
+        menu.addAction(_("Media Servers…"), self.servers_requested.emit)
 
-    def _on_download_clicked(self) -> None:
-        media = self._first_selected()
-        if media is None:
-            self._set_status(_("Select a file first."), error=True)
+    def _context_menu(self, point) -> None:
+        index = self._grid.indexAt(point)
+        if not index.isValid():
             return
-        self._save_media_to_disk(media)
+        if not self._grid.selectionModel().isSelected(index):
+            self._grid.setCurrentIndex(index)
+        menu = QMenu(self)
+        self._add_file_commands(menu, self._grid.selected_tiles())
+        if menu.actions():
+            menu.exec(QCursor.pos())
 
-    def _on_open_browser_clicked(self) -> None:
-        media = self._first_selected()
-        if media is None:
-            self._set_status(_("Select a file first."), error=True)
+    def _add_file_commands(self, menu: QMenu, tiles: List[Tile]) -> None:
+        """The commands for these tiles, as the context menu and the
+        action menu both list them."""
+        files = [tile for tile in tiles if tile.is_file]
+        failed = [tile.key for tile in tiles if tile.state == FAILED]
+        sending = [tile.key for tile in tiles if tile.state in (WAITING, SENDING)]
+        if failed:
+            menu.addAction(_("Retry"), lambda: [self._retry_upload(k) for k in failed])
+            menu.addAction(_("Remove"), lambda: [self._dismiss_upload(k) for k in failed])
+        if sending:
+            menu.addAction(_("Cancel Upload"), lambda: [self._cancel_upload(k) for k in sending])
+        if not files:
             return
-        QDesktopServices.openUrl(QUrl(media.url))
+        if failed or sending:
+            menu.addSeparator()
+        if self._pick_mode:
+            menu.addAction(_("Insert"), self._insert).setEnabled(self._can_insert())
+        menu.addAction(_("Quick Look"), self._toggle_quick_look)
+        menu.addSeparator()
+        menu.addAction(_("Copy Link") if len(files) == 1 else _("Copy Links"),
+                       self._copy_links)
+        if len(files) == 1:
+            menu.addAction(_("Open in Browser"), self._open_in_browser)
+        menu.addAction(_("Save As…") if len(files) == 1 else _("Save to Folder…"),
+                       self._save_as)
+        if not self._pick_mode:
+            menu.addSeparator()
+            menu.addAction(_("Delete"), self._delete)
 
-    def _on_delete_clicked(self) -> None:
-        targets = self._selected_media()
-        if not targets:
-            return
-        count = len(targets)
-        message = delete_warning(
-            count, sum(1 for m in targets if self._may_be_private(m.hash)))
-        if not confirm_destructive(
-                self,
-                title=ngettext(
-                    "Delete {count} file from your media servers?",
-                    "Delete {count} files from your media servers?",
-                    count,
-                ).format(count=count),
-                message=message,
-                action=_("Delete"), caution=True):
-            return
-        for media in targets:
-            self._store.delete_file(media.hash)
+    # -- open, insert, quick look ------------------------------------------
 
-    def _on_select_clicked(self) -> None:
-        media = self._first_selected()
-        if media is None:
+    def _open(self) -> None:
+        if self._pick_mode:
+            self._insert()
+        else:
+            self._toggle_quick_look()
+
+    def _can_insert(self) -> bool:
+        files = self._selected_files()
+        return len(files) == 1 and not self._visibility.is_unknown(files[0].key)
+
+    def _insert(self) -> None:
+        if not self._pick_mode or not self._can_insert():
             return
-        self.file_picked.emit(media, self._current_alt_text())
+        alt = self._alt_edit.text().strip() if self._alt_edit is not None else ""
+        self.file_picked.emit(self._selected_files()[0].media, alt)
         self.accept()
 
-    def _current_alt_text(self) -> str:
-        if self._alt_edit is None:
-            return ""
-        return self._alt_edit.text().strip()
-
-    def _on_item_activated(self, item: QListWidgetItem) -> None:
-        if self._pick_mode:
-            sha = item.data(Qt.UserRole)
-            media = self._store.files.get(sha)
-            if media is not None:
-                self.file_picked.emit(media, self._current_alt_text())
-                self.accept()
-            return
-        # Library mode: open the lightbox preview.
-        files = self._visible_files()
-        sha = item.data(Qt.UserRole)
-        try:
-            idx = next(i for i, f in enumerate(files) if f.hash == sha)
-        except StopIteration:
-            return
-        dialog = _PreviewDialog(files, idx, self._loader, is_dark=self._is_dark, parent=self)
-        # Surface the same Download action from inside the lightbox.
-        dialog.download_requested.connect(self._save_media_to_disk)
-        dialog.exec()
-
-    def _on_grid_context(self, point) -> None:
-        item = self._grid.itemAt(point)
-        if item is None:
-            return
-        sha = item.data(Qt.UserRole)
-        media = self._store.files.get(sha)
-        if media is None:
-            return
-        menu = QMenu(self)
-        act_preview = menu.addAction(_("Preview"))
-        menu.addSeparator()
-        act_copy = menu.addAction(_("Copy URL"))
-        act_open = menu.addAction(_("Open in Browser"))
-        act_download = menu.addAction(_("Download…"))
-        # Per-server copy submenu, useful when a file is mirrored on
-        # several servers and the user wants a specific CDN.
-        if len(media.urls) > 1:
-            per_server = menu.addMenu(_("Copy URL from Server"))
-            for entry in media.urls:
-                server = entry.get("server", "")
-                url = entry.get("url", "")
-                if not url:
-                    continue
-                label = _hostname_from_url(server) or server or _("(unknown)")
-                act = per_server.addAction(label)
-                act.setData(url)
-        menu.addSeparator()
+    def _refresh_pick_notice(self) -> None:
+        """When the chosen file cannot be used, because nobody could
+        check whether it is private, the picker says so where the eye
+        is, and offers the way out."""
         if not self._pick_mode:
-            act_delete = menu.addAction(_("Delete"))
+            return
+        files = self._selected_files()
+        blocked = len(files) == 1 and self._visibility.is_unknown(files[0].key)
+        library = self._private_library
+        checking = library is not None and library.loading
+        if blocked and checking:
+            self._pick_notice_text.setText(
+                _("MyEditor is still checking whether this image is private. One moment."))
+        elif blocked:
+            self._pick_notice_text.setText(
+                _("This image can’t be used until your signer app lets MyEditor check "
+                  "whether it is private."))
+        self._pick_notice_button.setVisible(blocked and not checking)
+        self._pick_notice.setVisible(blocked)
+        self._insert_button.setEnabled(self._can_insert())
+
+    def _toggle_quick_look(self) -> None:
+        if self._quick_look is not None and self._quick_look.isVisible():
+            self._quick_look.close()
+            return
+        if not self._selected_files():
+            return
+        if self._quick_look is None:
+            self._quick_look = QuickLook(grid=self._grid, is_dark=self._is_dark, parent=self)
+            self._quick_look.closed.connect(self._grid.setFocus)
+        self._show_in_quick_look()
+        self._quick_look.show()
+        self._quick_look.raise_()
+
+    def _quick_look_key(self) -> str:
+        if self._quick_look is None or not self._quick_look.isVisible():
+            return ""
+        files = self._selected_files()
+        return files[0].key if files else ""
+
+    def _show_in_quick_look(self) -> None:
+        files = self._selected_files()
+        if not files:
+            self._quick_look.close()
+            return
+        tile = files[0]
+        glyph = {"video": "video", "audio": "audio", "image": ""}.get(tile.kind, "document")
+        picture = None
+        if self._wants_picture(tile):
+            picture = self._full_picture(tile.key)
+            if picture is None:
+                self._loader.load(tile.key, tile.media.url)
+        self._quick_look.show_file(name=tile.name, detail=_quick_look_detail(tile),
+                                   url=tile.media.url, glyph=glyph, picture=picture)
+
+    def _full_picture(self, sha: str) -> Optional[QPixmap]:
+        if not self._loader.cache_path(sha).is_file():
+            return None
+        if self._visibility.is_private(sha):
+            return self._private_picture(sha)
+        picture = QPixmap(str(self._loader.cache_path(sha)))
+        return None if picture.isNull() else picture
+
+    # -- copy, open, save ---------------------------------------------------
+
+    def _copy_links(self) -> None:
+        files = self._selected_files()
+        if files:
+            QApplication.clipboard().setText("\n".join(tile.media.url for tile in files))
+
+    def _open_in_browser(self) -> None:
+        files = self._selected_files()
+        if files and url_safety.is_safe_media_url(files[0].media.url):
+            QDesktopServices.openUrl(QUrl(files[0].media.url))
+
+    def _save_as(self) -> None:
+        files = self._selected_files()
+        if not files:
+            return
+        if len(files) == 1:
+            target, _filter = QFileDialog.getSaveFileName(
+                self, _("Save As"), _save_name(files[0]), _("All Files (*)"))
+            targets = [(files[0], target)] if target else []
         else:
-            act_delete = None
+            folder = QFileDialog.getExistingDirectory(self, _("Choose a Folder"))
+            targets = [(tile, _unique_path(folder, _save_name(tile))) for tile in files] \
+                if folder else []
+        for tile, target in targets:
+            self._saving.setdefault(tile.key, []).append(target)
+            if self._loader.cache_path(tile.key).is_file():
+                self._finish_saves(tile.key)
+            else:
+                # Downloaded, and checked against its hash, by the loader.
+                self._loader.load(tile.key, tile.media.url)
 
-        chosen = menu.exec(QCursor.pos())
-        if chosen is None:
+    def _finish_saves(self, sha: str) -> None:
+        targets = self._saving.pop(sha, [])
+        if not targets:
             return
-        if chosen == act_preview:
-            self._on_item_activated(item)
-        elif chosen == act_copy:
-            QApplication.clipboard().setText(media.url)
-            self._set_status(_("Copied URL: {url}").format(url=media.url))
-        elif chosen == act_open:
-            QDesktopServices.openUrl(QUrl(media.url))
-        elif chosen == act_download:
-            self._save_media_to_disk(media)
-        elif act_delete is not None and chosen == act_delete:
-            self._store.delete_file(media.hash)
-        else:
-            # Could be one of the per-server copy entries.
-            data = chosen.data()
-            if isinstance(data, str) and data:
-                QApplication.clipboard().setText(data)
-                self._set_status(_("Copied URL: {url}").format(url=data))
-
-    def _save_media_to_disk(self, media: MediaFile) -> None:
-        """Save a media file from the local Blossom cache (or fetch it
-        on demand) to a user-chosen path. The download is async; we
-        connect to ``ThumbnailLoader.ready`` until the bytes arrive,
-        then copy them to the destination."""
-        suggested = _suggested_save_name(media)
-        target, _filter = QFileDialog.getSaveFileName(
-            self,
-            _("Save media"),
-            suggested,
-            _("All files (*)"),
-        )
-        if not target:
-            return
-
-        cache_path = self._loader.cache_path(media.hash)
-        if cache_path.is_file():
-            self._copy_to_target(cache_path, target)
-            return
-
-        # Not cached yet, kick off the loader and complete the copy on
-        # arrival. Track the destination by hash so multiple parallel
-        # downloads route to the right paths.
-        if not hasattr(self, "_pending_downloads"):
-            self._pending_downloads: dict = {}
-            self._loader.ready.connect(self._on_download_loader_ready)
-            self._loader.failed.connect(self._on_download_loader_failed)
-        self._pending_downloads[media.hash] = target
-        self._set_status(_("Downloading {url}…").format(url=media.url))
-        self._loader.load(media.hash, media.url)
-
-    def _on_download_loader_ready(self, sha: str, local_path: str, _pix) -> None:
-        target = self._pending_downloads.pop(sha, None) if hasattr(self, "_pending_downloads") else None
-        if not target:
-            return
-        self._copy_to_target(Path(local_path), target)
-
-    def _on_download_loader_failed(self, sha: str, reason: str) -> None:
-        target = self._pending_downloads.pop(sha, None) if hasattr(self, "_pending_downloads") else None
-        if target is None:
-            return
-        if reason == "not an image":
-            # The loader's one reason that is a value to compare, not a text.
-            reason = _("not an image")
-        self._set_status(_("Download failed: {reason}").format(reason=reason), error=True)
-
-    def _copy_to_target(self, src, dest: str) -> None:
-        """Copy a cached file to the user-chosen destination. ``src`` is
-        a ``Path``-compatible source already in the Blossom cache."""
         try:
-            data = Path(src).read_bytes()
-            save_document(dest, data)
-        except OSError as exc:
-            self._set_status(_("Could not save: {error}").format(error=exc), error=True)
+            data = self._loader.cache_path(sha).read_bytes()
+        except OSError:
+            data = b""
+        if data and self._visibility.is_private(sha):
+            # Saving a private file saves the file, not its envelope.
+            data = self._visibility.open_private(sha, data) or b""
+        for target in targets:
+            name = os.path.basename(target)
+            if not data:
+                self._say(_("“{name}” couldn’t be saved. Try again.").format(name=name),
+                          error=True)
+                continue
+            try:
+                save_document(target, data)
+            except OSError:
+                self._say(_("“{name}” couldn’t be saved there. Choose another folder.")
+                          .format(name=name), error=True)
+
+    # -- delete ---------------------------------------------------------------
+
+    def _delete(self) -> None:
+        if self._pick_mode:
             return
-        self._set_status(_("Saved to {path}").format(path=dest))
+        files = self._selected_files()
+        if not files:
+            return
+        title = (_("Delete “{name}”?").format(name=files[0].name) if len(files) == 1
+                 else ngettext("Delete {count} item?", "Delete {count} items?",
+                               len(files)).format(count=len(files)))
+        message = ngettext(
+            "Anything you published with it will no longer show it. You can’t undo "
+            "this action.",
+            "Anything you published with them will no longer show them. You can’t undo "
+            "this action.", len(files))
+        if not confirm_destructive(self, title=title, message=message, action=_("Delete"),
+                                   is_dark=self._is_dark):
+            return
+        for tile in files:
+            self._store.delete_file(tile.key)
 
-    # ------------------------------------------------------------------
-    # Status + upload progress
-    # ------------------------------------------------------------------
+    def _on_file_deleted(self, sha: str) -> None:
+        # Deleting a public copy is what un-sharing it is, so the record
+        # of what is shared follows.
+        self._visibility.forget_public_copy(sha)
 
-    # ------------------------------------------------------------------
-    # Servers: source filter, storage, reachability
-    # ------------------------------------------------------------------
-
-    def _server_name(self, origin: str) -> str:
-        return self._server_label(origin) or (url_safety.host_of(origin) or origin)
-
-    def _name_for_host(self, host: str) -> str:
-        """The name a server goes by here, from the bare host a store
-        signal carries."""
-        wanted = (host or "").lower()
-        for server in self._store.target_servers():
-            origin = url_safety.origin_of(server)
-            if (url_safety.host_of(origin) or "").lower() == wanted:
-                return self._server_name(origin)
-        return host
-
-    def _on_fetch_started(self) -> None:
-        self._set_status(_("Refreshing library…"))
-
-    def _on_fetch_finished(self) -> None:
-        self._set_status("")
-
-    def _on_fetch_error(self, code: str) -> None:
-        self._set_status(friendly_message(code), error=True)
-
-    def _refresh_servers(self) -> None:
-        """Rebuild the Source menu and the per-server notes and meters."""
-        current = self._source_combo.currentData() or ""
-        origins = [url_safety.origin_of(s) for s in self._store.target_servers()]
-        self._source_combo.blockSignals(True)
-        self._source_combo.clear()
-        self._source_combo.addItem(_("All servers"), "")
-        for origin in origins:
-            self._source_combo.addItem(self._server_name(origin), origin)
-        index = self._source_combo.findData(current)
-        self._source_combo.setCurrentIndex(index if index >= 0 else 0)
-        self._source_combo.blockSignals(False)
-        self._source_combo.setVisible(len(origins) > 1)
-        if (self._source_combo.currentData() or "") != current:
-            self._refresh_grid()
-
-        listings = self._store.server_listings()
-        down = [o for o in origins if o in listings and not listings[o].ok]
-        text = unreachable_text(
-            [self._server_name(o) for o in down],
-            [self._server_name(o) for o in down if self._has_files_on(o)])
-        self._servers_label.setText(text)
-        self._servers_label.setVisible(bool(text))
-        self._refresh_storage()
-
-    def _has_files_on(self, origin: str) -> bool:
-        return any(origin in _origins_of(m) for m in self._store.files.values())
-
-    def _refresh_storage(self) -> None:
-        """Show what each server with a known allowance holds.
-
-        The rows are built once for the set of metered servers and then
-        only updated, so the several signals one fetch sends cost text
-        updates rather than a rebuild each. A row that goes is hidden
-        before it is deleted, so it never lingers until the event loop
-        gets to it.
-        """
-        listings = self._store.server_listings()
-        metered = []
-        for server in self._store.target_servers():
-            origin = url_safety.origin_of(server)
-            quota = self._store.quota_for(origin)
-            if quota is not None:
-                metered.append((origin, quota))
-        if [origin for origin, _quota in metered] != list(self._storage_widgets):
-            for row in self._storage_widgets.values():
-                self._storage_rows.removeWidget(row.widget)
-                row.widget.hide()
-                row.widget.deleteLater()
-            self._storage_widgets = {}
-            for origin, _quota in metered:
-                row = self._storage_row(origin)
-                self._storage_widgets[origin] = row
-                self._storage_rows.addWidget(row.widget)
-        for origin, quota in metered:
-            self._update_storage_row(self._storage_widgets[origin], origin, quota,
-                                     listings.get(origin))
-        self._storage_box.setVisible(bool(metered))
-
-    def _storage_row(self, origin: str) -> SimpleNamespace:
-        widget = QWidget()
-        line = QHBoxLayout(widget)
-        line.setContentsMargins(0, 0, 0, 0)
-        line.setSpacing(10)
-        name = QLabel(_("{server} storage").format(server=self._server_name(origin)))
-        name.setObjectName("media_hint")
-        bar = QProgressBar()
-        bar.setRange(0, 1000)
-        bar.setTextVisible(False)
-        bar.setFixedWidth(180)
-        bar.setFixedHeight(6)
-        bar.setAccessibleName(name.text())
-        value = QLabel("")
-        value.setObjectName("media_hint")
-        line.addWidget(name)
-        line.addWidget(bar)
-        line.addWidget(value, 1)
-        return SimpleNamespace(widget=widget, name=name, bar=bar, value=value)
-
-    def _update_storage_row(self, row: SimpleNamespace, origin: str, quota: int,
-                            listing) -> None:
-        text, fraction = storage_text(self._store.bytes_on(origin), quota, listing)
-        row.bar.setValue(int(fraction * 1000))
-        row.bar.setAccessibleDescription(text)
-        row.bar.setVisible(listing is not None and listing.ok)
-        row.value.setText(text)
-
-    def _on_source_changed(self, _index: int) -> None:
-        self._refresh_grid()
-
-    def _on_server_skipped(self, name: str, host: str, reason: str) -> None:
-        self._set_status(
-            _("{name}: not stored on {server}, there isn\u2019t enough space left "
-              "there.").format(name=name, server=self._name_for_host(host)),
-            error=False)
-
-    def _on_mirror_failed(self, name: str, host: str, _code: str) -> None:
-        self._set_status(
-            _("{name} is saved, but {server} didn\u2019t take a copy.").format(
-                name=name, server=self._name_for_host(host)),
-            error=False)
-
-    def _set_status(self, text: str, *, error: bool = False) -> None:
-        self._status_label.setText(text)
-        if error:
-            color = "#FF6B6B" if self._is_dark else "#C0392B"
+    def _on_delete_failed(self, sha: str, code: str) -> None:
+        name = self._name_of(sha)
+        if sha in self._store.files:
+            text = _("“{name}” is still on one of your media servers. {reason}")
         else:
-            color = "#FFB347" if self._is_dark else "#A05000"
-        self._status_label.setStyleSheet(f"color: {color};")
+            text = _("“{name}” couldn’t be deleted. {reason}")
+        self._say(text.format(name=name, reason=friendly_message(code)), error=True)
 
-    def _ensure_upload_row(self, name: str) -> QProgressBar:
-        bar = self._active_uploads.get(name)
-        if bar is not None:
-            return bar
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        label = QLabel(name)
-        row.addWidget(label, 1)
-        bar = QProgressBar()
-        bar.setRange(0, 100)
-        bar.setValue(0)
-        bar.setFixedWidth(220)
-        row.addWidget(bar)
+    def _name_of(self, sha: str) -> str:
+        tile = self._model.tile(sha)
+        if tile is not None:
+            return tile.name
+        return self._store.name_of(sha) or self._visibility.name_of(sha) or _("The file")
 
-        wrapper = QWidget()
-        wrapper.setLayout(row)
-        self._upload_panel_layout.addWidget(wrapper)
-        bar._wrapper = wrapper   # carry the wrapper for later removal
-        self._active_uploads[name] = bar
-        self._upload_panel.setVisible(True)
-        return bar
+    # ------------------------------------------------------------------
+    # Adding files
+    # ------------------------------------------------------------------
 
-    def _remove_upload_row(self, name: str) -> None:
-        bar = self._active_uploads.pop(name, None)
-        if bar is None:
+    def _choose_files(self) -> None:
+        patterns = " ".join("*" + ext for ext in media_files.EXTENSIONS)
+        paths, _filter = QFileDialog.getOpenFileNames(
+            self, _("Add to Media Library"), "",
+            _("Images, Videos and Audio ({patterns})").format(patterns=patterns))
+        self._add_paths(paths)
+
+    def _add_paths(self, paths: List[str]) -> None:
+        refused = []
+        for path in paths:
+            mime = media_files.type_of(path)
+            if not mime or not os.path.isfile(path):
+                refused.append(os.path.basename(path))
+                continue
+            name = self._store.upload_file(path)
+            self._add_job(name, mime, _local_preview(mime=mime, path=path))
+        if refused:
+            self._say(ngettext(
+                "“{name}” wasn’t added. The Media Library takes images, videos and audio.",
+                "{count} files weren’t added. The Media Library takes images, videos and "
+                "audio.", len(refused)).format(name=refused[0], count=len(refused)),
+                error=True)
+
+    def _paste(self) -> None:
+        """Command-V on the grid adds a pasted image."""
+        clipboard = QApplication.clipboard()
+        if not clipboard.mimeData().hasImage():
             return
-        wrapper = getattr(bar, "_wrapper", None)
-        if wrapper is not None:
-            self._upload_panel_layout.removeWidget(wrapper)
-            wrapper.deleteLater()
-        if not self._active_uploads:
-            self._upload_panel.setVisible(False)
+        image = clipboard.image()
+        buffer = QBuffer()
+        buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+        if image.isNull() or not image.save(buffer, "PNG"):
+            self._say(_("The pasted image couldn’t be read."), error=True)
+            return
+        body = bytes(buffer.data())
+        name = self._store.add_bytes(body, label=_("Pasted Image") + ".png",
+                                     mime_type="image/png")
+        self._add_job(name, "image/png", _local_preview(mime="image/png", data=body))
+
+    def _add_job(self, name: str, mime: str, preview: Optional[QPixmap]) -> None:
+        tile = Tile(key=name, name=name, detail=_("Waiting…"), kind=kind_of_mime(mime),
+                    state=WAITING, pixmap=preview)
+        early = self._early_failures.pop(name, "")
+        if early:
+            # Refused before it started (no signer, too large, no room).
+            tile.state, tile.detail = FAILED, early
+        self._jobs[name] = tile
+        self._rebuild()
+
+    def _cancel_upload(self, name: str) -> None:
+        self._store.cancel_upload(name)
+
+    def _retry_upload(self, name: str) -> None:
+        tile = self._jobs.get(name)
+        if tile is None or tile.state != FAILED:
+            return
+        tile.state, tile.detail, tile.progress = WAITING, _("Waiting…"), -1
+        self._model.changed(name)
+        self._store.retry_upload(name)
+
+    def _dismiss_upload(self, name: str) -> None:
+        self._store.dismiss_upload(name)
+        self._jobs.pop(name, None)
+        self._rebuild()
+
+    # -- the store's word on them -----------------------------------------
 
     def _on_upload_started(self, name: str) -> None:
-        self._ensure_upload_row(name)
-        self._set_status(_("Uploading {name}…").format(name=name))
+        tile = self._jobs.get(name)
+        if tile is not None:
+            tile.state, tile.detail, tile.progress = SENDING, _("Uploading…"), 0
+            self._model.changed(name)
 
     def _on_upload_progress(self, name: str, sent: int, total: int) -> None:
-        bar = self._ensure_upload_row(name)
-        pct = int(sent * 100 / total) if total > 0 else 0
-        bar.setValue(pct)
+        tile = self._jobs.get(name)
+        if tile is not None and total > 0:
+            tile.progress = min(100, sent * 100 // total)
+            self._model.changed(name)
 
     def _on_upload_status(self, name: str, status: str) -> None:
-        bar = self._ensure_upload_row(name)
-        if status == "signing":
-            bar.setFormat(_("Signing…"))
-        elif status == "uploading":
-            bar.setFormat("%p%")
-        elif status == "mirroring":
-            bar.setFormat(_("Mirroring…"))
-        elif status == "done":
-            bar.setValue(100)
-            bar.setFormat(_("Done"))
-        elif status == "failed":
-            bar.setFormat(_("Failed"))
+        tile = self._jobs.get(name)
+        if tile is not None and status == "mirroring":
+            tile.state = FINISHING
+            self._model.changed(name)
 
-    def _on_upload_finished(self, name: str, _media: object) -> None:
-        self._remove_upload_row(name)
-        self._set_status(_("Uploaded {name}.").format(name=name))
-        self._refresh_grid()
+    def _on_upload_finished(self, name: str, media: object) -> None:
+        tile = self._jobs.pop(name, None)
+        if tile is None:
+            return
+        sha = getattr(media, "hash", "")
+        if tile.pixmap is not None and sha:
+            self._thumbs.setdefault(sha, tile.pixmap)
+        note = self._job_notes.pop(name, "")
+        self._rebuild()
+        if sha and self._model.row_of(sha) >= 0:
+            self._grid.setCurrentIndex(self._model.index(self._model.row_of(sha)))
+        if note:
+            self._say(note)
 
     def _on_upload_failed(self, name: str, reason: str) -> None:
-        self._remove_upload_row(name)
-        self._set_status(_("Upload of {name} failed: {reason}").format(name=name, reason=reason),
-                         error=True)
+        tile = self._jobs.get(name)
+        if tile is None:
+            # Refused inside upload_file, before its tile was made.
+            self._early_failures[name] = reason
+            return
+        self._job_notes.pop(name, None)
+        tile.state, tile.detail = FAILED, reason
+        self._model.changed(name)
+        self._say(_("“{name}” wasn’t added. {reason}").format(name=name, reason=reason),
+                  error=True)
+        self._refresh_pick_notice()
 
-    def _on_upload_rerouted(self, name: str, from_host: str, to_host: str) -> None:
-        self._set_status(
-            _("{from_host} can't take this file, routing {name} to {to_host} instead.").format(
-                from_host=from_host, name=name, to_host=to_host)
-        )
+    def _on_upload_cancelled(self, name: str) -> None:
+        if self._jobs.pop(name, None) is not None:
+            self._job_notes.pop(name, None)
+            self._rebuild()
 
-    def _on_file_deleted(self, file_hash: str) -> None:
-        """Deleting a public copy is what revoking one is, so record that.
+    def _on_copy_missing(self, name: str, _host: str, _why: str) -> None:
+        """A server did not take a copy, or was full. The file is on the
+        others, so it is said once, when it is added, and plainly."""
+        if name in self._jobs:
+            self._job_notes[name] = _(
+                "“{name}” is added, but one of your media servers didn’t keep a copy."
+            ).format(name=name)
 
-        Without this the ledger goes on claiming the copy exists: the
-        original keeps its published badge, and the next publish reuses
-        an address that now returns nothing, which is a broken image in
-        somebody's article. The grid repaints on the ``library_changed``
-        that follows this signal.
-        """
-        if self._visibility.forget_public_copy(file_hash):
-            self._set_status(
-                _("Removed the public copy. That picture is private again.")
-            )
+    # ------------------------------------------------------------------
+    # Listing, storage, and the line at the bottom
+    # ------------------------------------------------------------------
 
-    def _on_delete_failed(self, file_hash: str, code: str) -> None:
-        # The file stays in the grid: a server still has it.
-        self._set_status(friendly_message(code), error=True)
+    def _refresh(self) -> None:
+        self._fetch_failed = ""
+        self._store.fetch(force=True)
+        library = self._private_library
+        if library is not None and not library.loading and not library.settled:
+            library.refresh()
+        self._show_page()
+
+    def _on_fetch_started(self) -> None:
+        self._fetching = True
+        self._show_page()
+
+    def _on_fetch_finished(self) -> None:
+        self._fetching = False
+        self._show_page()
+
+    def _on_fetch_error(self, code: str) -> None:
+        if code == ERROR_CODES.NETWORK_UNAVAILABLE:
+            text = _("Couldn’t reach your media servers. Check your internet connection.")
+        else:
+            text = friendly_message(code)
+        if self._store.files:
+            self._say(text, error=True)
+        else:
+            self._fetch_failed = text
+            self._show_page()
+
+    def _refresh_storage(self) -> None:
+        listings = self._store.server_listings()
+        lines = []
+        for server in self._store.target_servers():
+            origin = url_safety.origin_of(server) or server
+            quota = self._store.quota_for(origin)
+            line = storage_text(self._store.bytes_on(origin), quota,
+                                listings.get(origin)) if quota else ""
+            if line:
+                lines.append(line)
+        self._storage.setText("  ·  ".join(lines))
+        self._storage.setVisible(bool(lines))
+
+    def _say(self, text: str, *, error: bool = False) -> None:
+        self._status.setText(text)
+        self._status.setProperty("tone", "error" if error else "")
+        self._status.style().unpolish(self._status)
+        self._status.style().polish(self._status)
+
+    def done(self, result: int) -> None:
+        if self._quick_look is not None:
+            self._quick_look.close()
+        super().done(result)
 
 
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
 
-def _meta_text(media: MediaFile) -> str:
-    """The preview's metadata strip: URL, then dimensions, size, type and
-    how many servers hold the file."""
-    server_count = len(media.urls)
-    dims = f"{media.width} × {media.height}  ·  " if media.width else ""
-    mirrored = ngettext(
-        "mirrored on {count} server", "mirrored on {count} servers", server_count,
-    ).format(count=server_count)
-    return (
-        f"{media.url}\n"
-        f"{dims}{format_size(media.size)}  ·  {media.mime_type}  ·  {mirrored}"
-    )
+def _extra_css(is_dark: bool) -> str:
+    return (f"QLabel#media_status[tone=\"error\"] {{ color: {theme.attention_color(is_dark)}; }}\n"
+            "QLabel#media_hint, QLabel#media_status { font-size: 12px; }\n"
+            "QLabel#media_empty { font-size: 14px; }\n"
+            "QToolButton#media_actions { font-size: 16px; padding: 0px 8px; }\n"
+            "QToolButton#media_actions::menu-indicator { image: none; width: 0px; }\n")
 
 
-def _name(combo: QComboBox, name: str) -> None:
-    """Name a pop-up menu and the list it opens, for a screen reader."""
-    combo.setAccessibleName(name)
-    combo.view().setAccessibleName(name)
+def kind_word_title(kind: str) -> str:
+    """A file's kind as a name, when it has no other."""
+    return {"image": _("Image"), "video": _("Video"), "audio": _("Audio")}.get(kind, _("File"))
 
 
-def _identity_line(media: MediaFile) -> str:
-    """The tile's second line: the day the file was uploaded, or, without
-    one, its type ("PNG"). Media servers keep no file names, and the hash
-    prefix that stood here told nobody anything; the picture itself is
-    how people tell images apart."""
+def _day_of(media: MediaFile) -> str:
     if media.uploaded_at_ms > 0:
         uploaded = QDateTime.fromMSecsSinceEpoch(int(media.uploaded_at_ms))
         if uploaded.isValid():
             return i18n.format_day(uploaded, short_month=True)
-    kind = (media.mime_type or "").split("/")[-1].split("+")[0].split(";")[0].upper()
-    return _("File") if kind in ("", "OCTET-STREAM") else kind
-
-
-def _short_label(media: MediaFile, state: str = PUBLIC) -> str:
-    """Card label: size, when it was uploaded (or its type), and the
-    file's visibility (see _identity_line). The size and mirror count are
-    on the first line, where people look.
-
-    The third line is the visibility word, and an ordinary public blob
-    simply does not have one: everything in a plain library is public, so
-    saying so on every tile would be noise, and noise is what teaches
-    people to stop reading. The cell is sized for three lines either way,
-    so a mixed library does not reflow when a state appears.
-    """
-    server_count = len(media.urls)
-    badge = f"· {server_count}×" if server_count > 1 else ""
-    lines = [f"{format_size(media.size)} {badge}", _identity_line(media)]
-    state_label = _STATE_LABELS.get(state, "")
-    if state_label:
-        lines.append(state_label)
-    return "\n".join(lines)
-
-
-def _tooltip_for(
-    media: MediaFile,
-    *,
-    preview_error: str = "",
-    state: str = PUBLIC,
-    public_copy=None,
-    library_error: str = "",
-) -> str:
-    server_count = len(media.urls)
-    lines = [
-        f"sha256: {media.hash}",
-        _("type:   {type}").format(type=media.mime_type),
-        _("size:   {size}").format(size=format_size(media.size)),
-    ]
-    if media.width and media.height:
-        lines.append(_("dim:    {width} × {height}").format(
-            width=media.width, height=media.height))
-    # Why this particular file could not be accounted for. It belongs
-    # here rather than in the banner above the grid: the reason names one
-    # file, and a banner that concatenates every file's reason is a
-    # diagnostic dump that says nothing about the tile under the pointer.
-    if library_error:
-        lines.append(_("library: {reason}").format(reason=library_error))
-    # Which of the two states a private file is in matters more than the
-    # colour of its chip can say, so the tooltip spells it out and names
-    # the copy's address when there is one. The address is the thing a
-    # user needs to revoke it.
-    if state in _STATE_TOOLTIPS:
-        lines.append(_("access: {access}").format(access=_STATE_TOOLTIPS[state]))
-    if public_copy is not None:
-        lines.append(_("copy:   {url}").format(url=public_copy.url))
-    # A blob can be perfectly healthy on the server and still have no
-    # preview, so the grid says which it is. A bare placeholder with no
-    # explanation reads as a broken app.
-    note = _no_preview_reason(media, preview_error, state)
-    if note:
-        lines.append(_("preview: {reason}").format(reason=note))
-    lines.append(ngettext("on {count} server:", "on {count} servers:", server_count).format(
-        count=server_count))
-    for entry in media.urls:
-        lines.append(f"  · {entry.get('url', '')}")
-    lines.append("")
-    lines.append(_("Double-click to preview · Right-click for actions"))
-    return "\n".join(lines)
-
-
-def _no_preview_reason(
-    media: MediaFile, preview_error: str = "", state: str = PUBLIC,
-) -> str:
-    """Plain-language reason this blob shows a placeholder, or "".
-
-    Several different situations land on the same grey square. A
-    non-image type is never even requested, while an image type that the
-    decoder refuses has already been downloaded and checked.
-
-    A private file is the third case and it needs its own sentence in
-    both directions. Its bytes are an encryption envelope, so "the bytes
-    are not a readable image" is true of what was downloaded and a lie
-    about the file: the picture is fine, it is sealed. And when the
-    decrypt itself fails, the reason is about the key, which is a
-    different problem with a different fix.
-    """
-    mime = (media.mime_type or "").strip()
-    if state in _ENCRYPTED_STATES:
-        # The decoder's refusal is the expected step for an envelope, so
-        # it is never worth repeating; anything else here is the private
-        # preview's own reason and already reads as a sentence.
-        if preview_error and preview_error != "not an image":
-            return preview_error
-        return ""
-    if not mime.startswith("image/"):
-        label = mime or _("unknown type")
-        return _("none, {type} is not an image").format(type=label)
-    if preview_error == "not an image":
-        return _("downloaded, but the bytes are not a readable image")
-    if preview_error:
-        return preview_error
     return ""
 
 
-def _placeholder_icon(
-    mime_type: str, state: str = PUBLIC, is_dark: bool = True,
-) -> QIcon:
-    """Generate a coloured placeholder icon based on the media type."""
-    pix = QPixmap(_THUMB_SIZE, _THUMB_SIZE)
-    if state in _ENCRYPTED_STATES:
-        # A private file's type on the server is the envelope's, not the
-        # picture's, so the type-coloured squares above would tell the
-        # user something false. Neutral until the decrypt says otherwise.
-        pix.fill(Qt.GlobalColor.darkGray)
-    elif (mime_type or "").startswith("image/"):
-        pix.fill(Qt.GlobalColor.darkGray)
-    elif (mime_type or "").startswith("video/"):
-        pix.fill(Qt.GlobalColor.darkBlue)
-    elif (mime_type or "").startswith("audio/"):
-        pix.fill(Qt.GlobalColor.darkGreen)
+def _quick_look_detail(tile: Tile) -> str:
+    """One quiet line: kind, size, dimensions, the day it was added."""
+    media = tile.media
+    parts = [kind_word_title(tile.kind), format_size(media.size)]
+    if media.width and media.height:
+        parts.append(f"{media.width} × {media.height}")
+    day = _day_of(media)
+    if day:
+        parts.append(day)
+    return "  ·  ".join(parts)
+
+
+def _save_name(tile: Tile) -> str:
+    """The name a file is saved under: its own, with the extension of
+    its kind when it has none."""
+    name = tile.name.replace("/", "-").replace("\\", "-").strip() or kind_word_title(tile.kind)
+    if not os.path.splitext(name)[1]:
+        name += media_files.extension_for(tile.media.mime_type or "")
+    return name
+
+
+def _unique_path(folder: str, name: str) -> str:
+    stem, ext = os.path.splitext(name)
+    path, number = os.path.join(folder, name), 2
+    while os.path.exists(path):
+        path = os.path.join(folder, f"{stem} {number}{ext}")
+        number += 1
+    return path
+
+
+def _local_preview(*, mime: str, path: str = "", data: bytes = b"") -> Optional[QPixmap]:
+    """The picture of a file being added, from the computer's own copy,
+    small. Only for the picture types the app decodes anyway."""
+    if mime not in _PREVIEWABLE:
+        return None
+    buffer = None
+    if path:
+        try:
+            if os.path.getsize(path) > _PREVIEW_MAX_BYTES:
+                return None
+        except OSError:
+            return None
+        reader = QImageReader(path)
     else:
-        pix.fill(Qt.GlobalColor.gray)
-    return _chipped_icon(pix, state, is_dark)
-
-
-def _chipped_icon(pix: QPixmap, state: str, is_dark: bool) -> QIcon:
-    """The thumbnail with its visibility chip drawn on, if it has one.
-
-    The chip is painted onto the pixmap rather than styled onto the item
-    because an item's text is one colour and the selection takes that
-    colour over. A cue that disappears the moment a file is selected is
-    a cue that is missing exactly when the user is about to act on it.
-    """
-    colors = _CHIP_COLORS[bool(is_dark)].get(state)
-    text = _CHIP_TEXT.get(state, "")
-    if colors is None or not text or pix.isNull():
-        return QIcon(pix)
-    fill, ink = colors
-
-    stamped = QPixmap(pix)
-    painter = QPainter(stamped)
-    try:
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        font = QFont(painter.font())
-        font.setBold(True)
-        font.setPointSize(max(7, font.pointSize() - 2))
-        painter.setFont(font)
-
-        metrics = painter.fontMetrics()
-        text_w = metrics.horizontalAdvance(text)
-        text_h = metrics.height()
-        chip = QRect(
-            _CHIP_MARGIN,
-            stamped.height() - text_h - 2 * _CHIP_PAD_Y - _CHIP_MARGIN,
-            text_w + 2 * _CHIP_PAD_X,
-            text_h + 2 * _CHIP_PAD_Y,
-        )
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(fill))
-        painter.drawRoundedRect(chip, 3, 3)
-        painter.setPen(QColor(ink))
-        painter.drawText(chip, Qt.AlignCenter, text)
-    finally:
-        painter.end()
-    return QIcon(stamped)
-
-
-def _origins_of(media: MediaFile) -> set:
-    return {url_safety.origin_of(u.get("server", "")) for u in media.urls}
+        buffer = QBuffer()
+        buffer.setData(data)
+        buffer.open(QIODevice.OpenModeFlag.ReadOnly)
+        reader = QImageReader(buffer)
+    reader.setAutoTransform(True)
+    size = reader.size()
+    if size.isValid():
+        size.scale(QSize(THUMB * 2, THUMB * 2), Qt.AspectRatioMode.KeepAspectRatioByExpanding)
+        reader.setScaledSize(size)
+    image = reader.read()
+    return None if image.isNull() else QPixmap.fromImage(image)
 
 
 _MiB = 1024 ** 2
@@ -2166,60 +1042,20 @@ def _gb(byte_count: int) -> str:
         megabytes = round(byte_count / _MiB)
         if megabytes < 1024:
             return f"{megabytes} MB"
-    return _decimal(f"{byte_count / _GiB:.1f} GB".replace(".0 GB", " GB"))
+    text = f"{byte_count / _GiB:.1f} GB".replace(".0 GB", " GB")
+    return text.replace(".", i18n.display_locale().decimalPoint())
 
 
-def unreachable_text(down: List[str], kept: List[str]) -> str:
-    """The note for servers that could not be listed, or "" for none.
+def storage_text(used: int, quota: int, listing) -> str:
+    """The storage line for a server with a known allowance, or "" when
+    its last listing did not succeed: a number from a failed listing is
+    a guess, and saying nothing is better than "unavailable".
 
-    ``kept`` names the ones whose files from last time are still shown;
-    a server that had nothing shown is not said to be showing anything.
+    "At least" when the listing stopped early; "Almost full" and "Full"
+    in words from 90 percent, so the warning never rests on a colour.
     """
-    if not down:
+    if listing is None or not listing.ok:
         return ""
-    servers = ", ".join(down)
-    if not kept:
-        return _("Couldn\u2019t reach {servers}.").format(servers=servers)
-    if kept != down:
-        return _("Couldn\u2019t reach {servers}. Showing the files {kept} had last "
-                 "time.").format(servers=servers, kept=", ".join(kept))
-    return ngettext(
-        "Couldn\u2019t reach {servers}. Showing the files it had last time.",
-        "Couldn\u2019t reach {servers}. Showing the files they had last time.",
-        len(down),
-    ).format(servers=servers)
-
-
-def delete_warning(count: int, may_be_private: int) -> str:
-    """The message under "Delete N files from your Blossom servers?".
-
-    ``may_be_private`` counts the selected files that are private, or
-    that nobody has checked. Another app can keep private files on the
-    same servers, and deleting one here deletes it there as well.
-    """
-    if may_be_private <= 0:
-        return _("This can't be undone.")
-    if count == 1:
-        return _("This may be a private file from another app. Deleting it here "
-                 "removes it there too. This can't be undone.")
-    if may_be_private >= count:
-        return _("These may be private files from another app. Deleting them here "
-                 "removes them there too. This can't be undone.")
-    return _("Some of these may be private files from another app. Deleting them "
-             "here removes them there too. This can't be undone.")
-
-
-def storage_text(used: int, quota: int, listing) -> tuple:
-    """``(text, fraction)`` for a storage meter.
-
-    Says "at least" when the listing stopped early, says it is unknown
-    when the server could not be listed, and says "almost full" in words
-    from 90 percent, so the warning never depends on the bar's colour.
-    """
-    if listing is None:
-        return _("Checking\u2026"), 0.0
-    if not listing.ok:
-        return _("Usage unavailable right now."), 0.0
     fraction = min(1.0, used / quota) if quota else 0.0
     if listing.truncated:
         text = _("At least {used} of {quota} used")
@@ -2229,46 +1065,4 @@ def storage_text(used: int, quota: int, listing) -> tuple:
         text = _("Almost full: {used} of {quota} used")
     else:
         text = _("{used} of {quota} used")
-    return text.format(used=_gb(used), quota=_gb(quota)), fraction
-
-
-def _suggested_save_name(media: MediaFile) -> str:
-    """Pick a sensible default filename for the Save dialog.
-
-    Blossom doesn't carry filenames, the URL path is the sha256. We
-    use the hash prefix + the mime-derived extension so the user gets
-    something they can recognize and re-rename if they want.
-    """
-    return f"{media.hash[:12]}{media_files.extension_for(media.mime_type or '')}"
-
-
-def _hostname_from_url(url: str) -> str:
-    try:
-        from urllib.parse import urlparse
-        return urlparse(url).hostname or ""
-    except (ValueError, AttributeError):
-        return ""
-
-
-def _paste_upload_name() -> str:
-    """Unique-per-process display name for a clipboard upload job.
-
-    ``int(time.time())`` collides when the user pastes twice inside one
-    second; ``int(time.time() * 1000)`` is finer but still racy on fast
-    hardware. A counter sourced from ``itertools.count`` is monotonic
-    by construction and reads cleanly in the status bar.
-    """
-    return f"clipboard-{int(time.time())}-{next(_paste_counter):03d}.png"
-
-
-def _styled_combo() -> QComboBox:
-    """A QComboBox that respects the dialog's stylesheet on every platform.
-
-    On macOS, an unstyled non-editable QComboBox can still pop up the
-    *native* AppKit menu, which ignores QSS. Swapping the view for a
-    QListView forces Qt to render its own styled popup, which means our
-    padding / item-height / hover styles actually apply.
-    """
-    combo = QComboBox()
-    combo.setView(QListView())
-    return combo
+    return text.format(used=_gb(used), quota=_gb(quota))

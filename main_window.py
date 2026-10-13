@@ -7034,7 +7034,6 @@ class MainWindow(QMainWindow):
             is_dark=self.is_dark_theme,
             pick_mode=False,
             visibility=self._media_visibility,
-            server_label=self._media_server_label,
             parent=self,
         )
         dialog.bind_private_library(self._private_library)
@@ -7065,7 +7064,6 @@ class MainWindow(QMainWindow):
             is_dark=self.is_dark_theme,
             pick_mode=True,
             visibility=self._media_visibility,
-            server_label=self._media_server_label,
             parent=self,
         )
         dialog.bind_private_library(self._private_library)

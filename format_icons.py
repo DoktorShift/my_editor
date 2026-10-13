@@ -190,3 +190,91 @@ def code_block(color: QColor) -> QIcon:
         painter.drawPath(right)
         painter.drawLine(QPointF(10.2, 3.5), QPointF(7.8, 14.5))
     return _icon(draw, color)
+
+
+# -- the Media Library's glyphs ----------------------------------------------
+# Drawn at any size with ``paint`` (a tile's kind, the shared mark on a
+# thumbnail), and as toolbar-sized icons like the rest.
+
+def _draw_globe(painter: QPainter, ink: QColor) -> None:
+    """A globe: anyone with the link can open the file."""
+    painter.setPen(_pen(ink, 1.4))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawEllipse(QRectF(2, 2, 14, 14))
+    painter.drawEllipse(QRectF(6, 2, 6, 14))
+    painter.drawLine(QPointF(2.2, 9), QPointF(15.8, 9))
+    painter.drawLine(QPointF(3.6, 5.4), QPointF(14.4, 5.4))
+    painter.drawLine(QPointF(3.6, 12.6), QPointF(14.4, 12.6))
+
+
+def _draw_video(painter: QPainter, ink: QColor) -> None:
+    """A frame of film with a play triangle."""
+    painter.setPen(_pen(ink, 1.4))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(QRectF(1.5, 3.5, 15, 11), 2, 2)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(ink)
+    triangle = QPainterPath()
+    triangle.moveTo(QPointF(7.4, 6.4))
+    triangle.lineTo(QPointF(12, 9))
+    triangle.lineTo(QPointF(7.4, 11.6))
+    triangle.closeSubpath()
+    painter.drawPath(triangle)
+
+
+def _draw_audio(painter: QPainter, ink: QColor) -> None:
+    """A note: two heads on a beam."""
+    painter.setPen(_pen(ink, 1.5))
+    painter.drawLine(QPointF(7, 13), QPointF(7, 4))
+    painter.drawLine(QPointF(14.5, 11.5), QPointF(14.5, 2.5))
+    painter.drawLine(QPointF(7, 4), QPointF(14.5, 2.5))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(ink)
+    painter.drawEllipse(QRectF(2.6, 11, 4.8, 3.8))
+    painter.drawEllipse(QRectF(10.1, 9.5, 4.8, 3.8))
+
+
+def _draw_document(painter: QPainter, ink: QColor) -> None:
+    """A page with a folded corner: any other file."""
+    painter.setPen(_pen(ink, 1.4))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    page = QPainterPath()
+    page.moveTo(QPointF(4, 1.8))
+    page.lineTo(QPointF(10.5, 1.8))
+    page.lineTo(QPointF(14.5, 5.8))
+    page.lineTo(QPointF(14.5, 16.2))
+    page.lineTo(QPointF(4, 16.2))
+    page.closeSubpath()
+    painter.drawPath(page)
+    painter.drawLine(QPointF(10.5, 1.8), QPointF(10.5, 5.8))
+    painter.drawLine(QPointF(10.5, 5.8), QPointF(14.5, 5.8))
+
+
+def _draw_alert(painter: QPainter, ink: QColor) -> None:
+    """An exclamation mark in a circle: this did not work."""
+    painter.setPen(_pen(ink, 1.6))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawEllipse(QRectF(1.8, 1.8, 14.4, 14.4))
+    painter.drawLine(QPointF(9, 5.2), QPointF(9, 10))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(ink)
+    painter.drawEllipse(QRectF(8, 11.8, 2, 2))
+
+
+_GLYPHS = {"globe": _draw_globe, "video": _draw_video, "audio": _draw_audio,
+           "document": _draw_document, "alert": _draw_alert}
+
+
+def paint(name: str, painter: QPainter, rect: QRectF, color: QColor) -> None:
+    """Draw glyph ``name`` (globe, video, audio, document, alert) to fill
+    the square ``rect``, sharp at any size."""
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.translate(rect.topLeft())
+    painter.scale(rect.width() / SIZE, rect.height() / SIZE)
+    _GLYPHS[name](painter, QColor(color))
+    painter.restore()
+
+
+def globe(color: QColor) -> QIcon:
+    return _icon(_draw_globe, color)
