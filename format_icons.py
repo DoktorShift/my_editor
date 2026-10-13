@@ -190,3 +190,30 @@ def code_block(color: QColor) -> QIcon:
         painter.drawPath(right)
         painter.drawLine(QPointF(10.2, 3.5), QPointF(7.8, 14.5))
     return _icon(draw, color)
+
+
+def _turning_arrow(painter: QPainter, ink: QColor) -> None:
+    """An arrow that comes up from below and turns back to the left."""
+    painter.setPen(_pen(ink, 1.6))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    path = QPainterPath()
+    path.moveTo(QPointF(15, 14.5))
+    path.cubicTo(QPointF(15, 9), QPointF(11.5, 6.5), QPointF(4, 6.5))
+    path.moveTo(QPointF(7.2, 3.2))
+    path.lineTo(QPointF(3.8, 6.5))
+    path.lineTo(QPointF(7.2, 9.8))
+    painter.drawPath(path)
+
+
+def undo(color: QColor) -> QIcon:
+    """An arrow turning back to the left: Undo."""
+    return _icon(_turning_arrow, color)
+
+
+def redo(color: QColor) -> QIcon:
+    """Undo's arrow, mirrored: Redo."""
+    def draw(painter: QPainter, ink: QColor) -> None:
+        painter.translate(SIZE, 0)
+        painter.scale(-1, 1)
+        _turning_arrow(painter, ink)
+    return _icon(draw, color)

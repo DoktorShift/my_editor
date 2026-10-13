@@ -2,12 +2,19 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The format toolbar: the few text controls writers reach for most.
 
-The paragraph style (Body, Heading 1 to 3), bold, italic, strikethrough,
-a link, the two kinds of list and a quote. Everything else is in the
-menus, and the menus hold everything; this bar repeats only what is used
-all the time, the way TextEdit's and Pages' format bars do. Underline has
-no button: Markdown and Nostr have no underline (it stays in the Format
-menu, for local files).
+Undo and Redo, the paragraph style (Body, Heading 1 to 3), bold, italic,
+strikethrough, a link, the two kinds of list and a quote. Everything else
+is in the menus, and the menus hold everything; this bar repeats only what
+is used all the time, the way TextEdit's and Pages' format bars do.
+Underline has no button: Markdown and Nostr have no underline (it stays in
+the Format menu, for local files).
+
+Undo and Redo each have an arrow beside them, as Pages' and Word's do: it
+lists the steps they take back (or bring back), newest first, to go
+several at once. The window fills those lists as they open (undo_menu,
+redo_menu); they open with a right-click (Control-click on a Mac) too, and
+with Down while the button has the keyboard focus, which Qt gives such a
+button no key for.
 
 Every button is the window's own command (commands.py): the same action,
 so its state, its key and whether it applies right now are the same here
@@ -20,7 +27,7 @@ from __future__ import annotations
 
 from typing import Dict, Optional
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QEvent, QSize, Qt
 from PySide6.QtGui import QAction, QColor, QKeySequence
 from PySide6.QtWidgets import QHBoxLayout, QMenu, QPushButton, QToolBar, QToolButton, QWidget
 
@@ -31,22 +38,24 @@ from constants import (
 )
 from i18n import _, pgettext
 
-# The buttons, in order; None is a separator.
+# The buttons before the style pop-up, each with its list of steps.
+HISTORY = ("undo", "redo")
+# The buttons after it, in order; None is a separator.
 LAYOUT = ("bold", "italic", "strike", None, "link", None, "bullets", "numbers", "checklist",
           "quote")
 
 
-def tooltip_for(action: QAction) -> str:
-    """"Bold (⌘B)": the command's name and its key, as the platform
-    writes keys, or only the name when it has none."""
-    title = action.text().replace("&", "").rstrip("…").rstrip()
+def tooltip_for(action: QAction, title: str = "") -> str:
+    """"Bold (⌘B)": the command's name (or ``title``) and its key, as the
+    platform writes keys, or only the name when it has none."""
+    title = title or action.text().replace("&", "").rstrip("…").rstrip()
     keys = action.shortcut().toString(QKeySequence.SequenceFormat.NativeText)
     return _("{command} ({keys})").format(command=title, keys=keys) if keys else title
 
 
 class FormatToolbar(QToolBar):
-    """The format toolbar. ``actions`` maps LAYOUT's names to the
-    window's commands; ``style_menu`` is Format > Style."""
+    """The format toolbar. ``actions`` maps HISTORY's and LAYOUT's names
+    to the window's commands; ``style_menu`` is Format > Style."""
 
     def __init__(self, actions: Dict[str, QAction], style_menu: QMenu, *,
                  dark: bool = True, parent: Optional[QWidget] = None) -> None:
@@ -59,6 +68,29 @@ class FormatToolbar(QToolBar):
         self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         self._actions = actions
         self._dark = dark
+
+        # Undo and Redo first, at the leading edge (the last a narrow window
+        # moves into the chevron): a click takes one step, the arrow beside
+        # lists them (the module docstring).
+        self.buttons: Dict[str, QToolButton] = {}
+        self._history_titles: Dict[str, str] = {}
+        for name in HISTORY:
+            action = actions[name]
+            self.addAction(action)
+            button = self.widgetForAction(action)
+            button.setMenu(QMenu(button))
+            button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+            button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+            button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            button.customContextMenuRequested.connect(lambda _at, b=button: b.showMenu())
+            button.installEventFilter(self)
+            button.setAccessibleName(_("Undo") if name == "undo" else _("Redo"))
+            self.buttons[name] = button
+            action.changed.connect(lambda n=name: self._describe_history(n))
+            self._describe_history(name)
+        self.undo_menu = self.buttons["undo"].menu()
+        self.redo_menu = self.buttons["redo"].menu()
+        self.addSeparator()
 
         # The paragraph style, as a pop-up button that says which it is.
         self.style_button = QPushButton(self)
@@ -73,7 +105,6 @@ class FormatToolbar(QToolBar):
         self.addWidget(self.style_button)
         self.addSeparator()
 
-        self.buttons: Dict[str, QToolButton] = {}
         for name in LAYOUT:
             if name is None:
                 self.addSeparator()
@@ -124,10 +155,33 @@ class FormatToolbar(QToolBar):
         """The paragraph style at the caret ("Heading 2"), on the pop-up."""
         self.style_button.setText(name)
 
+    def describe_history(self, undo: str, redo: str) -> None:
+        """What Undo and Redo take now, for their tips ("Undo Typing"), on
+        every platform."""
+        self._history_titles = {"undo": undo, "redo": redo}
+        for name in HISTORY:
+            self._describe_history(name)
+
+    def _describe_history(self, name: str) -> None:
+        # Also when the command changes, which sets Qt's own tip again.
+        self.buttons[name].setToolTip(tooltip_for(self._actions[name],
+                                                  self._history_titles.get(name, "")))
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802, Qt's name
+        # Down (Option-Down, Alt+Down) opens Undo's or Redo's list from the
+        # keyboard, as it opens a pop-up menu; Space takes one step.
+        if (event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Down
+                and watched in (self.buttons["undo"], self.buttons["redo"])):
+            watched.showMenu()
+            return True
+        return super().eventFilter(watched, event)
+
     def set_dark(self, dark: bool) -> None:
         self._dark = dark
         ink = QColor(DARK_FG if dark else LIGHT_FG)
         icons = {
+            "undo": format_icons.undo(ink),
+            "redo": format_icons.redo(ink),
             "bold": format_icons.letter(pgettext("format button", "B"), ink, bold=True),
             "italic": format_icons.letter(pgettext("format button", "I"), ink, italic=True),
             # A letter whose struck form still reads as a letter crossed out
@@ -173,6 +227,16 @@ class FormatToolbar(QToolBar):
                 border-color: {checked_edge};
             }}
             #FormatToolbar QToolButton:focus {{ border-color: {selection}; }}
+            #FormatToolbar QToolButton[popupMode="1"] {{ padding-right: 13px; }}
+            #FormatToolbar QToolButton::menu-button {{
+                background: transparent;
+                border: none;
+                width: 12px;
+            }}
+            #FormatToolbar QToolButton::menu-button:hover {{
+                background: {hover};
+                border-radius: 4px;
+            }}
             #FormatToolbar::separator {{
                 background: {border};
                 width: 1px;

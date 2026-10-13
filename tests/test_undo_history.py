@@ -31,6 +31,7 @@ from PySide6.QtGui import QTextCursor, QTextImageFormat  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
+import commands  # noqa: E402
 import editor as editor_module  # noqa: E402
 import rich_text  # noqa: E402
 from editor import HtmlEditor  # noqa: E402
@@ -342,3 +343,176 @@ def test_what_the_window_puts_in_the_text_is_a_named_step(tmp_path):
         "library": [True, "Image", True],
         "audio": [True, "Audio or Video", True],
     }
+
+
+def test_the_history_lists_the_steps_newest_first():
+    ed = structured("word")
+    cursor = ed.textCursor()
+    cursor.select(QTextCursor.SelectionType.WordUnderCursor)
+    ed.setTextCursor(cursor)
+    ed.toggle_bold()
+    ed.set_heading(1)
+    ed.insert_table(2, 2)
+    assert ed.undo_history() == ["Table", "Paragraph Style", "Bold", "Typing"]
+    assert ed.undo_history(2) == ["Table", "Paragraph Style"]
+    assert ed.redo_history() == []
+    ed.undo()
+    ed.undo()
+    assert ed.undo_history() == ["Bold", "Typing"]
+    assert ed.redo_history() == ["Paragraph Style", "Table"]
+    assert ed.redo_history(1) == ["Paragraph Style"]
+    assert (ed.undo_name(), ed.redo_name()) == ("Bold", "Paragraph Style")
+    cursor = ed.textCursor()
+    cursor.movePosition(QTextCursor.MoveOperation.End)
+    ed.setTextCursor(cursor)
+    QTest.keyClicks(ed, "s")
+    assert ed.undo_history() == ["Typing", "Bold", "Typing"]
+    assert ed.redo_history() == []
+
+
+def test_a_step_that_replaces_undone_ones_leaves_no_name_of_theirs():
+    """Undo two steps of a few changes each, then one change of many: Redo
+    has nothing, and the history only the steps that are there."""
+    ed = structured("word")
+    ed.insert_table(2, 2)
+    ed.insert_divider()
+    ed.undo()
+    ed.undo()
+    ed.insert_table(3, 3)
+    assert ed.redo_history() == [] and ed.redo_name() == ""
+    assert ed.undo_history() == ["Table", "Typing"]
+    ed.undo()
+    assert ed.redo_history() == ["Table"]
+
+
+HISTORY_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
+from PySide6.QtGui import QContextMenuEvent, QKeySequence, QTextCursor
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QToolButton
+app = QApplication(sys.argv[:1])
+import main_window
+w = main_window.MainWindow()
+w.show()
+tb = w.format_toolbar
+undo_button = tb.widgetForAction(w.act_undo)
+redo_button = tb.widgetForAction(w.act_redo)
+r = {}
+
+def names(menu):
+    menu.aboutToShow.emit()
+    return [a.text() for a in menu.actions() if not a.isSeparator()]
+
+def state(ed):
+    c = ed.textCursor()
+    return [ed.document().toHtml(), c.anchor(), c.position()]
+
+ed = w.new_tab()
+ed.setFocus()
+app.processEvents()
+r["empty"] = [undo_button.isEnabled(), redo_button.isEnabled(), names(undo_button.menu())]
+QTest.keyClicks(ed, "Some words")
+cursor = ed.textCursor()
+cursor.select(QTextCursor.SelectionType.WordUnderCursor)
+ed.setTextCursor(cursor)
+w.act_bold.trigger()
+w.act_italic.trigger()
+w.act_styles[2].trigger()
+app.processEvents()
+r["undo_names"] = names(undo_button.menu())
+r["undo_tip"] = undo_button.toolTip()
+r["redo_tip"] = redo_button.toolTip()
+r["keys"] = [w.act_undo.shortcut().toString(QKeySequence.SequenceFormat.NativeText),
+             w.act_redo.shortcut().toString(QKeySequence.SequenceFormat.NativeText)]
+
+# Moving back k steps is k single Undos, the caret where they leave it.
+top = state(ed)
+singles = []
+for _ in range(3):
+    w.act_undo.trigger()
+    singles.append(state(ed))
+for _ in range(3):
+    w.act_redo.trigger()
+r["back_at_top"] = state(ed) == top
+undo_button.menu().aboutToShow.emit()
+undo_button.menu().actions()[2].trigger()
+r["three_back"] = state(ed) == singles[2]
+r["redo_names"] = names(redo_button.menu())
+r["redo_tip_after"] = redo_button.toolTip()
+redo_button.menu().actions()[1].trigger()
+r["two_forward"] = state(ed) == singles[0]
+r["after_forward"] = [names(undo_button.menu()), names(redo_button.menu())]
+
+# A text field with the focus: its own one step, by the Edit menu's word.
+w._show_find(replace=False)
+w.findbar.edit.setFocus()
+QTest.keyClicks(w.findbar.edit, "abc")
+app.processEvents()
+r["field"] = [names(undo_button.menu()), undo_button.toolTip()]
+ed.setFocus()
+app.processEvents()
+
+# Plain text has its steps named too.
+path = os.path.join(os.environ["HOME"], "plain.txt")
+open(path, "w").write("text\n")
+w.open_path(path)
+plain = w.current_editor()
+plain.setFocus()
+cursor = plain.textCursor()
+cursor.movePosition(QTextCursor.MoveOperation.End)
+plain.setTextCursor(cursor)
+QTest.keyClicks(plain, "more")
+app.processEvents()
+r["plain"] = names(undo_button.menu())
+
+# The menu opens with a right-click (Control-click on a Mac) and, with the
+# button focused, from the keyboard.
+opened = []
+undo_button.menu().aboutToShow.connect(lambda: opened.append(1))
+def close_later():
+    QTimer.singleShot(50, lambda: undo_button.menu().hide())
+close_later()
+QApplication.sendEvent(undo_button, QContextMenuEvent(
+    QContextMenuEvent.Reason.Mouse, QPoint(4, 4), undo_button.mapToGlobal(QPoint(4, 4))))
+r["context_menu"] = len(opened)
+w.activateWindow()
+undo_button.setFocus()
+app.processEvents()
+r["focusable"] = [undo_button.isEnabled(), undo_button.hasFocus(), type(app.focusWidget()).__name__]
+close_later()
+QTest.keyClick(undo_button, Qt.Key.Key_Down)
+r["down_key"] = len(opened)
+r["names"] = [undo_button.accessibleName(), redo_button.accessibleName()]
+r["popup"] = [undo_button.popupMode() == QToolButton.ToolButtonPopupMode.MenuButtonPopup,
+              redo_button.popupMode() == QToolButton.ToolButtonPopupMode.MenuButtonPopup]
+for i in range(w.tabs.count()):
+    e = w._editor_from_widget(w.tabs.widget(i))
+    if e is not None:
+        e.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_the_toolbar_lists_and_takes_back_steps_of_undo(tmp_path):
+    from tests.app_process import run_window_script
+    r = run_window_script(HISTORY_SCRIPT, tmp_path)
+    undo_keys, redo_keys = r["keys"]
+    assert r["empty"] == [False, False, []]
+    assert r["undo_names"] == ["Paragraph Style", "Italic", "Bold", "Typing"]
+    # Named on every platform, in its keys.
+    assert r["undo_tip"] == f"Undo Paragraph Style ({undo_keys})"
+    assert r["redo_tip"] == f"Redo ({redo_keys})"
+    assert r["back_at_top"] and r["three_back"] and r["two_forward"]
+    assert r["redo_names"] == ["Bold", "Italic", "Paragraph Style"]
+    assert r["redo_tip_after"] == f"Redo Bold ({redo_keys})"
+    assert r["after_forward"] == [["Italic", "Bold", "Typing"], ["Paragraph Style"]]
+    assert r["field"] == [[commands.undo_words()], f"Undo ({undo_keys})"]
+    assert r["plain"] == ["Typing"]
+    assert r["context_menu"] == 1 and r["down_key"] == 2
+    assert r["focusable"] == [True, True, "QToolButton"]
+    assert r["names"] == ["Undo", "Redo"]
+    assert r["popup"] == [True, True]

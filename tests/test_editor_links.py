@@ -340,9 +340,9 @@ def test_links_from_files_open_only_where_they_safely_can(monkeypatch, href, ope
 def test_the_link_button_says_edit_link_to_a_screen_reader_too():
     from PySide6.QtGui import QAction
     from PySide6.QtWidgets import QMainWindow, QMenu
-    from format_toolbar import LAYOUT, FormatToolbar
+    from format_toolbar import HISTORY, LAYOUT, FormatToolbar
     window = QMainWindow()
-    actions = {name: QAction(name.capitalize(), window) for name in LAYOUT if name}
+    actions = {name: QAction(name.capitalize(), window) for name in (*HISTORY, *LAYOUT) if name}
     bar = FormatToolbar(actions, QMenu(), dark=False, parent=window)
     actions["link"].setText("Edit Link…")
     assert bar.buttons["link"].accessibleName() == "Edit Link"

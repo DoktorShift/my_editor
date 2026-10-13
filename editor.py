@@ -12,7 +12,7 @@ import functools
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Optional
 
 from PySide6.QtCore import (
     Qt, QTimer, QRect, QRectF, QPoint, QMetaMethod, QEvent, QUrl, Signal,
@@ -392,14 +392,35 @@ class HtmlEditor(QTextEdit):
 
     def undo_name(self) -> str:
         """What Undo would take back (an N_ word, "" when not known)."""
-        step = self._undo_names.get(self.document().availableUndoSteps())
-        return step[1] if step else ""
+        return next(iter(self.undo_history(1)), "")
 
     def redo_name(self) -> str:
-        """What Redo would bring back (an N_ word, "" when not known): the
-        step that starts where the document is now."""
+        """What Redo would bring back (an N_ word, "" when not known)."""
+        return next(iter(self.redo_history(1)), "")
+
+    def undo_history(self, limit: int = 0) -> List[str]:
+        """The names of the steps Undo takes back one after another (N_
+        words), newest first, as far as they are known; ``limit`` of them
+        at most when given. Each step starts where the one before it ends."""
+        names = []
         now = self.document().availableUndoSteps()
-        return next((name for before, name in self._undo_names.values() if before == now), "")
+        while now in self._undo_names and (not limit or len(names) < limit):
+            now, name = self._undo_names[now]
+            names.append(name)
+        return names
+
+    def redo_history(self, limit: int = 0) -> List[str]:
+        """The names of the steps Redo brings back one after another, the
+        next first, by the same rules as undo_history: each starts where
+        the document is after the one before."""
+        now = self.document().availableUndoSteps()
+        ahead = {before: (after, name) for after, (before, name)
+                 in sorted(self._undo_names.items()) if after > now}
+        names = []
+        while now in ahead and (not limit or len(names) < limit):
+            now, name = ahead[now]
+            names.append(name)
+        return names
 
     def _forget_redone_names(self) -> None:
         """A new change drops what could be redone, and with it its names."""

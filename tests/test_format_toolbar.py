@@ -8,6 +8,9 @@ What must hold:
   so state, keys and availability are the menu's. Each says its key in
   the platform's notation. Underline has no button.
 
+  Undo and Redo come first, before the style pop-up, each with the list
+  of its steps beside it; their tips name the step ("Undo Typing (⌘Z)").
+
   The buttons show the style at the caret, and the pop-up names the
   paragraph style.
 
@@ -32,7 +35,7 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QMenu, QToolButton  # n
 import commands  # noqa: E402
 from commands import Command, CommandRegistry  # noqa: E402
 from tests.accessibility import unnamed_controls  # noqa: E402
-from format_toolbar import LAYOUT, FormatToolbar, tooltip_for  # noqa: E402
+from format_toolbar import HISTORY, LAYOUT, FormatToolbar, tooltip_for  # noqa: E402
 from tests.app_process import run_window_script  # noqa: E402
 
 
@@ -48,7 +51,7 @@ def toolbar():
     keys = {"bold": "Ctrl+B", "italic": "Ctrl+I", "link": "Ctrl+K"}
     actions = {name: registry.add(Command(f"format.{name}", name.capitalize(),
                                           commands.FORMAT, keys.get(name), checkable=True))
-               for name in LAYOUT if name}
+               for name in (*HISTORY, *LAYOUT) if name}
     style_menu = QMenu()
     for title in ("Body", "Heading 1", "Heading 2", "Heading 3"):
         style_menu.addAction(title)
@@ -60,7 +63,7 @@ def toolbar():
 
 def test_the_buttons_are_the_window_commands(toolbar):
     assert [a for a in toolbar.actions() if a in toolbar.actions_.values()] == [
-        toolbar.actions_[name] for name in LAYOUT if name]
+        toolbar.actions_[name] for name in (*HISTORY, *LAYOUT) if name]
     assert "underline" not in toolbar.buttons
     toolbar.actions_["bold"].setChecked(True)
     assert toolbar.buttons["bold"].isChecked()
@@ -87,10 +90,36 @@ def test_the_style_popup_names_the_style(toolbar):
     assert toolbar.style_button.menu() is not None
 
 
+def test_undo_and_redo_come_first_with_their_lists(toolbar):
+    from PySide6.QtWidgets import QWidgetAction
+    leading = toolbar.actions()[:4]
+    assert leading[:2] == [toolbar.actions_["undo"], toolbar.actions_["redo"]]
+    assert leading[2].isSeparator()
+    assert isinstance(leading[3], QWidgetAction) and \
+        leading[3].defaultWidget() is toolbar.style_button
+    for name, words, menu in (("undo", "Undo", toolbar.undo_menu),
+                              ("redo", "Redo", toolbar.redo_menu)):
+        button = toolbar.buttons[name]
+        assert button.defaultAction() is toolbar.actions_[name]
+        assert button.menu() is menu
+        assert button.popupMode() == QToolButton.ToolButtonPopupMode.MenuButtonPopup
+        assert button.accessibleName() == words
+
+
+def test_undo_and_redo_tips_name_the_step(toolbar):
+    toolbar.actions_["undo"].setShortcut(QKeySequence("Ctrl+Z"))
+    native = QKeySequence("Ctrl+Z").toString(QKeySequence.SequenceFormat.NativeText)
+    toolbar.describe_history("Undo Typing", "Redo")
+    assert toolbar.buttons["undo"].toolTip() == f"Undo Typing ({native})"
+    assert toolbar.buttons["redo"].toolTip() == "Redo"
+    toolbar.actions_["undo"].setEnabled(False)          # Qt's own tip comes back
+    assert toolbar.buttons["undo"].toolTip() == f"Undo Typing ({native})"
+
+
 def test_both_themes_draw_every_icon(toolbar):
     for dark in (True, False):
         toolbar.set_dark(dark)
-        for name in LAYOUT:
+        for name in (*HISTORY, *LAYOUT):
             if name:
                 assert not toolbar.actions_[name].icon().isNull()
                 assert not toolbar.actions_[name].isIconVisibleInMenu()
@@ -235,7 +264,7 @@ def test_a_control_that_cannot_act_looks_it(dark):
     registry = CommandRegistry(window)
     actions = {name: registry.add(Command(f"format.{name}", name.capitalize(),
                                           commands.FORMAT, checkable=True))
-               for name in LAYOUT if name}
+               for name in (*HISTORY, *LAYOUT) if name}
     menu = QMenu()
     menu.addAction("Body")
     bar = FormatToolbar(actions, menu, dark=dark, parent=window)
@@ -260,7 +289,7 @@ def test_a_button_that_is_on_has_a_visible_edge(dark):
     registry = CommandRegistry(window)
     actions = {name: registry.add(Command(f"format.{name}", name.capitalize(),
                                           commands.FORMAT, checkable=True))
-               for name in LAYOUT if name}
+               for name in (*HISTORY, *LAYOUT) if name}
     bar = FormatToolbar(actions, QMenu(), dark=dark, parent=window)
     edge = DARK_MUTED_FG if dark else LIGHT_MUTED_FG
     assert "QToolButton:checked" in bar.styleSheet() and edge in bar.styleSheet()

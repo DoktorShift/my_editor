@@ -36,19 +36,20 @@ from i18n import _
 ShortcutSpec = Union[None, str, QKeySequence, QKeySequence.StandardKey, Tuple[str, ...]]
 
 
-def undo_words(action: str = "") -> str:
+def undo_words(action: str = "", *, named: Optional[bool] = None) -> str:
     """Edit > Undo's words for taking back ``action`` (an N_ word:
     "Typing", "Paste", "Skip"): "Undo Typing" where the platform's own
     apps name what Undo takes back (macOS), else "Undo", as Notepad and
-    GNOME's Text Editor say."""
-    if action and sys.platform == "darwin":
+    GNOME's Text Editor say. ``named`` True names it on every platform
+    (a toolbar button's tip, as Word's says "Undo Typing" on Windows)."""
+    if action and (named if named is not None else sys.platform == "darwin"):
         return _("Undo {action}").format(action=_(action))
     return _("Undo")
 
 
-def redo_words(action: str = "") -> str:
-    """Edit > Redo's words, by the same rule as undo_words."""
-    if action and sys.platform == "darwin":
+def redo_words(action: str = "", *, named: Optional[bool] = None) -> str:
+    """Edit > Redo's words, by the same rules as undo_words."""
+    if action and (named if named is not None else sys.platform == "darwin"):
         return _("Redo {action}").format(action=_(action))
     return _("Redo")
 

@@ -1449,12 +1449,15 @@ class MainWindow(QMainWindow):
             return
         imports = self._imports_in_front()
         field = _text_field(QApplication.focusWidget())
+        toolbar = getattr(self, "format_toolbar", None)
         if imports is not None:
             # What Undo undoes in the window in front (Undo Skip there).
             self.act_undo.setText(imports.undo_text())
             self.act_redo.setText(redo_words())
             self.act_undo.setEnabled(imports.can_undo())
             self.act_redo.setEnabled(field is not None and _field_history(field)[1])
+            if toolbar is not None:
+                toolbar.describe_history(imports.undo_text(), redo_words())
             return
         undo_name = redo_name = ""
         if field is not None:
@@ -1474,6 +1477,45 @@ class MainWindow(QMainWindow):
         self.act_redo.setText(redo_words(redo_name if can_redo else ""))
         self.act_undo.setEnabled(can_undo)
         self.act_redo.setEnabled(can_redo)
+        if toolbar is not None:
+            # The toolbar's tips name the step on every platform.
+            toolbar.describe_history(undo_words(undo_name if can_undo else "", named=True),
+                                     redo_words(redo_name if can_redo else "", named=True))
+
+    # How many steps the toolbar's Undo and Redo lists show, as Word's.
+    HISTORY_LENGTH = 15
+
+    def _fill_history(self, menu: QMenu, *, redo: bool) -> None:
+        """The toolbar's list of what Undo (or Redo) takes one step after
+        another, newest first, as the arrow beside the button opens it:
+        choosing the third takes three steps, exactly as three Undos would.
+        Only a document's steps have names; for a text field or the
+        Imports window, the list holds the one step the button takes, by
+        the Edit menu's words."""
+        menu.clear()
+        action = self.act_redo if redo else self.act_undo
+        if not action.isEnabled():
+            return
+        ed = self.current_editor()
+        names = []
+        if (ed is not None and self._imports_in_front() is None
+                and _text_field(QApplication.focusWidget()) is None):
+            names = (ed.redo_history if redo else ed.undo_history)(self.HISTORY_LENGTH)
+        if not names:
+            menu.addAction(action.text(), action.trigger)
+            return
+        for count, name in enumerate(names, 1):
+            menu.addAction(_(name), lambda n=count, e=ed: self._take_steps(e, n, redo=redo))
+
+    def _take_steps(self, ed, count: int, *, redo: bool) -> None:
+        """``count`` single Undos (or Redos) of ``ed``, one after another."""
+        if not shiboken6.isValid(ed) or ed is not self.current_editor() \
+                or self._shows_preview_only(ed):
+            return
+        take = ed.redo if redo else ed.undo
+        for _step in range(count):
+            take()
+        self._update_format_buttons()
 
     def _update_clipboard_commands(self, *_args) -> None:
         """Cut, Copy, Paste and Delete for whatever has the focus, dimmed
@@ -2506,10 +2548,16 @@ class MainWindow(QMainWindow):
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
         self.format_toolbar = FormatToolbar(
-            {"bold": self.act_bold, "italic": self.act_italic, "strike": self.act_strike,
+            {"undo": self.act_undo, "redo": self.act_redo,
+             "bold": self.act_bold, "italic": self.act_italic, "strike": self.act_strike,
              "link": self.act_link, "bullets": self.act_bullets, "numbers": self.act_numbers,
              "checklist": self.act_checklist, "quote": self.act_quote},
             self.m_style, dark=self.is_dark_theme)
+        self.format_toolbar.undo_menu.aboutToShow.connect(
+            lambda: self._fill_history(self.format_toolbar.undo_menu, redo=False))
+        self.format_toolbar.redo_menu.aboutToShow.connect(
+            lambda: self._fill_history(self.format_toolbar.redo_menu, redo=True))
+        self._update_undo_redo_buttons()
         self.view_switch = ViewSwitch(
             (self.act_view_write, self.act_view_preview, self.act_view_split),
             dark=self.is_dark_theme)
