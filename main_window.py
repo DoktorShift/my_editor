@@ -3683,15 +3683,17 @@ class MainWindow(QMainWindow):
         if len(refused) == 1:
             title = _("“{detail}” can’t be saved in the file").format(
                 detail=self._detail_label(next(iter(refused))))
+            without = _("Save Without It")
         else:
             title = _("Some article details can’t be saved in the file")
+            without = _("Save Without Them")
         choice = ask(self, title=title, caution=True, is_dark=self.is_dark_theme,
                      message=_("MyEditor can’t write what you typed for {details} into "
                                "“{name}” so that other apps read it the same way. The file "
                                "keeps what it had, and the article still publishes what you "
                                "typed.").format(details=self._detail_names(refused),
                                                 name=os.path.basename(path)),
-                     buttons=(Button(_("Save Without It"), "without", NORMAL),
+                     buttons=(Button(without, "without", NORMAL),
                               Button(_("Keep Editing"), "keep", DEFAULT)))
         if choice != "without":
             return False

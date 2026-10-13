@@ -212,3 +212,23 @@ def test_a_save_leaving_typed_details_out_says_so_beside_the_media_still_to_go_i
     MainWindow._say_saved(window, ed, "/notes/post.md")
     assert shown == ["Saved without what you typed for “Hashtags”: MyEditor can’t write it "
                      "into the file. “talk.mp4” goes into the file once it is uploaded."]
+
+
+@pytest.mark.parametrize("refused, title, button", [
+    ({"tags"}, "“Hashtags” can’t be saved in the file", "Save Without It"),
+    ({"title", "tags"}, "Some article details can’t be saved in the file", "Save Without Them"),
+])
+def test_saving_without_details_names_them_in_its_button(monkeypatch, refused, title, button):
+    """Round 9, L5: "Save Without It" for several details."""
+    import main_window as module
+    asked = []
+    monkeypatch.setattr(module, "ask", lambda parent, **kwargs: asked.append(kwargs) or "keep")
+    window = types.SimpleNamespace(is_dark_theme=False,
+                                   _article_details_of=lambda ed: module.ArticleDetails())
+    window._detail_label = MainWindow._detail_label
+    window._detail_names = lambda details: MainWindow._detail_names(window, details)
+    front = types.SimpleNamespace(refused=frozenset(refused))
+    assert MainWindow._saving_without(window, types.SimpleNamespace(), front, "/n/post.md") \
+        is False
+    assert asked[0]["title"] == title
+    assert [b.label for b in asked[0]["buttons"]] == [button, "Keep Editing"]
