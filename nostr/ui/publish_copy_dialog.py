@@ -108,7 +108,7 @@ _PROMISES = (
 _UNCHECKED_PICK = _(
     "This picture has not been checked against your private library, so it "
     "was not used. Wait for the library to finish opening, or reconnect your "
-    "signer, then try again."
+    "signer app, then try again."
 )
 
 
@@ -485,9 +485,9 @@ def resolve_pick(
 
     if maker is None:
         return PickResolution(
-            reason=_("This picture is private, and this app cannot make a "
-                     "public copy of it right now. Connect your signer and "
-                     "try again."),
+            reason=_("This picture is private, and MyEditor can’t make a "
+                     "public copy of it right now. Connect your signer app "
+                     "and try again."),
         )
 
     if all(maker.existing_copy(blob) is not None for blob in private):

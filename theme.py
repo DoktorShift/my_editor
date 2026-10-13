@@ -20,7 +20,7 @@ apply_app_theme() once at startup and again on every theme change.
 
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPalette, QPen
-from PySide6.QtWidgets import QApplication, QProxyStyle, QStyle
+from PySide6.QtWidgets import QApplication, QDialogButtonBox, QProxyStyle, QStyle
 
 from constants import (
     DARK_BG, DARK_BORDER, DARK_FG, DARK_MENU_BG, DARK_MUTED_FG, DARK_SELECTION,
@@ -34,6 +34,12 @@ from constants import (
 _DIALOG_ACCENT = {True: ("#007ACC", "#1177C7"), False: (LIGHT_SELECTION, "#106EBE")}
 _DIALOG_DESTRUCTIVE = {True: "#FF6B5E", False: "#C0392B"}
 _DIALOG_LINK = {True: "#4FA3F7", False: LIGHT_SELECTION}
+# The ring around the control that has the keyboard focus: the link blue
+# around a plain button (3:1 or more against the button and the window),
+# and around the accent-filled default button a color that stands out
+# from the accent itself.
+_FOCUS_RING = {True: "#4FA3F7", False: LIGHT_SELECTION}
+_FOCUS_RING_ON_ACCENT = {True: "#FFFFFF", False: "#0A2540"}
 
 
 def _palette(is_dark: bool) -> QPalette:
@@ -94,13 +100,14 @@ def dialog_stylesheet(is_dark: bool) -> str:
 
     Covers the surface, text, and the three kinds of push button: normal,
     default (``setDefault(True)``), and destructive (objectName
-    ``destructive``). Dialogs append their own rules after it.
+    ``destructive``), each with a ring that shows when it has the keyboard
+    focus (a thicker border, with the padding reduced to match, so the
+    button keeps its size). Dialogs append their own rules after it.
     """
     if is_dark:
         bg, fg, muted, border, field = DARK_BG, DARK_FG, DARK_MUTED_FG, DARK_BORDER, DARK_MENU_BG
     else:
         bg, fg, muted, border, field = LIGHT_BG, LIGHT_FG, LIGHT_MUTED_FG, LIGHT_BORDER, LIGHT_MENU_BG
-    accent, accent_hover = _DIALOG_ACCENT[is_dark]
     destructive = _DIALOG_DESTRUCTIVE[is_dark]
     return f"""
     QDialog {{ background: {bg}; }}
@@ -110,14 +117,65 @@ def dialog_stylesheet(is_dark: bool) -> str:
         padding: 6px 14px; border-radius: 5px; min-width: 72px;
     }}
     QPushButton:hover {{ border-color: {muted}; }}
-    QPushButton:default {{ background: {accent}; color: #FFFFFF; border-color: {accent}; }}
-    QPushButton:default:hover {{ background: {accent_hover}; border-color: {accent_hover}; }}
     QPushButton#destructive {{ color: {destructive}; }}
     QPushButton#destructive:hover {{ border-color: {destructive}; }}
-    QPushButton:disabled, QPushButton:default:disabled {{
-        background: {field}; color: {muted}; border-color: {border};
-    }}
+    QPushButton:disabled {{ background: {field}; color: {muted}; border-color: {border}; }}
+    {default_and_focus_css(is_dark)}
     """
+
+
+def default_and_focus_css(is_dark: bool) -> str:
+    """Style rules for a dialog's push buttons that show what the keyboard
+    will do: the ring around the button with the focus (2 px, the padding
+    giving up the extra pixel so the button keeps its size; 6 px by 14 px
+    padding and a 1 px border are what it is drawn for) and the default
+    button in the accent. Every dialog with its own button style appends
+    them after it, so the default and the focus show there too.
+
+    A destructive button is never the default by design, but on Windows and
+    Linux the default moves to the button with the focus; it then keeps the
+    plain fill and its red label (red on the accent cannot be read) and the
+    ring that marks the focus."""
+    ring = _FOCUS_RING[is_dark]
+    field = DARK_MENU_BG if is_dark else LIGHT_MENU_BG
+    destructive = _DIALOG_DESTRUCTIVE[is_dark]
+    return (f"QPushButton:focus, QPushButton#destructive:focus "
+            f"{{ border: 2px solid {ring}; padding: 5px 13px; }}\n"
+            + accent_button_css("QPushButton:default", is_dark)
+            + f"QPushButton#destructive:default {{ background: {field}; color: {destructive}; "
+              f"border: 2px solid {ring}; padding: 5px 13px; }}\n")
+
+
+def accent_button_css(selector: str, is_dark: bool) -> str:
+    """Style rules that draw the buttons ``selector`` matches as the
+    accent-filled button (a dialog's default action): the fill, its hover,
+    with the keyboard focus a ring in the color that stands out from the
+    fill (the plain ring would be blue on blue), and while it cannot be
+    chosen the plain button's dimmed look, as a Mac dims a default button.
+    The rules for the plain button must come first or be less specific."""
+    accent, accent_hover = _DIALOG_ACCENT[is_dark]
+    ring = _FOCUS_RING_ON_ACCENT[is_dark]
+    if is_dark:
+        field, muted, border = DARK_MENU_BG, DARK_MUTED_FG, DARK_BORDER
+    else:
+        field, muted, border = LIGHT_MENU_BG, LIGHT_MUTED_FG, LIGHT_BORDER
+    return (f"{selector} {{ background: {accent}; color: #FFFFFF; border-color: {accent}; }}\n"
+            f"{selector}:hover {{ background: {accent_hover}; border-color: {accent_hover}; }}\n"
+            f"{selector}:focus {{ border: 2px solid {ring}; }}\n"
+            f"{selector}:disabled {{ background: {field}; color: {muted}; "
+            f"border-color: {border}; }}\n")
+
+
+def focus_ring_color(is_dark: bool) -> str:
+    """The color of the ring around a control with the keyboard focus, for
+    dialogs that draw their own controls (link-like buttons)."""
+    return _FOCUS_RING[is_dark]
+
+
+def focus_ring_on_accent_color(is_dark: bool) -> str:
+    """The ring's color on a control filled with the accent or its tint (a
+    checked toolbar button), where the plain ring would not show."""
+    return _FOCUS_RING_ON_ACCENT[is_dark]
 
 
 def error_text_color(is_dark: bool) -> str:
@@ -155,22 +213,37 @@ def check_box_border(palette: QPalette) -> QColor:
 
 
 class AppStyle(QProxyStyle):
-    """Fusion, with check boxes whose frame can be seen on the dark theme
-    too (review M5). Everything else is Fusion's."""
+    """Fusion, with check boxes and radio buttons whose frame can be seen
+    on the dark theme too (review M5; Fusion's radio ring was as faint as
+    its check box frame, so an unchecked choice in Create Account and in
+    Settings showed no circle at all), and with every dialog's buttons in
+    the order the HIG gives on every system: Cancel, then the default
+    action at the trailing end, as MyEditor's alerts have them (a button
+    box would otherwise put the default first on Windows and KDE, so one
+    flow showed both orders). Everything else is Fusion's."""
 
     _BOXES = (QStyle.PrimitiveElement.PE_IndicatorCheckBox,
               QStyle.PrimitiveElement.PE_IndicatorItemViewItemCheck)
+    _RADIO = QStyle.PrimitiveElement.PE_IndicatorRadioButton
+
+    def styleHint(self, hint, option=None, widget=None, returnData=None):  # noqa: N802
+        if hint == QStyle.StyleHint.SH_DialogButtonLayout:
+            return QDialogButtonBox.ButtonLayout.MacLayout.value
+        return super().styleHint(hint, option, widget, returnData)
 
     def drawPrimitive(self, element, option, painter, widget=None):  # noqa: N802
         super().drawPrimitive(element, option, painter, widget)
-        if element not in self._BOXES or option is None:
+        if option is None or (element not in self._BOXES and element != self._RADIO):
             return
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(QPen(check_box_border(option.palette), 1))
         frame = QRectF(option.rect).adjusted(0.5, 0.5, -0.5, -0.5)
-        painter.drawRoundedRect(frame, 2, 2)
+        if element == self._RADIO:
+            painter.drawEllipse(frame)
+        else:
+            painter.drawRoundedRect(frame, 2, 2)
         painter.restore()
 
 

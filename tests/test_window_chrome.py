@@ -4,7 +4,7 @@
 
 What must hold:
 
-  There is no header row of switches: the theme, line numbers and
+  There is no header row of switches: the appearance, line numbers and
   syntax highlighting are in the View menu, undo and redo in the Edit
   menu, and nowhere else. The format toolbar sits directly above the
   text.
@@ -40,6 +40,7 @@ r["toolbar_first"] = order.index(bar) == 0 and w.format_toolbar.parentWidget() i
 r["tabs_after"] = order.index(w.tabs) > order.index(bar)
 view = [a.objectName() for a in w.m_view.actions()]
 r["view"] = view
+r["appearance"] = [a.objectName() for a in w.m_appearance.actions()]
 edit = [a.objectName() for a in w.m_edit.actions()]
 r["edit"] = edit
 r["chip_without_account"] = w.profile_chip.isVisible()
@@ -61,7 +62,9 @@ def test_nothing_around_the_document_repeats_a_menu(tmp_path):
     r = run_window_script(SCRIPT, tmp_path)
     assert r["header"] is False
     assert r["toolbar_first"] and r["tabs_after"]
-    assert {"view.theme", "view.line_numbers", "view.syntax_highlighting"} <= set(r["view"])
+    assert {"view.line_numbers", "view.syntax_highlighting"} <= set(r["view"])
+    assert r["appearance"] == ["view.appearance.system", "view.appearance.light",
+                               "view.appearance.dark"]
     assert {"edit.undo", "edit.redo"} <= set(r["edit"])
     assert r["chip_without_account"] is False
     assert r["chip_with_account"] is True

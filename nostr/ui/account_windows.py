@@ -53,14 +53,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from alerts import DEFAULT as ALERT_DEFAULT, DESTRUCTIVE, Button, ask
+from alerts import DEFAULT as ALERT_DEFAULT, DESTRUCTIVE, Button, answer_return_as_the_system_does, ask
 from i18n import _
 from nostr import bech32, crypto, nip49
 from nostr.outbox.defaults import STARTER_LIST
 from nostr.account_backup import (
     BackupError, FoundKey, backup_text, find_key, password_problem, suggested_file_name,
 )
-from nostr.profiles import Profile
+from nostr.profiles import Profile, short_npub
 from nostr.qr import make_qr_pixmap
 from nostr.ui.assistant import (
     DEFAULT, LEADING, NORMAL, AssistantWindow, StepList, busy_bar, copy_secret,
@@ -96,11 +96,6 @@ KEY_NOT_SAVED = _("Your key couldn’t be saved on this computer. Make sure the 
                   "has free space, then try again.")
 CLOSE_ANY_TIME = _("You can close this window. MyEditor keeps going in the background.")
 FINISH_LATER = _("If you finish later, MyEditor tries again the next time you open it.")
-
-
-def short_npub(pubkey_hex: str) -> str:
-    npub = bech32.encode_npub(pubkey_hex)
-    return f"{npub[:12]}…{npub[-6:]}"
 
 
 def local_profile(pubkey_hex: str, *, relays=None) -> Profile:
@@ -245,7 +240,7 @@ class BackupForm(QWidget):
 
         actions = QHBoxLayout()
         self.save_button = QPushButton(_("Save Backup File…"))
-        self.save_button.setAutoDefault(False)
+        answer_return_as_the_system_does([self.save_button])
         self.save_button.clicked.connect(self.save_protected)
         actions.addWidget(self.save_button)
         actions.addStretch(1)
@@ -726,7 +721,7 @@ class CreateAccountWindow(_AmberSteps, AssistantWindow):
         col.addWidget(self._setup_intro)
         self._steps = StepList([
             (STEP_SAVED, _("Account saved")),
-            (STEP_RELAYS, _("Publishing your relay list")),
+            (STEP_RELAYS, _("Telling Nostr apps where your posts are")),
             (STEP_PROFILE, _("Publishing your profile")),
         ])
         col.addWidget(self._steps)
@@ -1056,7 +1051,7 @@ class RestoreAccountWindow(AssistantWindow):
         col.addWidget(self._who)
         self._steps = StepList([
             (STEP_SAVED, _("Account saved on this computer")),
-            (STEP_RELAYS, _("Finding your relay list")),
+            (STEP_RELAYS, _("Finding where your posts are")),
             (STEP_PROFILE, _("Finding your profile")),
         ])
         col.addWidget(self._steps)

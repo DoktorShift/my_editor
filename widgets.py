@@ -109,8 +109,7 @@ class LineNumberGutter(QWidget):
         font_metrics = painter.fontMetrics()
         editor_padding = 8
 
-        first_visible_pos = self.editor.cursorForPosition(self.editor.viewport().rect().topLeft())
-        first_visible_block = first_visible_pos.block()
+        first_visible_block = self.editor.first_visible_block()
         first_block_rect = layout.blockBoundingRect(first_visible_block)
 
         block = first_visible_block

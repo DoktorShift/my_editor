@@ -11,6 +11,17 @@ before any test module is imported, means every module's own
 ``QCoreApplication.instance() or ...`` fixture finds it, whatever order
 the files run in.
 
+The suite can also run as Windows and Linux see it, on any computer:
+
+  MYEDITOR_TEST_AS=linux   sys.platform reads "linux" from the start, so
+                           every module that asks at import sees Linux
+                           (alerts.IS_MAC among them)
+  MYEDITOR_TEST_AS=other   only the keyboard rules of Windows and Linux
+                           (alerts.IS_MAC False); the platform as it is
+
+Window scripts that run in a process of their own (tests/app_process.py)
+are run the same way.
+
 Python's cycle collector runs on whichever thread is executing Python
 when it is due. On Windows that was often one of the threads reading a
 child process's output while a test waited for it; Qt objects a cycle
@@ -25,7 +36,11 @@ import gc
 import os
 import sys
 
-import pytest
+# Before anything else is imported: see the module docstring.
+if os.environ.get("MYEDITOR_TEST_AS") == "linux":
+    sys.platform = "linux"
+
+import pytest  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -48,6 +63,12 @@ from main_thread_gc import collect_due  # noqa: E402
 _APP = QApplication.instance() or QApplication(sys.argv[:1])
 
 gc.disable()
+
+
+def pytest_configure(config):
+    if os.environ.get("MYEDITOR_TEST_AS") == "other":
+        import alerts
+        alerts.IS_MAC = False
 
 
 def pytest_unconfigure(config):

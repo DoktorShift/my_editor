@@ -560,7 +560,7 @@ class ImportsWindow(QMainWindow):
         find.triggered.connect(self.focus_search)
         self.addAction(find)
         close = QAction(self)
-        close.setShortcut(QKeySequence.StandardKey.Close)
+        close.setShortcuts(QKeySequence.StandardKey.Close)   # every key, Ctrl+W too
         close.triggered.connect(self.close)
         self.addAction(close)
         # Edit > Undo while this window is in front (the app's menu bar

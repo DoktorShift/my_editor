@@ -236,7 +236,7 @@ class TestTheCommand:
         assert asked["message"] == "Imported posts become drafts in your Nostr account."
         buttons = [(b.label, b.value, b.role) for b in asked["buttons"]]
         assert buttons == [("Create Account\u2026", "create", alerts.DEFAULT),
-                           ("Connect Signer\u2026", "connect", alerts.NORMAL),
+                           ("Connect Signer App\u2026", "connect", alerts.NORMAL),
                            ("Cancel", None, alerts.CANCEL)]
         assert ran == ([answer] if answer else [])
 
@@ -429,7 +429,7 @@ def test_imports_never_stop_the_editor(monkeypatch, caplog):
         nostr_state=SimpleNamespace(refresh=lambda: None, active=True),
         _imports=Imports(),
         _profile_store=SimpleNamespace(default=lambda: None),
-        _update_refresh_command=lambda: None)
+        _update_nostr_commands=lambda: None)
     with caplog.at_level(logging.ERROR):
         MainWindow._update_account_actions(host)        # does not raise
     assert "imports could not follow the account" in caplog.text

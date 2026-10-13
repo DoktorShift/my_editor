@@ -296,6 +296,30 @@ class TestFile:
         sheet.buttons["follow_all"].click()
         assert lists == [(count, 0, 0)]
 
+    @pytest.mark.parametrize("mac", [True, False])
+    def test_return_after_reading_chooses_the_sheets_action(self, controller, tmp_path,
+                                                             monkeypatch, mac):
+        # Review M1 of the merge: on Windows and Linux, reading dimmed the
+        # focused Choose File…, the focus fell to the "Show Where to Find
+        # Your Export" link, and Return pressed that instead of Follow All.
+        # A link never takes Return, and the focus goes to the action.
+        import alerts
+        from PySide6.QtTest import QTest
+        from PySide6.QtWidgets import QApplication
+        monkeypatch.setattr(alerts, "IS_MAC", mac)
+        sheet = FileSheet(controller)
+        sheet.show()
+        sheet.activateWindow()
+        settle()                                    # in front, as when a person uses it
+        lists = []
+        sheet.followed_list.connect(lambda *counts: lists.append(counts))
+        sheet.buttons["choose"].setFocus(Qt.FocusReason.TabFocusReason)
+        sheet.read(self.write(tmp_path, "subs.opml", OPML))
+        settle()
+        assert QApplication.focusWidget() is not sheet.guides_button
+        QTest.keyClick(QApplication.focusWidget() or sheet, Qt.Key.Key_Return)
+        assert lists == [(len(parse_opml(OPML).feeds), 0, 0)]
+
     def test_a_file_that_is_nothing_to_import(self, controller, tmp_path):
         sheet = FileSheet(controller)
         sheet.show()

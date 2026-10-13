@@ -257,11 +257,11 @@ def test_a_restore_that_finds_nothing_offers_a_relay_list_once(tmp_path, alerts)
     report.finished.connect(lambda ok, msg: finished.append(ok))
     s.controller._account_ready(profile, "", report, created=False)
     settle()
-    assert (STEP_RELAYS, "done", "This account has no relay list yet.") in steps
+    assert (STEP_RELAYS, "done", "None yet.") in steps
     assert (STEP_PROFILE, "done", "No public profile found.") in steps
     assert [key for key, state, _d in steps if state == "active"] == [STEP_RELAYS, STEP_PROFILE]
     assert finished == [True] and s.relays.published == []
-    assert [a["title"] for a in alerts.asked] == ["Publish a relay list for this account?"]
+    assert [a["title"] for a in alerts.asked] == ["Tell Nostr apps where your posts are?"]
     s.controller.offer_relay_list(profile)    # declined: not asked again
     assert len(alerts.asked) == 1
 
@@ -372,6 +372,9 @@ def test_pairing_an_app_offers_to_delete_the_key_kept_here(tmp_path, alerts):
     assert not s.vault.has(PK)
     titles = [a["title"] for a in alerts.asked]
     assert titles == ["Delete the private key kept on this computer?"] * 2
+    # Deleting is offered, never the default: Return and Escape keep the key.
+    roles = {b.label: b.role for b in alerts.asked[0]["buttons"]}
+    assert roles == {"Delete Key": "destructive", "Keep Key": "default"}
 
 
 def test_backing_up_a_local_account_without_its_key_says_what_to_do(tmp_path, alerts):
@@ -405,7 +408,7 @@ def test_the_pairing_dialog_opens_over_the_account_window_and_goes_away(
     s.controller._pair_signer(lambda profile: None, parent=account_window)
     dialog, = FakeConnectDialog.made
     assert dialog.parent() is account_window
-    assert dialog.kwargs["persist"] is False and dialog.kwargs["start_on_qr"] is True
+    assert dialog.kwargs["persist"] is False         # the code shows first by itself
     assert dialog.kwargs["offer_alternatives"] is False
     QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
     assert not shiboken6.isValid(dialog)

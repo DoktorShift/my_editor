@@ -247,6 +247,7 @@ def test_words():
     assert create_label(1) == "Create Draft"
     assert create_label(5) == "Create 5 Drafts"
     assert signer_note(0) == ""
+    assert signer_note(1).startswith("Your signer app may ask once.")
     assert signer_note(5).startswith("Your signer app may ask up to 5 times, twice for each "
                                      "draft")
 

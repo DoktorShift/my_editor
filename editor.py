@@ -441,6 +441,23 @@ class HtmlEditor(QTextEdit):
     def highlights(self, layer: str) -> list:
         return list(self._highlights[layer])
 
+    def block_at(self, point: QPoint):
+        """The paragraph at ``point`` (viewport coordinates).
+
+        Qt lays a long document out a part at a time, and until it has
+        finished, a position on screen can map to the wrong paragraph (the
+        top of a fresh 10,000-line document mapped to its 250th line), so
+        the layout is completed first. That costs nothing once it is done:
+        an edit only lays out what changed. Everything that maps the screen
+        to the text (Find's highlights, the line numbers, the quote bars
+        and the ruled lines) asks here."""
+        self.document().documentLayout().documentSize()
+        return self.cursorForPosition(point).block()
+
+    def first_visible_block(self):
+        """The paragraph at the top of the viewport."""
+        return self.block_at(QPoint(0, 0))
+
     # -------- Spelling --------
     def set_spelling(self, spelling) -> None:
         """Check this document's spelling with ``spelling`` (a
@@ -529,9 +546,8 @@ class HtmlEditor(QTextEdit):
         """``(first, last)``: the document positions from the start of the
         first paragraph on screen to the end of the last."""
         viewport = self.viewport()
-        top = self.cursorForPosition(QPoint(0, 0)).block()
-        bottom = self.cursorForPosition(
-            QPoint(viewport.width() - 1, viewport.height() - 1)).block()
+        top = self.first_visible_block()
+        bottom = self.block_at(QPoint(viewport.width() - 1, viewport.height() - 1))
         return top.position(), bottom.position() + bottom.length()
 
     def _is_dark(self) -> bool:
@@ -610,7 +626,7 @@ class HtmlEditor(QTextEdit):
         """A bar beside each level of a quote, as every reader draws one.
         Only painted: nothing of it is in the document."""
         vp = self.viewport()
-        block = self.cursorForPosition(QPoint(0, 0)).block()
+        block = self.first_visible_block()
         layout = self.document().documentLayout()
         dx = self.horizontalScrollBar().value()
         dy = self.verticalScrollBar().value()
@@ -685,8 +701,7 @@ class HtmlEditor(QTextEdit):
         position to viewport coordinates exactly (accounting for scroll offset and
         document margins), so each line of text sits on a rule with no drift. The
         rhythm is then extended above and below the text to fill the whole page."""
-        vp = self.viewport()
-        block = self.cursorForPosition(QPoint(0, 0)).block()
+        block = self.first_visible_block()
         if not block.isValid():
             return [], 0
         baselines = []

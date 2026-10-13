@@ -106,3 +106,78 @@ def _relative_luminance(hex_color: str) -> float:
         for value in channels
     ]
     return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+# -- the keyboard focus ring -----------------------------------------------------------
+# A dialog button with the keyboard focus must be told apart from the others
+# (WCAG 2.4.7), by a ring with 3:1 against what is next to it (WCAG 1.4.11).
+# The stylesheet drew none, so Tab moved through alerts and assistants with
+# nothing to show where Space would act.
+
+@pytest.mark.parametrize("is_dark", [True, False])
+def test_the_focus_ring_stands_out_from_the_button_and_the_window(is_dark):
+    bg, field = (DARK_BG, DARK_MENU_BG) if is_dark else (LIGHT_BG, LIGHT_MENU_BG)
+    accent = theme._DIALOG_ACCENT[is_dark][0]
+    ring, on_accent = theme._FOCUS_RING[is_dark], theme._FOCUS_RING_ON_ACCENT[is_dark]
+    assert _contrast_ratio(ring, field) >= 3
+    assert _contrast_ratio(ring, bg) >= 3
+    assert _contrast_ratio(on_accent, accent) >= 3      # around the default button
+    assert _contrast_ratio(on_accent, bg) >= 3
+    assert theme.focus_ring_color(is_dark) == ring
+
+
+@pytest.mark.parametrize("is_dark", [True, False])
+def test_a_focused_dialog_button_is_drawn_with_the_ring(qapp, is_dark):
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QDialog, QHBoxLayout, QPushButton
+
+    dialog = QDialog()
+    dialog.setStyleSheet(theme.dialog_stylesheet(is_dark))
+    row = QHBoxLayout(dialog)
+    plain, default = QPushButton("Cancel"), QPushButton("Save")
+    for button in (plain, default):
+        button.setAutoDefault(False)    # as the app's dialogs make them
+    default.setDefault(True)
+    row.addWidget(plain)
+    row.addWidget(default)
+    dialog.show()
+    dialog.activateWindow()
+    qapp.processEvents()
+    try:
+        for button, ring in ((plain, theme._FOCUS_RING[is_dark]),
+                             (default, theme._FOCUS_RING_ON_ACCENT[is_dark])):
+            size_before = button.size()
+            button.setFocus(Qt.TabFocusReason)
+            qapp.processEvents()
+            edge = button.grab().toImage().pixelColor(1, button.height() // 2)
+            assert edge == QColor(ring), button.text()
+            assert button.size() == size_before        # the ring takes no extra room
+    finally:
+        dialog.close()
+
+
+@pytest.mark.parametrize("base", ["Fusion", "Windows"])
+def test_every_button_box_puts_cancel_first_and_the_default_trailing(qapp, base):
+    # Review L8: a button box follows the platform's order, which on Windows
+    # and KDE puts the default first, while the alerts follow the HIG on
+    # every system; one flow showed both orders. The app's style decides.
+    from PySide6.QtWidgets import QDialog, QDialogButtonBox, QVBoxLayout
+
+    dialog = QDialog()
+    dialog.setStyle(theme.AppStyle(base))
+    box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
+                           | QDialogButtonBox.StandardButton.Cancel
+                           | QDialogButtonBox.StandardButton.Help)
+    box.setStyle(dialog.style())
+    QVBoxLayout(dialog).addWidget(box)
+    dialog.show()
+    qapp.processEvents()
+    try:
+        left_to_right = sorted(box.buttons(),
+                               key=lambda b: b.mapTo(dialog, b.rect().topLeft()).x())
+        roles = [box.buttonRole(b) for b in left_to_right]
+        assert roles == [QDialogButtonBox.ButtonRole.HelpRole,
+                         QDialogButtonBox.ButtonRole.RejectRole,
+                         QDialogButtonBox.ButtonRole.AcceptRole]
+    finally:
+        dialog.close()

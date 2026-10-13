@@ -44,7 +44,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QObject, Qt, Signal  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
-from PySide6.QtWidgets import QApplication, QDialog  # noqa: E402
+from PySide6.QtWidgets import QApplication, QDialog, QPushButton  # noqa: E402
 
 import updater  # noqa: E402
 import update_dialog  # noqa: E402
@@ -500,6 +500,84 @@ def test_whats_new_shows_the_notes_with_one_done_button():
     assert dialog.done_button.isDefault()
     buttons = [b.text() for b in dialog.findChildren(update_dialog.QPushButton)]
     assert buttons == ["Done"]
+
+
+def _link_labels(dialog):
+    return [l for l in dialog.findChildren(update_dialog.QLabel) if "<a " in l.text()]
+
+
+def test_the_links_to_the_release_notes_are_reached_by_keyboard(qt_app):
+    """Tab reaches the link and Return opens it: a link that only answers a
+    click left keyboard users without the release notes."""
+    from PySide6.QtTest import QTest
+    plan = plan_for(updater.MACOS_APP, "3.3", release_url=RELEASE_URL, machine="arm64")
+    for dialog in (UpdateDialog("3.3", "3.2", plan, release_url=RELEASE_URL, is_dark=False),
+                   WhatsNewDialog("3.4", NOTES, release_url=RELEASE_URL, is_dark=False)):
+        link, = _link_labels(dialog)
+        assert link.textInteractionFlags() & Qt.LinksAccessibleByKeyboard
+        assert link.focusPolicy() & Qt.TabFocus
+        opened = recorder(dialog.link_activated)
+        dialog.show()
+        link.setFocus(Qt.TabFocusReason)
+        QTest.keyClick(link, Qt.Key_Tab)          # onto the link inside the label
+        QTest.keyClick(link, Qt.Key_Return)
+        dialog.close()
+        assert opened == [(RELEASE_URL,)], type(dialog).__name__
+
+
+def test_software_update_opens_on_its_default_button(qt_app):
+    # Review L3: the release-notes link took the first focus, and Space
+    # there did nothing. Space acts on the default, as in an alert.
+    plan = plan_for(updater.MACOS_APP, "3.3", release_url=RELEASE_URL, machine="arm64")
+    for dialog in (UpdateDialog("3.3", "3.2", plan, release_url=RELEASE_URL, is_dark=False),
+                   automatic_dialog(FakeInstaller())):
+        dialog.show()
+        qt_app.processEvents()
+        try:
+            default, = [b for b in dialog._buttons.values() if b.isDefault()]
+            assert dialog.focusWidget() is default, default.text()
+        finally:
+            dialog.close()
+
+
+@pytest.mark.parametrize("mac", [True, False])
+def test_return_on_skip_follows_the_system(qt_app, monkeypatch, mac):
+    # Review R2: Return on a focused Skip This Version skips it on Windows
+    # and Linux; on a Mac it chooses the default, Install Update.
+    import alerts
+    from PySide6.QtTest import QTest
+    monkeypatch.setattr(alerts, "IS_MAC", mac)
+    dialog = automatic_dialog(FakeInstaller())
+    skipped = recorder(dialog.skip_requested)
+    dialog.show()
+    qt_app.processEvents()
+    try:
+        skip = dialog._buttons["skip"]
+        skip.setFocus(Qt.TabFocusReason)
+        qt_app.processEvents()
+        QTest.keyClick(skip, Qt.Key_Return)
+        assert bool(skipped) == (not mac)
+    finally:
+        dialog.close()
+
+
+def test_copy_then_closing_leaves_no_timer_behind(qt_app, monkeypatch):
+    # The M3 review saw "Internal C++ object already deleted": Copy turns
+    # into "Copied" and back after 1.5 s, and the timer outlived a dialog
+    # closed within that time.
+    from PySide6.QtCore import QEvent
+    from PySide6.QtTest import QTest
+    errors = []
+    monkeypatch.setattr(sys, "excepthook", lambda *exc: errors.append(exc))
+    plan = plan_for(updater.SOURCE, "3.3", release_url=RELEASE_URL)
+    dialog = UpdateDialog("3.3", "3.2", plan, release_url=RELEASE_URL, is_dark=False)
+    copy = next(b for b in dialog.findChildren(QPushButton) if b.text() == "Copy")
+    copy.click()
+    assert copy.text() == "Copied"
+    dialog.deleteLater()
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    QTest.qWait(1700)
+    assert errors == []
 
 
 def test_skip_is_explicit_and_says_which_version():

@@ -48,6 +48,7 @@ from PySide6.QtWidgets import (
 )
 
 import theme
+from alerts import answer_return_as_the_system_does, start_on_default
 from i18n import _
 from constants import (
     DARK_BORDER, DARK_FG, DARK_MENU_BG, DARK_MUTED_FG,
@@ -136,6 +137,11 @@ def _repolish(widget: QWidget) -> None:
     widget.style().polish(widget)
 
 
+def _reach_by_keyboard(link: QLabel) -> None:
+    """Tab reaches the link and Return opens it, as a click does."""
+    link.setTextInteractionFlags(Qt.LinksAccessibleByMouse | Qt.LinksAccessibleByKeyboard)
+
+
 class _StepRow(QWidget):
     """One numbered step: badge, title, detail, and room for progress or an error."""
 
@@ -186,12 +192,14 @@ class _StepRow(QWidget):
         field.setObjectName("update_command")
         field.setReadOnly(True)
         copy = QPushButton(_("Copy"))
-        copy.setAutoDefault(False)
+        answer_return_as_the_system_does([copy])
 
         def on_copy():
             QApplication.clipboard().setText(command)
             copy.setText(_("Copied"))
-            QTimer.singleShot(1500, lambda: copy.setText(_("Copy")))
+            # Tied to the button: a dialog closed within the 1.5 s takes the
+            # timer with it, instead of leaving it a deleted button to set.
+            QTimer.singleShot(1500, copy, lambda: copy.setText(_("Copy")))
 
         copy.clicked.connect(on_copy)
         row = QHBoxLayout()
@@ -310,6 +318,7 @@ class UpdateDialog(QDialog):
                             f'style="color:{link_color}">{link_text}</a>')
         notes_link.setTextFormat(Qt.RichText)
         notes_link.setOpenExternalLinks(False)
+        _reach_by_keyboard(notes_link)
         notes_link.linkActivated.connect(self.link_activated)
 
         content = QVBoxLayout()
@@ -374,10 +383,11 @@ class UpdateDialog(QDialog):
         for key, button in self._buttons.items():
             button.setVisible(key in visible)
             button.setDefault(False)
-            button.setAutoDefault(False)
+        answer_return_as_the_system_does(self._buttons.values())
         default = _DEFAULT_BUTTON.get(state)
         if default:
             self._buttons[default].setDefault(True)
+            start_on_default(self._buttons[default])
 
     def _reset_rows(self) -> None:
         for row in self._rows:
@@ -607,6 +617,7 @@ class WhatsNewDialog(QDialog):
                           f'style="color:{link_color}">{link_text}</a>')
             more.setTextFormat(Qt.RichText)
             more.setOpenExternalLinks(False)
+            _reach_by_keyboard(more)
             more.linkActivated.connect(self.link_activated)
             buttons.addWidget(more)
         buttons.addStretch(1)

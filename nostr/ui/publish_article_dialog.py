@@ -13,7 +13,7 @@ from __future__ import annotations
 import time
 from typing import Callable, List, Optional, Sequence
 
-from PySide6.QtCore import QLocale, QSize, Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtWidgets import (
     QDialog,
@@ -34,8 +34,8 @@ import announce
 import theme
 import word_count
 from popup_placement import fitting_size
-from alerts import CANCEL, DEFAULT, NORMAL, Button, ask
-from i18n import _, language, ngettext
+from alerts import CANCEL, DEFAULT, NORMAL, Button, ask, answer_return_as_the_system_does
+from i18n import _, display_locale, ngettext
 
 from ..article_details import ArticleDetails
 from ..first_publications import FirstPublications
@@ -579,7 +579,7 @@ class PublishArticleDialog(QDialog):
         buttons = QDialogButtonBox()
         self._cancel_btn = buttons.addButton(QDialogButtonBox.Cancel)
         self._publish_btn = buttons.addButton(_("Publish"), QDialogButtonBox.AcceptRole)
-        self._publish_btn.setDefault(True)
+        answer_return_as_the_system_does(buttons.buttons())
         self._cancel_btn.clicked.connect(self._on_cancel)
         self._publish_btn.clicked.connect(self._on_publish)
         footer.addWidget(buttons)
@@ -591,7 +591,8 @@ class PublishArticleDialog(QDialog):
     def _apply_theme(self) -> None:
         error = theme.error_text_color(self._is_dark)
         self.setStyleSheet((_DARK_CSS if self._is_dark else _LIGHT_CSS)
-                           + f"QLabel#article_field_error {{ color: {error}; font-size: 11px; }}")
+                           + f"QLabel#article_field_error {{ color: {error}; font-size: 11px; }}"
+                           + theme.default_and_focus_css(self._is_dark))
         self._switch_menu.setStyleSheet(
             _DARK_MENU_CSS if self._is_dark else _LIGHT_MENU_CSS
         )
@@ -793,7 +794,7 @@ class PublishArticleDialog(QDialog):
         minutes = word_count.reading_minutes(words)
         self._meta_label.setText(ngettext(
             "{words} word · ~{minutes} min read", "{words} words · ~{minutes} min read", words,
-        ).format(words=QLocale(language()).toString(words), minutes=minutes))
+        ).format(words=display_locale().toString(words), minutes=minutes))
 
     # -- profile switcher --------------------------------------------------
 
@@ -818,7 +819,7 @@ class PublishArticleDialog(QDialog):
         menu.clear()
         profiles = self._store.list()
         if not profiles:
-            act = menu.addAction(_("(no profiles)"))
+            act = menu.addAction(_("(no accounts)"))
             act.setEnabled(False)
             return
         for profile in profiles:

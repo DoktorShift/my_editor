@@ -57,6 +57,7 @@ from PySide6.QtWidgets import (
 )
 
 import file_paths
+from alerts import answer_return_as_the_system_does
 from constants import DARK_BORDER, LIGHT_BORDER
 from i18n import _, ngettext
 
@@ -743,7 +744,7 @@ class LinkSheet(_Sheet):
         row.addWidget(text_label(_("This looks like a whole source. Follow it to get its new "
                                    "posts too.")), 1)
         self.follow_button = QPushButton(_("Follow…"))
-        self.follow_button.setAutoDefault(False)
+        answer_return_as_the_system_does([self.follow_button])
         self.follow_button.clicked.connect(self._follow)
         row.addWidget(self.follow_button, 0, Qt.AlignmentFlag.AlignTop)
         self.source_note.hide()

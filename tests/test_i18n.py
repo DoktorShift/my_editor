@@ -20,6 +20,7 @@ What must hold:
 """
 
 import os
+import re
 import subprocess
 import sys
 
@@ -228,3 +229,130 @@ def test_a_variable_that_would_break_the_lookup_is_found(source):
 ])
 def test_code_that_is_fine_is_not_reported(source):
     assert shadowing(source) == []
+
+
+_QT_WORDS_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+import i18n
+i18n.install(sys.argv[2])
+from PySide6.QtCore import QCoreApplication
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+i18n.install_qt_translations(app)
+r = {context: QCoreApplication.translate(context, "Preferences...")
+     for context in ("QMenuBar", "MAC_APPLICATION_MENU")}
+r["quit"] = QCoreApplication.translate("MAC_APPLICATION_MENU", "Quit %1")
+print("RESULT " + json.dumps(r))
+"""
+
+
+@pytest.mark.parametrize("language, word, quit_word", [
+    ("en", "Settings…", "Quit %1"), ("de", "Einstellungen …", "%1 beenden")])
+def test_a_mac_names_the_settings_command_settings(tmp_path, language, word, quit_word):
+    # Qt's Cocoa plugin titles the command in the application menu itself,
+    # asking for "Preferences..." (the pre-Ventura word) in these contexts.
+    # In a process of its own: a translator changes the whole application.
+    from tests.app_process import run_window_script
+    r = run_window_script(_QT_WORDS_SCRIPT, tmp_path, language)
+    assert r["QMenuBar"] == r["MAC_APPLICATION_MENU"] == word
+    assert r["quit"] == quit_word           # every other text is left to Qt's own
+
+
+# The glossary (docs/translating.md): an account is an account (its profile
+# is the name and picture people see), a signer app is a signer app, and no
+# text names a protocol, in English and in German. Review L7: the publishing
+# flow still said "your signer", "this profile" and "NIP-44"; review N3:
+# "(no profiles)" for the accounts got through a list of bad phrases. So
+# "profile" is refused everywhere except in the phrases below, where it can
+# only mean the profile people see. A phrase is a beginning: what follows
+# it is the same profile ("Your profile name", "Dein Profilname").
+_SIGNER = {"en": re.compile(r"\bsigner\b(?!\s+apps?\b)", re.IGNORECASE),
+           "de": re.compile(r"\bSigner\b(?!-App)")}
+_PROFILE = {"en": re.compile(r"profile", re.IGNORECASE),
+            "de": re.compile(r"profil", re.IGNORECASE)}
+_PUBLIC_PROFILE_PHRASES = {
+    "en": (
+        r"\b(?:your|my) profile",            # Your profile shows it now.
+        r"\bpublic profile",                 # No public profile found.
+        r"\bNostr profile",                  # No Nostr profile is published at ...
+        r"\bedit profile",                   # Edit Profile..., the window's title
+        r"\bon profile",                     # Show on Profile
+        r"\bprofile saved",                  # Profile saved.
+        r"\bhave a profile",                 # You don't have a profile yet.
+        r"\binto a profile",                 # (a secret key) never goes into a profile
+        r"\btheir profile",                  # a link to their profile (an author's)
+        r"^this profile can’t be edited here$",
+        r"bsky\.app/profile/",               # an address someone pastes
+    ),
+    "de": (
+        r"\b(?:dein|deinem|deine|mein|meinem|im|kein|öffentliches|seinem|ihrem) Profil",
+        r"\bin ein Profil",                  # kommt nie in ein Profil (a secret key)
+        r"Nostr-Profil",
+        r"\bProfil (?:bearbeiten|gespeichert|wird)",
+        r"\bProfilbild",
+        r"^Dieses Profil lässt sich hier nicht bearbeiten$",
+        r"bsky\.app/profile/",
+    ),
+}
+_PUBLIC_PROFILE = {language: re.compile("|".join(phrases), re.IGNORECASE)
+                   for language, phrases in _PUBLIC_PROFILE_PHRASES.items()}
+
+
+# Protocol names: a NIP number, or an event kind ("Kind 1 when published").
+_PROTOCOL = re.compile(r"\bNIP-\d|\bkind\s+\d", re.IGNORECASE)
+
+
+def _off_glossary(text: str, language: str) -> bool:
+    if _SIGNER[language].search(text) or _PROTOCOL.search(text):
+        return True
+    return bool(_PROFILE[language].search(_PUBLIC_PROFILE[language].sub("", text)))
+
+
+def _code_texts():
+    """Every text in the code, with where it is said (scripts/i18n.py)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(   # scripts/i18n.py, not the app's i18n
+        "catalog_tool", os.path.join(ROOT, "scripts", "i18n.py"))
+    catalog_tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(catalog_tool)
+    messages, _problems = catalog_tool.extract()
+    return {text: message.references[0] for message in messages.values()
+            for text in (message.msgid, message.plural) if text}
+
+
+def test_every_text_speaks_the_glossarys_words():
+    off = sorted(f"{where}: {text}" for text, where in _code_texts().items()
+                 if _off_glossary(text, "en"))
+    assert off == []
+
+
+def test_the_german_texts_speak_the_glossarys_words_too():
+    with open(os.path.join(ROOT, "locale", "de.po"), encoding="utf-8") as f:
+        entries = list(i18n._po_entries(f.read()))
+    where = _code_texts()
+    off, imperative = [], []
+    for entry in entries:
+        for german in entry.get("msgstr", []):
+            said = f"{where.get(entry['msgid'], '?')}: {entry['msgid']} -> {german}"
+            if german and _off_glossary(german, "de"):
+                off.append(said)
+            # One form of address: du, in the full imperative (docs/translating.md).
+            if re.search(r"\b[Vv]ersuch es\b", german):
+                imperative.append(said)
+    assert off == []
+    assert imperative == []
+
+
+@pytest.mark.parametrize("text, language, off", [
+    ("Your profile name", "en", False), ("Dein Profilname", "de", False),
+    ("Copy profile link", "en", True), ("Profillink kopieren", "de", True),
+    ("(no profiles)", "en", True), ("(keine Profile)", "de", True),
+    ("Edit Profile…", "en", False), ("Profil bearbeiten …", "de", False),
+    ("Dein Signer", "de", True), ("deine Signer-Apps", "de", False),
+    ("Kind 1 when published.", "en", True), ("a short note (kind 1)", "en", True),
+    ("Published as a note.", "en", False),
+])
+def test_the_glossary_rules_read_both_languages_alike(text, language, off):
+    assert _off_glossary(text, language) == off

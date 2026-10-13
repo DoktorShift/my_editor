@@ -65,8 +65,21 @@ class Profile:
         return self.signer == "local"
 
     def npub_short(self) -> str:
-        """First and last 4 hex chars - for UI fallback display."""
-        return f"{self.user_pubkey[:8]}…{self.user_pubkey[-4:]}"
+        """The account's public key as Nostr apps write it (npub1…),
+        shortened, for an account without a name: the same form the
+        account windows and other apps show."""
+        return short_npub(self.user_pubkey)
+
+
+def short_npub(pubkey_hex: str) -> str:
+    """``npub1qy352euf…6vfrg``: a public key, shortened, the way Nostr apps
+    write it; the hex itself, shortened, if it cannot be encoded."""
+    from nostr.bech32 import encode_npub
+    try:
+        npub = encode_npub(pubkey_hex)
+    except (ValueError, TypeError):
+        return f"{pubkey_hex[:8]}…"
+    return f"{npub[:12]}…{npub[-6:]}"
 
 
 # --------------------------------------------------------------------------- #

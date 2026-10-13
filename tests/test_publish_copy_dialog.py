@@ -229,7 +229,7 @@ def test_the_promises_are_shown_before_the_choice_and_not_during(tmp_path):
 def test_the_storage_cost_is_stated(tmp_path):
     world = build(tmp_path, [private(size=2 * 1024 * 1024)])
     line = world.dialog._storage.text()
-    assert "2.0 MiB" in line
+    assert "2.0 MB" in line         # the units the Media Library uses
     # A copy sits beside the original rather than replacing it, which is
     # the part a quota makes expensive.
     assert "original" in line
@@ -237,7 +237,7 @@ def test_the_storage_cost_is_stated(tmp_path):
 
 def test_the_storage_line_adds_the_whole_set_up():
     total = _storage_line([private(size=1024), private(OTHER, size=3 * 1024)])
-    assert "4.0 KiB" in total
+    assert "4 KB" in total
     assert "copies" in total
 
 
@@ -250,7 +250,7 @@ def test_the_action_button_says_what_it_does(tmp_path):
 
 def test_each_file_is_listed_by_name_and_size(tmp_path):
     world = build(tmp_path, [private(name="beach.jpg", size=4096)])
-    assert rows(world.dialog) == ["beach.jpg  ·  4.0 KiB  ·  Waiting"]
+    assert rows(world.dialog) == ["beach.jpg  ·  4 KB  ·  Waiting"]
 
 
 def test_a_file_with_no_name_is_listed_by_its_hash(tmp_path):

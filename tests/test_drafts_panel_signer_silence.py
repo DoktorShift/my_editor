@@ -253,3 +253,42 @@ def test_every_control_has_a_name_in_each_empty_state():
     assert unnamed_controls(searching) == []
     searching._search_edit.setText("")
     assert unnamed_controls(searching) == []
+
+
+NARROW_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+import i18n
+i18n.install(sys.argv[2])
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import theme
+app.setStyle(theme.AppStyle("Fusion"))
+from nostr.ui import drafts_panel as dp
+from tests.test_drafts_panel_signer_silence import locked_store, panel
+r = {}
+for state in ("unreachable", "unsupported"):
+    p = panel(locked_store(0 if state == "unsupported" else 3))
+    p.resize(dp.MIN_PANEL_WIDTH, 480)
+    p.show()
+    app.processEvents()
+    getattr(p, f"set_signer_{state}")(True)
+    app.processEvents()
+    text, _problem = p._status_line()
+    label = p._status_label
+    r[state] = [text, label.fontMetrics().horizontalAdvance(text), label.width()]
+    p.close()
+print("RESULT " + json.dumps(r, ensure_ascii=False))
+"""
+
+
+@pytest.mark.parametrize("language", ["en", "de"])
+def test_the_signer_lines_fit_the_narrowest_panel_whole(tmp_path, language):
+    # Review N3: the German "Deine Signer-App kann Entwürfe nicht
+    # entschlüsseln" needed 307 px in a 236 px line and lost its verb to
+    # the ellipsis. A status line is said whole or not at all.
+    from tests.app_process import run_window_script
+    r = run_window_script(NARROW_SCRIPT, tmp_path, language)
+    for state, (text, needs, room) in r.items():
+        assert needs <= room, (state, text, needs, room)

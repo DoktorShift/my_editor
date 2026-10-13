@@ -146,8 +146,9 @@ def test_an_imported_draft_keeps_its_preview_and_says_its_end_once_elsewhere():
 
 
 def test_a_date_is_not_padded():
-    """CP2 review: "04 January 2027" read oddly; English writes 4 January."""
+    """CP2 review: "04 January 2027" read oddly. The day is written the
+    language's own way (i18n.format_day): in English, January 4, 2027."""
     import datetime
     from nostr.ui.drafts_common import format_absolute_date
     moment = int(datetime.datetime(2027, 1, 4, 12, 0).timestamp())
-    assert format_absolute_date(moment) == "4 January 2027"
+    assert format_absolute_date(moment) == "January 4, 2027"

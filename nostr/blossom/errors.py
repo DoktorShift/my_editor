@@ -75,8 +75,8 @@ _FRIENDLY = {
         "sent."
     ),
     ERROR_CODES.SIGNER_REJECTED: _(
-        "The signer declined the request. Approve it in the signer app and "
-        "try again."
+        "Your signer app declined the request. Approve it there and try "
+        "again."
     ),
     ERROR_CODES.UPLOAD_FAILED: _(
         "The upload did not finish. The image stays in your document and "
@@ -87,7 +87,7 @@ _FRIENDLY = {
         "and can be uploaded later."
     ),
     ERROR_CODES.SIGNER_IDENTITY_MISMATCH: _(
-        "The signer answered for a different identity. Nothing was sent."
+        "Your signer app answered for a different account. Nothing was sent."
     ),
     ERROR_CODES.HASH_MISMATCH: _(
         "The server described a different file than the one that was sent. "
@@ -106,8 +106,8 @@ _FRIENDLY = {
         "again."
     ),
     ERROR_CODES.AUTH_REJECTED: _(
-        "That server did not accept the signed authorization. Check the "
-        "signer is connected, then try again."
+        "That server did not accept the signed authorization. Check that "
+        "your signer app is connected, then try again."
     ),
 }
 
@@ -118,8 +118,8 @@ _FALLBACK = _("Something went wrong with that media request. Nothing was lost.")
 # (nostr/media/manager.py), so they are written once, here, and compared
 # in the language they are shown in. Temporary until the store reports
 # structured codes for every failure.
-NO_SIGNER = _("Connect a Nostr signer first.")
-_SIGNER_REJECTED = N_("signer declined the request to the media server: {reason}")
+NO_SIGNER = _("Connect your signer app first.")
+_SIGNER_REJECTED = N_("Your signer app declined the request to the media server: {reason}")
 
 
 def signer_rejected(reason) -> str:

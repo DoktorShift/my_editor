@@ -30,7 +30,8 @@ from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 from PySide6.QtCore import QObject
 from PySide6.QtGui import QAction, QKeySequence
 
-ShortcutSpec = Union[None, str, QKeySequence, QKeySequence.StandardKey]
+# A tuple holds several keys, the one menus show first ("Ctrl+W", "Ctrl+F4").
+ShortcutSpec = Union[None, str, QKeySequence, QKeySequence.StandardKey, Tuple[str, ...]]
 
 # The groups, in the order the Keyboard Shortcuts window lists them. They
 # are keys, so they stay English; the window translates them where it
@@ -42,8 +43,9 @@ INSERT = "Insert"
 SEARCH = "Search"
 VIEW = "View"
 NOSTR = "Nostr"
+WINDOW = "Window"       # a Mac's Window menu
 HELP = "Help"
-GROUP_ORDER: Tuple[str, ...] = (FILE, EDIT, FORMAT, INSERT, SEARCH, VIEW, NOSTR, HELP)
+GROUP_ORDER: Tuple[str, ...] = (FILE, EDIT, FORMAT, INSERT, SEARCH, VIEW, NOSTR, WINDOW, HELP)
 
 
 @dataclass(frozen=True)
@@ -58,11 +60,12 @@ class Command:
     nostr: bool = False              # needs a Nostr account to mean anything
     keywords: Tuple[str, ...] = ()   # other words people use for it
     # The words the Keyboard Shortcuts window uses, when they differ from
-    # the menu title ("Toggle theme" for "Toggle Dark/Light Theme").
+    # the menu title ("Open file" for "Open…").
     listed_as: str = ""
-    # Where macOS puts it. Only About and Quit move to the application
-    # menu; every other command stays where it was put, whatever its title
-    # says in any language (Qt would otherwise guess from the words).
+    # Where macOS puts it. Only About, Settings and Quit move to the
+    # application menu; every other command stays where it was put,
+    # whatever its title says in any language (Qt would otherwise guess
+    # from the words).
     role: QAction.MenuRole = QAction.MenuRole.NoRole
     # The slash menu's group it is offered in (slash_menu.SECTIONS); ""
     # keeps it out of the slash menu.
@@ -89,6 +92,8 @@ def all_key_texts(shortcut: ShortcutSpec) -> List[str]:
         texts = [s.toString(QKeySequence.SequenceFormat.PortableText)
                  for s in QKeySequence.keyBindings(shortcut)]
         return [t for t in texts if t]
+    if isinstance(shortcut, tuple):
+        return [t for t in (key_text(keys) for keys in shortcut) if t]
     keys = key_text(shortcut)
     return [keys] if keys else []
 
@@ -98,6 +103,8 @@ def key_text(shortcut: ShortcutSpec) -> str:
     writes it (Qt maps Ctrl to Command on a Mac)."""
     if shortcut is None:
         return ""
+    if isinstance(shortcut, tuple):
+        return key_text(shortcut[0]) if shortcut else ""
     sequence = shortcut if isinstance(shortcut, QKeySequence) else QKeySequence(shortcut)
     return sequence.toString(QKeySequence.SequenceFormat.PortableText)
 
@@ -149,6 +156,8 @@ class CommandRegistry(QObject):
             # Every combination the platform uses for it (F3 and Command-G
             # for Find Next on a Mac), not only the first.
             action.setShortcuts(command.shortcut)
+        elif isinstance(command.shortcut, tuple):
+            action.setShortcuts([QKeySequence(keys) for keys in command.shortcut])
         elif command.shortcut is not None:
             action.setShortcut(command.shortcut if isinstance(command.shortcut, QKeySequence)
                                else QKeySequence(command.shortcut))

@@ -548,8 +548,8 @@ def test_single_flight_uploads_run_strictly_in_order(tmp_path):
 
 
 def test_signer_failures_are_classified(tmp_path):
-    for reason in ("signer declined the request to the media server: user said no",
-                   "Connect a Nostr signer first."):
+    for reason in ("Your signer app declined the request to the media server: user said no",
+                   "Connect your signer app first."):
         ctx = make_manager(tmp_path)
         asset = ctx.manager.adopt_bytes(PNG_BYTES)
         ctx.manager.request_upload(asset.sha256)
@@ -691,7 +691,7 @@ def test_a_finished_url_for_another_hash_is_refused(tmp_path):
 
 def test_a_synchronous_failure_leaves_the_manager_consistent(tmp_path):
     ctx = make_manager(tmp_path)
-    ctx.uploader.fail_synchronously = "Connect a Nostr signer first."
+    ctx.uploader.fail_synchronously = "Connect your signer app first."
     asset = ctx.manager.adopt_bytes(PNG_BYTES)
 
     ctx.manager.request_upload(asset.sha256)

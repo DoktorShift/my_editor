@@ -31,7 +31,7 @@ from PySide6.QtPrintSupport import QPrintDialog, QPrintPreviewDialog
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QFileDialog, QInputDialog, QLineEdit, QMenu, QWidget,
     QVBoxLayout, QPlainTextEdit, QTextEdit, QTabWidget, QToolButton, QHBoxLayout, QStatusBar,
-    QPushButton, QTabBar, QWidgetAction, QLabel, QDialog, QSplitter,
+    QPushButton, QTabBar, QLabel, QDialog, QSplitter,
     QProgressDialog
 )
 
@@ -51,8 +51,8 @@ import file_paths
 import i18n
 from i18n import _, ngettext, pgettext
 from commands import (
-    EDIT, FILE, FORMAT, HELP, INSERT, NOSTR, SEARCH, VIEW, Command, CommandRegistry,
-    platform_keys,
+    EDIT, FILE, FORMAT, HELP, INSERT, NOSTR, SEARCH, VIEW, WINDOW, Command, CommandRegistry,
+    all_key_texts, platform_keys,
 )
 import slash_menu
 from slash_menu import SlashItem
@@ -78,7 +78,7 @@ from highlighter import (
     LANGUAGE_DISPLAY_NAMES, RichTextLook, SyntaxHighlighter, canonical_language, detect_language,
     detect_language_from_content,
 )
-from settings import load_settings, save_setting
+from settings import load_settings, save_setting, save_settings
 from welcome import DEFAULT_KEYS as WELCOME_KEYS, is_pristine_welcome, welcome_html
 from update_check import UpdateChecker
 from updater import (
@@ -90,6 +90,7 @@ from alerts import (
     confirm_destructive, inform,
 )
 from update_dialog import UpdateDialog, WhatsNewDialog
+from settings_window import SettingsWindow
 from update_flow import AUTOMATIC, guide_url, plan_for
 import theme
 from export_html import document_to_html, normalize_after_set_html, sniff_image_ext
@@ -144,7 +145,7 @@ from workspace import Workspace
 from recent_files import load_recent, add_recent, clear_recent
 
 from nostr.avatar_store import AvatarBatchLoader, AvatarStore
-from nostr.bech32 import encode_note, encode_nprofile, encode_npub
+from nostr.bech32 import encode_nprofile, encode_npub
 from nostr.nip05_check import Nip05Check
 from nostr.ui.mention_picker import MentionPicker
 from nostr import refs
@@ -193,7 +194,7 @@ from nostr.media.publish_copy import PublicCopyMaker
 from nostr.media.visibility import PublicLedger
 from nostr.metadata import AvatarLoader, ProfileMetadataFetcher
 from nostr.outbox.directory import RelayDirectory
-from nostr.profiles import Profile, ProfileStore
+from nostr.profiles import Profile, ProfileStore, short_npub
 from nostr.publisher import (
     DraftBulkDeleteJob,
     DraftPublishJob,
@@ -233,7 +234,7 @@ _SAVE_FAILED_HINT = _("Your document is still open. Use Save As to choose anothe
 def _number(n: int) -> str:
     """``n`` with the digit grouping of the reader's language (70,000 in
     English, 70.000 in German)."""
-    return QLocale(i18n.language()).toString(n)
+    return i18n.display_locale().toString(n)
 
 
 # --------------------------------------------------------------------------- #
@@ -351,9 +352,8 @@ class MainWindow(QMainWindow):
             self.is_dark_theme = False
         else:
             self.is_dark_theme = self._detect_os_dark_theme()
-        # While True, the app follows OS color scheme changes live. Set to
-        # False the moment the user picks a theme explicitly (with
-        # View > Toggle Dark/Light Theme) so their choice sticks.
+        # While True (View > Appearance > Automatic), the app follows the
+        # system's light or dark appearance live; Light or Dark sticks.
         self._follow_os_theme = theme_pref is None
         QGuiApplication.styleHints().colorSchemeChanged.connect(self._on_os_color_scheme_changed)
 
@@ -692,13 +692,13 @@ class MainWindow(QMainWindow):
         # changed where Imports offers it.
         self._on_imports_badge_changed(self._imports_badge.on)
         self._imports_badge.changed.connect(self._on_imports_badge_changed)
-        self._build_status_bar_view_toggle()
         self._build_findbar()
+        self.nostr_state.changed.connect(self._on_nostr_in_use_changed)
 
         # The find bar and the account chip construct themselves in dark
         # mode; bring them in line with a light theme detected above.
         if not self.is_dark_theme:
-            self._set_theme(self.is_dark_theme, announce=False)
+            self._set_theme(self.is_dark_theme)
 
         # Startup order: the tabs an update restart wrote down come back
         # first, in their own order; then the file named on the command
@@ -783,6 +783,11 @@ class MainWindow(QMainWindow):
         menu_bg = DARK_MENU_BG if self.is_dark_theme else LIGHT_MENU_BG
         menu_fg = DARK_MENU_FG if self.is_dark_theme else LIGHT_MENU_FG
         border = DARK_BORDER if self.is_dark_theme else LIGHT_BORDER
+        muted = DARK_MUTED_FG if self.is_dark_theme else LIGHT_MUTED_FG
+        # A dimmed menu item is still read (it says what a command needs, as
+        # the Nostr menu's do without an account): dimmer than the rest, as
+        # in the editor's context menu, not the border color it vanished in.
+        dimmed = "#6A6A6A" if self.is_dark_theme else "#999999"
 
         self.setStyleSheet(f"""
             QMainWindow {{ background: {bg}; }}
@@ -814,6 +819,11 @@ class MainWindow(QMainWindow):
                 border: 1px solid {border};
             }}
             QTabBar QToolButton:hover {{ background: {bg}; }}
+            QPushButton#TabClose {{
+                color: {muted}; background: transparent; border: none;
+                border-radius: 4px; font-size: 18px; padding: 0px;
+            }}
+            QPushButton#TabClose:hover {{ color: {fg}; background: {border}; }}
             QStatusBar {{
                 background: {menu_bg};
                 color: {menu_fg};
@@ -831,7 +841,7 @@ class MainWindow(QMainWindow):
                 border: 1px solid {border};
             }}
             QMenu::item:selected {{ background: {bg}; }}
-            QMenu::item:disabled {{ color: {border}; }}
+            QMenu::item:disabled {{ color: {dimmed}; }}
             QScrollBar:vertical {{
                 background: {menu_bg};
                 width: 12px;
@@ -1162,6 +1172,8 @@ class MainWindow(QMainWindow):
         """
         ed = HtmlEditor()
         ed.document().contentsChanged.connect(self._update_tab_title)
+        # Saved or not, the window's title shows it (a Mac: the close button).
+        ed.document().modificationChanged.connect(self._update_window_title)
         ed.document().undoAvailable.connect(self._update_undo_redo_buttons)
         ed.document().redoAvailable.connect(self._update_undo_redo_buttons)
         ed.cursorPositionChanged.connect(self._update_status_bar)
@@ -1232,9 +1244,14 @@ class MainWindow(QMainWindow):
         ed = self.current_editor()
         if not ed:
             return
-        self.tabs.setTabText(self.tabs.currentIndex(), self._compose_tab_title(ed))
+        index = self.tabs.currentIndex()
+        self.tabs.setTabText(index, self._compose_tab_title(ed))
+        # Where the file is, for whoever wonders: on the tab, where it does
+        # not take room from the text.
+        self.tabs.setTabToolTip(index, getattr(ed, "_file_path", None) or "")
         # A screen reader announces the text area by its document's name.
         ed.setAccessibleName(self._document_name(ed))
+        self._update_window_title()
         self._update_status_bar()
 
     def _compose_tab_title(self, ed) -> str:
@@ -1282,38 +1299,53 @@ class MainWindow(QMainWindow):
         return _("Untitled")
 
     def _update_status_bar(self):
+        """The status bar's lasting part: the words (beside, see
+        _show_word_count) and, in code and plain text, where lines are
+        lines, the language and the line the caret is on. Its message
+        area is left to what just happened (saved, published): the file's
+        place is the tab's tooltip, and a PDF's page is in its own
+        toolbar, so neither is repeated here."""
         self._update_editor_commands()
-        viewer = self.current_pdf_viewer()
-        if viewer is not None:
-            self.status.showMessage(viewer._file_path)
-            self._line_label.setText(viewer.page_display())
-            self._words_label.setText("")
+        ed = self.current_editor()
+        if self.current_pdf_viewer() is not None or not ed:
+            self._line_label.setText("")
+            if not ed:
+                self._words_label.setText("")
             self._update_format_buttons()
             return
-        ed = self.current_editor()
-        if not ed:
-            self._line_label.setText("")
-            self._words_label.setText("")
-            return
-        path = getattr(ed, "_file_path", None)
-        file_info = path if path else _("(Untitled)")
-        lang = getattr(ed, "_language", None)
-        lang_label = LANGUAGE_DISPLAY_NAMES.get(lang, '') if lang else ''
-        current_line = ed.textCursor().blockNumber() + 1
-        total_lines = ed.document().blockCount()
-        parts = [file_info]
-        if lang_label:
-            parts.append(lang_label)
-        page_count = ed.document().pageCount()
-        if page_count > 1:
-            parts.append(_("Page {count}").format(count=page_count))
-        self.status.showMessage(" | ".join(parts))
-        self._line_label.setText(
-            _("Ln {line} / {total}").format(line=current_line, total=total_lines))
+        parts = []
+        if self._editor_kind(ed) == "source":
+            lang = getattr(ed, "_language", None)
+            if lang and LANGUAGE_DISPLAY_NAMES.get(lang):
+                parts.append(LANGUAGE_DISPLAY_NAMES[lang])
+            parts.append(_("Ln {line} / {total}").format(
+                line=ed.textCursor().blockNumber() + 1, total=ed.document().blockCount()))
+        self._line_label.setText(" \u00b7 ".join(parts))
         self._schedule_format_buttons()
 
-    def _update_window_title(self, *_):
-        self.setWindowTitle("")
+    def _update_window_title(self, *_args):
+        """The document in front names the window, as in every document
+        app: the title bar, the Window and Dock menus on a Mac, the
+        taskbar and Alt+Tab elsewhere, and what a screen reader says
+        when the window comes to the front. Windows and Linux add the
+        app's name after it; a Mac shows unsaved changes in the close
+        button ([*] is Qt's placeholder for them)."""
+        ed = self.current_editor()
+        viewer = self.current_pdf_viewer()
+        if ed is not None:
+            name, modified = self._document_name(ed), ed.document().isModified()
+        elif viewer is not None:
+            name, modified = os.path.basename(viewer._file_path), False
+        else:
+            self.setWindowModified(False)
+            self.setWindowTitle(APP_DISPLAY_NAME)
+            return
+        if sys.platform == "darwin":
+            self.setWindowTitle(f"{name}[*]")
+        else:
+            self.setWindowTitle(_("{document}[*] - {app}").format(document=name,
+                                                                   app=APP_DISPLAY_NAME))
+        self.setWindowModified(modified)
 
     def _on_tab_changed(self, index=None):
         self._show_backup_status()
@@ -1614,7 +1646,11 @@ class MainWindow(QMainWindow):
         self.act_rmd_toolchain = add(Command("file.rmd_toolchain", _("R Markdown Toolchain…"),
                                              FILE),
                                      triggered=self._on_rmd_toolchain)
-        self.act_close_tab = add(Command("file.close_tab", _("Close Tab"), FILE, "Ctrl+W",
+        # Ctrl+W (Command-W) first, as Notepad, Word and every Mac app show
+        # it; the system's other Close keys (Ctrl+F4 on Windows) answer too.
+        close_keys = ("Ctrl+W",) + tuple(
+            keys for keys in all_key_texts(QKeySequence.StandardKey.Close) if keys != "Ctrl+W")
+        self.act_close_tab = add(Command("file.close_tab", _("Close Tab"), FILE, close_keys,
                                          listed_as=_("Close tab")),
                                  triggered=self._close_current_tab)
         self.act_quit = add(Command("file.quit", _("Quit"), FILE, "Ctrl+Q",
@@ -1646,6 +1682,13 @@ class MainWindow(QMainWindow):
         self.act_select_all = add(Command("edit.select_all", _("Select All"), EDIT,
                                           QKeySequence.StandardKey.SelectAll),
                                   triggered=lambda: self._edit_focused("select_all"))
+        # Settings: in the application menu on a Mac (Command-comma), at the
+        # end of the Edit menu elsewhere (Ctrl+comma, as GNOME and most apps).
+        self.act_settings = add(Command("app.settings", _("Settings\u2026"), EDIT, "Ctrl+,",
+                                        listed_as=_("Settings"),
+                                        keywords=("preferences", "options"),
+                                        role=QAction.MenuRole.PreferencesRole),
+                                triggered=self._show_settings)
 
         # Formatting
         self.act_bold = add(Command("format.bold", _("Bold"), FORMAT, "Ctrl+B",
@@ -1868,13 +1911,23 @@ class MainWindow(QMainWindow):
         self._current_match_index = -1
         self._last_search_text = ""
 
-        # Theme, line numbers and syntax highlighting: menu items without
-        # keys, since no platform convention gives them one (their old keys
-        # were this app's own; Shift-Command-L is Notes' Checklist).
-        self.act_toggle_theme = add(Command("view.theme", _("Toggle Dark/Light Theme"), VIEW,
-                                            listed_as=_("Toggle theme"),
-                                            keywords=("dark", "light")),
-                                    triggered=self._toggle_theme)
+        # Appearance, line numbers and syntax highlighting: menu items
+        # without keys, since no platform convention gives them one (their
+        # old keys were this app's own; Shift-Command-L is Notes' Checklist).
+        # Appearance is the system's (followed as it changes) unless Light
+        # or Dark is chosen; Automatic goes back to the system's.
+        self._appearance_group = QActionGroup(self)
+        self._appearance_group.setExclusive(True)
+        self.act_appearance = {}
+        for mode, title in (("system", pgettext("appearance", "Automatic")),
+                            ("light", pgettext("appearance", "Light")),
+                            ("dark", pgettext("appearance", "Dark"))):
+            action = add(Command(f"view.appearance.{mode}", title, VIEW, checkable=True,
+                                 keywords=(_("appearance"), _("theme"), "dark", "light")),
+                         triggered=lambda m=mode: self.set_appearance(m),
+                         checked=self.appearance == mode)
+            self._appearance_group.addAction(action)
+            self.act_appearance[mode] = action
         self.act_toggle_line_numbers = add(
             Command("view.line_numbers", _("Show Line Numbers"), VIEW,
                     checkable=True, listed_as=_("Toggle line numbers")),
@@ -1920,7 +1973,8 @@ class MainWindow(QMainWindow):
         self._language_group.setExclusive(True)
         chosen = i18n.chosen_language()
         self.act_languages = []
-        for code in [i18n.SYSTEM] + i18n.available():
+        self._language_codes = [i18n.SYSTEM] + i18n.available()
+        for code in self._language_codes:
             title = (_("System Language") if code == i18n.SYSTEM
                      else i18n.LANGUAGE_NAMES.get(code, code))
             action = add(Command(f"view.language.{code}", title, VIEW, checkable=True,
@@ -1987,10 +2041,12 @@ class MainWindow(QMainWindow):
         # Distraction-free reading and writing: the whole window can go
         # full screen. QKeySequence.FullScreen is F11 on Windows/Linux
         # and Ctrl+Cmd+F on macOS, matching each platform's convention.
-        self.act_fullscreen = add(Command("view.fullscreen", _("Full Screen"), VIEW,
-                                          QKeySequence.StandardKey.FullScreen, checkable=True,
+        # Named for what it does next, as Notes, Pages and Finder name it
+        # (changeEvent keeps the name in step with the window).
+        self.act_fullscreen = add(Command("view.fullscreen", _("Enter Full Screen"), VIEW,
+                                          QKeySequence.StandardKey.FullScreen,
                                           listed_as=_("Full screen")),
-                                  toggled=self._toggle_fullscreen)
+                                  triggered=self._toggle_fullscreen)
         # View > Show Sidebar, for the window in front that has one (the
         # Imports window); dimmed while this window is in front. Its own
         # key (Control-Command-S) belongs to that window.
@@ -2031,7 +2087,7 @@ class MainWindow(QMainWindow):
         # Drafts surface - the side-docked panel, toggled from the Nostr
         # menu (no key, as above).
         self.act_nostr_drafts = add(
-            Command("nostr.drafts", _("Drafts…"), NOSTR, checkable=True,
+            Command("nostr.drafts", _("Drafts"), NOSTR, checkable=True,
                     nostr=True, listed_as=_("Toggle Drafts panel")),
             triggered=self._on_toggle_drafts_panel)
         # The Drafts panel's view reads again (its title follows the view
@@ -2069,7 +2125,8 @@ class MainWindow(QMainWindow):
                     keywords=("new", "key", "sign up")),
             triggered=self._on_create_account)
         self.act_nostr_connect = add(
-            Command("nostr.connect", _("Connect Signer…"), NOSTR, keywords=("login", "bunker")),
+            Command("nostr.connect", _("Connect Signer App\u2026"), NOSTR,
+                    keywords=("login", "bunker", "signer")),
             triggered=self._on_nostr_connect)
         self.act_restore_account = add(
             Command("nostr.restore_account", _("Restore Account\u2026"), NOSTR,
@@ -2088,9 +2145,22 @@ class MainWindow(QMainWindow):
                     keywords=("name", "picture", "about", "lightning address")),
             triggered=self._on_edit_profile)
         self.act_nostr_sign_out = add(
-            Command("nostr.sign_out", _("Sign Out Active Profile"), NOSTR, nostr=True,
+            Command("nostr.sign_out", _("Sign Out"), NOSTR, nostr=True,
                     keywords=("log out",)),
             triggered=self._on_nostr_sign_out)
+
+        # The Window menu every Mac app has, where Command-M minimizes the
+        # window in front (Qt makes none). Windows and Linux keep these in
+        # the title bar.
+        if sys.platform == "darwin":
+            self.act_minimize = add(Command("window.minimize", _("Minimize"), WINDOW,
+                                            "Ctrl+M"),
+                                    triggered=lambda: self._front_window().showMinimized())
+            self.act_zoom = add(Command("window.zoom", _("Zoom"), WINDOW),
+                                triggered=self._zoom_front_window)
+            self.act_bring_all = add(Command("window.bring_all", _("Bring All to Front"),
+                                             WINDOW),
+                                     triggered=self._bring_all_to_front)
 
         # Help
         self.act_welcome = add(Command("help.welcome", _("Welcome"), HELP),
@@ -2106,7 +2176,8 @@ class MainWindow(QMainWindow):
         self.act_show_logs = add(Command("help.show_logs", _("Show Log Files"), HELP,
                                          keywords=("diagnostics", "bug report", "crash")),
                                  triggered=self._show_log_files)
-        self.act_about = add(Command("help.about", pgettext("help menu", "About"), HELP,
+        self.act_about = add(Command("help.about",
+                                     _("About {app}").format(app=APP_DISPLAY_NAME), HELP,
                                      role=QAction.MenuRole.AboutRole),
                              triggered=self._show_about)
 
@@ -2131,9 +2202,13 @@ class MainWindow(QMainWindow):
             m_file.addAction(self.act_print_preview)
         m_file.addAction(self.act_print)
         m_file.addSeparator()
-        m_file.addAction(self.act_knit_html)
-        m_file.addAction(self.act_knit_pdf)
-        m_file.addAction(self.act_rmd_toolchain)
+        # R Markdown is for the few who write it: one item in the File menu,
+        # its commands (and Knit's key) inside.
+        self.m_rmarkdown = m_file.addMenu(_("R Markdown"))
+        self.m_rmarkdown.addAction(self.act_knit_html)
+        self.m_rmarkdown.addAction(self.act_knit_pdf)
+        self.m_rmarkdown.addSeparator()
+        self.m_rmarkdown.addAction(self.act_rmd_toolchain)
         m_file.addSeparator()
         m_file.addAction(self.act_close_tab)
         m_file.addAction(self.act_quit)
@@ -2166,6 +2241,11 @@ class MainWindow(QMainWindow):
         self.m_spelling.aboutToShow.connect(self._update_spelling_menu)
         self.m_substitutions = m_edit.addMenu(_("Substitutions"))
         self.m_substitutions.addAction(self.act_markdown_shortcuts)
+        # On a Mac Settings moves to the application menu; a separator left
+        # here would end the Edit menu with a line.
+        if sys.platform != "darwin":
+            m_edit.addSeparator()
+        m_edit.addAction(self.act_settings)
         self.m_edit = m_edit
 
         # Insert, between Edit and Format, as in Pages.
@@ -2223,6 +2303,8 @@ class MainWindow(QMainWindow):
 
         m_view = self.menuBar().addMenu(_("&View"))
         self.m_view = m_view
+        # Full screen is named for the window in front as the menu opens.
+        m_view.aboutToShow.connect(self._name_full_screen)
         m_view.addAction(self.act_view_write)
         m_view.addAction(self.act_view_preview)
         m_view.addAction(self.act_view_split)
@@ -2231,7 +2313,9 @@ class MainWindow(QMainWindow):
         m_view.addSeparator()
         m_view.addAction(self.act_monospace_writing)
         m_view.addSeparator()
-        m_view.addAction(self.act_toggle_theme)
+        self.m_appearance = m_view.addMenu(_("Appearance"))
+        for action in self.act_appearance.values():
+            self.m_appearance.addAction(action)
         m_view.addAction(self.act_toggle_line_numbers)
         m_view.addAction(self.act_toggle_syntax_hl)
         m_view.addSeparator()
@@ -2268,15 +2352,24 @@ class MainWindow(QMainWindow):
         m_nostr.addAction(self.act_imports_badge)
         m_nostr.addSeparator()
         m_nostr.addAction(self.act_membership)
+        # The ways to an account, then the account in use.
         m_nostr.addSeparator()
         m_nostr.addAction(self.act_create_account)
         m_nostr.addAction(self.act_nostr_connect)
         m_nostr.addAction(self.act_restore_account)
+        m_nostr.addSeparator()
         m_nostr.addAction(self.act_edit_profile)
         m_nostr.addAction(self._act_backup_account)
         m_nostr.addAction(self.act_move_to_signer)
-        self._update_account_actions()
         m_nostr.addAction(self.act_nostr_sign_out)
+        self._update_account_actions()
+
+        if sys.platform == "darwin":
+            self.m_window = self.menuBar().addMenu(_("Window"))
+            self.m_window.addAction(self.act_minimize)
+            self.m_window.addAction(self.act_zoom)
+            self.m_window.addSeparator()
+            self.m_window.addAction(self.act_bring_all)
 
         help_menu = self.menuBar().addMenu(_("&Help"))
         help_menu.addAction(self.act_welcome)
@@ -2288,51 +2381,27 @@ class MainWindow(QMainWindow):
         help_menu.addSeparator()
         help_menu.addAction(self.act_about)
 
-    def _build_status_bar_view_toggle(self):
-        """Quick status-bar toggle for Paper Mode, mirroring the View menu item."""
-        self._paper_btn = QToolButton()
-        self._paper_btn.setText(_("Paper"))
-        self._paper_btn.setToolTip(_("Toggle Paper Mode"))
-        self._paper_btn.setCheckable(True)
-        self._paper_btn.setChecked(self.paper_mode)
-        self._paper_btn.setAutoRaise(True)
-        self._paper_btn.toggled.connect(self._toggle_paper_mode)
-        self.status.addPermanentWidget(self._paper_btn)
-
     def _populate_recent_menu(self):
+        """The files opened last, then Clear Recent Files: an ordinary
+        menu item (reached by the keyboard like any other, in the menu's
+        own color, since clearing the list deletes no file), dimmed while
+        the list is empty, as a Mac's Open Recent menu does."""
+        # The menu owns its items, so clear() deletes them (owned by the
+        # window, every refill used to leave the old ones behind).
         self.m_recent.clear()
         self.m_recent.setToolTipsVisible(True)
         entries = [p for p in load_recent() if os.path.exists(p)]
-
-        if not entries:
-            empty = QAction(_("(empty)"), self)
-            empty.setEnabled(False)
-            self.m_recent.addAction(empty)
-        else:
-            for path in entries:
-                action = QAction(os.path.basename(path), self)
-                action.setToolTip(path)
-                action.triggered.connect(lambda checked, p=path: self.open_path(p))
-                self.m_recent.addAction(action)
-
-        self.m_recent.addSeparator()
-        clear_widget = QLabel("  " + _("Clear Recent Files") + "  ")
-        clear_widget.setContentsMargins(4, 4, 4, 4)
-        clear_widget.setStyleSheet("""
-            QLabel {
-                color: #CC4444;
-                padding: 4px 8px;
-            }
-            QLabel:hover {
-                background: rgba(180, 40, 40, 0.15);
-                color: #FF6666;
-            }
-        """)
-        clear_action = QWidgetAction(self)
-        clear_action.setDefaultWidget(clear_widget)
-        clear_action.triggered.connect(self._clear_recent_files)
-        clear_widget.mousePressEvent = lambda e: (self.m_recent.close(), self._clear_recent_files())
-        self.m_recent.addAction(clear_action)
+        for path in entries:
+            action = QAction(os.path.basename(path), self.m_recent)
+            action.setToolTip(path)
+            action.triggered.connect(lambda checked, p=path: self.open_path(p))
+            self.m_recent.addAction(action)
+        if entries:
+            self.m_recent.addSeparator()
+        clear = QAction(_("Clear Recent Files"), self.m_recent)
+        clear.setEnabled(bool(entries))
+        clear.triggered.connect(self._clear_recent_files)
+        self.m_recent.addAction(clear)
 
     def _clear_recent_files(self):
         clear_recent()
@@ -2676,26 +2745,14 @@ class MainWindow(QMainWindow):
         self._update_window_title()
 
     def _attach_close_button(self, idx: int, container: QWidget):
+        # Closing a tab is not destructive (unsaved changes are asked
+        # about), so the button is the tab's own quiet color, not red; the
+        # window's stylesheet (TabClose) gives it its colors per theme.
         close_btn = QPushButton("×")
+        close_btn.setObjectName("TabClose")
         close_btn.setFixedSize(24, 24)
-        close_btn.setStyleSheet("""
-            QPushButton {
-                color: #A84444;
-                background: transparent;
-                border: none;
-                border-radius: 4px;
-                font-size: 18px;
-                padding: 0px;
-            }
-            QPushButton:hover {
-                color: #D06060;
-                background: rgba(168, 68, 68, 0.15);
-            }
-            QPushButton:pressed {
-                background: rgba(168, 68, 68, 0.30);
-            }
-        """)
-        close_btn.setToolTip(_("Close tab"))
+        close_btn.setToolTip(_("Close Tab"))
+        close_btn.setAccessibleName(_("Close Tab"))
         close_btn.clicked.connect(lambda: self.close_tab(self.tabs.indexOf(container)))
         self.tabs.tabBar().setTabButton(idx, QTabBar.RightSide, close_btn)
 
@@ -2746,11 +2803,17 @@ class MainWindow(QMainWindow):
         self.tabs.removeTab(index)
 
     def _close_current_tab(self):
-        # Command-W closes the window in front, also from the menu.
-        imports = self._imports_in_front()
-        if imports is not None:
-            if not imports.sheet_in_front():    # never closed under its sheet
-                imports.close()
+        # Command-W closes the window in front (Settings, Keyboard
+        # Shortcuts, Imports...), also from the menu: on a Mac the menu
+        # bar takes the key before the window in front sees it. In this
+        # window it closes the tab. A sheet is answered with its buttons:
+        # neither it nor the window under it is closed (CP3 review M2).
+        front = self._front_window()
+        if front is not self:
+            imports = self._imports_in_front()
+            if (front.windowModality() == Qt.WindowModality.NonModal
+                    and not (imports is not None and imports.sheet_in_front())):
+                front.close()
             return
         idx = self.tabs.currentIndex()
         if idx >= 0:
@@ -2894,10 +2957,7 @@ class MainWindow(QMainWindow):
         if not pending:
             return
         if self._profile_store.default() is None:
-            self.status.showMessage(
-                _("Images added. Connect a signer to upload them."), 6000
-            )
-            return
+            return          # a local image; nothing of Nostr without an account
 
         count = len(pending)
         upload = ask(
@@ -3031,7 +3091,7 @@ class MainWindow(QMainWindow):
         viewer.page_changed.connect(self._on_pdf_page_changed)
 
         idx = self.tabs.addTab(viewer, os.path.basename(path))
-        self.tabs.setTabToolTip(idx, viewer.document_title())
+        self.tabs.setTabToolTip(idx, path)
         self.tabs.setCurrentIndex(idx)
         self._attach_close_button(idx, viewer)
         # Watch the file so a regenerated PDF (LaTeX build, re-export)
@@ -3285,9 +3345,9 @@ class MainWindow(QMainWindow):
                     if outcome == "switch":
                         if not self._switch_active_profile_to(mismatch_pk):
                             inform(
-                                self, title=_("That profile isn't connected anymore"),
-                                message=_("Pair it again from Nostr > Connect Signer to save "
-                                          "here."))
+                                self, title=_("That account isn\u2019t signed in anymore"),
+                                message=_("Connect it again with Nostr > Connect Signer "
+                                          "App\u2026 to save here."))
                             return False
                 self._restash_with_binding(ed, binding)
                 return True
@@ -4079,11 +4139,15 @@ class MainWindow(QMainWindow):
         else:
             self.findbar.set_match_info(_("No matches"))
 
-    def _choose_language(self, code: str) -> None:
-        """Remember the language; it is used from the next start on."""
+    def _choose_language(self, code: str, tell: bool = True) -> None:
+        """Remember the language; it is used from the next start on. View >
+        Language says so in an alert; Settings (``tell`` False) says it
+        under its choice."""
         save_setting(i18n.SETTING, code)
+        for known, action in zip(self._language_codes, self.act_languages):
+            action.setChecked(known == code)
         target = i18n.resolve(code)
-        if target == i18n.language():
+        if target == i18n.language() or not tell:
             return
         name = i18n.LANGUAGE_NAMES.get(target, target)
         inform(self, title=_("Restart MyEditor to Change the Language"),
@@ -4091,20 +4155,72 @@ class MainWindow(QMainWindow):
                    name=name),
                is_dark=self.is_dark_theme)
 
-    def _show_shortcuts(self):
-        """Open the cheat-sheet style ``ShortcutsDialog``.
+    # -- a Mac's Window menu ----------------------------------------------------------
 
-        Replaces the previous plain-text ``QMessageBox`` so we get a
-        searchable, themed, category-grouped surface in keeping with
-        how major desktop apps display their keyboard reference.
-        """
-        from shortcuts_dialog import OTHER_KEYS, ShortcutsDialog, groups_from
-        # Nostr shortcuts are listed once Nostr is in use; before that the
-        # editor shows nothing of it beyond the Nostr menu.
-        groups = groups_from(self.commands.shortcut_groups(
+    def _front_window(self):
+        """The window in front: this one, Settings, the Imports window…"""
+        return QApplication.activeWindow() or self
+
+    def _zoom_front_window(self) -> None:
+        window = self._front_window()
+        if window.isMaximized():
+            window.showNormal()
+        else:
+            window.showMaximized()
+
+    def _bring_all_to_front(self) -> None:
+        """Every open window of MyEditor in front of other apps' windows,
+        the one in front staying in front."""
+        front = QApplication.activeWindow()
+        for window in QApplication.topLevelWidgets():
+            if window.isVisible() and not window.isMinimized() and window is not front:
+                window.raise_()
+        if front is not None:
+            front.raise_()
+
+    def _show_settings(self) -> None:
+        """The Settings window: one, brought to the front when it is open."""
+        window = getattr(self, "_settings_window", None)
+        if window is None:
+            window = SettingsWindow(
+                appearance=self.act_appearance,
+                languages=list(zip(self._language_codes, self.act_languages)),
+                choose_language=lambda code: self._choose_language(code, tell=False),
+                monospace=self.act_monospace_writing,
+                paste_choice=self._paste_choice,
+                choose_paste=self._store_paste_choice,
+                nostr_in_use=lambda: self.nostr_state.active,
+                is_dark=self.is_dark_theme, parent=self)
+            window.setAttribute(Qt.WA_DeleteOnClose, True)
+            window.destroyed.connect(lambda _obj=None: setattr(self, "_settings_window", None))
+            self._settings_window = window
+        window.show()
+        window.raise_()
+        window.activateWindow()
+
+    def _show_shortcuts(self):
+        """Help > Keyboard Shortcuts: a reference window beside the
+        document, not modal, so a key can be tried while it is open; one
+        window, brought to the front when it is already open."""
+        window = getattr(self, "_shortcuts_window", None)
+        if window is None:
+            from shortcuts_dialog import ShortcutsDialog
+            window = ShortcutsDialog(self._shortcut_groups(), is_dark=self.is_dark_theme,
+                                     parent=self)
+            window.setAttribute(Qt.WA_DeleteOnClose, True)
+            window.destroyed.connect(lambda _obj=None: setattr(self, "_shortcuts_window", None))
+            self._shortcuts_window = window
+        window.show()
+        window.raise_()
+        window.activateWindow()
+
+    def _shortcut_groups(self):
+        """The keys Help > Keyboard Shortcuts lists. Nostr shortcuts are
+        listed while an account is in use; before that the editor shows
+        nothing of it beyond the Nostr menu."""
+        from shortcuts_dialog import OTHER_KEYS, groups_from
+        return groups_from(self.commands.shortcut_groups(
             OTHER_KEYS, nostr=self.nostr_state.active))
-        dlg = ShortcutsDialog(groups, is_dark=self.is_dark_theme, parent=self)
-        dlg.exec()
 
     def _show_about(self):
         answer = ask(
@@ -4470,8 +4586,9 @@ class MainWindow(QMainWindow):
         "file.knit_html", "file.knit_pdf", "search.replace", "search.next",
         "search.previous", "search.use_selection",
         "view.line_numbers", "view.syntax_highlighting", "view.paper_mode", "view.toolbar",
-        "view.highlight_line", "nostr.publish_note", "nostr.publish_article",
-        "nostr.insert_image"})
+        "view.highlight_line", "view.write", "view.preview", "view.split",
+        "edit.footnote_jump", "nostr.publish_note", "nostr.publish_article",
+        "nostr.insert_image", "nostr.insert_mention"})
     _DOCUMENT_PREFIXES = ("format.", "insert.")
 
     def _is_document_command(self, command_id: str) -> bool:
@@ -4509,10 +4626,8 @@ class MainWindow(QMainWindow):
         # closed under it.
         self.act_close_tab.setText(_("Close Window") if in_front else _("Close Tab"))
         self.act_close_tab.setEnabled(not (in_front and imports.sheet_in_front()))
-        # Full Screen says whether the window in front is.
-        blocked = self.act_fullscreen.blockSignals(True)
-        self.act_fullscreen.setChecked((imports or self).isFullScreen())
-        self.act_fullscreen.blockSignals(blocked)
+        # Enter or Exit Full Screen, for the window now in front.
+        self._name_full_screen()
         if in_front:
             shown = imports.act_sidebar.isChecked()
             self.act_window_sidebar.setText(_("Hide Sidebar") if shown else _("Show Sidebar"))
@@ -4917,14 +5032,40 @@ class MainWindow(QMainWindow):
 
 
     # ----------------------------------------------------------------------
-    # THEME TOGGLE
+    # APPEARANCE
     # ----------------------------------------------------------------------
-    def _set_theme(self, is_dark: bool, announce: bool = True):
+    @property
+    def appearance(self) -> str:
+        """"system" while the system's appearance is followed, else "light"
+        or "dark"."""
+        if self._follow_os_theme:
+            return "system"
+        return "dark" if self.is_dark_theme else "light"
+
+    def set_appearance(self, mode: str) -> None:
+        """Automatic ("system": the system's light or dark, followed as it
+        changes), Light or Dark; remembered across launches. View >
+        Appearance and Settings both choose through here."""
+        settings = load_settings()
+        if mode == "system":
+            settings.pop("theme", None)
+            is_dark = self._detect_os_dark_theme()
+        else:
+            settings["theme"] = mode
+            is_dark = mode == "dark"
+        save_settings(settings)
+        self._follow_os_theme = mode == "system"
+        if is_dark != self.is_dark_theme:
+            self._set_theme(is_dark)
+        self.act_appearance[mode].setChecked(True)
+
+    def _set_theme(self, is_dark: bool):
         """Apply is_dark to every theme-aware widget in the window.
 
-        Shared by the manual toggle (View > Toggle Dark/Light Theme) and the
-        OS color-scheme-follow path, so the fan-out logic lives in one
-        place instead of being duplicated.
+        Shared by View > Appearance and the path that follows the system's
+        appearance, so the fan-out logic lives in one place instead of
+        being duplicated. The change itself is the feedback; nothing is
+        said about it.
         """
         self.is_dark_theme = is_dark
         self._apply_theme()
@@ -4957,33 +5098,39 @@ class MainWindow(QMainWindow):
         imports_window = getattr(self, "_imports", None) and self._imports.window()
         if imports_window is not None:
             imports_window.apply_theme(self.is_dark_theme)
-        if announce:
-            message = (_("Switched to Dark theme") if self.is_dark_theme
-                       else _("Switched to Light theme"))
-            self.status.showMessage(message, 2000)
-
-    def _toggle_theme(self):
-        target = not self.is_dark_theme
-        self._set_theme(target)
-        # The user made an explicit choice - stop following the OS scheme
-        # and remember this choice across restarts.
-        self._follow_os_theme = False
-        save_setting("theme", "dark" if target else "light")
+        for name in ("_settings_window", "_shortcuts_window"):
+            window = getattr(self, name, None)
+            if window is not None:
+                window.apply_theme(self.is_dark_theme)
 
     def _on_os_color_scheme_changed(self, scheme):
         if not self._follow_os_theme:
             return
         self._set_theme(scheme != Qt.ColorScheme.Light)
 
-    def _toggle_fullscreen(self, checked: bool):
-        # The window in front goes full screen, as View > Enter Full Screen
-        # does in every Mac app; with the Imports window in front, that one
-        # (CP2 review L-a: this window behind did).
+    def _toggle_fullscreen(self, *_args):
+        """The window in front goes full screen, as View > Enter Full Screen
+        does in every Mac app (with the Imports window in front, that one:
+        CP2 review L-a), or back to the size it had (a maximized window
+        comes back maximized)."""
         window = self._imports_in_front() or self
-        if checked:
-            window.showFullScreen()
-        else:
-            window.showNormal()
+        window.setWindowState(window.windowState() ^ Qt.WindowState.WindowFullScreen)
+        self._name_full_screen()
+
+    def _name_full_screen(self, *_args) -> None:
+        """Enter Full Screen or Exit Full Screen, for the window in front."""
+        if hasattr(self, "act_fullscreen"):
+            window = self._imports_in_front() or self
+            self.act_fullscreen.setText(
+                _("Exit Full Screen") if window.isFullScreen() else _("Enter Full Screen"))
+
+    def changeEvent(self, event):  # noqa: N802, Qt's name
+        super().changeEvent(event)
+        # However the window got there: the menu, its key, or the window's
+        # own full-screen button on a Mac. (A state set while the window is
+        # being built comes before its commands.)
+        if event.type() == QEvent.Type.WindowStateChange:
+            self._name_full_screen()
 
 
     # ----------------------------------------------------------------------
@@ -5348,10 +5495,6 @@ class MainWindow(QMainWindow):
             self.act_paper_mode.blockSignals(True)
             self.act_paper_mode.setChecked(on)
             self.act_paper_mode.blockSignals(False)
-        if hasattr(self, "_paper_btn") and self._paper_btn.isChecked() != on:
-            self._paper_btn.blockSignals(True)
-            self._paper_btn.setChecked(on)
-            self._paper_btn.blockSignals(False)
         for i in range(self.tabs.count()):
             ed = self._editor_from_widget(self.tabs.widget(i))
             if ed:
@@ -5548,7 +5691,7 @@ class MainWindow(QMainWindow):
         if not profiles:
             act = menu.addAction(_("Create Account\u2026"))
             act.triggered.connect(self._on_create_account)
-            act = menu.addAction(_("Connect Signer\u2026"))
+            act = menu.addAction(_("Connect Signer App\u2026"))
             act.triggered.connect(self._on_nostr_connect)
             act = menu.addAction(_("Restore Account\u2026"))
             act.triggered.connect(self._on_restore_account)
@@ -5576,8 +5719,10 @@ class MainWindow(QMainWindow):
             act_backup.triggered.connect(self._on_backup_account)
             act_move = menu.addAction(_("Move Key to Signer App\u2026"))
             act_move.triggered.connect(self._on_move_to_signer)
-        act_add = menu.addAction(_("Add Profile\u2026"))
+        # Connecting offers creating and restoring an account too.
+        act_add = menu.addAction(_("Add Account\u2026"))
         act_add.triggered.connect(self._on_nostr_connect)
+        menu.addSeparator()
         act_signout = menu.addAction(_("Sign Out"))
         act_signout.triggered.connect(self._on_nostr_sign_out)
 
@@ -5606,16 +5751,45 @@ class MainWindow(QMainWindow):
                 except Exception:  # noqa: BLE001, imports never stop the editor
                     logging.getLogger(__name__).exception(
                         "imports could not follow the account")
+        self._update_nostr_commands()
+
+    # The account's own commands that need its key kept on this computer.
+    _LOCAL_KEY_COMMANDS = frozenset({"nostr.backup_account", "nostr.move_to_signer"})
+
+    def _update_nostr_commands(self) -> None:
+        """The Nostr menu's commands that act for an account are dimmed while
+        none is in use, as the HIG asks of a command that cannot act; the
+        ways to an account (create, connect, restore) and the membership
+        stay available next to them. Back Up and Move Key also need the
+        key on this computer. A document command dimmed while the Imports
+        window is in front gets its new state when that window goes."""
+        if not hasattr(self, "commands"):
+            return
         current = self._profile_store.default()
-        for name in ("_act_backup_account", "act_move_to_signer"):
-            action = getattr(self, name, None)
-            if action is not None:
-                action.setEnabled(current is not None and current.is_local)
-        draft_relays = getattr(self, "act_draft_relays", None)
-        if draft_relays is not None:
-            # Where drafts are kept is the account's: nothing to set without one.
-            draft_relays.setEnabled(current is not None)
+        active = self.nostr_state.active
+        dimmed = getattr(self, "_document_commands_dimmed", False)
+        kept = self.__dict__.setdefault("_dimmed_were_enabled", {})
+        for command in self.commands.commands(NOSTR):
+            if not command.nostr:
+                continue
+            enabled = active
+            if command.id in self._LOCAL_KEY_COMMANDS:
+                enabled = active and current is not None and current.is_local
+            if dimmed and self._is_document_command(command.id):
+                kept[command.id] = enabled
+            else:
+                self.commands.action(command.id).setEnabled(enabled)
+        # Refresh Drafts also needs the panel shown.
         self._update_refresh_command()
+
+    def _on_nostr_in_use_changed(self, active: bool) -> None:
+        """Nothing of Nostr stays on screen once no account is in use."""
+        if not active:
+            self._hide_drafts_panel()
+        if getattr(self, "_settings_window", None) is not None:
+            self._settings_window.refresh()
+        if getattr(self, "_shortcuts_window", None) is not None:
+            self._shortcuts_window.set_groups(self._shortcut_groups())
 
     # -- creating, restoring and backing up accounts ---------------------------
     # The windows and the network work behind them are the account
@@ -5642,7 +5816,7 @@ class MainWindow(QMainWindow):
         nothing but this app."""
         choice = ask(self, title=title, message=message, is_dark=self.is_dark_theme,
                      buttons=(Button(_("Create Account\u2026"), "create", DEFAULT),
-                              Button(_("Connect Signer\u2026"), "connect", NORMAL),
+                              Button(_("Connect Signer App\u2026"), "connect", NORMAL),
                               Button(_("Cancel"), None, CANCEL)))
         if choice == "create":
             self._on_create_account()
@@ -5739,7 +5913,8 @@ class MainWindow(QMainWindow):
         publishes became its upload servers. Said once, where it shows."""
         hosts = ", ".join(url_safety.host_of(s) or s for s in servers)
         self.status.showMessage(
-            _("Media uploads go to the servers your Nostr profile lists: {hosts}").format(
+            _("Media uploads go to the media servers your Nostr account lists: "
+              "{hosts}").format(
                 hosts=hosts), 8000)
         if self._visible_media_library() is not None:
             self._media_store.refetch_if_targets_changed()
@@ -6192,16 +6367,8 @@ class MainWindow(QMainWindow):
                              "back. MyEditor did not paste it. Keep it in a password "
                              "manager or a signer app."))
 
-    def _on_nostr_note_published(self, event_id_hex: str, results):
-        accepted = sum(1 for _relay, ok, _message in results if ok)
-        note_id = encode_note(event_id_hex) if event_id_hex else ""
-        if note_id:
-            msg = _("Published to Nostr: {accepted}/{total} relays · {id}…").format(
-                accepted=accepted, total=len(results), id=note_id[:16])
-        else:
-            msg = _("Published to Nostr: {accepted}/{total} relays").format(
-                accepted=accepted, total=len(results))
-        self.status.showMessage(msg, 8000)
+    def _on_nostr_note_published(self, _event_id_hex: str, results):
+        self._say_published(results, article=False)
 
     def _on_nostr_publish_article(self):
         active = self._profile_store.default()
@@ -6266,15 +6433,27 @@ class MainWindow(QMainWindow):
         dialog.published.connect(self._on_nostr_article_published)
         dialog.exec()
 
-    def _on_nostr_article_published(self, naddr: str, results):
+    def _on_nostr_article_published(self, _naddr: str, results):
+        self._say_published(results, article=True)
+
+    def _say_published(self, results, *, article: bool) -> None:
+        """That it went out, in the status bar, and how many relays took it
+        when not every one did. No event id, which the person has nothing
+        to do with: the Published list and the dialog itself say more."""
         accepted = sum(1 for _relay, ok, _message in results if ok)
-        if naddr:
-            msg = _("Published article to Nostr: {accepted}/{total} relays · {id}…").format(
-                accepted=accepted, total=len(results), id=naddr[:18])
+        total = len(results)
+        if accepted >= total:
+            message = (_("Your article is published.") if article
+                       else _("Your note is published."))
+        elif article:
+            message = ngettext("Your article is published; {accepted} of {total} relay took it.",
+                               "Your article is published; {accepted} of {total} relays took "
+                               "it.", total).format(accepted=accepted, total=total)
         else:
-            msg = _("Published article to Nostr: {accepted}/{total} relays").format(
-                accepted=accepted, total=len(results))
-        self.status.showMessage(msg, 8000)
+            message = ngettext("Your note is published; {accepted} of {total} relay took it.",
+                               "Your note is published; {accepted} of {total} relays took it.",
+                               total).format(accepted=accepted, total=total)
+        self.status.showMessage(message, 8000)
 
     # -- media (Blossom) --------------------------------------------------
 
@@ -6478,13 +6657,9 @@ class MainWindow(QMainWindow):
         self._insert_asset(editor, asset, alt="image")
 
         if asset.is_uploaded or self._profile_store.default() is None:
-            if not asset.is_uploaded:
-                self.status.showMessage(
-                    _("Image added. Connect a signer to upload it."), 6000
-                )
-            return
+            return          # nothing of Nostr without an account
 
-        choice = load_settings().get(_PASTE_UPLOAD_SETTING, "ask")
+        choice = self._paste_choice()
         if choice == "never":
             return
         if choice != "always" and not self._confirm_paste_upload():
@@ -6515,8 +6690,20 @@ class MainWindow(QMainWindow):
             buttons=(Button(_("Upload"), True, NORMAL), Button(_("Keep Local"), False, DEFAULT)),
             checkbox=_("Remember this choice"))
         if remember:
-            save_setting(_PASTE_UPLOAD_SETTING, "always" if upload else "never")
+            self._store_paste_choice("always" if upload else "never")
         return upload
+
+    def _paste_choice(self) -> str:
+        """What a pasted image does while an account is in use: "ask",
+        "always" (upload) or "never"."""
+        return load_settings().get(_PASTE_UPLOAD_SETTING, "ask")
+
+    def _store_paste_choice(self, value: str) -> None:
+        """The one place the choice is stored, from Settings or from the
+        alert's Remember This Choice; an open Settings window shows it."""
+        save_setting(_PASTE_UPLOAD_SETTING, value)
+        if getattr(self, "_settings_window", None) is not None:
+            self._settings_window.refresh()
 
     # ----------------------------------------------------------------------
     # NOSTR - drafts panel toggling
@@ -6794,7 +6981,8 @@ class MainWindow(QMainWindow):
         signer round-trip - no relay re-fetch.
         """
         self._draft_sync.retry_decrypt(identifier)
-        self.status.showMessage(_("Retrying decryption - approve on your signer…"), 6000)
+        self.status.showMessage(_("Trying again. Approve the request in your signer "
+                                  "app\u2026"), 6000)
 
     def _on_panel_delete_drafts(self, identifiers: list) -> None:
         """Delete one draft or twenty, through one question and one run.
@@ -6896,9 +7084,9 @@ class MainWindow(QMainWindow):
         signs_here = profile is not None and getattr(profile, "is_local", False)
         if requests > 1 and not signs_here:
             lines.append(ngettext(
-                "Your signer will ask you to approve each one, so expect "
+                "Your signer app will ask you to approve each one, so expect "
                 "{count} request. You can stop partway through.",
-                "Your signer will ask you to approve each one, so expect "
+                "Your signer app will ask you to approve each one, so expect "
                 "{count} requests. You can stop partway through.",
                 requests).format(count=requests))
             if imported:
@@ -7051,8 +7239,8 @@ class MainWindow(QMainWindow):
             # The panel may be closed, and this is the same condition that
             # makes publishing fail, so it belongs in the window too.
             self.status.showMessage(
-                _("Your signer is not responding. Open your signer app and "
-                  "make sure it is running."), 8000,
+                _("Your signer app is not responding. Open it and make sure it is "
+                  "running."), 8000,
             )
 
     def _on_draft_sync_bunker_error(self, message: str) -> None:
@@ -7111,8 +7299,9 @@ class MainWindow(QMainWindow):
                     # confirmation - surface and bail rather than fall
                     # through to a save under the wrong identity.
                     inform(
-                        self, title=_("That profile isn't connected anymore"),
-                        message=_("Pair it again from Nostr > Connect Signer to save here."))
+                        self, title=_("That account isn\u2019t signed in anymore"),
+                        message=_("Connect it again with Nostr > Connect Signer "
+                                  "App\u2026 to save here."))
                     return
                 # After the switch, the binding now matches active, so
                 # we proceed normally below.
@@ -7297,7 +7486,7 @@ class MainWindow(QMainWindow):
             return
         if payload_bytes > MAX_INNER_PAYLOAD_BYTES:
             inform(self, title=_("This draft is too large"),
-                   message=_("It has {size} bytes, and NIP-44 encryption allows {limit}. "
+                   message=_("It has {size} bytes, and encryption allows {limit}. "
                              "Split it into smaller drafts or publish it directly.").format(
                        size=_number(payload_bytes), limit=_number(MAX_INNER_PAYLOAD_BYTES)))
             return
@@ -7575,8 +7764,8 @@ class MainWindow(QMainWindow):
             if p is not None:
                 return p.display_name or p.npub_short()
             if pk:
-                return f"{pk[:8]}…{pk[-4:]}"
-            return _("(unknown profile)")
+                return short_npub(pk)
+            return _("(unknown account)")
 
         active_label = _label_for(active, active.user_pubkey if active else "")
         original_label = _label_for(original, original_pubkey)
@@ -7594,7 +7783,7 @@ class MainWindow(QMainWindow):
             title=_("This draft was last saved as {original}, but you're "
                     "signed in as {active}").format(original=original_label,
                                                     active=active_label),
-            message=_("Saving under the current profile would create a separate "
+            message=_("Saving under the current account would create a separate "
                       "draft. How would you like to handle it?"),
             buttons=buttons, caution=True)
 

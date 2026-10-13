@@ -293,6 +293,8 @@ class _EntryWindow:
     _handle_dropped_images = MainWindow._handle_dropped_images
     _handle_dropped_urls = MainWindow._handle_dropped_urls
     _confirm_paste_upload = MainWindow._confirm_paste_upload
+    _paste_choice = MainWindow._paste_choice
+    _store_paste_choice = MainWindow._store_paste_choice
     _insert_asset = MainWindow._insert_asset
 
     def __init__(self, cache_dir, *, profile=None):
@@ -350,6 +352,11 @@ def _png_file(tmp_path, name="shot.png", data=PNG_BYTES):
     return str(path)
 
 
+def _speaks_of_nostr(messages) -> bool:
+    words = ("signer", "upload", "nostr", "blossom", "server")
+    return any(word in message.lower() for message in messages for word in words)
+
+
 def test_a_paste_lands_in_the_document_with_no_signer(tmp_path):
     # A pasted screenshot exists nowhere else. Nothing about signers,
     # servers or networks may be a reason for it to vanish.
@@ -360,7 +367,9 @@ def test_a_paste_lands_in_the_document_with_no_signer(tmp_path):
     assert len(win.image_names()) == 1
     assert win.image_names()[0].startswith(f"{ASSET_SCHEME}:")
     assert win._uploader.calls == []
-    assert any("Connect a signer" in m for m in win.status.messages)
+    # Without an account the editor says nothing of Nostr: a local image
+    # is just an image (uploading is asked when publishing).
+    assert not _speaks_of_nostr(win.status.messages)
 
 
 def test_a_paste_that_cannot_encode_falls_back_to_a_normal_paste(tmp_path):
@@ -438,6 +447,26 @@ def test_ask_uploads_when_the_prompt_is_answered_with_upload(tmp_path,
     assert shown[0].checkbox == "Remember this choice"
 
 
+def test_remember_this_choice_shows_at_once_in_an_open_settings_window(tmp_path,
+                                                                      monkeypatch):
+    # Review L5: Settings stays open beside the document, and kept saying
+    # Ask Every Time after the alert had stored the answer.
+    settings = {"upload_pasted_images": "ask"}
+    monkeypatch.setattr(main_window_module, "load_settings", lambda: dict(settings))
+    monkeypatch.setattr(main_window_module, "save_setting", settings.__setitem__)
+    monkeypatch.setattr(main_window_module, "ask_with_checkbox",
+                        lambda *args, **kwargs: (True, True))     # Upload, remembered
+    win = _EntryWindow(tmp_path / "cache", profile=object())
+    win._media_store = types.SimpleNamespace(target_servers=lambda: ["https://cdn.example"])
+    shown = []
+    win._settings_window = types.SimpleNamespace(refresh=lambda: shown.append(win._paste_choice()))
+
+    win._handle_pasted_image(win.editor, _clipboard_image())
+
+    assert settings["upload_pasted_images"] == "always"
+    assert shown == ["always"]
+
+
 def test_a_failed_upload_leaves_the_image_in_the_document(tmp_path,
                                                           paste_choice):
     paste_choice("always")
@@ -461,7 +490,7 @@ def test_a_drop_inserts_every_image_with_no_signer(tmp_path):
 
     assert len(win.image_names()) == 2
     assert win._uploader.calls == []
-    assert any("Connect a signer" in m for m in win.status.messages)
+    assert not _speaks_of_nostr(win.status.messages)    # none without an account
 
 
 def test_a_dropped_image_keeps_the_filename_as_its_alt_text(tmp_path):

@@ -28,6 +28,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+import theme
+from alerts import answer_return_as_the_system_does
 from i18n import _, ngettext
 
 from ..avatar_store import AvatarStore
@@ -217,7 +219,7 @@ class PublishNoteDialog(QDialog):
         layout.setContentsMargins(20, 18, 20, 16)
         layout.setSpacing(10)
 
-        header = QLabel(_("Publish a short note (kind 1) to Nostr."))
+        header = QLabel(_("Publish a short note to Nostr."))
         layout.addWidget(header)
 
         hint = QLabel(_(
@@ -280,7 +282,7 @@ class PublishNoteDialog(QDialog):
         buttons = QDialogButtonBox()
         self._cancel_btn = buttons.addButton(QDialogButtonBox.Cancel)
         self._publish_btn = buttons.addButton(_("Publish"), QDialogButtonBox.AcceptRole)
-        self._publish_btn.setDefault(True)
+        answer_return_as_the_system_does(buttons.buttons())
         self._cancel_btn.clicked.connect(self._on_cancel)
         self._publish_btn.clicked.connect(self._on_publish)
         bottom.addWidget(buttons)
@@ -288,7 +290,8 @@ class PublishNoteDialog(QDialog):
         layout.addLayout(bottom)
 
     def _apply_theme(self) -> None:
-        self.setStyleSheet(_DARK_DIALOG_CSS if self._is_dark else _LIGHT_DIALOG_CSS)
+        self.setStyleSheet((_DARK_DIALOG_CSS if self._is_dark else _LIGHT_DIALOG_CSS)
+                           + theme.default_and_focus_css(self._is_dark))
         self._switch_menu.setStyleSheet(
             _DARK_MENU_CSS if self._is_dark else _LIGHT_MENU_CSS
         )
@@ -320,7 +323,7 @@ class PublishNoteDialog(QDialog):
         menu.clear()
         profiles = self._store.list()
         if not profiles:
-            act = menu.addAction(_("(no profiles)"))
+            act = menu.addAction(_("(no accounts)"))
             act.setEnabled(False)
             return
         for profile in profiles:

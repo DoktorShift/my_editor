@@ -345,18 +345,96 @@ def install(choice: str = SYSTEM, *, locale_dir: Optional[str] = None) -> str:
 
 
 def install_qt_translations(app) -> None:
-    """Qt's own words (file dialogs, standard buttons) in the same language."""
-    if _language in (ENGLISH, PSEUDO):
-        return
+    """Qt's own words (file dialogs, standard buttons) in the same language,
+    and MyEditor's own word where Qt's is out of date."""
     from PySide6.QtCore import QLibraryInfo, QTranslator
-    path = QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)
     keep = getattr(app, "_myeditor_translators", [])
-    for name in ("qtbase", "qt"):
-        translator = QTranslator(app)
-        if translator.load(f"{name}_{_language}", path):
-            app.installTranslator(translator)
-            keep.append(translator)
+    if _language not in (ENGLISH, PSEUDO):
+        path = QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)
+        for name in ("qtbase", "qt"):
+            translator = QTranslator(app)
+            if translator.load(f"{name}_{_language}", path):
+                app.installTranslator(translator)
+                keep.append(translator)
+    # Installed last, so Qt asks it first.
+    own_words = _own_words_translator(app)
+    app.installTranslator(own_words)
+    keep.append(own_words)
     app._myeditor_translators = keep
+
+
+def _own_words_translator(parent):
+    """A translator for the few words MyEditor says instead of Qt's.
+
+    A Mac's application menu titles the Settings command itself, with the
+    word macOS used before Ventura: Qt asks for "Preferences..." in the
+    contexts below and never shows the command's own text. macOS 13 and
+    the HIG call it Settings, and so do MyEditor's window and docs. Every
+    other text is left to Qt's translations: the answer is None (a null
+    text, which Qt reads as "not translated here"; an empty one would be
+    taken as the translation)."""
+    from PySide6.QtCore import QTranslator
+
+    class OwnWords(QTranslator):
+        def translate(self, context, source_text, disambiguation=None, n=-1):
+            if context in ("QMenuBar", "MAC_APPLICATION_MENU") \
+                    and source_text == "Preferences...":
+                return _("Settings\u2026")
+            return None
+
+        def isEmpty(self) -> bool:
+            return False
+
+    return OwnWords(parent)
+
+
+# --------------------------------------------------------------------------- #
+# Numbers and dates, the language's way                                         #
+# --------------------------------------------------------------------------- #
+
+def display_locale():
+    """The QLocale numbers and dates are written in: the language MyEditor
+    speaks, not the system's, so a German window never shows an English
+    month name nor an English one a German one. The pseudo language
+    writes them as English does."""
+    from PySide6.QtCore import QLocale
+    return QLocale(ENGLISH if _language == PSEUDO else _language)
+
+
+def _day_pattern(locale, *, short_month: bool, year: bool) -> str:
+    """The locale's own long date without the weekday ("MMMM d, yyyy" in
+    English, "d. MMMM yyyy" in German), with "MMM" for ``short_month``,
+    and without the year and its separator unless ``year``."""
+    from PySide6.QtCore import QLocale
+    pattern = locale.dateFormat(QLocale.FormatType.LongFormat)
+    pattern = re.sub(r"\s*dddd[,.]?\s*", " ", pattern, count=1).strip(" ,")
+    if not year:
+        pattern = re.sub(r"[\s,./-]*y+[\s,./-]*", " ", pattern).strip(" ,/-")
+    return pattern.replace("MMMM", "MMM") if short_month else pattern
+
+
+def format_day(day, *, short_month: bool = False, year: bool = True) -> str:
+    """``day`` (a QDate, a QDateTime or a datetime.date) the way the
+    language writes a day: "January 6, 2027", "6. Januar 2027"; with
+    ``short_month``, "Jan 6, 2027" for a list row; without ``year``,
+    "Jan 6", "6. Jan.", for a day of this year in a list. Never a padded
+    day from a fixed pattern ("06 January 2027")."""
+    from PySide6.QtCore import QDate, QDateTime
+    if isinstance(day, QDateTime):
+        day = day.date()
+    elif not isinstance(day, QDate):
+        day = QDate(day.year, day.month, day.day)
+    locale = display_locale()
+    return locale.toString(day, _day_pattern(locale, short_month=short_month, year=year))
+
+
+def format_moment(moment) -> str:
+    """A QDateTime as the day and the clock time, the language's way:
+    "January 6, 2027 at 2:05 PM", "6. Januar 2027 um 14:05"."""
+    from PySide6.QtCore import QLocale
+    locale = display_locale()
+    time = locale.toString(moment.time(), locale.timeFormat(QLocale.FormatType.ShortFormat))
+    return _("{date} at {time}").format(date=format_day(moment), time=time)
 
 
 def chosen_language() -> str:

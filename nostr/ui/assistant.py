@@ -35,6 +35,7 @@ import atexit
 import sys
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
+import shiboken6
 from PySide6.QtCore import QEvent, QMimeData, QSize, Qt, QTimer
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
@@ -52,6 +53,7 @@ from PySide6.QtWidgets import (
 )
 
 import theme
+from alerts import answer_return_as_the_system_does
 from constants import (
     DARK_BORDER, DARK_MENU_BG, DARK_MUTED_FG,
     LIGHT_BORDER, LIGHT_MENU_BG, LIGHT_MUTED_FG, LIGHT_SELECTION,
@@ -102,9 +104,12 @@ def stylesheet(is_dark: bool) -> str:
     QPushButton:disabled {{ color: {muted}; }}
     QPushButton:default:disabled {{ background: {field}; color: {muted}; border-color: {border}; }}
     QPushButton#link {{
-        border: none; background: transparent; color: {link}; padding: 2px 0; min-width: 0;
+        border: 2px solid transparent; border-radius: 3px; background: transparent;
+        color: {link}; padding: 0px; min-width: 0;
     }}
     QPushButton#link:hover {{ text-decoration: underline; }}
+    QPushButton#link:focus {{ border-color: {theme.focus_ring_color(is_dark)}; }}
+    QPushButton#link[tone="destructive"] {{ color: {theme.attention_color(is_dark)}; }}
     QPushButton#link:disabled {{ color: {muted}; }}
     QRadioButton {{ font-weight: 600; }}
     QProgressBar {{
@@ -128,6 +133,8 @@ def link_button(text: str, handler: Callable[[], None]) -> QPushButton:
     with the page's buttons."""
     button = QPushButton(text)
     button.setObjectName("link")
+    # A link is not one of the window's buttons: it never takes Return
+    # from the window's action, on any system (Space still presses it).
     button.setAutoDefault(False)
     button.setCursor(Qt.PointingHandCursor)
     button.clicked.connect(handler)
@@ -373,20 +380,22 @@ class _ShownPageStack(QStackedWidget):
     QStackedWidget asks for the room of its largest page, so a narrow page
     would be laid out as wide as the widest one and cut off at the side of
     a window sized for it. The same holds for the height its wrapped
-    text needs at a width: a short page after a long one (a last page
-    after a form) would otherwise scroll in a window with room to spare."""
+    text needs at a width, which the scroll area asks for: answered for
+    the tallest page, a short one scrolled (a waiting page showed only a
+    scroll bar), and a short page after a long one would scroll in a
+    window with room to spare."""
 
     def sizeHint(self) -> QSize:
         page = self.currentWidget()
         return page.sizeHint() if page is not None else super().sizeHint()
 
-    def heightForWidth(self, width: int) -> int:
-        page = self.currentWidget()
-        return page.heightForWidth(width) if page is not None else super().heightForWidth(width)
-
     def minimumSizeHint(self) -> QSize:
         page = self.currentWidget()
         return page.minimumSizeHint() if page is not None else super().minimumSizeHint()
+
+    def heightForWidth(self, width: int) -> int:  # noqa: N802, Qt's name
+        page = self.currentWidget()
+        return page.heightForWidth(width) if page is not None else super().heightForWidth(width)
 
 
 class AssistantWindow(QDialog):
@@ -404,6 +413,11 @@ class AssistantWindow(QDialog):
         self._pages: Dict[str, QWidget] = {}
         self.buttons: Dict[str, QPushButton] = {}
         self._button_widgets: List[QPushButton] = []
+        self._action: Optional[QPushButton] = None
+        # Where the focus fell when a button dimmed itself and no action
+        # could take it yet (see _on_focus_moved).
+        self._fell_to: Optional[QWidget] = None
+        QApplication.instance().focusChanged.connect(self._on_focus_moved)
 
         self._stack = _ShownPageStack()
         # A page taller than the screen scrolls, so the buttons stay in
@@ -432,6 +446,37 @@ class AssistantWindow(QDialog):
     def page(self) -> Optional[str]:
         return self._page
 
+    def _on_focus_moved(self, old, new) -> None:
+        """A button of this window that dims itself or goes (its row laid
+        out again) while it has the focus hands the focus to the window's
+        action, the button Return chooses at rest. Qt moves it on to the
+        next control instead, a link or Cancel, and on Windows and Linux
+        Return would then press that one. While the window has no action to
+        take it (Choose File… while a file is read), it is given to the
+        next one laid out, or to the action once it is lit again (Save,
+        dimmed until the form changes), unless the person has moved the
+        focus meanwhile."""
+        if new is not self._fell_to:
+            self._fell_to = None
+        if (isinstance(old, QPushButton) and shiboken6.isValid(old)
+                and (not old.isEnabled() or old.isHidden())
+                and old.window() is self and new is not None and new.window() is self):
+            if self._action_can_take_focus() and self._action is not old:
+                self._action.setFocus(Qt.FocusReason.OtherFocusReason)
+            else:
+                self._fell_to = new
+
+    def _action_can_take_focus(self) -> bool:
+        action = self._action
+        return (action is not None and shiboken6.isValid(action)
+                and action.isEnabled() and not action.isHidden())
+
+    def _give_owed_focus(self) -> None:
+        if (self._fell_to is not None and QApplication.focusWidget() is self._fell_to
+                and self._action_can_take_focus()):
+            self._fell_to = None
+            self._action.setFocus(Qt.FocusReason.OtherFocusReason)
+
     def add_page(self, key: str, widget: QWidget) -> None:
         self._pages[key] = widget
         self._stack.addWidget(widget)
@@ -443,6 +488,8 @@ class AssistantWindow(QDialog):
         if (event.type() == QEvent.Type.LayoutRequest
                 and watched is self._stack.currentWidget()):
             self.fit_page()
+        elif event.type() == QEvent.Type.EnabledChange and watched is self._action:
+            self._give_owed_focus()
         return super().eventFilter(watched, event)
 
     def show_page(self, key: str, buttons: Iterable[ButtonSpec]) -> None:
@@ -501,6 +548,14 @@ class AssistantWindow(QDialog):
         window = max(self._base_width, wide + sides, narrowest + sides, buttons + sides)
         if window != self.minimumWidth():
             self.setMinimumWidth(window)
+        # A window on screen keeps its size when what it holds needs more
+        # (a field problem that widens the page and adds lines at once): it
+        # grows to its layout's minimum, or the page runs under the buttons.
+        if self.isVisible():
+            self.layout().invalidate()
+            least = self.layout().totalMinimumSize()
+            if self.width() < least.width() or self.height() < least.height():
+                self.resize(max(self.width(), least.width()), max(self.height(), least.height()))
 
     def _tallest_page(self) -> int:
         """The most page height the screen has room for, with the window's
@@ -532,11 +587,16 @@ class AssistantWindow(QDialog):
         while self._button_row.count():
             self._button_row.takeAt(0)
         self.buttons = {}
+        self._action = None
 
         def make(key, label, placement, handler):
             button = QPushButton(label)
-            button.setAutoDefault(False)
+            # Return as the system's own dialogs answer it (alerts.py).
+            answer_return_as_the_system_does([button])
             button.setDefault(placement == DEFAULT)
+            if placement == DEFAULT:
+                self._action = button
+                button.installEventFilter(self)     # lit again: see _give_owed_focus
             button.clicked.connect(handler)
             self.buttons[key] = button
             self._button_widgets.append(button)
@@ -550,4 +610,7 @@ class AssistantWindow(QDialog):
             for spec in specs:
                 if spec[2] == placement:
                     self._button_row.addWidget(make(*spec))
+        # Once the new row is on screen (a button added to a shown window
+        # shows a moment later).
+        QTimer.singleShot(0, self, self._give_owed_focus)
         self.fit_page()             # the new buttons may need a wider window

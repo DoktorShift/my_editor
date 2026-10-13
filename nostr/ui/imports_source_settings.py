@@ -163,7 +163,7 @@ class SourceSettingsSheet(_Sheet):
         self.status = text_label("", "muted")
         status_row.addWidget(self.status, 1)
         self.check_now_button = QPushButton(_("Check Now"))
-        self.check_now_button.setAutoDefault(False)
+        alerts.answer_return_as_the_system_does([self.check_now_button])
         self.check_now_button.clicked.connect(self.check_now)
         status_row.addWidget(self.check_now_button, 0, Qt.AlignmentFlag.AlignTop)
         column.addLayout(status_row)

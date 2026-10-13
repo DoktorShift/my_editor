@@ -1,11 +1,13 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Check boxes can be seen on both themes (review M5).
+"""Check boxes and radio buttons can be seen on both themes (review M5).
 
 Fusion draws a check box's frame in the window colour darkened, 1.07:1
 on the dark theme: the Imports list's main control was nearly
 invisible. The app's style keeps Fusion and gives the frame 3:1, what
-controls need against what surrounds them.
+controls need against what surrounds them. A radio button's ring was
+just as faint (an unchecked choice in Create Account showed no circle),
+and gets the same frame.
 """
 
 from __future__ import annotations
@@ -13,7 +15,9 @@ from __future__ import annotations
 import pytest
 from PySide6.QtCore import QPoint, QRect
 from PySide6.QtGui import QColor, QImage, QPainter, QPalette
-from PySide6.QtWidgets import QCheckBox, QStyle, QStyleFactory, QStyleOptionButton
+from PySide6.QtWidgets import (
+    QCheckBox, QRadioButton, QStyle, QStyleFactory, QStyleOptionButton,
+)
 
 import theme
 from tests.widget_lifetime import delete_new_windows
@@ -68,3 +72,28 @@ def edge_contrast(style) -> float:
 def test_the_app_style_draws_the_frame():
     assert edge_contrast(QStyleFactory.create("Fusion")) < 1.5      # what it was
     assert edge_contrast(theme.AppStyle("Fusion")) >= 2.5
+
+
+def radio_edge_contrast(style) -> float:
+    """How the top of an unchecked radio button's ring stands out from the
+    dark window, as ``style`` draws it (the strongest of the top rows,
+    since the ring is drawn smooth)."""
+    palette = theme._palette(True)
+    button = QRadioButton()
+    option = QStyleOptionButton()
+    option.initFrom(button)
+    option.palette = palette
+    option.rect = QRect(2, 2, 16, 16)
+    option.state = QStyle.StateFlag.State_Enabled | QStyle.StateFlag.State_Off
+    image = QImage(20, 20, QImage.Format.Format_ARGB32)
+    image.fill(palette.color(QPalette.ColorRole.Window))
+    painter = QPainter(image)
+    style.drawPrimitive(QStyle.PrimitiveElement.PE_IndicatorRadioButton, option, painter, button)
+    painter.end()
+    window = palette.color(QPalette.ColorRole.Window)
+    return max(contrast(image.pixelColor(QPoint(10, y)), window) for y in range(2, 5))
+
+
+def test_the_app_style_draws_the_radio_ring():
+    assert radio_edge_contrast(QStyleFactory.create("Fusion")) < 1.5     # what it was
+    assert radio_edge_contrast(theme.AppStyle("Fusion")) >= 2.5

@@ -349,6 +349,7 @@ r["picker_without"] = w._mention_picker is not None and w._mention_picker.isVisi
 w._fill_insert_menu()
 r["insert_without"] = "nostr.insert_mention" in [a.objectName() for a in w.m_insert.actions()]
 w.nostr_state._active = True
+w._update_nostr_commands()          # as the app does when an account comes into use
 w._fill_insert_menu()
 r["insert_with"] = "nostr.insert_mention" in [a.objectName() for a in w.m_insert.actions()]
 alice = Person(pubkey="a1" * 32, display_name="Alice", relay_hint="wss://relay.example.com")
@@ -363,7 +364,7 @@ r["markdown"] = document_to_markdown(ed.document())
 r["slash_with"] = "Insert Mention…" in [c.title for c in w.commands.rank(
     "mention", nostr=True)]
 from nostr.ui import mention_picker
-w._set_theme(not w.is_dark_theme, announce=False)
+w._set_theme(not w.is_dark_theme)
 r["picker_follows_theme"] = picker.styleSheet() == (
     mention_picker._style(w.is_dark_theme))
 ed.document().setModified(False)

@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
     QTreeView, QVBoxLayout, QWidget,
 )
 
+import theme
 from atomic_file import read_json, write_json
 from i18n import _, ngettext
 from url_safety import is_safe_external_url
@@ -105,7 +106,7 @@ QToolButton {
     padding: 3px 8px; font-size: 12px;
 }
 QToolButton:hover { background: #3C3C3C; }
-QToolButton:checked { background: #3C2800; color: #FFB347; border-color: #FF8C00; }
+QToolButton:checked { background: #264F78; color: #FFFFFF; border-color: #3794FF; }
 """
 
 _TOOLBAR_LIGHT_CSS = """
@@ -123,8 +124,21 @@ QToolButton {
     padding: 3px 8px; font-size: 12px;
 }
 QToolButton:hover { background: #E1E1E1; }
-QToolButton:checked { background: #FFF0D0; color: #A05000; border-color: #E88000; }
+QToolButton:checked { background: #DCEBFA; color: #0B4F8A; border-color: #0078D4; }
 """
+
+
+def _toolbar_css(is_dark: bool) -> str:
+    """The toolbar's style with the app's focus ring: 2 px wide (the padding
+    gives up the extra pixel, so a button keeps its size), and on a checked
+    button (the fit mode in use) the ring that stands out from its fill
+    rather than the checked border's own blue."""
+    ring = theme.focus_ring_color(is_dark)
+    on_checked = theme.focus_ring_on_accent_color(is_dark)
+    return (_TOOLBAR_DARK_CSS if is_dark else _TOOLBAR_LIGHT_CSS) + (
+        f"QToolButton:focus {{ border: 2px solid {ring}; padding: 2px 7px; }}\n"
+        f"QToolButton:checked:focus {{ border-color: {on_checked}; }}\n")
+
 
 # Surface painted around the pages. Slightly darker than the page in
 # light mode, the app backdrop in dark mode, so pages read as sheets.
@@ -154,6 +168,14 @@ QTreeView::item { padding: 3px 4px; }
 QTreeView::item:hover { background: #ECECEC; }
 QTreeView::item:selected { background: #0078D4; color: #FFFFFF; }
 """
+
+
+def _with_keys(words: str, keys: QKeySequence) -> str:
+    """A tooltip with the keys as this computer writes them: "Zoom in
+    (⌘+)" on a Mac, "Zoom in (Ctrl++)" elsewhere, never a Mac reader
+    told to press Ctrl."""
+    text = keys.toString(QKeySequence.SequenceFormat.NativeText)
+    return _("{command} ({keys})").format(command=words, keys=text) if text else words
 
 
 # Painted over selected text. Pages always render white (see module
@@ -522,6 +544,7 @@ class PdfViewerTab(QWidget):
         self.outline = QTreeView()
         self.outline.setModel(self._bookmarks)
         self.outline.setHeaderHidden(True)
+        self.outline.setAccessibleName(_("Table of contents"))
         self.outline.setFixedWidth(_OUTLINE_WIDTH)
         self.outline.setExpandsOnDoubleClick(False)
         self.outline.activated.connect(self._on_outline_activated)
@@ -578,15 +601,18 @@ class PdfViewerTab(QWidget):
 
         self._outline_btn = QToolButton()
         self._outline_btn.setText(_("Contents"))
-        self._outline_btn.setToolTip(_("Table of contents (F12)"))
+        self._outline_btn.setToolTip(_with_keys(_("Table of contents"), QKeySequence(Qt.Key_F12)))
         self._outline_btn.setCheckable(True)
         self._outline_btn.setEnabled(False)
         self._outline_btn.clicked.connect(self.toggle_outline)
         bar.addWidget(self._outline_btn)
         bar.addSpacing(8)
 
-        bar.addWidget(QLabel(_("Page")))
+        page_label = QLabel(_("Page"))
+        bar.addWidget(page_label)
         self._page_edit = QLineEdit()
+        page_label.setBuddy(self._page_edit)
+        self._page_edit.setAccessibleName(_("Page"))
         self._page_edit.setFixedWidth(48)
         self._page_edit.setAlignment(Qt.AlignCenter)
         # Click-to-focus only: initial focus and Tab must stay with the
@@ -601,7 +627,10 @@ class PdfViewerTab(QWidget):
 
         self._zoom_out_btn = QToolButton()
         self._zoom_out_btn.setText("−")
-        self._zoom_out_btn.setToolTip(_("Zoom out (Ctrl+-)"))
+        # A glyph on the button; its name says what it does.
+        self._zoom_out_btn.setAccessibleName(_("Zoom Out"))
+        self._zoom_out_btn.setToolTip(_with_keys(_("Zoom out"),
+                                                 QKeySequence(QKeySequence.StandardKey.ZoomOut)))
         self._zoom_out_btn.clicked.connect(self.zoom_out)
         bar.addWidget(self._zoom_out_btn)
 
@@ -612,7 +641,9 @@ class PdfViewerTab(QWidget):
 
         self._zoom_in_btn = QToolButton()
         self._zoom_in_btn.setText("+")
-        self._zoom_in_btn.setToolTip(_("Zoom in (Ctrl++)"))
+        self._zoom_in_btn.setAccessibleName(_("Zoom In"))
+        self._zoom_in_btn.setToolTip(_with_keys(_("Zoom in"),
+                                                QKeySequence(QKeySequence.StandardKey.ZoomIn)))
         self._zoom_in_btn.clicked.connect(self.zoom_in)
         bar.addWidget(self._zoom_in_btn)
 
@@ -620,7 +651,7 @@ class PdfViewerTab(QWidget):
 
         self._fit_width_btn = QToolButton()
         self._fit_width_btn.setText(_("Fit Width"))
-        self._fit_width_btn.setToolTip(_("Fit page width (Ctrl+0)"))
+        self._fit_width_btn.setToolTip(_with_keys(_("Fit page width"), QKeySequence("Ctrl+0")))
         self._fit_width_btn.setCheckable(True)
         self._fit_width_btn.setChecked(True)
         self._fit_width_btn.clicked.connect(lambda: self._set_zoom_mode(QPdfView.ZoomMode.FitToWidth))
@@ -628,7 +659,7 @@ class PdfViewerTab(QWidget):
 
         self._fit_page_btn = QToolButton()
         self._fit_page_btn.setText(_("Fit Page"))
-        self._fit_page_btn.setToolTip(_("Fit whole page"))
+        self._fit_page_btn.setToolTip(_with_keys(_("Fit whole page"), QKeySequence("Ctrl+2")))
         self._fit_page_btn.setCheckable(True)
         self._fit_page_btn.clicked.connect(lambda: self._set_zoom_mode(QPdfView.ZoomMode.FitInView))
         bar.addWidget(self._fit_page_btn)
@@ -978,7 +1009,7 @@ class PdfViewerTab(QWidget):
 
     def update_theme(self, is_dark: bool):
         self.is_dark = is_dark
-        self._toolbar.setStyleSheet(_TOOLBAR_DARK_CSS if is_dark else _TOOLBAR_LIGHT_CSS)
+        self._toolbar.setStyleSheet(_toolbar_css(is_dark))
         self.outline.setStyleSheet(_OUTLINE_DARK_CSS if is_dark else _OUTLINE_LIGHT_CSS)
         self.findbar.is_dark = is_dark
         self.findbar._update_theme()

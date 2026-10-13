@@ -837,8 +837,12 @@ def test_every_icon_only_control_has_an_accessible_name():
 
 
 def test_the_surviving_profile_chip_is_named():
-    # Icon-only, and the control the panel's empty state points at.
-    assert ProfileChip().accessibleName() == "Nostr profile"
+    # Icon-only: it is announced as what it is, the account (with whose
+    # it is as its description once one is in use).
+    chip = ProfileChip()
+    assert chip.accessibleName() == "Account"
+    chip.set_profile("Alice", "ab" * 32)
+    assert chip.accessibleDescription() == "Alice"
 
 
 def test_a_screen_reader_hears_the_row_and_not_a_blank():

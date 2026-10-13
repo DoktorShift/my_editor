@@ -147,8 +147,8 @@ class TestTheMenuBar:
 
     def stand_in(self, window):
         return SimpleNamespace(
-            _imports_in_front=lambda: window, current_editor=lambda: None,
-            current_pdf_viewer=lambda: None)
+            _imports_in_front=lambda: window, _front_window=lambda: window,
+            current_editor=lambda: None, current_pdf_viewer=lambda: None)
 
     def test_edit_undo(self, window):
         window.posts.setFocus()
@@ -204,7 +204,6 @@ def test_the_documents_commands_are_dimmed_while_imports_is_in_front(window, mon
     front = {"window": window}
     from PySide6.QtGui import QAction
     fullscreen = QAction("Full Screen")
-    fullscreen.setCheckable(True)
     host = SimpleNamespace(
         commands=registry, act_window_sidebar=sidebar, _m_background=QMenu(),
         act_fullscreen=fullscreen, isFullScreen=lambda: False, act_close_tab=QAction("Close"),
@@ -214,8 +213,10 @@ def test_the_documents_commands_are_dimmed_while_imports_is_in_front(window, mon
         _DOCUMENT_PREFIXES=MainWindow._DOCUMENT_PREFIXES)
     host._is_document_command = lambda cid: MainWindow._is_document_command(host, cid)
     host._update_window_commands = lambda: MainWindow._update_window_commands(host)
+    host._name_full_screen = lambda: MainWindow._name_full_screen(host)
     bold.setEnabled(False)          # as the document left it
     MainWindow._update_window_commands(host)
+    assert fullscreen.text() == "Enter Full Screen"     # named for the window in front
     assert not save.isEnabled() and not bold.isEnabled()
     assert copy.isEnabled()          # acts on the window in front
     assert sidebar.isEnabled() and sidebar.text() == "Hide Sidebar"
@@ -234,8 +235,13 @@ def test_the_documents_commands_are_dimmed_while_imports_is_in_front(window, mon
     MainWindow._toggle_window_sidebar(host)
     assert not window.act_sidebar.isChecked()
     assert sidebar.text() == "Show Sidebar"
+    window.showFullScreen()
+    MainWindow._update_window_commands(host)
+    assert fullscreen.text() == "Exit Full Screen"
+    window.showNormal()
     front["window"] = None           # the editor's window in front again
     MainWindow._update_window_commands(host)
+    assert fullscreen.text() == "Enter Full Screen"
     assert save.isEnabled() and not bold.isEnabled()
     assert not sidebar.isEnabled()
     assert host.act_close_tab.text() == "Close Tab"
@@ -279,8 +285,9 @@ def test_a_sheet_takes_the_edit_commands_and_keeps_its_window(window, monkeypatc
     closed = []
     window.close = lambda: closed.append(True)
     host = SimpleNamespace(
-        _imports_in_front=lambda: window, current_editor=lambda: None,
-        current_pdf_viewer=lambda: None, act_undo=QAction("Undo"), act_redo=QAction("Redo"))
+        _imports_in_front=lambda: window, _front_window=lambda: sheet,
+        current_editor=lambda: None, current_pdf_viewer=lambda: None,
+        act_undo=QAction("Undo"), act_redo=QAction("Redo"))
     MainWindow._update_undo_redo_buttons(host)
     assert host.act_undo.text() == "Undo" and host.act_undo.isEnabled()
     MainWindow._undo(host)
@@ -434,9 +441,25 @@ def test_copy_copies_the_link_of_every_post_an_action_applies_to(window):
 def test_full_screen_acts_on_the_window_in_front(window):
     """CP2 review L-a: View > Full Screen made the editor window behind
     full screen while the Imports window was in front."""
-    host = SimpleNamespace(_imports_in_front=lambda: window, showFullScreen=None,
-                           showNormal=None)
-    MainWindow._toggle_fullscreen(host, True)
+    host = SimpleNamespace(_imports_in_front=lambda: window, _name_full_screen=lambda: None)
+    MainWindow._toggle_fullscreen(host)
     assert window.isFullScreen()
-    MainWindow._toggle_fullscreen(host, False)
+    MainWindow._toggle_fullscreen(host)
     assert not window.isFullScreen()
+
+
+
+def test_command_w_closes_the_window(window):
+    # Every key the system binds to Close, Ctrl+W included (a shortcut set
+    # from the standard key alone got only Ctrl+F4 on Windows).
+    QTest.keyClick(window, Qt.Key_W, Qt.ControlModifier)
+    assert not window.isVisible()
+
+
+@pytest.mark.parametrize("command_id", [
+    "nostr.insert_mention", "edit.footnote_jump", "view.write", "view.preview", "view.split"])
+def test_the_commands_that_act_on_the_document_rest_while_imports_is_in_front(command_id):
+    # Review of the merge: with Imports in front, Insert Mention… stayed
+    # enabled and acted on the document behind, as did the footnote jump
+    # and Write, Preview and Split; Publish and Insert Image were dimmed.
+    assert MainWindow._is_document_command(MainWindow, command_id)

@@ -31,7 +31,7 @@ import weakref
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QFormLayout, QLabel, QLineEdit, QPlainTextEdit, QVBoxLayout, QWidget
 
 import announce
@@ -62,16 +62,18 @@ class Field:
 
 
 # In the order people think of them: who they are, how they look, where
-# else to find them. The labels are marked here and translated where shown.
+# else to find them. The labels are marked here and translated where shown;
+# they end in a colon, as every form's labels in MyEditor do, and a screen
+# reader gets them without it.
 FIELDS = (
-    Field("display_name", N_("Name"), N_("The name people see")),
-    Field("name", N_("Username"), N_("A short name, without spaces")),
-    Field("about", N_("About"), kind="about"),
-    Field("picture", N_("Picture"), N_("Address of an image, https://…"), kind="image"),
-    Field("banner", N_("Banner"), N_("Address of a wide image, https://…"), kind="image"),
-    Field("website", N_("Website"), "https://…", kind="link"),
-    Field("lud16", N_("Lightning Address"), N_("you@wallet.example"), kind="lightning"),
-    Field("nip05", N_("Nostr Address"), N_("you@example.com"), kind="address"),
+    Field("display_name", N_("Name:"), N_("The name people see")),
+    Field("name", N_("Username:"), N_("A short name, without spaces")),
+    Field("about", N_("About:"), kind="about"),
+    Field("picture", N_("Picture:"), N_("Address of an image, https://…"), kind="image"),
+    Field("banner", N_("Banner:"), N_("Address of a wide image, https://…"), kind="image"),
+    Field("website", N_("Website:"), "https://…", kind="link"),
+    Field("lud16", N_("Lightning address:"), N_("you@wallet.example"), kind="lightning"),
+    Field("nip05", N_("Nostr address:"), N_("you@example.com"), kind="address"),
 )
 
 # Older apps wrote the display name under this key; it is shown when the
@@ -209,6 +211,8 @@ class ProfileWindow(AssistantWindow):
         col.addWidget(self._form_note)
         form = QFormLayout()
         form.setSpacing(8)
+        # Labels right-aligned beside their fields, as in every form here.
+        form.setLabelAlignment(Qt.AlignRight)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         # A text box still reports a change while it is being destroyed;
         # through a weak reference that report never reaches a window that
@@ -228,7 +232,7 @@ class ProfileWindow(AssistantWindow):
                 edit = QLineEdit()
                 edit.setPlaceholderText(_(field.placeholder) if field.placeholder else "")
             edit.textChanged.connect(edited)
-            edit.setAccessibleName(_(field.label))
+            edit.setAccessibleName(_(field.label).rstrip(":").strip())
             error = text_label("", "error")
             error.hide()
             holder = QWidget()
@@ -345,8 +349,8 @@ class ProfileWindow(AssistantWindow):
                      "to a part of it this window doesn’t show. Close this window and open "
                      "Edit Profile again; it will offer to leave that part out.")
         else:
-            note = _("Your profile wasn’t saved: the signer didn’t sign it, or too few "
-                     "servers took it. Nothing was changed. Try again in a moment.")
+            note = _("Your profile wasn’t saved: your signer app didn’t sign it, or too "
+                     "few servers took it. Nothing was changed. Try again in a moment.")
         self._set_form_note(note, problem=True)
         self._show_form_page()
 

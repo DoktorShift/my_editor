@@ -56,6 +56,7 @@ from PySide6.QtWidgets import (
 from alerts import CANCEL, Button, ask, confirm_destructive, inform
 from atomic_file import save_text_document
 from alerts import DEFAULT as ALERT_DEFAULT
+import i18n
 from i18n import _
 from nostr import einundzwanzig_api as e21
 from nostr.einundzwanzig import (
@@ -66,6 +67,7 @@ from nostr.qr import make_qr_pixmap
 from nostr.ui.assistant import (
     DEFAULT, LEADING, NORMAL, AssistantWindow, busy_bar, link_button, page, text_label,
 )
+from nostr.ui.flow_layout import FlowLayout
 
 # Pages.
 OVERVIEW = "overview"
@@ -78,19 +80,19 @@ _QR_SIZE = 216
 _ASK_SIGNER = _("Approve the request in your signer app.")
 _ONE_MOMENT = _("One moment.")
 _SIGNER_MAY_ASK = _("Your signer app may ask you to approve.")
-_DEFAULT_NOTE = _("Membership belongs to your Nostr identity and runs for a calendar "
+_DEFAULT_NOTE = _("Membership belongs to your Nostr account and runs for a calendar "
                   "year. You renew it yourself; nothing is charged automatically.")
 
 
 def format_date(iso: str) -> str:
-    """``20 April 2024`` from ``2024-04-20`` (``20. April 2024`` in German);
-    the input unchanged if it is not a date."""
+    """``April 20, 2024`` from ``2024-04-20`` (``20. April 2024`` in German),
+    the language's own way of writing a day; the input unchanged if it is
+    not a date."""
     try:
         day = datetime.date.fromisoformat((iso or "")[:10])
     except ValueError:
         return iso or ""
-    month = e21.display_locale().standaloneMonthName(day.month)
-    return _("{day} {month} {year}").format(day=day.day, month=month, year=day.year)
+    return i18n.format_day(day)
 
 
 def _host(url: str) -> str:
@@ -235,7 +237,7 @@ class MembershipWindow(AssistantWindow):
         col.addWidget(text_label(
             _("EINUNDZWANZIG brings Bitcoiners together across the German-speaking "
               "world, with local meetups, education and exchange. Membership supports "
-              "the community and adds services to your Nostr identity.")))
+              "the community and adds services to your Nostr account.")))
         col.addSpacing(4)
         # Everything the association lists for its members, in its order.
         for service in MEMBER_SERVICES:
@@ -275,7 +277,8 @@ class MembershipWindow(AssistantWindow):
         self._set_overview_note(note)
         if not self._pubkey:
             buttons = [("not_now", _("Not Now"), NORMAL, self.reject),
-                       ("connect", _("Connect Signer…"), DEFAULT, self._ask_to_connect)]
+                       ("connect", _("Connect Signer App\u2026"), DEFAULT,
+                        self._ask_to_connect)]
         elif self._service == "unavailable":
             buttons = [("not_now", _("Not Now"), NORMAL, self.reject),
                        ("website", _("Join on the Website"), DEFAULT, self._join_on_website)]
@@ -288,8 +291,8 @@ class MembershipWindow(AssistantWindow):
 
     def _set_overview_note(self, note: str) -> None:
         if not self._pubkey:
-            note = note or _("Membership belongs to a Nostr identity. Connect your "
-                             "signer to join.")
+            note = note or _("Membership belongs to a Nostr account. Connect your "
+                             "signer app, or create an account, to join.")
         elif self._service == "unavailable":
             note = note or _("Joining in the app isn’t available right now. "
                              "You can join on the EINUNDZWANZIG website.")
@@ -912,17 +915,18 @@ class MembershipWindow(AssistantWindow):
         col.addWidget(self._member_note)
         col.addStretch(1)
 
-        links = QHBoxLayout()
-        links.setSpacing(16)
+        # In rows that wrap, so longer words (German) never clip them.
+        links = FlowLayout(spacing=16)
         self._receipt_link = link_button(_("Receipt"), self._open_receipt)
         self._details_link = link_button(
             _("Show Membership Details"), lambda: self._load_status(back=self._show_member))
         self._export_link = link_button(_("Export My Data…"), self._export)
         self._erase_link = link_button(_("Delete My Data…"), self._erase)
+        # Deleting is said in red, as a destructive button is.
+        self._erase_link.setProperty("tone", "destructive")
         for link in (self._receipt_link, self._details_link, self._export_link,
                      self._erase_link):
             links.addWidget(link)
-        links.addStretch(1)
         col.addLayout(links)
         self.add_page(MEMBER, body)
 

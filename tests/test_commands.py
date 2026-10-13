@@ -239,16 +239,18 @@ def test_menu_titles_follow_title_case_and_no_em_dashes(main_window_commands):
             assert word[0].isupper() or not word[0].isalpha(), command.title
 
 
-def test_only_about_and_quit_move_to_the_macos_application_menu(main_window_commands):
+def test_only_about_settings_and_quit_move_to_the_macos_application_menu(
+        main_window_commands):
     # Qt guesses an action's place from its words unless told; a German
     # title starting with "Einstellungen" or "Optionen" would otherwise be
-    # moved out of its menu on a Mac.
+    # moved out of its menu on a Mac. Settings is told, and goes there.
     roles = {c.id: c.role for c in main_window_commands.commands.commands()}
     assert roles.pop("help.about") == QAction.MenuRole.AboutRole
     assert roles.pop("file.quit") == QAction.MenuRole.QuitRole
+    assert roles.pop("app.settings") == QAction.MenuRole.PreferencesRole
     assert set(roles.values()) == {QAction.MenuRole.NoRole}
     by_id = {c.id: c for c in main_window_commands.commands.commands()}
-    for command_id in ("help.about", "file.quit", "file.save"):
+    for command_id in ("help.about", "file.quit", "app.settings", "file.save"):
         action = main_window_commands.commands.action(command_id)
         assert action.menuRole() == by_id[command_id].role
 
@@ -415,10 +417,14 @@ def test_each_platform_gets_its_own_conventions(qt_app, monkeypatch, platform, k
 def test_the_app_invented_view_keys_are_retired(fresh_window):
     # No platform convention gives these a key; Shift-Command-L is Notes'
     # Checklist. The menu items stay.
-    for command_id in ("view.theme", "view.line_numbers", "view.syntax_highlighting"):
+    for command_id in ("view.line_numbers", "view.syntax_highlighting"):
         action = fresh_window.commands.action(command_id)
         assert action.shortcut().isEmpty(), command_id
         assert action in fresh_window.m_view.actions()
+    for mode in ("system", "light", "dark"):
+        action = fresh_window.commands.action(f"view.appearance.{mode}")
+        assert action.shortcut().isEmpty(), mode
+        assert action in fresh_window.m_appearance.actions()
 
 
 def test_imports_is_in_the_nostr_menu_without_a_shortcut(main_window_commands):
@@ -455,3 +461,36 @@ def test_the_welcome_page_names_the_keys_the_platform_way(fresh_window):
     page = welcome_html(keys)
     assert f"<b>{native}</b>" in page
     assert "<b>⌘N</b>" in welcome_html({"file.new": "⌘N"})
+
+
+def test_the_welcome_page_says_where_publishing_lives_and_sells_no_local_colors():
+    """The first page names the writing keys and, in one line of the same
+    list, where publishing starts (the Nostr menu, the one way in), with
+    nothing of Nostr to click and none of its words (review, decision 2:
+    a 50-word paragraph about signer apps, Drafts and Imports was the most
+    Nostr anyone saw before choosing it). Colors stay in local files and
+    are not advertised."""
+    from welcome import welcome_html
+    page = welcome_html()
+    assert "View &gt; Appearance" in page or "View > Appearance" in page
+    nostr = [line for line in page.splitlines() if "Nostr" in line]
+    assert nostr == ["        <li>Nostr menu - publish your writing, when you want to</li>"]
+    assert "signer" not in page and "Drafts" not in page and "Imports" not in page
+    assert "<a " not in page                       # nothing to click: the menu is the door
+    assert "Colors" not in page and "color:" not in page
+
+
+def test_close_tab_answers_every_key_the_system_binds_to_close(main_window_commands):
+    # On Windows, apps with tabs close one with Ctrl+F4 as well as Ctrl+W;
+    # Close Tab takes the system's own list, as the other windows' Close does.
+    # Its main key, the one menus and Keyboard Shortcuts show, stays Ctrl+W
+    # (Command-W) on every system, as in Notepad and Word (review S2: Qt's
+    # Windows list starts with Ctrl+F4, which the test platform uses).
+    action = main_window_commands.act_close_tab
+    keys = {k.toString() for k in action.shortcuts()}
+    expected = {k.toString() for k in QKeySequence.keyBindings(QKeySequence.StandardKey.Close)}
+    assert keys == expected and "Ctrl+W" in keys
+    assert action.shortcut() == QKeySequence("Ctrl+W")
+    listed = dict((words, keys) for _group, rows in main_window_commands.commands.shortcut_groups()
+                  for keys, words in rows)
+    assert listed["Close tab"] == "Ctrl+W"

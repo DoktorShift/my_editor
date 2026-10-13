@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -112,6 +113,7 @@ _GROUP_TITLES = {
     "Insert": pgettext("shortcut group", "Insert"),
     "Search": pgettext("shortcut group", "Search"),
     "View": pgettext("shortcut group", "View"),
+    "Window": pgettext("shortcut group", "Window"),
     "Help": pgettext("shortcut group", "Help"),
     "PDF Reading": pgettext("shortcut group", "PDF Reading"),
 }
@@ -430,9 +432,11 @@ class _ShortcutCard(QFrame):
 class ShortcutsDialog(QDialog):
     """Help → Keyboard Shortcuts.
 
-    A modal cheat sheet styled like the keyboard-shortcuts pages found
-    in major desktop applications: category cards laid out in two
-    columns, kbd-style key caps, and a live search across all groups.
+    A reference window styled like the keyboard-shortcuts pages found in
+    major desktop applications: category cards laid out in two columns,
+    kbd-style key caps, and a live search across all groups. It is not
+    modal: it stays open beside the document, so a key can be tried
+    while it is up.
     """
 
     def __init__(self, groups, *, is_dark: bool = True,
@@ -441,7 +445,7 @@ class ShortcutsDialog(QDialog):
         self._groups = tuple(groups)
         self.setObjectName("shortcuts_dialog")
         self.setWindowTitle(_("Keyboard Shortcuts"))
-        self.setModal(True)
+        self.setModal(False)
         # Wide-and-tall by default so all six categories fit without
         # scrolling on the common laptop resolutions. The dialog is
         # resizable so users on small screens can still see everything.
@@ -496,9 +500,7 @@ class ShortcutsDialog(QDialog):
         # Build every card up front; ``_reflow_cards`` decides where
         # each one sits in the two-column grid. Reflow runs on every
         # filter change so hidden cards don't leave holes in the layout.
-        for group in self._groups:
-            self._cards.append(_ShortcutCard(group))
-        self._reflow_cards()
+        self._make_cards()
 
         scroll.setWidget(inner)
         root.addWidget(scroll, 1)
@@ -519,6 +521,8 @@ class ShortcutsDialog(QDialog):
         close_btn.setDefault(True)
         close_btn.clicked.connect(self.accept)
         root.addWidget(buttons)
+        # Command-W (Ctrl+W) closes it, as it does any window.
+        QShortcut(QKeySequence.StandardKey.Close, self).activated.connect(self.close)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -537,6 +541,21 @@ class ShortcutsDialog(QDialog):
     def apply_theme(self, is_dark: bool) -> None:
         self._is_dark = is_dark
         self.setStyleSheet(_DARK_CSS if is_dark else _LIGHT_CSS)
+
+    def set_groups(self, groups) -> None:
+        """List ``groups`` instead, keeping the filter typed: the window
+        stays open while Nostr comes into use or goes out of it, and lists
+        only the keys that work."""
+        for card in self._cards:
+            self._cards_grid.removeWidget(card)
+            card.deleteLater()
+        self._groups = tuple(groups)
+        self._make_cards()
+        self._on_filter_changed(self._search.text())
+
+    def _make_cards(self) -> None:
+        self._cards = [_ShortcutCard(group) for group in self._groups]
+        self._reflow_cards()
 
     def _on_filter_changed(self, text: str) -> None:
         total_visible = 0

@@ -317,7 +317,7 @@ def test_without_a_price_the_fee_stays_as_the_association_states_it():
 def test_without_a_signer_the_way_on_is_connecting_one():
     win = window(pubkey=None)
     asked = recorder(win.connect_requested)
-    assert default_button(win).text() == "Connect Signer…"
+    assert default_button(win).text() == "Connect Signer App…"
     default_button(win).click()
     assert asked == [()]
 
@@ -397,7 +397,8 @@ def test_the_application_waits_for_the_statutes():
     win = window(api)
     to_apply(win, api)
     assert win.page == APPLY
-    assert "Version 1.3, adopted 20 April 2024." == win._statutes_label.text()
+    # The language's own way of writing a day, not a padded fixed pattern.
+    assert "Version 1.3, adopted April 20, 2024." == win._statutes_label.text()
     send = win.buttons["send"]
     assert not send.isEnabled()
     win._consent.setChecked(True)
@@ -943,3 +944,18 @@ def test_a_page_is_never_cut_off_at_the_side(long_note):
     assert win._scroll.geometry().right() <= win.width()
     assert win._pay_intro.width() <= win._scroll.viewport().width()
     win.close()
+
+
+def test_the_data_links_wrap_whole_and_delete_is_said_in_red(qt_app):
+    """German link titles clipped at both ends of one row; they wrap now.
+    Deleting the membership data is said in the destructive red."""
+    win = window(FakeApi(), known_member=True)
+    win.show()
+    qt_app.processEvents()
+    try:
+        for link in (win._details_link, win._export_link, win._erase_link):
+            if link.isVisible():
+                assert link.width() >= link.sizeHint().width(), link.text()
+        assert win._erase_link.property("tone") == "destructive"
+    finally:
+        win.close()

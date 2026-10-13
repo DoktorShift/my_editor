@@ -182,7 +182,7 @@ r["note_tabs"] = w.tabs.count() - count
 
 view.status_message.emit("Asked 3 relays to delete it.")
 r["status_from_view"] = w.statusBar().currentMessage()
-w._set_theme(not w.is_dark_theme, announce=False)
+w._set_theme(not w.is_dark_theme)
 r["view_follows_theme"] = view.is_dark == w.is_dark_theme
 
 for i in range(w.tabs.count()):

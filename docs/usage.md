@@ -43,7 +43,7 @@ On macOS, `Ctrl` in these tables is the Command key (`⌘`) and `Alt` is Option 
 
 Writing (Markdown files, new documents and drafts) is set in your system's own text font at a reading size, in a column of a comfortable line length, with the thin insertion point of a word processor; plain text and code files keep the monospace font across the whole window, and its block caret. `View > Use Monospace Font for Writing` sets all writing in monospace.
 
-The status bar says, quietly, how long the document is: its words and how long it takes to read (225 words a minute, as the long-form Nostr readers count), or how many words are selected.
+The status bar says, quietly, how long the document is: its words and how long it takes to read (225 words a minute, as the long-form Nostr readers count), or how many words are selected. In code and plain text it also shows the language and the line the caret is on. Where a file is saved is in its tab's tooltip, and in the window's title bar as its name.
 
 The **format toolbar** above the document holds the controls used most: the paragraph style (Body, Heading 1 to 3), Bold, Italic, Strikethrough, Add Link, Bulleted List, Numbered List, Checklist and Quote. Everything else is in the `Format` and `Insert` menus. `View > Show Toolbar` (`Ctrl+Alt+T` on macOS) hides it; a PDF tab has none.
 
@@ -144,20 +144,22 @@ Lists are real lists, written to Markdown as `- item` and `1. item`, nested by f
 
 **Write, Preview and Split.** A document that holds Markdown can be shown as you write it, as it reads, or both side by side: `View > Write`, `View > Preview` and `View > Split`, also the switch at the right end of the format toolbar. The preview is drawn from the document's Markdown, the same way the publish preview draws it, and follows your typing. While a Nostr account is in use it shows what will be published, as an article (cover, title, summary, byline, the text and hashtags) or as a note (`Preview As`), and says what your readers will not see the way it looks in the editor: pictures not uploaded yet, a first heading that repeats the title. Split needs room for two readable columns; in a narrower window the side you used last shows, the switch flips between writing and reading, and the two come back side by side when the window is wide enough again. Your choice is remembered. In Preview, nothing edits the hidden text (not even Undo; Copy and Select All work on the preview), and Find works in Write and Split. A Markdown file that opens as its text (one with raw HTML in it, for example) has its preview too, drawn from that text. Plain-text, code and R Markdown files show only their text.
 
-The **`View`** menu holds the appearance options: theme, line numbers, syntax highlighting, background style (lined, dashed, dotted, grid), paper mode, and highlight current line. Nothing around the document repeats a menu: the window shows the format toolbar, the tabs and the text.
+The **`View`** menu holds the appearance options: `View > Appearance` (Automatic follows your computer's light or dark appearance as it changes; Light and Dark stay as chosen), line numbers, syntax highlighting, background style (lined, dashed, dotted, grid), paper mode, and highlight current line. Nothing around the document repeats a menu: the window shows the format toolbar, the tabs and the text.
+
+**Settings** (`MyEditor > Settings…` on a Mac, `Cmd+,`; `Edit > Settings…` on Windows and Linux, `Ctrl+,`) gathers the choices you make once: the appearance, the language, the writing font, and, while a Nostr account is in use, what happens to a pasted image (ask every time, upload it, or keep it local). Each choice applies at once, and each is also in its menu.
 
 `Help > Keyboard Shortcuts` lists every shortcut as it is on the computer in use: on a Mac in Apple's symbols (`⇧⌘S`), elsewhere with your keyboard's key names (`Strg+Umschalt+S` on a German one). It is built from the same command list as the menus (`commands.py`), so the two always agree; the Nostr shortcuts appear there once an account is in use.
 
 ### Nostr
 
-The Nostr commands have no shortcuts of their own: no platform has a convention for them. They are in the `Nostr` menu (and in Help > Keyboard Shortcuts' search): Publish as Note…, Publish as Article…, Media Library…, Insert Image…, Drafts…. Refresh Drafts is the one exception: it answers the system's own Refresh key.
+The Nostr commands have no shortcuts of their own: no platform has a convention for them. They are in the `Nostr` menu (and in Help > Keyboard Shortcuts' search): Publish as Note…, Publish as Article…, Media Library…, Insert Image…, Drafts. Refresh Drafts is the one exception: it answers the system's own Refresh key.
 
 | Shortcut | Action |
 |---|---|
 | `Ctrl+R` (Command-R) on macOS, `F5` elsewhere | Refresh the Drafts panel's view (Nostr > Refresh Drafts, named for the view shown) |
 | `Ctrl+Shift+S` | Save current document (chooser: local file or private Nostr draft) |
 
-The **`Nostr`** menu also exposes `Drafts…`, `Refresh Drafts`, `Draft Relays…`, `Connect Signer…`, and `Sign Out Active Profile` for managing identities. While an account is in use, its avatar sits at the right end of the tab row: a one-click profile switcher. See the [Nostr guide](nostr.md) for the full workflow.
+The **`Nostr`** menu also holds `Drafts`, `Refresh Drafts`, `Draft Relays…`, the ways to an account (`Create Account…`, `Connect Signer App…`, `Restore Account…`) and the account in use (`Edit Profile…`, `Back Up Account…`, `Sign Out`). Until an account is in use, the commands that act for one are dimmed. While an account is in use, its avatar sits at the right end of the tab row: a one-click account switcher. See the [Nostr guide](nostr.md) for the full workflow.
 
 ---
 
@@ -258,7 +260,7 @@ Files are saved when you choose Save. What you type is backed up as you go (two 
 
 ## R Markdown knitting
 
-`.Rmd` tabs get `File > Knit to HTML` (`Ctrl+Shift+K`) and `File > Knit to PDF`.
+`.Rmd` tabs get `File > R Markdown > Knit to HTML` (`Ctrl+Shift+K`) and `File > R Markdown > Knit to PDF`.
 Knitting saves the tab, then renders the file through `rmarkdown::render` and
 opens the result.
 
@@ -268,4 +270,4 @@ private app library. Nothing is downloaded without confirmation, and an existing
 system R is always preferred over downloading one. Knit to PDF additionally
 needs LaTeX, offered as an optional TinyTeX install (about 100 MB).
 
-`File > R Markdown Toolchain…` shows the status of all components at any time.
+`File > R Markdown > R Markdown Toolchain…` shows the status of all components at any time.

@@ -16,7 +16,8 @@ uses too). It lets go of the clipboard before it ends
 (``release_clipboard``, as the test run does).
 
 The script gets the repository folder and ``args`` as its arguments and
-prints its result as one line: ``RESULT`` and the JSON.
+prints its result as one line: ``RESULT`` and the JSON. A run made as
+Windows and Linux see it (MYEDITOR_TEST_AS) is so in the child too.
 """
 
 from __future__ import annotations
@@ -29,6 +30,16 @@ from typing import MutableMapping
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# Run at the start of every child's script: a run made as Windows and Linux
+# see it (MYEDITOR_TEST_AS, tests/conftest.py) is so in the child too.
+CHILD_PROLOGUE = (
+    "import os as _os, sys as _sys\n"
+    "if _os.environ.get('MYEDITOR_TEST_AS') == 'linux':\n"
+    "    _sys.platform = 'linux'\n"
+    "elif _os.environ.get('MYEDITOR_TEST_AS') == 'other':\n"
+    "    _sys.path.insert(0, _sys.argv[1])\n"
+    "    import alerts as _alerts\n"
+    "    _alerts.IS_MAC = False\n")
 # Run at the end of every child's script.
 CHILD_EPILOGUE = "\nfrom tests.app_process import release_clipboard\nrelease_clipboard()\n"
 
@@ -73,7 +84,8 @@ def child_env(home) -> dict:
 def run_window_script(script: str, home, *args: str, timeout: float = 120) -> dict:
     """Run ``script`` with ``home`` as its home folder and return what it
     printed on its RESULT line."""
-    proc = subprocess.run([sys.executable, "-c", script + CHILD_EPILOGUE, REPO, *args],
+    proc = subprocess.run([sys.executable, "-c", CHILD_PROLOGUE + script + CHILD_EPILOGUE,
+                           REPO, *args],
                           env=child_env(home), capture_output=True, text=True,
                           timeout=timeout)
     result = next((out for out in proc.stdout.splitlines() if out.startswith("RESULT ")), None)

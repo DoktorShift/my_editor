@@ -620,7 +620,7 @@ class TestBlossomRehost(unittest.TestCase):
         failed = [p for p in progress if p.status == "failed"]
         self.assertEqual(
             [p.error for p in failed],
-            ["signer declined the request to the media server: user declined"],
+            ["Your signer app declined the request to the media server: user declined"],
         )
 
 

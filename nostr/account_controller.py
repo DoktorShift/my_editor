@@ -34,8 +34,8 @@ from typing import Callable, Dict, Optional
 import shiboken6
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from alerts import CANCEL, DEFAULT, Button, ask, confirm_destructive, inform
-from i18n import _, ngettext
+from alerts import CANCEL, DEFAULT, DESTRUCTIVE, Button, ask, confirm_destructive, inform
+from i18n import _
 from nostr.outbox import writer as outbox_writer
 from nostr.outbox.defaults import STARTER_LIST
 from nostr.outbox.lookup import fetch_replaceable
@@ -194,7 +194,7 @@ class AccountController(QObject):
         """Pair a signer app for Create Account, over its window. Nothing is
         saved here: the window checks the account first."""
         dialog = ConnectDialog(self._relay_pool, self._store, parent=parent or self._window,
-                               is_dark=self._is_dark(), persist=False, start_on_qr=True,
+                               is_dark=self._is_dark(), persist=False,
                                offer_alternatives=False)
         dialog.profile_connected.connect(on_profile)
         try:
@@ -294,14 +294,11 @@ class AccountController(QObject):
 
         def relays_known(relay_list) -> None:
             state["relays"] = relay_list
+            # In plain words: the step says what was looked for.
             if relay_list.found:
-                count = len(relay_list.write)
-                window.step(STEP_RELAYS, "done",
-                            ngettext("Found, with {count} relay to write to.",
-                                     "Found, with {count} relays to write to.",
-                                     count).format(count=count))
+                window.step(STEP_RELAYS, "done", _("Found."))
             elif relay_list.state is LookupState.ABSENT:
-                window.step(STEP_RELAYS, "done", _("This account has no relay list yet."))
+                window.step(STEP_RELAYS, "done", _("None yet."))
             else:
                 window.step(STEP_RELAYS, "error", _("Couldn’t check right now."))
             window.step(STEP_PROFILE, "active")
@@ -344,10 +341,11 @@ class AccountController(QObject):
             return
         hosts = ", ".join(url.split("://", 1)[1] for url, _marker in STARTER_LIST)
         choice = ask(
-            self._window, title=_("Publish a relay list for this account?"),
-            message=_("Other Nostr apps use a relay list to find your notes and "
-                      "articles, and this account doesn’t have one yet. MyEditor "
-                      "can publish its recommended relays: {hosts}.").format(hosts=hosts),
+            self._window, title=_("Tell Nostr apps where your posts are?"),
+            message=_("Other Nostr apps find your notes and articles through a "
+                      "relay list, and this account doesn’t have one yet. MyEditor "
+                      "can publish one with its recommended relays: {hosts}."
+                      ).format(hosts=hosts),
             buttons=(Button(_("Not Now"), False, CANCEL),
                      Button(_("Publish Relay List"), True, DEFAULT)),
             is_dark=self._is_dark())
@@ -392,9 +390,11 @@ class AccountController(QObject):
                       "MyEditor still keeps a copy of it on this computer. Deleting it "
                       "leaves the key only where you approve what is signed."
                       ).format(name=name),
-            buttons=(Button(_("Keep Key"), False, CANCEL),
-                     Button(_("Delete Key"), True, DEFAULT)),
-            is_dark=self._is_dark())
+            # Deleting is the person's own choice, never the default:
+            # without a backup, the signer app would hold the only copy.
+            buttons=(Button(_("Delete Key"), True, DESTRUCTIVE),
+                     Button(_("Keep Key"), False, DEFAULT)),
+            caution=True, is_dark=self._is_dark())
         if choice is True:
             self._forget_key(profile.user_pubkey)
 
@@ -424,7 +424,8 @@ class AccountController(QObject):
         elif has_key:
             confirmed = confirm_destructive(
                 self._window, title=title,
-                message=_("Your key stays in your signer. MyEditor forgets this connection "
+                message=_("Your key stays in your signer app. MyEditor forgets this "
+                          "connection "
                           "and deletes the copy of the key it keeps on this computer."),
                 action=_("Sign Out and Delete Key"), is_dark=self._is_dark())
         elif profile.is_local:
@@ -436,7 +437,7 @@ class AccountController(QObject):
         else:
             confirmed = confirm_destructive(
                 self._window, title=title,
-                message=_("Your key stays in your signer. MyEditor only forgets "
+                message=_("Your key stays in your signer app. MyEditor only forgets "
                           "this connection."),
                 action=_("Sign Out"), is_dark=self._is_dark())
         if not confirmed:

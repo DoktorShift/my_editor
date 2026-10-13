@@ -76,7 +76,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from alerts import confirm_destructive
+from alerts import answer_return_as_the_system_does, confirm_destructive
 from i18n import _, ngettext
 
 from ..draft_relays import (
@@ -156,7 +156,7 @@ class DraftRelaysSheet(AssistantWindow):
         under_list = QHBoxLayout()
         under_list.addStretch(1)
         self._remove = QPushButton(_("Remove"))
-        self._remove.setAutoDefault(False)
+        answer_return_as_the_system_does([self._remove])
         self._remove.clicked.connect(self._remove_selected)
         under_list.addWidget(self._remove)
         column.addLayout(under_list)
@@ -170,7 +170,7 @@ class DraftRelaysSheet(AssistantWindow):
         self._field.textChanged.connect(self._on_typing)
         self._field.installEventFilter(self)
         self._add = QPushButton(_("Add"))
-        self._add.setAutoDefault(False)
+        answer_return_as_the_system_does([self._add])
         self._add.clicked.connect(self._add_typed)
         add_row.addWidget(label)
         add_row.addWidget(self._field, 1)
@@ -205,7 +205,7 @@ class DraftRelaysSheet(AssistantWindow):
         under_left = QHBoxLayout()
         under_left.addStretch(1)
         self._stop_looking = QPushButton(_("Stop Looking…"))
-        self._stop_looking.setAutoDefault(False)
+        answer_return_as_the_system_does([self._stop_looking])
         self._stop_looking.clicked.connect(self._stop_looking_on_selected)
         under_left.addWidget(self._stop_looking)
         left_column.addLayout(under_left)

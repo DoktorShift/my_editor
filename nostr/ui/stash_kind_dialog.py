@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
 
 import announce
 import theme
+from alerts import answer_return_as_the_system_does, start_on_default
 from i18n import _
 
 from ..drafts import (
@@ -137,9 +138,6 @@ QPushButton {
 QPushButton:hover { background: #3C3C3C; }
 QPushButton:pressed { background: #1E1E1E; }
 QPushButton:disabled { background: #252526; color: #6A6A6A; border-color: #2D2D2D; }
-QPushButton:default { background: #007ACC; color: #FFFFFF; border-color: #1177C7; }
-QPushButton:default:hover { background: #1177C7; }
-QPushButton:default:disabled { background: #2D4F69; color: #8A9BA8; border-color: #2D4F69; }
 """
 
 _LIGHT_CSS = """
@@ -197,9 +195,6 @@ QPushButton {
 QPushButton:hover { background: #E1E1E1; }
 QPushButton:pressed { background: #D0D0D0; }
 QPushButton:disabled { background: #F8F8F8; color: #BBBBBB; border-color: #EBEBEB; }
-QPushButton:default { background: #0078D4; color: #FFFFFF; border-color: #1066B4; }
-QPushButton:default:hover { background: #1066B4; }
-QPushButton:default:disabled { background: #BDD9F0; color: #FFFFFF; border-color: #BDD9F0; }
 """
 
 
@@ -222,6 +217,7 @@ def _field(label_text: str, edit: QLineEdit) -> QWidget:
     layout.setSpacing(4)
     label = QLabel(label_text)
     label.setObjectName("stash_kind_field_label")
+    label.setBuddy(edit)            # a screen reader names the field by it
     layout.addWidget(label)
     layout.addWidget(edit)
     return container
@@ -252,8 +248,10 @@ class _KindCard(QFrame):
         head = QHBoxLayout()
         head.setContentsMargins(0, 0, 0, 0)
         head.setSpacing(8)
+        # The card's radio takes the focus, so the kinds are reached with
+        # Tab and chosen with the arrow keys, as in any radio group.
         self.radio = QRadioButton()
-        self.radio.setFocusPolicy(Qt.NoFocus)
+        self.radio.setAccessibleName(title)
         head.addWidget(self.radio, 0, Qt.AlignVCenter)
         self.title_label = QLabel(title)
         self.title_label.setObjectName("stash_kind_option")
@@ -339,6 +337,9 @@ class StashKindDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 22, 24, 18)
         root.setSpacing(14)
+        # The window takes the height its wrapped hints need at its width,
+        # so no hint is ever cut off, in any language (as Settings does).
+        root.setSizeConstraint(QVBoxLayout.SizeConstraint.SetFixedSize)
 
         title = QLabel(_("Save as Nostr draft"))
         title.setObjectName("stash_kind_title")
@@ -359,16 +360,16 @@ class StashKindDialog(QDialog):
         self._note_card = _KindCard(
             title=_("Short note"),
             hint=_(
-                "Quick thought, plain text. Kind 1 when published. "
-                "No slug: the draft is identified by a private UUID."
+                "A quick thought, as plain text. Published as a note. "
+                "No slug: the draft gets a private identifier."
             ),
         )
         self._article_card = _KindCard(
             title=_("Long-form article"),
             hint=_(
-                "Markdown post with a stable slug. Kind 30023 when "
-                "published; the slug ties the draft to the eventual "
-                "article so re-stashing replaces in place."
+                "A Markdown post with a fixed slug. Published as an "
+                "article. The slug ties the draft to the article it "
+                "becomes, so saving it again replaces it."
             ),
         )
         self._group.addButton(self._note_card.radio, 0)
@@ -427,17 +428,27 @@ class StashKindDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
         self._save_btn = buttons.button(QDialogButtonBox.Ok)
         self._save_btn.setText(_("Save draft"))
-        self._save_btn.setDefault(True)
+        answer_return_as_the_system_does(buttons.buttons())
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
-
         self._refresh_save_enabled()
+        # It opens on its action, so Return saves and Space does too; an
+        # article without a title yet opens on its title, which Save waits
+        # for (the focus would otherwise fall to Cancel, which on Windows
+        # and Linux then takes the default).
+        if self._save_btn.isEnabled():
+            start_on_default(self._save_btn)
+        else:
+            self._title_edit.setFocus()
 
     def _apply_theme(self) -> None:
+        # The default button, its focus ring and its dimmed state from the
+        # one place every dialog takes them (theme.py).
         error = theme.error_text_color(self._is_dark)
         self.setStyleSheet((_DARK_CSS if self._is_dark else _LIGHT_CSS)
-                           + f"QLabel#stash_kind_error {{ color: {error}; font-size: 11px; }}")
+                           + f"QLabel#stash_kind_error {{ color: {error}; font-size: 11px; }}"
+                           + theme.default_and_focus_css(self._is_dark))
 
     # -- behaviour ---------------------------------------------------------
 

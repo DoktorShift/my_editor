@@ -70,6 +70,13 @@ def alert(tmp_path):
                  checkbox="Don’t ask again", is_dark=False)
 
 
+def alert_with_details(tmp_path):
+    return Alert(None, title="Couldn’t publish", message="No relay answered.",
+                 buttons=(Button("Cancel", "cancel", CANCEL),
+                          Button("Try Again", "retry", DEFAULT)),
+                 details="wss://relay.example: timed out", is_dark=False)
+
+
 def shortcuts(tmp_path):
     return ShortcutsDialog(groups_from([("Editing", [("Ctrl+B", "Bold")])]), is_dark=False)
 
@@ -81,7 +88,7 @@ def draft_relays(tmp_path):
 
 
 WINDOWS = [membership, profile, backup, create, restore, move_to_signer, connect, update,
-           alert, shortcuts, draft_relays]
+           alert, alert_with_details, shortcuts, draft_relays]
 
 
 @pytest.mark.parametrize("make", WINDOWS, ids=[w.__name__ for w in WINDOWS])
