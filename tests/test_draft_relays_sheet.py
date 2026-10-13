@@ -120,6 +120,11 @@ class Lists(QObject):
         on_done(outcome)
 
 
+def settle():
+    for _ in range(6):
+        QApplication.processEvents()
+
+
 def open_sheet(lists):
     sheet = DraftRelaysSheet(lists, is_dark=False)
     sheet.show()
@@ -515,3 +520,30 @@ def test_the_relays_still_looked_at_follow_a_move_in_the_background():
     lists.left_behind_changed.emit()                        # its drafts moved
     assert sheet._left_list.count() == 0 and not sheet._left.isVisibleTo(sheet)
 
+
+
+@pytest.mark.parametrize("mac", [True, False])
+def test_a_button_that_dims_itself_hands_the_focus_to_save(monkeypatch, mac):
+    # Review L1 of the merge: on Windows and Linux, Return pressed the
+    # focused Use My Usual Relays, which then dimmed itself; the focus fell
+    # to Cancel, which took the default, and the next Return dropped the
+    # change. The focus goes to the sheet's action, Save, on every system
+    # (on a Mac the focused button is pressed with Space).
+    import alerts
+    monkeypatch.setattr(alerts, "IS_MAC", mac)
+    sheet, saved = open_sheet(Lists([MINE]))
+    sheet.activateWindow()
+    settle()                                        # in front, as when a person uses it
+    try:
+        usual = sheet.buttons["usual"]
+        usual.setFocus(Qt.FocusReason.TabFocusReason)
+        settle()
+        QTest.keyClick(QApplication.focusWidget(),
+                       Qt.Key.Key_Space if mac else Qt.Key.Key_Return)
+        settle()
+        assert not usual.isEnabled()                    # pressed, and dimmed itself
+        assert QApplication.focusWidget() is sheet._action
+        assert sheet._action.text() == "Save"
+    finally:
+        sheet._generation += 1
+        sheet.reject()

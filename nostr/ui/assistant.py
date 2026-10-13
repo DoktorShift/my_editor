@@ -35,6 +35,7 @@ import atexit
 import sys
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
+import shiboken6
 from PySide6.QtCore import QEvent, QMimeData, QSize, Qt, QTimer
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
@@ -132,7 +133,9 @@ def link_button(text: str, handler: Callable[[], None]) -> QPushButton:
     with the page's buttons."""
     button = QPushButton(text)
     button.setObjectName("link")
-    answer_return_as_the_system_does([button])
+    # A link is not one of the window's buttons: it never takes Return
+    # from the window's action, on any system (Space still presses it).
+    button.setAutoDefault(False)
     button.setCursor(Qt.PointingHandCursor)
     button.clicked.connect(handler)
     return button
@@ -410,6 +413,11 @@ class AssistantWindow(QDialog):
         self._pages: Dict[str, QWidget] = {}
         self.buttons: Dict[str, QPushButton] = {}
         self._button_widgets: List[QPushButton] = []
+        self._action: Optional[QPushButton] = None
+        # Where the focus fell when a button dimmed itself and no action
+        # could take it yet (see _on_focus_moved).
+        self._fell_to: Optional[QWidget] = None
+        QApplication.instance().focusChanged.connect(self._on_focus_moved)
 
         self._stack = _ShownPageStack()
         # A page taller than the screen scrolls, so the buttons stay in
@@ -438,6 +446,37 @@ class AssistantWindow(QDialog):
     def page(self) -> Optional[str]:
         return self._page
 
+    def _on_focus_moved(self, old, new) -> None:
+        """A button of this window that dims itself or goes (its row laid
+        out again) while it has the focus hands the focus to the window's
+        action, the button Return chooses at rest. Qt moves it on to the
+        next control instead, a link or Cancel, and on Windows and Linux
+        Return would then press that one. While the window has no action to
+        take it (Choose File… while a file is read), it is given to the
+        next one laid out, or to the action once it is lit again (Save,
+        dimmed until the form changes), unless the person has moved the
+        focus meanwhile."""
+        if new is not self._fell_to:
+            self._fell_to = None
+        if (isinstance(old, QPushButton) and shiboken6.isValid(old)
+                and (not old.isEnabled() or old.isHidden())
+                and old.window() is self and new is not None and new.window() is self):
+            if self._action_can_take_focus() and self._action is not old:
+                self._action.setFocus(Qt.FocusReason.OtherFocusReason)
+            else:
+                self._fell_to = new
+
+    def _action_can_take_focus(self) -> bool:
+        action = self._action
+        return (action is not None and shiboken6.isValid(action)
+                and action.isEnabled() and not action.isHidden())
+
+    def _give_owed_focus(self) -> None:
+        if (self._fell_to is not None and QApplication.focusWidget() is self._fell_to
+                and self._action_can_take_focus()):
+            self._fell_to = None
+            self._action.setFocus(Qt.FocusReason.OtherFocusReason)
+
     def add_page(self, key: str, widget: QWidget) -> None:
         self._pages[key] = widget
         self._stack.addWidget(widget)
@@ -449,6 +488,8 @@ class AssistantWindow(QDialog):
         if (event.type() == QEvent.Type.LayoutRequest
                 and watched is self._stack.currentWidget()):
             self.fit_page()
+        elif event.type() == QEvent.Type.EnabledChange and watched is self._action:
+            self._give_owed_focus()
         return super().eventFilter(watched, event)
 
     def show_page(self, key: str, buttons: Iterable[ButtonSpec]) -> None:
@@ -538,12 +579,16 @@ class AssistantWindow(QDialog):
         while self._button_row.count():
             self._button_row.takeAt(0)
         self.buttons = {}
+        self._action = None
 
         def make(key, label, placement, handler):
             button = QPushButton(label)
             # Return as the system's own dialogs answer it (alerts.py).
             answer_return_as_the_system_does([button])
             button.setDefault(placement == DEFAULT)
+            if placement == DEFAULT:
+                self._action = button
+                button.installEventFilter(self)     # lit again: see _give_owed_focus
             button.clicked.connect(handler)
             self.buttons[key] = button
             self._button_widgets.append(button)
@@ -557,4 +602,7 @@ class AssistantWindow(QDialog):
             for spec in specs:
                 if spec[2] == placement:
                     self._button_row.addWidget(make(*spec))
+        # Once the new row is on screen (a button added to a shown window
+        # shows a moment later).
+        QTimer.singleShot(0, self, self._give_owed_focus)
         self.fit_page()             # the new buttons may need a wider window
