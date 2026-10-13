@@ -4996,7 +4996,6 @@ msgstr "Übersprungen"
 
 #: nostr/imports/workspace.py:50
 #: nostr/ui/media_library_dialog.py:1913
-#: nostr/ui/publish_copy_dialog.py:91
 msgid "Failed"
 msgstr "Fehlgeschlagen"
 
@@ -5285,90 +5284,57 @@ msgstr "der Schlüssel in deiner Bibliothek öffnet diese Datei nicht"
 msgid "the file inside is not an image this app can show"
 msgstr "die enthaltene Datei ist kein Bild, das die App anzeigen kann"
 
-#: nostr/media/publish_copy.py:724
-msgid "This file's public copy could not be uploaded."
-msgstr "Die öffentliche Kopie dieser Datei konnte nicht hochgeladen werden."
-
 #: nostr/media/publish_copy.py:359
-msgid "Another copy is already being made."
-msgstr "Es wird bereits eine andere Kopie erstellt."
+#: nostr/media/publish_copy.py:459
+msgid "Another image is being shared right now. Try again in a moment."
+msgstr "Gerade wird ein anderes Bild geteilt. Versuche es gleich noch einmal."
 
 #: nostr/media/publish_copy.py:379
-msgid "This file does not say where it is stored, so no public copy could be made."
-msgstr "Bei dieser Datei steht nicht, wo sie gespeichert ist, daher konnte keine öffentliche Kopie erstellt werden."
+msgid "MyEditor can’t tell where this image is stored, so it can’t be shared."
+msgstr "MyEditor kann nicht erkennen, wo dieses Bild gespeichert ist, daher kann es nicht geteilt werden."
 
-#: nostr/media/publish_copy.py:621
-msgid "This file could not be downloaded from any of your servers."
-msgstr "Diese Datei konnte von keinem deiner Server heruntergeladen werden."
+#: nostr/media/publish_copy.py:618
+msgid "This image couldn’t be downloaded from your media servers."
+msgstr "Dieses Bild konnte nicht von deinen Medienservern geladen werden."
 
-#: nostr/media/publish_copy.py:639
+#: nostr/media/publish_copy.py:635
 #: nostr/ui/thumbnail_loader.py:57
 msgid "a server returned the wrong file"
 msgstr "ein Server hat die falsche Datei geliefert"
 
-#: nostr/media/publish_copy.py:694
-msgid "The server did not give this copy an address this app can record, so it was not published."
-msgstr "Der Server hat für diese Kopie keine Adresse geliefert, die die App speichern kann, daher wurde sie nicht veröffentlicht."
+#: nostr/media/publish_copy.py:691
+msgid "Your media server didn’t answer as expected, so the image wasn’t shared."
+msgstr "Dein Medienserver hat nicht wie erwartet geantwortet, daher wurde das Bild nicht geteilt."
 
-#: nostr/media/publish_copy.py:708
-msgid "Your record of what is public could not be saved, so this copy was not published. It may already be on your server."
-msgstr "Deine Liste mit öffentlichen Dateien konnte nicht gespeichert werden, daher wurde diese Kopie nicht veröffentlicht. Sie liegt aber vielleicht schon auf deinem Server."
+#: nostr/media/publish_copy.py:705
+msgid "MyEditor couldn’t save its list of shared images, so the image wasn’t shared. It may be on your media server already."
+msgstr "MyEditor konnte seine Liste geteilter Bilder nicht sichern, daher wurde das Bild nicht geteilt. Es ist vielleicht schon auf deinem Medienserver."
 
-#: nostr/media/publish_copy.py:651
-msgid "This file could not be opened with the key in your library, so no public copy was made."
-msgstr "Diese Datei ließ sich mit dem Schlüssel in deiner Bibliothek nicht öffnen, daher wurde keine öffentliche Kopie erstellt."
+#: nostr/media/publish_copy.py:719
+#: nostr/ui/publish_copy_dialog.py:482
+msgid "This image couldn’t be shared."
+msgstr "Dieses Bild konnte nicht geteilt werden."
 
-#: nostr/media/publish_copy.py:721
-#, python-brace-format
-msgid "This file's public copy could not be uploaded: {reason}"
-msgstr "Die öffentliche Kopie dieser Datei konnte nicht hochgeladen werden: {reason}"
+#: nostr/media/publish_copy.py:647
+msgid "This image couldn’t be opened, so it wasn’t shared."
+msgstr "Dieses Bild konnte nicht geöffnet werden, daher wurde es nicht geteilt."
+
+#: nostr/media/publish_copy.py:658
+msgid "This image couldn’t be prepared for sharing, so it wasn’t shared."
+msgstr "Dieses Bild konnte nicht zum Teilen vorbereitet werden, daher wurde es nicht geteilt."
 
 #: nostr/media/publish_copy.py:421
-msgid "This copy was cancelled before anything was uploaded."
-msgstr "Diese Kopie wurde abgebrochen, bevor etwas hochgeladen wurde."
+msgid "Sharing was cancelled before anything was uploaded."
+msgstr "Das Teilen wurde abgebrochen, bevor etwas hochgeladen wurde."
 
-#: nostr/media/publish_copy.py:618
+#: nostr/media/publish_copy.py:718
 #, python-brace-format
-msgid "This file could not be downloaded from any of your servers ({reason})."
-msgstr "Diese Datei konnte von keinem deiner Server heruntergeladen werden ({reason})."
-
-#: nostr/media/publish_copy.py:662
-#, python-brace-format
-msgid "This file was not published: {reason}."
-msgstr "Diese Datei wurde nicht veröffentlicht: {reason}."
-
-#: nostr/media/publish_copy.py:459
-msgid "Public copies are already being made."
-msgstr "Es werden bereits öffentliche Kopien erstellt."
+msgid "This image couldn’t be shared. {reason}"
+msgstr "Dieses Bild konnte nicht geteilt werden. {reason}"
 
 #: nostr/media/publish_copy.py:597
-msgid "This file's public copy is not listed, so it was not published."
-msgstr "Die öffentliche Kopie dieser Datei ist nicht verzeichnet, daher wurde sie nicht veröffentlicht."
-
-#: nostr/media/scrub.py:87
-msgid "there are no bytes to publish"
-msgstr "es gibt keine Daten zum Veröffentlichen"
-
-#: nostr/media/scrub.py:91
-msgid "this file is not an image this app can publish"
-msgstr "diese Datei ist kein Bild, das die App veröffentlichen kann"
-
-#: nostr/media/scrub.py:107
-msgid "this image could not be read"
-msgstr "dieses Bild konnte nicht gelesen werden"
-
-#: nostr/media/scrub.py:120
-msgid "this image could not be re-encoded"
-msgstr "dieses Bild konnte nicht neu gespeichert werden"
-
-#: nostr/media/scrub.py:124
-msgid "re-encoding produced nothing"
-msgstr "beim neuen Speichern ist nichts entstanden"
-
-#: nostr/media/scrub.py:103
-#, python-brace-format
-msgid "{type} cannot be prepared for publication"
-msgstr "{type} kann nicht für die Veröffentlichung vorbereitet werden"
+msgid "This image’s shared copy couldn’t be found, so it wasn’t used."
+msgstr "Die geteilte Kopie dieses Bildes wurde nicht gefunden, daher wurde sie nicht verwendet."
 
 #: nostr/outbox/writer.py:337
 msgid "The relays didn’t take it yet."
@@ -5913,8 +5879,8 @@ msgstr "Zaps werden so geteilt, wie es eine andere App festgelegt hat."
 
 #: nostr/ui/article_details_panel.py:483
 #: nostr/ui/draft_relays_sheet.py:158
-#: nostr/ui/media_servers_dialog.py:100
-#: nostr/ui/media_servers_dialog.py:241
+#: nostr/ui/media_servers_dialog.py:103
+#: nostr/ui/media_servers_dialog.py:246
 msgid "Remove"
 msgstr "Entfernen"
 
@@ -6354,7 +6320,6 @@ msgstr "(ohne Titel)"
 
 #: nostr/ui/drafts_panel.py:502
 #: nostr/ui/drafts_panel.py:560
-#: nostr/ui/publish_copy_dialog.py:85
 msgid "Decrypting"
 msgstr "Wird entschlüsselt"
 
@@ -6563,7 +6528,6 @@ msgid "Drafts for {name}"
 msgstr "Entwürfe von {name}"
 
 #: nostr/ui/drafts_panel.py:2054
-#: nostr/ui/publish_copy_dialog.py:254
 msgid "Try again"
 msgstr "Erneut versuchen"
 
@@ -8008,64 +7972,64 @@ msgstr[1] "{count} Dateien von deinen Medienservern löschen?"
 msgid "Could not save: {error}"
 msgstr "Speichern fehlgeschlagen: {error}"
 
-#: nostr/ui/media_servers_dialog.py:65
+#: nostr/ui/media_servers_dialog.py:66
 msgid "Media Servers"
 msgstr "Medienserver"
 
-#: nostr/ui/media_servers_dialog.py:83
+#: nostr/ui/media_servers_dialog.py:86
 msgid "Images, videos and audio you add are kept on these servers. New files go to the first one, and the others keep copies."
 msgstr "Bilder, Videos und Audio, die du hinzufügst, werden auf diesen Servern gespeichert. Neue Dateien gehen an den ersten, die anderen bewahren Kopien auf."
 
-#: nostr/ui/media_servers_dialog.py:89
+#: nostr/ui/media_servers_dialog.py:92
 msgid "Media servers"
 msgstr "Medienserver"
 
-#: nostr/ui/media_servers_dialog.py:96
+#: nostr/ui/media_servers_dialog.py:99
 msgid "Make Primary"
 msgstr "Als Hauptserver festlegen"
 
-#: nostr/ui/media_servers_dialog.py:98
+#: nostr/ui/media_servers_dialog.py:101
 msgid "New files go to this server first."
 msgstr "Neue Dateien gehen zuerst an diesen Server."
 
-#: nostr/ui/media_servers_dialog.py:111
+#: nostr/ui/media_servers_dialog.py:114
 msgid "Server address"
 msgstr "Serveradresse"
 
-#: nostr/ui/media_servers_dialog.py:116
+#: nostr/ui/media_servers_dialog.py:119
 msgid "Add Server"
 msgstr "Server hinzufügen"
 
-#: nostr/ui/media_servers_dialog.py:122
+#: nostr/ui/media_servers_dialog.py:125
 msgid "Enter a server address that starts with https://, such as https://media.example.com."
 msgstr "Gib eine Serveradresse ein, die mit https:// beginnt, etwa https://media.example.com."
 
-#: nostr/ui/media_servers_dialog.py:137
+#: nostr/ui/media_servers_dialog.py:140
 msgid "Add to List"
 msgstr "Zur Liste hinzufügen"
 
-#: nostr/ui/media_servers_dialog.py:151
+#: nostr/ui/media_servers_dialog.py:154
 msgid "Share this list so other Nostr apps find your files."
 msgstr "Teile diese Liste, damit andere Nostr-Apps deine Dateien finden."
 
-#: nostr/ui/media_servers_dialog.py:153
+#: nostr/ui/media_servers_dialog.py:156
 msgid "Share with Other Apps…"
 msgstr "Mit anderen Apps teilen …"
 
-#: nostr/ui/media_servers_dialog.py:187
+#: nostr/ui/media_servers_dialog.py:192
 msgid "Included with your membership"
 msgstr "In deiner Mitgliedschaft enthalten"
 
-#: nostr/ui/media_servers_dialog.py:193
+#: nostr/ui/media_servers_dialog.py:198
 #, python-brace-format
 msgid "Your Nostr account also lists {servers}."
 msgstr "Dein Nostr-Konto nennt außerdem {servers}."
 
-#: nostr/ui/media_servers_dialog.py:239
+#: nostr/ui/media_servers_dialog.py:244
 msgid "Files already there stay there. The Media Library shows them only while another of your servers has them too."
 msgstr "Dateien, die schon dort sind, bleiben dort. Die Mediathek zeigt sie nur, solange auch ein anderer deiner Server sie hat."
 
-#: nostr/ui/media_servers_dialog.py:238
+#: nostr/ui/media_servers_dialog.py:243
 #, python-brace-format
 msgid "Remove “{server}”?"
 msgstr "„{server}“ entfernen?"
@@ -8714,149 +8678,81 @@ msgstr "Als neu veröffentlichen"
 msgid "Cannot build article: {reason}"
 msgstr "Artikel kann nicht erstellt werden: {reason}"
 
-#: nostr/ui/publish_copy_dialog.py:108
-msgid "This picture has not been checked against your private library, so it was not used. Wait for the library to finish opening, or reconnect your signer app, then try again."
-msgstr "Dieses Bild wurde noch nicht mit deiner privaten Bibliothek abgeglichen und wurde deshalb nicht verwendet. Warte, bis die Bibliothek geöffnet ist, oder verbinde deine Signer-App neu, und versuche es dann noch einmal."
+#: nostr/ui/publish_copy_dialog.py:69
+msgid "MyEditor couldn’t check yet whether this image is private. Try again in a moment, or check your signer app."
+msgstr "MyEditor konnte noch nicht prüfen, ob dieses Bild privat ist. Versuche es gleich noch einmal oder sieh in deiner Signer-App nach."
 
-#: nostr/ui/publish_copy_dialog.py:82
-msgid "Waiting"
-msgstr "Wartet"
+#: nostr/ui/publish_copy_dialog.py:470
+msgid "Cancelled. Nothing was shared."
+msgstr "Abgebrochen. Es wurde nichts geteilt."
 
-#: nostr/ui/publish_copy_dialog.py:83
-msgid "Checking"
-msgstr "Wird geprüft"
+#: nostr/ui/publish_copy_dialog.py:105
+#: nostr/ui/publish_copy_dialog.py:213
+#: nostr/ui/publish_copy_dialog.py:244
+msgid "Share"
+msgstr "Teilen"
 
-#: nostr/ui/publish_copy_dialog.py:84
-msgid "Downloading the original"
-msgstr "Original wird heruntergeladen"
+#: nostr/ui/publish_copy_dialog.py:173
+msgid "Anyone with the link will be able to see it. Camera and location details are removed first."
+msgid_plural "Anyone with the link will be able to see them. Camera and location details are removed first."
+msgstr[0] "Alle, die den Link haben, können es sehen. Kamera- und Ortsangaben werden vorher entfernt."
+msgstr[1] "Alle, die den Link haben, können sie sehen. Kamera- und Ortsangaben werden vorher entfernt."
 
-#: nostr/ui/publish_copy_dialog.py:86
-msgid "Removing camera and location data"
-msgstr "Kamera- und Standortdaten werden entfernt"
+#: nostr/ui/publish_copy_dialog.py:190
+msgid "Sharing"
+msgstr "Teilen"
 
-#: nostr/ui/publish_copy_dialog.py:87
-msgid "Uploading the copy"
-msgstr "Kopie wird hochgeladen"
-
-#: nostr/ui/publish_copy_dialog.py:88
-msgid "Recording it as public"
-msgstr "Wird als öffentlich vermerkt"
-
-#: nostr/ui/publish_copy_dialog.py:89
-msgid "Already has a public copy"
-msgstr "Hat schon eine öffentliche Kopie"
-
-#: nostr/ui/publish_copy_dialog.py:90
-msgid "Public copy created"
-msgstr "Öffentliche Kopie erstellt"
-
-#: nostr/ui/publish_copy_dialog.py:92
-msgid "Cancelled, nothing was uploaded"
-msgstr "Abgebrochen, nichts wurde hochgeladen"
-
-#: nostr/ui/publish_copy_dialog.py:99
-msgid "A separate public copy is uploaded. Anyone with its address can open it."
-msgstr "Eine separate öffentliche Kopie wird hochgeladen. Alle, die ihre Adresse kennen, können sie öffnen."
-
-#: nostr/ui/publish_copy_dialog.py:100
-msgid "The private original is not changed, moved or unlocked. It stays private."
-msgstr "Das private Original wird weder verändert noch verschoben oder entsperrt. Es bleibt privat."
-
-#: nostr/ui/publish_copy_dialog.py:101
-msgid "Camera and location details are removed from the copy before it is sent."
-msgstr "Kamera- und Standortangaben werden vor dem Senden aus der Kopie entfernt."
-
-#: nostr/ui/publish_copy_dialog.py:102
-msgid "You can revoke the copy later. It is listed with your published media."
-msgstr "Du kannst die Kopie später zurückziehen. Sie steht bei deinen veröffentlichten Medien."
-
-#: nostr/ui/publish_copy_dialog.py:546
-msgid "Use the existing copies"
-msgstr "Vorhandene Kopien verwenden"
-
-#: nostr/ui/publish_copy_dialog.py:571
-msgid "Each copy is stored beside its original, so it uses that much space again on your media servers."
-msgstr "Jede Kopie wird neben ihrem Original gespeichert und belegt auf deinen Medienservern noch einmal so viel Platz."
-
-#: nostr/ui/publish_copy_dialog.py:589
-msgid "Cancelled. Nothing was uploaded and nothing was published."
-msgstr "Abgebrochen. Es wurde nichts hochgeladen und nichts veröffentlicht."
-
-#: nostr/ui/publish_copy_dialog.py:603
-msgid "A public copy could not be created."
-msgstr "Eine öffentliche Kopie konnte nicht erstellt werden."
-
-#: nostr/ui/publish_copy_dialog.py:145
-msgid "Create a public copy"
-msgstr "Öffentliche Kopie erstellen"
-
-#: nostr/ui/publish_copy_dialog.py:547
-msgid "Create public copy"
-msgid_plural "Create {count} public copies"
-msgstr[0] "Öffentliche Kopie erstellen"
-msgstr[1] "{count} öffentliche Kopien erstellen"
-
-#: nostr/ui/publish_copy_dialog.py:580
+#: nostr/ui/publish_copy_dialog.py:471
 #, python-brace-format
-msgid "The copies use about {size} more on your media servers, on top of the originals, which keep their own space."
-msgstr "Die Kopien belegen auf deinen Medienservern etwa {size} zusätzlich zu den Originalen, die ihren eigenen Platz behalten."
+msgid "Cancelled. {count} image was shared before that; Stop Sharing in the Media Library undoes it."
+msgid_plural "Cancelled. {count} images were shared before that; Stop Sharing in the Media Library undoes it."
+msgstr[0] "Abgebrochen. {count} Bild wurde davor schon geteilt; „Teilen beenden“ in der Mediathek macht das rückgängig."
+msgstr[1] "Abgebrochen. {count} Bilder wurden davor schon geteilt; „Teilen beenden“ in der Mediathek macht das rückgängig."
 
-#: nostr/ui/publish_copy_dialog.py:590
+#: nostr/ui/publish_copy_dialog.py:485
 #, python-brace-format
-msgid "Cancelled. Nothing was published, but {count} public copy had already been created. It is listed with your published media and can be revoked there."
-msgid_plural "Cancelled. Nothing was published, but {count} public copies had already been created. They are listed with your published media and can be revoked there."
-msgstr[0] "Abgebrochen. Es wurde nichts veröffentlicht, aber eine öffentliche Kopie war schon erstellt. Sie steht bei deinen veröffentlichten Medien und kann dort zurückgezogen werden."
-msgstr[1] "Abgebrochen. Es wurde nichts veröffentlicht, aber {count} öffentliche Kopien waren schon erstellt. Sie stehen bei deinen veröffentlichten Medien und können dort zurückgezogen werden."
+msgid "{reason} {count} other image was shared already; Stop Sharing in the Media Library undoes it."
+msgid_plural "{reason} {count} other images were shared already; Stop Sharing in the Media Library undoes it."
+msgstr[0] "{reason} {count} anderes Bild wurde schon geteilt; „Teilen beenden“ in der Mediathek macht das rückgängig."
+msgstr[1] "{reason} {count} andere Bilder wurden schon geteilt; „Teilen beenden“ in der Mediathek macht das rückgängig."
 
-#: nostr/ui/publish_copy_dialog.py:606
+#: nostr/ui/publish_copy_dialog.py:231
+msgid "These images are shared already."
+msgstr "Diese Bilder sind schon geteilt."
+
+#: nostr/ui/publish_copy_dialog.py:337
+msgid "Stopping…"
+msgstr "Wird angehalten …"
+
+#: nostr/ui/publish_copy_dialog.py:407
+msgid "This image is private and can’t be shared right now. Connect your signer app and try again."
+msgstr "Dieses Bild ist privat und kann gerade nicht geteilt werden. Verbinde deine Signer-App und versuche es erneut."
+
+#: nostr/ui/publish_copy_dialog.py:446
+msgid "The image wasn’t shared, so nothing was inserted."
+msgstr "Das Bild wurde nicht geteilt, daher wurde nichts eingefügt."
+
+#: nostr/ui/publish_copy_dialog.py:234
+msgid "Share this image?"
+msgstr "Dieses Bild teilen?"
+
+#: nostr/ui/publish_copy_dialog.py:239
+msgid "Sharing this image…"
+msgstr "Dieses Bild wird geteilt …"
+
+#: nostr/ui/publish_copy_dialog.py:235
 #, python-brace-format
-msgid "Nothing was published. {reason} {count} copy made before this is listed with your published media and can be revoked."
-msgid_plural "Nothing was published. {reason} {count} copies made before this are listed with your published media and can be revoked."
-msgstr[0] "Es wurde nichts veröffentlicht. {reason} Eine zuvor erstellte Kopie steht bei deinen veröffentlichten Medien und kann zurückgezogen werden."
-msgstr[1] "Es wurde nichts veröffentlicht. {reason} {count} zuvor erstellte Kopien stehen bei deinen veröffentlichten Medien und können zurückgezogen werden."
+msgid "Share “{name}”?"
+msgid_plural "Share {count} images?"
+msgstr[0] "„{name}“ teilen?"
+msgstr[1] "{count} Bilder teilen?"
 
-#: nostr/ui/publish_copy_dialog.py:406
-msgid "Stopping. Nothing new will be uploaded."
-msgstr "Wird angehalten. Es wird nichts Neues hochgeladen."
-
-#: nostr/ui/publish_copy_dialog.py:488
-msgid "This picture is private, and MyEditor can’t make a public copy of it right now. Connect your signer app and try again."
-msgstr "Dieses Bild ist privat, und MyEditor kann gerade keine öffentliche Kopie davon erstellen. Verbinde deine Signer-App und versuche es noch einmal."
-
-#: nostr/ui/publish_copy_dialog.py:576
+#: nostr/ui/publish_copy_dialog.py:240
 #, python-brace-format
-msgid "The copy uses about {size} more on your media servers. The original keeps its own space."
-msgstr "Die Kopie belegt auf deinen Medienservern etwa {size} zusätzlich. Das Original behält seinen eigenen Platz."
-
-#: nostr/ui/publish_copy_dialog.py:605
-#, python-brace-format
-msgid "Nothing was published. {reason}"
-msgstr "Es wurde nichts veröffentlicht. {reason}"
-
-#: nostr/ui/publish_copy_dialog.py:282
-msgid "These pictures already have public copies."
-msgstr "Diese Bilder haben schon öffentliche Kopien."
-
-#: nostr/ui/publish_copy_dialog.py:371
-#, python-brace-format
-msgid "{done} of {total} settled."
-msgstr "{done} von {total} erledigt."
-
-#: nostr/ui/publish_copy_dialog.py:528
-msgid "No public copy was created, so nothing was inserted."
-msgstr "Es wurde keine öffentliche Kopie erstellt, daher wurde nichts eingefügt."
-
-#: nostr/ui/publish_copy_dialog.py:284
-msgid "Create a public copy of this picture?"
-msgid_plural "Create public copies of these {count} pictures?"
-msgstr[0] "Öffentliche Kopie dieses Bildes erstellen?"
-msgstr[1] "Öffentliche Kopien dieser {count} Bilder erstellen?"
-
-#: nostr/ui/publish_copy_dialog.py:290
-msgid "Creating the public copy…"
-msgid_plural "Creating {count} public copies…"
-msgstr[0] "Öffentliche Kopie wird erstellt …"
-msgstr[1] "{count} öffentliche Kopien werden erstellt …"
+msgid "Sharing “{name}”…"
+msgid_plural "Sharing {count} images…"
+msgstr[0] "„{name}“ wird geteilt …"
+msgstr[1] "{count} Bilder werden geteilt …"
 
 #: nostr/ui/publish_note_dialog.py:184
 msgid "Publish as Note"
