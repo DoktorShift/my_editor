@@ -296,22 +296,43 @@ def test_a_server_at_an_ip_address_is_listed_by_it(tmp_path, address, row):
     assert rows(dialog)[-1] == row
 
 
-@pytest.mark.parametrize("address, row", [
-    ("https://exаmple.com", "xn--exmple-4nf.com"),          # a Cyrillic а among Latin letters
-    ("https://xn--exmple-4nf.com", "xn--exmple-4nf.com"),
-    ("https://раураӏ.com", "xn--80aa0cbo65f.com"),           # Cyrillic letters that all look Latin
-    ("https://bücher.de", "bücher.de"),
-    ("https://例え.jp", "例え.jp"),
-    ("https://ドメイン名例.jp", "ドメイン名例.jp"),
-    ("https://пример.рф", "пример.рф"),                       # Cyrillic that doesn't pass for Latin
+def _ascii(host: str) -> str:
+    from PySide6.QtCore import QUrl
+    return bytes(QUrl.toAce(host)).decode("ascii")
+
+
+@pytest.mark.parametrize("host", [
+    "exаmple.com",                    # a Cyrillic а among Latin letters
+    "раураӏ.com", "рап.com", "хреп.com", "сег.com", "еьау.com", "ок.org",   # Cyrillic
+    "пример.com",                     # Cyrillic outside its own countries' domains
+    "καρα.com", "τoy.com",            # Greek
+    "ոսո.com", "սհօ.com", "ցօց.com",  # Armenian
+    "ꭺꮃ.com",                         # Cherokee
+    "ıbm.com",                        # a Latin dotless ı
+    "ɡoogle.com",                     # a Latin script g
 ])
-def test_a_lookalike_host_is_never_shown_as_the_real_one(tmp_path, address, row):
-    """Whatever the domain: a label that mixes scripts, or is made only of
-    letters that pass for Latin ones, is shown in its ASCII form."""
+def test_a_host_that_could_pass_for_a_latin_one_is_shown_in_ascii(tmp_path, host):
+    """Whatever the domain: a label that mixes scripts, is written in a
+    script with letters that pass for Latin ones (outside that script's
+    own countries' domains), or uses a Latin letter that passes for
+    another, is shown in its ASCII form."""
     dialog, _settings, _changes = sheet(tmp_path)
-    dialog.address.setText(address)
+    dialog.address.setText(f"https://{host}")
     dialog.add_button.click()
-    assert rows(dialog)[-1] == row
+    assert rows(dialog)[-1] == _ascii(host)
+    assert rows(dialog)[-1].startswith("xn--")
+
+
+@pytest.mark.parametrize("host", [
+    "bücher.de", "münchen.com", "société.com", "straße.de", "smørrebrød.com",
+    "例え.jp", "ドメイン名例.jp", "media例え.jp", "例子.cn", "예시.kr",
+    "пример.рф", "παράδειγμα.gr", "مثال.com", "उदाहरण.com",
+])
+def test_a_host_in_another_script_is_shown_as_written(tmp_path, host):
+    dialog, _settings, _changes = sheet(tmp_path)
+    dialog.address.setText(f"https://{host}")
+    dialog.add_button.click()
+    assert rows(dialog)[-1] == host
 
 
 @pytest.mark.parametrize("text, origin", [("https://c.example:443", C),

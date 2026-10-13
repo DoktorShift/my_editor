@@ -91,36 +91,55 @@ def server_address(text: str) -> Tuple[Optional[str], str]:
     return (origin, "") if url_safety.is_safe_media_url(origin) else (None, "https")
 
 
-# Letters of other scripts that pass for Latin ones in a host name.
-_LATIN_LOOKALIKES = frozenset("аеорсухіјѕԁԛԝһӏүɡ" "οανικρτυχ")
-# Scripts that are written together: Japanese, Korean and Chinese
-# names mix their own with Latin and Han.
+# Scripts written together: Japanese, Korean and Chinese names mix their
+# own with Latin and Han.
 _WRITTEN_TOGETHER = (frozenset({"LATIN", "CJK", "HIRAGANA", "KATAKANA"}),
                      frozenset({"LATIN", "CJK", "HANGUL"}),
                      frozenset({"LATIN", "CJK", "BOPOMOFO"}))
+# Scripts with letters that pass for Latin ones, and the domains of the
+# countries that write them, where a name in them is expected.
+_PASSES_FOR_LATIN = {
+    "CYRILLIC": frozenset({"рф", "укр", "срб", "бг", "мкд", "қаз", "мон", "бел",
+                           "ru", "su", "ua", "bg", "rs", "by", "kz", "mk", "mn"}),
+    "GREEK": frozenset({"gr", "ελ"}),
+    "ARMENIAN": frozenset({"am", "հայ"}),
+    "CHEROKEE": frozenset(),
+}
+# Latin letters beyond ASCII and its accented forms that are their own
+# and don't pass for another (the dotless ı, a script ɡ, small capitals do).
+_DISTINCT_LATIN = frozenset("ßæøœðþłđħŋ")
 
 
 def _display_host(host: str) -> str:
     """``host`` as a person reads it. An IP address is shown as it is
     written. A host in another script is kept in its ASCII form, and
     shown as it is written only when it can't pass for another: where
-    Qt (as a browser) trusts its domain, and no label mixes scripts or
-    is made only of letters that pass for Latin ones."""
+    Qt (as a browser) trusts its domain, and no label is a lookalike."""
     if not host or ":" in host:
         return host
     written = QUrl.fromAce(host.encode("ascii", "replace")) or host
-    if written != host and any(_lookalike(label) for label in written.split(".")):
+    if written == host:
+        return host
+    labels = written.split(".")
+    if any(_lookalike(label, labels[-1].lower()) for label in labels):
         return host
     return written
 
 
-def _lookalike(label: str) -> bool:
+def _lookalike(label: str, domain: str) -> bool:
+    """Whether a label could pass for another: it mixes scripts (beyond
+    those written together), is in a script with letters that pass for
+    Latin ones outside its own countries' domains, or has a Latin letter
+    that passes for another."""
     letters = [ch for ch in label if ch.isalpha()]
     scripts = {_script(ch) for ch in letters}
-    if len(scripts) > 1 and not any(scripts <= together for together in _WRITTEN_TOGETHER):
-        return True
-    return bool(letters) and scripts != {"LATIN"} and all(
-        ch in _LATIN_LOOKALIKES for ch in letters)
+    if len(scripts) > 1:
+        return not any(scripts <= together for together in _WRITTEN_TOGETHER)
+    if scripts == {"LATIN"}:
+        return any(not unicodedata.normalize("NFD", ch)[0].isascii()
+                   and ch not in _DISTINCT_LATIN for ch in letters)
+    script = next(iter(scripts), "")
+    return script in _PASSES_FOR_LATIN and domain not in _PASSES_FOR_LATIN[script]
 
 
 def _script(ch: str) -> str:
