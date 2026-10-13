@@ -6176,7 +6176,8 @@ class MainWindow(QMainWindow):
 
     def _open_media_servers(self) -> None:
         """Media Servers…, from the Media Library: which servers keep the
-        person's files, in which order, and sharing that list."""
+        person's files, in which order, and sharing that list. A sheet on
+        the library window."""
         parent = self._visible_media_library() or self
         sheet = MediaServersDialog(
             settings=self._media_store.settings,
@@ -6186,12 +6187,11 @@ class MainWindow(QMainWindow):
             is_dark=self.is_dark_theme, parent=parent)
         sheet.changed.connect(self._media_store.refetch_if_targets_changed)
         sheet.share_requested.connect(lambda s=sheet: self._share_media_server_list(s))
+        sheet.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        sheet.destroyed.connect(lambda _obj=None: setattr(self, "_media_servers_sheet", None))
         self._media_servers_sheet = sheet
-        try:
-            sheet.exec()
-        finally:
-            self._media_servers_sheet = None
-            sheet.deleteLater()
+        # A sheet on the library window, as Draft Relays is on this one.
+        sheet.open()
 
     def _share_media_server_list(self, parent=None) -> None:
         """Publish the servers uploads go to as the account's media server

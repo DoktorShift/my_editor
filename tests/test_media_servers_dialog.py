@@ -210,3 +210,19 @@ def test_done_answers_return_when_the_address_field_is_empty(tmp_path):
     dialog.address.setFocus()
     QTest.keyClick(dialog.address, Qt.Key.Key_Return)
     assert not dialog.isVisible()
+
+
+def test_it_is_a_sheet_on_the_window_that_opened_it(tmp_path):
+    """Window-modal, as the app's other sheets are (Draft Relays): it
+    blocks the library it belongs to, not the whole app."""
+    dialog, _settings, _changes = sheet(tmp_path)
+    assert dialog.windowModality() == Qt.WindowModality.WindowModal
+
+
+def test_the_main_window_opens_it_as_a_sheet_on_the_library():
+    import inspect
+    import textwrap
+    from main_window import MainWindow
+    source = textwrap.dedent(inspect.getsource(MainWindow._open_media_servers))
+    assert "sheet.open()" in source and "exec()" not in source
+    assert "self._visible_media_library()" in source

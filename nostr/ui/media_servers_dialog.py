@@ -85,6 +85,8 @@ class MediaServersDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(_("Media Servers"))
+        # A sheet: it blocks the window it belongs to, not the app.
+        self.setWindowModality(Qt.WindowModality.WindowModal)
         self._settings = settings
         self._entitled = [url_safety.origin_of(s) or s for s in entitled]
         self._suggested = list(suggestions)
