@@ -34,7 +34,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QObject, QStandardPaths, QUrl, Signal
+from PySide6.QtCore import QObject, QStandardPaths, QTimer, QUrl, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
@@ -46,7 +46,7 @@ from .outbox.directory import RelayDirectory
 from .outbox.lookup import Lookup, LookupState, fetch_replaceable
 from .outbox.policy import KIND_PROFILE, lookup_relays
 from .profiles import Profile, ProfileStore
-from .relay import RelayPool
+from .relay import RECONNECT_FIRST_MS, RECONNECT_LONGEST_MS, RelayPool
 
 
 AVATAR_CACHE_DIR = Path.home() / ".cache" / "my_editor" / "nostr_avatars"
@@ -68,17 +68,33 @@ _MAX_AVATAR_REDIRECTS: int = 4
 
 def can_receive_zaps(pool: RelayPool, directory: RelayDirectory, pubkey: str, hint: str,
                      answer, *, parent: Optional[QObject] = None,
-                     query=fetch_replaceable, timeout_ms: int = 8_000) -> None:
+                     query=fetch_replaceable, timeout_ms: int = 8_000,
+                     first_wait_ms: int = RECONNECT_FIRST_MS,
+                     longest_wait_ms: int = RECONNECT_LONGEST_MS) -> None:
     """``answer(True)`` when ``pubkey``'s profile names a lightning address
     (lud16, or lud06: where a zap to them is paid, NIP-57), ``answer(False)``
-    when it names none or the relays have no profile of theirs, and
-    ``answer(None)`` when that couldn't be found out (no relay answered).
-    Read where their profile is (the relay hint, their write relays, the
-    indexers)."""
-    def done(result: Lookup) -> None:
+    when it names none or the relays have no profile of theirs. Read where
+    their profile is (the relay hint, their write relays, the indexers).
+
+    No relay answering is no answer: the lookup is asked again, waiting
+    longer each time as the relays' own reconnecting does (from
+    ``first_wait_ms``, twice as long each time, up to ``longest_wait_ms``),
+    and only after that ``answer(None)``: couldn't be found out."""
+    relays = lookup_relays(hints=[hint] if hint else [], known=directory.cached(pubkey))
+
+    def ask(wait: int) -> None:
+        query(pool, relays, kind=KIND_PROFILE, author=pubkey,
+              on_done=lambda result: done(result, wait), timeout_ms=timeout_ms, parent=parent)
+
+    def done(result: Lookup, wait: int) -> None:
         event = result.event
         if event is None and result.state is LookupState.UNKNOWN:
-            answer(None)
+            if wait > longest_wait_ms:
+                answer(None)
+            elif parent is not None:
+                QTimer.singleShot(wait, parent, lambda: ask(wait * 2))
+            else:
+                QTimer.singleShot(wait, lambda: ask(wait * 2))
             return
         try:
             fields = json.loads((event or {}).get("content", "") or "{}")
@@ -89,8 +105,8 @@ def can_receive_zaps(pool: RelayPool, directory: RelayDirectory, pubkey: str, hi
         answer(any(isinstance(fields.get(key), str) and fields[key].strip()
                    for key in ("lud16", "lud06")))
 
-    query(pool, lookup_relays(hints=[hint] if hint else [], known=directory.cached(pubkey)),
-          kind=KIND_PROFILE, author=pubkey, on_done=done, timeout_ms=timeout_ms, parent=parent)
+    ask(first_wait_ms)
+
 
 class ProfileMetadataFetcher(QObject):
     """Background loader for a profile's kind 0 event.

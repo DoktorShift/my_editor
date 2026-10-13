@@ -235,7 +235,6 @@ def test_an_answer_that_comes_later_takes_the_share_back():
     ('{"name": "Bob"}', False),
     ("not json", False),
     (None, False),                                       # the relays have no profile
-    ("unreachable", None),                               # no relay answered: not known
 ])
 def test_a_lightning_address_in_the_profile_is_what_receives_zaps(content, able):
     from nostr.metadata import can_receive_zaps
@@ -245,8 +244,6 @@ def test_a_lightning_address_in_the_profile_is_what_receives_zaps(content, able)
 
     def query(pool, relays, *, kind, author, on_done, **_rest):
         asked.append((relays, kind, author))
-        if content == "unreachable":
-            return on_done(Lookup(LookupState.UNKNOWN))
         event = None if content is None else {"content": content, "created_at": 1}
         on_done(Lookup(LookupState.FOUND if event else LookupState.ABSENT, event))
 
@@ -278,3 +275,63 @@ def test_the_signer_is_written_first_so_standup_credits_the_writer():
     # Without co-authors, no author tag at all.
     alone = ArticleDetails(identifier="x").published_tags("Body", author=(ME, RELAY))
     assert not [tag for tag in alone if tag[0] == "p"]
+
+
+def test_a_profile_no_relay_answered_is_asked_again_with_backoff():
+    """No relay answering is no answer: the lookup is asked again, waiting
+    longer each time as the relays' own reconnecting does, up to its
+    longest wait; meanwhile the line under Share zaps says nothing."""
+    import time
+    from PySide6.QtCore import QCoreApplication
+    from nostr.metadata import can_receive_zaps
+    from nostr.outbox.lookup import Lookup, LookupState
+    from tests.outbox_fakes import FakeRelayDirectory
+    asked, answers = [], []
+
+    def query(pool, relays, *, kind, author, on_done, **_rest):
+        asked.append(time.monotonic())
+        if len(asked) < 3:
+            return on_done(Lookup(LookupState.UNKNOWN))
+        on_done(Lookup(LookupState.FOUND, {"content": '{"lud16": "b@w.example"}',
+                                           "created_at": 1}))
+
+    can_receive_zaps(None, FakeRelayDirectory(), BOB, RELAY, answers.append, query=query,
+                     first_wait_ms=20, longest_wait_ms=40)
+    deadline = time.monotonic() + 3
+    while not answers and time.monotonic() < deadline:
+        QCoreApplication.processEvents()
+    assert answers == [True] and len(asked) == 3
+    assert asked[2] - asked[1] >= asked[1] - asked[0] >= 0.015          # longer each time
+
+    asked.clear()
+    never = []
+    can_receive_zaps(None, FakeRelayDirectory(), BOB, RELAY, never.append,
+                     query=lambda *a, on_done, **k: (asked.append(1),
+                                                     on_done(Lookup(LookupState.UNKNOWN))),
+                     first_wait_ms=5, longest_wait_ms=20)
+    deadline = time.monotonic() + 3
+    while not never and time.monotonic() < deadline:
+        QCoreApplication.processEvents()
+    assert never == [None] and len(asked) == 4                     # 5, 10, 20 ms, then given up
+
+
+def test_while_no_relay_answers_the_share_line_says_nothing():
+    panel, sent, asked = panel_with(ArticleDetails(title="T", coauthors=((BOB, RELAY),)),
+                                    zappable={BOB: None})
+    panel.share_zaps.setChecked(True)
+    assert [tag[1] for tag in sent[-1].zaps] == [ME, BOB]
+    assert panel.zaps_note.isHidden()
+    panel.show_article(ArticleDetails(title="T", coauthors=((BOB, RELAY),),
+                                      zaps=sent[-1].zaps), fixed_identifier=False)
+    assert panel.zaps_note.isHidden()                  # never "another app set them"
+
+
+def test_a_co_author_not_found_out_is_asked_again_next_time():
+    checks = []
+    panel, sent, asked = panel_with(ArticleDetails(title="T", coauthors=((BOB, RELAY),)),
+                                    checks=checks)
+    [(pubkey, answer)] = checks
+    answer(None)                                   # every try went unanswered
+    panel.show_article(ArticleDetails(title="Other", coauthors=((BOB, RELAY),)),
+                       fixed_identifier=False)
+    assert [pubkey for pubkey, _answer in checks] == [BOB, BOB]

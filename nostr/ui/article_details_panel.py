@@ -455,7 +455,11 @@ class ArticleDetailsPanel(QFrame):
 
     def _zappable_answered(self, pubkey: str, able: Optional[bool]) -> None:
         """A co-author who can't receive zaps loses their equal share; one
-        whose profile couldn't be read (None) keeps it."""
+        whose profile couldn't be read (None) keeps it, says nothing, and is
+        asked about again the next time the co-authors are shown."""
+        if able is None:
+            self._zappable.pop(pubkey, None)
+            return
         before = self._equal_zaps(self._shown.coauthors)
         self._zappable[pubkey] = able
         if not any(p == pubkey for p, _hint in self._shown.coauthors):
