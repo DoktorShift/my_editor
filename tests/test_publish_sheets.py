@@ -478,3 +478,56 @@ def test_the_window_gives_an_open_sheet_its_new_appearance():
     assert "_publish_sheet" in inspect.getsource(MainWindow._set_theme)
     for handler in (MainWindow._on_nostr_publish_article, MainWindow._on_nostr_publish_note):
         assert "self._publish_sheet = dialog" in inspect.getsource(handler)
+
+
+@pytest.mark.parametrize("make", [article, note])
+def test_tab_reaches_the_buttons_left_to_right_on_the_first_open(tmp_path, make):
+    """Review low 1: the order was set before the buttons were placed, so
+    on the first open Tab went from the account to Publish, then Cancel,
+    on a Mac where Cancel is at the left."""
+    from PySide6.QtWidgets import QDialogButtonBox, QStyle
+
+    def after_account():
+        after, chain = sheet._account.button.nextInFocusChain(), []
+        while len(chain) < 2:
+            if after in (sheet._cancel_btn, sheet._publish_btn):
+                chain.append(after)
+            after = after.nextInFocusChain()
+        return chain
+
+    sheet = make(tmp_path, default_title="T") if make is article else make(tmp_path)
+    box = sheet._publish_btn.parentWidget()
+    layout = box.style().styleHint(QStyle.StyleHint.SH_DialogButtonLayout, None, box)
+    cancel_first = layout in (QDialogButtonBox.ButtonLayout.MacLayout.value,
+                              QDialogButtonBox.ButtonLayout.GnomeLayout.value)
+    expected = ([sheet._cancel_btn, sheet._publish_btn] if cancel_first
+                else [sheet._publish_btn, sheet._cancel_btn])
+    assert after_account() == expected                      # before it is ever shown
+    sheet.show()
+    QApplication.processEvents()
+    assert after_account() == expected == sorted(expected, key=lambda b: b.x())
+    sheet.close()
+
+
+def test_the_bottom_row_orders_tab_by_the_platforms_button_layout_not_by_where_they_are(
+        tmp_path):
+    """The order is the platform's (Cancel at the left on a Mac and in
+    GNOME), known before any button is placed: on Cocoa the buttons are
+    placed after the row is first laid out."""
+    from PySide6.QtWidgets import QDialogButtonBox, QStyle
+    from nostr.ui.publish_sheet import AccountRow, BottomRow
+    args = common(tmp_path)
+    account = AccountRow(args["active_profile"], args["store"], args["avatars"], is_dark=False)
+    box = QDialogButtonBox()
+    cancel = box.addButton(QDialogButtonBox.StandardButton.Cancel)
+    publish = box.addButton("Publish", QDialogButtonBox.ButtonRole.AcceptRole)
+    row = BottomRow(account, box)
+    layout = box.style().styleHint(QStyle.StyleHint.SH_DialogButtonLayout, None, box)
+    cancel_first = layout in (QDialogButtonBox.ButtonLayout.MacLayout.value,
+                              QDialogButtonBox.ButtonLayout.GnomeLayout.value)
+    after, chain = account.button.nextInFocusChain(), []
+    while len(chain) < 2:
+        if after in (cancel, publish):
+            chain.append(after)
+        after = after.nextInFocusChain()
+    assert chain == ([cancel, publish] if cancel_first else [publish, cancel]) and row

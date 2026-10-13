@@ -34,11 +34,11 @@ from __future__ import annotations
 import sys
 from typing import Iterable, List, Optional, Tuple
 
-from PySide6.QtCore import QPoint, QSize, Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QBoxLayout, QDialog, QDialogButtonBox, QFrame, QHBoxLayout, QLabel, QMenu, QPushButton,
-    QToolButton, QToolTip, QWidget,
+    QStyle, QToolButton, QToolTip, QWidget,
 )
 
 import announce
@@ -388,17 +388,25 @@ class BottomRow(QWidget):
         self._row.addWidget(account, 0, Qt.AlignmentFlag.AlignLeft)
         self._row.addStretch(1)
         self._row.addWidget(buttons, 0, Qt.AlignmentFlag.AlignRight)
+        # Tab goes left to right: the account, then the buttons in the order
+        # the platform puts them in (Cancel first on a Mac and in GNOME),
+        # known before they are placed. (Never asked of the box's own layout
+        # items: wrapping those leaves Python holding items the box deletes.)
+        layout = buttons.style().styleHint(QStyle.StyleHint.SH_DialogButtonLayout, None,
+                                           buttons)
+        reject_first = layout in (QDialogButtonBox.ButtonLayout.MacLayout.value,
+                                  QDialogButtonBox.ButtonLayout.GnomeLayout.value)
+        accepts = [b for b in buttons.buttons()
+                   if buttons.buttonRole(b) != QDialogButtonBox.ButtonRole.RejectRole]
+        rejects = [b for b in buttons.buttons()
+                   if buttons.buttonRole(b) == QDialogButtonBox.ButtonRole.RejectRole]
+        previous = account.button
+        for button in (rejects + accepts if reject_first else accepts + rejects):
+            QWidget.setTabOrder(previous, button)
+            previous = button
 
     def resizeEvent(self, event) -> None:  # noqa: N802, Qt's name
         super().resizeEvent(event)
-        # Tab goes left to right: the account, then the buttons as the
-        # platform placed them (Cancel first on a Mac). (Asked of the
-        # buttons, never of the box's own layout items: wrapping those
-        # leaves Python holding items the box deletes.)
-        previous = self._account.button
-        for button in sorted(self._buttons.buttons(), key=lambda b: b.mapTo(self, QPoint()).x()):
-            QWidget.setTabOrder(previous, button)
-            previous = button
         beside = (self._account.sizeHint().width() + self._row.spacing()
                   + self._buttons.sizeHint().width())
         direction = (QBoxLayout.Direction.LeftToRight if self.width() >= beside
