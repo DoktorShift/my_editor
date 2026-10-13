@@ -416,17 +416,27 @@ df._on_publish()
 nd.wait_until(lambda: published_f.fired or (df._job is None and not df._looking_up
                                              and "not published" in df._status.text()), 40_000)
 if rep.check("republishing it publishes", published_f.fired, df._status.text()):
-    nd.spin(500)
-    under = nd.nak_req([RNOSTR], kinds=[30023], authors=[alice.user_pubkey],
-                       tags={"d": [own_name]})
-    made = nd.nak_req([RNOSTR], kinds=[30023], authors=[alice.user_pubkey],
+    took = [url for url, ok, _message in published_f.last[1] if ok]
+    rep.info("relays that took the new version", ", ".join(took) + " / " + json.dumps(
+        [list(r) for r in published_f.last[1]]))
+    nd.spin(1500)
+    # Per relay, the newest version under the file's name (a relay may
+    # still hand out the version it replaced too; readers take the newest).
+    newest = {}
+    for relay in took:
+        found = nd.nak_req([relay], kinds=[30023], authors=[alice.user_pubkey],
+                           tags={"d": [own_name]})
+        if found:
+            newest[nd.RELAY_NAMES.get(relay, relay)] = max(found, key=lambda e: e["created_at"])
+    made = nd.nak_req([RNOSTR, NRS], kinds=[30023], authors=[alice.user_pubkey],
                       tags={"d": [slugify(own_name)]})
     rep.check("it replaced the article under the file's name, and made no second one",
-              len(under) == 1 and under[0]["content"] == "Edited later." and made == [],
-              f"under the name {len(under)}, under {slugify(own_name)} {len(made)}")
-    rep.check("it keeps its first publication date",
-              under and nd.tag_values(under[0], "published_at") == [str(old_at)],
-              json.dumps(nd.tag_values(under[0], "published_at") if under else None))
+              len(newest) == len(took) and made == []
+              and all(e["content"] == "Edited later." for e in newest.values()),
+              f"newest under the name {({r: e['content'] for r, e in newest.items()})}, "
+              f"under {slugify(own_name)} {len(made)}")
+    dates = sorted({d for e in newest.values() for d in nd.tag_values(e, "published_at")})
+    rep.check("it keeps its first publication date", dates == [str(old_at)], json.dumps(dates))
 fresh_name = f"Fresh Post {uuid.uuid4().hex[:6]}"
 dn = file_sheet(fresh_name)
 nd.wait_until(lambda: not dn._checking_file_name, 30_000)
