@@ -45,8 +45,8 @@ from constants import (
 from widgets import ElidedLabel, FindBar, LineNumberGutter, FileChangedBar, UpdateBar
 from format_toolbar import FormatToolbar
 from atomic_file import (
-    read_json, read_text_as_written, save_document, save_text_document, with_newlines,
-    write_json,
+    newline_of, read_json, read_text_as_written, save_document, save_text_document,
+    with_newlines, write_json,
 )
 import diagnostics
 import file_paths
@@ -3102,12 +3102,16 @@ class MainWindow(QMainWindow):
         Shared by open_path and _reload_from_disk so both agree on the
         dispatch and on post-load normalization. ``content`` is as the file
         writes it: its line endings become "\n" here, but for a Markdown
-        file's front matter, which keeps each line's own (saved so again).
+        file's front matter, which keeps each line's own (saved so again);
+        the text under it is saved with the ending most of its own lines
+        have.
         """
         ext = path.lower()
         front = None
         if ext.endswith('.md'):
             front, content = front_matter.split(content)
+            if front is not None and "\n" in content:
+                ed._newline = newline_of(content)
         content = with_newlines(content)
         if ext.endswith(('.html', '.htm')):
             ed.setHtml(content)

@@ -1105,3 +1105,13 @@ def test_a_restored_tab_saves_with_the_line_endings_its_file_had(tmp_path):
         saved = r[name]
         assert "More." in saved and saved.startswith(text.split("Body")[0]), name
         assert saved.count("\n") == saved.count("\r\n"), (name, saved)   # every one CRLF
+
+
+def test_a_texts_line_ending_is_counted_over_its_text_alone(tmp_path):
+    """Round 9, L1: a CRLF front matter longer than its LF text made the
+    text CRLF on saving."""
+    text = "---\r\ntitle: A\r\ntags: [x]\r\nslug: s\r\n---\r\n\r\nBody one.\n\nBody text.\n"
+    path = tmp_path / "lf_text.md"
+    path.write_bytes(text.encode("utf-8"))
+    r = run_window_script(SCRIPT, tmp_path, str(path))
+    assert r["lf_text.md saved"] == text.replace("Body text.", "Body text. More.")
