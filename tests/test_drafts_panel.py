@@ -191,12 +191,13 @@ def test_panel_carries_no_second_profile_control():
     assert not hasattr(panel, "_refresh_profile_chip")
     assert not hasattr(DraftsPanel, "switch_profile_requested")
     assert not hasattr(panel, "set_avatar_store")
-    # Only the action menu and the close button remain in the header.
+    # Only the action menu remains in the header: the panel is shown and
+    # hidden from the toolbar, the menu bar and a key, not by a ×.
     buttons = [
         b for b in panel._top_band.findChildren(QToolButton)
         if b.objectName() == "drafts_panel_icon_btn"
     ]
-    assert {b.toolTip() for b in buttons} == {"Actions", "Close drafts panel"}
+    assert {b.toolTip() for b in buttons} == {"Actions"}
 
 
 def test_the_panel_says_nothing_at_rest():
@@ -603,8 +604,7 @@ def test_the_selected_row_carries_a_shape_cue_not_only_a_fill():
             panel.hide()
 
 
-@pytest.mark.parametrize("control_name", ["_launcher", "_close_btn", "_actions_btn",
-                                          "_search_edit"])
+@pytest.mark.parametrize("control_name", ["_launcher", "_actions_btn", "_search_edit"])
 def test_focus_is_visible_on_every_keyboard_reachable_control(control_name):
     """Measured before this change: focusing changed zero pixels.
 
@@ -623,7 +623,7 @@ def test_focus_is_visible_on_every_keyboard_reachable_control(control_name):
         control = getattr(panel, control_name)
         # Focus elsewhere first: a shown panel hands its focus to the first
         # control in the chain, and a cleared focus can come straight back.
-        elsewhere = panel._close_btn if control is panel._search_edit else panel._search_edit
+        elsewhere = panel._actions_btn if control is panel._search_edit else panel._search_edit
         elsewhere.setFocus(Qt.OtherFocusReason)
         QApplication.processEvents()
         assert not control.hasFocus()
@@ -671,7 +671,7 @@ def test_every_chrome_control_is_reachable_by_keyboard():
     panel.add_view("published", "Published", "", QWidget())
     for control in (
         *panel._view_switch.segments, panel._view_switch.popup, panel._actions_btn,
-        panel._close_btn, panel._imports_row.button, panel._imports_row.action,
+        panel._imports_row.button, panel._imports_row.action,
         panel._search_edit, panel._list,
     ):
         assert control.focusPolicy() != Qt.NoFocus
@@ -823,7 +823,6 @@ def test_every_icon_only_control_has_an_accessible_name():
     segments = panel._view_switch.segments
     names = {
         panel._actions_btn: "Actions",
-        panel._close_btn: "Close drafts panel",
         panel._search_edit: "Search Drafts",
         segments[0]: "Drafts",
         segments[1]: "Published",
@@ -832,10 +831,9 @@ def test_every_icon_only_control_has_an_accessible_name():
     }
     for widget, expected in names.items():
         assert widget.accessibleName() == expected
-    # The two icon buttons carry one string for both channels, so the
+    # The icon button carries one string for both channels, so the
     # spoken label and the hovered label cannot drift apart.
-    for button in (panel._actions_btn, panel._close_btn):
-        assert button.accessibleName() == button.toolTip()
+    assert panel._actions_btn.accessibleName() == panel._actions_btn.toolTip()
 
 
 def test_the_surviving_profile_chip_is_named():
@@ -1039,17 +1037,16 @@ def test_the_chrome_fits_at_the_minimum_width():
     panel.show()
     panel.layout().activate()
     try:
-        # The close button is the last thing in the band; if it fits,
+        # The action menu is the last thing in the band; if it fits,
         # nothing before it has overflowed.
-        right_edge = panel._close_btn.mapTo(panel, panel._close_btn.rect().topRight()).x()
+        right_edge = panel._actions_btn.mapTo(panel, panel._actions_btn.rect().topRight()).x()
         assert right_edge <= MIN_PANEL_WIDTH, right_edge
         # One view: a title, not a switch.
         assert panel._title.isVisibleTo(panel)
         assert not panel._view_switch.isVisibleTo(panel)
         # accessibility.md: macOS default control size is 28x28 pt.
-        for control in (panel._actions_btn, panel._close_btn):
-            assert control.height() >= 28
-            assert control.width() >= 28
+        assert panel._actions_btn.height() >= 28
+        assert panel._actions_btn.width() >= 28
         assert panel._imports_row.button.height() >= 28
     finally:
         panel.hide()
@@ -1169,7 +1166,7 @@ def test_the_switch_never_cuts_a_word(sized, scale, width, labels):
         if not switch.is_popup():
             for segment in switch.segments:
                 assert segment.width() >= segment.sizeHint().width()
-        right = panel._close_btn.mapTo(panel, panel._close_btn.rect().topRight()).x()
+        right = panel._actions_btn.mapTo(panel, panel._actions_btn.rect().topRight()).x()
         assert right <= width
     finally:
         panel.hide()

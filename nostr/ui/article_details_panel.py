@@ -81,11 +81,11 @@ class _WrappingCheckBox(QWidget):
 
 
 class ArticleDetailsPanel(QFrame):
-    """The inspector. ``changed(ArticleDetails)`` as the person edits;
-    ``close_requested`` from its close button."""
+    """The inspector. ``changed(ArticleDetails)`` as the person edits. It
+    is shown and hidden by Article Details (the toolbar's toggle, the
+    View and Nostr menus, its key), so it has no close button."""
 
     changed = Signal(object)
-    close_requested = Signal()
     # (document, address): a picture dropped as the cover of a document no
     # longer in front is uploaded: that document's cover.
     cover_uploaded = Signal(object, str)
@@ -159,14 +159,6 @@ class ArticleDetailsPanel(QFrame):
         title = QLabel(_("Article Details"))
         title.setObjectName("article_details_title")
         row.addWidget(title, 1)
-        close = QToolButton()
-        close.setObjectName("article_details_close")
-        close.setText("×")
-        close.setToolTip(_("Close Article Details"))
-        close.setAccessibleName(_("Close Article Details"))
-        close.setAutoRaise(True)
-        close.clicked.connect(self.close_requested)
-        row.addWidget(close)
         return header
 
     def _build_form(self, media_store, media_visibility, copy_maker, private_library,
@@ -335,7 +327,7 @@ class ArticleDetailsPanel(QFrame):
             + f"#article_details_problem {{ color: {theme.error_text_color(dark)}; }}"
             + f"QLabel#article_cover_preview {{ border: 1px solid {border};"
               f" border-radius: 4px; color: {muted}; }}"
-            + "QToolButton#article_details_close, QToolButton#article_details_disclosure"
+            + "QToolButton#article_details_disclosure"
               " { border: none; padding: 2px 4px; }")
 
     def align_band(self, toolbar_height: int) -> None:

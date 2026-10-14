@@ -20,7 +20,8 @@ from typing import List, Optional, Tuple
 from send2trash import send2trash
 import shiboken6
 from PySide6.QtCore import (
-    QBuffer, QByteArray, QDateTime, QEvent, QIODevice, QObject, Qt, QLocale, QMarginsF, QTimer,
+    QBuffer, QByteArray, QDateTime, QEvent, QIODevice, QObject, Qt, QLocale, QMarginsF, QSize,
+    QTimer,
     QUrl, QFileSystemWatcher,
 )
 from PySide6.QtNetwork import QLocalServer
@@ -44,7 +45,8 @@ from constants import (
     DARK_MUTED_FG, LIGHT_MUTED_FG, IPC_SERVER_NAME,
 )
 from widgets import ElidedLabel, FindBar, LineNumberGutter, FileChangedBar, UpdateBar
-from format_toolbar import FormatToolbar
+import format_icons
+from format_toolbar import FormatToolbar, tooltip_for
 from selection_bar import SelectionBar
 from atomic_file import (
     newline_of, read_json, read_text_as_written, save_document, save_text_document,
@@ -2838,6 +2840,7 @@ class MainWindow(QMainWindow):
         # The switch sits right of the toolbar, outside it, so a narrow
         # window never hides it in the toolbar's chevron.
         self._view_switch_holder = self.format_toolbar.add_trailing(self.view_switch)
+        self.format_toolbar.add_trailing(self._build_pane_toggles())
         self.format_bar = QWidget()
         bar_row = QHBoxLayout(self.format_bar)
         bar_row.setContentsMargins(0, 0, 0, 0)
@@ -2868,7 +2871,7 @@ class MainWindow(QMainWindow):
         self._drafts_panel.refresh_requested.connect(self._draft_sync.refresh_by_hand)
         # The deletions other apps announce come with the drafts (L13).
         self._drafts_panel.refresh_requested.connect(self._draft_deletions.refresh)
-        self._drafts_panel.close_requested.connect(self._hide_drafts_panel)
+        self._drafts_panel.hide_requested.connect(self._hide_drafts_panel)
         self._drafts_panel.draft_relays_requested.connect(self._open_draft_relays)
         # The second view: what the account published, to edit, open,
         # share or delete. It reads the relays once it is shown
@@ -2908,8 +2911,6 @@ class MainWindow(QMainWindow):
             relay_hint=self._relay_directory.relay_hint, is_dark=self.is_dark_theme)
         self._article_details_panel.changed.connect(
             lambda details: self._set_article_details(self.current_editor(), details))
-        self._article_details_panel.close_requested.connect(
-            lambda: self.act_article_details.setChecked(False))
         self._article_details_panel.cover_uploaded.connect(self._cover_uploaded_for)
         self._central_splitter.addWidget(self._article_details_panel)
         self._central_splitter.addWidget(self._drafts_panel)
@@ -2931,6 +2932,54 @@ class MainWindow(QMainWindow):
 
     def _align_article_details_band(self, toolbar_height: int, _search_height: int) -> None:
         self._article_details_panel.align_band(toolbar_height)
+
+    def _build_pane_toggles(self) -> QWidget:
+        """Article Details and the Drafts panel, shown and hidden from the
+        toolbar's trailing edge, where a Mac toolbar keeps "buttons that
+        open nearby inspectors" (Apple's guidelines; Pages and Xcode have
+        theirs there). Each is checked while its pane is open and names
+        its key in its tooltip; the menus and the keys do the same. Both
+        panes are Nostr's, so the toggles are there only while a Nostr
+        account is in use."""
+        group = QWidget()
+        row = QHBoxLayout(group)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(2)
+        self._details_toggle = QToolButton()
+        self._details_toggle.setDefaultAction(self.act_article_details)
+        self._details_toggle.setAccessibleName(_("Article Details"))
+        self._drafts_toggle = QToolButton()
+        self._drafts_toggle.setCheckable(True)
+        self._drafts_toggle.setAccessibleName(_("Drafts"))
+        self._drafts_toggle.clicked.connect(self._on_drafts_toggle)
+        for button in (self._details_toggle, self._drafts_toggle):
+            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+            button.setIconSize(QSize(format_icons.SIZE, format_icons.SIZE))
+            button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+            row.addWidget(button)
+        self.act_article_details.setIconVisibleInMenu(False)
+        self.act_article_details.setToolTip(tooltip_for(self.act_article_details))
+        self._drafts_toggle.setToolTip(tooltip_for(self.act_nostr_drafts))
+        self._pane_toggles = group
+        self._paint_pane_toggles()
+        group.setVisible(self.nostr_state.active)
+        return group
+
+    def _paint_pane_toggles(self) -> None:
+        """The toggles' icons in the theme's ink, as the toolbar's are."""
+        if getattr(self, "_pane_toggles", None) is None:
+            return
+        ink = QColor(DARK_FG if self.is_dark_theme else LIGHT_FG)
+        self.act_article_details.setIcon(format_icons.inspector(ink))
+        self._drafts_toggle.setIcon(format_icons.drafts(ink))
+
+    def _on_drafts_toggle(self) -> None:
+        """The toolbar's Drafts toggle: the panel away whichever view it
+        shows, or back at the view it showed."""
+        if self._drafts_panel.isVisible():
+            self._hide_drafts_panel()
+        else:
+            self._show_drafts_panel()
 
 
     # ----------------------------------------------------------------------
@@ -5804,6 +5853,7 @@ class MainWindow(QMainWindow):
             self.format_toolbar.set_dark(self.is_dark_theme)
         if getattr(self, 'view_switch', None) is not None:
             self.view_switch.set_dark(self.is_dark_theme)
+        self._paint_pane_toggles()
         if hasattr(self, 'update_bar'):
             self.update_bar.update_theme(self.is_dark_theme)
         for i in range(self.tabs.count()):
@@ -5994,7 +6044,7 @@ class MainWindow(QMainWindow):
 
     def _sync_view_switch(self, ed, shown: str) -> None:
         rich = self._previewable(ed)
-        self._view_switch_holder.setVisible(rich)
+        self.view_switch.setVisible(rich)
         for action in (self.act_view_write, self.act_view_preview, self.act_view_split):
             action.setEnabled(rich)
         if not rich:
@@ -6533,6 +6583,9 @@ class MainWindow(QMainWindow):
 
     def _on_nostr_in_use_changed(self, active: bool) -> None:
         """Nothing of Nostr stays on screen once no account is in use."""
+        toggles = getattr(self, "_pane_toggles", None)
+        if toggles is not None:
+            toggles.setVisible(active)
         if not active:
             self._hide_drafts_panel()
             details = getattr(self, "act_article_details", None)
@@ -8095,6 +8148,7 @@ class MainWindow(QMainWindow):
         # while the editor keeps the remainder.
         self._give_panel_room(self._drafts_panel, DEFAULT_PANEL_WIDTH)
         self.act_nostr_drafts.setChecked(True)
+        self._drafts_toggle.setChecked(True)
         self._draft_sync.refresh()
         self._draft_deletions.refresh()
         self._follow_account_in_published()
@@ -8123,6 +8177,7 @@ class MainWindow(QMainWindow):
                 target.setFocus()
         self._drafts_panel.hide()
         self.act_nostr_drafts.setChecked(False)
+        self._drafts_toggle.setChecked(False)
         self._update_refresh_command()
 
     def _refresh_drafts_panel(self) -> None:

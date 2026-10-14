@@ -246,6 +246,44 @@ def more(color: QColor) -> QIcon:
 # Drawn at any size with ``paint``: a tile's kind, and the lock on the
 # thumbnail of a private file.
 
+def inspector(color: QColor) -> QIcon:
+    """A window with a pane at its right holding lines of details: the
+    inspector beside the document (Article Details)."""
+    def draw(painter: QPainter, ink: QColor) -> None:
+        painter.setPen(_pen(ink, 1.5))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(QRectF(2, 3.5, 14, 11), 2.4, 2.4)
+        painter.drawLine(QPointF(11, 3.8), QPointF(11, 14.2))
+        painter.setPen(_pen(ink, 1.3))
+        for y in (7.0, 10.0):
+            painter.drawLine(QPointF(12.8, y), QPointF(14.2, y))
+    return _icon(draw, color)
+
+
+def drafts(color: QColor) -> QIcon:
+    """Two pages, one behind the other, the front one written on: the
+    drafts and what was published (the Drafts panel)."""
+    def draw(painter: QPainter, ink: QColor) -> None:
+        painter.setPen(_pen(ink, 1.5))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        # The page behind shows only above and right of the front one.
+        back = QPainterPath()
+        back.moveTo(6.5, 3.6)
+        back.lineTo(6.5, 3.4)
+        back.quadTo(6.5, 2, 7.9, 2)
+        back.lineTo(14.6, 2)
+        back.quadTo(16, 2, 16, 3.4)
+        back.lineTo(16, 11.6)
+        back.quadTo(16, 13, 14.6, 13)
+        back.lineTo(14.3, 13)
+        painter.drawPath(back)
+        painter.drawRoundedRect(QRectF(2.5, 5, 9.5, 11.2), 1.6, 1.6)
+        painter.setPen(_pen(ink, 1.3))
+        for y, end in ((8.6, 9.5), (11.2, 9.5), (13.6, 7.6)):
+            painter.drawLine(QPointF(5, y), QPointF(end, y))
+    return _icon(draw, color)
+
+
 def _draw_lock(painter: QPainter, ink: QColor) -> None:
     """A padlock: only the person can open the file."""
     painter.setPen(_pen(ink, 1.6))

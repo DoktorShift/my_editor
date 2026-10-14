@@ -167,7 +167,7 @@ def test_the_switch_never_cuts_a_word(app_font, language, system, lang, width, s
             assert not panel._top_band.is_stacked()
             assert panel.minimumWidth() == MIN_PANEL_WIDTH
         assert panel.minimumWidth() <= max(MIN_PANEL_WIDTH, panel._top_band.popup_room())
-        right = panel._close_btn.mapTo(panel, panel._close_btn.rect().topRight()).x()
+        right = panel._actions_btn.mapTo(panel, panel._actions_btn.rect().topRight()).x()
         assert right <= panel.width()
     finally:
         panel.hide()
@@ -194,13 +194,14 @@ def test_the_action_menu_holds_refresh_draft_relays_and_the_bulk_actions():
         shown = [a.text() for a in panel._actions_btn.menu().actions()
                  if a.isVisible() and not a.isSeparator()]
         assert shown == ["Refresh Drafts", "Draft Relays…", "Select All Drafts",
-                         "Delete Draft"]
+                         "Delete Draft", "Hide Drafts"]
         assert not panel._select_all_action.isEnabled()          # no drafts listed
         assert not panel._delete_selected_action.isEnabled()     # none selected
         panel.show_view(PANEL_VIEW)                              # drafts' own: not here
         shown = [a.text() for a in panel._actions_btn.menu().actions()
                  if a.isVisible() and not a.isSeparator()]
-        assert shown == ["Refresh Published Notes and Articles", "Draft Relays…"]
+        assert shown == ["Refresh Published Notes and Articles", "Draft Relays…",
+                         "Hide Drafts"]
     finally:
         panel.hide()
 
@@ -230,9 +231,10 @@ def test_the_action_menu_sits_with_the_panel_wide_controls_in_band_1():
         assert panel._actions_btn.accessibleName() == "Actions"
         assert panel._top_band.isAncestorOf(panel._actions_btn)
         assert not panel._top_band.is_stacked()                  # band 1 on one line
+        # At the trailing end of band 1, on the switch's line.
         actions = panel._actions_btn.mapTo(panel, panel._actions_btn.rect().topRight())
-        close = panel._close_btn.mapTo(panel, panel._close_btn.rect().topLeft())
-        assert actions.x() <= close.x() and actions.y() == close.y()
+        switch = panel._view_switch.mapTo(panel, panel._view_switch.rect().topLeft())
+        assert actions.x() <= panel.width() and actions.x() > switch.x()
     finally:
         panel.hide()
 

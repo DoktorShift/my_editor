@@ -1262,7 +1262,9 @@ class DraftsPanel(QFrame):
                                    view; a view added with a ``refresh``
                                    of its own reads again itself)
       draft_relays_requested()   , Draft Relays… in the action menu
-      close_requested()          , × on the header
+      hide_requested()           , Hide Drafts in the action menu (the
+                                   toolbar's toggle and the Nostr menu
+                                   show and hide it too)
       view_changed(str)          , another view was chosen (its key)
       open_imports()             , the Imports row: open the Imports window
       pause_import()             , the Imports row's Pause
@@ -1304,7 +1306,7 @@ class DraftsPanel(QFrame):
     copy_event_id = Signal(str)
     refresh_requested = Signal()
     draft_relays_requested = Signal()
-    close_requested = Signal()
+    hide_requested = Signal()
     view_changed = Signal(str)
     open_imports = Signal()
     pause_import = Signal()
@@ -1397,8 +1399,10 @@ class DraftsPanel(QFrame):
 
     def _build_top_band(self) -> QWidget:
         """Band 1: the view's title (or the switch between views) on the
-        leading edge, the panel's action menu and close on the trailing
-        one.
+        leading edge, the panel's action menu on the trailing one. No
+        close button: a Mac pane is shown and hidden from the toolbar (its
+        toggle), the menu bar and a key, and Hide Drafts is in the action
+        menu.
 
         ``_TopBand`` chooses between the title, the segments and the
         pop-up button, and takes the two buttons to a second line only
@@ -1414,7 +1418,7 @@ class DraftsPanel(QFrame):
         self._view_switch.view_chosen.connect(self.show_view)
 
         # Icon-only, so the accessible name is the only string that
-        # announces them; the glyph alone reads as "⋯" and "×".
+        # announces it; the glyph alone reads as "⋯".
         # accessibility.md: "To ensure a smooth experience, label
         # interface elements appropriately."
         icons = QWidget()
@@ -1426,10 +1430,6 @@ class DraftsPanel(QFrame):
         # line, where the holder is only ever as wide as its buttons.
         icons_layout.addStretch(1)
         icons_layout.addWidget(self._build_actions_button(control_h))
-        self._close_btn = self._make_icon_button(
-            "×", _("Close drafts panel"), self.close_requested.emit, control_h,
-        )
-        icons_layout.addWidget(self._close_btn)
 
         self._top_band = _TopBand(self._title, self._view_switch, icons)
         return self._top_band
@@ -1471,8 +1471,8 @@ class DraftsPanel(QFrame):
         Space, Return or Enter.
 
         Refresh (the view shown reads again), Draft Relays… (also in the
-        Nostr menu), and, in the Drafts view, Select All and Delete for
-        the drafts selected. ``pull-down-buttons.md``: "listing a minimum
+        Nostr menu), in the Drafts view Select All and Delete for the
+        drafts selected, and Hide Drafts. ``pull-down-buttons.md``: "listing a minimum
         of three items can help the interaction feel worthwhile".
         """
         self._actions_btn = self._make_icon_button("⋯", _("Actions"), None, control_h)
@@ -1491,6 +1491,9 @@ class DraftsPanel(QFrame):
         self._select_all_action.triggered.connect(self._select_all_drafts)
         self._delete_selected_action = menu.addAction(_("Delete Draft"))
         self._delete_selected_action.triggered.connect(self._delete_selected)
+        menu.addSeparator()
+        hide = menu.addAction(_("Hide Drafts"))
+        hide.triggered.connect(self.hide_requested)
         self._actions_btn.setMenu(menu)
         return self._actions_btn
 
