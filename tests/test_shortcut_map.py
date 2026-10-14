@@ -62,6 +62,11 @@ def window_on(platform, monkeypatch):
     from main_window import MainWindow
     from tests.test_commands import StandIn
     monkeypatch.setattr(commands, "sys", types.SimpleNamespace(platform=platform))
+    # The File menu offers Print Preview by the system the app starts on
+    # (a Mac's print panel has its own preview), so that is set for
+    # ``platform`` too.
+    import printing
+    monkeypatch.setattr(printing, "OFFERS_PRINT_PREVIEW", platform != "darwin")
     win = StandIn()
     MainWindow._build_actions(win)          # refuses two commands on one key
     return win
