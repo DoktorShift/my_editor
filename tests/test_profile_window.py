@@ -280,6 +280,8 @@ def test_edit_profile_opens_a_window_that_reads_the_active_account(monkeypatch):
     host = QMainWindow()
     host._profile_store = SimpleNamespace(default=lambda: profile)
     host._relay_pool = host._session_pool = host._relay_directory = None
+    host._media_store = None                      # no media servers: no Choose…
+    host._profile_image_loader = lambda _pubkey: None
     host.is_dark_theme = False
     mw_module.MainWindow._on_edit_profile(host)
     windows = host.findChildren(pw.ProfileWindow)
@@ -348,3 +350,121 @@ def test_a_field_problem_never_lays_the_form_over_the_buttons(tmp_path, language
     from tests.app_process import run_window_script
     r = run_window_script(OVERLAP_SCRIPT, tmp_path, language)
     assert r["last_bottom"] <= r["save_top"], r
+
+
+# -- the card, the groups and Choose… ------------------------------------------
+
+PIC = "https://media.example/pic.jpg"
+WIDE = "https://media.example/wide.png"
+
+
+def _pixmap(color):
+    from PySide6.QtGui import QColor, QPixmap
+    pixmap = QPixmap(40, 40)
+    pixmap.fill(QColor(color))
+    return pixmap
+
+
+def test_the_card_shows_the_profile_as_the_fields_read():
+    win, net = window()
+    net.reads[0](found(display_name="Ann Bell", name="ann", nip05="ann@example.com"))
+    assert (win.card.name(), win.card.detail()) == ("Ann Bell", "ann@example.com")
+    edit(win, "nip05", "")
+    assert win.card.detail() == "@ann"           # no Nostr address: the username
+    edit(win, "display_name", "")
+    assert win.card.name() == "ann"              # no name: the username
+    win.close()
+
+
+def test_the_cards_pictures_are_loaded_for_the_addresses_given_and_follow_a_change():
+    asked = []
+    win, net = window(load_image=lambda kind, url, done: asked.append((kind, url, done)))
+    net.reads[0](found(name="ann", picture=PIC, banner=WIDE))
+    win._image_timer.timeout.emit()
+    assert [(kind, url) for kind, url, _done in asked] == [("picture", PIC), ("banner", WIDE)]
+    red, blue = _pixmap("#FF0000"), _pixmap("#0000FF")
+    asked[0][2](red)
+    asked[1][2](blue)
+    assert win.card._picture is red and win.card._banner is blue
+    # An address typed over: the answer for the old one no longer lands.
+    edit(win, "picture", "https://media.example/new.jpg")
+    win._image_timer.timeout.emit()
+    asked[0][2](blue)
+    assert win.card._picture is not blue
+    edit(win, "banner", "")
+    win._image_timer.timeout.emit()
+    assert win.card._banner is None
+    win.close()
+
+
+def test_an_image_answer_after_closing_is_dropped():
+    asked = []
+    win, net = window(load_image=lambda kind, url, done: asked.append(done))
+    net.reads[0](found(name="ann", picture=PIC))
+    win._image_timer.timeout.emit()
+    win.reject()                                 # closed, as Cancel or the close box does
+    asked[0](_pixmap("#FF0000"))                 # nothing happens, nothing breaks
+    assert win.card._picture is None
+
+
+def test_a_long_address_shows_where_it_lives():
+    win, net = window()
+    net.reads[0](found(name="ann", picture=PIC + "?" + "x" * 200))
+    assert win._edits["picture"].cursorPosition() == 0
+    win.close()
+
+
+def test_the_fields_come_in_groups_titled_in_order():
+    from PySide6.QtWidgets import QLabel
+    win, _net = window()
+    titles = [label.text() for label in win._pages["form"].findChildren(QLabel)
+              if label.objectName() == "item_title"]
+    assert titles == ["Pictures", "Links and Payments"]   # the first, under the card
+    win.close()
+
+
+def test_choose_is_offered_with_the_media_library_and_fills_in_the_public_address(
+        monkeypatch):
+    from nostr.ui import cover_field
+    win, _net = window()
+    assert win._choose == {}                     # no media servers: the address only
+    win.close()
+
+    picked = SimpleNamespace(url=PIC)
+
+    class Picker:
+        def __init__(self, **_kwargs):
+            self._filter_combo = SimpleNamespace(setCurrentIndex=lambda *_a: None)
+            self.file_picked = SimpleNamespace(connect=lambda slot: setattr(self, "slot", slot))
+
+        def setWindowTitle(self, title):
+            self.title = title
+
+        def exec(self):
+            self.slot(picked)
+
+    monkeypatch.setattr(cover_field, "MediaLibraryDialog", Picker)
+    monkeypatch.setattr(pw, "resolve_pick", lambda media, **_kw: SimpleNamespace(
+        ok=True, url=media.url, reason=""))
+    services = cover_field.MediaServices(store=SimpleNamespace())
+    win, net = window(media=services)
+    net.reads[0](found(name="ann"))
+    assert set(win._choose) == {"picture", "banner"}
+    assert win._choose["banner"].accessibleName() == "Choose Banner"
+    win._choose["picture"].click()
+    assert win._edits["picture"].text() == PIC and "picture" in win.changes()
+    win.close()
+
+
+def test_a_private_picture_that_stays_private_says_why_under_its_field(monkeypatch):
+    from nostr.ui import cover_field
+    monkeypatch.setattr(pw, "choose_picture",
+                        lambda services, *, on_picked, **_kw: on_picked(SimpleNamespace()))
+    monkeypatch.setattr(pw, "resolve_pick", lambda media, **_kw: SimpleNamespace(
+        ok=False, url="", reason="This picture is kept privately."))
+    win, net = window(media=cover_field.MediaServices(store=SimpleNamespace()))
+    net.reads[0](found(name="ann"))
+    win._choose["banner"].click()
+    assert win._edits["banner"].text() == ""
+    assert win._errors["banner"].text() == "This picture is kept privately."
+    win.close()
