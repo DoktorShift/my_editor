@@ -69,6 +69,15 @@ theme.install_style_sheet_guard(_APP)
 gc.disable()
 
 
+@pytest.fixture(autouse=True)
+def _backups_of_its_own(tmp_path_factory, monkeypatch):
+    """A window a test builds backs up what is typed in it, as the app does:
+    into a folder of the test's own, never the person's ~/.cache, from where
+    MyEditor offers every backup back at its next launch."""
+    import recovery
+    monkeypatch.setattr(recovery, "BACKUP_DIR", str(tmp_path_factory.mktemp("backups")))
+
+
 def pytest_configure(config):
     if os.environ.get("MYEDITOR_TEST_AS") == "other":
         import alerts
