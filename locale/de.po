@@ -647,8 +647,8 @@ msgstr "Einträge löschen"
 
 #: main_window.py:2987
 #: main_window.py:2410
-#: nostr/ui/article_details_panel.py:116
-#: nostr/ui/article_details_panel.py:161
+#: nostr/ui/article_details_panel.py:134
+#: nostr/ui/article_details_panel.py:179
 msgid "Article Details"
 msgstr "Artikeldetails"
 
@@ -1115,6 +1115,7 @@ msgid "Publish as Article…"
 msgstr "Als Artikel veröffentlichen …"
 
 #: main_window.py:2381
+#: nostr/ui/cover_field.py:407
 msgid "Media Library…"
 msgstr "Mediathek …"
 
@@ -1269,36 +1270,37 @@ msgid "PDFs open read-only; there is nothing to save."
 msgstr "PDFs werden nur zum Lesen geöffnet. Es gibt nichts zu speichern."
 
 #: main_window.py:4197
-#: nostr/ui/article_details_panel.py:190
-#: nostr/ui/article_header.py:214
-#: nostr/ui/article_header.py:262
+#: nostr/ui/article_details_panel.py:211
+#: nostr/ui/article_header.py:228
+#: nostr/ui/article_header.py:276
 #: nostr/ui/publish_article_dialog.py:441
 #: nostr/ui/stash_kind_dialog.py:421
 msgid "Title"
 msgstr "Titel"
 
 #: main_window.py:4197
-#: nostr/ui/article_details_panel.py:199
-#: nostr/ui/article_header.py:222
+#: nostr/ui/article_details_panel.py:216
+#: nostr/ui/article_header.py:236
 #: nostr/ui/publish_article_dialog.py:448
 msgid "Summary"
 msgstr "Zusammenfassung"
 
 #: main_window.py:4197
-#: nostr/ui/cover_field.py:196
-#: nostr/ui/cover_field.py:203
-#: nostr/ui/cover_field.py:230
+#: nostr/ui/cover_field.py:286
+#: nostr/ui/cover_field.py:294
+#: nostr/ui/cover_field.py:419
 msgid "Cover image"
 msgstr "Titelbild"
 
 #: main_window.py:4198
-#: nostr/ui/article_details_panel.py:215
+#: nostr/ui/article_details_panel.py:231
+#: nostr/ui/article_details_panel.py:233
 #: nostr/ui/publish_article_dialog.py:454
 msgid "Hashtags"
 msgstr "Hashtags"
 
 #: main_window.py:4198
-#: nostr/ui/article_details_panel.py:256
+#: nostr/ui/article_details_panel.py:260
 #: nostr/ui/publish_article_dialog.py:499
 #: nostr/ui/stash_kind_dialog.py:429
 msgid "Link name"
@@ -1309,12 +1311,10 @@ msgid "Date"
 msgstr "Datum"
 
 #: main_window.py:4199
-#: nostr/ui/article_details_panel.py:219
 msgid "Co-Authors"
 msgstr "Mitautoren"
 
 #: main_window.py:4200
-#: nostr/ui/article_details_panel.py:231
 msgid "Share zaps equally with co-authors"
 msgstr "Zaps zu gleichen Teilen mit den Mitautoren teilen"
 
@@ -2569,8 +2569,8 @@ msgid "MyEditor can read audio and video files of these kinds: {kinds}."
 msgstr "MyEditor kann Audio- und Videodateien dieser Arten lesen: {kinds}."
 
 #: main_window.py:7694
-#: nostr/ui/cover_field.py:386
-#: nostr/ui/cover_field.py:292
+#: nostr/ui/cover_field.py:519
+#: nostr/ui/cover_field.py:359
 #: nostr/ui/media_library_dialog.py:1057
 #: nostr/ui/media_library_dialog.py:1084
 #: nostr/ui/media_library_dialog.py:1087
@@ -3104,7 +3104,8 @@ msgstr "Vorschau als:"
 
 #: preview_pane.py:96
 #: nostr/refs.py:151
-#: nostr/ui/article_header.py:158
+#: nostr/ui/article_details_panel.py:208
+#: nostr/ui/article_header.py:169
 #: nostr/ui/imports_article.py:121
 #: nostr/ui/published_view.py:134
 msgid "Article"
@@ -6149,44 +6150,72 @@ msgstr "Sicherung speichern"
 msgid "The password is wrong. Try again."
 msgstr "Das Passwort ist falsch. Versuche es erneut."
 
-#: nostr/ui/article_details_panel.py:181
+#: nostr/ui/article_details_panel.py:199
 msgid "Every detail is kept as written in the file: MyEditor can’t read its front matter in full."
 msgstr "Alle Details bleiben so, wie sie in der Datei stehen: MyEditor kann deren Front Matter nicht vollständig lesen."
 
-#: nostr/ui/article_details_panel.py:189
-#: nostr/ui/article_details_panel.py:439
+#: nostr/ui/article_details_panel.py:210
+#: nostr/ui/article_details_panel.py:465
 #: nostr/ui/publish_article_dialog.py:440
 #: nostr/ui/stash_kind_dialog.py:418
 msgid "Article title"
 msgstr "Titel des Artikels"
 
-#: nostr/ui/article_details_panel.py:194
-#: nostr/ui/publish_article_dialog.py:447
-msgid "Short summary (one sentence)"
-msgstr "Kurze Zusammenfassung (ein Satz)"
+#: nostr/ui/article_details_panel.py:215
+msgid "Shown under the title in feeds"
+msgstr "Erscheint in Feeds unter dem Titel"
 
-#: nostr/ui/article_details_panel.py:226
-#: nostr/ui/publish_article_dialog.py:481
-msgid "Add Co-Author…"
-msgstr "Mitautor hinzufügen …"
+#: nostr/ui/article_details_panel.py:219
+#: nostr/ui/article_header.py:198
+msgid "Cover"
+msgstr "Titelbild"
 
-#: nostr/ui/article_details_panel.py:244
+#: nostr/ui/article_details_panel.py:237
+msgid "Authors"
+msgstr "Autoren"
+
+#: nostr/ui/article_details_panel.py:249
 msgid "Advanced"
 msgstr "Erweitert"
 
-#: nostr/ui/article_details_panel.py:292
+#: nostr/ui/article_details_panel.py:311
 #: nostr/ui/publish_article_dialog.py:757
 #: nostr/ui/stash_kind_dialog.py:334
 msgid "Kept as written in the file."
 msgstr "Bleibt so, wie es in der Datei steht."
 
-#: nostr/ui/article_details_panel.py:482
-msgid "Zaps are shared the way another app set them."
-msgstr "Zaps werden so geteilt, wie es eine andere App festgelegt hat."
+#: nostr/ui/article_details_panel.py:474
+#: nostr/ui/publish_article_dialog.py:534
+msgid "Not published yet."
+msgstr "Noch nicht veröffentlicht."
 
-#: nostr/ui/article_details_panel.py:517
-#: nostr/ui/article_header.py:192
-#: nostr/ui/cover_field.py:216
+#: nostr/ui/article_details_panel.py:405
+msgid "A saved or published article keeps its link name; saving it under another one makes another article."
+msgstr "Ein gespeicherter oder veröffentlichter Artikel behält seinen Linknamen; unter einem anderen gespeichert, wird er ein anderer Artikel."
+
+#: nostr/ui/article_details_panel.py:526
+#: nostr/ui/publish_article_dialog.py:498
+#: nostr/ui/stash_kind_dialog.py:425
+msgid "my-article"
+msgstr "mein-artikel"
+
+#: nostr/ui/article_details_panel.py:472
+#: nostr/ui/publish_article_dialog.py:532
+#, python-brace-format
+msgid "First published {moment}"
+msgstr "Zuerst veröffentlicht am {moment}"
+
+#: nostr/ui/article_header.py:189
+msgid "Add Cover"
+msgstr "Titelbild hinzufügen"
+
+#: nostr/ui/article_header.py:202
+msgid "Change Cover…"
+msgstr "Titelbild ändern …"
+
+#: nostr/ui/article_header.py:203
+#: nostr/ui/authors_section.py:76
+#: nostr/ui/cover_field.py:307
 #: nostr/ui/draft_relays_sheet.py:173
 #: nostr/ui/media_library_dialog.py:682
 #: nostr/ui/media_servers_dialog.py:229
@@ -6194,62 +6223,15 @@ msgstr "Zaps werden so geteilt, wie es eine andere App festgelegt hat."
 msgid "Remove"
 msgstr "Entfernen"
 
-#: nostr/ui/article_details_panel.py:448
-#: nostr/ui/publish_article_dialog.py:534
-msgid "Not published yet."
-msgstr "Noch nicht veröffentlicht."
-
-#: nostr/ui/article_details_panel.py:379
-msgid "A saved or published article keeps its link name; saving it under another one makes another article."
-msgstr "Ein gespeicherter oder veröffentlichter Artikel behält seinen Linknamen; unter einem anderen gespeichert, wird er ein anderer Artikel."
-
-#: nostr/ui/article_details_panel.py:519
-#: nostr/ui/publish_sheet.py:241
-#: nostr/ui/tag_field.py:90
-#, python-brace-format
-msgid "Remove {name}"
-msgstr "{name} entfernen"
-
-#: nostr/ui/article_details_panel.py:585
-#: nostr/ui/publish_article_dialog.py:498
-#: nostr/ui/stash_kind_dialog.py:425
-msgid "my-article"
-msgstr "mein-artikel"
-
-#: nostr/ui/article_details_panel.py:446
-#: nostr/ui/publish_article_dialog.py:532
-#, python-brace-format
-msgid "First published {moment}"
-msgstr "Zuerst veröffentlicht am {moment}"
-
-#: nostr/ui/article_details_panel.py:484
-#, python-brace-format
-msgid "{names} can’t receive zaps: their profile has no lightning address. They get no share."
-msgid_plural "{names} can’t receive zaps: their profiles have no lightning address. They get no share."
-msgstr[0] "{names} kann keine Zaps empfangen: Im Profil steht keine Lightning-Adresse. Diese Person erhält keinen Anteil."
-msgstr[1] "{names} können keine Zaps empfangen: Bei ihnen steht keine Lightning-Adresse im Profil. Sie erhalten keinen Anteil."
-
-#: nostr/ui/article_header.py:178
-msgid "Add Cover"
-msgstr "Titelbild hinzufügen"
-
-#: nostr/ui/article_header.py:187
-msgid "Cover"
-msgstr "Titelbild"
-
-#: nostr/ui/article_header.py:191
-msgid "Change Cover…"
-msgstr "Titelbild ändern …"
-
-#: nostr/ui/article_header.py:193
+#: nostr/ui/article_header.py:204
 msgid "Remove Cover"
 msgstr "Titelbild entfernen"
 
-#: nostr/ui/article_header.py:221
+#: nostr/ui/article_header.py:235
 msgid "Add a summary"
 msgstr "Zusammenfassung hinzufügen"
 
-#: nostr/ui/article_header.py:306
+#: nostr/ui/article_header.py:317
 msgid "Cover from the web"
 msgstr "Titelbild aus dem Web"
 
@@ -6276,6 +6258,49 @@ msgstr "Schritt {number}, erledigt"
 #, python-brace-format
 msgid "Step {number}, failed"
 msgstr "Schritt {number}, fehlgeschlagen"
+
+#: nostr/ui/authors_section.py:83
+msgid "No lightning address in their profile, so they can’t be paid a share."
+msgstr "Keine Lightning-Adresse im Profil, darum kann kein Anteil gezahlt werden."
+
+#: nostr/ui/authors_section.py:135
+#: nostr/ui/publish_article_dialog.py:481
+msgid "Add Co-Author…"
+msgstr "Mitautor hinzufügen …"
+
+#: nostr/ui/authors_section.py:149
+msgid "Split Evenly"
+msgstr "Gleich aufteilen"
+
+#: nostr/ui/authors_section.py:153
+msgid "Give you and every co-author who can be paid an equal share of the zaps."
+msgstr "Gibt dir und allen Mitautoren, die bezahlt werden können, den gleichen Anteil der Zaps."
+
+#: nostr/ui/authors_section.py:159
+msgid "Apps that support zap splits, like Amethyst and noStrudel, pay each person their share. Other apps pay you."
+msgstr "Apps, die Zap-Aufteilungen unterstützen, etwa Amethyst und noStrudel, zahlen jeder Person ihren Anteil. Andere Apps zahlen dich."
+
+#: nostr/ui/authors_section.py:175
+msgid "You"
+msgstr "Du"
+
+#: nostr/ui/authors_section.py:68
+#: nostr/ui/authors_section.py:73
+#, python-brace-format
+msgid "Share for {name}"
+msgstr "Anteil für {name}"
+
+#: nostr/ui/authors_section.py:78
+#: nostr/ui/publish_sheet.py:241
+#: nostr/ui/tag_field.py:90
+#, python-brace-format
+msgid "Remove {name}"
+msgstr "{name} entfernen"
+
+#: nostr/ui/authors_section.py:174
+#, python-brace-format
+msgid "{name} · you"
+msgstr "{name} · du"
 
 #: nostr/ui/connect_dialog.py:108
 msgid "Connect Signer App"
@@ -6393,12 +6418,12 @@ msgid_plural "This code works for {seconds} more seconds."
 msgstr[0] "Dieser Code gilt noch {seconds} Sekunde."
 msgstr[1] "Dieser Code gilt noch {seconds} Sekunden."
 
-#: nostr/ui/cover_field.py:217
+#: nostr/ui/cover_field.py:308
 msgid "Remove Cover Image"
 msgstr "Titelbild entfernen"
 
-#: nostr/ui/cover_field.py:263
-#: nostr/ui/cover_field.py:435
+#: nostr/ui/cover_field.py:330
+#: nostr/ui/cover_field.py:568
 msgid ""
 "No cover\n"
 "selected"
@@ -6406,47 +6431,51 @@ msgstr ""
 "Kein Titelbild\n"
 "ausgewählt"
 
-#: nostr/ui/cover_field.py:206
+#: nostr/ui/cover_field.py:400
+msgid "Drop or paste a picture, or press Return to choose one."
+msgstr "Bild ablegen oder einsetzen, oder Return drücken, um eines auszuwählen."
+
+#: nostr/ui/cover_field.py:297
 msgid "Drop a picture here to upload it as the cover."
 msgstr "Ziehe ein Bild hierher, um es als Titelbild hochzuladen."
 
-#: nostr/ui/cover_field.py:210
+#: nostr/ui/cover_field.py:301
 #: nostr/ui/profile_window.py:314
 msgid "Choose…"
 msgstr "Auswählen …"
 
-#: nostr/ui/cover_field.py:211
-#: nostr/ui/cover_field.py:339
+#: nostr/ui/cover_field.py:302
+#: nostr/ui/cover_field.py:472
 msgid "Choose Cover Image"
 msgstr "Titelbild auswählen"
 
-#: nostr/ui/cover_field.py:212
+#: nostr/ui/cover_field.py:303
 #: nostr/ui/profile_window.py:316
 msgid "Choose a picture from your Media Library, or upload one."
 msgstr "Wähle ein Bild aus deiner Mediathek oder lade eines hoch."
 
-#: nostr/ui/cover_field.py:364
+#: nostr/ui/cover_field.py:404
+msgid "Choose"
+msgstr "Auswählen"
+
+#: nostr/ui/cover_field.py:408
+msgid "Web Address…"
+msgstr "Webadresse …"
+
+#: nostr/ui/cover_field.py:497
 msgid "A picture can be uploaded once you use a Nostr account with media servers. Paste its web address instead."
 msgstr "Ein Bild lässt sich hochladen, sobald du ein Nostr-Konto mit Medienservern verwendest. Füge stattdessen seine Webadresse ein."
 
-#: nostr/ui/cover_field.py:368
+#: nostr/ui/cover_field.py:501
 msgid "Only a picture can be a cover."
 msgstr "Nur ein Bild kann ein Titelbild sein."
 
-#: nostr/ui/cover_field.py:242
-msgid "Pictures you pick are uploaded to your media servers."
-msgstr "Bilder, die du auswählst, werden auf deine Medienserver hochgeladen."
-
-#: nostr/ui/cover_field.py:244
-msgid "Paste an image URL hosted anywhere on the public web."
-msgstr "Füge die Adresse eines Bildes ein, das öffentlich im Web liegt."
-
-#: nostr/ui/cover_field.py:421
+#: nostr/ui/cover_field.py:554
 #, python-brace-format
 msgid "The picture was not uploaded: {reason}"
 msgstr "Das Bild wurde nicht hochgeladen: {reason}"
 
-#: nostr/ui/cover_field.py:394
+#: nostr/ui/cover_field.py:527
 #, python-brace-format
 msgid ""
 "Uploading…\n"
@@ -6455,7 +6484,7 @@ msgstr ""
 "Wird hochgeladen …\n"
 "{percent} %"
 
-#: nostr/ui/cover_field.py:445
+#: nostr/ui/cover_field.py:578
 msgid ""
 "Preview shown\n"
 "for library picks"
@@ -6463,12 +6492,12 @@ msgstr ""
 "Vorschau nur für\n"
 "Bilder der Mediathek"
 
-#: nostr/ui/cover_field.py:375
+#: nostr/ui/cover_field.py:508
 #, python-brace-format
 msgid "Could not read file: {error}"
 msgstr "Die Datei konnte nicht gelesen werden: {error}"
 
-#: nostr/ui/cover_field.py:379
+#: nostr/ui/cover_field.py:512
 #, python-brace-format
 msgid "This picture can’t be a cover: {reason}."
 msgstr "Dieses Bild kann kein Titelbild sein: {reason}."
@@ -9052,6 +9081,10 @@ msgstr "Veröffentlichen"
 #: nostr/ui/publish_article_dialog.py:443
 msgid "Title:"
 msgstr "Titel:"
+
+#: nostr/ui/publish_article_dialog.py:447
+msgid "Short summary (one sentence)"
+msgstr "Kurze Zusammenfassung (ein Satz)"
 
 #: nostr/ui/publish_article_dialog.py:450
 msgid "Summary:"

@@ -33,7 +33,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 from nostr import bech32  # noqa: E402
 from nostr.article_details import ArticleDetails  # noqa: E402
@@ -195,13 +195,13 @@ def test_a_detail_kept_as_written_in_the_file_is_shown_read_only_and_says_so():
                        kept_in_file=frozenset({"image", "tags"}))
     assert panel.cover.url_edit.isReadOnly() and panel.hashtags.isReadOnly()
     assert not panel.title_edit.isReadOnly()
-    notes = [label.text() for label in panel.findChildren(type(panel.zaps_note))
+    notes = [label.text() for label in panel.findChildren(QLabel)
              if not label.isHidden() and label.text() == "Kept as written in the file."]
     assert len(notes) == 2
     panel.show_article(ArticleDetails(title="T"), fixed_identifier=False)
     assert not panel.cover.url_edit.isReadOnly() and not panel.hashtags.isReadOnly()
     assert not any(label.text() == "Kept as written in the file." and not label.isHidden()
-                   for label in panel.findChildren(type(panel.zaps_note)))
+                   for label in panel.findChildren(QLabel))
 
 
 def test_a_hashtag_holding_a_comma_is_shown_and_handed_back_whole():
