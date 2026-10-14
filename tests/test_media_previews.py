@@ -99,7 +99,7 @@ def test_file_icons_use_cached_system_associations_without_user_paths(tmp_path, 
     class Provider:
         def icon(self, info):
             calls.append(info.filePath())
-            assert not info.exists()
+            assert info.exists() and info.size() == 0
             return native_icon if info.suffix() else QIcon()
 
     monkeypatch.setattr(file_icons, "QFileIconProvider", Provider)
@@ -107,8 +107,12 @@ def test_file_icons_use_cached_system_associations_without_user_paths(tmp_path, 
     mime = media_files.type_of("Budget.xlsx")
     assert icons.icon(str(tmp_path / "Private Budget.xlsx"), mime).cacheKey() == native_icon.cacheKey()
     assert icons.icon("Another.xlsx", mime).cacheKey() == native_icon.cacheKey()
-    assert calls == ["myeditor-file-type", "myeditor-file-type.xlsx"]
+    assert [Path(path).name for path in calls] == ["file", "file.xlsx"]
+    assert all(Path(path).parent == Path(icons._directory.path()) for path in calls)
     assert list(tmp_path.iterdir()) == []
+    directory = Path(icons._directory.path())
+    del icons
+    assert not directory.exists()
 
 
 @pytest.mark.parametrize("name,glyph", [
