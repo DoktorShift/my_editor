@@ -37,20 +37,20 @@ def test_no_module_but_tab_details_touches_a_tabs_details():
 
 
 RESTORE_SCRIPT = r"""
-import json, os, sys
+import dataclasses, json, os, shutil, sys
 sys.path.insert(0, sys.argv[1])
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import QApplication
 app = QApplication(sys.argv[:1])
-import main_window
+import main_window, workspace_restore
 from recovery import read_backup
 
 path, copy = sys.argv[2], sys.argv[3]
 w = main_window.MainWindow()
 w.show()
 r = {}
-for case in ("restored", "restored copy"):
+for case in ("restored", "restored copy", "resumed"):
     open(path, "w", encoding="utf-8").write(sys.argv[4])
     ed = w.open_path(path)
     w._set_article_details(ed, w._article_details_of(ed).with_changes(
@@ -58,14 +58,22 @@ for case in ("restored", "restored copy"):
     c = ed.textCursor()
     c.movePosition(QTextCursor.MoveOperation.End)
     c.insertText("Z")
-    ed._backup.write_now()
-    record = read_backup(ed._backup.path)
+    if case == "resumed":                   # the record of a restart, its backup kept
+        tab = workspace_restore.capture_editor_tab(ed)
+        shutil.copy(tab.backup_file, tab.backup_file + ".kept")
+        tab = dataclasses.replace(tab, backup_file=tab.backup_file + ".kept")
+    else:                                   # a crash
+        ed._backup.write_now()
+        record = read_backup(ed._backup.path)
     ed.document().setModified(False)
     w.close_tab(w.tabs.currentIndex())
     app.processEvents()
-    restored = w._restore_one_backup(record)
+    if case == "resumed":
+        restored = workspace_restore.resume_tab(w, tab, draft_type=main_window.DraftBinding)
+    else:
+        restored = w._restore_one_backup(record)
     w.tabs.setCurrentIndex(w.tabs.count() - 1)
-    target = path if case == "restored" else copy
+    target = copy if case == "restored copy" else path
     w._save_to(target)                      # nothing asked for the details first
     r[case] = open(target, encoding="utf-8").read()
     restored.document().setModified(False)
@@ -78,12 +86,13 @@ print("RESULT " + json.dumps(r))
 
 def test_a_restored_tab_saves_the_details_changed_before_the_crash(tmp_path):
     """B1: the file kept its old title, the save said Saved, and the tab
-    went on publishing the new one."""
+    went on publishing the new one. The same after a restart."""
     r = run_window_script(RESTORE_SCRIPT, tmp_path, str(tmp_path / "post.md"),
                           str(tmp_path / "copy.md"), SOURCE)
-    for case in ("restored", "restored copy"):
+    for case in ("restored", "restored copy", "resumed"):
         assert "title: Changed Title\n" in r[case] and "tags: [a, b, c]\n" in r[case], case
         assert "summary: FM summary\n" in r[case] and "slug: fm-slug\n" in r[case], case
+        assert r[case].endswith("\nBody.Z\n"), case
 
 
 STASH_SCRIPT = r"""
