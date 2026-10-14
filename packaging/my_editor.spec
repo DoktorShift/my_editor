@@ -50,6 +50,10 @@ hiddenimports = [
     "PySide6.QtNetwork",
     "PySide6.QtWebSockets",
     "PySide6.QtPrintSupport",
+    # Local Quick Look playback and video thumbnails. PyInstaller's Qt
+    # hooks collect the multimedia backend plugins and their libraries.
+    "PySide6.QtMultimedia",
+    "PySide6.QtMultimediaWidgets",
     # Full-text recovery (nostr/imports/fulltext.py): readability-lxml
     # rides on lxml's compiled extensions, which static analysis can
     # only partially see.
@@ -95,8 +99,6 @@ excludes = [
     "PySide6.Qt3DRender",
     "PySide6.QtCharts",
     "PySide6.QtDataVisualization",
-    "PySide6.QtMultimedia",
-    "PySide6.QtMultimediaWidgets",
     "PySide6.QtBluetooth",
     "PySide6.QtNfc",
     "PySide6.QtPositioning",

@@ -416,14 +416,13 @@ class MediaStore(QObject):
     ) -> List[MediaFile]:
         """Filtered + sorted snapshot, matching STANDUP's options.
 
-        ``filter_type`` ∈ {'all','image','video','audio'}; everything
+        ``filter_type`` ∈ {'all','image','video','audio','file'}; everything
         else falls under 'all'.
         ``sort_by`` ∈ {'newest','oldest','largest','smallest'}.
         """
         result = list(self._files.values())
-        prefix = {"image": "image/", "video": "video/", "audio": "audio/"}.get(filter_type)
-        if prefix:
-            result = [f for f in result if (f.mime_type or "").startswith(prefix)]
+        if filter_type in ("image", "video", "audio", "file"):
+            result = [f for f in result if media_files.library_kind(f.mime_type) == filter_type]
         if sort_by == "oldest":
             result.sort(key=lambda f: f.uploaded_at_ms)
         elif sort_by == "largest":

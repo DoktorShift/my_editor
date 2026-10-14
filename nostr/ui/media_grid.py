@@ -53,10 +53,12 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QAbstractItemView, QListView, QStyle, QStyledItemDelegate
 
 import format_icons
+import media_files
 import theme
 from i18n import _
 
 from ..blossom.store import MediaFile
+from .file_icons import FileIcons
 
 # The thumbnail's side, and the cell around it.
 THUMB = 128
@@ -103,6 +105,7 @@ class Tile:
     pixmap: Optional[QPixmap] = None
     # A picture that cannot be drawn here (HEIC on most systems).
     no_picture: bool = False
+    mime: str = ""
 
     @property
     def is_file(self) -> bool:
@@ -215,6 +218,7 @@ class TileDelegate(QStyledItemDelegate):
         super().__init__(view)
         self._view = view
         self._is_dark = is_dark
+        self._file_icons = FileIcons()
 
     def cell_size(self) -> QSize:
         line = QFontMetrics(self._view.font()).lineSpacing()
@@ -284,14 +288,32 @@ class TileDelegate(QStyledItemDelegate):
             side = min(source.width(), source.height())
             source = QRectF(source.center().x() - side / 2, source.center().y() - side / 2,
                             side, side)
-            painter.drawPixmap(QRectF(thumb), tile.pixmap, source)
+            if tile.kind == "file":
+                source = QRectF(tile.pixmap.rect())
+                size = tile.pixmap.size().scaled(thumb.size(), Qt.AspectRatioMode.KeepAspectRatio)
+                target = QRect(thumb)
+                target.setSize(size)
+                target.moveCenter(thumb.center())
+                painter.drawPixmap(QRectF(target), tile.pixmap, source)
+            else:
+                painter.drawPixmap(QRectF(thumb), tile.pixmap, source)
         elif tile.state == FILE and (tile.kind != "image" or tile.no_picture):
-            glyph = {"video": "video", "audio": "audio"}.get(tile.kind, "document")
+            glyph = media_files.file_glyph(tile.mime)
             side = 44
             rect = QRectF(thumb.center().x() - side / 2, thumb.center().y() - side / 2,
                           side, side)
-            format_icons.paint(glyph, painter, rect,
-                               palette.color(QPalette.ColorRole.PlaceholderText))
+            icon = self._file_icons.icon(tile.name, tile.mime) if tile.kind == "file" else None
+            if icon is not None and not icon.isNull():
+                icon.paint(painter, rect.toRect())
+            else:
+                format_icons.paint(glyph, painter, rect,
+                                   palette.color(QPalette.ColorRole.PlaceholderText))
+            if tile.kind == "file":
+                suffix = media_files.file_extension(tile.name, tile.mime).lstrip(".").upper()
+                if suffix:
+                    painter.setPen(palette.color(QPalette.ColorRole.Text))
+                    painter.drawText(thumb.adjusted(8, THUMB - 30, -8, -8),
+                                     Qt.AlignmentFlag.AlignCenter, suffix)
         if tile.state != FILE:
             painter.fillRect(thumb, _SCRIM)
         painter.restore()
