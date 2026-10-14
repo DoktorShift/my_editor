@@ -92,10 +92,10 @@ from .media_grid import (
     Tile,
 )
 from .media_preview import QuickLook
+from .media_source import PreviewResolver
+from .media_thumbnails import MediaThumbnails
 from .media_saver import MediaSaver, save_failure, saves_failure
 from .thumbnail_loader import ThumbnailLoader
-
-_PREFIXES = {"image": "image/", "video": "video/", "audio": "audio/"}
 
 # Types a file being added is shown from its own bytes while it uploads:
 # the ones the app decodes anyway.
@@ -104,10 +104,7 @@ _PREVIEW_MAX_BYTES = 40 * 1024 * 1024
 
 
 def kind_of_mime(mime: str) -> str:
-    for kind, prefix in _PREFIXES.items():
-        if (mime or "").startswith(prefix):
-            return kind
-    return "file"
+    return media_files.library_kind(mime)
 
 
 class _DropPage(QWidget):
@@ -175,6 +172,9 @@ class MediaLibraryDialog(QDialog):
         self._visibility = visibility or MediaVisibility()
         self._private_library: Optional[PrivateLibrary] = None
         self._loader = ThumbnailLoader(parent=self)
+        self._previews = MediaThumbnails(self._loader, self._visibility, parent=self)
+        self._previews.ready.connect(self._set_thumbnail)
+        self._preview_asked: set[str] = set()
         self._thumbs: Dict[str, QPixmap] = {}
         self._asked: set = set()
         # Files added from this window, by job name, until they land.
@@ -323,7 +323,7 @@ class MediaLibraryDialog(QDialog):
         bar.setContentsMargins(14, 12, 14, 10)
         bar.setSpacing(8)
         self._add_button = QPushButton(_("Add…"))
-        self._add_button.setToolTip(_("Add images, videos, audio or PDFs from your computer"))
+        self._add_button.setToolTip(_("Add images, videos, audio or files from your computer"))
         self._add_button.setAutoDefault(False)
         self._add_button.clicked.connect(self._choose_files)
         self._add_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -331,7 +331,7 @@ class MediaLibraryDialog(QDialog):
         self._filter_combo = QComboBox()
         self._filter_combo.setAccessibleName(_("Show"))
         for kind, label in (("all", _("All Items")), ("image", _("Images")),
-                            ("video", _("Videos")), ("audio", _("Audio"))):
+                            ("video", _("Videos")), ("audio", _("Audio")), ("file", _("Files"))):
             self._filter_combo.addItem(label, kind)
         self._filter_combo.currentIndexChanged.connect(self._rebuild)
         self._filter_combo.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -451,6 +451,15 @@ class MediaLibraryDialog(QDialog):
         self._on_private_library_changed()
 
     def _on_private_library_changed(self) -> None:
+        self._previews.cancel()
+        # A decrypted thumbnail belongs to the account that opened it.
+        # Rebuild from that account's current privacy records, rather
+        # than retaining pixels across an account switch or key change.
+        self._thumbs.clear()
+        self._asked.clear()
+        self._preview_asked.clear()
+        if self._quick_look is not None:
+            self._quick_look.invalidate()
         self._rebuild()
 
     def _on_private_library_status(self, _text: str) -> None:
@@ -507,16 +516,20 @@ class MediaLibraryDialog(QDialog):
             and self._visibility.state_of(source) == PUBLISHED_COPY
 
     def _file_tile(self, media: MediaFile) -> Tile:
-        mime = self._visibility.declared_mime(media.hash) or media.mime_type or ""
+        name = self._store.name_of(media.hash) or self._visibility.name_of(media.hash)
+        mime = (self._visibility.declared_mime(media.hash) or media.mime_type or "").lower().split(";", 1)[0].strip()
+        if mime in ("", "application/octet-stream"):
+            mime = media_files.type_of(name) or mime
         kind = kind_of_mime(mime)
         day = _day_of(media)
-        name = (self._store.name_of(media.hash) or self._visibility.name_of(media.hash)
-                or day or kind_word_title(kind))
+        name = name or day or kind_word_title(kind)
         detail = day if name != day else format_size(media.size)
+        if kind == "file":
+            detail = media_files.file_type_label(mime) + " · " + format_size(media.size)
         state = self._visibility.state_of(media.hash)
         return Tile(key=media.hash, name=name, detail=detail, kind=kind,
                     private=state == PRIVATE, media=media,
-                    pixmap=self._thumbs.get(media.hash))
+                    pixmap=self._thumbs.get(media.hash), mime=mime)
 
     def _show_page(self) -> None:
         """The grid, or one plain sentence where it would be."""
@@ -532,7 +545,7 @@ class MediaLibraryDialog(QDialog):
         elif self._fetching:
             message = _("Loading…")
         else:
-            message = _("Images, videos, audio and PDFs you add appear here. Anyone with "
+            message = _("Images, videos, audio and files you add appear here. Anyone with "
                         "the link can see them.")
             button = _("Add…")
         self._empty_text.setText(message)
@@ -558,6 +571,10 @@ class MediaLibraryDialog(QDialog):
             if self._wants_picture(tile):
                 self._asked.add(key)
                 self._loader.load(key, tile.media.url)
+            elif (tile.kind == "video" or tile.mime == "application/pdf") \
+                    and key not in self._preview_asked and not self._visibility.is_unknown(key):
+                self._preview_asked.add(key)
+                self._previews.request(tile.media, tile.mime)
 
     def _wants_picture(self, tile: Tile) -> bool:
         """A picture, whatever the server calls it: a private picture is
@@ -565,7 +582,7 @@ class MediaLibraryDialog(QDialog):
         decoder refuses it."""
         if self._visibility.is_private(tile.key):
             declared = self._visibility.declared_mime(tile.key)
-            return not declared or declared.startswith("image/")
+            return tile.kind == "image" or (not declared and tile.kind == "file")
         return tile.kind == "image"
 
     def _on_thumbnail_ready(self, sha: str, _path: str, pix: QPixmap) -> None:
@@ -605,13 +622,17 @@ class MediaLibraryDialog(QDialog):
         return QPixmap.fromImage(outcome.image) if outcome.ok else None
 
     def _set_thumbnail(self, sha: str, pix: QPixmap) -> None:
+        if sha not in self._store.files:
+            return
         ratio = self.devicePixelRatioF()
         side = int(THUMB * ratio)
-        scaled = pix.scaled(QSize(side, side), Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+        tile = self._model.tile(sha)
+        aspect = (Qt.AspectRatioMode.KeepAspectRatio if tile is not None and tile.kind == "file"
+                  else Qt.AspectRatioMode.KeepAspectRatioByExpanding)
+        scaled = pix.scaled(QSize(side, side), aspect,
                             Qt.TransformationMode.SmoothTransformation)
         scaled.setDevicePixelRatio(ratio)
         self._thumbs[sha] = scaled
-        tile = self._model.tile(sha)
         if tile is not None:
             tile.pixmap = scaled
             self._model.changed(sha)
@@ -729,8 +750,12 @@ class MediaLibraryDialog(QDialog):
         if not self._selected_files():
             return
         if self._quick_look is None:
-            self._quick_look = QuickLook(grid=self._grid, is_dark=self._is_dark, parent=self)
+            resolver = PreviewResolver(self._loader, self._visibility, parent=self)
+            self._quick_look = QuickLook(grid=self._grid, is_dark=self._is_dark,
+                                        resolver=resolver, parent=self)
             self._quick_look.closed.connect(self._grid.setFocus)
+            self._quick_look.thumbnail_ready.connect(self._set_thumbnail)
+            self._quick_look.save_requested.connect(self._save_preview)
         self._show_in_quick_look()
         self._quick_look.show()
         self._quick_look.raise_()
@@ -747,14 +772,15 @@ class MediaLibraryDialog(QDialog):
             self._quick_look.close()
             return
         tile = files[0]
-        glyph = {"video": "video", "audio": "audio", "image": ""}.get(tile.kind, "document")
+        glyph = "" if tile.kind == "image" else media_files.file_glyph(tile.mime)
         picture = None
         if self._wants_picture(tile):
             picture = self._full_picture(tile.key)
             if picture is None:
                 self._loader.load(tile.key, tile.media.url)
         self._quick_look.show_file(name=tile.name, detail=_quick_look_detail(tile),
-                                   url=self._link_of(tile), glyph=glyph, picture=picture)
+                                   url=self._link_of(tile), glyph=glyph, picture=picture,
+                                   media=tile.media, mime=tile.mime)
 
     def _full_picture(self, sha: str) -> Optional[QPixmap]:
         if not self._loader.cache_path(sha).is_file():
@@ -789,7 +815,13 @@ class MediaLibraryDialog(QDialog):
             QDesktopServices.openUrl(QUrl(link))
 
     def _save_as(self) -> None:
+        self._save_files(self._selected_files())
+
+    def _save_preview(self) -> None:
         files = self._selected_files()
+        self._save_files(files[:1])
+
+    def _save_files(self, files: List[Tile]) -> None:
         if not files:
             return
         if len(files) == 1:
@@ -955,9 +987,11 @@ class MediaLibraryDialog(QDialog):
 
     def _choose_files(self) -> None:
         patterns = " ".join("*" + ext for ext in media_files.EXTENSIONS)
+        # R Markdown's conventional casing matters to non-native Linux dialogs.
+        patterns += " *.Rmd"
         paths, _filter = QFileDialog.getOpenFileNames(
             self, _("Add to Media Library"), "",
-            _("Images, Videos, Audio and PDFs ({patterns})").format(patterns=patterns))
+            _("Images, Videos, Audio and Files ({patterns})").format(patterns=patterns))
         self._add_paths(paths)
 
     def _add_paths(self, paths: List[str]) -> None:
@@ -975,10 +1009,9 @@ class MediaLibraryDialog(QDialog):
             self._add_job(name, mime, _local_preview(mime=mime, path=path))
         if refused:
             self._say(ngettext(
-                "“{name}” wasn’t added. The Media Library takes images, videos, audio and "
-                "PDFs.",
-                "{count} files weren’t added. The Media Library takes images, videos, audio "
-                "and PDFs.", len(refused)).format(name=refused[0], count=len(refused)),
+                "“{name}” wasn’t added. Choose a supported image, video, audio or document file.",
+                "{count} files weren’t added. Choose supported images, videos, audio or document files.",
+                len(refused)).format(name=refused[0], count=len(refused)),
                 error=True)
 
     def _paste(self) -> None:
@@ -1204,8 +1237,12 @@ class MediaLibraryDialog(QDialog):
         for button in (self._add_button, self._actions_button):
             button.setMinimumWidth(button.sizeHint().width())
         super().showEvent(event)
+        # The first layout is ready on the next turn. Initial previews
+        # must not depend on the person scrolling or resizing the grid.
+        QTimer.singleShot(0, self, self._load_visible)
 
     def done(self, result: int) -> None:
+        self._previews.cancel()
         if self._quick_look is not None:
             self._quick_look.close()
         if self._owns_saver:
@@ -1246,7 +1283,7 @@ def _day_of(media: MediaFile) -> str:
 def _quick_look_detail(tile: Tile) -> str:
     """One quiet line: kind, size, dimensions, the day it was added."""
     media = tile.media
-    parts = [kind_word_title(tile.kind), format_size(media.size)]
+    parts = [media_files.file_type_label(tile.mime or media.mime_type), format_size(media.size)]
     if media.width and media.height:
         parts.append(f"{media.width} × {media.height}")
     day = _day_of(media)
@@ -1295,7 +1332,7 @@ def _save_name(tile: Tile) -> str:
     ext = ext.rstrip(". ")
     if len(ext) > 16:                        # not an extension, a long name with a dot
         stem, ext = name, ""
-    ext = ext or media_files.extension_for(tile.media.mime_type or "")
+    ext = ext or media_files.extension_for(tile.mime or tile.media.mime_type or "")
     stem = stem.rstrip(". ") or kind_word_title(tile.kind)
     first, dot, rest = stem.partition(".")
     if first.rstrip(" ").upper() in _DEVICE_NAMES:     # "CON.tar.gz" is CON too

@@ -109,6 +109,24 @@ def _editor() -> str:
     return "Markdown in and out"
 
 
+def _multimedia() -> str:
+    # Importing the module alone does not load its backend plugin. This
+    # check catches a bundle missing the plugin or its FFmpeg libraries.
+    from PySide6.QtMultimedia import QMediaPlayer
+    from PySide6.QtMultimediaWidgets import QVideoWidget
+    player = QMediaPlayer()
+    video = QVideoWidget()
+    try:
+        if not player.isAvailable():
+            raise RuntimeError("the local media playback backend is unavailable")
+        player.setVideoOutput(video)
+        player.setVideoOutput(None)
+    finally:
+        player.deleteLater()
+        video.deleteLater()
+    return "local playback backend and video widget"
+
+
 CHECKS: List[Check] = [
     ("translations", _translations),
     ("icon", _icon),
@@ -117,6 +135,7 @@ CHECKS: List[Check] = [
     ("modules", _modules),
     ("spelling", _spelling),
     ("editor", _editor),
+    ("media playback", _multimedia),
 ]
 
 
