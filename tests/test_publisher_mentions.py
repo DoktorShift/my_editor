@@ -113,9 +113,9 @@ def test_build_note_inline_only_still_emits_p_tag():
 # --------------------------------------------------------------------------- #
 
 def test_build_article_p_tags_appear_after_d_tag_before_metadata():
-    """Tag order is cosmetic per NIP-01 but matters for readability; verify
-    we put p-tags right after the d-tag so the article's identity stays
-    obvious at the top of the tag list."""
+    """The d tag first (rnostr takes the first tag as the address), then
+    the client, then the p tags, so the article's identity stays obvious
+    at the top of the tag list."""
     event = build_article(
         f"body text for nostr:{encode_npub(ALICE_PK)}",
         AUTHOR_PK,
@@ -123,8 +123,8 @@ def test_build_article_p_tags_appear_after_d_tag_before_metadata():
         title="Hello",
     )
     keys = [t[0] for t in event["tags"]]
-    # Expect: client, d, p, title  (no other tags in this test)
-    assert keys == ["client", "d", "p", "title"]
+    # Expect: d, client, p, title  (no other tags in this test)
+    assert keys == ["d", "client", "p", "title"]
 
 
 def test_build_article_no_mentions_no_p_tags():

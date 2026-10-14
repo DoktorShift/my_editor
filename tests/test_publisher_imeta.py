@@ -309,7 +309,7 @@ def test_an_article_carries_imeta_after_its_metadata_and_before_extras():
         extra_tags=[["source", "https://blog.example/feed"]],
     )
     kinds = [t[0] for t in event["tags"]]
-    assert kinds == ["client", "d", "title", "image", "t", "imeta", "source"]
+    assert kinds == ["d", "client", "title", "image", "t", "imeta", "source"]
 
 
 def test_media_defaults_to_nothing_so_no_caller_changes():

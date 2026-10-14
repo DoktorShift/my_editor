@@ -229,3 +229,28 @@ def test_a_mark_stays_only_with_the_letter_it_belongs_to(title, slug):
 def test_titles_of_emoji_only_get_names_of_their_own():
     names = {slugify(title) for title in ("❤️", "☀️", "⭐️⭐️⭐️")}
     assert len(names) == 3 and all(name.startswith("article-") for name in names)
+
+
+def test_every_addressable_event_the_app_builds_has_its_d_tag_first():
+    """Review round 3, M3: an article put ["client", ...] before its d tag,
+    and rnostr takes the first tag as the address, so there each article
+    replaced the author's last one. Every addressable event the app
+    builds names its address first: an article (also once a key is taken
+    out of it), a draft and a draft's deletion. (The feed list is pinned
+    in test_imports_subscriptions; the private relay list, 10013, is
+    replaceable and has no d tag.)"""
+    from nostr.drafts import build_draft_wrap, build_tombstone_wrap
+    from nostr.publisher import build_note, without_secret_keys
+    article = build_article(content="Body #nostr", slug="my-post", pubkey_hex=PK,
+                            title="T", hashtags=["nostr"],
+                            extra_tags=[["zap", PK, "", "1"]])
+    wrap = build_draft_wrap(identifier="draft-1", inner_kind=30023, encrypted_content="x",
+                            pubkey_hex=PK, client_name=CLIENT_NAME,
+                            extra_tags=[["k", "30023"]])
+    tombstone = build_tombstone_wrap(identifier="draft-1", inner_kind=30023, pubkey_hex=PK,
+                                     client_name=CLIENT_NAME)
+    for event in (article, without_secret_keys(article), wrap, tombstone):
+        assert 30000 <= event["kind"] < 40000
+        assert event["tags"][0][0] == "d", event["tags"]
+        assert ["client", CLIENT_NAME] in event["tags"]
+    assert build_note(content="hi", pubkey_hex=PK)["tags"][0] == ["client", CLIENT_NAME]

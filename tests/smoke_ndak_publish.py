@@ -379,6 +379,12 @@ if rep.check("the article publishes", published_m.fired, dm._status.text()):
         rep.check("its text still carries the nostr:npub reference (NIP-27)",
                   ev["content"] == body_m.strip() and f"nostr:{bob_npub}" in ev["content"],
                   repr(ev["content"][:120]))
+    # rnostr files an article under its first tag: with the client tag
+    # first, as before, every article took the place of the author's last.
+    still = {nd.RELAY_NAMES[r]: len(nd.nak_req([r], kinds=[30023], authors=[alice.user_pubkey],
+                                               tags={"d": [slug]})) for r in (RNOSTR, NRS)}
+    rep.check("the article before it is still on every relay (its d tag comes first)",
+              all(n == 1 for n in still.values()), json.dumps(still))
 
 # --------------------------------------------------------------------------- #
 rep.section("A file's article that version 3.3 published under the file's own name")
@@ -388,9 +394,11 @@ from nostr.publisher import slugify  # noqa: E402
 
 own_name = f"My Post {uuid.uuid4().hex[:6]}"
 old_at = int(time.time()) - 86_400 * 30
-# As version 3.3 published "My Post ….md": the file's name as it is, no record kept.
+# As version 3.3 published "My Post ….md": the file's name as it is, no
+# record kept, and its tags in 3.3's order (the client tag before d).
 nd.nak_publish(alice_sk.hex(), [RNOSTR, NRS], kind=30023, content="Written in 3.3.",
-               tags=[["d", own_name], ["title", "My Post"], ["published_at", str(old_at)]],
+               tags=[["client", "MyEditor"], ["d", own_name], ["title", "My Post"],
+                     ["published_at", str(old_at)]],
                created_at=old_at)
 record = FirstPublications(nd.HOME / "first_publications_ndak.json")
 
@@ -420,12 +428,15 @@ if rep.check("republishing it publishes", published_f.fired, df._status.text()):
     rep.info("relays that took the new version", ", ".join(took) + " / " + json.dumps(
         [list(r) for r in published_f.last[1]]))
     nd.spin(1500)
-    # Per relay, the newest version under the file's name (a relay may
-    # still hand out the version it replaced too; readers take the newest).
-    newest = {}
+    # Per relay, the newest version under the file's name: readers take
+    # the newest. rnostr files an article under its first tag, which in
+    # 3.3 was the client tag, so it keeps the 3.3 version beside the new
+    # one (whose d tag comes first) for good; the others replace it.
+    newest, versions = {}, {}
     for relay in took:
         found = nd.nak_req([relay], kinds=[30023], authors=[alice.user_pubkey],
                            tags={"d": [own_name]})
+        versions[nd.RELAY_NAMES.get(relay, relay)] = len(found)
         if found:
             newest[nd.RELAY_NAMES.get(relay, relay)] = max(found, key=lambda e: e["created_at"])
     made = nd.nak_req([RNOSTR, NRS], kinds=[30023], authors=[alice.user_pubkey],
@@ -435,6 +446,10 @@ if rep.check("republishing it publishes", published_f.fired, df._status.text()):
               and all(e["content"] == "Edited later." for e in newest.values()),
               f"newest under the name {({r: e['content'] for r, e in newest.items()})}, "
               f"under {slugify(own_name)} {len(made)}")
+    rep.check("a relay that files articles by their d tag keeps one version",
+              versions.get(nd.RELAY_NAMES[NRS]) == 1, json.dumps(versions))
+    rep.info("versions under the file's name per relay (rnostr keeps 3.3's, filed under "
+             "its client tag)", json.dumps(versions))
     dates = sorted({d for e in newest.values() for d in nd.tag_values(e, "published_at")})
     rep.check("it keeps its first publication date", dates == [str(old_at)], json.dumps(dates))
 fresh_name = f"Fresh Post {uuid.uuid4().hex[:6]}"

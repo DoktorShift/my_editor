@@ -410,6 +410,8 @@ def build_article(
     The ``slug`` becomes the ``d``-tag, the identifier that makes this
     event addressable. Re-publishing with the same slug replaces the
     previous version on relays that honour parameterized replacement.
+    The ``d`` tag is the first tag: rnostr takes the first tag's value as
+    the address.
 
     Everyone ``content`` mentions gets a ``p`` tag, as in ``build_note``
     (outside code: a link in code mentions nobody).
@@ -431,9 +433,12 @@ def build_article(
     if not slug.strip():
         raise ValueError("article slug (d-tag) must not be empty")
     p_tags = _mention_tags(content, markdown=True)
+    # The address first: some relays (rnostr) take the first tag as the
+    # address, so a "client" tag before it made each article replace the
+    # author's last one there.
     tags: List[List[str]] = [
-        ["client", CLIENT_NAME],
         ["d", slug.strip()],
+        ["client", CLIENT_NAME],
     ]
     tags.extend(p_tags)
     # Quoted notes and articles (NIP-18 q tags) and their authors.
