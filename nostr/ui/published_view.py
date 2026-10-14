@@ -17,6 +17,8 @@ through two signals:
 
     set_account(profile)     whose items to show (None: nobody's)
     refresh()                read again (the panel's refresh button)
+    set_search_text(text)    show only what holds ``text`` (the panel's
+                             search field, while this view is shown)
     apply_theme(is_dark)
     open_requested(object)   an article to edit in a tab (a PublishedItem):
                              bound to the article's identifier, so that
@@ -158,12 +160,27 @@ class _Rows(QAbstractListModel):
         self._model = model
         self._items: List[PublishedItem] = []
         self._more = False
+        self._needle = ""
+
+    def set_search(self, text: str) -> None:
+        """Show only the items whose title or text holds ``text``."""
+        self._needle = " ".join(text.split()).casefold()
+        self.reload()
+
+    def searching(self) -> bool:
+        return bool(self._needle)
+
+    def _matches(self, item: PublishedItem) -> bool:
+        if not self._needle:
+            return True
+        return self._needle in f"{item.title} {item.event.get('content') or ''}".casefold()
 
     def keys(self) -> List[str]:
         return [item.id for item in self._items] + ([self._MORE] if self._more else [])
 
     def reload(self) -> None:
-        items = self._model.items() if self._model.state == READY else []
+        items = ([item for item in self._model.items() if self._matches(item)]
+                 if self._model.state == READY else [])
         more = self._model.state == READY and (
             self._model.has_more or self._model.loading_more or self._model.more_failed)
         old_keys = self.keys()
@@ -392,7 +409,8 @@ def add_to_panel(panel, view: "PublishedView") -> None:
     while it is shown."""
     panel.add_view(PANEL_VIEW, _("Published"), _("Your published notes and articles"), view,
                    refresh=view.refresh,
-                   refresh_name=_("Refresh Published Notes and Articles"))
+                   refresh_name=_("Refresh Published Notes and Articles"),
+                   search=view.set_search_text, search_name=_("Search Published"))
 
 
 class PublishedView(QWidget):
@@ -416,6 +434,7 @@ class PublishedView(QWidget):
         self._rows = _Rows(model, self)
         self._last = (model.state, model.refreshing, model.more_failed)
         self._digit_dates = False
+        self._search_text = ""
         self._build()
         # Bound methods, not lambdas: they go with the view if it goes first.
         model.changed.connect(self._on_changed)
@@ -459,6 +478,12 @@ class PublishedView(QWidget):
 
     def set_account(self, profile) -> None:
         self._model.set_account(profile)
+
+    def set_search_text(self, text: str) -> None:
+        """Filter the list by what is typed in the panel's search field."""
+        self._search_text = text.strip()
+        self._rows.set_search(text)
+        self._show_state()
 
     def refresh(self) -> None:
         self._model.refresh()
@@ -556,6 +581,10 @@ class PublishedView(QWidget):
             # Reading on past pages that showed nothing (all deleted):
             # still the first read, as far as the person can tell.
             self._show_placeholder("", _("Looking for your notes and articles…"), busy=True)
+        elif self._search_text and not self._rows.rowCount():
+            self._show_placeholder(
+                _("No Results for “{query}”").format(query=self._search_text),
+                _("Check the spelling or try a new search."))
         elif not self._model.items() and not (self._model.has_more
                                               or self._model.more_failed):
             self._show_placeholder(_("Nothing published yet"),

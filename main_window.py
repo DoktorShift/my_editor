@@ -109,6 +109,7 @@ from word_count import count_words, reading_minutes
 from export_pdf import export_pdf, load_page_setup
 from page_setup_dialog import PageSetupDialog
 import printing
+from window_grid import BandAligner
 from pdf_viewer import PdfViewerTab, reader_keys as pdf_reader_keys
 from rmarkdown import KnitRunner, MediaLink, derive_title, document_to_rmd, media_dir_for
 from rmd_setup_dialog import RmdSetupDialog
@@ -895,6 +896,10 @@ class MainWindow(QMainWindow):
 
         self.setStyleSheet(f"""
             QMainWindow {{ background: {bg}; }}
+            /* The panes' divider: one point, in the separator color, from
+               the toolbar band to the bottom (Apple's thin divider). The
+               panels beside it draw no edge of their own. */
+            QSplitter#central_splitter::handle {{ background: {border}; }}
             QTabWidget::pane {{
                 border-top: 1px solid {border};
                 background: {bg};
@@ -2916,6 +2921,16 @@ class MainWindow(QMainWindow):
         self._drafts_panel.hide()
 
         self.setCentralWidget(self._central_splitter)
+        # The panels' headers line up with the toolbar and the tab row,
+        # whatever their size (window_grid.py).
+        self._band_aligner = BandAligner(
+            side=editor_side, toolbar=self.format_bar, tabs=self.tabs,
+            panels=(self._drafts_panel.align_bands, self._align_article_details_band),
+            parent=self)
+        self._band_aligner.align()
+
+    def _align_article_details_band(self, toolbar_height: int, _search_height: int) -> None:
+        self._article_details_panel.align_band(toolbar_height)
 
 
     # ----------------------------------------------------------------------

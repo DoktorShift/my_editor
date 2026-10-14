@@ -5,22 +5,26 @@
 Layout, top to bottom:
 
   ┌──────────────────────────────────────────┐
-  │  Drafts                          ⋯    ×  │  chrome band 1
+  │  ( Drafts | Published )          ⋯    ×  │  band 1: the toolbar band's
+  ├──────────────────────────────────────────┤  section over this pane
+  │  [ Search Drafts                      ]  │  band 2: level with the
+  ├──────────────────────────────────────────┤  document tabs
+  │  Refreshing drafts…                      │  the banner, only with
+  ├──────────────────────────────────────────┤  something to say
   │  [▢] Imports                    14 new › │  the Imports row
-  │  [ Search drafts…                     ]  │  chrome band 2
-  │  Drafts for Alice                        │  status line
-  ├──────────────────────────────────────────┤
   │  Article title                      2h   │  list rows
   │  blog.example.com · first words of body  │
-  │  Another draft                      1d   │
-  │  first words of body                     │
   │                                          │
   │   (empty state placeholder)              │
   └──────────────────────────────────────────┘
 
-Everything starts at the same 12 px gutter: the title or the view
-switch, the Imports row, the search field, the status line, the empty
-state and both row lines.
+The panel is a pane of the window, not a thing beside it: the window's
+divider is its left edge, and the window keeps its two bands as tall as
+the format toolbar and the tab row beside it (``align_bands``,
+window_grid.py), so the lines under them run straight across.
+
+Everything starts at the same 12 px gutter: the view switch, the search
+field, the banner, the Imports row, the empty state and both row lines.
 
 Band 1 names the panel's view. With one view (Drafts) it is a title;
 when another view is added (``add_view``), a segmented switch takes its
@@ -45,7 +49,8 @@ The Imports row (the owner's decision D-2: one place for imports, the
 Imports window) says how many new posts wait and opens the window; while
 an import has posts to do, it says how far it is, with Pause or Resume.
 
-Band 2 is the search field.
+Band 2 is the search field of the view shown: each view filters itself
+(``add_view(search=...)``) and keeps what was typed into it.
 
 Each row is two stacked lines with exactly one inline item, the age.
 ``typography.md`` warns that in a horizontally constrained context
@@ -59,11 +64,11 @@ Decryption state is carried by three channels that survive greyscale and
 colour blindness: the title's slant, the words on line 2, and the row's
 accessible text. It used to be carried by the hue of one lock glyph.
 
-The account the drafts belong to is named in the status line, and the
-one control that switches accounts is the editor header's ProfileChip
-(``widgets.py``). The panel deliberately carries no second chip: two
-identical avatar-plus-chevron controls a few hundred pixels apart read
-as one duplicated control, and only one of them owned the menu.
+The account the drafts belong to is shown by the account's picture at
+the end of the tab row beside the panel (the ProfileChip, ``widgets.py``),
+the one control that switches accounts. The panel carries no second chip
+and no line naming the account: at rest it says nothing, and its banner
+speaks only while there is something to know.
 
 There is no kind filter. The wrap's ``k`` tag is optional, so an
 undecrypted, loading or failed draft has ``inner_kind == 0``, and
@@ -156,6 +161,9 @@ from .eliding_label import ElidingLabel
 from .imports_glyphs import glyph
 
 
+# Qt's largest widget size, which lets a band take its own height again.
+QWIDGETSIZE_MAX = (1 << 24) - 1
+
 # Width hints. The host can resize through a QSplitter; these are the
 # sensible defaults so the panel doesn't crowd the editor.
 DEFAULT_PANEL_WIDTH: int = 320
@@ -165,7 +173,7 @@ MAX_PANEL_WIDTH: int = 520
 # The panel's single gutter (GUTTER) and the rows' box model (_ROW_PAD_V,
 # _ROW_LINE_GAP, _SELECTION_BAR_W) come from drafts_common, which every
 # list in the panel shares, so its views read alike. The segmented
-# control, the search field, the status line, the empty state and both
+# control, the search field, the banner, the empty state and both
 # row lines all start at the gutter. ``layout.md``: "Align components
 # with one another to make them easier to scan and to communicate
 # organization and hierarchy."
@@ -173,7 +181,7 @@ MAX_PANEL_WIDTH: int = 520
 # Between the title and the age on a row's first line.
 _ROW_INLINE_GAP: int = 8
 
-# How long a one-off sync narration holds the status line once the store
+# How long a one-off sync narration holds the banner once the store
 # is no longer loading. Matches the main window's own transient status
 # messages, and lets the line fall back to naming the account.
 _SYNC_MESSAGE_TTL_MS: int = 6_000
@@ -190,16 +198,36 @@ def _panel_css(is_dark: bool) -> str:
     """
     t = _THEME_TOKENS[bool(is_dark)]
     return f"""
-QFrame#drafts_panel {{
-    background: {t["panel_bg"]};
-    border-left: 1px solid {t["border"]};
-}}
-QFrame#drafts_panel_top_band,
-QFrame#drafts_panel_imports,
-QFrame#drafts_panel_search_band {{
+/* No edge of its own: the window's divider is the panel's left edge. */
+QFrame#drafts_panel {{ background: {t["panel_bg"]}; }}
+/* Band 1 is the toolbar band's section over this pane: its background and
+   its line. Band 2 is the tab row's: the list's ground and the line under
+   the document tabs. */
+QFrame#drafts_panel_top_band {{
     background: {t["chrome_bg"]};
     border: none;
+    border-bottom: 1px solid {t["border"]};
 }}
+QFrame#drafts_panel_search_band {{
+    background: {t["panel_bg"]};
+    border: none;
+    border-bottom: 1px solid {t["border"]};
+}}
+QFrame#drafts_panel_imports {{ background: {t["panel_bg"]}; border: none; }}
+QFrame#drafts_panel_banner {{
+    background: {t["panel_bg"]};
+    border: none;
+    border-bottom: 1px solid {t["border"]};
+}}
+QPushButton#drafts_panel_banner_action {{
+    background: transparent;
+    color: {t["row_fg"]};
+    border: 1px solid {t["border"]};
+    border-radius: 4px;
+    padding: 2px 10px;
+}}
+QPushButton#drafts_panel_banner_action:hover {{ background: {t["hover_bg"]}; }}
+QPushButton#drafts_panel_banner_action:focus {{ border-color: {t["accent"]}; }}
 QLabel#drafts_panel_title {{ color: {t["chrome_fg"]}; font-weight: 600; }}
 QLabel#drafts_panel_imports_activity {{ color: {t["muted"]}; }}
 QPushButton#drafts_panel_imports_open {{
@@ -228,13 +256,6 @@ QToolButton#drafts_panel_view_popup {{
    the style's arrow sat in the corner, on the view's name. */
 QToolButton#drafts_panel_view_popup::menu-indicator {{ image: none; width: 0px; }}
 QToolButton#drafts_panel_view_popup:hover {{ background: {t["hover_bg"]}; }}
-/* One hairline, where the chrome meets the list. The two bands read as
-   a single surface so nothing divides them. layout.md: "Group related
-   items to help people find the information they want... use negative
-   space, background shapes, colors, materials, or separator lines to
-   show when elements are related". */
-QFrame#drafts_panel_search_band {{ border-bottom: 1px solid {t["border"]}; }}
-
 QLabel#drafts_panel_status {{ color: {t["muted"]}; }}
 QLabel#drafts_panel_status[error="true"] {{ color: {t["error_fg"]}; }}
 
@@ -1247,14 +1268,14 @@ class DraftsPanel(QFrame):
       pause_import()             , the Imports row's Pause
       resume_import()            , the Imports row's Resume or Try Again
 
-    Switching profiles is not one of these: the editor header's
-    ProfileChip owns that menu, and the panel names the bound account
-    in its status line rather than duplicating the control.
+    Switching profiles is not one of these: the ProfileChip at the end
+    of the tab row owns that menu and names the account.
 
     Public methods:
       bind_store(store)          , connect to a DraftStore instance
       set_active_profile(p)      , the account the drafts belong to
-      set_status(text)           , narrate a sync step on the status line
+      set_status(text)           , narrate a sync step in the banner
+      align_bands(toolbar, search), the window's grid (window_grid.py)
       set_signer_unsupported(bool), show the "signer lacks NIP-44" state
       apply_theme(is_dark)       , switch dark/light
       set_preview_image_loader(l), hand the hover preview a ThumbnailLoader
@@ -1318,6 +1339,11 @@ class DraftsPanel(QFrame):
         # called while it is shown. Drafts: refresh_requested, to the host.
         self._view_refresh: dict = {}
         self._refresh_names: dict = {self.DRAFTS_VIEW: _("Refresh Drafts")}
+        # Each view's search: what the field is called while it is shown,
+        # how the view filters, and what was typed into it, kept per view.
+        self._search_names: dict = {self.DRAFTS_VIEW: _("Search Drafts")}
+        self._view_search: dict = {}
+        self._view_search_text: dict = {}
 
         self._status_timer = QTimer(self)
         self._status_timer.setSingleShot(True)
@@ -1341,6 +1367,8 @@ class DraftsPanel(QFrame):
         outer.setSpacing(0)
 
         outer.addWidget(self._build_top_band())
+        outer.addWidget(self._build_search_band())
+        outer.addWidget(self._build_banner())
         outer.addWidget(self._build_mode_stack(), 1)
         # Return and Enter open the action menu (``eventFilter``), once the
         # list it filters for too is there.
@@ -1348,8 +1376,8 @@ class DraftsPanel(QFrame):
 
     def _build_mode_stack(self) -> QWidget:
         """The views, one page each: Drafts, and whatever ``add_view``
-        adds. The Imports row and the search band belong to the drafts
-        list, so they live on its page."""
+        adds. The Imports row belongs to the drafts list, so it lives on
+        its page, at the top of the list."""
         self._mode_stack = QStackedWidget()
         self._mode_stack.setObjectName("drafts_panel_mode_stack")
 
@@ -1362,7 +1390,6 @@ class DraftsPanel(QFrame):
         self._imports_row.pause_requested.connect(self.pause_import)
         self._imports_row.resume_requested.connect(self.resume_import)
         drafts_mode_layout.addWidget(self._imports_row)
-        drafts_mode_layout.addWidget(self._build_search_band())
         drafts_mode_layout.addWidget(self._build_body(), 1)
         self._mode_stack.addWidget(drafts_mode)
         self._view_pages[self.DRAFTS_VIEW] = drafts_mode
@@ -1497,11 +1524,15 @@ class DraftsPanel(QFrame):
         self.draft_relays_requested.emit()
 
     def _build_search_band(self) -> QWidget:
-        """Band 2: the search field, which is the panel's only filter.
+        """Band 2: the search field of the view shown, level with the
+        document tabs beside the panel (the window sets its height,
+        ``align_bands``), so the line under it meets the line under the
+        tabs.
 
-        ``searching.md``: "If search is important, give it a primary
-        position in your app or view." It is the only filter left, so it
-        gets the band to itself.
+        ``search-fields.md``: "Include search at the top of the sidebar
+        when filtering content or navigation there." Search is each view's
+        only filter: it reads the whole text of a draft, not only its
+        title, and clearing it shows everything again.
 
         There used to be an All / Notes / Articles chip row under it. It
         filtered on ``record.inner_kind``, which comes from the outer
@@ -1509,40 +1540,90 @@ class DraftsPanel(QFrame):
         decrypted yet, and every draft from a client that omits the tag,
         was kind 0 and matched neither Notes nor Articles. The chips did
         not mis-sort those drafts, they hid them.
-
-        The status line sits under the field rather than in a footer.
-        ``sidebars.md``: "Avoid putting critical information or actions
-        at the bottom of a sidebar. People often relocate a window in a
-        way that hides its bottom edge." ``feedback.md``: "When status
-        feedback is available near the items it describes, people get
-        important information without having to take action or leave
-        their current context."
         """
         frame = QFrame()
         frame.setObjectName("drafts_panel_search_band")
-        layout = QVBoxLayout(frame)
-        layout.setContentsMargins(GUTTER, 0, GUTTER, 6)
-        layout.setSpacing(3)
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(GUTTER, 6, GUTTER, 7)
+        layout.setSpacing(0)
+        self._search_band = frame
 
         self._search_edit = QLineEdit()
         self._search_edit.setObjectName("drafts_panel_search")
-        self._search_edit.setPlaceholderText(_("Search drafts…"))
-        self._search_edit.setAccessibleName(_("Search drafts"))
+        self._search_edit.setPlaceholderText(self._search_names[self.DRAFTS_VIEW])
+        self._search_edit.setAccessibleName(self._search_names[self.DRAFTS_VIEW])
         self._search_edit.setClearButtonEnabled(True)
         self._search_edit.setMinimumHeight(_control_height())
+        self._search_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._search_edit.textChanged.connect(self._on_search_changed)
-        layout.addWidget(self._search_edit)
+        layout.addWidget(self._search_edit, 1, Qt.AlignVCenter)
+        return frame
 
-        # Eliding, for the same reason the row title is: a long display
-        # name would otherwise be clipped from the right with no sign it
-        # had been cut, and would push the band's sizeHint past the
-        # width the user dragged the panel to.
+    def _build_banner(self) -> QWidget:
+        """What the panel has to say, over the list, only while there is
+        something to know: a refresh under way, drafts that could not be
+        decrypted, a signer that does not answer (with Try Again). At rest
+        it says nothing; the account's picture at the end of the tab row
+        beside the panel names whose drafts these are.
+
+        ``feedback.md``: "When status feedback is available near the
+        items it describes, people get important information without
+        having to take action or leave their current context."
+        ``sidebars.md``: "Avoid putting critical information or actions at
+        the bottom of a sidebar", so it sits at the top of the list.
+        """
+        frame = QFrame()
+        frame.setObjectName("drafts_panel_banner")
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(GUTTER, 6, GUTTER, 7)
+        layout.setSpacing(6)
+        # The sentence has the whole width, so it is said whole on the
+        # narrowest panel; eliding only past that, with the whole sentence
+        # as its tooltip, so it never widens the panel.
         self._status_label = _ElidingLabel()
         self._status_label.setObjectName("drafts_panel_status")
         self._status_label.setFont(_secondary_font())
         self._status_label.setProperty("error", "false")
         layout.addWidget(self._status_label)
+        # Its action under it, leading, as an inline message has it.
+        self._banner_action = QPushButton(_("Try Again"))
+        self._banner_action.setObjectName("drafts_panel_banner_action")
+        self._banner_action.clicked.connect(self.retry_signer.emit)
+        self._banner_action.hide()
+        layout.addWidget(self._banner_action, 0, Qt.AlignLeft)
+        self._banner = frame
+        frame.hide()
         return frame
+
+    # -- the window's grid ----------------------------------------------------
+
+    def align_bands(self, toolbar_height: int, search_height: int) -> None:
+        """Line the panel's two bands up with the window beside it: band 1
+        as tall as the format toolbar (``toolbar_height``), band 2 ending
+        on the line under the document tabs (``search_height``). 0 gives a
+        band its own height (no toolbar shown, or the find bar between the
+        toolbar and the tabs). A band whose own content is taller (very
+        large text) keeps its height rather than cutting its controls."""
+        self._top_band.setMinimumHeight(max(0, int(toolbar_height)))
+        if search_height > 0:
+            self._search_band.setFixedHeight(int(search_height))
+        else:
+            self._search_band.setMinimumHeight(0)
+            self._search_band.setMaximumHeight(QWIDGETSIZE_MAX)
+
+    def _show_search_of(self, key: str) -> None:
+        """The search field as the view ``key`` has it: its name, what was
+        typed into it there, or no field for a view that has no search."""
+        searchable = key == self.DRAFTS_VIEW or key in self._view_search
+        self._search_edit.setVisible(searchable)
+        if not searchable:
+            return
+        name = self._search_names.get(key, _("Search"))
+        self._search_edit.setPlaceholderText(name)
+        self._search_edit.setAccessibleName(name)
+        wanted = self._view_search_text.get(key, "")
+        if self._search_edit.text() != wanted:
+            self._search_edit.setText(wanted)
 
     def _build_body(self) -> QWidget:
         # Stacks the actual list and an empty-state widget on the same
@@ -1610,13 +1691,18 @@ class DraftsPanel(QFrame):
 
     def add_view(self, key: str, title: str, hint: str, widget: QWidget, *,
                  refresh: Optional[Callable[[], None]] = None,
-                 refresh_name: str = "") -> None:
+                 refresh_name: str = "",
+                 search: Optional[Callable[[str], None]] = None,
+                 search_name: str = "") -> None:
         """Add a view beside Drafts (another page of the panel). From the
         second view on, band 1 offers the switch between them.
 
         ``refresh`` is how the view reads again when Refresh in the action
         menu is chosen while it is shown, and ``refresh_name`` what that
-        command is called then (title case, as menus write it)."""
+        command is called then (title case, as menus write it).
+        ``search`` filters the view by what is typed in the search field
+        while it is shown, and ``search_name`` names the field then; a
+        view without one leaves the field out."""
         if key in self._view_pages:
             raise ValueError(f"the panel already has a view {key!r}")
         self._views.append((key, title, hint))
@@ -1625,6 +1711,9 @@ class DraftsPanel(QFrame):
             self._view_refresh[key] = refresh
         if refresh_name:
             self._refresh_names[key] = refresh_name
+        if search is not None:
+            self._view_search[key] = search
+            self._search_names[key] = search_name or _("Search")
         self._mode_stack.addWidget(widget)
         self._view_switch.set_views(self._views, self.current_view())
         self._make_room_for_view_names()
@@ -1645,6 +1734,8 @@ class DraftsPanel(QFrame):
             return
         self._mode_stack.setCurrentWidget(page)
         self._view_switch.set_current(key)
+        self._show_search_of(key)
+        self._render_status()
         self._update_actions_menu()
         self._top_band.reflow()
         # Another view is other data and other rows, so the drafts
@@ -1747,8 +1838,6 @@ class DraftsPanel(QFrame):
         # Where drafts are kept is the account's: nothing to set without one.
         self._draft_relays_action.setEnabled(profile is not None)
         self._refresh_empty_state()
-        # The status line names the account, so it has to be re-rendered
-        # whenever the binding changes.
         self._render_status()
 
     def set_status(self, text: str) -> None:
@@ -1859,27 +1948,32 @@ class DraftsPanel(QFrame):
         """The clock the preview reads, in one place so tests can move it."""
         return int(time.time())
 
-    # -- status line: one writer ------------------------------------------
+    # -- the banner: one writer ---------------------------------------------
 
     def _render_status(self) -> None:
-        """The single writer for the status line."""
+        """The single writer for the banner."""
         text, is_error = self._status_line()
         self._status_label.set_full_text(text)
         self._status_label.setToolTip(text)
-        # An empty line collapses rather than leaving a blank strip of
-        # chrome above the list.
         self._status_label.setVisible(bool(text))
+        # Only the drafts view speaks here, and only with something to say:
+        # an empty banner would be a strip of chrome over the list.
+        self._banner.setVisible(bool(text) and self.current_view() == self.DRAFTS_VIEW)
+        # Its one action, where the remedy is a click: the signer again.
+        self._banner_action.setVisible(self._signer_unreachable and not self._signer_unsupported)
         self._status_label.setProperty("error", "true" if is_error else "false")
         self._status_label.style().unpolish(self._status_label)
         self._status_label.style().polish(self._status_label)
 
     def _status_line(self) -> Tuple[str, bool]:
-        """``(text, is_error)`` in priority order, first match wins.
+        """``(text, is_error)`` in priority order, first match wins; at
+        rest ``("", False)``.
 
-        The resting text names the account, which is what replaces the
-        deleted profile chip. It used to read "{ready}/{total}
+        At rest it used to name the account ("Drafts for Alice"), a line
+        of chrome that said the same thing all day; the account's picture
+        beside the panel says it. Before that it read "{ready}/{total}
         decrypted", which said "54/54" for the whole time the user was
-        actually reading the list and so said nothing there.
+        actually reading the list.
         """
         if self._signer_unsupported:
             return _("Your signer app can’t decrypt drafts"), True
@@ -1910,18 +2004,13 @@ class DraftsPanel(QFrame):
         if total and ready < total:
             text = _("Decrypting {ready} of {total}")
             return text.format(ready=ready, total=total), False
-        profile = self._active_profile
-        if profile is None:
-            return "", False
-        name = profile.display_name or profile.npub_short()
-        return _("Drafts for {name}").format(name=name), False
+        return "", False
 
     def _restart_status_ttl(self) -> None:
         self._status_timer.stop()
         # While a refresh is in flight the loading branch holds the line
         # on its own. Once it is not, a narration line is a report of a
-        # finished event, so it expires and the line goes back to naming
-        # the account.
+        # finished event, so it expires and the banner goes away.
         if self._sync_message and not self._loading:
             self._status_timer.start(_SYNC_MESSAGE_TTL_MS)
 
@@ -1959,7 +2048,7 @@ class DraftsPanel(QFrame):
         # Only when there is nothing readable to show. A signer that went
         # quiet halfway through leaves drafts already decrypted on
         # screen, and replacing those with an explanation would take away
-        # more than it gives; there the status line and the per-row retry
+        # more than it gives; there the banner and the per-row retry
         # carry the message.
         if self._signer_unreachable and not self._has_readable_draft():
             self._show_placeholder(
@@ -1977,7 +2066,7 @@ class DraftsPanel(QFrame):
                 # make people wait for loading to complete before
                 # displaying anything, they can interpret the lack of
                 # content as a problem with your app." Rows arrive into
-                # the list and the status line narrates the wait.
+                # the list and the banner narrates the wait.
                 self._body_stack.setCurrentIndex(0)
                 return
             body = _("Press {shortcut} in any tab to save its contents "
@@ -1989,10 +2078,11 @@ class DraftsPanel(QFrame):
             )
             return
         if self._list.count() == 0:
+            # Apple's own words for a search that found nothing.
             self._show_placeholder(
-                _("No matching drafts"),
-                _('No draft matches "{query}".').format(query=self._search_text),
-                action=_("Clear search"),
+                _("No Results for “{query}”").format(query=self._search_text.strip()),
+                _("Check the spelling or try a new search."),
+                action=_("Clear Search"),
                 on_action=self._search_edit.clear,
             )
             return
@@ -2208,6 +2298,13 @@ class DraftsPanel(QFrame):
     # -- search handler ----------------------------------------------------
 
     def _on_search_changed(self, text: str) -> None:
+        view = self.current_view()
+        self._view_search_text[view] = text
+        if view != self.DRAFTS_VIEW:
+            search = self._view_search.get(view)
+            if search is not None:
+                search(text)
+            return
         # Closed and disarmed before the rebuild, not after: the rebuild
         # destroys every row widget, and typing must never leave a
         # preview anchored to one of them or open one for whichever row

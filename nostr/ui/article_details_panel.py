@@ -37,7 +37,7 @@ import announce
 import theme
 from constants import (
     DARK_BG, DARK_BORDER, DARK_FG, DARK_MENU_BG, DARK_MUTED_FG, LIGHT_BG, LIGHT_BORDER, LIGHT_FG,
-    LIGHT_MUTED_FG,
+    LIGHT_MENU_BG, LIGHT_MUTED_FG,
 )
 from i18n import _, format_moment, ngettext
 
@@ -149,10 +149,13 @@ class ArticleDetailsPanel(QFrame):
     # -- building -------------------------------------------------------------
 
     def _build_header(self) -> QWidget:
-        header = QWidget()
+        """The toolbar band's section over this pane: the band's background
+        and line, as tall as the format toolbar (``align_band``)."""
+        header = QFrame()
         header.setObjectName("article_details_header")
+        self._header = header
         row = QHBoxLayout(header)
-        row.setContentsMargins(16, 10, 8, 10)
+        row.setContentsMargins(16, 6, 8, 6)
         title = QLabel(_("Article Details"))
         title.setObjectName("article_details_title")
         row.addWidget(title, 1)
@@ -312,11 +315,13 @@ class ArticleDetailsPanel(QFrame):
         background, border, field, text, muted = (
             (DARK_BG, DARK_BORDER, DARK_MENU_BG, DARK_FG, DARK_MUTED_FG) if dark
             else (LIGHT_BG, LIGHT_BORDER, LIGHT_BG, LIGHT_FG, LIGHT_MUTED_FG))
+        band = DARK_MENU_BG if dark else LIGHT_MENU_BG
         self.setStyleSheet(
             theme.dialog_stylesheet(dark)
-            + f"#ArticleDetailsPanel {{ background: {background};"
-              f" border-left: 1px solid {border}; }}"
-            + f"#article_details_header {{ border-bottom: 1px solid {border}; }}"
+            # No edge of its own: the window's divider is its left edge.
+            + f"#ArticleDetailsPanel {{ background: {background}; }}"
+            + f"#article_details_header {{ background: {band};"
+              f" border: none; border-bottom: 1px solid {border}; }}"
             + "#article_details_title { font-weight: 600; }"
             + f"#article_details_scroll, #article_details_body {{ background: {background}; }}"
             + f"QLineEdit, QPlainTextEdit {{ background: {field}; color: {text};"
@@ -332,6 +337,11 @@ class ArticleDetailsPanel(QFrame):
               f" border-radius: 4px; color: {muted}; }}"
             + "QToolButton#article_details_close, QToolButton#article_details_disclosure"
               " { border: none; padding: 2px 4px; }")
+
+    def align_band(self, toolbar_height: int) -> None:
+        """The header as tall as the format toolbar beside it, so their
+        lines meet (0: its own height)."""
+        self._header.setMinimumHeight(max(0, int(toolbar_height)))
 
     def set_dark(self, is_dark: bool) -> None:
         self._is_dark = is_dark

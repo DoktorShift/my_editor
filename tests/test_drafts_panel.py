@@ -199,20 +199,17 @@ def test_panel_carries_no_second_profile_control():
     assert {b.toolTip() for b in buttons} == {"Actions", "Close drafts panel"}
 
 
-def test_status_line_names_the_bound_account():
-    # This is what replaces the deleted chip: the account is still
-    # legible, as a label rather than a second control.
+def test_the_panel_says_nothing_at_rest():
+    # "Drafts for Alice" was a line of chrome that said the same thing all
+    # day; the account's picture beside the panel names the account. The
+    # banner over the list appears only with something to say.
     panel = DraftsPanel(is_dark=True)
     panel.set_active_profile(make_profile("Alice"))
-    assert panel._status_label.full_text() == "Drafts for Alice"
+    assert panel._status_label.full_text() == ""
+    assert not panel._banner.isVisibleTo(panel)
+    panel.set_status("Refreshing drafts…")
+    assert panel._banner.isVisibleTo(panel)
     assert panel._status_label.property("error") == "false"
-
-
-def test_status_line_falls_back_to_the_short_npub():
-    panel = DraftsPanel(is_dark=True)
-    profile = make_profile("")
-    panel.set_active_profile(profile)
-    assert panel._status_label.full_text() == f"Drafts for {profile.npub_short()}"
 
 
 # --------------------------------------------------------------------------- #
@@ -713,8 +710,10 @@ def test_a_search_with_no_matches_offers_a_way_out():
     panel._search_edit.setText("zzz-no-such-draft")
 
     assert panel._body_stack.currentIndex() == 1
-    assert panel._empty_title.text() == "No matching drafts"
-    assert '"zzz-no-such-draft"' in panel._empty_body.text()
+    # Apple's own words for a search that found nothing.
+    assert panel._empty_title.text() == "No Results for “zzz-no-such-draft”"
+    assert panel._empty_body.text() == "Check the spelling or try a new search."
+    assert panel._empty_action.text() == "Clear Search"
     assert panel._empty_action.isVisibleTo(panel._empty_widget)
 
     panel._empty_action.click()
@@ -778,15 +777,16 @@ def test_the_resting_status_returns_once_a_narration_expires():
     assert panel._status_label.full_text() == "Decrypting 1 of 2"
 
 
-def test_a_long_display_name_neither_clips_nor_widens_the_panel():
+def test_a_long_banner_line_neither_clips_nor_widens_the_panel():
     panel = DraftsPanel(is_dark=True)
-    panel.set_active_profile(make_profile("A" * 120))
+    panel.set_active_profile(make_profile("Alice"))
+    panel.set_status("Refreshing " + "A" * 120)
     panel.resize(MIN_PANEL_WIDTH, 400)
     panel.show()
     panel.layout().activate()
     try:
         label = panel._status_label
-        assert label.full_text().startswith("Drafts for AAA")
+        assert label.full_text().startswith("Refreshing AAA")
         # The whole string stays reachable even though the painted one is
         # cut, because it never went through setText.
         assert label.accessibleName() == label.full_text()
@@ -805,8 +805,10 @@ def test_decrypt_progress_only_shows_while_work_is_outstanding():
     assert panel._status_label.full_text() == "Decrypting 1 of 2"
     store.set_decrypted("h1", inner={"kind": 1, "content": "Second body", "tags": []})
     # "2/2 decrypted" said nothing, and it said it for the whole time the
-    # user was actually reading the list.
-    assert panel._status_label.full_text() == "Drafts for Alice"
+    # user was actually reading the list: with nothing left to do, the
+    # banner goes.
+    assert panel._status_label.full_text() == ""
+    assert not panel._banner.isVisibleTo(panel)
 
 
 # --------------------------------------------------------------------------- #
@@ -822,7 +824,7 @@ def test_every_icon_only_control_has_an_accessible_name():
     names = {
         panel._actions_btn: "Actions",
         panel._close_btn: "Close drafts panel",
-        panel._search_edit: "Search drafts",
+        panel._search_edit: "Search Drafts",
         segments[0]: "Drafts",
         segments[1]: "Published",
         panel._view_switch.popup: "View: Drafts",

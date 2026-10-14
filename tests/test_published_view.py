@@ -447,3 +447,46 @@ def test_both_themes_build():
     assert view.is_dark and "#1E1E1E".lower() in view.styleSheet().lower()
     view.apply_theme(False)
     assert not view.is_dark
+
+
+# -- search --------------------------------------------------------------------------------
+
+def test_search_filters_by_title_and_text_and_says_when_nothing_matches():
+    view, _model, relays, _said, _edited = make(
+        note("Coffee first, then the long article"), article("lotus", "Lotus v0.4.5"))
+    view.set_account(Profile())
+    relays.run()
+    view.set_search_text("lotus")
+    assert [row for row in shown(view) if row] == ["Lotus v0.4.5"]
+    view.set_search_text("COFFEE")
+    assert shown(view)[0].startswith("Coffee first")
+    view.set_search_text("nothing like it")
+    assert shown(view) == ("No Results for “nothing like it”",
+                           "Check the spelling or try a new search.", False, False)
+    view.set_search_text("")
+    assert len([row for row in shown(view) if row]) == 2
+
+
+def test_the_panel_search_field_follows_the_view_shown():
+    """One search field over both views (level with the document tabs):
+    named for the view shown, filtering it, and keeping what was typed in
+    each view."""
+    from nostr.ui.drafts_panel import DraftsPanel
+    view, _model, relays, _said, _edited = make(article("lotus", "Lotus v0.4.5"),
+                                                note("gm"))
+    view.set_account(Profile())
+    relays.run()
+    panel = DraftsPanel(is_dark=False)
+    pv.add_to_panel(panel, view)
+    field = panel._search_edit
+    assert field.placeholderText() == "Search Drafts"
+    field.setText("plain")
+    panel.show_view(pv.PANEL_VIEW)
+    assert field.placeholderText() == field.accessibleName() == "Search Published"
+    assert field.text() == ""
+    field.setText("lotus")
+    assert [row for row in shown(view) if row] == ["Lotus v0.4.5"]
+    panel.show_view(panel.DRAFTS_VIEW)
+    assert field.text() == "plain"
+    panel.show_view(pv.PANEL_VIEW)
+    assert field.text() == "lotus"

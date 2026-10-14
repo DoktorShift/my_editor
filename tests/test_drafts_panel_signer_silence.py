@@ -201,7 +201,7 @@ def test_the_search_placeholder_still_clears_the_search():
     p = panel(store)
     p._search_edit.setText("zzzznomatch")
     assert showing_placeholder(p)
-    assert p._empty_action.text() == "Clear search"
+    assert p._empty_action.text() == "Clear Search"
 
     p._empty_action.click()
     assert p._search_edit.text() == ""
