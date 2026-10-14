@@ -480,3 +480,40 @@ def test_the_panel_search_field_follows_the_view_shown():
     assert field.text() == "plain"
     panel.show_view(pv.PANEL_VIEW)
     assert field.text() == "lotus"
+
+
+# -- the preview ---------------------------------------------------------------------------
+
+def test_a_click_on_a_published_post_opens_its_full_preview(monkeypatch):
+    """As in the Drafts view: a click shows the post styled as Nostr shows
+    it, with its next step; an article's is Edit Article, a note's Open in
+    Browser, and Delete from Nostr… is last in the ⋯ menu."""
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QMouseEvent
+    view, _model, relays, _said, edited = make(article("essay", "Essay"), note("Hello there"))
+    view.set_account(Profile())
+    relays.run()
+    view.show()
+    view.activateWindow()
+    QApplication.processEvents()
+    controller = view._preview
+
+    def click(row):
+        rect = view._list.visualRect(view._rows.index(row))
+        at = QPointF(rect.left() + 20, rect.bottom() - 10)
+        QApplication.sendEvent(view._list.viewport(), QMouseEvent(
+            QEvent.MouseButtonPress, at, at, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+
+    click(1)                                          # the article
+    assert controller.is_full() is True
+    bar = controller.popover().action_bar()
+    assert bar.primary.text() == "Edit Article"
+    more = [a.text() for a in bar.more.menu().actions() if not a.isSeparator()]
+    assert more[-1] == "Delete from Nostr…"
+    assert controller.popover().reader().toPlainText().strip() == "Body"
+    bar.primary.click()
+    assert [item.title for item in edited] == ["Essay"]
+    click(0)                                          # the note
+    assert controller.popover().action_bar().primary.text() == "Open in Browser"
+    view.hide()
+    assert controller.is_open() is False

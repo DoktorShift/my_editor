@@ -154,6 +154,7 @@ from .drafts_common import (
     source_host as _source_host,
 )
 from .drafts_preview import (
+    PreviewAction,
     PreviewController,
     preview_announcement,
     preview_is_eligible,
@@ -1695,18 +1696,54 @@ class DraftsPanel(QFrame):
         )
 
     def _show_preview_for(self, item: QListWidgetItem) -> None:
-        """Open the preview for the row a context menu was raised on.
+        """Open the full preview for the row a context menu was raised on.
 
         Resolved from the item rather than from the current row: a
         right-click does not move the selection, so the two are often
         different rows and the menu has to describe the one under the
-        pointer. Opened as a keyboard preview, because it was reached by
-        an explicit command and so should take focus and be dismissible
-        with Escape rather than by moving the pointer away.
+        pointer.
         """
         identifier, anchor = self._preview_anchor(item)
         if identifier:
-            self._preview.open_for(identifier, anchor, keyboard=True)
+            self._preview.open_for(identifier, anchor, full=True)
+
+    def preview_anchor_for(self, identifier: str) -> QRect:
+        """Where a draft's row is now (global), or an empty rect when it is
+        not in sight: a full preview moves with its row as the list
+        scrolls."""
+        item = self._items.get(identifier)
+        if item is None:
+            return QRect()
+        local = self._list.visualItemRect(item)
+        if not self._list.viewport().rect().intersects(local):
+            return QRect()
+        return self._preview_anchor(item)[1]
+
+    def preview_actions(self, identifier: str) -> List[PreviewAction]:
+        """The full preview's commands for a draft: Continue Editing (the
+        next step, also Return and a double click), Publish…, and in its ⋯
+        menu Copy Event ID and Delete Draft."""
+        record = self.preview_record(identifier)
+        actions = [PreviewAction("publish", _("Publish…")),
+                   PreviewAction("open", _("Continue Editing"), primary=True)]
+        if record is not None and record.event_id:
+            actions.append(PreviewAction("copy_id", _("Copy Event ID"), more=True))
+        actions.append(PreviewAction("delete", _("Delete Draft"), more=True, destructive=True))
+        return actions
+
+    def preview_act(self, identifier: str, key: str) -> None:
+        """Do what the full preview's bar asked for one draft."""
+        record = self.preview_record(identifier)
+        if record is None:
+            return
+        if key == "open":
+            self.open_draft.emit(identifier)
+        elif key == "publish":
+            self.publish_draft.emit(identifier)
+        elif key == "copy_id":
+            self._copy_event_id(record)
+        elif key == "delete":
+            self._request_delete([identifier])
 
     def preview_is_available(self) -> bool:
         """Whether a preview may open at all right now.
@@ -2135,6 +2172,8 @@ class DraftsPanel(QFrame):
         record = self._store.get(identifier) if self._store is not None else None
         if record is None:
             return
+        # The draft itself opens; its preview makes way.
+        self._preview.close()
         if record.state is DraftState.READY:
             self.open_draft.emit(identifier)
         elif record.state is DraftState.FAILED:

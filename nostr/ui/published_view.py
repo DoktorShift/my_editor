@@ -45,7 +45,8 @@ from __future__ import annotations
 
 import sys
 import time
-from typing import List, Optional
+from dataclasses import dataclass, field
+from typing import List, Optional, Tuple
 
 from PySide6.QtCore import QAbstractListModel, QEvent, QModelIndex, QPoint, QRect, Qt, QUrl, Signal
 from PySide6.QtGui import (
@@ -61,12 +62,14 @@ import theme
 from i18n import _, ngettext
 
 from ..bunker import humanize_failure, is_signer_silent
+from ..draft_store import DraftState
 from ..drafts import derive_preview_snippet
 from ..publish_pipeline import refused_by_relay
 from ..published import (
     DELETING, LOADING, READY, SIGNED_OUT, UNREACHABLE, PublishedItem, PublishedList,
 )
 from . import post_list
+from .drafts_preview import PreviewAction, PreviewController
 from .drafts_common import (
     LIST_GUTTER, MIN_CONTROL_PX, ROW_LINE_GAP, THEME_TOKENS, format_absolute_time,
     secondary_font,
@@ -78,6 +81,38 @@ PROBLEM_ROLE = Qt.ItemDataRole.UserRole + 5  # Load More: what went wrong, or ""
 
 # Where a long title is cut in an alert's title.
 ALERT_TITLE_CHARS = 60
+
+
+@dataclass
+class PublishedRecord:
+    """A published item in the shape the preview reads a draft in
+    (drafts_preview.py), so one preview serves both lists: what it says,
+    its text and its tags. ``is_published`` makes its origin line say when
+    it first went out, not when it was saved."""
+
+    identifier: str
+    inner_kind: int
+    title: str
+    snippet: str
+    content: str
+    created_at: int
+    event_id: str
+    inner_tags: List[list] = field(default_factory=list)
+    state: DraftState = DraftState.READY
+    expiration: Optional[int] = None
+    ciphertext: str = ""
+    failure_reason: str = ""
+    is_published: bool = True
+
+
+def preview_record_of(item: PublishedItem) -> PublishedRecord:
+    content = str(item.event.get("content") or "")
+    return PublishedRecord(
+        identifier=item.id, inner_kind=item.kind, title=display_title(item),
+        snippet=derive_preview_snippet(content), content=content,
+        created_at=item.first_published, event_id=item.id,
+        inner_tags=[list(tag) for tag in item.event.get("tags", []) or []
+                    if isinstance(tag, list)])
 
 
 # --------------------------------------------------------------------------- #
@@ -432,6 +467,7 @@ class PublishedView(QWidget):
         self._is_dark = bool(is_dark)
         self.setStyleSheet(_view_css(self._is_dark))
         self._delegate.set_dark(self._is_dark)
+        self._preview.apply_theme(self._is_dark)
         self._paint_empty_symbol()
 
     # -- building ---------------------------------------------------------------
@@ -457,6 +493,11 @@ class PublishedView(QWidget):
         self._list.activated.connect(self._on_activated)
         self._list.clicked.connect(self._on_clicked)
         self._list.menu_requested.connect(self._show_menu)
+        # Resting the pointer on a row shows its short preview; a click or
+        # Space its full one, styled as Nostr shows it (drafts_preview.py,
+        # as in the Drafts view).
+        self._preview = PreviewController(self)
+        self._preview.attach_list(self._list)
         # Return and Delete belong to the list, see ``eventFilter``.
         self._list.installEventFilter(self)
         self._stack.addWidget(self._list)
@@ -630,9 +671,97 @@ class PublishedView(QWidget):
         if not self._model.loading_more:
             self._model.load_more()
 
+    # -- the preview's host ------------------------------------------------------
+
+    def set_preview_image_loader(self, loader) -> None:
+        """The app's image loader for a preview's cover (None: no covers)."""
+        self._preview.set_image_loader(loader)
+
+    def preview_record(self, key: str) -> Optional[PublishedRecord]:
+        item = self._model.item(key) if key else None
+        return preview_record_of(item) if item is not None else None
+
+    def _anchor(self, index: QModelIndex) -> Tuple[str, QRect]:
+        item = self._rows.item_at(index.row()) if index.isValid() else None
+        if item is None:
+            return "", QRect()
+        rect = self._list.visualRect(index)
+        row = index.data(post_list.ROW_ROLE)
+        if isinstance(row, post_list.PostRow) and row.section:
+            rect = rect.adjusted(0, post_list.section_height(), 0, 0)
+        return item.id, QRect(self._list.viewport().mapToGlobal(rect.topLeft()), rect.size())
+
+    def preview_row_at(self, pos) -> Tuple[str, QRect]:
+        index = self._list.indexAt(pos)
+        key, anchor = self._anchor(index)
+        if key and pos.y() < anchor.top() - self._list.viewport().mapToGlobal(QPoint()).y():
+            return "", QRect()                                   # over a section's title
+        return key, anchor
+
+    def preview_current_row(self) -> Tuple[str, QRect]:
+        return self._anchor(self._list.currentIndex())
+
+    def preview_anchor_for(self, key: str) -> QRect:
+        for row in range(self._rows.rowCount()):
+            item = self._rows.item_at(row)
+            if item is not None and item.id == key:
+                index = self._rows.index(row)
+                if not self._list.viewport().rect().intersects(self._list.visualRect(index)):
+                    return QRect()
+                return self._anchor(index)[1]
+        return QRect()
+
+    def preview_is_available(self) -> bool:
+        window = self.window()
+        return self.isVisible() and window is not None and window.isActiveWindow()
+
+    def preview_now(self) -> int:
+        return int(time.time())
+
+    def preview_actions(self, key: str) -> List[PreviewAction]:
+        """The full preview's commands: Edit Article (an article's next
+        step), Open in Browser, Copy Link, and Delete from Nostr… in its
+        ⋯ menu, last."""
+        item = self._model.item(key)
+        if item is None:
+            return []
+        actions: List[PreviewAction] = []
+        editable = item.is_article and bool(item.identifier)
+        has_link = item.web_link() is not None
+        if has_link:
+            actions.append(PreviewAction("browser", _("Open in Browser"), primary=not editable))
+            actions.append(PreviewAction("copy", _("Copy Link"), more=editable))
+        if editable:
+            actions.append(PreviewAction("edit", _("Edit Article"), primary=True))
+        actions.append(PreviewAction("delete", _("Delete from Nostr…"), more=True,
+                                     destructive=True))
+        return actions
+
+    def preview_act(self, key: str, action: str) -> None:
+        item = self._model.item(key)
+        if item is None:
+            return
+        if action == "edit":
+            self.open_requested.emit(item)
+        elif action == "browser":
+            self._open_in_browser(item)
+        elif action == "copy":
+            self._copy_link(item)
+        elif action == "delete":
+            self._ask_to_delete(item)
+
+    def hideEvent(self, event) -> None:
+        self._preview.close(disarm=True)
+        super().hideEvent(event)
+
+    def closeEvent(self, event) -> None:
+        self._preview.shutdown()
+        super().closeEvent(event)
+
     def _on_activated(self, index: QModelIndex) -> None:
         item = self._rows.item_at(index.row())
         if item is not None:
+            self._preview.close()
             self._open(item)
 
     def _on_clicked(self, index: QModelIndex) -> None:
@@ -694,6 +823,8 @@ class PublishedView(QWidget):
         return menu
 
     def _show_menu(self, index: QModelIndex, point: QPoint) -> None:
+        # Nothing shows over a popover (popovers.md).
+        self._preview.close(disarm=True)
         menu = self.menu_for(index)
         if menu is not None:
             menu.exec(point)

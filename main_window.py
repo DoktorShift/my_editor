@@ -2881,6 +2881,7 @@ class MainWindow(QMainWindow):
                           session_pool=self._session_pool,
                           entitled_relays=self._entitled_relays, parent=self),
             is_dark=self.is_dark_theme)
+        self._published_view.set_preview_image_loader(self._media_image_loader)
         add_published_view(self._drafts_panel, self._published_view)
         self._drafts_panel.view_changed.connect(self._follow_account_in_published)
         self._drafts_panel.view_changed.connect(self._update_refresh_command)

@@ -1,9 +1,24 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Hover preview for one draft: a popover, its geometry and its timing.
+"""The preview of a draft or a published post: a popover, its geometry,
+its timing, and its two sizes.
 
-Resting the pointer on a drafts-panel row for half a second opens a
-floating preview of that draft. It is a **popover**, not a tooltip:
+    rest the pointer on a row   the short preview: cover, title, summary,
+                                and the facts (half a second, goes with
+                                the pointer)
+    click a row, or Space       the full preview: the same header, then
+                                the whole text styled as Nostr shows it,
+                                and the next steps (Continue Editing,
+                                Publish…; Edit Article, Open in Browser)
+    click the row again, Esc,   it goes; one click on another row moves
+    a click elsewhere           it there, and the arrow keys take it along
+
+Both lists of the Drafts panel host it (the drafts, and what was
+published), through the host methods ``PreviewController`` names; a
+published post is handed over in a draft's shape (PublishedRecord).
+
+Resting the pointer on a row for half a second opens a floating preview
+of that draft. It is a **popover**, not a tooltip:
 ``offering-help.md`` limits a tooltip to "a maximum of 60 to 75
 characters", which a hero image plus a summary plus three metadata lines
 is nowhere near. ``popovers.md`` endorses the surface instead: "Consider
@@ -73,17 +88,23 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication,
     QGraphicsDropShadowEffect,
+    QHBoxLayout,
     QLabel,
+    QMenu,
+    QPushButton,
     QSizePolicy,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
+import theme
 import url_safety
 from i18n import _, ngettext
 
 from ..draft_store import DraftRecord, DraftState
 from ..drafts import flatten_markdown_inline
+from ..preview import NostrPreview
 from .drafts_common import (
     BASE_POINT_SIZE,
     THEME_TOKENS,
@@ -163,6 +184,12 @@ _BASE_WIDTH: int = 360
 _MIN_WIDTH: int = 320
 _MAX_WIDTH: int = 460
 _BASE_MAX_HEIGHT: int = 460
+# The full preview: a comfortable reading width (about 60 characters of
+# body text at 13 pt), as tall as the screen allows, and never so short
+# that its text has no room to be read in.
+_FULL_WIDTH: int = 440
+_MIN_FULL_WIDTH: int = 320
+_MIN_READER_HEIGHT: int = 96
 
 # 14 px on all four sides, more than the panel's 12 px GUTTER. A floating
 # surface needs more air than an inline row, and the popover is not
@@ -460,6 +487,12 @@ def _origin_line(record: DraftRecord) -> str:
     host = source_host(record)
     if host:
         parts.append(host)
+    if getattr(record, "is_published", False):
+        # Something already out there: when it first went out, no save.
+        first = format_absolute_date(record.created_at)
+        if first:
+            parts.append(_("Published {date}").format(date=first))
+        return _SEP.join(parts)
     published = published_at(record)
     # Two identical dates on one line is noise, so a draft stashed in the
     # same minute it was published shows only the save time.
@@ -542,8 +575,13 @@ def preview_is_eligible(
     *,
     now: int,
     digest: Optional[BodyDigest] = None,
+    full: bool = False,
 ) -> bool:
     """Whether a preview would show anything the row does not already.
+
+    A full preview (a click, Space) shows the whole text styled, so every
+    readable record qualifies for it; the short one that resting the
+    pointer opens qualifies only with more to say than its row.
 
     A 360 px window that repeats a row verbatim is exactly what
     ``popovers.md`` means by "Avoid making a popover too big". In
@@ -559,6 +597,8 @@ def preview_is_eligible(
     """
     if record.state is not DraftState.READY:
         return False
+    if full:
+        return True
     if article_image_url(record):
         return True
     if first_tag(record, "summary").strip():
@@ -753,6 +793,18 @@ def preview_max_height(available: QRect) -> int:
     """Tallest the surface may compose to before the degrade ladder runs."""
     grown = round(_BASE_MAX_HEIGHT * app_point_size() / BASE_POINT_SIZE)
     return max(120, min(grown, available.height() - 32))
+
+
+def full_preview_width(available: QRect) -> int:
+    """The full preview's width: a reading column, scaled with the text,
+    narrower only where the screen is."""
+    grown = round(_FULL_WIDTH * app_point_size() / BASE_POINT_SIZE)
+    return max(_MIN_FULL_WIDTH, min(grown, available.width() - 48))
+
+
+def full_preview_max_height(available: QRect) -> int:
+    """The full preview may be as tall as the screen, less a margin."""
+    return max(240, available.height() - 2 * _SCREEN_MARGIN - 16)
 
 
 def uses_child_window(platform_name: str) -> bool:
@@ -1014,6 +1066,154 @@ class _HeroImage(QWidget):
 # The popover                                                                 #
 # --------------------------------------------------------------------------- #
 
+class PreviewAction(NamedTuple):
+    """A command at the foot of a full preview, as its host offers it.
+
+    ``primary`` is the next step (Continue Editing, Edit Article), drawn
+    as the default button at the trailing end; ``menu`` makes a pull-down
+    of ``(key, title)`` choices ("Open in"); ``more`` puts the command in
+    the ⋯ menu instead of on the bar (Delete last, as menus order it).
+    """
+
+    key: str
+    title: str
+    primary: bool = False
+    menu: Tuple[Tuple[str, str], ...] = ()
+    more: bool = False
+    destructive: bool = False
+
+
+class _Reader(NostrPreview):
+    """The text of a full preview, as Nostr shows it (the editor's
+    Preview renderer), on the popover's own ground with a line above it.
+    Pictures come from no lookup: they show as frames, and nothing is
+    fetched for them."""
+
+    def __init__(self, *, dark: bool, parent: Optional[QWidget] = None) -> None:
+        super().__init__(dark=dark, parent=parent)
+        self.setObjectName("drafts_preview_reader")
+        self.setAccessibleName(_("Text"))
+        self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        # A step smaller than the editor's Preview: a popover is a glance
+        # at the text, beside the document being written.
+        self.zoomOut(2)
+
+    def _apply_colors(self) -> None:
+        tokens = THEME_TOKENS[bool(self._dark)]
+        self.setStyleSheet(
+            f"QTextBrowser {{ background: {tokens['chrome_bg']}; color: {tokens['field_fg']};"
+            f" border: none; border-top: 1px solid {tokens['border']}; }}")
+
+    def text_height(self, width: int) -> int:
+        """How tall the text is laid out at ``width``, margins included:
+        measured at the width it is really given (the reader's own column
+        and margins), so a text that fits shows no scrollbar."""
+        self.setFixedWidth(width)
+        self._center_column()
+        margins = self.viewportMargins()
+        column = max(120, width - margins.left() - margins.right()
+                     - 2 * self.frameWidth())
+        doc = self.document()
+        doc.setTextWidth(column)
+        return int(doc.size().height()) + margins.top() + margins.bottom() + 4
+
+
+class _ActionBar(QWidget):
+    """The foot of a full preview: the ⋯ menu leading, the commands, and
+    the primary one trailing as the default button (Apple's guidelines put
+    the default action on the trailing side). ``chosen(key)``."""
+
+    chosen = Signal(str)
+
+    def __init__(self, parent: Optional[QWidget] = None, *, is_dark: bool = True) -> None:
+        super().__init__(parent)
+        self.setObjectName("drafts_preview_bar")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._is_dark = bool(is_dark)
+        self._row = QHBoxLayout(self)
+        self._row.setContentsMargins(10, 8, 10, 8)
+        self._row.setSpacing(8)
+        self.buttons: dict = {}
+        self.primary: Optional[QWidget] = None
+        self.more: Optional[QToolButton] = None
+
+    def set_actions(self, actions: Tuple[PreviewAction, ...]) -> None:
+        while self._row.count():
+            item = self._row.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.hide()
+                widget.deleteLater()
+        self.buttons, self.primary, self.more = {}, None, None
+        extra = [action for action in actions if action.more]
+        if extra:
+            self.more = QToolButton()
+            self.more.setObjectName("drafts_preview_more")
+            self.more.setText("\u22ef")
+            self.more.setAccessibleName(_("More"))
+            self.more.setToolTip(_("More"))
+            self.more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+            menu = QMenu(self.more)
+            for index, action in enumerate(extra):
+                if action.destructive and index:
+                    menu.addSeparator()
+                entry = menu.addAction(action.title)
+                entry.setData(action.key)
+            menu.triggered.connect(self._on_menu)
+            self.more.setMenu(menu)
+            self._row.addWidget(self.more)
+        self._row.addStretch(1)
+        on_bar = [action for action in actions if not action.more]
+        for action in sorted(on_bar, key=lambda a: a.primary):
+            if action.menu:
+                button = QToolButton()
+                button.setText(action.title + "  \u25be")
+                button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+                menu = QMenu(button)
+                for key, title in action.menu:
+                    entry = menu.addAction(title)
+                    entry.setData(key)
+                menu.triggered.connect(self._on_menu)
+                button.setMenu(menu)
+            else:
+                button = QPushButton(action.title)
+                button.setAutoDefault(False)
+                button.clicked.connect(lambda _checked=False, k=action.key: self.chosen.emit(k))
+            button.setObjectName("drafts_preview_primary" if action.primary
+                                 else "drafts_preview_action")
+            button.setAccessibleName(action.title)
+            self._row.addWidget(button)
+            self.buttons[action.key] = button
+            if action.primary:
+                self.primary = button
+        self.apply_theme(self._is_dark)
+
+    def _on_menu(self, entry) -> None:
+        key = entry.data()
+        if isinstance(key, str) and key:
+            self.chosen.emit(key)
+
+    def apply_theme(self, is_dark: bool) -> None:
+        self._is_dark = bool(is_dark)
+        t = THEME_TOKENS[self._is_dark]
+        self.setStyleSheet(f"""
+QWidget#drafts_preview_bar {{ background: {t["chrome_bg"]};
+    border-top: 1px solid {t["border"]}; }}
+QPushButton#drafts_preview_action, QToolButton#drafts_preview_action,
+QToolButton#drafts_preview_more {{
+    background: transparent; color: {t["row_fg"]};
+    border: 1px solid {t["border"]}; border-radius: 6px; padding: 4px 12px; }}
+QToolButton#drafts_preview_more {{ padding: 4px 8px; }}
+QToolButton#drafts_preview_action::menu-indicator,
+QToolButton#drafts_preview_more::menu-indicator {{ image: none; width: 0px; }}
+QPushButton#drafts_preview_action:hover, QToolButton#drafts_preview_action:hover,
+QToolButton#drafts_preview_more:hover {{ background: {t["hover_bg"]}; }}
+QPushButton#drafts_preview_primary {{ border-radius: 6px; padding: 4px 14px; }}
+{theme.accent_button_css("QPushButton#drafts_preview_primary", self._is_dark)}
+QPushButton:focus, QToolButton:focus {{ border: 2px solid {theme.focus_ring_color(self._is_dark)}; }}
+""")
+
+
 class Plan(NamedTuple):
     """One rung of the degrade ladder."""
 
@@ -1158,14 +1358,19 @@ class PreviewPopover(QWidget):
     that. Qt gives no Liquid Glass, and the panel's cross-platform
     discipline forbids a per-platform blur path.
 
-    It carries no interactive content at all. ``popovers.md`` asks to
-    "limit the amount of functionality in the popover to a few related
-    tasks"; here the number of tasks is zero, and everything actionable
-    stays in the context menu, which is reachable by pointer and by the
-    Menu key.
+    Two sizes of one surface (``popovers.md``: "Some popovers provide both
+    condensed and expanded views of the same information"). The short one,
+    which resting the pointer on a row opens, carries nothing interactive:
+    the title, the summary and the facts. The full one, which a click or
+    Space opens, adds the whole text styled as Nostr shows it (the
+    editor's Preview renderer), scrolling inside, and a bar with the next
+    steps (``popovers.md``: "limit the amount of functionality in the
+    popover to a few related tasks"); its host says which
+    (PreviewAction), and ``action_chosen(key)`` says which was picked.
     """
 
     dismissed = Signal()
+    action_chosen = Signal(str)
 
     def __init__(
         self,
@@ -1182,6 +1387,7 @@ class PreviewPopover(QWidget):
         self._card = QSize(0, 0)
         self._fields = PreviewFields("", "", "", "", "", "", "")
         self._plan = LADDER[0]
+        self._full = False
         self._closing = False
         # With no loader wired up there is no way to fill a hero box, so
         # none is reserved: a permanently empty 203 px rectangle is worse
@@ -1259,6 +1465,17 @@ class PreviewPopover(QWidget):
         for child in self.findChildren(QWidget):
             child.setAttribute(Qt.WA_TransparentForMouseEvents, True)
 
+        # The full preview's text and its commands: the only parts that
+        # take the pointer (made after the loop above, which keeps the
+        # short preview's labels out of the pointer's way).
+        self._reader = _Reader(dark=self._is_dark, parent=card)
+        self._reader.hide()
+        card_layout.insertWidget(card_layout.indexOf(self._body) + 1, self._reader)
+        self._bar = _ActionBar(card, is_dark=self._is_dark)
+        self._bar.chosen.connect(self.action_chosen)
+        self._bar.hide()
+        card_layout.insertWidget(card_layout.indexOf(self._reader) + 1, self._bar)
+
         # One effect for the widget's lifetime, recoloured on a theme
         # switch. ``setGraphicsEffect`` destroys whatever was there
         # before, so building a fresh one per theme change would leave a
@@ -1293,6 +1510,9 @@ class PreviewPopover(QWidget):
         self.setStyleSheet(preview_css(self._is_dark))
         self._surface.apply_theme(self._is_dark)
         self._hero.apply_theme(self._is_dark)
+        if hasattr(self, "_reader"):
+            self._reader.set_dark(self._is_dark)
+            self._bar.apply_theme(self._is_dark)
         # The shadow is what separates the surface from arbitrary editor
         # content behind it, which no border token can do on its own, so
         # it is heavier in dark where the border has least to work with.
@@ -1313,6 +1533,15 @@ class PreviewPopover(QWidget):
     def plan(self) -> Plan:
         return self._plan
 
+    def is_full(self) -> bool:
+        return self._full
+
+    def reader(self) -> "_Reader":
+        return self._reader
+
+    def action_bar(self) -> _ActionBar:
+        return self._bar
+
     def labels(self) -> Tuple[Tuple[str, _ClampedLabel], ...]:
         return self._rows
 
@@ -1332,30 +1561,60 @@ class PreviewPopover(QWidget):
         max_height: int,
         now: int,
         digest: Optional[BodyDigest] = None,
+        full: bool = False,
+        actions: Tuple[PreviewAction, ...] = (),
     ) -> Optional[QSize]:
         """Lay the record out at ``width``, degrading until it fits.
 
         The ladder runs once, here, at open time. Nothing in it may run
         later, or the window would resize while it was being read.
         Returns the card size, or ``None`` when even the last rung is
-        taller than ``max_height``.
+        taller than ``max_height``. ``full`` adds the text, styled, and
+        the bar of ``actions`` under the header (the full preview).
         """
+        self._full = bool(full)
         self._fields = preview_fields(record, now=now, digest=digest)
+        if self._full:
+            # The text itself follows, so the header carries a summary only
+            # where the writer gave one; its opening words would repeat.
+            self._fields = self._fields._replace(
+                summary=first_tag(record, "summary").strip())
         self._title.setFont(title_font())
         self._summary.setFont(body_font())
         footnote = secondary_font()
         for label in (self._origin, self._stats, self._tags, self._expiry):
             label.setFont(footnote)
 
+        self._reader.setVisible(self._full)
+        self._bar.setVisible(self._full)
+        reader_height = bar_height = 0
+        if self._full:
+            if int(getattr(record, "inner_kind", 0) or 0) == 30023:
+                self._reader.show_markdown(record.content or "")
+            else:
+                self._reader.show_note(record.content or "")
+            self._bar.set_actions(tuple(actions))
+            bar_height = self._bar.sizeHint().height()
+            reader_height = self._reader.text_height(width)
         for plan in LADDER:
-            height = self._apply_plan(plan, width=width)
-            if height <= max_height:
-                self._plan = plan
-                self._card = QSize(width, height)
-                self._surface.set_card_size(self._card)
-                halo = self.halo()
-                self.resize(width + 2 * halo, height + 2 * halo)
-                return QSize(self._card)
+            header = self._apply_plan(plan, width=width)
+            room = max_height - header - bar_height
+            if not self._full and header <= max_height:
+                height = header
+            elif self._full and room >= _MIN_READER_HEIGHT:
+                # The text as tall as it is, up to the room left: longer
+                # texts scroll inside.
+                shown = min(reader_height, room)
+                self._reader.setFixedHeight(shown)
+                height = header + shown + bar_height
+            else:
+                continue
+            self._plan = plan
+            self._card = QSize(width, height)
+            self._surface.set_card_size(self._card)
+            halo = self.halo()
+            self.resize(width + 2 * halo, height + 2 * halo)
+            return QSize(self._card)
         return None
 
     def _apply_plan(self, plan: Plan, *, width: int) -> int:
@@ -1542,6 +1801,23 @@ class PreviewPopover(QWidget):
 # Controller                                                                  #
 # --------------------------------------------------------------------------- #
 
+class _OutsideClicks(QObject):
+    """Watches the whole application, while a full preview is up, for a
+    press outside it and outside its list, and says so (``pressed``). Its
+    own object: the controller's filter on the list would otherwise see
+    every press on the list twice, once from the application."""
+
+    def __init__(self, is_outside, pressed, parent: QObject) -> None:
+        super().__init__(parent)
+        self._is_outside = is_outside
+        self._pressed = pressed
+
+    def eventFilter(self, obj, event) -> bool:
+        if event.type() == QEvent.MouseButtonPress and self._is_outside(obj):
+            self._pressed()
+        return False
+
+
 class PreviewController(QObject):
     """Owns the dwell timing, the one popover, and every dismissal path.
 
@@ -1557,11 +1833,15 @@ class PreviewController(QObject):
     exactly as ``_on_current_item_changed`` already had to guard against
     with its ``try / except RuntimeError``.
 
-    The panel is the only thing it talks to, through five small methods:
-    ``preview_record``, ``preview_row_at`` (the row under the pointer, in
-    the list's viewport: the rows are painted, so there is no row widget
-    to watch), ``preview_current_row``, ``preview_is_available`` and
-    ``preview_now``. Everything else is injected or pure.
+    Its host (the Drafts panel, the Published view) is the only thing it
+    talks to, through a few small methods: ``preview_record`` (a draft, or
+    a record of a draft's shape), ``preview_row_at`` (the row under the
+    pointer, in the list's viewport: the rows are painted, so there is no
+    row widget to watch), ``preview_current_row``, ``preview_anchor_for``
+    (where a row is now, as the list scrolls), ``preview_is_available``,
+    ``preview_now``, and for the full preview ``preview_actions`` (its
+    commands, PreviewAction) and ``preview_act`` (do one). Everything else
+    is injected or pure.
     """
 
     @property
@@ -1590,6 +1870,11 @@ class PreviewController(QObject):
         self._hovered_id = ""
         self._hovered_anchor = QRect()
         self._keyboard_open = False
+        # The full preview (a click, Space) stays until it is dismissed;
+        # the short one (resting the pointer) goes with the pointer.
+        self._full = False
+        self._outside = _OutsideClicks(self._outside_click, self.close, self)
+        self._app_watched = False
         self._disarmed = False
         self._image_url = ""
         # Per session, so a broken hero is not re-requested every time
@@ -1654,6 +1939,8 @@ class PreviewController(QObject):
         bar = list_widget.verticalScrollBar()
         if bar is not None:
             bar.valueChanged.connect(self._on_scrolled)
+        # The full preview follows the arrow keys, as Quick Look does.
+        list_widget.selectionModel().currentChanged.connect(self._on_current_changed)
 
     def apply_theme(self, is_dark: bool) -> None:
         self._is_dark = bool(is_dark)
@@ -1688,6 +1975,10 @@ class PreviewController(QObject):
     def opened_by_keyboard(self) -> bool:
         return self._keyboard_open
 
+    def is_full(self) -> bool:
+        """Whether the preview shown is the full one (a click, Space)."""
+        return self._full and self.is_visible()
+
     def has_active_timer(self) -> bool:
         return (
             self._dwell.isActive()
@@ -1706,6 +1997,8 @@ class PreviewController(QObject):
         # after a swap and painting itself into the wrong draft.
         self._image_url = ""
         self._shown_id = ""
+        self._full = False
+        self._unwatch_app()
         if disarm:
             self._disarmed = True
         keyboard, self._keyboard_open = self._keyboard_open, False
@@ -1722,6 +2015,7 @@ class PreviewController(QObject):
     def shutdown(self) -> None:
         """Stop every timer and destroy the window. Nothing outlives this."""
         self.close()
+        self._unwatch_app()
         self._disconnect_loader()
         self._unwatch_window()
         if self._popover is not None:
@@ -1760,12 +2054,13 @@ class PreviewController(QObject):
                 self._dwell.start(PREVIEW_OPEN_DELAY_MS)
             return
         record = self._panel.preview_record(identifier)
-        if record is None or not self._eligible_record(record):
+        if record is None or not self._eligible_record(record, full=self._full):
             self.close()
             return
         # Keeps the anchor and the reserved image box; a height change
         # animates over the swap duration rather than jumping.
-        if not self._render(record, self._shown_anchor, animate=True):
+        if not self._render(record, self._shown_anchor, animate=True, full=self._full,
+                            identifier=identifier):
             self.close()
 
     def on_record_removed(self, identifier: str) -> None:
@@ -1806,6 +2101,10 @@ class PreviewController(QObject):
             return False
         if kind == QEvent.MouseMove:
             identifier, anchor = self._panel.preview_row_at(event.position().toPoint())
+            if self.is_full():
+                # The full preview stays where it was opened; the pointer
+                # crossing other rows on its way to it changes nothing.
+                return False
             if not identifier:
                 if self._hovered_id:
                     self._on_row_leave()
@@ -1813,15 +2112,18 @@ class PreviewController(QObject):
             self._hovered_id, self._hovered_anchor = identifier, anchor
             self._on_row_move(identifier, anchor, event)
         elif kind == QEvent.Leave:
-            self._on_row_leave()
+            if not self.is_full():
+                self._on_row_leave()
         elif kind == QEvent.MouseButtonPress:
-            # ``popovers.md``: "a popover generally closes when people
-            # click or tap outside its bounds".
+            self._on_row_press(event)
+        elif kind == QEvent.MouseButtonDblClick:
+            # A double click opens the draft itself; the preview makes way.
             self.close(disarm=True)
         elif kind == QEvent.MouseButtonRelease:
             self._disarmed = False
         elif kind == QEvent.Wheel:
-            self.close(disarm=True)
+            if not self.is_full():
+                self.close(disarm=True)
         elif kind == QEvent.ToolTip:
             identifier, _anchor = self._panel.preview_row_at(event.pos())
             return bool(identifier) and self._suppresses_tooltip(identifier)
@@ -1862,14 +2164,41 @@ class PreviewController(QObject):
         if kind == QEvent.Enter:
             self._closer.stop()
         elif kind == QEvent.Leave:
-            if self.is_open():
+            if self.is_open() and not self.is_full():
                 # Short, because leaving is deliberate; long enough that
                 # a jitter at its own edge while reading does not close
                 # it.
                 self._closer.start(PREVIEW_CLOSE_DELAY_MS)
-        elif kind == QEvent.MouseButtonPress:
+        elif kind == QEvent.MouseButtonPress and not self.is_full():
             self.close(disarm=True)
         return False
+
+    def _on_row_press(self, event) -> None:
+        """A click on a row selects it (the list does that) and opens its
+        full preview; a click on the row whose full preview is open closes
+        it, as does a click with a modifier (choosing several rows) or on
+        no row at all. ``popovers.md``: "let people close one popover and
+        open another with a single click"."""
+        identifier, anchor = self._panel.preview_row_at(event.position().toPoint())
+        plain = (event.button() == Qt.LeftButton
+                 and event.modifiers() == Qt.KeyboardModifier.NoModifier)
+        if not identifier or not plain:
+            self.close(disarm=True)
+            return
+        if identifier == self._shown_id and self.is_full():
+            self.close(disarm=True)
+            return
+        self.open_for(identifier, anchor, full=True)
+
+    def _on_current_changed(self, *_indexes) -> None:
+        """The arrow keys moved the current row: the full preview follows
+        it, as Quick Look follows the selection in Finder."""
+        if not self.is_full():
+            return
+        identifier, anchor = self._panel.preview_current_row()
+        if identifier and identifier != self._shown_id:
+            if not self.open_for(identifier, anchor, full=True):
+                self.close()
 
     def _on_row_move(self, identifier: str, anchor: QRect, event) -> None:
         if event.buttons() != Qt.NoButton:
@@ -1909,6 +2238,14 @@ class PreviewController(QObject):
             self._closer.start(PREVIEW_LEAVE_GRACE_MS)
 
     def _on_list_key(self, event) -> bool:
+        if event.modifiers() == Qt.NoModifier and self.is_open():
+            if event.key() == Qt.Key_Escape:
+                self.close()
+                return True
+            if event.key() == Qt.Key_Tab and self.is_full():
+                # Into the preview, to its commands; Escape comes back.
+                self._enter_popover()
+                return True
         if event.key() != Qt.Key_Space or event.modifiers() != Qt.NoModifier:
             return False
         # Space because that is the system's own preview key, in Finder
@@ -1920,6 +2257,21 @@ class PreviewController(QObject):
         return True
 
     def _on_scrolled(self, _value: int) -> None:
+        if self.is_full():
+            # The full preview moves with its row, and goes when the row
+            # scrolls out of sight.
+            anchor = self._panel.preview_anchor_for(self._shown_id)
+            if anchor.isEmpty():
+                self.close()
+                return
+            self._shown_anchor = anchor
+            placement = preview_geometry(anchor, self._popover.card_size(),
+                                         self._available_rect(anchor))
+            if placement is None:
+                self.close()
+            else:
+                self._popover.place(placement)
+            return
         # Without this a stationary pointer plus a wheel flick opens a
         # preview for whatever row happened to slide underneath it.
         self.close(disarm=True)
@@ -1937,50 +2289,86 @@ class PreviewController(QObject):
     # -- opening -----------------------------------------------------------
 
     def toggle_current_row(self) -> bool:
-        """The keyboard route: Space on the focused row toggles the preview."""
+        """The keyboard route: Space on the current row shows or hides its
+        full preview, as Space does Quick Look in Finder. The keyboard
+        stays in the list, so the arrow keys move the preview along; Tab
+        goes into it."""
         identifier, anchor = self._panel.preview_current_row()
         if not identifier:
             return False
-        if self._shown_id == identifier and self.is_visible():
+        if self._shown_id == identifier and self.is_full():
             self.close()
             return False
-        return self.open_for(identifier, anchor, keyboard=True)
+        return self.open_for(identifier, anchor, full=True)
 
     def open_for(
-        self, identifier: str, anchor: QRect, *, keyboard: bool = False,
+        self, identifier: str, anchor: QRect, *, keyboard: bool = False, full: bool = False,
     ) -> bool:
-        """Show the preview for one draft. Returns whether it opened."""
+        """Show the preview for one draft (the short one, or the ``full``
+        one). Returns whether it opened."""
         if not self._panel.preview_is_available():
             return False
         record = self._panel.preview_record(identifier)
-        if record is None or not self._eligible_record(record):
+        if record is None or not self._eligible_record(record, full=full):
             return False
         swap = self.is_open() and not keyboard
         self._closer.stop()
-        if not self._render(record, anchor, animate=swap):
+        self._dwell.stop()
+        self._pending_id = ""
+        if not self._render(record, anchor, animate=swap, full=full,
+                            identifier=identifier):
             self.close()
             return False
         self._shown_id = identifier
         self._shown_anchor = anchor
+        self._full = bool(full)
         self._keyboard_open = bool(keyboard)
         popover = self._ensure_popover()
         if not swap:
             popover.show_preview(keyboard=keyboard)
+        if self._full:
+            self._watch_app()
         self._start_image()
         return True
 
-    def _render(self, record: DraftRecord, anchor: QRect, *, animate: bool) -> bool:
+    def _enter_popover(self) -> None:
+        """Tab from the list: the keyboard goes into the full preview, to
+        its next step; Escape brings it back to the list."""
+        if self._popover is None:
+            return
+        self._keyboard_open = True
+        self._popover.show_preview(keyboard=True)
+        self._popover.activateWindow()
+        target = self._popover.action_bar().primary or self._popover.reader()
+        target.setFocus(Qt.TabFocusReason)
+
+    def _on_action(self, key: str) -> None:
+        """A command of the full preview's bar: the host does it, and the
+        preview makes way (a popover "disappears after people interact
+        with it")."""
+        identifier = self._shown_id
+        if not identifier:
+            return
+        self.close()
+        self._panel.preview_act(identifier, key)
+
+    def _render(self, record: DraftRecord, anchor: QRect, *, animate: bool,
+                full: bool = False, identifier: str = "") -> bool:
         popover = self._ensure_popover()
         popover.set_images_enabled(self._loader is not None)
         available = self._available_rect(anchor)
-        width = preview_width(available)
+        width = full_preview_width(available) if full else preview_width(available)
         digest = self._digest(record)
+        actions = tuple(self._panel.preview_actions(identifier)) if full else ()
         size = popover.compose(
             record,
             width=width,
-            max_height=preview_max_height(available),
+            max_height=(full_preview_max_height(available) if full
+                        else preview_max_height(available)),
             now=self._now(),
             digest=digest,
+            full=full,
+            actions=actions,
         )
         placement = (
             preview_geometry(anchor, size, available) if size is not None else None
@@ -1994,6 +2382,8 @@ class PreviewController(QObject):
                 max_height=max(120, size.height() // 2),
                 now=self._now(),
                 digest=digest,
+                full=full,
+                actions=actions,
             )
             placement = (
                 preview_geometry(anchor, size, available) if size is not None else None
@@ -2011,6 +2401,7 @@ class PreviewController(QObject):
                 child_mode=uses_child_window(QGuiApplication.platformName()),
             )
             self._popover.dismissed.connect(self._on_dismissed)
+            self._popover.action_chosen.connect(self._on_action)
             self._popover.installEventFilter(self)
         self._watch_window()
         return self._popover
@@ -2023,6 +2414,33 @@ class PreviewController(QObject):
         if window is not None:
             window.installEventFilter(self)
             self._watched_window = window
+
+    def _watch_app(self) -> None:
+        """While the full preview is up, a click anywhere else in the app
+        closes it (``popovers.md``: "a popover generally closes when people
+        click or tap outside its bounds")."""
+        app = QApplication.instance()
+        if app is not None and not self._app_watched:
+            app.installEventFilter(self._outside)
+            self._app_watched = True
+
+    def _unwatch_app(self) -> None:
+        app = QApplication.instance()
+        if app is not None and self._app_watched:
+            app.removeEventFilter(self._outside)
+        self._app_watched = False
+
+    def _outside_click(self, obj) -> bool:
+        """Whether a press on ``obj`` is outside the preview and its list."""
+        if not isinstance(obj, QWidget) or self._popover is None:
+            return False
+        if obj is self._popover or self._popover.isAncestorOf(obj):
+            return False
+        if self._list is not None and (obj is self._list.viewport()
+                                       or self._list.isAncestorOf(obj)):
+            return False
+        # A menu the preview opened (the ⋯ and "Open in" pull-downs).
+        return not isinstance(obj.window(), QMenu)
 
     def _unwatch_window(self) -> None:
         if self._watched_window is None:
@@ -2100,9 +2518,9 @@ class PreviewController(QObject):
         record = self._panel.preview_record(identifier)
         return record is not None and self._eligible_record(record)
 
-    def _eligible_record(self, record: DraftRecord) -> bool:
+    def _eligible_record(self, record: DraftRecord, *, full: bool = False) -> bool:
         return preview_is_eligible(
-            record, now=self._now(), digest=self._digest(record),
+            record, now=self._now(), digest=self._digest(record), full=full,
         )
 
     def shown_anchor(self) -> QRect:
