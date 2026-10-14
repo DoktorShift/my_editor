@@ -49,6 +49,7 @@ from PySide6.QtGui import (
     QColor,
     QFont,
     QImage,
+    QPainter,
     QTextBlockFormat,
     QTextCharFormat,
     QTextCursor,
@@ -62,7 +63,9 @@ from PySide6.QtWidgets import QTextBrowser
 import i18n
 import media_files
 import rich_text
+import text_look
 import word_count
+from fonts import monospace_family
 from doc_walk import doc_length, doc_offset, iter_blocks
 from i18n import _, ngettext
 from markdown_writer import READ_FEATURES, read_markdown
@@ -190,6 +193,10 @@ def _char(*, size: float = 0, bold: bool = False, color: str = "",
     return fmt
 
 
+def _CODE_FAMILIES() -> List[str]:
+    return [monospace_family(), "monospace"]
+
+
 def _style_body(first_block, colors: Palette) -> None:
     """Give the rendered Markdown the readers' look, block by block, from
     ``first_block`` to the end."""
@@ -199,56 +206,40 @@ def _style_body(first_block, colors: Palette) -> None:
         fmt = block.blockFormat()
         cursor = QTextCursor(block)
         heading = fmt.headingLevel()
-        fence = fmt.property(QTextFormat.Property.BlockCodeFence)
         quote = fmt.property(QTextFormat.Property.BlockQuoteLevel)
         in_table = cursor.currentTable() is not None
         if heading:
             fmt.setTopMargin(22)
             fmt.setBottomMargin(8)
             char = _char(size=heading_sizes.get(heading, 13.5), bold=True, color=colors.text)
-        elif fence:
-            fmt.setBackground(QColor(colors.code_background))
-            fmt.setLeftMargin(12)
-            fmt.setRightMargin(12)
-            fmt.setLineHeight(140, QTextBlockFormat.LineHeightTypes.ProportionalHeight.value)
-            char = _char(size=12, color=colors.text)
+        elif rich_text.is_code_block(block):
+            # One box behind the whole block is painted (text_look), with
+            # room around its lines; a background per line would leave a
+            # gap between them.
+            first, last = rich_text.code_run(block)
+            fmt.clearBackground()
+            fmt.setLeftMargin(text_look.CODE_PAD_X + 2)
+            fmt.setRightMargin(text_look.CODE_PAD_X + 2)
+            fmt.setTopMargin(10 if block == first else 0)
+            fmt.setBottomMargin(14 if block == last else 0)
+            fmt.setLineHeight(135, QTextBlockFormat.LineHeightTypes.ProportionalHeight.value)
+            char = _char(size=12, color=colors.text, family=_CODE_FAMILIES())
         elif in_table:
             fmt.setBottomMargin(0)
             char = _char(size=12.5, color=colors.text, family=SERIF)
         else:
             fmt.setLineHeight(160, QTextBlockFormat.LineHeightTypes.ProportionalHeight.value)
             # List items sit closer together than paragraphs.
+            if block.textList() is not None:
+                fmt.setTopMargin(0)
             fmt.setBottomMargin(4 if block.textList() is not None else 12)
             color = colors.muted if isinstance(quote, int) and quote > 0 else colors.text
             char = _char(size=13.5, color=color, family=SERIF)
             if isinstance(quote, int) and quote > 0:
-                fmt.setLeftMargin(16 * quote)
+                # Room for a bar beside each level (text_look).
+                fmt.setLeftMargin(20 * quote)
         cursor.setBlockFormat(fmt)
         _merge_fragments(block, char, colors)
-        block = block.next()
-
-
-def _tidy_tables(doc: QTextDocument) -> None:
-    """Undo a quirk of Qt's Markdown import: a table right after a code
-    block gets an empty line in its first cell, and that cell loses the
-    header's weight. Header cells are bold, as the apps show them."""
-    seen = set()
-    block = doc.begin()
-    while block.isValid():
-        table = QTextCursor(block).currentTable()
-        if table is not None and id(table) not in seen and table.rows():
-            seen.add(id(table))
-            for column in range(table.columns()):
-                cell = table.cellAt(0, column)
-                first = doc.findBlock(cell.firstPosition())
-                if not first.text() and first.next().position() <= cell.lastPosition():
-                    cursor = QTextCursor(first)
-                    cursor.deleteChar()
-                cursor = cell.firstCursorPosition()
-                cursor.setPosition(cell.lastPosition(), QTextCursor.MoveMode.KeepAnchor)
-                bold = QTextCharFormat()
-                bold.setFontWeight(QFont.Weight.Bold)
-                cursor.mergeCharFormat(bold)
         block = block.next()
 
 
@@ -269,9 +260,12 @@ def _merge_fragments(block, char: QTextCharFormat, colors: Palette) -> None:
                 fmt.merge(char)
                 # Qt sizes headings relative to the text; the size given wins.
                 fmt.clearProperty(QTextFormat.Property.FontSizeAdjustment)
-                if own.fontFixedPitch():
-                    fmt.setFontFamilies(own.fontFamilies() or ["monospace"])
-                    fmt.setBackground(QColor(colors.code_background))
+                if own.fontFixedPitch() or rich_text.is_code_block(block):
+                    # "monospace", which Markdown gives code, is no font on
+                    # macOS or Windows: the system's own monospace font.
+                    fmt.setFontFamilies(_CODE_FAMILIES())
+                    if not rich_text.is_code_block(block):
+                        fmt.setBackground(QColor(colors.code_background))
                 if own.isAnchor():
                     fmt.setForeground(QColor(colors.link))
                 cursor.setCharFormat(fmt)
@@ -299,7 +293,6 @@ def body_document(markdown: str, *, names: Optional[NameLookup] = None,
     body.setPointSizeF(13.5)
     doc.setDefaultFont(body)
     read_markdown(doc, markdown_for_preview(markdown, names, media_names), MARKDOWN_FEATURES)
-    _tidy_tables(doc)
     notes = _render_footnotes(doc)
     _style_body(doc.begin(), palette(dark))
     if notes:
@@ -591,6 +584,15 @@ class NostrPreview(QTextBrowser):
         self._show(note_document(text, author=author, names=names,
                                  media_names=self._media_names, dark=self._dark,
                                  parent=self))
+
+    def paintEvent(self, event) -> None:
+        # Under the text, as the editor draws them: a box behind each code
+        # block and a bar beside each quote (text_look).
+        painter = QPainter(self.viewport())
+        text_look.paint_code_boxes(self, painter, QColor(palette(self._dark).code_background))
+        text_look.paint_quote_bars(self, painter, text_look.quote_bar_color(self._dark))
+        painter.end()
+        super().paintEvent(event)
 
     def _show(self, doc: QTextDocument) -> None:
         # The document's parent is this view, so its images are asked for

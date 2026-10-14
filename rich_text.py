@@ -57,6 +57,10 @@ def normalize_after_markdown_load(doc) -> None:
     circle, square), as lists made here have: Qt's reader gives every
     depth a disc, and tables the grid of the ones inserted here.
 
+    A table right after a code block gets an empty line at the top of its
+    first header cell, with the header's weight on it: the cell's text sat
+    a line low and plain. The empty line goes and the text gets the weight.
+
     Call after every ``setMarkdown`` whose result the person edits.
     """
     marker = QTextFormat.Property.BlockMarker
@@ -75,7 +79,8 @@ def normalize_after_markdown_load(doc) -> None:
               if table.format().cellPadding() != table_format().cellPadding()]
     if tables_of(doc):
         unescape_cell_code(doc)
-    if not stray and not headings and not reshaped and not tables:
+    low = _low_header_cells(doc)
+    if not stray and not headings and not reshaped and not tables and not low:
         return
     cursor = QTextCursor(doc)
     cursor.beginEditBlock()
@@ -95,7 +100,29 @@ def normalize_after_markdown_load(doc) -> None:
         fmt = text_list.format()
         fmt.setStyle(list_format(BULLET, max(1, fmt.indent())).style())
         text_list.setFormat(fmt)
+    for cell in low:
+        empty = doc.findBlock(cell.firstPosition())
+        weight = QTextCharFormat()
+        weight.setFontWeight(empty.charFormat().fontWeight())
+        QTextCursor(empty).deleteChar()
+        text = cell.firstCursorPosition()
+        text.setPosition(cell.lastPosition(), QTextCursor.MoveMode.KeepAnchor)
+        text.mergeCharFormat(weight)
     cursor.endEditBlock()
+
+
+def _low_header_cells(doc) -> list:
+    """Header cells whose text Qt's Markdown reader put under an empty
+    line (normalize_after_markdown_load)."""
+    cells = []
+    for table in tables_of(doc):
+        for column in range(table.columns()):
+            cell = table.cellAt(0, column)
+            first = doc.findBlock(cell.firstPosition())
+            if (not first.text() and first.next().isValid()
+                    and first.next().position() <= cell.lastPosition()):
+                cells.append(cell)
+    return cells
 
 
 # --------------------------------------------------------------------------- #

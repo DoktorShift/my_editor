@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from PySide6.QtCore import (
-    Qt, QTimer, QRect, QRectF, QPoint, QMetaMethod, QEvent, QUrl, Signal,
+    Qt, QTimer, QRect, QPoint, QMetaMethod, QEvent, QUrl, Signal,
 )
 from PySide6.QtGui import (
     QPainter, QTextBlockFormat, QTextCursor, QTextCharFormat, QColor, QClipboard, QPen,
@@ -39,6 +39,7 @@ import markdown_shortcuts
 import media_files
 import paste
 import rich_text
+import text_look
 from slash_menu import SlashMenu
 import url_safety
 from link_popover import LinkPopover, clipboard_address
@@ -256,6 +257,10 @@ class HtmlEditor(QTextEdit):
         # the system's text font (set_writing_font). The font is set here,
         # not in the style sheet, which could only name a family.
         self.setFont(code_font())
+        # Room beside the text for the box painted behind a code block
+        # (text_look). A margin of the layout only: neither HTML nor
+        # Markdown keeps it.
+        self.document().setDocumentMargin(text_look.CODE_PAD_X + 4)
         # Characters per line when writing; None for code (full width).
         self._writing_measure_chars = None
         self._highlights = {layer: [] for layer in self.HIGHLIGHT_LAYERS}
@@ -660,7 +665,8 @@ class HtmlEditor(QTextEdit):
         metrics = self.fontMetrics()
         char_w = (metrics.averageCharWidth() if self._writing_measure_chars
                   else metrics.horizontalAdvance("0")) or 8
-        measure = char_w * chars
+        # The line is ``chars`` long, the document's margins beside it.
+        measure = char_w * chars + 2 * self.document().documentMargin()
         side = int(max(0, (self.width() - measure) / 2))
         self.setViewportMargins(side, 0, side, 0)
 
@@ -851,8 +857,9 @@ class HtmlEditor(QTextEdit):
         if self._bg_pattern != "none" or self._paper_mode:
             self._paint_guides(painter)
 
-        self._paint_code_boxes(painter)
-        self._paint_quote_bars(painter)
+        dark = self._is_dark()
+        text_look.paint_code_boxes(self, painter, text_look.code_box_color(dark))
+        text_look.paint_quote_bars(self, painter, text_look.quote_bar_color(dark))
         painter.end()
 
         super().paintEvent(event)
@@ -865,60 +872,6 @@ class HtmlEditor(QTextEdit):
         p2 = QPainter(vp)
         p2.fillRect(rect, color)
         p2.end()
-
-    def _paint_code_boxes(self, painter):
-        """A box behind each code block, as every reader draws one. Only
-        painted: nothing of it is in the document."""
-        vp = self.viewport()
-        block = self.cursorForPosition(QPoint(0, 0)).block()
-        if rich_text.is_code_block(block):
-            block = rich_text.code_run(block)[0]
-        layout = self.document().documentLayout()
-        dx = self.horizontalScrollBar().value()
-        dy = self.verticalScrollBar().value()
-        color = QColor("#2D2F33") if self._is_dark() else QColor("#F1F3F5")
-        painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(color)
-        while block.isValid():
-            rect = layout.blockBoundingRect(block)
-            if rect.top() - dy > vp.height():
-                break
-            if not rich_text.is_code_block(block):
-                block = block.next()
-                continue
-            first, last = rich_text.code_run(block)
-            top = layout.blockBoundingRect(first).top() - dy
-            bottom = layout.blockBoundingRect(last).bottom() - dy
-            left = rect.left() - dx - 6
-            painter.drawRoundedRect(QRectF(left, top - 3, vp.width() - left - 2,
-                                           bottom - top + 6), 6, 6)
-            block = last.next()
-        painter.restore()
-
-    def _paint_quote_bars(self, painter):
-        """A bar beside each level of a quote, as every reader draws one.
-        Only painted: nothing of it is in the document."""
-        vp = self.viewport()
-        block = self.first_visible_block()
-        layout = self.document().documentLayout()
-        dx = self.horizontalScrollBar().value()
-        dy = self.verticalScrollBar().value()
-        color = QColor("#5A5D63") if self._is_dark() else QColor("#C9CDD2")
-        while block.isValid():
-            rect = layout.blockBoundingRect(block)
-            top = int(rect.top()) - dy
-            if top > vp.height():
-                break
-            depth = rich_text.quote_depth(block)
-            if depth:
-                fmt = block.blockFormat()
-                height = int(rect.height() - fmt.topMargin() - fmt.bottomMargin())
-                for level in range(depth):
-                    x = int(rect.left()) - dx + level * rich_text.QUOTE_INDENT + 12
-                    painter.fillRect(QRect(x, top + int(fmt.topMargin()), 3, height), color)
-            block = block.next()
 
     def _paint_guides(self, painter):
         vp = self.viewport()
