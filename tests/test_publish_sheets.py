@@ -8,8 +8,9 @@ What must hold:
 
   Both are sheets: window-modal, a sheet on macOS, opened with open()
   (never exec()); what changed in Publish as Article goes back to the
-  document when it closes, published or not. A note is composed for
-  sharing and changes nothing in the document.
+  document when it closes, published or not (its link name and first
+  publication date once published). A note is composed for sharing and
+  changes nothing in the document.
 
   Publish as Article has no second copy of the text: it publishes the
   document's text. Its labels are in sentence case and end in a colon,
@@ -588,9 +589,11 @@ def test_a_link_name_typed_by_hand_is_written_in_one_form(tmp_path, captured):
     sheet = article(tmp_path, default_title="T")
     sheet._slug_edit.setText(decomposed)
     sheet._on_slug_edited(decomposed)
-    assert sheet.details().identifier == "école-été"
-    sheet._publish(link_name(sheet._slug_edit.text()), sheet._body, 1_800_000_000)
+    assert sheet._slug() == "école-été"
+    sheet._publish(sheet._slug(), sheet._body, 1_800_000_000)
     assert ["d", "école-été"] in captured[0]["tags"]
+    sheet._on_completed([("wss://nos.lol", True, "")])
+    assert sheet.details().identifier == "école-été"
     from nostr.ui.article_details_panel import ArticleDetailsPanel
     from nostr.ui.stash_kind_dialog import StashKind, StashKindDialog
     panel = ArticleDetailsPanel()
@@ -642,44 +645,119 @@ def test_a_link_name_the_article_has_is_kept_letter_for_letter(tmp_path, capture
     assert stash.choice.identifier == kept
 
 
-@pytest.mark.parametrize("state, kept", [("found", True), ("unknown", True), ("never", False)])
-def test_a_file_published_under_its_own_name_elsewhere_keeps_that_name(
-        tmp_path, captured, state, kept):
-    """Review round 2, M1: version 3.3 published a file's article under
-    the file's name as it is ("My Post"), and recorded nothing; made a
-    link name ("my-post") now, republishing it made a second article.
-    The relays are asked first: an article of the author's under the
-    file's own name keeps it (and is recorded); so does one when no relay
-    can tell (never a second article); otherwise the made name stays."""
+# "Grüße an alle" as a Mac gives a file's name ("u" and an accent), composed, and made.
+RAW = "Gru\u0308\u00dfe an alle"
+COMPOSED = "Gr\u00fc\u00dfe an alle"
+MADE = "grusse-an-alle"
+
+
+def file_article(tmp_path, asked, **more):
+    """A file's article with no link name of its own, as the window opens
+    it: the made link name, and the file's name as the file system gives it."""
     from nostr.first_publications import FirstPublications
+    more.setdefault("first_publications", FirstPublications(tmp_path / "first.json"))
+    return article(tmp_path, default_title="Hello", default_slug=MADE, file_name=RAW,
+                   published_at_lookup=lambda author, slug, done, also=(): asked.append(
+                       (author, slug, tuple(also), done)), **more)
+
+
+@pytest.mark.parametrize("state", ["found", "never", "unknown", "unknown-new"])
+def test_a_files_own_name_is_asked_about_at_publish_and_not_before(
+        tmp_path, captured, monkeypatch, state):
+    """Review round 3, M2 and lows 1 to 3: the file's own name was asked of
+    the relays when the sheet opened, before the person chose to publish
+    (and on Cancel too); with no answer it became the link name for good,
+    and a late answer overwrote a link name typed or a title edited
+    meanwhile. Nothing is asked before Publish now. At Publish the file's
+    own names (as the file system gives it, and composed) are asked about
+    with the made link name, in one question: found under one, the
+    article goes out under exactly that name, and this computer records
+    it; none found, under the made name; when nobody can tell, the person
+    decides, told why."""
     from nostr.publisher import FOUND, NEVER, UNKNOWN, FirstPublication
-    answers = {"found": FirstPublication(FOUND, FIRST), "never": FirstPublication(NEVER),
-               "unknown": FirstPublication(UNKNOWN)}
+    answers = {"found": FirstPublication(FOUND, FIRST, under=RAW),
+               "never": FirstPublication(NEVER), "unknown": FirstPublication(UNKNOWN),
+               "unknown-new": FirstPublication(UNKNOWN)}
+    alerts = []
+    monkeypatch.setattr(article_module, "ask", lambda *a, **k: alerts.append(k) or (
+        "new" if state == "unknown-new" else "cancel"))
     asked = []
-    record = FirstPublications(tmp_path / "first.json")
-    sheet = article(tmp_path, default_title="Hello", default_slug="my-post",
-                    file_name="My Post", first_publications=record,
-                    published_at_lookup=lambda author, slug, done: asked.append((slug, done)))
-    assert [slug for slug, _done in asked] == ["My Post"]
-    assert not sheet._publish_btn.isEnabled()                  # asking first
-    asked[0][1](answers[state])
-    assert sheet._slug_edit.text() == ("My Post" if kept else "my-post")
-    assert sheet._publish_btn.isEnabled()
+    sheet = file_article(tmp_path, asked)
+    assert asked == [] and sheet._status.isHidden() and sheet._publish_btn.isEnabled()
+    assert sheet._slug_edit.text() == MADE
+    sheet._on_publish()
+    [(author, slug, also, done)] = asked
+    assert (author, slug, also) == (PK, MADE, (RAW, COMPOSED))
+    done(answers[state])
+    tags = captured[0]["tags"] if captured else []
     if state == "found":
-        assert record.get(PK, "My Post") == FIRST
-        sheet._on_publish()                                   # its date is known: no asking
-        assert ["d", "My Post"] in captured[0]["tags"]
-        assert ["published_at", str(FIRST)] in captured[0]["tags"]
-        sheet._title_edit.setText("Another title")
-        assert sheet._slug_edit.text() == "My Post"
+        assert ["d", RAW] in tags and ["published_at", str(FIRST)] in tags
+        assert sheet._first_publications.get(PK, RAW) == FIRST
+    elif state == "never":
+        assert ["d", MADE] in tags
+    else:
+        import unicodedata
+        assert COMPOSED in unicodedata.normalize("NFC", alerts[0]["message"])
+        assert (["d", MADE] in tags) if state == "unknown-new" else captured == []
 
 
-def test_the_window_asks_about_a_files_own_name_when_it_has_no_link_name():
-    import inspect
+def test_a_link_name_typed_or_another_account_is_what_publish_asks_about(tmp_path, captured):
+    """Review round 3, lows 1 and 2: decided at Publish, a typed link name
+    is the one asked about (no file name with it), and the account in use
+    then is the one asked for."""
+    from nostr.profiles import Profile
+    asked = []
+    sheet = file_article(tmp_path, asked)
+    other = Profile(user_pubkey=CAROL, bunker_pubkey="c" * 64,
+                    bunker_relays=["wss://bunker.example"], local_secret_hex="0" * 64,
+                    display_name="Carol")
+    sheet._store.upsert(other)
+    sheet._account._switch(other)
+    sheet._title_edit.setText("A new title")
+    sheet._on_publish()
+    assert asked[-1][:3] == (CAROL, "a-new-title", (RAW, COMPOSED))
+    sheet.reject()
+    typed = file_article(tmp_path, asked)
+    typed._slug_edit.setText("my-own-name")
+    typed._on_slug_edited("my-own-name")
+    typed._on_publish()
+    assert asked[-1][1:3] == ("my-own-name", ())
+
+
+def test_the_link_name_goes_back_to_the_document_only_once_published(tmp_path, captured):
+    """Review round 3, M2: Cancel wrote a link name back to the document
+    (and marked it changed), one chosen only because no relay answered.
+    The link name and the first publication date go back only as the
+    record of a publication; Cancel leaves them as they were."""
+    from nostr.publisher import FOUND, FirstPublication
+    asked = []
+    sheet = file_article(tmp_path, asked)
+    sheet._slug_edit.setText("typed-name")
+    sheet._on_slug_edited("typed-name")
+    sheet.reject()
+    assert not sheet.details_changed() and sheet.details().identifier == ""
+    found = file_article(tmp_path, asked)
+    found._on_publish()
+    asked[-1][3](FirstPublication(FOUND, FIRST, under=RAW))
+    assert not found.details_changed()                   # not published yet
+    found._on_completed([("wss://nos.lol", True, "")])
+    assert found.details().identifier == RAW and found.details().published_at == FIRST
+    assert found.details_changed()
+
+
+def test_a_file_this_computer_published_keeps_the_name_it_went_out_under(tmp_path):
+    """Review round 3, M1: this computer's record is asked about the file's
+    own name in both forms, and gives back the one it holds, as it is."""
     from main_window import MainWindow
-    source = inspect.getsource(MainWindow._on_nostr_publish_article)
-    assert "file_name=" in source
-    assert "def _file_name(" in inspect.getsource(MainWindow) or "_file_name" in source
+    from nostr.first_publications import FirstPublications
+    record = FirstPublications(tmp_path / "first.json")
+    window = types.SimpleNamespace(_first_publications=record)
+    path = f"/notes/{RAW}.md"
+    assert MainWindow._link_name_for_file(window, path, PK) == MADE
+    record.remember(PK, COMPOSED, FIRST)
+    assert MainWindow._link_name_for_file(window, path, PK) == COMPOSED
+    record.remember(PK, RAW, FIRST)
+    assert MainWindow._link_name_for_file(window, path, PK) == RAW
 
 
 @pytest.mark.parametrize("make", [article, note])

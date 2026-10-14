@@ -172,7 +172,10 @@ def test_the_publish_window_hands_back_only_what_changed_in_it(tmp_path):
     assert dialog.details().hashtags == ("a", "b")                # each once, as written
     dialog._hashtags.set_tags(("a",))
     assert not dialog.details_changed()
-    dialog._published_at_used = 1_700_000_000
+    # The date it went out with goes back once it went out (review round 3).
+    dialog._publishing = ("my-post", 1_700_000_000)
+    assert not dialog.details_changed()
+    dialog._on_completed([("wss://nos.lol", True, "")])
     assert dialog.details_changed() and dialog.details().published_at == 1_700_000_000
 
 

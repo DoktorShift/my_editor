@@ -413,17 +413,21 @@ def file_sheet(name):
 
 
 df = file_sheet(own_name)
-nd.wait_until(lambda: not df._checking_file_name, 30_000)
-rep.check("the relays are asked first, and the file's own name is kept",
-          df._slug_edit.text() == own_name, df._slug_edit.text())
-rep.check("and recorded on this computer, with its first date",
-          record.get(alice.user_pubkey, own_name) == old_at,
-          str(record.get(alice.user_pubkey, own_name)))
+nd.spin(500)
+rep.check("nothing is asked before Publish: the sheet shows the made link name",
+          df._slug_edit.text() == slugify(own_name) and not df._looking_up
+          and df._status.isHidden(), df._slug_edit.text())
 published_f = nd.Catch(df.published)
 df._on_publish()
 nd.wait_until(lambda: published_f.fired or (df._job is None and not df._looking_up
                                              and "not published" in df._status.text()), 40_000)
 if rep.check("republishing it publishes", published_f.fired, df._status.text()):
+    rep.check("asked at Publish, it went out under the file's own name, as it is",
+              df.details().identifier == own_name and df._slug_edit.text() == own_name,
+              df.details().identifier)
+    rep.check("and this computer recorded it, with its first date",
+              record.get(alice.user_pubkey, own_name) == old_at,
+              str(record.get(alice.user_pubkey, own_name)))
     took = [url for url, ok, _message in published_f.last[1] if ok]
     rep.info("relays that took the new version", ", ".join(took) + " / " + json.dumps(
         [list(r) for r in published_f.last[1]]))
@@ -454,9 +458,13 @@ if rep.check("republishing it publishes", published_f.fired, df._status.text()):
     rep.check("it keeps its first publication date", dates == [str(old_at)], json.dumps(dates))
 fresh_name = f"Fresh Post {uuid.uuid4().hex[:6]}"
 dn = file_sheet(fresh_name)
-nd.wait_until(lambda: not dn._checking_file_name, 30_000)
-rep.check("a file never published under its name gets the made link name",
-          dn._slug_edit.text() == slugify(fresh_name), dn._slug_edit.text())
+published_n = nd.Catch(dn.published)
+dn._on_publish()
+nd.wait_until(lambda: published_n.fired or (dn._job is None and not dn._looking_up
+                                             and "not published" in dn._status.text()), 40_000)
+rep.check("a file never published under its name goes out under the made link name",
+          published_n.fired and dn.details().identifier == slugify(fresh_name),
+          dn.details().identifier)
 
 # --------------------------------------------------------------------------- #
 rep.section("Deleting published notes and articles (NIP-09 kind 5)")

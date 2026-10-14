@@ -213,6 +213,7 @@ from nostr.publisher import (
     DraftBulkDeleteJob,
     DraftPublishJob,
     PublishedMedia,
+    file_link_names,
     library_audio_video_in,
     slugify,
 )
@@ -6943,7 +6944,7 @@ class MainWindow(QMainWindow):
         if not default_slug:
             default_slug = self._link_name_for_file(self.current_path(), active.user_pubkey)
             # The file's name as it is, which version 3.3 published files
-            # under: the sheet asks the relays about it first.
+            # under: the sheet asks the relays about it at Publish.
             file_name = self._file_name(self.current_path())
 
         dialog = PublishArticleDialog(
@@ -6988,15 +6989,17 @@ class MainWindow(QMainWindow):
         """The link name a file-backed article starts with: made from the
         file's name as a title's is ("Grüße an alle.md" is
         "grusse-an-alle"), unless this computer published it under the
-        name as it is, which it then keeps (another would be another
-        article). Published elsewhere, or by version 3.3, which kept no
-        record, the sheet finds that out from the relays (file_name)."""
+        name as it is (as the file system gives it, or composed), which it
+        then keeps exactly (another would be another article). Published
+        elsewhere, or by version 3.3, which kept no record, the sheet finds
+        that out from the relays at Publish (file_name)."""
         name = MainWindow._file_name(path)
         if not name:
             return ""
         record = getattr(self, "_first_publications", None)
-        if record is not None and record.get(author, name):
-            return name
+        for own in file_link_names(name) if record is not None else ():
+            if record.get(author, own):
+                return own
         return slugify(name)
 
     def _article_sheet_closed(self, dialog, ed) -> None:

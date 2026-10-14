@@ -37,15 +37,20 @@ Publish dimmed, before anything is sent.
 
 Publishing asks the relays for the article's first publication date
 first (an edit keeps it), unless this computer or the draft knows it;
-when no relay can tell, the person decides. Then the event goes through
-the secret key check and the publish pipeline.
+when no relay can tell, the person decides. A file's article whose link
+name is still the one made for it is asked about under the file's own
+name too (3.3 published files under it), in the same question: found
+there, it goes out under that name. Nothing is asked before Publish.
+Then the event goes through the secret key check and the publish
+pipeline. The link name and the first publication date go back to the
+document only once it is published, as the record of that.
 """
 
 from __future__ import annotations
 
 import sys
 import time
-from typing import Callable, List, Optional, Sequence
+from typing import Callable, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QDateTime, QSize, Qt, Signal
 from PySide6.QtGui import QFontMetrics, QPixmap
@@ -77,7 +82,7 @@ from ..preview import reading_minutes
 from ..profiles import Profile, ProfileStore
 from ..publisher import (
     FOUND, NEVER, FirstPublication, PublishedMedia, PublishJob, PublishResult, build_article,
-    find_first_publication, link_name, slugify,
+    file_link_names, find_first_publication, link_name, slugify,
 )
 from ..relay import RelayPool
 from ..search import Nip50SearchClient
@@ -305,9 +310,15 @@ class PublishArticleDialog(QDialog):
         self._first_published = (
             {default_slug: first_published} if default_slug and first_published else {})
         self._first_publications = first_publications
+        # ``(author, slug, on_done)``; for a file's article also ``also=``,
+        # the file's own names (find_first_publication).
         self._published_at_lookup = published_at_lookup or self._look_up_published_at
         self._looking_up = False
-        self._published_at_used: Optional[int] = None
+        # The link name and first publication date being published with,
+        # and once a relay took it, published with: only then do they go
+        # back to the document (details()).
+        self._publishing: Optional[Tuple[str, int]] = None
+        self._published_as: Optional[Tuple[str, int]] = None
         # The article's details (an imported article's summary, cover,
         # hashtags and source, its co-authors): offered here, published
         # with it, and what changes here goes back to the document.
@@ -326,12 +337,12 @@ class PublishArticleDialog(QDialog):
         # The link name it has already, kept letter for letter (link_name).
         self._kept_slug = default_slug
         self._coauthor_picker: Optional[MentionPicker] = None
-        # A file's article with no link name of its own: its file's name as
-        # it is, which an older version published it under (version 3.3
-        # recorded nothing), asked of the relays before the made name is
-        # used (_check_file_name).
-        self._file_name = link_name(file_name) if self._slug_is_auto else ""
-        self._checking_file_name = False
+        # A file's article with no link name of its own: its file's names
+        # as they are (as the file system gives it, and composed), which
+        # version 3.3 published files under and recorded nothing of. Asked
+        # about at Publish with the made link name (_on_publish), never
+        # before: nothing goes out before the person publishes.
+        self._file_names = file_link_names(file_name) if self._slug_is_auto else []
 
         self._build(active_profile, default_title, default_slug)
         self._coauthors = Coauthors(profile=self._account.profile,
@@ -344,7 +355,6 @@ class PublishArticleDialog(QDialog):
         self._details_shown = self.details()
         self._show_people()
         self._refresh_card()
-        self._check_file_name()
         self._refresh_publish_enabled()
         self._fit(_WIDTH)
 
@@ -633,37 +643,6 @@ class PublishArticleDialog(QDialog):
         self._slug_hint.setText("…/" + slug if slug else "")
         self._slug_hint.setVisible(bool(slug))
 
-    def _check_file_name(self) -> None:
-        """Ask whether the author has an article under the file's own name
-        (an older version published files so); the answer comes to
-        _file_name_checked. Publish waits for it."""
-        if not self._file_name or self._file_name == self._slug() or not self._slug_is_auto:
-            return
-        self._checking_file_name = True
-        self._set_status(_("Checking whether this article was published before…"))
-        author = self._account.profile().user_pubkey
-        self._published_at_lookup(
-            author, self._file_name,
-            lambda found, a=author: self._file_name_checked(a, found))
-
-    def _file_name_checked(self, author: str, found: FirstPublication) -> None:
-        if not self._checking_file_name or author != self._account.profile().user_pubkey:
-            return                     # closed meanwhile, or another account now
-        self._checking_file_name = False
-        self._set_status("")
-        if found.state == NEVER:
-            self._refresh_publish_enabled()
-            return                     # no such article: the made name stays
-        # An article under the file's own name, or no relay could tell:
-        # that name stays (another would be a second article).
-        self._slug_is_auto = False
-        self._slug_edit.setText(self._file_name)
-        if found.state == FOUND:
-            self._first_published[self._file_name] = found.published_at
-            if self._first_publications is not None:
-                self._first_publications.remember(author, self._file_name, found.published_at)
-        self._refresh_publish_enabled()
-
     # -- people -----------------------------------------------------------------------
 
     def _show_people(self) -> None:
@@ -705,24 +684,25 @@ class PublishArticleDialog(QDialog):
     def _on_account_switched(self, _profile: Profile) -> None:
         self._show_people()
         self._refresh_card()
-        if self._checking_file_name:
-            self._checking_file_name = False
-            self._check_file_name()       # asked again, for this account
-            self._refresh_publish_enabled()
 
     # -- state ------------------------------------------------------------------------
 
     def details(self) -> ArticleDetails:
         """The article's details as the sheet has them now (the one model
         Article Details shows too): what it was given, with what was
-        changed here, and the first publication date it published with."""
+        changed here. Its link name and first publication date are those
+        it was published with, once a relay took it, and as they were
+        until then: a link name typed, made or found here is never the
+        document's because the sheet was closed (review round 3, M2)."""
+        identifier, published_at = self._published_as or (self._details.identifier,
+                                                           self._details.published_at)
         return self._details.with_changes(
-            identifier=self._slug(),
+            identifier=identifier,
             title=self._title_edit.text().strip(),
             summary=self._summary_edit.text().strip(),
             image=self._image_edit.text().strip(),
             hashtags=self._hashtags.tags(),
-            published_at=self._published_at_used or self._details.published_at)
+            published_at=published_at)
 
     def details_changed(self) -> bool:
         """Whether anything of :meth:`details` changed here (typed, or
@@ -741,7 +721,6 @@ class PublishArticleDialog(QDialog):
         # NIP-23 requires the d-tag; an empty document has nothing to say;
         # a cover still uploading is waited for.
         self._publish_btn.setEnabled(self._job is None and not self._looking_up
-                                     and not self._checking_file_name
                                      and bool(slug) and bool(self._body) and not problem
                                      and not self._cover.uploading())
 
@@ -765,14 +744,15 @@ class PublishArticleDialog(QDialog):
     # -- publishing -------------------------------------------------------------------
 
     def _look_up_published_at(self, author: str, slug: str,
-                              on_done: Callable[[FirstPublication], None]) -> None:
+                              on_done: Callable[[FirstPublication], None],
+                              also: Sequence[str] = ()) -> None:
         find_first_publication(self._relay_pool, self._relay_directory, author, slug,
-                               on_done, parent=self)
+                               on_done, parent=self, also=also)
 
     def _on_publish(self) -> None:
         slug = self._slug()
         if (not slug or not self._body or self._job is not None or self._looking_up
-                or self._checking_file_name or slug_problem(slug) or self._cover.uploading()):
+                or slug_problem(slug) or self._cover.uploading()):
             return
         author = self._account.profile().user_pubkey
         known = self._first_published.get(slug) or (
@@ -781,14 +761,23 @@ class PublishArticleDialog(QDialog):
         if known:
             self._publish(slug, self._body, known)
             return
-        # An article published before keeps its date: find it first.
+        # An article published before keeps its date: find it first. A
+        # file's article with the link name made for it may be out under
+        # the file's own name: asked about in the same question, now that
+        # the person publishes, for the account and the link name of now.
+        also = [name for name in self._file_names if name != slug] if self._slug_is_auto else []
         self._looking_up = True
         self._set_busy(True)
         self._set_status(_("Checking whether this article was published before…"))
-        self._published_at_lookup(
-            author, slug, lambda when, s=slug, a=author: self._on_published_at(s, a, when))
+        answer = (lambda when, s=slug, a=author, names=tuple(also):
+                  self._on_published_at(s, a, when, names))
+        if also:
+            self._published_at_lookup(author, slug, answer, also=also)
+        else:
+            self._published_at_lookup(author, slug, answer)
 
-    def _on_published_at(self, slug: str, author: str, found: FirstPublication) -> None:
+    def _on_published_at(self, slug: str, author: str, found: FirstPublication,
+                         file_names: Sequence[str] = ()) -> None:
         if not self._looking_up:
             return                                     # the sheet was closed meanwhile
         self._looking_up = False
@@ -800,24 +789,44 @@ class PublishArticleDialog(QDialog):
             return
         self._set_busy(False)
         if found.state == FOUND:
+            if found.under:
+                # Out under the file's own name: that is the article, and
+                # its link name, exactly as it is (another would be a
+                # second article). This computer remembers it.
+                slug = found.under
+                self._slug_is_auto = False
+                self._kept_slug = slug
+                self._slug_edit.setText(slug)
+                if self._first_publications is not None:
+                    self._first_publications.remember(author, slug, found.published_at)
             self._first_published[slug] = found.published_at
             self._publish(slug, self._body, found.published_at)
         elif found.state == NEVER:
             self._publish(slug, self._body, int(time.time()))
         else:
             self._set_status("")
-            self._ask_when_nobody_can_tell(slug, self._body)
+            self._ask_when_nobody_can_tell(slug, self._body, file_names)
 
-    def _ask_when_nobody_can_tell(self, slug: str, body: str) -> None:
+    def _ask_when_nobody_can_tell(self, slug: str, body: str,
+                                  file_names: Sequence[str] = ()) -> None:
         """None of the relays the author publishes to answered: whether the
         article went out before cannot be told, and a guess would either
-        re-date an edit or back-date a new article. The person decides."""
+        re-date an edit or back-date a new article, or for a file's
+        article make a second one beside one under the file's own name.
+        The person decides."""
+        if file_names:
+            message = _("None of the relays you publish to answered. Earlier versions of "
+                        "MyEditor published a file under its own name, “{name}”, so this "
+                        "article may be out already. Publishing it as new makes another "
+                        "article, dated today.").format(name=file_names[0])
+        else:
+            message = _("None of the relays you publish to answered. If the article went "
+                        "out before, publishing it as new gives it today's date, and "
+                        "readers see it as a new article.")
         choice = ask(
             self,
             title=_("Couldn't check whether this article was published before"),
-            message=_("None of the relays you publish to answered. If the article went "
-                      "out before, publishing it as new gives it today's date, and "
-                      "readers see it as a new article."),
+            message=message,
             buttons=(Button(_("Publish as New"), "new", NORMAL),
                      Button(_("Cancel"), "cancel", CANCEL),
                      Button(_("Try Again"), "again", DEFAULT)),
@@ -854,7 +863,7 @@ class PublishArticleDialog(QDialog):
 
         self._set_busy(True)
         self._set_status("")
-        self._published_at_used = published_at
+        self._publishing = (slug, published_at)
 
         self._job = PublishJob(
             relay_pool=self._relay_pool,
@@ -885,13 +894,15 @@ class PublishArticleDialog(QDialog):
             self._set_busy(False)
             return
         author = self._account.profile().user_pubkey
-        if self._first_publications is not None and self._published_at_used:
+        # What it went out as: the document's record of it (details()).
+        self._published_as = self._publishing
+        slug, published_at = self._published_as
+        if self._first_publications is not None and published_at:
             # This computer remembers it, for when the relays cannot tell.
-            self._first_publications.remember(author, self._slug(),
-                                              self._published_at_used)
+            self._first_publications.remember(author, slug, published_at)
         hint_relays = [url for url, ok, _message in results if ok][:2]
         naddr = encode_naddr(
-            identifier=self._slug(),
+            identifier=slug,
             author_pubkey_hex=author,
             kind=30023,
             relays=hint_relays,
@@ -916,5 +927,4 @@ class PublishArticleDialog(QDialog):
             self._job.cancel()
             self._job = None
         self._looking_up = False
-        self._checking_file_name = False
         super().reject()

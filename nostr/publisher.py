@@ -652,6 +652,16 @@ def link_name(typed: str, kept: str = "") -> str:
     return unicodedata.normalize("NFC", (typed or "").strip())
 
 
+def file_link_names(file_name: str) -> List[str]:
+    """The link names a file's article may be out under besides the one
+    made of its name: the name as the file system gives it (3.3 published
+    a file's article so; a Mac gives it with "u" and an accent for "ü"),
+    then composed, each once."""
+    raw = (file_name or "").strip()
+    return list(dict.fromkeys(name for name in (raw, unicodedata.normalize("NFC", raw))
+                              if name))
+
+
 def slugify(text: str) -> str:
     """Turn a title (or a file's name) into the article's link name, its
     d-tag identifier.
