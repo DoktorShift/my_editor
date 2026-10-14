@@ -294,6 +294,14 @@ class MediaServersDialog(QDialog):
         done_row.addWidget(self.done_button)
         layout.addLayout(done_row)
 
+    def event(self, event) -> bool:  # noqa: N802 (Qt's name)
+        if event.type() == QEvent.Type.LayoutRequest and self.layout() is not None:
+            # As tall as its wrapped texts need at its narrowest, which
+            # Qt doesn't count for a window: the buttons never overlap
+            # the list.
+            self.setMinimumHeight(self.layout().minimumHeightForWidth(self.minimumWidth()))
+        return super().event(event)
+
     # -- state ---------------------------------------------------------------
 
     def _name(self, origin: str) -> str:

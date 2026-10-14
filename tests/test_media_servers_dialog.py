@@ -296,6 +296,25 @@ def test_a_full_address_is_added_as_its_server(tmp_path, text, origin):
     assert settings.configured_servers == [A, B, origin]
 
 
+def test_at_its_smallest_the_sheet_keeps_every_control_clear_of_the_list(tmp_path):
+    """Its wrapped texts take more lines at its narrowest than Qt counts
+    for a window: still, Make Primary and Remove stay below the list, and
+    Done inside the sheet, with an offer and a problem shown too."""
+    dialog, _settings, _ = sheet(tmp_path, servers=(A, B, C), suggestions=["https://d.example"])
+    dialog.show()
+    for typed in ("", "not an address"):
+        if typed:
+            dialog.address.setText(typed)
+            dialog.add_button.click()
+        QApplication.processEvents()
+        dialog.resize(1, 1)
+        QApplication.processEvents()
+        assert dialog.primary_button.geometry().top() > dialog.server_list.geometry().bottom()
+        assert dialog.done_button.geometry().bottom() < dialog.height()
+    assert not dialog.address_error.isHidden()
+    dialog.close()
+
+
 def test_the_sheet_names_every_kind_the_library_keeps(tmp_path):
     dialog, _settings, _ = sheet(tmp_path)
     texts = [label.text() for label in dialog.findChildren(QLabel)]
