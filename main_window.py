@@ -2971,8 +2971,14 @@ class MainWindow(QMainWindow):
         self._drafts_toggle.setToolTip(tooltip_for(self.act_nostr_drafts))
         self._pane_toggles = group
         self._paint_pane_toggles()
-        group.setVisible(self.nostr_state.active)
+        self._show_pane_toggles(self.nostr_state.active)
         return group
+
+    def _show_pane_toggles(self, shown: bool) -> None:
+        """Both panes are Nostr's: their toggles only while an account is
+        in use."""
+        if getattr(self, "_pane_toggles", None) is not None:
+            self._pane_toggles.setVisible(shown)
 
     def _paint_pane_toggles(self) -> None:
         """The toggles' icons in the theme's ink, as the toolbar's are."""
@@ -6600,9 +6606,7 @@ class MainWindow(QMainWindow):
 
     def _on_nostr_in_use_changed(self, active: bool) -> None:
         """Nothing of Nostr stays on screen once no account is in use."""
-        toggles = getattr(self, "_pane_toggles", None)
-        if toggles is not None:
-            toggles.setVisible(active)
+        self._show_pane_toggles(active)
         if not active:
             self._hide_drafts_panel()
             details = getattr(self, "act_article_details", None)
