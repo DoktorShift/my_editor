@@ -75,3 +75,55 @@ def test_the_preview_and_the_tab_follow_the_details_as_they_are_typed(tmp_path):
     assert r["window"].startswith("Plain text, forever")
     assert r["spoken"] == "Plain text, forever"
     assert r["file_tab"] == "notes.md*"
+
+
+PLACEHOLDERS = r"""
+import json, os, sys, time
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+main_window.MainWindow._maybe_auto_check_for_updates = lambda self: None
+
+def settle(seconds=0.6):
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        app.processEvents()
+        time.sleep(0.02)
+
+w = main_window.MainWindow()
+w.show()
+w.nostr_state._active = True
+w._on_nostr_in_use_changed(True)
+ed = w.new_tab()
+ed.setPlainText("Why I write in plain text\n\nEvery tool I loved is gone.")
+w.act_article_details.setChecked(True)
+settle()
+panel = w._article_details_panel
+r = {"title": panel.title_edit.placeholderText(),
+     "link": panel.identifier_edit.placeholderText()}
+cursor = ed.textCursor()
+cursor.setPosition(0)
+cursor.insertText("Still ")
+settle()
+r["title_after_edit"] = panel.title_edit.placeholderText()
+r["link_after_edit"] = panel.identifier_edit.placeholderText()
+r["typed_untouched"] = panel.title_edit.text()
+panel.title_edit.setText("Plain text, forever")
+settle()
+r["link_follows_typed"] = panel.identifier_edit.placeholderText()
+ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_an_empty_title_shows_the_title_it_will_publish_with_as_the_text_changes(tmp_path):
+    r = run_window_script(PLACEHOLDERS, tmp_path)
+    assert r["title"] == "Why I write in plain text"
+    assert r["link"] == "why-i-write-in-plain-text"
+    assert r["title_after_edit"] == "Still Why I write in plain text"
+    assert r["link_after_edit"] == "still-why-i-write-in-plain-text"
+    assert r["typed_untouched"] == ""
+    assert r["link_follows_typed"] == "plain-text-forever"

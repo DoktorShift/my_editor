@@ -122,6 +122,8 @@ class ArticleDetailsPanel(QFrame):
         # the one publishing would make when none is typed (a file's).
         self._kept_identifier = ""
         self._made_identifier = ""
+        # The title the article publishes with while none is typed.
+        self._derived_title = ""
         self._filling = False
         # The details the file writes in a way that is kept as written
         # (article_details.kept_in_file), and the line under each.
@@ -412,6 +414,10 @@ class ArticleDetailsPanel(QFrame):
         self._kept_identifier = details.identifier
         self._show_people(details)
 
+    def shows_article(self) -> bool:
+        """Whether the fields are shown (not why there are none)."""
+        return self._pages.currentWidget() is self._form
+
     def show_no_article(self, reason: str) -> None:
         """The tab in front holds no article: ``reason`` instead of fields."""
         self.cover.set_owner(None)
@@ -424,6 +430,14 @@ class ArticleDetailsPanel(QFrame):
             edit.setText(text)
             if edit.isReadOnly():
                 edit.setCursorPosition(0)       # shown from its start
+
+    def set_derived_title(self, title: str) -> None:
+        """The title the article publishes with while none is typed (its
+        first heading or line, article_details.default_title), shown as
+        the Title's placeholder; the link name's placeholder follows it."""
+        self._derived_title = title
+        self.title_edit.setPlaceholderText(title or _("Article title"))
+        self._suggest_identifier()
 
     def _show_first_published(self, when: Optional[int]) -> None:
         if when:
@@ -565,8 +579,8 @@ class ArticleDetailsPanel(QFrame):
     def _suggest_identifier(self) -> None:
         """An empty address shows the one Publish as Article would start
         with, as a placeholder: a file's article the one made of the file's
-        name; any other the one made of the title, following it."""
-        title = self.title_edit.text().strip()
+        name; any other the one made of its title, following it."""
+        title = self.title_edit.text().strip() or self._derived_title
         self.identifier_edit.setPlaceholderText(
             self._made_identifier or (slugify(title) if title else _("my-article")))
 

@@ -1298,6 +1298,8 @@ class MainWindow(QMainWindow):
             lambda e=ed: self._on_document_changed_for_find(e))
         ed.document().contentsChanged.connect(
             lambda e=ed: self._on_document_changed_for_words(e))
+        ed.document().contentsChanged.connect(
+            lambda e=ed: self._on_document_changed_for_article(e))
         ed.selectionChanged.connect(lambda e=ed: self._on_selection_changed_for_words(e))
         ed.currentCharFormatChanged.connect(self._schedule_format_buttons)
         ed.selectionChanged.connect(self._schedule_format_buttons)
@@ -2929,6 +2931,12 @@ class MainWindow(QMainWindow):
         self._article_details_panel.changed.connect(
             lambda details: self._set_article_details(self.current_editor(), details))
         self._article_details_panel.cover_uploaded.connect(self._cover_uploaded_for)
+        # What the article takes from its text (the title it publishes with
+        # while none is set), read again once typing pauses, as the preview.
+        self._article_from_text = QTimer(self)
+        self._article_from_text.setSingleShot(True)
+        self._article_from_text.setInterval(preview_pane.RENDER_DELAY_MS)
+        self._article_from_text.timeout.connect(self._show_article_from_text)
         self._central_splitter.addWidget(self._article_details_panel)
         self._central_splitter.addWidget(self._drafts_panel)
         # Editor takes all stretch; the panels start hidden.
@@ -7258,6 +7266,22 @@ class MainWindow(QMainWindow):
                     if not details.identifier and profile is not None else "")
             panel.show_article(details, fixed_identifier=fixed, kept_in_file=details.kept,
                                document=ed, made_identifier=made)
+            panel.set_derived_title(self._derived_title_of(ed))
+
+    def _derived_title_of(self, ed) -> str:
+        """The title ``ed``'s article publishes with while none is set: its
+        first heading or line (article_details.default_title)."""
+        return default_title(self._publish_payload(ed, "markdown")[0], self._preview_name)
+
+    def _on_document_changed_for_article(self, ed) -> None:
+        panel = self._article_details_panel
+        if ed is self.current_editor() and panel.isVisible() and panel.shows_article():
+            self._article_from_text.start()
+
+    def _show_article_from_text(self) -> None:
+        ed, panel = self.current_editor(), self._article_details_panel
+        if ed is not None and panel.isVisible() and panel.shows_article():
+            panel.set_derived_title(self._derived_title_of(ed))
 
     def _cover_uploaded_for(self, ed, url: str) -> None:
         """A picture dropped in Article Details as the cover of ``ed``'s
