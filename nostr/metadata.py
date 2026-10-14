@@ -32,7 +32,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from PySide6.QtCore import QObject, QStandardPaths, QTimer, QUrl, Signal
 from PySide6.QtGui import QPixmap
@@ -219,6 +219,29 @@ class AvatarLoader(QObject):
         self._nam = nam or QNetworkAccessManager(self)
         # pubkey -> reply, so a re-request for the same pubkey can be coalesced
         self._inflight: dict[str, QNetworkReply] = {}
+
+    def fetch(self, key: str, url: str,
+              on_done: Callable[[Optional[QPixmap]], None]) -> None:
+        """``on_done(pixmap)`` once ``url`` is at hand for ``key``, or
+        ``on_done(None)`` when it can't be had: one answer, for one picture
+        (Edit Profile's card), with the checks and the cache of ``load``.
+        A key per address keeps an older answer off a newer picture."""
+        def answer(got: str, pixmap: Optional[QPixmap]) -> None:
+            if got != key:
+                return
+            self.ready.disconnect(on_ready)
+            self.failed.disconnect(on_failed)
+            on_done(pixmap)
+
+        def on_ready(got: str, pixmap) -> None:
+            answer(got, pixmap)
+
+        def on_failed(got: str, _reason: str) -> None:
+            answer(got, None)
+
+        self.ready.connect(on_ready)
+        self.failed.connect(on_failed)
+        self.load(key, url)
 
     def load(self, pubkey_hex: str, picture_url: str) -> None:
         """Resolve an avatar for ``pubkey_hex`` from ``picture_url``.
