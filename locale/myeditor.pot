@@ -839,7 +839,7 @@ msgstr ""
 #: main_window.py:5664
 #: nostr/ui/media_library_dialog.py:683
 #: nostr/ui/media_library_dialog.py:872
-#: nostr/ui/published_view.py:705
+#: nostr/ui/published_view.py:734
 msgid "Delete"
 msgstr ""
 
@@ -1134,8 +1134,8 @@ msgid "Insert Audio or Video…"
 msgstr ""
 
 #: main_window.py:2417
-#: nostr/ui/published_view.py:414
-#: nostr/ui/published_view.py:494
+#: nostr/ui/published_view.py:441
+#: nostr/ui/published_view.py:521
 msgid "Published"
 msgstr ""
 
@@ -1313,8 +1313,8 @@ msgstr ""
 
 #: main_window.py:4233
 #: main_window.py:5468
-#: nostr/ui/published_view.py:672
-#: nostr/ui/published_view.py:693
+#: nostr/ui/published_view.py:699
+#: nostr/ui/published_view.py:722
 msgid "That link cannot be opened."
 msgstr ""
 
@@ -1370,8 +1370,8 @@ msgstr ""
 #: main_window.py:5794
 #: nostr/ui/connect_dialog.py:212
 #: nostr/ui/media_library_dialog.py:673
-#: nostr/ui/published_view.py:869
-#: nostr/ui/published_view.py:781
+#: nostr/ui/published_view.py:898
+#: nostr/ui/published_view.py:810
 msgid "Copy Link"
 msgstr ""
 
@@ -3040,13 +3040,13 @@ msgstr ""
 #: preview_pane.py:96
 #: nostr/refs.py:151
 #: nostr/ui/imports_article.py:121
-#: nostr/ui/published_view.py:124
+#: nostr/ui/published_view.py:134
 msgid "Article"
 msgstr ""
 
 #: preview_pane.py:97
 #: nostr/ui/publish_note_dialog.py:264
-#: nostr/ui/published_view.py:124
+#: nostr/ui/published_view.py:134
 msgid "Note"
 msgstr ""
 
@@ -6723,7 +6723,7 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: nostr/ui/drafts_panel.py:488
-#: nostr/ui/published_view.py:156
+#: nostr/ui/published_view.py:186
 msgid "No additional text"
 msgstr ""
 
@@ -6757,7 +6757,7 @@ msgid "No Drafts"
 msgstr ""
 
 #: nostr/ui/drafts_panel.py:1901
-#: nostr/ui/published_view.py:586
+#: nostr/ui/published_view.py:613
 msgid "Check the spelling or try a new search."
 msgstr ""
 
@@ -6803,7 +6803,7 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: nostr/ui/drafts_panel.py:1900
-#: nostr/ui/published_view.py:585
+#: nostr/ui/published_view.py:612
 #, python-brace-format
 msgid "No Results for “{query}”"
 msgstr ""
@@ -8006,7 +8006,7 @@ msgid "{used} of {quota} used"
 msgstr ""
 
 #: nostr/ui/media_library_dialog.py:533
-#: nostr/ui/published_view.py:179
+#: nostr/ui/published_view.py:206
 msgid "Loading…"
 msgstr ""
 
@@ -9067,164 +9067,186 @@ msgstr ""
 msgid "(no accounts)"
 msgstr ""
 
-#: nostr/ui/published_view.py:193
-#: nostr/ui/published_view.py:179
+#: nostr/ui/published_view.py:220
+#: nostr/ui/published_view.py:206
 msgid "Load More Notes"
 msgstr ""
 
-#: nostr/ui/published_view.py:185
+#: nostr/ui/published_view.py:133
+msgid "Curation"
+msgstr ""
+
+#: nostr/ui/published_view.py:212
 msgid "Couldn’t load."
 msgstr ""
 
-#: nostr/ui/published_view.py:190
+#: nostr/ui/published_view.py:217
 msgid "Loading more notes"
 msgstr ""
 
-#: nostr/ui/published_view.py:192
+#: nostr/ui/published_view.py:219
 msgid "Load More Notes. Couldn’t load more notes. Press Return to try again."
 msgstr ""
 
-#: nostr/ui/published_view.py:414
+#: nostr/ui/published_view.py:441
 msgid "Your published notes and articles"
 msgstr ""
 
-#: nostr/ui/published_view.py:172
+#: nostr/ui/published_view.py:199
 msgid "Deleting"
 msgstr ""
 
-#: nostr/ui/published_view.py:416
+#: nostr/ui/published_view.py:443
 msgid "Refresh Published Notes and Articles"
 msgstr ""
 
-#: nostr/ui/published_view.py:417
+#: nostr/ui/published_view.py:444
 msgid "Search Published"
 msgstr ""
 
-#: nostr/ui/published_view.py:528
+#: nostr/ui/published_view.py:555
 msgid "Loading"
 msgstr ""
 
-#: nostr/ui/published_view.py:696
+#: nostr/ui/published_view.py:725
 msgid "Link copied."
 msgstr ""
 
-#: nostr/ui/published_view.py:864
-#: nostr/ui/published_view.py:777
+#: nostr/ui/published_view.py:893
+#: nostr/ui/published_view.py:806
 msgid "Open With"
 msgstr ""
 
-#: nostr/ui/published_view.py:874
-#: nostr/ui/published_view.py:784
+#: nostr/ui/published_view.py:903
+#: nostr/ui/published_view.py:813
 msgid "Delete from Nostr…"
 msgstr ""
 
-#: nostr/ui/published_view.py:907
+#: nostr/ui/published_view.py:936
 msgid "The relays turned the request down. Show Details says why; you can try again later."
 msgstr ""
 
-#: nostr/ui/published_view.py:910
+#: nostr/ui/published_view.py:939
 msgid "No relay accepted the request. Check your internet connection, then try again."
 msgstr ""
 
-#: nostr/ui/published_view.py:150
+#: nostr/ui/published_view.py:119
+#, python-brace-format
+msgid "Collects {n} article."
+msgid_plural "Collects {n} articles."
+msgstr[0] ""
+msgstr[1] ""
+
+#: nostr/ui/published_view.py:156
+#, python-brace-format
+msgid "Collects {n} article"
+msgid_plural "Collects {n} articles"
+msgstr[0] ""
+msgstr[1] ""
+
+#: nostr/ui/published_view.py:177
 msgid "Deleting…"
 msgstr ""
 
-#: nostr/ui/published_view.py:169
+#: nostr/ui/published_view.py:196
 #, python-brace-format
 msgid "First published {time}"
 msgstr ""
 
-#: nostr/ui/published_view.py:570
+#: nostr/ui/published_view.py:597
 msgid "No account in use"
 msgstr ""
 
-#: nostr/ui/published_view.py:571
+#: nostr/ui/published_view.py:598
 msgid "Choose an account in the Nostr menu to see what you published."
 msgstr ""
 
-#: nostr/ui/published_view.py:626
+#: nostr/ui/published_view.py:653
 msgid "Couldn’t load more notes. Check your internet connection, then try again."
 msgstr ""
 
-#: nostr/ui/published_view.py:630
+#: nostr/ui/published_view.py:657
 msgid "Refreshing what you published…"
 msgstr ""
 
-#: nostr/ui/published_view.py:637
+#: nostr/ui/published_view.py:664
 msgid "Couldn’t refresh. Check your internet connection, then try again."
 msgstr ""
 
-#: nostr/ui/published_view.py:703
+#: nostr/ui/published_view.py:732
 msgid "Relays that keep it are asked to remove it. People and apps that already saved a copy may still have it. Your draft stays."
 msgstr ""
 
-#: nostr/ui/published_view.py:857
-#: nostr/ui/published_view.py:783
+#: nostr/ui/published_view.py:886
+#: nostr/ui/published_view.py:812
 msgid "Edit Article"
 msgstr ""
 
-#: nostr/ui/published_view.py:918
+#: nostr/ui/published_view.py:947
 msgid "Your signer app didn’t approve the request. Try again, and approve it when your signer app asks."
 msgstr ""
 
-#: nostr/ui/published_view.py:574
-#: nostr/ui/published_view.py:582
+#: nostr/ui/published_view.py:601
+#: nostr/ui/published_view.py:609
 msgid "Looking for your notes and articles…"
 msgstr ""
 
-#: nostr/ui/published_view.py:640
+#: nostr/ui/published_view.py:667
 msgid "Some relays didn’t answer, so something may be missing."
 msgstr ""
 
-#: nostr/ui/published_view.py:681
-msgid "Standup Discover doesn’t show this article yet, so it opened on njump."
-msgstr ""
-
-#: nostr/ui/published_view.py:861
-#: nostr/ui/published_view.py:779
+#: nostr/ui/published_view.py:890
+#: nostr/ui/published_view.py:808
 #, python-brace-format
 msgid "Open in {app}"
 msgstr ""
 
-#: nostr/ui/published_view.py:897
+#: nostr/ui/published_view.py:926
 #, python-brace-format
 msgid "{accepted} of {total} relay accepted the request to delete “{title}”."
 msgid_plural "{accepted} of {total} relays accepted the request to delete “{title}”."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/published_view.py:576
+#: nostr/ui/published_view.py:603
 msgid "Couldn’t load what you published"
 msgstr ""
 
-#: nostr/ui/published_view.py:577
+#: nostr/ui/published_view.py:604
 msgid "Check your internet connection, then try again."
 msgstr ""
 
-#: nostr/ui/published_view.py:702
+#: nostr/ui/published_view.py:709
+msgid "Standup Discover doesn’t show this curation yet, so it opened on njump."
+msgstr ""
+
+#: nostr/ui/published_view.py:711
+msgid "Standup Discover doesn’t show this article yet, so it opened on njump."
+msgstr ""
+
+#: nostr/ui/published_view.py:731
 #, python-brace-format
 msgid "Delete “{title}” from Nostr?"
 msgstr ""
 
-#: nostr/ui/published_view.py:775
+#: nostr/ui/published_view.py:804
 msgid "Open in"
 msgstr ""
 
-#: nostr/ui/published_view.py:924
+#: nostr/ui/published_view.py:953
 #, python-brace-format
 msgid "Couldn’t delete “{title}”"
 msgstr ""
 
-#: nostr/ui/published_view.py:904
+#: nostr/ui/published_view.py:933
 msgid "no answer"
 msgstr ""
 
-#: nostr/ui/published_view.py:589
+#: nostr/ui/published_view.py:616
 msgid "Nothing Published Yet"
 msgstr ""
 
-#: nostr/ui/published_view.py:590
+#: nostr/ui/published_view.py:617
 msgid "Notes and articles you publish appear here."
 msgstr ""
 

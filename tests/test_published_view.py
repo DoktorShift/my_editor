@@ -551,3 +551,24 @@ def test_a_click_on_a_published_post_opens_its_full_preview(monkeypatch):
     assert controller.popover().action_bar().primary.text() == "Open in njump"
     view.hide()
     assert controller.is_open() is False
+
+
+def test_a_curation_is_listed_and_opens_in_standup_discover_first(opened):
+    """Curations (Standup sites and magazines) are among what was
+    published: a row with what they collect, opening in Standup Discover's
+    curated reader first, never offered for editing."""
+    shelf = signed(30004, [["d", "my-blog"], ["title", "Weekend reading"],
+                           ["a", "30023:" + "b" * 64 + ":one"],
+                           ["a", "30023:" + "b" * 64 + ":two"]], "", created_at=NOW - 500)
+    view, _model, relays, _said, edited = make(shelf)
+    view.set_account(Profile())
+    relays.run()
+    row = view._rows.data(view._rows.index(0), ROW_ROLE)
+    assert (row.title, row.kind, row.detail) == ("Weekend reading", "curation",
+                                                 "Collects 2 articles")
+    menu = view.menu_for(view._rows.index(0))
+    words = [a.text() for a in menu.actions() if not a.isSeparator()]
+    assert words[0] == "Open in Standup Discover" and "Edit Article" not in words
+    menu.defaultAction().trigger()
+    assert opened[0].startswith("https://media.einundzwanzig.space/s/by/")
+    assert opened[0].endswith("/bXktYmxvZw") and edited == []

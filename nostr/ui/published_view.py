@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 rinbal
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The Published view: what the account published, and taking it back.
+"""The Published view: what the account published (articles, curations and
+notes), and taking it back.
 
   ┌──────────────────────────────────────────┐
   │  Why self-custody still matters          │  an article's title, or a
@@ -108,12 +109,19 @@ class PublishedRecord:
 
 def preview_record_of(item: PublishedItem) -> PublishedRecord:
     content = str(item.event.get("content") or "")
+    tags = [list(tag) for tag in item.event.get("tags", []) or [] if isinstance(tag, list)]
+    if item.is_curation:
+        # A curation's text is what it collects; its description is the
+        # preview's summary.
+        description = _tag_value(item, "description")
+        if description and not _tag_value(item, "summary"):
+            tags.append(["summary", description])
+        content = ngettext("Collects {n} article.", "Collects {n} articles.",
+                           item.curated).format(n=item.curated)
     return PublishedRecord(
         identifier=item.id, inner_kind=item.kind, title=display_title(item),
         snippet=derive_preview_snippet(content), content=content,
-        created_at=item.first_published, event_id=item.id,
-        inner_tags=[list(tag) for tag in item.event.get("tags", []) or []
-                    if isinstance(tag, list)])
+        created_at=item.first_published, event_id=item.id, inner_tags=tags)
 
 
 # --------------------------------------------------------------------------- #
@@ -121,13 +129,32 @@ def preview_record_of(item: PublishedItem) -> PublishedRecord:
 # --------------------------------------------------------------------------- #
 
 def kind_word(item: PublishedItem) -> str:
+    if item.is_curation:
+        return _("Curation")
     return _("Article") if item.is_article else _("Note")
 
 
 def web_kind(item: PublishedItem) -> str:
-    """What a reading app is asked to show (web_readers): an article or a
-    short note."""
+    """What a reading app is asked to show (web_readers): an article, a
+    curation or a short note."""
+    if item.is_curation:
+        return web_readers.CURATION
     return web_readers.ARTICLE if item.is_article else web_readers.NOTE
+
+
+def _tag_value(item: PublishedItem, name: str) -> str:
+    for tag in item.event.get("tags", []) or []:
+        if isinstance(tag, list) and len(tag) >= 2 and tag[0] == name:
+            return " ".join(str(tag[1]).split())
+    return ""
+
+
+def curation_words(item: PublishedItem) -> str:
+    """What a curation is, in words: its description, else how many
+    articles it collects."""
+    return (_tag_value(item, "description") or _tag_value(item, "summary")
+            or ngettext("Collects {n} article", "Collects {n} articles",
+                        item.curated).format(n=item.curated))
 
 
 def display_title(item: PublishedItem) -> str:
@@ -144,11 +171,14 @@ def published_row(item: PublishedItem, deletion: str = "", *, now: int) -> post_
     then what it is, when it first went out, and the words after the
     title (an article's summary when it has one), never the title again."""
     when = post_list.list_date(item.first_published, now)
-    kind = "article" if item.is_article else "note"
+    kind = web_kind(item)
     if deletion == DELETING:
         return post_list.PostRow(display_title(item), kind=kind, when=when,
                                  detail=_("Deleting…"), state=post_list.DELETING)
     content = str(item.event.get("content") or "")
+    if item.is_curation:
+        return post_list.PostRow(display_title(item), kind=kind, when=when,
+                                 detail=curation_words(item))
     summary = _summary(item) if item.is_article else ""
     detail = summary or post_list.words_after_title(item.title,
                                                     derive_preview_snippet(content))
@@ -157,10 +187,7 @@ def published_row(item: PublishedItem, deletion: str = "", *, now: int) -> post_
 
 
 def _summary(item: PublishedItem) -> str:
-    for tag in item.event.get("tags", []) or []:
-        if isinstance(tag, list) and len(tag) >= 2 and tag[0] == "summary":
-            return " ".join(str(tag[1]).split())
-    return ""
+    return _tag_value(item, "summary")
 
 
 def accessible_text(item: PublishedItem, deletion: str = "") -> str:
@@ -678,8 +705,10 @@ class PublishedView(QWidget):
 
         def answered(found) -> None:
             if found is False and fallback:
-                self.status_message.emit(_("Standup Discover doesn’t show this article yet, "
-                                           "so it opened on njump."))
+                self.status_message.emit(
+                    _("Standup Discover doesn’t show this curation yet, so it opened on njump.")
+                    if item.is_curation else
+                    _("Standup Discover doesn’t show this article yet, so it opened on njump."))
                 QDesktopServices.openUrl(QUrl(fallback))
             else:
                 QDesktopServices.openUrl(QUrl(link))
