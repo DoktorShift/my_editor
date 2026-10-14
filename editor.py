@@ -313,6 +313,8 @@ class HtmlEditor(QTextEdit):
         self._paper_mode = False
         self._highlight_line = False
         self._paper_measure_chars = 88   # target column measure in Paper Mode
+        # Room above the text for a header shown there (editor_header.py).
+        self._top_inset = 0
         self.viewport().setAutoFillBackground(False)
 
     def undo(self):
@@ -671,12 +673,23 @@ class HtmlEditor(QTextEdit):
         self._update_paper_margins()
         self.viewport().update()
 
+    def set_top_inset(self, height: int) -> None:
+        """Room above the text, in pixels, for a header shown there
+        (editor_header.EditorHeader); it is not part of the document."""
+        height = max(0, int(height))
+        if height != self._top_inset:
+            self._top_inset = height
+            self._update_paper_margins()
+
+    def top_inset(self) -> int:
+        return self._top_inset
+
     def _update_paper_margins(self):
         """The text column: Paper Mode's page, or the writing measure, or
-        the whole width."""
+        the whole width; below a header's room, if any."""
         chars = self._paper_measure_chars if self._paper_mode else self._writing_measure_chars
         if not chars:
-            self.setViewportMargins(0, 0, 0, 0)
+            self.setViewportMargins(0, self._top_inset, 0, 0)
             return
         metrics = self.fontMetrics()
         char_w = (metrics.averageCharWidth() if self._writing_measure_chars
@@ -684,7 +697,7 @@ class HtmlEditor(QTextEdit):
         # The line is ``chars`` long, the document's margins beside it.
         measure = char_w * chars + 2 * self.document().documentMargin()
         side = int(max(0, (self.width() - measure) / 2))
-        self.setViewportMargins(side, 0, side, 0)
+        self.setViewportMargins(side, self._top_inset, side, 0)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -849,6 +862,11 @@ class HtmlEditor(QTextEdit):
 
     def _is_dark(self) -> bool:
         return hasattr(self, "_theme_colors") and self._theme_colors["bg"] == DARK_BG
+
+    def surface_color(self) -> QColor:
+        """What the text is set on: the page in Paper Mode, else the
+        editor's background."""
+        return self._surface_color()
 
     def _surface_color(self) -> QColor:
         if self._paper_mode:

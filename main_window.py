@@ -166,6 +166,7 @@ from nostr.ui.mention_picker import MentionPicker
 from nostr.ui import media_card
 from nostr.ui.reference_popover import ReferencePopover
 from nostr.ui.article_details_panel import ArticleDetailsPanel, DEFAULT_WIDTH as ARTICLE_DETAILS_WIDTH
+from nostr.ui.article_headers import ArticleHeaders
 from nostr import refs
 from nostr.blossom.errors import friendly_message
 from nostr.blossom.names import MediaNames
@@ -1211,6 +1212,9 @@ class MainWindow(QMainWindow):
                    and (self._editor_kind(editor) == "rich"
                         or getattr(editor, "_markdown_source", False)))
         editor.set_writing_font(writing)
+        headers = getattr(self, "_article_headers", None)
+        if headers is not None:
+            headers.update(editor)               # its head in the new font
 
     def _update_editor_theme(self, editor):
         pane = getattr(editor, "_preview_pane", None)
@@ -1551,6 +1555,7 @@ class MainWindow(QMainWindow):
     def _on_tab_changed(self, index=None):
         self._show_backup_status()
         self._fill_article_details_panel()
+        self._article_headers.update(self.current_editor())
         self._apply_view(self.current_editor())
         self._update_window_title()
         self._update_word_count()
@@ -2931,6 +2936,13 @@ class MainWindow(QMainWindow):
         self._article_details_panel.changed.connect(
             lambda details: self._set_article_details(self.current_editor(), details))
         self._article_details_panel.cover_uploaded.connect(self._cover_uploaded_for)
+        # An article's cover, title and summary on its page (decision 1 of
+        # the Article Details review), for the tabs that are articles.
+        self._article_headers = ArticleHeaders(
+            wanted=self._wants_article_header, details_of=self._article_details_of,
+            set_details=self._set_article_details, derived_title=self._derived_title_of,
+            choose_cover=self._choose_cover_for, media_store=self._media_store,
+            is_dark=self.is_dark_theme, parent=self)
         # What the article takes from its text (the title it publishes with
         # while none is set), read again once typing pauses, as the preview.
         self._article_from_text = QTimer(self)
@@ -5911,6 +5923,7 @@ class MainWindow(QMainWindow):
             self._published_view.apply_theme(self.is_dark_theme)
         if getattr(self, "_article_details_panel", None) is not None:
             self._article_details_panel.set_dark(self.is_dark_theme)
+            self._article_headers.set_dark(self.is_dark_theme, self._all_editors())
         self._redraw_media_cards()
         for banner in getattr(self, "_tab_conflict_banners", {}).values():
             banner.apply_theme(self.is_dark_theme)
@@ -6623,6 +6636,7 @@ class MainWindow(QMainWindow):
     def _on_nostr_in_use_changed(self, active: bool) -> None:
         """Nothing of Nostr stays on screen once no account is in use."""
         self._show_pane_toggles(active)
+        self._update_article_headers()
         if not active:
             self._hide_drafts_panel()
             details = getattr(self, "act_article_details", None)
@@ -7232,6 +7246,8 @@ class MainWindow(QMainWindow):
 
     def _show_article_details_panel(self, shown: bool) -> None:
         panel = self._article_details_panel
+        # Opening it on a tab makes the tab an article (decision 2).
+        self._article_headers.update(self.current_editor())
         if shown and self.nostr_state.active:
             self._fill_article_details_panel()
             panel.show()
@@ -7275,13 +7291,50 @@ class MainWindow(QMainWindow):
 
     def _on_document_changed_for_article(self, ed) -> None:
         panel = self._article_details_panel
-        if ed is self.current_editor() and panel.isVisible() and panel.shows_article():
+        shown = (panel.isVisible() and panel.shows_article()
+                 or self._article_headers.header_of(ed) is not None)
+        if ed is self.current_editor() and shown:
             self._article_from_text.start()
 
     def _show_article_from_text(self) -> None:
         ed, panel = self.current_editor(), self._article_details_panel
-        if ed is not None and panel.isVisible() and panel.shows_article():
+        if ed is None:
+            return
+        if panel.isVisible() and panel.shows_article():
             panel.set_derived_title(self._derived_title_of(ed))
+        self._article_headers.show_derived_title(ed)
+
+    def _wants_article_header(self, ed) -> bool:
+        """Whether ``ed`` shows its article's head on the page: while a Nostr
+        account is in use, for a written document that is an article (an
+        article's draft, a published article, details set in the tab, or
+        Article Details open on it). A note never; code never."""
+        if ed is None or not self.nostr_state.active:
+            return False
+        if not (self._editor_kind(ed) == "rich" or getattr(ed, "_markdown_source", False)):
+            return False
+        binding = getattr(ed, "_draft_binding", None)
+        if binding is not None:
+            return binding.inner_kind == INNER_KIND_LONG_FORM
+        if self._published_article_of(ed) is not None:
+            return True
+        own = tab_details.details_of(ed)
+        if own is not None and (own.title or own.summary or own.image):
+            return True
+        return ed is self.current_editor() and self.act_article_details.isChecked()
+
+    def _update_article_headers(self) -> None:
+        """Every tab's article head, shown or taken away as it is wanted."""
+        for ed in self._all_editors():
+            self._article_headers.update(ed)
+
+    def _choose_cover_for(self, ed) -> None:
+        """Add Cover or Change Cover… on the page: Article Details' picker,
+        with the inspector open on that article."""
+        if ed is not self.current_editor():
+            return
+        self.act_article_details.setChecked(True)
+        self._article_details_panel.cover.choose()
 
     def _cover_uploaded_for(self, ed, url: str) -> None:
         """A picture dropped in Article Details as the cover of ``ed``'s
@@ -9092,6 +9145,7 @@ class MainWindow(QMainWindow):
         if pane is not None:
             pane.schedule()
         self._update_tab_title(ed)
+        self._article_headers.update(ed)
         if ed is self.current_editor():
             self._fill_article_details_panel()
 
@@ -9225,8 +9279,9 @@ class MainWindow(QMainWindow):
         ed._recovered_title = ""
         ed.document().setModified(False)
         self._update_tab_title()
+        # A note or an article now, with the draft's address.
+        self._article_headers.update(ed)
         if ed is self.current_editor():
-            # A note or an article now, with the draft's address.
             self._fill_article_details_panel()
 
     def _editor_widget_index(self, ed) -> int:

@@ -55,6 +55,15 @@ from .media_saver import MediaSaver
 from .publish_copy_dialog import resolve_pick
 from .thumbnail_loader import ThumbnailLoader
 
+
+def library_picture_hash(media_store: Optional[MediaStore], address: str) -> str:
+    """The hash of the picture behind ``address`` when it is one of the
+    account's media library, whose own copy can be shown; "" otherwise.
+    An address typed is never downloaded to show it: that would be a
+    surprise (and a request to a server nobody chose)."""
+    sha = (hash_from_url(address.strip()) or "").lower() if address.strip() else ""
+    return sha if sha and media_store is not None and sha in media_store.files else ""
+
 THUMB = QSize(144, 84)
 
 
@@ -420,14 +429,13 @@ class CoverImageField(QWidget):
             self._uploading = ""
             self.uploading_changed.emit(False)
         address = text.strip()
-        sha = (hash_from_url(address) or "").lower() if address else ""
+        sha = library_picture_hash(self._media_store, address) if self._loader else ""
         self.remove_button.setVisible(bool(address))
         if not address:
             self._show_placeholder(_("No cover\nselected"))
         elif sha and sha == self._thumb_hash and not self._picture.isNull():
             pass                                   # this picture is shown
-        elif (sha and self._loader is not None and self._media_store is not None
-              and sha in self._media_store.files):
+        elif sha:
             # A picture of the library: its preview, from the library's copy.
             self._show_placeholder("")
             self._thumb_hash = sha
