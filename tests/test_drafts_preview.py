@@ -672,8 +672,22 @@ def child_host(panel):
     host.deleteLater()
 
 
-def row_of(panel, index: int):
-    return panel._list.itemWidget(panel._list.item(index))
+def row_point(panel, index: int, offset=(5, 5)) -> QPointF:
+    """A point inside a row, in the list's viewport (the rows are painted:
+    the viewport is what the pointer is over), under any section title."""
+    from nostr.ui.post_list import ROW_ROLE, section_height
+    item = panel._list.item(index)
+    rect = panel._list.visualItemRect(item)
+    top = rect.top() + (section_height() if item.data(ROW_ROLE).section else 0)
+    return QPointF(rect.left() + offset[0], top + offset[1])
+
+
+def pointer(panel, index: int, kind, offset=(5, 5), *, buttons=Qt.NoButton,
+            button=Qt.NoButton) -> None:
+    """A mouse event over a row, delivered to the list's viewport."""
+    at = row_point(panel, index, offset)
+    QApplication.sendEvent(panel._list.viewport(), QMouseEvent(
+        kind, at, at, button, buttons, Qt.NoModifier))
 
 
 def identifier_at(panel, index: int) -> str:
@@ -690,23 +704,16 @@ def index_of(panel, identifier: str) -> int:
 
 def move_onto(panel, index: int) -> None:
     """A real pointer move inside a row, as Qt would deliver it."""
-    row = row_of(panel, index)
-    QApplication.sendEvent(row, QEvent(QEvent.Enter))
-    QApplication.sendEvent(row, QMouseEvent(
-        QEvent.MouseMove, QPointF(5, 5), QPointF(5, 5),
-        Qt.NoButton, Qt.NoButton, Qt.NoModifier,
-    ))
+    pointer(panel, index, QEvent.MouseMove)
 
 
 def leave(panel, index: int) -> None:
-    QApplication.sendEvent(row_of(panel, index), QEvent(QEvent.Leave))
+    QApplication.sendEvent(panel._list.viewport(), QEvent(QEvent.Leave))
 
 
 def press(panel, index: int) -> None:
-    QApplication.sendEvent(row_of(panel, index), QMouseEvent(
-        QEvent.MouseButtonPress, QPointF(5, 5), QPointF(5, 5),
-        Qt.LeftButton, Qt.LeftButton, Qt.NoModifier,
-    ))
+    pointer(panel, index, QEvent.MouseButtonPress, buttons=Qt.LeftButton,
+            button=Qt.LeftButton)
 
 
 def fire(timer) -> None:
@@ -783,10 +790,7 @@ def test_movement_inside_one_row_does_not_restart_the_dwell(panel, monkeypatch):
     move_onto(panel, 1)
     started = controller._dwell.remainingTime()
     for _ in range(3):
-        QApplication.sendEvent(row_of(panel, 1), QMouseEvent(
-            QEvent.MouseMove, QPointF(9, 9), QPointF(9, 9),
-            Qt.NoButton, Qt.NoButton, Qt.NoModifier,
-        ))
+        pointer(panel, 1, QEvent.MouseMove, (9, 9))
     assert controller._dwell.remainingTime() <= started
     assert controller.pending_identifier() == "d1"
 
@@ -933,17 +937,14 @@ def test_a_mouse_press_closes_and_disarms_until_release(panel):
 
 def test_a_drag_across_rows_is_not_a_dwell(panel):
     controller = panel._preview
-    QApplication.sendEvent(row_of(panel, 1), QMouseEvent(
-        QEvent.MouseMove, QPointF(5, 5), QPointF(5, 5),
-        Qt.NoButton, Qt.LeftButton, Qt.NoModifier,
-    ))
+    pointer(panel, 1, QEvent.MouseMove, buttons=Qt.LeftButton)
     assert controller.is_armed() is False
 
 
 def test_a_wheel_event_on_a_row_closes_immediately(panel):
     controller = panel._preview
     open_preview(panel, 0)
-    QApplication.sendEvent(row_of(panel, 0), QEvent(QEvent.Wheel))
+    QApplication.sendEvent(panel._list.viewport(), QEvent(QEvent.Wheel))
     assert controller.is_open() is False
     assert controller.is_disarmed() is True
 
@@ -951,17 +952,15 @@ def test_a_wheel_event_on_a_row_closes_immediately(panel):
 def test_a_search_keystroke_closes_and_leaves_no_widget_reference(panel):
     controller = panel._preview
     open_preview(panel, 0)
-    rows_before = [row_of(panel, i) for i in range(panel._list.count())]
-
     panel._search_edit.setText("Article 1")
     assert controller.is_open() is False
     assert controller.is_disarmed() is True
-    # The rebuild destroyed every row widget the preview could have been
-    # holding; the controller holds identifiers and rects only.
+    # The rebuild replaced every row; the controller holds identifiers and
+    # rects only, never a row.
     assert controller.shown_identifier() == ""
     assert controller.pending_identifier() == ""
-    for attribute in vars(controller).values():
-        assert attribute not in rows_before
+    from PySide6.QtWidgets import QListWidgetItem
+    assert not any(isinstance(value, QListWidgetItem) for value in vars(controller).values())
 
 
 def test_a_context_menu_closes_the_popover_before_it_is_built(panel):
@@ -1021,9 +1020,9 @@ def help_event(panel, index: int) -> bool:
     moments ago, so on a row the pointer is resting on this always
     arrives while the popover is up.
     """
-    row = row_of(panel, index)
-    pos = QPoint(5, 5)
-    QApplication.sendEvent(row, QHelpEvent(QEvent.ToolTip, pos, row.mapToGlobal(pos)))
+    viewport = panel._list.viewport()
+    pos = row_point(panel, index).toPoint()
+    QApplication.sendEvent(viewport, QHelpEvent(QEvent.ToolTip, pos, viewport.mapToGlobal(pos)))
     return QToolTip.isVisible()
 
 
@@ -1033,7 +1032,6 @@ def test_no_tooltip_appears_beside_an_open_preview(panel, tooltips):
     # popover deliberately does not cover the row, which is exactly why
     # the pointer stays on the row and the help event fires.
     open_preview(panel, 0)
-    assert row_of(panel, 0).toolTip() != ""  # the row keeps its text
     assert help_event(panel, 0) is False
     # Nor on the row a pending swap is about to open, which the pointer
     # is equally resting on.
@@ -1044,13 +1042,13 @@ def test_no_tooltip_appears_beside_an_open_preview(panel, tooltips):
 
 
 def test_a_row_that_gets_no_preview_keeps_its_tooltip(panel, tooltips):
-    # The tooltip is the only place a FAILED row's full text exists, so
-    # suppression stops where the preview stops.
+    # Suppression stops where the preview stops: a FAILED row gets no
+    # preview, so the list's own tooltip rule (the whole title, where the
+    # row cuts it) speaks for it, not the preview controller.
     panel._store_ref.set_failed(identifier_at(panel, 1), "signer timed out")
     move_onto(panel, 1)
     assert panel._preview.is_armed() is False
-    assert row_of(panel, 1).toolTip() != ""
-    assert help_event(panel, 1) is True
+    assert panel._preview._suppresses_tooltip(identifier_at(panel, 1)) is False
 
 
 def test_deactivating_the_window_closes_the_preview(panel):

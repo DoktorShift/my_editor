@@ -250,6 +250,12 @@ class AppStyle(QProxyStyle):
         painter.restore()
 
 
+# The system's own selection color (the accent color people choose in
+# System Settings on a Mac, the Windows accent), read once before the
+# app's palette replaces it; None until then.
+_SYSTEM_HIGHLIGHT: Optional[QColor] = None
+
+
 def apply_app_theme(is_dark: bool) -> None:
     """Push the light/dark palette onto the running QApplication.
 
@@ -257,10 +263,39 @@ def apply_app_theme(is_dark: bool) -> None:
     import QApplication or thread it through. A no-op if no application
     exists yet (e.g. during import in tests).
     """
+    global _SYSTEM_HIGHLIGHT
     app = QApplication.instance()
     if app is None:
         return
+    if _SYSTEM_HIGHLIGHT is None:
+        _SYSTEM_HIGHLIGHT = QColor(app.palette().color(QPalette.ColorRole.Highlight))
     app.setPalette(_palette(is_dark))
+
+
+def _luminance(colour: QColor) -> float:
+    def channel(value: float) -> float:
+        return value / 12.92 if value <= 0.03928 else ((value + 0.055) / 1.055) ** 2.4
+    return (0.2126 * channel(colour.redF()) + 0.7152 * channel(colour.greenF())
+            + 0.0722 * channel(colour.blueF()))
+
+
+def list_selection_color(is_dark: bool) -> QColor:
+    """The fill of a selected row in a list that has the keyboard focus:
+    the system's selection color, so it follows the accent color people
+    chose, as every list on a Mac does; the theme's own blue where the
+    system's would not carry white text at 4.5:1 (or is not known)."""
+    system = _SYSTEM_HIGHLIGHT
+    if system is not None and system.isValid():
+        if (1.05) / (_luminance(system) + 0.05) >= 4.5:
+            return QColor(system)
+    return QColor(DARK_SELECTION if is_dark else LIGHT_SELECTION)
+
+
+def inactive_selection_color(is_dark: bool) -> QColor:
+    """A selected row's fill while its list does not have the focus: a
+    quiet grey, as a Mac list shows it, so only one place on screen wears
+    the accent."""
+    return QColor(255, 255, 255, 26) if is_dark else QColor(0, 0, 0, 20)
 
 
 # Qt keeps a widget's parsed style sheet under the widget's address as soon

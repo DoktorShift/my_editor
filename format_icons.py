@@ -353,13 +353,54 @@ def _draw_alert(painter: QPainter, ink: QColor) -> None:
     painter.drawEllipse(QRectF(8, 11.8, 2, 2))
 
 
+def _draw_article(painter: QPainter, ink: QColor) -> None:
+    """A page with lines of text: an article (long-form)."""
+    painter.setPen(_pen(ink, 1.6))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(QRectF(3.5, 1.8, 11, 14.4), 2, 2)
+    for y, end in ((6.0, 11.5), (9.0, 11.5), (12.0, 9.2)):
+        painter.drawLine(QPointF(6.5, y), QPointF(end, y))
+
+
+def _draw_note(painter: QPainter, ink: QColor) -> None:
+    """A speech bubble: a note, a short post."""
+    painter.setPen(_pen(ink, 1.6))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    bubble = QPainterPath()
+    bubble.addRoundedRect(QRectF(2, 2.5, 14, 10), 3, 3)
+    tail = QPainterPath()
+    tail.moveTo(5, 12.3)
+    tail.lineTo(4.4, 16)
+    tail.lineTo(9, 12.3)
+    painter.drawPath(bubble.united(tail))
+
+
+def _draw_curation(painter: QPainter, ink: QColor) -> None:
+    """Cards stacked: a curation, a collection of articles."""
+    painter.setPen(_pen(ink, 1.6))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(QRectF(2.5, 6.5, 13, 9.5), 2, 2)
+    painter.drawLine(QPointF(4.5, 4.2), QPointF(13.5, 4.2))
+    painter.drawLine(QPointF(6.5, 2), QPointF(11.5, 2))
+
+
+def _draw_clock(painter: QPainter, ink: QColor) -> None:
+    """A clock face: something that ends at a time (an expiring draft)."""
+    painter.setPen(_pen(ink, 1.6))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawEllipse(QRectF(2, 2, 14, 14))
+    painter.drawLine(QPointF(9, 5), QPointF(9, 9))
+    painter.drawLine(QPointF(9, 9), QPointF(11.8, 10.8))
+
+
 _GLYPHS = {"lock": _draw_lock, "video": _draw_video, "audio": _draw_audio,
-           "document": _draw_document, "alert": _draw_alert}
+           "document": _draw_document, "alert": _draw_alert, "article": _draw_article,
+           "note": _draw_note, "curation": _draw_curation, "clock": _draw_clock}
 
 
 def paint(name: str, painter: QPainter, rect: QRectF, color: QColor) -> None:
-    """Draw glyph ``name`` (lock, video, audio, document, alert) to fill
-    the square ``rect``, sharp at any size."""
+    """Draw glyph ``name`` (lock, video, audio, document, alert, article,
+    note, curation, clock) to fill the square ``rect``, sharp at any size."""
     painter.save()
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.translate(rect.topLeft())

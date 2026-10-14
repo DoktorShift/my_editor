@@ -44,18 +44,16 @@ published yet, and could not be read (with Try Again).
 from __future__ import annotations
 
 import sys
+import time
 from typing import List, Optional
 
-from PySide6.QtCore import (
-    QAbstractListModel, QEvent, QModelIndex, QPoint, QRect, QSize, Qt, QUrl, Signal,
-)
+from PySide6.QtCore import QAbstractListModel, QEvent, QModelIndex, QPoint, QRect, Qt, QUrl, Signal
 from PySide6.QtGui import (
     QColor, QContextMenuEvent, QDesktopServices, QFontMetrics, QGuiApplication, QKeySequence,
 )
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QFrame, QLabel, QListView, QMenu, QProgressBar,
-    QPushButton, QStackedLayout, QStyle, QStyledItemDelegate, QStyleOptionFocusRect,
-    QVBoxLayout, QWidget,
+    QPushButton, QStackedLayout, QStyle, QVBoxLayout, QWidget,
 )
 
 import alerts
@@ -63,19 +61,18 @@ import theme
 from i18n import _, ngettext
 
 from ..bunker import humanize_failure, is_signer_silent
+from ..drafts import derive_preview_snippet
 from ..publish_pipeline import refused_by_relay
 from ..published import (
     DELETING, LOADING, READY, SIGNED_OUT, UNREACHABLE, PublishedItem, PublishedList,
 )
+from . import post_list
 from .drafts_common import (
-    LIST_GUTTER, MIN_CONTROL_PX, ROW_LINE_GAP, ROW_PAD_V, SELECTION_BAR_W, THEME_TOKENS,
-    format_absolute_date, format_absolute_time, format_short_date, secondary_font,
-    title_font,
+    LIST_GUTTER, MIN_CONTROL_PX, ROW_LINE_GAP, THEME_TOKENS, format_absolute_time,
+    secondary_font,
 )
 
 ITEM_ROLE = Qt.ItemDataRole.UserRole + 1     # the PublishedItem, None for Load More
-META_ROLE = Qt.ItemDataRole.UserRole + 2     # line 2 of a row
-SHORT_META_ROLE = Qt.ItemDataRole.UserRole + 3   # line 2 with the date in digits
 STATE_ROLE = Qt.ItemDataRole.UserRole + 4    # the item's deletion state
 PROBLEM_ROLE = Qt.ItemDataRole.UserRole + 5  # Load More: what went wrong, or ""
 
@@ -100,13 +97,28 @@ def short_title(item: PublishedItem, limit: int = ALERT_TITLE_CHARS) -> str:
     return title if len(title) <= limit else title[:limit - 1].rstrip() + "…"
 
 
-def meta_text(item: PublishedItem, deletion: str = "", *, short: bool = False) -> str:
-    """Line 2 of a row: what it is and when it first went out; ``short``
-    writes the date in digits, for a line too narrow for the month's name."""
+def published_row(item: PublishedItem, deletion: str = "", *, now: int) -> post_list.PostRow:
+    """One published item as its row draws it (post_list.py): the title,
+    then what it is, when it first went out, and the words after the
+    title (an article's summary when it has one), never the title again."""
+    when = post_list.list_date(item.first_published, now)
+    kind = "article" if item.is_article else "note"
     if deletion == DELETING:
-        return _("Deleting…")
-    when = (format_short_date if short else format_absolute_date)(item.first_published)
-    return _("{kind} · {date}").format(kind=kind_word(item), date=when)
+        return post_list.PostRow(display_title(item), kind=kind, when=when,
+                                 detail=_("Deleting…"), state=post_list.DELETING)
+    content = str(item.event.get("content") or "")
+    summary = _summary(item) if item.is_article else ""
+    detail = summary or post_list.words_after_title(item.title,
+                                                    derive_preview_snippet(content))
+    return post_list.PostRow(display_title(item), kind=kind, when=when,
+                             detail=detail or _("No additional text"))
+
+
+def _summary(item: PublishedItem) -> str:
+    for tag in item.event.get("tags", []) or []:
+        if isinstance(tag, list) and len(tag) >= 2 and tag[0] == "summary":
+            return " ".join(str(tag[1]).split())
+    return ""
 
 
 def accessible_text(item: PublishedItem, deletion: str = "") -> str:
@@ -117,12 +129,6 @@ def accessible_text(item: PublishedItem, deletion: str = "") -> str:
     if deletion == DELETING:
         sentences.append(_("Deleting"))
     return ". ".join(s.rstrip(". ") for s in sentences) + "."
-
-
-def tooltip_text(item: PublishedItem) -> str:
-    """The whole title, and the exact time it first went out."""
-    return "\n".join((display_title(item), _("{kind}, first published {time}").format(
-        kind=kind_word(item), time=format_absolute_time(item.first_published))))
 
 
 def more_label(model: PublishedList) -> str:
@@ -159,6 +165,7 @@ class _Rows(QAbstractListModel):
         super().__init__(parent)
         self._model = model
         self._items: List[PublishedItem] = []
+        self._rows: List[post_list.PostRow] = []
         self._more = False
         self._needle = ""
 
@@ -187,6 +194,7 @@ class _Rows(QAbstractListModel):
         new_keys = [item.id for item in items] + ([self._MORE] if more else [])
         if new_keys == old_keys:
             self._items = items
+            self._draw_rows()
             if new_keys:
                 self.dataChanged.emit(self.index(0), self.index(len(new_keys) - 1))
             return
@@ -195,11 +203,21 @@ class _Rows(QAbstractListModel):
         moved = [old_keys[index.row()] if 0 <= index.row() < len(old_keys) else None
                  for index in persistent]
         self._items, self._more = items, more
+        self._draw_rows()
         rows = {key: row for row, key in enumerate(new_keys)}
         for index, key in zip(persistent, moved):
             row = rows.get(key, -1)
             self.changePersistentIndex(index, self.index(row) if row >= 0 else QModelIndex())
         self.layoutChanged.emit()
+
+    def _draw_rows(self) -> None:
+        """Each item's row, with its date section on the first of each."""
+        now = int(time.time())
+        sections = post_list.section_starts([item.first_published for item in self._items],
+                                            now)
+        self._rows = [published_row(item, self._model.deletion_state(item.id), now=now)
+                      ._replace(section=section)
+                      for item, section in zip(self._items, sections)]
 
     def item_at(self, row: int) -> Optional[PublishedItem]:
         return self._items[row] if 0 <= row < len(self._items) else None
@@ -232,117 +250,61 @@ class _Rows(QAbstractListModel):
             return display_title(item)
         if role == Qt.ItemDataRole.AccessibleTextRole:
             return accessible_text(item, state)
-        if role == Qt.ItemDataRole.ToolTipRole:
-            return tooltip_text(item)
+        if role == post_list.ROW_ROLE:
+            return self._rows[index.row()]
         if role == ITEM_ROLE:
             return item
-        if role == META_ROLE:
-            return meta_text(item, state)
-        if role == SHORT_META_ROLE:
-            return meta_text(item, state, short=True)
         if role == STATE_ROLE:
             return state
         return None
 
 
-def row_height() -> int:
-    """Two lines and their padding, from the fonts in use, so the rows
-    grow with the text size (the same box as the drafts list)."""
-    return (ROW_PAD_V + QFontMetrics(title_font()).height() + ROW_LINE_GAP
-            + QFontMetrics(secondary_font()).height() + ROW_PAD_V)
+class _RowDelegate(post_list.PostRowDelegate):
+    """The rows as the drafts list draws them (post_list.py); Load More is
+    centred, in the link colour."""
 
+    def __init__(self, view: "PublishedView", list_view: QListView) -> None:
+        super().__init__(list_view, is_dark=view.is_dark)
+        self._published = view
 
-class _RowDelegate(QStyledItemDelegate):
-    """Paints a row the way the drafts list does: the title over a muted
-    second line, a hover fill, and on the selected row a fill and a
-    leading bar. Load More is centred, in the link colour."""
-
-    def __init__(self, view: "PublishedView") -> None:
-        super().__init__(view)
-        self._view = view
-
-    def sizeHint(self, option, index) -> QSize:
-        return QSize(0, row_height())
-
-    def paint(self, painter, option, index) -> None:
-        tokens = THEME_TOKENS[self._view.is_dark]
-        rect = option.rect
-        selected = bool(option.state & QStyle.StateFlag.State_Selected)
-        painter.save()
-        if selected:
-            painter.fillRect(rect, QColor(tokens["selected_bg"]))
-            bar = QRect(rect.left(), rect.top(), SELECTION_BAR_W, rect.height())
-            painter.fillRect(QStyle.visualRect(option.direction, rect, bar),
-                             QColor(tokens["selection_bar"]))
-        elif option.state & QStyle.StateFlag.State_MouseOver:
-            painter.fillRect(rect, QColor(tokens["hover_bg"]))
-        inner = rect.adjusted(LIST_GUTTER, ROW_PAD_V, -LIST_GUTTER, -ROW_PAD_V)
-        leading = QStyle.visualAlignment(option.direction, Qt.AlignmentFlag.AlignLeft)
-        item = index.data(ITEM_ROLE)
-        if item is None:
-            self._paint_more(painter, index, inner, tokens, selected)
-        else:
-            deleting = index.data(STATE_ROLE) == DELETING
-            title_colour = (tokens["selected_fg"] if selected
-                            else tokens["muted"] if deleting else tokens["row_fg"])
-            meta_colour = tokens["selected_muted"] if selected else tokens["muted"]
-            heading = title_font()
-            heading_height = QFontMetrics(heading).height()
-            line_1 = QRect(inner.left(), inner.top(), inner.width(), heading_height)
-            painter.setFont(heading)
-            painter.setPen(QColor(title_colour))
-            painter.drawText(line_1, int(leading | Qt.AlignmentFlag.AlignVCenter),
-                             painter.fontMetrics().elidedText(
-                                 index.data(Qt.ItemDataRole.DisplayRole) or "",
-                                 Qt.TextElideMode.ElideRight, line_1.width()))
-            secondary = secondary_font()
-            line_2 = QRect(inner.left(), line_1.bottom() + 1 + ROW_LINE_GAP, inner.width(),
-                           QFontMetrics(secondary).height())
-            painter.setFont(secondary)
-            painter.setPen(QColor(meta_colour))
-            # Large text on a narrow panel: the date in digits keeps the
-            # whole date in view where the month's name would not, and
-            # every row then writes it so (PublishedView.digit_dates).
-            meta = index.data(SHORT_META_ROLE if self._view.digit_dates else META_ROLE) or ""
-            painter.drawText(line_2, int(leading | Qt.AlignmentFlag.AlignVCenter),
-                             painter.fontMetrics().elidedText(
-                                 meta, Qt.TextElideMode.ElideRight, line_2.width()))
-        if option.state & QStyle.StateFlag.State_HasFocus and not selected:
-            # The keyboard's place when nothing is selected yet.
-            focus = QStyleOptionFocusRect()
-            focus.rect = rect.adjusted(1, 1, -1, -1)
-            focus.palette = option.palette
-            focus.state = option.state
-            self._view.style().drawPrimitive(QStyle.PrimitiveElement.PE_FrameFocusRect,
-                                             focus, painter, self._view)
-        painter.restore()
-
-
-    def _paint_more(self, painter, index, inner: QRect, tokens: dict, selected: bool) -> None:
+    def paint_other(self, painter, option, index) -> None:
         """Load More: its action centred, in the link colour; after a
         failure, the action on line 1 and what went wrong under it."""
-        loading = self._view.model.loading_more
-        action_colour = (tokens["selected_fg"] if selected else tokens["muted"] if loading
-                         else theme.dialog_link_color(self._view.is_dark))
+        tokens = THEME_TOKENS[self._published.is_dark]
+        selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        inner = option.rect.adjusted(LIST_GUTTER, post_list.ROW_PAD_V, -LIST_GUTTER,
+                                     -post_list.ROW_PAD_V)
+        loading = self._published.model.loading_more
+        action_colour = (tokens["muted"] if loading
+                         else theme.dialog_link_color(self._published.is_dark))
         label = index.data(Qt.ItemDataRole.DisplayRole) or ""
         problem = index.data(PROBLEM_ROLE) or ""
+        painter.save()
         painter.setFont(QApplication.font())
         painter.setPen(QColor(action_colour))
         centre = int(Qt.AlignmentFlag.AlignCenter)
         if not problem:
             painter.drawText(inner, centre, painter.fontMetrics().elidedText(
                 label, Qt.TextElideMode.ElideRight, inner.width()))
-            return
-        line_1 = QRect(inner.left(), inner.top(), inner.width(), painter.fontMetrics().height())
-        painter.drawText(line_1, centre, painter.fontMetrics().elidedText(
-            label, Qt.TextElideMode.ElideRight, inner.width()))
-        secondary = secondary_font()
-        line_2 = QRect(inner.left(), line_1.bottom() + 1 + ROW_LINE_GAP, inner.width(),
-                       QFontMetrics(secondary).height())
-        painter.setFont(secondary)
-        painter.setPen(QColor(tokens["selected_muted"] if selected else tokens["error_fg"]))
-        painter.drawText(line_2, centre, painter.fontMetrics().elidedText(
-            problem, Qt.TextElideMode.ElideRight, inner.width()))
+        else:
+            line_1 = QRect(inner.left(), inner.top(), inner.width(),
+                           painter.fontMetrics().height())
+            painter.drawText(line_1, centre, painter.fontMetrics().elidedText(
+                label, Qt.TextElideMode.ElideRight, inner.width()))
+            secondary = secondary_font()
+            line_2 = QRect(inner.left(), line_1.bottom() + 1 + ROW_LINE_GAP, inner.width(),
+                           QFontMetrics(secondary).height())
+            painter.setFont(secondary)
+            painter.setPen(QColor(tokens["error_fg"]))
+            painter.drawText(line_2, centre, painter.fontMetrics().elidedText(
+                problem, Qt.TextElideMode.ElideRight, inner.width()))
+        if selected:
+            painter.setPen(QColor(tokens["accent"]))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(option.rect.adjusted(post_list.SELECTION_INSET, 1,
+                                                         -post_list.SELECTION_INSET, -1),
+                                    post_list.SELECTION_RADIUS, post_list.SELECTION_RADIUS)
+        painter.restore()
 
 
 class _List(QListView):
@@ -433,7 +395,6 @@ class PublishedView(QWidget):
         self._is_dark = bool(is_dark)
         self._rows = _Rows(model, self)
         self._last = (model.state, model.refreshing, model.more_failed)
-        self._digit_dates = False
         self._search_text = ""
         self._build()
         # Bound methods, not lambdas: they go with the view if it goes first.
@@ -455,27 +416,6 @@ class PublishedView(QWidget):
     def model(self) -> PublishedList:
         return self._model
 
-    @property
-    def digit_dates(self) -> bool:
-        """Whether the rows write their dates in digits: when any row's
-        date in words does not fit its line, all of them do, so the dates
-        read and line up alike."""
-        return self._digit_dates
-
-    def _choose_date_style(self) -> None:
-        room = self._list.viewport().width() - 2 * LIST_GUTTER
-        metrics = QFontMetrics(secondary_font())
-        digits = room > 0 and any(
-            metrics.horizontalAdvance(meta_text(item)) > room for item in self._model.items())
-        if digits != self._digit_dates:
-            self._digit_dates = digits
-            self._list.viewport().update()
-
-    def changeEvent(self, event) -> None:
-        super().changeEvent(event)
-        if event.type() == QEvent.Type.FontChange:
-            self._choose_date_style()
-
     def set_account(self, profile) -> None:
         self._model.set_account(profile)
 
@@ -491,7 +431,7 @@ class PublishedView(QWidget):
     def apply_theme(self, is_dark: bool) -> None:
         self._is_dark = bool(is_dark)
         self.setStyleSheet(_view_css(self._is_dark))
-        self._list.viewport().update()
+        self._delegate.set_dark(self._is_dark)
 
     # -- building ---------------------------------------------------------------
 
@@ -503,10 +443,12 @@ class PublishedView(QWidget):
         self._list.setObjectName("published_list")
         self._list.setAccessibleName(_("Published"))
         self._list.setModel(self._rows)
-        self._list.setItemDelegate(_RowDelegate(self))
+        self._delegate = _RowDelegate(self, self._list)
+        self._list.setItemDelegate(self._delegate)
         self._list.setFrameShape(QFrame.Shape.NoFrame)
         self._list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self._list.setUniformItemSizes(True)
+        # A section's first row is taller by the section's title.
+        self._list.setUniformItemSizes(False)
         self._list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._list.setMouseTracking(True)
@@ -514,10 +456,8 @@ class PublishedView(QWidget):
         self._list.activated.connect(self._on_activated)
         self._list.clicked.connect(self._on_clicked)
         self._list.menu_requested.connect(self._show_menu)
-        # Return and Delete belong to the list, see ``eventFilter``; the
-        # viewport's width decides how the dates are written.
+        # Return and Delete belong to the list, see ``eventFilter``.
         self._list.installEventFilter(self)
-        self._list.viewport().installEventFilter(self)
         self._stack.addWidget(self._list)
 
         self._placeholder = QWidget()
@@ -556,7 +496,6 @@ class PublishedView(QWidget):
         current = self._list.currentIndex()
         row = current.row() if current.isValid() else -1
         self._rows.reload()
-        self._choose_date_style()
         if row >= 0 and not self._list.currentIndex().isValid() and self._rows.rowCount():
             # The row went (deleted): the keyboard stays where it was.
             nearest = self._rows.index(min(row, self._rows.rowCount() - 1))
@@ -694,8 +633,6 @@ class PublishedView(QWidget):
         return index.row()
 
     def eventFilter(self, watched, event) -> bool:
-        if watched is self._list.viewport() and event.type() == QEvent.Type.Resize:
-            self._choose_date_style()
         if watched is self._list and event.type() == QEvent.Type.KeyPress:
             key = event.key()
             row = self._selected_row()

@@ -75,14 +75,19 @@ undecrypted, loading or failed draft has ``inner_kind == 0``, and
 filtering on it hid drafts instead of sorting them. Search is the only
 filter, so clearing the field always shows every draft in the store.
 
+The rows are painted by post_list.py, which the Published view uses
+too, so both lists read alike: grouped by date as Notes groups notes,
+two lines each (the title; what it is, when, and the words after the
+title), selected as a Mac list selects. A draft's row is an item of
+Qt's own list with its words in roles, so selection, the keyboard and
+the scrollbar are the platform's.
+
 Cross-platform discipline:
-  - All glyphs are Unicode codepoints (⟲, ×) so the panel renders
-    identically on macOS / Windows / Linux without bundling fonts.
-  - Uses Qt's built-in widgets exclusively (QListWidget + setItemWidget
-    pattern) so the panel honours each platform's native scrollbar,
-    selection highlight, and high-DPI behaviour for free.
+  - Glyphs are drawn (format_icons.py) or Unicode (⋯), so the panel
+    renders identically on macOS / Windows / Linux without bundling fonts.
   - No platform-specific code paths, `is_dark` is the only branching
-    axis, matching the rest of the editor.
+    axis, matching the rest of the editor; the selection takes the
+    system's selection color (theme.list_selection_color).
 
 The panel is **dormant** when no profile is bound: ``set_active_profile(None)``
 puts it in a quiet "not connected" state. It is the host (MainWindow)'s
@@ -93,7 +98,7 @@ it does, the panel won't crash, it'll just show the disconnected state.
 from __future__ import annotations
 
 import time
-from typing import Callable, List, NamedTuple, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 from PySide6.QtCore import QEvent, QPointF, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
@@ -142,15 +147,11 @@ from ..profiles import Profile
 from .drafts_common import (
     LIST_GUTTER as GUTTER,
     MIN_CONTROL_PX as _MIN_CONTROL_PX,
-    ROW_LINE_GAP as _ROW_LINE_GAP,
-    ROW_PAD_V as _ROW_PAD_V,
-    SELECTION_BAR_W as _SELECTION_BAR_W,
     THEME_TOKENS as _THEME_TOKENS,
     format_absolute_date,
     format_absolute_time as _format_absolute_time,
     secondary_font as _secondary_font,
     source_host as _source_host,
-    title_font as _title_font,
 )
 from .drafts_preview import (
     PreviewController,
@@ -158,6 +159,10 @@ from .drafts_preview import (
     preview_is_eligible,
 )
 from .eliding_label import ElidingLabel
+from .post_list import (
+    FAILED, LOADING, READY, ROW_ROLE, PostRow, PostRowDelegate, list_date, section_height,
+    section_starts, words_after_title,
+)
 from .imports_glyphs import glyph
 
 
@@ -170,16 +175,13 @@ DEFAULT_PANEL_WIDTH: int = 320
 MIN_PANEL_WIDTH: int = 260
 MAX_PANEL_WIDTH: int = 520
 
-# The panel's single gutter (GUTTER) and the rows' box model (_ROW_PAD_V,
-# _ROW_LINE_GAP, _SELECTION_BAR_W) come from drafts_common, which every
-# list in the panel shares, so its views read alike. The segmented
+# The panel's single gutter (GUTTER) comes from drafts_common, and the
+# rows are drawn by post_list.py, which both of the panel's lists share,
+# so its views read alike. The segmented
 # control, the search field, the banner, the empty state and both
 # row lines all start at the gutter. ``layout.md``: "Align components
 # with one another to make them easier to scan and to communicate
 # organization and hierarchy."
-
-# Between the title and the age on a row's first line.
-_ROW_INLINE_GAP: int = 8
 
 # How long a one-off sync narration holds the banner once the store
 # is no longer loading. Matches the main window's own transient status
@@ -300,13 +302,7 @@ QListWidget#drafts_panel_list {{
     background: {t["panel_bg"]};
     border: none;
 }}
-QListWidget#drafts_panel_list::item {{ border: none; }}
-QListWidget#drafts_panel_list::item:selected {{ background: {t["selected_bg"]}; }}
-/* No ::item:hover rule: the row widget covers the item rect exactly and
-   is not mouse transparent, so the viewport never sees the pointer and
-   such a rule could not fire. The row paints its own hover fill.
-   No ``outline: 0`` either, so the keyboard's current row keeps
-   whatever indicator the platform draws. */
+QListWidget#drafts_panel_list::item {{ border: none; background: transparent; }}
 
 QLabel#drafts_panel_empty_title {{ color: {t["chrome_fg"]}; font-weight: 600; }}
 QLabel#drafts_panel_empty_body {{ color: {t["muted"]}; }}
@@ -319,22 +315,6 @@ QPushButton#drafts_panel_empty_action {{
 }}
 QPushButton#drafts_panel_empty_action:hover {{ background: {t["hover_bg"]}; }}
 
-QLabel#drafts_row_title {{ color: {t["row_fg"]}; font-weight: 600; }}
-QLabel#drafts_row_age,
-QLabel#drafts_row_meta {{ color: {t["muted"]}; }}
-/* Progress and failure must not share a channel. feedback.md: "it often
-   works well to display status information in a passive way so that
-   people can view it when they need it. In contrast, a warning about
-   possible data loss needs to interrupt people." Both recede in colour,
-   only failure leans. */
-QLabel#drafts_row_title[state="loading"],
-QLabel#drafts_row_title[state="failed"] {{ color: {t["muted"]}; }}
-QLabel#drafts_row_title[sel="true"] {{ color: {t["selected_fg"]}; }}
-QLabel#drafts_row_age[sel="true"],
-QLabel#drafts_row_meta[sel="true"] {{ color: {t["selected_muted"]}; }}
-/* Last, and colour-free, so a failed row keeps its slant whether or not
-   it is also the selected one. */
-QLabel#drafts_row_title[state="failed"] {{ font-style: italic; }}
 """
 
 
@@ -362,50 +342,6 @@ QMenu::separator {{ height: 1px; background: {t["border"]}; margin: 4px 0px; }}
 # Type scale and derived geometry                                             #
 # --------------------------------------------------------------------------- #
 
-# The age column is sized from the widest thing it can ever hold, so it
-# never clips and never changes width from row to row. "just now" is
-# rendered "now" for the same reason: it was the one string wide enough
-# to give a freshly saved draft a different column width from every
-# other row. These are the widest age of each unit, in seconds;
-# ``_AGE_SAMPLES``, below the formatter, writes them in the language shown.
-_AGE_SAMPLE_SECONDS: Tuple[int, ...] = (
-    0, 59 * 60, 23 * 3600, 29 * 86_400, 11 * 30 * 86_400, 99 * 365 * 86_400,
-)
-
-
-class _RowMetrics(NamedTuple):
-    title_font: QFont
-    secondary_font: QFont
-    height: int
-    age_width: int
-
-
-def _row_metrics() -> _RowMetrics:
-    """Row fonts and geometry, derived rather than pinned.
-
-    Recomputed on demand rather than cached at import: the row widget
-    and its list item's size hint have to agree, and they only agree if
-    both read this one function against the current application font. At
-    the macOS 13 pt default this returns a 54 px row, which is exactly
-    the height that used to be hardcoded, so density does not change on
-    a normal machine, it merely scales now.
-    """
-    title_font = _title_font()
-    secondary_font = _secondary_font()
-    fm_title = QFontMetrics(title_font)
-    fm_secondary = QFontMetrics(secondary_font)
-    height = (
-        _ROW_PAD_V
-        + fm_title.height()
-        + _ROW_LINE_GAP
-        + fm_secondary.height()
-        + _ROW_PAD_V
-    )
-    age_width = max(fm_secondary.horizontalAdvance(s) for s in _AGE_SAMPLES)
-    return _RowMetrics(title_font, secondary_font, height, age_width)
-
-
-
 def _control_height() -> int:
     """Minimum height for the panel's chrome controls.
 
@@ -431,52 +367,6 @@ def _save_shortcut_text() -> str:
 # Record to text                                                              #
 # --------------------------------------------------------------------------- #
 
-def _format_relative_time(ts: int, *, now: Optional[int] = None) -> str:
-    """Return a compact human-readable age, e.g. ``'2h'``, ``'3d'``.
-
-    Every result fits the age column, which is sized from
-    ``_AGE_SAMPLES``. Full timestamps belong in the row tooltip and in
-    the row's accessible text, not on the row itself.
-    """
-    if ts <= 0:
-        return ""
-    now = now if now is not None else int(time.time())
-    delta = max(0, now - int(ts))
-    # Abbreviated units, the same for one and many in English: "5m", "1h".
-    if delta < 60:
-        return _("now")
-    if delta < 3600:
-        n = delta // 60
-        return ngettext("{n}m", "{n}m", n).format(n=n)
-    if delta < 86_400:
-        n = delta // 3600
-        return ngettext("{n}h", "{n}h", n).format(n=n)
-    if delta < 86_400 * 30:
-        n = delta // 86_400
-        return ngettext("{n}d", "{n}d", n).format(n=n)
-    if delta < 86_400 * 365:
-        n = delta // (86_400 * 30)
-        return ngettext("{n}mo", "{n}mo", n).format(n=n)
-    n = delta // (86_400 * 365)
-    return ngettext("{n}y", "{n}y", n).format(n=n)
-
-
-_AGE_SAMPLES: Tuple[str, ...] = tuple(
-    _format_relative_time(1, now=1 + age) for age in _AGE_SAMPLE_SECONDS
-)
-
-
-# Row state as a stylesheet property. Set from one mapping rather than a
-# boolean OR: LOADING and FAILED used to share a single ``failed`` flag,
-# so a draft mid-decryption rendered identically to one that could not be
-# decrypted and a cold load of a whole library looked broken.
-_ROW_STATE = {
-    DraftState.READY: "ready",
-    DraftState.LOADING: "loading",
-    DraftState.FAILED: "failed",
-}
-
-
 def _display_title(record: DraftRecord) -> str:
     """Line 1 of a row. Shared so the row and its announcement agree."""
     if record.state is DraftState.LOADING:
@@ -485,8 +375,10 @@ def _display_title(record: DraftRecord) -> str:
 
 
 def _display_meta(record: DraftRecord) -> str:
-    """Line 2 of a row: one composed string, one elision.
+    """Line 2 of a row after its date: one composed string, one elision.
 
+    The words after the title, never the title again: a note's title is
+    its first line, and its preview used to start with that same line.
     Elide-right naturally preserves the host, because the host sits at
     the head of the line.
     """
@@ -506,7 +398,7 @@ def _display_meta(record: DraftRecord) -> str:
     # preview: its 90 days are said once, where drafts are created (Q-11),
     # not on every row (CP2 review N6); its tooltip and its spoken text
     # say it.
-    preview = record.snippet or ""
+    preview = words_after_title(record.title, record.snippet or "")
     if not is_imported(record):
         preview = expiry_note(record.expiration) or preview
     if host and preview:
@@ -531,9 +423,8 @@ def expiry_note(expiration: Optional[int]) -> str:
 def _accessible_row_text(record: DraftRecord, *, now: Optional[int] = None) -> str:
     """What a screen reader announces for one row.
 
-    The visible row lives in a ``setItemWidget`` widget that the
-    accessibility tree does not descend into, and the item itself had no
-    display text, so a screen reader heard a list of blank rows. This
+    The visible row is painted (post_list.py), so the item itself has no
+    display text, and a screen reader heard a list of blank rows. This
     goes on the item, in reading order, in words rather than glyphs.
     ``accessibility.md``: "Describe your app's interface and content for
     VoiceOver... VoiceOver is a screen reader that lets people
@@ -571,24 +462,34 @@ def _accessible_row_text(record: DraftRecord, *, now: Optional[int] = None) -> s
     return ". ".join(s.rstrip(". ") for s in sentences if s.strip()) + "."
 
 
-def _row_tooltip(record: DraftRecord) -> str:
-    """The whole row, unelided, plus the exact save time and, for a draft
-    that still carries an end date, when it is removed."""
-    lines = [_display_title(record)]
-    meta = _display_meta(record)
-    if meta:
-        lines.append(meta)
-    saved = _format_absolute_time(record.created_at)
-    if saved:
-        lines.append(_("Saved {time}").format(time=saved))
-    note = expiry_note(record.expiration) if record.state is DraftState.READY else ""
-    if note and note not in meta:
-        lines.append(note)
-    return "\n".join(lines)
+# What a draft's inner kind is, as the row's symbol says it.
+_KIND_NAMES = {1: "note", 30023: "article"}
+
+_ROW_STATES = {DraftState.READY: READY, DraftState.LOADING: LOADING,
+               DraftState.FAILED: FAILED}
+
+
+def _draft_row(record: DraftRecord, *, now: int) -> PostRow:
+    """One draft as its row draws it (post_list.py): the title, then what
+    it is, when it was saved and the words after the title. A draft still
+    decrypting knows none of that yet; one that could not be decrypted
+    says why, with an alert at the end of its title."""
+    when = list_date(record.created_at, now)
+    state = _ROW_STATES.get(record.state, READY)
+    if record.state is DraftState.LOADING:
+        return PostRow(_display_title(record), when=when, state=state)
+    detail = _display_meta(record)
+    if record.state is DraftState.FAILED:
+        return PostRow(_display_title(record), when=when, detail=detail, state=state,
+                       mark="alert")
+    expiring = not is_imported(record) and bool(expiry_note(record.expiration))
+    return PostRow(_display_title(record), kind=_KIND_NAMES.get(record.inner_kind, ""),
+                   when=when, detail=detail or _("No additional text"), state=state,
+                   mark="clock" if expiring else "")
 
 
 # --------------------------------------------------------------------------- #
-# Row widget                                                                  #
+# Chrome widgets                                                              #
 # --------------------------------------------------------------------------- #
 
 class _ElidingLabel(ElidingLabel):
@@ -1070,154 +971,6 @@ class _ImportsRow(QFrame):
             self.resume_requested.emit()
 
 
-class _DraftRowWidget(QWidget):
-    """One row: title and age on line 1, host and preview on line 2.
-
-    Two stacked lines with exactly one inline item, per ``typography.md``:
-    "When font size increases in a horizontally constrained context,
-    inline items (like glyphs and timestamps) and container boundaries
-    can crowd text and cause truncation or overlapping. To improve
-    readability, consider using a stacked layout where text appears
-    above secondary items."
-
-    The lock glyph and the kind pill that used to sit on line 1 are
-    gone. ``layout.md``: "Make essential information easy to find by
-    giving it sufficient space. People want to view the most important
-    information right away, so don't obscure it by crowding it with
-    nonessential details." Neither discriminated anything: the lock was
-    an identical ⚿ on every row and the pill read "Imported" on 54 of 54
-    rows in a real library.
-    """
-
-    def __init__(
-        self,
-        parent: Optional[QWidget] = None,
-        *,
-        is_dark: bool = True,
-    ) -> None:
-        super().__init__(parent)
-        self._is_dark = bool(is_dark)
-        self._selected = False
-        self._hovered = False
-
-        metrics = _row_metrics()
-        self._row_height = metrics.height
-        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(GUTTER, _ROW_PAD_V, GUTTER, _ROW_PAD_V)
-        layout.setSpacing(_ROW_LINE_GAP)
-
-        top = QHBoxLayout()
-        top.setContentsMargins(0, 0, 0, 0)
-        top.setSpacing(_ROW_INLINE_GAP)
-
-        self._title = _ElidingLabel()
-        self._title.setObjectName("drafts_row_title")
-        self._title.setFont(metrics.title_font)
-        self._title.setProperty("state", "ready")
-        self._title.setProperty("sel", "false")
-        top.addWidget(self._title, 1)
-
-        # The only fixed width on line 1, and it is derived, so it holds
-        # at 200% font instead of clipping "just now" inside 36 px.
-        self._age = QLabel("")
-        self._age.setObjectName("drafts_row_age")
-        self._age.setFont(metrics.secondary_font)
-        self._age.setFixedWidth(metrics.age_width)
-        self._age.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self._age.setProperty("sel", "false")
-        top.addWidget(self._age, 0)
-        layout.addLayout(top)
-
-        self._meta = _ElidingLabel()
-        self._meta.setObjectName("drafts_row_meta")
-        self._meta.setFont(metrics.secondary_font)
-        self._meta.setProperty("sel", "false")
-        layout.addWidget(self._meta)
-
-        self._styled_labels = (self._title, self._age, self._meta)
-        self.setFixedHeight(metrics.height)
-
-    # -- geometry ----------------------------------------------------------
-
-    def row_height(self) -> int:
-        """The height this row asked for, so the item can hint the same.
-
-        Both the widget and its ``QListWidgetItem`` must read one value
-        or the list allocates its own height whatever the row asks for.
-        """
-        return self._row_height
-
-    # -- content -----------------------------------------------------------
-
-    def set_record(self, record: DraftRecord) -> None:
-        self._title.set_full_text(_display_title(record))
-        self._meta.set_full_text(_display_meta(record))
-        self._age.setText(_format_relative_time(record.created_at))
-        self.setToolTip(_row_tooltip(record))
-        self._title.setProperty("state", _ROW_STATE.get(record.state, "ready"))
-        # The draft this row is showing, stored on the widget so the
-        # preview controller's event filter can resolve a row without
-        # walking the list, and so it never has to hold a widget
-        # reference of its own past the event it is handling.
-        self.setProperty("draft_identifier", record.identifier)
-        self.refresh_style()
-
-    # -- state -------------------------------------------------------------
-
-    def set_selected(self, selected: bool) -> None:
-        if bool(selected) == self._selected:
-            return
-        self._selected = bool(selected)
-        for label in self._styled_labels:
-            label.setProperty("sel", "true" if self._selected else "false")
-        self.refresh_style()
-
-    def apply_theme(self, is_dark: bool) -> None:
-        self._is_dark = bool(is_dark)
-        self.update()
-
-    def enterEvent(self, event) -> None:
-        # Hover changes the fill only, never a text colour, so it costs a
-        # repaint and not a restyle.
-        self._hovered = True
-        self.update()
-        super().enterEvent(event)
-
-    def leaveEvent(self, event) -> None:
-        self._hovered = False
-        self.update()
-        super().leaveEvent(event)
-
-    def refresh_style(self) -> None:
-        for label in self._styled_labels:
-            label.style().unpolish(label)
-            label.style().polish(label)
-        self.update()
-
-    # -- painting ----------------------------------------------------------
-
-    def paintEvent(self, event) -> None:
-        tokens = _THEME_TOKENS[self._is_dark]
-        painter = QPainter(self)
-        if self._hovered and not self._selected:
-            # The list's ::item:hover rule cannot fire, this widget covers
-            # the item rect exactly and is not mouse transparent. Making
-            # it transparent would revive the rule and lose the row's
-            # tooltip, which is the only place the full title and the
-            # exact save time are readable, so the fill is painted here.
-            painter.fillRect(self.rect(), QColor(tokens["hover_bg"]))
-        if self._selected:
-            # The shape cue that goes with the selection fill. A bar
-            # survives greyscale and colour blindness in a way a
-            # background tint does not.
-            painter.fillRect(
-                QRect(0, 0, _SELECTION_BAR_W, self.height()),
-                QColor(tokens["selection_bar"]),
-            )
-
-
 # --------------------------------------------------------------------------- #
 # Drafts panel                                                                #
 # --------------------------------------------------------------------------- #
@@ -1639,8 +1392,12 @@ class DraftsPanel(QFrame):
         self._list.setObjectName("drafts_panel_list")
         self._list.setAccessibleName(_("Drafts"))
         self._list.setSpacing(0)
-        self._list.setUniformItemSizes(True)
+        # A section's first row is taller by the section's title.
+        self._list.setUniformItemSizes(False)
         self._list.setVerticalScrollMode(QListWidget.ScrollPerPixel)
+        self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._row_delegate = PostRowDelegate(self._list, is_dark=self._is_dark)
+        self._list.setItemDelegate(self._row_delegate)
         # Extended, so a shift-drag or a cmd-click selects a range the way
         # it does in every list on this platform, and Select All means
         # what it says. The preview and the open/publish commands still
@@ -1648,7 +1405,6 @@ class DraftsPanel(QFrame):
         # there is exactly one current row whatever else is selected.
         self._list.setSelectionMode(QListWidget.ExtendedSelection)
         self._list.itemActivated.connect(self._on_item_activated)
-        self._list.currentItemChanged.connect(self._on_current_item_changed)
         self._list.setContextMenuPolicy(Qt.CustomContextMenu)
         self._list.customContextMenuRequested.connect(self._on_context_menu)
         # Delete / Backspace on the list, see ``eventFilter``.
@@ -1770,17 +1526,8 @@ class DraftsPanel(QFrame):
         self._preview.apply_theme(is_dark)
         if hasattr(self, "_imports_row"):
             self._imports_row.update()
-        if not hasattr(self, "_list") or self._list is None:
-            return
-        self._list.viewport().update()
-        # Rows paint their own hover fill and selection bar, so they each
-        # need the new tokens, and their property-driven labels need a
-        # repolish to pick up the new colours.
-        for i in range(self._list.count()):
-            widget = self._list.itemWidget(self._list.item(i))
-            if isinstance(widget, _DraftRowWidget):
-                widget.apply_theme(is_dark)
-                widget.refresh_style()
+        if getattr(self, "_row_delegate", None) is not None:
+            self._row_delegate.set_dark(is_dark)
 
     def _apply_placeholder_colour(self, is_dark: bool) -> None:
         """Hold the search placeholder above the 4.5:1 minimum.
@@ -1909,6 +1656,20 @@ class DraftsPanel(QFrame):
         """
         return self._preview_anchor(self._list.currentItem())
 
+    def preview_row_at(self, pos) -> Tuple[str, QRect]:
+        """The draft under ``pos`` (in the list's viewport) and its row's
+        rect in global coordinates; nothing over a section's title, which
+        is no draft's."""
+        item = self._list.itemAt(pos)
+        identifier, anchor = self._preview_anchor(item)
+        if not identifier:
+            return "", QRect()
+        local = self._list.visualItemRect(item)
+        row = item.data(ROW_ROLE)
+        if isinstance(row, PostRow) and row.section and pos.y() < local.top() + section_height():
+            return "", QRect()
+        return identifier, anchor
+
     def _preview_anchor(self, item: Optional[QListWidgetItem]) -> Tuple[str, QRect]:
         if item is None:
             return "", QRect()
@@ -1916,6 +1677,10 @@ class DraftsPanel(QFrame):
         if not isinstance(identifier, str) or not identifier:
             return "", QRect()
         rect = self._list.visualItemRect(item)
+        row = item.data(ROW_ROLE)
+        if isinstance(row, PostRow) and row.section:
+            # The row itself, under its section's title.
+            rect = rect.adjusted(0, section_height(), 0, 0)
         return identifier, QRect(
             self._list.viewport().mapToGlobal(rect.topLeft()), rect.size(),
         )
@@ -2140,6 +1905,7 @@ class DraftsPanel(QFrame):
         for record in self._store.all():
             if self._passes_filter(record):
                 self._insert_row(record)
+        self._refresh_sections()
         self._ensure_current_row()
         self._refresh_empty_state()
         self._render_status()
@@ -2174,33 +1940,44 @@ class DraftsPanel(QFrame):
     def _insert_row(self, record: DraftRecord, *, at_index: Optional[int] = None) -> None:
         item = QListWidgetItem()
         item.setData(Qt.UserRole, record.identifier)
-        widget = _DraftRowWidget(is_dark=self._is_dark)
-        widget.set_record(record)
-        # One value, read from the row itself, so the list cannot
-        # allocate a different height from the one the row asked for.
-        item.setSizeHint(QSize(0, widget.row_height()))
         self._decorate_item(item, record)
         if at_index is None:
             self._list.addItem(item)
         else:
             self._list.insertItem(at_index, item)
-        self._list.setItemWidget(item, widget)
-        # Mouse tracking plus the controller's event filter. It cannot go
-        # on the list's viewport: the row widget covers the item rect
-        # exactly and is not mouse transparent, so the viewport never
-        # sees the pointer.
-        self._preview.attach_row(widget)
         self._items[record.identifier] = item
 
     def _decorate_item(self, item: QListWidgetItem, record: DraftRecord) -> None:
-        """Announcement and tooltip for one row.
+        """What one row draws and what a screen reader says for it.
 
         Called from both ``_insert_row`` and ``_update_row`` so what a
-        screen reader hears cannot drift from what the row shows.
+        screen reader hears cannot drift from what the row shows. The row
+        keeps the section title it has (``_refresh_sections`` owns that);
+        the tooltip is the painter's, shown only where a title is cut.
         """
+        old = item.data(ROW_ROLE)
+        row = _draft_row(record, now=self.preview_now())
+        if isinstance(old, PostRow) and old.section:
+            row = row._replace(section=old.section)
+        item.setData(ROW_ROLE, row)
         item.setData(Qt.AccessibleTextRole, _accessible_row_text(record))
         item.setData(TITLE_ROLE, (record.title or record.snippet or "").strip())
-        item.setData(Qt.ToolTipRole, _row_tooltip(record))
+
+    def _refresh_sections(self) -> None:
+        """Give each row that starts a date section that section's title
+        (Today, Yesterday, Previous 7 Days...), and take it from the
+        others. Run after the rows change, and as the panel is shown, so
+        a day that turned over moves its drafts along."""
+        now = self.preview_now()
+        items = [self._list.item(row) for row in range(self._list.count())]
+        times = []
+        for item in items:
+            record = self.preview_record(item.data(Qt.UserRole))
+            times.append(record.created_at if record is not None else 0)
+        for item, section in zip(items, section_starts(times, now)):
+            row = item.data(ROW_ROLE)
+            if isinstance(row, PostRow) and row.section != section:
+                item.setData(ROW_ROLE, row._replace(section=section))
 
     def _remove_row(self, identifier: str) -> None:
         item = self._items.pop(identifier, None)
@@ -2209,6 +1986,7 @@ class DraftsPanel(QFrame):
         row = self._list.row(item)
         if row >= 0:
             self._list.takeItem(row)
+        self._refresh_sections()
 
     def _update_row(self, identifier: str) -> None:
         item = self._items.get(identifier)
@@ -2218,9 +1996,7 @@ class DraftsPanel(QFrame):
         if record is None:
             return
         self._decorate_item(item, record)
-        widget = self._list.itemWidget(item)
-        if isinstance(widget, _DraftRowWidget):
-            widget.set_record(record)
+        self._refresh_sections()
 
     # -- store-signal handlers --------------------------------------------
 
@@ -2245,6 +2021,7 @@ class DraftsPanel(QFrame):
             if r.identifier in self._items:
                 visible_idx += 1
         self._insert_row(record, at_index=visible_idx)
+        self._refresh_sections()
         self._ensure_current_row()
         self._refresh_empty_state()
         self._render_status()
@@ -2317,27 +2094,6 @@ class DraftsPanel(QFrame):
         self._rebuild_list()
 
     # -- list interaction --------------------------------------------------
-
-    def _on_current_item_changed(
-        self,
-        current: Optional[QListWidgetItem],
-        previous: Optional[QListWidgetItem],
-    ) -> None:
-        """Drive the row widgets' selected look from the list's current row.
-
-        The list paints the selection fill through ``::item:selected``,
-        but the row widget on top of it owns the text colours and the
-        leading accent bar, so it has to be told.
-        """
-        for item, selected in ((previous, False), (current, True)):
-            if item is None:
-                continue
-            try:
-                widget = self._list.itemWidget(item)
-            except RuntimeError:
-                continue
-            if isinstance(widget, _DraftRowWidget):
-                widget.set_selected(selected)
 
     def _on_item_activated(self, item: QListWidgetItem) -> None:
         """Double-click / Enter on a row.
@@ -2558,6 +2314,17 @@ class DraftsPanel(QFrame):
         return None
 
     # -- lifetime ----------------------------------------------------------
+
+    def showEvent(self, event) -> None:
+        # Dates are relative to today: a panel shown on another day says
+        # "Yesterday" where it said "Today".
+        for row in range(self._list.count()):
+            item = self._list.item(row)
+            record = self.preview_record(item.data(Qt.UserRole))
+            if record is not None:
+                self._decorate_item(item, record)
+        self._refresh_sections()
+        super().showEvent(event)
 
     def hideEvent(self, event) -> None:
         """A hidden panel must not leave a floating window describing it."""

@@ -1557,9 +1557,11 @@ class PreviewController(QObject):
     exactly as ``_on_current_item_changed`` already had to guard against
     with its ``try / except RuntimeError``.
 
-    The panel is the only thing it talks to, through four small methods:
-    ``preview_record``, ``preview_current_row``, ``preview_is_available``
-    and ``preview_now``. Everything else is injected or pure.
+    The panel is the only thing it talks to, through five small methods:
+    ``preview_record``, ``preview_row_at`` (the row under the pointer, in
+    the list's viewport: the rows are painted, so there is no row widget
+    to watch), ``preview_current_row``, ``preview_is_available`` and
+    ``preview_now``. Everything else is injected or pure.
     """
 
     @property
@@ -1597,6 +1599,7 @@ class PreviewController(QObject):
         # articles does not re-tokenise 60 KB per row.
         self._digests: Dict[Tuple[str, int], BodyDigest] = {}
         self._watched_window: Optional[QWidget] = None
+        self._list = None
 
         # Every timer is parented to this controller, which is a child of
         # the panel, so panel destruction cannot leave one firing into a
@@ -1639,19 +1642,15 @@ class PreviewController(QObject):
             pass
         self._loader = None
 
-    def attach_row(self, row: QWidget) -> None:
-        """Watch one row for hover. Called from the panel's ``_insert_row``.
-
-        The filter cannot go on the list's viewport: the row widget
-        covers the item rect exactly and is not mouse transparent, so
-        the viewport never sees the pointer.
-        """
-        row.setMouseTracking(True)
-        row.installEventFilter(self)
-
     def attach_list(self, list_widget) -> None:
-        """Watch the list for the Space key and for any scrolling."""
+        """Watch the list for the Space key and for any scrolling, and its
+        viewport for the pointer: the rows are painted, so the pointer's
+        row is the one under it (the host's ``preview_row_at``)."""
+        self._list = list_widget
         list_widget.installEventFilter(self)
+        viewport = list_widget.viewport()
+        viewport.setMouseTracking(True)
+        viewport.installEventFilter(self)
         bar = list_widget.verticalScrollBar()
         if bar is not None:
             bar.valueChanged.connect(self._on_scrolled)
@@ -1801,20 +1800,18 @@ class PreviewController(QObject):
             if not self._keyboard_open:
                 self.close(disarm=True)
             return False
-        if kind == QEvent.KeyPress and obj is getattr(self._panel, "_list", None):
+        if kind == QEvent.KeyPress and obj is self._list:
             return self._on_list_key(event)
-        identifier = self._row_identifier(obj)
-        if identifier is None:
+        if self._list is None or obj is not self._list.viewport():
             return False
         if kind == QEvent.MouseMove:
-            self._on_row_move(identifier, obj, event)
-        elif kind == QEvent.Enter:
-            # Records where the pointer is and nothing else. Arming is
-            # left to MouseMove, which Qt delivers straight after an
-            # Enter, so a list scrolling under a still pointer cannot
-            # open anything.
-            self._hovered_id = identifier
-            self._hovered_anchor = self._anchor_of(obj)
+            identifier, anchor = self._panel.preview_row_at(event.position().toPoint())
+            if not identifier:
+                if self._hovered_id:
+                    self._on_row_leave()
+                return False
+            self._hovered_id, self._hovered_anchor = identifier, anchor
+            self._on_row_move(identifier, anchor, event)
         elif kind == QEvent.Leave:
             self._on_row_leave()
         elif kind == QEvent.MouseButtonPress:
@@ -1826,7 +1823,8 @@ class PreviewController(QObject):
         elif kind == QEvent.Wheel:
             self.close(disarm=True)
         elif kind == QEvent.ToolTip:
-            return self._suppresses_tooltip(identifier)
+            identifier, _anchor = self._panel.preview_row_at(event.pos())
+            return bool(identifier) and self._suppresses_tooltip(identifier)
         return False
 
     def _suppresses_tooltip(self, identifier: str) -> bool:
@@ -1873,19 +1871,12 @@ class PreviewController(QObject):
             self.close(disarm=True)
         return False
 
-    def _row_identifier(self, obj) -> Optional[str]:
-        if not isinstance(obj, QWidget):
-            return None
-        identifier = obj.property("draft_identifier")
-        return identifier if isinstance(identifier, str) and identifier else None
-
-    def _on_row_move(self, identifier: str, row: QWidget, event) -> None:
+    def _on_row_move(self, identifier: str, anchor: QRect, event) -> None:
         if event.buttons() != Qt.NoButton:
             # A drag is not a dwell.
             return
         self._disarmed = False
         self._closer.stop()
-        anchor = self._anchor_of(row)
         if identifier == self._shown_id:
             self._shown_anchor = anchor
             return
@@ -2045,9 +2036,8 @@ class PreviewController(QObject):
     def _return_focus(self) -> None:
         # Escape leaves the current row exactly where it was; only the
         # focus comes back.
-        list_widget = getattr(self._panel, "_list", None)
-        if list_widget is not None:
-            list_widget.setFocus(Qt.OtherFocusReason)
+        if self._list is not None:
+            self._list.setFocus(Qt.OtherFocusReason)
 
     # -- image -------------------------------------------------------------
 
@@ -2114,9 +2104,6 @@ class PreviewController(QObject):
         return preview_is_eligible(
             record, now=self._now(), digest=self._digest(record),
         )
-
-    def _anchor_of(self, row: QWidget) -> QRect:
-        return QRect(row.mapToGlobal(row.rect().topLeft()), row.size())
 
     def shown_anchor(self) -> QRect:
         return QRect(self._shown_anchor)

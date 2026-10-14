@@ -126,10 +126,11 @@ def test_a_draft_that_still_has_an_end_date_says_so_in_the_list():
 def test_an_imported_draft_keeps_its_preview_and_says_its_end_once_elsewhere():
     """CP2 review N6: every imported draft's row showed the expiry instead
     of its preview, cut at the panel's width; Q-11 says it once, where
-    drafts are created. The tooltip and the spoken row still say it."""
+    drafts are created. The spoken row still says it (the row's tooltip
+    shows only a title the row cuts short)."""
     from nostr.draft_store import DraftRecord, DraftState
-    from nostr.ui.drafts_panel import (_accessible_row_text, _display_meta, _row_tooltip,
-                                       expiry_note, is_imported)
+    from nostr.ui.drafts_panel import (_accessible_row_text, _display_meta, expiry_note,
+                                       is_imported)
     end = 1_800_000_000
     imported = DraftRecord(identifier="rss-0123456789abcdef", inner_kind=30023,
                            state=DraftState.READY, title="An article",
@@ -137,7 +138,6 @@ def test_an_imported_draft_keeps_its_preview_and_says_its_end_once_elsewhere():
                            inner_tags=[["source", "https://blog.example/feed"]])
     assert is_imported(imported)
     assert _display_meta(imported) == "blog.example · first words"
-    assert expiry_note(end) in _row_tooltip(imported)
     assert expiry_note(end) in _accessible_row_text(imported, now=end - 30 * 86400)
     by_name = DraftRecord(identifier="rss-fedcba9876543210", inner_kind=30023,
                           state=DraftState.READY, title="A file's post", snippet="words",

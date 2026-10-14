@@ -528,8 +528,8 @@ msgstr ""
 #: update_dialog.py:287
 #: nostr/ui/account_windows.py:764
 #: nostr/ui/draft_relays_sheet.py:613
-#: nostr/ui/drafts_panel.py:1061
-#: nostr/ui/drafts_panel.py:1592
+#: nostr/ui/drafts_panel.py:962
+#: nostr/ui/drafts_panel.py:1345
 #: nostr/ui/imports_activity.py:288
 #: nostr/ui/imports_window.py:1186
 msgid "Try Again"
@@ -654,8 +654,8 @@ msgstr ""
 
 #: main_window.py:2953
 #: main_window.py:2411
-#: nostr/ui/drafts_panel.py:1640
-#: nostr/ui/drafts_panel.py:1338
+#: nostr/ui/drafts_panel.py:1393
+#: nostr/ui/drafts_panel.py:1091
 msgid "Drafts"
 msgstr ""
 
@@ -839,7 +839,7 @@ msgstr ""
 #: main_window.py:5647
 #: nostr/ui/media_library_dialog.py:683
 #: nostr/ui/media_library_dialog.py:872
-#: nostr/ui/published_view.py:670
+#: nostr/ui/published_view.py:609
 msgid "Delete"
 msgstr ""
 
@@ -1134,18 +1134,18 @@ msgid "Insert Audio or Video…"
 msgstr ""
 
 #: main_window.py:2416
-#: nostr/ui/published_view.py:410
-#: nostr/ui/published_view.py:504
+#: nostr/ui/published_view.py:372
+#: nostr/ui/published_view.py:444
 msgid "Published"
 msgstr ""
 
 #: main_window.py:2424
-#: nostr/ui/drafts_panel.py:1343
+#: nostr/ui/drafts_panel.py:1096
 msgid "Refresh Drafts"
 msgstr ""
 
 #: main_window.py:2432
-#: nostr/ui/drafts_panel.py:1486
+#: nostr/ui/drafts_panel.py:1239
 msgid "Draft Relays…"
 msgstr ""
 
@@ -1313,8 +1313,8 @@ msgstr ""
 
 #: main_window.py:4224
 #: main_window.py:5457
-#: nostr/ui/published_view.py:651
-#: nostr/ui/published_view.py:658
+#: nostr/ui/published_view.py:590
+#: nostr/ui/published_view.py:597
 msgid "That link cannot be opened."
 msgstr ""
 
@@ -1370,7 +1370,7 @@ msgstr ""
 #: main_window.py:5777
 #: nostr/ui/connect_dialog.py:212
 #: nostr/ui/media_library_dialog.py:673
-#: nostr/ui/published_view.py:729
+#: nostr/ui/published_view.py:666
 msgid "Copy Link"
 msgstr ""
 
@@ -3039,13 +3039,13 @@ msgstr ""
 #: preview_pane.py:96
 #: nostr/refs.py:151
 #: nostr/ui/imports_article.py:121
-#: nostr/ui/published_view.py:91
+#: nostr/ui/published_view.py:88
 msgid "Article"
 msgstr ""
 
 #: preview_pane.py:97
 #: nostr/ui/publish_note_dialog.py:264
-#: nostr/ui/published_view.py:91
+#: nostr/ui/published_view.py:88
 msgid "Note"
 msgstr ""
 
@@ -4316,14 +4316,14 @@ msgid_plural "Asking {n} relays to delete it…"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/draft_store.py:302
+#: nostr/draft_store.py:307
 #: nostr/draft_sync.py:736
-#: nostr/ui/drafts_panel.py:496
-#: nostr/ui/drafts_panel.py:554
+#: nostr/ui/drafts_panel.py:388
+#: nostr/ui/drafts_panel.py:445
 msgid "Could not decrypt"
 msgstr ""
 
-#: nostr/draft_store.py:408
+#: nostr/draft_store.py:413
 msgid "Untitled note"
 msgstr ""
 
@@ -4379,8 +4379,8 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: nostr/draft_sync.py:779
-#: nostr/ui/drafts_panel.py:1982
-#: nostr/ui/drafts_panel.py:2046
+#: nostr/ui/drafts_panel.py:1747
+#: nostr/ui/drafts_panel.py:1811
 msgid "Your signer app can’t decrypt drafts"
 msgstr ""
 
@@ -5396,6 +5396,7 @@ msgid "yesterday"
 msgstr ""
 
 #: nostr/imports/workspace.py:242
+#: nostr/ui/post_list.py:139
 msgid "Yesterday"
 msgstr ""
 
@@ -6370,7 +6371,7 @@ msgid "A newer version of this draft was published from another device."
 msgstr ""
 
 #: nostr/ui/draft_conflict_banner.py:190
-#: nostr/ui/drafts_panel.py:699
+#: nostr/ui/drafts_panel.py:600
 msgid "View"
 msgstr ""
 
@@ -6589,256 +6590,221 @@ msgid_plural "Moving {count} drafts…"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/drafts_panel.py:447
-msgid "now"
-msgstr ""
-
-#: nostr/ui/drafts_panel.py:483
+#: nostr/ui/drafts_panel.py:373
 msgid "Decrypting…"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:484
+#: nostr/ui/drafts_panel.py:374
 #: nostr/ui/drafts_preview.py:230
 msgid "(no title)"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:494
-#: nostr/ui/drafts_panel.py:552
+#: nostr/ui/drafts_panel.py:386
+#: nostr/ui/drafts_panel.py:443
 msgid "Decrypting"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:461
-#, python-brace-format
-msgid "{n}y"
-msgid_plural "{n}y"
-msgstr[0] ""
-msgstr[1] ""
-
-#: nostr/ui/drafts_panel.py:527
+#: nostr/ui/drafts_panel.py:419
 #, python-brace-format
 msgid "Removed on {date} unless you save it again"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:896
-#: nostr/ui/drafts_panel.py:906
+#: nostr/ui/drafts_panel.py:797
+#: nostr/ui/drafts_panel.py:807
 #: nostr/ui/imports_window.py:229
 msgid "Imports"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:897
+#: nostr/ui/drafts_panel.py:798
 msgid "Open the Imports window"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:1040
-#: nostr/ui/drafts_panel.py:1061
-#: nostr/ui/drafts_panel.py:1062
+#: nostr/ui/drafts_panel.py:941
+#: nostr/ui/drafts_panel.py:962
+#: nostr/ui/drafts_panel.py:963
 #: nostr/ui/imports_activity.py:258
 #: nostr/ui/imports_activity.py:285
 msgid "Pause"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:1061
+#: nostr/ui/drafts_panel.py:962
 #: nostr/ui/imports_activity.py:291
 msgid "Resume"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:1346
+#: nostr/ui/drafts_panel.py:1099
 msgid "Search Drafts"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:1454
+#: nostr/ui/drafts_panel.py:1207
 #: nostr/ui/media_library_dialog.py:637
 msgid "Refresh"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:1478
+#: nostr/ui/drafts_panel.py:1231
 #: nostr/ui/media_library_dialog.py:363
 #: nostr/ui/media_library_dialog.py:364
 msgid "Actions"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:1490
+#: nostr/ui/drafts_panel.py:1243
 msgid "Select All Drafts"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:1492
-#: nostr/ui/drafts_panel.py:1514
-#: nostr/ui/drafts_panel.py:2523
+#: nostr/ui/drafts_panel.py:1245
+#: nostr/ui/drafts_panel.py:1267
+#: nostr/ui/drafts_panel.py:2279
 msgid "Delete Draft"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:1495
+#: nostr/ui/drafts_panel.py:1248
 msgid "Hide Drafts"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:1624
-#: nostr/ui/drafts_panel.py:1719
+#: nostr/ui/drafts_panel.py:1377
+#: nostr/ui/drafts_panel.py:1475
 #: nostr/ui/imports_window.py:363
 #: nostr/ui/media_library_dialog.py:350
 msgid "Search"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:1999
+#: nostr/ui/drafts_panel.py:1764
 #, python-brace-format
 msgid "{n} draft could not be decrypted"
 msgid_plural "{n} drafts could not be decrypted"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/drafts_panel.py:2008
+#: nostr/ui/drafts_panel.py:1773
 #, python-brace-format
 msgid "Decrypting {ready} of {total}"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:2075
+#: nostr/ui/drafts_panel.py:1840
 #, python-brace-format
 msgid "Press {shortcut} in any tab to save its contents as an encrypted draft on Nostr. Drafts sync to your other devices that use the same account."
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:2474
+#: nostr/ui/drafts_panel.py:2230
 msgid "Show Preview"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:2493
+#: nostr/ui/drafts_panel.py:2249
 msgid "Open in New Tab"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:2498
+#: nostr/ui/drafts_panel.py:2254
 msgid "Publish…"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:2504
+#: nostr/ui/drafts_panel.py:2260
 msgid "Copy Event ID"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:2520
-#: nostr/ui/drafts_panel.py:1513
+#: nostr/ui/drafts_panel.py:2276
+#: nostr/ui/drafts_panel.py:1266
 #, python-brace-format
 msgid "Delete {n} Draft"
 msgid_plural "Delete {n} Drafts"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/drafts_panel.py:450
-#, python-brace-format
-msgid "{n}m"
-msgid_plural "{n}m"
-msgstr[0] ""
-msgstr[1] ""
+#: nostr/ui/drafts_panel.py:487
+#: nostr/ui/published_view.py:114
+msgid "No additional text"
+msgstr ""
 
-#: nostr/ui/drafts_panel.py:453
-#, python-brace-format
-msgid "{n}h"
-msgid_plural "{n}h"
-msgstr[0] ""
-msgstr[1] ""
-
-#: nostr/ui/drafts_panel.py:456
-#, python-brace-format
-msgid "{n}d"
-msgid_plural "{n}d"
-msgstr[0] ""
-msgstr[1] ""
-
-#: nostr/ui/drafts_panel.py:459
-#, python-brace-format
-msgid "{n}mo"
-msgid_plural "{n}mo"
-msgstr[0] ""
-msgstr[1] ""
-
-#: nostr/ui/drafts_panel.py:1338
+#: nostr/ui/drafts_panel.py:1091
 msgid "Your saved private drafts"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:1988
-#: nostr/ui/drafts_panel.py:2058
+#: nostr/ui/drafts_panel.py:1753
+#: nostr/ui/drafts_panel.py:1823
 msgid "Your signer app is not responding"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:2039
+#: nostr/ui/drafts_panel.py:1804
 msgid "No Nostr account in use"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:2040
+#: nostr/ui/drafts_panel.py:1805
 msgid "Create an account, connect your signer app or restore an account from its backup, all in the Nostr menu."
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:2047
+#: nostr/ui/drafts_panel.py:1812
 msgid "Drafts are encrypted in a way this signer app can’t open. To use drafts, connect a signer app that can, such as Amber or nsec.app."
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:2059
+#: nostr/ui/drafts_panel.py:1824
 msgid "Drafts stay encrypted until your signer app unlocks them. Open your signer app, make sure it is running, then try again."
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:2079
+#: nostr/ui/drafts_panel.py:1844
 msgid "No private drafts yet"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:2087
-#: nostr/ui/published_view.py:587
+#: nostr/ui/drafts_panel.py:1852
+#: nostr/ui/published_view.py:526
 msgid "Check the spelling or try a new search."
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:2487
+#: nostr/ui/drafts_panel.py:2243
 msgid "Retry Decryption"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:500
+#: nostr/ui/drafts_panel.py:392
 #, python-brace-format
 msgid "{reason}. Double-click to retry."
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:556
+#: nostr/ui/drafts_panel.py:447
 msgid "Press Return to retry"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:563
-#: nostr/ui/drafts_panel.py:583
+#: nostr/ui/drafts_panel.py:454
 #: nostr/ui/drafts_preview.py:477
 #, python-brace-format
 msgid "Saved {time}"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:902
+#: nostr/ui/drafts_panel.py:803
 #, python-brace-format
 msgid "{count} new"
 msgid_plural "{count} new"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/drafts_panel.py:2006
+#: nostr/ui/drafts_panel.py:1771
 msgid "Refreshing drafts"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:2061
+#: nostr/ui/drafts_panel.py:1826
 msgid "Try again"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:2088
+#: nostr/ui/drafts_panel.py:1853
 msgid "Clear Search"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:905
+#: nostr/ui/drafts_panel.py:806
 #, python-brace-format
 msgid "Imports, {count} new post"
 msgid_plural "Imports, {count} new posts"
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/drafts_panel.py:2086
-#: nostr/ui/published_view.py:586
+#: nostr/ui/drafts_panel.py:1851
+#: nostr/ui/published_view.py:525
 #, python-brace-format
 msgid "No Results for “{query}”"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:560
+#: nostr/ui/drafts_panel.py:451
 #, python-brace-format
 msgid "Imported from {host}"
 msgstr ""
 
-#: nostr/ui/drafts_panel.py:790
+#: nostr/ui/drafts_panel.py:691
 #, python-brace-format
 msgid "View: {title}"
 msgstr ""
@@ -8021,7 +7987,7 @@ msgid "{used} of {quota} used"
 msgstr ""
 
 #: nostr/ui/media_library_dialog.py:533
-#: nostr/ui/published_view.py:131
+#: nostr/ui/published_view.py:137
 msgid "Loading…"
 msgstr ""
 
@@ -8084,7 +8050,7 @@ msgstr ""
 
 #: nostr/ui/media_library_dialog.py:676
 #: nostr/ui/media_preview.py:103
-#: nostr/ui/published_view.py:726
+#: nostr/ui/published_view.py:663
 msgid "Open in Browser"
 msgstr ""
 
@@ -8682,6 +8648,18 @@ msgstr ""
 msgid "Type to search people"
 msgstr ""
 
+#: nostr/ui/post_list.py:137
+msgid "Today"
+msgstr ""
+
+#: nostr/ui/post_list.py:141
+msgid "Previous 7 Days"
+msgstr ""
+
+#: nostr/ui/post_list.py:143
+msgid "Previous 30 Days"
+msgstr ""
+
 #: nostr/ui/profile_card.py:56
 msgid "Your profile as others see it"
 msgstr ""
@@ -9071,153 +9049,143 @@ msgstr ""
 msgid "(no accounts)"
 msgstr ""
 
-#: nostr/ui/published_view.py:145
-#: nostr/ui/published_view.py:131
+#: nostr/ui/published_view.py:151
+#: nostr/ui/published_view.py:137
 msgid "Load More Notes"
 msgstr ""
 
-#: nostr/ui/published_view.py:107
-msgid "Deleting…"
-msgstr ""
-
-#: nostr/ui/published_view.py:137
+#: nostr/ui/published_view.py:143
 msgid "Couldn’t load."
 msgstr ""
 
-#: nostr/ui/published_view.py:142
+#: nostr/ui/published_view.py:148
 msgid "Loading more notes"
 msgstr ""
 
-#: nostr/ui/published_view.py:144
+#: nostr/ui/published_view.py:150
 msgid "Load More Notes. Couldn’t load more notes. Press Return to try again."
 msgstr ""
 
-#: nostr/ui/published_view.py:410
+#: nostr/ui/published_view.py:372
 msgid "Your published notes and articles"
 msgstr ""
 
-#: nostr/ui/published_view.py:109
-#, python-brace-format
-msgid "{kind} · {date}"
-msgstr ""
-
-#: nostr/ui/published_view.py:118
+#: nostr/ui/published_view.py:130
 msgid "Deleting"
 msgstr ""
 
-#: nostr/ui/published_view.py:412
+#: nostr/ui/published_view.py:374
 msgid "Refresh Published Notes and Articles"
 msgstr ""
 
-#: nostr/ui/published_view.py:413
+#: nostr/ui/published_view.py:375
 msgid "Search Published"
 msgstr ""
 
-#: nostr/ui/published_view.py:533
+#: nostr/ui/published_view.py:473
 msgid "Loading"
 msgstr ""
 
-#: nostr/ui/published_view.py:661
+#: nostr/ui/published_view.py:600
 msgid "Link copied."
 msgstr ""
 
-#: nostr/ui/published_view.py:734
+#: nostr/ui/published_view.py:671
 msgid "Delete from Nostr…"
 msgstr ""
 
-#: nostr/ui/published_view.py:765
+#: nostr/ui/published_view.py:702
 msgid "The relays turned the request down. Show Details says why; you can try again later."
 msgstr ""
 
-#: nostr/ui/published_view.py:768
+#: nostr/ui/published_view.py:705
 msgid "No relay accepted the request. Check your internet connection, then try again."
 msgstr ""
 
-#: nostr/ui/published_view.py:115
+#: nostr/ui/published_view.py:108
+msgid "Deleting…"
+msgstr ""
+
+#: nostr/ui/published_view.py:127
 #, python-brace-format
 msgid "First published {time}"
 msgstr ""
 
-#: nostr/ui/published_view.py:571
+#: nostr/ui/published_view.py:510
 msgid "No account in use"
 msgstr ""
 
-#: nostr/ui/published_view.py:572
+#: nostr/ui/published_view.py:511
 msgid "Choose an account in the Nostr menu to see what you published."
 msgstr ""
 
-#: nostr/ui/published_view.py:616
+#: nostr/ui/published_view.py:555
 msgid "Couldn’t load more notes. Check your internet connection, then try again."
 msgstr ""
 
-#: nostr/ui/published_view.py:620
+#: nostr/ui/published_view.py:559
 msgid "Refreshing what you published…"
 msgstr ""
 
-#: nostr/ui/published_view.py:627
+#: nostr/ui/published_view.py:566
 msgid "Couldn’t refresh. Check your internet connection, then try again."
 msgstr ""
 
-#: nostr/ui/published_view.py:668
+#: nostr/ui/published_view.py:607
 msgid "Relays that keep it are asked to remove it. People and apps that already saved a copy may still have it. Your draft stays."
 msgstr ""
 
-#: nostr/ui/published_view.py:723
+#: nostr/ui/published_view.py:660
 msgid "Edit"
 msgstr ""
 
-#: nostr/ui/published_view.py:776
+#: nostr/ui/published_view.py:713
 msgid "Your signer app didn’t approve the request. Try again, and approve it when your signer app asks."
 msgstr ""
 
-#: nostr/ui/published_view.py:124
-#, python-brace-format
-msgid "{kind}, first published {time}"
-msgstr ""
-
-#: nostr/ui/published_view.py:575
-#: nostr/ui/published_view.py:583
+#: nostr/ui/published_view.py:514
+#: nostr/ui/published_view.py:522
 msgid "Looking for your notes and articles…"
 msgstr ""
 
-#: nostr/ui/published_view.py:630
+#: nostr/ui/published_view.py:569
 msgid "Some relays didn’t answer, so something may be missing."
 msgstr ""
 
-#: nostr/ui/published_view.py:755
+#: nostr/ui/published_view.py:692
 #, python-brace-format
 msgid "{accepted} of {total} relay accepted the request to delete “{title}”."
 msgid_plural "{accepted} of {total} relays accepted the request to delete “{title}”."
 msgstr[0] ""
 msgstr[1] ""
 
-#: nostr/ui/published_view.py:577
+#: nostr/ui/published_view.py:516
 msgid "Couldn’t load what you published"
 msgstr ""
 
-#: nostr/ui/published_view.py:578
+#: nostr/ui/published_view.py:517
 msgid "Check your internet connection, then try again."
 msgstr ""
 
-#: nostr/ui/published_view.py:667
+#: nostr/ui/published_view.py:606
 #, python-brace-format
 msgid "Delete “{title}” from Nostr?"
 msgstr ""
 
-#: nostr/ui/published_view.py:782
+#: nostr/ui/published_view.py:719
 #, python-brace-format
 msgid "Couldn’t delete “{title}”"
 msgstr ""
 
-#: nostr/ui/published_view.py:762
+#: nostr/ui/published_view.py:699
 msgid "no answer"
 msgstr ""
 
-#: nostr/ui/published_view.py:590
+#: nostr/ui/published_view.py:529
 msgid "Nothing published yet"
 msgstr ""
 
-#: nostr/ui/published_view.py:591
+#: nostr/ui/published_view.py:530
 msgid "Notes and articles you publish appear here."
 msgstr ""
 

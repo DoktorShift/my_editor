@@ -85,12 +85,7 @@ THEME_TOKENS = {
         "control_pressed_bg": DARK_BG,
         "selected_bg": "#094771",
         "selected_fg": "#FFFFFF",
-        "selected_muted": "#C9D9E5",        # 6.76 on the selection fill
         "accent": "#007ACC",                # focus ring
-        # The selection bar sits on top of the selection fill, so it is
-        # not the accent: #007ACC on #094771 is 2.16:1 and the shape cue
-        # disappears exactly where it has to be legible. 3.82:1 here.
-        "selection_bar": "#4DA6FF",
         "text_selection_bg": DARK_SELECTION,
         "error_fg": "#F48771",
     },
@@ -108,9 +103,7 @@ THEME_TOKENS = {
         "control_pressed_bg": "#D0D0D0",
         "selected_bg": "#DCEEFA",
         "selected_fg": "#1A1A1A",
-        "selected_muted": "#565656",        # 6.17 on the selection fill
         "accent": "#0078D4",
-        "selection_bar": "#0F5FA8",         # 5.48 on the selection fill
         "text_selection_bg": LIGHT_SELECTION,
         "error_fg": "#C8412A",
     },
@@ -171,14 +164,14 @@ def secondary_font() -> QFont:
     return font
 
 
-# The rows of the panel's lists: two stacked lines from one gutter, with
-# a leading bar on the selected row as well as a fill (``accessibility.md``:
-# "Offer visual indicators, like distinct shapes or icons, in addition to
-# color"). The vertical values add up to the row height.
+# The rows of the panel's lists (post_list.py): two stacked lines from one
+# gutter; a selected row is a rounded shape inset from the list's edges,
+# a shape as well as a fill (``accessibility.md``: "Offer visual
+# indicators, like distinct shapes or icons, in addition to color"). The
+# vertical values add up to the row height.
 LIST_GUTTER: int = 12
 ROW_PAD_V: int = 7
 ROW_LINE_GAP: int = 2
-SELECTION_BAR_W: int = 3
 
 
 def scaled(base: int) -> int:

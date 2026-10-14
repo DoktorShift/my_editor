@@ -23,17 +23,13 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import (
     QColor,
-    QEnterEvent,
     QFont,
     QFontMetrics,
-    QImage,
     QKeySequence,
-    QPainter,
     QPalette,
-    QRegion,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -47,18 +43,15 @@ from nostr.drafts import DraftWrapMeta
 from nostr.profiles import Profile
 import nostr.ui.drafts_panel as dp
 from nostr.ui.drafts_panel import (
-    _AGE_SAMPLES,
     _THEME_TOKENS,
     MIN_PANEL_WIDTH,
     DraftsPanel,
-    _DraftRowWidget,
     _accessible_row_text,
-    _format_relative_time,
     _menu_css,
     _panel_css,
-    _row_metrics,
     _secondary_font,
 )
+from nostr.ui.post_list import ROW_ROLE, PostRow
 from nostr.ui.profile_chip import ProfileChip
 from tests.accessibility import unnamed_controls
 from tests.widget_lifetime import delete_new_windows
@@ -228,11 +221,12 @@ def test_no_kind_filter_controls_remain():
 
 
 def test_unknown_kind_drafts_are_all_visible():
-    # Four records, all inner_kind 0, in three different states. The old
-    # chips showed 4 under All, 0 under Notes and 0 under Articles.
+    # Four records whose wraps carry no kind, in three different states.
+    # The old chips showed 4 under All, 0 under Notes and 0 under
+    # Articles. A draft learns its kind once decrypted; until then it is 0.
     store = populated_store()
     panel = bound_panel(store)
-    assert all(r.inner_kind == 0 for r in store)
+    assert store.get("d0").inner_kind == store.get("d1").inner_kind == 0
     assert sorted(visible_identifiers(panel)) == ["d0", "d1", "d2", "d3"]
     assert panel._body_stack.currentIndex() == 0
 
@@ -278,19 +272,8 @@ def test_a_failed_draft_stays_reachable():
 
 
 # --------------------------------------------------------------------------- #
-# D3: the row's own truncation                                                #
+# The rows: drawn as Notes draws a writer's list (post_list.py)               #
 # --------------------------------------------------------------------------- #
-
-def render_row(record, width: int) -> _DraftRowWidget:
-    row = _DraftRowWidget()
-    row.set_record(record)
-    # Shown first: a hidden widget does not re-run its layout on resize,
-    # so the label would keep a width the test never asked for.
-    row.show()
-    row.resize(width, row.height())
-    row.layout().activate()
-    return row
-
 
 def ready_record(title: str, snippet: str = "") -> DraftRecord:
     return DraftRecord(
@@ -303,164 +286,105 @@ def ready_record(title: str, snippet: str = "") -> DraftRecord:
     )
 
 
-def decrypted_row(body: str, width: int) -> _DraftRowWidget:
+def row_of(panel: DraftsPanel, index: int) -> PostRow:
+    return panel._list.item(index).data(ROW_ROLE)
+
+
+def decrypted_row(body: str, *, kind: int = 1) -> PostRow:
     """A row built the long way round, through the store's derivation."""
     store = DraftStore()
     store.bind_profile(PK)
     store.upsert_skeleton(wrap_meta("d0"))
-    store.set_decrypted("d0", inner={"kind": 1, "content": body, "tags": []})
-    return render_row(store.get("d0"), width)
+    store.set_decrypted("d0", inner={"kind": kind, "content": body, "tags": []})
+    return dp._draft_row(store.get("d0"), now=1_700_000_100)
 
 
-def test_a_long_title_elides_inside_the_label():
-    # 90 characters at the narrowest the panel goes. Before, QLabel
-    # clipped the string from the right and took the ellipsis with it,
-    # so the row read "One Class, On" with no sign it had been cut.
+def shown_panel(store, *, width: int = 320, is_dark: bool = True) -> DraftsPanel:
+    panel = DraftsPanel(is_dark=is_dark)
+    panel.set_active_profile(make_profile())
+    panel.bind_store(store)
+    panel.resize(width, 400)
+    panel.show()
+    panel.layout().activate()
+    QApplication.processEvents()
+    return panel
+
+
+def test_a_long_title_ends_in_an_ellipsis_and_its_tooltip_is_the_title():
+    # The tooltip is there only where the row cuts the title: one that
+    # repeated a whole row covered the row below it.
     long_title = "One Class, One Purpose: Refactoring the Whole Import Pipeline Without Breaking It"
-    row = render_row(ready_record(long_title), MIN_PANEL_WIDTH)
-    label = row._title
-    width = label.contentsRect().width()
-    painted = label.fontMetrics().elidedText(label.full_text(), Qt.ElideRight, width)
-    assert label.fontMetrics().horizontalAdvance(painted) <= width
-    assert painted.endswith("…")
-    assert len(painted) < len(long_title)
-    # And the row really paints, ellipsis and all, at that width.
-    assert not row.grab().isNull()
-    # The label never mutates the string it was handed. It holds no
-    # QLabel text of its own at all, which is what stops elision from
-    # feeding back into the layout.
-    from PySide6.QtWidgets import QLabel
-    assert QLabel.text(label) == ""
-    assert label.full_text() == long_title
-    # The whole row is readable from any point on it, so the full title
-    # survives at every width.
-    assert long_title in row.toolTip()
-
-    # Widening the row re-elides for free, no setText and no resizeEvent.
-    row.resize(520, row.height())
-    row.layout().activate()
-    wider = label.fontMetrics().elidedText(
-        label.full_text(), Qt.ElideRight, label.contentsRect().width(),
-    )
-    assert len(wider) > len(painted)
-
-
-def paint_to_image(widget) -> QImage:
-    """What the widget's own paintEvent puts on screen.
-
-    ``DrawChildren`` alone, because the default flags also fill the
-    window background, which would swamp the glyphs being compared.
-    """
-    image = QImage(widget.size(), QImage.Format_ARGB32)
-    image.fill(Qt.transparent)
-    widget.render(image, QPoint(), QRegion(), QWidget.RenderFlag.DrawChildren)
-    return image
-
-
-def paint_label_string(label, text: str) -> QImage:
-    """The label's own draw call, with a string of our choosing.
-
-    The reference the painted row is compared against. It has to be the
-    same call ``_ElidingLabel.paintEvent`` makes, through the same style
-    and palette, or the comparison would be measuring something else.
-    """
-    image = QImage(label.size(), QImage.Format_ARGB32)
-    image.fill(Qt.transparent)
-    painter = QPainter(image)
-    # drawItemText paints in the painter's font, and a QPainter opened on
-    # an image starts from the application font rather than the label's,
-    # which would compare the title against a lighter weight.
-    painter.setFont(label.font())
-    label.style().drawItemText(
-        painter,
-        label.contentsRect(),
-        int(label.alignment()),
-        label.palette(),
-        label.isEnabled(),
-        text,
-        label.foregroundRole(),
-    )
-    painter.end()
-    return image
-
-
-def test_the_row_paints_the_elided_title_and_not_the_full_one():
-    """Pins the pixels, not a recomputation of the elision.
-
-    ``test_a_long_title_elides_inside_the_label`` above asserts against
-    a string it elides itself, so it exercises QFontMetrics rather than
-    the widget: deleting the elision from ``paintEvent`` leaves it
-    passing while the row visibly goes back to a title cut mid-word with
-    no ellipsis. This compares the painted output with the same draw
-    call fed the two candidate strings, so only one of them can match.
-    """
-    long_title = (
-        "One Class, One Purpose: Refactoring the Whole Import Pipeline "
-        "Without Breaking It"
-    )
-    row = render_row(ready_record(long_title), MIN_PANEL_WIDTH)
-    label = row._title
-    expected = label.fontMetrics().elidedText(
-        long_title, Qt.ElideRight, label.contentsRect().width(),
-    )
-    # The premise: at this width the two candidates really are different.
-    assert expected.endswith("…")
-    assert len(expected) < len(long_title)
-
-    painted = paint_to_image(label)
-    assert painted == paint_label_string(label, expected)
-    assert painted != paint_label_string(label, long_title)
+    store = DraftStore()
+    store.bind_profile(PK)
+    for name, title in (("d0", long_title), ("d1", "Short")):
+        store.upsert_skeleton(wrap_meta(name, created_at=1700000000))
+        store.set_decrypted(name, inner={"kind": 30023, "content": "Body",
+                                         "tags": [["title", title]]})
+    panel = shown_panel(store, width=MIN_PANEL_WIDTH)
+    try:
+        delegate = panel._row_delegate
+        texts = {}
+        for row in range(panel._list.count()):
+            index = panel._list.model().index(row, 0)
+            rect = panel._list.visualRect(index)
+            texts[row_of(panel, row).title] = delegate.title_is_cut(rect, row_of(panel, row))
+        assert texts == {long_title: True, "Short": False}
+        # The painted string ends in an ellipsis at that width.
+        long_index = next(r for r in range(panel._list.count())
+                          if row_of(panel, r).title == long_title)
+        rect = delegate.title_rect(panel._list.visualRect(
+            panel._list.model().index(long_index, 0)), row_of(panel, long_index))
+        painted = QFontMetrics(delegate._title_font(row_of(panel, long_index))).elidedText(
+            long_title, Qt.ElideRight, rect.width())
+        assert painted.endswith("…") and len(painted) < len(long_title)
+    finally:
+        panel.hide()
 
 
 def test_a_title_never_widens_the_panel():
-    row = render_row(ready_record("x" * 400), MIN_PANEL_WIDTH)
-    assert row._title.minimumSizeHint().width() == 0
-    assert row._meta.minimumSizeHint().width() == 0
-    panel = DraftsPanel(is_dark=True)
+    store = DraftStore()
+    store.bind_profile(PK)
+    store.upsert_skeleton(wrap_meta("d0"))
+    store.set_decrypted("d0", inner={"kind": 1, "content": "x" * 400, "tags": []})
+    panel = bound_panel(store)
     assert panel.minimumSizeHint().width() <= MIN_PANEL_WIDTH
 
 
 def test_an_image_led_body_never_reaches_the_row_as_markdown():
-    body = "![One Class, One Purpose](https://x/hero.png)\n\n# One Class, One Purpose\n\nBody."
-    row = decrypted_row(body, MIN_PANEL_WIDTH)
-    assert row._title.full_text() == "One Class, One Purpose"
-    assert "![" not in row._meta.full_text()
-    assert "https://" not in row._meta.full_text()
+    row = decrypted_row(
+        "![One Class, One Purpose](https://x/hero.png)\n\n# One Class, One Purpose\n\nBody.")
+    assert row.title == "One Class, One Purpose"
+    assert "![" not in row.detail and "https://" not in row.detail
 
 
-# --------------------------------------------------------------------------- #
-# Row layout: derived geometry, one inline item                               #
-# --------------------------------------------------------------------------- #
+def test_a_note_shows_the_words_after_its_title_never_the_title_again():
+    row = decrypted_row("Thinking about relays again\nWho keeps my drafts, and for how long?")
+    assert row.title == "Thinking about relays again"
+    assert row.detail == "Who keeps my drafts, and for how long?"
+    # A one-line note says so, as Notes does.
+    assert decrypted_row("gm").detail == "No additional text"
+
+
+def test_line_two_says_what_it_is_and_when():
+    assert decrypted_row("A note", kind=1).kind == "note"
+    assert decrypted_row("An article", kind=30023).kind == "article"
+    record = ready_record("Not decrypted yet")
+    record.state = DraftState.LOADING
+    loading = dp._draft_row(record, now=1_700_000_100)
+    assert loading.kind == "" and loading.state == "loading"
+    # Saved a minute and a half before: today, so its time.
+    assert loading.when and ":" in loading.when
+
 
 def test_row_height_scales_with_the_application_font(app_font):
-    """The row and its list item must read one height, at any font size.
-
-    A QSS ``font-size`` would have pinned both; the sizes are set in
-    Python from the application font precisely so this holds.
-    """
+    """The rows' height comes from the fonts in use, never a literal."""
     heights = {}
     for point_size in (9, 18):
         app_font.setFont(QFont("Helvetica", point_size))
-        store = healthy_store()
-        panel = bound_panel(store)
-        item = panel._list.item(0)
-        widget = panel._list.itemWidget(item)
-        assert item.sizeHint().height() == widget.row_height()
-        assert widget.height() == widget.row_height()
-        heights[point_size] = widget.row_height()
+        panel = bound_panel(healthy_store())
+        index = panel._list.model().index(1, 0)            # not a section's first row
+        heights[point_size] = panel._row_delegate.sizeHint(None, index).height()
     assert heights[18] > heights[9]
-
-
-def test_the_age_column_fits_every_age_it_can_show(app_font):
-    # "just now" needed 46 px inside a 36 px label and was the only
-    # string wide enough to give one row a different column width.
-    assert _format_relative_time(1_700_000_000, now=1_700_000_010) == "now"
-    for point_size in (9, 13, 18):
-        app_font.setFont(QFont("Helvetica", point_size))
-        metrics = _row_metrics()
-        fm = QFontMetrics(metrics.secondary_font)
-        for sample in _AGE_SAMPLES:
-            assert fm.horizontalAdvance(sample) <= metrics.age_width
 
 
 def test_the_secondary_font_never_overtakes_the_title(app_font):
@@ -472,28 +396,16 @@ def test_the_secondary_font_never_overtakes_the_title(app_font):
         assert secondary >= min(10.0, QApplication.font().pointSizeF())
 
 
-def test_the_row_has_one_inline_item_beside_the_title():
-    # The lock glyph and the kind pill are gone; they discriminated
-    # nothing and cost the title column 80 px.
-    row = render_row(ready_record("Title"), MIN_PANEL_WIDTH)
-    assert not hasattr(row, "_lock")
-    assert not hasattr(row, "_kind")
-    title_width = row._title.contentsRect().width()
-    assert title_width > 150, title_width
-
-
 def test_the_meta_line_carries_the_source_host_not_a_pill():
     record = ready_record("Title", snippet="First words of the body")
     record.inner_tags = [["source", "https://www.blog.example.com/posts/1"]]
-    row = render_row(record, MIN_PANEL_WIDTH)
-    assert row._meta.full_text() == "blog.example.com · First words of the body"
+    assert dp._display_meta(record) == "blog.example.com · First words of the body"
 
 
 def test_a_file_import_source_does_not_become_a_bare_drive_letter():
     record = ready_record("Title", snippet="Body")
     record.inner_tags = [["source", r"C:\exports\wordpress.xml"]]
-    row = render_row(record, MIN_PANEL_WIDTH)
-    assert row._meta.full_text().startswith("wordpress.xml · ")
+    assert dp._display_meta(record).startswith("wordpress.xml · ")
 
 
 def test_a_pathological_source_cannot_eat_the_meta_line():
@@ -501,8 +413,7 @@ def test_a_pathological_source_cannot_eat_the_meta_line():
     record.inner_tags = [
         ["source", "https://" + "a-very-long-subdomain." * 6 + "example.org/x"]
     ]
-    row = render_row(record, MIN_PANEL_WIDTH)
-    host = row._meta.full_text().split(" · ")[0]
+    host = dp._display_meta(record).split(" · ")[0]
     assert len(host) <= 28
     # Elided in the middle, because a host is identified by its tail.
     assert host.endswith("example.org")
@@ -516,92 +427,51 @@ def test_a_pathological_source_cannot_eat_the_meta_line():
 def test_loading_and_failed_rows_are_told_apart():
     store = populated_store()
     panel = bound_panel(store)
-    rows = {
-        panel._list.item(i).data(Qt.UserRole): panel._list.itemWidget(panel._list.item(i))
-        for i in range(panel._list.count())
-    }
+    rows = {panel._list.item(i).data(Qt.UserRole): row_of(panel, i)
+            for i in range(panel._list.count())}
     # d0 never decrypted, d1 failed, d2 is ready.
-    assert rows["d0"]._title.property("state") == "loading"
-    assert rows["d1"]._title.property("state") == "failed"
-    assert rows["d2"]._title.property("state") == "ready"
-    # The old boolean lumped LOADING in with FAILED, so a cold load of a
-    # whole library rendered as a library of broken drafts.
-    assert rows["d0"]._title.property("failed") is None
-    assert rows["d0"]._meta.full_text() == "Decrypting"
-    assert "retry" in rows["d1"]._meta.full_text().lower()
+    assert rows["d0"].state == "loading" and rows["d0"].title == "Decrypting…"
+    assert rows["d1"].state == "failed" and rows["d1"].mark == "alert"
+    assert rows["d2"].state == "ready" and rows["d2"].mark == ""
+    assert "retry" in rows["d1"].detail.lower()
 
 
-def test_selecting_a_row_moves_the_selected_look_with_it():
-    store = healthy_store()
-    panel = bound_panel(store)
-    first = panel._list.itemWidget(panel._list.item(0))
-    second = panel._list.itemWidget(panel._list.item(1))
-    # A populated list always has a current row, so the arrow keys have
-    # an anchor the moment focus arrives.
-    assert panel._list.currentRow() == 0
-    assert first._title.property("sel") == "true"
-    assert second._title.property("sel") == "false"
-
-    panel._list.setCurrentRow(1)
-    assert first._title.property("sel") == "false"
-    assert second._title.property("sel") == "true"
-    assert second._age.property("sel") == "true"
-    assert second._meta.property("sel") == "true"
-    assert not second.grab().isNull()
-
-
-def test_hovering_a_row_fills_it():
-    """The row paints its own hover fill, and it has to.
-
-    The list's ``::item:hover`` rule was dead code: the row widget covers
-    the item rect exactly and is not mouse transparent, so the viewport
-    never saw the pointer. Reviving it by making the row transparent
-    would cost the row its tooltip.
-    """
-    store = healthy_store()
-    panel = bound_panel(store)
-    panel.resize(320, 400)
-    panel.show()
-    panel.layout().activate()
-    try:
-        # Row 1, because row 0 is the current row and shows selection.
-        row = panel._list.itemWidget(panel._list.item(1))
-        centre = row.mapTo(panel, row.rect().center())
-        # Well right of the text, so only the fill is under the sample.
-        sample = lambda: QColor(panel.grab().toImage().pixel(300, centre.y())).name().upper()
-        tokens = _THEME_TOKENS[True]
-        assert sample() == tokens["panel_bg"].upper()
-        row.enterEvent(QEnterEvent(QPointF(5, 5), QPointF(5, 5), QPointF(5, 5)))
-        assert sample() == tokens["hover_bg"].upper()
-        row.leaveEvent(QEvent(QEvent.Leave))
-        assert sample() == tokens["panel_bg"].upper()
-    finally:
-        panel.hide()
-
-
-def test_the_selected_row_carries_a_shape_cue_not_only_a_fill():
-    # accessibility.md: "Offer visual indicators, like distinct shapes or
-    # icons, in addition to color to help people perceive differences in
-    # function and changes in state."
+def test_the_selection_is_an_inset_shape_in_the_accent_and_grey_without_focus():
+    """A selected row is a rounded shape inset from the list's edges, in
+    the system's selection color while the list has the focus and a quiet
+    grey otherwise, as a Mac list draws it (no bar, no hover fill)."""
+    import theme
     for is_dark in (True, False):
-        store = healthy_store()
-        panel = DraftsPanel(is_dark=is_dark)
-        panel.set_active_profile(make_profile())
-        panel.bind_store(store)
-        panel.resize(320, 400)
-        panel.show()
-        panel.layout().activate()
+        panel = shown_panel(healthy_store(), is_dark=is_dark)
         try:
-            row = panel._list.itemWidget(panel._list.item(0))
-            centre = row.mapTo(panel, row.rect().center())
-            image = panel.grab().toImage()
+            panel._list.setCurrentRow(1)
+            index = panel._list.model().index(1, 0)
+            rect = panel._list.visualRect(index)
+            y = rect.center().y()
+            viewport = panel._list.viewport()
+
+            def at(x):
+                return QColor(viewport.grab().toImage().pixel(x, y)).name().upper()
+
             tokens = _THEME_TOKENS[is_dark]
-            bar = QColor(image.pixel(1, centre.y())).name().upper()
-            fill = QColor(image.pixel(40, centre.y())).name().upper()
-            assert bar == tokens["selection_bar"].upper()
-            assert fill == tokens["selected_bg"].upper()
+            panel.activateWindow()
+            panel._list.setFocus(Qt.OtherFocusReason)
+            QApplication.processEvents()
+            accent = theme.list_selection_color(is_dark).name().upper()
+            assert at(2) == tokens["panel_bg"].upper()       # inset from the edge
+            assert at(rect.width() - 30) == accent
+            panel._search_edit.setFocus(Qt.OtherFocusReason)
+            QApplication.processEvents()
+            assert at(rect.width() - 30) not in (accent, tokens["panel_bg"].upper())
         finally:
             panel.hide()
+
+
+def test_white_text_reads_on_the_selection_in_both_themes():
+    import theme
+    for is_dark in (True, False):
+        fill = theme.list_selection_color(is_dark).name()
+        assert contrast("#FFFFFF", fill) >= 4.5, fill
 
 
 @pytest.mark.parametrize("control_name", ["_launcher", "_actions_btn", "_search_edit"])
@@ -893,7 +763,7 @@ def hexes_in(css: str) -> set:
 
 
 # Roles the row widget paints directly, so they never reach the QSS.
-_PAINT_ONLY_ROLES = {"selection_bar"}
+_PAINT_ONLY_ROLES: set = set()
 
 
 @pytest.mark.parametrize("is_dark", [True, False])
@@ -963,8 +833,7 @@ def test_every_text_pair_clears_the_minimum_contrast(is_dark):
         ("muted on chrome", t["muted"], t["chrome_bg"]),
         ("field text on list", t["field_fg"], t["panel_bg"]),
         ("chrome text on chrome", t["chrome_fg"], t["chrome_bg"]),
-        ("selected title on selection", t["selected_fg"], t["selected_bg"]),
-        ("selected muted on selection", t["selected_muted"], t["selected_bg"]),
+        ("menu item on its highlight", t["selected_fg"], t["selected_bg"]),
         ("error on chrome", t["error_fg"], t["chrome_bg"]),
     ]
     for name, fg, bg in pairs:
@@ -977,12 +846,6 @@ def test_every_text_pair_clears_the_minimum_contrast(is_dark):
     # unavailable item or behavior."
     disabled = contrast(t["disabled"], t["chrome_bg"])
     assert 3.0 <= disabled < 4.5, f"{disabled:.2f}:1"
-
-    # The selection bar is the shape cue that carries selection without
-    # colour, so it has to be legible on the fill it sits on. The accent
-    # is not usable here: #007ACC on #094771 is 2.16:1.
-    bar = contrast(t["selection_bar"], t["selected_bg"])
-    assert bar >= 3.0, f"selection bar {bar:.2f}:1"
 
 
 @pytest.mark.parametrize("is_dark", [True, False])
@@ -1017,12 +880,10 @@ def test_switching_theme_repaints_existing_rows():
     store = populated_store()
     panel = bound_panel(store)
     panel.apply_theme(False)
-    for i in range(panel._list.count()):
-        widget = panel._list.itemWidget(panel._list.item(i))
-        assert widget._is_dark is False
-        assert not widget.grab().isNull()
+    assert panel._row_delegate._dark is False
+    assert not panel._list.viewport().grab().isNull()
     panel.apply_theme(True)
-    assert panel._list.itemWidget(panel._list.item(0))._is_dark is True
+    assert panel._row_delegate._dark is True
 
 
 # --------------------------------------------------------------------------- #
@@ -1356,14 +1217,15 @@ def test_every_control_has_a_name():
 
 def test_the_panel_keeps_no_copy_of_the_row_geometry():
     """The panel's lists read alike because their rows come from one
-    place, drafts_common; the panel keeps no copy of it."""
-    from nostr.ui import drafts_common
+    place, post_list.py; the panel keeps no copy of it and paints none."""
+    from nostr.ui import drafts_common, post_list
     source = pathlib.Path(dp.__file__).read_text(encoding="utf-8")
     for name in ("GUTTER", "_ROW_PAD_V", "_ROW_LINE_GAP", "_SELECTION_BAR_W"):
         assert not re.search(rf"^{name}\s*[:=]", source, re.MULTILINE), name
-    assert (dp.GUTTER, dp._ROW_PAD_V, dp._ROW_LINE_GAP, dp._SELECTION_BAR_W) == (
-        drafts_common.LIST_GUTTER, drafts_common.ROW_PAD_V, drafts_common.ROW_LINE_GAP,
-        drafts_common.SELECTION_BAR_W)
+    assert dp.GUTTER == drafts_common.LIST_GUTTER
+    panel = DraftsPanel(is_dark=True)
+    assert isinstance(panel._list.itemDelegate(), post_list.PostRowDelegate)
+    assert "setItemWidget" not in source
 
 
 def test_typing_a_drafts_first_letters_selects_it():

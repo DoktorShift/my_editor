@@ -13,6 +13,7 @@ opens the menu of the current row; every control has a name.
 """
 
 import os
+import time
 import sys
 
 import pytest
@@ -28,7 +29,8 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 import alerts  # noqa: E402
 from nostr.published import LOADING, PAGE_SIZE, PublishedList  # noqa: E402
 from nostr.ui import published_view as pv  # noqa: E402
-from nostr.ui.published_view import META_ROLE, PublishedView  # noqa: E402
+from nostr.ui.post_list import ROW_ROLE, list_date  # noqa: E402
+from nostr.ui.published_view import PublishedView  # noqa: E402
 from tests.accessibility import unnamed_controls  # noqa: E402
 from tests.outbox_fakes import (  # noqa: E402
     NOW, FakeClient, FakeRelayDirectory, FakeSessionPool, PK, Profile, signed,
@@ -161,12 +163,17 @@ def test_a_row_says_its_title_what_it_is_and_when_it_first_went_out():
     relays.run()
     assert shown(view) == ["Hello there", "Essay"]
     rows = view._rows
-    date = pv.format_absolute_date(NOW - 2000)
-    assert rows.data(rows.index(1), META_ROLE) == f"Article · {date}"
-    assert rows.data(rows.index(0), META_ROLE).startswith("Note · ")
+    essay, hello = rows.data(rows.index(1), ROW_ROLE), rows.data(rows.index(0), ROW_ROLE)
+    # Line 2: what it is, when it first went out, the words after the title.
+    assert (essay.title, essay.kind, essay.detail) == ("Essay", "article", "Body")
+    assert essay.when == list_date(NOW - 2000, int(time.time()))
+    assert (hello.kind, hello.detail) == ("note", "No additional text")
+    # Grouped by date: the first row starts its section.
+    assert hello.section
     spoken = rows.data(rows.index(1), Qt.ItemDataRole.AccessibleTextRole)
     assert spoken.startswith("Essay. Article. First published ")
-    assert "Essay" in rows.data(rows.index(1), Qt.ItemDataRole.ToolTipRole)
+    # No tooltip repeating a row shown whole (the painter's rule).
+    assert rows.data(rows.index(1), Qt.ItemDataRole.ToolTipRole) is None
     assert view._list.accessibleName() == "Published"
     assert unnamed_controls(view) == []
 
@@ -229,15 +236,6 @@ def test_load_more_that_failed_says_so_and_stays_the_way_to_try_again():
     QTest.keyClick(view._list, Qt.Key.Key_Return)
     relays.run()
     assert rows.rowCount() == PAGE_SIZE + 1 and not model.has_more
-
-
-def test_a_narrow_line_shows_the_date_in_digits():
-    view, _model, relays, _said, _edited = make(article("essay", "Essay"))
-    view.set_account(Profile())
-    relays.run()
-    rows = view._rows
-    assert rows.data(rows.index(0), pv.SHORT_META_ROLE) == (
-        f"Article · {pv.format_short_date(NOW - 2000)}")
 
 
 # -- actions --------------------------------------------------------------------------------
@@ -334,7 +332,7 @@ def test_confirming_deletes_and_the_row_goes(answered_alerts):
     select(view, 1)
     answered_alerts.answers = [True]
     QTest.keyClick(view._list, Qt.Key.Key_Backspace)
-    assert view._rows.data(view._rows.index(1), META_ROLE) == "Deleting…"
+    assert view._rows.data(view._rows.index(1), ROW_ROLE).detail == "Deleting…"
     relays.run()
     assert shown(view) == ["kept"]
     assert said[-1] == "2 of 2 relays accepted the request to delete “Essay”."
@@ -399,20 +397,12 @@ def test_keys_act_on_the_selected_row_only(answered_alerts, opened):
     assert answered_alerts.asked[0]["title"] == "Delete “only note” from Nostr?"
 
 
-def test_one_date_style_for_the_whole_list():
-    """Review F11: when one row's date in words does not fit, every row
-    writes its date in digits, so the column reads and lines up alike."""
-    view, model, relays, _said, _edited = make(note("a"), article("essay", "Essay"))
+def test_a_note_says_the_words_after_its_first_line():
+    view, _model, relays, _said, _edited = make(note("Coffee first\nthen the long article"))
     view.set_account(Profile())
     relays.run()
-    view.show()
-    assert not view.digit_dates
-    view.resize(110, 480)                           # too narrow for "Article · 10 January 2027"
-    QApplication.processEvents()
-    assert view.digit_dates
-    view.resize(320, 480)
-    QApplication.processEvents()
-    assert not view.digit_dates
+    row = view._rows.data(view._rows.index(0), ROW_ROLE)
+    assert (row.title, row.detail) == ("Coffee first", "then the long article")
 
 
 def test_a_deletion_left_as_it_is_keeps_the_row(answered_alerts):
