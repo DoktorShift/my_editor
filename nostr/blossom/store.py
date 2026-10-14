@@ -284,6 +284,9 @@ class MediaStore(QObject):
         # multiple parallel uploads. (Phase 1 we expect one at a time
         # but the shape supports more.)
         self._uploads: Dict[str, UploadJobState] = {}
+        # The names uploads are shown by, where their job's own name is not
+        # a file's (a cover dropped in the publish sheet: "photo-1a2b3c4d.png").
+        self._shown_names: Dict[str, str] = {}
 
     # ------------------------------------------------------------------
     # Read API
@@ -760,15 +763,24 @@ class MediaStore(QObject):
                 pass
         return hashlib.sha256(body).hexdigest()
 
+    def shown_name(self, name: str) -> str:
+        """The name the upload ``name`` is shown by: the file's it was given
+        with (upload_bytes' ``shown_as``), else its own."""
+        return self._shown_names.get(name, name)
+
     def upload_bytes(
         self,
         body: bytes,
         *,
         name: str,
         mime_type: str = "application/octet-stream",
+        shown_as: str = "",
     ) -> None:
         """Upload an in-memory buffer. Used by the drop handler when the
         bytes come from a QMimeData payload rather than a file path.
+
+        ``name`` is the upload's own; ``shown_as``, the file's name it is
+        shown by when ``name`` is no file's (shown_name).
 
         The bytes are put in the local cache first, so nothing that
         happens next decides whether they can still be displayed.
@@ -785,6 +797,8 @@ class MediaStore(QObject):
         the servers the planner accepted, so a server skipped for size
         can never be reached by a retry.
         """
+        if shown_as:
+            self._shown_names[name] = shown_as
         profile = self._profile_provider()
         if profile is None:
             self.upload_failed.emit(name, NO_SIGNER)

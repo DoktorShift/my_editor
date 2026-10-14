@@ -31,6 +31,8 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from nostr import bech32  # noqa: E402
@@ -62,7 +64,7 @@ def test_it_shows_the_articles_details_and_hands_nothing_back():
     assert panel.title_edit.text() == "My Post"
     assert panel.summary_edit.toPlainText() == "About it"
     assert panel.cover.text() == "https://cdn.example/c.jpg"
-    assert panel.tags_edit.text() == "bitcoin"
+    assert panel.hashtags.tags() == ("bitcoin",)
     assert panel.identifier_edit.text() == "my-post"
     assert "2023" in panel.first_published.text()
     assert sent == []
@@ -71,7 +73,9 @@ def test_it_shows_the_articles_details_and_hands_nothing_back():
 def test_what_is_typed_goes_to_the_tab_as_the_details():
     panel, sent = panel_with()
     panel.title_edit.setText("A New Title ")
-    panel.tags_edit.setText("Bitcoin, #Nostr")
+    panel.hashtags.set_tags(())
+    QTest.keyClicks(panel.hashtags.entry, "Bitcoin, #Nostr")
+    QTest.keyClick(panel.hashtags.entry, Qt.Key.Key_Return)
     assert sent[-1] == DETAILS.with_changes(title="A New Title",
                                             hashtags=("Bitcoin", "Nostr"))
     # Shown again as handed back: the space being typed stays.
@@ -188,13 +192,13 @@ def test_a_detail_kept_as_written_in_the_file_is_shown_read_only_and_says_so():
     panel = ArticleDetailsPanel()
     panel.show_article(ArticleDetails(title="T"), fixed_identifier=False,
                        kept_in_file=frozenset({"image", "tags"}))
-    assert panel.cover.url_edit.isReadOnly() and panel.tags_edit.isReadOnly()
+    assert panel.cover.url_edit.isReadOnly() and panel.hashtags.isReadOnly()
     assert not panel.title_edit.isReadOnly()
     notes = [label.text() for label in panel.findChildren(type(panel.zaps_note))
              if not label.isHidden() and label.text() == "Kept as written in the file."]
     assert len(notes) == 2
     panel.show_article(ArticleDetails(title="T"), fixed_identifier=False)
-    assert not panel.cover.url_edit.isReadOnly() and not panel.tags_edit.isReadOnly()
+    assert not panel.cover.url_edit.isReadOnly() and not panel.hashtags.isReadOnly()
     assert not any(label.text() == "Kept as written in the file." and not label.isHidden()
                    for label in panel.findChildren(type(panel.zaps_note)))
 
@@ -204,6 +208,7 @@ def test_a_hashtag_holding_a_comma_is_shown_and_handed_back_whole():
     sent = []
     panel.changed.connect(sent.append)
     panel.show_article(ArticleDetails(title="T", hashtags=("a", "b, c")), fixed_identifier=False)
-    assert panel.tags_edit.text() == 'a, "b, c"'
-    panel.tags_edit.setText(panel.tags_edit.text() + ", d")
+    assert [chip.accessibleName() for chip in panel.hashtags.chips()] == ["a", "b, c"]
+    QTest.keyClicks(panel.hashtags.entry, "d")
+    QTest.keyClick(panel.hashtags.entry, Qt.Key.Key_Return)
     assert sent[-1].hashtags == ("a", "b, c", "d")

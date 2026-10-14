@@ -28,7 +28,7 @@ from PySide6.QtGui import (
     QTextTable, QTextTableFormat,
 )
 
-from doc_walk import iter_blocks
+from doc_walk import doc_length, doc_offset, iter_blocks, text_index
 
 # Inline styles, by name. Underline has no Markdown; it stays in local
 # files only (markdown_writer.has_local_only_formatting).
@@ -965,10 +965,12 @@ def mention_at(cursor: QTextCursor) -> Optional[Tuple[int, int]]:
     return found[0], found[1]
 
 
-def plain_text_of(fragment: QTextDocumentFragment) -> str:
+def plain_text_of(fragment: QTextDocumentFragment, *, as_written: bool = False) -> str:
     """The plain text of ``fragment`` as another app should get it: each
     mention as its ``nostr:`` address, which every Nostr app reads as the
-    person ("@Name" alone names nobody there)."""
+    person ("@Name" alone names nobody there). ``as_written`` keeps its
+    no-break spaces (Qt's plain text makes them spaces), as a note that
+    goes out does."""
     doc = QTextDocument()
     QTextCursor(doc).insertFragment(fragment)
     mentions = []
@@ -983,13 +985,13 @@ def plain_text_of(fragment: QTextDocumentFragment) -> str:
                 if found is not None and found not in mentions:
                     mentions.append(found)
             it += 1
-    if not mentions:
-        return fragment.toPlainText()
     for start, end, href in reversed(mentions):
         cursor = QTextCursor(doc)
         cursor.setPosition(start)
         cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
         cursor.insertText(href)
+    if as_written:
+        return doc.toRawText().replace("\u2029", "\n").replace("\u2028", "\n")
     return doc.toPlainText()
 
 
@@ -1003,17 +1005,20 @@ def link_references(doc, label_for) -> int:
     for block in iter_blocks(doc):
         if is_code_block(block):
             continue
-        for match in _REFERENCE_TEXT.finditer(block.text()):
+        text = block.text()
+        for match in _REFERENCE_TEXT.finditer(text):
+            # (A place in the text is converted to one in the document: an
+            # emoji before it takes two positions there.)
+            start = block.position() + doc_offset(text, match.start())
             probe = QTextCursor(block)
-            probe.setPosition(block.position() + match.start() + 1)
+            probe.setPosition(start + 1)
             fmt = probe.charFormat()
             if fmt.isAnchor() or has_style(fmt, CODE):
                 continue
             label = label_for(match.group(1))
             if label is None:
                 continue
-            found.append((block.position() + match.start(), match.end() - match.start(),
-                          match.group(0), label))
+            found.append((start, doc_length(match.group(0)), match.group(0), label))
     if not found:
         return 0
     edit = QTextCursor(doc)
@@ -1051,9 +1056,10 @@ def _prose_blocks(doc) -> Iterator:
             yield block
 
 
-def _in_code_words(block, offset: int) -> bool:
+def _in_code_words(block, index: int) -> bool:
+    """Whether the character at ``index`` of ``block``'s text is code."""
     cursor = QTextCursor(block)
-    cursor.setPosition(block.position() + offset + 1)
+    cursor.setPosition(block.position() + doc_offset(block.text(), index) + 1)
     return has_style(cursor.charFormat(), CODE)
 
 
@@ -1078,7 +1084,8 @@ def footnote_marks(doc, label: Optional[str] = None) -> List[Tuple[int, str]]:
         for found in FOOTNOTE_MARK.finditer(text, start):
             if (label is None or found.group(1) == label) \
                     and not _in_code_words(block, found.start()):
-                marks.append((block.position() + found.start(), found.group(1)))
+                marks.append((block.position() + doc_offset(text, found.start()),
+                              found.group(1)))
     return marks
 
 
@@ -1138,7 +1145,7 @@ def footnote_jump(cursor: QTextCursor) -> Optional[int]:
         return None
     doc = cursor.document()
     text = block.text()
-    offset = cursor.positionInBlock()
+    offset = text_index(text, cursor.positionInBlock())
     definition = FOOTNOTE_DEFINITION.match(text)
     for found in FOOTNOTE_MARK.finditer(text, definition.end() if definition else 0):
         if found.start() <= offset <= found.end() \
@@ -1146,9 +1153,11 @@ def footnote_jump(cursor: QTextCursor) -> Optional[int]:
             target = footnote_definition(doc, found.group(1))
             if target is None:
                 return None
-            words = FOOTNOTE_DEFINITION.match(target.text())
-            rest = target.text()[words.end():]
-            return target.position() + words.end() + (len(rest) - len(rest.lstrip(" ")))
+            note = target.text()
+            words = FOOTNOTE_DEFINITION.match(note)
+            rest = note[words.end():]
+            return target.position() + doc_offset(
+                note, words.end() + len(rest) - len(rest.lstrip(" ")))
     if definition is not None:
         marks = footnote_marks(doc, definition.group(1))
         return marks[0][0] if marks else None
@@ -1508,7 +1517,7 @@ def set_link(cursor: QTextCursor, text: str, href: str) -> None:
             style.clearProperty(prop)
         style.merge(anchor)
         cursor.insertText(text, style)
-        cursor.setPosition(cursor.position() - len(text), QTextCursor.MoveMode.KeepAnchor)
+        cursor.setPosition(cursor.position() - doc_length(text), QTextCursor.MoveMode.KeepAnchor)
     elif cursor.hasSelection():
         cursor.mergeCharFormat(anchor)
     cursor.endEditBlock()

@@ -4,7 +4,7 @@
 
 Above, where the post comes from: its source, its date, and Open Original
 to read it on the site. Below, the article an import of it makes, drawn
-by the same preview the publish dialogs use (nostr/preview.py): cover,
+by the same preview the publish sheets use (nostr/preview.py): cover,
 title, summary, byline, the body as Markdown, the "Originally published
 at" line, the tags.
 

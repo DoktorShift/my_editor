@@ -30,6 +30,8 @@ from typing import List, Tuple
 
 from PySide6.QtGui import QTextCharFormat, QTextCursor, QTextDocument
 
+from doc_walk import doc_length, doc_offset
+
 Match = Tuple[int, int]          # (start, end) positions in the document
 
 
@@ -43,9 +45,11 @@ class FindOptions:
 
 
 def _in_word(char: str) -> bool:
-    """Letters, numbers and the accents on them make words (Qt's own
-    rule for whole words, with accents added)."""
-    return char.isalnum() or unicodedata.combining(char) != 0
+    """Letters and numbers make words, as Qt finds whole words: a mark
+    and a character beyond U+FFFF (an emoji, a rare CJK letter, which Qt
+    sees as two halves) end one. (An accent on a match's last letter is
+    looked at on its own: find_all.)"""
+    return char.isalnum() and ord(char) <= 0xFFFF
 
 
 def _pattern(needle: str, options: FindOptions) -> re.Pattern:
@@ -66,11 +70,13 @@ def find_all(doc: QTextDocument, needle: str, options: FindOptions = FindOptions
     matches: List[Match] = []
     if not needle:
         return matches
-    # The document's characters, one per position (paragraph ends and
-    # table edges included), so string indexes are document positions.
+    # The document's characters (paragraph ends and table edges included):
+    # one per position, but for a character beyond U+FFFF (an emoji), which
+    # takes two positions and is one character here.
     text = doc.toRawText()
     length = len(text)
     taken_until = 0
+    to_document = (lambda index: index) if doc_length(text) == length else _Positions(text)
     for found in _pattern(needle, options).finditer(text):
         start, end = found.start(1), found.end(1)
         if start < taken_until or start == end:
@@ -80,9 +86,27 @@ def find_all(doc: QTextDocument, needle: str, options: FindOptions = FindOptions
         if options.whole_words and ((start > 0 and _in_word(text[start - 1]))
                                     or (end < length and _in_word(text[end]))):
             continue
-        matches.append((start, end))
+        matches.append((to_document(start), to_document(end)))
         taken_until = end
     return matches
+
+
+class _Positions:
+    """Document positions of indexes into ``text``, asked in increasing
+    order (each found after the one before), so a long document is walked
+    once."""
+
+    def __init__(self, text: str) -> None:
+        self._text = text
+        self._index = 0
+        self._position = 0
+
+    def __call__(self, index: int) -> int:
+        if index < self._index:
+            return doc_offset(self._text, index)
+        self._position += doc_length(self._text[self._index:index])
+        self._index = index
+        return self._position
 
 
 def visible_matches(matches: List[Match], first: int, last: int) -> List[Tuple[int, Match]]:
@@ -116,7 +140,7 @@ def replace_match(doc: QTextDocument, match: Match, replacement: str) -> Match:
     cursor.beginEditBlock()
     cursor.insertText(replacement, style)
     cursor.endEditBlock()
-    return start, start + len(replacement)
+    return start, start + doc_length(replacement)
 
 
 def replace_all(doc: QTextDocument, needle: str, replacement: str,

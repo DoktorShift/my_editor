@@ -22,9 +22,10 @@ from i18n import N_, _
 from .. import refs
 from ..publisher import without_secret_keys
 
-# A key in the slug: it is published as it is, and is never rewritten.
-SLUG_HOLDS_A_KEY = N_("A secret key can’t be part of the slug, which is published as it "
-                      "is. Change the title or the slug.")
+# A key in the link name (an article's identifier, its d tag): it is
+# published as it is, and is never rewritten.
+SLUG_HOLDS_A_KEY = N_("A secret key can’t be part of the link name, which is published as it "
+                      "is. Change the title or the link name.")
 
 
 def slug_problem(slug: str) -> Optional[str]:

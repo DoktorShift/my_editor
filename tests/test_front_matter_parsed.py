@@ -284,7 +284,7 @@ r["asked"] = asked
 r["file"] = open(path, encoding="utf-8").read()
 if w.current_editor() is ed:
     r["said"] = w.status.currentMessage()
-    r["tags read-only"] = panel.tags_edit.isReadOnly()
+    r["tags read-only"] = panel.hashtags.isReadOnly()
     r["hashtags"] = list(w._article_details_of(ed).hashtags)
     r["modified"] = ed.document().isModified()
     ed.document().setModified(False)

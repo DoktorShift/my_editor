@@ -169,6 +169,9 @@ class FakeStore(QObject):
     def upload_bytes(self, body, *, name, mime_type) -> None:
         pass
 
+    def shown_name(self, name: str) -> str:
+        return name
+
     def upload_file(self, path) -> None:
         pass
 

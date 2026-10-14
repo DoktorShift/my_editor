@@ -187,7 +187,7 @@ def test_the_publish_dialog_offers_and_publishes_the_drafts_details(tmp_path, mo
     dialog = _dialog(tmp_path, details)
     assert dialog._summary_edit.text() == "What it is about"
     assert dialog._image_edit.text() == COVER
-    assert dialog._tags_edit.text() == "bitcoin, nostr"
+    assert dialog._hashtags.tags() == ("bitcoin", "nostr")
     dialog._title_edit.setText("A new title")
     assert dialog._slug_edit.text() == "imported-post"        # the article keeps its identifier
     dialog._on_publish()
@@ -264,16 +264,17 @@ def test_a_kept_detail_never_changes_in_the_model():
 
 
 def test_the_publish_window_shows_a_kept_detail_read_only_saying_so(tmp_path, qt_app):
+    from PySide6.QtWidgets import QLabel
     dialog = _dialog(tmp_path, kept())
     dialog.show()
     QApplication.processEvents()
-    notes = [label for label in dialog.findChildren(type(dialog._status))
+    notes = [label for label in dialog.findChildren(QLabel)
              if label.text() == "Kept as written in the file."]
-    assert dialog._title_edit.isReadOnly() and dialog._tags_edit.isReadOnly()
+    assert dialog._title_edit.isReadOnly() and dialog._hashtags.isReadOnly()
     assert not dialog._summary_edit.isReadOnly() and len(notes) == 2
     dialog._set_busy(True)
     dialog._set_busy(False)
-    assert dialog._title_edit.isReadOnly() and dialog._tags_edit.isReadOnly()
+    assert dialog._title_edit.isReadOnly() and dialog._hashtags.isReadOnly()
     dialog._title_edit.setText("A real title")
     assert dialog.details().title == "Hello"
     dialog.close()
@@ -293,27 +294,36 @@ def test_save_as_draft_shows_a_kept_detail_read_only_saying_so(qt_app):
 
 
 class _AnyMediaStore:
-    """A media store the cover only asks whether there is one."""
+    """A media store the cover only asks whether there is one: its signals
+    connect to nothing, its files are none."""
+    files: dict = {}
+
     def __getattr__(self, name):
+        if name.startswith("upload_"):
+            return types.SimpleNamespace(connect=lambda *args: None)
         return lambda *args, **kwargs: None
 
 
 def test_a_cover_being_worked_on_lets_nothing_be_picked_and_keeps_its_hint(qt_app):
-    """Round 10, M2: while the publish window worked, "Choose or upload…"
-    stayed enabled; a cover kept as written says nothing of picking one."""
+    """Round 10, M2: while the publish window worked, "Choose…" stayed
+    enabled; a cover kept as written says nothing of picking one (the hint
+    is under the stacked field, as Article Details has it)."""
     from nostr.ui.cover_field import CoverImageField
-    cover = CoverImageField(media_store=_AnyMediaStore())
+    cover = CoverImageField(media_store=_AnyMediaStore(), stacked=True)
     cover.show()
     hint = cover._hint
     cover.setBusy(True)
     assert not cover.pick_button.isEnabled() and cover.url_edit.isReadOnly()
+    assert not cover.remove_button.isEnabled() and not cover.preview.isEnabled()
     assert hint.isVisibleTo(cover)
     cover.setBusy(False)
     assert cover.pick_button.isEnabled() and not cover.url_edit.isReadOnly()
+    assert cover.remove_button.isEnabled() and cover.preview.isEnabled()
     cover.setReadOnly(True)
     cover.setBusy(True)
     cover.setBusy(False)
     assert not cover.pick_button.isEnabled() and cover.url_edit.isReadOnly()
+    assert not cover.preview.isEnabled()
     assert not hint.isVisibleTo(cover)
     cover.close()
 
@@ -327,3 +337,109 @@ def test_the_publish_window_lets_no_cover_be_picked_while_it_works(tmp_path, qt_
     dialog._set_busy(False)
     assert dialog._cover.pick_button.isEnabled()
     dialog.close()
+
+
+# -- the title an article that names none is offered ----------------------------------
+
+NPUB = "npub1f2ktq2xcmh9wpmv0s6wqu6r9uvlvp7qr6sdqqk87x3dmnc9w0juswgtagx"
+
+
+def test_the_default_title_is_the_first_heading():
+    from nostr.article_details import default_title
+    assert default_title("An opening line.\n\n## *The* heading\n\nMore.") == "The heading"
+    assert default_title("```\n# not a heading\n```\n\n# Real one") == "Real one"
+
+
+def test_without_a_heading_it_is_the_first_line_as_plain_text():
+    from nostr.article_details import default_title
+    assert default_title("*fafuui S s* and **more**\n\nBody.") == "fafuui S s and more"
+    assert default_title("![hero](https://x/y.png)\n\nSee [the post](https://x/p).") \
+        == "See the post."
+    assert default_title("") == ""
+
+
+def test_a_mention_in_the_title_is_its_name_never_its_key():
+    from nostr import bech32
+    from nostr.article_details import default_title
+    pubkey = bech32.decode_npub(NPUB)
+    names = {pubkey: "DrShift"}.get
+    assert default_title(f"*fafuui S s*nostr:{NPUB}", names) == "fafuui S s @DrShift"
+    unknown = default_title(f"*fafuui S s*nostr:{NPUB}")
+    assert unknown == "fafuui S s @npub1f2kt…tagx" and len(unknown) < 30
+    assert default_title(f"`nostr:{NPUB}` in code") == f"nostr:{NPUB} in code"
+
+
+def test_the_window_offers_and_previews_the_same_default_title():
+    """Publish as Article and the preview take an article's title from the
+    one rule (article_details.default_title), not a line of their own."""
+    import inspect
+    from main_window import MainWindow
+    for method in (MainWindow._on_nostr_publish_article, MainWindow._preview_content):
+        source = inspect.getsource(method)
+        assert "default_title(" in source and 'lstrip("# ")' not in source
+
+
+def test_a_carried_picture_description_needs_the_address_itself_in_the_text():
+    """NIP-92, as for the pictures described here: a description another
+    app gave is carried only while its address is in the text, not when
+    the text only holds a longer address that contains it."""
+    details = ArticleDetails.from_tags(IMPORTED_TAGS)
+    assert details.carried_tags(f"![x]({PICTURE})")[-1][1] == f"url {PICTURE}"
+    assert not any(tag[0] == "imeta" for tag in
+                   details.carried_tags(f"See https://proxy.example/?u={PICTURE} now."))
+
+
+def test_a_title_reads_every_kind_of_reference_never_as_a_key():
+    """Review low 2: a first line that quotes a note or an article gave a
+    raw, cut key as the title; "(nostr:npub…)" gave "( @Name)"."""
+    from nostr import bech32
+    from nostr.article_details import default_title
+    pubkey = bech32.decode_npub(NPUB)
+    names = {pubkey: "DrShift"}.get
+    nprofile = bech32.encode_nprofile(pubkey, ["wss://relay.example.com"])
+    nevent = bech32.encode_nevent("e5" * 32, ["wss://relay.example.com"], pubkey)
+    note = bech32.encode_note("e5" * 32)
+    naddr = bech32.encode_naddr(identifier="my-post", author_pubkey_hex=pubkey, kind=30023,
+                                relays=[])
+    assert default_title(f"Thanks (nostr:{NPUB}) and nostr:{nprofile}!", names) \
+        == "Thanks (@DrShift) and @DrShift!"
+    assert default_title(f"nostr:{nevent}\n\nWhy it matters.", names) == "Quoted note"
+    assert default_title(f"As nostr:{note} says", names) == "As Quoted note says"
+    assert default_title(f"Read nostr:{naddr} first", names) == "Read Article first"
+    for title in (default_title(f"x nostr:{e}") for e in (NPUB, nprofile, nevent, note, naddr)):
+        assert "nostr:" not in title and max(len(word) for word in title.split()) < 20
+
+
+def test_a_files_link_name_is_made_from_its_name_as_a_title_is(tmp_path):
+    """Review low 4: a file-backed tab's link name was the file's name as
+    it is ("Grüße an alle"), spaces and all. It is made the way a title's
+    is now; an article this computer published under the file's own name
+    keeps that name, so republishing it replaces it."""
+    import types
+    from main_window import MainWindow
+    from nostr.first_publications import FirstPublications
+    record = FirstPublications(tmp_path / "first.json")
+    window = types.SimpleNamespace(_first_publications=record)
+    name_of = lambda path: MainWindow._link_name_for_file(window, path, PK)  # noqa: E731
+    assert name_of("/notes/Grüße an alle.md") == "grusse-an-alle"
+    assert name_of("") == ""
+    record.remember(PK, "Old Post", 1_700_000_000)
+    assert name_of("/notes/Old Post.md") == "Old Post"
+
+
+def test_the_link_name_shown_before_one_is_typed_is_the_sheets():
+    """Review round 3: for a file's article Article Details offered the
+    link name made of the title, and Publish as Article the one made of
+    the file's name. Both show the sheet's now."""
+    import inspect
+    from main_window import MainWindow
+    from nostr.ui.article_details_panel import ArticleDetailsPanel
+    panel = ArticleDetailsPanel()
+    panel.show_article(ArticleDetails(title="Hello"), fixed_identifier=False,
+                       made_identifier="grusse-an-alle")
+    assert panel.identifier_edit.placeholderText() == "grusse-an-alle"
+    panel.title_edit.setText("Another title")
+    assert panel.identifier_edit.placeholderText() == "grusse-an-alle"
+    panel.show_article(ArticleDetails(title="Hello"), fixed_identifier=False)
+    assert panel.identifier_edit.placeholderText() == "hello"
+    assert "made_identifier=" in inspect.getsource(MainWindow._fill_article_details_panel)

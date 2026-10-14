@@ -68,10 +68,26 @@ def fetch_replaceable(pool, relays: Sequence[str], *, kind: int, author: str,
 
     ``d_tag`` names one event of an addressable kind (an article, kind
     30023, by its identifier): only that one competes."""
+    if d_tag is not None:
+        return fetch_addressable(pool, relays, kind=kind, author=author, d_tags=[d_tag],
+                                 on_done=lambda results: on_done(results[d_tag]),
+                                 timeout_ms=timeout_ms, parent=parent)
     key = (author or "").lower()
     return _ReplaceableQuery(pool, dedupe_relays(relays), kind, [key],
-                             lambda results: on_done(results[key]), timeout_ms, parent,
-                             d_tag=d_tag)
+                             lambda results: on_done(results[key]), timeout_ms, parent)
+
+
+def fetch_addressable(pool, relays: Sequence[str], *, kind: int, author: str,
+                      d_tags: Sequence[str], on_done: Callable[[Dict[str, Lookup]], None],
+                      timeout_ms: int = 6_000,
+                      parent: Optional[QObject] = None) -> "_ReplaceableQuery":
+    """Ask ``relays`` for ``author``'s newest ``kind`` under each of
+    ``d_tags`` (the identifiers an article may have), in one request;
+    ``on_done`` once, with a Lookup per identifier, each classified from
+    the same answers."""
+    names = list(dict.fromkeys(d_tags))
+    return _ReplaceableQuery(pool, dedupe_relays(relays), kind, [(author or "").lower()],
+                             on_done, timeout_ms, parent, d_tags=names)
 
 
 def fetch_replaceable_many(pool, relays: Sequence[str], *, kind: int,
@@ -89,18 +105,21 @@ def fetch_replaceable_many(pool, relays: Sequence[str], *, kind: int,
 
 
 class _ReplaceableQuery(QObject):
-    """One REQ for the newest ``kind`` of one or more authors."""
+    """One REQ for the newest ``kind`` of one or more authors, or of one
+    author under each of ``d_tags``: what it finds is kept per author, or
+    per identifier."""
 
     def __init__(self, pool, relays: List[str], kind: int, authors: List[str], on_done,
-                 timeout_ms: int, parent, *, d_tag: Optional[str] = None) -> None:
+                 timeout_ms: int, parent, *, d_tags: Optional[List[str]] = None) -> None:
         super().__init__(parent)
         self._relays = relays
         self._kind = kind
-        self._d_tag = d_tag
+        self._d_tags = d_tags
         self._authors = authors
         self._on_done = on_done
-        self._best: Dict[str, Optional[dict]] = {a: None for a in authors}
-        self._checked: Dict[str, int] = {a: 0 for a in authors}
+        keys = authors if d_tags is None else d_tags
+        self._best: Dict[str, Optional[dict]] = {k: None for k in keys}
+        self._checked: Dict[str, int] = {k: 0 for k in keys}
         self._overflow: set = set()
         self._rejected: set = set()     # fingerprints of copies that failed the check
         self._answered: List[str] = []
@@ -108,12 +127,12 @@ class _ReplaceableQuery(QObject):
         self._finished = False
         self._sub = None
         self._timer: Optional[QTimer] = None
-        if not relays or not authors:
+        if not relays or not keys:
             QTimer.singleShot(0, self._finish)
             return
-        query = {"kinds": [kind], "authors": list(authors), "limit": 2 * len(authors)}
-        if d_tag is not None:
-            query["#d"] = [d_tag]
+        query = {"kinds": [kind], "authors": list(authors), "limit": 2 * len(keys)}
+        if d_tags is not None:
+            query["#d"] = list(d_tags)
         self._sub = pool.subscribe(relays, [query])
         # However this query goes (answered, or with the object that asked),
         # its subscription goes too: left open, the relays would go on
@@ -134,22 +153,24 @@ class _ReplaceableQuery(QObject):
     def _on_event(self, event: dict) -> None:
         if self._finished or not isinstance(event, dict) or event.get("kind") != self._kind:
             return
-        author = str(event.get("pubkey", "")).lower()
-        if author not in self._best:
-            return
-        if self._d_tag is not None and _d_of(event) != self._d_tag:
-            return          # another article of the same author
-        if not is_newer(event, self._best[author]):
+        key = str(event.get("pubkey", "")).lower()
+        if self._d_tags is not None:
+            if key not in self._authors:
+                return
+            key = _d_of(event)
+        if key not in self._best:
+            return          # another author, or another article of this one
+        if not is_newer(event, self._best[key]):
             return          # older, or the same event again from another relay
         fingerprint = events.fingerprint(event)
         if fingerprint in self._rejected:
             return          # the same forgery again: once is enough
-        if self._checked[author] >= VERIFY_CAP:
-            self._overflow.add(author)
+        if self._checked[key] >= VERIFY_CAP:
+            self._overflow.add(key)
             return
-        self._checked[author] += 1
+        self._checked[key] += 1
         if events.verify_event(event):
-            self._best[author] = event
+            self._best[key] = event
         else:
             self._rejected.add(fingerprint)
 
@@ -178,13 +199,13 @@ class _ReplaceableQuery(QObject):
             self._sub.deleteLater()
         answered = tuple(self._answered)
         results = {}
-        for author, event in self._best.items():
-            if author in self._overflow:
-                results[author] = Lookup(LookupState.UNKNOWN, answered=answered,
-                                         refused=tuple(self._refused), unchecked=True)
+        for key, event in self._best.items():
+            if key in self._overflow:
+                results[key] = Lookup(LookupState.UNKNOWN, answered=answered,
+                                      refused=tuple(self._refused), unchecked=True)
                 continue
-            results[author] = Lookup(state=classify(event, answered), event=event,
-                                     answered=answered, refused=tuple(self._refused))
+            results[key] = Lookup(state=classify(event, answered), event=event,
+                                  answered=answered, refused=tuple(self._refused))
         try:
             self._on_done(results)
         finally:

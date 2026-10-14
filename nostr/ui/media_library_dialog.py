@@ -1899,13 +1899,13 @@ class MediaLibraryDialog(QDialog):
     def _on_server_skipped(self, name: str, host: str, reason: str) -> None:
         self._set_status(
             _("{name}: not stored on {server}, there isn\u2019t enough space left "
-              "there.").format(name=name, server=self._name_for_host(host)),
+              "there.").format(name=self._shown(name), server=self._name_for_host(host)),
             error=False)
 
     def _on_mirror_failed(self, name: str, host: str, _code: str) -> None:
         self._set_status(
             _("{name} is saved, but {server} didn\u2019t take a copy.").format(
-                name=name, server=self._name_for_host(host)),
+                name=self._shown(name), server=self._name_for_host(host)),
             error=False)
 
     def _set_status(self, text: str, *, error: bool = False) -> None:
@@ -1916,13 +1916,18 @@ class MediaLibraryDialog(QDialog):
             color = "#FFB347" if self._is_dark else "#A05000"
         self._status_label.setStyleSheet(f"color: {color};")
 
+    def _shown(self, name: str) -> str:
+        """The name an upload is shown by: its file's (MediaStore.shown_name),
+        not the job's own name another part of the app gave it."""
+        return self._store.shown_name(name)
+
     def _ensure_upload_row(self, name: str) -> QProgressBar:
         bar = self._active_uploads.get(name)
         if bar is not None:
             return bar
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
-        label = QLabel(name)
+        label = QLabel(self._shown(name))
         row.addWidget(label, 1)
         bar = QProgressBar()
         bar.setRange(0, 100)
@@ -1951,7 +1956,7 @@ class MediaLibraryDialog(QDialog):
 
     def _on_upload_started(self, name: str) -> None:
         self._ensure_upload_row(name)
-        self._set_status(_("Uploading {name}…").format(name=name))
+        self._set_status(_("Uploading {name}…").format(name=self._shown(name)))
 
     def _on_upload_progress(self, name: str, sent: int, total: int) -> None:
         bar = self._ensure_upload_row(name)
@@ -1974,18 +1979,19 @@ class MediaLibraryDialog(QDialog):
 
     def _on_upload_finished(self, name: str, _media: object) -> None:
         self._remove_upload_row(name)
-        self._set_status(_("Uploaded {name}.").format(name=name))
+        self._set_status(_("Uploaded {name}.").format(name=self._shown(name)))
         self._refresh_grid()
 
     def _on_upload_failed(self, name: str, reason: str) -> None:
         self._remove_upload_row(name)
-        self._set_status(_("Upload of {name} failed: {reason}").format(name=name, reason=reason),
+        self._set_status(_("Upload of {name} failed: {reason}").format(name=self._shown(name),
+                                                                       reason=reason),
                          error=True)
 
     def _on_upload_rerouted(self, name: str, from_host: str, to_host: str) -> None:
         self._set_status(
             _("{from_host} can't take this file, routing {name} to {to_host} instead.").format(
-                from_host=from_host, name=name, to_host=to_host)
+                from_host=from_host, name=self._shown(name), to_host=to_host)
         )
 
     def _on_file_deleted(self, file_hash: str) -> None:

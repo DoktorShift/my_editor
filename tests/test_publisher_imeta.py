@@ -82,13 +82,52 @@ def test_a_complete_record_emits_every_field_in_a_fixed_order():
         "dim 800x600",
         "alt A kitten",
         "size 12345",
-        f"fallback {MIRROR}/{SHA}",
+        f"fallback {MIRROR}/{SHA}.png",
     ]]
 
 
 def test_the_primary_origin_is_not_repeated_as_a_fallback():
     tags = build_imeta_tags([full_record()], body_with(URL))
-    assert f"fallback {OURS}/{SHA}" not in tags[0]
+    assert not any(entry.startswith(f"fallback {OURS}/") for entry in tags[0])
+
+
+@pytest.mark.parametrize("url, mime, fallback", [
+    (f"{OURS}/{SHA}.png", "image/png", f"{MIRROR}/{SHA}.png"),       # as the primary has it
+    (f"{OURS}/{SHA}.JPG", "image/png", f"{MIRROR}/{SHA}.JPG"),       # its own spelling
+    (f"{OURS}/{SHA}", "audio/mpeg", f"{MIRROR}/{SHA}.mp3"),          # from the type
+    (f"{OURS}/{SHA}", "application/octet-stream", f"{MIRROR}/{SHA}"),  # none known
+    (f"{OURS}/{SHA}.png?x=1", "image/png", f"{MIRROR}/{SHA}.png"),   # not the query
+])
+def test_a_fallback_keeps_the_blobs_file_extension(url, mime, fallback):
+    """BUD-01: a server MUST accept /<sha256> with an optional file
+    extension; the extension is what tells a reader a picture from a
+    sound before it loads, so a fallback keeps the primary's."""
+    tags = build_imeta_tags([full_record(url=url, mime=mime)], body_with(url))
+    assert f"fallback {fallback}" in tags[0]
+
+
+@pytest.mark.parametrize("content", [
+    f"See https://evil.example/?u={URL} for it.",                    # inside another address
+    f"See {URL}.bak, a backup.",                                     # a longer address
+    f"See {URL}x and {OURS}/{SHA}.pngs.",                           # one that goes on
+    f"See https://other.example/{URL}",                              # in another's path
+])
+def test_only_the_address_itself_in_the_text_is_described(content):
+    """NIP-92: an imeta tag SHOULD match a URL in the event content; one
+    that only holds this address inside a longer one is another URL."""
+    assert build_imeta_tags([full_record()], content) == []
+
+
+@pytest.mark.parametrize("content", [
+    f"![A kitten]({URL})",
+    f'![A kitten]({URL} "A title")',
+    f"<{URL}>",
+    f"Look: {URL}.",
+    f"{URL}\nNext line",
+    f"Look ({URL}), then on.",
+])
+def test_the_address_is_found_however_the_text_writes_it(content):
+    assert len(build_imeta_tags([full_record()], content)) == 1
 
 
 def test_unknown_values_are_omitted_rather_than_defaulted():
@@ -270,19 +309,7 @@ def test_an_article_carries_imeta_after_its_metadata_and_before_extras():
         extra_tags=[["source", "https://blog.example/feed"]],
     )
     kinds = [t[0] for t in event["tags"]]
-    assert kinds == ["client", "d", "title", "image", "t", "imeta", "source"]
-
-
-def test_the_content_check_runs_after_mentions_are_appended():
-    # The mention URIs are appended by the builder, so only the builder
-    # holds the final content string the substring guard has to see.
-    event = build_note(
-        body_with(URL), PK,
-        mentions=[(PK, "")],
-        media=[full_record()],
-    )
-    assert len(imeta_of(event)) == 1
-    assert "nostr:nprofile1" in event["content"]
+    assert kinds == ["d", "client", "title", "image", "t", "imeta", "source"]
 
 
 def test_media_defaults_to_nothing_so_no_caller_changes():
@@ -313,3 +340,24 @@ def test_a_draft_keeps_imeta_on_the_inner_event_and_none_on_the_wrap():
     )
     assert imeta_of(wrap) == []
     assert SHA not in json.dumps(wrap)
+
+
+@pytest.mark.parametrize("content", [
+    f"*{URL}*", f"**{URL}**", f"`{URL}`", f"| {URL} |", f"|{URL}|", f"{URL}#frag",
+    f"Look at {URL}…", f"Look: {URL}", f"　{URL}　", f"_{URL}_",
+])
+def test_an_address_in_emphasis_code_a_table_or_after_any_space_is_found(content):
+    """Review low 6: written in emphasis, in code, in a table, with a
+    fragment, before an ellipsis or after a no-break or ideographic space,
+    the address is still the address in the text (NIP-92)."""
+    assert len(build_imeta_tags([full_record()], content)) == 1
+
+
+@pytest.mark.parametrize("content", [f"{URL}_v2", f"foo_{URL}", f"see {URL}_v2 now"])
+def test_an_address_joined_to_a_word_by_an_underscore_is_another_address(content):
+    """Review round 2: "…a.png_v2" and "foo_…a.png" counted as a.png."""
+    assert build_imeta_tags([full_record()], content) == []
+
+
+def test_underscores_around_an_address_are_still_emphasis():
+    assert len(build_imeta_tags([full_record()], f"see _{URL}_ now")) == 1

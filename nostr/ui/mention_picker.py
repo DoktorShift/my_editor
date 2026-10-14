@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Floating popup for picking a person to mention.
 
-Usage from a parent widget (e.g. the publish dialog):
+Usage from a parent widget (e.g. a publish sheet):
 
     picker = MentionPicker(known_people, search_client, parent=self)
     picker.picked.connect(self._on_mention_picked)

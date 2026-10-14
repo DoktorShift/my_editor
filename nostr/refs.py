@@ -137,6 +137,21 @@ def person_name(entity: str,
     return name or short_key(bech32.encode_npub(reference.pubkey))
 
 
+def reference_label(entity: str,
+                    names: Optional[Callable[[str], Optional[str]]] = None) -> str:
+    """How a reference reads where its key would not (a title, the
+    preview): "@" and the person's name (or short key), "Quoted note", or
+    "Article"; the entity as written when it does not decode."""
+    reference = read_entity(entity.removeprefix("nostr:"))
+    if reference is None:
+        return entity
+    if reference.kind == NOTE:
+        return _("Quoted note")
+    if reference.kind == ARTICLE:
+        return _("Article")
+    return "@" + person_name(reference.entity, names)
+
+
 def outside_code(markdown: str, change: Callable[[str], str]) -> str:
     """Apply ``change`` to the Markdown outside fenced code blocks and
     inline code, which show references as they are."""
@@ -156,6 +171,41 @@ def outside_code(markdown: str, change: Callable[[str], str]) -> str:
         parts = re.split(r"(`+[^`]*`+)", line)
         out.append("".join(p if p.startswith("`") else change(p) for p in parts))
     return "\n".join(out)
+
+
+# What may stand right before and after an address written in a note or an
+# article: the start or end, any space (a no-break or an ideographic one
+# too), Markdown's emphasis, code and table marks, brackets and quotes; a
+# fragment ("#...") or an ellipsis after it. A sentence's full stop or
+# comma may follow it, before any of those.
+_BEFORE_ADDRESS = set("(<[\"'*_`|")
+_AFTER_ADDRESS = set(")>]\"'*_`|#\u2026")
+_SENTENCE_MARKS = set(".,;:!?")
+
+
+def address_in(address: str, text: str) -> bool:
+    """Whether ``address`` (a web address) is written in ``text`` as an
+    address of its own: not only inside a longer one (in its path or its
+    query) or as the start of one that goes on ("….png.bak", "….pngx")."""
+    if not address:
+        return False
+    start = text.find(address)
+    while start >= 0:
+        end = start + len(address)
+        before = text[start - 1] if start else " "
+        after = text[end] if end < len(text) else " "
+        if after in _SENTENCE_MARKS:
+            after = text[end + 1] if end + 1 < len(text) else " "
+        # An underscore is emphasis only apart from words ("_address_"),
+        # not one joining the address to a word ("…png_v2", "foo_https:").
+        before_ok = before.isspace() or before in _BEFORE_ADDRESS and not (
+            before == "_" and start > 1 and text[start - 2].isalnum())
+        after_ok = after.isspace() or after in _AFTER_ADDRESS and not (
+            after == "_" and end + 1 < len(text) and text[end + 1].isalnum())
+        if before_ok and after_ok:
+            return True
+        start = text.find(address, start + 1)
+    return False
 
 
 def find_references(content: str, *, markdown: bool = True) -> List[Reference]:

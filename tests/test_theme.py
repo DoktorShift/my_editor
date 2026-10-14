@@ -181,3 +181,82 @@ def test_every_button_box_puts_cancel_first_and_the_default_trailing(qapp, base)
                          QDialogButtonBox.ButtonRole.AcceptRole]
     finally:
         dialog.close()
+
+
+def test_a_window_given_a_style_sheet_is_polished_at_once():
+    """Qt keeps a window's parsed style sheet under the window's address
+    once anything in it is measured, and forgets it only for a window that
+    was polished. A window given a style sheet and dropped unshown (a
+    dialog built and not needed) left its style under that address, and
+    the next window allocated there drew with it: on Linux, Publish as
+    Note's Publish came out in the Media Library's grey after the public
+    copy dialog had been built (review M1). The app polishes a widget as
+    soon as it is given a style sheet (theme.install_style_sheet_guard,
+    which main.py and the tests install)."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QDialog, QLabel, QVBoxLayout
+    dialog = QDialog()
+    QVBoxLayout(dialog).addWidget(QLabel("x"))
+    dialog.setStyleSheet("QLabel { color: #2D2D30; }")
+    assert dialog.testAttribute(Qt.WidgetAttribute.WA_WState_Polished)
+    import inspect
+    import main
+    assert "install_style_sheet_guard(app)" in inspect.getsource(main)
+
+
+def test_a_widget_given_a_style_sheet_under_a_styled_parent_is_polished_too():
+    """Review round 2: Qt sends nothing to a widget given a style sheet
+    while it sits under a styled parent, so the guard's filter missed it;
+    every style sheet set from Python is covered now."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QDialog, QFrame
+    parent = QDialog()
+    parent.setStyleSheet("QLabel { }")
+    child = QFrame(parent)
+    child.setStyleSheet("QPushButton { color: #2D2D30; }")
+    assert child.testAttribute(Qt.WidgetAttribute.WA_WState_Polished)
+
+
+def test_every_style_sheet_goes_through_the_one_that_polishes():
+    """Review round 3, low 5: the guard's application-wide event filter was
+    redundant beside the setStyleSheet wrapper, and cost something on every
+    event; it is gone. What holds instead: the wrapper is installed (a
+    keyword call and a reload of theme keep working), a widget whose style
+    sheet was set before it is polished by the helper, and no module sets
+    an application style sheet or loads .ui files, which would set style
+    sheets past the wrapper."""
+    import importlib
+    import pathlib
+    import re
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication, QFrame, QWidget
+    assert theme.style_sheet_guard_installed()
+    assert not hasattr(QApplication.instance(), "_style_sheet_guard")    # no filter
+    frame = QFrame()
+    frame.setStyleSheet(styleSheet="QFrame { border: none; }")
+    assert frame.testAttribute(Qt.WidgetAttribute.WA_WState_Polished)
+    early = QFrame()
+    theme._set_style_sheet(early, "QFrame { border: none; }")         # past the wrapper
+    assert not early.testAttribute(Qt.WidgetAttribute.WA_WState_Polished)
+    theme.polish_style_sheets(early)
+    assert early.testAttribute(Qt.WidgetAttribute.WA_WState_Polished)
+    importlib.reload(theme)
+    theme.install_style_sheet_guard(QApplication.instance())
+    again = QFrame()
+    again.setStyleSheet("QFrame { border: none; }")                  # no recursion
+    assert again.testAttribute(Qt.WidgetAttribute.WA_WState_Polished)
+    assert QWidget.setStyleSheet is not theme._set_style_sheet
+    root = pathlib.Path(__file__).resolve().parent.parent
+    banned = re.compile(r"(QApplication|QCoreApplication|\bapp|instance\(\))\.setStyleSheet\("
+                        r"|QtUiTools|loadUiType\(")
+    found = [str(path.relative_to(root)) for path in sorted(root.glob("*.py"))
+             + sorted((root / "nostr").rglob("*.py")) + sorted((root / "spelling").rglob("*.py"))
+             if banned.search(path.read_text(encoding="utf-8"))]
+    assert found == []
+
+
+def test_the_live_flows_draw_as_the_app_does():
+    import inspect
+    from tests import smoke_ndak_common
+    source = inspect.getsource(smoke_ndak_common.qt_app)
+    assert "install_style_sheet_guard" in source and "AppStyle" in source

@@ -37,7 +37,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import front_matter  # noqa: E402
 from nostr.article_details import (  # noqa: E402
-    ArticleDetails, from_front_matter, front_matter_with, hashtags_from, hashtags_text,
+    ArticleDetails, from_front_matter, front_matter_with, hashtags_from,
     kept_in_file)
 from tests.app_process import run_window_script  # noqa: E402
 
@@ -337,7 +337,6 @@ def test_a_tag_holding_a_comma_stays_one_tag():
     front, body = front_matter.split('---\ntags: [a, "b, c", \'d\']\n---\n\nB\n')
     details = from_front_matter(front)
     assert details.hashtags == ("a", "b, c", "d")
-    assert hashtags_from(hashtags_text(details.hashtags)) == details.hashtags
     added = details.with_changes(hashtags=details.hashtags + ("Extra",))
     out = front_matter.join(front_matter_with(added, front), body)
     assert "tags: [a, \"b, c\", 'd', Extra]\n" in out
@@ -602,7 +601,11 @@ def test_the_comments_of_a_flow_list_over_lines_are_kept_after_it():
 ])
 def test_an_apostrophe_in_a_typed_hashtag_is_part_of_it(typed, tags):
     assert hashtags_from(typed) == tags
-    assert hashtags_from(hashtags_text(tags)) == tags
+    # Typed or pasted into the hashtags field (tag_field.TagField), the same.
+    from nostr.ui.tag_field import TagField
+    field = TagField()
+    field.entry.setText(typed)
+    assert field.tags() == tags
 
 
 @pytest.mark.parametrize("text, tags", [
@@ -679,7 +682,10 @@ def test_an_escaped_quote_stays_inside_its_hashtag(text, tags):
     ('a "b", c', "d"), ('a\\", b', "c"), ("it's, ok", "x"), ('say "hi"',),
 ])
 def test_a_hashtag_with_quotes_and_commas_comes_back_from_the_field(tags):
-    assert hashtags_from(hashtags_text(tags)) == tags
+    from nostr.ui.tag_field import TagField
+    field = TagField()
+    field.set_tags(tags)
+    assert field.tags() == tags
 
 
 # -- what is read is what a YAML or TOML parser reads (round 7) ----------------

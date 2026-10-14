@@ -191,7 +191,7 @@ from nostr.ui.imports_window import ImportsWindow
 from nostr.imports.constants import IDENTIFIER_PREFIX as IMPORT_IDENTIFIER_PREFIX
 from nostr.imports.constants import SOURCE_TAG as IMPORT_SOURCE_TAG
 from nostr.article_details import (
-    ArticleDetails, front_matter_with)
+    ArticleDetails, default_title, front_matter_with)
 from nostr.first_publications import FirstPublications
 from nostr.drafts import (
     INNER_KIND_LONG_FORM,
@@ -216,7 +216,9 @@ from nostr.publisher import (
     DraftBulkDeleteJob,
     DraftPublishJob,
     PublishedMedia,
+    file_link_names,
     library_audio_video_in,
+    slugify,
 )
 from nostr.relay import RelayPool
 from nostr.search import Nip50SearchClient
@@ -2680,6 +2682,7 @@ class MainWindow(QMainWindow):
             lambda details: self._set_article_details(self.current_editor(), details))
         self._article_details_panel.close_requested.connect(
             lambda: self.act_article_details.setChecked(False))
+        self._article_details_panel.cover_uploaded.connect(self._cover_uploaded_for)
         self._central_splitter.addWidget(self._article_details_panel)
         self._central_splitter.addWidget(self._drafts_panel)
         # Editor takes all stretch; the panels start hidden.
@@ -3847,7 +3850,7 @@ class MainWindow(QMainWindow):
         """The name Article Details gives a detail of the front matter
         (article_details._FRONT_KEYS)."""
         return {"title": _("Title"), "summary": _("Summary"), "image": _("Cover image"),
-                "tags": _("Hashtags"), "slug": _("Slug (article ID)"),
+                "tags": _("Hashtags"), "slug": _("Link name"),
                 "date": _("Date"), "coauthors": _("Co-Authors"),
                 "zap_split": _("Share zaps equally with co-authors")}[detail]
 
@@ -5559,6 +5562,11 @@ class MainWindow(QMainWindow):
             window = getattr(self, name, None)
             if window is not None:
                 window.apply_theme(self.is_dark_theme)
+        # A publish sheet open on the window (window-modal: the menus and
+        # the system's appearance still reach the app).
+        sheet = getattr(self, "_publish_sheet", None)
+        if sheet is not None and shiboken6.isValid(sheet):
+            sheet.apply_theme(self.is_dark_theme)
 
     def _on_os_color_scheme_changed(self, scheme):
         if not self._follow_os_theme:
@@ -5819,8 +5827,7 @@ class MainWindow(QMainWindow):
         if rich_text.orphan_notes(ed.document()):
             checks.append(_("A note no mark refers to: most apps leave it out."))
         details = self._article_details_of(ed)
-        title = details.title or next(
-            (line.lstrip("# ").strip() for line in markdown.splitlines() if line.strip()), "")
+        title = details.title or default_title(markdown, self._preview_name)
         first = next((line for line in markdown.splitlines() if line.strip()), "")
         if details.title and first.startswith("# ") and first[2:].strip() == details.title:
             # Said only for a title set on purpose: without one, the title
@@ -6754,12 +6761,17 @@ class MainWindow(QMainWindow):
             known_people=self._known_people,
             search_client=self._search_client,
             avatars=self._avatars,
+            address_check=self._address_check,
             media=media,
             parent=self,
             is_dark=self.is_dark_theme,
         )
         dialog.published.connect(self._on_nostr_note_published)
-        dialog.exec()
+        # Composed for sharing, as a share sheet is: the document is not
+        # changed by what is changed in it.
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._publish_sheet = dialog
+        dialog.open()
 
     def _toggle_ticks(self) -> None:
         ed = self.current_editor()
@@ -6820,8 +6832,19 @@ class MainWindow(QMainWindow):
         else:
             fixed = (binding is not None and binding.inner_kind == INNER_KIND_LONG_FORM) or \
                 self._published_article_of(ed) is not None
-            panel.show_article(self._article_details_of(ed), fixed_identifier=fixed,
-                               kept_in_file=self._article_details_of(ed).kept)
+            details = self._article_details_of(ed)
+            # The link name the sheet starts with for a file's article.
+            profile = self._profile_store.default()
+            made = (self._link_name_for_file(self.current_path(), profile.user_pubkey)
+                    if not details.identifier and profile is not None else "")
+            panel.show_article(details, fixed_identifier=fixed, kept_in_file=details.kept,
+                               document=ed, made_identifier=made)
+
+    def _cover_uploaded_for(self, ed, url: str) -> None:
+        """A picture dropped in Article Details as the cover of ``ed``'s
+        article is uploaded, with another tab in front now: ``ed``'s cover."""
+        if ed is not None and shiboken6.isValid(ed):
+            self._set_article_details(ed, self._article_details_of(ed).with_changes(image=url))
 
     def _pick_coauthor(self, anchor, chosen) -> None:
         """Who writes the article with its author, asked under ``anchor`` the
@@ -6838,10 +6861,8 @@ class MainWindow(QMainWindow):
 
     def _person_name(self, pubkey: str) -> str:
         """How a person is called: their name when known, else their short
-        Nostr address."""
-        person = self._known_people.get(pubkey)
-        return (person.display_name if person is not None and person.display_name
-                else refs.short_key(encode_npub(pubkey)))
+        Nostr address (KnownPeople.name_of)."""
+        return self._known_people.name_of(pubkey)
 
     # -- mentions ----------------------------------------------------------------
 
@@ -7136,7 +7157,7 @@ class MainWindow(QMainWindow):
             self._refresh_asset_in_documents(sha)
 
     # -- secret keys: never pasted where Nostr is written ---------------------
-    # (nor published: nostr/ui/secret_key_check.py, at the publish dialogs)
+    # (nor published: nostr/ui/secret_key_check.py, at the publish sheets)
 
     def _guard_paste(self, ed, text: str):
         """A paste with a Nostr secret key in it, into prose while a Nostr
@@ -7181,22 +7202,21 @@ class MainWindow(QMainWindow):
         #      ``d`` and title from its draft, preserving the addressable
         #      coordinate so re-publishing replaces the draft in place).
         #   2. File path basename for disk-backed tabs.
-        #   3. First non-blank line as a heuristic title for free-form tabs.
+        #   3. The first heading, else the first line, as plain text, for
+        #      a title (article_details.default_title).
         # A draft of an article (an import, an edit) brings all its details:
         # summary, cover, hashtags, source, and when it first went out (a
         # new version keeps that date).
         details = self._article_details_of(ed)
-        default_title = details.title
+        title = details.title or default_title(body, self._preview_name)
         default_slug = details.identifier
         first_published = details.published_at
-        if not default_title:
-            first_line = next((ln for ln in body.splitlines() if ln.strip()), "")
-            default_title = first_line.lstrip("# ").strip()
+        file_name = ""
         if not default_slug:
-            path = self.current_path()
-            default_slug = (
-                os.path.splitext(os.path.basename(path))[0] if path else ""
-            )
+            default_slug = self._link_name_for_file(self.current_path(), active.user_pubkey)
+            # The file's name as it is, which version 3.3 published files
+            # under: the sheet asks the relays about it at Publish.
+            file_name = self._file_name(self.current_path())
 
         dialog = PublishArticleDialog(
             body_markdown=body,
@@ -7209,12 +7229,15 @@ class MainWindow(QMainWindow):
             known_people=self._known_people,
             search_client=self._search_client,
             avatars=self._avatars,
+            address_check=self._address_check,
+            can_receive_zaps=self._ask_can_receive_zaps,
             media_store=self._media_store,
             media_visibility=self._media_visibility,
             copy_maker=self._copy_maker,
             private_library=self._private_library,
-            default_title=default_title,
+            default_title=title,
             default_slug=default_slug,
+            file_name=file_name,
             first_published=first_published,
             details=details,
             first_publications=self._first_publications,
@@ -7223,9 +7246,37 @@ class MainWindow(QMainWindow):
             is_dark=self.is_dark_theme,
         )
         dialog.published.connect(self._on_nostr_article_published)
-        dialog.exec()
-        # What was changed there is the article's, as in Article Details.
-        if dialog.details_changed():
+        dialog.finished.connect(lambda _result, d=dialog, e=ed: self._article_sheet_closed(d, e))
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._publish_sheet = dialog
+        dialog.open()
+
+    @staticmethod
+    def _file_name(path: str) -> str:
+        """A file's name without its extension ("My Post" for My Post.md)."""
+        return os.path.splitext(os.path.basename(path))[0] if path else ""
+
+    def _link_name_for_file(self, path: str, author: str) -> str:
+        """The link name a file-backed article starts with: made from the
+        file's name as a title's is ("Grüße an alle.md" is
+        "grusse-an-alle"), unless this computer published it under the
+        name as it is (as the file system gives it, or composed), which it
+        then keeps exactly (another would be another article). Published
+        elsewhere, or by version 3.3, which kept no record, the sheet finds
+        that out from the relays at Publish (file_name)."""
+        name = MainWindow._file_name(path)
+        if not name:
+            return ""
+        record = getattr(self, "_first_publications", None)
+        for own in file_link_names(name) if record is not None else ():
+            if record.get(author, own):
+                return own
+        return slugify(name)
+
+    def _article_sheet_closed(self, dialog, ed) -> None:
+        """Publish as Article closed, published or not: what was changed
+        there is the article's, as in Article Details."""
+        if ed is not None and shiboken6.isValid(ed) and dialog.details_changed():
             self._set_article_details(ed, dialog.details())
 
     def _on_nostr_article_published(self, _naddr: str, results):
@@ -7769,7 +7820,7 @@ class MainWindow(QMainWindow):
     def _on_panel_publish_draft(self, identifier: str) -> None:
         """Promote a draft to a real (signed, public) Nostr publish.
 
-        Routes through the existing publish dialogs. The simplest path:
+        Routes through the existing publish sheets. The simplest path:
         open the draft into a tab (so all current-tab-reading plumbing
         keeps working) then trigger the appropriate publish action.
         """
@@ -7875,11 +7926,11 @@ class MainWindow(QMainWindow):
                 "This action can't be undone.", replaced))
         if keyed:
             lines.append(ngettext(
-                "A draft whose slug holds a secret key is deleted by a request instead, "
+                "A draft whose link name holds a secret key is deleted by a request instead, "
                 "which doesn't send the key again. Your other devices, and apps that "
                 "follow such requests, will treat it as removed. This action can't be "
                 "undone.",
-                "Drafts whose slugs hold a secret key are deleted by a request each "
+                "Drafts whose link names hold a secret key are deleted by a request each "
                 "instead, which doesn't send the keys again. Your other devices, and apps "
                 "that follow such requests, will treat them as removed. This action can't "
                 "be undone.", keyed))

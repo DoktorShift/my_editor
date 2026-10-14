@@ -36,16 +36,18 @@ on the draft's wrap, and a draft the person saved has none.
 from __future__ import annotations
 
 import functools
-import json
 import re
 from dataclasses import dataclass, field, fields, replace
 from datetime import date, datetime, timezone
-from typing import AbstractSet, Any, FrozenSet, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import (
+    AbstractSet, Any, Callable, FrozenSet, Iterable, List, Optional, Sequence, Tuple, Union,
+)
 
 import front_matter
 
 from . import refs
 from .bech32 import encode_nprofile, encode_npub
+from .drafts import derive_title_from_markdown, flatten_markdown_inline
 
 # Tags MyEditor writes itself; every other tag is carried as it is.
 DETAILS = ("d", "title", "summary", "image", "published_at", "t")
@@ -57,20 +59,53 @@ REBUILT = ("client", "p", "q")
 AUTHOR_MARKER = "author"
 
 
+# A heading line (CommonMark: one to six "#" and a space), and a reference.
+_HEADING = re.compile(r"^\s{0,3}#{1,6}\s")
+_REFERENCE = re.compile(r"nostr:((?:npub|nprofile|note|nevent|naddr)1[02-9ac-hj-np-z]+)")
+
+
+def default_title(markdown: str,
+                  names: Optional[Callable[[str], Optional[str]]] = None) -> str:
+    """The title offered for an article that names none (the publish
+    window, the preview): its first heading, else its first line with
+    words, as plain text without Markdown. A reference never reads as a
+    key: a mention is "@" and the person's name (``names``: pubkey -> name
+    or None) or their short key, a quoted note or article a short label
+    (refs.reference_label). Code blocks are not looked at; inline code is
+    kept as written."""
+    lines = []
+    fence = None
+    for line in (markdown or "").split("\n"):
+        stripped = line.lstrip()
+        if fence is not None:
+            if stripped.startswith(fence):
+                fence = None
+        elif stripped.startswith(("```", "~~~")):
+            fence = stripped[:3]
+        else:
+            lines.append(line)
+
+    def named(text: str) -> str:
+        def label(found) -> str:
+            # Apart from a word before it ("*Words*nostr:…"), not from a
+            # bracket ("(nostr:…)").
+            before = text[found.start() - 1] if found.start() else " "
+            apart = " " if before.isalnum() or before in "*_~`" else ""
+            return apart + refs.reference_label(found.group(1), names)
+        return _REFERENCE.sub(label, text)
+
+    text = refs.outside_code("\n".join(lines), named)
+    heading = next((line for line in text.split("\n")
+                    if _HEADING.match(line) and flatten_markdown_inline(line.lstrip(" #"))), "")
+    return derive_title_from_markdown(heading or text)
+
+
 def hashtags_from(text: str) -> Tuple[str, ...]:
     """The hashtags written in ``text``, separated by commas (one holding a
-    comma in double quotes, as hashtags_text writes it; an apostrophe is a
-    letter, "don't panic"): without "#", each
-    once whatever its case, in the order and the case written (an article's
-    ``t`` tags are lowercase, as they are published)."""
+    comma in double quotes; an apostrophe is a letter, "don't panic"):
+    without "#", each once whatever its case, in the order and the case
+    written (an article's ``t`` tags are lowercase, as they are published)."""
     return _hashtags(front_matter.split_items(text or "", quotes='"'))
-
-
-def hashtags_text(hashtags: Sequence[str]) -> str:
-    """``hashtags`` as they are typed in a field: separated by commas, one
-    holding a comma or a double quote in double quotes, so it stays whole."""
-    return ", ".join(json.dumps(tag, ensure_ascii=False) if any(c in tag for c in ',"')
-                     else tag for tag in hashtags)
 
 
 def _hashtags(items: Iterable[str]) -> Tuple[str, ...]:
@@ -169,7 +204,7 @@ class ArticleDetails:
         for tag in self.carried:
             if tag[0] == "imeta":
                 url = next((part[4:] for part in tag[1:] if part.startswith("url ")), "")
-                if not url or url not in content:
+                if not url or not refs.address_in(url, content):
                     continue
             kept.append(list(tag))
         return kept
@@ -276,16 +311,17 @@ def _detail(key: str, value: Union[str, List[str], None]) -> Any:
     text, a list of texts; None for no entry): its hashtags, its moment,
     its items, or its text."""
     if key == "tags":
-        return _hashtags(value) if isinstance(value, list) else _string_tags(value or "")
+        return _hashtags(value) if isinstance(value, list) else hashtags_written(value or "")
     if key in ("coauthors", "zap_split"):
         return value if isinstance(value, list) else (value or "").split(",")
     text = value.strip() if isinstance(value, str) else ""
     return _moment(text) if key == "date" else text
 
 
-def _string_tags(written: str) -> Tuple[str, ...]:
+def hashtags_written(written: str) -> Tuple[str, ...]:
     """The hashtags a string of them holds: separated by commas, else by
-    spaces, as Jekyll reads "tags: ruby jekyll"."""
+    spaces, as Jekyll reads "tags: ruby jekyll" (a front matter's string,
+    or what is typed or pasted into the hashtags field)."""
     return hashtags_from(written) if "," in written else _hashtags(written.split())
 
 
@@ -595,7 +631,8 @@ def _with_detail(entries: List[front_matter.Entry], syntax: str, key: str, value
     # its way (a string of tags; in quotes, a list of texts), so the check
     # holds what is read back to it, not to what that way reads.
     meant = _detail(key, value)
-    if in_files_way and isinstance(current.value, str) and len(_string_tags(current.value)) > 1:
+    if in_files_way and isinstance(current.value, str) \
+            and len(hashtags_written(current.value)) > 1:
         # Written as a string of tags ("ruby jekyll", "a, b"): a string
         # again, in its way, while it can hold each tag whole. A string
         # of one tag, or none, is no such way: Hugo and Eleventy read

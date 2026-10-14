@@ -30,7 +30,7 @@ from constants import (
 from fonts import code_font, writing_font
 from i18n import N_, _, ngettext
 import announce
-from doc_walk import iter_blocks
+from doc_walk import doc_length, doc_offset, iter_blocks, text_index
 import image_safety
 import file_paths
 import link_url
@@ -1160,7 +1160,8 @@ class HtmlEditor(QTextEdit):
         block = cursor.block()
         if rich_text.is_code_block(block) or rich_text.holds_link_or_code(cursor):
             return
-        before = block.text()[:cursor.positionInBlock() - 1]
+        text = block.text()
+        before = text[:text_index(text, cursor.positionInBlock()) - 1]
         if before and not (before[-1].isspace() or before[-1] in "([{\"'\u201c\u2018"):
             return
         self.mention_requested.emit(cursor.position() - 1)
@@ -1188,7 +1189,8 @@ class HtmlEditor(QTextEdit):
         block = cursor.block()
         if rich_text.is_code_block(block) or cursor.currentTable() is not None:
             return
-        before = block.text()[:cursor.positionInBlock() - 1]
+        text = block.text()
+        before = text[:text_index(text, cursor.positionInBlock()) - 1]
         if before and not before[-1].isspace():
             return
         self._slash_at = cursor.position() - 1
@@ -1660,8 +1662,9 @@ class HtmlEditor(QTextEdit):
         block = cursor.block()
         if rich_text.is_code_block(block):
             return ""
-        offset = cursor.positionInBlock()
-        for found in rich_text.FOOTNOTE_MARK.finditer(block.text()):
+        text = block.text()
+        offset = text_index(text, cursor.positionInBlock())
+        for found in rich_text.FOOTNOTE_MARK.finditer(text):
             if found.start() <= offset <= found.end():
                 return rich_text.footnote_text(self.document(), found.group(1))
         return ""
@@ -1777,7 +1780,7 @@ class HtmlEditor(QTextEdit):
         c.endEditBlock()
 
         if cursor_pos_after is None:
-            cursor_pos_after = start_pos + len(new_text)
+            cursor_pos_after = start_pos + doc_length(new_text)
 
         nc = self.textCursor()
         nc.setPosition(cursor_pos_after)
@@ -1797,7 +1800,9 @@ class HtmlEditor(QTextEdit):
         else:
             new_line = " " * max(0, spaces - tab_width) + line[spaces:]
         bullet_pos = new_line.find("• ")
-        move_to = start + bullet_pos + 2 if bullet_pos >= 0 else start + len(new_line.rstrip())
+        # (Places in the line as places in the document: an emoji takes two.)
+        move_to = (start + doc_offset(new_line, bullet_pos + 2) if bullet_pos >= 0
+                   else start + doc_length(new_line.rstrip()))
         with self.undo_step(_INDENT_STEPS[delta]):
             self._set_line_text(start, new_line, move_to)
         if delta > 0:
@@ -2268,7 +2273,8 @@ class HtmlEditor(QTextEdit):
         if key in (Qt.Key_Return, Qt.Key_Enter) and (plain or shift):
             # The new line starts as far in as the caret's line (after any
             # line break in the block), no further than the caret.
-            before = block.text()[:cursor.positionInBlock()]
+            text = block.text()
+            before = text[:text_index(text, cursor.positionInBlock())]
             line = before[before.rfind(LINE_BREAK) + 1:]
             indent = line[:len(line) - len(line.lstrip(" \t"))]
             with self._typing(TYPED, cursor):

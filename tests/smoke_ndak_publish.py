@@ -28,7 +28,11 @@ import smoke_ndak_common as nd  # noqa: E402
 nd.bootstrap("publish")
 app = nd.qt_app()
 
+from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtTest import QTest  # noqa: E402
+
 from nostr import bech32, crypto  # noqa: E402
+from nostr.article_details import default_title  # noqa: E402
 from nostr.avatar_store import AvatarStore  # noqa: E402
 from nostr.known_people import KnownPeople, Person  # noqa: E402
 from nostr.outbox import policy  # noqa: E402
@@ -58,19 +62,31 @@ def names(relays) -> str:
     return ", ".join(sorted(nd.RELAY_NAMES.get(r, r) for r in relays)) or "none"
 
 
-def note_dialog(profile, content: str, chips=(), entitled=lambda: []):
+def mention(dialog, person):
+    """Mention ``person`` at the end of the note, as a person does: type
+    " @" and choose them in the picker that opens."""
+    edit = dialog._text_edit
+    cursor = edit.textCursor()
+    cursor.movePosition(cursor.MoveOperation.End)
+    edit.setTextCursor(cursor)
+    QTest.keyClicks(edit, " @")
+    dialog._picker.picked.emit(person)
+
+
+def note_dialog(profile, content: str, mentions=(), entitled=lambda: []):
     dialog = PublishNoteDialog(
         content=content, active_profile=profile, store=stack.store,
         relay_pool=stack.pool, relay_directory=stack.directory,
         session_pool=stack.sessions, entitled_relays=entitled,
         known_people=known, search_client=search, avatars=avatars, is_dark=False)
-    for person in chips:
-        dialog._mention_row._on_picked(person)
+    dialog.show()
+    for person in mentions:
+        mention(dialog, person)
     return dialog
 
 
-def publish_note(profile, content: str, chips=(), entitled=lambda: [], timeout_ms=25_000):
-    dialog = note_dialog(profile, content, chips, entitled)
+def publish_note(profile, content: str, mentions=(), entitled=lambda: [], timeout_ms=25_000):
+    dialog = note_dialog(profile, content, mentions, entitled)
     published = nd.Catch(dialog.published)
     dialog._on_publish()
     nd.wait_until(lambda: published.fired or (dialog._job is None and
@@ -135,30 +151,35 @@ if rep.check("the note dialog publishes and closes", published.fired,
                   dialog._status.text())
 
 # --------------------------------------------------------------------------- #
-rep.section("Note with mentions: chips and an inline nostr:npub (other people's ws:// relays refused)")
+rep.section("Note with mentions: chosen after @ and an inline nostr:npub "
+            "(other people's ws:// relays refused)")
 
 dave_npub = bech32.encode_npub(dave)
 content_2 = f"Hello nostr:{dave_npub}, mentions test {uuid.uuid4().hex[:6]}"
-chips = [Person(pubkey=bob, display_name="Bob ndak", relay_hint=KHATRU, source="search"),
+picked = [Person(pubkey=bob, display_name="Bob ndak", relay_hint=KHATRU, source="search"),
          Person(pubkey=carol, display_name="Carol ndak", source="contact")]
-dialog, published = publish_note(alice, content_2, chips)
+dialog, published = publish_note(alice, content_2, picked)
 if rep.check("a note with mentions publishes", published.fired, dialog._status.text()):
     note2_id, results = published.last
     ev = fetch_one(note2_id)
     if ev:
         nd.review_event(rep, "note with mentions", ev, kind=1)
         p_tags = [t for t in ev["tags"] if t[0] == "p"]
-        rep.check("p tags: inline mention first, then the chips, each once",
+        rep.check("p tags: each mention once, in the order of the text",
                   [t[1] for t in p_tags] == [dave, bob, carol], json.dumps(p_tags))
-        rep.check("the chip with a relay hint carries it in its p tag (NIP-10)",
+        rep.check("a mention chosen with a relay carries it in its p tag (NIP-10)",
                   ["p", bob, KHATRU] in p_tags and ["p", carol] in p_tags, json.dumps(p_tags))
-        tail = ev["content"].split("\n\n")[-1].split(" ")
-        decoded = [bech32.decode_nprofile(u[len("nostr:"):]) for u in tail if u.startswith("nostr:nprofile1")]
-        rep.check("chips are appended as nostr:nprofile URIs (NIP-27), the inline npub kept",
-                  ev["content"].startswith(content_2) and decoded == [(bob, [KHATRU]), (carol, [])],
+        rep.check("the People row named exactly the people tagged",
+                  [pk for pk, _name in dialog._people.people()] == [t[1] for t in p_tags],
+                  str(dialog._people.people()))
+        tail = ev["content"][len(content_2):].split()
+        rep.check("the mentions are in the text as nostr: URIs (NIP-27), the inline npub kept",
+                  ev["content"].startswith(content_2)
+                  and tail == [f"nostr:{bech32.encode_nprofile(bob, [KHATRU])}",
+                               f"nostr:{bech32.encode_npub(carol)}"],
                   repr(ev["content"][len(content_2):]))
         nak_decoded = nd.nak("decode", tail[0][len("nostr:"):]).stdout.strip()
-        rep.check("nak decodes the appended nprofile", bob in nak_decoded, nak_decoded[:160])
+        rep.check("nak decodes the mention's nprofile", bob in nak_decoded, nak_decoded[:160])
         where = present_on(note2_id)
         rep.check("by design, other people's ws://localhost read relays are not used "
                   "(is_public_relay): the note stays on Alice's relays",
@@ -184,8 +205,8 @@ rep.check("publish plan: Alice's outbox, then everyone's first read relay in tur
           and list(plan.inbox) == [KHATRU, OBELISK, STRFRY],
           f"author {plan.author if plan else None}, inbox {plan.inbox if plan else None}")
 content_3 = f"Routing test {uuid.uuid4().hex[:6]} for nostr:{dave_npub}"
-chips3 = chips + [Person(pubkey=erin, display_name="Erin", relay_hint=STRFRY, source="mention")]
-dialog, published = publish_note(alice, content_3, chips3)
+picked3 = picked + [Person(pubkey=erin, display_name="Erin", relay_hint=STRFRY, source="mention")]
+dialog, published = publish_note(alice, content_3, picked3)
 if rep.check("a note mentioning four people publishes", published.fired, dialog._status.text()):
     note3_id, results = published.last
     ev = fetch_one(note3_id)
@@ -231,7 +252,8 @@ def article_dialog(profile, body, *, title, summary, slug, image, tags):
     dialog._summary_edit.setText(summary)
     dialog._slug_edit.setText(slug)
     dialog._image_edit.setText(image)
-    dialog._tags_edit.setText(tags)
+    QTest.keyClicks(dialog._hashtags.entry, tags)
+    QTest.keyClick(dialog._hashtags.entry, Qt.Key.Key_Return)
     return dialog
 
 
@@ -306,6 +328,143 @@ if rep.check("editing the article (same slug) publishes", published2.fired, d2._
                   "(publish_article_dialog.py sets published_at=int(time.time()) on every publish)")
         rep.event("article, edited", edited, claimed=[u for u, ok, _ in published2.last[1] if ok],
                   expected=[RNOSTR, NRS], present=nd.presence(edited["id"]))
+
+# --------------------------------------------------------------------------- #
+rep.section("An article whose first line is italic words and a mention")
+
+known.upsert(Person(pubkey=bob, display_name="Bob ndak", relay_hint=KHATRU, source="search"))
+words = f"Fafuui {uuid.uuid4().hex[:6]}"
+body_m = f"*{words}*nostr:{bob_npub}\n\nThe rest of the article, written by the smoke test.\n"
+
+
+def known_name(pubkey):
+    person = known.get(pubkey)
+    return person.display_name if person is not None else None
+
+
+# As the window offers it (main_window: article_details.default_title).
+title_m = default_title(body_m, known_name)
+dm = PublishArticleDialog(
+    body_markdown=body_m, active_profile=alice, store=stack.store, relay_pool=stack.pool,
+    relay_directory=stack.directory, session_pool=stack.sessions, entitled_relays=lambda: [],
+    known_people=known, search_client=search, avatars=avatars, default_title=title_m,
+    is_dark=False)
+slug_m = dm._slug_edit.text()
+rep.check("the title is the words and the person's name, without Markdown or a key",
+          title_m == f"{words} @Bob ndak" and dm._title_edit.text() == title_m
+          and "npub1" not in title_m and "nostr:" not in title_m and "*" not in title_m,
+          title_m)
+rep.check("the link name is short and readable, never a key",
+          slug_m == f"{words.lower().replace(' ', '-')}-bob-ndak" and len(slug_m) <= 48
+          and "npub" not in slug_m, slug_m)
+shown_people = dm._people.people()
+rep.check("People names Bob as mentioned, by name",
+          shown_people == [(bob, "Bob ndak, mentioned")], str(shown_people))
+published_m = nd.Catch(dm.published)
+dm._on_publish()
+nd.wait_until(lambda: published_m.fired or (dm._job is None and not dm._looking_up
+                                             and not dm._status.isHidden()
+                                             and "not published" in dm._status.text()), 40_000)
+if rep.check("the article publishes", published_m.fired, dm._status.text()):
+    found = nd.nak_req([RNOSTR, NRS], kinds=[30023], authors=[alice.user_pubkey],
+                       tags={"d": [slug_m]})
+    if rep.check("it is on the relays under its link name", bool(found), slug_m):
+        ev = found[0]
+        nd.review_event(rep, "article with a mention", ev, kind=30023)
+        rep.check("its title tag has no key", nd.tag_values(ev, "title") == [title_m],
+                  json.dumps(nd.tag_values(ev, "title")))
+        rep.check("its p tags are exactly the People row",
+                  [t[1] for t in ev["tags"] if t[0] == "p"] == [pk for pk, _n in shown_people],
+                  json.dumps([t for t in ev["tags"] if t[0] == "p"]))
+        rep.check("its text still carries the nostr:npub reference (NIP-27)",
+                  ev["content"] == body_m.strip() and f"nostr:{bob_npub}" in ev["content"],
+                  repr(ev["content"][:120]))
+    # rnostr files an article under its first tag: with the client tag
+    # first, as before, every article took the place of the author's last.
+    still = {nd.RELAY_NAMES[r]: len(nd.nak_req([r], kinds=[30023], authors=[alice.user_pubkey],
+                                               tags={"d": [slug]})) for r in (RNOSTR, NRS)}
+    rep.check("the article before it is still on every relay (its d tag comes first)",
+              all(n == 1 for n in still.values()), json.dumps(still))
+
+# --------------------------------------------------------------------------- #
+rep.section("A file's article that version 3.3 published under the file's own name")
+
+from nostr.first_publications import FirstPublications  # noqa: E402
+from nostr.publisher import slugify  # noqa: E402
+
+own_name = f"My Post {uuid.uuid4().hex[:6]}"
+old_at = int(time.time()) - 86_400 * 30
+# As version 3.3 published "My Post ….md": the file's name as it is, no
+# record kept, and its tags in 3.3's order (the client tag before d).
+nd.nak_publish(alice_sk.hex(), [RNOSTR, NRS], kind=30023, content="Written in 3.3.",
+               tags=[["client", "MyEditor"], ["d", own_name], ["title", "My Post"],
+                     ["published_at", str(old_at)]],
+               created_at=old_at)
+record = FirstPublications(nd.HOME / "first_publications_ndak.json")
+
+
+def file_sheet(name):
+    return PublishArticleDialog(
+        body_markdown="Edited later.", active_profile=alice, store=stack.store,
+        relay_pool=stack.pool, relay_directory=stack.directory, session_pool=stack.sessions,
+        entitled_relays=lambda: [], known_people=known, search_client=search, avatars=avatars,
+        default_title="My Post", default_slug=slugify(name), file_name=name,
+        first_publications=record, is_dark=False)
+
+
+df = file_sheet(own_name)
+nd.spin(500)
+rep.check("nothing is asked before Publish: the sheet shows the made link name",
+          df._slug_edit.text() == slugify(own_name) and not df._looking_up
+          and df._status.isHidden(), df._slug_edit.text())
+published_f = nd.Catch(df.published)
+df._on_publish()
+nd.wait_until(lambda: published_f.fired or (df._job is None and not df._looking_up
+                                             and "not published" in df._status.text()), 40_000)
+if rep.check("republishing it publishes", published_f.fired, df._status.text()):
+    rep.check("asked at Publish, it went out under the file's own name, as it is",
+              df.details().identifier == own_name and df._slug_edit.text() == own_name,
+              df.details().identifier)
+    rep.check("and this computer recorded it, with its first date",
+              record.get(alice.user_pubkey, own_name) == old_at,
+              str(record.get(alice.user_pubkey, own_name)))
+    took = [url for url, ok, _message in published_f.last[1] if ok]
+    rep.info("relays that took the new version", ", ".join(took) + " / " + json.dumps(
+        [list(r) for r in published_f.last[1]]))
+    nd.spin(1500)
+    # Per relay, the newest version under the file's name: readers take
+    # the newest. rnostr files an article under its first tag, which in
+    # 3.3 was the client tag, so it keeps the 3.3 version beside the new
+    # one (whose d tag comes first) for good; the others replace it.
+    newest, versions = {}, {}
+    for relay in took:
+        found = nd.nak_req([relay], kinds=[30023], authors=[alice.user_pubkey],
+                           tags={"d": [own_name]})
+        versions[nd.RELAY_NAMES.get(relay, relay)] = len(found)
+        if found:
+            newest[nd.RELAY_NAMES.get(relay, relay)] = max(found, key=lambda e: e["created_at"])
+    made = nd.nak_req([RNOSTR, NRS], kinds=[30023], authors=[alice.user_pubkey],
+                      tags={"d": [slugify(own_name)]})
+    rep.check("it replaced the article under the file's name, and made no second one",
+              len(newest) == len(took) and made == []
+              and all(e["content"] == "Edited later." for e in newest.values()),
+              f"newest under the name {({r: e['content'] for r, e in newest.items()})}, "
+              f"under {slugify(own_name)} {len(made)}")
+    rep.check("a relay that files articles by their d tag keeps one version",
+              versions.get(nd.RELAY_NAMES[NRS]) == 1, json.dumps(versions))
+    rep.info("versions under the file's name per relay (rnostr keeps 3.3's, filed under "
+             "its client tag)", json.dumps(versions))
+    dates = sorted({d for e in newest.values() for d in nd.tag_values(e, "published_at")})
+    rep.check("it keeps its first publication date", dates == [str(old_at)], json.dumps(dates))
+fresh_name = f"Fresh Post {uuid.uuid4().hex[:6]}"
+dn = file_sheet(fresh_name)
+published_n = nd.Catch(dn.published)
+dn._on_publish()
+nd.wait_until(lambda: published_n.fired or (dn._job is None and not dn._looking_up
+                                             and "not published" in dn._status.text()), 40_000)
+rep.check("a file never published under its name goes out under the made link name",
+          published_n.fired and dn.details().identifier == slugify(fresh_name),
+          dn.details().identifier)
 
 # --------------------------------------------------------------------------- #
 rep.section("Deleting published notes and articles (NIP-09 kind 5)")

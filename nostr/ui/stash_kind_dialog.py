@@ -52,7 +52,7 @@ from ..drafts import (
     INNER_KIND_SHORT_NOTE,
     new_note_identifier,
 )
-from ..publisher import slugify
+from ..publisher import link_name, slugify
 from .secret_key_check import slug_problem
 
 
@@ -313,6 +313,9 @@ class StashKindDialog(QDialog):
         # Tracks whether the user has touched the slug manually; until
         # they do, the slug mirrors slugify(title) in real time.
         self._slug_is_auto = not bool(suggested_slug) and "identifier" not in self._kept
+        # The link name the article has already, kept letter for letter
+        # (link_name).
+        self._kept_slug = suggested_slug
         self._choice: Optional[StashChoice] = None
 
         self._build_ui(
@@ -376,14 +379,14 @@ class StashKindDialog(QDialog):
             title=_("Short note"),
             hint=_(
                 "A quick thought, as plain text. Published as a note. "
-                "No slug: the draft gets a private identifier."
+                "No link name: the draft gets a private identifier."
             ),
         )
         self._article_card = _KindCard(
             title=_("Long-form article"),
             hint=_(
-                "A Markdown post with a fixed slug. Published as an "
-                "article. The slug ties the draft to the article it "
+                "A Markdown post with a fixed link name. Published as an "
+                "article. The link name ties the draft to the article it "
                 "becomes, so saving it again replaces it."
             ),
         )
@@ -412,18 +415,18 @@ class StashKindDialog(QDialog):
         article_layout.addWidget(_divider())
 
         self._title_edit = QLineEdit()
-        self._title_edit.setPlaceholderText(_("Article title (used to derive the slug)"))
+        self._title_edit.setPlaceholderText(_("Article title"))
         self._title_edit.setText(suggested_title)
         self._title_edit.textChanged.connect(self._on_title_changed)
         article_layout.addWidget(self._kept_if(_field(_("Title"), self._title_edit),
                                                "title", self._title_edit))
 
         self._slug_edit = QLineEdit()
-        self._slug_edit.setPlaceholderText(_("article-slug"))
+        self._slug_edit.setPlaceholderText(_("my-article"))
         seed_slug = suggested_slug or (slugify(suggested_title) if suggested_title else "")
         self._slug_edit.setText(seed_slug)
         self._slug_edit.textEdited.connect(self._on_slug_edited)
-        slug_field = _field(_("Slug (the draft's d-tag)"), self._slug_edit)
+        slug_field = _field(_("Link name"), self._slug_edit)
         # Why the slug can't be saved, under it (the draft's slug is not
         # encrypted: relays and readers see it).
         self._slug_problem = QLabel()
@@ -515,7 +518,7 @@ class StashKindDialog(QDialog):
             return
         # Articles need a non-empty slug to be addressable. Title is
         # nice-to-have but not strictly required by the protocol.
-        slug = self._slug_edit.text().strip()
+        slug = link_name(self._slug_edit.text(), self._kept_slug)
         problem = slug_problem(slug) or ""
         said = self._slug_problem.text() if not self._slug_problem.isHidden() else ""
         announce.field_problem(self._slug_edit, self._slug_problem, problem)
@@ -535,7 +538,7 @@ class StashKindDialog(QDialog):
                 summary="",
             )
         else:
-            slug = self._slug_edit.text().strip()
+            slug = link_name(self._slug_edit.text(), self._kept_slug)
             if not slug or slug_problem(slug):
                 # Defensive: the OK button shouldn't have been enabled.
                 return

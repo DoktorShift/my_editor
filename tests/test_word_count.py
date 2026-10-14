@@ -10,7 +10,7 @@ What must hold:
   Reading time is 225 words a minute, rounded up, at least a minute for
   anything there is to read, nothing for nothing.
 
-  The status bar, the preview and the publish dialog use this one rule.
+  The status bar, the preview and the publish sheet use this one rule.
 """
 
 import os

@@ -41,16 +41,18 @@ from constants import (
 )
 from i18n import _, format_moment, ngettext
 
-from ..article_details import ArticleDetails, equal_zaps, hashtags_from, hashtags_text
+from ..article_details import ArticleDetails
 from ..blossom.store import MediaStore
 from ..media.media_visibility import MediaVisibility
 from ..media.private_library import PrivateLibrary
 from ..media.publish_copy import PublicCopyMaker
 from ..profiles import Profile
-from ..publisher import slugify
+from ..publisher import link_name, slugify
+from .coauthors import Coauthors
 from .cover_field import CoverImageField
 from .eliding_label import ElidingLabel
 from .secret_key_check import slug_problem
+from .tag_field import TagField
 
 MIN_WIDTH = 260
 DEFAULT_WIDTH = 300
@@ -83,6 +85,9 @@ class ArticleDetailsPanel(QFrame):
 
     changed = Signal(object)
     close_requested = Signal()
+    # (document, address): a picture dropped as the cover of a document no
+    # longer in front is uploaded: that document's cover.
+    cover_uploaded = Signal(object, str)
 
     def __init__(self, *, media_store: Optional[MediaStore] = None,
                  media_visibility: Optional[MediaVisibility] = None,
@@ -99,19 +104,22 @@ class ArticleDetailsPanel(QFrame):
         # answering with a Person), and how a person is called.
         self._pick_person = pick_person
         self._name_of = name_of
-        self._profile = profile
-        # Whether someone can receive zaps (pubkey, relay hint, answer(bool)),
-        # what was answered (pubkey -> bool, None while asking), and the
-        # relay a zap to someone is announced on.
-        self._can_receive_zaps = can_receive_zaps
-        self._zappable: dict = {}
-        self._relay_hint = relay_hint
+        # Adding and removing co-authors, and sharing zaps with them, as
+        # Publish as Article does: whether someone can receive zaps
+        # (pubkey, relay hint, answer(bool)) and the relay a zap to someone
+        # is announced on decide the shares.
+        self._coauthors = Coauthors(profile=profile, relay_hint=relay_hint,
+                                    can_receive_zaps=can_receive_zaps)
         self.setObjectName("ArticleDetailsPanel")
         self.setAccessibleName(_("Article Details"))
         self.setMinimumWidth(MIN_WIDTH)
         self.setMaximumWidth(MAX_WIDTH)
         self._is_dark = is_dark
         self._shown = ArticleDetails()
+        # The link name of the article shown, kept letter for letter, and
+        # the one publishing would make when none is typed (a file's).
+        self._kept_identifier = ""
+        self._made_identifier = ""
         self._filling = False
         # The details the file writes in a way that is kept as written
         # (article_details.kept_in_file), and the line under each.
@@ -197,15 +205,15 @@ class ArticleDetailsPanel(QFrame):
             copy_maker=copy_maker, private_library=private_library, profile=profile,
             is_dark=self._is_dark, stacked=True)
         self.cover.problem.connect(self._say_cover_problem)
+        self.cover.landed_for.connect(self.cover_uploaded)
         form.addSpacing(6)
         form.addWidget(self.cover)
         self.cover_problem = self._problem_label()
         form.addWidget(self.cover_problem)
         self._add_kept_note(form, "image")
 
-        self.tags_edit = QLineEdit()
-        self.tags_edit.setPlaceholderText(_("comma, separated, hashtags"))
-        self._add_labeled(form, _("Hashtags"), self.tags_edit)
+        self.hashtags = TagField(is_dark=self._is_dark)
+        self._add_labeled(form, _("Hashtags"), self.hashtags)
         self._add_kept_note(form, "tags")
 
         form.addSpacing(6)
@@ -246,7 +254,7 @@ class ArticleDetailsPanel(QFrame):
         advanced.setContentsMargins(0, 0, 0, 0)
         advanced.setSpacing(6)
         self.identifier_edit = QLineEdit()
-        self._add_labeled(advanced, _("Slug (article ID)"), self.identifier_edit)
+        self._add_labeled(advanced, _("Link name"), self.identifier_edit)
         self._add_kept_note(advanced, "slug")
         self.identifier_note = QLabel()
         self.identifier_note.setObjectName("article_details_hint")
@@ -263,8 +271,9 @@ class ArticleDetailsPanel(QFrame):
         form.addStretch(1)
         scroll.setWidget(body)
 
-        for edit in (self.title_edit, self.tags_edit, self.identifier_edit):
+        for edit in (self.title_edit, self.identifier_edit):
             edit.textChanged.connect(self._edited)
+        self.hashtags.changed.connect(self._edited)
         self.summary_edit.textChanged.connect(self._edited)
         self.cover.changed.connect(self._edited)
         return scroll
@@ -325,23 +334,34 @@ class ArticleDetailsPanel(QFrame):
     def set_dark(self, is_dark: bool) -> None:
         self._is_dark = is_dark
         self.cover.set_dark(is_dark)
+        self.hashtags.set_dark(is_dark)
         self._apply_theme()
 
     # -- showing a tab's article ------------------------------------------------
 
     def show_article(self, details: ArticleDetails, *, fixed_identifier: bool,
-                     kept_in_file: frozenset = frozenset()) -> None:
+                     kept_in_file: frozenset = frozenset(), document: object = None,
+                     made_identifier: str = "") -> None:
         """Show ``details``, the article in the tab in front, without
         handing them back. ``fixed_identifier``: the article has its
         address already (a saved draft, a published article).
         ``kept_in_file``: the details its file writes in a way that stays as
-        written (article_details.kept_in_file), shown read-only."""
+        written (article_details.kept_in_file), shown read-only.
+        ``document``: whose article it is, which a cover dropped for it
+        lands on (cover_uploaded) once another is in front.
+        ``made_identifier``: the link name Publish as Article starts with
+        when none is typed (a file's article: made of the file's name), as
+        the field's placeholder; without it, the one made of the title."""
+        self._made_identifier = made_identifier
         # What the fields hold already (the person's own typing, handed
         # back and shown again) is left as typed: a space at the end of a
         # word being written stays.
         typed = self._pages.currentWidget() is self._form and details == self.details()
         self._filling = True
         try:
+            # Another document's cover is shown as it is, and a picture
+            # uploading for the one shown before goes on for that one.
+            self.cover.set_owner(document, details.image)
             self._shown = details
             self._show_kept(kept_in_file)
             if not typed:
@@ -350,7 +370,7 @@ class ArticleDetailsPanel(QFrame):
                 self._show_people(details)
             self.identifier_edit.setReadOnly(fixed_identifier or "slug" in self._kept)
             self.identifier_note.setText(
-                _("A saved or published article keeps its address; saving it under "
+                _("A saved or published article keeps its link name; saving it under "
                   "another one makes another article.") if fixed_identifier else "")
             self.identifier_note.setVisible(fixed_identifier)
             self._show_first_published(details.published_at)
@@ -372,7 +392,7 @@ class ArticleDetailsPanel(QFrame):
         self.title_edit.setReadOnly("title" in self._kept)
         self.summary_edit.setReadOnly("summary" in self._kept)
         self.cover.setReadOnly("image" in self._kept)
-        self.tags_edit.setReadOnly("tags" in self._kept)
+        self.hashtags.setReadOnly("tags" in self._kept)
         # The read-only look comes from a property the style sheet reads.
         self.summary_edit.style().unpolish(self.summary_edit)
         self.summary_edit.style().polish(self.summary_edit)
@@ -382,13 +402,15 @@ class ArticleDetailsPanel(QFrame):
         if self.summary_edit.toPlainText() != details.summary:
             self.summary_edit.setPlainText(details.summary)
         self._set_text(self.cover.url_edit, details.image)
-        if hashtags_from(self.tags_edit.text()) != details.hashtags:
-            self._set_text(self.tags_edit, hashtags_text(details.hashtags))
+        if self.hashtags.tags() != details.hashtags:
+            self.hashtags.set_tags(details.hashtags)
         self._set_text(self.identifier_edit, details.identifier)
+        self._kept_identifier = details.identifier
         self._show_people(details)
 
     def show_no_article(self, reason: str) -> None:
         """The tab in front holds no article: ``reason`` instead of fields."""
+        self.cover.set_owner(None)
         self._no_article.setText(reason)
         self._pages.setCurrentWidget(self._no_article)
 
@@ -419,7 +441,7 @@ class ArticleDetailsPanel(QFrame):
                 item.widget().deleteLater()
         # Tab reaches each Remove in turn, between the hashtags and Add
         # Co-Author, where they are seen (rows made later would come last).
-        previous = self.tags_edit
+        previous = self.hashtags.entry
         for pubkey, _hint in details.coauthors:
             row, remove = self._coauthor_row(pubkey)
             remove.setEnabled("coauthors" not in self._kept)
@@ -433,11 +455,11 @@ class ArticleDetailsPanel(QFrame):
         self.share_zaps.setChecked(bool(details.zaps))
         self.share_zaps.blockSignals(False)
         # Disabled as a whole: the box and its words.
-        unzappable = [pubkey for pubkey, _hint in details.coauthors
-                      if self._zappable.get(pubkey) is False]
+        unzappable = self._coauthors.unzappable(details.coauthors)
         self._share_row.setEnabled((len(unzappable) < len(details.coauthors)
                                     or bool(details.zaps)) and "zap_split" not in self._kept)
-        foreign = bool(details.zaps) and details.zaps != self._equal_zaps(details.coauthors)
+        foreign = bool(details.zaps) and details.zaps != self._coauthors.equal_zaps(
+            details.coauthors)
         if foreign:
             note = _("Zaps are shared the way another app set them.")
         elif unzappable:
@@ -452,35 +474,18 @@ class ArticleDetailsPanel(QFrame):
         self.zaps_note.setText(note)
         self.zaps_note.setVisible(bool(note))
         # Last: an answer at once shows the co-authors again.
-        for pubkey, hint in details.coauthors:
-            self._ask_if_zappable(pubkey, hint)
-
-    def _ask_if_zappable(self, pubkey: str, hint: str) -> None:
-        """Ask once whether a co-author can receive zaps (their profile
-        names a lightning address); until the answer, they are counted in."""
-        if self._can_receive_zaps is None or pubkey in self._zappable:
-            return
-        self._zappable[pubkey] = None
-        self._can_receive_zaps(pubkey, hint, lambda able, key=pubkey: self._zappable_answered(
-            key, able))
+        self._coauthors.ask(details.coauthors, self._zappable_answered)
 
     def _zappable_answered(self, pubkey: str, able: Optional[bool]) -> None:
         """A co-author who can't receive zaps loses their equal share; one
-        whose profile couldn't be read (None) keeps it, says nothing, and is
-        asked about again the next time the co-authors are shown."""
-        if able is None:
-            self._zappable.pop(pubkey, None)
+        whose profile couldn't be read keeps it and says nothing."""
+        details = self._coauthors.learned(self._shown, pubkey, able)
+        if details is None:
             return
-        before = self._equal_zaps(self._shown.coauthors)
-        self._zappable[pubkey] = able
-        if not any(p == pubkey for p, _hint in self._shown.coauthors):
-            return
-        if self._shown.zaps and self._shown.zaps == before:
-            after = self._equal_zaps(self._shown.coauthors)
-            if after != before:
-                self._hand_back(self._shown.with_changes(zaps=after))
-                return
-        self._show_people(self._shown)
+        if details != self._shown:
+            self._hand_back(details)
+        else:
+            self._show_people(details)
 
     def _coauthor_row(self, pubkey: str) -> Tuple[QWidget, QPushButton]:
         row = QWidget()
@@ -503,36 +508,15 @@ class ArticleDetailsPanel(QFrame):
             self._pick_person(self.add_coauthor_button, self._add_coauthor)
 
     def _add_coauthor(self, person) -> None:
-        own = self._profile()
-        if any(pubkey == person.pubkey for pubkey, _hint in self._shown.coauthors) or (
-                own is not None and person.pubkey == own.user_pubkey):
-            return                     # already there, or the author: nothing to add
-        self._people_changed(self._shown.coauthors + ((person.pubkey, person.relay_hint or ""),))
+        details = self._coauthors.added(self._shown, person)
+        if details is not None:        # None: already there, or the author
+            self._hand_back(details)
 
     def _remove_coauthor(self, pubkey: str) -> None:
-        self._people_changed(tuple(p for p in self._shown.coauthors if p[0] != pubkey))
-
-    def _people_changed(self, coauthors) -> None:
-        """New co-authors: shared zaps follow them (equally); zaps another
-        app shared are left as they were until changed here."""
-        zaps = self._shown.zaps
-        if zaps and zaps == self._equal_zaps(self._shown.coauthors):
-            zaps = self._equal_zaps(coauthors)
-        self._hand_back(self._shown.with_changes(coauthors=coauthors, zaps=zaps))
+        self._hand_back(self._coauthors.removed(self._shown, pubkey))
 
     def _share_zaps_toggled(self, shared: bool) -> None:
-        zaps = self._equal_zaps(self._shown.coauthors) if shared else ()
-        self._hand_back(self._shown.with_changes(zaps=zaps))
-
-    def _equal_zaps(self, coauthors):
-        """Equal shares with the co-authors who can receive zaps (or are not
-        known yet not to)."""
-        own = self._profile()
-        if own is None:
-            return ()
-        recipients = tuple(person for person in coauthors
-                           if self._zappable.get(person[0]) is not False)
-        return equal_zaps(own.user_pubkey, self._relay_hint(own.user_pubkey), recipients)
+        self._hand_back(self._coauthors.shared(self._shown, shared))
 
     def _hand_back(self, details: ArticleDetails) -> None:
         self._shown = details
@@ -549,8 +533,13 @@ class ArticleDetailsPanel(QFrame):
             title=self.title_edit.text().strip(),
             summary=self.summary_edit.toPlainText().strip(),
             image=self.cover.text().strip(),
-            hashtags=hashtags_from(self.tags_edit.text()),
-            identifier=self.identifier_edit.text().strip())
+            hashtags=self.hashtags.tags(),
+            identifier=self._identifier())
+
+    def _identifier(self) -> str:
+        """The link name in its field, as it is published: the article's
+        own exactly as it is, one typed in one form (link_name)."""
+        return link_name(self.identifier_edit.text(), self._kept_identifier)
 
     def _edited(self, *_args) -> None:
         self._check_identifier()
@@ -565,15 +554,17 @@ class ArticleDetailsPanel(QFrame):
 
     def _check_identifier(self) -> None:
         announce.field_problem(self.identifier_edit, self.identifier_problem,
-                               slug_problem(self.identifier_edit.text()) or "")
+                               slug_problem(self._identifier()) or "")
         if not self.identifier_problem.isHidden():
             self.advanced_toggle.setChecked(True)
 
     def _suggest_identifier(self) -> None:
-        """An empty address shows the one publishing would make of the
-        title, as a placeholder: it follows the title until it is typed."""
+        """An empty address shows the one Publish as Article would start
+        with, as a placeholder: a file's article the one made of the file's
+        name; any other the one made of the title, following it."""
         title = self.title_edit.text().strip()
-        self.identifier_edit.setPlaceholderText(slugify(title) if title else _("article-slug"))
+        self.identifier_edit.setPlaceholderText(
+            self._made_identifier or (slugify(title) if title else _("my-article")))
 
     def _say_cover_problem(self, reason: str) -> None:
         announce.field_problem(self.cover.url_edit, self.cover_problem, reason)

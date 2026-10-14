@@ -133,7 +133,7 @@ def test_a_co_author_is_added_and_removed_in_article_details():
 
 def test_remove_is_reached_with_tab_between_hashtags_and_add_co_author():
     panel, sent, asked = panel_with(ArticleDetails(title="T", coauthors=((BOB, ""), (CAROL, ""))))
-    chain, widget = [], panel.tags_edit
+    chain, widget = [], panel.hashtags.entry
     for _step in range(4):
         widget = widget.nextInFocusChain()
         while not (widget.focusPolicy() & Qt.FocusPolicy.TabFocus
@@ -146,7 +146,7 @@ def test_remove_is_reached_with_tab_between_hashtags_and_add_co_author():
 
 def test_remove_is_reached_with_tab_between_hashtags_and_add_co_author():
     panel, sent, asked = panel_with(ArticleDetails(title="T", coauthors=((BOB, ""), (CAROL, ""))))
-    chain, widget = [], panel.tags_edit
+    chain, widget = [], panel.hashtags.entry
     for _step in range(4):
         widget = widget.nextInFocusChain()
         while not (widget.focusPolicy() & Qt.FocusPolicy.TabFocus

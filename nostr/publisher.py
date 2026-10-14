@@ -33,18 +33,21 @@ reject the blob it just downloaded, which is worse than an absent one.
 
 from __future__ import annotations
 
+import hashlib
 import re
+import unicodedata
 from dataclasses import dataclass
-from typing import Callable, Iterable, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QObject, Signal
 
+import media_files
 import url_safety
 from i18n import _, display_locale, ngettext
 
 from . import CLIENT_NAME
 from .article_details import AUTHOR_MARKER
-from .bech32 import decode_npub, decode_nprofile, encode_nprofile
+from .bech32 import bech32_decode, decode_npub, decode_nprofile
 from .blossom.hashes import blob_url, hash_from_url
 from .bunker import BunkerClient, BunkerSessionPool
 from .drafts import (
@@ -60,8 +63,8 @@ from .events import build_event, verify_event
 from .outbox import RelayDirectory, ask_draft_relays, normalize_relay_url
 from . import refs
 from .outbox import defaults as outbox_defaults
-from .outbox.lookup import fetch_replaceable
-from .outbox.policy import dedupe_relays
+from .outbox.lookup import Lookup, fetch_addressable
+from .outbox.policy import dedupe_relays, is_newer
 from .profiles import Profile
 from .publish_pipeline import Mention, PublishPipeline, PublishResult
 from .relay import RelayPool
@@ -129,50 +132,17 @@ def extract_inline_mentions(content: str, *, markdown: bool = False) -> List[Men
     return found
 
 
-def _resolve_mentions(
-    content: str, chip_mentions: Sequence[Mention], *, markdown: bool
-) -> Tuple[str, List[List[str]]]:
-    """Merge inline + chip mentions into (final_content, p_tags).
-
-    Behaviour:
-      - Any ``nostr:n…`` URI already inline in ``content`` is left where it is.
-      - Chip mentions whose pubkey is NOT already inline are appended to the
-        body as ``nostr:nprofile1…`` URIs, separated from prose by one blank
-        line and from each other by single spaces.
-      - The resulting p-tag list deduplicates by pubkey, preserving the
-        first-seen relay hint (inline URIs are seen first).
-    """
-    inline = extract_inline_mentions(content, markdown=markdown)
-    inline_pks = {pk for pk, _ in inline}
-
-    appended_uris: List[str] = []
-    for pk, hint in chip_mentions:
-        if pk in inline_pks:
-            continue
-        nprofile = encode_nprofile(pk, [hint] if hint else [])
-        appended_uris.append(f"nostr:{nprofile}")
-        inline_pks.add(pk)  # avoid double-appending if caller passes dupes
-
-    if appended_uris:
-        sep = "\n\n" if content.strip() else ""
-        final_content = content + sep + " ".join(appended_uris)
-    else:
-        final_content = content
-
-    # Union of mention pubkeys for p-tags. Order: inline first, then chip
-    # mentions in the order the user picked them. First seen wins the relay
-    # hint slot, usually the more specific one.
-    seen: set[str] = set()
+def _mention_tags(content: str, *, markdown: bool) -> List[List[str]]:
+    """A ``p`` tag for each person ``content`` mentions, once each, in the
+    order of the text, with the relay hint written first for them."""
+    seen: set = set()
     p_tags: List[List[str]] = []
-    for pk, hint in list(inline) + list(chip_mentions):
+    for pk, hint in extract_inline_mentions(content, markdown=markdown):
         if pk in seen:
             continue
         seen.add(pk)
-        tag = ["p", pk]
-        if hint:
-            tag.append(hint)
-        p_tags.append(tag)
-    return final_content, p_tags
+        p_tags.append(["p", pk] + ([hint] if hint else []))
+    return p_tags
 
 
 # --------------------------------------------------------------------------- #
@@ -254,9 +224,10 @@ def _fallbacks_for(record: PublishedMedia) -> List[str]:
     """
     if not record.sha256:
         return []
+    extension = _blob_extension(record)
     out: List[str] = []
     for origin in record.servers:
-        candidate = blob_url(origin, record.sha256)
+        candidate = blob_url(origin, record.sha256) + extension
         if candidate == record.url or url_safety.same_origin(candidate, record.url):
             continue
         if candidate in out or not _is_injection_free(candidate):
@@ -265,6 +236,19 @@ def _fallbacks_for(record: PublishedMedia) -> List[str]:
             continue
         out.append(candidate)
     return out
+
+
+def _blob_extension(record: PublishedMedia) -> str:
+    """The file extension a fallback address keeps: the one the primary
+    address gives the blob (``<sha256>.png``), else the one its type has.
+    BUD-01: a server MUST accept ``/<sha256>`` with an optional file
+    extension, and a reader tells a picture from a sound by it before
+    anything loads."""
+    tail = record.url.split("?", 1)[0].split("#", 1)[0].rsplit("/", 1)[-1]
+    name, dot, extension = tail.partition(".")
+    if name.lower() == record.sha256.lower() and dot and extension.isalnum():
+        return "." + extension
+    return media_files.extension_for(record.mime)
 
 
 # A web address in published text.
@@ -316,10 +300,11 @@ def build_imeta_tags(
             continue
         if not url_safety.is_safe_media_url(url):
             continue
-        # NIP-92: each tag SHOULD match a URL in the event content. The
-        # user can still edit the body in the publish dialog, so an
-        # image described here may no longer be there.
-        if url not in content:
+        # NIP-92: each tag SHOULD match a URL in the event content: the
+        # address itself, not one that only holds it (in its query, or as
+        # the start of a longer one). A note's text can still be changed
+        # in its publish sheet, so a picture described here may be gone.
+        if not refs.address_in(url, content):
             continue
 
         entries: List[str] = []
@@ -370,16 +355,14 @@ def build_note(
     content: str,
     pubkey_hex: str,
     *,
-    mentions: Optional[Sequence[Mention]] = None,
     extra_tags: Optional[List[List[str]]] = None,
     media: Sequence[PublishedMedia] = (),
 ) -> dict:
     """Construct an unsigned kind 1 event ready for a remote signer.
 
-    ``mentions`` is a list of ``(pubkey_hex, relay_hint)`` tuples, typically
-    sourced from the publish dialog's mention-chip row. They're merged with
-    any inline ``nostr:n…`` URIs already in ``content`` (deduplicated), and
-    their URIs are appended at the end of the body if not already present.
+    Everyone ``content`` mentions (its ``nostr:npub``/``nprofile`` links,
+    written there as the sheet's mentions are) gets a ``p`` tag, once,
+    with the relay hint the link carries.
 
     ``media`` describes images this app resolved into URLs already in
     ``content``; the imeta tags are built here rather than threaded
@@ -392,18 +375,18 @@ def build_note(
     Always attaches ``["client", CLIENT_NAME]`` so readers that honour the
     NIP-89 client tag display "Published from MyEditor" under the note.
     """
-    final_content, p_tags = _resolve_mentions(content, mentions or [], markdown=False)
+    p_tags = _mention_tags(content, markdown=False)
     tags: List[List[str]] = [["client", CLIENT_NAME]]
     tags.extend(p_tags)
     # Quoted notes and articles (NIP-18 q tags) and their authors.
-    tags.extend(refs.quote_tags(refs.find_references(final_content, markdown=False),
+    tags.extend(refs.quote_tags(refs.find_references(content, markdown=False),
                                 [tag[1] for tag in p_tags]))
-    tags.extend(build_imeta_tags(media, final_content))
+    tags.extend(build_imeta_tags(media, content))
     if extra_tags:
         tags.extend(extra_tags)
     return build_event(
         kind=1,
-        content=final_content,
+        content=content,
         tags=tags,
         pubkey_hex=pubkey_hex,
     )
@@ -419,7 +402,6 @@ def build_article(
     image: str = "",
     published_at: Optional[int] = None,
     hashtags: Iterable[str] = (),
-    mentions: Optional[Sequence[Mention]] = None,
     extra_tags: Optional[List[List[str]]] = None,
     media: Sequence[PublishedMedia] = (),
 ) -> dict:
@@ -428,10 +410,11 @@ def build_article(
     The ``slug`` becomes the ``d``-tag, the identifier that makes this
     event addressable. Re-publishing with the same slug replaces the
     previous version on relays that honour parameterized replacement.
+    The ``d`` tag is the first tag: rnostr takes the first tag's value as
+    the address.
 
-    ``mentions`` follows the same convention as ``build_note``: chip-picked
-    profiles whose URIs aren't already in the body are appended at the end,
-    and a ``["p", hex, relay-hint]`` tag is emitted per unique pubkey.
+    Everyone ``content`` mentions gets a ``p`` tag, as in ``build_note``
+    (outside code: a link in code mentions nobody).
 
     Per NIP-23, ``content`` is Markdown and clients MUST NOT hard line-break
     paragraphs or accept HTML. This does not transform the content; that is the
@@ -449,14 +432,17 @@ def build_article(
     """
     if not slug.strip():
         raise ValueError("article slug (d-tag) must not be empty")
-    final_content, p_tags = _resolve_mentions(content, mentions or [], markdown=True)
+    p_tags = _mention_tags(content, markdown=True)
+    # The address first: some relays (rnostr) take the first tag as the
+    # address, so a "client" tag before it made each article replace the
+    # author's last one there.
     tags: List[List[str]] = [
-        ["client", CLIENT_NAME],
         ["d", slug.strip()],
+        ["client", CLIENT_NAME],
     ]
     tags.extend(p_tags)
     # Quoted notes and articles (NIP-18 q tags) and their authors.
-    tags.extend(refs.quote_tags(refs.find_references(final_content),
+    tags.extend(refs.quote_tags(refs.find_references(content),
                                 [tag[1] for tag in p_tags]))
     if title.strip():
         tags.append(["title", title.strip()])
@@ -471,13 +457,13 @@ def build_article(
         tag = raw.strip().lstrip("#").lower()
         if tag:
             tags.append(["t", tag])
-    tags.extend(build_imeta_tags(media, final_content))
+    tags.extend(build_imeta_tags(media, content))
     if extra_tags:
         tags.extend(extra_tags)
     tags = _one_tag_per_person(tags)
     return build_event(
         kind=30023,
-        content=final_content,
+        content=content,
         tags=tags,
         pubkey_hex=pubkey_hex,
     )
@@ -532,10 +518,14 @@ UNKNOWN = "unknown"      # too few relays answered to tell
 
 @dataclass(frozen=True)
 class FirstPublication:
-    """When an article was first published, and how sure that is."""
+    """When an article was first published, and how sure that is.
+    ``under``: the other link name it was found under, when it was asked
+    about with others (a file's own name); empty when it was found under
+    the one asked about, or not found."""
 
     state: str
     published_at: Optional[int] = None
+    under: str = ""
 
 
 def first_publication_of(lookup, outbox: Sequence[str],
@@ -561,10 +551,34 @@ def first_publication_of(lookup, outbox: Sequence[str],
     return FirstPublication(UNKNOWN)
 
 
+def first_publication_among(found: Dict[str, Lookup], names: Sequence[str],
+                            outbox: Sequence[str]) -> FirstPublication:
+    """What the relays said about an article that may be out under any of
+    ``names`` (in the order they count: a file's own names first, the
+    link name asked about last). The first found is the article; with
+    none found, NEVER only when the answers would say so for each. A
+    file's own names were asked of the write relays alone, so the write
+    relays' answers tell for them."""
+    slug = names[-1]
+    for name in names:
+        lookup = found.get(name)
+        if lookup is not None and lookup.event is not None:
+            answer = first_publication_of(lookup, outbox)
+            return FirstPublication(answer.state, answer.published_at,
+                                    under="" if name == slug else name)
+    answers = [first_publication_of(found[name], outbox, indexers=() if name != slug
+                                    else outbox_defaults.INDEXER_RELAYS)
+               for name in names if name in found]
+    if answers and all(answer.state == NEVER for answer in answers):
+        return FirstPublication(NEVER)
+    return FirstPublication(UNKNOWN)
+
+
 def find_first_publication(relay_pool: RelayPool, relay_directory: RelayDirectory,
                            author: str, slug: str,
                            on_done: Callable[[FirstPublication], None], *,
-                           parent: QObject, timeout_ms: int = 4_000) -> None:
+                           parent: QObject, timeout_ms: int = 4_000,
+                           also: Sequence[str] = ()) -> None:
     """Whether and when the author's article ``slug`` was first published
     (FirstPublication). The question lives as long as ``parent`` (the
     dialog asking it).
@@ -574,32 +588,170 @@ def find_first_publication(relay_pool: RelayPool, relay_directory: RelayDirector
     that, and an edit must not move it. Asked of the relays the author
     publishes to, where the current version is, and also of the relays
     they read from and the indexers, so a relay list that moved since
-    does not hide the first version."""
+    does not hide the first version.
+
+    ``also``: other link names the article may be out under (a file's own
+    name, which 3.3 published files under), counted before ``slug``
+    (first_publication_among). They are asked of the write relays alone,
+    where 3.3 published: those get one request about every name, the
+    others one about ``slug``, so no name goes where it would not be
+    published."""
+    names = list(dict.fromkeys([*also, slug]))
+
     def got_relays(relays: List[str]) -> None:
         outbox = dedupe_relays(relays)
         asked = dedupe_relays([*outbox, *relay_directory.cached(author).read,
                                *outbox_defaults.INDEXER_RELAYS])
-        fetch_replaceable(relay_pool, asked, kind=30023, author=author, d_tag=slug,
-                          on_done=lambda found: on_done(first_publication_of(found, outbox)),
+        if len(names) == 1:
+            fetch_addressable(relay_pool, asked, kind=30023, author=author, d_tags=names,
+                              on_done=lambda found: on_done(
+                                  first_publication_among(found, names, outbox)),
+                              timeout_ms=timeout_ms, parent=parent)
+            return
+        parts: Dict[str, Dict[str, Lookup]] = {}
+
+        def answered(part: str, found: Dict[str, Lookup]) -> None:
+            parts[part] = found
+            if len(parts) == 2:
+                on_done(first_publication_among(
+                    _joined(parts["own"], parts["others"]), names, outbox))
+        others = [url for url in asked if url not in outbox]
+        fetch_addressable(relay_pool, outbox, kind=30023, author=author, d_tags=names,
+                          on_done=lambda found: answered("own", found),
+                          timeout_ms=timeout_ms, parent=parent)
+        fetch_addressable(relay_pool, others, kind=30023, author=author, d_tags=[slug],
+                          on_done=lambda found: answered("others", found),
                           timeout_ms=timeout_ms, parent=parent)
     relay_directory.outbox_of(author, got_relays)
+
+
+def _joined(own: Dict[str, Lookup], others: Dict[str, Lookup]) -> Dict[str, Lookup]:
+    """Two lookups' answers as one: per name, the newer version either
+    found, and every relay that answered or refused in either."""
+    joined = dict(own)
+    for name, other in others.items():
+        mine = own.get(name)
+        if mine is None:
+            joined[name] = other
+            continue
+        newer = (other.event if other.event is not None
+                 and (mine.event is None or is_newer(other.event, mine.event)) else mine.event)
+        joined[name] = Lookup(state=mine.state if newer is mine.event else other.state,
+                              event=newer, answered=mine.answered + other.answered,
+                              refused=mine.refused + other.refused,
+                              unchecked=mine.unchecked or other.unchecked)
+    return joined
 
 
 # --------------------------------------------------------------------------- #
 # Slug helper                                                                  #
 # --------------------------------------------------------------------------- #
 
-_SLUG_KEEP = re.compile(r"[^a-z0-9]+")
+# A Nostr entity written in a title (a mention, a quote, a key): left out
+# of the link name when it really is one (its checksum holds); a word that
+# only starts like one ("Note10", "note1 on") stays.
+_SLUG_ENTITY = re.compile(r"(?:nostr:)?((?:npub|nprofile|nsec|ncryptsec|note|nevent|naddr)1"
+                          r"[0-9a-z]+)", re.IGNORECASE)
+_SLUG_ENTITY_KINDS = ("npub", "nprofile", "nsec", "ncryptsec", "note", "nevent", "naddr")
+# One shortened as a name it has none ("npub1abcd\u2026wxyz").
+_SLUG_SHORT_KEY = re.compile(r"(?:npub|nprofile|note|nevent|naddr)1[0-9a-z]*\u2026[0-9a-z]+",
+                             re.IGNORECASE)
+# A hex key or hash: never a word.
+_SLUG_HEX = re.compile(r"[0-9a-f]{32,}")
+# Letters Unicode does not take apart into a letter and an accent.
+_SLUG_LETTERS = str.maketrans({"\u0142": "l", "\u00f8": "o", "\u0111": "d", "\u00e6": "ae",
+                               "\u0153": "oe", "\u00df": "ss", "\u1e9e": "ss",
+                               "\u00fe": "th", "\u00f0": "d", "\u0131": "i",
+                               "\u0127": "h", "\u0167": "t", "\u0140": "l"})
+# Variation selectors (an emoji's text or picture presentation) and the
+# keycap: never part of a word.
+_SLUG_DROPPED = re.compile("[\ufe00-\ufe0f\U000e0100-\U000e01ef\u20e3]")
+SLUG_MAX = 48
 
 
-def slugify(text: str, *, fallback: str = "untitled") -> str:
-    """Turn a title (or filename) into a stable d-tag identifier.
+def _is_entity(word: str) -> bool:
+    try:
+        hrp, _data = bech32_decode(word)
+    except ValueError:
+        return False
+    return hrp in _SLUG_ENTITY_KINDS
 
-    Lowercase, ASCII-only, hyphen-separated. Returns ``fallback`` if the
-    cleaned result is empty.
+
+def link_name(typed: str, kept: str = "") -> str:
+    """The link name a field holds, as it is published.
+
+    One the article has already (``kept``: its draft's, its published
+    version's, its file's), while the field still holds it, exactly as it
+    is: relays compare a d tag letter for letter, and the same word
+    written another way is another article (a Mac writes file names with
+    "u" and an accent for "ü", and 3.3 published files under their names
+    as they were). One typed or pasted by hand in the one form slugify
+    writes too (NFC: "é" one character, as a title typed anywhere gives),
+    so the same name is the same d tag wherever it was typed."""
+    if kept and typed == kept:
+        return kept
+    return unicodedata.normalize("NFC", (typed or "").strip())
+
+
+def file_link_names(file_name: str) -> List[str]:
+    """The link names a file's article may be out under besides the one
+    made of its name: the name as the file system gives it (3.3 published
+    a file's article so; a Mac gives it with "u" and an accent for "ü"),
+    then composed, each once."""
+    raw = (file_name or "").strip()
+    return list(dict.fromkeys(name for name in (raw, unicodedata.normalize("NFC", raw))
+                              if name))
+
+
+def slugify(text: str) -> str:
+    """Turn a title (or a file's name) into the article's link name, its
+    d-tag identifier.
+
+    Lower case, words joined by hyphens. Latin letters are written without
+    their accents ("Grüße" is "grusse", "Łódź" is "lodz"); a word in
+    another script is kept as written (NIP-23 identifiers are any text,
+    as Hugo and WordPress keep such slugs), so articles titled in
+    Cyrillic or Japanese never share one name. A Nostr key, mention or
+    quote in the title is left out (only one whose checksum holds; a word
+    like "Note10" stays), and so is a hex key. A mark stays only with the
+    letter or digit it follows; an emoji's variation selector, a keycap
+    and a joiner are no words. At most ``SLUG_MAX``
+    characters, cut after a word where one ends. A title with no words
+    left (emoji only) gets a short name of its own from the title, never
+    one shared by every such title; no title gives none.
     """
-    cleaned = _SLUG_KEEP.sub("-", text.strip().lower()).strip("-")
-    return cleaned or fallback
+    if not (text or "").strip():
+        return ""
+    cleaned = _SLUG_SHORT_KEY.sub(" ", text)
+    cleaned = _SLUG_ENTITY.sub(lambda found: " " if _is_entity(found.group(1))
+                               else found.group(0), cleaned)
+    cleaned = cleaned.lower().translate(_SLUG_LETTERS)
+    kept: List[str] = []
+    for char in unicodedata.normalize("NFKD", cleaned):
+        if unicodedata.combining(char) and kept and kept[-1].isascii():
+            continue                       # a Latin letter's accent
+        kept.append(char)
+    cleaned = unicodedata.normalize("NFC", "".join(kept))
+    words, word = [], []
+    for char in cleaned + " ":
+        kind = unicodedata.category(char)[0]
+        if _SLUG_DROPPED.match(char):
+            continue                       # an emoji's presentation, a keycap
+        if kind in "LN" or (kind == "M" and word):
+            # A mark belongs to the letter or digit it follows, and to
+            # nothing else.
+            word.append(char)
+        elif kind != "M" and word:
+            words.append("".join(word))
+            word = []
+    words = [w for w in words if not _SLUG_HEX.fullmatch(w)]
+    slug = "-".join(words)
+    if len(slug) > SLUG_MAX:
+        cut = slug[:SLUG_MAX + 1]
+        slug = cut[:cut.rfind("-")] if "-" in cut else slug[:SLUG_MAX]
+    if not slug:
+        slug = "article-" + hashlib.sha256(text.strip().encode("utf-8")).hexdigest()[:8]
+    return slug
 
 
 # --------------------------------------------------------------------------- #
@@ -1048,7 +1200,7 @@ class DraftDeleteJob(QObject):
         the key again (as its d tag), so the draft's wrap is deleted by its
         id alone, with a NIP-09 request that names no address."""
         if not self._replaced_wrap_id:
-            self._emit_failed(_("This draft can’t be deleted: its slug holds a secret key, "
+            self._emit_failed(_("This draft can’t be deleted: its link name holds a secret key, "
                                 "and the version on your relays isn’t known here. Refresh "
                                 "your drafts and try again."))
             return

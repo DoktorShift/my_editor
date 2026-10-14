@@ -44,6 +44,7 @@ from typing import Optional
 from PySide6.QtGui import QTextCursor
 
 import rich_text
+from doc_walk import doc_length, doc_offset, text_index
 
 # The start of a paragraph, up to the space just typed.
 _BLOCK_START = re.compile(r"(#{1,3}|[-*+]|(\d{1,9})[.)]|>) ")
@@ -85,8 +86,10 @@ def after_space(cursor: QTextCursor) -> str:
     if cursor.hasSelection():
         return ""
     block = cursor.block()
-    typed = block.text()[:cursor.positionInBlock()]
-    if not _plain_span(cursor.document(), block.position(), block.position() + len(typed)):
+    text = block.text()
+    typed = text[:text_index(text, cursor.positionInBlock())]
+    if not _plain_span(cursor.document(), block.position(),
+                       block.position() + doc_length(typed)):
         return ""                     # "`#`": a code word, no heading mark
     task = _TASK_START.fullmatch(typed)
     if task is not None and (_is_body(block) or block.textList() is not None):
@@ -100,7 +103,7 @@ def after_space(cursor: QTextCursor) -> str:
     edit = QTextCursor(doc)
     edit.beginEditBlock()
     marks = QTextCursor(block)
-    marks.setPosition(block.position() + len(typed), QTextCursor.MoveMode.KeepAnchor)
+    marks.setPosition(block.position() + doc_length(typed), QTextCursor.MoveMode.KeepAnchor)
     marks.removeSelectedText()
     at = QTextCursor(block)
     if marker.startswith("#"):
@@ -127,7 +130,7 @@ def _make_task(cursor: QTextCursor, block, typed: str, *, ticked: bool) -> str:
     edit = QTextCursor(cursor.document())
     edit.beginEditBlock()
     marks = QTextCursor(block)
-    marks.setPosition(block.position() + len(typed), QTextCursor.MoveMode.KeepAnchor)
+    marks.setPosition(block.position() + doc_length(typed), QTextCursor.MoveMode.KeepAnchor)
     marks.removeSelectedText()
     if block.textList() is None:
         rich_text.toggle_checklist(QTextCursor(block))
@@ -226,13 +229,15 @@ def after_mark(cursor: QTextCursor) -> Optional[str]:
     block = cursor.block()
     if rich_text.is_code_block(block):
         return None
-    typed = block.text()[:cursor.positionInBlock()]
+    text = block.text()
+    typed = text[:text_index(text, cursor.positionInBlock())]
     if not typed:
         return None
     if typed[-1] in CLOSING_MARKS:
         rules, after = _INLINE, 0
     elif len(typed) > 1 and typed[-2] == "_" and not typed[-1].isalnum() and typed[-1] != "_":
-        rules, after = ((rich_text.ITALIC, _UNDERSCORE),), 1
+        # (What is typed after the "_" may take two places: an emoji.)
+        rules, after = ((rich_text.ITALIC, _UNDERSCORE),), doc_length(typed[-1])
         typed = typed[:-1]
     else:
         return None
@@ -243,13 +248,14 @@ def after_mark(cursor: QTextCursor) -> Optional[str]:
             continue
         if style != rich_text.CODE and _in_open_code(typed[:found.start()]):
             continue                  # "`**x**": code being typed, not bold
-        start = block.position() + found.start()
-        end = block.position() + len(typed)
+        # Places in the text, as places in the document.
+        start = block.position() + doc_offset(typed, found.start())
+        end = block.position() + doc_length(typed)
         if not _plain_span(doc, start, end):
             return None
         opening = found.start(1) - found.start()
         closing = found.end() - found.end(1)
-        words = len(found.group(1))
+        words = doc_length(found.group(1))
         probe = QTextCursor(doc)
         probe.setPosition(start + 1)
         before = probe.charFormat()   # what the opening mark was typed in
