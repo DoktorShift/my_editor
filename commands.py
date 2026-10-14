@@ -62,10 +62,12 @@ FORMAT = "Formatting"
 INSERT = "Insert"
 SEARCH = "Search"
 VIEW = "View"
+NAVIGATION = "Navigation"   # tabs and panes, by key (a Mac's Window menu has two)
 NOSTR = "Nostr"
 WINDOW = "Window"       # a Mac's Window menu
 HELP = "Help"
-GROUP_ORDER: Tuple[str, ...] = (FILE, EDIT, FORMAT, INSERT, SEARCH, VIEW, NOSTR, WINDOW, HELP)
+GROUP_ORDER: Tuple[str, ...] = (FILE, EDIT, FORMAT, INSERT, SEARCH, VIEW, NAVIGATION, NOSTR,
+                                WINDOW, HELP)
 
 
 # The menu commands left without a key, on purpose, and why: everything
@@ -312,6 +314,24 @@ class CommandRegistry(QObject):
 
         menu.aboutToShow.connect(opening)
         menu.aboutToHide.connect(closing)
+
+    def refuse_clashes(self, where: str, keys: Iterable[str], *,
+                       yielding: Iterable[str] = ()) -> None:
+        """Raise ValueError when a key that ``where`` binds for itself (the
+        PDF reader's) is bound twice there, or is also a command's, unless
+        that command is one of ``yielding``: commands that are off wherever
+        ``where`` has its keys (the editing commands, in a PDF tab). Two
+        shortcuts on one key are ambiguous to Qt, and then neither works."""
+        yielding = set(yielding)
+        seen = set()
+        for spec in keys:
+            text = key_text(spec)
+            if text in seen:
+                raise ValueError(f"{text} is bound twice in {where}")
+            seen.add(text)
+            owner = self._by_keys.get(text)
+            if owner is not None and owner not in yielding:
+                raise ValueError(f"{text} is taken by {owner!r}; {where} cannot have it too")
 
     # -- reading -----------------------------------------------------------
 

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from typing import List
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QAccessible
 from PySide6.QtWidgets import QWidget
 
@@ -59,3 +60,20 @@ def _describe(widget: QWidget) -> str:
         parts.append(f"in {type(parent).__name__}"
                      + (f"#{parent.objectName()}" if parent.objectName() else ""))
     return " ".join(parts)
+
+
+def out_of_tab_reach(root: QWidget) -> List[str]:
+    """The controls of ``root`` shown now (on the page up) that Tab never
+    reaches: a person on the keyboard could not get to them."""
+    found = []
+    for widget in root.findChildren(QWidget):
+        if widget.metaObject().className() in QT_INTERNALS or not widget.isVisibleTo(root):
+            continue
+        if not widget.isEnabled():
+            continue
+        interface = QAccessible.queryAccessibleInterface(widget)
+        if interface is None or interface.role() not in INTERACTIVE:
+            continue
+        if not widget.focusPolicy() & Qt.FocusPolicy.TabFocus:
+            found.append(_describe(widget))
+    return found

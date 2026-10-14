@@ -31,8 +31,8 @@ from PySide6.QtGui import (
 )
 from PySide6.QtPrintSupport import QPrintDialog, QPrintPreviewDialog
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QFileDialog, QInputDialog, QLineEdit, QMenu, QWidget,
-    QVBoxLayout, QPlainTextEdit, QTextEdit, QTabWidget, QToolButton, QHBoxLayout, QStatusBar,
+    QAbstractItemView, QApplication, QMainWindow, QFileDialog, QInputDialog, QLineEdit, QMenu,
+    QWidget, QVBoxLayout, QPlainTextEdit, QTextEdit, QTabWidget, QToolButton, QHBoxLayout, QStatusBar,
     QPushButton, QTabBar, QLabel, QDialog, QSplitter,
     QProgressDialog, QToolTip
 )
@@ -55,7 +55,8 @@ import file_paths
 import i18n
 from i18n import N_, _, ngettext, pgettext
 from commands import (
-    EDIT, FILE, FORMAT, HELP, INSERT, NOSTR, SEARCH, VIEW, WINDOW, Command, CommandRegistry,
+    EDIT, FILE, FORMAT, HELP, INSERT, NAVIGATION, NOSTR, SEARCH, VIEW, WINDOW, Command,
+    CommandRegistry,
     all_key_texts, platform_keys, redo_words, standard_and, undo_words,
 )
 import front_matter
@@ -108,7 +109,7 @@ from word_count import count_words, reading_minutes
 from export_pdf import export_pdf, load_page_setup
 from page_setup_dialog import PageSetupDialog
 import printing
-from pdf_viewer import PdfViewerTab
+from pdf_viewer import PdfViewerTab, reader_keys as pdf_reader_keys
 from rmarkdown import KnitRunner, MediaLink, derive_title, document_to_rmd, media_dir_for
 from rmd_setup_dialog import RmdSetupDialog
 import rmd_toolchain
@@ -1477,6 +1478,56 @@ class MainWindow(QMainWindow):
                                                                    app=APP_DISPLAY_NAME))
         self.setWindowModified(modified)
 
+    def _show_tab(self, index: int, *, wrap: bool = True) -> None:
+        """The tab at ``index`` in front, its document taking the keys: from
+        the last tab the next one is the first, as in Safari; a tab number
+        past the last one does nothing."""
+        count = self.tabs.count()
+        if not count or not wrap and index >= count:
+            return
+        self.tabs.setCurrentIndex(index % count)
+        target = self._pane_focus_target(self._central_splitter.widget(0))
+        if target is not None:
+            target.setFocus(Qt.FocusReason.TabFocusReason)
+
+    def _panes(self) -> list:
+        """The panes shown, in the order F6 visits them: the document,
+        Article Details, the Drafts panel."""
+        panes = [self._central_splitter.widget(0)]
+        return panes + [pane for pane in (self._article_details_panel, self._drafts_panel)
+                        if pane is not None and pane.isVisible()]
+
+    def _move_to_pane(self, step: int) -> None:
+        """F6 (Shift+F6): the keyboard focus to the next (previous) pane."""
+        panes = self._panes()
+        focus = QApplication.focusWidget()
+        here = next((i for i, pane in enumerate(panes)
+                     if focus is not None and pane.isAncestorOf(focus)), 0)
+        for offset in range(1, len(panes) + 1):
+            target = self._pane_focus_target(panes[(here + step * offset) % len(panes)])
+            if target is not None:
+                target.setFocus(Qt.FocusReason.OtherFocusReason)
+                return
+
+    def _pane_focus_target(self, pane):
+        """Where the keys go in ``pane``: the document of the tab in front;
+        else the pane's list, or its first control reached with Tab."""
+        if pane is self._central_splitter.widget(0):
+            viewer = self.current_pdf_viewer()
+            return viewer.view if viewer is not None else self.current_editor()
+        for view in pane.findChildren(QAbstractItemView):
+            if view.isVisible() and view.focusPolicy() & Qt.FocusPolicy.TabFocus:
+                return view
+        first = widget = pane.nextInFocusChain()
+        while widget is not None and widget is not pane:
+            if (pane.isAncestorOf(widget) and widget.isVisible() and widget.isEnabled()
+                    and widget.focusPolicy() & Qt.FocusPolicy.TabFocus):
+                return widget
+            widget = widget.nextInFocusChain()
+            if widget is first:
+                break
+        return None
+
     def _on_tab_changed(self, index=None):
         self._show_backup_status()
         self._fill_article_details_panel()
@@ -2427,6 +2478,44 @@ class MainWindow(QMainWindow):
                                              WINDOW),
                                      triggered=self._bring_all_to_front)
 
+        # Moving around by key: tabs as in Safari on a Mac (Control-Tab and
+        # Shift-Command-] for the next one, Command-1 to 8 and Command-9 for
+        # the last), as in Firefox and GNOME's apps elsewhere (Ctrl+Tab,
+        # Ctrl+PgDown, Alt+1 to 9; Ctrl+1 is Heading 1 there). F6 and
+        # Shift+F6 move to the next and the previous pane, as on Windows
+        # and in GNOME.
+        self.act_next_tab = add(Command(
+            "nav.next_tab", _("Show Next Tab"), NAVIGATION,
+            platform_keys(("Meta+Tab", "Ctrl+}"), ("Ctrl+Tab", "Ctrl+PgDown"))),
+            triggered=lambda: self._show_tab(self.tabs.currentIndex() + 1))
+        self.act_previous_tab = add(Command(
+            "nav.previous_tab", _("Show Previous Tab"), NAVIGATION,
+            platform_keys(("Meta+Shift+Tab", "Ctrl+{"), ("Ctrl+Shift+Tab", "Ctrl+PgUp"))),
+            triggered=lambda: self._show_tab(self.tabs.currentIndex() - 1))
+        for number in range(1, 9):
+            add(Command(f"nav.tab_{number}", _("Go to Tab {number}").format(number=number),
+                        NAVIGATION, platform_keys(f"Ctrl+{number}", f"Alt+{number}")),
+                triggered=lambda n=number: self._show_tab(n - 1, wrap=False))
+        add(Command("nav.last_tab", _("Go to Last Tab"), NAVIGATION,
+                    platform_keys("Ctrl+9", "Alt+9")),
+            triggered=lambda: self._show_tab(self.tabs.count() - 1))
+        add(Command("nav.next_pane", _("Next Pane"), NAVIGATION, "F6",
+                    listed_as=_("Move to the next pane"), keywords=(_("focus"), _("panel"))),
+            triggered=lambda: self._move_to_pane(+1))
+        add(Command("nav.previous_pane", _("Previous Pane"), NAVIGATION, "Shift+F6",
+                    listed_as=_("Move to the previous pane"),
+                    keywords=(_("focus"), _("panel"))),
+            triggered=lambda: self._move_to_pane(-1))
+        # The PDF reader's own keys never take a command's, but those of
+        # the editing commands, which are off in a PDF tab.
+        editor_only = {action.objectName() for action in (
+            *self._editor_actions, *self._rich_actions, *self._block_actions,
+            *self._word_actions)}
+        self.commands.refuse_clashes(
+            "the PDF reader",
+            [keys for _s, _w, act, tab_keys, view_keys in pdf_reader_keys() if act is not None
+             for keys in tab_keys + view_keys], yielding=editor_only)
+
         # Help
         self.act_welcome = add(Command("help.welcome", _("Welcome"), HELP),
                                triggered=self.show_welcome_tab)
@@ -2648,6 +2737,10 @@ class MainWindow(QMainWindow):
             self.m_window = self.menuBar().addMenu(_("Window"))
             self.m_window.addAction(self.act_minimize)
             self.m_window.addAction(self.act_zoom)
+            self.m_window.addSeparator()
+            # Safari's: the tabs, before the windows.
+            self.m_window.addAction(self.act_previous_tab)
+            self.m_window.addAction(self.act_next_tab)
             self.m_window.addSeparator()
             self.m_window.addAction(self.act_bring_all)
 
@@ -7981,6 +8074,11 @@ class MainWindow(QMainWindow):
     def _hide_drafts_panel(self) -> None:
         if self._drafts_panel is None:
             return
+        if self._drafts_panel.isAncestorOf(QApplication.focusWidget()):
+            # Its keys go back to the document, as Article Details' do.
+            target = self._pane_focus_target(self._central_splitter.widget(0))
+            if target is not None:
+                target.setFocus()
         self._drafts_panel.hide()
         self.act_nostr_drafts.setChecked(False)
         self._update_refresh_command()

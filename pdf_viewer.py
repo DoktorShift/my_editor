@@ -46,7 +46,7 @@ import theme
 from atomic_file import read_json, write_json
 from i18n import _, ngettext
 from url_safety import is_safe_external_url
-from commands import standard_and
+from commands import platform_keys, standard_and
 from widgets import FindBar
 
 _POSITIONS_PATH = os.path.expanduser("~/.config/my_editor/pdf_positions.json")
@@ -184,7 +184,8 @@ def _with_keys(words: str, keys: QKeySequence) -> str:
 # tab, keys that work on the page only). Keys with Ctrl work in the find
 # field too; bare keys (a space, a letter, Home) only on the page, so the
 # find field and the page box still type them. J, K, N, P and G are
-# SumatraPDF's; Ctrl+0, 1 and 2 SumatraPDF's zoom keys, as in MyEditor 3.3.
+# SumatraPDF's; Ctrl+0, 1 and 2 SumatraPDF's zoom keys, as in MyEditor 3.3
+# (Option-Command-1 and 2 on a Mac, see below).
 # Find (Ctrl+F) and Copy (Ctrl+C) are the window's Edit commands, which
 # act on the reader in a PDF tab; they are listed, not bound, here.
 MOVE, ZOOM, FIND = "Move Around", "Zoom", "Find and Copy"
@@ -210,8 +211,11 @@ def reader_keys():
         (ZOOM, _("Zoom out"), lambda tab: tab.zoom_out(),
          standard_and(QKeySequence.StandardKey.ZoomOut), ("-",)),
         (ZOOM, _("Fit page width"), lambda tab: tab.fit_width(), ("Ctrl+0",), ()),
-        (ZOOM, _("Actual size"), lambda tab: tab.actual_size(), ("Ctrl+1",), ()),
-        (ZOOM, _("Fit whole page"), lambda tab: tab.fit_page(), ("Ctrl+2",), ()),
+        # Option-Command-1 and 2 on a Mac, where Command-1 to 9 go to tabs.
+        (ZOOM, _("Actual size"), lambda tab: tab.actual_size(),
+         (platform_keys("Ctrl+Alt+1", "Ctrl+1"),), ()),
+        (ZOOM, _("Fit whole page"), lambda tab: tab.fit_page(),
+         (platform_keys("Ctrl+Alt+2", "Ctrl+2"),), ()),
         (FIND, _("Find in PDF"), None, ("Ctrl+F",), ()),
         (FIND, _("Copy selected text"), None, standard_and(QKeySequence.StandardKey.Copy), ()),
         (FIND, _("Clear selection"), lambda tab: tab.view.clear_selection(), (), ("Esc",)),

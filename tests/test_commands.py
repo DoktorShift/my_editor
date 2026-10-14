@@ -188,8 +188,11 @@ def test_every_menu_item_is_a_registered_command(main_window_commands):
         assert action.objectName() in win.commands, f"{action.text()} is not a command"
     registered = {c.id for c in win.commands.commands()}
     shown = {a.objectName() for a in in_menus}
-    # Print Preview is offered only where the platform has one.
-    assert registered - shown <= {"file.print_preview"}
+    # Print Preview is offered only where the platform has one; moving
+    # between tabs and panes is done by key (the Keyboard Shortcuts window
+    # lists them; a Mac's Window menu has Show Next and Previous Tab).
+    keyboard_only = {c.id for c in win.commands.commands(commands.NAVIGATION)}
+    assert registered - shown <= {"file.print_preview"} | keyboard_only
 
 
 def test_the_menus_build_their_actions_through_the_registry():
