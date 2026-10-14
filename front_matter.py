@@ -466,9 +466,17 @@ def _with_trailers_apart(entries: List[Entry]) -> List[Entry]:
 def join(front: Optional[FrontMatter], body: str) -> str:
     """``body`` under ``front`` as it was written, or alone when there is
     none (or nothing but blank lines is left in it)."""
+    above = head(front, body)
+    return above + body.lstrip("\n") if above else body
+
+
+def head(front: Optional[FrontMatter], body: str) -> str:
+    """What goes above ``body`` in its file (join): ``front`` as it was
+    written and the blank lines after it, or "" when there is none (or
+    nothing but blank lines is left in it)."""
     if front is None or front.changed and not any(
             line.strip() for entry in front.entries for line in entry.lines):
-        return body                         # none, or none left (an empty one stays)
+        return ""                           # none, or none left (an empty one stays)
     if not front.changed and front.as_written:
         written = "".join(line + ending for line, ending in front.as_written)
     else:
@@ -479,7 +487,9 @@ def join(front: Optional[FrontMatter], body: str) -> str:
     # right under it); in the file's line ending for one written anew.
     gap = front.gap if front.as_written else \
         front.gap.replace("\r\n", "\n").replace("\n", front.newline)
-    return written + gap + body.lstrip("\n")
+    if body.lstrip("\n") and not written.endswith(("\n", "\r")):
+        gap = front.newline                 # it ended the file: the text goes under it
+    return written + gap
 
 
 def _endings(front: FrontMatter, lines: Sequence[str]) -> List[str]:

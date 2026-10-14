@@ -1010,6 +1010,69 @@ def test_the_window_saves_a_front_matter_with_its_own_line_endings(tmp_path):
             "Body text.", "Body text. More."), path
 
 
+# A file that is only a front matter, its closing line without a line
+# ending, as VS Code saves one by default.
+ENDS_THE_FILE = {"lf.md": "---\ntitle: Only\ntags: [a]\n---",
+                 "crlf.md": "---\r\ntitle: Only\r\ntags: [a]\r\n---",
+                 "cr.md": "---\rtitle: Only\r---",
+                 "toml.md": '+++\ntitle = "Only"\n+++',
+                 "dots.md": "---\ntitle: Only\n..."}
+
+
+@pytest.mark.parametrize("text", ENDS_THE_FILE.values())
+def test_a_text_under_a_front_matter_ending_the_file_starts_on_a_line_of_its_own(text):
+    """Round 11, H1: the text went on the closing line ("---My text"), and
+    the file had no front matter any more. With no text, it stays as it was."""
+    front, body = front_matter.split(text)
+    assert body == ""
+    titled = front_matter_with(from_front_matter(front).with_changes(title="New"), front)
+    for written, expected in ((front, text), (titled, text.replace("Only", "New"))):
+        assert front_matter.join(written, "") == expected
+        assert front_matter.join(written, "My text.\n") == expected + front.newline + "My text.\n"
+
+
+TYPED_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtGui import QTextCursor
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+import main_window
+
+w = main_window.MainWindow()
+w.show()
+r = {}
+for path in sys.argv[2:]:
+    ed = w.open_path(path)
+    if os.path.basename(path).startswith("t_"):
+        w._set_article_details(ed, w._article_details_of(ed).with_changes(title="New"))
+    c = ed.textCursor()
+    c.movePosition(QTextCursor.MoveOperation.End)
+    c.insertText("My first paragraph.")
+    w._save_to(path)
+    r[os.path.basename(path)] = open(path, "rb").read().decode("utf-8")
+    ed.document().setModified(False)
+w.close()
+print("RESULT " + json.dumps(r))
+"""
+
+
+def test_the_window_types_under_a_front_matter_ending_the_file(tmp_path):
+    paths = []
+    for name, text in ENDS_THE_FILE.items():
+        for prefix in ("", "t_"):
+            path = tmp_path / (prefix + name)
+            path.write_bytes(text.encode("utf-8"))
+            paths.append(str(path))
+    r = run_window_script(TYPED_SCRIPT, tmp_path, *paths)
+    for name, text in ENDS_THE_FILE.items():
+        newline = front_matter.split(text)[0].newline
+        typed = newline + "My first paragraph." + newline
+        assert r[name] == text + typed, name
+        assert r["t_" + name] == text.replace("Only", "New") + typed, name
+
+
 # -- a lone CR ends a line, as YAML reads it (round 9, H1) ----------------------
 
 CR_ONLY = "---\rtitle: CR Title\rtags: [x]\r---\r\rBody.\r"

@@ -3596,7 +3596,7 @@ class MainWindow(QMainWindow):
                     front = front_matter_with(self._article_details_of(ed), front)
                 if not self._saving_without(ed, front, path):
                     return False
-                head = front_matter.join(front, "")
+                head = front_matter.head(front, content)
                 if head:
                     content = content.lstrip("\n")
                 if front is not None and getattr(ed, "_front_matter", None) is None:
